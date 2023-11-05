@@ -13,35 +13,26 @@ namespace content {
 
 WebCursor::WebCursor() = default;
 
-WebCursor::~WebCursor() {
-  CleanupPlatformData();
-}
+WebCursor::~WebCursor() = default;
 
 WebCursor::WebCursor(const ui::Cursor& cursor) {
   SetCursor(cursor);
 }
 
-WebCursor::WebCursor(const WebCursor& other) {
-  CopyAllData(other);
-}
-
-WebCursor& WebCursor::operator=(const WebCursor& other) {
-  CleanupPlatformData();
-  CopyAllData(other);
-  return *this;
-}
+WebCursor::WebCursor(const WebCursor& other) = default;
 
 bool WebCursor::SetCursor(const ui::Cursor& cursor) {
-  static constexpr int kMaxSize = 1024;
+  // This value matches kMaximumCursorSize from Blink's EventHandler.
+  static constexpr int kMaximumCursorSize = 128;
   if (cursor.image_scale_factor() < 0.01f ||
       cursor.image_scale_factor() > 100.f ||
       (cursor.type() == ui::mojom::CursorType::kCustom &&
-       (cursor.custom_bitmap().width() > kMaxSize ||
-        cursor.custom_bitmap().height() > kMaxSize ||
+       (cursor.custom_bitmap().width() > kMaximumCursorSize ||
+        cursor.custom_bitmap().height() > kMaximumCursorSize ||
         cursor.custom_bitmap().width() / cursor.image_scale_factor() >
-            kMaxSize ||
+            kMaximumCursorSize ||
         cursor.custom_bitmap().height() / cursor.image_scale_factor() >
-            kMaxSize))) {
+            kMaximumCursorSize))) {
     return false;
   }
 
@@ -70,11 +61,6 @@ bool WebCursor::operator==(const WebCursor& other) const {
 
 bool WebCursor::operator!=(const WebCursor& other) const {
   return !(*this == other);
-}
-
-void WebCursor::CopyAllData(const WebCursor& other) {
-  SetCursor(other.cursor_);
-  CopyPlatformData(other);
 }
 
 }  // namespace content

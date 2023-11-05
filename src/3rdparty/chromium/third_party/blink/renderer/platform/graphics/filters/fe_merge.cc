@@ -24,6 +24,7 @@
 
 #include <memory>
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 
@@ -39,7 +40,7 @@ sk_sp<PaintFilter> FEMerge::CreateImageFilter() {
     input_refs[i] = paint_filter_builder::Build(InputEffect(i),
                                                 OperatingInterpolationSpace());
   }
-  base::Optional<PaintFilter::CropRect> crop_rect = GetCropRect();
+  absl::optional<PaintFilter::CropRect> crop_rect = GetCropRect();
   return sk_make_sp<MergePaintFilter>(input_refs.get(), size,
                                       base::OptionalOrNullptr(crop_rect));
 }

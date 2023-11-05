@@ -18,8 +18,8 @@
 #include "common/PlacementAllocated.h"
 
 #include <cstdint>
-#include <memory>
 #include <type_traits>
+#include <utility>
 
 // The SlabAllocator allocates objects out of one or more fixed-size contiguous "slabs" of memory.
 // This makes it very quick to allocate and deallocate fixed-size objects because the allocator only
@@ -57,7 +57,7 @@ class SlabAllocatorImpl {
   public:
     // Allocations host their current index and the index of the next free block.
     // Because this is an index, and not a byte offset, it can be much smaller than a size_t.
-    // TODO(enga): Is uint8_t sufficient?
+    // TODO(crbug.com/dawn/825): Is uint8_t sufficient?
     using Index = uint16_t;
 
     SlabAllocatorImpl(SlabAllocatorImpl&& rhs);
@@ -77,12 +77,12 @@ class SlabAllocatorImpl {
         // Ownership of the allocation is transferred to the slab on creation.
         // | ---------- allocation --------- |
         // | pad | Slab | data ------------> |
-        Slab(std::unique_ptr<char[]> allocation, IndexLinkNode* head);
+        Slab(char allocation[], IndexLinkNode* head);
         Slab(Slab&& rhs);
 
         void Splice();
 
-        std::unique_ptr<char[]> allocation;
+        char* allocation;
         IndexLinkNode* freeList;
         Slab* prev;
         Slab* next;

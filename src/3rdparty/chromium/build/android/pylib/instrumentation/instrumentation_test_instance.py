@@ -2,12 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
 import copy
 import logging
 import os
 import pickle
 import re
 
+import six
 from devil.android import apk_helper
 from pylib import constants
 from pylib.base import base_test_result
@@ -41,16 +43,6 @@ _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS = [
 _VALID_ANNOTATIONS = set(_DEFAULT_ANNOTATIONS +
                          _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS)
 
-_EXTRA_DRIVER_TEST_LIST = (
-    'org.chromium.test.driver.OnDeviceInstrumentationDriver.TestList')
-_EXTRA_DRIVER_TEST_LIST_FILE = (
-    'org.chromium.test.driver.OnDeviceInstrumentationDriver.TestListFile')
-_EXTRA_DRIVER_TARGET_PACKAGE = (
-    'org.chromium.test.driver.OnDeviceInstrumentationDriver.TargetPackage')
-_EXTRA_DRIVER_TARGET_CLASS = (
-    'org.chromium.test.driver.OnDeviceInstrumentationDriver.TargetClass')
-_EXTRA_TIMEOUT_SCALE = (
-    'org.chromium.test.driver.OnDeviceInstrumentationDriver.TimeoutScale')
 _TEST_LIST_JUNIT4_RUNNERS = [
     'org.chromium.base.test.BaseChromiumAndroidJUnitRunner']
 
@@ -77,7 +69,6 @@ _BUNDLE_STACK_ID = 'stack'
 
 # The ID of the bundle value Chrome uses to report the test duration.
 _BUNDLE_DURATION_ID = 'duration_ms'
-
 
 class MissingSizeAnnotationError(test_exception.TestException):
   def __init__(self, class_name):
@@ -197,9 +188,8 @@ def GenerateTestResults(result_code, result_bundle, statuses, duration_ms,
 
   if current_result:
     if current_result.GetType() == base_test_result.ResultType.UNKNOWN:
-      crashed = (result_code == _ACTIVITY_RESULT_CANCELED
-                 and any(_NATIVE_CRASH_RE.search(l)
-                         for l in result_bundle.itervalues()))
+      crashed = (result_code == _ACTIVITY_RESULT_CANCELED and any(
+          _NATIVE_CRASH_RE.search(l) for l in six.itervalues(result_bundle)))
       if crashed:
         current_result.SetType(base_test_result.ResultType.CRASH)
 
@@ -402,8 +392,8 @@ def _GetTestsFromDexdump(test_apk):
         } for m in methods if m.startswith('test')]
 
   for dump in dex_dumps:
-    for package_name, package_info in dump.iteritems():
-      for class_name, class_info in package_info['classes'].iteritems():
+    for package_name, package_info in six.iteritems(dump):
+      for class_name, class_info in six.iteritems(package_info['classes']):
         if class_name.endswith('Test'):
           tests.append({
               'class': '%s.%s' % (package_name, class_name),
@@ -418,7 +408,7 @@ def SaveTestsToPickle(pickle_path, tests):
     'VERSION': _PICKLE_FORMAT_VERSION,
     'TEST_METHODS': tests,
   }
-  with open(pickle_path, 'w') as pickle_file:
+  with open(pickle_path, 'wb') as pickle_file:
     pickle.dump(pickle_data, pickle_file)
 
 
@@ -532,11 +522,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._use_apk_under_test_flags_file = False
     self._initializeFlagAttributes(args)
 
-    self._driver_apk = None
-    self._driver_package = None
-    self._driver_name = None
-    self._initializeDriverAttributes()
-
     self._screenshot_dir = None
     self._timeout_scale = None
     self._wait_for_java_debugger = None
@@ -565,6 +550,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
 
     self._skia_gold_properties = None
     self._initializeSkiaGoldAttributes(args)
+
+    self._test_launcher_batch_limit = None
+    self._initializeTestLauncherAttributes(args)
 
     self._wpr_enable_record = args.wpr_enable_record
 
@@ -664,7 +652,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._package_info = None
     if self._apk_under_test:
       package_under_test = self._apk_under_test.GetPackageName()
-      for package_info in constants.PACKAGE_INFO.itervalues():
+      for package_info in six.itervalues(constants.PACKAGE_INFO):
         if package_under_test == package_info.package:
           self._package_info = package_info
           break
@@ -731,17 +719,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
         not args.coverage_dir):
       self._flags.append('--strict-mode=' + args.strict_mode)
 
-  def _initializeDriverAttributes(self):
-    self._driver_apk = os.path.join(
-        constants.GetOutDirectory(), constants.SDK_BUILD_APKS_DIR,
-        'OnDeviceInstrumentationDriver.apk')
-    if os.path.exists(self._driver_apk):
-      driver_apk = apk_helper.ApkHelper(self._driver_apk)
-      self._driver_package = driver_apk.GetPackageName()
-      self._driver_name = driver_apk.GetInstrumentationName()
-    else:
-      self._driver_apk = None
-
   def _initializeTestControlAttributes(self, args):
     self._screenshot_dir = args.screenshot_dir
     self._timeout_scale = args.timeout_scale or 1
@@ -786,6 +763,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   def _initializeSkiaGoldAttributes(self, args):
     self._skia_gold_properties = gold_utils.AndroidSkiaGoldProperties(args)
 
+  def _initializeTestLauncherAttributes(self, args):
+    if hasattr(args, 'test_launcher_batch_limit'):
+      self._test_launcher_batch_limit = args.test_launcher_batch_limit
+
   @property
   def additional_apks(self):
     return self._additional_apks
@@ -813,18 +794,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   @property
   def coverage_directory(self):
     return self._coverage_directory
-
-  @property
-  def driver_apk(self):
-    return self._driver_apk
-
-  @property
-  def driver_package(self):
-    return self._driver_package
-
-  @property
-  def driver_name(self):
-    return self._driver_name
 
   @property
   def edit_shared_prefs(self):
@@ -895,8 +864,16 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._test_apk_incremental_install_json
 
   @property
+  def test_filter(self):
+    return self._test_filter
+
+  @property
   def test_jar(self):
     return self._test_jar
+
+  @property
+  def test_launcher_batch_limit(self):
+    return self._test_launcher_batch_limit
 
   @property
   def test_support_apk(self):
@@ -1021,7 +998,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       elif clazz == _PARAMETERIZED_COMMAND_LINE_FLAGS:
         list_of_switches = []
         for annotation in methods['value']:
-          for clazz, methods in annotation.iteritems():
+          for clazz, methods in six.iteritems(annotation):
             list_of_switches += _annotationToSwitches(clazz, methods)
         return list_of_switches
       else:
@@ -1039,7 +1016,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       list_of_switches = []
       _checkParameterization(annotations)
       if _SKIP_PARAMETERIZATION not in annotations:
-        for clazz, methods in annotations.iteritems():
+        for clazz, methods in six.iteritems(annotations):
           list_of_switches += _annotationToSwitches(clazz, methods)
       if list_of_switches:
         _setTestFlags(t, _switchesToFlags(list_of_switches[0]))
@@ -1048,23 +1025,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
           _setTestFlags(parameterized_t, _switchesToFlags(p))
           new_tests.append(parameterized_t)
     return tests + new_tests
-
-  def GetDriverEnvironmentVars(
-      self, test_list=None, test_list_file_path=None):
-    env = {
-      _EXTRA_DRIVER_TARGET_PACKAGE: self.test_package,
-      _EXTRA_DRIVER_TARGET_CLASS: self.junit3_runner_class,
-      _EXTRA_TIMEOUT_SCALE: self._timeout_scale,
-    }
-
-    if test_list:
-      env[_EXTRA_DRIVER_TEST_LIST] = ','.join(test_list)
-
-    if test_list_file_path:
-      env[_EXTRA_DRIVER_TEST_LIST_FILE] = (
-          os.path.basename(test_list_file_path))
-
-    return env
 
   @staticmethod
   def ParseAmInstrumentRawOutput(raw_output):

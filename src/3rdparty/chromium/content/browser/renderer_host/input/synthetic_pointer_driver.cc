@@ -24,10 +24,19 @@ std::unique_ptr<SyntheticPointerDriver> SyntheticPointerDriver::Create(
     case content::mojom::GestureSourceType::kPenInput:
       return std::make_unique<SyntheticPenDriver>();
     case content::mojom::GestureSourceType::kDefaultInput:
-      return std::unique_ptr<SyntheticPointerDriver>();
+      return nullptr;
   }
   NOTREACHED();
-  return std::unique_ptr<SyntheticPointerDriver>();
+  return nullptr;
+}
+
+// static
+std::unique_ptr<SyntheticPointerDriver> SyntheticPointerDriver::Create(
+    content::mojom::GestureSourceType gesture_source_type,
+    bool from_devtools_debugger) {
+  auto driver = Create(gesture_source_type);
+  driver->from_devtools_debugger_ = from_devtools_debugger;
+  return driver;
 }
 
 }  // namespace content

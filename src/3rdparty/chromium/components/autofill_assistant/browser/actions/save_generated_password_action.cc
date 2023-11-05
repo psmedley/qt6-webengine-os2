@@ -5,7 +5,7 @@
 #include "components/autofill_assistant/browser/actions/save_generated_password_action.h"
 
 #include <utility>
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
@@ -34,10 +34,10 @@ void SaveGeneratedPasswordAction::InternalProcessAction(
     return;
   }
 
-  if (!delegate_->GetUserData()->has_additional_value(
+  if (!delegate_->GetUserData()->HasAdditionalValue(
           save_password.memory_key()) ||
       delegate_->GetUserData()
-              ->additional_value(save_password.memory_key())
+              ->GetAdditionalValue(save_password.memory_key())
               ->strings()
               .values()
               .size() != 1) {

@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/json/values_util.h"
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
@@ -98,14 +99,6 @@ int CompareLexicalNumberStrings(
   return 0;
 }
 
-bool IsOldIntelDriver(const std::vector<std::string>& version) {
-  DCHECK_EQ(4u, version.size());
-  unsigned value = 0;
-  bool valid = base::StringToUint(version[2], &value);
-  DCHECK(valid);
-  return value < 100;
-}
-
 // A mismatch is identified only if both |input| and |pattern| are not empty.
 bool StringMismatch(const std::string& input, const std::string& pattern) {
   if (input.empty() || pattern.empty())
@@ -142,20 +135,13 @@ bool GpuControlList::Version::Contains(const std::string& version_string,
     // Intel graphics driver version schema should only be specified on Windows.
     // https://www.intel.com/content/www/us/en/support/articles/000005654/graphics-drivers.html
     // If either of the two versions doesn't match the Intel driver version
-    // schema, or they belong to different generation of version schema, they
-    // should not be compared.
+    // schema, they should not be compared.
     if (version.size() != 4 || ref_version1.size() != 4)
       return false;
-    bool is_old_intel_driver = IsOldIntelDriver(version);
-    if (is_old_intel_driver != IsOldIntelDriver(ref_version1))
-      return false;
-    if (op == kBetween &&
-        (ref_version2.size() != 4 ||
-         is_old_intel_driver != IsOldIntelDriver(ref_version2))) {
+    if (op == kBetween && ref_version2.size() != 4) {
       return false;
     }
-    size_t ignored_segments = is_old_intel_driver ? 3 : 2;
-    for (size_t ii = 0; ii < ignored_segments; ++ii) {
+    for (size_t ii = 0; ii < 2; ++ii) {
       version.erase(version.begin());
       ref_version1.erase(ref_version1.begin());
       if (op == kBetween)
@@ -601,18 +587,17 @@ bool GpuControlList::Entry::NeedsMoreInfo(const GPUInfo& gpu_info,
 }
 
 void GpuControlList::Entry::GetFeatureNames(
-    base::ListValue* feature_names,
+    base::Value& feature_names,
     const FeatureMap& feature_map) const {
-  DCHECK(feature_names);
   for (size_t ii = 0; ii < feature_size; ++ii) {
     auto iter = feature_map.find(features[ii]);
     DCHECK(iter != feature_map.end());
-    feature_names->AppendString(iter->second);
+    feature_names.Append(iter->second);
   }
   for (size_t ii = 0; ii < disabled_extension_size; ++ii) {
     std::string name =
         base::StringPrintf("disable(%s)", disabled_extensions[ii]);
-    feature_names->AppendString(name);
+    feature_names.Append(name);
   }
 }
 
@@ -738,30 +723,30 @@ std::vector<std::string> GpuControlList::GetDisabledWebGLExtensions() {
                                   disabled_webgl_extensions.end());
 }
 
-void GpuControlList::GetReasons(base::ListValue* problem_list,
+void GpuControlList::GetReasons(base::Value& problem_list,
                                 const std::string& tag,
                                 const std::vector<uint32_t>& entries) const {
-  DCHECK(problem_list);
   for (auto index : entries) {
     DCHECK_LT(index, entry_count_);
     const Entry& entry = entries_[index];
-    auto problem = std::make_unique<base::DictionaryValue>();
+    auto problem = base::Value(base::Value::Type::DICTIONARY);
 
-    problem->SetString("description", entry.description);
+    problem.SetStringKey("description", entry.description);
 
-    auto cr_bugs = std::make_unique<base::ListValue>();
+    auto cr_bugs = base::Value(base::Value::Type::LIST);
     for (size_t jj = 0; jj < entry.cr_bug_size; ++jj)
-      cr_bugs->AppendInteger(entry.cr_bugs[jj]);
-    problem->Set("crBugs", std::move(cr_bugs));
+      cr_bugs.Append(
+          base::Int64ToValue(static_cast<int64_t>(entry.cr_bugs[jj])));
+    problem.SetKey("crBugs", std::move(cr_bugs));
 
-    auto features = std::make_unique<base::ListValue>();
-    entry.GetFeatureNames(features.get(), feature_map_);
-    problem->Set("affectedGpuSettings", std::move(features));
+    auto features = base::Value(base::Value::Type::LIST);
+    entry.GetFeatureNames(features, feature_map_);
+    problem.SetKey("affectedGpuSettings", std::move(features));
 
     DCHECK(tag == "workarounds" || tag == "disabledFeatures");
-    problem->SetString("tag", tag);
+    problem.SetStringKey("tag", tag);
 
-    problem_list->Append(std::move(problem));
+    problem_list.Append(std::move(problem));
   }
 }
 

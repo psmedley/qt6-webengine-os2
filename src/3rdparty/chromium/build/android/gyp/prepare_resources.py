@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -39,10 +39,10 @@ def _ParseArgs(args):
       'in the generated R.txt when generating R.java.')
 
   parser.add_argument(
-      '--shared-resources',
+      '--allow-missing-resources',
       action='store_true',
-      help='Make resources shareable by generating an onResourcesLoaded() '
-      'method in the R.java source file.')
+      help='Do not fail if some resources exist in the res/ dir but are not '
+      'listed in the sources.')
 
   parser.add_argument(
       '--resource-zip-out',
@@ -136,7 +136,7 @@ def _GenerateRTxt(options, r_txt_path):
 
 def _OnStaleMd5(options):
   with resource_utils.BuildContext() as build:
-    if options.sources:
+    if options.sources and not options.allow_missing_resources:
       _CheckAllFilesListed(options.sources, options.resource_dirs)
     if options.r_text_in:
       r_txt_path = options.r_text_in
@@ -188,7 +188,6 @@ def main(args):
   # Resource filenames matter to the output, so add them to strings as well.
   # This matters if a file is renamed but not changed (http://crbug.com/597126).
   input_strings = sorted(resource_names) + [
-      options.shared_resources,
       options.strip_drawables,
   ]
 

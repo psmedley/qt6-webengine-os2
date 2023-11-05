@@ -4,6 +4,8 @@
 
 #include "base/profiler/native_unwinder_mac.h"
 
+#include <sys/types.h>  // This needs to come before sys/ptrace.h
+
 #include <mach-o/compact_unwind_encoding.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
@@ -15,6 +17,7 @@
 #include "base/profiler/native_unwinder.h"
 #include "base/profiler/profile_builder.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 extern "C" {
 #if defined(ARCH_CPU_X86_64)
@@ -177,7 +180,7 @@ UnwindResult NativeUnwinderMac::TryUnwind(RegisterContext* thread_context,
   unw_init_local(&unwind_cursor, &unwind_context);
 
   for (;;) {
-    Optional<UnwindResult> result =
+    absl::optional<UnwindResult> result =
         CheckPreconditions(&stack->back(), &unwind_cursor, stack_top);
     if (result.has_value())
       return *result;
@@ -221,7 +224,7 @@ UnwindResult NativeUnwinderMac::TryUnwind(RegisterContext* thread_context,
 
 // Checks preconditions for attempting an unwind. If any conditions fail,
 // returns corresponding UnwindResult. Otherwise returns nullopt.
-Optional<UnwindResult> NativeUnwinderMac::CheckPreconditions(
+absl::optional<UnwindResult> NativeUnwinderMac::CheckPreconditions(
     const Frame* current_frame,
     unw_cursor_t* unwind_cursor,
     uintptr_t stack_top) const {
@@ -264,7 +267,7 @@ Optional<UnwindResult> NativeUnwinderMac::CheckPreconditions(
   if (!HasValidRbp(unwind_cursor, stack_top))
     return UnwindResult::ABORTED;
 
-  return nullopt;
+  return absl::nullopt;
 }
 
 // Attempts to unwind the current frame using unw_step, and returns its return
@@ -303,7 +306,7 @@ int NativeUnwinderMac::UnwindStep(unw_context_t* unwind_context,
 // returns corresponding UnwindResult. Otherwise returns nullopt. Sets
 // *|successfully_unwound| if the unwind succeeded (and hence the frame should
 // be recorded).
-Optional<UnwindResult> NativeUnwinderMac::CheckPostconditions(
+absl::optional<UnwindResult> NativeUnwinderMac::CheckPostconditions(
     int step_result,
     unw_word_t prev_rsp,
     unw_word_t rsp,
@@ -343,7 +346,7 @@ Optional<UnwindResult> NativeUnwinderMac::CheckPostconditions(
   if (!stack_pointer_was_moved_and_is_valid)
     return UnwindResult::ABORTED;
 
-  return nullopt;
+  return absl::nullopt;
 }
 
 std::unique_ptr<Unwinder> CreateNativeUnwinder(ModuleCache* module_cache) {

@@ -5,12 +5,13 @@
 #ifndef CONTENT_PUBLIC_BROWSER_WEB_UI_MESSAGE_HANDLER_H_
 #define CONTENT_PUBLIC_BROWSER_WEB_UI_MESSAGE_HANDLER_H_
 
+#include <ostream>
+#include <string>
 #include <vector>
 
 #include "base/check.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
 #include "base/values.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/web_ui.h"
@@ -44,7 +45,7 @@ class CONTENT_EXPORT WebUIMessageHandler {
   // is needed from production code, just publicize AllowJavascript() instead.
   void AllowJavascriptForTesting();
 
-  bool IsJavascriptAllowed() const;
+  bool IsJavascriptAllowed();
 
  protected:
   FRIEND_TEST_ALL_PREFIXES(WebUIMessageHandlerTest, ExtractIntegerValue);
@@ -74,7 +75,7 @@ class CONTENT_EXPORT WebUIMessageHandler {
                                  double* out_value);
 
   // Extract a string value from a list Value.
-  static base::string16 ExtractStringValue(const base::ListValue* value);
+  static std::u16string ExtractStringValue(const base::ListValue* value);
 
   // This is where subclasses specify which messages they'd like to handle and
   // perform any additional initialization.. At this point web_ui() will return
@@ -133,7 +134,7 @@ class CONTENT_EXPORT WebUIMessageHandler {
   }
 
   // Returns the attached WebUI for this handler.
-  WebUI* web_ui() const { return web_ui_; }
+  WebUI* web_ui() { return web_ui_; }
 
   // Sets the attached WebUI - exposed to subclasses for testing purposes.
   void set_web_ui(WebUI* web_ui) { web_ui_ = web_ui; }

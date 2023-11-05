@@ -10,12 +10,9 @@
 #include <memory>
 #include <vector>
 
-#include "core/fxcrt/cfx_datetime.h"
+#include "core/fxcrt/widestring.h"
 #include "xfa/fwl/cfwl_event.h"
 #include "xfa/fwl/cfwl_widget.h"
-
-#define FWL_ITEMSTATE_MCD_Flag (1L << 0)
-#define FWL_ITEMSTATE_MCD_Selected (1L << 1)
 
 class CFWL_MessageMouse;
 
@@ -71,38 +68,42 @@ class CFWL_MonthCalendar final : public CFWL_Widget {
     int32_t iMonth;
     int32_t iDay;
   };
+
   struct DATEINFO {
     DATEINFO(int32_t day,
              int32_t dayofweek,
-             uint32_t dwSt,
-             CFX_RectF rc,
+             bool bFlag,
+             bool bSelect,
              const WideString& wsday);
     ~DATEINFO();
 
-    int32_t iDay;
-    int32_t iDayOfWeek;
-    uint32_t dwStates;
+    Mask<CFWL_PartState> AsPartStateMask() const;
+
+    const int32_t iDay;
+    const int32_t iDayOfWeek;
+    bool bFlagged;
+    bool bSelected;
     CFX_RectF rect;
-    WideString wsDay;
+    const WideString wsDay;
   };
 
   CFWL_MonthCalendar(CFWL_App* app,
                      const Properties& properties,
                      CFWL_Widget* pOuter);
 
-  void DrawBackground(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawHeadBK(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawLButton(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawRButton(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawCaption(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawSeparator(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawDatesInBK(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawWeek(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawToday(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawDatesIn(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
-  void DrawDatesOut(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
+  void DrawBackground(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawHeadBK(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawLButton(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawRButton(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawCaption(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawSeparator(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawDatesInBK(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawWeek(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawToday(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawDatesIn(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
+  void DrawDatesOut(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
   void DrawDatesInCircle(CFGAS_GEGraphics* pGraphics,
-                         const CFX_Matrix* pMatrix);
+                         const CFX_Matrix& mtMatrix);
   CFX_SizeF CalcSize();
   void Layout();
   void CalcHeadSize();
@@ -145,8 +146,8 @@ class CFWL_MonthCalendar final : public CFWL_Widget {
   int32_t m_iMonth = 1;
   int32_t m_iDay = 1;
   int32_t m_iHovered = -1;
-  int32_t m_iLBtnPartStates = CFWL_PartState_Normal;
-  int32_t m_iRBtnPartStates = CFWL_PartState_Normal;
+  Mask<CFWL_PartState> m_iLBtnPartStates = CFWL_PartState::kNormal;
+  Mask<CFWL_PartState> m_iRBtnPartStates = CFWL_PartState::kNormal;
   DATE m_dtMin;
   DATE m_dtMax;
   CFX_SizeF m_HeadSize;

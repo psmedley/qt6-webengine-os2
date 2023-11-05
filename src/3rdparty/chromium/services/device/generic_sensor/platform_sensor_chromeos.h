@@ -10,7 +10,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "chromeos/components/sensors/mojom/sensor.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -38,6 +37,9 @@ class PlatformSensorChromeOS
   bool CheckSensorConfiguration(
       const PlatformSensorConfiguration& configuration) override;
   PlatformSensorConfiguration GetDefaultConfiguration() override;
+  // Called by PlatformSensorProviderChromeOS when this PlatformSensor is
+  // overridden by a late-present sensor of the same type.
+  void SensorReplaced() override;
 
   // chromeos::sensors::mojom::SensorDeviceSamplesObserver overrides:
   void OnSampleUpdated(const base::flat_map<int32_t, int64_t>& sample) override;

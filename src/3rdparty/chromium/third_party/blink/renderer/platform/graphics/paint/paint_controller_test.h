@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PAINT_CONTROLLER_TEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PAINT_CONTROLLER_TEST_H_
 
+#include "base/dcheck_is_on.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
@@ -44,6 +45,10 @@ class PaintControllerTestBase : public testing::Test {
                              DisplayItem::kUninitializedType),
         paint_controller_(std::make_unique<PaintController>()) {}
 
+  void SetUp() override {
+    testing::FLAGS_gtest_death_test_style = "threadsafe";
+  }
+
   void InitRootChunk() { InitRootChunk(GetPaintController()); }
   void InitRootChunk(PaintController& paint_controller) {
     paint_controller.UpdateCurrentPaintChunkProperties(
@@ -75,13 +80,9 @@ class PaintControllerTestBase : public testing::Test {
 
   void InvalidateAll() { paint_controller_->InvalidateAllForTesting(); }
 
-  void CommitAndFinishCycle() {
-    paint_controller_->CommitNewDisplayItems();
-    paint_controller_->FinishCycle();
-  }
-
   using SubsequenceMarkers = PaintController::SubsequenceMarkers;
-  SubsequenceMarkers* GetSubsequenceMarkers(const DisplayItemClient& client) {
+  const SubsequenceMarkers* GetSubsequenceMarkers(
+      const DisplayItemClient& client) {
     return paint_controller_->GetSubsequenceMarkers(client);
   }
 

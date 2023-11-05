@@ -692,8 +692,8 @@ spv_result_t ValidateExtension(ValidationState_t& _, const Instruction* inst) {
     if (extension ==
         ExtensionToString(kSPV_KHR_workgroup_memory_explicit_layout)) {
       return _.diag(SPV_ERROR_WRONG_VERSION, inst)
-          << "SPV_KHR_workgroup_memory_explicit_layout extension "
-             "requires SPIR-V version 1.4 or later.";
+             << "SPV_KHR_workgroup_memory_explicit_layout extension "
+                "requires SPIR-V version 1.4 or later.";
     }
   }
 
@@ -812,7 +812,7 @@ spv_result_t ValidateExtInst(ValidationState_t& _, const Instruction* inst) {
         for (uint32_t operand_index = 4; operand_index < num_operands;
              ++operand_index) {
           const uint32_t operand_type = _.GetOperandTypeId(inst, operand_index);
-          if (!_.IsIntScalarOrVectorType(operand_type)) {
+          if (!operand_type || !_.IsIntScalarOrVectorType(operand_type)) {
             return _.diag(SPV_ERROR_INVALID_DATA, inst)
                    << ext_inst_name() << ": "
                    << "expected all operands to be int scalars or vectors";
@@ -1372,7 +1372,16 @@ spv_result_t ValidateExtInst(ValidationState_t& _, const Instruction* inst) {
                  << "or vector type";
         }
 
-        const uint32_t interpolant_type = _.GetOperandTypeId(inst, 4);
+        // If HLSL legalization and first operand is an OpLoad, use load
+        // pointer as the interpolant lvalue. Else use interpolate first
+        // operand.
+        uint32_t interp_id = inst->GetOperandAs<uint32_t>(4);
+        auto* interp_inst = _.FindDef(interp_id);
+        uint32_t interpolant_type = (_.options()->before_hlsl_legalization &&
+                                     interp_inst->opcode() == SpvOpLoad)
+                                        ? _.GetOperandTypeId(interp_inst, 2)
+                                        : _.GetOperandTypeId(inst, 4);
+
         uint32_t interpolant_storage_class = 0;
         uint32_t interpolant_data_type = 0;
         if (!_.GetPointerTypeInfo(interpolant_type, &interpolant_data_type,
@@ -3103,6 +3112,7 @@ spv_result_t ValidateExtInst(ValidationState_t& _, const Instruction* inst) {
       case OpenCLDebugInfo100DebugMacroDef:
       case OpenCLDebugInfo100DebugMacroUndef:
       case OpenCLDebugInfo100DebugImportedEntity:
+      case OpenCLDebugInfo100DebugModuleINTEL:
         break;
       case OpenCLDebugInfo100InstructionsMax:
         assert(0);

@@ -38,6 +38,7 @@ namespace {
 using base::test::ParseJson;
 using testing::HasSubstr;
 using ContentActionType = declarative_content_constants::ContentActionType;
+using extensions::mojom::ManifestLocation;
 
 std::unique_ptr<base::DictionaryValue> SimpleManifest() {
   return DictionaryBuilder()
@@ -60,7 +61,9 @@ class RequestContentScriptTest : public ExtensionServiceTestBase {
     InitializeEmptyExtensionService();
     auto* extension_system =
         static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile()));
+
     extension_system->CreateUserScriptManager();
+    service()->AddExtension(extension());
     extension_system->SetReady();
     base::RunLoop().RunUntilIdle();
   }
@@ -120,7 +123,7 @@ TEST(DeclarativeContentActionTest, ShowActionWithoutAction) {
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
           .SetManifest(manifest.Build())
-          .SetLocation(Manifest::COMPONENT)
+          .SetLocation(ManifestLocation::kComponent)
           .Build();
   env.GetExtensionService()->AddExtension(extension.get());
 
@@ -149,7 +152,7 @@ TEST_P(ParameterizedDeclarativeContentActionTest, ShowAction) {
   scoped_refptr<const Extension> extension =
       ExtensionBuilder("extension")
           .SetAction(GetParam())
-          .SetLocation(Manifest::INTERNAL)
+          .SetLocation(ManifestLocation::kInternal)
           .Build();
 
   env.GetExtensionService()->AddExtension(extension.get());

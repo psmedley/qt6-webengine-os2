@@ -10,7 +10,6 @@
 #include "base/containers/flat_map.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/unguessable_token.h"
 #include "components/paint_preview/browser/hit_tester.h"
 #include "components/paint_preview/browser/paint_preview_base_service.h"
@@ -20,6 +19,7 @@
 #include "components/paint_preview/public/paint_preview_compositor_service.h"
 #include "components/services/paint_preview_compositor/public/mojom/paint_preview_compositor.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class MemoryPressureMonitor;
@@ -77,7 +77,7 @@ class PlayerCompositorDelegate {
   // Pass this ID to `CancelBitmapRequest(int32_t)` to cancel the request if it
   // hasn't already been sent.
   int32_t RequestBitmap(
-      const base::Optional<base::UnguessableToken>& frame_guid,
+      const absl::optional<base::UnguessableToken>& frame_guid,
       const gfx::Rect& clip_rect,
       float scale_factor,
       base::OnceCallback<void(mojom::PaintPreviewCompositor::BitmapStatus,
@@ -141,6 +141,10 @@ class PlayerCompositorDelegate {
       mojom::PaintPreviewCompositor::BeginCompositeStatus status,
       mojom::PaintPreviewBeginCompositeResponsePtr composite_response);
 
+  void OnHitTestersBuilt(
+      std::unique_ptr<base::flat_map<base::UnguessableToken,
+                                     std::unique_ptr<HitTester>>> hit_testers);
+
   void OnCompositorServiceDisconnected();
 
   void OnCompositorClientCreated(const GURL& expected_url,
@@ -178,7 +182,8 @@ class PlayerCompositorDelegate {
   int max_requests_{1};
   bool main_frame_mode_{false};
 
-  base::flat_map<base::UnguessableToken, std::unique_ptr<HitTester>>
+  std::unique_ptr<
+      base::flat_map<base::UnguessableToken, std::unique_ptr<HitTester>>>
       hit_testers_;
   std::unique_ptr<PaintPreviewProto> proto_;
   std::unique_ptr<ui::AXTreeUpdate> ax_tree_update_;

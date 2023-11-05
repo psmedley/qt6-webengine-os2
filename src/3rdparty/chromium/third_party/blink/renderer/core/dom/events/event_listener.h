@@ -48,7 +48,7 @@ class CORE_EXPORT EventListener : public GarbageCollected<EventListener>,
  public:
   EventListener(const EventListener&) = delete;
   EventListener& operator=(const EventListener&) = delete;
-  virtual ~EventListener() = default;
+  ~EventListener() override = default;
 
   // Invokes this event listener.
   virtual void Invoke(ExecutionContext*, Event*) = 0;
@@ -99,4 +99,4 @@ class CORE_EXPORT EventListener : public GarbageCollected<EventListener>,
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_LISTENER_H_

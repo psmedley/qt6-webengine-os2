@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -26,6 +27,7 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/zlib/google/zip.h"
@@ -142,7 +144,7 @@ class ContentHashFetcherTest : public ExtensionsTest {
 
     std::string error;
     scoped_refptr<Extension> extension = file_util::LoadExtension(
-        destination, Manifest::INTERNAL, 0 /* flags */, &error);
+        destination, mojom::ManifestLocation::kInternal, 0 /* flags */, &error);
     EXPECT_NE(nullptr, extension.get()) << " error:'" << error << "'";
     return extension;
   }
@@ -232,8 +234,7 @@ TEST_F(ContentHashFetcherTest, MissingVerifiedContentsAndCorrupt) {
   // Tamper with a file in the extension.
   base::FilePath script_path = extension_root().AppendASCII("script.js");
   std::string addition = "//hello world";
-  ASSERT_TRUE(
-      base::AppendToFile(script_path, addition.c_str(), addition.size()));
+  ASSERT_TRUE(base::AppendToFile(script_path, addition));
 
   RegisterInterception(fetch_url(), GetResourcePath("verified_contents.json"));
 

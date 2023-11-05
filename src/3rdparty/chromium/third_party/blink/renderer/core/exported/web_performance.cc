@@ -75,13 +75,13 @@ WebPerformance::BackForwardCacheRestore() const {
       private_->timing()->BackForwardCacheRestore();
 
   WebVector<BackForwardCacheRestoreTiming> timings(restore_timings.size());
-  for (size_t i = 0; i < restore_timings.size(); i++) {
+  for (wtf_size_t i = 0; i < restore_timings.size(); i++) {
     timings[i].navigation_start =
         MillisecondsToSeconds(restore_timings[i].navigation_start);
     timings[i].first_paint =
         MillisecondsToSeconds(restore_timings[i].first_paint);
-    for (size_t j = 0; j < restore_timings[i].request_animation_frames.size();
-         j++) {
+    for (wtf_size_t j = 0;
+         j < restore_timings[i].request_animation_frames.size(); j++) {
       timings[i].request_animation_frames[j] =
           MillisecondsToSeconds(restore_timings[i].request_animation_frames[j]);
     }
@@ -243,32 +243,32 @@ double WebPerformance::FirstInputOrScrollNotifiedTimestamp() const {
       private_->timing()->FirstInputOrScrollNotifiedTimestamp());
 }
 
-base::Optional<base::TimeDelta> WebPerformance::FirstInputDelay() const {
+absl::optional<base::TimeDelta> WebPerformance::FirstInputDelay() const {
   return private_->timing()->FirstInputDelay();
 }
 
-base::Optional<base::TimeDelta> WebPerformance::FirstInputTimestamp() const {
+absl::optional<base::TimeDelta> WebPerformance::FirstInputTimestamp() const {
   return private_->timing()->FirstInputTimestamp();
 }
 
-base::Optional<base::TimeDelta> WebPerformance::LongestInputDelay() const {
+absl::optional<base::TimeDelta> WebPerformance::LongestInputDelay() const {
   return private_->timing()->LongestInputDelay();
 }
 
-base::Optional<base::TimeDelta> WebPerformance::LongestInputTimestamp() const {
+absl::optional<base::TimeDelta> WebPerformance::LongestInputTimestamp() const {
   return private_->timing()->LongestInputTimestamp();
 }
 
-base::Optional<base::TimeDelta> WebPerformance::FirstInputProcessingTime()
+absl::optional<base::TimeDelta> WebPerformance::FirstInputProcessingTime()
     const {
   return private_->timing()->FirstInputProcessingTime();
 }
 
-base::Optional<base::TimeDelta> WebPerformance::FirstScrollDelay() const {
+absl::optional<base::TimeDelta> WebPerformance::FirstScrollDelay() const {
   return private_->timing()->FirstScrollDelay();
 }
 
-base::Optional<base::TimeDelta> WebPerformance::FirstScrollTimestamp() const {
+absl::optional<base::TimeDelta> WebPerformance::FirstScrollTimestamp() const {
   return private_->timing()->FirstScrollTimestamp();
 }
 
@@ -303,21 +303,41 @@ double WebPerformance::ParseBlockedOnScriptExecutionFromDocumentWriteDuration()
           ->ParseBlockedOnScriptExecutionFromDocumentWriteDuration());
 }
 
-base::Optional<base::TimeTicks> WebPerformance::LastPortalActivatedPaint()
+absl::optional<base::TimeTicks> WebPerformance::LastPortalActivatedPaint()
     const {
   return private_->timing()->LastPortalActivatedPaint();
 }
 
-base::Optional<base::TimeTicks> WebPerformance::UnloadStart() const {
+absl::optional<base::TimeDelta> WebPerformance::PrerenderActivationStart()
+    const {
+  return private_->timing()->PrerenderActivationStart();
+}
+
+absl::optional<base::TimeTicks> WebPerformance::UnloadStart() const {
   return private_->timing()->UnloadStart();
 }
 
-base::Optional<base::TimeTicks> WebPerformance::UnloadEnd() const {
+absl::optional<base::TimeTicks> WebPerformance::UnloadEnd() const {
   return private_->timing()->UnloadEnd();
 }
 
-base::Optional<base::TimeTicks> WebPerformance::CommitNavigationEnd() const {
+absl::optional<base::TimeTicks> WebPerformance::CommitNavigationEnd() const {
   return private_->timing()->CommitNavigationEnd();
+}
+
+absl::optional<base::TimeDelta> WebPerformance::UserTimingMarkFullyLoaded()
+    const {
+  return private_->timing()->UserTimingMarkFullyLoaded();
+}
+
+absl::optional<base::TimeDelta> WebPerformance::UserTimingMarkFullyVisible()
+    const {
+  return private_->timing()->UserTimingMarkFullyVisible();
+}
+
+absl::optional<base::TimeDelta> WebPerformance::UserTimingMarkInteractive()
+    const {
+  return private_->timing()->UserTimingMarkInteractive();
 }
 
 WebPerformance::WebPerformance(WindowPerformance* performance)

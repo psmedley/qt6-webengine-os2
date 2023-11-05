@@ -7,6 +7,8 @@
 #ifndef CORE_FPDFAPI_FONT_CPDF_FONT_H_
 #define CORE_FPDFAPI_FONT_CPDF_FONT_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <utility>
 #include <vector>
@@ -15,7 +17,6 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
 #include "core/fxcrt/fx_string.h"
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
@@ -25,7 +26,6 @@ class CFX_DIBitmap;
 class CFX_SubstFont;
 class CPDF_CIDFont;
 class CPDF_Document;
-class CPDF_Object;
 class CPDF_TrueTypeFont;
 class CPDF_Type1Font;
 class CPDF_Type3Char;
@@ -37,7 +37,7 @@ class CPDF_Font : public Retainable, public Observable {
   // Callback mechanism for Type3 fonts to get pixels from forms.
   class FormIface {
    public:
-    virtual ~FormIface() {}
+    virtual ~FormIface() = default;
 
     virtual void ParseContentForType3Char(CPDF_Type3Char* pChar) = 0;
     virtual bool HasPageObjects() const = 0;
@@ -49,7 +49,7 @@ class CPDF_Font : public Retainable, public Observable {
   // Callback mechanism for Type3 fonts to get new forms from upper layers.
   class FormFactoryIface {
    public:
-    virtual ~FormFactoryIface() {}
+    virtual ~FormFactoryIface() = default;
 
     virtual std::unique_ptr<FormIface> CreateForm(
         CPDF_Document* pDocument,

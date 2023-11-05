@@ -52,7 +52,7 @@ class SliderThumbElement final : public HTMLDivElement {
 
   void DragFrom(const LayoutPoint&);
   void DefaultEventHandler(Event&) override;
-  bool WillRespondToMouseMoveEvents() override;
+  bool WillRespondToMouseMoveEvents() const override;
   bool WillRespondToMouseClickEvents() override;
   void DetachLayoutTree(bool performing_reattach) override;
   const AtomicString& ShadowPseudoId() const override;
@@ -117,4 +117,4 @@ class SliderContainerElement final : public HTMLDivElement {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_SLIDER_THUMB_ELEMENT_H_

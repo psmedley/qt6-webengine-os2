@@ -4,6 +4,8 @@
 
 #include "content/browser/file_system_access/file_system_chooser.h"
 
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -13,6 +15,7 @@
 #include "content/browser/file_system_access/file_system_chooser_test_helpers.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_error.mojom.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/select_file_dialog_factory.h"
 #include "ui/shell_dialogs/select_file_policy.h"
@@ -85,10 +88,10 @@ TEST_F(FileSystemChooserTest, AcceptsMimeTypes) {
       new CancellingSelectFileDialogFactory(&dialog_params));
   std::vector<blink::mojom::ChooseFileSystemEntryAcceptsOptionPtr> accepts;
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::ASCIIToUTF16(""), std::vector<std::string>({"tExt/Plain"}),
+      u"", std::vector<std::string>({"tExt/Plain"}),
       std::vector<std::string>({})));
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::ASCIIToUTF16("Images"), std::vector<std::string>({"image/*"}),
+      u"Images", std::vector<std::string>({"image/*"}),
       std::vector<std::string>({})));
   SyncShowDialog(std::move(accepts), /*include_accepts_all=*/true);
 
@@ -115,9 +118,8 @@ TEST_F(FileSystemChooserTest, AcceptsMimeTypes) {
 
   ASSERT_EQ(2u,
             dialog_params.file_types->extension_description_overrides.size());
-  EXPECT_EQ(base::ASCIIToUTF16(""),
-            dialog_params.file_types->extension_description_overrides[0]);
-  EXPECT_EQ(base::ASCIIToUTF16("Images"),
+  EXPECT_EQ(u"", dialog_params.file_types->extension_description_overrides[0]);
+  EXPECT_EQ(u"Images",
             dialog_params.file_types->extension_description_overrides[1]);
 }
 
@@ -127,7 +129,7 @@ TEST_F(FileSystemChooserTest, AcceptsExtensions) {
       new CancellingSelectFileDialogFactory(&dialog_params));
   std::vector<blink::mojom::ChooseFileSystemEntryAcceptsOptionPtr> accepts;
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::ASCIIToUTF16(""), std::vector<std::string>({}),
+      u"", std::vector<std::string>({}),
       std::vector<std::string>({"text", "js", "text"})));
   SyncShowDialog(std::move(accepts), /*include_accepts_all=*/true);
 
@@ -144,8 +146,7 @@ TEST_F(FileSystemChooserTest, AcceptsExtensions) {
 
   ASSERT_EQ(1u,
             dialog_params.file_types->extension_description_overrides.size());
-  EXPECT_EQ(base::ASCIIToUTF16(""),
-            dialog_params.file_types->extension_description_overrides[0]);
+  EXPECT_EQ(u"", dialog_params.file_types->extension_description_overrides[0]);
 }
 
 TEST_F(FileSystemChooserTest, AcceptsExtensionsAndMimeTypes) {
@@ -154,7 +155,7 @@ TEST_F(FileSystemChooserTest, AcceptsExtensionsAndMimeTypes) {
       new CancellingSelectFileDialogFactory(&dialog_params));
   std::vector<blink::mojom::ChooseFileSystemEntryAcceptsOptionPtr> accepts;
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::ASCIIToUTF16(""), std::vector<std::string>({"image/*"}),
+      u"", std::vector<std::string>({"image/*"}),
       std::vector<std::string>({"text", "jpg"})));
   SyncShowDialog(std::move(accepts), /*include_accepts_all=*/false);
 
@@ -177,8 +178,7 @@ TEST_F(FileSystemChooserTest, AcceptsExtensionsAndMimeTypes) {
 
   ASSERT_EQ(1u,
             dialog_params.file_types->extension_description_overrides.size());
-  EXPECT_EQ(base::ASCIIToUTF16(""),
-            dialog_params.file_types->extension_description_overrides[0]);
+  EXPECT_EQ(u"", dialog_params.file_types->extension_description_overrides[0]);
 }
 
 TEST_F(FileSystemChooserTest, IgnoreShellIntegratedExtensions) {
@@ -187,7 +187,7 @@ TEST_F(FileSystemChooserTest, IgnoreShellIntegratedExtensions) {
       new CancellingSelectFileDialogFactory(&dialog_params));
   std::vector<blink::mojom::ChooseFileSystemEntryAcceptsOptionPtr> accepts;
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::ASCIIToUTF16(""), std::vector<std::string>({}),
+      u"", std::vector<std::string>({}),
       std::vector<std::string>(
           {"lnk", "foo.lnk", "foo.bar.local", "text", "local"})));
   SyncShowDialog(std::move(accepts), /*include_accepts_all=*/false);
@@ -203,8 +203,7 @@ TEST_F(FileSystemChooserTest, IgnoreShellIntegratedExtensions) {
 
   ASSERT_EQ(1u,
             dialog_params.file_types->extension_description_overrides.size());
-  EXPECT_EQ(base::ASCIIToUTF16(""),
-            dialog_params.file_types->extension_description_overrides[0]);
+  EXPECT_EQ(u"", dialog_params.file_types->extension_description_overrides[0]);
 }
 
 TEST_F(FileSystemChooserTest, LocalPath) {
@@ -240,37 +239,35 @@ TEST_F(FileSystemChooserTest, DescriptionSanitization) {
       new CancellingSelectFileDialogFactory(&dialog_params));
   std::vector<blink::mojom::ChooseFileSystemEntryAcceptsOptionPtr> accepts;
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::UTF8ToUTF16("Description        with \t      a  \r   lot   of  \n "
-                        "                                 spaces"),
+      u"Description        with \t      a  \r   lot   of  \n "
+      u"                                 spaces",
       std::vector<std::string>({}), std::vector<std::string>({"txt"})));
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::UTF8ToUTF16("Description that is very long and should be "
-                        "truncated to 64 code points if it works"),
+      u"Description that is very long and should be "
+      u"truncated to 64 code points if it works",
       std::vector<std::string>({}), std::vector<std::string>({"js"})));
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::UTF8ToUTF16("Unbalanced RTL \xe2\x80\xae section"),
-      std::vector<std::string>({}), std::vector<std::string>({"js"})));
+      u"Unbalanced RTL \u202e section", std::vector<std::string>({}),
+      std::vector<std::string>({"js"})));
   accepts.emplace_back(blink::mojom::ChooseFileSystemEntryAcceptsOption::New(
-      base::UTF8ToUTF16("Unbalanced RTL \xe2\x80\xae section in a otherwise "
-                        "very long description that will be truncated"),
+      u"Unbalanced RTL \u202e section in a otherwise "
+      u"very long description that will be truncated",
       std::vector<std::string>({}), std::vector<std::string>({"js"})));
   SyncShowDialog(std::move(accepts), /*include_accepts_all=*/false);
 
   ASSERT_TRUE(dialog_params.file_types);
   ASSERT_EQ(4u,
             dialog_params.file_types->extension_description_overrides.size());
-  EXPECT_EQ(base::UTF8ToUTF16("Description with a lot of spaces"),
+  EXPECT_EQ(u"Description with a lot of spaces",
             dialog_params.file_types->extension_description_overrides[0]);
+  EXPECT_EQ(u"Description that is very long and should be truncated to 64 cod…",
+            dialog_params.file_types->extension_description_overrides[1]);
+  EXPECT_EQ(u"Unbalanced RTL \u202e section\u202c",
+            dialog_params.file_types->extension_description_overrides[2]);
   EXPECT_EQ(
-      base::UTF8ToUTF16(
-          "Description that is very long and should be truncated to 64 cod…"),
-      dialog_params.file_types->extension_description_overrides[1]);
-  EXPECT_EQ(
-      base::UTF8ToUTF16("Unbalanced RTL \xe2\x80\xae section\xe2\x80\xac"),
-      dialog_params.file_types->extension_description_overrides[2]);
-  EXPECT_EQ(base::UTF8ToUTF16("Unbalanced RTL \xe2\x80\xae section in a "
-                              "otherwise very long description t…\xe2\x80\xac"),
-            dialog_params.file_types->extension_description_overrides[3]);
+      u"Unbalanced RTL \u202e section in a "
+      u"otherwise very long description t…\u202c",
+      dialog_params.file_types->extension_description_overrides[3]);
 }
 
 }  // namespace content

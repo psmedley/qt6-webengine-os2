@@ -4,6 +4,8 @@
 
 #include "content/browser/browser_main_runner_impl.h"
 
+#include <memory>
+
 #include "base/base_switches.h"
 #include "base/check.h"
 #include "base/command_line.h"
@@ -83,21 +85,21 @@ int BrowserMainRunnerImpl::Initialize(const MainFunctionParams& parameters) {
     if (parameters.command_line.HasSwitch(switches::kBrowserStartupDialog))
       WaitForDebugger("Browser");
 
-    notification_service_.reset(new NotificationServiceImpl);
+    notification_service_ = std::make_unique<NotificationServiceImpl>();
 
 #if defined(OS_WIN)
 #if !defined(TOOLKIT_QT)
     // Ole must be initialized before starting message pump, so that TSF
     // (Text Services Framework) module can interact with the message pump
     // on Windows 8 Metro mode.
-    ole_initializer_.reset(new ui::ScopedOleInitializer);
+    ole_initializer_ = std::make_unique<ui::ScopedOleInitializer>();
 #endif
 #endif  // OS_WIN
 
     gfx::InitializeFonts();
 
-    main_loop_.reset(
-        new BrowserMainLoop(parameters, std::move(scoped_execution_fence_)));
+    main_loop_ = std::make_unique<BrowserMainLoop>(
+        parameters, std::move(scoped_execution_fence_));
 
     main_loop_->Init();
 
@@ -115,9 +117,9 @@ int BrowserMainRunnerImpl::Initialize(const MainFunctionParams& parameters) {
     if (!main_loop_->InitializeToolkit())
       return 1;
 
-    main_loop_->PreMainMessageLoopStart();
-    main_loop_->MainMessageLoopStart();
-    main_loop_->PostMainMessageLoopStart();
+    main_loop_->PreCreateMainMessageLoop();
+    main_loop_->CreateMainMessageLoop();
+    main_loop_->PostCreateMainMessageLoop();
 
     // WARNING: If we get a WM_ENDSESSION, objects created on the stack here
     // are NOT deleted. If you need something to run during WM_ENDSESSION add it
@@ -149,7 +151,7 @@ void BrowserMainRunnerImpl::SynchronouslyFlushStartupTasks() {
 int BrowserMainRunnerImpl::Run() {
   DCHECK(initialization_started_);
   DCHECK(!is_shutdown_);
-  main_loop_->RunMainMessageLoopParts();
+  main_loop_->RunMainMessageLoop();
   return main_loop_->GetResultCode();
 }
 
@@ -169,7 +171,7 @@ void BrowserMainRunnerImpl::Shutdown() {
   main_loop_->PreShutdown();
 
   // Finalize the startup tracing session if it is still active.
-  StartupTracingController::GetInstance().WaitUntilStopped();
+  StartupTracingController::GetInstance().ShutdownAndWaitForStopIfNeeded();
 
   {
     // The trace event has to stay between profiler creation and destruction.

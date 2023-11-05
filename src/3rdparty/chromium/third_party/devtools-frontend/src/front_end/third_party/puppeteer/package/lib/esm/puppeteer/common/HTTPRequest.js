@@ -76,17 +76,8 @@ export class HTTPRequest {
     /**
      * Contains the request's resource type as it was perceived by the rendering
      * engine.
-     * @remarks
-     * @returns one of the following: `document`, `stylesheet`, `image`, `media`,
-     * `font`, `script`, `texttrack`, `xhr`, `fetch`, `eventsource`, `websocket`,
-     * `manifest`, `other`.
      */
     resourceType() {
-        // TODO (@jackfranklin): protocol.d.ts has a type for this, but all the
-        // string values are uppercase. The Puppeteer docs explicitly say the
-        // potential values are all lower case, and the constructor takes the event
-        // type and calls toLowerCase() on it, so we can't reuse the type from the
-        // protocol.d.ts. Why do we lower case?
         return this._resourceType;
     }
     /**
@@ -109,13 +100,15 @@ export class HTTPRequest {
         return this._headers;
     }
     /**
-     * @returns the response for this request, if a response has been received.
+     * @returns A matching `HTTPResponse` object, or null if the response has not
+     * been received yet.
      */
     response() {
         return this._response;
     }
     /**
-     * @returns the frame that initiated the request.
+     * @returns the frame that initiated the request, or null if navigating to
+     * error pages.
      */
     frame() {
         return this._frame;
@@ -127,6 +120,7 @@ export class HTTPRequest {
         return this._isNavigationRequest;
     }
     /**
+     * A `redirectChain` is a chain of requests initiated to fetch a resource.
      * @remarks
      *
      * `redirectChain` is shared between all the requests of the same chain.
@@ -274,7 +268,7 @@ export class HTTPRequest {
         const responseHeaders = {};
         if (response.headers) {
             for (const header of Object.keys(response.headers))
-                responseHeaders[header.toLowerCase()] = response.headers[header];
+                responseHeaders[header.toLowerCase()] = String(response.headers[header]);
         }
         if (response.contentType)
             responseHeaders['content-type'] = response.contentType;

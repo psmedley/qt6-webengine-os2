@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if !V8_ENABLE_WEBASSEMBLY
+#error This header should only be included if WebAssembly is enabled.
+#endif  // !V8_ENABLE_WEBASSEMBLY
+
 #ifndef V8_WASM_MODULE_COMPILER_H_
 #define V8_WASM_MODULE_COMPILER_H_
 
@@ -19,6 +23,12 @@
 #include "src/wasm/wasm-module.h"
 
 namespace v8 {
+
+namespace base {
+template <typename T>
+class Vector;
+}  // namespace base
+
 namespace internal {
 
 class JSArrayBuffer;
@@ -26,9 +36,6 @@ class JSPromise;
 class Counters;
 class WasmModuleObject;
 class WasmInstanceObject;
-
-template <typename T>
-class Vector;
 
 namespace wasm {
 
@@ -57,7 +64,7 @@ void CompileJsToWasmWrappers(Isolate* isolate, const WasmModule* module,
 // compiled yet.
 V8_EXPORT_PRIVATE
 WasmCode* CompileImportWrapper(
-    WasmEngine* wasm_engine, NativeModule* native_module, Counters* counters,
+    NativeModule* native_module, Counters* counters,
     compiler::WasmImportCallKind kind, const FunctionSig* sig,
     int expected_arity, WasmImportWrapperCache::ModificationScope* cache_scope);
 

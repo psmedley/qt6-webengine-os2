@@ -113,7 +113,7 @@ std::vector<SkBitmap> LoadResourceBitmaps(
            extension->path() == it->resource.extension_root());
 
     int resource_id = 0;
-    if (extension->location() == Manifest::COMPONENT) {
+    if (extension->location() == mojom::ManifestLocation::kComponent) {
       const extensions::ComponentExtensionResourceManager* manager =
           extensions::ExtensionsBrowserClient::Get()
               ->GetComponentExtensionResourceManager();
@@ -239,8 +239,8 @@ void ImageLoader::LoadImageAtEveryScaleFactorAsync(
   std::vector<ImageRepresentation> info_list;
 
   std::set<float> scales;
-  for (auto scale : ui::GetSupportedScaleFactors())
-    scales.insert(ui::GetScaleForScaleFactor(scale));
+  for (auto scale : ui::GetSupportedResourceScaleFactors())
+    scales.insert(ui::GetScaleForResourceScaleFactor(scale));
 
   // There may not be a screen in unit tests.
   auto* screen = display::Screen::GetScreen();

@@ -4,8 +4,8 @@
 
 #include "components/no_state_prefetch/common/prerender_origin.h"
 
+#include "base/cxx17_backports.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 
 namespace prerender {
 
@@ -29,6 +29,7 @@ const char* kOriginNames[] = {
     "[Deprecated] Offline",
     "Navigation Predictor",
     "Isolated Prerender",
+    "Speculation Rules Same Origin Prerender",
     "Max",
 };
 static_assert(base::size(kOriginNames) == ORIGIN_MAX + 1,

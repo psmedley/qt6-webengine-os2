@@ -24,6 +24,9 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/api/declarative/rules_registry.h"
+#include "extensions/browser/api/declarative/rules_registry_service.h"
+#include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
 #include "extensions/browser/extension_action.h"
 #include "extensions/browser/extension_action_manager.h"
 #include "extensions/browser/extension_registry.h"
@@ -238,18 +241,15 @@ void DeclarativeContentApiTest::CheckBookmarkEvents(bool match_is_bookmarked) {
   // Check rule evaluation on add/remove bookmark.
   bookmarks::BookmarkModel* bookmark_model =
       BookmarkModelFactory::GetForBrowserContext(browser()->profile());
-  const bookmarks::BookmarkNode* node =
-      bookmark_model->AddURL(bookmark_model->other_node(), 0,
-                             base::ASCIIToUTF16("title"),
-                             GURL("http://test1/"));
+  const bookmarks::BookmarkNode* node = bookmark_model->AddURL(
+      bookmark_model->other_node(), 0, u"title", GURL("http://test1/"));
   EXPECT_EQ(match_is_bookmarked, action->GetIsVisible(tab_id));
 
   bookmark_model->Remove(node);
   EXPECT_EQ(!match_is_bookmarked, action->GetIsVisible(tab_id));
 
   // Check rule evaluation on navigate to bookmarked and non-bookmarked URL.
-  bookmark_model->AddURL(bookmark_model->other_node(), 0,
-                         base::ASCIIToUTF16("title"),
+  bookmark_model->AddURL(bookmark_model->other_node(), 0, u"title",
                          GURL("http://test2/"));
 
   NavigateInRenderer(tab, GURL("http://test2/"));
@@ -367,8 +367,7 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, ReusedActionInstance) {
   const Extension* extension = LoadExtension(ext_dir_.UnpackedPath());
   ASSERT_TRUE(extension);
   // Wait for declarative rules to be set up.
-  content::BrowserContext::GetDefaultStoragePartition(profile())
-      ->FlushNetworkInterfaceForTesting();
+  profile()->GetDefaultStoragePartition()->FlushNetworkInterfaceForTesting();
   const ExtensionAction* action =
       ExtensionActionManager::Get(browser()->profile())
           ->GetExtensionAction(*extension);
@@ -443,14 +442,14 @@ class ParameterizedShowActionDeclarativeContentApiTest
   ParameterizedShowActionDeclarativeContentApiTest() {}
   ~ParameterizedShowActionDeclarativeContentApiTest() override {}
 
-  void TestShowAction(base::Optional<ActionInfo::Type> action_type);
+  void TestShowAction(absl::optional<ActionInfo::Type> action_type);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ParameterizedShowActionDeclarativeContentApiTest);
 };
 
 void ParameterizedShowActionDeclarativeContentApiTest::TestShowAction(
-    base::Optional<ActionInfo::Type> action_type) {
+    absl::optional<ActionInfo::Type> action_type) {
   constexpr char kManifestTemplate[] =
       R"({
            "name": "Declarative Content Show Action",
@@ -480,8 +479,7 @@ void ParameterizedShowActionDeclarativeContentApiTest::TestShowAction(
       loader.LoadExtension(ext_dir_.UnpackedPath());
   ASSERT_TRUE(extension);
   // Wait for declarative rules to be set up.
-  content::BrowserContext::GetDefaultStoragePartition(profile())
-      ->FlushNetworkInterfaceForTesting();
+  profile()->GetDefaultStoragePartition()->FlushNetworkInterfaceForTesting();
 
   ExtensionAction* action = ExtensionActionManager::Get(browser()->profile())
                                 ->GetExtensionAction(*extension);
@@ -531,7 +529,7 @@ void ParameterizedShowActionDeclarativeContentApiTest::TestShowAction(
 
 IN_PROC_BROWSER_TEST_P(ParameterizedShowActionDeclarativeContentApiTest,
                        NoActionInManifest) {
-  TestShowAction(base::nullopt);
+  TestShowAction(absl::nullopt);
 }
 
 IN_PROC_BROWSER_TEST_P(ParameterizedShowActionDeclarativeContentApiTest,
@@ -796,8 +794,7 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
 
   UnloadExtension(extension_id);
   // Wait for declarative rules to be removed.
-  content::BrowserContext::GetDefaultStoragePartition(profile())
-      ->FlushNetworkInterfaceForTesting();
+  profile()->GetDefaultStoragePartition()->FlushNetworkInterfaceForTesting();
   NavigateInRenderer(tab, GURL("http://test/"));
   EXPECT_TRUE(WaitForPageActionVisibilityChangeTo(0));
   EXPECT_EQ(0u, extension_action_test_util::GetVisiblePageActionCount(tab));
@@ -988,17 +985,15 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
 
   // Remove the second tab, then trigger a rule evaluation for the remaining
   // tab.
-  browser()->tab_strip_model()->DetachWebContentsAt(
+  browser()->tab_strip_model()->DetachAndDeleteWebContentsAt(
       browser()->tab_strip_model()->GetIndexOfWebContents(tab2));
   NavigateInRenderer(tab1, GURL("http://test1/"));
   EXPECT_TRUE(action->GetIsVisible(ExtensionTabUtil::GetTabId(tab1)));
 }
 
 // https://crbug.com/517492
-// Fails on XP: http://crbug.com/515717
-// Fails on other platfomrs: http://crbug.com/1013457
 IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
-                       DISABLED_RemoveAllRulesAfterExtensionUninstall) {
+                       RemoveAllRulesAfterExtensionUninstall) {
   ext_dir_.WriteManifest(kDeclarativeContentManifest);
   ext_dir_.WriteFile(FILE_PATH_LITERAL("background.js"), kBackgroundHelpers);
 
@@ -1018,12 +1013,12 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
   ExtensionService* extension_service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
 
-  base::string16 error;
+  std::u16string error;
   ASSERT_TRUE(extension_service->UninstallExtension(
       extension->id(),
       UNINSTALL_REASON_FOR_TESTING,
       &error));
-  ASSERT_EQ(base::ASCIIToUTF16(""), error);
+  ASSERT_EQ(u"", error);
 
   // Reload the extension, then add and remove a rule.
   extension = LoadExtension(ext_dir_.UnpackedPath());
@@ -1035,6 +1030,52 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
   const std::string kRemoveTestRule1 = "removeRule('1', 'remove_rule1');\n";
   EXPECT_EQ("remove_rule1",
             ExecuteScriptInBackgroundPage(extension->id(), kRemoveTestRule1));
+}
+
+// Test that an extension with a RequestContentScript rule in its manifest can
+// be loaded.
+// Regression for crbug.com/1211316, which could cause this test to flake if
+// RulesRegistry::OnExtensionLoaded() was called before
+// UserScriptmanager::OnExtensionLoaded().
+IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, RequestContentScriptRule) {
+  constexpr char kManifest[] = R"(
+      {
+        "name": "Declarative Content apitest",
+        "version": "0.1",
+        "manifest_version": 2,
+        "page_action": {},
+        "permissions": [
+          "declarativeContent"
+        ],
+        "event_rules": [{
+          "event": "declarativeContent.onPageChanged",
+          "actions": [{
+            "type": "declarativeContent.RequestContentScript",
+            "js": ["asdf.js"]
+          }],
+          "conditions": [{
+            "type": "declarativeContent.PageStateMatcher",
+            "pageUrl": {"hostPrefix": "test1"}
+          }]
+        }]
+      }
+  )";
+
+  ext_dir_.WriteManifest(kManifest);
+  const Extension* extension = LoadExtension(ext_dir_.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  RulesRegistryService* rules_registry_service =
+      extensions::RulesRegistryService::Get(browser()->profile());
+  scoped_refptr<RulesRegistry> rules_registry =
+      rules_registry_service->GetRulesRegistry(
+          RulesRegistryService::kDefaultRulesRegistryID,
+          "declarativeContent.onPageChanged");
+  DCHECK(rules_registry);
+
+  std::vector<const api::events::Rule*> rules;
+  rules_registry->GetAllRules(extension->id(), &rules);
+  EXPECT_EQ(1u, rules.size());
 }
 
 // TODO(wittman): Once ChromeContentRulesRegistry operates on condition and

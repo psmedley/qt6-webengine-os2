@@ -4,6 +4,7 @@
 
 #include "device/bluetooth/dbus/bluetooth_adapter_client.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -21,6 +22,7 @@
 #include "dbus/values_util.h"
 #include "device/bluetooth/bluez/bluetooth_service_attribute_value_bluez.h"
 #include "device/bluetooth/bluez/bluetooth_service_record_bluez.h"
+#include "device/bluetooth/dbus/bluetooth_metrics_helper.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace bluez {
@@ -37,8 +39,7 @@ namespace {
 void WriteNumberAttribute(dbus::MessageWriter* writer,
                           const BluetoothServiceAttributeValueBlueZ& attribute,
                           bool is_signed) {
-  int value;
-  attribute.value().GetAsInteger(&value);
+  int value = attribute.value().GetInt();
 
   switch (attribute.size()) {
     case 1:
@@ -119,7 +120,7 @@ BluetoothAdapterClient::Error ErrorResponseToError(
 void OnResponseAdapter(
     base::OnceClosure callback,
     BluetoothAdapterClient::ErrorCallback error_callback,
-    const base::Optional<BluetoothAdapterClient::Error>& error) {
+    const absl::optional<BluetoothAdapterClient::Error>& error) {
   if (!error) {
     std::move(callback).Run();
     return;
@@ -137,22 +138,22 @@ BluetoothAdapterClient::DiscoveryFilter::~DiscoveryFilter() = default;
 void BluetoothAdapterClient::DiscoveryFilter::CopyFrom(
     const DiscoveryFilter& filter) {
   if (filter.rssi.get())
-    rssi.reset(new int16_t(*filter.rssi));
+    rssi = std::make_unique<int16_t>(*filter.rssi);
   else
     rssi.reset();
 
   if (filter.pathloss.get())
-    pathloss.reset(new uint16_t(*filter.pathloss));
+    pathloss = std::make_unique<uint16_t>(*filter.pathloss);
   else
     pathloss.reset();
 
   if (filter.transport.get())
-    transport.reset(new std::string(*filter.transport));
+    transport = std::make_unique<std::string>(*filter.transport);
   else
-    transport.reset(new std::string(kBluezAutoTransport));
+    transport = std::make_unique<std::string>(kBluezAutoTransport);
 
   if (filter.uuids.get())
-    uuids.reset(new std::vector<std::string>(*filter.uuids));
+    uuids = std::make_unique<std::vector<std::string>>(*filter.uuids);
   else
     uuids.reset();
 }
@@ -451,7 +452,7 @@ class BluetoothAdapterClientImpl : public BluetoothAdapterClient,
   // BluetoothAdapterClient override.
   void ConnectDevice(const dbus::ObjectPath& object_path,
                      const std::string& address,
-                     const base::Optional<AddressType>& address_type,
+                     const absl::optional<AddressType>& address_type,
                      ConnectDeviceCallback callback,
                      ErrorCallback error_callback) override {
     dbus::MethodCall method_call(bluetooth_adapter::kBluetoothAdapterInterface,
@@ -488,8 +489,9 @@ class BluetoothAdapterClientImpl : public BluetoothAdapterClient,
     object_proxy->CallMethodWithErrorCallback(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::BindOnce(&BluetoothAdapterClientImpl::OnConnectDevice,
-                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)),
-        base::BindOnce(&BluetoothAdapterClientImpl::OnError,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback),
+                       /*start_time=*/base::Time::Now()),
+        base::BindOnce(&BluetoothAdapterClientImpl::OnConnectDeviceError,
                        weak_ptr_factory_.GetWeakPtr(),
                        std::move(error_callback)));
   }
@@ -557,7 +559,7 @@ class BluetoothAdapterClientImpl : public BluetoothAdapterClient,
                   dbus::Response* response,
                   dbus::ErrorResponse* error_response) {
     if (response) {
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
 
@@ -577,13 +579,22 @@ class BluetoothAdapterClientImpl : public BluetoothAdapterClient,
 
   // Called when ConnectDevice() succeeds.
   void OnConnectDevice(ConnectDeviceCallback callback,
+                       base::Time start_time,
                        dbus::Response* response) {
     DCHECK(response);
     dbus::MessageReader reader(response);
     dbus::ObjectPath device_path;
     if (!reader.PopObjectPath(&device_path))
       LOG(ERROR) << "Invalid response from ConnectDevice.";
+
+    RecordSuccess(kConnectDeviceMethod, start_time);
     std::move(callback).Run(device_path);
+  }
+
+  void OnConnectDeviceError(ErrorCallback error_callback,
+                            dbus::ErrorResponse* response) {
+    RecordFailure(kConnectDeviceMethod, response);
+    OnError(std::move(error_callback), response);
   }
 
   dbus::ObjectManager* object_manager_ = nullptr;

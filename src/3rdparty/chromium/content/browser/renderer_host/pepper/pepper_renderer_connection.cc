@@ -6,11 +6,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
-#include "base/stl_util.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -19,13 +19,13 @@
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 #include "content/browser/renderer_host/pepper/pepper_file_ref_host.h"
 #include "content/browser/renderer_host/pepper/pepper_file_system_browser_host.h"
-#include "content/common/frame_messages.h"
 #include "content/common/pepper_renderer_instance_data.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "ipc/ipc_message_macros.h"
 #include "ppapi/host/resource_host.h"
 #include "ppapi/proxy/ppapi_message_utils.h"
@@ -35,10 +35,6 @@
 namespace content {
 
 namespace {
-
-const uint32_t kPepperFilteredMessageClasses[] = {
-    PpapiMsgStart, FrameMsgStart,
-};
 
 // Responsible for creating the pending resource hosts, holding their IDs until
 // all of them have been created for a single message, and sending the reply to
@@ -110,7 +106,9 @@ class PepperRendererConnection::OpenChannelToPpapiPluginCallback
                            int* renderer_id) override {
     // base::kNullProcessHandle indicates that the channel will be used by the
     // browser itself. Make sure we never output that value here.
-    CHECK_NE(base::kNullProcessHandle, filter_->PeerHandle());
+    if (filter_->PeerHandle() == base::kNullProcessHandle) {
+      return;
+    }
     *renderer_handle = filter_->PeerHandle();
     *renderer_id = filter_->render_process_id_;
   }
@@ -135,28 +133,25 @@ PepperRendererConnection::PepperRendererConnection(
     PluginServiceImpl* plugin_service,
     BrowserContext* browser_context,
     StoragePartition* storage_partition)
-    : BrowserMessageFilter(kPepperFilteredMessageClasses,
-                           base::size(kPepperFilteredMessageClasses)),
+    : BrowserMessageFilter(PpapiMsgStart),
       BrowserAssociatedInterface<mojom::PepperIOHost>(this),
       render_process_id_(render_process_id),
       incognito_(browser_context->IsOffTheRecord()),
       plugin_service_(plugin_service),
       profile_data_directory_(storage_partition->GetPath()) {
   // Only give the renderer permission for stable APIs.
-  in_process_host_.reset(new BrowserPpapiHostImpl(this,
-                                                  ppapi::PpapiPermissions(),
-                                                  "",
-                                                  base::FilePath(),
-                                                  base::FilePath(),
-                                                  true /* in_process */,
-                                                  false /* external_plugin */));
+  in_process_host_ = std::make_unique<BrowserPpapiHostImpl>(
+      this, ppapi::PpapiPermissions(), "", base::FilePath(), base::FilePath(),
+      true /* in_process */, false /* external_plugin */);
 }
 
 PepperRendererConnection::~PepperRendererConnection() {}
 
 BrowserPpapiHostImpl* PepperRendererConnection::GetHostForChildProcess(
     int child_process_id) const {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(base::FeatureList::IsEnabled(features::kProcessHostOnUI)
+                          ? content::BrowserThread::UI
+                          : content::BrowserThread::IO);
 
   // Find the plugin which this message refers to. Check NaCl plugins first.
   BrowserPpapiHostImpl* host = static_cast<BrowserPpapiHostImpl*>(
@@ -182,6 +177,15 @@ BrowserPpapiHostImpl* PepperRendererConnection::GetHostForChildProcess(
   }
 
   return host;
+}
+
+void PepperRendererConnection::OverrideThreadForMessage(
+    const IPC::Message& message,
+    content::BrowserThread::ID* thread) {
+  if (base::FeatureList::IsEnabled(features::kProcessHostOnUI) &&
+      IPC_MESSAGE_ID_CLASS(message.type()) == PpapiMsgStart) {
+    *thread = content::BrowserThread::UI;
+  }
 }
 
 bool PepperRendererConnection::OnMessageReceived(const IPC::Message& msg) {
@@ -223,8 +227,8 @@ void PepperRendererConnection::OnMsgCreateResourceHostsFromHost(
         base::FilePath external_path;
         if (ppapi::UnpackMessage<PpapiHostMsg_FileRef_CreateForRawFS>(
                 nested_msg, &external_path)) {
-          resource_host.reset(new PepperFileRefHost(
-              host, instance, params.pp_resource(), external_path));
+          resource_host = std::make_unique<PepperFileRefHost>(
+              host, instance, params.pp_resource(), external_path);
         }
       } else if (nested_msg.type() ==
                  PpapiHostMsg_FileSystem_CreateFromRenderer::ID) {
@@ -340,7 +344,7 @@ void PepperRendererConnection::DidDeleteOutOfProcessPepperInstance(
 void PepperRendererConnection::OpenChannelToPepperPlugin(
     const url::Origin& embedder_origin,
     const base::FilePath& path,
-    const base::Optional<url::Origin>& origin_lock,
+    const absl::optional<url::Origin>& origin_lock,
     OpenChannelToPepperPluginCallback callback) {
   // Enforce that the sender of the IPC (i.e. |render_process_id_|) is actually
   // able/allowed to host a frame with |embedder_origin|.

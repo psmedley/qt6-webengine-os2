@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/animation/property_handle.h"
 #include "third_party/blink/renderer/core/animation/transition_interpolation.h"
 #include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
+#include "third_party/blink/renderer/core/css/css_cyclic_variable_value.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
 #include "third_party/blink/renderer/core/css/css_invalid_variable_value.h"
 #include "third_party/blink/renderer/core/css/css_pending_substitution_value.h"
@@ -74,15 +75,15 @@ const CSSValue* Parse(const CSSProperty& property,
 }
 
 const CSSValue* ValueAt(const MatchResult& result, uint32_t position) {
-  size_t matched_properties_index = DecodeMatchedPropertiesIndex(position);
-  size_t declaration_index = DecodeDeclarationIndex(position);
+  wtf_size_t matched_properties_index = DecodeMatchedPropertiesIndex(position);
+  wtf_size_t declaration_index = DecodeDeclarationIndex(position);
   const MatchedPropertiesVector& vector = result.GetMatchedProperties();
   const CSSPropertyValueSet* set = vector[matched_properties_index].properties;
   return &set->PropertyAt(declaration_index).Value();
 }
 
 const TreeScope& TreeScopeAt(const MatchResult& result, uint32_t position) {
-  size_t matched_properties_index = DecodeMatchedPropertiesIndex(position);
+  wtf_size_t matched_properties_index = DecodeMatchedPropertiesIndex(position);
   const MatchedProperties& properties =
       result.GetMatchedProperties()[matched_properties_index];
   DCHECK_EQ(properties.types_.origin, CascadeOrigin::kAuthor);
@@ -194,6 +195,8 @@ void StyleCascade::Apply(CascadeFilter filter) {
       state_.Style()->SetHasAuthorBackground();
     if (resolver.AuthorFlags() & CSSProperty::kBorder)
       state_.Style()->SetHasAuthorBorder();
+    if (resolver.AuthorFlags() & CSSProperty::kBorderRadius)
+      state_.Style()->SetHasAuthorBorderRadius();
   }
 }
 
@@ -230,8 +233,16 @@ const CSSValue* StyleCascade::Resolve(const CSSPropertyName& name,
 
   DCHECK(resolved);
 
-  if (resolved->IsInvalidVariableValue())
+  // TODO(crbug.com/1185745): Cycles in animations get special handling by our
+  // implementation. This is not per spec, but the correct behavior is not
+  // defined at the moment.
+  if (resolved->IsCyclicVariableValue())
     return nullptr;
+
+  // TODO(crbug.com/1185745): We should probably not return 'unset' for
+  // properties where CustomProperty::SupportsGuaranteedInvalid return true.
+  if (resolved->IsInvalidVariableValue())
+    return cssvalue::CSSUnsetValue::Create();
 
   return resolved;
 }
@@ -290,7 +301,7 @@ void StyleCascade::AnalyzeMatchResult() {
 
 void StyleCascade::AnalyzeInterpolations() {
   const auto& entries = interpolations_.GetEntries();
-  for (size_t i = 0; i < entries.size(); ++i) {
+  for (wtf_size_t i = 0; i < entries.size(); ++i) {
     for (const auto& active_interpolation : *entries[i].map) {
       auto name = active_interpolation.key.GetCSSPropertyName();
       uint32_t position = EncodeInterpolationPosition(
@@ -412,7 +423,7 @@ void StyleCascade::ApplyMatchResult(CascadeResolver& resolver) {
 
 void StyleCascade::ApplyInterpolations(CascadeResolver& resolver) {
   const auto& entries = interpolations_.GetEntries();
-  for (size_t i = 0; i < entries.size(); ++i) {
+  for (wtf_size_t i = 0; i < entries.size(); ++i) {
     const auto& entry = entries[i];
     ApplyInterpolationMap(*entry.map, entry.origin, i, resolver);
   }
@@ -551,7 +562,7 @@ void StyleCascade::LookupAndApplyInterpolation(const CSSProperty& property,
   if (property.IsVisited())
     return;
   DCHECK(priority.GetOrigin() >= CascadeOrigin::kAnimation);
-  size_t index = DecodeInterpolationIndex(priority.GetPosition());
+  wtf_size_t index = DecodeInterpolationIndex(priority.GetPosition());
   DCHECK_LE(index, interpolations_.GetEntries().size());
   const ActiveInterpolationsMap& map = *interpolations_.GetEntries()[index].map;
   PropertyHandle handle = ToPropertyHandle(property, priority);
@@ -640,18 +651,15 @@ const CSSValue* StyleCascade::ResolveCustomProperty(
   state_.Style()->SetHasVariableDeclaration();
 
   if (resolver.InCycle())
-    return CSSInvalidVariableValue::Create();
+    return CSSCyclicVariableValue::Create();
 
-  if (!data) {
-    MaybeUseCountInvalidVariableUnset(To<CustomProperty>(property));
-    return cssvalue::CSSUnsetValue::Create();
-  }
+  if (!data)
+    return CSSInvalidVariableValue::Create();
 
   if (data == decl.Value())
     return &decl;
 
-  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(decl.GetName(),
-                                                            data);
+  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(data);
 }
 
 const CSSValue* StyleCascade::ResolveVariableReference(
@@ -979,20 +987,6 @@ void StyleCascade::CountUse(WebFeature feature) {
 void StyleCascade::MaybeUseCountRevert(const CSSValue& value) {
   if (IsRevert(value))
     CountUse(WebFeature::kCSSKeywordRevert);
-}
-
-void StyleCascade::MaybeUseCountInvalidVariableUnset(
-    const CustomProperty& property) {
-  if (!property.SupportsGuaranteedInvalid())
-    return;
-  if (!property.IsInherited() && !property.HasInitialValue())
-    return;
-  const AtomicString& name = property.GetPropertyNameAtomicString();
-  const ComputedStyle* parent_style = state_.ParentStyle();
-  if (parent_style &&
-      parent_style->GetVariableData(name, property.IsInherited())) {
-    CountUse(WebFeature::kCSSInvalidVariableUnset);
-  }
 }
 
 }  // namespace blink

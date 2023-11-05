@@ -47,12 +47,14 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/bidi_text_run.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+
+// To avoid conflicts with the DrawText macro from the Windows SDK...
+#undef DrawText
 
 namespace blink {
 
@@ -204,7 +206,8 @@ std::unique_ptr<DragImage> DragImage::Create(const KURL& url,
   // TODO(fserb): are we sure this should be software?
   std::unique_ptr<CanvasResourceProvider> resource_provider(
       CanvasResourceProvider::CreateBitmapProvider(
-          scaled_image_size, kLow_SkFilterQuality, CanvasResourceParams(),
+          scaled_image_size, cc::PaintFlags::FilterQuality::kLow,
+          CanvasResourceParams(),
           CanvasResourceProvider::ShouldInitialize::kNo));
   if (!resource_provider)
     return nullptr;

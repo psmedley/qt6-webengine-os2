@@ -13,9 +13,11 @@
 #include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 
-namespace chromeos {
-
+namespace ash {
 class UpdateScreen;
+}
+
+namespace chromeos {
 
 // Interface for dependency injection between WelcomeScreen and its actual
 // representation. Owned by UpdateScreen.
@@ -43,15 +45,15 @@ class UpdateView {
   virtual void Hide() = 0;
 
   // Binds `screen` to the view.
-  virtual void Bind(UpdateScreen* screen) = 0;
+  virtual void Bind(ash::UpdateScreen* screen) = 0;
 
   // Unbinds the screen from the view.
   virtual void Unbind() = 0;
 
   virtual void SetUpdateState(UIState value) = 0;
   virtual void SetUpdateStatus(int percent,
-                               const base::string16& percent_message,
-                               const base::string16& timeleft_message) = 0;
+                               const std::u16string& percent_message,
+                               const std::u16string& timeleft_message) = 0;
   virtual void ShowLowBatteryWarningMessage(bool value) = 0;
   virtual void SetAutoTransition(bool value) = 0;
   virtual void SetCancelUpdateShortcutEnabled(bool value) = 0;
@@ -68,13 +70,13 @@ class UpdateScreenHandler : public UpdateView, public BaseScreenHandler {
   // UpdateView:
   void Show() override;
   void Hide() override;
-  void Bind(UpdateScreen* screen) override;
+  void Bind(ash::UpdateScreen* screen) override;
   void Unbind() override;
 
   void SetUpdateState(UpdateView::UIState value) override;
   void SetUpdateStatus(int percent,
-                       const base::string16& percent_message,
-                       const base::string16& timeleft_message) override;
+                       const std::u16string& percent_message,
+                       const std::u16string& timeleft_message) override;
   void ShowLowBatteryWarningMessage(bool value) override;
   void SetAutoTransition(bool value) override;
   void SetCancelUpdateShortcutEnabled(bool value) override;
@@ -87,7 +89,7 @@ class UpdateScreenHandler : public UpdateView, public BaseScreenHandler {
       ::login::LocalizedValuesBuilder* builder) override;
   void Initialize() override;
 
-  UpdateScreen* screen_ = nullptr;
+  ash::UpdateScreen* screen_ = nullptr;
 
   // If true, Initialize() will call Show().
   bool show_on_init_ = false;
@@ -96,5 +98,12 @@ class UpdateScreenHandler : public UpdateView, public BaseScreenHandler {
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after the //chrome/browser/chromeos
+// source migration is finished.
+namespace ash {
+using ::chromeos::UpdateScreenHandler;
+using ::chromeos::UpdateView;
+}
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_UPDATE_SCREEN_HANDLER_H_

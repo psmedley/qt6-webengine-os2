@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/enterprise_device_attributes.h"
-#include "chromeos/lacros/lacros_chrome_service_impl.h"
+#include "chromeos/lacros/lacros_service.h"
 
 namespace {
 
@@ -21,8 +21,10 @@ const char kUnsupportedProfile[] = "Not available.";
 // error, or empty string on success. |context| is the browser context in which
 // the extension is hosted.
 std::string ValidateCrosapi(content::BrowserContext* context) {
-  if (!chromeos::LacrosChromeServiceImpl::Get()->IsDeviceAttributesAvailable())
+  if (!chromeos::LacrosService::Get()
+           ->IsAvailable<crosapi::mojom::DeviceAttributes>()) {
     return kUnsupportedByAsh;
+  }
 
   // These APIs are used in security-sensitive contexts. We need to ensure that
   // the user for ash is the same as the user for lacros. We do this by
@@ -74,8 +76,8 @@ EnterpriseDeviceAttributesGetDirectoryDeviceIdFunction::Run() {
       &EnterpriseDeviceAttributesGetDirectoryDeviceIdFunction::OnCrosapiResult,
       this);
 
-  chromeos::LacrosChromeServiceImpl::Get()
-      ->device_attributes_remote()
+  chromeos::LacrosService::Get()
+      ->GetRemote<crosapi::mojom::DeviceAttributes>()
       ->GetDirectoryDeviceId(std::move(cb));
   return RespondLater();
 }
@@ -106,8 +108,8 @@ EnterpriseDeviceAttributesGetDeviceSerialNumberFunction::Run() {
       &EnterpriseDeviceAttributesGetDeviceSerialNumberFunction::OnCrosapiResult,
       this);
 
-  chromeos::LacrosChromeServiceImpl::Get()
-      ->device_attributes_remote()
+  chromeos::LacrosService::Get()
+      ->GetRemote<crosapi::mojom::DeviceAttributes>()
       ->GetDeviceSerialNumber(std::move(cb));
   return RespondLater();
 }
@@ -138,8 +140,8 @@ EnterpriseDeviceAttributesGetDeviceAssetIdFunction::Run() {
       &EnterpriseDeviceAttributesGetDeviceAssetIdFunction::OnCrosapiResult,
       this);
 
-  chromeos::LacrosChromeServiceImpl::Get()
-      ->device_attributes_remote()
+  chromeos::LacrosService::Get()
+      ->GetRemote<crosapi::mojom::DeviceAttributes>()
       ->GetDeviceAssetId(std::move(cb));
   return RespondLater();
 }
@@ -171,8 +173,8 @@ EnterpriseDeviceAttributesGetDeviceAnnotatedLocationFunction::Run() {
           OnCrosapiResult,
       this);
 
-  chromeos::LacrosChromeServiceImpl::Get()
-      ->device_attributes_remote()
+  chromeos::LacrosService::Get()
+      ->GetRemote<crosapi::mojom::DeviceAttributes>()
       ->GetDeviceAnnotatedLocation(std::move(cb));
   return RespondLater();
 }
@@ -203,8 +205,8 @@ EnterpriseDeviceAttributesGetDeviceHostnameFunction::Run() {
       &EnterpriseDeviceAttributesGetDeviceHostnameFunction::OnCrosapiResult,
       this);
 
-  chromeos::LacrosChromeServiceImpl::Get()
-      ->device_attributes_remote()
+  chromeos::LacrosService::Get()
+      ->GetRemote<crosapi::mojom::DeviceAttributes>()
       ->GetDeviceHostname(std::move(cb));
   return RespondLater();
 }

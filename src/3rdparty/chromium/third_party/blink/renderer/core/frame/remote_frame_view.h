@@ -43,8 +43,6 @@ class RemoteFrameView final : public GarbageCollected<RemoteFrameView>,
   void Dispose() override;
   void SetFrameRect(const IntRect&) override;
   void PropagateFrameRects() override;
-  // Override to notify remote frame that its viewport size has changed.
-  void InvalidateRect(const IntRect&);
   void Paint(GraphicsContext&,
              const GlobalPaintFlags,
              const CullRect&,
@@ -53,7 +51,9 @@ class RemoteFrameView final : public GarbageCollected<RemoteFrameView>,
   void Hide() override;
   void Show() override;
 
-  bool UpdateViewportIntersectionsForSubtree(unsigned parent_flags) override;
+  bool UpdateViewportIntersectionsForSubtree(
+      unsigned parent_flags,
+      absl::optional<base::TimeTicks>&) override;
   void SetNeedsOcclusionTracking(bool);
   bool NeedsOcclusionTracking() const { return needs_occlusion_tracking_; }
 

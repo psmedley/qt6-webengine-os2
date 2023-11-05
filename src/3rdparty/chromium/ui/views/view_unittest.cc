@@ -33,6 +33,7 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_types.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/layer.h"
@@ -55,7 +56,6 @@
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/metadata/metadata_types.h"
 #include "ui/views/paint_info.h"
 #include "ui/views/test/view_metadata_test_utils.h"
 #include "ui/views/test/views_test_base.h"
@@ -65,7 +65,6 @@
 #include "ui/views/widget/root_view.h"
 #include "ui/views/window/dialog_delegate.h"
 
-using base::ASCIIToUTF16;
 using testing::ElementsAre;
 
 namespace {
@@ -183,8 +182,8 @@ void ScrambleTree(views::View* view) {
   size_t count = view->children().size();
   if (count > 1) {
     const uint64_t max = count - 1;
-    size_t a = size_t{base::RandGenerator(max)};
-    size_t b = size_t{base::RandGenerator(max)};
+    size_t a = static_cast<size_t>(base::RandGenerator(max));
+    size_t b = static_cast<size_t>(base::RandGenerator(max));
 
     if (a != b) {
       views::View* view_a = view->children()[a];
@@ -1964,9 +1963,9 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
 }
 
 TEST_F(ViewTest, Textfield) {
-  const base::string16 kText = ASCIIToUTF16(
-      "Reality is that which, when you stop believing it, doesn't go away.");
-  const base::string16 kExtraText = ASCIIToUTF16("Pretty deep, Philip!");
+  const std::u16string kText =
+      u"Reality is that which, when you stop believing it, doesn't go away.";
+  const std::u16string kExtraText = u"Pretty deep, Philip!";
 
   Widget* widget = new Widget;
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
@@ -1982,7 +1981,7 @@ TEST_F(ViewTest, Textfield) {
   EXPECT_EQ(kText, textfield->GetText());
   textfield->AppendText(kExtraText);
   EXPECT_EQ(kText + kExtraText, textfield->GetText());
-  textfield->SetText(base::string16());
+  textfield->SetText(std::u16string());
   EXPECT_TRUE(textfield->GetText().empty());
 
   // Test selection related methods.
@@ -1998,10 +1997,9 @@ TEST_F(ViewTest, Textfield) {
 
 // Tests that the Textfield view respond appropiately to cut/copy/paste.
 TEST_F(ViewTest, TextfieldCutCopyPaste) {
-  const base::string16 kNormalText = ASCIIToUTF16("Normal");
-  const base::string16 kReadOnlyText = ASCIIToUTF16("Read only");
-  const base::string16 kPasswordText =
-      ASCIIToUTF16("Password! ** Secret stuff **");
+  const std::u16string kNormalText = u"Normal";
+  const std::u16string kReadOnlyText = u"Read only";
+  const std::u16string kPasswordText = u"Password! ** Secret stuff **";
 
   ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
 
@@ -2031,7 +2029,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
 
   normal->SelectAll(false);
   normal->ExecuteCommand(Textfield::kCut, 0);
-  base::string16 result;
+  std::u16string result;
   clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr,
                       &result);
   EXPECT_EQ(kNormalText, result);
@@ -2286,7 +2284,7 @@ TEST_F(ViewTest, HandleAccelerator) {
 // TODO(themblsha): Bring this up on non-Mac platforms. It currently fails
 // because TestView::AcceleratorPressed() is not called. See
 // http://crbug.com/667757.
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
 // Test that BridgedContentView correctly handles Accelerator key events when
 // subject to OS event dispatch.
 TEST_F(ViewTest, ActivateAcceleratorOnMac) {
@@ -2329,11 +2327,11 @@ TEST_F(ViewTest, ActivateAcceleratorOnMac) {
                              key_down_accelerator.modifiers());
   EXPECT_EQ(view->accelerator_count_map_[key_down_accelerator], 1);
 }
-#endif  // OS_APPLE
+#endif  // OS_MAC
 
 // TODO(crbug.com/667757): these tests were initially commented out when getting
 // aura to run. Figure out if still valuable and either nuke or fix.
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
 TEST_F(ViewTest, ActivateAccelerator) {
   ui::Accelerator return_accelerator(ui::VKEY_RETURN, ui::EF_NONE);
   TestViewWidget test_widget(CreateParams(Widget::InitParams::TYPE_POPUP),
@@ -2415,7 +2413,7 @@ TEST_F(ViewTest, ViewInHiddenWidgetWithAccelerator) {
   EXPECT_FALSE(focus_manager->ProcessAccelerator(return_accelerator));
   EXPECT_EQ(1, view->accelerator_count_map_[return_accelerator]);
 }
-#endif  // OS_APPLE
+#endif  // OS_MAC
 
 ////////////////////////////////////////////////////////////////////////////////
 // Native view hierachy
@@ -3501,7 +3499,7 @@ TEST_F(ViewTest, RemoveAllChildViews) {
   EXPECT_EQ(3u, foo->children().size());
 
   // Now remove all child views from root.
-  root.RemoveAllChildViews(true);
+  root.RemoveAllChildViews();
 
   EXPECT_TRUE(root.children().empty());
 }
@@ -5375,12 +5373,12 @@ TEST_F(ViewTest, TestEnabledPropertyMetadata) {
   auto subscription = test_view->AddEnabledChangedCallback(base::BindRepeating(
       [](bool* enabled_changed) { *enabled_changed = true; },
       &enabled_changed));
-  views::metadata::ClassMetaData* view_metadata = View::MetaData();
+  ui::metadata::ClassMetaData* view_metadata = View::MetaData();
   ASSERT_TRUE(view_metadata);
-  views::metadata::MemberMetaDataBase* enabled_property =
+  ui::metadata::MemberMetaDataBase* enabled_property =
       view_metadata->FindMemberData("Enabled");
   ASSERT_TRUE(enabled_property);
-  base::string16 false_value = base::ASCIIToUTF16("false");
+  std::u16string false_value = u"false";
   enabled_property->SetValueAsString(test_view.get(), false_value);
   EXPECT_TRUE(enabled_changed);
   EXPECT_FALSE(test_view->GetEnabled());
@@ -5389,12 +5387,12 @@ TEST_F(ViewTest, TestEnabledPropertyMetadata) {
 
 TEST_F(ViewTest, TestMarginsPropertyMetadata) {
   auto test_view = std::make_unique<View>();
-  views::metadata::ClassMetaData* view_metadata = View::MetaData();
+  ui::metadata::ClassMetaData* view_metadata = View::MetaData();
   ASSERT_TRUE(view_metadata);
-  views::metadata::MemberMetaDataBase* insets_property =
+  ui::metadata::MemberMetaDataBase* insets_property =
       view_metadata->FindMemberData("kMarginsKey");
   ASSERT_TRUE(insets_property);
-  base::string16 insets_value = base::ASCIIToUTF16("8,8,8,8");
+  std::u16string insets_value = u"8,8,8,8";
   insets_property->SetValueAsString(test_view.get(), insets_value);
   EXPECT_EQ(insets_property->GetValueAsString(test_view.get()), insets_value);
 }
@@ -5501,7 +5499,7 @@ TEST_F(ViewTest, RemoveAllChildViewsNullsFocusListPointers) {
   View* const second = parent.AddChildView(std::make_unique<View>());
   View* const last = parent.AddChildView(std::make_unique<View>());
 
-  parent.RemoveAllChildViews(false /* delete_children */);
+  parent.RemoveAllChildViewsWithoutDeleting();
 
   EXPECT_EQ(first->GetPreviousFocusableView(), nullptr);
   EXPECT_EQ(first->GetNextFocusableView(), nullptr);

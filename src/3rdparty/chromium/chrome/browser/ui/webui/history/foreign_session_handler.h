@@ -51,6 +51,7 @@ class ForeignSessionHandler : public content::WebUIMessageHandler {
   // WebUIMessageHandler implementation.
   void RegisterMessages() override;
   void OnJavascriptAllowed() override;
+  void OnJavascriptDisallowed() override;
 
   ForeignSessionHandler();
   ~ForeignSessionHandler() override;
@@ -73,13 +74,15 @@ class ForeignSessionHandler : public content::WebUIMessageHandler {
   static sync_sessions::OpenTabsUIDelegate* GetOpenTabsUIDelegate(
       content::WebUI* web_ui);
 
+  void SetWebUIForTesting(content::WebUI* web_ui) { set_web_ui(web_ui); }
+
  private:
   void OnForeignSessionUpdated();
 
   base::Value GetForeignSessions();
 
   // Returns a string used to show the user when a session was last modified.
-  base::string16 FormatSessionTime(const base::Time& time);
+  std::u16string FormatSessionTime(const base::Time& time);
 
   // Determines which session is to be opened, and then calls
   // OpenForeignSession, to begin the process of opening a new browser window.

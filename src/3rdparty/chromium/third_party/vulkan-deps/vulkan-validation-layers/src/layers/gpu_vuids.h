@@ -28,6 +28,13 @@ struct GpuVuidsCmdDraw : GpuVuid {
     }
 };
 
+struct GpuVuidsCmdDrawMultiEXT : GpuVuid {
+    GpuVuidsCmdDrawMultiEXT() : GpuVuid() {
+        uniform_access_oob = "VUID-vkCmdDrawMultiEXT-None-02705";
+        storage_access_oob = "VUID-vkCmdDrawMultiEXT-None-02706";
+    }
+};
+
 struct GpuVuidsCmdDrawIndexed : GpuVuid {
     GpuVuidsCmdDrawIndexed() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDrawIndexed-None-02705";
@@ -35,10 +42,18 @@ struct GpuVuidsCmdDrawIndexed : GpuVuid {
     }
 };
 
+struct GpuVuidsCmdDrawMultiIndexedEXT : GpuVuid {
+    GpuVuidsCmdDrawMultiIndexedEXT() : GpuVuid() {
+        uniform_access_oob = "VUID-vkCmdDrawMultiIndexedEXT-None-02705";
+        storage_access_oob = "VUID-vkCmdDrawMultiIndexedEXT-None-02706";
+    }
+};
+
 struct GpuVuidsCmdDrawIndirect : GpuVuid {
     GpuVuidsCmdDrawIndirect() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDrawIndirect-None-02705";
         storage_access_oob = "VUID-vkCmdDrawIndirect-None-02706";
+        first_instance_not_zero = "VUID-vkCmdDrawIndirect-firstInstance-00478";
     }
 };
 
@@ -46,6 +61,7 @@ struct GpuVuidsCmdDrawIndexedIndirect : GpuVuid {
     GpuVuidsCmdDrawIndexedIndirect() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDrawIndexedIndirect-None-02705";
         storage_access_oob = "VUID-vkCmdDrawIndexedIndirect-None-02706";
+        first_instance_not_zero = "VUID-vkCmdDrawIndexedIndirect-firstInstance-00530";
     }
 };
 
@@ -67,6 +83,9 @@ struct GpuVuidsCmdDrawIndirectCount : GpuVuid {
     GpuVuidsCmdDrawIndirectCount() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDrawIndirectCount-None-02705";
         storage_access_oob = "VUID-vkCmdDrawIndirectCount-None-02706";
+        count_exceeds_bufsize_1 = "VUID-vkCmdDrawIndirectCount-countBuffer-03121";
+        count_exceeds_bufsize = "VUID-vkCmdDrawIndirectCount-countBuffer-03122";
+        count_exceeds_device_limit = "VUID-vkCmdDrawIndirectCount-countBuffer-02717";
     }
 };
 
@@ -74,6 +93,9 @@ struct GpuVuidsCmdDrawIndexedIndirectCount : GpuVuid {
     GpuVuidsCmdDrawIndexedIndirectCount() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDrawIndexedIndirectCount-None-02705";
         storage_access_oob = "VUID-vkCmdDrawIndexedIndirectCount-None-02706";
+        count_exceeds_bufsize_1 = "VUID-vkCmdDrawIndexedIndirectCount-countBuffer-03153";
+        count_exceeds_bufsize = "VUID-vkCmdDrawIndexedIndirectCount-countBuffer-03154";
+        count_exceeds_device_limit = "VUID-vkCmdDrawIndexedIndirectCount-countBuffer-02717";
     }
 };
 
@@ -136,7 +158,9 @@ struct GpuVuidsCmdDispatchBase : GpuVuid {
 // This LUT is created to allow a static listing of each VUID that is covered by drawdispatch commands
 static const std::map<CMD_TYPE, GpuVuid> gpu_vuid = {
     {CMD_DRAW, GpuVuidsCmdDraw()},
+    {CMD_DRAWMULTIEXT, GpuVuidsCmdDrawMultiEXT()},
     {CMD_DRAWINDEXED, GpuVuidsCmdDrawIndexed()},
+    {CMD_DRAWMULTIINDEXEDEXT, GpuVuidsCmdDrawMultiIndexedEXT()},
     {CMD_DRAWINDIRECT, GpuVuidsCmdDrawIndirect()},
     {CMD_DRAWINDEXEDINDIRECT, GpuVuidsCmdDrawIndexedIndirect()},
     {CMD_DISPATCH, GpuVuidsCmdDispatch()},

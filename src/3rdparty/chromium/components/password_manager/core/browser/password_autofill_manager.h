@@ -20,6 +20,10 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "ui/gfx/image/image.h"
 
+namespace autofill {
+class AutofillDriver;
+}
+
 namespace favicon_base {
 struct FaviconImageResult;
 }
@@ -45,19 +49,21 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   void OnPopupShown() override;
   void OnPopupHidden() override;
   void OnPopupSuppressed() override;
-  void DidSelectSuggestion(const base::string16& value,
-                           int identifier) override;
-  void DidAcceptSuggestion(const base::string16& value,
-                           int identifier,
+  void DidSelectSuggestion(const std::u16string& value,
+                           int frontend_id) override;
+  void DidAcceptSuggestion(const std::u16string& value,
+                           int frontend_id,
+                           const std::string& backend_id,
                            int position) override;
-  bool GetDeletionConfirmationText(const base::string16& value,
-                                   int identifier,
-                                   base::string16* title,
-                                   base::string16* body) override;
-  bool RemoveSuggestion(const base::string16& value, int identifier) override;
+  bool GetDeletionConfirmationText(const std::u16string& value,
+                                   int frontend_id,
+                                   std::u16string* title,
+                                   std::u16string* body) override;
+  bool RemoveSuggestion(const std::u16string& value, int frontend_id) override;
   void ClearPreviewedForm() override;
   autofill::PopupType GetPopupType() const override;
-  autofill::AutofillDriver* GetAutofillDriver() override;
+  absl::variant<autofill::AutofillDriver*, PasswordManagerDriver*> GetDriver()
+      override;
   int32_t GetWebContentsPopupControllerAxId() const override;
   void RegisterDeletionCallback(base::OnceClosure deletion_callback) override;
 
@@ -71,7 +77,7 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   // from the password manager. |options| should be a bitwise mask of
   // autofill::ShowPasswordSuggestionsOptions values.
   void OnShowPasswordSuggestions(base::i18n::TextDirection text_direction,
-                                 const base::string16& typed_username,
+                                 const std::u16string& typed_username,
                                  int options,
                                  const gfx::RectF& bounds);
 
@@ -99,10 +105,10 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   void OnNoCredentialsFound();
 
   // A public version of FillSuggestion(), only for use in tests.
-  bool FillSuggestionForTest(const base::string16& username);
+  bool FillSuggestionForTest(const std::u16string& username);
 
   // A public version of PreviewSuggestion(), only for use in tests.
-  bool PreviewSuggestionForTest(const base::string16& username);
+  bool PreviewSuggestionForTest(const std::u16string& username);
 
 #if defined(UNIT_TEST)
   void set_autofill_client(autofill::AutofillClient* autofill_client) {
@@ -119,7 +125,7 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
 
   // Builds the suggestions used to show or update the autofill popup.
   std::vector<autofill::Suggestion> BuildSuggestions(
-      const base::string16& username_filter,
+      const std::u16string& username_filter,
       ForPasswordField for_password_field,
       ShowAllPasswords show_all_passwords,
       OffersGeneration for_generation,
@@ -140,12 +146,12 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   // Attempts to find and fill the suggestions with the user name |username| and
   // the |item_id| indicating the store (account-stored or local). Returns true
   // if it was successful.
-  bool FillSuggestion(const base::string16& username, int item_id);
+  bool FillSuggestion(const std::u16string& username, int item_id);
 
   // Attempts to find and preview the suggestions with the user name |username|
   // and the |item_id| indicating the store (account-stored or local). Returns
   // true if it was successful.
-  bool PreviewSuggestion(const base::string16& username, int item_id);
+  bool PreviewSuggestion(const std::u16string& username, int item_id);
 
   // If one of the login mappings in |fill_data| matches |current_username| and
   // |item_id| (indicating whether a credential is stored in account or
@@ -155,7 +161,7 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   // empty, as this is the behavior of |PasswordFormFillData|.
   // Otherwise, returns false and leaves |password_and_meta_data| untouched.
   bool GetPasswordAndMetadataForUsername(
-      const base::string16& current_username,
+      const std::u16string& current_username,
       int item_id,
       const autofill::PasswordFormFillData& fill_data,
       autofill::PasswordAndMetadata* password_and_meta_data);
@@ -181,6 +187,16 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
       autofill::AutofillClient::PopupOpenArgs reopen_args,
       PasswordManagerClient::ReauthSucceeded reauth_succeeded);
 
+  // Called when the biometric reauth that guards password filling completes.
+  // |frontend_id| identifies the suggestion that was selected for filling.
+  void OnBiometricReauthCompleted(const std::u16string& username_value,
+                                  int frontend_id,
+                                  bool auth_succeded);
+
+  // Cancels an ongoing biometric re-authentication. Usually, because
+  // the filling scope has changed or because |this| is being destroyed.
+  void CancelBiometricReauthIfOngoing();
+
   std::unique_ptr<autofill::PasswordFormFillData> fill_data_;
 
   // Contains the favicon for the credentials offered on the current page.
@@ -198,6 +214,11 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
 
   // Used to track a requested favicon.
   base::CancelableTaskTracker favicon_tracker_;
+
+  // Used to trigger a reauthentication prompt based on biometrics that needs
+  // to be cleared before the password is filled. Currently only used
+  // on Android.
+  scoped_refptr<device_reauth::BiometricAuthenticator> authenticator_;
 
   base::WeakPtrFactory<PasswordAutofillManager> weak_ptr_factory_{this};
 

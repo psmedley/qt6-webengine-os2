@@ -1,4 +1,4 @@
-import { assert } from '../../../common/framework/util/util.js';
+import { assert } from '../../../common/util/util.js';
 
 declare function takeScreenshotDelayed(ms: number): void;
 
@@ -17,7 +17,7 @@ export async function runRefTest(fn: (t: GPURefTest) => Promise<void>): Promise<
   assert(adapter !== null);
   const device = await adapter.requestDevice();
   assert(device !== null);
-  const queue = device.defaultQueue;
+  const queue = device.queue;
 
   await fn({ device, queue });
 

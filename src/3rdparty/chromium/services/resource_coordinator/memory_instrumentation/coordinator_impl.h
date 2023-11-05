@@ -10,8 +10,8 @@
 #include <set>
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/trace_event/memory_dump_request_args.h"
@@ -22,6 +22,7 @@
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/registry.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/tracing_observer.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace memory_instrumentation {
 
@@ -50,7 +51,7 @@ class CoordinatorImpl : public Registry,
       mojo::PendingRemote<mojom::ClientProcess> client_process,
       mojom::ProcessType process_type,
       base::ProcessId process_id,
-      const base::Optional<std::string>& service_name) override;
+      const absl::optional<std::string>& service_name) override;
 
   // mojom::Coordinator implementation.
   void RequestGlobalMemoryDump(
@@ -83,17 +84,21 @@ class CoordinatorImpl : public Registry,
   using RequestGlobalMemoryDumpInternalCallback =
       base::OnceCallback<void(bool, uint64_t, mojom::GlobalMemoryDumpPtr)>;
   friend class CoordinatorImplTest;             // For testing
+  FRIEND_TEST_ALL_PREFIXES(CoordinatorImplTest,
+                           DumpsAreAddedToTraceWhenRequested);
+  FRIEND_TEST_ALL_PREFIXES(CoordinatorImplTest,
+                           DumpsArentAddedToTraceUnlessRequested);
 
   // Holds metadata and a client pipe connected to every client process.
   struct ClientInfo {
     ClientInfo(mojo::Remote<mojom::ClientProcess> client,
                mojom::ProcessType,
-               base::Optional<std::string> service_name);
+               absl::optional<std::string> service_name);
     ~ClientInfo();
 
     const mojo::Remote<mojom::ClientProcess> client;
     const mojom::ProcessType process_type;
-    const base::Optional<std::string> service_name;
+    const absl::optional<std::string> service_name;
   };
 
   void UnregisterClientProcess(base::ProcessId);
@@ -185,6 +190,7 @@ class CoordinatorImpl : public Registry,
       this};
 
   const bool use_proto_writer_;
+  const bool write_proto_heap_profile_;
 
   THREAD_CHECKER(thread_checker_);
   base::WeakPtrFactory<CoordinatorImpl> weak_ptr_factory_{this};

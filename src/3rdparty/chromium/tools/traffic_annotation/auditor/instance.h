@@ -121,7 +121,7 @@ class AnnotationInstance : public InstanceBase {
 
   // Same message as |proto|, but with the schema loaded at runtime
   // (using reflection) based on chrome_settings_full_runtime.proto.
-  std::unique_ptr<google::protobuf::Message> runtime_proto = nullptr;
+  std::unique_ptr<google::protobuf::Message> runtime_proto;
 
   // Type of the annotation.
   Type type;
@@ -156,6 +156,7 @@ class CallInstance : public InstanceBase {
  public:
   CallInstance();
   CallInstance(const CallInstance& other);
+  CallInstance& operator=(const CallInstance& other);
 
   // Deserializes an instance from serialized lines of text provided by the
   // extractor.

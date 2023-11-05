@@ -6,13 +6,11 @@
 #define CHROME_BROWSER_PRINTING_PRINT_PREVIEW_DIALOG_CONTROLLER_H_
 
 #include <map>
-#include <memory>
 
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/tab_contents/web_contents_collection.h"
-#include "components/sessions/core/session_id.h"
 
 class GURL;
 
@@ -78,7 +76,7 @@ class PrintPreviewDialogController
   using PrintPreviewDialogMap =
       std::map<content::WebContents*, content::WebContents*>;
 
-  virtual ~PrintPreviewDialogController();
+  ~PrintPreviewDialogController() override;
 
   // WebContentsCollection::Observer:
   // Handles the closing of the RenderProcessHost. This is observed when the

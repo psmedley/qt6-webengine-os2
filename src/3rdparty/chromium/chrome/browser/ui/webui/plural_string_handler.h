@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_PLURAL_STRING_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_PLURAL_STRING_HANDLER_H_
 
+#include <map>
+#include <string>
+
 #include "base/macros.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
@@ -37,7 +40,7 @@ class PluralStringHandler : public content::WebUIMessageHandler {
   // |HandleGetPluralStringTuple*| methods above.
   void GetPluralStringTuple(const base::ListValue* args, int string_tuple_id);
 
-  base::string16 GetPluralizedStringForMessageName(std::string message_name,
+  std::u16string GetPluralizedStringForMessageName(std::string message_name,
                                                    int count);
 
   std::map<std::string, int> name_to_id_;

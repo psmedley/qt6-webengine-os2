@@ -8,9 +8,8 @@
 #include <string>
 
 #include "base/barrier_closure.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/memory/ptr_util.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
 #include "base/time/time.h"
 #include "content/browser/background_fetch/storage/image_helpers.h"
 #include "content/browser/content_index/content_index.pb.h"
@@ -18,6 +17,8 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -102,16 +103,16 @@ blink::mojom::ContentDescriptionPtr DescriptionFromProto(
   return result;
 }
 
-base::Optional<ContentIndexEntry> EntryFromSerializedProto(
+absl::optional<ContentIndexEntry> EntryFromSerializedProto(
     int64_t service_worker_registration_id,
     const std::string& serialized_proto) {
   proto::ContentEntry entry_proto;
   if (!entry_proto.ParseFromString(serialized_proto))
-    return base::nullopt;
+    return absl::nullopt;
 
   GURL launch_url(entry_proto.launch_url());
   if (!launch_url.is_valid())
-    return base::nullopt;
+    return absl::nullopt;
 
   auto description = DescriptionFromProto(entry_proto.description());
   base::Time registration_time = base::Time::FromDeltaSinceWindowsEpoch(
@@ -174,7 +175,7 @@ void ContentIndexDatabase::AddEntryOnCoreThread(
     return;
   }
 
-  auto* service_worker_registration =
+  scoped_refptr<ServiceWorkerRegistration> service_worker_registration =
       service_worker_context_->GetLiveRegistration(
           service_worker_registration_id);
   if (!service_worker_registration ||
@@ -183,7 +184,7 @@ void ContentIndexDatabase::AddEntryOnCoreThread(
     return;
   }
 
-  if (!service_worker_registration->origin().IsSameOriginWith(origin)) {
+  if (!service_worker_registration->key().origin().IsSameOriginWith(origin)) {
     std::move(callback).Run(blink::mojom::ContentIndexError::STORAGE_ERROR);
     return;
   }
@@ -230,7 +231,7 @@ void ContentIndexDatabase::DidSerializeIcons(
                           std::move(description), launch_url, entry_time);
 
   service_worker_context_->StoreRegistrationUserData(
-      service_worker_registration_id, origin,
+      service_worker_registration_id, blink::StorageKey(origin),
       {{std::move(entry_key), std::move(entry_value)},
        {std::move(icon_key), std::move(icons_value)}},
       base::BindOnce(&ContentIndexDatabase::DidAddEntry,
@@ -293,7 +294,7 @@ void ContentIndexDatabase::DeleteEntryOnCoreThread(
       service_worker_context_->GetLiveRegistration(
           service_worker_registration_id);
   if (!service_worker_registration ||
-      !service_worker_registration->origin().IsSameOriginWith(origin)) {
+      !service_worker_registration->key().origin().IsSameOriginWith(origin)) {
     std::move(callback).Run(blink::mojom::ContentIndexError::STORAGE_ERROR);
     return;
   }
@@ -362,7 +363,7 @@ void ContentIndexDatabase::GetDescriptionsOnCoreThread(
       service_worker_context_->GetLiveRegistration(
           service_worker_registration_id);
   if (!service_worker_registration ||
-      !service_worker_registration->origin().IsSameOriginWith(origin)) {
+      !service_worker_registration->key().origin().IsSameOriginWith(origin)) {
     std::move(callback).Run(blink::mojom::ContentIndexError::STORAGE_ERROR,
                             /* descriptions= */ {});
     return;
@@ -601,7 +602,7 @@ void ContentIndexDatabase::GetEntry(
 
   auto wrapped_callback = base::BindOnce(
       [](ContentIndexContext::GetEntryCallback callback,
-         base::Optional<ContentIndexEntry> entry) {
+         absl::optional<ContentIndexEntry> entry) {
         GetUIThreadTaskRunner({})->PostTask(
             FROM_HERE, base::BindOnce(std::move(callback), std::move(entry)));
       },
@@ -636,7 +637,7 @@ void ContentIndexDatabase::DidGetEntry(
   content_index::RecordDatabaseOperationStatus("GetEntry", status);
 
   if (status != blink::ServiceWorkerStatusCode::kOk) {
-    std::move(callback).Run(base::nullopt);
+    std::move(callback).Run(absl::nullopt);
     return;
   }
 
@@ -682,7 +683,7 @@ void ContentIndexDatabase::DidDeleteItem(
     return;
 
   service_worker_context_->FindReadyRegistrationForId(
-      service_worker_registration_id, origin,
+      service_worker_registration_id, blink::StorageKey(origin),
       base::BindOnce(&ContentIndexDatabase::StartActiveWorkerForDispatch,
                      weak_ptr_factory_core_.GetWeakPtr(), description_id));
 }
@@ -723,13 +724,13 @@ void ContentIndexDatabase::DeliverMessageToWorker(
 
   // Don't allow DB operations while the `contentdelete` event is firing.
   // This is to prevent re-registering the deleted content within the event.
-  BlockOrigin(service_worker->origin());
+  BlockOrigin(service_worker->key().origin());
 
   int request_id = service_worker->StartRequest(
       ServiceWorkerMetrics::EventType::CONTENT_DELETE,
       base::BindOnce(&ContentIndexDatabase::DidDispatchEvent,
                      weak_ptr_factory_core_.GetWeakPtr(),
-                     service_worker->origin()));
+                     service_worker->key().origin()));
 
   service_worker->endpoint()->DispatchContentDeleteEvent(
       description_id, service_worker->CreateSimpleEventCallback(request_id));

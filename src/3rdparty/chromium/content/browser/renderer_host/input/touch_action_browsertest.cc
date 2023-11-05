@@ -6,10 +6,12 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -164,7 +166,7 @@ class TouchActionBrowserTest : public ContentBrowserTest {
         host->render_frame_metadata_provider());
     host->GetView()->SetSize(gfx::Size(400, 400));
 
-    base::string16 ready_title(base::ASCIIToUTF16("ready"));
+    std::u16string ready_title(u"ready");
     TitleWatcher watcher(shell()->web_contents(), ready_title);
     ignore_result(watcher.WaitAndGetTitle());
 
@@ -189,24 +191,18 @@ class TouchActionBrowserTest : public ContentBrowserTest {
   }
 
   int ExecuteScriptAndExtractInt(const std::string& script) {
-    int value = 0;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
-        shell(), "domAutomationController.send(" + script + ")", &value));
-    return value;
+    return EvalJs(shell(), script).ExtractInt();
   }
 
   void JankMainThread(base::TimeDelta delta) {
     std::string script = "var end = performance.now() + ";
     script.append(std::to_string(delta.InMilliseconds()));
     script.append("; while (performance.now() < end) ; ");
-    EXPECT_TRUE(content::ExecuteScript(shell(), script));
+    EXPECT_TRUE(ExecJs(shell(), script));
   }
 
   double ExecuteScriptAndExtractDouble(const std::string& script) {
-    double value = 0;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractDouble(
-        shell(), "domAutomationController.send(" + script + ")", &value));
-    return value;
+    return EvalJs(shell(), script).ExtractDouble();
   }
 
   double GetScrollTop() {
@@ -219,9 +215,9 @@ class TouchActionBrowserTest : public ContentBrowserTest {
   }
 
   bool URLLoaded() {
-    base::string16 ready_title(base::ASCIIToUTF16("ready"));
+    std::u16string ready_title(u"ready");
     TitleWatcher watcher(shell()->web_contents(), ready_title);
-    const base::string16 title = watcher.WaitAndGetTitle();
+    const std::u16string title = watcher.WaitAndGetTitle();
     return title == ready_title;
   }
 
@@ -258,9 +254,8 @@ class TouchActionBrowserTest : public ContentBrowserTest {
 
     std::unique_ptr<SyntheticSmoothScrollGesture> gesture1(
         new SyntheticSmoothScrollGesture(params1));
-    GetWidgetHost()->QueueSyntheticGesture(
-        std::move(gesture1),
-        base::BindOnce([](SyntheticGesture::Result result) {}));
+    GetWidgetHost()->QueueSyntheticGesture(std::move(gesture1),
+                                           base::DoNothing());
 
     JankMainThread(kLongJankTime);
     GiveItSomeTime(800);

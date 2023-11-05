@@ -147,8 +147,6 @@ class WebPlugin {
   virtual bool GetPrintPresetOptionsFromDocument(WebPrintPresetOptions*) {
     return false;
   }
-  // Returns true if the plugin is a PDF plugin.
-  virtual bool IsPdfPlugin() { return false; }
 
   // Sets up printing with the specified printParams. Returns the number of
   // pages to be printed at these settings.
@@ -169,7 +167,6 @@ class WebPlugin {
   virtual bool CanUndo() const { return false; }
   virtual bool CanRedo() const { return false; }
 
-  virtual bool ExecuteEditCommand(const WebString& name) { return false; }
   virtual bool ExecuteEditCommand(const WebString& name,
                                   const WebString& value) {
     return false;
@@ -239,10 +236,7 @@ class WebPlugin {
   virtual void StopFind() {}
 
   // View rotation types.
-  enum RotationType {
-    kRotationType90Clockwise,
-    kRotationType90Counterclockwise
-  };
+  enum class RotationType { k90Clockwise, k90Counterclockwise };
   // Whether the plugin can rotate the view of its content.
   virtual bool CanRotateView() { return false; }
   // Rotates the plugin's view of its content.

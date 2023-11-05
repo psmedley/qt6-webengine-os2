@@ -9,17 +9,17 @@
 #include "components/no_state_prefetch/browser/no_state_prefetch_contents.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_processor_impl.h"
 #include "components/no_state_prefetch/common/prerender_canceler.mojom.h"
+#include "components/payments/content/payment_credential_factory.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
-#include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom.h"
-#include "third_party/blink/public/mojom/installedapp/related_application.mojom.h"
+#include "third_party/blink/public/mojom/payments/payment_credential.mojom.h"
 #include "third_party/blink/public/mojom/payments/payment_request.mojom.h"
 #include "third_party/blink/public/mojom/prerender/prerender.mojom.h"
 #include "weblayer/browser/no_state_prefetch/no_state_prefetch_processor_impl_delegate_impl.h"
-#include "weblayer/browser/no_state_prefetch/prerender_utils.h"
+#include "weblayer/browser/no_state_prefetch/no_state_prefetch_utils.h"
 #include "weblayer/browser/translate_client_impl.h"
 #include "weblayer/browser/webui/weblayer_internals.mojom.h"
 #include "weblayer/browser/webui/weblayer_internals_ui.h"
@@ -27,6 +27,7 @@
 #if defined(OS_ANDROID)
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom.h"
 #include "third_party/blink/public/mojom/webshare/webshare.mojom.h"
 #endif
 
@@ -95,28 +96,6 @@ void BindPrerenderCanceler(
 }
 
 #if defined(OS_ANDROID)
-// TODO(https://crbug.com/1037884): Remove this.
-class StubInstalledAppProvider : public blink::mojom::InstalledAppProvider {
- public:
-  StubInstalledAppProvider() {}
-  ~StubInstalledAppProvider() override = default;
-
-  // InstalledAppProvider overrides:
-  void FilterInstalledApps(
-      std::vector<blink::mojom::RelatedApplicationPtr> related_apps,
-      const GURL& manifest_url,
-      FilterInstalledAppsCallback callback) override {
-    std::move(callback).Run(std::vector<blink::mojom::RelatedApplicationPtr>());
-  }
-
-  static void Create(
-      content::RenderFrameHost* rfh,
-      mojo::PendingReceiver<blink::mojom::InstalledAppProvider> receiver) {
-    mojo::MakeSelfOwnedReceiver(std::make_unique<StubInstalledAppProvider>(),
-                                std::move(receiver));
-  }
-};
-
 template <typename Interface>
 void ForwardToJavaWebContents(content::RenderFrameHost* frame_host,
                               mojo::PendingReceiver<Interface> receiver) {
@@ -151,13 +130,14 @@ void PopulateWebLayerFrameBinders(
       base::BindRepeating(&BindPrerenderCanceler));
 
 #if defined(OS_ANDROID)
-  // TODO(https://crbug.com/1037884): Remove this.
-  map->Add<blink::mojom::InstalledAppProvider>(
-      base::BindRepeating(&StubInstalledAppProvider::Create));
+  map->Add<blink::mojom::InstalledAppProvider>(base::BindRepeating(
+      &ForwardToJavaFrame<blink::mojom::InstalledAppProvider>));
   map->Add<blink::mojom::ShareService>(base::BindRepeating(
       &ForwardToJavaWebContents<blink::mojom::ShareService>));
   map->Add<payments::mojom::PaymentRequest>(base::BindRepeating(
       &ForwardToJavaFrame<payments::mojom::PaymentRequest>));
+  map->Add<payments::mojom::PaymentCredential>(
+      base::BindRepeating(&payments::CreatePaymentCredential));
 #endif
 }
 

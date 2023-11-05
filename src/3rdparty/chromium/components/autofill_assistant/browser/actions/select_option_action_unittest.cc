@@ -16,6 +16,8 @@
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
 #include "components/autofill_assistant/browser/selector.h"
 #include "components/autofill_assistant/browser/service.pb.h"
+#include "components/autofill_assistant/browser/user_model.h"
+#include "components/autofill_assistant/browser/web/mock_web_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace autofill_assistant {
@@ -33,6 +35,9 @@ class SelectOptionActionTest : public testing::Test {
   SelectOptionActionTest() {}
 
   void SetUp() override {
+    ON_CALL(mock_action_delegate_, GetWebController)
+        .WillByDefault(Return(&mock_web_controller_));
+
     proto_.set_option_comparison_attribute(SelectOptionProto::VALUE);
   }
 
@@ -48,9 +53,11 @@ class SelectOptionActionTest : public testing::Test {
   }
 
   MockActionDelegate mock_action_delegate_;
+  MockWebController mock_web_controller_;
   base::MockCallback<Action::ProcessActionCallback> callback_;
   SelectOptionProto proto_;
   UserData user_data_;
+  UserModel user_model_;
 };
 
 TEST_F(SelectOptionActionTest, NoValueToSelectFails) {
@@ -75,7 +82,7 @@ TEST_F(SelectOptionActionTest, EmptyTextFilterValueFails) {
 TEST_F(SelectOptionActionTest, EmptyAutofillValueFails) {
   Selector selector({"#select"});
   *proto_.mutable_element() = selector.proto;
-  proto_.mutable_autofill_value();
+  proto_.mutable_autofill_regexp_value();
   EXPECT_CALL(
       callback_,
       Run(Pointee(Property(&ProcessedActionProto::status, INVALID_ACTION))));
@@ -106,6 +113,7 @@ TEST_F(SelectOptionActionTest, CheckExpectedCallChain) {
   Selector selector({"#select"});
   *proto_.mutable_element() = selector.proto;
   proto_.mutable_text_filter_value()->set_re2("option");
+  proto_.set_strict(true);
 
   Selector expected_selector = selector;
   EXPECT_CALL(mock_action_delegate_,
@@ -114,10 +122,10 @@ TEST_F(SelectOptionActionTest, CheckExpectedCallChain) {
                                    base::TimeDelta::FromSeconds(0)));
   auto expected_element =
       test_util::MockFindElement(mock_action_delegate_, expected_selector);
-  EXPECT_CALL(mock_action_delegate_,
-              SelectOption("option", false, SelectOptionProto::VALUE,
+  EXPECT_CALL(mock_web_controller_,
+              SelectOption("option", false, SelectOptionProto::VALUE, true,
                            EqualsElement(expected_element), _))
-      .WillOnce(RunOnceCallback<4>(OkClientStatus()));
+      .WillOnce(RunOnceCallback<5>(OkClientStatus()));
 
   EXPECT_CALL(
       callback_,
@@ -128,9 +136,12 @@ TEST_F(SelectOptionActionTest, CheckExpectedCallChain) {
 TEST_F(SelectOptionActionTest, RequestDataFromUnknownProfile) {
   Selector selector({"#select"});
   *proto_.mutable_element() = selector.proto;
-  auto* value = proto_.mutable_autofill_value();
+  auto* value = proto_.mutable_autofill_regexp_value();
   value->mutable_profile()->set_identifier("none");
-  value->mutable_value_expression()->set_re2("value");
+  value->mutable_value_expression_re2()
+      ->mutable_value_expression()
+      ->add_chunk()
+      ->set_text("value");
   EXPECT_CALL(callback_, Run(Pointee(Property(&ProcessedActionProto::status,
                                               PRECONDITION_FAILED))));
   Run();
@@ -142,18 +153,19 @@ TEST_F(SelectOptionActionTest, RequestUnknownDataFromProfile) {
   // Middle name is expected to be empty.
   autofill::test::SetProfileInfo(&contact, "John", /* middle name */ "", "Doe",
                                  "", "", "", "", "", "", "", "", "");
-  user_data_.selected_addresses_["contact"] =
-      std::make_unique<autofill::AutofillProfile>(contact);
+
+  user_model_.SetSelectedAutofillProfile(
+      "contact", std::make_unique<autofill::AutofillProfile>(contact),
+      &user_data_);
 
   Selector selector({"#select"});
   *proto_.mutable_element() = selector.proto;
-  auto* value = proto_.mutable_autofill_value();
+  auto* value = proto_.mutable_autofill_regexp_value();
   value->mutable_profile()->set_identifier("contact");
-  value->mutable_value_expression()->set_re2(
-      base::StrCat({"${",
-                    base::NumberToString(static_cast<int>(
-                        autofill::ServerFieldType::NAME_MIDDLE)),
-                    "}"}));
+  value->mutable_value_expression_re2()
+      ->mutable_value_expression()
+      ->add_chunk()
+      ->set_key(static_cast<int>(autofill::ServerFieldType::NAME_MIDDLE));
 
   EXPECT_CALL(callback_, Run(Pointee(Property(&ProcessedActionProto::status,
                                               AUTOFILL_INFO_NOT_AVAILABLE))));
@@ -165,32 +177,32 @@ TEST_F(SelectOptionActionTest, SelectOptionFromProfileValue) {
                                     autofill::test::kEmptyOrigin);
   autofill::test::SetProfileInfo(&contact, "John", "", "Doe", "", "", "", "",
                                  "", "", "", "", "");
-  user_data_.selected_addresses_["contact"] =
-      std::make_unique<autofill::AutofillProfile>(contact);
+  user_model_.SetSelectedAutofillProfile(
+      "contact", std::make_unique<autofill::AutofillProfile>(contact),
+      &user_data_);
 
   InSequence sequence;
 
   Selector selector({"#select"});
   *proto_.mutable_element() = selector.proto;
-  auto* value = proto_.mutable_autofill_value();
+  auto* value = proto_.mutable_autofill_regexp_value();
   value->mutable_profile()->set_identifier("contact");
-  value->mutable_value_expression()->set_re2(
-      base::StrCat({"${",
-                    base::NumberToString(static_cast<int>(
-                        autofill::ServerFieldType::NAME_FIRST)),
-                    "}"}));
+  value->mutable_value_expression_re2()
+      ->mutable_value_expression()
+      ->add_chunk()
+      ->set_key(static_cast<int>(autofill::ServerFieldType::NAME_FIRST));
 
   Selector expected_selector = selector;
   EXPECT_CALL(mock_action_delegate_,
               OnShortWaitForElement(expected_selector, _))
       .WillOnce(RunOnceCallback<1>(OkClientStatus(),
                                    base::TimeDelta::FromSeconds(0)));
-  EXPECT_CALL(mock_action_delegate_,
-              SelectOption("John", false, SelectOptionProto::VALUE,
+  EXPECT_CALL(mock_web_controller_,
+              SelectOption("John", false, SelectOptionProto::VALUE, false,
                            EqualsElement(test_util::MockFindElement(
                                mock_action_delegate_, expected_selector)),
                            _))
-      .WillOnce(RunOnceCallback<4>(OkClientStatus()));
+      .WillOnce(RunOnceCallback<5>(OkClientStatus()));
 
   EXPECT_CALL(
       callback_,
@@ -213,10 +225,10 @@ TEST_F(SelectOptionActionTest, SelectRegularExpressionValue) {
                                    base::TimeDelta::FromSeconds(0)));
   auto expected_element =
       test_util::MockFindElement(mock_action_delegate_, expected_selector);
-  EXPECT_CALL(mock_action_delegate_,
-              SelectOption("^option$", true, SelectOptionProto::VALUE,
+  EXPECT_CALL(mock_web_controller_,
+              SelectOption("^option$", true, SelectOptionProto::VALUE, false,
                            EqualsElement(expected_element), _))
-      .WillOnce(RunOnceCallback<4>(OkClientStatus()));
+      .WillOnce(RunOnceCallback<5>(OkClientStatus()));
 
   EXPECT_CALL(
       callback_,
@@ -229,33 +241,36 @@ TEST_F(SelectOptionActionTest, EscapeRegularExpressionAutofillValue) {
                                     autofill::test::kEmptyOrigin);
   autofill::test::SetProfileInfo(&contact, "John", "", "Doe", "", "", "", "",
                                  "", "", "", "", "+41791234567");
-  user_data_.selected_addresses_["contact"] =
-      std::make_unique<autofill::AutofillProfile>(contact);
+  user_model_.SetSelectedAutofillProfile(
+      "contact", std::make_unique<autofill::AutofillProfile>(contact),
+      &user_data_);
 
   InSequence sequence;
 
   Selector selector({"#select"});
   *proto_.mutable_element() = selector.proto;
-  auto* value = proto_.mutable_autofill_value();
+  auto* value = proto_.mutable_autofill_regexp_value();
   value->mutable_profile()->set_identifier("contact");
-  value->mutable_value_expression()->set_re2(
-      base::StrCat({"^${",
-                    base::NumberToString(static_cast<int>(
-                        autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER)),
-                    "}$"}));
-  value->mutable_value_expression()->set_case_sensitive(true);
+  *value->mutable_value_expression_re2()->mutable_value_expression() =
+      test_util::ValueExpressionBuilder()
+          .addChunk("^")
+          .addChunk(autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER)
+          .addChunk("$")
+          .toProto();
+  value->mutable_value_expression_re2()->set_case_sensitive(true);
 
   Selector expected_selector = selector;
   EXPECT_CALL(mock_action_delegate_,
               OnShortWaitForElement(expected_selector, _))
       .WillOnce(RunOnceCallback<1>(OkClientStatus(),
                                    base::TimeDelta::FromSeconds(0)));
-  EXPECT_CALL(mock_action_delegate_,
-              SelectOption("^\\+41791234567$", true, SelectOptionProto::VALUE,
-                           EqualsElement(test_util::MockFindElement(
-                               mock_action_delegate_, expected_selector)),
-                           _))
-      .WillOnce(RunOnceCallback<4>(OkClientStatus()));
+  EXPECT_CALL(
+      mock_web_controller_,
+      SelectOption("^\\+41791234567$", true, SelectOptionProto::VALUE, false,
+                   EqualsElement(test_util::MockFindElement(
+                       mock_action_delegate_, expected_selector)),
+                   _))
+      .WillOnce(RunOnceCallback<5>(OkClientStatus()));
 
   EXPECT_CALL(
       callback_,

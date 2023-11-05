@@ -37,23 +37,20 @@ bool AreSame(const CoreAccountInfo& info, const ListedAccount& account) {
 
 // Returns the extended info for the primary account (no consent required) if
 // available.
-base::Optional<AccountInfo> GetExtendedAccountInfo(
-    signin::IdentityManager* identity_manager) {
+AccountInfo GetExtendedAccountInfo(signin::IdentityManager* identity_manager) {
   CoreAccountId account_id =
-      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kNotRequired);
+      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kSignin);
   if (account_id.empty())
-    return base::nullopt;
-  return identity_manager
-      ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
-          account_id);
+    return AccountInfo();
+  return identity_manager->FindExtendedAccountInfoByAccountId(account_id);
 }
 
 // Returns true if there is primary account (no consent required) but no
 // extended info, yet.
 bool WaitingForExtendedInfo(signin::IdentityManager* identity_manager) {
-  if (!identity_manager->HasPrimaryAccount(signin::ConsentLevel::kNotRequired))
+  if (!identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin))
     return false;
-  return !GetExtendedAccountInfo(identity_manager).has_value();
+  return GetExtendedAccountInfo(identity_manager).IsEmpty();
 }
 
 }  // namespace
@@ -241,14 +238,12 @@ void AccountInvestigator::DoPeriodicReport(
 
   // Report extra metrics only for signed-in accounts that are split by the
   // primary account type.
-  if (identity_manager_->HasPrimaryAccount(
-          signin::ConsentLevel::kNotRequired)) {
+  if (identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
     const bool is_syncing =
         identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync);
-    base::Optional<AccountInfo> info =
-        GetExtendedAccountInfo(identity_manager_);
+    AccountInfo info = GetExtendedAccountInfo(identity_manager_);
     signin_metrics::LogSignedInCookiesCountsPerPrimaryAccountType(
-        signed_in_accounts.size(), is_syncing, info->IsManaged());
+        signed_in_accounts.size(), is_syncing, info.IsManaged());
   }
 
   periodic_pending_ = false;

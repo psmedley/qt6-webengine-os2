@@ -68,7 +68,7 @@ class ExtensionPreferenceApiTest : public extensions::ExtensionApiTest {
     EXPECT_EQ(CookieControlsMode::kOff, GetCookieControlsMode(prefs));
     EXPECT_TRUE(prefs->GetBoolean(prefs::kEnableHyperlinkAuditing));
     EXPECT_TRUE(prefs->GetBoolean(prefs::kEnableReferrers));
-    EXPECT_TRUE(prefs->GetBoolean(prefs::kOfferTranslateEnabled));
+    EXPECT_TRUE(prefs->GetBoolean(translate::prefs::kOfferTranslateEnabled));
     EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_DEFAULT,
               prefs->GetInteger(prefs::kNetworkPredictionOptions));
     EXPECT_TRUE(
@@ -94,7 +94,7 @@ class ExtensionPreferenceApiTest : public extensions::ExtensionApiTest {
               GetCookieControlsMode(prefs));
     EXPECT_FALSE(prefs->GetBoolean(prefs::kEnableHyperlinkAuditing));
     EXPECT_FALSE(prefs->GetBoolean(prefs::kEnableReferrers));
-    EXPECT_FALSE(prefs->GetBoolean(prefs::kOfferTranslateEnabled));
+    EXPECT_FALSE(prefs->GetBoolean(translate::prefs::kOfferTranslateEnabled));
     EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_NEVER,
               prefs->GetInteger(prefs::kNetworkPredictionOptions));
     EXPECT_FALSE(
@@ -159,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, Standard) {
   SetCookieControlsMode(prefs, CookieControlsMode::kBlockThirdParty);
   prefs->SetBoolean(prefs::kEnableHyperlinkAuditing, false);
   prefs->SetBoolean(prefs::kEnableReferrers, false);
-  prefs->SetBoolean(prefs::kOfferTranslateEnabled, false);
+  prefs->SetBoolean(translate::prefs::kOfferTranslateEnabled, false);
   prefs->SetInteger(prefs::kNetworkPredictionOptions,
                     chrome_browser_net::NETWORK_PREDICTION_NEVER);
   prefs->SetBoolean(password_manager::prefs::kCredentialsEnableService, false);
@@ -195,14 +195,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, PersistentIncognito) {
   PrefService* prefs = profile_->GetPrefs();
   SetCookieControlsMode(prefs, CookieControlsMode::kOff);
 
-  EXPECT_TRUE(RunExtensionTest({.name = "preference/persistent_incognito"},
+  EXPECT_TRUE(RunExtensionTest("preference/persistent_incognito", {},
                                {.allow_in_incognito = true}))
       << message_;
 
   // Setting an incognito preference should not create an incognito profile.
   EXPECT_FALSE(profile_->HasPrimaryOTRProfile());
 
-  PrefService* otr_prefs = profile_->GetPrimaryOTRProfile()->GetPrefs();
+  PrefService* otr_prefs =
+      profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true)->GetPrefs();
   auto* otr_pref = otr_prefs->FindPreference(prefs::kCookieControlsMode);
   ASSERT_TRUE(otr_pref);
   EXPECT_TRUE(otr_pref->IsExtensionControlled());
@@ -223,13 +224,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, SessionOnlyIncognito) {
   PrefService* prefs = profile_->GetPrefs();
   SetCookieControlsMode(prefs, CookieControlsMode::kOff);
 
-  EXPECT_TRUE(RunExtensionTest({.name = "preference/session_only_incognito"},
+  EXPECT_TRUE(RunExtensionTest("preference/session_only_incognito", {},
                                {.allow_in_incognito = true}))
       << message_;
 
   EXPECT_TRUE(profile_->HasPrimaryOTRProfile());
 
-  PrefService* otr_prefs = profile_->GetPrimaryOTRProfile()->GetPrefs();
+  PrefService* otr_prefs =
+      profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true)->GetPrefs();
   auto* otr_pref = otr_prefs->FindPreference(prefs::kCookieControlsMode);
   ASSERT_TRUE(otr_pref);
   EXPECT_TRUE(otr_pref->IsExtensionControlled());
@@ -255,8 +257,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, Clear) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, OnChange) {
-  EXPECT_TRUE(RunExtensionTest({.name = "preference/onchange"},
-                               {.allow_in_incognito = true}))
+  EXPECT_TRUE(
+      RunExtensionTest("preference/onchange", {}, {.allow_in_incognito = true}))
       << message_;
 }
 
@@ -264,7 +266,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, OnChangeSplit) {
   extensions::ResultCatcher catcher;
   catcher.RestrictToBrowserContext(profile_);
   extensions::ResultCatcher catcher_incognito;
-  catcher_incognito.RestrictToBrowserContext(profile_->GetPrimaryOTRProfile());
+  catcher_incognito.RestrictToBrowserContext(
+      profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true));
 
   // Open an incognito window.
   OpenURLOffTheRecord(profile_, GURL("chrome://newtab/"));

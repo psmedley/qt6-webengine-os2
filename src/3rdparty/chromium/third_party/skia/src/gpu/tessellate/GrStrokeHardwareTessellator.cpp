@@ -7,13 +7,15 @@
 
 #include "src/gpu/tessellate/GrStrokeHardwareTessellator.h"
 
+#include "src/core/SkMathPriv.h"
 #include "src/core/SkPathPriv.h"
+#include "src/gpu/GrMeshDrawTarget.h"
+#include "src/gpu/GrOpFlushState.h"
 #include "src/gpu/GrRecordingContextPriv.h"
 #include "src/gpu/GrVx.h"
 #include "src/gpu/geometry/GrPathUtils.h"
-#include "src/gpu/tessellate/GrWangsFormula.h"
-
-using Tolerances = GrStrokeTessellateShader::Tolerances;
+#include "src/gpu/geometry/GrWangsFormula.h"
+#include "src/gpu/tessellate/GrCullTest.h"
 
 namespace {
 
@@ -44,7 +46,6 @@ static grvx::float2 pow4(grvx::float2 x) {
 class PatchWriter {
 public:
     using ShaderFlags = GrStrokeTessellator::ShaderFlags;
-    using PatchChunk = GrStrokeHardwareTessellator::PatchChunk;
 
     enum class JoinType {
         kMiter = SkPaint::kMiter_Join,
@@ -53,33 +54,22 @@ public:
         kBowtie = SkPaint::kLast_Join + 1  // Double sided round join.
     };
 
-    PatchWriter(ShaderFlags shaderFlags, GrMeshDrawOp::Target* target, float matrixMaxScale,
-                SkTArray<PatchChunk>* patchChunks, int totalCombinedVerbCnt)
+    PatchWriter(ShaderFlags shaderFlags, GrMeshDrawTarget* target,
+                const SkRect& strokeCullBounds, const SkMatrix& viewMatrix, float matrixMaxScale,
+                GrVertexChunkArray* patchChunks, size_t patchStride, int minPatchesPerChunk)
             : fShaderFlags(shaderFlags)
-            , fTarget(target)
-            , fPatchChunks(patchChunks)
-            , fPatchStride(GrStrokeTessellateShader::PatchStride(fShaderFlags))
+            , fCullTest(strokeCullBounds, viewMatrix)
+            , fChunkBuilder(target, patchChunks, patchStride, minPatchesPerChunk)
             // Subtract 2 because the tessellation shader chops every cubic at two locations, and
             // each chop has the potential to introduce an extra segment.
             , fMaxTessellationSegments(target->caps().shaderCaps()->maxTessellationSegments() - 2)
-            , fParametricIntolerance(Tolerances::CalcParametricIntolerance(matrixMaxScale)) {
-        // Pre-allocate at least enough vertex space for 1 in 4 strokes to chop, and for 8 caps.
-        int strokePreallocCount = totalCombinedVerbCnt * 5/4;
-        int capPreallocCount = 8;
-        fNextChunkMinPatchAllocCount = strokePreallocCount + capPreallocCount;
+            , fParametricPrecision(GrStrokeTolerances::CalcParametricPrecision(matrixMaxScale)) {
     }
 
-    ~PatchWriter() {
-        if (!fPatchChunks->empty()) {
-            fTarget->putBackVertices(fCurrChunkPatchCapacity - fCurrChunkPatchCount, fPatchStride);
-            fPatchChunks->back().fPatchCount = fCurrChunkPatchCount;
-        }
-    }
-
-    // This is the intolerance value, adjusted for the view matrix, to use with Wang's formulas when
+    // This is the precision value, adjusted for the view matrix, to use with Wang's formulas when
     // determining how many parametric segments a curve will require.
-    float parametricIntolerance() const {
-        return fParametricIntolerance;
+    float parametricPrecision() const {
+        return fParametricPrecision;
     }
     // Will a line and worst-case previous join both fit in a single patch together?
     bool lineFitsInPatch_withJoin() {
@@ -240,10 +230,10 @@ public:
             fLastControlPoint = p[0];  // Disables the join section of this patch.
         }
 
-        if (this->allocPatch()) {
-            fPatchWriter.write(fLastControlPoint);
-            fPatchWriter.writeArray(p, 4);
-            this->writeDynamicAttribs();
+        if (GrVertexWriter patchWriter = fChunkBuilder.appendVertex()) {
+            patchWriter.write(fLastControlPoint);
+            patchWriter.writeArray(p, 4);
+            this->writeDynamicAttribs(&patchWriter);
         }
 
         fLastControlPoint = endControlPoint;
@@ -364,6 +354,11 @@ private:
     // tessellation patches.
     void internalConicPatchesTo(JoinType prevJoinType, const SkPoint p[3], float w,
                                 int maxDepth = -1) {
+        if (!fCullTest.areVisible3(p)) {
+            // The stroke is out of view. Discard it.
+            this->discardStroke(p, 3);
+            return;
+        }
         // Zero-length paths need special treatment because they are spec'd to behave differently.
         // If the control point is colocated on an endpoint then this might end up being the case.
         // Fall back on a lineTo and let it make the final check.
@@ -377,11 +372,16 @@ private:
         if (w == 1) {
             GrPathUtils::convertQuadToCubic(p, asPatch);
         } else {
-            GrPathShader::WriteConicPatch(p, w, asPatch);
+            GrTessellationShader::WriteConicPatch(p, w, asPatch);
         }
 
-        float numParametricSegments_pow4 =
-                GrWangsFormula::quadratic_pow4(fParametricIntolerance, p);
+        float numParametricSegments_pow4;
+        if (w == 1) {
+            numParametricSegments_pow4 = GrWangsFormula::quadratic_pow4(fParametricPrecision, p);
+        } else {
+            float n = GrWangsFormula::conic_pow2(fParametricPrecision, p, w);
+            numParametricSegments_pow4 = n*n;
+        }
         if (this->stroke180FitsInPatch(numParametricSegments_pow4) || maxDepth == 0) {
             this->internalPatchTo(prevJoinType,
                                   this->stroke180FitsInPatch_withJoin(numParametricSegments_pow4),
@@ -438,6 +438,11 @@ private:
     // tessellation patches. The cubic must be convex and must not rotate more than 180 degrees.
     void internalCubicConvex180PatchesTo(JoinType prevJoinType, const SkPoint p[4],
                                          int maxDepth = -1) {
+        if (!fCullTest.areVisible4(p)) {
+            // The stroke is out of view. Discard it.
+            this->discardStroke(p, 4);
+            return;
+        }
         // The stroke tessellation shader assigns special meaning to p0==p1==p2 and p1==p2==p3. If
         // this is the case then we need to rewrite the cubic.
         if (p[1] == p[2] && (p[1] == p[0] || p[1] == p[3])) {
@@ -445,7 +450,7 @@ private:
             return;
         }
 
-        float numParametricSegments_pow4 = GrWangsFormula::cubic_pow4(fParametricIntolerance, p);
+        float numParametricSegments_pow4 = GrWangsFormula::cubic_pow4(fParametricPrecision, p);
         if (this->stroke180FitsInPatch(numParametricSegments_pow4) || maxDepth == 0) {
             this->internalPatchTo(prevJoinType,
                                   this->stroke180FitsInPatch_withJoin(numParametricSegments_pow4),
@@ -579,78 +584,58 @@ private:
         // We should never write out joins before the first curve.
         SkASSERT(fHasLastControlPoint);
 
-        if (this->allocPatch()) {
-            fPatchWriter.write(fLastControlPoint, junctionPoint);
+        if (GrVertexWriter patchWriter = fChunkBuilder.appendVertex()) {
+            patchWriter.write(fLastControlPoint, junctionPoint);
             if (joinType == JoinType::kBowtie) {
                 // {prevControlPoint, [p0, p0, p0, p3]} is a reserved patch pattern that means this
                 // patch is a bowtie. The bowtie is anchored on p0 and its tangent angles go from
                 // (p0 - prevControlPoint) to (p3 - p0).
-                fPatchWriter.write(junctionPoint, junctionPoint);
+                patchWriter.write(junctionPoint, junctionPoint);
             } else {
                 // {prevControlPoint, [p0, p3, p3, p3]} is a reserved patch pattern that means this
                 // patch is a join only (no curve sections in the patch). The join is anchored on p0
                 // and its tangent angles go from (p0 - prevControlPoint) to (p3 - p0).
-                fPatchWriter.write(nextControlPoint, nextControlPoint);
+                patchWriter.write(nextControlPoint, nextControlPoint);
             }
-            fPatchWriter.write(nextControlPoint);
-            this->writeDynamicAttribs();
+            patchWriter.write(nextControlPoint);
+            this->writeDynamicAttribs(&patchWriter);
         }
 
         fLastControlPoint = nextControlPoint;
     }
 
-    SK_ALWAYS_INLINE void writeDynamicAttribs() {
+    SK_ALWAYS_INLINE void writeDynamicAttribs(GrVertexWriter* patchWriter) {
         if (fShaderFlags & ShaderFlags::kDynamicStroke) {
-            fPatchWriter.write(fDynamicStroke);
+            patchWriter->write(fDynamicStroke);
         }
         if (fShaderFlags & ShaderFlags::kDynamicColor) {
-            fPatchWriter.write(fDynamicColor);
+            patchWriter->write(fDynamicColor);
         }
     }
 
-    SK_ALWAYS_INLINE bool allocPatch() {
-        if (fCurrChunkPatchCount == fCurrChunkPatchCapacity && !this->allocPatchChunk()) {
-            return false;
+    void discardStroke(const SkPoint p[], int numPoints) {
+        if (!fHasLastControlPoint) {
+            // This disables the first join, if any. (The first join gets added as a standalone
+            // patch during close(), but setting fCurrContourFirstControlPoint to p[0] causes us to
+            // skip that join if we attempt to add it later.)
+            fCurrContourFirstControlPoint = p[0];
+            fHasLastControlPoint = true;
         }
-        SkASSERT(fCurrChunkPatchCount < fCurrChunkPatchCapacity);
-        ++fCurrChunkPatchCount;
-        return true;
-    }
-
-    bool allocPatchChunk() {
-        if (!fPatchChunks->empty()) {
-            fPatchChunks->back().fPatchCount = fCurrChunkPatchCount;
-            // No need to put back vertices; the buffer is full.
-        }
-        fCurrChunkPatchCount = 0;
-        PatchChunk* chunk = &fPatchChunks->push_back();
-        fPatchWriter = {fTarget->makeVertexSpaceAtLeast(fPatchStride, fNextChunkMinPatchAllocCount,
-                                                        fNextChunkMinPatchAllocCount,
-                                                        &chunk->fPatchBuffer, &chunk->fBasePatch,
-                                                        &fCurrChunkPatchCapacity)};
-        if (!fPatchWriter.isValid()) {
-            SkDebugf("WARNING: Failed to allocate vertex buffer for tessellated stroke.\n");
-            fPatchChunks->pop_back();
-            fCurrChunkPatchCapacity = 0;
-            return false;
-        }
-        fNextChunkMinPatchAllocCount *= 2;
-        return true;
+        // Set fLastControlPoint to the next stroke's p0 (which will be equal to the final point of
+        // this stroke). This has the effect of disabling the next stroke's join.
+        fLastControlPoint = p[numPoints - 1];
     }
 
     const ShaderFlags fShaderFlags;
-    GrMeshDrawOp::Target* const fTarget;
-    SkTArray<PatchChunk>* const fPatchChunks;
-
-    // Size in bytes of a tessellation patch with our shader flags.
-    const size_t fPatchStride;
+    const GrCullTest fCullTest;
+    GrVertexChunkBuilder fChunkBuilder;
 
     // The maximum number of tessellation segments the hardware can emit for a single patch.
     const int fMaxTessellationSegments;
 
-    // This is the intolerance value, adjusted for the view matrix, to use with Wang's formulas when
+    // This is the precision value, adjusted for the view matrix, to use with Wang's formulas when
     // determining how many parametric segments a curve will require.
-    const float fParametricIntolerance;
+    const float fParametricPrecision;
 
     // Number of radial segments required for each radian of rotation in order to look smooth with
     // the current stroke radius.
@@ -672,12 +657,6 @@ private:
     bool fSoloRoundJoinAlwaysFitsInPatch;
     JoinType fStrokeJoinType;
 
-    // Variables related to the patch chunk that we are currently writing out during prepareBuffers.
-    int fCurrChunkPatchCount = 0;
-    int fCurrChunkPatchCapacity = 0;
-    int fNextChunkMinPatchAllocCount;
-    GrVertexWriter fPatchWriter;
-
     // Variables related to the specific contour that we are currently iterating during
     // prepareBuffers().
     bool fHasLastControlPoint = false;
@@ -686,55 +665,9 @@ private:
     SkPoint fLastControlPoint;
 
     // Values for the current dynamic state (if any) that will get written out with each patch.
-    GrStrokeTessellateShader::DynamicStroke fDynamicStroke;
+    GrStrokeTessellationShader::DynamicStroke fDynamicStroke;
     GrVertexColor fDynamicColor;
 };
-
-// Calculates and buffers up future values for "numRadialSegmentsPerRadian" using SIMD.
-class alignas(sizeof(grvx::float4)) RadialSegmentsPerRadianBuffer {
-public:
-    using PathStrokeList = GrStrokeTessellator::PathStrokeList;
-
-    RadialSegmentsPerRadianBuffer(float parametricIntolerance)
-            : fParametricIntolerance(parametricIntolerance) {
-    }
-
-    float fetchNext(PathStrokeList* head) {
-        // GrStrokeTessellateOp::onCombineIfPossible does not allow hairlines to become dynamic. If
-        // this changes, we will need to call Tolerances::GetLocalStrokeWidth() for each stroke.
-        SkASSERT(!head->fStroke.isHairlineStyle());
-        if (fBufferIdx == 4) {
-            // We ran out of values. Peek ahead and buffer up 4 more.
-            PathStrokeList* peekAhead = head;
-            int i = 0;
-            do {
-                fStrokeWidths[i++] = peekAhead->fStroke.getWidth();
-            } while ((peekAhead = peekAhead->fNext) && i < 4);
-            Tolerances::ApproxNumRadialSegmentsPerRadian(fParametricIntolerance,
-                                                         fStrokeWidths).store(
-                    fNumRadialSegmentsPerRadian);
-            fBufferIdx = 0;
-        }
-        SkASSERT(0 <= fBufferIdx && fBufferIdx < 4);
-        SkASSERT(fStrokeWidths[fBufferIdx] == head->fStroke.getWidth());
-        return fNumRadialSegmentsPerRadian[fBufferIdx++];
-    }
-
-private:
-    grvx::float4 fStrokeWidths{};  // Must be first for alignment purposes.
-    float fNumRadialSegmentsPerRadian[4];
-    const float fParametricIntolerance;
-    int fBufferIdx = 4;  // Initialize the buffer as "empty";
-};
-
-SK_ALWAYS_INLINE static bool conic_has_cusp(const SkPoint p[3]) {
-    SkVector a = p[1] - p[0];
-    SkVector b = p[2] - p[1];
-    // A conic of any class can only have a cusp if it is a degenerate flat line with a 180 degree
-    // turnarund. To detect this, the beginning and ending tangents must be parallel
-    // (a.cross(b) == 0) and pointing in opposite directions (a.dot(b) < 0).
-    return a.cross(b) == 0 && a.dot(b) < 0;
-}
 
 SK_ALWAYS_INLINE static bool cubic_has_cusp(const SkPoint p[4]) {
     using grvx::float2;
@@ -772,41 +705,51 @@ SK_ALWAYS_INLINE static bool cubic_has_cusp(const SkPoint p[4]) {
 
 }  // namespace
 
-void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
-                                          const SkMatrix& viewMatrix) {
+GrStrokeHardwareTessellator::GrStrokeHardwareTessellator(const GrShaderCaps& shaderCaps,
+                                                         ShaderFlags shaderFlags,
+                                                         const SkMatrix& viewMatrix,
+                                                         PathStrokeList* pathStrokeList,
+                                                         std::array<float,2> matrixMinMaxScales,
+                                                         const SkRect& strokeCullBounds)
+        : GrStrokeTessellator(shaderCaps, GrStrokeTessellationShader::Mode::kHardwareTessellation,
+                              shaderFlags, SkNextLog2(shaderCaps.maxTessellationSegments()),
+                              viewMatrix, pathStrokeList, matrixMinMaxScales, strokeCullBounds) {
+}
+
+void GrStrokeHardwareTessellator::prepare(GrMeshDrawTarget* target, int totalCombinedVerbCnt) {
     using JoinType = PatchWriter::JoinType;
 
-    std::array<float, 2> matrixMinMaxScales;
-    if (!viewMatrix.getMinMaxScales(matrixMinMaxScales.data())) {
-        matrixMinMaxScales.fill(1);
-    }
+    // Over-allocate enough patches for 1 in 4 strokes to chop and for 8 extra caps.
+    int strokePreallocCount = totalCombinedVerbCnt * 5/4;
+    int capPreallocCount = 8;
+    int minPatchesPerChunk = strokePreallocCount + capPreallocCount;
+    PatchWriter patchWriter(fShader.flags(), target, fStrokeCullBounds, fShader.viewMatrix(),
+                            fMatrixMinMaxScales[1], &fPatchChunks, fShader.vertexStride(),
+                            minPatchesPerChunk);
 
-    PatchWriter patchWriter(fShaderFlags, target, matrixMinMaxScales[1], &fPatchChunks,
-                            fTotalCombinedVerbCnt);
-    if (!(fShaderFlags & ShaderFlags::kDynamicStroke)) {
+    if (!fShader.hasDynamicStroke()) {
         // Strokes are static. Calculate tolerances once.
         const SkStrokeRec& stroke = fPathStrokeList->fStroke;
-        float localStrokeWidth = Tolerances::GetLocalStrokeWidth(matrixMinMaxScales.data(),
-                                                                 stroke.getWidth());
-        float numRadialSegmentsPerRadian = Tolerances::CalcNumRadialSegmentsPerRadian(
-                patchWriter.parametricIntolerance(), localStrokeWidth);
+        float localStrokeWidth = GrStrokeTolerances::GetLocalStrokeWidth(fMatrixMinMaxScales.data(),
+                                                                         stroke.getWidth());
+        float numRadialSegmentsPerRadian = GrStrokeTolerances::CalcNumRadialSegmentsPerRadian(
+                patchWriter.parametricPrecision(), localStrokeWidth);
         patchWriter.updateTolerances(numRadialSegmentsPerRadian, stroke.getJoin());
     }
 
     // Fast SIMD queue that buffers up values for "numRadialSegmentsPerRadian". Only used when we
     // have dynamic strokes.
-    RadialSegmentsPerRadianBuffer radialSegmentsPerRadianBuffer(
-            patchWriter.parametricIntolerance());
+    GrStrokeToleranceBuffer toleranceBuffer(patchWriter.parametricPrecision());
 
     for (PathStrokeList* pathStroke = fPathStrokeList; pathStroke; pathStroke = pathStroke->fNext) {
         const SkStrokeRec& stroke = pathStroke->fStroke;
-        if (fShaderFlags & ShaderFlags::kDynamicStroke) {
+        if (fShader.hasDynamicStroke()) {
             // Strokes are dynamic. Update tolerances with every new stroke.
-            patchWriter.updateTolerances(radialSegmentsPerRadianBuffer.fetchNext(pathStroke),
+            patchWriter.updateTolerances(toleranceBuffer.fetchRadialSegmentsPerRadian(pathStroke),
                                          stroke.getJoin());
             patchWriter.updateDynamicStroke(stroke);
         }
-        if (fShaderFlags & ShaderFlags::kDynamicColor) {
+        if (fShader.hasDynamicColor()) {
             patchWriter.updateDynamicColor(pathStroke->fColor);
         }
 
@@ -822,13 +765,13 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
                     // "A subpath ... consisting of a single moveto shall not be stroked."
                     // https://www.w3.org/TR/SVG11/painting.html#StrokeProperties
                     if (!contourIsEmpty) {
-                        patchWriter.writeCaps(p[-1], viewMatrix, stroke);
+                        patchWriter.writeCaps(p[-1], fShader.viewMatrix(), stroke);
                     }
                     patchWriter.moveTo(p[0]);
                     contourIsEmpty = true;
                     continue;
                 case SkPathVerb::kClose:
-                    patchWriter.writeClose(p[0], viewMatrix, stroke);
+                    patchWriter.writeClose(p[0], fShader.viewMatrix(), stroke);
                     contourIsEmpty = true;
                     continue;
                 case SkPathVerb::kLine:
@@ -853,7 +796,7 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
                         patchWriter.writeLineTo(p[0], p[2]);
                         continue;
                     }
-                    if (conic_has_cusp(p)) {
+                    if (GrPathUtils::conicHasCusp(p)) {
                         // Cusps are rare, but the tessellation shader can't handle them. Chop the
                         // curve into segments that the shader can handle.
                         SkPoint cusp = SkEvalQuadAt(p, SkFindQuadMidTangent(p));
@@ -862,7 +805,7 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
                         continue;
                     }
                     float numParametricSegments_pow4 =
-                            GrWangsFormula::quadratic_pow4(patchWriter.parametricIntolerance(), p);
+                            GrWangsFormula::quadratic_pow4(patchWriter.parametricPrecision(), p);
                     if (!patchWriter.stroke180FitsInPatch(numParametricSegments_pow4)) {
                         // The curve requires more tessellation segments than the hardware can
                         // support. This is rare. Recursively chop until each sub-curve fits.
@@ -888,7 +831,7 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
                         patchWriter.writeLineTo(p[0], p[2]);
                         continue;
                     }
-                    if (conic_has_cusp(p)) {
+                    if (GrPathUtils::conicHasCusp(p)) {
                         // Cusps are rare, but the tessellation shader can't handle them. Chop the
                         // curve into segments that the shader can handle.
                         SkConic conic(p, *w);
@@ -900,8 +843,8 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
                     // For now, the tessellation shader still uses Wang's quadratic formula when it
                     // draws conics.
                     // TODO: Update here when the shader starts using the real conic formula.
-                    float numParametricSegments_pow4 =
-                            GrWangsFormula::quadratic_pow4(patchWriter.parametricIntolerance(), p);
+                    float n = GrWangsFormula::conic_pow2(patchWriter.parametricPrecision(), p, *w);
+                    float numParametricSegments_pow4 = n*n;
                     if (!patchWriter.stroke180FitsInPatch(numParametricSegments_pow4)) {
                         // The curve requires more tessellation segments than the hardware can
                         // support. This is rare. Recursively chop until each sub-curve fits.
@@ -912,7 +855,7 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
                     // case. Write it out directly.
                     prevJoinFitsInPatch = patchWriter.stroke180FitsInPatch_withJoin(
                             numParametricSegments_pow4);
-                    GrPathShader::WriteConicPatch(p, *w, scratchPts);
+                    GrTessellationShader::WriteConicPatch(p, *w, scratchPts);
                     patchPts = scratchPts;
                     endControlPoint = p[1];
                     break;
@@ -926,7 +869,7 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
                         continue;
                     }
                     float numParametricSegments_pow4 =
-                            GrWangsFormula::cubic_pow4(patchWriter.parametricIntolerance(), p);
+                            GrWangsFormula::cubic_pow4(patchWriter.parametricPrecision(), p);
                     if (!patchWriter.stroke360FitsInPatch(numParametricSegments_pow4) ||
                         cubic_has_cusp(p)) {
                         // Either the curve requires more tessellation segments than the hardware
@@ -950,16 +893,14 @@ void GrStrokeHardwareTessellator::prepare(GrMeshDrawOp::Target* target,
         }
         if (!contourIsEmpty) {
             const SkPoint* p = SkPathPriv::PointData(path);
-            patchWriter.writeCaps(p[path.countPoints() - 1], viewMatrix, stroke);
+            patchWriter.writeCaps(p[path.countPoints() - 1], fShader.viewMatrix(), stroke);
         }
     }
 }
 
 void GrStrokeHardwareTessellator::draw(GrOpFlushState* flushState) const {
-    for (const auto& chunk : fPatchChunks) {
-        if (chunk.fPatchBuffer) {
-            flushState->bindBuffers(nullptr, nullptr, std::move(chunk.fPatchBuffer));
-            flushState->draw(chunk.fPatchCount, chunk.fBasePatch);
-        }
+    for (const auto& vertexChunk : fPatchChunks) {
+        flushState->bindBuffers(nullptr, nullptr, vertexChunk.fBuffer);
+        flushState->draw(vertexChunk.fCount, vertexChunk.fBase);
     }
 }

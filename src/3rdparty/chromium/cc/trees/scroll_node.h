@@ -11,6 +11,7 @@
 #include "cc/input/scroll_snap_data.h"
 #include "cc/paint/element_id.h"
 #include "cc/paint/filter_operations.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -61,7 +62,7 @@ struct CC_EXPORT ScrollNode {
 
   OverscrollBehavior overscroll_behavior;
 
-  base::Optional<SnapContainerData> snap_container_data;
+  absl::optional<SnapContainerData> snap_container_data;
 
   bool is_composited : 1;
 

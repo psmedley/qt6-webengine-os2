@@ -320,7 +320,7 @@ TNode<JSArray> ObjectEntriesValuesBuiltinsAssembler::FastGetOwnValuesOrEntries(
             IntPtrConstant(2));
         StoreFixedArrayElement(CAST(elements), 0, next_key, SKIP_WRITE_BARRIER);
         StoreFixedArrayElement(CAST(elements), 1, value, SKIP_WRITE_BARRIER);
-        value = TNode<JSArray>::UncheckedCast(array);
+        value = array;
       }
 
       StoreFixedArrayElement(values_or_entries, var_result_index.value(),
@@ -350,7 +350,7 @@ ObjectEntriesValuesBuiltinsAssembler::FinalizeValuesOrEntriesJSArray(
 
   GotoIf(IntPtrEqual(size, IntPtrConstant(0)), if_empty);
   TNode<JSArray> array = AllocateJSArray(array_map, result, SmiTag(size));
-  return TNode<JSArray>::UncheckedCast(array);
+  return array;
 }
 
 TF_BUILTIN(ObjectPrototypeHasOwnProperty, ObjectBuiltinsAssembler) {
@@ -443,7 +443,7 @@ TF_BUILTIN(ObjectAssign, ObjectBuiltinsAssembler) {
   // 4. For each element nextSource of sources, in ascending index order,
   args.ForEach(
       [=](TNode<Object> next_source) {
-        CallBuiltin(Builtins::kSetDataProperties, context, to, next_source);
+        CallBuiltin(Builtin::kSetDataProperties, context, to, next_source);
       },
       IntPtrConstant(1));
   Goto(&done);
@@ -541,6 +541,36 @@ TF_BUILTIN(ObjectKeys, ObjectBuiltinsAssembler) {
         AllocateJSArray(array_map, var_elements.value(), var_length.value());
     Return(array);
   }
+}
+
+// https://github.com/tc39/proposal-accessible-object-hasownproperty
+TF_BUILTIN(ObjectHasOwn, ObjectBuiltinsAssembler) {
+  // Object.prototype.hasOwnProperty()
+  // 1. Let obj be ? ToObject(O).
+  // 2. Let key be ? ToPropertyKey(P).
+  // 3. Return ? HasOwnProperty(obj, key).
+  //
+  // ObjectPrototypeHasOwnProperty has similar semantics with steps 1 and 2
+  // swapped. We check if ToObject can fail and delegate the rest of the
+  // execution to ObjectPrototypeHasOwnProperty.
+
+  auto target = Parameter<Object>(Descriptor::kJSTarget);
+  auto new_target = Parameter<Object>(Descriptor::kJSNewTarget);
+  auto object = Parameter<Object>(Descriptor::kObject);
+  auto key = Parameter<Object>(Descriptor::kKey);
+  auto context = Parameter<Context>(Descriptor::kContext);
+
+  // ToObject can only fail when object is undefined or null.
+  Label undefined_or_null(this), not_undefined_nor_null(this);
+  Branch(IsNullOrUndefined(object), &undefined_or_null,
+         &not_undefined_nor_null);
+
+  BIND(&undefined_or_null);
+  ThrowTypeError(context, MessageTemplate::kUndefinedOrNullToObject);
+
+  BIND(&not_undefined_nor_null);
+  Return(CallBuiltin(Builtin::kObjectPrototypeHasOwnProperty, context, target,
+                     new_target, Int32Constant(2), object, key));
 }
 
 // ES #sec-object.getOwnPropertyNames
@@ -1033,11 +1063,6 @@ TF_BUILTIN(ObjectCreate, ObjectBuiltinsAssembler) {
   Label call_runtime(this, Label::kDeferred), prototype_valid(this),
       no_properties(this);
 
-  if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-    // TODO(v8:11167) remove once OrderedNameDictionary supported.
-    GotoIf(Int32TrueConstant(), &call_runtime);
-  }
-
   {
     Comment("Argument 1 check: prototype");
     GotoIf(IsNull(prototype), &prototype_valid);
@@ -1077,9 +1102,9 @@ TF_BUILTIN(ObjectCreate, ObjectBuiltinsAssembler) {
     BIND(&null_proto);
     {
       map = LoadSlowObjectWithNullPrototypeMap(native_context);
-      if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-        properties = AllocateOrderedNameDictionary(
-            OrderedNameDictionary::kInitialCapacity);
+      if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
+        properties =
+            AllocateSwissNameDictionary(SwissNameDictionary::kInitialCapacity);
       } else {
         properties = AllocateNameDictionary(NameDictionary::kInitialCapacity);
       }
@@ -1226,7 +1251,7 @@ TF_BUILTIN(CreateGeneratorObject, ObjectBuiltinsAssembler) {
       IntPtrAdd(WordSar(frame_size, IntPtrConstant(kTaggedSizeLog2)),
                 formal_parameter_count);
   TNode<FixedArrayBase> parameters_and_registers =
-      AllocateFixedArray(HOLEY_ELEMENTS, size);
+      AllocateFixedArray(HOLEY_ELEMENTS, size, kAllowLargeObjectAllocation);
   FillFixedArrayWithValue(HOLEY_ELEMENTS, parameters_and_registers,
                           IntPtrConstant(0), size, RootIndex::kUndefinedValue);
   // TODO(cbruni): support start_offset to avoid double initialization.
@@ -1278,17 +1303,12 @@ TF_BUILTIN(ObjectGetOwnPropertyDescriptor, ObjectBuiltinsAssembler) {
   TNode<JSReceiver> object = ToObject_Inline(context, object_input);
 
   // 2. Let key be ? ToPropertyKey(P).
-  key = CallBuiltin(Builtins::kToName, context, key);
+  key = CallBuiltin(Builtin::kToName, context, key);
 
   // 3. Let desc be ? obj.[[GetOwnProperty]](key).
   Label if_keyisindex(this), if_iskeyunique(this),
       call_runtime(this, Label::kDeferred),
       return_undefined(this, Label::kDeferred), if_notunique_name(this);
-
-  if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-    // TODO(v8:11167) remove once OrderedNameDictionary supported.
-    GotoIf(Int32TrueConstant(), &call_runtime);
-  }
 
   TNode<Map> map = LoadMap(object);
   TNode<Uint16T> instance_type = LoadMapInstanceType(map);
@@ -1372,14 +1392,8 @@ void ObjectBuiltinsAssembler::AddToDictionaryIf(
   Label done(this);
   GotoIfNot(condition, &done);
 
-  if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-    // TODO(v8:11167) remove once OrderedNameDictionary supported.
-    CallRuntime(Runtime::kAddDictionaryProperty, context, object,
-                HeapConstant(name), value);
-  } else {
-    Add<NameDictionary>(CAST(name_dictionary), HeapConstant(name), value,
-                        bailout);
-  }
+  Add<PropertyDictionary>(CAST(name_dictionary), HeapConstant(name), value,
+                          bailout);
   Goto(&done);
 
   BIND(&done);
@@ -1436,8 +1450,8 @@ TNode<JSObject> ObjectBuiltinsAssembler::FromPropertyDescriptor(
     // We want to preallocate the slots for value, writable, get, set,
     // enumerable and configurable - a total of 6
     TNode<HeapObject> properties =
-        V8_DICT_MODE_PROTOTYPES_BOOL
-            ? TNode<HeapObject>(AllocateOrderedNameDictionary(6))
+        V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL
+            ? TNode<HeapObject>(AllocateSwissNameDictionary(6))
             : AllocateNameDictionary(6);
     TNode<JSObject> js_desc = AllocateJSObjectFromMap(map, properties);
 
@@ -1480,12 +1494,9 @@ TNode<JSObject> ObjectBuiltinsAssembler::FromPropertyDescriptor(
     js_descriptor = js_desc;
     Goto(&return_desc);
 
-    if (!V8_DICT_MODE_PROTOTYPES_BOOL) {
-      // TODO(v8:11167) make unconditional once OrderedNameDictionary supported.
-      BIND(&bailout);
-      CSA_ASSERT(this, Int32Constant(0));
-      Unreachable();
-    }
+    BIND(&bailout);
+    CSA_ASSERT(this, Int32Constant(0));
+    Unreachable();
   }
 
   BIND(&return_desc);

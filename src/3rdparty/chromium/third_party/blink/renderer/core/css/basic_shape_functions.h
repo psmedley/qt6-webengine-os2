@@ -42,11 +42,12 @@ class StyleResolverState;
 class ComputedStyle;
 
 CSSValue* ValueForBasicShape(const ComputedStyle&, const BasicShape*);
-scoped_refptr<BasicShape> BasicShapeForValue(const StyleResolverState&,
-                                             const CSSValue&);
+CORE_EXPORT scoped_refptr<BasicShape> BasicShapeForValue(
+    const StyleResolverState&,
+    const CSSValue&);
 FloatPoint FloatPointForCenterCoordinate(const BasicShapeCenterCoordinate&,
                                          const BasicShapeCenterCoordinate&,
                                          FloatSize);
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_BASIC_SHAPE_FUNCTIONS_H_

@@ -16,7 +16,6 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/extensions/api/passwords_private.h"
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
@@ -128,7 +127,7 @@ ResponseAction PasswordsPrivateRequestPlaintextPasswordFunction::Run() {
 }
 
 void PasswordsPrivateRequestPlaintextPasswordFunction::GotPassword(
-    base::Optional<base::string16> password) {
+    absl::optional<std::u16string> password) {
   if (password) {
     Respond(OneArgument(base::Value(std::move(*password))));
     return;
@@ -296,7 +295,7 @@ ResponseAction PasswordsPrivateGetPlaintextInsecurePasswordFunction::Run() {
 }
 
 void PasswordsPrivateGetPlaintextInsecurePasswordFunction::GotCredential(
-    base::Optional<api::passwords_private::InsecureCredential> credential) {
+    absl::optional<api::passwords_private::InsecureCredential> credential) {
   if (!credential) {
     Respond(
         Error("Could not obtain plaintext insecure password. Either the user "

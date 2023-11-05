@@ -7,15 +7,16 @@
 
 #include <memory>
 #include <set>
+#include <string>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "cc/input/browser_controls_state.h"
 #include "components/find_in_page/find_result_observer.h"
+#include "content/public/browser/color_chooser.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "weblayer/browser/i18n_util.h"
@@ -29,10 +30,6 @@
 namespace js_injection {
 class JsCommunicationHost;
 }
-
-namespace autofill {
-class AutofillProvider;
-}  // namespace autofill
 
 namespace blink {
 namespace web_pref {
@@ -160,14 +157,10 @@ class TabImpl : public Tab,
   void SetJavaImpl(JNIEnv* env,
                    const base::android::JavaParamRef<jobject>& impl);
 
-  // Invoked every time that the Java-side AutofillProvider instance is
-  // changed (set to null or to a new object). On first invocation with a non-
-  // null object initializes the native Autofill infrastructure. On
-  // subsequent invocations updates the association of that native
-  // infrastructure with its Java counterpart.
-  void OnAutofillProviderChanged(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& autofill_provider);
+  // Invoked every time that the Java-side AutofillProvider instance is created,
+  // the native side autofill might have been initialized in the case that
+  // Android context is switched.
+  void InitializeAutofillIfNecessary(JNIEnv* env);
   void UpdateBrowserControlsConstraint(JNIEnv* env,
                                        jint constraint,
                                        jboolean animate);
@@ -219,18 +212,18 @@ class TabImpl : public Tab,
   void AddObserver(TabObserver* observer) override;
   void RemoveObserver(TabObserver* observer) override;
   NavigationController* GetNavigationController() override;
-  void ExecuteScript(const base::string16& script,
+  void ExecuteScript(const std::u16string& script,
                      bool use_separate_isolate,
                      JavaScriptResultCallback callback) override;
   const std::string& GetGuid() override;
   void SetData(const std::map<std::string, std::string>& data) override;
   const std::map<std::string, std::string>& GetData() override;
-  base::string16 AddWebMessageHostFactory(
+  std::u16string AddWebMessageHostFactory(
       std::unique_ptr<WebMessageHostFactory> factory,
-      const base::string16& js_object_name,
+      const std::u16string& js_object_name,
       const std::vector<std::string>& js_origins) override;
   void RemoveWebMessageHostFactory(
-      const base::string16& js_object_name) override;
+      const std::u16string& js_object_name) override;
   std::unique_ptr<FaviconFetcher> CreateFaviconFetcher(
       FaviconFetcherDelegate* delegate) override;
 #if !defined(OS_ANDROID)
@@ -241,11 +234,12 @@ class TabImpl : public Tab,
   void SetWebPreferences(blink::web_pref::WebPreferences* prefs);
 
   // Executes |script| with a user gesture.
-  void ExecuteScriptWithUserGestureForTests(const base::string16& script);
+  void ExecuteScriptWithUserGestureForTests(const std::u16string& script);
 
-  // Initializes the autofill system with |provider| for tests.
-  void InitializeAutofillForTests(
-      std::unique_ptr<autofill::AutofillProvider> provider);
+#if defined(OS_ANDROID)
+  // Initializes the autofill system for tests.
+  void InitializeAutofillForTests();
+#endif  // defined(OS_ANDROID)
 
  private:
   // content::WebContentsDelegate:
@@ -257,11 +251,13 @@ class TabImpl : public Tab,
                               content::InvalidateTypes changed_flags) override;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* web_contents) override;
-  content::ColorChooser* OpenColorChooser(
+#if defined(OS_ANDROID)
+  std::unique_ptr<content::ColorChooser> OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
       const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions)
       override;
+#endif
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       scoped_refptr<content::FileSelectListener> listener,
                       const blink::mojom::FileChooserParams& params) override;
@@ -277,6 +273,7 @@ class TabImpl : public Tab,
       content::WebContents* web_contents) override;
   bool OnlyExpandTopControlsAtPageTop() override;
   bool ShouldAnimateBrowserControlsHeightChanges() override;
+  bool IsBackForwardCacheSupported() override;
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
@@ -346,8 +343,6 @@ class TabImpl : public Tab,
 
   void UpdateRendererPrefs(bool should_sync_prefs);
 
-  void InitializeAutofill();
-
   // Returns the FindTabHelper for the page, or null if none exists.
   find_in_page::FindTabHelper* GetFindTabHelper();
 
@@ -355,6 +350,7 @@ class TabImpl : public Tab,
       content::WebContents* web_contents);
 
 #if defined(OS_ANDROID)
+  void InitializeAutofillDriver();
   void SetBrowserControlsConstraint(ControlsVisibilityReason reason,
                                     cc::BrowserControlsState constraint);
 #endif
@@ -401,14 +397,12 @@ class TabImpl : public Tab,
   // If true, the fullscreen delegate is called when the tab gains active.
   bool enter_fullscreen_on_gained_active_ = false;
 
-  std::unique_ptr<autofill::AutofillProvider> autofill_provider_;
-
   const std::string guid_;
 
   std::map<std::string, std::string> data_;
   base::ObserverList<DataObserver>::Unchecked data_observers_;
 
-  base::string16 title_;
+  std::u16string title_;
 
   std::unique_ptr<js_injection::JsCommunicationHost> js_communication_host_;
 

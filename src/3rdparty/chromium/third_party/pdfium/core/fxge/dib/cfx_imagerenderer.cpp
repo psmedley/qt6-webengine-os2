@@ -6,6 +6,8 @@
 
 #include "core/fxge/dib/cfx_imagerenderer.h"
 
+#include <math.h>
+
 #include <memory>
 
 #include "core/fxge/cfx_cliprgn.h"
@@ -44,8 +46,8 @@ CFX_ImageRenderer::CFX_ImageRenderer(const RetainPtr<CFX_DIBitmap>& pDevice,
       int dest_height = image_rect.Height();
       FX_RECT bitmap_clip = m_ClipBox;
       bitmap_clip.Offset(-image_rect.left, -image_rect.top);
-      bitmap_clip = FXDIB_SwapClipBox(bitmap_clip, dest_width, dest_height,
-                                      m_Matrix.c > 0, m_Matrix.b < 0);
+      bitmap_clip = bitmap_clip.SwappedClipBox(dest_width, dest_height,
+                                               m_Matrix.c > 0, m_Matrix.b < 0);
       m_Composer.Compose(pDevice, pClipRgn, bitmap_alpha, mask_color, m_ClipBox,
                          true, m_Matrix.c > 0, m_Matrix.b < 0, m_bRgbByteOrder,
                          BlendMode::kNormal);
@@ -96,7 +98,7 @@ bool CFX_ImageRenderer::Continue(PauseIndicatorIface* pPause) {
   if (!pBitmap || !pBitmap->GetBuffer())
     return false;
 
-  if (pBitmap->IsMask()) {
+  if (pBitmap->IsMaskFormat()) {
     if (m_BitmapAlpha != 255)
       m_MaskColor = FXARGB_MUL_ALPHA(m_MaskColor, m_BitmapAlpha);
     m_pDevice->CompositeMask(

@@ -329,11 +329,11 @@ static inline void update_stat(AudioStatsContext *s, ChannelStats *p, double d, 
 
     drop = p->win_samples[p->win_pos];
     p->win_samples[p->win_pos] = nd;
-    index = av_clip(FFABS(nd) * HISTOGRAM_MAX, 0, HISTOGRAM_MAX);
+    index = av_clip(lrint(av_clipd(FFABS(nd), 0.0, 1.0) * HISTOGRAM_MAX), 0, HISTOGRAM_MAX);
     p->max_index = FFMAX(p->max_index, index);
     p->histogram[index]++;
     if (!isnan(p->noise_floor))
-        p->histogram[av_clip(FFABS(drop) * HISTOGRAM_MAX, 0, HISTOGRAM_MAX)]--;
+        p->histogram[av_clip(lrint(av_clipd(FFABS(drop), 0.0, 1.0) * HISTOGRAM_MAX), 0, HISTOGRAM_MAX)]--;
     p->win_pos++;
 
     while (p->histogram[p->max_index] == 0)
@@ -705,7 +705,8 @@ static void print_stats(AVFilterContext *ctx)
         if (fabs(p->sigma_x) > fabs(max_sigma_x))
             max_sigma_x = p->sigma_x;
 
-        av_log(ctx, AV_LOG_INFO, "Channel: %d\n", c + 1);
+        if (s->measure_perchannel != MEASURE_NONE)
+            av_log(ctx, AV_LOG_INFO, "Channel: %d\n", c + 1);
         if (s->measure_perchannel & MEASURE_DC_OFFSET)
             av_log(ctx, AV_LOG_INFO, "DC offset: %f\n", p->sigma_x / p->nb_samples);
         if (s->measure_perchannel & MEASURE_MIN_LEVEL)
@@ -757,7 +758,8 @@ static void print_stats(AVFilterContext *ctx)
             av_log(ctx, AV_LOG_INFO, "Number of denormals: %"PRId64"\n", p->nb_denormals);
     }
 
-    av_log(ctx, AV_LOG_INFO, "Overall\n");
+    if (s->measure_overall != MEASURE_NONE)
+        av_log(ctx, AV_LOG_INFO, "Overall\n");
     if (s->measure_overall & MEASURE_DC_OFFSET)
         av_log(ctx, AV_LOG_INFO, "DC offset: %f\n", max_sigma_x / (nb_samples / s->nb_channels));
     if (s->measure_overall & MEASURE_MIN_LEVEL)
@@ -837,7 +839,7 @@ static const AVFilterPad astats_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_af_astats = {
+const AVFilter ff_af_astats = {
     .name          = "astats",
     .description   = NULL_IF_CONFIG_SMALL("Show time domain statistics about audio frames."),
     .query_formats = query_formats,

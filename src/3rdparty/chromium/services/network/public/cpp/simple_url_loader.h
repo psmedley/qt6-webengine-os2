@@ -14,9 +14,9 @@
 
 #include "base/callback_forward.h"
 #include "base/component_export.h"
-#include "base/macros.h"
-#include "base/optional.h"
-#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/mojom/url_response_head.mojom-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
 
@@ -151,6 +151,9 @@ class COMPONENT_EXPORT(NETWORK_CPP) SimpleURLLoader {
   // is completed. When null, the timer falls back to base::TimeTicks::Now().
   static void SetTimeoutTickClockForTest(
       const base::TickClock* timeout_tick_clock);
+
+  SimpleURLLoader(const SimpleURLLoader&) = delete;
+  SimpleURLLoader& operator=(const SimpleURLLoader&) = delete;
 
   virtual ~SimpleURLLoader();
 
@@ -352,7 +355,7 @@ class COMPONENT_EXPORT(NETWORK_CPP) SimpleURLLoader {
   // The URLLoaderCompletionStatus for the request. Will be nullopt if the
   // response never completed. May only be called once the loader has informed
   // the caller of completion.
-  virtual const base::Optional<URLLoaderCompletionStatus>& CompletionStatus()
+  virtual const absl::optional<URLLoaderCompletionStatus>& CompletionStatus()
       const = 0;
 
   // Returns the URL that this loader is processing. May only be called once the
@@ -376,11 +379,11 @@ class COMPONENT_EXPORT(NETWORK_CPP) SimpleURLLoader {
   // occurred.
   virtual int64_t GetContentSize() const = 0;
 
+  // Returns the number of times retry has been attempted.
+  virtual int GetNumRetries() const = 0;
+
  protected:
   SimpleURLLoader();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SimpleURLLoader);
 };
 
 }  // namespace network

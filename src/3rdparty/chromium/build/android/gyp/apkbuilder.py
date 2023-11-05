@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -341,15 +341,16 @@ def main(args):
     depfile_deps += secondary_native_libs
 
   if options.java_resources:
-    # Included via .build_config, so need to write it to depfile.
+    # Included via .build_config.json, so need to write it to depfile.
     depfile_deps.extend(options.java_resources)
 
   assets = _ExpandPaths(options.assets)
   uncompressed_assets = _ExpandPaths(options.uncompressed_assets)
 
-  # Included via .build_config, so need to write it to depfile.
+  # Included via .build_config.json, so need to write it to depfile.
   depfile_deps.extend(x[0] for x in assets)
   depfile_deps.extend(x[0] for x in uncompressed_assets)
+  depfile_deps.append(options.resource_apk)
 
   # Bundle modules have a structure similar to APKs, except that resources
   # are compiled in protobuf format (instead of binary xml), and that some

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PROPERTY_TREE_STATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PROPERTY_TREE_STATE_H_
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/platform/graphics/paint/clip_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/effect_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
@@ -138,10 +139,30 @@ class PLATFORM_EXPORT PropertyTreeState : public PropertyTreeStateOrAlias {
     PropertyTreeStateOrAlias::SetEffect(node);
   }
 
+  // Returns true if any property tree state change is >= |change| relative to
+  // |relative_to|. Note that this is O(|nodes|).
+  bool Changed(PaintPropertyChangeType change,
+               const PropertyTreeState& relative_to) const;
+  bool ChangedToRoot(PaintPropertyChangeType change) const {
+    return Changed(change, Root());
+  }
+
+  // Determines whether drawings based on the 'guest' state can be painted into
+  // a layer with the 'home' state, and if yes, returns the common ancestor
+  // state to which both layer will be upcasted.
+  absl::optional<PropertyTreeState> CanUpcastWith(
+      const PropertyTreeState& guest) const;
+
  private:
   // For Uninitialized();
   PropertyTreeState() = default;
 };
+
+PLATFORM_EXPORT inline PropertyTreeState PropertyTreeStateOrAlias::Unalias()
+    const {
+  return PropertyTreeState(Transform().Unalias(), Clip().Unalias(),
+                           Effect().Unalias());
+}
 
 PLATFORM_EXPORT std::ostream& operator<<(std::ostream&,
                                          const PropertyTreeStateOrAlias&);

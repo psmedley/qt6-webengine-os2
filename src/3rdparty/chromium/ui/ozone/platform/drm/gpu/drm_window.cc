@@ -67,17 +67,15 @@ void DrmWindow::SetBounds(const gfx::Rect& bounds) {
 
 void DrmWindow::SetCursor(const std::vector<SkBitmap>& bitmaps,
                           const gfx::Point& location,
-                          int frame_delay_ms) {
+                          base::TimeDelta frame_delay) {
   cursor_bitmaps_ = bitmaps;
   cursor_location_ = location;
   cursor_frame_ = 0;
-  cursor_frame_delay_ms_ = frame_delay_ms;
   cursor_timer_.Stop();
 
-  if (cursor_frame_delay_ms_) {
-    cursor_timer_.Start(
-        FROM_HERE, base::TimeDelta::FromMilliseconds(cursor_frame_delay_ms_),
-        this, &DrmWindow::OnCursorAnimationTimeout);
+  if (!frame_delay.is_zero()) {
+    cursor_timer_.Start(FROM_HERE, frame_delay, this,
+                        &DrmWindow::OnCursorAnimationTimeout);
   }
 
   ResetCursor();
@@ -107,7 +105,8 @@ void DrmWindow::SchedulePageFlip(
   if (force_buffer_reallocation_) {
     force_buffer_reallocation_ = false;
     std::move(submission_callback)
-        .Run(gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS, nullptr);
+        .Run(gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS,
+             /*release_fence=*/gfx::GpuFenceHandle());
     std::move(presentation_callback).Run(gfx::PresentationFeedback::Failure());
     return;
   }
@@ -115,7 +114,9 @@ void DrmWindow::SchedulePageFlip(
   last_submitted_planes_ = DrmOverlayPlane::Clone(planes);
 
   if (!controller_) {
-    std::move(submission_callback).Run(gfx::SwapResult::SWAP_ACK, nullptr);
+    std::move(submission_callback)
+        .Run(gfx::SwapResult::SWAP_ACK,
+             /*release_fence=*/gfx::GpuFenceHandle());
     std::move(presentation_callback).Run(gfx::PresentationFeedback::Failure());
     return;
   }

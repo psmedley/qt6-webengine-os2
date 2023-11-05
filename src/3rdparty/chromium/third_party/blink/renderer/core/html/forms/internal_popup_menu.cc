@@ -10,8 +10,8 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
 #include "third_party/blink/renderer/core/css/css_value_id_mappings.h"
-#include "third_party/blink/renderer/core/css/pseudo_style_request.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
@@ -54,6 +54,10 @@ const char* TextTransformToString(ETextTransform transform) {
   return getValueName(PlatformEnumToCSSValueID(transform));
 }
 
+const char* TextAlignToString(ETextAlign align) {
+  return getValueName(PlatformEnumToCSSValueID(align));
+}
+
 const String SerializeComputedStyleForProperty(const ComputedStyle& style,
                                                CSSPropertyID id) {
   const CSSProperty& property = CSSProperty::Get(id);
@@ -89,9 +93,7 @@ scoped_refptr<const ComputedStyle> StyleForHoveredScrollbarPart(
   scrollbar->SetHoveredPart(part);
   scoped_refptr<const ComputedStyle> part_style =
       element.UncachedStyleForPseudoElement(
-          PseudoElementStyleRequest(target_id, To<CustomScrollbar>(scrollbar),
-                                    part),
-          style);
+          StyleRequest(target_id, To<CustomScrollbar>(scrollbar), part, style));
   return part_style;
 }
 
@@ -180,6 +182,9 @@ class InternalPopupMenu::ItemIterationContext {
         buffer_);
     AddProperty("textTransform",
                 String(TextTransformToString(BaseStyle().TextTransform())),
+                buffer_);
+    AddProperty("textAlign",
+                String(TextAlignToString(BaseStyle().GetTextAlign(false))),
                 buffer_);
     AddProperty("fontSize", BaseFont().ComputedPixelSize(), buffer_);
     AddProperty("fontStyle", String(FontStyleToString(BaseFont().Style())),
@@ -359,8 +364,6 @@ void InternalPopupMenu::WriteDocument(SharedBuffer* data) {
   AddProperty("scaleFactor", scale_factor, data);
   bool is_rtl = !owner_style->IsLeftToRightDirection();
   AddProperty("isRTL", is_rtl, data);
-  AddProperty("isFormControlsRefreshEnabled",
-              features::IsFormControlsRefreshEnabled(), data);
   AddProperty("paddingStart",
               is_rtl ? owner_element.ClientPaddingRight().ToDouble()
                      : owner_element.ClientPaddingLeft().ToDouble(),
@@ -435,6 +438,10 @@ void InternalPopupMenu::AddElementStyle(ItemIterationContext& context,
   if (base_style.TextTransform() != style->TextTransform()) {
     AddProperty("textTransform",
                 String(TextTransformToString(style->TextTransform())), data);
+  }
+  if (base_style.GetTextAlign(false) != style->GetTextAlign(false)) {
+    AddProperty("textAlign",
+                String(TextAlignToString(style->GetTextAlign(false))), data);
   }
 
   PagePopupClient::AddString("},\n", data);

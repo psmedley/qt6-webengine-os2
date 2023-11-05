@@ -33,9 +33,8 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-blink-forward.h"
@@ -55,7 +54,7 @@ namespace blink {
 
 enum class ResourceType : uint8_t;
 class ClientHintsPreferences;
-class FeaturePolicy;
+class PermissionsPolicy;
 class KURL;
 struct ResourceLoaderOptions;
 class ResourceTimingInfo;
@@ -71,6 +70,8 @@ class WebScopedVirtualTimePauser;
 class PLATFORM_EXPORT FetchContext : public GarbageCollected<FetchContext> {
  public:
   FetchContext() = default;
+  FetchContext(const FetchContext&) = delete;
+  FetchContext& operator=(const FetchContext&) = delete;
 
   static FetchContext& NullInstance() {
     return *MakeGarbageCollected<FetchContext>();
@@ -110,30 +111,30 @@ class PLATFORM_EXPORT FetchContext : public GarbageCollected<FetchContext> {
   // struct and this should take a moved-value of it.
   virtual void AddResourceTiming(const ResourceTimingInfo&);
   virtual bool AllowImage(bool, const KURL&) const { return false; }
-  virtual base::Optional<ResourceRequestBlockedReason> CanRequest(
+  virtual absl::optional<ResourceRequestBlockedReason> CanRequest(
       ResourceType,
       const ResourceRequest&,
       const KURL&,
       const ResourceLoaderOptions&,
       ReportingDisposition,
-      const base::Optional<ResourceRequest::RedirectInfo>& redirect_info)
+      const absl::optional<ResourceRequest::RedirectInfo>& redirect_info)
       const {
     return ResourceRequestBlockedReason::kOther;
   }
   // In derived classes, performs *only* a SubresourceFilter check for whether
   // the request can go through or should be blocked.
-  virtual base::Optional<ResourceRequestBlockedReason>
+  virtual absl::optional<ResourceRequestBlockedReason>
   CanRequestBasedOnSubresourceFilterOnly(
       ResourceType,
       const ResourceRequest&,
       const KURL&,
       const ResourceLoaderOptions&,
       ReportingDisposition,
-      const base::Optional<ResourceRequest::RedirectInfo>& redirect_info)
+      const absl::optional<ResourceRequest::RedirectInfo>& redirect_info)
       const {
     return ResourceRequestBlockedReason::kOther;
   }
-  virtual base::Optional<ResourceRequestBlockedReason> CheckCSPForRequest(
+  virtual absl::optional<ResourceRequestBlockedReason> CheckCSPForRequest(
       mojom::blink::RequestContextType,
       network::mojom::RequestDestination request_destination,
       const KURL&,
@@ -161,14 +162,16 @@ class PLATFORM_EXPORT FetchContext : public GarbageCollected<FetchContext> {
     return MakeGarbageCollected<FetchContext>();
   }
 
-  virtual const FeaturePolicy* GetFeaturePolicy() const { return nullptr; }
+  virtual const PermissionsPolicy* GetPermissionsPolicy() const {
+    return nullptr;
+  }
 
   // Determine if the request is on behalf of an advertisement. If so, return
   // true. Checks `resource_request.Url()` unless `alias_url` is non-null, in
   // which case it checks the latter.
   virtual bool CalculateIfAdSubresource(
       const ResourceRequestHead& resource_request,
-      const base::Optional<KURL>& alias_url,
+      const absl::optional<KURL>& alias_url,
       ResourceType type,
       const FetchInitiatorInfo& initiator_info) {
     return false;
@@ -191,11 +194,8 @@ class PLATFORM_EXPORT FetchContext : public GarbageCollected<FetchContext> {
 
   // Returns if the request context is for prerendering or not.
   virtual bool IsPrerendering() const { return false; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FetchContext);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_FETCH_CONTEXT_H_

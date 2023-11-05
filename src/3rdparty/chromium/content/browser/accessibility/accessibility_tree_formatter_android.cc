@@ -8,9 +8,9 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/json/json_writer.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -121,6 +121,14 @@ base::Value AccessibilityTreeFormatterAndroid::BuildTreeForSelector(
   return base::Value(base::Value::Type::DICTIONARY);
 }
 
+base::Value AccessibilityTreeFormatterAndroid::BuildNode(
+    ui::AXPlatformNodeDelegate* node) const {
+  CHECK(node);
+  base::DictionaryValue dict;
+  AddProperties(*BrowserAccessibility::FromAXPlatformNodeDelegate(node), &dict);
+  return std::move(dict);
+}
+
 void AccessibilityTreeFormatterAndroid::AddDefaultFilters(
     std::vector<AXPropertyFilter>* property_filters) {
   AddPropertyFilter(property_filters, "hint=*");
@@ -133,18 +141,23 @@ void AccessibilityTreeFormatterAndroid::AddDefaultFilters(
 void AccessibilityTreeFormatterAndroid::RecursiveBuildTree(
     const BrowserAccessibility& node,
     base::DictionaryValue* dict) const {
-  AddProperties(node, dict);
+  if (!ShouldDumpNode(node))
+    return;
 
-  auto children = std::make_unique<base::ListValue>();
+  AddProperties(node, dict);
+  if (!ShouldDumpChildren(node))
+    return;
+
+  base::ListValue children;
 
   for (size_t i = 0; i < node.PlatformChildCount(); ++i) {
     BrowserAccessibility* child_node = node.PlatformGetChild(i);
     std::unique_ptr<base::DictionaryValue> child_dict(
         new base::DictionaryValue);
     RecursiveBuildTree(*child_node, child_dict.get());
-    children->Append(std::move(child_dict));
+    children.Append(std::move(child_dict));
   }
-  dict->Set(kChildrenDictAttr, std::move(children));
+  dict->SetKey(kChildrenDictAttr, std::move(children));
 }
 
 void AccessibilityTreeFormatterAndroid::AddProperties(
@@ -165,6 +178,7 @@ void AccessibilityTreeFormatterAndroid::AddProperties(
   dict->SetBoolean("collapsed", android_node->IsCollapsed());
   dict->SetBoolean("collection", android_node->IsCollection());
   dict->SetBoolean("collection_item", android_node->IsCollectionItem());
+  dict->SetBoolean("content_invalid", android_node->IsContentInvalid());
   dict->SetBoolean("disabled", !android_node->IsEnabled());
   dict->SetBoolean("dismissable", android_node->IsDismissable());
   dict->SetBoolean("editable_text", android_node->IsTextField());

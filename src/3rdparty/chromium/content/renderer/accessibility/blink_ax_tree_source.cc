@@ -10,8 +10,8 @@
 #include <set>
 
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -24,7 +24,6 @@
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_frame_proxy.h"
 #include "content/renderer/render_view_impl.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/web_ax_enums.h"
@@ -41,6 +40,7 @@
 #include "third_party/blink/public/web/web_view.h"
 #include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/accessibility_switches.h"
+#include "ui/accessibility/ax_common.h"
 #include "ui/accessibility/ax_enum_util.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/accessibility/ax_tree_id.h"
@@ -149,6 +149,10 @@ bool FindExactlyOneInnerImageInMaxDepthThree(WebAXObject obj,
   return SearchForExactlyOneInnerImage(obj, inner_image, /* max_depth = */ 3);
 }
 
+// Ignore code that limits based on the protocol (like https, file, etc.)
+// to enable tests to run.
+bool g_ignore_protocol_checks_for_testing;
+
 }  // namespace
 
 ScopedFreezeBlinkAXTreeSource::ScopedFreezeBlinkAXTreeSource(
@@ -193,6 +197,9 @@ void BlinkAXTreeSource::Freeze() {
 void BlinkAXTreeSource::Thaw() {
   CHECK(frozen_);
   WebAXObject::Thaw(document_);
+  document_ = WebDocument();
+  focus_ = WebAXObject();
+  root_ = WebAXObject();
   frozen_ = false;
 }
 
@@ -201,6 +208,8 @@ void BlinkAXTreeSource::SetRoot(WebAXObject root) {
   explicit_root_ = root;
 }
 
+#if defined(AX_FAIL_FAST_BUILD)
+// TODO(accessibility) Remove once it's clear this never triggers.
 bool BlinkAXTreeSource::IsInTree(WebAXObject node) const {
   CHECK(frozen_);
   while (IsValid(node)) {
@@ -210,6 +219,7 @@ bool BlinkAXTreeSource::IsInTree(WebAXObject node) const {
   }
   return false;
 }
+#endif
 
 void BlinkAXTreeSource::SetAccessibilityMode(ui::AXMode new_mode) {
   if (accessibility_mode_ == new_mode)
@@ -265,7 +275,7 @@ void BlinkAXTreeSource::PopulateAXRelativeBounds(WebAXObject obj,
                                                  bool* clips_children) const {
   WebAXObject offset_container;
   gfx::RectF bounds_in_container;
-  SkMatrix44 web_container_transform;
+  skia::Matrix44 web_container_transform;
   obj.GetRelativeBounds(offset_container, bounds_in_container,
                         web_container_transform, clips_children);
   bounds->bounds = bounds_in_container;
@@ -273,7 +283,7 @@ void BlinkAXTreeSource::PopulateAXRelativeBounds(WebAXObject obj,
     bounds->offset_container_id = offset_container.AxID();
 
   if (content::AXShouldIncludePageScaleFactorInRoot() && obj.Equals(root())) {
-    const WebView* web_view = render_frame_->GetRenderView()->GetWebView();
+    const WebView* web_view = render_frame_->GetWebView();
     std::unique_ptr<gfx::Transform> container_transform =
         std::make_unique<gfx::Transform>(web_container_transform);
     container_transform->Scale(web_view->PageScaleFactor(),
@@ -347,6 +357,32 @@ bool BlinkAXTreeSource::GetTreeData(ui::AXTreeData* tree_data) const {
 
   tree_data->root_scroller_id = root().RootScroller().AxID();
 
+  if (accessibility_mode_.has_mode(ui::AXMode::kHTMLMetadata)) {
+    WebElement head = GetMainDocument().Head();
+    for (WebNode child = head.FirstChild(); !child.IsNull();
+         child = child.NextSibling()) {
+      if (!child.IsElementNode())
+        continue;
+      WebElement elem = child.To<WebElement>();
+      if (elem.HasHTMLTagName("SCRIPT")) {
+        if (elem.GetAttribute("type") != "application/ld+json")
+          continue;
+      } else if (!elem.HasHTMLTagName("LINK") &&
+                 !elem.HasHTMLTagName("TITLE") &&
+                 !elem.HasHTMLTagName("META")) {
+        continue;
+      }
+      std::string tag = base::ToLowerASCII(elem.TagName().Utf8());
+      std::string html = "<" + tag;
+      for (unsigned i = 0; i < elem.AttributeCount(); i++) {
+        html += " " + elem.AttributeLocalName(i).Utf8() + "=\"" +
+                elem.AttributeValue(i).Utf8() + "\"";
+      }
+      html += ">" + elem.InnerHTML().Utf8() + "</" + tag + ">";
+      tree_data->metadata.push_back(html);
+    }
+  }
+
   return true;
 }
 
@@ -374,11 +410,6 @@ void BlinkAXTreeSource::GetChildren(
       ShouldLoadInlineTextBoxes(parent)) {
     parent.LoadInlineTextBoxes();
   }
-
-  bool is_iframe = false;
-  WebNode node = parent.GetNode();
-  if (!node.IsNull() && node.IsElementNode())
-    is_iframe = node.To<WebElement>().HasHTMLTagName("iframe");
 
   for (unsigned i = 0; i < parent.ChildCount(); i++) {
     WebAXObject child = parent.ChildAt(i);
@@ -482,31 +513,35 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
   TRACE_EVENT2("accessibility", "BlinkAXTreeSource::SerializeNode", "role",
                ui::ToString(dst->role), "id", dst->id);
 
-  SerializeNameAndDescriptionAttributes(src, dst);
-
   if (accessibility_mode_.has_mode(ui::AXMode::kPDF)) {
+    SerializeNameAndDescriptionAttributes(src, dst);
     // Return early. None of the following attributes are needed for PDFs.
     return;
   }
 
+  // Bounding boxes are needed on all nodes, including ignored, for hit testing.
   SerializeBoundingBoxAttributes(src, dst);
   cached_bounding_boxes_[dst->id] = dst->relative_bounds;
+
+  // Return early. The following attributes are unnecessary for ignored nodes.
+  // Exception: focusable ignored nodes are fully serialized, so that reasonable
+  // verbalizations can be made if they actually receive focus.
+  if (src.AccessibilityIsIgnored() &&
+      !dst->HasState(ax::mojom::State::kFocusable)) {
+    // The name is important for exposing the selection around ignored nodes.
+    // TODO(accessibility) Remove this and still pass this content_browsertest:
+    // All/DumpAccessibilityTreeTest.AccessibilityIgnoredSelection/blink
+    if (src.Role() == ax::mojom::Role::kStaticText)
+      SerializeNameAndDescriptionAttributes(src, dst);
+    return;
+  }
+
+  SerializeNameAndDescriptionAttributes(src, dst);
 
   if (accessibility_mode_.has_mode(ui::AXMode::kScreenReader)) {
     if (src.IsInLiveRegion())
       SerializeLiveRegionAttributes(src, dst);
     SerializeOtherScreenReaderAttributes(src, dst);
-  }
-
-  WebNode node = src.GetNode();
-  bool is_iframe = false;
-  if (!node.IsNull() && node.IsElementNode()) {
-    WebElement element = node.To<WebElement>();
-    is_iframe = element.HasHTMLTagName("iframe");
-
-    // Presence of other ARIA attributes.
-    if (src.HasAriaAttribute())
-      dst->AddBoolAttribute(ax::mojom::BoolAttribute::kHasAriaAttribute, true);
   }
 
   if (dst->id == image_data_node_id_) {
@@ -761,11 +796,6 @@ void BlinkAXTreeSource::SerializeOtherScreenReaderAttributes(
     dst->AddBoolAttribute(ax::mojom::BoolAttribute::kModal, src.IsModal());
   }
 
-  if (ui::IsPlatformDocument(dst->role)) {
-    TruncateAndAddStringAttribute(dst, ax::mojom::StringAttribute::kHtmlTag,
-                                  "#document");
-  }
-
   if (ui::IsImage(dst->role))
     AddImageAnnotations(src, dst);
 
@@ -802,6 +832,11 @@ void BlinkAXTreeSource::SerializeOtherScreenReaderAttributes(
 blink::WebDocument BlinkAXTreeSource::GetMainDocument() const {
   CHECK(frozen_);
   return document_;
+}
+
+// static
+void BlinkAXTreeSource::IgnoreProtocolChecksForTesting() {
+  g_ignore_protocol_checks_for_testing = true;
 }
 
 WebAXObject BlinkAXTreeSource::ComputeRoot() const {
@@ -901,7 +936,7 @@ void BlinkAXTreeSource::AddImageAnnotations(blink::WebAXObject& src,
   // unloaded images where the size is unknown.
   WebAXObject offset_container;
   gfx::RectF bounds;
-  SkMatrix44 container_transform;
+  skia::Matrix44 container_transform;
   bool clips_children = false;
   src.GetRelativeBounds(offset_container, bounds, container_transform,
                         &clips_children);
@@ -913,9 +948,10 @@ void BlinkAXTreeSource::AddImageAnnotations(blink::WebAXObject& src,
   }
 
   // Skip images in documents which are not http, https, file and data schemes.
-  GURL gurl = document().Url();
-  if (!(gurl.SchemeIsHTTPOrHTTPS() || gurl.SchemeIsFile() ||
-        gurl.SchemeIs(url::kDataScheme))) {
+  blink::WebString protocol = document().GetSecurityOrigin().Protocol();
+  if (!g_ignore_protocol_checks_for_testing && protocol != url::kHttpScheme &&
+      protocol != url::kHttpsScheme && protocol != url::kFileScheme &&
+      protocol != url::kDataScheme) {
     dst->SetImageAnnotationStatus(
         ax::mojom::ImageAnnotationStatus::kWillNotAnnotateDueToScheme);
     return;

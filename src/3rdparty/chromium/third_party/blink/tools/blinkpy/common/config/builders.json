@@ -24,11 +24,6 @@
         "port_name": "mac-mac10.13",
         "specifiers": ["Mac10.13", "Release"]
     },
-    "Mac10.13 Tests (dbg)": {
-        "master": "chromium.mac",
-        "port_name": "mac-mac10.13",
-        "specifiers": ["Mac10.13", "Debug"]
-    },
     "Mac10.14 Tests": {
         "master": "chromium.mac",
         "port_name": "mac-mac10.14",
@@ -61,8 +56,8 @@
     },
     "Win10 Tests x64": {
         "master": "chromium.win",
-        "port_name": "win-win10",
-        "specifiers": ["Win10", "Release"]
+        "port_name": "win-win10.1909",
+        "specifiers": ["Win10.1909", "Release"]
     },
     "Win7 Tests (dbg)(1)": {
         "master": "chromium.win",
@@ -132,8 +127,14 @@
     },
     "win10-blink-rel": {
         "master": "tryserver.blink",
-        "port_name": "win-win10",
-        "specifiers": ["Win10", "Release"],
+        "port_name": "win-win10.1909",
+        "specifiers": ["Win10.1909", "Release"],
+        "is_try_builder": true
+    },
+    "win10.20h2-blink-rel": {
+        "master": "tryserver.blink",
+        "port_name": "win-win10.20h2",
+        "specifiers": ["Win10.20h2", "Release"],
         "is_try_builder": true
     },
     "linux-rel": {
@@ -146,23 +147,44 @@
     },
     "mac-rel": {
         "master": "tryserver.chromium.mac",
-        "port_name": "mac-mac10.13",
-        "specifiers": ["Mac10.13", "Release"],
+        "port_name": "mac-mac10.15",
+        "specifiers": ["Mac10.15", "Release"],
         "is_try_builder": true,
         "is_cq_builder":true
     },
     "win10_chromium_x64_rel_ng": {
         "master": "tryserver.chromium.win",
-        "port_name": "win-win10",
-        "specifiers": ["Win10", "Release"],
+        "port_name": "win-win10.1909",
+        "specifiers": ["Win10.1909", "Release"],
         "is_try_builder": true,
         "is_cq_builder":true
     },
-    "android-pie-arm64-wpt-rel-non-cq": {
+    "android-weblayer-pie-x86-wpt-fyi-rel": {
         "port_name": "android-android-pie",
+        "master": "chromium.android.fyi",
         "specifiers": [
-            "Android", "android_weblayer", "android_webview",
-            "chrome_android", "Release"],
+            "Android", "android_weblayer", "Release"
+        ]
+    },
+    "android-weblayer-pie-x86-wpt-smoketest": {
+        "port_name": "android-android-pie",
+        "master": "chromium.android.fyi",
+        "specifiers": [
+            "Android", "android_weblayer", "Release"
+        ],
+        "is_try_builder": true
+    },
+    "android-web-platform-pie-x86-fyi-rel": {
+        "port_name": "android-android-pie",
+        "master": "chromium.android.fyi",
+        "specifiers": [
+            "Android", "chrome_android", "Release"]
+    },
+    "linux-blink-optional-highdpi-rel": {
+        "master": "tryserver.blink",
+        "port_name": "linux-trusty",
+        "specifiers": ["Trusty", "Release"],
+        "flag_specific": "highdpi",
         "is_try_builder": true
     }
 }

@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/webui/web_ui_data_source_impl.h"
 #include "content/public/test/browser_task_environment.h"
@@ -20,7 +20,7 @@ const int kDummyDefaultResourceId = 456;
 const int kDummyResourceId = 789;
 const int kDummyJSResourceId = 790;
 
-const char kDummyString[] = "foo";
+const char16_t kDummyString[] = u"foo";
 const char kDummyDefaultResource[] = "<html>foo</html>";
 const char kDummyResource[] = "<html>blah</html>";
 const char kDummyJSResource[] = "export const bar = 5;";
@@ -29,10 +29,10 @@ class TestClient : public TestContentClient {
  public:
   ~TestClient() override {}
 
-  base::string16 GetLocalizedString(int message_id) override {
+  std::u16string GetLocalizedString(int message_id) override {
     if (message_id == kDummyStringId)
-      return base::UTF8ToUTF16(kDummyString);
-    return base::string16();
+      return kDummyString;
+    return std::u16string();
   }
 
   base::RefCountedMemory* GetDataResourceBytes(int resource_id) override {
@@ -130,7 +130,7 @@ TEST_F(WebUIDataSourceTest, SomeValues) {
   source()->AddInteger("counter", 10);
   source()->AddInteger("debt", -456);
   source()->AddDouble("threshold", 0.55);
-  source()->AddString("planet", base::ASCIIToUTF16("pluto"));
+  source()->AddString("planet", u"pluto");
   source()->AddLocalizedString("button", kDummyStringId);
   StartDataRequest("strings.js", base::BindOnce(&SomeValuesCallback));
 }
@@ -401,6 +401,31 @@ TEST_F(WebUIDataSourceTest, SetCspValues) {
                     network::mojom::CSPDirectiveName::RequireTrustedTypesFor));
   EXPECT_EQ("", url_data_source->GetContentSecurityPolicy(
                     network::mojom::CSPDirectiveName::TrustedTypes));
+}
+
+TEST_F(WebUIDataSourceTest, SetCrossOriginPolicyValues) {
+  URLDataSource* url_data_source = source()->source();
+
+  // Default values.
+  EXPECT_EQ("", url_data_source->GetCrossOriginOpenerPolicy());
+  EXPECT_EQ("", url_data_source->GetCrossOriginEmbedderPolicy());
+  EXPECT_EQ("", url_data_source->GetCrossOriginResourcePolicy());
+
+  // Overridden values.
+  source()->OverrideCrossOriginOpenerPolicy("same-origin");
+  EXPECT_EQ("same-origin", url_data_source->GetCrossOriginOpenerPolicy());
+  source()->OverrideCrossOriginEmbedderPolicy("require-corp");
+  EXPECT_EQ("require-corp", url_data_source->GetCrossOriginEmbedderPolicy());
+  source()->OverrideCrossOriginResourcePolicy("cross-origin");
+  EXPECT_EQ("cross-origin", url_data_source->GetCrossOriginResourcePolicy());
+
+  // Remove/change the values.
+  source()->OverrideCrossOriginOpenerPolicy("same-site");
+  EXPECT_EQ("same-site", url_data_source->GetCrossOriginOpenerPolicy());
+  source()->OverrideCrossOriginEmbedderPolicy("");
+  EXPECT_EQ("", url_data_source->GetCrossOriginEmbedderPolicy());
+  source()->OverrideCrossOriginResourcePolicy("same-origin");
+  EXPECT_EQ("same-origin", url_data_source->GetCrossOriginResourcePolicy());
 }
 
 }  // namespace content

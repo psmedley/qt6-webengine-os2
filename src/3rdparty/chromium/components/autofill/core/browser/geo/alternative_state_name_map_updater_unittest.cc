@@ -3,16 +3,17 @@
 // found in the LICENSE file.
 
 #include "components/autofill/core/browser/geo/alternative_state_name_map_updater.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/geo/alternative_state_name_map.h"
 #include "components/autofill/core/browser/geo/alternative_state_name_map_test_utils.h"
+#include "components/autofill/core/browser/geo/mock_alternative_state_name_map_updater.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
 #include "components/autofill/core/browser/test_personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
@@ -21,32 +22,12 @@
 #include "components/prefs/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 using base::ASCIIToUTF16;
 using base::UTF8ToUTF16;
 
 namespace autofill {
-
-class MockAlternativeStateNameMapUpdater
-    : public AlternativeStateNameMapUpdater {
- public:
-  MockAlternativeStateNameMapUpdater(base::OnceClosure callback,
-                                     PrefService* local_state,
-                                     PersonalDataManager* personal_data_manager)
-      : AlternativeStateNameMapUpdater(local_state, personal_data_manager),
-        callback_(std::move(callback)) {}
-
-  // PersonalDataManagerObserver:
-  void OnPersonalDataFinishedProfileTasks() override {
-    if (base::FeatureList::IsEnabled(
-            features::kAutofillUseAlternativeStateNameMap)) {
-      PopulateAlternativeStateNameMap(std::move(callback_));
-    }
-  }
-
- private:
-  base::OnceClosure callback_;
-};
 
 class AlternativeStateNameMapUpdaterTest : public ::testing::Test {
  public:
@@ -65,6 +46,8 @@ class AlternativeStateNameMapUpdaterTest : public ::testing::Test {
                                 /*identity_manager=*/nullptr,
                                 /*client_profile_validator=*/nullptr,
                                 /*history_service=*/nullptr,
+                                /*strike_database=*/nullptr,
+                                /*image_fetcher=*/nullptr,
                                 /*is_off_the_record=*/false);
     alternative_state_name_map_updater_ =
         std::make_unique<AlternativeStateNameMapUpdater>(
@@ -94,14 +77,14 @@ TEST_F(AlternativeStateNameMapUpdaterTest, EntryAddedToStateMap) {
   test::ClearAlternativeStateNameMapForTesting();
   std::string states_data = test::CreateStatesProtoAsString();
   std::vector<AlternativeStateNameMap::StateName> test_strings = {
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria")),
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("Bayern")),
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("B.Y")),
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("Bav-aria")),
-      AlternativeStateNameMap::StateName(UTF8ToUTF16("amapá")),
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("Broen")),
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria is in Germany")),
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("BA is in Germany"))};
+      AlternativeStateNameMap::StateName(u"Bavaria"),
+      AlternativeStateNameMap::StateName(u"Bayern"),
+      AlternativeStateNameMap::StateName(u"B.Y"),
+      AlternativeStateNameMap::StateName(u"Bav-aria"),
+      AlternativeStateNameMap::StateName(u"amapá"),
+      AlternativeStateNameMap::StateName(u"Broen"),
+      AlternativeStateNameMap::StateName(u"Bavaria is in Germany"),
+      AlternativeStateNameMap::StateName(u"BA is in Germany")};
   std::vector<bool> state_data_present = {true,  true,  true,  true,
                                           false, false, false, false};
 
@@ -113,7 +96,7 @@ TEST_F(AlternativeStateNameMapUpdaterTest, EntryAddedToStateMap) {
   for (size_t i = 0; i < test_strings.size(); i++) {
     SCOPED_TRACE(test_strings[i]);
     EXPECT_EQ(AlternativeStateNameMap::GetCanonicalStateName(
-                  "DE", test_strings[i].value()) != base::nullopt,
+                  "DE", test_strings[i].value()) != absl::nullopt,
               state_data_present[i]);
   }
 }
@@ -128,16 +111,15 @@ TEST_F(AlternativeStateNameMapUpdaterTest, TestLoadStatesData) {
   WritePathToPref(GetPath());
   CountryToStateNamesListMapping country_to_state_names_list_mapping = {
       {AlternativeStateNameMap::CountryCode("DE"),
-       {AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria"))}}};
+       {AlternativeStateNameMap::StateName(u"Bavaria")}}};
   base::RunLoop run_loop;
   alternative_state_name_map_updater_->LoadStatesDataForTesting(
       country_to_state_names_list_mapping, autofill_client_.GetPrefs(),
       run_loop.QuitClosure());
   run_loop.Run();
 
-  EXPECT_NE(AlternativeStateNameMap::GetCanonicalStateName(
-                "DE", ASCIIToUTF16("Bavaria")),
-            base::nullopt);
+  EXPECT_NE(AlternativeStateNameMap::GetCanonicalStateName("DE", u"Bavaria"),
+            absl::nullopt);
 }
 
 // Tests that there is no insertion in the AlternativeStateNameMap when a
@@ -152,7 +134,7 @@ TEST_F(AlternativeStateNameMapUpdaterTest, NoTaskIsPosted) {
 
   CountryToStateNamesListMapping country_to_state_names_list_mapping = {
       {AlternativeStateNameMap::CountryCode("DEE"),
-       {AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria"))}}};
+       {AlternativeStateNameMap::StateName(u"Bavaria")}}};
   base::RunLoop run_loop;
   alternative_state_name_map_updater_->LoadStatesDataForTesting(
       country_to_state_names_list_mapping, autofill_client_.GetPrefs(),
@@ -178,7 +160,7 @@ TEST_F(AlternativeStateNameMapUpdaterTest, TestLoadStatesDataUTF8) {
 
   CountryToStateNamesListMapping country_to_state_names_list_mapping = {
       {AlternativeStateNameMap::CountryCode("ES"),
-       {AlternativeStateNameMap::StateName(ASCIIToUTF16("Parana"))}}};
+       {AlternativeStateNameMap::StateName(u"Parana")}}};
 
   base::RunLoop run_loop;
   alternative_state_name_map_updater_->LoadStatesDataForTesting(
@@ -186,22 +168,22 @@ TEST_F(AlternativeStateNameMapUpdaterTest, TestLoadStatesDataUTF8) {
       run_loop.QuitClosure());
   run_loop.Run();
 
-  base::Optional<StateEntry> entry1 =
+  absl::optional<StateEntry> entry1 =
       AlternativeStateNameMap::GetInstance()->GetEntry(
           AlternativeStateNameMap::CountryCode("ES"),
-          AlternativeStateNameMap::StateName(UTF8ToUTF16("Paraná")));
-  EXPECT_NE(entry1, base::nullopt);
+          AlternativeStateNameMap::StateName(u"Paraná"));
+  EXPECT_NE(entry1, absl::nullopt);
   EXPECT_EQ(entry1->canonical_name(), "Paraná");
   EXPECT_THAT(entry1->abbreviations(),
               testing::UnorderedElementsAreArray({"PR"}));
   EXPECT_THAT(entry1->alternative_names(), testing::UnorderedElementsAreArray(
                                                {"Parana", "State of Parana"}));
 
-  base::Optional<StateEntry> entry2 =
+  absl::optional<StateEntry> entry2 =
       AlternativeStateNameMap::GetInstance()->GetEntry(
           AlternativeStateNameMap::CountryCode("ES"),
-          AlternativeStateNameMap::StateName(UTF8ToUTF16("Parana")));
-  EXPECT_NE(entry2, base::nullopt);
+          AlternativeStateNameMap::StateName(u"Parana"));
+  EXPECT_NE(entry2, absl::nullopt);
   EXPECT_EQ(entry2->canonical_name(), "Paraná");
   EXPECT_THAT(entry2->abbreviations(),
               testing::UnorderedElementsAreArray({"PR"}));
@@ -228,9 +210,9 @@ TEST_F(AlternativeStateNameMapUpdaterTest,
 
   CountryToStateNamesListMapping country_to_state_names = {
       {AlternativeStateNameMap::CountryCode("ES"),
-       {AlternativeStateNameMap::StateName(ASCIIToUTF16("Parana"))}},
+       {AlternativeStateNameMap::StateName(u"Parana")}},
       {AlternativeStateNameMap::CountryCode("DE"),
-       {AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria"))}}};
+       {AlternativeStateNameMap::StateName(u"Bavaria")}}};
 
   base::RunLoop run_loop;
   alternative_state_name_map_updater_->LoadStatesDataForTesting(
@@ -238,22 +220,22 @@ TEST_F(AlternativeStateNameMapUpdaterTest,
       run_loop.QuitClosure());
   run_loop.Run();
 
-  base::Optional<StateEntry> entry1 =
+  absl::optional<StateEntry> entry1 =
       AlternativeStateNameMap::GetInstance()->GetEntry(
           AlternativeStateNameMap::CountryCode("ES"),
-          AlternativeStateNameMap::StateName(UTF8ToUTF16("Paraná")));
-  EXPECT_NE(entry1, base::nullopt);
+          AlternativeStateNameMap::StateName(u"Paraná"));
+  EXPECT_NE(entry1, absl::nullopt);
   EXPECT_EQ(entry1->canonical_name(), "Paraná");
   EXPECT_THAT(entry1->abbreviations(),
               testing::UnorderedElementsAreArray({"PR"}));
   EXPECT_THAT(entry1->alternative_names(), testing::UnorderedElementsAreArray(
                                                {"Parana", "State of Parana"}));
 
-  base::Optional<StateEntry> entry2 =
+  absl::optional<StateEntry> entry2 =
       AlternativeStateNameMap::GetInstance()->GetEntry(
           AlternativeStateNameMap::CountryCode("DE"),
-          AlternativeStateNameMap::StateName(UTF8ToUTF16("Bavaria")));
-  EXPECT_NE(entry2, base::nullopt);
+          AlternativeStateNameMap::StateName(u"Bavaria"));
+  EXPECT_NE(entry2, absl::nullopt);
   EXPECT_EQ(entry2->canonical_name(), "Bavaria");
   EXPECT_THAT(entry2->abbreviations(),
               testing::UnorderedElementsAreArray({"BY"}));
@@ -264,15 +246,15 @@ TEST_F(AlternativeStateNameMapUpdaterTest,
 // Tests the |StateNameMapUpdater::ContainsState()| functionality.
 TEST_F(AlternativeStateNameMapUpdaterTest, ContainsState) {
   EXPECT_TRUE(AlternativeStateNameMapUpdater::ContainsStateForTesting(
-      {AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria")),
-       AlternativeStateNameMap::StateName(ASCIIToUTF16("Bayern")),
-       AlternativeStateNameMap::StateName(ASCIIToUTF16("BY"))},
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria"))));
+      {AlternativeStateNameMap::StateName(u"Bavaria"),
+       AlternativeStateNameMap::StateName(u"Bayern"),
+       AlternativeStateNameMap::StateName(u"BY")},
+      AlternativeStateNameMap::StateName(u"Bavaria")));
   EXPECT_FALSE(AlternativeStateNameMapUpdater::ContainsStateForTesting(
-      {AlternativeStateNameMap::StateName(ASCIIToUTF16("Bavaria")),
-       AlternativeStateNameMap::StateName(ASCIIToUTF16("Bayern")),
-       AlternativeStateNameMap::StateName(ASCIIToUTF16("BY"))},
-      AlternativeStateNameMap::StateName(ASCIIToUTF16("California"))));
+      {AlternativeStateNameMap::StateName(u"Bavaria"),
+       AlternativeStateNameMap::StateName(u"Bayern"),
+       AlternativeStateNameMap::StateName(u"BY")},
+      AlternativeStateNameMap::StateName(u"California")));
 }
 
 // Tests that the |AlternativeStateNameMap| is populated with the help of the
@@ -286,8 +268,8 @@ TEST_F(AlternativeStateNameMapUpdaterTest,
                   test::CreateStatesProtoAsString());
 
   AutofillProfile profile;
-  profile.SetInfo(ADDRESS_HOME_STATE, base::ASCIIToUTF16("Bavaria"), "en-US");
-  profile.SetInfo(ADDRESS_HOME_COUNTRY, base::ASCIIToUTF16("DE"), "en-US");
+  profile.SetInfo(ADDRESS_HOME_STATE, u"Bavaria", "en-US");
+  profile.SetInfo(ADDRESS_HOME_COUNTRY, u"DE", "en-US");
 
   base::RunLoop run_loop;
   MockAlternativeStateNameMapUpdater mock_alternative_state_name_updater(
@@ -300,10 +282,8 @@ TEST_F(AlternativeStateNameMapUpdaterTest,
 
   EXPECT_FALSE(
       AlternativeStateNameMap::GetInstance()->IsLocalisedStateNamesMapEmpty());
-  EXPECT_NE(AlternativeStateNameMap::GetCanonicalStateName(
-                "DE", base::ASCIIToUTF16("Bavaria")),
-            AlternativeStateNameMap::CanonicalStateName(
-                base::ASCIIToUTF16("Bayern")));
+  EXPECT_NE(AlternativeStateNameMap::GetCanonicalStateName("DE", u"Bavaria"),
+            AlternativeStateNameMap::CanonicalStateName(u"Bayern"));
 }
 
 }  // namespace autofill

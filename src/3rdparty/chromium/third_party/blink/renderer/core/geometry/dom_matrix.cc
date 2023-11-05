@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/geometry/dom_matrix.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_matrix_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_unrestricteddoublesequence.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 
@@ -19,31 +20,38 @@ DOMMatrix* DOMMatrix::Create(ExecutionContext* execution_context,
   return MakeGarbageCollected<DOMMatrix>(TransformationMatrix());
 }
 
-DOMMatrix* DOMMatrix::Create(ExecutionContext* execution_context,
-                             StringOrUnrestrictedDoubleSequence& init,
-                             ExceptionState& exception_state) {
-  if (init.IsString()) {
-    if (!execution_context->IsWindow()) {
-      exception_state.ThrowTypeError(
-          "DOMMatrix can't be constructed with strings on workers.");
-      return nullptr;
-    }
+DOMMatrix* DOMMatrix::Create(
+    ExecutionContext* execution_context,
+    const V8UnionStringOrUnrestrictedDoubleSequence* init,
+    ExceptionState& exception_state) {
+  DCHECK(init);
 
-    DOMMatrix* matrix = MakeGarbageCollected<DOMMatrix>(TransformationMatrix());
-    matrix->SetMatrixValueFromString(execution_context, init.GetAsString(),
-                                     exception_state);
-    return matrix;
-  }
+  switch (init->GetContentType()) {
+    case V8UnionStringOrUnrestrictedDoubleSequence::ContentType::kString: {
+      if (!execution_context->IsWindow()) {
+        exception_state.ThrowTypeError(
+            "DOMMatrix can't be constructed with strings on workers.");
+        return nullptr;
+      }
 
-  if (init.IsUnrestrictedDoubleSequence()) {
-    const Vector<double>& sequence = init.GetAsUnrestrictedDoubleSequence();
-    if (sequence.size() != 6 && sequence.size() != 16) {
-      exception_state.ThrowTypeError(
-          "The sequence must contain 6 elements for a 2D matrix or 16 elements "
-          "for a 3D matrix.");
-      return nullptr;
+      DOMMatrix* matrix =
+          MakeGarbageCollected<DOMMatrix>(TransformationMatrix());
+      matrix->SetMatrixValueFromString(execution_context, init->GetAsString(),
+                                       exception_state);
+      return matrix;
     }
-    return MakeGarbageCollected<DOMMatrix>(sequence, sequence.size());
+    case V8UnionStringOrUnrestrictedDoubleSequence::ContentType::
+        kUnrestrictedDoubleSequence: {
+      const Vector<double>& sequence = init->GetAsUnrestrictedDoubleSequence();
+      if (sequence.size() != 6 && sequence.size() != 16) {
+        exception_state.ThrowTypeError(
+            "The sequence must contain 6 elements for a 2D matrix or 16 "
+            "elements "
+            "for a 3D matrix.");
+        return nullptr;
+      }
+      return MakeGarbageCollected<DOMMatrix>(sequence, sequence.size());
+    }
   }
 
   NOTREACHED();
@@ -55,7 +63,7 @@ DOMMatrix* DOMMatrix::Create(DOMMatrixReadOnly* other,
   return MakeGarbageCollected<DOMMatrix>(other->Matrix(), other->is2D());
 }
 
-DOMMatrix* DOMMatrix::Create(const SkMatrix44& matrix,
+DOMMatrix* DOMMatrix::Create(const skia::Matrix44& matrix,
                              ExceptionState& exception_state) {
   TransformationMatrix transformation_matrix(matrix);
   return MakeGarbageCollected<DOMMatrix>(transformation_matrix,

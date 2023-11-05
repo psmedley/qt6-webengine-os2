@@ -20,11 +20,11 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -40,13 +40,15 @@
 #include "media/gpu/chromeos/platform_video_frame_utils.h"
 #include "media/gpu/macros.h"
 #include "media/gpu/v4l2/v4l2_decode_surface.h"
-#include "media/gpu/v4l2/v4l2_h264_accelerator_chromium.h"
-#include "media/gpu/v4l2/v4l2_h264_accelerator_legacy.h"
 #include "media/gpu/v4l2/v4l2_image_processor_backend.h"
+#include "media/gpu/v4l2/v4l2_utils.h"
 #include "media/gpu/v4l2/v4l2_vda_helpers.h"
-#include "media/gpu/v4l2/v4l2_vp8_accelerator.h"
-#include "media/gpu/v4l2/v4l2_vp8_accelerator_legacy.h"
-#include "media/gpu/v4l2/v4l2_vp9_accelerator_legacy.h"
+#include "media/gpu/v4l2/v4l2_video_decoder_delegate_h264.h"
+#include "media/gpu/v4l2/v4l2_video_decoder_delegate_h264_legacy.h"
+#include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp8.h"
+#include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp8_legacy.h"
+#include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp9_chromium.h"
+#include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp9_legacy.h"
 #include "ui/gfx/native_pixmap_handle.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image.h"
@@ -295,27 +297,37 @@ bool V4L2SliceVideoDecodeAccelerator::Initialize(const Config& config,
   if (video_profile_ >= H264PROFILE_MIN && video_profile_ <= H264PROFILE_MAX) {
     if (supports_requests_) {
       decoder_ = std::make_unique<H264Decoder>(
-          std::make_unique<V4L2ChromiumH264Accelerator>(this, device_.get()),
+          std::make_unique<V4L2VideoDecoderDelegateH264>(this, device_.get()),
           video_profile_);
     } else {
       decoder_ = std::make_unique<H264Decoder>(
-          std::make_unique<V4L2LegacyH264Accelerator>(this, device_.get()),
+          std::make_unique<V4L2VideoDecoderDelegateH264Legacy>(this,
+                                                               device_.get()),
           video_profile_);
     }
   } else if (video_profile_ >= VP8PROFILE_MIN &&
              video_profile_ <= VP8PROFILE_MAX) {
     if (supports_requests_) {
       decoder_ = std::make_unique<VP8Decoder>(
-          std::make_unique<V4L2VP8Accelerator>(this, device_.get()));
+          std::make_unique<V4L2VideoDecoderDelegateVP8>(this, device_.get()));
     } else {
       decoder_ = std::make_unique<VP8Decoder>(
-          std::make_unique<V4L2LegacyVP8Accelerator>(this, device_.get()));
+          std::make_unique<V4L2VideoDecoderDelegateVP8Legacy>(this,
+                                                              device_.get()));
     }
   } else if (video_profile_ >= VP9PROFILE_MIN &&
              video_profile_ <= VP9PROFILE_MAX) {
-    decoder_ = std::make_unique<VP9Decoder>(
-        std::make_unique<V4L2LegacyVP9Accelerator>(this, device_.get()),
-        video_profile_);
+    if (supports_requests_) {
+      decoder_ = std::make_unique<VP9Decoder>(
+          std::make_unique<V4L2VideoDecoderDelegateVP9Chromium>(this,
+                                                                device_.get()),
+          video_profile_);
+    } else {
+      decoder_ = std::make_unique<VP9Decoder>(
+          std::make_unique<V4L2VideoDecoderDelegateVP9Legacy>(this,
+                                                              device_.get()),
+          video_profile_);
+    }
   } else {
     NOTREACHED() << "Unsupported profile " << GetProfileName(video_profile_);
     return false;
@@ -505,7 +517,7 @@ bool V4L2SliceVideoDecodeAccelerator::SetupFormats() {
   // output format or not may depend on the input format.
   memset(&fmtdesc, 0, sizeof(fmtdesc));
   fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-  output_format_fourcc_ = base::nullopt;
+  output_format_fourcc_ = absl::nullopt;
   output_planes_count_ = 0;
   while (device_->Ioctl(VIDIOC_ENUM_FMT, &fmtdesc) == 0) {
     auto fourcc = Fourcc::FromV4L2PixFmt(fmtdesc.pixelformat);
@@ -1125,7 +1137,8 @@ void V4L2SliceVideoDecodeAccelerator::InitiateSurfaceSetChange() {
   VLOGF(2);
   DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, kDecoding);
-  TRACE_EVENT_ASYNC_BEGIN0("media,gpu", "V4L2SVDA Resolution Change", this);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("media,gpu", "V4L2SVDA Resolution Change",
+                                    TRACE_ID_LOCAL(this));
   DCHECK(!surface_set_change_pending_);
   surface_set_change_pending_ = true;
   NewEventPending();
@@ -1185,7 +1198,8 @@ bool V4L2SliceVideoDecodeAccelerator::FinishSurfaceSetChange() {
 
   surface_set_change_pending_ = false;
   VLOGF(2) << "Surface set change finished";
-  TRACE_EVENT_ASYNC_END0("media,gpu", "V4L2SVDA Resolution Change", this);
+  TRACE_EVENT_NESTABLE_ASYNC_END0("media,gpu", "V4L2SVDA Resolution Change",
+                                  TRACE_ID_LOCAL(this));
   return true;
 }
 
@@ -1464,9 +1478,18 @@ void V4L2SliceVideoDecodeAccelerator::CreateGLImageFor(
   gl::ScopedTextureBinder bind_restore(gl_device->GetTextureTarget(),
                                        texture_id);
   bool ret = gl_image->BindTexImage(gl_device->GetTextureTarget());
-  DCHECK(ret);
-  bind_image_cb_.Run(client_texture_id, gl_device->GetTextureTarget(), gl_image,
-                     true);
+  if (!ret) {
+    LOG(ERROR) << "Error while binding tex image";
+    NOTIFY_ERROR(PLATFORM_FAILURE);
+    return;
+  }
+  ret = bind_image_cb_.Run(client_texture_id, gl_device->GetTextureTarget(),
+                           gl_image, true);
+  if (!ret) {
+    LOG(ERROR) << "Error while running bind image callback";
+    NOTIFY_ERROR(PLATFORM_FAILURE);
+    return;
+  }
 }
 
 void V4L2SliceVideoDecodeAccelerator::ImportBufferForPicture(
@@ -1498,7 +1521,9 @@ void V4L2SliceVideoDecodeAccelerator::ImportBufferForPictureForImportTask(
 
   if (pixel_format != gl_image_format_fourcc_->ToVideoPixelFormat()) {
     LOG(ERROR) << "Unsupported import format: "
-               << VideoPixelFormatToString(pixel_format);
+               << VideoPixelFormatToString(pixel_format) << ", expected "
+               << VideoPixelFormatToString(
+                      gl_image_format_fourcc_->ToVideoPixelFormat());
     NOTIFY_ERROR(INVALID_ARGUMENT);
     return;
   }
@@ -1741,7 +1766,8 @@ void V4L2SliceVideoDecodeAccelerator::FlushTask() {
 void V4L2SliceVideoDecodeAccelerator::InitiateFlush() {
   VLOGF(2);
   DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
-  TRACE_EVENT_ASYNC_BEGIN0("media,gpu", "V4L2SVDA Flush", this);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("media,gpu", "V4L2SVDA Flush",
+                                    TRACE_ID_LOCAL(this));
 
   // This will trigger output for all remaining surfaces in the decoder.
   // However, not all of them may be decoded yet (they would be queued
@@ -1802,7 +1828,8 @@ bool V4L2SliceVideoDecodeAccelerator::FinishFlush() {
   child_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&Client::NotifyFlushDone, client_));
 
-  TRACE_EVENT_ASYNC_END0("media,gpu", "V4L2SVDA Flush", this);
+  TRACE_EVENT_NESTABLE_ASYNC_END0("media,gpu", "V4L2SVDA Flush",
+                                  TRACE_ID_LOCAL(this));
   return true;
 }
 
@@ -1818,7 +1845,8 @@ void V4L2SliceVideoDecodeAccelerator::Reset() {
 void V4L2SliceVideoDecodeAccelerator::ResetTask() {
   VLOGF(2);
   DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
-  TRACE_EVENT_ASYNC_BEGIN0("media,gpu", "V4L2SVDA Reset", this);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("media,gpu", "V4L2SVDA Reset",
+                                    TRACE_ID_LOCAL(this));
 
   if (IsDestroyPending())
     return;
@@ -1881,7 +1909,8 @@ bool V4L2SliceVideoDecodeAccelerator::FinishReset() {
   child_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&Client::NotifyResetDone, client_));
 
-  TRACE_EVENT_ASYNC_END0("media,gpu", "V4L2SVDA Reset", this);
+  TRACE_EVENT_NESTABLE_ASYNC_END0("media,gpu", "V4L2SVDA Reset",
+                                  TRACE_ID_LOCAL(this));
   return true;
 }
 
@@ -2079,7 +2108,7 @@ V4L2SliceVideoDecodeAccelerator::CreateSurface() {
 
   if (supports_requests_) {
     // Get a free request from the queue for a new surface.
-    base::Optional<V4L2RequestRef> request_ref =
+    absl::optional<V4L2RequestRef> request_ref =
         requests_queue_->GetFreeRequest();
     if (!request_ref) {
       LOG(ERROR) << "Failed getting a request";
@@ -2337,14 +2366,14 @@ bool V4L2SliceVideoDecodeAccelerator::OnMemoryDump(
       input_queue_->AllocatedBuffersCount();
   size_t input_queue_memory_usage = 0;
   std::string input_queue_buffers_memory_type =
-      V4L2Device::V4L2MemoryToString(input_queue_->GetMemoryType());
+      V4L2MemoryToString(input_queue_->GetMemoryType());
   input_queue_memory_usage += input_queue_->GetMemoryUsage();
 
   // VIDEO_CAPTURE queue's memory usage.
   const size_t output_queue_buffers_count = output_buffer_map_.size();
   size_t output_queue_memory_usage = 0;
   std::string output_queue_buffers_memory_type =
-      V4L2Device::V4L2MemoryToString(output_queue_->GetMemoryType());
+      V4L2MemoryToString(output_queue_->GetMemoryType());
   if (output_mode_ == Config::OutputMode::ALLOCATE) {
     // Call QUERY_BUF here because the length of buffers on VIDIOC_CATURE queue
     // are not recorded nowhere in V4L2VideoDecodeAccelerator.

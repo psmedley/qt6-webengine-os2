@@ -45,7 +45,7 @@ bool CanBeAnchorNode<EditingStrategy>(Node* node) {
 template <>
 bool CanBeAnchorNode<EditingInFlatTreeStrategy>(Node* node) {
   return CanBeAnchorNode<EditingStrategy>(node) &&
-         (!node || node->CanParticipateInFlatTree());
+         (!node || !node->IsShadowRoot());
 }
 #endif
 
@@ -148,10 +148,11 @@ PositionTemplate<Strategy>::PositionTemplate(const Node& anchor_node,
     : PositionTemplate(&anchor_node, offset) {}
 
 template <typename Strategy>
-PositionTemplate<Strategy>::PositionTemplate(const PositionTemplate& other)
-    : anchor_node_(other.anchor_node_),
-      offset_(other.offset_),
-      anchor_type_(other.anchor_type_) {}
+PositionTemplate<Strategy>::PositionTemplate(const PositionTemplate&) = default;
+
+template <typename Strategy>
+PositionTemplate<Strategy>& PositionTemplate<Strategy>::operator=(
+    const PositionTemplate&) = default;
 
 // static
 template <typename Strategy>
@@ -586,7 +587,6 @@ PositionInFlatTree ToPositionInFlatTree(const Position& pos) {
   if (pos.IsOffsetInAnchor()) {
     if (anchor->IsCharacterDataNode())
       return PositionInFlatTree(anchor, pos.ComputeOffsetInContainerNode());
-    DCHECK(!anchor->IsElementNode() || anchor->CanParticipateInFlatTree());
     int offset = pos.ComputeOffsetInContainerNode();
     if (!offset) {
       Node* node = anchor->IsShadowRoot() ? anchor->OwnerShadowHost() : anchor;
@@ -597,7 +597,7 @@ PositionInFlatTree ToPositionInFlatTree(const Position& pos) {
       Node* node = anchor->IsShadowRoot() ? anchor->OwnerShadowHost() : anchor;
       return PositionInFlatTree::LastPositionInNode(*node);
     }
-    if (!child->CanParticipateInFlatTree()) {
+    if (child->IsShadowRoot()) {
       if (anchor->IsShadowRoot())
         return PositionInFlatTree(anchor->OwnerShadowHost(), offset);
       return PositionInFlatTree(anchor, offset);
@@ -615,7 +615,6 @@ PositionInFlatTree ToPositionInFlatTree(const Position& pos) {
 
   if (anchor->IsShadowRoot())
     return PositionInFlatTree(anchor->OwnerShadowHost(), pos.AnchorType());
-  DCHECK(anchor->CanParticipateInFlatTree());
   if (pos.IsBeforeAnchor() || pos.IsAfterAnchor()) {
     if (!FlatTreeTraversal::Parent(*anchor)) {
       // For Before/AfterAnchor, if |anchor| doesn't have parent in the flat

@@ -7,7 +7,8 @@
 #include "base/check.h"
 #include "base/notreached.h"
 #include "base/win/scoped_handle.h"
-#include "gpu/ipc/common/gpu_memory_buffer_impl_dxgi.h"
+#include "gpu/ipc/common/dxgi_helpers.h"
+#include "media/base/win/mf_helpers.h"
 #include "media/capture/video/video_capture_buffer_handle.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -20,9 +21,9 @@ namespace {
 base::win::ScopedHandle CreateNV12Texture(ID3D11Device* d3d11_device,
                                           const gfx::Size& size) {
   const DXGI_FORMAT dxgi_format = DXGI_FORMAT_NV12;
-  D3D11_TEXTURE2D_DESC desc;
-      desc.Width = size.width();
-      desc.Height = size.height();
+  D3D11_TEXTURE2D_DESC desc{};
+      desc.Width = static_cast<UINT>(size.width());
+      desc.Height = static_cast<UINT>(size.height());
       desc.MipLevels = 1;
       desc.ArraySize = 1;
       desc.Format = dxgi_format;
@@ -31,13 +32,19 @@ base::win::ScopedHandle CreateNV12Texture(ID3D11Device* d3d11_device,
       desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
       desc.CPUAccessFlags = 0;
       desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
-                   D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+                       D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
   Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture;
 
   HRESULT hr = d3d11_device->CreateTexture2D(&desc, nullptr, &d3d11_texture);
   if (FAILED(hr)) {
     DLOG(ERROR) << "Failed to create D3D11 texture: "
+                << logging::SystemErrorCodeToString(hr);
+    return base::win::ScopedHandle();
+  }
+  hr = SetDebugName(d3d11_texture.Get(), "Camera_MemoryBufferTracker");
+  if (FAILED(hr)) {
+    DLOG(ERROR) << "Failed to label D3D11 texture: "
                 << logging::SystemErrorCodeToString(hr);
     return base::win::ScopedHandle();
   }
@@ -89,11 +96,14 @@ bool GpuMemoryBufferTracker::CreateBufferInternal() {
   buffer_ = gpu::GpuMemoryBufferImplDXGI::CreateFromHandle(
       std::move(buffer_handle), buffer_size_,
       gfx::BufferFormat::YUV_420_BIPLANAR, gfx::BufferUsage::GPU_READ,
-      gpu::GpuMemoryBufferImpl::DestructionCallback());
+      gpu::GpuMemoryBufferImpl::DestructionCallback(), nullptr, nullptr);
   if (!buffer_) {
     NOTREACHED() << "Failed to create GPU memory buffer";
     return false;
   }
+
+  region_ = base::UnsafeSharedMemoryRegion::Create(GetMemorySizeInBytes());
+
   return true;
 }
 
@@ -127,8 +137,19 @@ GpuMemoryBufferTracker::GetMemoryMappedAccess() {
 
 base::UnsafeSharedMemoryRegion
 GpuMemoryBufferTracker::DuplicateAsUnsafeRegion() {
-  NOTREACHED() << "Unsupported operation";
-  return base::UnsafeSharedMemoryRegion();
+  if (!buffer_) {
+    return base::UnsafeSharedMemoryRegion();
+  }
+
+  CHECK(region_.IsValid());
+
+  if (!gpu::CopyDXGIBufferToShMem(buffer_->GetHandle(), region_.Duplicate(),
+                                  d3d_device_.Get(), &staging_texture_)) {
+    DLOG(ERROR) << "Couldn't copy DXGI buffer to shmem";
+    return base::UnsafeSharedMemoryRegion();
+  }
+
+  return region_.Duplicate();
 }
 
 mojo::ScopedSharedBufferHandle GpuMemoryBufferTracker::DuplicateAsMojoBuffer() {
@@ -140,7 +161,9 @@ gfx::GpuMemoryBufferHandle GpuMemoryBufferTracker::GetGpuMemoryBufferHandle() {
   if (!EnsureD3DDevice()) {
     return gfx::GpuMemoryBufferHandle();
   }
-  return buffer_->CloneHandle();
+  auto handle = buffer_->CloneHandle();
+  handle.region = region_.Duplicate();
+  return handle;
 }
 
 uint32_t GpuMemoryBufferTracker::GetMemorySizeInBytes() {

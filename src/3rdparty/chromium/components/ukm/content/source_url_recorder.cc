@@ -13,7 +13,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_receiver_set.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "services/metrics/public/cpp/delegating_ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
@@ -141,7 +140,7 @@ void SourceUrlRecorderWebContentsObserver::DidStartNavigation(
   // non-main frame navs. Additionally, at least for the time being, we don't
   // track metrics for same-document navigations (e.g. changes in URL fragment,
   // or URL changes due to history.pushState) in UKM.
-  if (!navigation_handle->IsInMainFrame() ||
+  if (!navigation_handle->IsInPrimaryMainFrame() ||
       navigation_handle->IsSameDocument()) {
     return;
   }
@@ -158,7 +157,7 @@ void SourceUrlRecorderWebContentsObserver::DidStartNavigation(
 void SourceUrlRecorderWebContentsObserver::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
   auto it = pending_navigations_.find(navigation_handle->GetNavigationId());
-  if (!navigation_handle->IsInMainFrame()) {
+  if (!navigation_handle->IsInPrimaryMainFrame()) {
     DCHECK(it == pending_navigations_.end());
     return;
   }
@@ -293,7 +292,7 @@ ukm::SourceId SourceUrlRecorderWebContentsObserver::
 void SourceUrlRecorderWebContentsObserver::MaybeRecordUrl(
     content::NavigationHandle* navigation_handle,
     const GURL& initial_url) {
-  DCHECK(navigation_handle->IsInMainFrame());
+  DCHECK(navigation_handle->IsInPrimaryMainFrame());
 
   // TODO(crbug/1078355): If ShouldRecordURLs is false, we should still create a
   // UKM source, but not add any URLs to it.
@@ -316,6 +315,22 @@ void SourceUrlRecorderWebContentsObserver::MaybeRecordUrl(
 
   navigation_data.is_same_document_navigation =
       navigation_handle->IsSameDocument();
+
+  navigation_data.same_origin_status =
+      UkmSource::NavigationData::SameOriginStatus::UNSET;
+  // Only set the same origin flag for committed non-error,
+  // non-same-document navigations.
+  if (navigation_handle->HasCommitted() && !navigation_handle->IsErrorPage() &&
+      !navigation_handle->IsSameDocument()) {
+    navigation_data.same_origin_status =
+        navigation_handle->IsSameOrigin()
+            ? UkmSource::NavigationData::SameOriginStatus::SAME_ORIGIN
+            : UkmSource::NavigationData::SameOriginStatus::CROSS_ORIGIN;
+  }
+  navigation_data.is_renderer_initiated =
+      navigation_handle->IsRendererInitiated();
+  navigation_data.is_error_page = navigation_handle->IsErrorPage();
+
   navigation_data.previous_source_id =
       last_committed_full_navigation_source_id_;
 

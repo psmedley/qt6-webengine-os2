@@ -9,12 +9,15 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
+#include "base/location.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "pdf/pdf_features.h"
 #include "pdf/pdfium/pdfium_engine.h"
-#include "pdf/ppapi_migration/input_event_conversions.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/pdfium/public/fpdf_annot.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -25,7 +28,7 @@ namespace {
 int g_last_timer_id = 0;
 
 std::string WideStringToString(FPDF_WIDESTRING wide_string) {
-  return base::UTF16ToUTF8(reinterpret_cast<const base::char16*>(wide_string));
+  return base::UTF16ToUTF8(reinterpret_cast<const char16_t*>(wide_string));
 }
 
 }  // namespace
@@ -152,10 +155,9 @@ void PDFiumFormFiller::Form_OutputSelectedRect(FPDF_FORMFILLINFO* param,
                                                double bottom) {
   PDFiumEngine* engine = GetEngine(param);
   int page_index = engine->GetVisiblePageIndex(page);
-  if (page_index == -1) {
-    NOTREACHED();
+  if (page_index == -1)
     return;
-  }
+
   gfx::Rect rect = engine->pages_[page_index]->PageToScreen(
       engine->GetVisibleRect().origin(), engine->current_zoom_, left, top,
       right, bottom, engine->layout_.options().default_page_orientation());
@@ -228,12 +230,11 @@ FPDF_PAGE PDFiumFormFiller::Form_GetCurrentPage(FPDF_FORMFILLINFO* param,
   int index = engine->last_focused_page_;
   if (index == -1) {
     index = engine->GetMostVisiblePage();
-    if (index == -1) {
-      NOTREACHED();
+    if (index == -1)
       return nullptr;
-    }
   }
 
+  DCHECK_NE(index, -1);
   return engine->pages_[index]->GetPage();
 }
 
@@ -329,11 +330,12 @@ void PDFiumFormFiller::Form_DoURIActionWithKeyboardModifier(
     FPDF_BYTESTRING uri,
     int modifiers) {
   PDFiumEngine* engine = GetEngine(param);
-  bool middle_button = !!(modifiers & kInputEventModifierMiddleButtonDown);
-  bool alt_key = !!(modifiers & kInputEventModifierAltKey);
-  bool ctrl_key = !!(modifiers & kInputEventModifierControlKey);
-  bool meta_key = !!(modifiers & kInputEventModifierMetaKey);
-  bool shift_key = !!(modifiers & kInputEventModifierShiftKey);
+  bool middle_button =
+      !!(modifiers & blink::WebInputEvent::Modifiers::kMiddleButtonDown);
+  bool alt_key = !!(modifiers & blink::WebInputEvent::Modifiers::kAltKey);
+  bool ctrl_key = !!(modifiers & blink::WebInputEvent::Modifiers::kControlKey);
+  bool meta_key = !!(modifiers & blink::WebInputEvent::Modifiers::kMetaKey);
+  bool shift_key = !!(modifiers & blink::WebInputEvent::Modifiers::kShiftKey);
 
   WindowOpenDisposition disposition = ui::DispositionFromClick(
       middle_button, alt_key, ctrl_key, meta_key, shift_key);
@@ -422,18 +424,18 @@ void PDFiumFormFiller::Form_GetPageViewRect(FPDF_FORMFILLINFO* param,
   float screen_top_in_page_coords =
       page_height * (0 - page_view_rect.y()) / page_view_rect.height();
   // The bottom-most y position that is visible on the screen is the bottom of
-  // the plugin area, which is y = engine->plugin_size_.height().
+  // the plugin area, which is y = engine->plugin_size().height().
   float screen_bottom_in_page_coords =
-      page_height * (engine->plugin_size_.height() - page_view_rect.y()) /
+      page_height * (engine->plugin_size().height() - page_view_rect.y()) /
       page_view_rect.height();
   // The left-most x position that is visible on the screen is the left of the
   // plugin area, which is x = 0.
   float screen_left_in_page_coords =
       page_width * (0 - page_view_rect.x()) / page_view_rect.width();
   // The right-most x position that is visible on the screen is the right of the
-  // plugin area, which is x = engine->plugin_size_.width().
+  // plugin area, which is x = engine->plugin_size().width().
   float screen_right_in_page_coords =
-      page_width * (engine->plugin_size_.width() - page_view_rect.x()) /
+      page_width * (engine->plugin_size().width() - page_view_rect.x()) /
       page_view_rect.width();
 
   // Return the edge of the screen or of the page, since we're restricted to
@@ -610,8 +612,8 @@ int PDFiumFormFiller::Form_Response(IPDF_JSPLATFORM* param,
 
   PDFiumEngine* engine = GetEngine(param);
   std::string rv = engine->client_->Prompt(question_str, default_str);
-  base::string16 rv_16 = base::UTF8ToUTF16(rv);
-  int rv_bytes = rv_16.size() * sizeof(base::char16);
+  std::u16string rv_16 = base::UTF8ToUTF16(rv);
+  int rv_bytes = rv_16.size() * sizeof(char16_t);
   if (response) {
     int bytes_to_copy = rv_bytes < length ? rv_bytes : length;
     memcpy(response, rv_16.c_str(), bytes_to_copy);
@@ -640,7 +642,7 @@ void PDFiumFormFiller::Form_Mail(IPDF_JSPLATFORM* param,
                                  FPDF_WIDESTRING cc,
                                  FPDF_WIDESTRING bcc,
                                  FPDF_WIDESTRING message) {
-  // Note: |mail_data| and |length| are ignored. We don't handle attachments;
+  // Note: `mail_data` and `length` are ignored. We don't handle attachments;
   // there is no way with mailto.
   std::string to_str = WideStringToString(to);
   std::string cc_str = WideStringToString(cc);

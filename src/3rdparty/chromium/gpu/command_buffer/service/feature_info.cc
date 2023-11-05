@@ -6,20 +6,22 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/containers/contains.h"
+#include "base/cxx17_backports.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
-#include "gpu/command_buffer/service/texture_definition.h"
+#include "gpu/command_buffer/service/native_image_buffer.h"
 #include "gpu/config/gpu_switches.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_fence.h"
@@ -224,7 +226,9 @@ void FeatureInfo::InitializeBasicState(const base::CommandLine* command_line) {
   const auto useANGLE = command_line->GetSwitchValueASCII(switches::kUseANGLE);
 
   feature_flags_.is_swiftshader_for_webgl =
-      (useGL == gl::kGLImplementationSwiftShaderForWebGLName);
+      (useGL == gl::kGLImplementationSwiftShaderForWebGLName) ||
+      ((useGL == gl::kGLImplementationANGLEName) &&
+       (useANGLE == gl::kANGLEImplementationSwiftShaderForWebGLName));
 
   // The shader translator is needed to translate from WebGL-conformant GLES SL
   // to normal GLES SL, enforce WebGL conformance, translate from GLES SL 1.0 to
@@ -274,6 +278,11 @@ void FeatureInfo::InitializeForTesting(ContextType context_type) {
 }
 
 bool IsGL_REDSupportedOnFBOs() {
+#if defined(OS_MAC)
+  // The glTexImage2D call below can hang on Mac so skip this since it's only
+  // really needed to workaround a Mesa issue. See https://crbug.com/1158744.
+  return true;
+#else
   DCHECK(glGetError() == GL_NO_ERROR);
   // Skia uses GL_RED with frame buffers, unfortunately, Mesa claims to support
   // GL_EXT_texture_rg, but it doesn't support it on frame buffers.  To fix
@@ -305,6 +314,7 @@ bool IsGL_REDSupportedOnFBOs() {
   DCHECK(glGetError() == GL_NO_ERROR);
 
   return result;
+#endif  // defined(OS_MAC)
 }
 
 void FeatureInfo::EnableCHROMIUMTextureStorageImage() {
@@ -475,8 +485,8 @@ void FeatureInfo::InitializeFeatures() {
   const char* renderer_str =
       reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 
-  gl_version_info_.reset(
-      new gl::GLVersionInfo(version_str, renderer_str, extensions));
+  gl_version_info_ = std::make_unique<gl::GLVersionInfo>(
+      version_str, renderer_str, extensions);
 
   bool enable_es3 = IsWebGL2OrES3OrHigherContext();
 
@@ -493,7 +503,6 @@ void FeatureInfo::InitializeFeatures() {
   // changed on another decoder that does expose them.
   ScopedPixelUnpackBufferOverride scoped_pbo_override(has_pixel_buffers, 0);
 
-  AddExtensionString("GL_ANGLE_translated_shader_source");
   AddExtensionString("GL_CHROMIUM_async_pixel_transfers");
   AddExtensionString("GL_CHROMIUM_bind_uniform_location");
   AddExtensionString("GL_CHROMIUM_color_space_metadata");
@@ -524,6 +533,16 @@ void FeatureInfo::InitializeFeatures() {
 
   if (gfx::HasExtension(extensions, "GL_ANGLE_translated_shader_source")) {
     feature_flags_.angle_translated_shader_source = true;
+  }
+
+  // The validating command decoder always supports
+  // ANGLE_translated_shader_source regardless of the underlying context. But
+  // passthrough relies on the underlying ANGLE context which can't always
+  // support it (e.g. on Vulkan shaders are translated directly to binary
+  // SPIR-V).
+  if (!is_passthrough_cmd_decoder_ ||
+      feature_flags_.angle_translated_shader_source) {
+    AddExtensionString("GL_ANGLE_translated_shader_source");
   }
 
   // Check if we should allow GL_EXT_texture_compression_dxt1 and
@@ -1563,10 +1582,6 @@ void FeatureInfo::InitializeFeatures() {
     validators_.src_blend_factor.AddValue(GL_ONE_MINUS_SRC1_ALPHA_EXT);
     validators_.dst_blend_factor.AddValue(GL_ONE_MINUS_SRC1_ALPHA_EXT);
     validators_.g_l_state.AddValue(GL_MAX_DUAL_SOURCE_DRAW_BUFFERS_EXT);
-  }
-
-  if (workarounds_.avoid_egl_image_target_texture_reuse) {
-    TextureDefinition::AvoidEGLTargetTextureReuse();
   }
 
   if (gl_version_info_->IsLowerThanGL(4, 3)) {

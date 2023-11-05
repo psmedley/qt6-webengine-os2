@@ -5,17 +5,18 @@
 #include "components/download/public/common/download_file_impl.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/download/internal/common/parallel_download_utils.h"
@@ -159,9 +160,6 @@ DownloadFileImpl::DownloadFileImpl(
       potential_file_length_(kUnknownContentLength),
       bytes_seen_(0),
       num_active_streams_(0),
-      record_stream_bandwidth_(false),
-      bytes_seen_with_parallel_streams_(0),
-      bytes_seen_without_parallel_streams_(0),
       is_paused_(false),
       download_id_(download_id),
       main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
@@ -188,11 +186,10 @@ DownloadFileImpl::~DownloadFileImpl() {
 void DownloadFileImpl::Initialize(
     InitializeCallback initialize_callback,
     CancelRequestCallback cancel_request_callback,
-    const DownloadItem::ReceivedSlices& received_slices,
-    bool is_parallelizable) {
+    const DownloadItem::ReceivedSlices& received_slices) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  update_timer_.reset(new base::RepeatingTimer());
+  update_timer_ = std::make_unique<base::RepeatingTimer>();
   int64_t bytes_so_far = 0;
   cancel_request_callback_ = cancel_request_callback;
   received_slices_ = received_slices;
@@ -226,8 +223,6 @@ void DownloadFileImpl::Initialize(
     return;
   }
   download_start_ = base::TimeTicks::Now();
-  last_update_time_ = download_start_;
-  record_stream_bandwidth_ = is_parallelizable;
 
   // Primarily to make reset to zero in restart visible to owner.
   SendUpdate();
@@ -544,9 +539,12 @@ bool DownloadFileImpl::InProgress() const {
 void DownloadFileImpl::Pause() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   is_paused_ = true;
-  record_stream_bandwidth_ = false;
   for (auto& stream : source_streams_)
     stream.second->ClearDataReadyCallback();
+
+  // Stop sending updates since meaningless after paused.
+  if (update_timer_ && update_timer_->IsRunning())
+    update_timer_->Stop();
 }
 
 void DownloadFileImpl::Resume() {
@@ -705,12 +703,6 @@ void DownloadFileImpl::NotifyObserver(SourceStream* source_stream,
 
 void DownloadFileImpl::OnDownloadCompleted() {
   RecordFileBandwidth(bytes_seen_, base::TimeTicks::Now() - download_start_);
-  if (record_stream_bandwidth_) {
-    RecordParallelizableDownloadStats(
-        bytes_seen_with_parallel_streams_, download_time_with_parallel_streams_,
-        bytes_seen_without_parallel_streams_,
-        download_time_without_parallel_streams_, IsSparseFile());
-  }
   weak_factory_.InvalidateWeakPtrs();
   std::unique_ptr<crypto::SecureHash> hash_state = file_.Finish();
   update_timer_.reset();
@@ -754,16 +746,6 @@ void DownloadFileImpl::WillWriteToDisk(size_t data_len) {
                          this, &DownloadFileImpl::SendUpdate);
   }
   rate_estimator_.Increment(data_len);
-  base::TimeTicks now = base::TimeTicks::Now();
-  base::TimeDelta time_elapsed = (now - last_update_time_);
-  last_update_time_ = now;
-  if (num_active_streams_ > 1) {
-    download_time_with_parallel_streams_ += time_elapsed;
-    bytes_seen_with_parallel_streams_ += data_len;
-  } else {
-    download_time_without_parallel_streams_ += time_elapsed;
-    bytes_seen_without_parallel_streams_ += data_len;
-  }
 }
 
 void DownloadFileImpl::AddNewSlice(int64_t offset, int64_t length) {

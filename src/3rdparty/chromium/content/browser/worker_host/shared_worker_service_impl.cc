@@ -12,6 +12,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
@@ -41,6 +42,7 @@
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/loader/fetch_client_settings_object.mojom.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom.h"
 #include "third_party/blink/public/mojom/worker/shared_worker_client.mojom.h"
@@ -89,11 +91,11 @@ void SharedWorkerServiceImpl::EnumerateSharedWorkers(Observer* observer) {
 bool SharedWorkerServiceImpl::TerminateWorker(
     const GURL& url,
     const std::string& name,
-    const url::Origin& constructor_origin) {
+    const blink::StorageKey& storage_key) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   SharedWorkerHost* worker_host =
-      FindMatchingSharedWorkerHost(url, name, constructor_origin);
+      FindMatchingSharedWorkerHost(url, name, storage_key);
   if (worker_host) {
     DestroyHost(worker_host);
     return true;
@@ -112,7 +114,7 @@ void SharedWorkerServiceImpl::SetURLLoaderFactoryForTesting(
 }
 
 void SharedWorkerServiceImpl::ConnectToWorker(
-    GlobalFrameRoutingId client_render_frame_host_id,
+    GlobalRenderFrameHostId client_render_frame_host_id,
     blink::mojom::SharedWorkerInfoPtr info,
     mojo::PendingRemote<blink::mojom::SharedWorkerClient> client,
     blink::mojom::SharedWorkerCreationContextType creation_context_type,
@@ -132,12 +134,12 @@ void SharedWorkerServiceImpl::ConnectToWorker(
 
   // Enforce same-origin policy.
   // data: URLs are not considered a different origin.
-  url::Origin constructor_origin = render_frame_host->GetLastCommittedOrigin();
+  const blink::StorageKey& storage_key = render_frame_host->storage_key();
   bool is_cross_origin = !info->url.SchemeIs(url::kDataScheme) &&
-                         url::Origin::Create(info->url) != constructor_origin;
+                         url::Origin::Create(info->url) != storage_key.origin();
   if (is_cross_origin &&
       !GetContentClient()->browser()->DoesSchemeAllowCrossOriginSharedWorker(
-          constructor_origin.scheme())) {
+          storage_key.origin().scheme())) {
     ScriptLoadFailed(std::move(client), /*error_message=*/"");
     return;
   }
@@ -147,7 +149,7 @@ void SharedWorkerServiceImpl::ConnectToWorker(
           info->url,
           render_frame_host->ComputeSiteForCookies().RepresentativeUrl(),
           main_frame->GetLastCommittedOrigin(), info->options->name,
-          constructor_origin,
+          storage_key,
           WebContentsImpl::FromRenderFrameHostID(client_render_frame_host_id)
               ->GetBrowserContext(),
           client_render_frame_host_id.child_id,
@@ -156,8 +158,8 @@ void SharedWorkerServiceImpl::ConnectToWorker(
     return;
   }
 
-  SharedWorkerHost* host = FindMatchingSharedWorkerHost(
-      info->url, info->options->name, constructor_origin);
+  SharedWorkerHost* host =
+      FindMatchingSharedWorkerHost(info->url, info->options->name, storage_key);
   if (host) {
     // Non-secure contexts cannot connect to secure workers, and secure contexts
     // cannot connect to non-secure workers:
@@ -193,10 +195,10 @@ void SharedWorkerServiceImpl::ConnectToWorker(
     return;
   }
   auto partition_domain = site_instance->GetPartitionDomain(storage_partition_);
-  SharedWorkerInstance instance(
-      info->url, info->options->type, info->options->credentials,
-      info->options->name, constructor_origin, info->creation_address_space,
-      creation_context_type);
+  SharedWorkerInstance instance(info->url, info->options->type,
+                                info->options->credentials, info->options->name,
+                                storage_key, info->creation_address_space,
+                                creation_context_type);
   host = CreateWorker(
       *render_frame_host, instance, std::move(info->content_security_policies),
       std::move(info->outside_fetch_client_settings_object), partition_domain,
@@ -232,7 +234,7 @@ void SharedWorkerServiceImpl::NotifyBeforeWorkerDestroyed(
 
 void SharedWorkerServiceImpl::NotifyClientAdded(
     const blink::SharedWorkerToken& token,
-    GlobalFrameRoutingId client_render_frame_host_id) {
+    GlobalRenderFrameHostId client_render_frame_host_id) {
   auto insertion_result = shared_worker_client_counts_.insert(
       {{token, client_render_frame_host_id}, 0});
 
@@ -249,7 +251,7 @@ void SharedWorkerServiceImpl::NotifyClientAdded(
 
 void SharedWorkerServiceImpl::NotifyClientRemoved(
     const blink::SharedWorkerToken& token,
-    GlobalFrameRoutingId client_render_frame_host_id) {
+    GlobalRenderFrameHostId client_render_frame_host_id) {
   auto it = shared_worker_client_counts_.find(
       std::make_pair(token, client_render_frame_host_id));
   DCHECK(it != shared_worker_client_counts_.end());
@@ -294,7 +296,7 @@ SharedWorkerHost* SharedWorkerServiceImpl::CreateWorker(
   // script is loaded so that the process allocation can take COEP header into
   // account.
   scoped_refptr<SiteInstanceImpl> site_instance = creator.GetSiteInstance();
-  if (site_instance->IsCoopCoepCrossOriginIsolated()) {
+  if (site_instance->IsCrossOriginIsolated()) {
     if (is_guest) {
       site_instance = SiteInstanceImpl::CreateForGuest(
           partition->browser_context(),
@@ -302,8 +304,9 @@ SharedWorkerHost* SharedWorkerServiceImpl::CreateWorker(
     } else {
       site_instance = SiteInstanceImpl::CreateForUrlInfo(
           partition->browser_context(),
-          UrlInfo(instance.url(), /*origin_requests_isolation=*/false),
-          CoopCoepCrossOriginIsolatedInfo::CreateNonIsolated());
+          UrlInfo(UrlInfoInit(instance.url())
+                      .WithStoragePartitionConfig(partition->GetConfig())),
+          WebExposedIsolationInfo::CreateNonIsolated());
     }
   }
 
@@ -323,7 +326,8 @@ SharedWorkerHost* SharedWorkerServiceImpl::CreateWorker(
   auto insertion_result =
       worker_hosts_.insert(std::make_unique<SharedWorkerHost>(
           this, instance, std::move(site_instance),
-          std::move(content_security_policies)));
+          std::move(content_security_policies),
+          creator.cross_origin_embedder_policy()));
   DCHECK(insertion_result.second);
   SharedWorkerHost* host = insertion_result.first->get();
 
@@ -363,7 +367,7 @@ SharedWorkerHost* SharedWorkerServiceImpl::CreateWorker(
   WorkerScriptFetchInitiator::Start(
       worker_process_host->GetID(), host->token(), host->instance().url(),
       &creator, net::SiteForCookies::FromOrigin(worker_origin),
-      host->instance().constructor_origin(),
+      host->instance().storage_key().origin(),
       net::IsolationInfo::Create(
           net::IsolationInfo::RequestType::kOther, worker_origin, worker_origin,
           net::SiteForCookies::FromOrigin(worker_origin)),
@@ -445,9 +449,9 @@ void SharedWorkerServiceImpl::StartWorker(
 SharedWorkerHost* SharedWorkerServiceImpl::FindMatchingSharedWorkerHost(
     const GURL& url,
     const std::string& name,
-    const url::Origin& constructor_origin) {
+    const blink::StorageKey& storage_key) {
   for (auto& host : worker_hosts_) {
-    if (host->instance().Matches(url, name, constructor_origin))
+    if (host->instance().Matches(url, name, storage_key))
       return host.get();
   }
   return nullptr;

@@ -119,7 +119,8 @@ class StartupTracingController::BackgroundTracer {
         output_file_(output_file),
         output_format_(output_format),
         on_tracing_finished_(std::move(on_tracing_finished)) {
-    tracing_session_ = perfetto::Tracing::NewTrace();
+    tracing_session_ =
+        perfetto::Tracing::NewTrace(perfetto::BackendType::kCustomBackend);
 
     if (write_mode_ == WriteMode::kStreaming) {
 #if !defined(OS_WIN)
@@ -138,7 +139,7 @@ class StartupTracingController::BackgroundTracer {
     EmergencyTraceFinalisationCoordinator::GetInstance().OnTracingStarted(
         task_runner_,
         base::BindOnce(&BackgroundTracer::Stop, weak_ptr_factory_.GetWeakPtr(),
-                       base::nullopt));
+                       absl::nullopt));
 
     tracing_session_->SetOnStopCallback([&]() { OnTracingStopped(); });
     tracing_session_->StartBlocking();
@@ -146,7 +147,7 @@ class StartupTracingController::BackgroundTracer {
     TRACE_EVENT("startup", "StartupTracingController::Start");
   }
 
-  void Stop(base::Optional<base::FilePath> output_file) {
+  void Stop(absl::optional<base::FilePath> output_file) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
     // Tracing might have already been finished due to a timeout.
@@ -508,6 +509,15 @@ void StartupTracingController::WaitUntilStopped() {
   base::RunLoop run_loop;
   Stop(run_loop.QuitClosure());
   run_loop.Run();
+}
+
+void StartupTracingController::ShutdownAndWaitForStopIfNeeded() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (should_continue_on_shutdown_)
+    return;
+
+  WaitUntilStopped();
 }
 
 // static

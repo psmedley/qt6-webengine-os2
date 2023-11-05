@@ -118,8 +118,22 @@ class StringView {
 #endif
   }
 
+  bool StartsWith(const StringView& other) {
+    if (other.size() == 0)
+      return true;
+    if (size() == 0)
+      return false;
+    if (other.size() > size())
+      return false;
+    for (uint32_t i = 0; i < other.size(); ++i) {
+      if (at(i) != other.at(i))
+        return false;
+    }
+    return true;
+  }
+
   std::string ToStdString() const {
-    return data_ == nullptr ? "" : std::string(data_, size_);
+    return size_ == 0 ? "" : std::string(data_, size_);
   }
 
   uint64_t Hash() const {
@@ -168,15 +182,11 @@ inline bool operator<=(const StringView& x, const StringView& y) {
 }  // namespace base
 }  // namespace perfetto
 
-namespace std {
-
 template <>
-struct hash<::perfetto::base::StringView> {
+struct std::hash<::perfetto::base::StringView> {
   size_t operator()(const ::perfetto::base::StringView& sv) const {
     return static_cast<size_t>(sv.Hash());
   }
 };
-
-}  // namespace std
 
 #endif  // INCLUDE_PERFETTO_EXT_BASE_STRING_VIEW_H_

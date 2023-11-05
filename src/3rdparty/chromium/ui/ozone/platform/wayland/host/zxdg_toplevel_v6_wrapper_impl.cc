@@ -8,6 +8,7 @@
 #include <xdg-shell-client-protocol.h>
 #include <xdg-shell-unstable-v6-client-protocol.h>
 
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/hit_test.h"
 #include "ui/ozone/platform/wayland/common/wayland_util.h"
@@ -34,9 +35,9 @@ bool ZXDGToplevelV6WrapperImpl::Initialize() {
     return false;
   }
 
-  static const zxdg_toplevel_v6_listener zxdg_toplevel_v6_listener = {
-      &ZXDGToplevelV6WrapperImpl::ConfigureTopLevel,
-      &ZXDGToplevelV6WrapperImpl::CloseTopLevel,
+  static constexpr zxdg_toplevel_v6_listener zxdg_toplevel_v6_listener = {
+      &ConfigureTopLevel,
+      &CloseTopLevel,
   };
 
   if (!zxdg_surface_v6_wrapper_)
@@ -95,7 +96,7 @@ void ZXDGToplevelV6WrapperImpl::SurfaceResize(WaylandConnection* connection,
                           wl::IdentifyDirection(*connection, hittest));
 }
 
-void ZXDGToplevelV6WrapperImpl::SetTitle(const base::string16& title) {
+void ZXDGToplevelV6WrapperImpl::SetTitle(const std::u16string& title) {
   DCHECK(zxdg_toplevel_v6_);
   zxdg_toplevel_v6_set_title(zxdg_toplevel_v6_.get(),
                              base::UTF16ToUTF8(title).c_str());
@@ -125,6 +126,11 @@ void ZXDGToplevelV6WrapperImpl::SetDecoration(DecorationMode decoration) {}
 void ZXDGToplevelV6WrapperImpl::AckConfigure(uint32_t serial) {
   DCHECK(zxdg_surface_v6_wrapper_);
   zxdg_surface_v6_wrapper_->AckConfigure(serial);
+}
+
+bool ZXDGToplevelV6WrapperImpl::IsConfigured() {
+  DCHECK(zxdg_surface_v6_wrapper_);
+  return zxdg_surface_v6_wrapper_->IsConfigured();
 }
 
 // static

@@ -9,8 +9,7 @@
 ] interface GPUQueue {
     void submit(sequence<GPUCommandBuffer> buffers);
 
-    GPUFence createFence(optional GPUFenceDescriptor descriptor = {});
-    void signal(GPUFence fence, GPUFenceValue signalValue);
+    [CallWith=ScriptState] Promise<void> onSubmittedWorkDone();
 
     // TODO(crbug.com/1088107): Merge these overloads into one with
     // [AllowShared] BufferSource (or whatever the upstream spec has), which
@@ -39,9 +38,15 @@
         GPUImageDataLayout dataLayout,
         GPUExtent3D size);
 
+    // Deprecated
     [RaisesException] void copyImageBitmapToTexture(
         GPUImageCopyImageBitmap source,
         GPUImageCopyTexture destination,
+        GPUExtent3D copySize);
+
+    [RaisesException] void copyExternalImageToTexture(
+        GPUImageCopyExternalImage source,
+        GPUImageCopyTextureTagged destination,
         GPUExtent3D copySize);
 };
 GPUQueue includes GPUObjectBase;

@@ -21,14 +21,13 @@ class CORE_EXPORT ActiveSuggestionMarker final : public StyleableMarker {
                          ui::mojom::ImeTextSpanUnderlineStyle underline_style,
                          Color text_color,
                          Color background_color);
+  ActiveSuggestionMarker(const ActiveSuggestionMarker&) = delete;
+  ActiveSuggestionMarker& operator=(const ActiveSuggestionMarker&) = delete;
 
   // DocumentMarker implementations
   MarkerType GetType() const final;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ActiveSuggestionMarker);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_ACTIVE_SUGGESTION_MARKER_H_

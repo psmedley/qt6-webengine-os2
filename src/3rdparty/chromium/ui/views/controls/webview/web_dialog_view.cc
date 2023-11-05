@@ -16,11 +16,11 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/layout/fill_layout.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/widget/native_widget_private.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
@@ -54,18 +54,6 @@ void ObservableWebView::DidFinishLoad(
     delegate_->OnWebContentsFinishedLoad();
 }
 
-void ObservableWebView::ResourceLoadComplete(
-    content::RenderFrameHost* render_frame_host,
-    const content::GlobalRequestID& request_id,
-    const blink::mojom::ResourceLoadInfo& resource_load_info) {
-  // Only listen to the main frame.
-  if (render_frame_host->GetParent())
-    return;
-
-  if (delegate_)
-    delegate_->OnMainFrameResourceLoadComplete(resource_load_info);
-}
-
 void ObservableWebView::ResetDelegate() {
   delegate_ = nullptr;
 }
@@ -96,6 +84,8 @@ WebDialogView::WebDialogView(content::BrowserContext* context,
   if (delegate_) {
     for (const auto& accelerator : delegate_->GetAccelerators())
       AddAccelerator(accelerator);
+    RegisterWindowWillCloseCallback(base::BindOnce(
+        &WebDialogView::NotifyDialogWillClose, base::Unretained(this)));
   }
 }
 
@@ -107,6 +97,15 @@ content::WebContents* WebDialogView::web_contents() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // WebDialogView, views::View implementation:
+
+void WebDialogView::AddedToWidget() {
+  gfx::RoundedCornersF corner_radii(
+      delegate_ && delegate_->GetWebDialogFrameKind() ==
+                       WebDialogDelegate::FrameKind::kDialog
+          ? GetCornerRadius()
+          : 0);
+  web_view_->holder()->SetCornerRadii(corner_radii);
+}
 
 gfx::Size WebDialogView::CalculatePreferredSize() const {
   gfx::Size out;
@@ -179,23 +178,19 @@ views::CloseRequestResult WebDialogView::OnWindowCloseRequested() {
 ////////////////////////////////////////////////////////////////////////////////
 // WebDialogView, views::WidgetDelegate implementation:
 
-bool WebDialogView::OnCloseRequested(Widget::ClosedReason close_reason) {
-  return !delegate_ || delegate_->DeprecatedOnDialogCloseRequested();
-}
-
 bool WebDialogView::CanMaximize() const {
   if (delegate_)
     return delegate_->CanMaximizeDialog();
   return false;
 }
 
-base::string16 WebDialogView::GetWindowTitle() const {
+std::u16string WebDialogView::GetWindowTitle() const {
   if (delegate_)
     return delegate_->GetDialogTitle();
-  return base::string16();
+  return std::u16string();
 }
 
-base::string16 WebDialogView::GetAccessibleWindowTitle() const {
+std::u16string WebDialogView::GetAccessibleWindowTitle() const {
   if (delegate_)
     return delegate_->GetAccessibleDialogTitle();
   return GetWindowTitle();
@@ -264,7 +259,7 @@ ui::ModalType WebDialogView::GetDialogModalType() const {
   return ui::MODAL_TYPE_NONE;
 }
 
-base::string16 WebDialogView::GetDialogTitle() const {
+std::u16string WebDialogView::GetDialogTitle() const {
   return GetWindowTitle();
 }
 
@@ -475,6 +470,11 @@ void WebDialogView::InitDialog() {
 
   if (!disable_url_load_for_test_)
     web_view_->LoadInitialURL(GetDialogContentURL());
+}
+
+void WebDialogView::NotifyDialogWillClose() {
+  if (delegate_)
+    delegate_->OnDialogWillClose();
 }
 
 BEGIN_METADATA(WebDialogView, ClientView)

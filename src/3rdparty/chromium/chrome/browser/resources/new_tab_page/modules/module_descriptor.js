@@ -2,35 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {BrowserProxy} from '../browser_proxy.js';
-import {mojoTimeDelta} from '../utils.js';
+import {recordDuration, recordLoadDuration} from '../metrics_utils.js';
+import {WindowProxy} from '../window_proxy.js';
 
 /**
  * @fileoverview Provides the module descriptor. Each module must create a
  * module descriptor and register it at the NTP.
  */
 
-/**
- * @typedef {function(): !Promise<?HTMLElement>}
- */
+/** @typedef {function(): !Promise<?HTMLElement>} */
 let InitializeModuleCallback;
+
+/** @typedef {{element: !HTMLElement, descriptor: !ModuleDescriptor}} */
+export let Module;
 
 export class ModuleDescriptor {
   /**
    * @param {string} id
    * @param {string} name
-   * @param {number} heightPx
    * @param {!InitializeModuleCallback} initializeCallback
    */
-  constructor(id, name, heightPx, initializeCallback) {
+  constructor(id, name, initializeCallback) {
     /** @private {string} */
     this.id_ = id;
     /** @private {string} */
     this.name_ = name;
-    /** @private {number} */
-    this.heightPx_ = heightPx;
-    /** @private {HTMLElement} */
-    this.element_ = null;
     /** @private {!InitializeModuleCallback} */
     this.initializeCallback_ = initializeCallback;
   }
@@ -45,40 +41,30 @@ export class ModuleDescriptor {
     return this.name_;
   }
 
-  /** @return {number} */
-  get heightPx() {
-    return this.heightPx_;
-  }
-
-  /** @return {?HTMLElement} */
-  get element() {
-    return this.element_;
-  }
-
   /**
-   * Initializes the module. On success, |this.element| will be populated after
-   * the returned promise has resolved.
+   * Initializes the module and returns the module element on success.
    * @param {number} timeout Timeout in milliseconds after which initialization
    *     aborts.
-   * @return {!Promise}
+   * @return {!Promise<?HTMLElement>}
    */
   async initialize(timeout) {
-    const loadStartTime = BrowserProxy.getInstance().now();
-    this.element_ = await Promise.race([
+    const loadStartTime = WindowProxy.getInstance().now();
+    const element = await Promise.race([
       this.initializeCallback_(), new Promise(resolve => {
-        BrowserProxy.getInstance().setTimeout(() => {
+        WindowProxy.getInstance().setTimeout(() => {
           resolve(null);
         }, timeout);
       })
     ]);
-    if (!this.element_) {
-      return;
+    if (!element) {
+      return null;
     }
-    if (this.element_.height !== undefined) {
-      this.heightPx_ = this.element_.height;
-    }
-    const loadEndTime = BrowserProxy.getInstance().now();
-    BrowserProxy.getInstance().handler.onModuleLoaded(
-        this.id_, mojoTimeDelta(loadEndTime - loadStartTime), loadEndTime);
+    const loadEndTime = WindowProxy.getInstance().now();
+    const duration = loadEndTime - loadStartTime;
+    recordLoadDuration('NewTabPage.Modules.Loaded', loadEndTime);
+    recordLoadDuration(`NewTabPage.Modules.Loaded.${this.id_}`, loadEndTime);
+    recordDuration('NewTabPage.Modules.LoadDuration', duration);
+    recordDuration(`NewTabPage.Modules.LoadDuration.${this.id_}`, duration);
+    return element;
   }
 }

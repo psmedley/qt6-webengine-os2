@@ -7,10 +7,8 @@
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "components/services/storage/dom_storage/legacy_dom_storage_database.h"
 #include "components/services/storage/dom_storage/local_storage_impl.h"
 #include "components/services/storage/public/cpp/constants.h"
 #include "components/services/storage/public/cpp/filesystem/filesystem_proxy.h"
@@ -33,6 +31,7 @@
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace content {
 
@@ -50,17 +49,16 @@ class DOMStorageBrowserTest : public ContentBrowserTest {
     std::string result =
         the_browser->web_contents()->GetLastCommittedURL().ref();
     if (result != "pass") {
-      std::string js_result;
-      ASSERT_TRUE(ExecuteScriptAndExtractString(
-          the_browser, "window.domAutomationController.send(getLog())",
-          &js_result));
+      std::string js_result = EvalJs(the_browser, "getLog()").ExtractString();
       FAIL() << "Failed: " << js_result;
     }
   }
 
   StoragePartition* partition() {
-    return BrowserContext::GetDefaultStoragePartition(
-        shell()->web_contents()->GetBrowserContext());
+    return shell()
+        ->web_contents()
+        ->GetBrowserContext()
+        ->GetDefaultStoragePartition();
   }
 
   std::vector<StorageUsageInfo> GetUsage() {
@@ -75,9 +73,9 @@ class DOMStorageBrowserTest : public ContentBrowserTest {
     return usage;
   }
 
-  void DeletePhysicalOrigin(url::Origin origin) {
+  void DeletePhysicalStorageKey(blink::StorageKey storage_key) {
     base::RunLoop loop;
-    partition()->GetDOMStorageContext()->DeleteLocalStorage(origin,
+    partition()->GetDOMStorageContext()->DeleteLocalStorage(storage_key,
                                                             loop.QuitClosure());
     loop.Run();
   }
@@ -127,12 +125,12 @@ IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, MAYBE_DataPersists) {
   SimpleTest(GetTestUrl("dom_storage", "verify_data.html"), kNotIncognito);
 }
 
-IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, DeletePhysicalOrigin) {
+IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, DeletePhysicalStorageKey) {
   EXPECT_EQ(0U, GetUsage().size());
   SimpleTest(GetTestUrl("dom_storage", "store_data.html"), kNotIncognito);
   std::vector<StorageUsageInfo> usage = GetUsage();
   ASSERT_EQ(1U, usage.size());
-  DeletePhysicalOrigin(usage[0].origin);
+  DeletePhysicalStorageKey(blink::StorageKey(usage[0].origin));
   EXPECT_EQ(0U, GetUsage().size());
 }
 
@@ -157,71 +155,12 @@ IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, FileUrlWithHost) {
               testing::EndsWith("/title1.html"));
 
   // Verify that window.localStorage works fine.
-  std::string result;
   std::string script = R"(
       localStorage["foo"] = "bar";
-      domAutomationController.send(localStorage["foo"]);
+      localStorage["foo"];
   )";
-  EXPECT_TRUE(ExecuteScriptAndExtractString(shell(), script, &result));
-  EXPECT_EQ("bar", result);
+  EXPECT_EQ("bar", EvalJs(shell(), script));
 }
 #endif
-
-IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, DataMigrates) {
-  const base::FilePath legacy_local_storage_path =
-      partition()->GetPath().Append(storage::kLocalStoragePath);
-  base::FilePath db_path = legacy_local_storage_path.Append(
-      storage::LocalStorageImpl::LegacyDatabaseFileNameFromOrigin(
-          url::Origin::Create(GetTestUrl("dom_storage", "store_data.html"))));
-  {
-    base::ScopedAllowBlockingForTesting allow_blocking;
-    EXPECT_TRUE(base::CreateDirectory(legacy_local_storage_path));
-    storage::LegacyDomStorageDatabase db(
-        db_path,
-        std::make_unique<storage::FilesystemProxy>(
-            storage::FilesystemProxy::UNRESTRICTED, legacy_local_storage_path));
-    storage::LegacyDomStorageValuesMap data;
-    data[base::ASCIIToUTF16("foo")] =
-        base::NullableString16(base::ASCIIToUTF16("bar"), false);
-    db.CommitChanges(false, data);
-    EXPECT_TRUE(base::PathExists(db_path));
-  }
-  std::vector<StorageUsageInfo> usage = GetUsage();
-  ASSERT_EQ(1U, usage.size());
-  EXPECT_GT(usage[0].total_size_bytes, 6u);
-
-  SimpleTest(GetTestUrl("dom_storage", "verify_data.html"), kNotIncognito);
-  usage = GetUsage();
-  ASSERT_EQ(1U, usage.size());
-  EXPECT_GT(usage[0].total_size_bytes, 6u);
-  {
-    base::ScopedAllowBlockingForTesting allow_blocking;
-    EXPECT_FALSE(base::PathExists(db_path));
-  }
-}
-
-// Verify that when kCloneSessionStorageForNoOpener is enabled, sessionStorage
-// is cloned for popups even when |noopener| is specified.
-// TODO(crbug.com/1151381): Remove in Chrome 92.
-class DOMStorageCloningBrowserTest : public ContentBrowserTest {
- public:
-  DOMStorageCloningBrowserTest() {
-    feature_list_.InitAndEnableFeature(
-        blink::features::kCloneSessionStorageForNoOpener);
-  }
-
-  void PopupTest(const GURL& test_url, const std::string& expected) {
-    NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 2);
-    std::string result = shell()->web_contents()->GetLastCommittedURL().ref();
-    EXPECT_EQ(result, expected);
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(DOMStorageCloningBrowserTest, NoOpenerTest) {
-  PopupTest(GetTestUrl("dom_storage", "noopener_cloning.html"), "firstTab");
-}
 
 }  // namespace content

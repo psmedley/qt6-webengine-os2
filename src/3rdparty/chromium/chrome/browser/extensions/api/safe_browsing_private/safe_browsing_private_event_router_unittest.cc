@@ -5,11 +5,11 @@
 
 #include <memory>
 #include <set>
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/json/json_reader.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
@@ -34,8 +34,8 @@
 #include "components/enterprise/common/proto/connectors.pb.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/realtime_reporting_job_configuration.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/core/features.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/test_event_router.h"
@@ -43,9 +43,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
+#include "chrome/browser/ash/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
-#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chromeos/tpm/stub_install_attributes.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/scoped_user_manager.h"
@@ -109,17 +110,25 @@ std::unique_ptr<KeyedService> BuildSafeBrowsingPrivateEventRouter(
       new SafeBrowsingPrivateEventRouter(context));
 }
 
-class SafeBrowsingPrivateEventRouterTest : public testing::Test {
+class SafeBrowsingPrivateEventRouterTestBase : public testing::Test {
  public:
-  SafeBrowsingPrivateEventRouterTest()
+  SafeBrowsingPrivateEventRouterTestBase()
       : profile_manager_(TestingBrowserProcess::GetGlobal()) {
     EXPECT_TRUE(profile_manager_.SetUp());
+  }
+
+  SafeBrowsingPrivateEventRouterTestBase(
+      const SafeBrowsingPrivateEventRouterTestBase&) = delete;
+  SafeBrowsingPrivateEventRouterTestBase& operator=(
+      const SafeBrowsingPrivateEventRouterTestBase&) = delete;
+
+  ~SafeBrowsingPrivateEventRouterTestBase() override = default;
+
+  void SetUp() override {
     profile_ = profile_manager_.CreateTestingProfile("test-user");
     policy::SetDMTokenForTesting(
         policy::DMToken::CreateValidTokenForTesting("fake-token"));
   }
-
-  ~SafeBrowsingPrivateEventRouterTest() override = default;
 
   void TriggerOnPolicySpecifiedPasswordReuseDetectedEvent() {
     SafeBrowsingPrivateEventRouterFactory::GetForProfile(profile_)
@@ -137,7 +146,7 @@ class SafeBrowsingPrivateEventRouterTest : public testing::Test {
     SafeBrowsingPrivateEventRouterFactory::GetForProfile(profile_)
         ->OnDangerousDownloadOpened(
             GURL("https://evil.com/malware.exe"), "/path/to/malware.exe",
-            "sha256_of_malware_exe", "exe",
+            "sha256_of_malware_exe", "exe", "scan_id",
             download::DownloadDangerType::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE,
             1234);
   }
@@ -158,15 +167,15 @@ class SafeBrowsingPrivateEventRouterTest : public testing::Test {
     SafeBrowsingPrivateEventRouterFactory::GetForProfile(profile_)
         ->OnDangerousDownloadEvent(
             GURL("https://maybevil.com/warning.exe"), "/path/to/warning.exe",
-            "sha256_of_warning_exe", "POTENTIALLY_UNWANTED", "exe", 567,
-            safe_browsing::EventResult::WARNED);
+            "sha256_of_warning_exe", "POTENTIALLY_UNWANTED", "exe", "scan_id",
+            567, safe_browsing::EventResult::WARNED);
   }
 
   void TriggerOnDangerousDownloadEventBypass() {
     SafeBrowsingPrivateEventRouterFactory::GetForProfile(profile_)
         ->OnDangerousDownloadWarningBypassed(
             GURL("https://bypassevil.com/bypass.exe"), "/path/to/bypass.exe",
-            "sha256_of_bypass_exe", "BYPASSED_WARNING", "exe", 890);
+            "sha256_of_bypass_exe", "BYPASSED_WARNING", "exe", "scan_id", 890);
   }
 
   void TriggerOnSensitiveDataEvent(safe_browsing::EventResult event_result) {
@@ -183,7 +192,7 @@ class SafeBrowsingPrivateEventRouterTest : public testing::Test {
         ->OnAnalysisConnectorResult(
             GURL("https://evil.com/sensitive_data.txt"), "sensitive_data.txt",
             "sha256_of_data", "text/plain",
-            SafeBrowsingPrivateEventRouter::kTriggerFileUpload,
+            SafeBrowsingPrivateEventRouter::kTriggerFileUpload, "scan_id",
             safe_browsing::DeepScanAccessPoint::UPLOAD, result, 12345,
             event_result);
   }
@@ -241,15 +250,27 @@ class SafeBrowsingPrivateEventRouterTest : public testing::Test {
   content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<policy::MockCloudPolicyClient> client_;
   TestingProfileManager profile_manager_;
-  TestingProfile* profile_;
+  TestingProfile* profile_ = nullptr;
   extensions::TestEventRouter* event_router_ = nullptr;
 
  private:
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
   policy::FakeBrowserDMTokenStorage dm_token_storage_;
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+};
 
-  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingPrivateEventRouterTest);
+class SafeBrowsingPrivateEventRouterTest
+    : public SafeBrowsingPrivateEventRouterTestBase {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+ public:
+  SafeBrowsingPrivateEventRouterTest() {
+    test_user_manager_ = std::make_unique<ash::ScopedTestUserManager>();
+  }
+
+ protected:
+  ash::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
+  std::unique_ptr<ash::ScopedTestUserManager> test_user_manager_;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
 TEST_F(SafeBrowsingPrivateEventRouterTest, TestOnReuseDetected) {
@@ -369,6 +390,8 @@ TEST_F(SafeBrowsingPrivateEventRouterTest, TestOnDangerousDownloadOpened) {
   EXPECT_EQ(
       safe_browsing::EventResultToString(safe_browsing::EventResult::BYPASSED),
       *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyEventResult));
+  EXPECT_EQ("scan_id",
+            *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyScanId));
 }
 
 TEST_F(SafeBrowsingPrivateEventRouterTest,
@@ -491,6 +514,8 @@ TEST_F(SafeBrowsingPrivateEventRouterTest, TestOnDangerousDownloadWarning) {
   EXPECT_EQ(
       safe_browsing::EventResultToString(safe_browsing::EventResult::WARNED),
       *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyEventResult));
+  EXPECT_EQ("scan_id",
+            *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyScanId));
 }
 
 TEST_F(SafeBrowsingPrivateEventRouterTest,
@@ -533,6 +558,8 @@ TEST_F(SafeBrowsingPrivateEventRouterTest,
   EXPECT_EQ(
       safe_browsing::EventResultToString(safe_browsing::EventResult::BYPASSED),
       *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyEventResult));
+  EXPECT_EQ("scan_id",
+            *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyScanId));
 }
 
 TEST_F(SafeBrowsingPrivateEventRouterTest, PolicyControlOnToOffIsDynamic) {
@@ -741,6 +768,8 @@ TEST_F(SafeBrowsingPrivateEventRouterTest, TestOnSensitiveDataEvent_Allowed) {
   EXPECT_EQ("fake rule",
             *triggered_rule.FindStringKey(
                 SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleName));
+  EXPECT_EQ("scan_id",
+            *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyScanId));
 }
 
 TEST_F(SafeBrowsingPrivateEventRouterTest, TestOnSensitiveDataEvent_Blocked) {
@@ -791,6 +820,8 @@ TEST_F(SafeBrowsingPrivateEventRouterTest, TestOnSensitiveDataEvent_Blocked) {
   EXPECT_EQ("fake rule",
             *triggered_rule.FindStringKey(
                 SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleName));
+  EXPECT_EQ("scan_id",
+            *event->FindStringKey(SafeBrowsingPrivateEventRouter::kKeyScanId));
 }
 
 TEST_F(SafeBrowsingPrivateEventRouterTest, TestOnUnscannedFileEvent_Allowed) {
@@ -902,8 +933,8 @@ TEST_F(SafeBrowsingPrivateEventRouterTest, TestProfileUsername) {
   EXPECT_EQ("", captured_args.FindKey("userName")->GetString());
 
   // With an unconsented primary account, we should set the username.
-  identity_test_environment.MakeUnconsentedPrimaryAccountAvailable(
-      "profile@example.com");
+  identity_test_environment.MakePrimaryAccountAvailable(
+      "profile@example.com", signin::ConsentLevel::kSignin);
   TriggerOnSecurityInterstitialShownEvent();
   base::RunLoop().RunUntilIdle();
   captured_args = event_observer.PassEventArgs().GetList()[0].Clone();
@@ -911,7 +942,8 @@ TEST_F(SafeBrowsingPrivateEventRouterTest, TestProfileUsername) {
             captured_args.FindKey("userName")->GetString());
 
   // With a consented primary account, we should set the username.
-  identity_test_environment.MakePrimaryAccountAvailable("profile@example.com");
+  identity_test_environment.MakePrimaryAccountAvailable(
+      "profile@example.com", signin::ConsentLevel::kSync);
   TriggerOnSecurityInterstitialShownEvent();
   base::RunLoop().RunUntilIdle();
   captured_args = event_observer.PassEventArgs().GetList()[0].Clone();
@@ -1063,7 +1095,7 @@ TEST_F(SafeBrowsingPrivateEventRouterTest, TestUnscannedFileEnabled) {
 //   bool: whether the policy is enabled.
 //   bool: whether the server has authorized this browser instance.
 class SafeBrowsingIsRealtimeReportingEnabledTest
-    : public SafeBrowsingPrivateEventRouterTest,
+    : public SafeBrowsingPrivateEventRouterTestBase,
       public testing::WithParamInterface<
           testing::tuple<bool, bool, bool, bool>> {
  public:
@@ -1091,14 +1123,17 @@ class SafeBrowsingIsRealtimeReportingEnabledTest
           switches::kEnableChromeBrowserCloudManagement);
     }
 #endif
+  }
 
+  void SetUp() override {
+    SafeBrowsingPrivateEventRouterTestBase::SetUp();
     if (is_policy_enabled_) {
       profile_->GetPrefs()->Set(enterprise_connectors::kOnSecurityEventPref,
                                 *base::JSONReader::Read(kConnectorsPrefValue));
     }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-    auto user_manager = std::make_unique<chromeos::FakeChromeUserManager>();
+    auto user_manager = std::make_unique<ash::FakeChromeUserManager>();
     const AccountId account_id(
         AccountId::FromUserEmail(profile_->GetProfileUserName()));
     const user_manager::User* user = user_manager->AddUserWithAffiliation(
@@ -1193,7 +1228,7 @@ INSTANTIATE_TEST_SUITE_P(All,
 //   std::string: the name of the event to enable.
 //   int: How many triggers use this event name.
 class SafeBrowsingIsRealtimeReportingEventDisabledTest
-    : public SafeBrowsingPrivateEventRouterTest,
+    : public SafeBrowsingPrivateEventRouterTestBase,
       public testing::WithParamInterface<testing::tuple<std::string, int>> {
  public:
   SafeBrowsingIsRealtimeReportingEventDisabledTest()

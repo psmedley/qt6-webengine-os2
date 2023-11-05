@@ -3747,7 +3747,7 @@ void WebGLImageConversion::ImageExtractor::ExtractImage(
                                !skia_image->colorSpace()->isSRGB();
   if ((!skia_image || ignore_color_space || need_unpremultiplied ||
        need_color_conversion) &&
-      image_->Data()) {
+      image_->HasData()) {
     // Attempt to get raw unpremultiplied image data.
     const bool data_complete = true;
     std::unique_ptr<ImageDecoder> decoder(ImageDecoder::Create(
@@ -3996,8 +3996,10 @@ bool WebGLImageConversion::ExtractTextureData(
   data.resize(width * height * bytes_per_pixel);
 
   unsigned image_size_in_bytes, skip_size_in_bytes;
-  ComputeImageSizeInBytes(format, type, width, height, 1, unpack_params,
-                          &image_size_in_bytes, nullptr, &skip_size_in_bytes);
+  if (ComputeImageSizeInBytes(format, type, width, height, 1, unpack_params,
+                              &image_size_in_bytes, nullptr,
+                              &skip_size_in_bytes) != GL_NO_ERROR)
+    return false;
   const uint8_t* src_data = static_cast<const uint8_t*>(pixels);
   if (skip_size_in_bytes) {
     src_data += skip_size_in_bytes;

@@ -23,7 +23,7 @@ import {AggregationController} from './aggregation_controller';
 
 export class CounterAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
-    await engine.query(`drop view if exists ${this.kind};`);
+    await engine.queryV2(`drop view if exists ${this.kind};`);
 
     const ids = [];
     for (const trackId of area.tracks) {
@@ -31,7 +31,7 @@ export class CounterAggregationController extends AggregationController {
       // Track will be undefined for track groups.
       if (track !== undefined && track.kind === COUNTER_TRACK_KIND) {
         const config = track.config as Config;
-        // TODO(taylori): Also aggregate annotation (with namespace) counters.
+        // TODO(hjd): Also aggregate annotation (with namespace) counters.
         if (config.namespace === undefined) {
           ids.push(config.trackId);
         }
@@ -67,7 +67,7 @@ export class CounterAggregationController extends AggregationController {
     on track_id = counter_track.id
     group by track_id`;
 
-    await engine.query(query);
+    await engine.queryV2(query);
     return true;
   }
 

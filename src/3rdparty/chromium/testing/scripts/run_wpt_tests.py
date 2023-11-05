@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 # Copyright 2018 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -44,7 +44,6 @@ CHROME_BINARY_MAC = os.path.join(
     OUT_DIR, "Chromium.app", "Contents", "MacOS", "Chromium")
 CHROMEDRIVER_BINARY = os.path.join(OUT_DIR, "chromedriver")
 
-DEFAULT_ISOLATED_SCRIPT_TEST_OUTPUT = os.path.join(OUT_DIR, "results.json")
 MOJO_JS_PATH = os.path.join(OUT_DIR, "gen")
 
 TESTS_ROOT_DIR = os.path.join(WEB_TESTS_DIR, "external", "wpt")
@@ -73,8 +72,6 @@ class WPTTestAdapter(wpt_common.BaseWptScriptAdapter):
             WPT_BINARY,
             "--venv=" + SRC_DIR,
             "--skip-venv-setup",
-            # TODO(crbug.com/1166741): We should be running WPT under Python 3.
-            "--py2",
             "run",
             "chrome"
         ] + self.options.test_list + [
@@ -84,6 +81,7 @@ class WPTTestAdapter(wpt_common.BaseWptScriptAdapter):
             "--binary-arg=--enable-experimental-web-platform-features",
             "--binary-arg=--enable-blink-test-features",
             "--binary-arg=--enable-blink-features=MojoJS,MojoJSTest",
+            "--binary-arg=--disable-field-trial-config",
             "--webdriver-binary=" + chromedriver,
             "--webdriver-arg=--enable-chrome-logs",
             "--headless",
@@ -93,11 +91,9 @@ class WPTTestAdapter(wpt_common.BaseWptScriptAdapter):
             # Exclude webdriver tests for now. They are run separately on the CI
             "--exclude=webdriver",
             "--exclude=infrastructure/webdriver",
-            # Setting --no-fail-on-unexpected makes the return code of wpt 0
-            # even if there were test failures. The CQ doesn't like this since
-            # it uses the exit code to determine which shards to retry (ie:
-            # those that had non-zero exit codes).
-            #"--no-fail-on-unexpected",
+            # By default, WPT will treat unexpected passes as errors, so we
+            # disable that to be consistent with Chromium CI.
+            "--no-fail-on-unexpected-pass",
             "--metadata", WPT_METADATA_OUTPUT_DIR.format(self.options.target),
             # By specifying metadata above, WPT will try to find manifest in the
             # metadata directory. So here we point it back to the correct path
@@ -131,15 +127,6 @@ class WPTTestAdapter(wpt_common.BaseWptScriptAdapter):
         parser.add_argument("test_list", nargs="*",
                             help="List of tests or test directories to run")
 
-    def maybe_set_default_isolated_script_test_output(self):
-        if self.options.isolated_script_test_output:
-            return
-        default_value = DEFAULT_ISOLATED_SCRIPT_TEST_OUTPUT.format(
-            self.options.target)
-        print("--isolated-script-test-output not set, defaulting to %s" %
-              default_value)
-        self.options.isolated_script_test_output = default_value
-
     def do_pre_test_run_tasks(self):
         # Copy the checked-in manifest to the temporary working directory
         shutil.copy(WPT_CHECKED_IN_MANIFEST,
@@ -156,7 +143,6 @@ class WPTTestAdapter(wpt_common.BaseWptScriptAdapter):
             "--checked-in-metadata-dir",
             WPT_CHECKED_IN_METADATA_DIR,
             "--no-process-baselines",
-            "--no-handle-annotations"
         ])
 
 

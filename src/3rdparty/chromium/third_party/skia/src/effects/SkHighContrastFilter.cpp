@@ -12,6 +12,7 @@
 #include "src/core/SkRuntimeEffectPriv.h"
 
 sk_sp<SkColorFilter> SkHighContrastFilter::Make(const SkHighContrastConfig& config) {
+#ifdef SK_ENABLE_SKSL
     if (!config.isValid()) {
         return nullptr;
     }
@@ -19,14 +20,13 @@ sk_sp<SkColorFilter> SkHighContrastFilter::Make(const SkHighContrastConfig& conf
     struct Uniforms { float grayscale, invertStyle, contrast; };
 
     SkString code{R"(
-        uniform shader input;
         uniform half grayscale, invertStyle, contrast;
     )"};
     code += kRGB_to_HSL_sksl;
     code += kHSL_to_RGB_sksl;
     code += R"(
-        half4 main() {
-            half4 c = sample(input);  // linear unpremul RGBA in dst gamut.
+        half4 main(half4 inColor) {
+            half4 c = inColor;  // linear unpremul RGBA in dst gamut.
             if (grayscale == 1) {
                 c.rgb = dot(half3(0.2126, 0.7152, 0.0722), c.rgb).rrr;
             }
@@ -42,11 +42,9 @@ sk_sp<SkColorFilter> SkHighContrastFilter::Make(const SkHighContrastConfig& conf
         }
     )";
 
-    auto [effect, err] = SkRuntimeEffect::Make(code);
-    if (!err.isEmpty()) {
-        SkDebugf("%s\n%s\n", code.c_str(), err.c_str());
-    }
-    SkASSERT(effect && err.isEmpty());
+    sk_sp<SkRuntimeEffect> effect = SkMakeCachedRuntimeEffect(SkRuntimeEffect::MakeForColorFilter,
+                                                              std::move(code));
+    SkASSERT(effect);
 
     // A contrast setting of exactly +1 would divide by zero (1+c)/(1-c), so pull in to +1-ε.
     // I'm not exactly sure why we've historically pinned -1 up to -1+ε, maybe just symmetry?
@@ -60,11 +58,14 @@ sk_sp<SkColorFilter> SkHighContrastFilter::Make(const SkHighContrastConfig& conf
         (1+c)/(1-c),
     };
 
-    sk_sp<SkColorFilter>    input = nullptr;
     skcms_TransferFunction linear = SkNamedTransferFn::kLinear;
     SkAlphaType          unpremul = kUnpremul_SkAlphaType;
     return SkColorFilters::WithWorkingFormat(
-            effect->makeColorFilter(SkData::MakeWithCopy(&uniforms,sizeof(uniforms)), &input, 1),
+            effect->makeColorFilter(SkData::MakeWithCopy(&uniforms,sizeof(uniforms))),
             &linear, nullptr/*use dst gamut*/, &unpremul);
+#else
+    // TODO(skia:12197)
+    return nullptr;
+#endif
 }
 

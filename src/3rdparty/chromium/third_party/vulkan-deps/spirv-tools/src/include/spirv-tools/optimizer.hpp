@@ -514,6 +514,13 @@ Optimizer::PassToken CreateDeadInsertElimPass();
 // eliminated with standard dead code elimination.
 Optimizer::PassToken CreateAggressiveDCEPass();
 
+// Creates a remove-unused-interface-variables pass.
+// Removes variables referenced on the |OpEntryPoint| instruction that are not
+// referenced in the entry point function or any function in its call tree. Note
+// that this could cause the shader interface to no longer match other shader
+// stages.
+Optimizer::PassToken CreateRemoveUnusedInterfaceVariablesPass();
+
 // Creates an empty pass.
 // This is deprecated and will be removed.
 // TODO(jaebaek): remove this pass after handling glslang's broken unit tests.
@@ -837,6 +844,15 @@ Optimizer::PassToken CreateWrapOpKillPass();
 // VK_AMD_shader_trinary_minmax with equivalent code using core instructions and
 // capabilities.
 Optimizer::PassToken CreateAmdExtToKhrPass();
+
+// Replaces the internal version of GLSLstd450 InterpolateAt* extended
+// instructions with the externally valid version. The internal version allows
+// an OpLoad of the interpolant for the first argument. This pass removes the
+// OpLoad and replaces it with its pointer. glslang and possibly other
+// frontends will create the internal version for HLSL. This pass will be part
+// of HLSL legalization and should be called after interpolants have been
+// propagated into their final positions.
+Optimizer::PassToken CreateInterpolateFixupPass();
 
 }  // namespace spvtools
 

@@ -19,6 +19,7 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
+#include "media/base/video_aspect_ratio.h"
 #include "media/base/video_util.h"
 
 extern "C" {
@@ -151,10 +152,6 @@ Dav1dVideoDecoder::~Dav1dVideoDecoder() {
   CloseDecoder();
 }
 
-std::string Dav1dVideoDecoder::GetDisplayName() const {
-  return "Dav1dVideoDecoder";
-}
-
 VideoDecoderType Dav1dVideoDecoder::GetDecoderType() const {
   return VideoDecoderType::kDav1d;
 }
@@ -224,7 +221,7 @@ void Dav1dVideoDecoder::Initialize(const VideoDecoderConfig& config,
   // |n_frame_threads|=1 (https://crbug.com/957511) the minimum total number of
   // threads is 6 (two tile and two frame) regardless of core count. The maximum
   // is min(2 * base::SysInfo::NumberOfProcessors(), limits::kMaxVideoThreads).
-  if (low_delay)
+  if (low_delay || config.is_rtc())
     s.n_frame_threads = 1;
   else if (s.n_frame_threads * (s.n_tile_threads + 1) > max_threads)
     s.n_frame_threads = std::max(2, max_threads / (s.n_tile_threads + 1));
@@ -284,6 +281,10 @@ void Dav1dVideoDecoder::Reset(base::OnceClosure reset_cb) {
                                                      std::move(reset_cb));
   else
     std::move(reset_cb).Run();
+}
+
+bool Dav1dVideoDecoder::IsOptimizedForRTC() const {
+  return true;
 }
 
 void Dav1dVideoDecoder::Detach() {
@@ -412,7 +413,7 @@ scoped_refptr<VideoFrame> Dav1dVideoDecoder::BindImageToVideoFrame(
   const bool needs_fake_uv_planes = pic->p.layout == DAV1D_PIXEL_LAYOUT_I400;
   if (needs_fake_uv_planes) {
     // UV planes are half the size of the Y plane.
-    uv_plane_stride = base::bits::Align(pic->stride[0] / 2, 2);
+    uv_plane_stride = base::bits::AlignUp(pic->stride[0] / 2, 2);
     const auto uv_plane_height = (pic->p.h + 1) / 2;
     const size_t size_needed = uv_plane_stride * uv_plane_height;
 
@@ -441,7 +442,8 @@ scoped_refptr<VideoFrame> Dav1dVideoDecoder::BindImageToVideoFrame(
 
   auto frame = VideoFrame::WrapExternalYuvData(
       pixel_format, visible_size, gfx::Rect(visible_size),
-      config_.natural_size(), pic->stride[0], uv_plane_stride, uv_plane_stride,
+      config_.aspect_ratio().GetNaturalSize(gfx::Rect(visible_size)),
+      pic->stride[0], uv_plane_stride, uv_plane_stride,
       static_cast<uint8_t*>(pic->data[0]), u_plane, v_plane,
       base::TimeDelta::FromMicroseconds(pic->m.timestamp));
   if (!frame)

@@ -8,19 +8,26 @@
 #include <memory>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "components/keyed_service/core/simple_factory_key.h"
 #include "content/public/browser/browser_context.h"
+#include "fuchsia/engine/browser/web_engine_permission_delegate.h"
 
 class WebEngineNetLogObserver;
-class WebEnginePermissionDelegate;
 
-class WebEngineBrowserContext : public content::BrowserContext {
+class WebEngineBrowserContext final : public content::BrowserContext {
  public:
-  // |force_incognito|: If set, then this BrowserContext will run in incognito
-  // mode even if /data is available.
-  explicit WebEngineBrowserContext(bool force_incognito);
+  // Creates a browser context that persists cookies, LocalStorage, etc, in
+  // the specified |data_directory|.
+  static std::unique_ptr<WebEngineBrowserContext> CreatePersistent(
+      base::FilePath data_directory);
+
+  // Creates a browser context with no support for persistent data.
+  static std::unique_ptr<WebEngineBrowserContext> CreateIncognito();
+
   ~WebEngineBrowserContext() override;
+
+  WebEngineBrowserContext(const WebEngineBrowserContext&) = delete;
+  WebEngineBrowserContext& operator=(const WebEngineBrowserContext&) = delete;
 
   // BrowserContext implementation.
   std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
@@ -42,28 +49,21 @@ class WebEngineBrowserContext : public content::BrowserContext {
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
       override;
-  media::VideoDecodePerfHistory* GetVideoDecodePerfHistory() override;
-
-  // Returns a comma-separated list of language codes, in preference order.
-  // This is suitable for direct use setting the "sec-ch-lang" header, or
-  // passed to net::HttpUtil::GenerateAcceptLanguageHeader() to generate a
-  // legacy "accept-language" header value.
-  std::string GetPreferredLanguages() const;
+  std::unique_ptr<media::VideoDecodePerfHistory> CreateVideoDecodePerfHistory()
+      override;
 
  private:
   // Contains URLRequestContextGetter required for resource loading.
   class ResourceContext;
 
-  media::VideoDecodePerfHistory* GetInMemoryVideoDecodePerfHistory();
+  explicit WebEngineBrowserContext(base::FilePath data_dir_path);
 
-  base::FilePath data_dir_path_;
+  const base::FilePath data_dir_path_;
 
-  std::unique_ptr<WebEngineNetLogObserver> net_log_observer_;
-  std::unique_ptr<SimpleFactoryKey> simple_factory_key_;
+  const std::unique_ptr<WebEngineNetLogObserver> net_log_observer_;
+  SimpleFactoryKey simple_factory_key_;
+  WebEnginePermissionDelegate permission_delegate_;
   std::unique_ptr<ResourceContext> resource_context_;
-  std::unique_ptr<WebEnginePermissionDelegate> permission_delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebEngineBrowserContext);
 };
 
 #endif  // FUCHSIA_ENGINE_BROWSER_WEB_ENGINE_BROWSER_CONTEXT_H_

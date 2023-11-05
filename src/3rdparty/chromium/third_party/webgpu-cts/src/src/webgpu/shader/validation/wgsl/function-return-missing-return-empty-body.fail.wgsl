@@ -4,6 +4,6 @@
 fn func() -> i32 {
 }
 
-[[stage(vertex)]]
-fn main() -> void {
+[[stage(fragment)]]
+fn main() {
 }

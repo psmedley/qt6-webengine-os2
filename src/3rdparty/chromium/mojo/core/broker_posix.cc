@@ -29,8 +29,8 @@ Channel::MessagePtr WaitForBrokerMessage(
     size_t expected_num_handles,
     size_t expected_data_size,
     std::vector<PlatformHandle>* incoming_handles) {
-  Channel::MessagePtr message(new Channel::Message(
-      sizeof(BrokerMessageHeader) + expected_data_size, expected_num_handles));
+  Channel::MessagePtr message = Channel::Message::CreateMessage(
+      sizeof(BrokerMessageHeader) + expected_data_size, expected_num_handles);
   bool error = false;
 #if defined(OS_OS2)
   ssize_t read_result =

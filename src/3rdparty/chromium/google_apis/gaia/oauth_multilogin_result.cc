@@ -10,9 +10,9 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece_forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace {
 
@@ -96,10 +96,10 @@ void OAuthMultiloginResult::TryParseCookiesFromValue(base::Value* json_value) {
     const std::string* domain = cookie.FindStringKey("domain");
     const std::string* host = cookie.FindStringKey("host");
     const std::string* path = cookie.FindStringKey("path");
-    base::Optional<bool> is_secure = cookie.FindBoolKey("isSecure");
-    base::Optional<bool> is_http_only = cookie.FindBoolKey("isHttpOnly");
+    absl::optional<bool> is_secure = cookie.FindBoolKey("isSecure");
+    absl::optional<bool> is_http_only = cookie.FindBoolKey("isHttpOnly");
     const std::string* priority = cookie.FindStringKey("priority");
-    base::Optional<double> expiration_delta = cookie.FindDoubleKey("maxAge");
+    absl::optional<double> expiration_delta = cookie.FindDoubleKey("maxAge");
     const std::string* same_site = cookie.FindStringKey("sameSite");
 
     base::TimeDelta before_expiration =
@@ -128,8 +128,8 @@ void OAuthMultiloginResult::TryParseCookiesFromValue(base::Value* json_value) {
             /*last_access=*/base::Time::Now(), is_secure.value_or(true),
             is_http_only.value_or(true), samesite_mode,
             net::StringToCookiePriority(priority ? *priority : "medium"),
-            /*same_party=*/false, net::CookieSourceScheme::kUnset,
-            url::PORT_UNSPECIFIED);
+            /*same_party=*/false, /*partition_key=*/absl::nullopt,
+            net::CookieSourceScheme::kUnset, url::PORT_UNSPECIFIED);
     // If the unique_ptr is null, it means the cookie was not canonical.
     if (new_cookie) {
       cookies_.push_back(std::move(*new_cookie));
@@ -142,7 +142,7 @@ void OAuthMultiloginResult::TryParseCookiesFromValue(base::Value* json_value) {
 OAuthMultiloginResult::OAuthMultiloginResult(const std::string& raw_data) {
   base::StringPiece data = StripXSSICharacters(raw_data);
   status_ = OAuthMultiloginResponseStatus::kUnknownStatus;
-  base::Optional<base::Value> json_data = base::JSONReader::Read(data);
+  absl::optional<base::Value> json_data = base::JSONReader::Read(data);
   if (!json_data) {
     RecordMultiloginResponseStatus(status_);
     return;

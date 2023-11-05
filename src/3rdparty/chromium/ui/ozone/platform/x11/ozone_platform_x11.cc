@@ -5,13 +5,14 @@
 #include "ui/ozone/platform/x11/ozone_platform_x11.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
@@ -21,6 +22,7 @@
 #include "ui/base/dragdrop/os_exchange_data_provider_factory.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_factory_ozone.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
+#include "ui/base/linux/linux_ui_delegate.h"
 #include "ui/base/x/x11_cursor_factory.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/display/fake/fake_display_delegate.h"
@@ -30,13 +32,17 @@
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/linux/gpu_memory_buffer_support_x11.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/switches.h"
 #include "ui/ozone/common/stub_overlay_manager.h"
 #include "ui/ozone/platform/x11/gl_egl_utility_x11.h"
 #include "ui/ozone/platform/x11/x11_clipboard_ozone.h"
+#include "ui/ozone/platform/x11/x11_global_shortcut_listener_ozone.h"
+#include "ui/ozone/platform/x11/x11_keyboard_hook_ozone.h"
 #include "ui/ozone/platform/x11/x11_menu_utils.h"
 #include "ui/ozone/platform/x11/x11_screen_ozone.h"
 #include "ui/ozone/platform/x11/x11_surface_factory.h"
 #include "ui/ozone/platform/x11/x11_user_input_monitor.h"
+#include "ui/ozone/platform/x11/x11_utils.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
 #include "ui/ozone/public/input_controller.h"
 #include "ui/ozone/public/ozone_platform.h"
@@ -53,29 +59,23 @@
 #include "ui/ozone/platform/x11/x11_os_exchange_data_provider_ozone.h"
 #endif
 
-#if BUILDFLAG(USE_GTK)
-#include "ui/gtk/gtk_ui_delegate.h"        // nogncheck
-#include "ui/gtk/x/gtk_ui_delegate_x11.h"  // nogncheck
-#endif
-
-#if BUILDFLAG(USE_XKBCOMMON)
-#include "ui/events/ozone/layout/xkb/xkb_evdev_codes.h"
-#include "ui/events/ozone/layout/xkb/xkb_keyboard_layout_engine.h"
-#else
-#include "ui/events/ozone/layout/stub/stub_keyboard_layout_engine.h"
-#endif
-
 namespace ui {
 
 namespace {
+
+class LinuxUiDelegateX11 : public LinuxUiDelegate {
+ public:
+  ~LinuxUiDelegateX11() override = default;
+
+  // LinuxUiDelegate:
+  LinuxUiBackend GetBackend() const override { return LinuxUiBackend::kX11; }
+};
 
 // Singleton OzonePlatform implementation for X11 platform.
 class OzonePlatformX11 : public OzonePlatform,
                          public ui::OSExchangeDataProviderFactoryOzone {
  public:
-  OzonePlatformX11() {
-    SetInstance(this);
-  }
+  OzonePlatformX11() { SetInstance(this); }
 
   ~OzonePlatformX11() override = default;
 
@@ -107,7 +107,7 @@ class OzonePlatformX11 : public OzonePlatform,
       PlatformWindowInitProperties properties) override {
     auto window = std::make_unique<X11Window>(delegate);
     window->Initialize(std::move(properties));
-    window->SetTitle(base::ASCIIToUTF16("Ozone X11"));
+    window->SetTitle(u"Ozone X11");
     return std::move(window);
   }
 
@@ -117,9 +117,13 @@ class OzonePlatformX11 : public OzonePlatform,
   }
 
   std::unique_ptr<PlatformScreen> CreateScreen() override {
-    auto screen = std::make_unique<X11ScreenOzone>();
-    screen->Init();
-    return screen;
+    return std::make_unique<X11ScreenOzone>();
+  }
+
+  void InitScreen(PlatformScreen* screen) override {
+    // InitScreen is always called with the same screen that CreateScreen
+    // hands back, so it is safe to cast here.
+    static_cast<X11ScreenOzone*>(screen)->Init();
   }
 
   PlatformClipboard* GetPlatformClipboard() override {
@@ -152,6 +156,31 @@ class OzonePlatformX11 : public OzonePlatform,
     return menu_utils_.get();
   }
 
+  PlatformUtils* GetPlatformUtils() override { return x11_utils_.get(); }
+
+  PlatformGlobalShortcutListener* GetPlatformGlobalShortcutListener(
+      PlatformGlobalShortcutListenerDelegate* delegate) override {
+    if (!global_shortcut_listener_) {
+      global_shortcut_listener_ =
+          std::make_unique<X11GlobalShortcutListenerOzone>(delegate);
+    }
+    return global_shortcut_listener_.get();
+  }
+
+  std::unique_ptr<PlatformKeyboardHook> CreateKeyboardHook(
+      PlatformKeyboardHookTypes type,
+      base::RepeatingCallback<void(KeyEvent* event)> callback,
+      absl::optional<base::flat_set<DomCode>> dom_codes,
+      gfx::AcceleratedWidget accelerated_widget) override {
+    switch (type) {
+      case PlatformKeyboardHookTypes::kModifier:
+        return std::make_unique<X11KeyboardHookOzone>(
+            std::move(dom_codes), std::move(callback), accelerated_widget);
+      case PlatformKeyboardHookTypes::kMedia:
+        return nullptr;
+    }
+  }
+
   std::unique_ptr<OSExchangeDataProvider> CreateProvider() override {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     return std::make_unique<OSExchangeDataProviderNonBacked>();
@@ -165,7 +194,6 @@ class OzonePlatformX11 : public OzonePlatform,
     static bool initialised = false;
     if (!initialised) {
       properties->custom_frame_pref_default = ui::GetCustomFramePrefDefault();
-      properties->use_system_title_bar = true;
 
       // When the Ozone X11 backend is running, use a UI loop to grab Expose
       // events. See GLSurfaceGLX and https://crbug.com/326995.
@@ -196,6 +224,14 @@ class OzonePlatformX11 : public OzonePlatform,
   }
 
   void InitializeUI(const InitParams& params) override {
+    // If opening the connection failed there is nothing we can do. Crash here
+    // instead of crashing later. If you are crashing here, make sure there is
+    // an X server running and $DISPLAY is set.
+    // In case of non-Ozone/X11, the very same check happens during the
+    // BrowserMainLoop::InitializeToolkit call.
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kHeadless))
+      CHECK(x11::Connection::Get()->Ready()) << "Missing X server or $DISPLAY";
+
     InitializeCommon(params);
     CreatePlatformEventSource();
     overlay_manager_ = std::make_unique<StubOverlayManager>();
@@ -204,27 +240,19 @@ class OzonePlatformX11 : public OzonePlatform,
     cursor_factory_ = std::make_unique<X11CursorFactory>();
     gpu_platform_support_host_.reset(CreateStubGpuPlatformSupportHost());
 
-#if BUILDFLAG(USE_XKBCOMMON)
-    keyboard_layout_engine_ =
-        std::make_unique<XkbKeyboardLayoutEngine>(xkb_evdev_code_converter_);
-    // TODO(nickdiego): debugging..
+    // TODO(crbug.com/987939): Support XKB.
     keyboard_layout_engine_ = std::make_unique<StubKeyboardLayoutEngine>();
-#else
-    keyboard_layout_engine_ = std::make_unique<StubKeyboardLayoutEngine>();
-#endif
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(
         keyboard_layout_engine_.get());
 
     TouchFactory::SetTouchDeviceListFromCommandLine();
 
 #if BUILDFLAG(USE_GTK)
-    DCHECK(!GtkUiDelegate::instance());
-    gtk_ui_delegate_ =
-        std::make_unique<GtkUiDelegateX11>(x11::Connection::Get());
-    GtkUiDelegate::SetInstance(gtk_ui_delegate_.get());
+    linux_ui_delegate_ = std::make_unique<LinuxUiDelegateX11>();
 #endif
 
     menu_utils_ = std::make_unique<X11MenuUtils>();
+    x11_utils_ = std::make_unique<X11Utils>();
 
     base::UmaHistogramEnumeration("Linux.WindowManager", GetWindowManagerUMA());
   }
@@ -253,7 +281,7 @@ class OzonePlatformX11 : public OzonePlatform,
         std::make_unique<X11SurfaceFactory>(std::move(connection));
   }
 
-  void PostMainMessageLoopStart(
+  void PostCreateMainMessageLoop(
       base::OnceCallback<void()> shutdown_cb) override {
     // Installs the X11 error handlers for the UI process after the
     // main message loop has started. This will allow us to exit cleanly
@@ -273,11 +301,6 @@ class OzonePlatformX11 : public OzonePlatform,
     if (common_initialized_)
       return;
 
-    // If opening the connection failed there is nothing we can do. Crash here
-    // instead of crashing later. If you are crashing here, make sure there is
-    // an X server running and $DISPLAY is set.
-    CHECK(x11::Connection::Get()->Ready()) << "Missing X server or $DISPLAY";
-
     common_initialized_ = true;
   }
 
@@ -292,10 +315,6 @@ class OzonePlatformX11 : public OzonePlatform,
 
   bool common_initialized_ = false;
 
-#if BUILDFLAG(USE_XKBCOMMON)
-  XkbEvdevCodes xkb_evdev_code_converter_;
-#endif
-
   // Objects in the UI process.
   std::unique_ptr<KeyboardLayoutEngine> keyboard_layout_engine_;
   std::unique_ptr<OverlayManagerOzone> overlay_manager_;
@@ -304,6 +323,8 @@ class OzonePlatformX11 : public OzonePlatform,
   std::unique_ptr<CursorFactory> cursor_factory_;
   std::unique_ptr<GpuPlatformSupportHost> gpu_platform_support_host_;
   std::unique_ptr<X11MenuUtils> menu_utils_;
+  std::unique_ptr<X11Utils> x11_utils_;
+  std::unique_ptr<PlatformGlobalShortcutListener> global_shortcut_listener_;
 
   // Objects in the GPU process.
   std::unique_ptr<X11SurfaceFactory> surface_factory_ozone_;
@@ -313,7 +334,7 @@ class OzonePlatformX11 : public OzonePlatform,
   std::unique_ptr<X11EventSource> event_source_;
 
 #if BUILDFLAG(USE_GTK)
-  std::unique_ptr<GtkUiDelegate> gtk_ui_delegate_;
+  std::unique_ptr<LinuxUiDelegate> linux_ui_delegate_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(OzonePlatformX11);

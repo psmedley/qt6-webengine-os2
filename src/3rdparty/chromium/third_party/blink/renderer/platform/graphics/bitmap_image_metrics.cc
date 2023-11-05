@@ -8,6 +8,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "media/media_buildflags.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/color_space_gamut.h"
@@ -18,10 +19,8 @@
 
 namespace blink {
 
-namespace {
-
-BitmapImageMetrics::DecodedImageType StringToDecodedImageType(
-    const String& type) {
+BitmapImageMetrics::DecodedImageType
+BitmapImageMetrics::StringToDecodedImageType(const String& type) {
   if (type == "jpg")
     return BitmapImageMetrics::DecodedImageType::kJPEG;
   if (type == "png")
@@ -38,10 +37,12 @@ BitmapImageMetrics::DecodedImageType StringToDecodedImageType(
   if (type == "avif")
     return BitmapImageMetrics::DecodedImageType::kAVIF;
 #endif
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  if (type == "jxl")
+    return BitmapImageMetrics::DecodedImageType::kJXL;
+#endif
   return BitmapImageMetrics::DecodedImageType::kUnknown;
 }
-
-}  // namespace
 
 void BitmapImageMetrics::CountDecodedImageType(const String& type) {
   UMA_HISTOGRAM_ENUMERATION("Blink.DecodedImageType",
@@ -75,7 +76,7 @@ void BitmapImageMetrics::CountImageJpegDensity(int image_min_side,
     DEFINE_THREAD_SAFE_STATIC_LOCAL(
         CustomCountHistogram, density_histogram,
         ("Blink.DecodedImage.JpegDensity.KiBWeighted", 1, 1000, 100));
-    int image_size_kib = (image_size_bytes + 512) / 1024;
+    int image_size_kib = static_cast<int>((image_size_bytes + 512) / 1024);
     if (image_size_kib > 0) {
       density_histogram.CountMany(
           base::saturated_cast<base::Histogram::Sample>(density_centi_bpp),

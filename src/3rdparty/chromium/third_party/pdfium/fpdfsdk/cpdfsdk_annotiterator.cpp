@@ -12,7 +12,7 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "fpdfsdk/cpdfsdk_annot.h"
 #include "fpdfsdk/cpdfsdk_pageview.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/containers/contains.h"
 
 namespace {
 
@@ -28,23 +28,7 @@ bool CompareByTopDescending(const CPDFSDK_Annot* p1, const CPDFSDK_Annot* p2) {
   return GetAnnotRect(p1).top > GetAnnotRect(p2).top;
 }
 
-CPDFSDK_AnnotIterator::TabOrder GetTabOrder(CPDFSDK_PageView* pPageView) {
-  CPDF_Page* pPDFPage = pPageView->GetPDFPage();
-  ByteString sTabs = pPDFPage->GetDict()->GetStringFor("Tabs");
-  if (sTabs == "R")
-    return CPDFSDK_AnnotIterator::ROW;
-  if (sTabs == "C")
-    return CPDFSDK_AnnotIterator::COLUMN;
-  return CPDFSDK_AnnotIterator::STRUCTURE;
-}
-
 }  // namespace
-
-CPDFSDK_AnnotIterator::CPDFSDK_AnnotIterator(CPDFSDK_PageView* pPageView,
-                                             CPDF_Annot::Subtype nAnnotSubtype)
-    : CPDFSDK_AnnotIterator(
-          pPageView,
-          std::vector<CPDF_Annot::Subtype>(1, nAnnotSubtype)) {}
 
 CPDFSDK_AnnotIterator::CPDFSDK_AnnotIterator(
     CPDFSDK_PageView* pPageView,
@@ -82,42 +66,56 @@ CPDFSDK_Annot* CPDFSDK_AnnotIterator::GetPrevAnnot(CPDFSDK_Annot* pAnnot) {
   return *(--iter);
 }
 
-void CPDFSDK_AnnotIterator::CollectAnnots(std::vector<CPDFSDK_Annot*>* pArray) {
+void CPDFSDK_AnnotIterator::CollectAnnots(
+    std::vector<UnownedPtr<CPDFSDK_Annot>>* pArray) {
   for (auto* pAnnot : m_pPageView->GetAnnotList()) {
     if (pdfium::Contains(m_subtypes, pAnnot->GetAnnotSubtype()) &&
         !pAnnot->IsSignatureWidget()) {
-      pArray->push_back(pAnnot);
+      pArray->emplace_back(pAnnot);
     }
   }
 }
 
 CFX_FloatRect CPDFSDK_AnnotIterator::AddToAnnotsList(
-    std::vector<CPDFSDK_Annot*>* sa,
+    std::vector<UnownedPtr<CPDFSDK_Annot>>* sa,
     size_t idx) {
   CPDFSDK_Annot* pLeftTopAnnot = sa->at(idx);
   CFX_FloatRect rcLeftTop = GetAnnotRect(pLeftTopAnnot);
-  m_Annots.push_back(pLeftTopAnnot);
+  m_Annots.emplace_back(pLeftTopAnnot);
   sa->erase(sa->begin() + idx);
   return rcLeftTop;
 }
 
-void CPDFSDK_AnnotIterator::AddSelectedToAnnots(std::vector<CPDFSDK_Annot*>* sa,
-                                                std::vector<size_t>* aSelect) {
+void CPDFSDK_AnnotIterator::AddSelectedToAnnots(
+    std::vector<UnownedPtr<CPDFSDK_Annot>>* sa,
+    std::vector<size_t>* aSelect) {
   for (size_t i = 0; i < aSelect->size(); ++i)
-    m_Annots.push_back(sa->at(aSelect->at(i)));
+    m_Annots.emplace_back(sa->at(aSelect->at(i)));
 
   for (int i = aSelect->size() - 1; i >= 0; --i)
     sa->erase(sa->begin() + aSelect->at(i));
 }
 
+// static
+CPDFSDK_AnnotIterator::TabOrder CPDFSDK_AnnotIterator::GetTabOrder(
+    CPDFSDK_PageView* pPageView) {
+  CPDF_Page* pPDFPage = pPageView->GetPDFPage();
+  ByteString sTabs = pPDFPage->GetDict()->GetStringFor("Tabs");
+  if (sTabs == "R")
+    return kRow;
+  if (sTabs == "C")
+    return kColumn;
+  return kStructure;
+}
+
 void CPDFSDK_AnnotIterator::GenerateResults() {
   switch (m_eTabOrder) {
-    case STRUCTURE:
+    case kStructure:
       CollectAnnots(&m_Annots);
       break;
 
-    case ROW: {
-      std::vector<CPDFSDK_Annot*> sa;
+    case kRow: {
+      std::vector<UnownedPtr<CPDFSDK_Annot>> sa;
       CollectAnnots(&sa);
       std::sort(sa.begin(), sa.end(), CompareByLeftAscending);
 
@@ -148,8 +146,8 @@ void CPDFSDK_AnnotIterator::GenerateResults() {
       break;
     }
 
-    case COLUMN: {
-      std::vector<CPDFSDK_Annot*> sa;
+    case kColumn: {
+      std::vector<UnownedPtr<CPDFSDK_Annot>> sa;
       CollectAnnots(&sa);
       std::sort(sa.begin(), sa.end(), CompareByTopDescending);
 

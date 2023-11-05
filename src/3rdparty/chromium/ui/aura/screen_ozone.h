@@ -6,6 +6,7 @@
 #define UI_AURA_SCREEN_OZONE_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "ui/aura/aura_export.h"
@@ -47,12 +48,15 @@ class AURA_EXPORT ScreenOzone : public display::Screen {
   void AddObserver(display::DisplayObserver* observer) override;
   void RemoveObserver(display::DisplayObserver* observer) override;
   std::string GetCurrentWorkspace() override;
-  base::Value GetGpuExtraInfoAsListValue(
+  std::vector<base::Value> GetGpuExtraInfo(
       const gfx::GpuExtraInfo& gpu_extra_info) override;
 
   // Returns the NativeWindow associated with the AcceleratedWidget.
   virtual gfx::NativeWindow GetNativeWindowFromAcceleratedWidget(
       gfx::AcceleratedWidget widget) const;
+
+ protected:
+  ui::PlatformScreen* platform_screen() { return platform_screen_.get(); }
 
  private:
   gfx::AcceleratedWidget GetAcceleratedWidgetForWindow(

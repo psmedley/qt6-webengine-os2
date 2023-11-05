@@ -56,7 +56,6 @@
 #include "components/viz/common/surfaces/frame_sink_id_allocator.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "content/browser/compositor/image_transport_factory.h"
-#include "content/browser/renderer_host/display_util.h"
 #include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/cursor_manager.h"
@@ -71,6 +70,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/display/display_util.h"
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/event.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
@@ -129,13 +129,13 @@ static inline ui::GestureProvider::Config QtGestureProviderConfig() {
 
 extern display::Display toDisplayDisplay(int id, const QScreen *screen);
 
-static blink::ScreenInfo screenInfoFromQScreen(QScreen *screen)
+static display::ScreenInfo screenInfoFromQScreen(QScreen *screen)
 {
-    blink::ScreenInfo r;
+    display::ScreenInfo r;
     if (!screen)
         screen = qApp->primaryScreen();
     if (screen)
-        content::DisplayUtil::DisplayToScreenInfo(&r, toDisplayDisplay(0, screen));
+        display::DisplayUtil::DisplayToScreenInfo(&r, toDisplayDisplay(0, screen));
     else
         r.device_scale_factor = qGuiApp->devicePixelRatio();
     return r;
@@ -597,6 +597,11 @@ void RenderWidgetHostViewQt::DisplayCursor(const content::WebCursor &webCursor)
         if (updateCursorFromResource(cursorInfo.type()))
             return;
         break;
+    case ui::mojom::CursorType::kEastWestNoResize:
+    case ui::mojom::CursorType::kNorthEastSouthWestNoResize:
+    case ui::mojom::CursorType::kNorthSouthNoResize:
+    case ui::mojom::CursorType::kNorthWestSouthEastNoResize:
+        // Use forbidden cursor matching webcursor_mac.mm and win_cursor_factory.cc
     case ui::mojom::CursorType::kNoDrop:
     case ui::mojom::CursorType::kNotAllowed:
         shape = Qt::ForbiddenCursor;
@@ -664,18 +669,18 @@ void RenderWidgetHostViewQt::Destroy()
     delete this;
 }
 
-void RenderWidgetHostViewQt::SetTooltipText(const base::string16 &tooltip_text)
+void RenderWidgetHostViewQt::UpdateTooltipUnderCursor(const std::u16string &tooltip_text)
 {
-    DisplayTooltipText(tooltip_text);
+    UpdateTooltip(tooltip_text);
 }
 
-void RenderWidgetHostViewQt::DisplayTooltipText(const base::string16 &tooltip_text)
+void RenderWidgetHostViewQt::UpdateTooltip(const std::u16string &tooltip_text)
 {
     if (host()->delegate() && m_adapterClient)
         m_adapterClient->setToolTip(toQt(tooltip_text));
 }
 
-void RenderWidgetHostViewQt::GetScreenInfo(blink::ScreenInfo *results)
+void RenderWidgetHostViewQt::GetScreenInfo(display::ScreenInfo *results)
 {
     *results = m_screenInfo;
 }
@@ -748,15 +753,22 @@ void RenderWidgetHostViewQt::OnTextSelectionChanged(content::TextInputManager *t
     Q_UNUSED(text_input_manager);
     Q_UNUSED(updated_view);
 
-    const content::TextInputManager::TextSelection *selection = GetTextInputManager()->GetTextSelection(updated_view);
-    if (!selection)
-        return;
+    // We obtain the TextSelection from focused RWH which is obtained from the
+    // frame tree.
+    content::RenderWidgetHostViewBase *focused_view =
+        GetFocusedWidget() ? GetFocusedWidget()->GetView() : nullptr;
+
+    if (!focused_view)
+      return;
 
 #if defined(USE_OZONE)
-    if (!selection->selected_text().empty() && selection->user_initiated()) {
-        // Set the CLIPBOARD_TYPE_SELECTION to the ui::Clipboard.
-        ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardBuffer::kSelection);
-        clipboard_writer.WriteText(selection->selected_text());
+    if (ui::Clipboard::IsSupportedClipboardBuffer(ui::ClipboardBuffer::kSelection)) {
+        const content::TextInputManager::TextSelection *selection = GetTextInputManager()->GetTextSelection(focused_view);
+        if (selection->selected_text().length() && selection->user_initiated()) {
+            // Set the ClipboardBuffer::kSelection to the ui::Clipboard.
+            ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardBuffer::kSelection);
+            clipboard_writer.WriteText(selection->selected_text());
+        }
     }
 #endif // defined(USE_OZONE)
 
@@ -877,7 +889,7 @@ bool RenderWidgetHostViewQt::isPopup() const
 
 bool RenderWidgetHostViewQt::updateScreenInfo()
 {
-    blink::ScreenInfo oldScreenInfo = m_screenInfo;
+    display::ScreenInfo oldScreenInfo = m_screenInfo;
     QScreen *screen = m_delegate->window() ? m_delegate->window()->screen() : nullptr;
     m_screenInfo = screenInfoFromQScreen(screen);
 
@@ -988,9 +1000,8 @@ void RenderWidgetHostViewQt::TakeFallbackContentFrom(content::RenderWidgetHostVi
 {
     DCHECK(!static_cast<RenderWidgetHostViewBase*>(view)->IsRenderWidgetHostViewChildFrame());
     RenderWidgetHostViewQt *viewQt = static_cast<RenderWidgetHostViewQt *>(view);
-    base::Optional<SkColor> color = viewQt->GetBackgroundColor();
-    if (color)
-        SetBackgroundColor(*color);
+    CopyBackgroundColorIfPresentFrom(*viewQt);
+
     m_delegatedFrameHost->TakeFallbackContentFrom(viewQt->m_delegatedFrameHost.get());
     host()->GetContentRenderingTimeoutFrom(viewQt->host());
 }
@@ -1029,7 +1040,7 @@ void RenderWidgetHostViewQt::OnRenderFrameMetadataChangedAfterActivation(base::T
         m_adapterClient->updateContentsSize(toQt(m_lastContentsSize));
 }
 
-void RenderWidgetHostViewQt::synchronizeVisualProperties(const base::Optional<viz::LocalSurfaceId> &childSurfaceId)
+void RenderWidgetHostViewQt::synchronizeVisualProperties(const absl::optional<viz::LocalSurfaceId> &childSurfaceId)
 {
     if (childSurfaceId)
         m_dfhLocalSurfaceIdAllocator.UpdateFromChild(*childSurfaceId);
@@ -1062,9 +1073,9 @@ ui::Compositor *RenderWidgetHostViewQt::GetCompositor()
     return m_uiCompositor.get();
 }
 
-base::Optional<content::DisplayFeature> RenderWidgetHostViewQt::GetDisplayFeature()
+absl::optional<content::DisplayFeature> RenderWidgetHostViewQt::GetDisplayFeature()
 {
-    return base::nullopt;
+    return absl::nullopt;
 }
 
 void RenderWidgetHostViewQt::SetDisplayFeatureForTesting(const content::DisplayFeature *)

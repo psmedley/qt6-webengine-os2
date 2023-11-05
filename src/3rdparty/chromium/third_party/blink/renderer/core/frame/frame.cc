@@ -48,6 +48,7 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_remote_frame_impl.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
+#include "third_party/blink/renderer/core/html/html_object_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
@@ -55,6 +56,7 @@
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -97,6 +99,7 @@ void Frame::Trace(Visitor* visitor) const {
 }
 
 bool Frame::Detach(FrameDetachType type) {
+  TRACE_EVENT0("blink", "Frame::Detach");
   DCHECK(client_);
   // Detach() can be re-entered, so this can't simply DCHECK(IsAttached()).
   DCHECK(!IsDetached());
@@ -162,7 +165,7 @@ bool Frame::Detach(FrameDetachType type) {
   // the frame tree. https://crbug.com/578349.
   DisconnectOwnerElement();
   page_ = nullptr;
-  embedding_token_ = base::nullopt;
+  embedding_token_ = absl::nullopt;
 
   return true;
 }
@@ -219,7 +222,7 @@ static ChromeClient& GetEmptyChromeClient() {
 }
 
 ChromeClient& Frame::GetChromeClient() const {
-  if (Page* page = this->GetPage())
+  if (Page* page = GetPage())
     return page->GetChromeClient();
   return GetEmptyChromeClient();
 }
@@ -309,18 +312,29 @@ void Frame::ClearUserActivationInFrameTree() {
     node->user_activation_state_.Clear();
 }
 
+void Frame::RenderFallbackContent() {
+  // Fallback has been requested by the browser navigation code, so triggering
+  // the fallback content should also dispatch an error event.
+  To<HTMLObjectElement>(Owner())->RenderFallbackContent(
+      HTMLObjectElement::ErrorEventPolicy::kDispatch);
+}
+
+void Frame::RenderFallbackContentWithResourceTiming(
+    mojom::blink::ResourceTimingInfoPtr timing,
+    const String& server_timing_value) {
+  auto* local_dom_window = To<LocalDOMWindow>(Parent()->DomWindow());
+  DOMWindowPerformance::performance(*local_dom_window)
+      ->AddResourceTimingWithUnparsedServerTiming(
+          std::move(timing), server_timing_value,
+          html_names::kObjectTag.LocalName(), mojo::NullReceiver(),
+          local_dom_window);
+  RenderFallbackContent();
+}
+
 void Frame::SetOwner(FrameOwner* owner) {
   owner_ = owner;
   UpdateInertIfPossible();
   UpdateInheritedEffectiveTouchActionIfPossible();
-}
-
-bool Frame::IsAdSubframe() const {
-  return ad_frame_type_ != mojom::blink::AdFrameType::kNonAd;
-}
-
-bool Frame::IsAdRoot() const {
-  return ad_frame_type_ == mojom::blink::AdFrameType::kRootAd;
 }
 
 void Frame::UpdateInertIfPossible() {
@@ -387,12 +401,12 @@ Frame::Frame(FrameClient* client,
              Frame* previous_sibling,
              FrameInsertType insert_type,
              const FrameToken& frame_token,
+             const base::UnguessableToken& devtools_frame_token,
              WindowProxyManager* window_proxy_manager,
              WindowAgentFactory* inheriting_agent_factory)
     : tree_node_(this),
       page_(&page),
       owner_(owner),
-      ad_frame_type_(mojom::blink::AdFrameType::kNonAd),
       client_(client),
       window_proxy_manager_(window_proxy_manager),
       parent_(parent),
@@ -401,7 +415,7 @@ Frame::Frame(FrameClient* client,
                                 ? inheriting_agent_factory
                                 : MakeGarbageCollected<WindowAgentFactory>()),
       is_loading_(false),
-      devtools_frame_token_(client->GetDevToolsFrameToken()),
+      devtools_frame_token_(devtools_frame_token),
       frame_token_(frame_token) {
   InstanceCounters::IncrementCounter(InstanceCounters::kFrameCounter);
   if (parent_ && insert_type == FrameInsertType::kInsertInConstructor) {
@@ -446,7 +460,6 @@ void Frame::ApplyFrameOwnerProperties(
   owner->SetAllowPaymentRequest(properties->allow_payment_request);
   owner->SetIsDisplayNone(properties->is_display_none);
   owner->SetColorScheme(properties->color_scheme);
-  owner->SetRequiredCsp(properties->required_csp);
 }
 
 void Frame::InsertAfter(Frame* new_child, Frame* previous_sibling) {
@@ -581,7 +594,7 @@ bool Frame::Swap(WebFrame* new_web_frame) {
     To<WebRemoteFrameImpl>(new_web_frame)
         ->InitializeCoreFrame(*page, owner, WebFrame::FromCoreFrame(parent_),
                               nullptr, FrameInsertType::kInsertLater, name,
-                              &window_agent_factory());
+                              &window_agent_factory(), devtools_frame_token_);
     // At this point, a `RemoteFrame` will have already updated
     // `Page::MainFrame()` or `FrameOwner::ContentFrame()` as appropriate, and
     // its `parent_` pointer is also populated.

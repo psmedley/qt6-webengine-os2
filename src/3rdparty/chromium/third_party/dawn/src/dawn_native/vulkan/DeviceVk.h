@@ -57,9 +57,9 @@ namespace dawn_native { namespace vulkan {
         uint32_t GetGraphicsQueueFamily() const;
         VkQueue GetQueue() const;
 
-        BufferUploader* GetBufferUploader() const;
         FencedDeleter* GetFencedDeleter() const;
         RenderPassCache* GetRenderPassCache() const;
+        ResourceMemoryAllocator* GetResourceMemoryAllocator() const;
 
         CommandRecordingContext* GetPendingRecordingContext();
         MaybeError SubmitPendingCommands();
@@ -77,9 +77,9 @@ namespace dawn_native { namespace vulkan {
                                             ExternalImageExportInfoVk* info,
                                             std::vector<ExternalSemaphoreHandle>* semaphoreHandle);
 
-        // Dawn API
-        CommandBufferBase* CreateCommandBuffer(CommandEncoder* encoder,
-                                               const CommandBufferDescriptor* descriptor) override;
+        ResultOrError<Ref<CommandBufferBase>> CreateCommandBuffer(
+            CommandEncoder* encoder,
+            const CommandBufferDescriptor* descriptor) override;
 
         MaybeError TickImpl() override;
 
@@ -94,14 +94,6 @@ namespace dawn_native { namespace vulkan {
                                             TextureCopy* dst,
                                             const Extent3D& copySizePixels) override;
 
-        ResultOrError<ResourceMemoryAllocation> AllocateMemory(VkMemoryRequirements requirements,
-                                                               bool mappable);
-        void DeallocateMemory(ResourceMemoryAllocation* allocation);
-
-        int FindBestMemoryTypeIndex(VkMemoryRequirements requirements, bool mappable);
-
-        ResourceMemoryAllocator* GetResourceMemoryAllocatorForTesting() const;
-
         // Return the fixed subgroup size to use for compute shaders on this device or 0 if none
         // needs to be set.
         uint32_t GetComputeSubgroupSize() const;
@@ -114,35 +106,40 @@ namespace dawn_native { namespace vulkan {
       private:
         Device(Adapter* adapter, const DeviceDescriptor* descriptor);
 
-        ResultOrError<BindGroupBase*> CreateBindGroupImpl(
+        ResultOrError<Ref<BindGroupBase>> CreateBindGroupImpl(
             const BindGroupDescriptor* descriptor) override;
-        ResultOrError<BindGroupLayoutBase*> CreateBindGroupLayoutImpl(
+        ResultOrError<Ref<BindGroupLayoutBase>> CreateBindGroupLayoutImpl(
             const BindGroupLayoutDescriptor* descriptor) override;
         ResultOrError<Ref<BufferBase>> CreateBufferImpl(
             const BufferDescriptor* descriptor) override;
-        ResultOrError<ComputePipelineBase*> CreateComputePipelineImpl(
+        ResultOrError<Ref<ComputePipelineBase>> CreateComputePipelineImpl(
             const ComputePipelineDescriptor* descriptor) override;
-        ResultOrError<PipelineLayoutBase*> CreatePipelineLayoutImpl(
+        ResultOrError<Ref<PipelineLayoutBase>> CreatePipelineLayoutImpl(
             const PipelineLayoutDescriptor* descriptor) override;
-        ResultOrError<QuerySetBase*> CreateQuerySetImpl(
+        ResultOrError<Ref<QuerySetBase>> CreateQuerySetImpl(
             const QuerySetDescriptor* descriptor) override;
-        ResultOrError<RenderPipelineBase*> CreateRenderPipelineImpl(
+        ResultOrError<Ref<RenderPipelineBase>> CreateRenderPipelineImpl(
             const RenderPipelineDescriptor* descriptor) override;
-        ResultOrError<SamplerBase*> CreateSamplerImpl(const SamplerDescriptor* descriptor) override;
-        ResultOrError<ShaderModuleBase*> CreateShaderModuleImpl(
+        ResultOrError<Ref<SamplerBase>> CreateSamplerImpl(
+            const SamplerDescriptor* descriptor) override;
+        ResultOrError<Ref<ShaderModuleBase>> CreateShaderModuleImpl(
             const ShaderModuleDescriptor* descriptor,
             ShaderModuleParseResult* parseResult) override;
-        ResultOrError<SwapChainBase*> CreateSwapChainImpl(
+        ResultOrError<Ref<SwapChainBase>> CreateSwapChainImpl(
             const SwapChainDescriptor* descriptor) override;
-        ResultOrError<NewSwapChainBase*> CreateSwapChainImpl(
+        ResultOrError<Ref<NewSwapChainBase>> CreateSwapChainImpl(
             Surface* surface,
             NewSwapChainBase* previousSwapChain,
             const SwapChainDescriptor* descriptor) override;
         ResultOrError<Ref<TextureBase>> CreateTextureImpl(
             const TextureDescriptor* descriptor) override;
-        ResultOrError<TextureViewBase*> CreateTextureViewImpl(
+        ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
             TextureBase* texture,
             const TextureViewDescriptor* descriptor) override;
+        void CreateComputePipelineAsyncImpl(const ComputePipelineDescriptor* descriptor,
+                                            size_t blueprintHash,
+                                            WGPUCreateComputePipelineAsyncCallback callback,
+                                            void* userdata) override;
 
         ResultOrError<VulkanDeviceKnobs> CreateDevice(VkPhysicalDevice physicalDevice);
         void GatherQueueFromDevice();
@@ -173,7 +170,7 @@ namespace dawn_native { namespace vulkan {
         std::unique_ptr<external_semaphore::Service> mExternalSemaphoreService;
 
         ResultOrError<VkFence> GetUnusedFence();
-        ExecutionSerial CheckAndUpdateCompletedSerials() override;
+        ResultOrError<ExecutionSerial> CheckAndUpdateCompletedSerials() override;
 
         // We track which operations are in flight on the GPU with an increasing serial.
         // This works only because we have a single queue. Each submit to a queue is associated

@@ -9,9 +9,10 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/battery/battery_dispatcher.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
@@ -28,7 +29,7 @@ ScriptPromise BatteryManager::getBattery(ScriptState* script_state,
   LocalDOMWindow* window = navigator.DomWindow();
   if (!window->IsSecureContext())
     UseCounter::Count(window, WebFeature::kBatteryStatusInsecureOrigin);
-  window->GetFrame()->CountUseIfFeatureWouldBeBlockedByFeaturePolicy(
+  window->GetFrame()->CountUseIfFeatureWouldBeBlockedByPermissionsPolicy(
       WebFeature::kBatteryStatusCrossOrigin,
       WebFeature::kBatteryStatusSameOriginABA);
 

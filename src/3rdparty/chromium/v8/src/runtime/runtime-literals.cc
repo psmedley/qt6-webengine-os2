@@ -34,13 +34,11 @@ void PreInitializeLiteralSite(Handle<FeedbackVector> vector,
   vector->SynchronizedSet(slot, Smi::FromInt(1));
 }
 
-enum DeepCopyHints { kNoHints = 0, kObjectIsShallow = 1 };
-
 template <class ContextObject>
 class JSObjectWalkVisitor {
  public:
-  JSObjectWalkVisitor(ContextObject* site_context, DeepCopyHints hints)
-      : site_context_(site_context), hints_(hints) {}
+  explicit JSObjectWalkVisitor(ContextObject* site_context)
+      : site_context_(site_context) {}
 
   V8_WARN_UNUSED_RESULT MaybeHandle<JSObject> StructureWalk(
       Handle<JSObject> object);
@@ -64,7 +62,6 @@ class JSObjectWalkVisitor {
 
  private:
   ContextObject* site_context_;
-  const DeepCopyHints hints_;
 };
 
 template <class ContextObject>
@@ -72,9 +69,8 @@ MaybeHandle<JSObject> JSObjectWalkVisitor<ContextObject>::StructureWalk(
     Handle<JSObject> object) {
   Isolate* isolate = this->isolate();
   bool copying = ContextObject::kCopying;
-  bool shallow = hints_ == kObjectIsShallow;
 
-  if (!shallow) {
+  {
     StackLimitCheck check(isolate);
 
     if (check.HasOverflowed()) {
@@ -84,6 +80,8 @@ MaybeHandle<JSObject> JSObjectWalkVisitor<ContextObject>::StructureWalk(
   }
 
   if (object->map(isolate).is_deprecated()) {
+    base::SharedMutexGuard<base::kExclusive> mutex_guard(
+        isolate->boilerplate_migration_access());
     JSObject::MigrateInstance(isolate, object);
   }
 
@@ -103,16 +101,13 @@ MaybeHandle<JSObject> JSObjectWalkVisitor<ContextObject>::StructureWalk(
 
   DCHECK(copying || copy.is_identical_to(object));
 
-  if (shallow) return copy;
-
   HandleScope scope(isolate);
 
   // Deep copy own properties. Arrays only have 1 property "length".
   if (!copy->IsJSArray(isolate)) {
     if (copy->HasFastProperties(isolate)) {
       Handle<DescriptorArray> descriptors(
-          copy->map(isolate).instance_descriptors(isolate, kRelaxedLoad),
-          isolate);
+          copy->map(isolate).instance_descriptors(isolate), isolate);
       for (InternalIndex i : copy->map(isolate).IterateOwnDescriptors()) {
         PropertyDetails details = descriptors->GetDetails(i);
         DCHECK_EQ(kField, details.location());
@@ -127,15 +122,16 @@ MaybeHandle<JSObject> JSObjectWalkVisitor<ContextObject>::StructureWalk(
               isolate, value, VisitElementOrProperty(copy, value), JSObject);
           if (copying) copy->FastPropertyAtPut(index, *value);
         } else if (copying && details.representation().IsDouble()) {
-          uint64_t double_value = HeapNumber::cast(raw).value_as_bits();
+          uint64_t double_value =
+              HeapNumber::cast(raw).value_as_bits(kRelaxedLoad);
           auto value = isolate->factory()->NewHeapNumberFromBits(double_value);
           copy->FastPropertyAtPut(index, *value);
         }
       }
     } else {
-      if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-        Handle<OrderedNameDictionary> dict(
-            copy->property_dictionary_ordered(isolate), isolate);
+      if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
+        Handle<SwissNameDictionary> dict(
+            copy->property_dictionary_swiss(isolate), isolate);
         for (InternalIndex i : dict->IterateEntries()) {
           Object raw = dict->ValueAt(i);
           if (!raw.IsJSObject(isolate)) continue;
@@ -214,11 +210,13 @@ MaybeHandle<JSObject> JSObjectWalkVisitor<ContextObject>::StructureWalk(
       break;
     case FAST_STRING_WRAPPER_ELEMENTS:
     case SLOW_STRING_WRAPPER_ELEMENTS:
+    case WASM_ARRAY_ELEMENTS:
       UNREACHABLE();
 
 #define TYPED_ARRAY_CASE(Type, type, TYPE, ctype) case TYPE##_ELEMENTS:
 
       TYPED_ARRAYS(TYPED_ARRAY_CASE)
+      RAB_GSAB_TYPED_ARRAYS(TYPED_ARRAY_CASE)
 #undef TYPED_ARRAY_CASE
       // Typed elements cannot be created using an object literal.
       UNREACHABLE();
@@ -245,7 +243,6 @@ class DeprecationUpdateContext {
   Handle<AllocationSite> EnterNewScope() { return Handle<AllocationSite>(); }
   Handle<AllocationSite> current() {
     UNREACHABLE();
-    return Handle<AllocationSite>();
   }
 
   static const bool kCopying = false;
@@ -292,7 +289,7 @@ class AllocationSiteCreationContext : public AllocationSiteContext {
   }
   void ExitScope(Handle<AllocationSite> scope_site, Handle<JSObject> object) {
     if (object.is_null()) return;
-    scope_site->set_boilerplate(*object);
+    scope_site->set_boilerplate(*object, kReleaseStore);
     if (FLAG_trace_creation_allocation_sites) {
       bool top_level =
           !scope_site.is_null() && top().is_identical_to(scope_site);
@@ -313,7 +310,7 @@ class AllocationSiteCreationContext : public AllocationSiteContext {
 
 MaybeHandle<JSObject> DeepWalk(Handle<JSObject> object,
                                DeprecationUpdateContext* site_context) {
-  JSObjectWalkVisitor<DeprecationUpdateContext> v(site_context, kNoHints);
+  JSObjectWalkVisitor<DeprecationUpdateContext> v(site_context);
   MaybeHandle<JSObject> result = v.StructureWalk(object);
   Handle<JSObject> for_assert;
   DCHECK(!result.ToHandle(&for_assert) || for_assert.is_identical_to(object));
@@ -322,7 +319,7 @@ MaybeHandle<JSObject> DeepWalk(Handle<JSObject> object,
 
 MaybeHandle<JSObject> DeepWalk(Handle<JSObject> object,
                                AllocationSiteCreationContext* site_context) {
-  JSObjectWalkVisitor<AllocationSiteCreationContext> v(site_context, kNoHints);
+  JSObjectWalkVisitor<AllocationSiteCreationContext> v(site_context);
   MaybeHandle<JSObject> result = v.StructureWalk(object);
   Handle<JSObject> for_assert;
   DCHECK(!result.ToHandle(&for_assert) || for_assert.is_identical_to(object));
@@ -330,9 +327,8 @@ MaybeHandle<JSObject> DeepWalk(Handle<JSObject> object,
 }
 
 MaybeHandle<JSObject> DeepCopy(Handle<JSObject> object,
-                               AllocationSiteUsageContext* site_context,
-                               DeepCopyHints hints) {
-  JSObjectWalkVisitor<AllocationSiteUsageContext> v(site_context, hints);
+                               AllocationSiteUsageContext* site_context) {
+  JSObjectWalkVisitor<AllocationSiteUsageContext> v(site_context);
   MaybeHandle<JSObject> copy = v.StructureWalk(object);
   Handle<JSObject> for_assert;
   DCHECK(!copy.ToHandle(&for_assert) || !for_assert.is_identical_to(object));
@@ -517,26 +513,13 @@ Handle<JSObject> CreateArrayLiteral(
       copied_elements_values->length(), allocation);
 }
 
-inline DeepCopyHints DecodeCopyHints(int flags) {
-  DeepCopyHints copy_hints =
-      (flags & AggregateLiteral::kIsShallow) ? kObjectIsShallow : kNoHints;
-  if (FLAG_track_double_fields) {
-    // Make sure we properly clone mutable heap numbers on 32-bit platforms.
-    copy_hints = kNoHints;
-  }
-  return copy_hints;
-}
-
 template <typename LiteralHelper>
 MaybeHandle<JSObject> CreateLiteralWithoutAllocationSite(
     Isolate* isolate, Handle<HeapObject> description, int flags) {
   Handle<JSObject> literal = LiteralHelper::Create(isolate, description, flags,
                                                    AllocationType::kYoung);
-  DeepCopyHints copy_hints = DecodeCopyHints(flags);
-  if (copy_hints == kNoHints) {
-    DeprecationUpdateContext update_context(isolate);
-    RETURN_ON_EXCEPTION(isolate, DeepWalk(literal, &update_context), JSObject);
-  }
+  DeprecationUpdateContext update_context(isolate);
+  RETURN_ON_EXCEPTION(isolate, DeepWalk(literal, &update_context), JSObject);
   return literal;
 }
 
@@ -555,8 +538,6 @@ MaybeHandle<JSObject> CreateLiteral(Isolate* isolate,
   CHECK(literals_slot.ToInt() < vector->length());
   Handle<Object> literal_site(vector->Get(literals_slot)->cast<Object>(),
                               isolate);
-  DeepCopyHints copy_hints = DecodeCopyHints(flags);
-
   Handle<AllocationSite> site;
   Handle<JSObject> boilerplate;
 
@@ -593,8 +574,7 @@ MaybeHandle<JSObject> CreateLiteral(Isolate* isolate,
   // Copy the existing boilerplate.
   AllocationSiteUsageContext usage_context(isolate, site, enable_mementos);
   usage_context.EnterNewScope();
-  MaybeHandle<JSObject> copy =
-      DeepCopy(boilerplate, &usage_context, copy_hints);
+  MaybeHandle<JSObject> copy = DeepCopy(boilerplate, &usage_context);
   usage_context.ExitScope(site, boilerplate);
   return copy;
 }

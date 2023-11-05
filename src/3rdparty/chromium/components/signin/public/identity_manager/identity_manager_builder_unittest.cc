@@ -4,6 +4,8 @@
 
 #include "components/signin/public/identity_manager/identity_manager_builder.h"
 
+#include <limits>
+
 #include "base/files/scoped_temp_dir.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
@@ -22,8 +24,10 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "ash/components/account_manager/account_manager.h"
 #include "ash/components/account_manager/account_manager_factory.h"
+#include "components/account_manager_core/account_manager_facade_impl.h"
+#include "components/account_manager_core/chromeos/account_manager.h"
+#include "components/account_manager_core/chromeos/account_manager_mojo_service.h"
 #endif
 
 #if defined(OS_IOS)
@@ -76,7 +80,7 @@ TEST_F(IdentityManagerBuilderTest, BuildIdentityManagerInitParameters) {
   base::FilePath dest_path = temp_dir.GetPath();
 
 #if defined(OS_ANDROID)
-  DisableInteractionWithSystemAccounts();
+  SetUpMockAccountManagerFacade();
 #endif
 
   IdentityManagerBuildParams params;
@@ -102,6 +106,17 @@ TEST_F(IdentityManagerBuilderTest, BuildIdentityManagerInitParameters) {
       base::BindRepeating(
           [](base::OnceClosure closure) -> void { std::move(closure).Run(); }));
   params.account_manager = account_manager;
+
+  mojo::Remote<crosapi::mojom::AccountManager> remote;
+  GetAccountManagerFactory()
+      ->GetAccountManagerMojoService(dest_path.value())
+      ->BindReceiver(remote.BindNewPipeAndPassReceiver());
+  auto account_manager_facade =
+      std::make_unique<account_manager::AccountManagerFacadeImpl>(
+          std::move(remote),
+          /*remote_version=*/std::numeric_limits<uint32_t>::max());
+
+  params.account_manager_facade = account_manager_facade.get();
   params.is_regular_profile = true;
 #endif
 
@@ -126,10 +141,6 @@ TEST_F(IdentityManagerBuilderTest, BuildIdentityManagerInitParameters) {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   EXPECT_NE(init_params.ash_account_manager, nullptr);
 #endif
-
-  // Manually shut down AccountFetcherService to avoid DCHECK failure inside its
-  // destructor.
-  init_params.account_fetcher_service->Shutdown();
 }
 
 }  // namespace signin

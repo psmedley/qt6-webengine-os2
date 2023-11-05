@@ -222,7 +222,7 @@ class AudioRendererImplTest : public ::testing::Test, public RendererClient {
   MOCK_METHOD1(OnVideoConfigChange, void(const VideoDecoderConfig&));
   MOCK_METHOD1(OnVideoNaturalSizeChange, void(const gfx::Size&));
   MOCK_METHOD1(OnVideoOpacityChange, void(bool));
-  MOCK_METHOD1(OnVideoFrameRateChange, void(base::Optional<int>));
+  MOCK_METHOD1(OnVideoFrameRateChange, void(absl::optional<int>));
   MOCK_METHOD1(OnDurationChange, void(base::TimeDelta));
   MOCK_METHOD1(OnRemotePlayStateChange, void(MediaStatus::State state));
   MOCK_METHOD1(TranscribeAudioCallback, void(scoped_refptr<AudioBuffer>));
@@ -1684,6 +1684,46 @@ TEST_F(AudioRendererImplTest, HighLatencyHint) {
   // increase, nor a change to the playback threshold.
   EXPECT_EQ(buffer_capacity().value, high_latency_playback_threshold);
   EXPECT_EQ(buffer_playback_threshold().value, high_latency_playback_threshold);
+}
+
+TEST_F(AudioRendererImplTest, PlayUnmuted) {
+  // Setting the volume to a non-zero value does not count as unmuted until the
+  // audio is played.
+  EXPECT_EQ(renderer_->was_unmuted_for_testing(), 0);
+  renderer_->SetVolume(1);
+  EXPECT_EQ(renderer_->was_unmuted_for_testing(), 0);
+
+  Initialize();
+  Preroll();
+  StartTicking();
+  EXPECT_EQ(renderer_->was_unmuted_for_testing(), 1);
+}
+
+TEST_F(AudioRendererImplTest, UnmuteWhilePlaying) {
+  ConfigureWithMockSink(hardware_params_);
+  EXPECT_CALL(*mock_sink_, SetVolume(0));
+  renderer_->SetVolume(0);
+  EXPECT_EQ(renderer_->was_unmuted_for_testing(), 0);
+
+  EXPECT_CALL(*mock_sink_, Start());
+  EXPECT_CALL(*mock_sink_, Play());
+  Initialize();
+  Preroll();
+  StartTicking();
+  EXPECT_EQ(renderer_->was_unmuted_for_testing(), 0);
+
+  EXPECT_CALL(*mock_sink_, SetVolume(1));
+  renderer_->SetVolume(1);
+  EXPECT_EQ(renderer_->was_unmuted_for_testing(), 1);
+
+  // Muting should pause the sink.
+  EXPECT_CALL(*mock_sink_, SetVolume(0));
+  EXPECT_CALL(*mock_sink_, Pause());
+  renderer_->SetVolume(0);
+  EXPECT_EQ(renderer_->was_unmuted_for_testing(), 1);
+
+  StopTicking();
+  EXPECT_CALL(*mock_sink_, Stop());
 }
 
 }  // namespace media

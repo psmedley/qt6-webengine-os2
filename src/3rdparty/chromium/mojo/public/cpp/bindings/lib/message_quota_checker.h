@@ -10,11 +10,12 @@
 
 #include "base/component_export.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
+#include "base/types/pass_key.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace mojo {
 namespace internal {
@@ -79,9 +80,16 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MessageQuotaChecker
     double decayed_average_ = 0.0;
   };
 
+  // Exposed for use in tests.
+  struct Configuration;
+
   // Returns a new instance if this invocation has been sampled for quota
   // checking.
   static scoped_refptr<MessageQuotaChecker> MaybeCreate();
+
+  // Public for base::MakeRefCounted(). Use MaybeCreate().
+  MessageQuotaChecker(const Configuration* config,
+                      base::PassKey<MessageQuotaChecker>);
 
   // Call before writing a message to |message_pipe_|.
   void BeforeWrite();
@@ -99,14 +107,12 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MessageQuotaChecker
 
   // Test support.
   size_t GetCurrentQuotaStatusForTesting();
-  struct Configuration;
   static Configuration GetConfigurationForTesting();
   static scoped_refptr<MessageQuotaChecker> MaybeCreateForTesting(
       const Configuration& config);
 
  private:
   friend class base::RefCountedThreadSafe<MessageQuotaChecker>;
-  explicit MessageQuotaChecker(const Configuration* config);
   ~MessageQuotaChecker();
   static Configuration GetConfiguration();
   static scoped_refptr<MessageQuotaChecker> MaybeCreateImpl(
@@ -114,7 +120,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MessageQuotaChecker
 
   // Returns the amount of unread message quota currently used if there is
   // an associated message pipe.
-  base::Optional<size_t> GetCurrentMessagePipeQuota();
+  absl::optional<size_t> GetCurrentMessagePipeQuota();
   void QuotaCheckImpl(size_t num_enqueued);
 
   const Configuration* config_;
@@ -150,7 +156,7 @@ struct MessageQuotaChecker::Configuration {
   size_t unread_message_count_quota = 0u;
   size_t crash_threshold = 0u;
   void (*maybe_crash_function)(size_t quota_used,
-                               base::Optional<size_t> message_pipe_quota_used,
+                               absl::optional<size_t> message_pipe_quota_used,
                                int64_t seconds_since_construction,
                                double average_write_rate,
                                uint64_t messages_enqueued,

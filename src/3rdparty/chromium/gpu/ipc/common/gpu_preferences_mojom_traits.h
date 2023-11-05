@@ -9,6 +9,7 @@
 #include "build/chromeos_buildflags.h"
 
 #include "gpu/config/gpu_preferences.h"
+#include "gpu/gpu_export.h"
 #include "gpu/ipc/common/gpu_preferences.mojom-shared.h"
 #include "ui/gfx/mojom/buffer_types_mojom_traits.h"
 
@@ -21,7 +22,7 @@
 namespace mojo {
 
 template <>
-struct EnumTraits<gpu::mojom::GrContextType, gpu::GrContextType> {
+struct GPU_EXPORT EnumTraits<gpu::mojom::GrContextType, gpu::GrContextType> {
   static gpu::mojom::GrContextType ToMojom(gpu::GrContextType input) {
     switch (input) {
       case gpu::GrContextType::kGL:
@@ -57,8 +58,8 @@ struct EnumTraits<gpu::mojom::GrContextType, gpu::GrContextType> {
 };
 
 template <>
-struct EnumTraits<gpu::mojom::VulkanImplementationName,
-                  gpu::VulkanImplementationName> {
+struct GPU_EXPORT EnumTraits<gpu::mojom::VulkanImplementationName,
+                             gpu::VulkanImplementationName> {
   static gpu::mojom::VulkanImplementationName ToMojom(
       gpu::VulkanImplementationName input) {
     switch (input) {
@@ -95,7 +96,41 @@ struct EnumTraits<gpu::mojom::VulkanImplementationName,
 };
 
 template <>
-struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
+struct GPU_EXPORT EnumTraits<gpu::mojom::DawnBackendValidationLevel,
+                             gpu::DawnBackendValidationLevel> {
+  static gpu::mojom::DawnBackendValidationLevel ToMojom(
+      gpu::DawnBackendValidationLevel input) {
+    switch (input) {
+      case gpu::DawnBackendValidationLevel::kDisabled:
+        return gpu::mojom::DawnBackendValidationLevel::kDisabled;
+      case gpu::DawnBackendValidationLevel::kPartial:
+        return gpu::mojom::DawnBackendValidationLevel::kPartial;
+      case gpu::DawnBackendValidationLevel::kFull:
+        return gpu::mojom::DawnBackendValidationLevel::kFull;
+    }
+    NOTREACHED();
+    return gpu::mojom::DawnBackendValidationLevel::kDisabled;
+  }
+  static bool FromMojom(gpu::mojom::DawnBackendValidationLevel input,
+                        gpu::DawnBackendValidationLevel* out) {
+    switch (input) {
+      case gpu::mojom::DawnBackendValidationLevel::kDisabled:
+        *out = gpu::DawnBackendValidationLevel::kDisabled;
+        return true;
+      case gpu::mojom::DawnBackendValidationLevel::kPartial:
+        *out = gpu::DawnBackendValidationLevel::kPartial;
+        return true;
+      case gpu::mojom::DawnBackendValidationLevel::kFull:
+        *out = gpu::DawnBackendValidationLevel::kFull;
+        return true;
+    }
+    return false;
+  }
+};
+
+template <>
+struct GPU_EXPORT
+    StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   static bool Read(gpu::mojom::GpuPreferencesDataView prefs,
                    gpu::GpuPreferences* out) {
     out->disable_accelerated_video_decode =
@@ -135,7 +170,6 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     out->enable_threaded_texture_mailboxes =
         prefs.enable_threaded_texture_mailboxes();
     out->gl_shader_interm_output = prefs.gl_shader_interm_output();
-    out->emulate_shader_precision = prefs.emulate_shader_precision();
     out->enable_android_surface_control =
         prefs.enable_android_surface_control();
     out->enable_gpu_service_logging = prefs.enable_gpu_service_logging();
@@ -165,8 +199,6 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
       return false;
     out->enable_vulkan_protected_memory =
         prefs.enable_vulkan_protected_memory();
-    out->enforce_vulkan_protected_memory =
-        prefs.enforce_vulkan_protected_memory();
     out->disable_vulkan_surface = prefs.disable_vulkan_surface();
     out->disable_vulkan_fallback_to_gl_for_testing =
         prefs.disable_vulkan_fallback_to_gl_for_testing();
@@ -176,8 +208,11 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     out->enable_gpu_benchmarking_extension =
         prefs.enable_gpu_benchmarking_extension();
     out->enable_webgpu = prefs.enable_webgpu();
-    out->enable_dawn_backend_validation =
-        prefs.enable_dawn_backend_validation();
+    out->enable_webgpu_spirv = prefs.enable_webgpu_spirv();
+    out->force_webgpu_compat = prefs.force_webgpu_compat();
+    if (!prefs.ReadEnableDawnBackendValidation(
+            &out->enable_dawn_backend_validation))
+      return false;
     if (!prefs.ReadEnabledDawnFeaturesList(&out->enabled_dawn_features_list))
       return false;
     if (!prefs.ReadDisabledDawnFeaturesList(&out->disabled_dawn_features_list))
@@ -195,7 +230,7 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     out->enable_native_gpu_memory_buffers =
         prefs.enable_native_gpu_memory_buffers();
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
     out->enable_chromeos_direct_video_decoder =
         prefs.enable_chromeos_direct_video_decoder();
 #endif
@@ -294,9 +329,6 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   static bool gl_shader_interm_output(const gpu::GpuPreferences& prefs) {
     return prefs.gl_shader_interm_output;
   }
-  static bool emulate_shader_precision(const gpu::GpuPreferences& prefs) {
-    return prefs.emulate_shader_precision;
-  }
   static bool enable_android_surface_control(const gpu::GpuPreferences& prefs) {
     return prefs.enable_android_surface_control;
   }
@@ -342,10 +374,6 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   static bool enable_vulkan_protected_memory(const gpu::GpuPreferences& prefs) {
     return prefs.enable_vulkan_protected_memory;
   }
-  static bool enforce_vulkan_protected_memory(
-      const gpu::GpuPreferences& prefs) {
-    return prefs.enforce_vulkan_protected_memory;
-  }
   static bool disable_vulkan_surface(const gpu::GpuPreferences& prefs) {
     return prefs.disable_vulkan_surface;
   }
@@ -370,7 +398,14 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   static bool enable_webgpu(const gpu::GpuPreferences& prefs) {
     return prefs.enable_webgpu;
   }
-  static bool enable_dawn_backend_validation(const gpu::GpuPreferences& prefs) {
+  static bool enable_webgpu_spirv(const gpu::GpuPreferences& prefs) {
+    return prefs.enable_webgpu_spirv;
+  }
+  static bool force_webgpu_compat(const gpu::GpuPreferences& prefs) {
+    return prefs.force_webgpu_compat;
+  }
+  static gpu::DawnBackendValidationLevel enable_dawn_backend_validation(
+      const gpu::GpuPreferences& prefs) {
     return prefs.enable_dawn_backend_validation;
   }
   static const std::vector<std::string>& enabled_dawn_features_list(
@@ -397,7 +432,7 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
       const gpu::GpuPreferences& prefs) {
     return prefs.enable_native_gpu_memory_buffers;
   }
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
   static bool enable_chromeos_direct_video_decoder(
       const gpu::GpuPreferences& prefs) {
     return prefs.enable_chromeos_direct_video_decoder;

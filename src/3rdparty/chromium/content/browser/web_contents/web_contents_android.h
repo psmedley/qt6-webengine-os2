@@ -19,6 +19,10 @@
 
 class GURL;
 
+namespace ui {
+struct AXTreeUpdate;
+}
+
 namespace content {
 
 class WebContentsImpl;
@@ -183,7 +187,8 @@ class CONTENT_EXPORT WebContentsAndroid {
 
   void RequestAccessibilitySnapshot(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& view_structure_root,
+      const base::android::JavaParamRef<jobject>& view_structure_builder,
       const base::android::JavaParamRef<jobject>& callback);
 
   base::android::ScopedJavaLocalRef<jstring> GetEncoding(
@@ -202,7 +207,7 @@ class CONTENT_EXPORT WebContentsAndroid {
 
   int DownloadImage(JNIEnv* env,
                     const base::android::JavaParamRef<jobject>& obj,
-                    const base::android::JavaParamRef<jstring>& url,
+                    const base::android::JavaParamRef<jobject>& url,
                     jboolean is_fav_icon,
                     jint max_bitmap_size,
                     jboolean bypass_cache,
@@ -294,6 +299,12 @@ class CONTENT_EXPORT WebContentsAndroid {
   void SelectWordAroundCaretAck(bool did_select,
                                 int start_adjust,
                                 int end_adjust);
+  // Walks over the AXTreeUpdate and creates a light weight snapshot.
+  void AXTreeSnapshotCallback(
+      const base::android::JavaRef<jobject>& view_structure_root,
+      const base::android::JavaRef<jobject>& view_structure_builder,
+      const base::android::JavaRef<jobject>& callback,
+      const ui::AXTreeUpdate& result);
 
   WebContentsImpl* web_contents_;
 

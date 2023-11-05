@@ -7,26 +7,30 @@
 #include <cstdint>
 #include <initializer_list>
 #include <utility>
-#include <vector>
 
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/optional.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/thread_pool.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "components/reporting/compression/compression_module.h"
+#include "components/reporting/compression/test_compression_module.h"
 #include "components/reporting/encryption/test_encryption_module.h"
 #include "components/reporting/proto/record.pb.h"
 #include "components/reporting/storage/resources/resource_interface.h"
 #include "components/reporting/storage/storage_configuration.h"
 #include "components/reporting/util/status.h"
 #include "components/reporting/util/statusor.h"
+#include "components/reporting/util/test_support_callbacks.h"
 #include "crypto/sha2.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 using ::testing::_;
 using ::testing::Between;
@@ -45,42 +49,6 @@ constexpr size_t kTotalQueueStarts = 4;
 constexpr size_t kTotalWritesPerStart = 16;
 constexpr char kDataPrefix[] = "Rec";
 
-// Usage (in tests only):
-//
-//   TestEvent<ResType> e;
-//   ... Do some async work passing e.cb() as a completion callback of
-//       base::OnceCallback<void(ResType* res)> type which also may perform some
-//       other action specified by |done| callback provided by the caller.
-//   ... = e.result();  // Will wait for e.cb() to be called and return the
-//       collected result.
-//
-template <typename ResType>
-class TestEvent {
- public:
-  TestEvent() : run_loop_(std::make_unique<base::RunLoop>()) {}
-  ~TestEvent() { EXPECT_FALSE(run_loop_->running()) << "Not responded"; }
-  TestEvent(const TestEvent& other) = delete;
-  TestEvent& operator=(const TestEvent& other) = delete;
-  ResType result() {
-    run_loop_->Run();
-    return std::forward<ResType>(result_);
-  }
-
-  // Completion callback to hand over to the processing method.
-  base::OnceCallback<void(ResType res)> cb() {
-    return base::BindOnce(
-        [](base::RunLoop* run_loop, ResType* result, ResType res) {
-          *result = std::forward<ResType>(res);
-          run_loop->Quit();
-        },
-        base::Unretained(run_loop_.get()), base::Unretained(&result_));
-  }
-
- private:
-  std::unique_ptr<base::RunLoop> run_loop_;
-  ResType result_;
-};
-
 class TestUploadClient : public UploaderInterface {
  public:
   // Mapping of <generation id, sequencing id> to matching record digest.
@@ -89,7 +57,7 @@ class TestUploadClient : public UploaderInterface {
   // generation is uploaded without last record digest.
   using LastRecordDigestMap = base::flat_map<
       std::pair<int64_t /*generation id */, int64_t /*sequencing id*/>,
-      base::Optional<std::string /*digest*/>>;
+      absl::optional<std::string /*digest*/>>;
 
   explicit TestUploadClient(LastRecordDigestMap* last_record_digest_map)
       : last_record_digest_map_(last_record_digest_map) {}
@@ -148,7 +116,7 @@ class TestUploadClient : public UploaderInterface {
   void Completed(Status status) override { ASSERT_OK(status); }
 
  private:
-  base::Optional<int64_t> generation_id_;
+  absl::optional<int64_t> generation_id_;
   LastRecordDigestMap* const last_record_digest_map_;
 
   Sequence test_upload_sequence_;
@@ -157,6 +125,10 @@ class TestUploadClient : public UploaderInterface {
 class StorageQueueStressTest : public ::testing::TestWithParam<size_t> {
  public:
   void SetUp() override {
+    // Enable compression.
+    scoped_feature_list_.InitFromCommandLine(
+        {CompressionModule::kCompressReportingFeature}, {});
+
     ASSERT_TRUE(location_.CreateUniqueTempDir());
     options_.set_directory(base::FilePath(location_.GetPath()))
         .set_single_file_size(GetParam());
@@ -175,21 +147,34 @@ class StorageQueueStressTest : public ::testing::TestWithParam<size_t> {
     ASSERT_FALSE(storage_queue_) << "StorageQueue already assigned";
     test_encryption_module_ =
         base::MakeRefCounted<test::TestEncryptionModule>();
-    TestEvent<StatusOr<scoped_refptr<StorageQueue>>> e;
+    test_compression_module_ =
+        base::MakeRefCounted<test::TestCompressionModule>();
+    test::TestEvent<Status> key_update_event;
+    test_encryption_module_->UpdateAsymmetricKey("DUMMY KEY", 0,
+                                                 key_update_event.cb());
+    ASSERT_OK(key_update_event.result());
+    test::TestEvent<StatusOr<scoped_refptr<StorageQueue>>>
+        storage_queue_create_event;
     StorageQueue::Create(
         options,
-        base::BindRepeating(&StorageQueueStressTest::BuildTestUploader,
+        base::BindRepeating(&StorageQueueStressTest::AsyncStartTestUploader,
                             base::Unretained(this)),
-        test_encryption_module_, e.cb());
-    StatusOr<scoped_refptr<StorageQueue>> storage_queue_result = e.result();
+        test_encryption_module_, test_compression_module_,
+        storage_queue_create_event.cb());
+    StatusOr<scoped_refptr<StorageQueue>> storage_queue_result =
+        storage_queue_create_event.result();
     ASSERT_OK(storage_queue_result) << "Failed to create StorageQueue, error="
                                     << storage_queue_result.status();
     storage_queue_ = std::move(storage_queue_result.ValueOrDie());
   }
 
   void ResetTestStorageQueue() {
+    // Let everything ongoing to finish.
     task_environment_.RunUntilIdle();
     storage_queue_.reset();
+    // StorageQueue is destructed on a thread,
+    // so we need to wait for it to destruct.
+    task_environment_.RunUntilIdle();
   }
 
   QueueOptions BuildStorageQueueOptionsImmediate() const {
@@ -207,8 +192,10 @@ class StorageQueueStressTest : public ::testing::TestWithParam<size_t> {
     return BuildStorageQueueOptionsPeriodic(base::TimeDelta::Max());
   }
 
-  StatusOr<std::unique_ptr<UploaderInterface>> BuildTestUploader() {
-    return std::make_unique<TestUploadClient>(&last_record_digest_map_);
+  void AsyncStartTestUploader(
+      UploaderInterface::UploaderInterfaceResultCb start_uploader_cb) {
+    std::move(start_uploader_cb)
+        .Run(std::make_unique<TestUploadClient>(&last_record_digest_map_));
   }
 
   void WriteStringAsync(base::StringPiece data,
@@ -221,58 +208,27 @@ class StorageQueueStressTest : public ::testing::TestWithParam<size_t> {
     storage_queue_->Write(std::move(record), std::move(cb));
   }
 
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
+
+  base::test::ScopedFeatureList scoped_feature_list_;
   base::ScopedTempDir location_;
   StorageOptions options_;
   scoped_refptr<test::TestEncryptionModule> test_encryption_module_;
+  scoped_refptr<test::TestCompressionModule> test_compression_module_;
   scoped_refptr<StorageQueue> storage_queue_;
 
   // Test-wide global mapping of <generation id, sequencing id> to record
   // digest. Serves all TestUploadClients created by test fixture.
   TestUploadClient::LastRecordDigestMap last_record_digest_map_;
-
-  base::test::TaskEnvironment task_environment_{
-      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
-};
-
-class TestCallbackWaiter {
- public:
-  TestCallbackWaiter() : runner_(base::ThreadTaskRunnerHandle::Get()) {}
-  TestCallbackWaiter(const TestCallbackWaiter& other) = delete;
-  TestCallbackWaiter& operator=(const TestCallbackWaiter& other) = delete;
-
-  void Attach() {
-    const size_t old_counter = counter_.fetch_add(1);
-    DCHECK_GT(old_counter, 0u) << "Cannot attach when already being released";
-  }
-
-  void Signal() {
-    const size_t old_counter = counter_.fetch_sub(1);
-    DCHECK_GT(old_counter, 0u) << "Already being released";
-    if (old_counter > 1u) {
-      // There are more owners.
-      return;
-    }
-    // Dropping the last owner.
-    run_loop_.Quit();
-  }
-
-  void Wait() {
-    Signal();  // Rid of the constructor's ownership.
-    run_loop_.Run();
-  }
-
- private:
-  std::atomic<size_t> counter_{1};  // Owned by constructor.
-  const scoped_refptr<base::SingleThreadTaskRunner> runner_;
-  base::RunLoop run_loop_;
 };
 
 TEST_P(StorageQueueStressTest,
        WriteIntoNewStorageQueueReopenWriteMoreAndUpload) {
   for (size_t iStart = 0; iStart < kTotalQueueStarts; ++iStart) {
-    TestCallbackWaiter write_waiter;
+    test::TestCallbackWaiter write_waiter;
     base::RepeatingCallback<void(Status)> cb = base::BindRepeating(
-        [](TestCallbackWaiter* waiter, Status status) {
+        [](test::TestCallbackWaiter* waiter, Status status) {
           EXPECT_OK(status);
           waiter->Signal();
         },

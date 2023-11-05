@@ -5,6 +5,7 @@
 #include "media/renderers/video_renderer_impl.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -161,7 +162,8 @@ void VideoRendererImpl::Initialize(
     const TimeSource::WallClockTimeCB& wall_clock_time_cb,
     PipelineStatusCallback init_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  TRACE_EVENT_ASYNC_BEGIN0("media", "VideoRendererImpl::Initialize", this);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("media", "VideoRendererImpl::Initialize",
+                                    TRACE_ID_LOCAL(this));
 
   base::AutoLock auto_lock(lock_);
   DCHECK(stream);
@@ -174,9 +176,9 @@ void VideoRendererImpl::Initialize(
 
   demuxer_stream_ = stream;
 
-  video_decoder_stream_.reset(new VideoDecoderStream(
+  video_decoder_stream_ = std::make_unique<VideoDecoderStream>(
       std::make_unique<VideoDecoderStream::StreamTraits>(media_log_),
-      task_runner_, create_video_decoders_cb_, media_log_));
+      task_runner_, create_video_decoders_cb_, media_log_);
   video_decoder_stream_->set_config_change_observer(base::BindRepeating(
       &VideoRendererImpl::OnConfigChange, weak_factory_.GetWeakPtr()));
   if (gpu_memory_buffer_pool_) {
@@ -221,7 +223,7 @@ void VideoRendererImpl::Initialize(
 scoped_refptr<VideoFrame> VideoRendererImpl::Render(
     base::TimeTicks deadline_min,
     base::TimeTicks deadline_max,
-    bool background_rendering) {
+    RenderingMode rendering_mode) {
   TRACE_EVENT_BEGIN1("media", "VideoRendererImpl::Render", "id",
                      media_log_->id());
   base::AutoLock auto_lock(lock_);
@@ -235,6 +237,9 @@ scoped_refptr<VideoFrame> VideoRendererImpl::Render(
   // Due to how the |algorithm_| holds frames, this should never be null if
   // we've had a proper startup sequence.
   DCHECK(result);
+
+  const bool background_rendering =
+      rendering_mode == RenderingMode::kBackground;
 
   // Declare HAVE_NOTHING if we reach a state where we can't progress playback
   // any further.  We don't want to do this if we've already done so, reached
@@ -300,7 +305,8 @@ void VideoRendererImpl::OnVideoDecoderStreamInitialized(bool success) {
   // frames yet.
   state_ = kFlushed;
 
-  algorithm_.reset(new VideoRendererAlgorithm(wall_clock_time_cb_, media_log_));
+  algorithm_ =
+      std::make_unique<VideoRendererAlgorithm>(wall_clock_time_cb_, media_log_);
   if (!drop_frames_)
     algorithm_->disable_frame_dropping();
 
@@ -309,14 +315,16 @@ void VideoRendererImpl::OnVideoDecoderStreamInitialized(bool success) {
 
 void VideoRendererImpl::FinishInitialization(PipelineStatus status) {
   DCHECK(init_cb_);
-  TRACE_EVENT_ASYNC_END1("media", "VideoRendererImpl::Initialize", this,
-                         "status", PipelineStatusToString(status));
+  TRACE_EVENT_NESTABLE_ASYNC_END1("media", "VideoRendererImpl::Initialize",
+                                  TRACE_ID_LOCAL(this), "status",
+                                  PipelineStatusToString(status));
   std::move(init_cb_).Run(status);
 }
 
 void VideoRendererImpl::FinishFlush() {
   DCHECK(flush_cb_);
-  TRACE_EVENT_ASYNC_END0("media", "VideoRendererImpl::Flush", this);
+  TRACE_EVENT_NESTABLE_ASYNC_END0("media", "VideoRendererImpl::Flush",
+                                  TRACE_ID_LOCAL(this));
   std::move(flush_cb_).Run();
 }
 
@@ -461,7 +469,7 @@ void VideoRendererImpl::OnTimeStopped() {
 }
 
 void VideoRendererImpl::SetLatencyHint(
-    base::Optional<base::TimeDelta> latency_hint) {
+    absl::optional<base::TimeDelta> latency_hint) {
   base::AutoLock auto_lock(lock_);
 
   latency_hint_ = latency_hint;
@@ -824,7 +832,7 @@ void VideoRendererImpl::ReportFrameRateIfNeeded_Locked() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   lock_.AssertAcquired();
 
-  base::Optional<int> current_fps = fps_estimator_.ComputeFPS();
+  absl::optional<int> current_fps = fps_estimator_.ComputeFPS();
   if (last_reported_fps_ && current_fps &&
       *last_reported_fps_ == *current_fps) {
     // Reported an FPS before, and it hasn't changed.

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -76,6 +77,9 @@ const char DefaultSearchManager::kCreatedByPolicy[] = "created_by_policy";
 const char DefaultSearchManager::kDisabledByPolicy[] = "disabled_by_policy";
 const char DefaultSearchManager::kCreatedFromPlayAPI[] =
     "created_from_play_api";
+const char DefaultSearchManager::kPreconnectToSearchUrl[] =
+    "preconnect_to_search_url";
+const char DefaultSearchManager::kIsActive[] = "is_active";
 
 DefaultSearchManager::DefaultSearchManager(
     PrefService* pref_service,
@@ -191,7 +195,7 @@ const TemplateURLData* DefaultSearchManager::GetFallbackSearchEngine() const {
 void DefaultSearchManager::SetUserSelectedDefaultSearchEngine(
     const TemplateURLData& data) {
   if (!pref_service_) {
-    prefs_default_search_.reset(new TemplateURLData(data));
+    prefs_default_search_ = std::make_unique<TemplateURLData>(data);
     MergePrefsDataWithPrepopulated();
     NotifyObserver();
     return;
@@ -288,7 +292,7 @@ void DefaultSearchManager::LoadDefaultSearchEngineFromPrefs() {
 
   const base::DictionaryValue* url_dict =
       pref_service_->GetDictionary(kDefaultSearchProviderDataPrefName);
-  if (url_dict->empty())
+  if (url_dict->DictEmpty())
     return;
 
   if (default_search_controlled_by_policy_) {

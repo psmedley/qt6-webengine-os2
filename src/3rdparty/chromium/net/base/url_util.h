@@ -12,7 +12,6 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -192,8 +191,8 @@ NET_EXPORT bool IsStandardSchemeWithNetworkHost(base::StringPiece scheme);
 // Extracts the unescaped username/password from |url|, saving the results
 // into |*username| and |*password|.
 NET_EXPORT_PRIVATE void GetIdentityFromURL(const GURL& url,
-                                           base::string16* username,
-                                           base::string16* password);
+                                           std::u16string* username,
+                                           std::u16string* password);
 
 // Returns true if the url's host is a Google server. This should only be used
 // for histograms and shouldn't be used to affect behavior.
@@ -202,10 +201,6 @@ NET_EXPORT_PRIVATE bool HasGoogleHost(const GURL& url);
 // Returns true if |host| is the hostname of a Google server. This should only
 // be used for histograms and shouldn't be used to affect behavior.
 NET_EXPORT_PRIVATE bool IsGoogleHost(base::StringPiece host);
-
-// This function tests |host| to see if its one used in the initial TLS 1.3
-// deployment. TLS connections to them form the basis of our comparisons.
-NET_EXPORT_PRIVATE bool IsTLS13ExperimentHost(base::StringPiece host);
 
 // This function tests |host| to see if it is of any local hostname form.
 // |host| is normalized before being tested.

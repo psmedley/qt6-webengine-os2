@@ -59,6 +59,9 @@ def tag_matches(tag, impl_version='trunk', client_version='trunk'):
   Raises:
     AssertionError if the tag is invalid.
   """
+  # 'All' is special cased to match anything.
+  if tag == 'all':
+    return True
   # Extract the three components from the tag.
   match = re.match(r'(client|impl)_([gl]te)_([0-9]+)', tag)
   assert match is not None, (
@@ -174,9 +177,9 @@ def main():
   executable_args = [
       'instrumentation',
       '--output-directory',
-      args.test_runner_outdir,
+      args.client_outdir,
       '--runtime-deps-path',
-      os.path.join(args.test_runner_outdir,
+      os.path.join(args.client_outdir,
                    ('gen.runtime/weblayer/browser/android/javatests/' +
                     'weblayer_instrumentation_test_apk.runtime_deps')),
       '--test-apk',

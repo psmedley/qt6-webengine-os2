@@ -7,6 +7,8 @@
 #include <memory>
 #include <utility>
 
+#include "base/callback_helpers.h"
+#include "base/trace_event/trace_event.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
@@ -18,6 +20,12 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_track_capabilities.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_track_constraints.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_photo_capabilities.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_point_2d.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_boolean_constrainbooleanparameters.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_boolean_constraindoublerange_double.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_constraindomstringparameters_string_stringsequence.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_constraindoublerange_double.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_constrainpoint2dparameters_point2dsequence.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -89,7 +97,6 @@ WebString ToString(MeteringMode value) {
   }
 }
 
-#ifdef USE_BLINK_V8_BINDING_NEW_IDL_DICTIONARY
 V8FillLightMode ToV8FillLightMode(FillLightMode value) {
   switch (value) {
     case FillLightMode::OFF:
@@ -100,18 +107,6 @@ V8FillLightMode ToV8FillLightMode(FillLightMode value) {
       return V8FillLightMode(V8FillLightMode::Enum::kFlash);
   }
 }
-#else
-String ToV8FillLightMode(FillLightMode value) {
-  switch (value) {
-    case FillLightMode::OFF:
-      return String::FromUTF8("off");
-    case FillLightMode::AUTO:
-      return String::FromUTF8("auto");
-    case FillLightMode::FLASH:
-      return String::FromUTF8("flash");
-  }
-}
-#endif
 
 WebString ToString(RedEyeReduction value) {
   switch (value) {
@@ -499,11 +494,12 @@ void ImageCapture::SetMediaTrackConstraints(
 
   // TODO(mcasas): support other Mode types beyond simple string i.e. the
   // equivalents of "sequence<DOMString>"" or "ConstrainDOMStringParameters".
-  settings->has_white_balance_mode = constraints->hasWhiteBalanceMode() &&
-                                     constraints->whiteBalanceMode().IsString();
+  settings->has_white_balance_mode =
+      constraints->hasWhiteBalanceMode() &&
+      constraints->whiteBalanceMode()->IsString();
   if (settings->has_white_balance_mode) {
     const auto white_balance_mode =
-        constraints->whiteBalanceMode().GetAsString();
+        constraints->whiteBalanceMode()->GetAsString();
     if (capabilities_->whiteBalanceMode().Find(white_balance_mode) ==
         kNotFound) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -515,9 +511,9 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->white_balance_mode = ParseMeteringMode(white_balance_mode);
   }
   settings->has_exposure_mode =
-      constraints->hasExposureMode() && constraints->exposureMode().IsString();
+      constraints->hasExposureMode() && constraints->exposureMode()->IsString();
   if (settings->has_exposure_mode) {
-    const auto exposure_mode = constraints->exposureMode().GetAsString();
+    const auto exposure_mode = constraints->exposureMode()->GetAsString();
     if (capabilities_->exposureMode().Find(exposure_mode) == kNotFound) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError, "Unsupported exposureMode."));
@@ -528,9 +524,9 @@ void ImageCapture::SetMediaTrackConstraints(
   }
 
   settings->has_focus_mode =
-      constraints->hasFocusMode() && constraints->focusMode().IsString();
+      constraints->hasFocusMode() && constraints->focusMode()->IsString();
   if (settings->has_focus_mode) {
-    const auto focus_mode = constraints->focusMode().GetAsString();
+    const auto focus_mode = constraints->focusMode()->GetAsString();
     if (capabilities_->focusMode().Find(focus_mode) == kNotFound) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError, "Unsupported focusMode."));
@@ -542,9 +538,11 @@ void ImageCapture::SetMediaTrackConstraints(
 
   // TODO(mcasas): support ConstrainPoint2DParameters.
   if (constraints->hasPointsOfInterest() &&
-      constraints->pointsOfInterest().IsPoint2DSequence()) {
+      constraints->pointsOfInterest()->IsPoint2DSequence()
+  ) {
     for (const auto& point :
-         constraints->pointsOfInterest().GetAsPoint2DSequence()) {
+         constraints->pointsOfInterest()->GetAsPoint2DSequence()
+    ) {
       auto mojo_point = media::mojom::blink::Point2D::New();
       mojo_point->x = point->x();
       mojo_point->y = point->y();
@@ -556,10 +554,10 @@ void ImageCapture::SetMediaTrackConstraints(
   // TODO(mcasas): support ConstrainDoubleRange where applicable.
   settings->has_exposure_compensation =
       constraints->hasExposureCompensation() &&
-      constraints->exposureCompensation().IsDouble();
+      constraints->exposureCompensation()->IsDouble();
   if (settings->has_exposure_compensation) {
     const auto exposure_compensation =
-        constraints->exposureCompensation().GetAsDouble();
+        constraints->exposureCompensation()->GetAsDouble();
     if (exposure_compensation < capabilities_->exposureCompensation()->min() ||
         exposure_compensation > capabilities_->exposureCompensation()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -573,9 +571,9 @@ void ImageCapture::SetMediaTrackConstraints(
   }
 
   settings->has_exposure_time =
-      constraints->hasExposureTime() && constraints->exposureTime().IsDouble();
+      constraints->hasExposureTime() && constraints->exposureTime()->IsDouble();
   if (settings->has_exposure_time) {
-    const auto exposure_time = constraints->exposureTime().GetAsDouble();
+    const auto exposure_time = constraints->exposureTime()->GetAsDouble();
     if (exposure_time < capabilities_->exposureTime()->min() ||
         exposure_time > capabilities_->exposureTime()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -587,10 +585,10 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->exposure_time = exposure_time;
   }
   settings->has_color_temperature = constraints->hasColorTemperature() &&
-                                    constraints->colorTemperature().IsDouble();
+                                    constraints->colorTemperature()->IsDouble();
   if (settings->has_color_temperature) {
     const auto color_temperature =
-        constraints->colorTemperature().GetAsDouble();
+        constraints->colorTemperature()->GetAsDouble();
     if (color_temperature < capabilities_->colorTemperature()->min() ||
         color_temperature > capabilities_->colorTemperature()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -601,9 +599,9 @@ void ImageCapture::SetMediaTrackConstraints(
     temp_constraints->setColorTemperature(constraints->colorTemperature());
     settings->color_temperature = color_temperature;
   }
-  settings->has_iso = constraints->hasIso() && constraints->iso().IsDouble();
+  settings->has_iso = constraints->hasIso() && constraints->iso()->IsDouble();
   if (settings->has_iso) {
-    const auto iso = constraints->iso().GetAsDouble();
+    const auto iso = constraints->iso()->GetAsDouble();
     if (iso < capabilities_->iso()->min() ||
         iso > capabilities_->iso()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -615,9 +613,9 @@ void ImageCapture::SetMediaTrackConstraints(
   }
 
   settings->has_brightness =
-      constraints->hasBrightness() && constraints->brightness().IsDouble();
+      constraints->hasBrightness() && constraints->brightness()->IsDouble();
   if (settings->has_brightness) {
-    const auto brightness = constraints->brightness().GetAsDouble();
+    const auto brightness = constraints->brightness()->GetAsDouble();
     if (brightness < capabilities_->brightness()->min() ||
         brightness > capabilities_->brightness()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -629,9 +627,9 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->brightness = brightness;
   }
   settings->has_contrast =
-      constraints->hasContrast() && constraints->contrast().IsDouble();
+      constraints->hasContrast() && constraints->contrast()->IsDouble();
   if (settings->has_contrast) {
-    const auto contrast = constraints->contrast().GetAsDouble();
+    const auto contrast = constraints->contrast()->GetAsDouble();
     if (contrast < capabilities_->contrast()->min() ||
         contrast > capabilities_->contrast()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -643,9 +641,9 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->contrast = contrast;
   }
   settings->has_saturation =
-      constraints->hasSaturation() && constraints->saturation().IsDouble();
+      constraints->hasSaturation() && constraints->saturation()->IsDouble();
   if (settings->has_saturation) {
-    const auto saturation = constraints->saturation().GetAsDouble();
+    const auto saturation = constraints->saturation()->GetAsDouble();
     if (saturation < capabilities_->saturation()->min() ||
         saturation > capabilities_->saturation()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -657,9 +655,9 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->saturation = saturation;
   }
   settings->has_sharpness =
-      constraints->hasSharpness() && constraints->sharpness().IsDouble();
+      constraints->hasSharpness() && constraints->sharpness()->IsDouble();
   if (settings->has_sharpness) {
-    const auto sharpness = constraints->sharpness().GetAsDouble();
+    const auto sharpness = constraints->sharpness()->GetAsDouble();
     if (sharpness < capabilities_->sharpness()->min() ||
         sharpness > capabilities_->sharpness()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -672,9 +670,9 @@ void ImageCapture::SetMediaTrackConstraints(
   }
 
   settings->has_focus_distance = constraints->hasFocusDistance() &&
-                                 constraints->focusDistance().IsDouble();
+                                 constraints->focusDistance()->IsDouble();
   if (settings->has_focus_distance) {
-    const auto focus_distance = constraints->focusDistance().GetAsDouble();
+    const auto focus_distance = constraints->focusDistance()->GetAsDouble();
     if (focus_distance < capabilities_->focusDistance()->min() ||
         focus_distance > capabilities_->focusDistance()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -686,14 +684,14 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->focus_distance = focus_distance;
   }
 
-  settings->has_pan = constraints->hasPan() && constraints->pan().IsDouble();
+  settings->has_pan = constraints->hasPan() && constraints->pan()->IsDouble();
   if (settings->has_pan) {
     if (!IsPageVisible()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kSecurityError, "the page is not visible"));
       return;
     }
-    const auto pan = constraints->pan().GetAsDouble();
+    const auto pan = constraints->pan()->GetAsDouble();
     if (pan < capabilities_->pan()->min() ||
         pan > capabilities_->pan()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -704,14 +702,15 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->pan = pan;
   }
 
-  settings->has_tilt = constraints->hasTilt() && constraints->tilt().IsDouble();
+  settings->has_tilt =
+      constraints->hasTilt() && constraints->tilt()->IsDouble();
   if (settings->has_tilt) {
     if (!IsPageVisible()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kSecurityError, "the page is not visible"));
       return;
     }
-    const auto tilt = constraints->tilt().GetAsDouble();
+    const auto tilt = constraints->tilt()->GetAsDouble();
     if (tilt < capabilities_->tilt()->min() ||
         tilt > capabilities_->tilt()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -722,14 +721,15 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->tilt = tilt;
   }
 
-  settings->has_zoom = constraints->hasZoom() && constraints->zoom().IsDouble();
+  settings->has_zoom =
+      constraints->hasZoom() && constraints->zoom()->IsDouble();
   if (settings->has_zoom) {
     if (!IsPageVisible()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kSecurityError, "the page is not visible"));
       return;
     }
-    const auto zoom = constraints->zoom().GetAsDouble();
+    const auto zoom = constraints->zoom()->GetAsDouble();
     if (zoom < capabilities_->zoom()->min() ||
         zoom > capabilities_->zoom()->max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -742,9 +742,9 @@ void ImageCapture::SetMediaTrackConstraints(
 
   // TODO(mcasas): support ConstrainBooleanParameters where applicable.
   settings->has_torch =
-      constraints->hasTorch() && constraints->torch().IsBoolean();
+      constraints->hasTorch() && constraints->torch()->IsBoolean();
   if (settings->has_torch) {
-    const auto torch = constraints->torch().GetAsBoolean();
+    const auto torch = constraints->torch()->GetAsBoolean();
     if (torch && !capabilities_->torch()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError, "torch not supported"));
@@ -772,9 +772,9 @@ void ImageCapture::SetPanTiltZoomSettingsFromTrack(
   auto* video_track = MediaStreamVideoTrack::From(stream_track_->Component());
   DCHECK(video_track);
 
-  base::Optional<double> pan = video_track->pan();
-  base::Optional<double> tilt = video_track->tilt();
-  base::Optional<double> zoom = video_track->zoom();
+  absl::optional<double> pan = video_track->pan();
+  absl::optional<double> tilt = video_track->tilt();
+  absl::optional<double> zoom = video_track->zoom();
 
   const bool ptz_requested =
       pan.has_value() || tilt.has_value() || zoom.has_value();
@@ -990,11 +990,7 @@ void ImageCapture::OnMojoGetPhotoState(
         ToMediaSettingsRange(*photo_state->width));
   }
 
-#ifdef USE_BLINK_V8_BINDING_NEW_IDL_DICTIONARY
   WTF::Vector<V8FillLightMode> fill_light_mode;
-#else
-  WTF::Vector<WTF::String> fill_light_mode;
-#endif
   for (const auto& mode : photo_state->fill_light_mode) {
     fill_light_mode.push_back(ToV8FillLightMode(mode));
   }

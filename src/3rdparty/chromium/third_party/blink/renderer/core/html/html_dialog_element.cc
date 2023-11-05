@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/core/html/html_dialog_element.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_focus_options.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
@@ -109,7 +110,8 @@ static void InertSubtreesChanged(Document& document) {
 HTMLDialogElement::HTMLDialogElement(Document& document)
     : HTMLElement(html_names::kDialogTag, document),
       is_modal_(false),
-      return_value_("") {
+      return_value_(""),
+      previously_focused_element_(nullptr) {
   UseCounter::Count(document, WebFeature::kDialogElement);
 }
 
@@ -130,6 +132,17 @@ void HTMLDialogElement::close(const String& return_value) {
     return_value_ = return_value;
 
   ScheduleCloseEvent();
+
+  // We should call focus() last since it will fire a focus event which could
+  // modify this element.
+  if (RuntimeEnabledFeatures::DialogFocusNewSpecBehaviorEnabled() &&
+      previously_focused_element_) {
+    FocusOptions* focus_options = FocusOptions::Create();
+    focus_options->setPreventScroll(true);
+    Element* previously_focused_element = previously_focused_element_;
+    previously_focused_element_ = nullptr;
+    previously_focused_element->focus(focus_options);
+  }
 }
 
 void HTMLDialogElement::SetIsModal(bool is_modal) {
@@ -150,11 +163,15 @@ void HTMLDialogElement::show() {
   SetBooleanAttribute(html_names::kOpenAttr, true);
 
   // Showing a <dialog> should hide all open popups.
-  GetDocument().HideAllPopupsUntil(nullptr);
+  if (RuntimeEnabledFeatures::HTMLPopupElementEnabled()) {
+    GetDocument().HideAllPopupsUntil(nullptr);
+  }
 
   // The layout must be updated here because setFocusForDialog calls
   // Element::isFocusable, which requires an up-to-date layout.
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
+
+  previously_focused_element_ = GetDocument().FocusedElement();
 
   SetFocusForDialog(this);
 }
@@ -180,7 +197,9 @@ void HTMLDialogElement::showModal(ExceptionState& exception_state) {
   }
 
   // Showing a <dialog> should hide all open popups.
-  GetDocument().HideAllPopupsUntil(nullptr);
+  if (RuntimeEnabledFeatures::HTMLPopupElementEnabled()) {
+    GetDocument().HideAllPopupsUntil(nullptr);
+  }
 
   GetDocument().AddToTopLayer(this);
   SetBooleanAttribute(html_names::kOpenAttr, true);
@@ -193,12 +212,15 @@ void HTMLDialogElement::showModal(ExceptionState& exception_state) {
   // is thrown away.
   InertSubtreesChanged(GetDocument());
 
+  previously_focused_element_ = GetDocument().FocusedElement();
+
   SetFocusForDialog(this);
 }
 
 void HTMLDialogElement::RemovedFrom(ContainerNode& insertion_point) {
   HTMLElement::RemovedFrom(insertion_point);
   InertSubtreesChanged(GetDocument());
+  SetIsModal(false);
 }
 
 void HTMLDialogElement::DefaultEventHandler(Event& event) {
@@ -208,6 +230,11 @@ void HTMLDialogElement::DefaultEventHandler(Event& event) {
     return;
   }
   HTMLElement::DefaultEventHandler(event);
+}
+
+void HTMLDialogElement::Trace(Visitor* visitor) const {
+  visitor->Trace(previously_focused_element_);
+  HTMLElement::Trace(visitor);
 }
 
 }  // namespace blink

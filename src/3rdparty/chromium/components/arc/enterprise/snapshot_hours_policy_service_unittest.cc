@@ -9,7 +9,6 @@
 
 #include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "base/values.h"
@@ -20,6 +19,7 @@
 #include "components/user_manager/scoped_user_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace arc {
 namespace data_snapshotd {
@@ -27,6 +27,7 @@ namespace data_snapshotd {
 namespace {
 
 constexpr char kPublicAccountEmail[] = "public-session-account@localhost";
+constexpr char kUserAccountEmail[] = "regular-user-account@localhost";
 
 // DeviceArcDataSnapshotHours policy with one correct interval.
 constexpr char kJsonPolicy[] =
@@ -34,11 +35,11 @@ constexpr char kJsonPolicy[] =
     "\"intervals\": ["
     "{"
     "\"start\": {"
-    "\"day_of_week\": 1,"
+    "\"day_of_week\": \"MONDAY\","
     "\"time\": 1284000"
     "},"
     "\"end\": {"
-    "\"day_of_week\": 1,"
+    "\"day_of_week\": \"MONDAY\","
     "\"time\": 21720000"
     "}"
     "}"
@@ -52,11 +53,11 @@ constexpr char kJsonPolicyNoTimezone[] =
     "\"intervals\": ["
     "{"
     "\"start\": {"
-    "\"day_of_week\": 1,"
+    "\"day_of_week\": \"MONDAY\","
     "\"time\": 1284000"
     "},"
     "\"end\": {"
-    "\"day_of_week\": 1,"
+    "\"day_of_week\": \"MONDAY\","
     "\"time\": 21720000"
     "}"
     "}"
@@ -69,11 +70,11 @@ constexpr char kJsonPolicyIncorrectIntervals[] =
     "\"intervals\": ["
     "{"
     "\"start\": {"
-    "\"day_of_week\": 1,"
+    "\"day_of_week\": \"MONDAY\","
     "\"time\": 1284000"
     "},"
     "\"end\": {"
-    "\"day_of_week\": 0,"
+    "\"day_of_week\": \"UNSPECIFIED\","
     "\"time\": 21720000"
     "}"
     "}"
@@ -101,11 +102,11 @@ constexpr char kJsonPolicyWrongOffset[] =
     "\"intervals\": ["
     "{"
     "\"start\": {"
-    "\"day_of_week\": 1,"
+    "\"day_of_week\": \"MONDAY\","
     "\"time\": 1284000"
     "},"
     "\"end\": {"
-    "\"day_of_week\": 1,"
+    "\"day_of_week\": \"MONDAY\","
     "\"time\": 21720000"
     "}"
     "}"
@@ -146,14 +147,16 @@ class SnapshotHoursPolicyServiceTest
 
   void SetUp() override {
     arc::prefs::RegisterLocalStatePrefs(local_state_.registry());
-    policy_service_ =
-        std::make_unique<SnapshotHoursPolicyService>(local_state());
-    observer_ = std::make_unique<FakeObserver>();
-    policy_service()->AddObserver(observer_.get());
 
     fake_user_manager_ = new user_manager::FakeUserManager();
     scoped_user_manager_ = std::make_unique<user_manager::ScopedUserManager>(
         base::WrapUnique(fake_user_manager_));
+    fake_user_manager_->set_local_state(local_state());
+
+    policy_service_ =
+        std::make_unique<SnapshotHoursPolicyService>(local_state());
+    observer_ = std::make_unique<FakeObserver>();
+    policy_service()->AddObserver(observer_.get());
   }
 
   void TearDown() override {
@@ -183,9 +186,14 @@ class SnapshotHoursPolicyServiceTest
 
   // Enable feature and check.
   void EnableSnapshot(int enabled_calls_num = 1) {
-    base::Optional<base::Value> policy = base::JSONReader::Read(kJsonPolicy);
+    auto account_id = AccountId::FromUserEmail(kPublicAccountEmail);
+    EXPECT_TRUE(fake_user_manager_->AddPublicAccountUser(account_id));
+    policy_service()->LocalStateChanged(user_manager());
+
+    absl::optional<base::Value> policy = base::JSONReader::Read(kJsonPolicy);
     EXPECT_TRUE(policy.has_value());
     local_state()->Set(arc::prefs::kArcSnapshotHours, policy.value());
+
     EnsureSnapshotEnabled(enabled_calls_num);
   }
 
@@ -202,9 +210,28 @@ class SnapshotHoursPolicyServiceTest
 
   void LoginAsPublicSession() {
     auto account_id = AccountId::FromUserEmail(kPublicAccountEmail);
-    user_manager()->AddPublicAccountUser(account_id);
-    user_manager()->UserLoggedIn(account_id, account_id.GetUserEmail(), false,
+    const auto* user = fake_user_manager_->AddPublicAccountUser(account_id);
+    user_manager()->UserLoggedIn(account_id, user->username_hash(), false,
                                  false);
+    user_manager()->SwitchActiveUser(account_id);
+    EXPECT_EQ(user_manager()->GetActiveUser()->GetAccountId(), account_id);
+    policy_service()->LocalStateChanged(user_manager());
+  }
+
+  void RemovePublicSession() {
+    auto account_id = AccountId::FromUserEmail(kPublicAccountEmail);
+    user_manager()->RemoveUserFromList(account_id);
+    policy_service()->LocalStateChanged(user_manager());
+  }
+
+  void LoginAsRegularUser() {
+    auto account_id = AccountId::FromUserEmail(kUserAccountEmail);
+    const auto* user = user_manager()->AddUser(account_id);
+    user_manager()->UserLoggedIn(account_id, user->username_hash(), false,
+                                 false);
+    user_manager()->SwitchActiveUser(account_id);
+    EXPECT_EQ(user_manager()->GetActiveUser()->GetAccountId(), account_id);
+    policy_service()->LocalStateChanged(user_manager());
   }
 
   SnapshotHoursPolicyService* policy_service() { return policy_service_.get(); }
@@ -228,6 +255,15 @@ TEST_F(SnapshotHoursPolicyServiceTest, Disabled) {
   EnsureSnapshotDisabled();
 }
 
+// Test that the feature is disabled if MGS is not configured.
+TEST_F(SnapshotHoursPolicyServiceTest, MgsIsNotConfigured) {
+  EnableSnapshot();
+
+  RemovePublicSession();
+
+  EnsureSnapshotDisabled(1 /* disabled_calls_num */);
+}
+
 TEST_F(SnapshotHoursPolicyServiceTest, OneIntervalEnabled) {
   EnableSnapshot();
 }
@@ -236,7 +272,7 @@ TEST_F(SnapshotHoursPolicyServiceTest, DoubleDisable) {
   EnableSnapshot();
 
   {
-    base::Optional<base::Value> policy_value =
+    absl::optional<base::Value> policy_value =
         base::JSONReader::Read(kJsonPolicyEmptyIntervals);
     EXPECT_TRUE(policy_value.has_value());
     local_state()->Set(arc::prefs::kArcSnapshotHours, policy_value.value());
@@ -246,7 +282,7 @@ TEST_F(SnapshotHoursPolicyServiceTest, DoubleDisable) {
 
   {
     // User a different JSON to ensure the policy value is updated.
-    base::Optional<base::Value> policy_value =
+    absl::optional<base::Value> policy_value =
         base::JSONReader::Read(kJsonPolicyNoIntervals);
     EXPECT_TRUE(policy_value.has_value());
     local_state()->Set(arc::prefs::kArcSnapshotHours, policy_value.value());
@@ -285,7 +321,7 @@ TEST_F(SnapshotHoursPolicyServiceTest, InsideInterval) {
 
   // Disable snapshots.
   {
-    base::Optional<base::Value> policy_value =
+    absl::optional<base::Value> policy_value =
         base::JSONReader::Read(kJsonPolicyNoIntervals);
     EXPECT_TRUE(policy_value.has_value());
     local_state()->Set(arc::prefs::kArcSnapshotHours, policy_value.value());
@@ -304,6 +340,7 @@ TEST_F(SnapshotHoursPolicyServiceTest, InsideInterval) {
 TEST_F(SnapshotHoursPolicyServiceTest, DisableByUserPolicyForUser) {
   EnableSnapshot();
 
+  LoginAsRegularUser();
   TestingPrefServiceSimple profile_prefs;
   arc::prefs::RegisterProfilePrefs(profile_prefs.registry());
   profile_prefs.SetBoolean(arc::prefs::kArcEnabled, false);
@@ -330,7 +367,7 @@ TEST_F(SnapshotHoursPolicyServiceTest, DisableByUserPolicyForMGS) {
 TEST_P(SnapshotHoursPolicyServiceTest, DisabledByPolicy) {
   EnableSnapshot();
 
-  base::Optional<base::Value> policy_value = base::JSONReader::Read(policy());
+  absl::optional<base::Value> policy_value = base::JSONReader::Read(policy());
   EXPECT_TRUE(policy_value.has_value());
   local_state()->Set(arc::prefs::kArcSnapshotHours, policy_value.value());
 

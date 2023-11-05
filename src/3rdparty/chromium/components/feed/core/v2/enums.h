@@ -14,8 +14,30 @@ enum class NetworkRequestType : int {
   kFeedQuery = 0,
   kUploadActions = 1,
   kNextPage = 2,
-  kListFollowedWebFeeds = 3,
+  kListWebFeeds = 3,
   kUnfollowWebFeed = 4,
+  kFollowWebFeed = 5,
+  kListRecommendedWebFeeds = 6,
+  kWebFeedListContents = 7,
+  kQueryInteractiveFeed = 8,
+  kQueryBackgroundFeed = 9,
+  kQueryNextPage = 10,
+};
+
+// Denotes how the stream content loading is used for.
+enum class LoadType {
+  // Loads the stream model into memory. If successful, this directly forces a
+  // model load in |FeedStream()| before completing the task.
+  kInitialLoad = 0,
+  // Loads additional content from the network when the model is already loaded.
+  kLoadMore = 1,
+  // Refreshes the stored stream data from the network, on the background. This
+  // will fail if the model is already loaded.
+  kBackgroundRefresh = 2,
+  // Refreshes the stored stream data from the network, per the user request.
+  // The stored stream data and the loaded model will not be affected if the
+  // network request fails.
+  kManualRefresh = 3,
 };
 
 // This must be kept in sync with FeedLoadStreamStatus in enums.xml.
@@ -55,9 +77,16 @@ enum class LoadStreamStatus {
   kNetworkFetchFailed = 18,
   kCannotLoadMoreNoNextPageToken = 19,
   kDataInStoreIsExpired = 22,
-
-  kMaxValue = kDataInStoreIsExpired,
+  kDataInStoreIsForAnotherUser = 23,
+  kAbortWithPendingClearAll = 24,
+  kAlreadyHaveUnreadContent = 25,
+  kNotAWebFeedSubscriber = 26,
+  kMaxValue = kNotAWebFeedSubscriber,
 };
+
+// Were we able to load fresh Feed data. This should be 'true' unless some kind
+// of error occurred.
+bool IsLoadingSuccessfulAndFresh(LoadStreamStatus status);
 
 std::ostream& operator<<(std::ostream& out, LoadStreamStatus value);
 
@@ -72,7 +101,9 @@ enum class UploadActionsStatus {
   kFinishedWithoutUpdatingConsistencyToken = 5,
   kAbortUploadForSignedOutUser = 6,
   kAbortUploadBecauseDisabled = 7,
-  kMaxValue = kAbortUploadBecauseDisabled,
+  kAbortUploadForWrongUser = 8,
+  kAbortUploadActionsWithPendingClearAll = 9,
+  kMaxValue = kAbortUploadActionsWithPendingClearAll,
 };
 
 // Keep this in sync with FeedUploadActionsBatchStatus in enums.xml.
@@ -89,6 +120,20 @@ enum class UploadActionsBatchStatus {
 
 std::ostream& operator<<(std::ostream& out, UploadActionsStatus value);
 std::ostream& operator<<(std::ostream& out, UploadActionsBatchStatus value);
+
+// This must be kept in sync with WebFeedRefreshStatus in enums.xml.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// Status of updating recommended or subscribed web feeds.
+enum class WebFeedRefreshStatus {
+  kNoStatus = 0,
+  kSuccess = 1,
+  kNetworkFailure = 2,
+  kNetworkRequestThrottled = 3,
+  kAbortFetchWebFeedPendingClearAll = 4,
+  kMaxValue = kAbortFetchWebFeedPendingClearAll,
+};
+std::ostream& operator<<(std::ostream& out, WebFeedRefreshStatus value);
 
 }  // namespace feed
 

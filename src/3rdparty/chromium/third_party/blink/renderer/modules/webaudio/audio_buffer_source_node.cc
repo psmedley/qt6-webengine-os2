@@ -28,6 +28,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_buffer_source_options.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer_source_node.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
@@ -181,7 +182,7 @@ bool AudioBufferSourceHandler::RenderFromBuffer(
   DCHECK(bus);
   DCHECK(Buffer());
 
-  unsigned number_of_channels = this->NumberOfChannels();
+  unsigned number_of_channels = NumberOfChannels();
   unsigned bus_number_of_channels = bus->NumberOfChannels();
 
   bool channel_count_good =
@@ -191,8 +192,8 @@ bool AudioBufferSourceHandler::RenderFromBuffer(
   // Sanity check destinationFrameOffset, numberOfFrames.
   size_t destination_length = bus->length();
 
-  DCHECK_LE(destination_length, audio_utilities::kRenderQuantumFrames);
-  DCHECK_LE(number_of_frames, audio_utilities::kRenderQuantumFrames);
+  DCHECK_LE(destination_length, GetDeferredTaskHandler().RenderQuantumFrames());
+  DCHECK_LE(number_of_frames, GetDeferredTaskHandler().RenderQuantumFrames());
 
   DCHECK_LE(destination_frame_offset, destination_length);
   DCHECK_LE(destination_frame_offset + number_of_frames, destination_length);

@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
@@ -23,6 +22,7 @@
 
 namespace blink {
 
+class BrowserInterfaceBrokerProxy;
 class VideoCaptureImpl;
 class WebString;
 
@@ -42,6 +42,9 @@ class WebString;
 class BLINK_PLATFORM_EXPORT WebVideoCaptureImplManager {
  public:
   WebVideoCaptureImplManager();
+  WebVideoCaptureImplManager(const WebVideoCaptureImplManager&) = delete;
+  WebVideoCaptureImplManager& operator=(const WebVideoCaptureImplManager&) =
+      delete;
   virtual ~WebVideoCaptureImplManager();
 
   // Open a device associated with the session ID.
@@ -49,7 +52,9 @@ class BLINK_PLATFORM_EXPORT WebVideoCaptureImplManager {
   // is used.
   // Returns a callback that should be used to release the acquired
   // resources.
-  base::OnceClosure UseDevice(const media::VideoCaptureSessionId& id);
+  base::OnceClosure UseDevice(
+      const media::VideoCaptureSessionId& id,
+      BrowserInterfaceBrokerProxy* browser_interface_broker);
 
   // Start receiving video frames for the given session ID.
   //
@@ -118,10 +123,10 @@ class BLINK_PLATFORM_EXPORT WebVideoCaptureImplManager {
   struct DeviceEntry;
 
   static void ProcessFeedback(VideoCaptureFeedbackCB callback_to_io_thread,
-                              const media::VideoFrameFeedback& feedback);
+                              const media::VideoCaptureFeedback& feedback);
 
   void ProcessFeedbackInternal(const media::VideoCaptureSessionId& id,
-                               const media::VideoFrameFeedback& feedback);
+                               const media::VideoCaptureFeedback& feedback);
 
   void StopCapture(int client_id, const media::VideoCaptureSessionId& id);
   void UnrefDevice(const media::VideoCaptureSessionId& id);
@@ -145,8 +150,6 @@ class BLINK_PLATFORM_EXPORT WebVideoCaptureImplManager {
   // Bound to the render thread.
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<WebVideoCaptureImplManager> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebVideoCaptureImplManager);
 };
 
 }  // namespace blink

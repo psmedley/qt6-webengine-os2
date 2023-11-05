@@ -11,7 +11,6 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "components/google/core/common/google_util.h"
 #include "components/variations/net/omnibox_http_headers.h"
@@ -129,7 +128,7 @@ bool IsFirstPartyContext(Owner owner,
       request_initiator_url.SchemeIs("chrome")) {
     // A scheme matching the above patterns means that the request was
     // initiated by an internal page, e.g. a request from
-    // chrome-search://local-ntp/ for App Launcher resources.
+    // chrome://newtab/ for App Launcher resources.
     LogRequestContextHistogram(kInternalChromePageInitiated);
     return true;
   }

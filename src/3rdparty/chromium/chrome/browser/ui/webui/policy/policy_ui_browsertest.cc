@@ -230,7 +230,7 @@ class TestSelectFileDialog : public ui::SelectFileDialog {
       : ui::SelectFileDialog(listener, std::move(policy)) {}
 
   void SelectFileImpl(Type type,
-                      const base::string16& title,
+                      const std::u16string& title,
                       const base::FilePath& default_path,
                       const FileTypeInfo* file_types,
                       int file_type_index,
@@ -267,8 +267,8 @@ PolicyUITest::PolicyUITest() {}
 PolicyUITest::~PolicyUITest() {}
 
 void PolicyUITest::SetUpInProcessBrowserTestFixture() {
-  ON_CALL(provider_, IsInitializationComplete(_)).WillByDefault(Return(true));
-  ON_CALL(provider_, IsFirstPolicyLoadComplete(_)).WillByDefault(Return(true));
+  provider_.SetDefaultReturns(/*is_initialization_complete_return=*/true,
+                              /*is_first_policy_load_complete_return=*/true);
   policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
   policy::PushProfilePolicyConnectorProviderForTesting(&provider_);
 
@@ -284,7 +284,7 @@ void PolicyUITest::UpdateProviderPolicyForNamespace(
     const policy::PolicyMap& policy) {
   std::unique_ptr<policy::PolicyBundle> bundle =
       std::make_unique<policy::PolicyBundle>();
-  bundle->Get(policy_namespace).CopyFrom(policy);
+  bundle->Get(policy_namespace) = policy.Clone();
   provider_.UpdatePolicy(std::move(bundle));
 }
 
@@ -316,22 +316,22 @@ void PolicyUITest::VerifyPolicies(
       content::ExecuteScriptAndExtractString(contents, javascript, &json));
   std::unique_ptr<base::Value> value_ptr =
       base::JSONReader::ReadDeprecated(json);
-  const base::ListValue* actual_policies = NULL;
   ASSERT_TRUE(value_ptr.get());
-  ASSERT_TRUE(value_ptr->GetAsList(&actual_policies));
+  ASSERT_TRUE(value_ptr->is_list());
+  base::Value::ConstListView actual_policies = value_ptr->GetList();
 
   // Verify that the cells contain the expected strings for all policies.
-  ASSERT_EQ(expected_policies.size(), actual_policies->GetSize());
+  ASSERT_EQ(expected_policies.size(), actual_policies.size());
   for (size_t i = 0; i < expected_policies.size(); ++i) {
     const std::vector<std::string> expected_policy = expected_policies[i];
-    const base::ListValue* actual_policy;
-    ASSERT_TRUE(actual_policies->GetList(i, &actual_policy));
-    ASSERT_EQ(expected_policy.size(), actual_policy->GetSize());
+    ASSERT_TRUE(actual_policies[i].is_list());
+    base::Value::ConstListView actual_policy = actual_policies[i].GetList();
+    ASSERT_EQ(expected_policy.size(), actual_policy.size());
     for (size_t j = 0; j < expected_policy.size(); ++j) {
-      std::string value;
-      ASSERT_TRUE(actual_policy->GetString(j, &value));
-      if (expected_policy[j] != value)
-        EXPECT_EQ(expected_policy[j], value);
+      const std::string* value = actual_policy[j].GetIfString();
+      ASSERT_TRUE(value);
+      if (expected_policy[j] != *value)
+        EXPECT_EQ(expected_policy[j], *value);
     }
   }
 }
@@ -382,8 +382,19 @@ void PolicyUITest::VerifyExportingPolicies(
   // The |chrome_metadata| we compare against will have the actual values so
   // those will be cleared to empty values so that the equals comparison below
   // will just compare key existence and value types.
-  for (auto& key_value : *chrome_metadata_dict)
-    *(key_value.second) = base::Value(key_value.second->type());
+  for (auto key_value : chrome_metadata_dict->DictItems())
+    key_value.second = base::Value(key_value.second.type());
+
+  // Since policy management status can have variable information based on the
+  // test bot(e.g., AD joined bot can have updater domain information), it is
+  // difficult to test for exact values. Test instead that the same key,
+  // "status" exist and also that the type of it is a dictionary. The incoming
+  // |expected| value should already have a "status" key with an empty
+  // dictionary value.
+  base::Value* status =
+      actual_policies->FindKeyOfType("status", base::Value::Type::DICTIONARY);
+  EXPECT_NE(status, nullptr);
+  status->DictClear();
 
   // Check that this dictionary is the same as expected.
   EXPECT_EQ(expected, *actual_policies);
@@ -433,6 +444,8 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, WritePoliciesToJSONFile) {
   // such policies.
   expected_values.SetDictionary("extensionPolicies",
                                 std::make_unique<base::DictionaryValue>());
+  expected_values.SetDictionary("status",
+                                std::make_unique<base::DictionaryValue>());
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   expected_values.SetDictionary("loginScreenExtensionPolicies",
                                 std::make_unique<base::DictionaryValue>());
@@ -447,10 +460,8 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, WritePoliciesToJSONFile) {
 
   // Change policy values.
   values.Erase(policy::key::kDefaultImagesSetting);
-  expected_values.RemovePath(
-      std::string("chromePolicies.") +
-          std::string(policy::key::kDefaultImagesSetting),
-      nullptr);
+  expected_values.RemovePath(std::string("chromePolicies.") +
+                             std::string(policy::key::kDefaultImagesSetting));
 
   popups_blocked_for_urls.AppendString("ddd");
   values.Set(policy::key::kPopupsBlockedForUrls, policy::POLICY_LEVEL_MANDATORY,
@@ -682,7 +693,8 @@ IN_PROC_BROWSER_TEST_P(ExtensionPolicyUITest,
   extensions::ExtensionBuilder builder;
   builder.SetPath(temp_dir_.GetPath());
   builder.SetManifest(manifest.Build());
-  builder.SetLocation(extensions::Manifest::EXTERNAL_POLICY_DOWNLOAD);
+  builder.SetLocation(
+      extensions::mojom::ManifestLocation::kExternalPolicyDownload);
 
   // Install extension.
   extensions::ExtensionService* service =

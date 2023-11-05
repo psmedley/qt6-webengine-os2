@@ -52,15 +52,14 @@ class PublisherBase : public apps::mojom::Publisher {
   void ModifyCapabilityAccess(
       const mojo::RemoteSet<apps::mojom::Subscriber>& subscribers,
       const std::string& app_id,
-      base::Optional<bool> accessing_camera,
-      base::Optional<bool> accessing_microphone);
+      absl::optional<bool> accessing_camera,
+      absl::optional<bool> accessing_microphone);
 
   mojo::Receiver<apps::mojom::Publisher>& receiver() { return receiver_; }
 
  private:
   // apps::mojom::Publisher overrides.
   void LaunchAppWithFiles(const std::string& app_id,
-                          apps::mojom::LaunchContainer container,
                           int32_t event_flags,
                           apps::mojom::LaunchSource launch_source,
                           apps::mojom::FilePathsPtr file_paths) override;
@@ -76,7 +75,7 @@ class PublisherBase : public apps::mojom::Publisher {
                  bool clear_site_data,
                  bool report_abuse) override;
   void PauseApp(const std::string& app_id) override;
-  void UnpauseApps(const std::string& app_id) override;
+  void UnpauseApp(const std::string& app_id) override;
   void StopApp(const std::string& app_id) override;
   void GetMenuModel(const std::string& app_id,
                     apps::mojom::MenuType menu_type,
@@ -92,6 +91,10 @@ class PublisherBase : public apps::mojom::Publisher {
       apps::mojom::IntentFilterPtr intent_filter,
       apps::mojom::IntentPtr intent,
       apps::mojom::ReplacedAppPreferencesPtr replaced_app_preferences) override;
+  void SetResizeLocked(const std::string& app_id,
+                       apps::mojom::OptionalBool locked) override;
+  void SetWindowMode(const std::string& app_id,
+                     apps::mojom::WindowMode window_mode) override;
 
   mojo::Receiver<apps::mojom::Publisher> receiver_{this};
 };

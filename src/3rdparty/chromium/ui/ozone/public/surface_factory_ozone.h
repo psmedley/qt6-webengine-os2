@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/native_library.h"
 #include "gpu/vulkan/buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_pixmap.h"
@@ -69,11 +70,11 @@ class COMPONENT_EXPORT(OZONE_BASE) SurfaceFactoryOzone {
  public:
   // Returns a list of allowed GL implementations. The default implementation
   // will be the first item.
-  virtual std::vector<gl::GLImplementation> GetAllowedGLImplementations();
+  virtual std::vector<gl::GLImplementationParts> GetAllowedGLImplementations();
 
   // Returns the GLOzone to use for the specified GL implementation, or null if
   // GL implementation doesn't exist.
-  virtual GLOzone* GetGLOzone(gl::GLImplementation implementation);
+  virtual GLOzone* GetGLOzone(const gl::GLImplementationParts& implementation);
 
 #if BUILDFLAG(ENABLE_VULKAN)
   // Creates the vulkan implementation. This object should be capable of
@@ -82,12 +83,9 @@ class COMPONENT_EXPORT(OZONE_BASE) SurfaceFactoryOzone {
   // on the platform.
   // |allow_protected_memory| suggests that the vulkan implementation should
   // create protected-capable resources, such as VkQueue.
-  // |enforce_protected_memory| suggests that the vulkan implementation should
-  // always use protected memory and resources, such as CommandBuffers.
   virtual std::unique_ptr<gpu::VulkanImplementation> CreateVulkanImplementation(
       bool use_swiftshader,
-      bool allow_protected_memory,
-      bool enforce_protected_memory);
+      bool allow_protected_memory);
 
   // Creates a scanout NativePixmap that can be rendered using Vulkan.
   // TODO(spang): Remove this once VK_EXT_image_drm_format_modifier is
@@ -140,7 +138,7 @@ class COMPONENT_EXPORT(OZONE_BASE) SurfaceFactoryOzone {
       gfx::Size size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage,
-      base::Optional<gfx::Size> framebuffer_size = base::nullopt);
+      absl::optional<gfx::Size> framebuffer_size = absl::nullopt);
 
   // Similar to CreateNativePixmap, but returns the result asynchronously.
   using NativePixmapCallback =

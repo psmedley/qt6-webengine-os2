@@ -12,8 +12,8 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/check.h"
+#include "base/cxx17_backports.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/supports_user_data.h"
 #include "base/values.h"
 #include "content/public/renderer/v8_value_converter.h"
@@ -228,7 +228,7 @@ void APIEventHandler::FireEventInContext(const std::string& event_name,
 
   std::vector<v8::Local<v8::Value>> v8_args;
   v8_args.reserve(args.GetSize());
-  for (const auto& arg : args)
+  for (const auto& arg : args.GetList())
     v8_args.push_back(converter->ToV8Value(&arg, context));
 
   FireEventInContext(event_name, context, &v8_args, filter,

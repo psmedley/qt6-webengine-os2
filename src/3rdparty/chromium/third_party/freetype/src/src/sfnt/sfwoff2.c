@@ -341,6 +341,11 @@
 
 #else /* !FT_CONFIG_OPTION_USE_BROTLI */
 
+    FT_UNUSED( dst );
+    FT_UNUSED( dst_size );
+    FT_UNUSED( src );
+    FT_UNUSED( src_size );
+
     FT_ERROR(( "woff2_decompress: Brotli support not available.\n" ));
     return FT_THROW( Unimplemented_Feature );
 
@@ -790,7 +795,7 @@
       goto Fail;
 
     loca_buf_size = loca_values_size * offset_size;
-    if ( FT_NEW_ARRAY( loca_buf, loca_buf_size ) )
+    if ( FT_QNEW_ARRAY( loca_buf, loca_buf_size ) )
       goto Fail;
 
     dst = loca_buf;
@@ -2097,7 +2102,7 @@
     /* Validate requested face index. */
     *num_faces = woff2.num_fonts;
     /* value -(N+1) requests information on index N */
-    if ( *face_instance_index < 0 )
+    if ( *face_instance_index < 0 && face_index > 0 )
       face_index--;
 
     if ( face_index >= woff2.num_fonts )
@@ -2118,8 +2123,8 @@
 
 
       /* Create a temporary array. */
-      if ( FT_NEW_ARRAY( temp_indices,
-                         ttc_font->num_tables ) )
+      if ( FT_QNEW_ARRAY( temp_indices,
+                          ttc_font->num_tables ) )
         goto Exit;
 
       FT_TRACE4(( "Storing tables for TTC face index %d.\n", face_index ));
@@ -2127,9 +2132,9 @@
         temp_indices[nn] = indices[ttc_font->table_indices[nn]];
 
       /* Resize array to required size. */
-      if ( FT_RENEW_ARRAY( indices,
-                           woff2.num_tables,
-                           ttc_font->num_tables ) )
+      if ( FT_QRENEW_ARRAY( indices,
+                            woff2.num_tables,
+                            ttc_font->num_tables ) )
         goto Exit;
 
       for ( nn = 0; nn < ttc_font->num_tables; nn++ )
@@ -2169,8 +2174,8 @@
     }
 
     /* Write sfnt header. */
-    if ( FT_ALLOC( sfnt, sfnt_size ) ||
-         FT_NEW( sfnt_stream )       )
+    if ( FT_QALLOC( sfnt, sfnt_size ) ||
+         FT_NEW( sfnt_stream )        )
       goto Exit;
 
     sfnt_header = sfnt;
@@ -2241,8 +2246,8 @@
     }
 
     /* Allocate memory for uncompressed table data. */
-    if ( FT_ALLOC( uncompressed_buf, woff2.uncompressed_size ) ||
-         FT_FRAME_ENTER( woff2.totalCompressedSize )           )
+    if ( FT_QALLOC( uncompressed_buf, woff2.uncompressed_size ) ||
+         FT_FRAME_ENTER( woff2.totalCompressedSize )            )
       goto Exit;
 
     /* Uncompress the stream. */

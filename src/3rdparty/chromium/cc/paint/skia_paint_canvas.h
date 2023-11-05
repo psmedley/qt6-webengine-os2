@@ -77,7 +77,10 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
   void clipRRect(const SkRRect& rrect,
                  SkClipOp op,
                  bool do_anti_alias) override;
-  void clipPath(const SkPath& path, SkClipOp op, bool do_anti_alias) override;
+  void clipPath(const SkPath& path,
+                SkClipOp op,
+                bool do_anti_alias,
+                UsePaintCache) override;
   SkRect getLocalClipBounds() const override;
   bool getLocalClipBounds(SkRect* bounds) const override;
   SkIRect getDeviceClipBounds() const override;
@@ -101,7 +104,9 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
                      SkScalar rx,
                      SkScalar ry,
                      const PaintFlags& flags) override;
-  void drawPath(const SkPath& path, const PaintFlags& flags) override;
+  void drawPath(const SkPath& path,
+                const PaintFlags& flags,
+                UsePaintCache) override;
   void drawImage(const PaintImage& image,
                  SkScalar left,
                  SkScalar top,
@@ -130,6 +135,7 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
 
   bool isClipEmpty() const override;
   SkMatrix getTotalMatrix() const override;
+  SkM44 getLocalToDevice() const override;
 
   void Annotate(AnnotationType type,
                 const SkRect& rect,

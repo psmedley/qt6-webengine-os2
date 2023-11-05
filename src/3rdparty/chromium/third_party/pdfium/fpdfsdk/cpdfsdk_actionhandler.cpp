@@ -17,8 +17,8 @@
 #include "fxjs/ijs_event_context.h"
 #include "fxjs/ijs_runtime.h"
 #include "third_party/base/check.h"
+#include "third_party/base/containers/contains.h"
 #include "third_party/base/notreached.h"
-#include "third_party/base/stl_util.h"
 
 bool CPDFSDK_ActionHandler::DoAction_DocOpen(
     const CPDF_Action& action,
@@ -31,7 +31,7 @@ bool CPDFSDK_ActionHandler::DoAction_JavaScript(
     const CPDF_Action& JsAction,
     WideString csJSName,
     CPDFSDK_FormFillEnvironment* pFormFillEnv) {
-  if (JsAction.GetType() == CPDF_Action::JavaScript) {
+  if (JsAction.GetType() == CPDF_Action::Type::kJavaScript) {
     WideString swJS = JsAction.GetJavaScript();
     if (!swJS.IsEmpty()) {
       RunDocumentOpenJavaScript(pFormFillEnv, csJSName, swJS);
@@ -50,7 +50,7 @@ bool CPDFSDK_ActionHandler::DoAction_FieldJavaScript(
     CPDFSDK_FieldAction* data) {
   DCHECK(pFormFillEnv);
   if (pFormFillEnv->IsJSPlatformPresent() &&
-      JsAction.GetType() == CPDF_Action::JavaScript) {
+      JsAction.GetType() == CPDF_Action::Type::kJavaScript) {
     WideString swJS = JsAction.GetJavaScript();
     if (!swJS.IsEmpty()) {
       RunFieldJavaScript(pFormFillEnv, pFormField, type, data, swJS);
@@ -64,17 +64,17 @@ bool CPDFSDK_ActionHandler::DoAction_Link(
     const CPDF_Action& action,
     CPDF_AAction::AActionType type,
     CPDFSDK_FormFillEnvironment* form_fill_env,
-    int modifiers) {
+    Mask<FWL_EVENTFLAG> modifiers) {
   DCHECK(form_fill_env);
 
   if (!CPDF_AAction::IsUserInput(type))
     return false;
 
   switch (action.GetType()) {
-    case CPDF_Action::GoTo:
+    case CPDF_Action::Type::kGoTo:
       DoAction_GoTo(form_fill_env, action);
       return true;
-    case CPDF_Action::URI:
+    case CPDF_Action::Type::kURI:
       DoAction_URI(form_fill_env, action, modifiers);
       return true;
     default:
@@ -142,7 +142,7 @@ bool CPDFSDK_ActionHandler::ExecuteDocumentOpenAction(
   visited->insert(pDict);
 
   DCHECK(pFormFillEnv);
-  if (action.GetType() == CPDF_Action::JavaScript) {
+  if (action.GetType() == CPDF_Action::Type::kJavaScript) {
     if (pFormFillEnv->IsJSPlatformPresent()) {
       WideString swJS = action.GetJavaScript();
       if (!swJS.IsEmpty())
@@ -150,7 +150,7 @@ bool CPDFSDK_ActionHandler::ExecuteDocumentOpenAction(
     }
   } else {
     DoAction_NoJs(action, CPDF_AAction::AActionType::kDocumentOpen,
-                  pFormFillEnv, /*modifiers=*/0);
+                  pFormFillEnv);
   }
 
   for (int32_t i = 0, sz = action.GetSubActionsCount(); i < sz; i++) {
@@ -174,14 +174,14 @@ bool CPDFSDK_ActionHandler::ExecuteDocumentPageAction(
   visited->insert(pDict);
 
   DCHECK(pFormFillEnv);
-  if (action.GetType() == CPDF_Action::JavaScript) {
+  if (action.GetType() == CPDF_Action::Type::kJavaScript) {
     if (pFormFillEnv->IsJSPlatformPresent()) {
       WideString swJS = action.GetJavaScript();
       if (!swJS.IsEmpty())
         RunDocumentPageJavaScript(pFormFillEnv, type, swJS);
     }
   } else {
-    DoAction_NoJs(action, type, pFormFillEnv, /*modifiers=*/0);
+    DoAction_NoJs(action, type, pFormFillEnv);
   }
 
   DCHECK(pFormFillEnv);
@@ -219,7 +219,7 @@ bool CPDFSDK_ActionHandler::ExecuteFieldAction(
   visited->insert(pDict);
 
   DCHECK(pFormFillEnv);
-  if (action.GetType() == CPDF_Action::JavaScript) {
+  if (action.GetType() == CPDF_Action::Type::kJavaScript) {
     if (pFormFillEnv->IsJSPlatformPresent()) {
       WideString swJS = action.GetJavaScript();
       if (!swJS.IsEmpty()) {
@@ -229,7 +229,7 @@ bool CPDFSDK_ActionHandler::ExecuteFieldAction(
       }
     }
   } else {
-    DoAction_NoJs(action, type, pFormFillEnv, /*modifiers=*/0);
+    DoAction_NoJs(action, type, pFormFillEnv);
   }
 
   for (int32_t i = 0, sz = action.GetSubActionsCount(); i < sz; i++) {
@@ -245,45 +245,44 @@ bool CPDFSDK_ActionHandler::ExecuteFieldAction(
 void CPDFSDK_ActionHandler::DoAction_NoJs(
     const CPDF_Action& action,
     CPDF_AAction::AActionType type,
-    CPDFSDK_FormFillEnvironment* pFormFillEnv,
-    int modifiers) {
+    CPDFSDK_FormFillEnvironment* pFormFillEnv) {
   DCHECK(pFormFillEnv);
 
   switch (action.GetType()) {
-    case CPDF_Action::GoTo:
+    case CPDF_Action::Type::kGoTo:
       DoAction_GoTo(pFormFillEnv, action);
       break;
-    case CPDF_Action::URI:
+    case CPDF_Action::Type::kURI:
       if (CPDF_AAction::IsUserInput(type))
-        DoAction_URI(pFormFillEnv, action, modifiers);
+        DoAction_URI(pFormFillEnv, action, Mask<FWL_EVENTFLAG>{});
       break;
-    case CPDF_Action::Hide:
+    case CPDF_Action::Type::kHide:
       DoAction_Hide(action, pFormFillEnv);
       break;
-    case CPDF_Action::Named:
+    case CPDF_Action::Type::kNamed:
       DoAction_Named(pFormFillEnv, action);
       break;
-    case CPDF_Action::SubmitForm:
+    case CPDF_Action::Type::kSubmitForm:
       if (CPDF_AAction::IsUserInput(type))
         DoAction_SubmitForm(action, pFormFillEnv);
       break;
-    case CPDF_Action::ResetForm:
+    case CPDF_Action::Type::kResetForm:
       DoAction_ResetForm(action, pFormFillEnv);
       break;
-    case CPDF_Action::JavaScript:
+    case CPDF_Action::Type::kJavaScript:
       NOTREACHED();
       break;
-    case CPDF_Action::SetOCGState:
-    case CPDF_Action::Thread:
-    case CPDF_Action::Sound:
-    case CPDF_Action::Movie:
-    case CPDF_Action::Rendition:
-    case CPDF_Action::Trans:
-    case CPDF_Action::GoTo3DView:
-    case CPDF_Action::GoToR:
-    case CPDF_Action::GoToE:
-    case CPDF_Action::Launch:
-    case CPDF_Action::ImportData:
+    case CPDF_Action::Type::kSetOCGState:
+    case CPDF_Action::Type::kThread:
+    case CPDF_Action::Type::kSound:
+    case CPDF_Action::Type::kMovie:
+    case CPDF_Action::Type::kRendition:
+    case CPDF_Action::Type::kTrans:
+    case CPDF_Action::Type::kGoTo3DView:
+    case CPDF_Action::Type::kGoToR:
+    case CPDF_Action::Type::kGoToE:
+    case CPDF_Action::Type::kLaunch:
+    case CPDF_Action::Type::kImportData:
       // Unimplemented
       break;
     default:
@@ -306,20 +305,17 @@ void CPDFSDK_ActionHandler::DoAction_GoTo(
 void CPDFSDK_ActionHandler::DoAction_URI(
     CPDFSDK_FormFillEnvironment* pFormFillEnv,
     const CPDF_Action& action,
-    int modifiers) {
+    Mask<FWL_EVENTFLAG> modifiers) {
   DCHECK(action.GetDict());
-
-  ByteString sURI = action.GetURI(pFormFillEnv->GetPDFDocument());
-  pFormFillEnv->DoURIAction(sURI.c_str(), modifiers);
+  pFormFillEnv->DoURIAction(action.GetURI(pFormFillEnv->GetPDFDocument()),
+                            modifiers);
 }
 
 void CPDFSDK_ActionHandler::DoAction_Named(
     CPDFSDK_FormFillEnvironment* pFormFillEnv,
     const CPDF_Action& action) {
   DCHECK(action.GetDict());
-
-  ByteString csName = action.GetNamedAction();
-  pFormFillEnv->ExecuteNamedAction(csName.c_str());
+  pFormFillEnv->ExecuteNamedAction(action.GetNamedAction());
 }
 
 void CPDFSDK_ActionHandler::RunFieldJavaScript(
@@ -382,51 +378,49 @@ void CPDFSDK_ActionHandler::RunDocumentOpenJavaScript(
     CPDFSDK_FormFillEnvironment* pFormFillEnv,
     const WideString& sScriptName,
     const WideString& script) {
-  RunScript(pFormFillEnv, script,
-            [pFormFillEnv, sScriptName](IJS_EventContext* context) {
-              context->OnDoc_Open(pFormFillEnv, sScriptName);
-            });
+  RunScript(pFormFillEnv, script, [sScriptName](IJS_EventContext* context) {
+    context->OnDoc_Open(sScriptName);
+  });
 }
 
 void CPDFSDK_ActionHandler::RunDocumentPageJavaScript(
     CPDFSDK_FormFillEnvironment* pFormFillEnv,
     CPDF_AAction::AActionType type,
     const WideString& script) {
-  RunScript(pFormFillEnv, script,
-            [type, pFormFillEnv](IJS_EventContext* context) {
-              switch (type) {
-                case CPDF_AAction::kOpenPage:
-                  context->OnPage_Open(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kClosePage:
-                  context->OnPage_Close(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kCloseDocument:
-                  context->OnDoc_WillClose(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kSaveDocument:
-                  context->OnDoc_WillSave(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kDocumentSaved:
-                  context->OnDoc_DidSave(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kPrintDocument:
-                  context->OnDoc_WillPrint(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kDocumentPrinted:
-                  context->OnDoc_DidPrint(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kPageVisible:
-                  context->OnPage_InView(pFormFillEnv);
-                  break;
-                case CPDF_AAction::kPageInvisible:
-                  context->OnPage_OutView(pFormFillEnv);
-                  break;
-                default:
-                  NOTREACHED();
-                  break;
-              }
-            });
+  RunScript(pFormFillEnv, script, [type](IJS_EventContext* context) {
+    switch (type) {
+      case CPDF_AAction::kOpenPage:
+        context->OnPage_Open();
+        break;
+      case CPDF_AAction::kClosePage:
+        context->OnPage_Close();
+        break;
+      case CPDF_AAction::kCloseDocument:
+        context->OnDoc_WillClose();
+        break;
+      case CPDF_AAction::kSaveDocument:
+        context->OnDoc_WillSave();
+        break;
+      case CPDF_AAction::kDocumentSaved:
+        context->OnDoc_DidSave();
+        break;
+      case CPDF_AAction::kPrintDocument:
+        context->OnDoc_WillPrint();
+        break;
+      case CPDF_AAction::kDocumentPrinted:
+        context->OnDoc_DidPrint();
+        break;
+      case CPDF_AAction::kPageVisible:
+        context->OnPage_InView();
+        break;
+      case CPDF_AAction::kPageInvisible:
+        context->OnPage_OutView();
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
+  });
 }
 
 bool CPDFSDK_ActionHandler::DoAction_Hide(

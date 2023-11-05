@@ -39,8 +39,8 @@ class CONTENT_EXPORT SiteIsolationPolicy {
   static bool IsErrorPageIsolationEnabled(bool in_main_frame);
 
   // Returns true if isolated origins may be added at runtime in response
-  // to hints such as users typing in a password or (in the future) an origin
-  // opting itself into isolation via a header.
+  // to hints such as users typing in a password or sites serving headers like
+  // Cross-Origin-Opener-Policy.
   static bool AreDynamicIsolatedOriginsEnabled();
 
   // Returns true if isolated origins preloaded with the browser should be
@@ -56,12 +56,24 @@ class CONTENT_EXPORT SiteIsolationPolicy {
   // Returns true if the OriginAgentCluster header will be respected.
   static bool IsOriginAgentClusterEnabled();
 
+  // Returns true if Cross-Origin-Opener-Policy headers may be used as
+  // heuristics for turning on site isolation.
+  static bool IsSiteIsolationForCOOPEnabled();
+
+  // Return true if sites that were isolated due to COOP headers should be
+  // persisted across restarts.
+  static bool ShouldPersistIsolatedCOOPSites();
+
   // Applies isolated origins from all available sources, including the
   // command-line switch, field trials, enterprise policy, and the embedder.
   // See also AreIsolatedOriginsEnabled. These origins apply globally to the
   // whole browser in all profiles.  This should be called once on browser
   // startup.
   static void ApplyGlobalIsolatedOrigins();
+
+  // Forces other methods in this class to reread flag values instead of using
+  // their cached value.
+  static void DisableFlagCachingForTesting();
 
  private:
   SiteIsolationPolicy();  // Not instantiable.

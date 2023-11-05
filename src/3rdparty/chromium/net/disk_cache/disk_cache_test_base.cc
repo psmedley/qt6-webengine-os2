@@ -4,6 +4,7 @@
 
 #include "net/disk_cache/disk_cache_test_base.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -229,8 +230,7 @@ int64_t DiskCacheTestWithCache::CalculateSizeOfEntriesBetween(
 
 std::unique_ptr<DiskCacheTestWithCache::TestIterator>
 DiskCacheTestWithCache::CreateIterator() {
-  return std::unique_ptr<TestIterator>(
-      new TestIterator(cache_->CreateIterator()));
+  return std::make_unique<TestIterator>(cache_->CreateIterator());
 }
 
 void DiskCacheTestWithCache::FlushQueueForTest() {
@@ -302,9 +302,15 @@ int DiskCacheTestWithCache::GetAvailableRange(disk_cache::Entry* entry,
                                               int64_t offset,
                                               int len,
                                               int64_t* start) {
-  net::TestCompletionCallback cb;
-  int rv = entry->GetAvailableRange(offset, len, start, cb.callback());
-  return cb.GetResult(rv);
+  TestRangeResultCompletionCallback cb;
+  disk_cache::RangeResult result =
+      cb.GetResult(entry->GetAvailableRange(offset, len, cb.callback()));
+
+  if (result.net_error == net::OK) {
+    *start = result.start;
+    return result.available_len;
+  }
+  return result.net_error;
 }
 
 void DiskCacheTestWithCache::TrimForTest(bool empty) {

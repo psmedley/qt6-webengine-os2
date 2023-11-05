@@ -8,12 +8,12 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "services/device/public/mojom/screen_orientation_lock_types.mojom-shared.h"
-#include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "url/gurl.h"
 
@@ -21,8 +21,8 @@ namespace webapps {
 
 // https://wicg.github.io/web-share-target/level-2/#sharetargetfiles-and-its-members
 struct ShareTargetParamsFile {
-  base::string16 name;
-  std::vector<base::string16> accept;
+  std::u16string name;
+  std::vector<std::u16string> accept;
   ShareTargetParamsFile();
   ShareTargetParamsFile(const ShareTargetParamsFile& other);
   ~ShareTargetParamsFile();
@@ -30,9 +30,9 @@ struct ShareTargetParamsFile {
 
 // https://wicg.github.io/web-share-target/#dom-sharetargetparams
 struct ShareTargetParams {
-  base::string16 title;
-  base::string16 text;
-  base::string16 url;
+  std::u16string title;
+  std::u16string text;
+  std::u16string url;
   std::vector<ShareTargetParamsFile> files;
   ShareTargetParams();
   ShareTargetParams(const ShareTargetParams& other);
@@ -55,7 +55,7 @@ struct ShortcutInfo {
   // screen.
   static std::unique_ptr<ShortcutInfo> CreateShortcutInfo(
       const GURL& manifest_url,
-      const blink::Manifest& manifest,
+      const blink::mojom::Manifest& manifest,
       const GURL& primary_icon_url);
 
   // This enum is used to back a UMA histogram, and must be treated as
@@ -119,7 +119,7 @@ struct ShortcutInfo {
   ~ShortcutInfo();
 
   // Updates the info based on the given |manifest|.
-  void UpdateFromManifest(const blink::Manifest& manifest);
+  void UpdateFromManifest(const blink::mojom::Manifest& manifest);
 
   // Updates the source of the shortcut.
   void UpdateSource(const Source source);
@@ -127,24 +127,25 @@ struct ShortcutInfo {
   GURL manifest_url;
   GURL url;
   GURL scope;
-  base::string16 user_title;
-  base::string16 name;
-  base::string16 short_name;
-  base::string16 description;
-  std::vector<base::string16> categories;
+  std::u16string user_title;
+  std::u16string name;
+  std::u16string short_name;
+  std::u16string description;
+  std::vector<std::u16string> categories;
   blink::mojom::DisplayMode display = blink::mojom::DisplayMode::kBrowser;
   device::mojom::ScreenOrientationLockType orientation =
       device::mojom::ScreenOrientationLockType::DEFAULT;
   Source source = SOURCE_ADD_TO_HOMESCREEN_SHORTCUT;
-  base::Optional<SkColor> theme_color;
-  base::Optional<SkColor> background_color;
+  absl::optional<SkColor> theme_color;
+  absl::optional<SkColor> background_color;
   int ideal_splash_image_size_in_px = 0;
   int minimum_splash_image_size_in_px = 0;
   GURL splash_image_url;
+  bool is_splash_image_maskable = false;
   GURL best_primary_icon_url;
   std::vector<std::string> icon_urls;
   std::vector<GURL> screenshot_urls;
-  base::Optional<ShareTarget> share_target;
+  absl::optional<ShareTarget> share_target;
 
   // Both shortcut item related vectors have the same size.
   std::vector<blink::Manifest::ShortcutItem> shortcut_items;

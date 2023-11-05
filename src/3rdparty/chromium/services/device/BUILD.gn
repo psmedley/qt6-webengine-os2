@@ -37,6 +37,7 @@ source_set("lib") {
   deps = [
     ":binder_overrides",
     "//build:chromeos_buildflags",
+    "//services/device/device_posture",
     "//services/device/fingerprint",
     "//services/device/generic_sensor",
     "//services/device/geolocation",
@@ -191,10 +192,6 @@ source_set("tests") {
     sources += [ "generic_sensor/platform_sensor_provider_unittest_android.cc" ]
   }
 
-  if (is_chromeos_ash) {
-    sources += [ "geolocation/wifi_data_provider_chromeos_unittest.cc" ]
-  }
-
   if (is_win) {
     sources += [
       "battery/battery_status_manager_win_unittest.cc",
@@ -226,7 +223,10 @@ source_set("tests") {
   }
 
   if (is_chromeos_ash) {
-    sources += [ "fingerprint/fingerprint_chromeos_unittest.cc" ]
+    sources += [
+      "fingerprint/fingerprint_chromeos_unittest.cc",
+      "geolocation/wifi_data_provider_chromeos_unittest.cc",
+    ]
     deps += [
       "//chromeos/dbus:test_support",
       "//chromeos/dbus/biod:test_support",
@@ -235,6 +235,10 @@ source_set("tests") {
       "//services/device/fingerprint",
       "//third_party/protobuf:protobuf_lite",
     ]
+  }
+
+  if (is_chromeos_lacros) {
+    deps += [ "//chromeos/lacros:test_support" ]
   }
 
   if (is_android) {
@@ -258,7 +262,7 @@ source_set("tests") {
     deps += [
       "//components/variations:test_support",
       "//services/device/battery",
-      "//services/device/hid:mocks",
+      "//services/device/hid:test_support",
       "//services/device/public/cpp/hid",
       "//services/device/vibration",
     ]
@@ -266,13 +270,14 @@ source_set("tests") {
     if ((!is_linux && !is_chromeos) || use_udev) {
       sources += [
         "hid/hid_connection_impl_unittest.cc",
-        "hid/test_report_descriptors.cc",
-        "hid/test_report_descriptors.h",
         "public/cpp/hid/hid_device_filter_unittest.cc",
         "public/cpp/hid/hid_report_descriptor_unittest.cc",
       ]
       if (is_linux || is_chromeos) {
-        sources += [ "hid/input_service_linux_unittest.cc" ]
+        sources += [
+          "hid/hid_service_linux_unittest.cc",
+          "hid/input_service_linux_unittest.cc",
+        ]
       }
       if (!is_fuchsia) {
         # Fuchsia does not currently implement HidService.

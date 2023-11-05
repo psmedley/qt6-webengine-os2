@@ -13,7 +13,7 @@ class GPU_IPC_SERVICE_EXPORT WebGPUCommandBufferStub
     : public CommandBufferStub {
  public:
   WebGPUCommandBufferStub(GpuChannel* channel,
-                          const GPUCreateCommandBufferConfig& init_params,
+                          const mojom::CreateCommandBufferParams& init_params,
                           CommandBufferId command_buffer_id,
                           SequenceId sequence_id,
                           int32_t stream_id,
@@ -25,12 +25,11 @@ class GPU_IPC_SERVICE_EXPORT WebGPUCommandBufferStub
   // the gpu::Capabilities.
   gpu::ContextResult Initialize(
       CommandBufferStub* share_group,
-      const GPUCreateCommandBufferConfig& init_params,
+      const mojom::CreateCommandBufferParams& init_params,
       base::UnsafeSharedMemoryRegion shared_state_shm) override;
   MemoryTracker* GetContextGroupMemoryTracker() const override;
 
  private:
-  bool HandleMessage(const IPC::Message& message) override;
   void OnSwapBuffers(uint64_t swap_id, uint32_t flags) override;
 
   DISALLOW_COPY_AND_ASSIGN(WebGPUCommandBufferStub);

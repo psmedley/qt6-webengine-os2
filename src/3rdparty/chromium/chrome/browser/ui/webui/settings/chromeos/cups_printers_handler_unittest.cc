@@ -10,16 +10,14 @@
 #include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/json/json_string_value_serializer.h"
-#include "base/test/metrics/histogram_tester.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/printing/print_management/print_management_uma.h"
 #include "chrome/browser/chromeos/printing/printing_stubs.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_core_service_impl.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/test/base/testing_profile.h"
-#include "chromeos/components/scanning/scanning_uma.h"
+#include "chromeos/dbus/concierge/concierge_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "content/public/test/browser_task_environment.h"
@@ -63,7 +61,7 @@ void RemovedPrinter(base::OnceClosure quit_closure,
 
 class TestCupsPrintersManager : public StubCupsPrintersManager {
  public:
-  base::Optional<Printer> GetPrinter(const std::string& id) const override {
+  absl::optional<Printer> GetPrinter(const std::string& id) const override {
     return Printer();
   }
 };
@@ -111,7 +109,7 @@ class FakeSelectFileDialog : public ui::SelectFileDialog {
 
  protected:
   void SelectFileImpl(Type type,
-                      const base::string16& title,
+                      const std::u16string& title,
                       const base::FilePath& default_path,
                       const FileTypeInfo* file_types,
                       int file_type_index,
@@ -189,14 +187,14 @@ class CupsPrintersHandlerTest : public testing::Test {
  public:
   CupsPrintersHandlerTest()
       : task_environment_(content::BrowserTaskEnvironment::REAL_IO_THREAD),
-        profile_(),
+        profile_(std::make_unique<TestingProfile>()),
         web_ui_(),
         printers_handler_() {}
   ~CupsPrintersHandlerTest() override = default;
 
   void SetUp() override {
     printers_handler_ = CupsPrintersHandler::CreateForTesting(
-        &profile_, base::MakeRefCounted<FakePpdProvider>(),
+        profile_.get(), base::MakeRefCounted<FakePpdProvider>(),
         std::make_unique<StubPrinterConfigurer>(), &printers_manager_);
     printers_handler_->SetWebUIForTest(&web_ui_);
     printers_handler_->RegisterMessages();
@@ -204,9 +202,8 @@ class CupsPrintersHandlerTest : public testing::Test {
 
  protected:
   // Must outlive |profile_|.
-  base::HistogramTester histogram_tester_;
   content::BrowserTaskEnvironment task_environment_;
-  TestingProfile profile_;
+  std::unique_ptr<TestingProfile> profile_;
   content::TestWebUI web_ui_;
   std::unique_ptr<CupsPrintersHandler> printers_handler_;
   TestCupsPrintersManager printers_manager_;
@@ -214,6 +211,9 @@ class CupsPrintersHandlerTest : public testing::Test {
 
 TEST_F(CupsPrintersHandlerTest, RemoveCorrectPrinter) {
   DBusThreadManager::Initialize();
+  chromeos::ConciergeClient::InitializeFake(
+      /*fake_cicerone_client=*/nullptr);
+
   DebugDaemonClient* client = DBusThreadManager::Get()->GetDebugDaemonClient();
   client->CupsAddAutoConfiguredPrinter("testprinter1", "fakeuri",
                                        base::BindOnce(&AddedPrinter));
@@ -238,12 +238,16 @@ TEST_F(CupsPrintersHandlerTest, RemoveCorrectPrinter) {
       base::DoNothing());
   run_loop.Run();
   EXPECT_FALSE(expected);
+
+  profile_.reset();
+  chromeos::ConciergeClient::Shutdown();
+  DBusThreadManager::Shutdown();
 }
 
 TEST_F(CupsPrintersHandlerTest, VerifyOnlyPpdFilesAllowed) {
-  DownloadCoreServiceFactory::GetForBrowserContext(&profile_)
+  DownloadCoreServiceFactory::GetForBrowserContext(profile_.get())
       ->SetDownloadManagerDelegateForTesting(
-          std::make_unique<ChromeDownloadManagerDelegate>(&profile_));
+          std::make_unique<ChromeDownloadManagerDelegate>(profile_.get()));
 
   ui::SelectFileDialog::FileTypeInfo expected_file_type_info;
   // We only allow .ppd and .ppd.gz file extensions for our file select dialog.
@@ -256,36 +260,6 @@ TEST_F(CupsPrintersHandlerTest, VerifyOnlyPpdFilesAllowed) {
   args.Append("handleFunctionName");
   web_ui_.HandleReceivedMessage("selectPPDFile",
                                 &base::Value::AsListValue(args));
-}
-
-TEST_F(CupsPrintersHandlerTest, VerifyPrintManagementAppEntryPointHistogram) {
-  base::Value args(base::Value::Type::LIST);
-  web_ui_.HandleReceivedMessage("openPrintManagementApp",
-                                &base::Value::AsListValue(args));
-  histogram_tester_.ExpectBucketCount(
-      "Printing.CUPS.PrintManagementAppEntryPoint",
-      PrintManagementAppEntryPoint::kSettings, 1);
-  histogram_tester_.ExpectBucketCount(
-      "Printing.CUPS.PrintManagementAppEntryPoint",
-      PrintManagementAppEntryPoint::kNotification, 0);
-  histogram_tester_.ExpectBucketCount(
-      "Printing.CUPS.PrintManagementAppEntryPoint",
-      PrintManagementAppEntryPoint::kLauncher, 0);
-  histogram_tester_.ExpectBucketCount(
-      "Printing.CUPS.PrintManagementAppEntryPoint",
-      PrintManagementAppEntryPoint::kBrowser, 0);
-}
-
-TEST_F(CupsPrintersHandlerTest, VerifyScanAppEntryPointHistogram) {
-  base::Value args(base::Value::Type::LIST);
-  web_ui_.HandleReceivedMessage("openScanningApp",
-                                &base::Value::AsListValue(args));
-  histogram_tester_.ExpectBucketCount(
-      "Scanning.ScanAppEntryPoint",
-      chromeos::scanning::ScanAppEntryPoint::kSettings, 1);
-  histogram_tester_.ExpectBucketCount(
-      "Scanning.ScanAppEntryPoint",
-      chromeos::scanning::ScanAppEntryPoint::kLauncher, 0);
 }
 
 }  // namespace settings.

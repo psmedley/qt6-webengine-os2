@@ -52,7 +52,7 @@ if settings != "--settings" and settings != "--nosettings":
     sys.exit("### Expected --settings or --nosettings, got " + settings)
 
 targets = []
-worklist = tempfile.NamedTemporaryFile(suffix='.worklist', delete=False)
+worklist = tempfile.NamedTemporaryFile(suffix='.worklist', delete=False, mode='w')
 
 # The `inputs` array pairs off input files with their matching output directory, e.g.:
 #     //skia/tests/sksl/shared/test.sksl
@@ -73,14 +73,7 @@ for input, targetDir in pairwise(inputs):
 
     targets.append(target)
 
-    if lang == "--fp":
-        worklist.write(input + "\n")
-        worklist.write(target + ".cpp\n")
-        worklist.write(settings + "\n\n")
-        worklist.write(input + "\n")
-        worklist.write(target + ".h\n")
-        worklist.write(settings + "\n\n")
-    elif lang == "--glsl":
+    if lang == "--glsl":
         worklist.write(input + "\n")
         worklist.write(target + ".glsl\n")
         worklist.write(settings + "\n\n")
@@ -101,12 +94,12 @@ for input, targetDir in pairwise(inputs):
         worklist.write(target + ".stage\n")
         worklist.write(settings + "\n\n")
     else:
-        sys.exit("### Expected one of: --fp --glsl --metal --spirv --skvm --stage, got " + lang)
+        sys.exit("### Expected one of: --glsl --metal --spirv --skvm --stage --dsl, got " + lang)
 
     # Compile items one at a time.
     if not batchCompile:
         executeWorklist(input, worklist)
-        worklist = tempfile.NamedTemporaryFile(suffix='.worklist', delete=False)
+        worklist = tempfile.NamedTemporaryFile(suffix='.worklist', delete=False, mode='w')
 
 # Compile everything all in one go.
 if batchCompile:
@@ -114,19 +107,3 @@ if batchCompile:
 else:
     worklist.close()
     os.remove(worklist.name)
-
-# A special case cleanup pass, just for CPP and H files: if either one of these files starts with
-# `### Compilation failed`, its sibling should be replaced by an empty file. This improves clarity
-# during code review; a failure on either file means that success on the sibling is irrelevant.
-if lang == "--fp":
-    for target in targets:
-        cppFile = open(target + '.cpp', 'r')
-        hFile = open(target + '.h', 'r')
-        if cppFile.readline().startswith("### Compilation failed"):
-            # The CPP had a compilation failure. Clear the header file.
-            hFile.close()
-            makeEmptyFile(target + '.h')
-        elif hFile.readline().startswith("### Compilation failed"):
-            # The header had a compilation failure. Clear the CPP file.
-            cppFile.close()
-            makeEmptyFile(target + '.cpp')

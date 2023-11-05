@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
 
@@ -32,7 +32,7 @@ constexpr HistogramValue kHistogramValue[] = {
     {ContentSettingsType::COOKIES, 0},
     {ContentSettingsType::IMAGES, 1},
     {ContentSettingsType::JAVASCRIPT, 2},
-    {ContentSettingsType::DEPRECATED_PLUGINS, 3},
+    // Removed PLUGINS in M91.
     {ContentSettingsType::POPUPS, 4},
     {ContentSettingsType::GEOLOCATION, 5},
     {ContentSettingsType::NOTIFICATIONS, 6},
@@ -93,6 +93,12 @@ constexpr HistogramValue kHistogramValue[] = {
     {ContentSettingsType::PERMISSION_AUTOREVOCATION_DATA, 72},
     {ContentSettingsType::FILE_SYSTEM_LAST_PICKED_DIRECTORY, 73},
     {ContentSettingsType::DISPLAY_CAPTURE, 74},
+    {ContentSettingsType::FILE_HANDLING, 75},
+    {ContentSettingsType::FILE_SYSTEM_ACCESS_CHOOSER_DATA, 76},
+    {ContentSettingsType::FEDERATED_IDENTITY_SHARING, 77},
+    {ContentSettingsType::FEDERATED_IDENTITY_REQUEST, 78},
+    {ContentSettingsType::JAVASCRIPT_JIT, 79},
+    {ContentSettingsType::HTTP_ALLOWED, 80},
 };
 
 }  // namespace

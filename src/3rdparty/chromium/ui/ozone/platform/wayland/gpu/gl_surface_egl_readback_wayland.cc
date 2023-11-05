@@ -45,7 +45,6 @@ bool GLSurfaceEglReadbackWayland::Resize(const gfx::Size& size,
                                          const gfx::ColorSpace& color_space,
                                          bool has_alpha) {
   DestroyBuffers();
-
   pending_frames_ = 0;
 
   if (!PbufferGLSurfaceEGL::Resize(size, scale_factor, color_space, has_alpha))
@@ -133,7 +132,9 @@ GLSurfaceEglReadbackWayland::~GLSurfaceEglReadbackWayland() {
 
 void GLSurfaceEglReadbackWayland::OnSubmission(
     uint32_t buffer_id,
-    const gfx::SwapResult& swap_result) {
+    const gfx::SwapResult& swap_result,
+    gfx::GpuFenceHandle release_fence) {
+  DCHECK(release_fence.is_null());
   --pending_frames_;
 
   if (in_flight_pixel_buffers_.front()) {

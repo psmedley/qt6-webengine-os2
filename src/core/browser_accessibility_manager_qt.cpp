@@ -39,10 +39,13 @@
 
 #include "browser_accessibility_manager_qt.h"
 
+#include "content/browser/accessibility/browser_accessibility.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 
 #include "browser_accessibility_qt.h"
 #include "render_widget_host_view_qt.h"
+
+#include <QtGui/qaccessible.h>
 
 using namespace blink;
 
@@ -55,12 +58,9 @@ BrowserAccessibilityManager *BrowserAccessibilityManager::Create(
 {
 #if QT_CONFIG(accessibility)
     Q_ASSERT(delegate);
-    QObject *parent = nullptr;
-    if (delegate->AccessibilityIsMainFrame()) {
-        auto *access = static_cast<QtWebEngineCore::WebContentsAccessibilityQt *>(delegate->AccessibilityGetWebContentsAccessibility());
-        parent = access ? access->accessibilityParentObject() : nullptr;
-    }
-    return new BrowserAccessibilityManagerQt(parent, initialTree, delegate);
+    QtWebEngineCore::WebContentsAccessibilityQt *access = nullptr;
+    access = static_cast<QtWebEngineCore::WebContentsAccessibilityQt *>(delegate->AccessibilityGetWebContentsAccessibility());
+    return new BrowserAccessibilityManagerQt(access, initialTree, delegate);
 #else
     return nullptr;
 #endif // QT_CONFIG(accessibility)
@@ -79,10 +79,11 @@ BrowserAccessibilityManager *BrowserAccessibilityManager::Create(
 
 #if QT_CONFIG(accessibility)
 BrowserAccessibilityManagerQt::BrowserAccessibilityManagerQt(
-    QObject *parentObject, const ui::AXTreeUpdate &initialTree,
+    QtWebEngineCore::WebContentsAccessibilityQt *webContentsAccessibility,
+    const ui::AXTreeUpdate &initialTree,
     BrowserAccessibilityDelegate* delegate)
       : BrowserAccessibilityManager(delegate)
-      , m_parentObject(parentObject)
+      , m_webContentsAccessibility(webContentsAccessibility)
 {
     Initialize(initialTree);
     m_valid = true; // BrowserAccessibilityQt can start using the AXTree
@@ -95,13 +96,21 @@ BrowserAccessibilityManagerQt::~BrowserAccessibilityManagerQt()
 
 QAccessibleInterface *BrowserAccessibilityManagerQt::rootParentAccessible()
 {
-    return QAccessible::queryAccessibleInterface(m_parentObject);
+    content::BrowserAccessibility *parent_node = GetParentNodeFromParentTree();
+    if (!parent_node) {
+        Q_ASSERT(m_webContentsAccessibility);
+        return QAccessible::queryAccessibleInterface(m_webContentsAccessibility->accessibilityParentObject());
+    }
+
+    auto *parent_manager =
+            static_cast<BrowserAccessibilityManagerQt *>(parent_node->manager());
+    return parent_manager->rootParentAccessible();
 }
 
 void BrowserAccessibilityManagerQt::FireBlinkEvent(ax::mojom::Event event_type,
                                                    BrowserAccessibility* node)
 {
-    BrowserAccessibilityQt *iface = static_cast<BrowserAccessibilityQt*>(node);
+    auto *iface = toQAccessibleInterface(node);
 
     switch (event_type) {
     case ax::mojom::Event::kFocus: {
@@ -159,7 +168,7 @@ void BrowserAccessibilityManagerQt::FireBlinkEvent(ax::mojom::Event event_type,
 void BrowserAccessibilityManagerQt::FireGeneratedEvent(ui::AXEventGenerator::Event event_type,
                                                        BrowserAccessibility* node)
 {
-    BrowserAccessibilityQt *iface = static_cast<BrowserAccessibilityQt*>(node);
+    auto *iface = toQAccessibleInterface(node);
 
     switch (event_type) {
     case ui::AXEventGenerator::Event::VALUE_IN_TEXT_FIELD_CHANGED:

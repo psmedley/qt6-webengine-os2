@@ -34,6 +34,26 @@ bool PaintChunker::IsInInitialState() const {
 }
 #endif
 
+void PaintChunker::StartMarkingClientsForValidation(
+    Vector<const DisplayItemClient*>& clients_to_validate) {
+#if DCHECK_IS_ON()
+  DCHECK(IsInInitialState());
+#endif
+  DCHECK(!clients_to_validate_);
+  clients_to_validate_ = &clients_to_validate;
+}
+
+void PaintChunker::MarkClientForValidation(const DisplayItemClient& client) {
+  if (clients_to_validate_ && !client.IsMarkedForValidation()) {
+    clients_to_validate_->push_back(&client);
+    client.MarkForValidation();
+  }
+}
+
+void PaintChunker::StopMarkingClientsForValidation() {
+  clients_to_validate_ = nullptr;
+}
+
 void PaintChunker::UpdateCurrentPaintChunkProperties(
     const PaintChunk::Id* chunk_id,
     const PropertyTreeStateOrAlias& properties) {
@@ -44,7 +64,7 @@ void PaintChunker::UpdateCurrentPaintChunkProperties(
     if (chunk_id)
       next_chunk_id_.emplace(*chunk_id);
     else
-      next_chunk_id_ = base::nullopt;
+      next_chunk_id_ = absl::nullopt;
   }
   current_properties_ = properties;
 }
@@ -55,6 +75,10 @@ void PaintChunker::AppendByMoving(PaintChunk&& chunk) {
   wtf_size_t next_chunk_begin_index =
       chunks_->IsEmpty() ? 0 : chunks_->back().end_index;
   chunks_->emplace_back(next_chunk_begin_index, std::move(chunk));
+  // This chunk was copied from the cache, so it should already be valid; hence
+  // we don't call MarkClientForValidation().
+  DCHECK(!chunks_->back().id.client.IsCacheable() ||
+         chunks_->back().id.client.IsValid());
 }
 
 bool PaintChunker::EnsureCurrentChunk(const PaintChunk::Id& id) {
@@ -73,8 +97,10 @@ bool PaintChunker::EnsureCurrentChunk(const PaintChunk::Id& id) {
       next_chunk_id_.emplace(id);
     FinalizeLastChunkProperties();
     wtf_size_t begin = chunks_->IsEmpty() ? 0 : chunks_->back().end_index;
-    chunks_->emplace_back(begin, begin, *next_chunk_id_, current_properties_);
-    next_chunk_id_ = base::nullopt;
+    MarkClientForValidation(next_chunk_id_->client);
+    chunks_->emplace_back(begin, begin, *next_chunk_id_, current_properties_,
+                          current_effectively_invisible_);
+    next_chunk_id_ = absl::nullopt;
     will_force_new_chunk_ = false;
     return true;
   }
@@ -99,27 +125,26 @@ bool PaintChunker::IncrementDisplayItemIndex(const DisplayItem& item) {
   // set the candidate to be this item.
   if (item.IsDrawing() && item.DrawsContent()) {
     float item_area;
-    Color item_color =
-        static_cast<const DrawingDisplayItem&>(item).BackgroundColor(item_area);
+    Color item_color = To<DrawingDisplayItem>(item).BackgroundColor(item_area);
     ProcessBackgroundColorCandidate(chunk.id, item_color, item_area);
   }
 
-  constexpr wtf_size_t kMaxRegionComplexity = 10;
   if (should_compute_contents_opaque_ && item.IsDrawing()) {
-    const DrawingDisplayItem& drawing =
-        static_cast<const DrawingDisplayItem&>(item);
-    if (drawing.KnownToBeOpaque() &&
-        last_chunk_known_to_be_opaque_region_.Complexity() <
-            kMaxRegionComplexity) {
-      last_chunk_known_to_be_opaque_region_.Unite(item.VisualRect());
-    }
-    if (last_chunk_text_known_to_be_on_opaque_background_) {
+    const DrawingDisplayItem& drawing = To<DrawingDisplayItem>(item);
+    chunk.rect_known_to_be_opaque = MaximumCoveredRect(
+        chunk.rect_known_to_be_opaque, drawing.RectKnownToBeOpaque());
+    if (chunk.text_known_to_be_on_opaque_background) {
       if (const auto* paint_record = drawing.GetPaintRecord().get()) {
         if (paint_record->has_draw_text_ops()) {
-          last_chunk_text_known_to_be_on_opaque_background_ =
-              last_chunk_known_to_be_opaque_region_.Contains(item.VisualRect());
+          chunk.has_text = true;
+          chunk.text_known_to_be_on_opaque_background =
+              chunk.rect_known_to_be_opaque.Contains(item.VisualRect());
         }
       }
+    } else {
+      // text_known_to_be_on_opaque_background should be initially true before
+      // we see any text.
+      DCHECK(chunk.has_text);
     }
   }
 
@@ -168,8 +193,8 @@ bool PaintChunker::AddHitTestDataToCurrentChunk(const PaintChunk::Id& id,
 }
 
 void PaintChunker::AddSelectionToCurrentChunk(
-    base::Optional<PaintedSelectionBound> start,
-    base::Optional<PaintedSelectionBound> end) {
+    absl::optional<PaintedSelectionBound> start,
+    absl::optional<PaintedSelectionBound> end) {
   // We should have painted the selection when calling this method.
   DCHECK(chunks_);
   DCHECK(!chunks_->IsEmpty());
@@ -259,15 +284,6 @@ void PaintChunker::FinalizeLastChunkProperties() {
     return;
 
   auto& chunk = chunks_->back();
-  if (should_compute_contents_opaque_) {
-    chunk.known_to_be_opaque =
-        last_chunk_known_to_be_opaque_region_.Contains(chunk.bounds);
-    chunk.text_known_to_be_on_opaque_background =
-        last_chunk_text_known_to_be_on_opaque_background_;
-    last_chunk_known_to_be_opaque_region_ = Region();
-    last_chunk_text_known_to_be_on_opaque_background_ = true;
-  }
-
   if (candidate_background_color_ != Color::kTransparent) {
     chunk.background_color = candidate_background_color_;
     chunk.background_color_area = candidate_background_area_;

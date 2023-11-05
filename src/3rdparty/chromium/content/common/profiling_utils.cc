@@ -6,10 +6,10 @@
 
 #include <limits>
 #include <memory>
+#include <string>
 
 #include "base/base_paths.h"
 #include "base/bind.h"
-#include "base/callback_forward.h"
 #include "base/clang_profiling_buildflags.h"
 #include "base/environment.h"
 #include "base/files/file.h"
@@ -21,7 +21,6 @@
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/strings/strcat.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"

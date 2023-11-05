@@ -36,6 +36,18 @@ TEST(GeometryConversionsTest, PointFFromPPFloatPoint) {
   EXPECT_EQ(float_point, gfx::PointF(-2.2f, 1.2f));
 }
 
+TEST(GeometryConversionsTest, PPFloatPointFromPointF) {
+  pp::FloatPoint pp_cpp_float_point =
+      PPFloatPointFromPointF(gfx::PointF(-1.2f, 2.2f));
+  EXPECT_EQ(pp_cpp_float_point.x(), -1.2f);
+  EXPECT_EQ(pp_cpp_float_point.y(), 2.2f);
+
+  PP_FloatPoint pp_c_float_point =
+      PPFloatPointFromPointF(gfx::PointF(-2.2f, 1.2f));
+  EXPECT_EQ(pp_c_float_point.x, -2.2f);
+  EXPECT_EQ(pp_c_float_point.y, 1.2f);
+}
+
 TEST(GeometryConversionsTest, RectFromPPRect) {
   gfx::Rect rect = RectFromPPRect(pp::Rect(-1, 2, 3, 4));
   EXPECT_EQ(rect, gfx::Rect(-1, 2, 3, 4));
@@ -56,16 +68,6 @@ TEST(GeometryConversionsTest, PPRectFromRect) {
   EXPECT_EQ(pp_c_rect.point.y, -1);
   EXPECT_EQ(pp_c_rect.size.width, 4);
   EXPECT_EQ(pp_c_rect.size.height, 3);
-}
-
-TEST(GeometryConversionsTest, RectFFromPPFloatRect) {
-  gfx::RectF rect =
-      RectFFromPPFloatRect(pp::FloatRect(-1.0f, 2.1f, 3.2f, 4.3f));
-  EXPECT_EQ(rect, gfx::RectF(-1.0f, 2.1f, 3.2f, 4.3f));
-
-  rect =
-      RectFFromPPFloatRect(PP_MakeFloatRectFromXYWH(2.9f, -1.8f, 4.7f, 3.6f));
-  EXPECT_EQ(rect, gfx::RectF(2.9f, -1.8f, 4.7f, 3.6f));
 }
 
 TEST(GeometryConversionsTest, PPFloatRectFromRectF) {

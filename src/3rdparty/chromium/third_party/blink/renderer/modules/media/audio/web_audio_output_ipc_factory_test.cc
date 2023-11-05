@@ -41,7 +41,7 @@ blink::LocalFrameToken TokenFromInt(int i) {
 std::unique_ptr<base::Thread> MakeIOThread() {
   auto io_thread = std::make_unique<base::Thread>("test IO thread");
   base::Thread::Options thread_options(base::MessagePumpType::IO, 0);
-  CHECK(io_thread->StartWithOptions(thread_options));
+  CHECK(io_thread->StartWithOptions(std::move(thread_options)));
   return io_thread;
 }
 
@@ -54,7 +54,7 @@ class FakeRemoteFactory
   void RequestDeviceAuthorization(
       mojo::PendingReceiver<media::mojom::blink::AudioOutputStreamProvider>
           stream_provider,
-      const base::Optional<base::UnguessableToken>& session_id,
+      const absl::optional<base::UnguessableToken>& session_id,
       const String& device_id,
       RequestDeviceAuthorizationCallback callback) override {
     std::move(callback).Run(
@@ -179,7 +179,7 @@ TEST_F(WebAudioOutputIPCFactoryTest, SeveralFactories) {
 
   WebAudioOutputIPCFactory ipc_factory(io_thread->task_runner());
 
-  for (size_t i = 0; i < n_factories; i++) {
+  for (int i = 0; i < n_factories; i++) {
     ipc_factory.RegisterRemoteFactory(TokenFromInt(kRenderFrameId + i),
                                       &interface_broker);
   }
@@ -207,7 +207,7 @@ TEST_F(WebAudioOutputIPCFactoryTest, SeveralFactories) {
           ipc_factory.CreateAudioOutputIPC(TokenFromInt(kRenderFrameId + 2))));
   run_loop2.Run();
 
-  for (size_t i = 0; i < n_factories; i++) {
+  for (int i = 0; i < n_factories; i++) {
     if (i == 1)
       continue;
     ipc_factory.MaybeDeregisterRemoteFactory(TokenFromInt(i));

@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 import '../module_header.js';
+import 'chrome://resources/cr_elements/cr_auto_img/cr_auto_img.js';
+import 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.m.js';
 
-import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {I18nBehavior, loadTimeData} from '../../i18n_setup.js';
+import {InfoDialogElement} from '../info_dialog.js';
 import {ModuleDescriptor} from '../module_descriptor.js';
 
 import {DriveProxy} from './drive_module_proxy.js';
@@ -30,9 +32,30 @@ class DriveModuleElement extends mixinBehaviors
 
   static get properties() {
     return {
-      /** @type {Array<!drive.mojom.File>} */
+      /** @type {!Array<!drive.mojom.File>} */
       files: Array,
     };
+  }
+
+  /** @private */
+  onInfoButtonClick_() {
+    /** @type {InfoDialogElement} */ (this.$.infoDialogRender.get())
+        .showModal();
+  }
+
+  /** @private */
+  onDismissButtonClick_() {
+    DriveProxy.getInstance().handler.dismissModule();
+    this.dispatchEvent(new CustomEvent('dismiss-module', {
+      bubbles: true,
+      composed: true,
+      detail: {
+        message: loadTimeData.getStringF(
+            'dismissModuleToastMessage',
+            loadTimeData.getString('modulesDriveFilesSentence')),
+        restoreCallback: () => DriveProxy.getInstance().handler.restoreModule(),
+      },
+    }));
   }
 
   /** @private */
@@ -43,7 +66,7 @@ class DriveModuleElement extends mixinBehaviors
       detail: {
         message: loadTimeData.getStringF(
             'disableModuleToastMessage',
-            loadTimeData.getString('modulesDriveSentence')),
+            loadTimeData.getString('modulesDriveSentence2')),
       },
     }));
   }
@@ -54,44 +77,18 @@ class DriveModuleElement extends mixinBehaviors
    * @private
    */
   getImageSrc_(file) {
-    switch (file.type) {
-      case (drive.mojom.FileType.kDoc):
-        return 'modules/drive/icons/google_docs_logo.svg';
-      case (drive.mojom.FileType.kSheet):
-        return 'modules/drive/icons/google_sheets_logo.svg';
-      case (drive.mojom.FileType.kSlide):
-        return 'modules/drive/icons/google_slides_logo.svg';
-      default:
-        // TODO(crbug/1176982): Need to return an image
-        // in the case we don't know the type of
-        // drive item.
-        return '';
-    }
+    return 'https://drive-thirdparty.googleusercontent.com/32/type/' +
+        file.mimeType;
   }
 
   /**
-   * @param {drive.mojom.File} file
-   * @return {string}
+   * @param {!Event} e
    * @private
    */
-  getTargetUrl_(file) {
-    const id = file.id;
-    // TODO(crbug/1177439): Use URL from ItemSuggest to generate URL.
-    switch (file.type) {
-      case (drive.mojom.FileType.kDoc):
-        return `https://docs.google.com/document/d/${id}/edit?usp=drive_web`;
-      case (drive.mojom.FileType.kSlide):
-        return `https://docs.google.com/presentation/d/${
-            id}/edit?usp=drive_web`;
-      case (drive.mojom.FileType.kSheet):
-        return `https://docs.google.com/spreadsheets/d/${
-            id}/edit?usp=drive_web`;
-      default:
-        // TODO(crbug/1177426): Generic drive link leads to preview of page,
-        // will need to decide if this is appropriate or we want to navigate
-        // directly to the page we want.
-        return `https://drive.google.com/file/d/${id}/view?usp=drive_web`;
-    }
+  onFileClick_(e) {
+    this.dispatchEvent(new Event('usage', {bubbles: true, composed: true}));
+    const index = this.$.fileRepeat.indexForElement(e.target);
+    chrome.metricsPrivate.recordSmallCount('NewTabPage.Drive.FileClick', index);
   }
 }
 
@@ -114,4 +111,4 @@ async function createDriveElement() {
 export const driveDescriptor = new ModuleDescriptor(
     /*id=*/ 'drive',
     /*name=*/ loadTimeData.getString('modulesDriveSentence'),
-    /*heightPx=*/ 260, createDriveElement);
+    createDriveElement);

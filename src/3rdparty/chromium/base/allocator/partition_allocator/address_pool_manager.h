@@ -6,18 +6,21 @@
 #define BASE_ALLOCATOR_PARTITION_ALLOCATOR_ADDRESS_POOL_MANAGER_H_
 
 #include <bitset>
+#include <limits>
 
 #include "base/allocator/partition_allocator/address_pool_manager_bitmap.h"
 #include "base/allocator/partition_allocator/address_pool_manager_types.h"
 #include "base/allocator/partition_allocator/partition_alloc_check.h"
+#include "base/allocator/partition_allocator/partition_alloc_config.h"
 #include "base/allocator/partition_allocator/partition_alloc_constants.h"
-#include "base/atomicops.h"
-#include "base/lazy_instance.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "build/build_config.h"
 
 namespace base {
+
+template <typename Type>
+struct LazyInstanceTraitsBase;
 
 namespace internal {
 
@@ -32,43 +35,49 @@ namespace internal {
 //
 // (32bit version)
 // AddressPoolManager wraps AllocPages and FreePages and remembers allocated
-// address regions using bitmaps. IsManagedByPartitionAllocDirectMap and
-// IsManagedByPartitionAllocNormalBuckets use the bitmaps to judge whether a
-// given address is managed by the direct map or normal buckets.
+// address regions using bitmaps. IsManagedByPartitionAllocBRPPool and
+// IsManagedByPartitionAllocNonBRPPool use the bitmaps to judge whether a given
+// address is in a pool that supports BackupRefPtr or in a pool that doesn't.
+// All PartitionAlloc allocations must be in either of the pools.
 class BASE_EXPORT AddressPoolManager {
-  static constexpr uint64_t kGiB = 1024 * 1024 * 1024ull;
-
  public:
-  static constexpr uint64_t kNormalBucketMaxSize =
-#if defined(PA_HAS_64_BITS_POINTERS)
-      16 * kGiB;
-#else
-      4 * kGiB;
-#endif
-
   static AddressPoolManager* GetInstance();
 
 #if defined(PA_HAS_64_BITS_POINTERS)
   pool_handle Add(uintptr_t address, size_t length);
   void Remove(pool_handle handle);
+
+  // Populate a |used| bitset of superpages currently in use.
+  void GetPoolUsedSuperPages(pool_handle handle,
+                             std::bitset<kMaxSuperPages>& used);
+
+  // Return the base address of a pool.
+  uintptr_t GetPoolBaseAddress(pool_handle handle);
 #endif
+
   // Reserves address space from GigaCage.
   char* Reserve(pool_handle handle, void* requested_address, size_t length);
+
   // Frees address space back to GigaCage and decommits underlying system pages.
   void UnreserveAndDecommit(pool_handle handle, void* ptr, size_t length);
   void ResetForTesting();
 
 #if !defined(PA_HAS_64_BITS_POINTERS)
-  static bool IsManagedByDirectMapPool(const void* address) {
-    return AddressPoolManagerBitmap::IsManagedByDirectMapPool(address);
+  void MarkUsed(pool_handle handle, const void* address, size_t size);
+  void MarkUnused(pool_handle handle, const void* address, size_t size);
+
+  static bool IsManagedByNonBRPPool(const void* address) {
+    return AddressPoolManagerBitmap::IsManagedByNonBRPPool(address);
   }
 
-  static bool IsManagedByNormalBucketPool(const void* address) {
-    return AddressPoolManagerBitmap::IsManagedByNormalBucketPool(address);
+  static bool IsManagedByBRPPool(const void* address) {
+    return AddressPoolManagerBitmap::IsManagedByBRPPool(address);
   }
-#endif
+#endif  // !defined(PA_HAS_64_BITS_POINTERS)
 
  private:
+  friend class AddressPoolManagerForTesting;
+
   AddressPoolManager();
   ~AddressPoolManager();
 
@@ -87,13 +96,16 @@ class BASE_EXPORT AddressPoolManager {
 
     bool TryReserveChunk(uintptr_t address, size_t size);
 
+    void GetUsedSuperPages(std::bitset<kMaxSuperPages>& used);
+    uintptr_t GetBaseAddress();
+
    private:
+    base::Lock lock_;
+
     // The bitset stores the allocation state of the address pool. 1 bit per
     // super-page: 1 = allocated, 0 = free.
-    static constexpr size_t kMaxBits = kNormalBucketMaxSize / kSuperPageSize;
+    std::bitset<kMaxSuperPages> alloc_bitset_ GUARDED_BY(lock_);
 
-    base::Lock lock_;
-    std::bitset<kMaxBits> alloc_bitset_ GUARDED_BY(lock_);
     // An index of a bit in the bitset before which we know for sure there all
     // 1s. This is a best-effort hint in the sense that there still may be lots
     // of 1s after this index, but at least we know there is no point in
@@ -115,15 +127,15 @@ class BASE_EXPORT AddressPoolManager {
   static constexpr size_t kNumPools = 2;
   Pool pools_[kNumPools];
 
-#else   // defined(PA_HAS_64_BITS_POINTERS)
+#else  // defined(PA_HAS_64_BITS_POINTERS)
 
-  void MarkUsed(pool_handle handle, const char* address, size_t size);
-  void MarkUnused(pool_handle handle, uintptr_t address, size_t size);
+  // BRP stands for BackupRefPtr. GigaCage is split into pools, one which
+  // supports BackupRefPtr and one that doesn't.
+  static constexpr pool_handle kNonBRPPoolHandle = 1;
+  static constexpr pool_handle kBRPPoolHandle = 2;
+  friend pool_handle GetNonBRPPool();
+  friend pool_handle GetBRPPool();
 
-  static constexpr pool_handle kDirectMapHandle = 1;
-  static constexpr pool_handle kNormalBucketHandle = 2;
-  friend internal::pool_handle GetDirectMapPool();
-  friend internal::pool_handle GetNormalBucketPool();
 #endif  // defined(PA_HAS_64_BITS_POINTERS)
 
   friend struct base::LazyInstanceTraitsBase<AddressPoolManager>;
@@ -131,14 +143,15 @@ class BASE_EXPORT AddressPoolManager {
 };
 
 #if !defined(PA_HAS_64_BITS_POINTERS)
-ALWAYS_INLINE internal::pool_handle GetDirectMapPool() {
-  return AddressPoolManager::kDirectMapHandle;
+ALWAYS_INLINE pool_handle GetNonBRPPool() {
+  return AddressPoolManager::kNonBRPPoolHandle;
 }
 
-ALWAYS_INLINE internal::pool_handle GetNormalBucketPool() {
-  return AddressPoolManager::kNormalBucketHandle;
+ALWAYS_INLINE pool_handle GetBRPPool() {
+  return AddressPoolManager::kBRPPoolHandle;
 }
-#endif
+
+#endif  // !defined(PA_HAS_64_BITS_POINTERS)
 
 }  // namespace internal
 

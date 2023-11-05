@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -94,6 +94,10 @@ def main(argv):
                       'codesearch.')
   parser.add_argument("--plugin",
                       help="Relative path to custom generator plugin.")
+  #   TODO(crbug.com/1237958): Remove allow_optional when proto rolls to 3.15.
+  parser.add_argument("--allow-optional",
+                      action='store_true',
+                      help="Enables experimental_allow_proto3_optional.")
   parser.add_argument("--plugin-options",
                       help="Custom generator plugin options.")
   parser.add_argument("--cc-options",
@@ -151,6 +155,9 @@ def main(argv):
     if options.cc_options:
       cc_options_list.append(options.cc_options)
 
+    if options.allow_optional:
+      protoc_cmd += ["--experimental_allow_proto3_optional"]
+
     cc_options = FormatGeneratorOptions(','.join(cc_options_list))
     protoc_cmd += ["--cpp_out", cc_options + cc_out_dir]
     for filename in protos:
@@ -180,7 +187,7 @@ def main(argv):
     protoc_cmd += ['--dependency_out', options.descriptor_set_dependency_file]
     ret = subprocess.call(protoc_cmd)
 
-    with open(options.descriptor_set_dependency_file, 'r') as f:
+    with open(options.descriptor_set_dependency_file, 'rb') as f:
       dependency_file_data = f.read().decode('utf-8')
 
   ret = subprocess.call(protoc_cmd)

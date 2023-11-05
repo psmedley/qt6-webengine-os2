@@ -4,6 +4,8 @@
 
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 
+#include <memory>
+
 #include "base/sequenced_task_runner.h"
 #include "mojo/public/cpp/bindings/lib/multiplex_router.h"
 #include "mojo/public/cpp/bindings/lib/task_runner_helper.h"
@@ -60,11 +62,11 @@ void AssociatedReceiverBase::BindImpl(
     const char* interface_name) {
   DCHECK(handle.is_valid());
 
-  endpoint_client_.reset(new InterfaceEndpointClient(
+  endpoint_client_ = std::make_unique<InterfaceEndpointClient>(
       std::move(handle), receiver, std::move(payload_validator),
       expect_sync_requests,
       internal::GetTaskRunnerToUseFromUserProvidedTaskRunner(std::move(runner)),
-      interface_version, interface_name));
+      interface_version, interface_name);
 }
 
 }  // namespace internal
@@ -72,7 +74,7 @@ void AssociatedReceiverBase::BindImpl(
 void AssociateWithDisconnectedPipe(ScopedInterfaceEndpointHandle handle) {
   MessagePipe pipe;
   scoped_refptr<internal::MultiplexRouter> router =
-      new internal::MultiplexRouter(
+      internal::MultiplexRouter::CreateAndStartReceiving(
           std::move(pipe.handle0), internal::MultiplexRouter::MULTI_INTERFACE,
           false, base::SequencedTaskRunnerHandle::Get());
   router->AssociateInterface(std::move(handle));

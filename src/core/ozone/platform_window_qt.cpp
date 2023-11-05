@@ -41,6 +41,7 @@
 
 #include "base/bind.h"
 #include "ozone/platform_window_qt.h"
+#include "ui/base/cursor/platform_cursor.h"
 #include "ui/events/ozone/events_ozone.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/platform_window/platform_window_delegate.h"
@@ -64,6 +65,11 @@ gfx::Rect PlatformWindowQt::GetBounds() const
     return bounds_;
 }
 
+void PlatformWindowQt::Close()
+{
+    delegate_->OnClosed();
+}
+
 void PlatformWindowQt::SetBounds(const gfx::Rect& bounds)
 {
     if (bounds == bounds_)
@@ -80,8 +86,8 @@ bool PlatformWindowQt::CanDispatchEvent(const ui::PlatformEvent& /*ne*/)
 uint32_t PlatformWindowQt::DispatchEvent(const ui::PlatformEvent& native_event)
 {
     DispatchEventFromNativeUiEvent(
-                native_event, base::Bind(&PlatformWindowDelegate::DispatchEvent,
-                                         base::Unretained(delegate_)));
+                native_event, base::BindOnce(&PlatformWindowDelegate::DispatchEvent,
+                                             base::Unretained(delegate_)));
 
     return ui::POST_DISPATCH_STOP_PROPAGATION;
 }

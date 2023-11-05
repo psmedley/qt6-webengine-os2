@@ -11,10 +11,9 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/token.h"
+#include "build/chromeos_buildflags.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/sessions/core/serialized_user_agent_override.h"
 #include "components/sessions/core/session_id.h"
@@ -22,6 +21,7 @@
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
 #include "components/variations/variations_associated_data.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/color_palette.h"
@@ -73,7 +73,7 @@ struct SESSIONS_EXPORT SessionTab {
   int current_navigation_index;
 
   // The tab's group ID, if any.
-  base::Optional<tab_groups::TabGroupId> group;
+  absl::optional<tab_groups::TabGroupId> group;
 
   // True if the tab is pinned.
   bool pinned;
@@ -143,6 +143,9 @@ struct SESSIONS_EXPORT SessionWindow {
     TYPE_APP = 2,
     TYPE_DEVTOOLS = 3,
     TYPE_APP_POPUP = 4,
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    TYPE_CUSTOM_TAB = 5,
+#endif
   };
 
   // Identifier of the window.

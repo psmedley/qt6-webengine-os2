@@ -5,8 +5,6 @@
 #ifndef COMPONENTS_HISTORY_CORE_BROWSER_HISTORY_DATABASE_H_
 #define COMPONENTS_HISTORY_CORE_BROWSER_HISTORY_DATABASE_H_
 
-#include <stddef.h>
-
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -17,6 +15,7 @@
 #include "components/history/core/browser/sync/typed_url_sync_metadata_database.h"
 #endif
 #include "components/history/core/browser/url_database.h"
+#include "components/history/core/browser/visit_annotations_database.h"
 #include "components/history/core/browser/visit_database.h"
 #include "components/history/core/browser/visitsegment_database.h"
 #include "sql/database.h"
@@ -53,6 +52,7 @@ class HistoryDatabase : public DownloadDatabase,
 #endif
                         public URLDatabase,
                         public VisitDatabase,
+                        public VisitAnnotationsDatabase,
                         public VisitSegmentDatabase {
  public:
   // A simple class for scoping a history database transaction. This does not
@@ -81,6 +81,7 @@ class HistoryDatabase : public DownloadDatabase,
   void set_error_callback(const sql::Database::ErrorCallback& error_callback) {
     db_.set_error_callback(error_callback);
   }
+  void reset_error_callback() { db_.reset_error_callback(); }
 
   // Must call this function to complete initialization. Will return
   // sql::INIT_OK on success. Otherwise, no other function should be called. You
@@ -95,7 +96,7 @@ class HistoryDatabase : public DownloadDatabase,
   int CountUniqueHostsVisitedLastMonth();
 
   // Counts the number of unique domains (eLTD+1) visited within
-  // [|begin_time|, |end_time|).
+  // [`begin_time`, `end_time`).
   int CountUniqueDomainsVisited(base::Time begin_time, base::Time end_time);
 
   // Call to set the mode on the database to exclusive. The default locking mode
@@ -162,10 +163,6 @@ class HistoryDatabase : public DownloadDatabase,
   // visit id wasn't found.
   SegmentID GetSegmentID(VisitID visit_id);
 
-  // TODO(https://crbug.com/1141501): this is for an experiment, and will be
-  // removed once data is collected from experiment.
-  bool GetVisitsForUrl2(URLID url_id, VisitVector* visits) override;
-
   // Retrieves/Updates early expiration threshold, which specifies the earliest
   // known point in history that may possibly to contain visits suitable for
   // early expiration (AUTO_SUBFRAMES).
@@ -174,7 +171,7 @@ class HistoryDatabase : public DownloadDatabase,
 
  private:
 #if defined(OS_ANDROID)
-  // AndroidProviderBackend uses the |db_|.
+  // AndroidProviderBackend uses the `db_`.
   friend class AndroidProviderBackend;
   FRIEND_TEST_ALL_PREFIXES(AndroidURLsMigrationTest, MigrateToVersion22);
 #endif
@@ -195,7 +192,7 @@ class HistoryDatabase : public DownloadDatabase,
 
   // Makes sure the version is up to date, updating if necessary. If the
   // database is too old to migrate, the user will be notified. Returns
-  // sql::INIT_OK iff  the DB is up to date and ready for use.
+  // sql::INIT_OK iff the DB is up to date and ready for use.
   //
   // This assumes it is called from the init function inside a transaction. It
   // may commit the transaction and start a new one if migration requires it.

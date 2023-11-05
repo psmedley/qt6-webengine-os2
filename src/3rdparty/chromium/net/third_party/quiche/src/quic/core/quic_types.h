@@ -7,10 +7,12 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <ostream>
 #include <vector>
 
+#include "absl/container/inlined_vector.h"
 #include "quic/core/quic_connection_id.h"
 #include "quic/core/quic_error_codes.h"
 #include "quic/core/quic_packet_number.h"
@@ -24,7 +26,13 @@ namespace quic {
 using QuicPacketLength = uint16_t;
 using QuicControlFrameId = uint32_t;
 using QuicMessageId = uint32_t;
-using QuicDatagramFlowId = uint64_t;
+
+// TODO(b/181256914) replace QuicDatagramStreamId with QuicStreamId once we
+// remove support for draft-ietf-masque-h3-datagram-00 in favor of later drafts.
+using QuicDatagramStreamId = uint64_t;
+using QuicDatagramContextId = uint64_t;
+// Note that for draft-ietf-masque-h3-datagram-00, we represent the flow ID as a
+// QuicDatagramStreamId.
 
 // IMPORTANT: IETF QUIC defines stream IDs and stream counts as being unsigned
 // 62-bit numbers. However, we have decided to only support up to 2^32-1 streams
@@ -42,6 +50,12 @@ using QuicPublicResetNonceProof = uint64_t;
 using QuicStreamOffset = uint64_t;
 using DiversificationNonce = std::array<char, 32>;
 using PacketTimeVector = std::vector<std::pair<QuicPacketNumber, QuicTime>>;
+
+enum : size_t { kStatelessResetTokenLength = 16 };
+using StatelessResetToken = std::array<char, kStatelessResetTokenLength>;
+
+// WebTransport session IDs are stream IDs.
+using WebTransportSessionId = uint64_t;
 
 enum : size_t { kQuicPathFrameBufferSize = 8 };
 using QuicPathFrameBuffer = std::array<uint8_t, kQuicPathFrameBufferSize>;
@@ -278,7 +292,7 @@ QUIC_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
 // byte, with the two most significant bits being 0. Thus, the following
 // enumerations are valid as both the numeric values of frame types AND their
 // encodings.
-enum QuicIetfFrameType : uint8_t {
+enum QuicIetfFrameType : uint64_t {
   IETF_PADDING = 0x00,
   IETF_PING = 0x01,
   IETF_ACK = 0x02,
@@ -573,7 +587,7 @@ struct QUIC_EXPORT_PRIVATE AckedPacket {
 };
 
 // A vector of acked packets.
-using AckedPacketVector = QuicInlinedVector<AckedPacket, 2>;
+using AckedPacketVector = absl::InlinedVector<AckedPacket, 2>;
 
 // Information about a newly lost packet.
 struct QUIC_EXPORT_PRIVATE LostPacket {
@@ -590,7 +604,7 @@ struct QUIC_EXPORT_PRIVATE LostPacket {
 };
 
 // A vector of lost packets.
-using LostPacketVector = QuicInlinedVector<LostPacket, 2>;
+using LostPacketVector = absl::InlinedVector<LostPacket, 2>;
 
 // Please note, this value cannot used directly for packet serialization.
 enum QuicLongHeaderType : uint8_t {
@@ -708,10 +722,10 @@ enum AckResult {
 
 // Indicates the fate of a serialized packet in WritePacket().
 enum SerializedPacketFate : uint8_t {
-  DISCARD,         // Discard the packet.
-  COALESCE,        // Try to coalesce packet.
-  BUFFER,          // Buffer packet in buffered_packets_.
-  SEND_TO_WRITER,  // Send packet to writer.
+  DISCARD,                     // Discard the packet.
+  COALESCE,                    // Try to coalesce packet.
+  BUFFER,                      // Buffer packet in buffered_packets_.
+  SEND_TO_WRITER,              // Send packet to writer.
   LEGACY_VERSION_ENCAPSULATE,  // Perform Legacy Version Encapsulation on this
                                // packet.
 };
@@ -818,6 +832,16 @@ QUIC_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
                                              const KeyUpdateReason reason);
 
 QUIC_EXPORT_PRIVATE std::string KeyUpdateReasonString(KeyUpdateReason reason);
+
+// QuicSSLConfig contains configurations to be applied on a SSL object, which
+// overrides the configurations in SSL_CTX.
+struct QUIC_NO_EXPORT QuicSSLConfig {
+  // Whether TLS early data should be enabled. If not set, default to enabled.
+  absl::optional<bool> early_data_enabled;
+  // If set, used to configure the SSL object with
+  // SSL_set_signing_algorithm_prefs.
+  absl::optional<absl::InlinedVector<uint16_t, 8>> signing_algorithm_prefs;
+};
 
 }  // namespace quic
 

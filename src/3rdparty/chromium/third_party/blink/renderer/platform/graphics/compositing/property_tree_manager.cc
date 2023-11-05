@@ -19,7 +19,6 @@
 #include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scroll_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
-#include "third_party/skia/include/effects/SkLumaColorFilter.h"
 
 namespace blink {
 
@@ -421,6 +420,18 @@ int PropertyTreeManager::EnsureCompositorTransformNode(
       EnsureCompositorTransformNode(transform_node.Parent()->Unalias());
   id = GetTransformTree().Insert(cc::TransformNode(), parent_id);
 
+  // ScrollUnification creates the entire scroll tree and will already have done
+  // this.
+  if (!RuntimeEnabledFeatures::ScrollUnificationEnabled()) {
+    if (auto* scroll_translation_for_fixed =
+            transform_node.ScrollTranslationForFixed()) {
+      // Fixed-position can cause different topologies of the transform tree and
+      // the scroll tree. This ensures the ancestor scroll nodes of the scroll
+      // node for a descendant transform node below is created.
+      EnsureCompositorTransformNode(*scroll_translation_for_fixed);
+    }
+  }
+
   cc::TransformNode& compositor_node = *GetTransformTree().Node(id);
   UpdateCcTransformLocalMatrix(compositor_node, transform_node);
   compositor_node.transform_changed = transform_node.NodeChangeAffectsRaster();
@@ -485,6 +496,7 @@ int PropertyTreeManager::EnsureCompositorTransformNode(
   // If this transform is a scroll offset translation, create the associated
   // compositor scroll property node and adjust the compositor transform node's
   // scroll offset.
+  // TODO(ScrollUnification): Move this code into EnsureCompositorScrollNodes().
   if (auto* scroll_node = transform_node.ScrollNode()) {
     compositor_node.scrolls = true;
     compositor_node.should_be_snapped = true;
@@ -616,6 +628,9 @@ void PropertyTreeManager::CreateCompositorScrollNode(
 
 int PropertyTreeManager::EnsureCompositorScrollNode(
     const TransformPaintPropertyNode& scroll_offset_translation) {
+  // TODO(ScrollUnification): Remove this function and let
+  // EnsureCompositorScrollNodes() call EnsureCompositorTransformNode() and
+  // CreateCompositorScrollNode() directly.
   const auto* scroll_node = scroll_offset_translation.ScrollNode();
   DCHECK(scroll_node);
   EnsureCompositorTransformNode(scroll_offset_translation);
@@ -872,7 +887,7 @@ bool PropertyTreeManager::SupportsShaderBasedRoundedCorner(
   // Don't use shader based rounded corner if the next effect has backdrop
   // filter and the clip is in different transform space, because we will use
   // the effect's transform space for the mask isolation effect node.
-  if (next_effect && !next_effect->BackdropFilter().IsEmpty() &&
+  if (next_effect && next_effect->BackdropFilter() &&
       &next_effect->LocalTransformSpace() != &clip.LocalTransformSpace())
     return false;
 
@@ -970,7 +985,7 @@ int PropertyTreeManager::SynthesizeCcEffectsForClipsIfNeeded(
 
   int cc_effect_id_for_backdrop_effect = cc::EffectTree::kInvalidNodeId;
   for (auto i = pending_clips.size(); i--;) {
-    const auto& pending_clip = pending_clips[i];
+    auto& pending_clip = pending_clips[i];
     int clip_id = backdrop_effect_clip_id;
 
     // For a non-trivial clip, the synthetic effect is an isolation to enclose
@@ -979,6 +994,26 @@ int PropertyTreeManager::SynthesizeCcEffectsForClipsIfNeeded(
     // surface which is axis-aligned with the clip.
     cc::EffectNode& synthetic_effect = *GetEffectTree().Node(
         GetEffectTree().Insert(cc::EffectNode(), current_.effect_id));
+
+    if (pending_clip.type & CcEffectType::kSyntheticFor2dAxisAlignment) {
+      if (should_realize_backdrop_effect) {
+        // We need a synthetic mask clip layer for the non-2d-axis-aligned clip
+        // when we also need to realize a backdrop effect.
+        pending_clip.type = static_cast<CcEffectType>(
+            pending_clip.type | CcEffectType::kSyntheticForNonTrivialClip);
+      } else {
+        synthetic_effect.stable_id =
+            CompositorElementIdFromUniqueObjectId(NewUniqueObjectId())
+                .GetStableId();
+        synthetic_effect.render_surface_reason =
+            cc::RenderSurfaceReason::kClipAxisAlignment;
+        // The clip of the synthetic effect is the parent of the clip, so that
+        // the clip itself will be applied in the render surface.
+        DCHECK(pending_clip.clip->UnaliasedParent());
+        clip_id =
+            EnsureCompositorClipNode(*pending_clip.clip->UnaliasedParent());
+      }
+    }
 
     if (pending_clip.type & CcEffectType::kSyntheticForNonTrivialClip) {
       if (clip_id == cc::ClipTree::kInvalidNodeId)
@@ -1012,18 +1047,6 @@ int PropertyTreeManager::SynthesizeCcEffectsForClipsIfNeeded(
                 : cc::RenderSurfaceReason::kClipPath;
       }
       pending_synthetic_mask_layers_.insert(synthetic_effect.id);
-    }
-
-    if (pending_clip.type & CcEffectType::kSyntheticFor2dAxisAlignment) {
-      synthetic_effect.stable_id =
-          CompositorElementIdFromUniqueObjectId(NewUniqueObjectId())
-              .GetStableId();
-      synthetic_effect.render_surface_reason =
-          cc::RenderSurfaceReason::kClipAxisAlignment;
-      // The clip of the synthetic effect is the parent of the clip, so that
-      // the clip itself will be applied in the render surface.
-      DCHECK(pending_clip.clip->UnaliasedParent());
-      clip_id = EnsureCompositorClipNode(*pending_clip.clip->UnaliasedParent());
     }
 
     const TransformPaintPropertyNode* transform = nullptr;
@@ -1137,7 +1160,7 @@ static cc::RenderSurfaceReason RenderSurfaceReasonForEffect(
     return cc::RenderSurfaceReason::kFilter;
   if (effect.HasActiveFilterAnimation())
     return cc::RenderSurfaceReason::kFilterAnimation;
-  if (!effect.BackdropFilter().IsEmpty())
+  if (effect.BackdropFilter())
     return cc::RenderSurfaceReason::kBackdropFilter;
   if (effect.HasActiveBackdropFilterAnimation())
     return cc::RenderSurfaceReason::kBackdropFilterAnimation;
@@ -1148,6 +1171,8 @@ static cc::RenderSurfaceReason RenderSurfaceReasonForEffect(
       effect.BlendMode() != SkBlendMode::kDstIn) {
     return cc::RenderSurfaceReason::kBlendMode;
   }
+  if (effect.DocumentTransitionSharedElementId().valid())
+    return cc::RenderSurfaceReason::kDocumentTransitionParticipant;
   return cc::RenderSurfaceReason::kNone;
 }
 
@@ -1160,32 +1185,23 @@ void PropertyTreeManager::PopulateCcEffectNode(
   effect_node.render_surface_reason = RenderSurfaceReasonForEffect(effect);
   effect_node.opacity = effect.Opacity();
   const auto& transform = effect.LocalTransformSpace().Unalias();
-  if (effect.GetColorFilter() != kColorFilterNone) {
-    // Currently color filter is only used by SVG masks.
-    // We are cutting corner here by support only specific configuration.
-    DCHECK_EQ(effect.GetColorFilter(), kColorFilterLuminanceToAlpha);
-    DCHECK_EQ(effect.BlendMode(), SkBlendMode::kDstIn);
+  effect_node.transform_id = EnsureCompositorTransformNode(transform);
+  if (effect.HasBackdropEffect()) {
+    // We never have backdrop effect and filter on the same effect node.
     DCHECK(effect.Filter().IsEmpty());
-    effect_node.filters.Append(cc::FilterOperation::CreateReferenceFilter(
-        sk_make_sp<ColorFilterPaintFilter>(SkLumaColorFilter::Make(),
-                                           nullptr)));
-    effect_node.blend_mode = SkBlendMode::kDstIn;
-  } else {
-    effect_node.transform_id = EnsureCompositorTransformNode(transform);
-    if (effect.HasBackdropEffect()) {
-      // We never have backdrop effect and filter on the same effect node.
-      DCHECK(effect.Filter().IsEmpty());
-      effect_node.backdrop_filters =
-          effect.BackdropFilter().AsCcFilterOperations();
+    if (auto* backdrop_filter = effect.BackdropFilter()) {
+      effect_node.backdrop_filters = backdrop_filter->AsCcFilterOperations();
       effect_node.backdrop_filter_bounds = effect.BackdropFilterBounds();
-      effect_node.blend_mode = effect.BlendMode();
       effect_node.backdrop_mask_element_id = effect.BackdropMaskElementId();
-    } else {
-      effect_node.filters = effect.Filter().AsCcFilterOperations();
     }
+    effect_node.blend_mode = effect.BlendMode();
+  } else {
+    effect_node.filters = effect.Filter().AsCcFilterOperations();
   }
   effect_node.double_sided = !transform.IsBackfaceHidden();
   effect_node.effect_changed = effect.NodeChangeAffectsRaster();
+  effect_node.document_transition_shared_element_id =
+      effect.DocumentTransitionSharedElementId();
 }
 
 }  // namespace blink

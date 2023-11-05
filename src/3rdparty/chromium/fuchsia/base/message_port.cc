@@ -18,6 +18,7 @@
 #include "base/containers/circular_deque.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/macros.h"
+#include "base/stl_util.h"
 #include "fuchsia/base/mem_buffer_util.h"
 
 namespace cr_fuchsia {
@@ -28,14 +29,14 @@ using BlinkMessage = blink::WebMessagePort::Message;
 // Converts a fuchsia::web::WebMessage to a BlinkMessage.
 // An empty result indicates that conversion was successful.
 // Data validation errors are returned as a FrameError.
-base::Optional<fuchsia::web::FrameError> BlinkMessageFromFidl(
+absl::optional<fuchsia::web::FrameError> BlinkMessageFromFidl(
     fuchsia::web::WebMessage fidl_message,
     BlinkMessage* blink_message) {
   if (!fidl_message.has_data()) {
     return fuchsia::web::FrameError::NO_DATA_IN_MESSAGE;
   }
 
-  base::string16 data_utf16;
+  std::u16string data_utf16;
   if (!cr_fuchsia::ReadUTF8FromVMOAsUTF16(fidl_message.data(), &data_utf16)) {
     return fuchsia::web::FrameError::BUFFER_NOT_UTF8;
   }
@@ -64,7 +65,7 @@ base::Optional<fuchsia::web::FrameError> BlinkMessageFromFidl(
     }
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 // Defines a MessagePortAdapter, which translates and routes messages between a
@@ -95,9 +96,9 @@ class MessagePortAdapter : public blink::WebMessagePort::MessageReceiver {
 
   // Returns the next messagefrom Blink, or an empty value if there
   // are no more messages in the incoming queue.
-  base::Optional<fuchsia::web::WebMessage> GetNextBlinkMessage() {
+  absl::optional<fuchsia::web::WebMessage> GetNextBlinkMessage() {
     if (message_queue_.empty())
-      return base::nullopt;
+      return absl::nullopt;
 
     return std::move(message_queue_.front());
   }
@@ -110,7 +111,7 @@ class MessagePortAdapter : public blink::WebMessagePort::MessageReceiver {
  private:
   // blink::WebMessagePort::MessageReceiver implementation:
   bool OnMessage(BlinkMessage message) override {
-    base::Optional<fuchsia::web::WebMessage> message_converted =
+    absl::optional<fuchsia::web::WebMessage> message_converted =
         FidlWebMessageFromBlink(std::move(message),
                                 TransferableHostType::kLocal);
     if (!message_converted) {
@@ -168,7 +169,7 @@ class FidlMessagePortClientAdapter : public MessagePortAdapter {
 
   void OnMessageReceived(fuchsia::web::WebMessage message) {
     BlinkMessage blink_message;
-    base::Optional<fuchsia::web::FrameError> result =
+    absl::optional<fuchsia::web::FrameError> result =
         BlinkMessageFromFidl(std::move(message), &blink_message);
     if (result) {
       LOG(WARNING) << "Received bad message, error: "
@@ -195,7 +196,7 @@ class FidlMessagePortClientAdapter : public MessagePortAdapter {
 
   // cr_fuchsia::MessagePortAdapter implementation.
   void DeliverMessageToFidl() override {
-    base::Optional<fuchsia::web::WebMessage> message = GetNextBlinkMessage();
+    absl::optional<fuchsia::web::WebMessage> message = GetNextBlinkMessage();
     if (!message)
       return;
 
@@ -247,7 +248,7 @@ class FidlMessagePortServerAdapter : public fuchsia::web::MessagePort,
     if (!pending_receive_message_callback_)
       return;
 
-    base::Optional<fuchsia::web::WebMessage> message = GetNextBlinkMessage();
+    absl::optional<fuchsia::web::WebMessage> message = GetNextBlinkMessage();
     if (!message)
       return;
 
@@ -260,7 +261,7 @@ class FidlMessagePortServerAdapter : public fuchsia::web::MessagePort,
   void PostMessage(fuchsia::web::WebMessage message,
                    PostMessageCallback callback) override {
     BlinkMessage blink_message;
-    base::Optional<fuchsia::web::FrameError> status =
+    absl::optional<fuchsia::web::FrameError> status =
         BlinkMessageFromFidl(std::move(message), &blink_message);
 
     if (status) {
@@ -331,7 +332,7 @@ fidl::InterfaceHandle<fuchsia::web::MessagePort> FidlMessagePortFromBlink(
   return adapter->NewBinding();
 }
 
-base::Optional<fuchsia::web::WebMessage> FidlWebMessageFromBlink(
+absl::optional<fuchsia::web::WebMessage> FidlWebMessageFromBlink(
     BlinkMessage blink_message,
     TransferableHostType port_type) {
   fuchsia::web::WebMessage fidl_message;
@@ -359,10 +360,10 @@ base::Optional<fuchsia::web::WebMessage> FidlWebMessageFromBlink(
     blink_message.ports.clear();
   }
 
-  base::string16 data_utf16 = std::move(blink_message.data);
+  std::u16string data_utf16 = std::move(blink_message.data);
   std::string data_utf8;
   if (!base::UTF16ToUTF8(data_utf16.data(), data_utf16.size(), &data_utf8))
-    return base::nullopt;
+    return absl::nullopt;
 
   base::STLClearObject(&data_utf16);
 
@@ -370,7 +371,7 @@ base::Optional<fuchsia::web::WebMessage> FidlWebMessageFromBlink(
   fuchsia::mem::Buffer data_buffer =
       cr_fuchsia::MemBufferFromString(data_utf8, kBufferVmoName);
   if (!data_buffer.vmo)
-    return base::nullopt;
+    return absl::nullopt;
 
   fidl_message.set_data(std::move(data_buffer));
   return fidl_message;

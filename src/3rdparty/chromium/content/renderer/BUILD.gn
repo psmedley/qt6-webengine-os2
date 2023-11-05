@@ -57,14 +57,8 @@ target(link_target_type, "renderer") {
     "browser_exposed_renderer_interfaces.h",
     "categorized_worker_pool.cc",
     "categorized_worker_pool.h",
-    "child_frame_compositing_helper.cc",
-    "child_frame_compositing_helper.h",
-    "child_frame_compositor.h",
-    "compositor/compositor_dependencies.h",
     "content_security_policy_util.cc",
     "content_security_policy_util.h",
-    "crash_helpers.cc",
-    "crash_helpers.h",
     "discardable_memory_utils.cc",
     "discardable_memory_utils.h",
     "dom_automation_controller.cc",
@@ -81,10 +75,6 @@ target(link_target_type, "renderer") {
     "in_process_renderer_thread.h",
     "internal_document_state_data.cc",
     "internal_document_state_data.h",
-    "loader/navigation_body_loader.cc",
-    "loader/navigation_body_loader.h",
-    "loader/web_worker_fetch_context_impl.cc",
-    "loader/web_worker_fetch_context_impl.h",
     "media/audio_decoder.cc",
     "media/audio_decoder.h",
     "media/batching_media_log.cc",
@@ -99,8 +89,6 @@ target(link_target_type, "renderer") {
     "media/media_interface_factory.h",
     "media/media_permission_dispatcher.cc",
     "media/media_permission_dispatcher.h",
-    "media/power_status_helper_impl.cc",
-    "media/power_status_helper_impl.h",
     "media/render_media_client.cc",
     "media/render_media_client.h",
     "media/render_media_event_handler.cc",
@@ -119,8 +107,6 @@ target(link_target_type, "renderer") {
     "navigation_state.h",
     "net_info_helper.cc",
     "net_info_helper.h",
-    "peripheral_content_heuristic.cc",
-    "peripheral_content_heuristic.h",
     "render_frame_impl.cc",
     "render_frame_impl.h",
     "render_frame_proxy.cc",
@@ -242,10 +228,7 @@ target(link_target_type, "renderer") {
     ]
   }
 
-  configs += [
-    "//content:content_implementation",
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
+  configs += [ "//content:content_implementation" ]
   defines = []
 
   public_deps = [
@@ -259,6 +242,7 @@ target(link_target_type, "renderer") {
     "//base:i18n",
     "//build:chromecast_buildflags",
     "//build:chromeos_buildflags",
+    "//build:os_buildflags",
     "//cc",
     "//cc/animation",
     "//cc/mojo_embedder",
@@ -290,7 +274,6 @@ target(link_target_type, "renderer") {
     "//gpu/command_buffer/client:webgpu_interface",
     "//media",
     "//media:media_buildflags",
-    "//media/blink",
     "//media/capture",
     "//media/gpu",
     "//media/gpu/ipc/client",
@@ -325,6 +308,7 @@ target(link_target_type, "renderer") {
     "//third_party/blink/public:blink",
     "//third_party/blink/public:buildflags",
     "//third_party/blink/public/common",
+    "//third_party/blink/public/platform/media",
     "//third_party/blink/public/strings:strings_grit",
     "//third_party/boringssl",
     "//third_party/icu",
@@ -402,6 +386,13 @@ target(link_target_type, "renderer") {
     }
   }
 
+  if (enable_cast_streaming_renderer) {
+    deps += [
+      "//components/cast_streaming/public",
+      "//media/cast/receiver:cast_streaming_renderer",
+    ]
+  }
+
   if (enable_plugins && enable_webrtc) {
     sources += [
       "pepper/pepper_media_stream_audio_track_host.cc",
@@ -421,7 +412,6 @@ target(link_target_type, "renderer") {
       "pepper/content_renderer_pepper_host_factory.h",
       "pepper/event_conversion.cc",
       "pepper/event_conversion.h",
-      "pepper/gfx_conversion.h",
       "pepper/host_array_buffer_var.cc",
       "pepper/host_array_buffer_var.h",
       "pepper/host_dispatcher_wrapper.cc",
@@ -546,6 +536,17 @@ target(link_target_type, "renderer") {
     ]
   }
 
+  if (is_win) {
+    sources += [
+      "media/win/dcomp_texture_factory.cc",
+      "media/win/dcomp_texture_factory.h",
+      "media/win/dcomp_texture_host.cc",
+      "media/win/dcomp_texture_host.h",
+      "media/win/dcomp_texture_wrapper_impl.cc",
+      "media/win/dcomp_texture_wrapper_impl.h",
+    ]
+  }
+
   if (is_linux || is_chromeos || is_android) {
     deps += [ "//sandbox:sandbox_buildflags" ]
   }
@@ -553,9 +554,12 @@ target(link_target_type, "renderer") {
   if (is_chromeos_ash) {
     deps += [
       "//chromeos:chromeos_export",
-      "//chromeos/memory/userspace_swap",
       "//chromeos/system:system",
     ]
+
+    if (target_cpu == "x64") {
+      deps += [ "//chromeos/memory/userspace_swap" ]
+    }
   }
 
   if (use_ozone) {

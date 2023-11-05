@@ -7,8 +7,11 @@
 
 #include "base/component_export.h"
 #include "net/cookies/cookie_access_delegate.h"
+#include "net/cookies/cookie_constants.h"
+#include "net/cookies/same_party_context.h"
 #include "services/network/cookie_settings.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -52,9 +55,13 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieAccessDelegateImpl
       const GURL& url,
       const net::SiteForCookies& site_for_cookies,
       base::OnceCallback<void(bool)> callback) const override;
-  bool IsContextSamePartyWithSite(
+  net::SamePartyContext ComputeSamePartyContext(
       const net::SchemefulSite& site,
-      const net::SchemefulSite& top_frame_site,
+      const net::SchemefulSite* top_frame_site,
+      const std::set<net::SchemefulSite>& party_context) const override;
+  net::FirstPartySetsContextType ComputeFirstPartySetsContextType(
+      const net::SchemefulSite& site,
+      const absl::optional<net::SchemefulSite>& top_frame_site,
       const std::set<net::SchemefulSite>& party_context) const override;
   bool IsInNontrivialFirstPartySet(
       const net::SchemefulSite& site) const override;

@@ -16,8 +16,10 @@
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/stream_texture_shared_image_interface.h"
 #include "gpu/command_buffer/service/texture_owner.h"
+#include "gpu/ipc/common/gpu_channel.mojom.h"
 #include "gpu/ipc/service/command_buffer_stub.h"
-#include "ipc/ipc_listener.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "ui/gl/android/surface_texture.h"
 #include "ui/gl/gl_image.h"
 
@@ -29,12 +31,16 @@ namespace gpu {
 class GpuChannel;
 struct Mailbox;
 
+// This class is thread safe to be used by multiple gpu threads as
+// |texture_owner_| is thread safe and all other members are only accessed on
+// gpu main thread.
 class StreamTexture : public StreamTextureSharedImageInterface,
-                      public IPC::Listener,
-                      public SharedContextState::ContextLostObserver {
+                      public mojom::StreamTexture {
  public:
-  static scoped_refptr<StreamTexture> Create(GpuChannel* channel,
-                                             int stream_id);
+  static scoped_refptr<StreamTexture> Create(
+      GpuChannel* channel,
+      int stream_id,
+      mojo::PendingAssociatedReceiver<mojom::StreamTexture> receiver);
 
   // Cleans up related data and nulls |channel_|. Called when the channel
   // releases its ref on this class.
@@ -43,6 +49,7 @@ class StreamTexture : public StreamTextureSharedImageInterface,
  private:
   StreamTexture(GpuChannel* channel,
                 int32_t route_id,
+                mojo::PendingAssociatedReceiver<mojom::StreamTexture> receiver,
                 scoped_refptr<SharedContextState> context_state);
   ~StreamTexture() override;
 
@@ -82,30 +89,23 @@ class StreamTexture : public StreamTextureSharedImageInterface,
   // gpu::StreamTextureSharedImageInterface implementation.
   void ReleaseResources() override {}
   bool IsUsingGpuMemory() const override;
-  void UpdateAndBindTexImage() override;
+  void UpdateAndBindTexImage(GLuint service_id) override;
   bool HasTextureOwner() const override;
   TextureBase* GetTextureBase() const override;
   void NotifyOverlayPromotion(bool promotion, const gfx::Rect& bounds) override;
   bool RenderToOverlay() override;
+  bool TextureOwnerBindsTextureOnUpdate() override;
 
-  // SharedContextState::ContextLostObserver implementation.
-  void OnContextLost() override;
-
-  void UpdateTexImage(BindingsMode bindings_mode);
-  void EnsureBoundIfNeeded(BindingsMode mode);
   gpu::Mailbox CreateSharedImage(const gfx::Size& coded_size);
 
   // Called when a new frame is available for the SurfaceOwner.
   void OnFrameAvailable();
 
-  // IPC::Listener implementation:
-  bool OnMessageReceived(const IPC::Message& message) override;
-
-  // IPC message handlers:
-  void OnStartListening();
-  void OnForwardForSurfaceRequest(const base::UnguessableToken& request_token);
-  void OnUpdateRotatedVisibleSize(const gfx::Size& natural_size);
-  void OnDestroy();
+  // mojom::StreamTexture:
+  void ForwardForSurfaceRequest(const base::UnguessableToken& token) override;
+  void StartListening(mojo::PendingAssociatedRemote<mojom::StreamTextureClient>
+                          client) override;
+  void UpdateRotatedVisibleSize(const gfx::Size& natural_size) override;
 
   // The TextureOwner which receives frames.
   scoped_refptr<TextureOwner> texture_owner_;
@@ -117,14 +117,19 @@ class StreamTexture : public StreamTextureSharedImageInterface,
   bool has_pending_frame_;
 
   GpuChannel* channel_;
-  int32_t route_id_;
-  bool has_listener_;
+  const int32_t route_id_;
   scoped_refptr<SharedContextState> context_state_;
   SequenceId sequence_;
-  scoped_refptr<gpu::SyncPointClientState> sync_point_client_state_;
+
+  mojo::AssociatedReceiver<mojom::StreamTexture> receiver_;
+  mojo::AssociatedRemote<mojom::StreamTextureClient> client_;
 
   gfx::Size coded_size_;
   gfx::Rect visible_rect_;
+
+  // Bound to the thread on which StreamTexture is created. Some methods can
+  // only be called on this thread. StreamTexture is created on gpu main thread.
+  THREAD_CHECKER(gpu_main_thread_checker_);
 
   base::WeakPtrFactory<StreamTexture> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(StreamTexture);

@@ -8,7 +8,7 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/dom_code.h"
@@ -110,7 +110,7 @@ bool IsModifierKey(DWORD vk) {
 
 class ModifierKeyboardHookWinImpl : public KeyboardHookWinBase {
  public:
-  ModifierKeyboardHookWinImpl(base::Optional<base::flat_set<DomCode>> dom_codes,
+  ModifierKeyboardHookWinImpl(absl::optional<base::flat_set<DomCode>> dom_codes,
                               KeyEventCallback callback,
                               bool enable_hook_registration);
   ~ModifierKeyboardHookWinImpl() override;
@@ -153,7 +153,7 @@ class ModifierKeyboardHookWinImpl : public KeyboardHookWinBase {
 ModifierKeyboardHookWinImpl* ModifierKeyboardHookWinImpl::instance_ = nullptr;
 
 ModifierKeyboardHookWinImpl::ModifierKeyboardHookWinImpl(
-    base::Optional<base::flat_set<DomCode>> dom_codes,
+    absl::optional<base::flat_set<DomCode>> dom_codes,
     KeyEventCallback callback,
     bool enable_hook_registration)
     : KeyboardHookWinBase(std::move(dom_codes),
@@ -250,8 +250,8 @@ bool ModifierKeyboardHookWinImpl::ProcessKeyEventMessage(WPARAM w_param,
           : LocatedToNonLocatedKeyboardCode(static_cast<KeyboardCode>(vk));
 
   bool is_repeat = false;
-  MSG msg = {nullptr, w_param, non_located_vk, GetLParamFromScanCode(scan_code),
-             time_stamp};
+  MSG msg = {nullptr, static_cast<UINT>(w_param), non_located_vk,
+             GetLParamFromScanCode(scan_code), time_stamp};
   EventType event_type = EventTypeFromMSG(msg);
   if (event_type == ET_KEY_PRESSED) {
     UpdateModifierState(vk, /*key_down=*/true);
@@ -313,7 +313,7 @@ LRESULT CALLBACK ModifierKeyboardHookWinImpl::ProcessKeyEvent(int code,
 
 // static
 std::unique_ptr<KeyboardHook> KeyboardHook::CreateModifierKeyboardHook(
-    base::Optional<base::flat_set<DomCode>> dom_codes,
+    absl::optional<base::flat_set<DomCode>> dom_codes,
     gfx::AcceleratedWidget accelerated_widget,
     KeyEventCallback callback) {
   std::unique_ptr<ModifierKeyboardHookWinImpl> keyboard_hook =
@@ -330,7 +330,7 @@ std::unique_ptr<KeyboardHook> KeyboardHook::CreateModifierKeyboardHook(
 // static
 std::unique_ptr<KeyboardHookWinBase>
 KeyboardHookWinBase::CreateModifierKeyboardHookForTesting(
-    base::Optional<base::flat_set<DomCode>> dom_codes,
+    absl::optional<base::flat_set<DomCode>> dom_codes,
     KeyEventCallback callback) {
   return std::make_unique<ModifierKeyboardHookWinImpl>(
       std::move(dom_codes), std::move(callback),

@@ -34,7 +34,7 @@
 
 #if defined(__FreeBSD__) && !defined(__Userspace__)
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/netinet/sctp_pcb.c 366483 2020-10-06 11:29:08Z tuexen $");
+__FBSDID("$FreeBSD$");
 #endif
 
 #include <netinet/sctp_os.h>
@@ -4852,8 +4852,8 @@ sctp_aloc_a_assoc_id(struct sctp_inpcb *inp, struct sctp_tcb *stcb)
  */
 struct sctp_tcb *
 sctp_aloc_assoc(struct sctp_inpcb *inp, struct sockaddr *firstaddr,
-                int *error, uint32_t override_tag, uint32_t vrf_id,
-                uint16_t o_streams, uint16_t port,
+                int *error, uint32_t override_tag, uint32_t initial_tsn,
+                uint32_t vrf_id, uint16_t o_streams, uint16_t port,
 #if defined(__FreeBSD__) && !defined(__Userspace__)
                 struct thread *p,
 #elif defined(_WIN32) && !defined(__Userspace__)
@@ -5050,7 +5050,7 @@ sctp_aloc_assoc(struct sctp_inpcb *inp, struct sockaddr *firstaddr,
 	/* setup back pointer's */
 	stcb->sctp_ep = inp;
 	stcb->sctp_socket = inp->sctp_socket;
-	if ((err = sctp_init_asoc(inp, stcb, override_tag, vrf_id, o_streams))) {
+	if ((err = sctp_init_asoc(inp, stcb, override_tag, initial_tsn, vrf_id, o_streams))) {
 		/* failed */
 		SCTP_TCB_LOCK_DESTROY(stcb);
 		SCTP_TCB_SEND_LOCK_DESTROY(stcb);
@@ -5180,6 +5180,10 @@ out:
 	if (net == asoc->last_control_chunk_from) {
 		/* Clear net */
 		asoc->last_control_chunk_from = NULL;
+	}
+	if (net == asoc->last_net_cmt_send_started) {
+		/* Clear net */
+		asoc->last_net_cmt_send_started = NULL;
 	}
 	if (net == stcb->asoc.alternate) {
 		sctp_free_remote_addr(stcb->asoc.alternate);
@@ -6449,7 +6453,7 @@ sctp_startup_mcore_threads(void)
 		(void)kproc_create(sctp_mcore_thread,
 				   (void *)&sctp_mcore_workers[cpu],
 				   &sctp_mcore_workers[cpu].thread_proc,
-				   RFPROC,
+				   0,
 				   SCTP_KTHREAD_PAGES,
 				   SCTP_MCORE_NAME);
 	}
@@ -7182,7 +7186,7 @@ sctp_load_addresses_from_init(struct sctp_tcb *stcb, struct mbuf *m,
 							op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 							         msg);
 							sctp_abort_an_association(stcb_tmp->sctp_ep,
-										  stcb_tmp, op_err,
+							                          stcb_tmp, op_err, false,
 							                          SCTP_SO_NOT_LOCKED);
 							goto add_it_now;
 						}
@@ -7276,7 +7280,7 @@ sctp_load_addresses_from_init(struct sctp_tcb *stcb, struct mbuf *m,
 							op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 							         msg);
 							sctp_abort_an_association(stcb_tmp->sctp_ep,
-										  stcb_tmp, op_err,
+							                          stcb_tmp, op_err, false,
 							                          SCTP_SO_NOT_LOCKED);
 							goto add_it_now6;
 						}
@@ -7529,7 +7533,7 @@ sctp_load_addresses_from_init(struct sctp_tcb *stcb, struct mbuf *m,
 			break;
 		}
 		phdr = sctp_get_next_param(m, offset, &param_buf,
-					   sizeof(param_buf));
+		                           sizeof(param_buf));
 	}
 	/* Now check to see if we need to purge any addresses */
 	TAILQ_FOREACH_SAFE(net, &stcb->asoc.nets, sctp_next, nnet) {
@@ -7539,11 +7543,15 @@ sctp_load_addresses_from_init(struct sctp_tcb *stcb, struct mbuf *m,
 			/* remove and free it */
 			stcb->asoc.numnets--;
 			TAILQ_REMOVE(&stcb->asoc.nets, net, sctp_next);
-			sctp_free_remote_addr(net);
+			if (net == stcb->asoc.alternate) {
+				sctp_free_remote_addr(stcb->asoc.alternate);
+				stcb->asoc.alternate = NULL;
+			}
 			if (net == stcb->asoc.primary_destination) {
 				stcb->asoc.primary_destination = NULL;
 				sctp_select_primary_destination(stcb);
 			}
+			sctp_free_remote_addr(net);
 		}
 	}
 	if ((stcb->asoc.ecn_supported == 1) &&

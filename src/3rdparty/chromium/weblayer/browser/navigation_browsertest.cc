@@ -5,6 +5,7 @@
 #include "weblayer/test/weblayer_browser_test.h"
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
@@ -44,6 +45,8 @@ class NavigationObserverImpl : public NavigationObserver {
   ~NavigationObserverImpl() override { controller_->RemoveObserver(this); }
 
   using Callback = base::RepeatingCallback<void(Navigation*)>;
+  using PageLanguageDeterminedCallback =
+      base::RepeatingCallback<void(Page*, std::string)>;
 
   void SetStartedCallback(Callback callback) {
     started_callback_ = std::move(callback);
@@ -59,6 +62,11 @@ class NavigationObserverImpl : public NavigationObserver {
 
   void SetCompletedClosure(Callback callback) {
     completed_callback_ = std::move(callback);
+  }
+
+  void SetOnPageLanguageDeterminedCallback(
+      PageLanguageDeterminedCallback callback) {
+    on_page_language_determined_callback_ = std::move(callback);
   }
 
   // NavigationObserver:
@@ -81,6 +89,11 @@ class NavigationObserverImpl : public NavigationObserver {
     if (callback)
       callback.Run(navigation);
   }
+  void OnPageLanguageDetermined(Page* page,
+                                const std::string& language) override {
+    if (on_page_language_determined_callback_)
+      on_page_language_determined_callback_.Run(page, language);
+  }
 
  private:
   NavigationController* controller_;
@@ -88,6 +101,7 @@ class NavigationObserverImpl : public NavigationObserver {
   Callback redirected_callback_;
   Callback completed_callback_;
   Callback failed_callback_;
+  PageLanguageDeterminedCallback on_page_language_determined_callback_;
 };
 
 }  // namespace
@@ -244,7 +258,10 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, DestroyTabInNavigation) {
       base::BindLambdaForTesting([&](Navigation* navigation) {
         observer.reset();
         shell()->browser()->DestroyTab(new_tab);
-        run_loop.Quit();
+        // Destroying the tab posts a task to delete the WebContents, which must
+        // be run before the test shuts down lest it access deleted state.
+        base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                      run_loop.QuitClosure());
       }));
   new_tab->GetNavigationController()->Navigate(
       embedded_test_server()->GetURL("/simple_pageX.html"));
@@ -448,7 +465,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, PageSeesUserAgentString) {
 
   base::RunLoop run_loop;
   shell()->tab()->ExecuteScript(
-      base::ASCIIToUTF16("navigator.userAgent;"), false,
+      u"navigator.userAgent;", false,
       base::BindLambdaForTesting([&](base::Value value) {
         ASSERT_TRUE(value.is_string());
         EXPECT_EQ(custom_ua, value.GetString());
@@ -466,7 +483,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, Reload) {
   observer.WaitForNavigation();
 
   OneShotNavigationObserver observer2(shell());
-  shell()->tab()->ExecuteScript(base::ASCIIToUTF16("location.reload();"), false,
+  shell()->tab()->ExecuteScript(u"location.reload();", false,
                                 base::DoNothing());
   observer2.WaitForNavigation();
   EXPECT_TRUE(observer2.completed());
@@ -665,7 +682,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
       }));
   const GURL target_url = embedded_test_server()->GetURL("/foo.html");
   shell()->tab()->ExecuteScript(
-      base::ASCIIToUTF16("location.href='" + target_url.spec() + "';"), false,
+      u"location.href='" + base::ASCIIToUTF16(target_url.spec()) + u"';", false,
       base::DoNothing());
   response_2.WaitForRequest();
   // |custom_ua| should be present in the renderer initiated navigation.
@@ -917,5 +934,64 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, AndroidAppReferer) {
   EXPECT_EQ(header_value, response.http_request()->headers.at(header_name));
 }
 #endif
+
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       OnPageLanguageDeterminedCallback) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  NavigationController* controller = shell()->tab()->GetNavigationController();
+  NavigationObserverImpl observer(controller);
+
+  Page* committed_page = nullptr;
+  Page* page_with_language_determined = nullptr;
+  std::string determined_language = "";
+
+  base::RunLoop navigation_run_loop1;
+  base::RunLoop page_language_determination_run_loop1;
+
+  base::RunLoop* navigation_run_loop = &navigation_run_loop1;
+  base::RunLoop* page_language_determination_run_loop =
+      &page_language_determination_run_loop1;
+
+  observer.SetCompletedClosure(
+      base::BindLambdaForTesting([&](Navigation* navigation) {
+        committed_page = navigation->GetPage();
+        navigation_run_loop->Quit();
+      }));
+  observer.SetOnPageLanguageDeterminedCallback(
+      base::BindLambdaForTesting([&](Page* page, std::string language) {
+        page_with_language_determined = page;
+        determined_language = language;
+        page_language_determination_run_loop->Quit();
+      }));
+
+  // Navigate to a page in English.
+  controller->Navigate(embedded_test_server()->GetURL("/english_page.html"));
+  navigation_run_loop1.Run();
+  EXPECT_TRUE(committed_page);
+
+  // Verify that the language determined event fires as expected.
+  page_language_determination_run_loop1.Run();
+  EXPECT_EQ(committed_page, page_with_language_determined);
+  EXPECT_EQ("en", determined_language);
+
+  // Now navigate to a page in French.
+  committed_page = nullptr;
+  page_with_language_determined = nullptr;
+  base::RunLoop navigation_run_loop2;
+  base::RunLoop page_language_determination_run_loop2;
+
+  navigation_run_loop = &navigation_run_loop2;
+  page_language_determination_run_loop = &page_language_determination_run_loop2;
+
+  controller->Navigate(embedded_test_server()->GetURL("/french_page.html"));
+  navigation_run_loop2.Run();
+  EXPECT_TRUE(committed_page);
+
+  // Verify that the language determined event fires as expected.
+  page_language_determination_run_loop2.Run();
+  EXPECT_EQ(committed_page, page_with_language_determined);
+  EXPECT_EQ("fr", determined_language);
+}
 
 }  // namespace weblayer

@@ -10,7 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/time/time.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/bubble/bubble_border.h"
@@ -18,7 +18,6 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/progress_bar.h"
 #include "ui/views/input_event_activation_protector.h"
-#include "ui/views/metadata/metadata_header_macros.h"
 #include "ui/views/window/non_client_view.h"
 
 namespace gfx {
@@ -44,7 +43,7 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
   ~BubbleFrameView() override;
 
   static std::unique_ptr<Label> CreateDefaultTitleLabel(
-      const base::string16& title_text);
+      const std::u16string& title_text);
 
   // Creates a close button used in the corner of the dialog.
   static std::unique_ptr<Button> CreateCloseButton(
@@ -65,6 +64,7 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
   void UpdateWindowIcon() override;
   void UpdateWindowTitle() override;
   void SizeConstraintsChanged() override;
+  void InsertClientView(ClientView* client_view) override;
 
   // Sets a custom view to be the dialog title instead of the |default_title_|
   // label. If there is an existing title view it will be deleted.
@@ -72,10 +72,10 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
 
   // Updates the current progress value of |progress_indicator_|. If progress is
   // absent, hides |the progress_indicator|.
-  void SetProgress(base::Optional<double> progress);
+  void SetProgress(absl::optional<double> progress);
   // Returns the current progress value of |progress_indicator_| if
   // |progress_indicator_| is visible.
-  base::Optional<double> GetProgress() const;
+  absl::optional<double> GetProgress() const;
 
   // View:
   gfx::Size CalculatePreferredSize() const override;
@@ -139,6 +139,10 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
   // Set the arrow of the bubble border.
   void SetArrow(BubbleBorder::Arrow arrow);
   BubbleBorder::Arrow GetArrow() const;
+
+  // Specify whether the frame should include a visible, caret-shaped arrow.
+  void SetDisplayVisibleArrow(bool display_visible_arrow);
+  bool GetDisplayVisibleArrow() const;
 
   // Set the background color of the bubble border.
   void SetBackgroundColor(SkColor color);

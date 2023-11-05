@@ -12,6 +12,7 @@
 
 #include "absl/base/macros.h"
 #include "absl/strings/escaping.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "third_party/boringssl/src/include/openssl/sha.h"
 #include "quic/core/crypto/cert_compressor.h"
@@ -32,7 +33,6 @@
 #include "quic/test_tools/mock_random.h"
 #include "quic/test_tools/quic_crypto_server_config_peer.h"
 #include "quic/test_tools/quic_test_utils.h"
-#include "common/platform/api/quiche_text_utils.h"
 #include "common/quiche_endian.h"
 
 namespace quic {
@@ -57,9 +57,6 @@ const char kOldConfigId[] = "old-config-id";
 }  // namespace
 
 struct TestParams {
-  TestParams(ParsedQuicVersionVector supported_versions)
-      : supported_versions(std::move(supported_versions)) {}
-
   friend std::ostream& operator<<(std::ostream& os, const TestParams& p) {
     os << "  versions: "
        << ParsedQuicVersionVectorToString(p.supported_versions) << " }";
@@ -84,7 +81,7 @@ std::vector<TestParams> GetTestParams() {
   // Start with all versions, remove highest on each iteration.
   ParsedQuicVersionVector supported_versions = AllSupportedVersions();
   while (!supported_versions.empty()) {
-    params.push_back(TestParams(supported_versions));
+    params.push_back({supported_versions});
     supported_versions.erase(supported_versions.begin());
   }
 
@@ -377,9 +374,8 @@ INSTANTIATE_TEST_SUITE_P(CryptoServerTests,
 
 TEST_P(CryptoServerTest, BadSNI) {
   // clang-format off
-  static const char* const kBadSNIs[] = {
+  std::vector<std::string> badSNIs = {
     "",
-    "foo",
     "#00",
     "#ff00",
     "127.0.0.1",
@@ -387,17 +383,21 @@ TEST_P(CryptoServerTest, BadSNI) {
   };
   // clang-format on
 
-  for (size_t i = 0; i < ABSL_ARRAYSIZE(kBadSNIs); i++) {
-    CryptoHandshakeMessage msg =
-        crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
-                                       {"SNI", kBadSNIs[i]},
-                                       {"VER\0", client_version_string_}},
-                                      kClientHelloMinimumSize);
+  for (const std::string& bad_sni : badSNIs) {
+    CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+        {{"PDMD", "X509"}, {"SNI", bad_sni}, {"VER\0", client_version_string_}},
+        kClientHelloMinimumSize);
     ShouldFailMentioning("SNI", msg);
     const HandshakeFailureReason kRejectReasons[] = {
         SERVER_CONFIG_INCHOATE_HELLO_FAILURE};
     CheckRejectReasons(kRejectReasons, ABSL_ARRAYSIZE(kRejectReasons));
   }
+
+  // Check that SNIs without dots are allowed
+  CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+      {{"PDMD", "X509"}, {"SNI", "foo"}, {"VER\0", client_version_string_}},
+      kClientHelloMinimumSize);
+  ShouldSucceed(msg);
 }
 
 TEST_P(CryptoServerTest, DefaultCert) {

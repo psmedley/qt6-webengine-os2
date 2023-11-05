@@ -32,7 +32,7 @@ constexpr base::TimeDelta RetryChooserTimeout = base::TimeDelta::FromSeconds(5);
 SurfaceChooserHelper::SurfaceChooserHelper(
     std::unique_ptr<AndroidVideoSurfaceChooser> surface_chooser,
     bool is_overlay_required,
-    bool promote_aggressively,
+    bool promote_secure_only,
     bool always_use_texture_owner,
     std::unique_ptr<PromotionHintAggregator> promotion_hint_aggregator,
     const base::TickClock* tick_clock)
@@ -45,7 +45,7 @@ SurfaceChooserHelper::SurfaceChooserHelper(
       tick_clock_(tick_clock ? tick_clock
                              : base::DefaultTickClock::GetInstance()) {
   surface_chooser_state_.is_required = is_overlay_required_;
-  surface_chooser_state_.promote_aggressively = promote_aggressively;
+  surface_chooser_state_.promote_secure_only = promote_secure_only;
   surface_chooser_state_.always_use_texture_owner = always_use_texture_owner;
 }
 
@@ -100,7 +100,7 @@ void SurfaceChooserHelper::SetIsPersistentVideo(bool is_persistent_video) {
 }
 
 void SurfaceChooserHelper::UpdateChooserState(
-    base::Optional<AndroidOverlayFactoryCB> new_factory) {
+    absl::optional<AndroidOverlayFactoryCB> new_factory) {
   surface_chooser_->UpdateState(std::move(new_factory), surface_chooser_state_);
 }
 
@@ -144,7 +144,7 @@ void SurfaceChooserHelper::NotifyPromotionHintAndUpdateChooser(
 
   if (update_state) {
     most_recent_chooser_retry_ = now;
-    UpdateChooserState(base::Optional<AndroidOverlayFactoryCB>());
+    UpdateChooserState(absl::optional<AndroidOverlayFactoryCB>());
   }
 }
 

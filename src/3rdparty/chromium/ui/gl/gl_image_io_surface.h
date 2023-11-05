@@ -31,7 +31,13 @@ class GL_EXPORT GLImageIOSurface : public GLImage {
   static GLImageIOSurface* Create(const gfx::Size& size,
                                   unsigned internalformat);
 
+  // Initialize to wrap of |io_surface|. The format of the plane to wrap is
+  // specified in |format|. The index of the plane to wrap is
+  // |io_surface_plane|. If |format| is a multi-planar format (e.g,
+  // YUV_420_BIPLANAR or P010), then this will automatically convert from YUV
+  // to RGB, and |io_surface_plane| is ignored.
   bool Initialize(IOSurfaceRef io_surface,
+                  uint32_t io_surface_plane,
                   gfx::GenericSharedMemoryId io_surface_id,
                   gfx::BufferFormat format);
 
@@ -40,6 +46,7 @@ class GL_EXPORT GLImageIOSurface : public GLImage {
   // initialization will ensure that the CVPixelBuffer be retained for the
   // lifetime of the GLImage.
   bool InitializeWithCVPixelBuffer(CVPixelBufferRef cv_pixel_buffer,
+                                   uint32_t io_surface_plane,
                                    gfx::GenericSharedMemoryId io_surface_id,
                                    gfx::BufferFormat format);
 
@@ -112,6 +119,11 @@ class GL_EXPORT GLImageIOSurface : public GLImage {
   base::ScopedCFTypeRef<IOSurfaceRef> io_surface_;
   base::ScopedCFTypeRef<CVPixelBufferRef> cv_pixel_buffer_;
   gfx::GenericSharedMemoryId io_surface_id_;
+
+  // The plane that is bound for this image. If the plane is invalid, then
+  // this is a multi-planar IOSurface, which will be copied instead of bound.
+  static constexpr uint32_t kInvalidIOSurfacePlane = -1;
+  uint32_t io_surface_plane_ = kInvalidIOSurfacePlane;
 
   base::ThreadChecker thread_checker_;
   // The default value of Rec. 601 is based on historical shader code.

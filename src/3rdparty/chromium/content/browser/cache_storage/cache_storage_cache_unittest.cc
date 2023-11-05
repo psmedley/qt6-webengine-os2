@@ -190,12 +190,11 @@ class DelayableBackend : public disk_cache::Backend {
  private:
   void OpenEntryDelayedImpl(const std::string& key,
                             EntryResultCallback callback) {
-    auto copyable_callback =
-        base::AdaptCallbackForRepeating(std::move(callback));
+    auto split_callback = base::SplitOnceCallback(std::move(callback));
     EntryResult result =
-        backend_->OpenEntry(key, net::HIGHEST, copyable_callback);
+        backend_->OpenEntry(key, net::HIGHEST, std::move(split_callback.first));
     if (result.net_error() != net::ERR_IO_PENDING)
-      copyable_callback.Run(std::move(result));
+      std::move(split_callback.second).Run(std::move(result));
   }
 
   std::unique_ptr<disk_cache::Backend> backend_;
@@ -246,11 +245,11 @@ class FailableCacheEntry : public disk_cache::Entry {
                       CompletionOnceCallback callback) override {
     return entry_->WriteSparseData(offset, buf, buf_len, std::move(callback));
   }
-  int GetAvailableRange(int64_t offset,
-                        int len,
-                        int64_t* start,
-                        CompletionOnceCallback callback) override {
-    return entry_->GetAvailableRange(offset, len, start, std::move(callback));
+  disk_cache::RangeResult GetAvailableRange(
+      int64_t offset,
+      int len,
+      disk_cache::RangeResultCallback callback) override {
+    return entry_->GetAvailableRange(offset, len, std::move(callback));
   }
   bool CouldBeSparse() const override { return entry_->CouldBeSparse(); }
   void CancelSparseIO() override { entry_->CancelSparseIO(); }
@@ -361,7 +360,7 @@ std::string CopySideData(blink::mojom::Blob* actual_blob) {
   std::string output;
   base::RunLoop loop;
   actual_blob->ReadSideData(base::BindLambdaForTesting(
-      [&](const base::Optional<mojo_base::BigBuffer> data) {
+      [&](const absl::optional<mojo_base::BigBuffer> data) {
         if (data)
           output.append(data->data(), data->data() + data->size());
         loop.Quit();
@@ -434,13 +433,13 @@ void OnBadMessage(std::string* result) {
 class TestCacheStorageCache : public LegacyCacheStorageCache {
  public:
   TestCacheStorageCache(
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       const std::string& cache_name,
       const base::FilePath& path,
       LegacyCacheStorage* cache_storage,
       const scoped_refptr<storage::QuotaManagerProxy>& quota_manager_proxy,
       scoped_refptr<BlobStorageContextWrapper> blob_storage_context)
-      : LegacyCacheStorageCache(origin,
+      : LegacyCacheStorageCache(storage_key,
                                 storage::mojom::CacheStorageOwner::kCacheAPI,
                                 cache_name,
                                 path,
@@ -516,7 +515,7 @@ class MockLegacyCacheStorage : public LegacyCacheStorage {
       scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy,
       scoped_refptr<BlobStorageContextWrapper> blob_storage_context,
       LegacyCacheStorageManager* cache_storage_manager,
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       storage::mojom::CacheStorageOwner owner)
       : LegacyCacheStorage(origin_path,
                            memory_only,
@@ -525,7 +524,7 @@ class MockLegacyCacheStorage : public LegacyCacheStorage {
                            std::move(quota_manager_proxy),
                            std::move(blob_storage_context),
                            cache_storage_manager,
-                           std::move(origin),
+                           storage_key,
                            owner) {}
 
   void CacheUnreferenced(LegacyCacheStorageCache* cache) override {
@@ -585,7 +584,7 @@ class CacheStorageCacheTest : public testing::Test {
         temp_dir_path_, MemoryOnly(), base::ThreadTaskRunnerHandle::Get().get(),
         base::ThreadTaskRunnerHandle::Get(), quota_manager_proxy_,
         blob_storage_context_, /* cache_storage_manager = */ nullptr,
-        url::Origin::Create(kTestUrl),
+        blink::StorageKey(url::Origin::Create(kTestUrl)),
         storage::mojom::CacheStorageOwner::kCacheAPI);
 
     InitCache(mock_cache_storage_.get());
@@ -614,8 +613,9 @@ class CacheStorageCacheTest : public testing::Test {
 
   void InitCache(LegacyCacheStorage* cache_storage) {
     cache_ = std::make_unique<TestCacheStorageCache>(
-        url::Origin::Create(kTestUrl), kCacheName, temp_dir_path_,
-        cache_storage, quota_manager_proxy_, blob_storage_context_);
+        blink::StorageKey(url::Origin::Create(kTestUrl)), kCacheName,
+        temp_dir_path_, cache_storage, quota_manager_proxy_,
+        blob_storage_context_);
     cache_->Init();
   }
 
@@ -670,7 +670,7 @@ class CacheStorageCacheTest : public testing::Test {
         network::mojom::FetchResponseSource::kUnspecified,
         base::flat_map<std::string, std::string>(kHeaders.cbegin(),
                                                  kHeaders.cend()),
-        /*mime_type=*/base::nullopt, net::HttpRequestHeaders::kGetMethod,
+        /*mime_type=*/absl::nullopt, net::HttpRequestHeaders::kGetMethod,
         /*blob=*/nullptr, blink::mojom::ServiceWorkerResponseError::kUnknown,
         response_time_, /*cache_storage_cache_name=*/std::string(),
         /*cors_exposed_header_names=*/std::vector<std::string>(),
@@ -680,7 +680,8 @@ class CacheStorageCacheTest : public testing::Test {
         net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN,
         /*alpn_negotiated_protocol=*/"unknown",
         /*was_fetched_via_spdy=*/false, /*has_range_requested=*/false,
-        /*auth_challenge_info=*/base::nullopt);
+        /*auth_challenge_info=*/absl::nullopt,
+        /*request_include_credentials=*/true);
   }
 
   void CopySideDataToResponse(const std::string& uuid,
@@ -908,7 +909,7 @@ class CacheStorageCacheTest : public testing::Test {
   }
 
   void ErrorTypeCallback(base::RunLoop* run_loop, CacheStorageError error) {
-    callback_message_ = base::nullopt;
+    callback_message_ = absl::nullopt;
     callback_error_ = error;
     if (run_loop)
       run_loop->Quit();
@@ -982,8 +983,9 @@ class CacheStorageCacheTest : public testing::Test {
   virtual bool MemoryOnly() { return false; }
 
   void SetQuota(uint64_t quota) {
-    mock_quota_manager_->SetQuota(url::Origin::Create(kTestUrl),
-                                  blink::mojom::StorageType::kTemporary, quota);
+    mock_quota_manager_->SetQuota(
+        blink::StorageKey(url::Origin::Create(kTestUrl)),
+        blink::mojom::StorageType::kTemporary, quota);
   }
 
   void SetMaxQuerySizeBytes(size_t max_bytes) {
@@ -1019,13 +1021,12 @@ class CacheStorageCacheTest : public testing::Test {
   std::string expected_blob_data_;
 
   CacheStorageError callback_error_ = CacheStorageError::kSuccess;
-  base::Optional<std::string> callback_message_ = base::nullopt;
+  absl::optional<std::string> callback_message_ = absl::nullopt;
   blink::mojom::FetchAPIResponsePtr callback_response_;
   std::vector<std::string> callback_strings_;
   std::string bad_message_reason_;
   bool callback_closed_ = false;
 
- private:
   const GURL kTestUrl{"http://example.com"};
 };
 

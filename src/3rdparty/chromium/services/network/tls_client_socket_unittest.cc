@@ -32,6 +32,7 @@
 #include "services/network/mojo_socket_test_util.h"
 #include "services/network/proxy_resolving_socket_factory_mojo.h"
 #include "services/network/public/mojom/network_service.mojom.h"
+#include "services/network/public/mojom/tls_socket.mojom.h"
 #include "services/network/socket_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -150,14 +151,14 @@ class TLSClientSocketTestBase {
     base::RunLoop run_loop;
     int net_error = net::ERR_FAILED;
     factory_->CreateTCPConnectedSocket(
-        base::nullopt /* local_addr */, remote_addr_list,
+        absl::nullopt /* local_addr */, remote_addr_list,
         nullptr /* tcp_connected_socket_options */,
         TRAFFIC_ANNOTATION_FOR_TESTS, std::move(receiver),
         pre_tls_observer()->GetObserverRemote(),
         base::BindLambdaForTesting(
             [&](int result,
-                const base::Optional<net::IPEndPoint>& actual_local_addr,
-                const base::Optional<net::IPEndPoint>& peer_addr,
+                const absl::optional<net::IPEndPoint>& actual_local_addr,
+                const absl::optional<net::IPEndPoint>& peer_addr,
                 mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
                 mojo::ScopedDataPipeProducerHandle send_pipe_handle) {
               net_error = result;
@@ -181,8 +182,8 @@ class TLSClientSocketTestBase {
         std::move(receiver), mojo::NullRemote() /* observer */,
         base::BindLambdaForTesting(
             [&](int result,
-                const base::Optional<net::IPEndPoint>& actual_local_addr,
-                const base::Optional<net::IPEndPoint>& peer_addr,
+                const absl::optional<net::IPEndPoint>& actual_local_addr,
+                const absl::optional<net::IPEndPoint>& peer_addr,
                 mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
                 mojo::ScopedDataPipeProducerHandle send_pipe_handle) {
               net_error = result;
@@ -223,10 +224,10 @@ class TLSClientSocketTestBase {
             [](net::CompletionOnceCallback cb,
                mojo::ScopedDataPipeConsumerHandle* consumer_handle_out,
                mojo::ScopedDataPipeProducerHandle* producer_handle_out,
-               base::Optional<net::SSLInfo>* ssl_info_out, int result,
+               absl::optional<net::SSLInfo>* ssl_info_out, int result,
                mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
                mojo::ScopedDataPipeProducerHandle send_pipe_handle,
-               const base::Optional<net::SSLInfo>& ssl_info) {
+               const absl::optional<net::SSLInfo>& ssl_info) {
               *consumer_handle_out = std::move(receive_pipe_handle);
               *producer_handle_out = std::move(send_pipe_handle);
               *ssl_info_out = ssl_info;
@@ -278,7 +279,7 @@ class TLSClientSocketTestBase {
     return &post_tls_send_handle_;
   }
 
-  const base::Optional<net::SSLInfo>& ssl_info() { return ssl_info_; }
+  const absl::optional<net::SSLInfo>& ssl_info() { return ssl_info_; }
 
   net::MockClientSocketFactory* mock_client_socket_factory() {
     return &mock_client_socket_factory_;
@@ -299,7 +300,7 @@ class TLSClientSocketTestBase {
   mojo::ScopedDataPipeProducerHandle post_tls_send_handle_;
 
   // SSLInfo obtained from UpgradeToTLS.
-  base::Optional<net::SSLInfo> ssl_info_;
+  absl::optional<net::SSLInfo> ssl_info_;
 
   std::unique_ptr<net::ProxyResolutionService> proxy_resolution_service_;
   net::TestURLRequestContext url_request_context_;
@@ -441,7 +442,7 @@ TEST_P(TLSClientSocketTest, UpgradeToTLSTwice) {
     auto upgrade2_callback = base::BindLambdaForTesting(
         [&](int result, mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
             mojo::ScopedDataPipeProducerHandle send_pipe_handle,
-            const base::Optional<net::SSLInfo>& ssl_info) {
+            const absl::optional<net::SSLInfo>& ssl_info) {
           net_error = result;
           run_loop.Quit();
         });
@@ -504,7 +505,7 @@ TEST_P(TLSClientSocketTest, UpgradeToTLSWithCustomSSLConfig) {
   auto upgrade_callback = base::BindLambdaForTesting(
       [&](int result, mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
           mojo::ScopedDataPipeProducerHandle send_pipe_handle,
-          const base::Optional<net::SSLInfo>& ssl_info) {
+          const absl::optional<net::SSLInfo>& ssl_info) {
         net_error = result;
         run_loop.Quit();
       });

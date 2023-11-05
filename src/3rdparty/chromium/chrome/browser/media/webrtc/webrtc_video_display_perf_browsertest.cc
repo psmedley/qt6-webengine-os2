@@ -88,9 +88,11 @@ void PrintMeanAndMax(const std::string& var_name,
   CalculateMeanAndMax(vars, &mean, &std_dev, &max);
   perf_test::PrintResultMeanAndError(
       kTestResultString, name_modifier, var_name + " Mean",
-      base::StringPrintf("%.0lf,%.0lf", mean, std_dev), "μs", true);
+      base::StringPrintf("%.0lf,%.0lf", mean, std_dev), "μs_smallerIsBetter",
+      true);
   perf_test::PrintResult(kTestResultString, name_modifier, var_name + " Max",
-                         base::StringPrintf("%.0lf", max), "μs", true);
+                         base::StringPrintf("%.0lf", max), "μs_smallerIsBetter",
+                         true);
 }
 
 void FindEvents(trace_analyzer::TraceAnalyzer* analyzer,
@@ -131,19 +133,19 @@ std::vector<double> ParseGoogMaxDecodeFromWebrtcInternalsTab(
   ignore_result(parsed_json.release());
 
   // |dictionary| should have exactly two entries, one per ssrc.
-  if (!dictionary || dictionary->size() != 2u)
+  if (!dictionary || dictionary->DictSize() != 2u)
     return goog_decode_ms;
 
   // Only a given |dictionary| entry will have a "stats" entry that has a key
   // that ends with "recv-googMaxDecodeMs" inside (it will start with the ssrc
   // id, but we don't care about that). Then collect the string of "values" out
   // of that key and convert those into the |goog_decode_ms| vector of doubles.
-  for (const auto& dictionary_entry : *dictionary) {
-    for (const auto& ssrc_entry : dictionary_entry.second->DictItems()) {
+  for (auto dictionary_entry : dictionary->DictItems()) {
+    for (auto ssrc_entry : dictionary_entry.second.DictItems()) {
       if (ssrc_entry.first != "stats")
         continue;
 
-      for (const auto& stat_entry : ssrc_entry.second.DictItems()) {
+      for (auto stat_entry : ssrc_entry.second.DictItems()) {
         if (!base::EndsWith(stat_entry.first, "recv-googMaxDecodeMs",
                             base::CompareCase::SENSITIVE)) {
           continue;
@@ -413,8 +415,8 @@ class WebRtcVideoDisplayPerfBrowserTest
         test_config_.fps, smoothness_indicator.c_str());
     perf_test::PrintResult(
         kTestResultString, name_modifier, "Skipped frames",
-        base::StringPrintf("%.2lf", skipped_frame_percentage_), "percent",
-        true);
+        base::StringPrintf("%.2lf", skipped_frame_percentage_),
+        "percent_smallerIsBetter", true);
     // We identify intervals in a way that can help us easily bisect the source
     // of added latency in case of a regression. From these intervals, "Render
     // Algorithm" can take random amount of times based on the vsync cycle it is

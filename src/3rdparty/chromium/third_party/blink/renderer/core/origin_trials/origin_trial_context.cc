@@ -6,11 +6,13 @@
 
 #include <ostream>
 
+#include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "services/network/public/cpp/features.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/origin_trials/trial_token.h"
+#include "third_party/blink/public/common/origin_trials/trial_token_result.h"
 #include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
@@ -37,6 +39,8 @@
 namespace blink {
 
 namespace {
+
+constexpr char kDefaultTrialName[] = "UNKNOWN";
 
 void RecordTokenValidationResultHistogram(OriginTrialTokenStatus status) {
   UMA_HISTOGRAM_ENUMERATION("OriginTrials.ValidationResult", status);
@@ -129,7 +133,38 @@ std::ostream& operator<<(std::ostream& stream, OriginTrialTokenStatus status) {
 #endif  // ifndef NDEBUG
 }
 
+// Merges `OriginTrialStatus` from different tokens for the same trial.
+// Some combinations of status should never occur, such as
+// s1 == kOSNotSupported && s2 == kEnabled.
+OriginTrialStatus MergeOriginTrialStatus(OriginTrialStatus s1,
+                                         OriginTrialStatus s2) {
+  using Status = OriginTrialStatus;
+  if (s1 == Status::kEnabled || s2 == Status::kEnabled) {
+    return Status::kEnabled;
+  }
+
+  // kOSNotSupported status comes from OS support checks that are generated
+  // at compile time.
+  if (s1 == Status::kOSNotSupported || s2 == Status::kOSNotSupported) {
+    return Status::kOSNotSupported;
+  }
+
+  // kTrialNotAllowed status comes from `CanEnableTrialFromName` check.
+  if (s1 == Status::kTrialNotAllowed || s2 == Status::kTrialNotAllowed) {
+    return Status::kTrialNotAllowed;
+  }
+
+  return Status::kValidTokenNotProvided;
+}
+
 }  // namespace
+
+// TODO(crbug.com/607555): Mark `TrialToken` as copyable.
+OriginTrialTokenResult::OriginTrialTokenResult(
+    const String& raw_token,
+    OriginTrialTokenStatus status,
+    const absl::optional<TrialToken>& parsed_token)
+    : raw_token(raw_token), status(status), parsed_token(parsed_token) {}
 
 OriginTrialContext::OriginTrialContext(ExecutionContext* context)
     : trial_token_validator_(std::make_unique<TrialTokenValidator>()),
@@ -194,9 +229,18 @@ std::unique_ptr<Vector<String>> OriginTrialContext::GetTokens(
   DCHECK(execution_context);
   const OriginTrialContext* context =
       execution_context->GetOriginTrialContext();
-  if (!context || context->tokens_.IsEmpty())
+  if (!context || context->trial_results_.IsEmpty())
     return nullptr;
-  return std::make_unique<Vector<String>>(context->tokens_);
+
+  auto tokens = std::make_unique<Vector<String>>();
+  for (const auto& entry : context->trial_results_) {
+    const OriginTrialResult& trial_result = entry.value;
+    for (const OriginTrialTokenResult& token_result :
+         trial_result.token_results) {
+      tokens->push_back(token_result.raw_token);
+    }
+  }
+  return tokens;
 }
 
 // static
@@ -251,7 +295,6 @@ void OriginTrialContext::AddTokenInternal(const String& token,
                                           bool is_script_origin_secure) {
   if (token.IsEmpty())
     return;
-  tokens_.push_back(token);
 
   bool enabled = EnableTrialFromToken(origin, is_origin_secure, script_origin,
                                       is_script_origin_secure, token);
@@ -268,7 +311,6 @@ void OriginTrialContext::AddTokens(const Vector<String>& tokens) {
   bool found_valid = false;
   for (const String& token : tokens) {
     if (!token.IsEmpty()) {
-      tokens_.push_back(token);
       if (EnableTrialFromToken(GetSecurityOrigin(), IsSecureContext(), token))
         found_valid = true;
     }
@@ -300,33 +342,33 @@ void OriginTrialContext::InitializePendingFeatures() {
   // ready for script in that case, so bail out.
   if (!window || !window->document())
     return;
-  LocalFrame* frame = window->GetFrame();
-  if (!frame)
-    return;
-  ScriptState* script_state = ToScriptStateForMainWorld(frame);
+  ScriptState* script_state = ToScriptStateForMainWorld(window->GetFrame());
   if (!script_state)
     return;
   if (!script_state->ContextIsValid())
     return;
   ScriptState::Scope scope(script_state);
+  int new_feature_added = 0;
   for (OriginTrialFeature enabled_feature : enabled_features_) {
-    InstallFeature(enabled_feature, script_state);
+    new_feature_added += InstallFeature(enabled_feature, script_state);
   }
   for (OriginTrialFeature enabled_feature : navigation_activated_features_) {
-    InstallFeature(enabled_feature, script_state);
+    new_feature_added += InstallFeature(enabled_feature, script_state);
+  }
+  if (new_feature_added > 0) {
+    // Also allow V8 to install conditional features now.
+    script_state->GetIsolate()->InstallConditionalFeatures(
+        script_state->GetContext());
   }
 }
 
-void OriginTrialContext::InstallFeature(OriginTrialFeature enabled_feature,
+bool OriginTrialContext::InstallFeature(OriginTrialFeature enabled_feature,
                                         ScriptState* script_state) {
   if (installed_features_.Contains(enabled_feature))
-    return;
-#if defined(USE_BLINK_V8_BINDING_NEW_IDL_INTERFACE)
+    return false;
   InstallPropertiesPerFeature(script_state, enabled_feature);
-#else
-  InstallPendingOriginTrialFeature(enabled_feature, script_state);
-#endif
   installed_features_.insert(enabled_feature);
+  return true;
 }
 
 void OriginTrialContext::AddFeature(OriginTrialFeature feature) {
@@ -361,7 +403,8 @@ void OriginTrialContext::AddForceEnabledTrials(
   for (const auto& trial_name : trial_names) {
     DCHECK(origin_trials::IsTrialValid(trial_name));
     is_valid |=
-        EnableTrialFromName(trial_name, /*expiry_time=*/base::Time::Max());
+        EnableTrialFromName(trial_name, /*expiry_time=*/base::Time::Max()) ==
+        OriginTrialStatus::kEnabled;
   }
 
   if (is_valid) {
@@ -372,30 +415,53 @@ void OriginTrialContext::AddForceEnabledTrials(
 }
 
 bool OriginTrialContext::CanEnableTrialFromName(const StringView& trial_name) {
-  if (trial_name == "Portals" &&
-      !base::FeatureList::IsEnabled(features::kPortals)) {
+  if (trial_name == "HandwritingRecognition") {
+    return base::FeatureList::IsEnabled(
+               features::kHandwritingRecognitionWebPlatformApiFinch);
+  }
+  if (trial_name == "Portals")
+    return base::FeatureList::IsEnabled(features::kPortals);
+
+  if (trial_name == "FencedFrames")
+    return base::FeatureList::IsEnabled(features::kFencedFrames);
+
+  if (trial_name == "AppCache")
+    return base::FeatureList::IsEnabled(features::kAppCache);
+
+  if (trial_name == "ComputePressure")
+    return base::FeatureList::IsEnabled(features::kComputePressure);
+
+  if (trial_name == "FledgeInterestGroupAPI")
+    return base::FeatureList::IsEnabled(features::kFledgeInterestGroups);
+
+  if (trial_name == "TrustTokens")
+    return base::FeatureList::IsEnabled(network::features::kTrustTokens);
+
+  if (trial_name == "InterestCohortAPI") {
+    return base::FeatureList::IsEnabled(
+        features::kInterestCohortAPIOriginTrial);
+  }
+  if (trial_name == "SpeculationRulesPrefetch") {
+    return base::FeatureList::IsEnabled(
+        features::kSpeculationRulesPrefetchProxy);
+  }
+  if (trial_name == "ConversionMeasurement" &&
+      !base::FeatureList::IsEnabled(features::kConversionMeasurement)) {
     return false;
   }
-  if (trial_name == "AppCache" &&
-      !base::FeatureList::IsEnabled(features::kAppCache)) {
-    return false;
-  }
-  if (trial_name == "TrustTokens" &&
-      !base::FeatureList::IsEnabled(network::features::kTrustTokens)) {
-    return false;
-  }
-  if (trial_name == "InterestCohortAPI" &&
-      !base::FeatureList::IsEnabled(features::kInterestCohortAPIOriginTrial)) {
-    return false;
-  }
+
+  if (trial_name == "Prerender2")
+    return base::FeatureList::IsEnabled(features::kPrerender2);
+
   return true;
 }
 
-bool OriginTrialContext::EnableTrialFromName(const String& trial_name,
-                                             base::Time expiry_time) {
+OriginTrialStatus OriginTrialContext::EnableTrialFromName(
+    const String& trial_name,
+    base::Time expiry_time) {
   if (!CanEnableTrialFromName(trial_name)) {
     DVLOG(1) << "EnableTrialFromName: cannot enable trial " << trial_name;
-    return false;
+    return OriginTrialStatus::kTrialNotAllowed;
   }
 
   bool did_enable_feature = false;
@@ -424,7 +490,8 @@ bool OriginTrialContext::EnableTrialFromName(const String& trial_name,
         feature_expiry_times_.Set(implied_feature, expiry_time);
     }
   }
-  return did_enable_feature;
+  return did_enable_feature ? OriginTrialStatus::kEnabled
+                            : OriginTrialStatus::kOSNotSupported;
 }
 
 OriginTrialTokenStatus OriginTrialContext::ValidateTokenResult(
@@ -466,7 +533,7 @@ bool OriginTrialContext::EnableTrialFromToken(
     bool is_script_origin_secure,
     const String& token) {
   DCHECK(!token.IsEmpty());
-  bool valid = false;
+  OriginTrialStatus trial_status = OriginTrialStatus::kValidTokenNotProvided;
   StringUTF8Adaptor token_string(token);
   url::Origin script_url_origin;
   if (script_origin)
@@ -474,22 +541,53 @@ bool OriginTrialContext::EnableTrialFromToken(
   TrialTokenResult token_result = trial_token_validator_->ValidateToken(
       token_string.AsStringPiece(), origin->ToUrlOrigin(),
       script_origin ? &script_url_origin : nullptr, base::Time::Now());
-  DVLOG(1) << "EnableTrialFromToken: token_result = " << token_result.status
+  DVLOG(1) << "EnableTrialFromToken: token_result = " << token_result.Status()
            << ", token = " << token;
-  OriginTrialTokenStatus status = token_result.status;
+  OriginTrialTokenStatus status = token_result.Status();
   if (status == OriginTrialTokenStatus::kSuccess) {
-    String trial_name = String::FromUTF8(token_result.feature_name.data(),
-                                         token_result.feature_name.size());
+    const TrialToken& parsed_token = *token_result.ParsedToken();
+    String trial_name = String::FromUTF8(parsed_token.feature_name().data(),
+                                         parsed_token.feature_name().size());
     if (origin_trials::IsTrialValid(trial_name)) {
       status = ValidateTokenResult(trial_name, is_origin_secure,
                                    is_script_origin_secure,
-                                   token_result.is_third_party);
-      if (status == OriginTrialTokenStatus::kSuccess)
-        valid = EnableTrialFromName(trial_name, token_result.expiry_time);
+                                   parsed_token.is_third_party());
+      if (status == OriginTrialTokenStatus::kSuccess) {
+        trial_status =
+            EnableTrialFromName(trial_name, parsed_token.expiry_time());
+      }
     }
   }
   RecordTokenValidationResultHistogram(status);
-  return valid;
+  CacheToken(token, token_result, trial_status);
+  return trial_status == OriginTrialStatus::kEnabled;
+}
+
+void OriginTrialContext::CacheToken(const String& raw_token,
+                                    const TrialTokenResult& token_result,
+                                    OriginTrialStatus trial_status) {
+  String trial_name = token_result.ParsedToken()
+                          ? token_result.ParsedToken()->feature_name().c_str()
+                          : kDefaultTrialName;
+
+  // Does nothing if key already exists.
+  auto& trial_result =
+      trial_results_
+          .insert(trial_name,
+                  OriginTrialResult{
+                      trial_name,
+                      OriginTrialStatus::kValidTokenNotProvided,
+                      /* token_results */ {},
+                  })
+          .stored_value->value;
+
+  trial_result.status =
+      MergeOriginTrialStatus(trial_result.status, trial_status);
+  trial_result.token_results.push_back(OriginTrialTokenResult{
+      raw_token, token_result.Status(),
+      token_result.ParsedToken()
+          ? absl::make_optional(*token_result.ParsedToken())
+          : absl::nullopt});
 }
 
 void OriginTrialContext::Trace(Visitor* visitor) const {

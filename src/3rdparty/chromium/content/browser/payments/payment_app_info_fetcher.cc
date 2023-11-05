@@ -10,8 +10,6 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/optional.h"
-#include "base/task/post_task.h"
 #include "components/payments/content/icon/icon_size.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
@@ -20,8 +18,13 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/manifest_icon_downloader.h"
+#include "content/public/browser/page.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/manifest/manifest_icon_selector.h"
+#include "third_party/blink/public/common/manifest/manifest_util.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "url/origin.h"
 
@@ -37,9 +40,9 @@ void PaymentAppInfoFetcher::Start(
     PaymentAppInfoFetchCallback callback) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
 
-  std::unique_ptr<std::vector<GlobalFrameRoutingId>> frame_routing_ids =
+  std::unique_ptr<std::vector<GlobalRenderFrameHostId>> frame_routing_ids =
       service_worker_context->GetWindowClientFrameRoutingIds(
-          context_url.GetOrigin());
+          blink::StorageKey(url::Origin::Create(context_url)));
 
   RunOrPostTaskOnThread(
       FROM_HERE, BrowserThread::UI,
@@ -49,7 +52,8 @@ void PaymentAppInfoFetcher::Start(
 
 void PaymentAppInfoFetcher::StartOnUI(
     const GURL& context_url,
-    const std::unique_ptr<std::vector<GlobalFrameRoutingId>>& frame_routing_ids,
+    const std::unique_ptr<std::vector<GlobalRenderFrameHostId>>&
+        frame_routing_ids,
     PaymentAppInfoFetchCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -80,7 +84,7 @@ PaymentAppInfoFetcher::SelfDeleteFetcher::~SelfDeleteFetcher() {
 
 void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
     const GURL& context_url,
-    const std::unique_ptr<std::vector<GlobalFrameRoutingId>>&
+    const std::unique_ptr<std::vector<GlobalRenderFrameHostId>>&
         frame_routing_ids) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -150,7 +154,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
     web_contents_helper_ =
         std::make_unique<WebContentsHelper>(top_level_web_content);
 
-    top_level_web_content->GetManifest(
+    top_level_render_frame_host->GetPage().GetManifest(
         base::BindOnce(&PaymentAppInfoFetcher::SelfDeleteFetcher::
                            FetchPaymentAppManifestCallback,
                        weak_ptr_factory_.GetWeakPtr()));
@@ -170,7 +174,8 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
 void PaymentAppInfoFetcher::SelfDeleteFetcher::RunCallbackAndDestroy() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::PostTask(FROM_HERE, {ServiceWorkerContext::GetCoreThreadId()},
+  BrowserThread::GetTaskRunnerForThread(ServiceWorkerContext::GetCoreThreadId())
+      ->PostTask(FROM_HERE,
                  base::BindOnce(std::move(callback_),
                                 std::move(fetched_payment_app_info_)));
   delete this;
@@ -178,7 +183,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::RunCallbackAndDestroy() {
 
 void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     const GURL& url,
-    const blink::Manifest& manifest) {
+    blink::mojom::ManifestPtr manifest) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   manifest_url_ = url;
@@ -193,7 +198,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     return;
   }
 
-  if (manifest.IsEmpty()) {
+  if (blink::IsEmptyManifest(manifest)) {
     WarnIfPossible(
         "Unable to download a valid payment handler web app manifest from \"" +
         manifest_url_.spec() +
@@ -206,8 +211,8 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
   }
 
   fetched_payment_app_info_->prefer_related_applications =
-      manifest.prefer_related_applications;
-  for (const auto& related_application : manifest.related_applications) {
+      manifest->prefer_related_applications;
+  for (const auto& related_application : manifest->related_applications) {
     fetched_payment_app_info_->related_applications.emplace_back(
         StoredRelatedApplication());
     if (related_application.platform) {
@@ -223,24 +228,24 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     }
   }
 
-  if (!manifest.name) {
+  if (!manifest->name) {
     WarnIfPossible("The payment handler's web app manifest \"" +
                    manifest_url_.spec() +
                    "\" does not contain a \"name\" field. User may not "
                    "recognize this payment handler in UI, because it will be "
                    "labeled only by its origin.");
-  } else if (manifest.name->empty()) {
+  } else if (manifest->name->empty()) {
     WarnIfPossible(
         "The \"name\" field in the payment handler's web app manifest \"" +
         manifest_url_.spec() +
         "\" is empty. User may not recognize this payment handler in UI, "
         "because it will be labeled only by its origin.");
   } else {
-    base::UTF16ToUTF8(manifest.name->c_str(), manifest.name->length(),
+    base::UTF16ToUTF8(manifest->name->c_str(), manifest->name->length(),
                       &(fetched_payment_app_info_->name));
   }
 
-  if (manifest.icons.empty()) {
+  if (manifest->icons.empty()) {
     WarnIfPossible(
         "Unable to download the payment handler's icon, because the web app "
         "manifest \"" +
@@ -264,7 +269,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
   gfx::NativeView native_view = web_contents->GetNativeView();
 
   icon_url_ = blink::ManifestIconSelector::FindBestMatchingIcon(
-      manifest.icons,
+      manifest->icons,
       payments::IconSizeCalculator::IdealIconHeight(native_view),
       payments::IconSizeCalculator::MinimumIconHeight(),
       ManifestIconDownloader::kMaxWidthToHeightRatio,

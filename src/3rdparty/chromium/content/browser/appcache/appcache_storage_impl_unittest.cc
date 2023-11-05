@@ -20,7 +20,6 @@
 #include "base/message_loop/message_pump_type.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
@@ -55,6 +54,7 @@
 #include "storage/browser/quota/quota_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/appcache/appcache.mojom.h"
 #include "third_party/blink/public/mojom/appcache/appcache_info.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -181,17 +181,17 @@ class AppCacheStorageImplTest : public testing::Test {
     MockQuotaManagerProxy()
         : QuotaManagerProxy(nullptr, base::SequencedTaskRunnerHandle::Get()) {}
 
-    void NotifyStorageAccessed(const url::Origin& origin,
+    void NotifyStorageAccessed(const blink::StorageKey& storage_key,
                                StorageType type,
                                base::Time access_time) override {
       EXPECT_EQ(StorageType::kTemporary, type);
       ++notify_storage_accessed_count_;
-      last_origin_ = origin;
+      last_storage_key_ = storage_key;
     }
 
     void NotifyStorageModified(
         storage::QuotaClientType client_id,
-        const url::Origin& origin,
+        const blink::StorageKey& storage_key,
         StorageType type,
         int64_t delta,
         base::Time modification_time,
@@ -200,7 +200,7 @@ class AppCacheStorageImplTest : public testing::Test {
       EXPECT_EQ(storage::QuotaClientType::kAppcache, client_id);
       EXPECT_EQ(StorageType::kTemporary, type);
       ++notify_storage_modified_count_;
-      last_origin_ = origin;
+      last_storage_key_ = storage_key;
       last_delta_ = delta;
       if (callback)
         callback_task_runner->PostTask(FROM_HERE, std::move(callback));
@@ -211,14 +211,12 @@ class AppCacheStorageImplTest : public testing::Test {
         mojo::PendingRemote<storage::mojom::QuotaClient> client,
         storage::QuotaClientType quota_client_type,
         const std::vector<blink::mojom::StorageType>& storage_types) override {}
-    void NotifyOriginInUse(const url::Origin& origin) override {}
-    void NotifyOriginNoLongerInUse(const url::Origin& origin) override {}
     void SetUsageCacheEnabled(storage::QuotaClientType client_id,
-                              const url::Origin& origin,
+                              const blink::StorageKey& storage_key,
                               StorageType type,
                               bool enabled) override {}
     void GetUsageAndQuota(
-        const url::Origin& origin,
+        const blink::StorageKey& storage_key,
         blink::mojom::StorageType type,
         scoped_refptr<base::SequencedTaskRunner> callback_task_runner,
         UsageAndQuotaCallback callback) override {
@@ -236,7 +234,7 @@ class AppCacheStorageImplTest : public testing::Test {
 
     int notify_storage_accessed_count_ = 0;
     int notify_storage_modified_count_ = 0;
-    url::Origin last_origin_;
+    blink::StorageKey last_storage_key_;
     int last_delta_ = 0;
     bool async_ = false;
 
@@ -272,7 +270,7 @@ class AppCacheStorageImplTest : public testing::Test {
     base::Thread::Options options(base::MessagePumpType::IO, 0);
     background_thread =
         std::make_unique<base::Thread>("AppCacheTest::BackgroundThread");
-    ASSERT_TRUE(background_thread->StartWithOptions(options));
+    ASSERT_TRUE(background_thread->StartWithOptions(std::move(options)));
   }
 
   static void TearDownTestCase() {
@@ -309,7 +307,7 @@ class AppCacheStorageImplTest : public testing::Test {
     // including setting up a disk cache, which checks feature lists.
     // Defer until here so test constructors can set feature lists first.
     weak_partition_factory_.emplace(static_cast<StoragePartitionImpl*>(
-        BrowserContext::GetDefaultStoragePartition(&browser_context_)));
+        browser_context_.GetDefaultStoragePartition()));
   }
 
   void SetUpTest() {
@@ -603,7 +601,8 @@ class AppCacheStorageImplTest : public testing::Test {
     // Verify quota bookkeeping
     EXPECT_EQ(kDefaultEntrySize, storage()->usage_map_[kOrigin]);
     EXPECT_EQ(1, mock_quota_manager_proxy_->notify_storage_modified_count_);
-    EXPECT_EQ(kOrigin, mock_quota_manager_proxy_->last_origin_);
+    EXPECT_EQ(blink::StorageKey(kOrigin),
+              mock_quota_manager_proxy_->last_storage_key_);
     EXPECT_EQ(kDefaultEntrySize, mock_quota_manager_proxy_->last_delta_);
 
     TestFinished();
@@ -656,7 +655,8 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(kDefaultEntrySize + 100 + kDefaultEntryPadding + 1000,
               storage()->usage_map_[kOrigin]);
     EXPECT_EQ(1, mock_quota_manager_proxy_->notify_storage_modified_count_);
-    EXPECT_EQ(kOrigin, mock_quota_manager_proxy_->last_origin_);
+    EXPECT_EQ(blink::StorageKey(kOrigin),
+              mock_quota_manager_proxy_->last_storage_key_);
     EXPECT_EQ(100 + 1000, mock_quota_manager_proxy_->last_delta_);
 
     TestFinished();
@@ -724,7 +724,8 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(100 + 10 + kDefaultEntrySize + kDefaultEntryPadding,
               storage()->usage_map_[kOrigin]);
     EXPECT_EQ(1, mock_quota_manager_proxy_->notify_storage_modified_count_);
-    EXPECT_EQ(kOrigin, mock_quota_manager_proxy_->last_origin_);
+    EXPECT_EQ(blink::StorageKey(kOrigin),
+              mock_quota_manager_proxy_->last_storage_key_);
     EXPECT_EQ(100 + 10, mock_quota_manager_proxy_->last_delta_);
 
     TestFinished();
@@ -865,7 +866,8 @@ class AppCacheStorageImplTest : public testing::Test {
     // Verify quota bookkeeping
     EXPECT_TRUE(storage()->usage_map_.empty());
     EXPECT_EQ(1, mock_quota_manager_proxy_->notify_storage_modified_count_);
-    EXPECT_EQ(kOrigin, mock_quota_manager_proxy_->last_origin_);
+    EXPECT_EQ(blink::StorageKey(kOrigin),
+              mock_quota_manager_proxy_->last_storage_key_);
     EXPECT_EQ(-(kDefaultEntrySize + kDefaultEntryPadding),
               mock_quota_manager_proxy_->last_delta_);
 
@@ -1665,7 +1667,8 @@ class AppCacheStorageImplTest : public testing::Test {
       request.url = GetMockUrl("manifest");
       handler_ = host2->CreateRequestHandler(
           std::make_unique<AppCacheRequest>(request),
-          network::mojom::RequestDestination::kDocument, false);
+          network::mojom::RequestDestination::kDocument, false,
+          FrameTreeNode::kFrameTreeNodeInvalidId);
       handler_->MaybeCreateLoader(request, nullptr, base::DoNothing(),
                                   base::DoNothing());
     }
@@ -1827,7 +1830,7 @@ class AppCacheStorageImplTest : public testing::Test {
   TestBrowserContext browser_context_;
   base::test::ScopedFeatureList appcache_require_origin_trial_feature_;
   // Delayed initialization to avoid data races with feature list.
-  base::Optional<base::WeakPtrFactory<StoragePartitionImpl>>
+  absl::optional<base::WeakPtrFactory<StoragePartitionImpl>>
       weak_partition_factory_;
 
   // Test data

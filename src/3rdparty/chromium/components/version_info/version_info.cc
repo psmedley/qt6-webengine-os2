@@ -52,7 +52,7 @@ std::string GetOSType() {
   return "Windows";
 #elif defined(OS_IOS)
   return "iOS";
-#elif defined(OS_APPLE)
+#elif defined(OS_MAC)
   return "Mac OS X";
 #elif BUILDFLAG(IS_CHROMEOS_ASH)
 # if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -70,6 +70,8 @@ std::string GetOSType() {
   return "OpenBSD";
 #elif defined(OS_SOLARIS)
   return "Solaris";
+#elif defined(OS_FUCHSIA)
+  return "Fuchsia";
 #else
   return "Unknown";
 #endif

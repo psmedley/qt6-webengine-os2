@@ -5,18 +5,18 @@
 #include "chrome/browser/ui/webui/sync_internals/sync_internals_message_handler.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/sync/user_event_service_factory.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync/driver/fake_sync_service.h"
 #include "components/sync/driver/sync_internals_util.h"
 #include "components/sync/driver/sync_service.h"
-#include "components/sync/js/js_test_util.h"
 #include "components/sync/model/type_entities_count.h"
 #include "components/sync_user_events/fake_user_event_service.h"
 #include "content/public/browser/site_instance.h"
@@ -53,10 +53,6 @@ class TestSyncService : public syncer::FakeSyncService {
     ++remove_observer_count_;
   }
 
-  base::WeakPtr<syncer::JsController> GetJsController() override {
-    return js_controller_.AsWeakPtr();
-  }
-
   void GetAllNodesForDebugging(
       base::OnceCallback<void(std::unique_ptr<base::ListValue>)> callback)
       override {
@@ -80,7 +76,6 @@ class TestSyncService : public syncer::FakeSyncService {
  private:
   int add_observer_count_ = 0;
   int remove_observer_count_ = 0;
-  syncer::MockJsController js_controller_;
   base::OnceCallback<void(std::unique_ptr<base::ListValue>)>
       get_all_nodes_callback_;
 };
@@ -107,7 +102,7 @@ class SyncInternalsMessageHandlerTest : public ChromeRenderViewHostTestHarness {
 
     web_ui_.set_web_contents(web_contents());
     test_sync_service_ = static_cast<TestSyncService*>(
-        ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+        SyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile(), base::BindRepeating(&BuildTestSyncService)));
     fake_user_event_service_ = static_cast<FakeUserEventService*>(
         browser_sync::UserEventServiceFactory::GetInstance()
@@ -129,7 +124,7 @@ class SyncInternalsMessageHandlerTest : public ChromeRenderViewHostTestHarness {
   // Returns copies of the same constant dictionary, |about_information_|.
   std::unique_ptr<DictionaryValue> ConstructFakeAboutInformation(
       SyncService* service,
-      version_info::Channel channel) {
+      const std::string& channel) {
     ++about_sync_data_delegate_call_count_;
     last_delegate_sync_service_ = service;
     return base::DictionaryValue::From(
@@ -142,8 +137,7 @@ class SyncInternalsMessageHandlerTest : public ChromeRenderViewHostTestHarness {
     // Check the syncer::sync_ui_util::kOnAboutInfoUpdated event dispatch.
     const content::TestWebUI::CallData& about_info_call_data =
         *web_ui_.call_data()[0];
-    EXPECT_EQ(syncer::sync_ui_util::kDispatchEvent,
-              about_info_call_data.function_name());
+    EXPECT_EQ("cr.webUIListenerCallback", about_info_call_data.function_name());
     ASSERT_NE(nullptr, about_info_call_data.arg1());
     EXPECT_EQ(base::Value(syncer::sync_ui_util::kOnAboutInfoUpdated),
               *about_info_call_data.arg1());
@@ -154,7 +148,7 @@ class SyncInternalsMessageHandlerTest : public ChromeRenderViewHostTestHarness {
     // so check the syncer::sync_ui_util::kOnEntityCountsUpdated event dispatch.
     const content::TestWebUI::CallData& entity_counts_updated_call_data =
         *web_ui_.call_data()[1];
-    EXPECT_EQ(syncer::sync_ui_util::kDispatchEvent,
+    EXPECT_EQ("cr.webUIListenerCallback",
               entity_counts_updated_call_data.function_name());
     ASSERT_NE(nullptr, entity_counts_updated_call_data.arg1());
     EXPECT_EQ(base::Value(syncer::sync_ui_util::kOnEntityCountsUpdated),
@@ -240,7 +234,7 @@ TEST_F(SyncInternalsMessageHandlerTest, AddRemoveObserversDisallowJavascript) {
 
 TEST_F(SyncInternalsMessageHandlerTest, AddRemoveObserversSyncDisabled) {
   // Simulate completely disabling sync by flag or other mechanism.
-  ProfileSyncServiceFactory::GetInstance()->SetTestingFactory(
+  SyncServiceFactory::GetInstance()->SetTestingFactory(
       profile(), BrowserContextKeyedServiceFactory::TestingFactory());
 
   ListValue empty_list;
@@ -253,24 +247,28 @@ TEST_F(SyncInternalsMessageHandlerTest, AddRemoveObserversSyncDisabled) {
 
 TEST_F(SyncInternalsMessageHandlerTest, HandleGetAllNodes) {
   ListValue args;
-  args.AppendInteger(0);
+  args.AppendString("getAllNodes_0");
   handler()->HandleGetAllNodes(&args);
   test_sync_service()->get_all_nodes_callback().Run(
       std::make_unique<ListValue>());
-  EXPECT_EQ(1, CallCountWithName(syncer::sync_ui_util::kGetAllNodesCallback));
+  EXPECT_EQ(1, CallCountWithName("cr.webUIResponse"));
 
-  handler()->HandleGetAllNodes(&args);
+  ListValue args2;
+  args2.AppendString("getAllNodes_1");
+  handler()->HandleGetAllNodes(&args2);
   // This  breaks the weak ref the callback is hanging onto. Which results in
   // the call count not incrementing.
   handler()->DisallowJavascript();
   test_sync_service()->get_all_nodes_callback().Run(
       std::make_unique<ListValue>());
-  EXPECT_EQ(1, CallCountWithName(syncer::sync_ui_util::kGetAllNodesCallback));
+  EXPECT_EQ(1, CallCountWithName("cr.webUIResponse"));
 
-  handler()->HandleGetAllNodes(&args);
+  ListValue args3;
+  args3.AppendString("getAllNodes_2");
+  handler()->HandleGetAllNodes(&args3);
   test_sync_service()->get_all_nodes_callback().Run(
       std::make_unique<ListValue>());
-  EXPECT_EQ(2, CallCountWithName(syncer::sync_ui_util::kGetAllNodesCallback));
+  EXPECT_EQ(2, CallCountWithName("cr.webUIResponse"));
 }
 
 TEST_F(SyncInternalsMessageHandlerTest, SendAboutInfo) {
@@ -283,7 +281,7 @@ TEST_F(SyncInternalsMessageHandlerTest, SendAboutInfo) {
 
 TEST_F(SyncInternalsMessageHandlerTest, SendAboutInfoSyncDisabled) {
   // Simulate completely disabling sync by flag or other mechanism.
-  ProfileSyncServiceFactory::GetInstance()->SetTestingFactory(
+  SyncServiceFactory::GetInstance()->SetTestingFactory(
       profile(), BrowserContextKeyedServiceFactory::TestingFactory());
 
   handler()->AllowJavascriptForTesting();

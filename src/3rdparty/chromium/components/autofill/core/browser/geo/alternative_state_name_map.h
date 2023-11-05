@@ -5,16 +5,17 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_GEO_ALTERNATIVE_STATE_NAME_MAP_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_GEO_ALTERNATIVE_STATE_NAME_MAP_H_
 
-#include "components/autofill/core/browser/proto/states.pb.h"
+#include <string>
 
 #include "base/i18n/case_conversion.h"
 #include "base/no_destructor.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
-#include "base/strings/string16.h"
 #include "base/types/strong_alias.h"
+#include "components/autofill/core/browser/proto/states.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace autofill {
+
 // AlternativeStateNameMap encapsulates mappings from state names in the
 // profiles to their localized and the abbreviated names.
 //
@@ -71,13 +72,13 @@ class AlternativeStateNameMap {
 
   // Represents either a canonical state name, or an abbreviation, or an
   // alternative name or normalized state name from the profile.
-  using StateName = base::StrongAlias<class StateNameTag, base::string16>;
+  using StateName = base::StrongAlias<class StateNameTag, std::u16string>;
 
   // States can be represented as different strings (different spellings,
   // translations, abbreviations). All representations of a single state in a
   // single country are mapped to the same canonical name.
   using CanonicalStateName =
-      base::StrongAlias<class CanonicalStateNameTag, base::string16>;
+      base::StrongAlias<class CanonicalStateNameTag, std::u16string>;
 
   static AlternativeStateNameMap* GetInstance();
 
@@ -87,9 +88,9 @@ class AlternativeStateNameMap {
   // Calls |GetCanonicalStateName()| member method of AlternativeStateNameMap
   // and returns the canonical state name corresponding to |country_code| and
   // |state_name| if present.
-  static base::Optional<AlternativeStateNameMap::CanonicalStateName>
+  static absl::optional<AlternativeStateNameMap::CanonicalStateName>
   GetCanonicalStateName(const std::string& country_code,
-                        const base::string16& state_name);
+                        const std::u16string& state_name);
 
   ~AlternativeStateNameMap() = delete;
   AlternativeStateNameMap(const AlternativeStateNameMap&) = delete;
@@ -100,15 +101,15 @@ class AlternativeStateNameMap {
   // (|country_code|, |state_name|).
   // |is_state_name_normalized| denotes whether the |state_name| has been
   // normalized or not.
-  base::Optional<CanonicalStateName> GetCanonicalStateName(
+  absl::optional<CanonicalStateName> GetCanonicalStateName(
       const CountryCode& country_code,
       const StateName& state_name,
       bool is_state_name_normalized = false) const;
 
   // Returns the value present in |localized_state_names_map_| corresponding
   // to (|country_code|, |state_string_from_profile|). In case, the entry does
-  // not exist in the map, base::nullopt is returned.
-  base::Optional<StateEntry> GetEntry(
+  // not exist in the map, absl::nullopt is returned.
+  absl::optional<StateEntry> GetEntry(
       const CountryCode& country_code,
       const StateName& state_string_from_profile) const;
 

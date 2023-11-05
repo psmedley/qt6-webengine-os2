@@ -10,10 +10,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "media/base/audio_capturer_source.h"
+#include "media/base/media_export.h"
 
 namespace media {
 
-class FuchsiaAudioCapturerSource : public AudioCapturerSource {
+class MEDIA_EXPORT FuchsiaAudioCapturerSource final
+    : public AudioCapturerSource {
  public:
   explicit FuchsiaAudioCapturerSource(
       fidl::InterfaceHandle<fuchsia::media::AudioCapturer> capturer_handle);
@@ -24,15 +26,15 @@ class FuchsiaAudioCapturerSource : public AudioCapturerSource {
 
   // AudioCaptureSource implementation.
   void Initialize(const AudioParameters& params,
-                  CaptureCallback* callback) final;
-  void Start() final;
-  void Stop() final;
-  void SetVolume(double volume) final;
-  void SetAutomaticGainControl(bool enable) final;
-  void SetOutputDeviceForAec(const std::string& output_device_id) final;
+                  CaptureCallback* callback) override;
+  void Start() override;
+  void Stop() override;
+  void SetVolume(double volume) override;
+  void SetAutomaticGainControl(bool enable) override;
+  void SetOutputDeviceForAec(const std::string& output_device_id) override;
 
  private:
-  ~FuchsiaAudioCapturerSource() final;
+  ~FuchsiaAudioCapturerSource() override;
 
   void NotifyCaptureError(const std::string& error);
   void NotifyCaptureStarted();

@@ -21,8 +21,7 @@ class COMPONENT_EXPORT(VULKAN) VulkanCommandBuffer {
  public:
   VulkanCommandBuffer(VulkanDeviceQueue* device_queue,
                       VulkanCommandPool* command_pool,
-                      bool primary,
-                      bool use_protected_memory);
+                      bool primary);
   ~VulkanCommandBuffer();
 
   bool Initialize();
@@ -59,6 +58,12 @@ class COMPONENT_EXPORT(VULKAN) VulkanCommandBuffer {
                          uint32_t buffer_height,
                          uint32_t width,
                          uint32_t height);
+  void CopyImageToBuffer(VkBuffer buffer,
+                         VkImage image,
+                         uint32_t buffer_width,
+                         uint32_t buffer_height,
+                         uint32_t width,
+                         uint32_t height);
 
  private:
   friend class CommandBufferRecorderBase;
@@ -85,7 +90,6 @@ class COMPONENT_EXPORT(VULKAN) VulkanCommandBuffer {
   void ResetIfDirty();
 
   const bool primary_;
-  const bool use_protected_memory_;
   bool recording_ = false;
   RecordType record_type_ = RECORD_TYPE_EMPTY;
   VulkanDeviceQueue* device_queue_;

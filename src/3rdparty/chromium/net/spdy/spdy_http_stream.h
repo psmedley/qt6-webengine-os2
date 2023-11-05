@@ -13,6 +13,8 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_piece.h"
+#include "base/timer/timer.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
@@ -38,7 +40,8 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // |spdy_session| must not be NULL.
   SpdyHttpStream(const base::WeakPtr<SpdySession>& spdy_session,
                  spdy::SpdyStreamId pushed_stream_id,
-                 NetLogSource source_dependency);
+                 NetLogSource source_dependency,
+                 std::vector<std::string> dns_aliases);
   ~SpdyHttpStream() override;
 
   SpdyStream* stream() { return stream_; }
@@ -84,9 +87,11 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
   void SetPriority(RequestPriority priority) override;
   const std::vector<std::string>& GetDnsAliases() const override;
+  base::StringPiece GetAcceptChViaAlps() const override;
 
   // SpdyStream::Delegate implementation.
   void OnHeadersSent() override;
+  void OnEarlyHintsReceived(const spdy::Http2HeaderBlock& headers) override;
   void OnHeadersReceived(
       const spdy::Http2HeaderBlock& response_headers,
       const spdy::Http2HeaderBlock* pushed_request_headers) override;
@@ -140,9 +145,8 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // Call the user callback associated with reading the response.
   void DoResponseCallback(int rv);
 
-  void ScheduleBufferedReadCallback();
+  void MaybeScheduleBufferedReadCallback();
   void DoBufferedReadCallback();
-  bool ShouldWaitForMoreBufferedData() const;
 
   const base::WeakPtr<SpdySession> spdy_session_;
 
@@ -209,13 +213,16 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   scoped_refptr<IOBufferWithSize> request_body_buf_;
   int request_body_buf_size_;
 
-  // Is there a scheduled read callback pending.
-  bool buffered_read_callback_pending_;
-  // Has more data been received from the network during the wait for the
-  // scheduled read callback.
-  bool more_read_data_pending_;
+  // Timer to execute DoBufferedReadCallback() with a delay.
+  base::OneShotTimer buffered_read_timer_;
 
   bool was_alpn_negotiated_;
+
+  // Stores any DNS aliases for the remote endpoint. The alias chain is
+  // preserved in reverse order, from canonical name (i.e. address record name)
+  // through to query name. These are stored in the stream instead of the
+  // session due to complications related to IP-pooling.
+  std::vector<std::string> dns_aliases_;
 
   base::WeakPtrFactory<SpdyHttpStream> weak_factory_{this};
 

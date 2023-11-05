@@ -51,6 +51,7 @@
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
 #include "services/network/public/cpp/cors/cors.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
@@ -93,7 +94,7 @@ public:
     void FollowRedirect(const std::vector<std::string> &removed_headers,
                         const net::HttpRequestHeaders &modified_headers,
                         const net::HttpRequestHeaders &modified_cors_exempt_headers, // FIXME: do something with this?
-                        const base::Optional<GURL> &new_url) override
+                        const absl::optional<GURL> &new_url) override
     {
         // We can be asked for follow our own redirect
         scoped_refptr<URLRequestCustomJobProxy> proxy = new URLRequestCustomJobProxy(this, m_proxy->m_scheme, m_proxy->m_profileAdapter);
@@ -311,7 +312,7 @@ private:
                         m_request.site_for_cookies,
                         first_party_url_policy, m_request.referrer_policy,
                         m_request.referrer.spec(), net::HTTP_SEE_OTHER,
-                        m_redirect, base::nullopt, false /*insecure_scheme_was_upgraded*/);
+                        m_redirect, absl::nullopt, false /*insecure_scheme_was_upgraded*/);
             m_client->OnReceiveRedirect(redirectInfo, std::move(m_head));
             m_head = nullptr;
             // ### should m_request be updated with RedirectInfo? (see FollowRedirect)
@@ -325,15 +326,14 @@ private:
         m_client->OnStartLoadingResponseBody(std::move(m_pipeConsumerHandle));
         m_head = nullptr;
 
-        if (readAvailableData()) // May delete this
-            return;
-
         m_watcher = std::make_unique<mojo::SimpleWatcher>(
-                FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::AUTOMATIC, m_taskRunner);
+                FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL, m_taskRunner);
         m_watcher->Watch(m_pipeProducerHandle.get(), MOJO_HANDLE_SIGNAL_WRITABLE,
                          MOJO_WATCH_CONDITION_SATISFIED,
                          base::BindRepeating(&CustomURLLoader::notifyReadyWrite,
                                              m_weakPtrFactory.GetWeakPtr()));
+
+        readAvailableData(); // May delete this
     }
     void notifyCanceled() override
     {
@@ -401,8 +401,10 @@ private:
             uint32_t bufferSize = 0;
             MojoResult beginResult = m_pipeProducerHandle->BeginWriteData(
                     &buffer, &bufferSize, MOJO_BEGIN_WRITE_DATA_FLAG_NONE);
-            if (beginResult == MOJO_RESULT_SHOULD_WAIT)
+            if (beginResult == MOJO_RESULT_SHOULD_WAIT) {
+                m_watcher->ArmOrNotify();
                 return false; // Wait for pipe watcher
+            }
             if (beginResult != MOJO_RESULT_OK)
                 break;
             if (m_maxBytesToRead > 0 && m_maxBytesToRead <= int64_t{std::numeric_limits<uint32_t>::max()})
@@ -414,13 +416,20 @@ private:
             m_totalBytesRead += bytesRead;
             m_client->OnTransferSizeUpdated(m_totalBytesRead);
 
-            if (m_device->atEnd() || (m_maxBytesToRead > 0 && m_totalBytesRead >= m_maxBytesToRead)) {
+            const bool deviceAtEnd = m_device->atEnd();
+            if ((deviceAtEnd && !m_device->isSequential())
+                || (m_maxBytesToRead > 0 && m_totalBytesRead >= m_maxBytesToRead)) {
                 OnTransferComplete(MOJO_RESULT_OK);
                 return true; // Done with reading
             }
 
             if (readResult == 0)
                 return false; // Wait for readyRead
+            if (readResult < 0 && deviceAtEnd && m_device->isSequential()) {
+                // Failure on read, and sequential device claiming to be at end, so treat it as a successful end-of-data.
+                OnTransferComplete(MOJO_RESULT_OK);
+                return true; // Done with reading
+            }
             if (readResult < 0)
                 break;
         }
@@ -487,7 +496,6 @@ public:
 
     // network::mojom::URLLoaderFactory:
     void CreateLoaderAndStart(mojo::PendingReceiver<network::mojom::URLLoader> loader,
-                              int32_t routing_id,
                               int32_t request_id,
                               uint32_t options,
                               const network::ResourceRequest &request,
@@ -495,7 +503,6 @@ public:
                               const net::MutableNetworkTrafficAnnotationTag &traffic_annotation) override
     {
         DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-        Q_UNUSED(routing_id);
         Q_UNUSED(request_id);
         Q_UNUSED(options);
         Q_UNUSED(traffic_annotation);

@@ -13,7 +13,6 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/task_runner_util.h"
 #include "gpu/command_buffer/service/abstract_texture.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
@@ -55,8 +54,10 @@ using gpu::gles2::AbstractTexture;
 
 DirectSharedImageVideoProvider::DirectSharedImageVideoProvider(
     scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
-    GetStubCB get_stub_cb)
-    : gpu_factory_(gpu_task_runner, std::move(get_stub_cb)),
+    GetStubCB get_stub_cb,
+    scoped_refptr<gpu::RefCountedLock> drdc_lock)
+    : gpu::RefCountedLockHelperDrDc(std::move(drdc_lock)),
+      gpu_factory_(gpu_task_runner, std::move(get_stub_cb)),
       gpu_task_runner_(std::move(gpu_task_runner)) {}
 
 DirectSharedImageVideoProvider::~DirectSharedImageVideoProvider() = default;
@@ -71,10 +72,8 @@ void DirectSharedImageVideoProvider::Initialize(GpuInitCB gpu_init_cb) {
       .WithArgs(std::move(gpu_init_cb));
 }
 
-void DirectSharedImageVideoProvider::RequestImage(
-    ImageReadyCB cb,
-    const ImageSpec& spec,
-    scoped_refptr<gpu::TextureOwner> texture_owner) {
+void DirectSharedImageVideoProvider::RequestImage(ImageReadyCB cb,
+                                                  const ImageSpec& spec) {
   // It's unclear that we should handle the image group, but since CodecImages
   // have to be registered on it, we do.  If the CodecImage is ever re-used,
   // then part of that re-use would be to call the (then mis-named)
@@ -87,8 +86,7 @@ void DirectSharedImageVideoProvider::RequestImage(
   // Note: `cb` is only run on successful creation, so this does not use
   // `AsyncCall()` + `Then()` to chain the callbacks.
   gpu_factory_.AsyncCall(&GpuSharedImageVideoFactory::CreateImage)
-      .WithArgs(BindToCurrentLoop(std::move(cb)), spec,
-                std::move(texture_owner));
+      .WithArgs(BindToCurrentLoop(std::move(cb)), spec, GetDrDcLock());
 }
 
 GpuSharedImageVideoFactory::GpuSharedImageVideoFactory(
@@ -112,8 +110,6 @@ void GpuSharedImageVideoFactory::Initialize(
     std::move(gpu_init_cb).Run(nullptr);
     return;
   }
-
-  decoder_helper_ = GLES2DecoderHelper::Create(stub_->decoder_context());
 
   gpu::ContextResult result;
   auto shared_context = GetSharedContext(stub_, &result);
@@ -146,17 +142,17 @@ void GpuSharedImageVideoFactory::Initialize(
 void GpuSharedImageVideoFactory::CreateImage(
     FactoryImageReadyCB image_ready_cb,
     const SharedImageVideoProvider::ImageSpec& spec,
-    scoped_refptr<gpu::TextureOwner> texture_owner) {
+    scoped_refptr<gpu::RefCountedLock> drdc_lock) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // Generate a shared image mailbox.
   auto mailbox = gpu::Mailbox::GenerateForSharedImage();
-  auto codec_image = base::MakeRefCounted<CodecImage>(spec.coded_size);
+  auto codec_image =
+      base::MakeRefCounted<CodecImage>(spec.coded_size, drdc_lock);
 
   TRACE_EVENT0("media", "GpuSharedImageVideoFactory::CreateVideoFrame");
 
-  if (!CreateImageInternal(spec, std::move(texture_owner), mailbox,
-                           codec_image)) {
+  if (!CreateImageInternal(spec, mailbox, codec_image, std::move(drdc_lock))) {
     return;
   }
 
@@ -192,9 +188,9 @@ void GpuSharedImageVideoFactory::CreateImage(
 
 bool GpuSharedImageVideoFactory::CreateImageInternal(
     const SharedImageVideoProvider::ImageSpec& spec,
-    scoped_refptr<gpu::TextureOwner> texture_owner,
     gpu::Mailbox mailbox,
-    scoped_refptr<CodecImage> image) {
+    scoped_refptr<CodecImage> image,
+    scoped_refptr<gpu::RefCountedLock> drdc_lock) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (!MakeContextCurrent(stub_))
     return false;
@@ -204,28 +200,6 @@ bool GpuSharedImageVideoFactory::CreateImageInternal(
     return false;
 
   const auto& coded_size = spec.coded_size;
-
-  // Create a Texture and a CodecImage to back it.
-  // TODO(liberato): Once legacy mailbox support is removed, we don't need to
-  // create this texture.  So, we won't need |texture_owner| either.
-  std::unique_ptr<AbstractTexture> texture = decoder_helper_->CreateTexture(
-      GL_TEXTURE_EXTERNAL_OES, GL_RGBA, coded_size.width(), coded_size.height(),
-      GL_RGBA, GL_UNSIGNED_BYTE);
-
-  // Attach the image to the texture.
-  // Either way, we expect this to be UNBOUND (i.e., decoder-managed).  For
-  // overlays, BindTexImage will return true, causing it to transition to the
-  // BOUND state, and thus receive ScheduleOverlayPlane calls.  For TextureOwner
-  // backed images, BindTexImage will return false, and CopyTexImage will be
-  // tried next.
-  // TODO(liberato): consider not binding this as a StreamTextureImage if we're
-  // using an overlay.  There's no advantage.  We'd likely want to create (and
-  // initialize to a 1x1 texture) a 2D texture above in that case, in case
-  // somebody tries to sample from it.  Be sure that promotion hints still
-  // work properly, though -- they might require a stream texture image.
-  GLuint texture_owner_service_id =
-      texture_owner ? texture_owner->GetTextureId() : 0;
-  texture->BindStreamTextureImage(image.get(), texture_owner_service_id);
 
   gpu::ContextResult result;
   auto shared_context = GetSharedContext(stub_, &result);
@@ -244,8 +218,7 @@ bool GpuSharedImageVideoFactory::CreateImageInternal(
   auto shared_image = std::make_unique<gpu::SharedImageVideo>(
       mailbox, coded_size, gfx::ColorSpace::CreateSRGB(),
       kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType, std::move(image),
-      std::move(texture), std::move(shared_context),
-      false /* is_thread_safe */);
+      std::move(shared_context), /*is_thread_safe=*/true, std::move(drdc_lock));
 
   // Register it with shared image mailbox as well as legacy mailbox. This
   // keeps |shared_image| around until its destruction cb is called.
@@ -253,7 +226,7 @@ bool GpuSharedImageVideoFactory::CreateImageInternal(
   // mailbox.
   DCHECK(stub_->channel()->gpu_channel_manager()->shared_image_manager());
   stub_->channel()->shared_image_stub()->factory()->RegisterBacking(
-      std::move(shared_image), /* legacy_mailbox */ true);
+      std::move(shared_image), /*allow_legacy_mailbox=*/false);
 
   return true;
 }
@@ -262,7 +235,6 @@ void GpuSharedImageVideoFactory::OnWillDestroyStub(bool have_context) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(stub_);
   stub_ = nullptr;
-  decoder_helper_ = nullptr;
 }
 
 }  // namespace media

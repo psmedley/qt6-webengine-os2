@@ -5,11 +5,14 @@
 #include "gpu/ipc/service/gpu_channel_manager.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_post_task.h"
 #include "base/command_line.h"
 #include "base/debug/crash_logging.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/run_loop.h"
@@ -23,6 +26,7 @@
 #include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/command_buffer/service/feature_info.h"
+#include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gpu_tracer.h"
 #include "gpu/command_buffer/service/mailbox_manager_factory.h"
 #include "gpu/command_buffer/service/memory_program_cache.h"
@@ -30,8 +34,8 @@
 #include "gpu/command_buffer/service/scheduler.h"
 #include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
+#include "gpu/config/gpu_finch_features.h"
 #include "gpu/ipc/common/gpu_client_ids.h"
-#include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/common/memory_stats.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
@@ -43,7 +47,9 @@
 #include "ui/gl/gl_angle_util_win.h"
 #endif
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_enums.h"
 #include "ui/gl/gl_share_group.h"
+#include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/init/gl_factory.h"
 
@@ -80,6 +86,25 @@ void TrimD3DResources() {
   }
 }
 #endif
+
+void APIENTRY CrashReportOnGLErrorDebugCallback(GLenum source,
+                                                GLenum type,
+                                                GLuint id,
+                                                GLenum severity,
+                                                GLsizei length,
+                                                const GLchar* message,
+                                                const GLvoid* user_param) {
+  if (type == GL_DEBUG_TYPE_ERROR && source == GL_DEBUG_SOURCE_API &&
+      user_param) {
+    LOG(ERROR) << gl::GLEnums::GetStringEnum(id) << ": " << message;
+    int* remaining_reports =
+        const_cast<int*>(static_cast<const int*>(user_param));
+    if (*remaining_reports > 0) {
+      base::debug::DumpWithoutCrashing();
+      (*remaining_reports)--;
+    }
+  }
+}
 
 void FormatAllocationSourcesForTracing(
     base::trace_event::TracedValue* dict,
@@ -360,8 +385,10 @@ GpuChannelManager::~GpuChannelManager() {
 gles2::Outputter* GpuChannelManager::outputter() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (!outputter_)
-    outputter_.reset(new gles2::TraceOutputter("GpuChannelManager Trace"));
+  if (!outputter_) {
+    outputter_ =
+        std::make_unique<gles2::TraceOutputter>("GpuChannelManager Trace");
+  }
   return outputter_.get();
 }
 
@@ -377,13 +404,13 @@ gles2::ProgramCache* GpuChannelManager::program_cache() {
     // Use the EGL blob cache extension for the passthrough decoder.
     if (gpu_preferences_.use_passthrough_cmd_decoder &&
         gles2::PassthroughCommandDecoderSupported()) {
-      program_cache_.reset(new gles2::PassthroughProgramCache(
-          gpu_preferences_.gpu_program_cache_size, disable_disk_cache));
+      program_cache_ = std::make_unique<gles2::PassthroughProgramCache>(
+          gpu_preferences_.gpu_program_cache_size, disable_disk_cache);
     } else {
-      program_cache_.reset(new gles2::MemoryProgramCache(
+      program_cache_ = std::make_unique<gles2::MemoryProgramCache>(
           gpu_preferences_.gpu_program_cache_size, disable_disk_cache,
           workarounds.disable_program_caching_for_transform_feedback,
-          &activity_flags_));
+          &activity_flags_);
     }
   }
   return program_cache_.get();
@@ -420,18 +447,20 @@ void GpuChannelManager::set_share_group(gl::GLShareGroup* share_group) {
     share_group_ = share_group;
 }
 
-GpuChannel* GpuChannelManager::EstablishChannel(int client_id,
-                                                uint64_t client_tracing_id,
-                                                bool is_gpu_host,
-                                                bool cache_shaders_on_disk) {
+GpuChannel* GpuChannelManager::EstablishChannel(
+    const base::UnguessableToken& channel_token,
+    int client_id,
+    uint64_t client_tracing_id,
+    bool is_gpu_host,
+    bool cache_shaders_on_disk) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (gr_shader_cache_ && cache_shaders_on_disk)
     gr_shader_cache_->CacheClientIdOnDisk(client_id);
 
   std::unique_ptr<GpuChannel> gpu_channel = GpuChannel::Create(
-      this, scheduler_, sync_point_manager_, share_group_, task_runner_,
-      io_task_runner_, client_id, client_tracing_id, is_gpu_host,
+      this, channel_token, scheduler_, sync_point_manager_, share_group_,
+      task_runner_, io_task_runner_, client_id, client_tracing_id, is_gpu_host,
       image_decode_accelerator_worker_);
 
   if (!gpu_channel)
@@ -440,6 +469,30 @@ GpuChannel* GpuChannelManager::EstablishChannel(int client_id,
   GpuChannel* gpu_channel_ptr = gpu_channel.get();
   gpu_channels_[client_id] = std::move(gpu_channel);
   return gpu_channel_ptr;
+}
+
+void GpuChannelManager::SetChannelClientPid(int client_id,
+                                            base::ProcessId client_pid) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  GpuChannel* gpu_channel = LookupChannel(client_id);
+  if (gpu_channel) {
+    // TODO(rockot): It's possible to receive different PIDs for the same
+    // GpuChannel because some clients may reuse a client ID. For example, if a
+    // Content renderer crashes and restarts, the new process will use the same
+    // GPU client ID that the crashed process used. In such cases, this
+    // SetChannelClientPid (which comes from the GPU host, not the client
+    // process) may arrive late with the crashed process PID, followed shortly
+    // thereafter by the current PID of the client.
+    //
+    // For a short window of time this means a GpuChannel may have a stale PID
+    // value. It's not a serious issue since the PID is only informational and
+    // not required for security or application correctness, but we should still
+    // address it. One option is to introduce a separate host-controlled
+    // interface that is paired with the GpuChannel during Establish, which the
+    // host can then use to asynchronously push down a PID for the specific
+    // channel instance.
+    gpu_channel->set_client_pid(client_pid);
+  }
 }
 
 void GpuChannelManager::InternalDestroyGpuMemoryBuffer(
@@ -492,10 +545,32 @@ void GpuChannelManager::LoseAllContexts() {
                          base::BindOnce(&GpuChannelManager::DestroyAllChannels,
                                         weak_factory_.GetWeakPtr()));
   if (shared_context_state_) {
-    gr_cache_controller_.reset();
     shared_context_state_->MarkContextLost();
     shared_context_state_.reset();
   }
+}
+
+SharedContextState::ContextLostCallback
+GpuChannelManager::GetContextLostCallback() {
+  return base::BindPostTask(task_runner_,
+                            base::BindOnce(&GpuChannelManager::OnContextLost,
+                                           weak_factory_.GetWeakPtr()));
+}
+
+GpuChannelManager::OnMemoryAllocatedChangeCallback
+GpuChannelManager::GetOnMemoryAllocatedChangeCallback() {
+  return base::BindPostTask(
+      task_runner_,
+      base::BindOnce(
+          [](base::WeakPtr<gpu::GpuChannelManager> gpu_channel_manager,
+             gpu::CommandBufferId id, uint64_t old_size, uint64_t new_size,
+             gpu::GpuPeakMemoryAllocationSource source) {
+            if (gpu_channel_manager) {
+              gpu_channel_manager->peak_memory_monitor()
+                  ->OnMemoryAllocatedChange(id, old_size, new_size, source);
+            }
+          },
+          weak_factory_.GetWeakPtr()));
 }
 
 void GpuChannelManager::DestroyAllChannels() {
@@ -517,12 +592,12 @@ void GpuChannelManager::GetVideoMemoryUsageStats(
   uint64_t total_size = 0;
   for (const auto& entry : gpu_channels_) {
     const GpuChannel* channel = entry.second.get();
-    if (!channel->IsConnected())
+    if (channel->client_pid() == base::kNullProcessId)
       continue;
     uint64_t size = channel->GetMemoryUsage();
     total_size += size;
-    video_memory_usage_stats->process_map[channel->GetClientPID()]
-        .video_memory += size;
+    video_memory_usage_stats->process_map[channel->client_pid()].video_memory +=
+        size;
   }
 
   if (shared_context_state_ && !shared_context_state_->context_lost())
@@ -633,7 +708,6 @@ void GpuChannelManager::OnBackgroundCleanup() {
     program_cache_->Trim(0u);
 
   if (shared_context_state_) {
-    gr_cache_controller_.reset();
     shared_context_state_->MarkContextLost();
     shared_context_state_.reset();
   }
@@ -659,52 +733,22 @@ void GpuChannelManager::HandleMemoryPressure(
     base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  SCOPED_UMA_HISTOGRAM_TIMER(
-      "Memory.Experimental.GpuChannelManagerPressureHandlerDuration."
-      "TotalDuration");
-
-  if (program_cache_) {
-    SCOPED_UMA_HISTOGRAM_TIMER(
-        "Memory.Experimental.GpuChannelManagerPressureHandlerDuration."
-        "ProgramCacheHandleMemoryPressureDuration");
+  if (program_cache_)
     program_cache_->HandleMemoryPressure(memory_pressure_level);
-  }
 
   // These caches require a current context for cleanup.
   if (shared_context_state_ &&
       shared_context_state_->MakeCurrent(nullptr, true /* needs_gl */)) {
-    {
-      SCOPED_UMA_HISTOGRAM_TIMER(
-          "Memory.Experimental.GpuChannelManagerPressureHandlerDuration."
-          "DiscardableManagerHandleMemoryPressureDuration");
       discardable_manager_.HandleMemoryPressure(memory_pressure_level);
-    }
-    {
-      SCOPED_UMA_HISTOGRAM_TIMER(
-          "Memory.Experimental.GpuChannelManagerPressureHandlerDuration."
-          "PasshtroughDiscardableManagerHandleMemoryPressureDuration");
       passthrough_discardable_manager_.HandleMemoryPressure(
           memory_pressure_level);
-    }
-
-    SCOPED_UMA_HISTOGRAM_TIMER(
-        "Memory.Experimental.GpuChannelManagerPressureHandlerDuration."
-        "SharedContextStatePurgeMemoryDuration");
     shared_context_state_->PurgeMemory(memory_pressure_level);
   }
-  if (gr_shader_cache_) {
-    SCOPED_UMA_HISTOGRAM_TIMER(
-        "Memory.Experimental.GpuChannelManagerPressureHandlerDuration."
-        "GrShaderCachePurgeMemoryDuration");
+
+  if (gr_shader_cache_)
     gr_shader_cache_->PurgeMemory(memory_pressure_level);
-  }
 #if defined(OS_WIN)
-  {
-    SCOPED_UMA_HISTOGRAM_TIMER(
-        "Memory.Experimental.GpuChannelManagerPressureHandlerDuration."
-        "TrimD3DResourcesDuration");
-    TrimD3DResources();
-  }
+  TrimD3DResources();
 #endif
 }
 
@@ -727,9 +771,12 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
 #endif
   use_virtualized_gl_contexts |=
       gpu_driver_bug_workarounds_.use_virtualized_gl_contexts;
-  // MailboxManagerSync synchronization correctness currently depends on having
-  // only a single context. See crbug.com/510243 for details.
-  use_virtualized_gl_contexts |= mailbox_manager_->UsesSync();
+
+  bool enable_angle_validation = features::IsANGLEValidationEnabled();
+#if DCHECK_IS_ON()
+  // Force validation on for all debug builds and testing
+  enable_angle_validation = true;
+#endif
 
   const bool use_passthrough_decoder =
       gles2::PassthroughCommandDecoderSupported() &&
@@ -754,13 +801,18 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
     gl::GLContextAttribs attribs = gles2::GenerateGLContextAttribs(
         ContextCreationAttribs(), use_passthrough_decoder);
 
-    // Only skip validation if the GLContext will be used exclusively by the
-    // SharedContextState and dcheck is off.
-#if DCHECK_IS_ON()
-    attribs.can_skip_validation = false;
-#else
-    attribs.can_skip_validation = !use_virtualized_gl_contexts;
+#if !defined(OS_MAC)
+    // Disable robust resource initialization for raster decoder and compositor.
+    // TODO(crbug.com/1192632): disable robust_resource_initialization for
+    // SwANGLE.
+    // TODO(crbug.com/1238413): disable robust_resource_initialization for Mac.
+    if (gl::GLSurfaceEGL::GetDisplayType() != gl::ANGLE_SWIFTSHADER &&
+        features::IsUsingSkiaRenderer()) {
+      attribs.robust_resource_initialization = false;
+    }
 #endif
+
+    attribs.can_skip_validation = !enable_angle_validation;
 
     context =
         gl::init::CreateGLContext(share_group.get(), surface.get(), attribs);
@@ -805,6 +857,34 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
       metal_context_provider_, dawn_context_provider_,
       peak_memory_monitor_.GetWeakPtr());
 
+  // Initialize GL context, so Vulkan and GL interop can work properly.
+  auto feature_info = base::MakeRefCounted<gles2::FeatureInfo>(
+    gpu_driver_bug_workarounds(), gpu_feature_info());
+  if (!shared_context_state->InitializeGL(gpu_preferences_,
+                                          feature_info.get())) {
+    LOG(ERROR) << "ContextResult::kFatalFailure: Failed to Initialize GL for "
+        " SharedContextState";
+    *result = ContextResult::kFatalFailure;
+    return nullptr;
+  }
+
+  // Log crash reports when GL errors are generated.
+  if (gl::GetGLImplementation() == gl::kGLImplementationEGLANGLE &&
+      enable_angle_validation && feature_info->feature_flags().khr_debug) {
+    static int remaining_gl_error_reports =
+#if defined(OS_ANDROID)
+        // Don't generate crash reports on Android due to errors generated
+        // during video decode.
+        0;
+#else
+        // Limit the total number of gl error crash reports to 1 per GPU
+        // process.
+        1;
+#endif
+    gles2::InitializeGLDebugLogging(false, CrashReportOnGLErrorDebugCallback,
+                                    &remaining_gl_error_reports);
+  }
+
   // OOP-R needs GrContext for raster tiles.
   bool need_gr_context =
       gpu_feature_info_.status_values[GPU_FEATURE_TYPE_OOP_RASTERIZATION] ==
@@ -818,17 +898,6 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
   need_gr_context |= GpuMemoryAblationExperiment::ExperimentSupported();
 
   if (need_gr_context) {
-    if (gpu_preferences_.gr_context_type == gpu::GrContextType::kGL) {
-      auto feature_info = base::MakeRefCounted<gles2::FeatureInfo>(
-          gpu_driver_bug_workarounds(), gpu_feature_info());
-      if (!shared_context_state->InitializeGL(gpu_preferences_,
-                                              feature_info.get())) {
-        LOG(ERROR) << "ContextResult::kFatalFailure: Failed to Initialize GL "
-                      "for SharedContextState";
-        *result = ContextResult::kFatalFailure;
-        return nullptr;
-      }
-    }
     if (!shared_context_state->InitializeGrContext(
             gpu_preferences_, gpu_driver_bug_workarounds_, gr_shader_cache(),
             &activity_flags_, watchdog_)) {
@@ -838,9 +907,7 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
       return nullptr;
     }
   }
-
   shared_context_state_ = std::move(shared_context_state);
-  gr_cache_controller_.emplace(shared_context_state_.get(), task_runner_);
 
   *result = ContextResult::kSuccess;
   return shared_context_state_;
@@ -872,8 +939,8 @@ void GpuChannelManager::OnContextLost(bool synthetic_loss) {
   }
 
   context_lost_time_ = lost_time;
-
-  if (synthetic_loss)
+  bool is_gl = gpu_preferences_.gr_context_type == GrContextType::kGL;
+  if (synthetic_loss && is_gl)
     return;
 
   // Lose all other contexts.
@@ -893,14 +960,11 @@ void GpuChannelManager::OnContextLost(bool synthetic_loss) {
 void GpuChannelManager::ScheduleGrContextCleanup() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (gr_cache_controller_)
-    gr_cache_controller_->ScheduleGrContextCleanup();
+  shared_context_state_->ScheduleGrContextCleanup();
 }
 
 void GpuChannelManager::StoreShader(const std::string& key,
                                     const std::string& shader) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-
   delegate_->StoreShaderToDisk(kGrShaderCacheClientId, key, shader);
 }
 

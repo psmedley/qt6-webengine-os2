@@ -12,7 +12,7 @@
 #include "core/fpdfapi/parser/cpdf_read_validator.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "third_party/base/check.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/containers/contains.h"
 
 CPDF_ObjectAvail::CPDF_ObjectAvail(
     const RetainPtr<CPDF_ReadValidator>& validator,
@@ -41,13 +41,13 @@ CPDF_ObjectAvail::~CPDF_ObjectAvail() = default;
 
 CPDF_DataAvail::DocAvailStatus CPDF_ObjectAvail::CheckAvail() {
   if (!LoadRootObject())
-    return CPDF_DataAvail::DocAvailStatus::DataNotAvailable;
+    return CPDF_DataAvail::kDataNotAvailable;
 
   if (CheckObjects()) {
     CleanMemory();
-    return CPDF_DataAvail::DocAvailStatus::DataAvailable;
+    return CPDF_DataAvail::kDataAvailable;
   }
-  return CPDF_DataAvail::DocAvailStatus::DataNotAvailable;
+  return CPDF_DataAvail::kDataNotAvailable;
 }
 
 bool CPDF_ObjectAvail::LoadRootObject() {

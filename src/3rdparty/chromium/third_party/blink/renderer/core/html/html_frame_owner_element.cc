@@ -20,11 +20,12 @@
 
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 
+#include "services/network/public/mojom/content_security_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -40,6 +41,7 @@
 #include "third_party/blink/renderer/core/frame/remote_frame.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/html/fenced_frame/html_fenced_frame_element.h"
 #include "third_party/blink/renderer/core/html/lazy_load_frame_observer.h"
 #include "third_party/blink/renderer/core/html/loading_attribute.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -304,16 +306,6 @@ void HTMLFrameOwnerElement::SetSandboxFlags(
   }
 }
 
-void HTMLFrameOwnerElement::SetDisallowDocumentAccesss(bool disallowed) {
-  frame_policy_.disallow_document_access = disallowed;
-  // Don't notify about updates if ContentFrame() is null, for example when
-  // the subframe hasn't been created yet.
-  if (ContentFrame()) {
-    GetDocument().GetFrame()->GetLocalFrameHostRemote().DidChangeFramePolicy(
-        ContentFrame()->GetFrameToken(), frame_policy_);
-  }
-}
-
 bool HTMLFrameOwnerElement::IsKeyboardFocusable() const {
   return content_frame_ && HTMLElement::IsKeyboardFocusable();
 }
@@ -389,44 +381,12 @@ void HTMLFrameOwnerElement::FrameOwnerPropertiesChanged() {
   properties->allow_payment_request = AllowPaymentRequest();
   properties->is_display_none = IsDisplayNone();
   properties->color_scheme = GetColorScheme();
-  properties->required_csp =
-      RequiredCsp().IsNull() ? WTF::g_empty_string : RequiredCsp();
 
   GetDocument()
       .GetFrame()
       ->GetLocalFrameHostRemote()
       .DidChangeFrameOwnerProperties(ContentFrame()->GetFrameToken(),
                                      std::move(properties));
-}
-
-void HTMLFrameOwnerElement::CSPAttributeChanged() {
-  // Don't notify about updates if ContentFrame() is null, for example when
-  // the subframe hasn't been created yet; or if we are in the middle of
-  // swapping one frame for another, in which case the final state
-  // will be propagated at the end of the swapping operation.
-  if (is_swapping_frames_ || !ContentFrame())
-    return;
-
-  String fake_header =
-      "HTTP/1.1 200 OK\nContent-Security-Policy: " + RequiredCsp();
-  // ParseHeaders needs a url to resolve report endpoints and for matching the
-  // keyword 'self'. However, the csp attribute does not allow report
-  // endpoints. Moreover, in the csp attribute, 'self' should not match the
-  // owner's url, but rather the frame src url. This is taken care by the
-  // Content-Security-Policy Embedded Enforcement algorithm, implemented in the
-  // AncestorThrottle. That's why we pass an empty url here.
-  network::mojom::blink::ParsedHeadersPtr parsed_headers =
-      ParseHeaders(fake_header, KURL());
-
-  DCHECK_LE(parsed_headers->content_security_policy.size(), 1u);
-
-  network::mojom::blink::ContentSecurityPolicyPtr csp =
-      parsed_headers->content_security_policy.IsEmpty()
-          ? nullptr
-          : std::move(parsed_headers->content_security_policy[0]);
-
-  GetDocument().GetFrame()->GetLocalFrameHostRemote().DidChangeCSPAttribute(
-      ContentFrame()->GetFrameToken(), std::move(csp));
 }
 
 void HTMLFrameOwnerElement::AddResourceTiming(const ResourceTimingInfo& info) {
@@ -520,6 +480,18 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
     const AtomicString& frame_name,
     bool replace_current_item) {
   TRACE_EVENT0("navigation", "HTMLFrameOwnerElement::LoadOrRedirectSubframe");
+
+  // TODO(crbug.com/1123606): Remove this once we move to the MPArch
+  // implementation. If this is the "top-level" internal <iframe> hosted within
+  // a <fencedframe> element using the ShadowDOM implementation, then we need to
+  // mark |frame_policy_| as `is_fenced=true`, so that the LocalFrame inside
+  // this frame can react accordingly. See
+  // https://docs.google.com/document/d/1ijTZJT3DHQ1ljp4QQe4E4XCCRaYAxmInNzN1SzeJM8s/edit.
+  if (ContainingShadowRoot() && ContainingShadowRoot()->IsUserAgent() &&
+      IsA<HTMLFencedFrameElement>(ContainingShadowRoot()->host())) {
+    frame_policy_.is_fenced = true;
+  }
+
   // Update the |should_lazy_load_children_| value according to the "loading"
   // attribute immediately, so that it still gets respected even if the "src"
   // attribute gets parsed in ParseAttribute() before the "loading" attribute
@@ -547,6 +519,20 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
 
   if (ContentFrame()) {
     FrameLoadRequest frame_load_request(GetDocument().domWindow(), request);
+    // TODO(crbug.com/1123606): This is how we're temporarily restricting the
+    // referrer string on top-level frenced frame requests initiated from
+    // outside of the frame. The intention here is to redact the ultimate value
+    // of `document.referrer` so that it is consistent with what the MPArch
+    // version of fenced frames will show. We'll remove this after we've moved
+    // to the MPArch version and away from the ShadowDOM implementation. The
+    // reason we have this check here is because we only want to take this
+    // action for navigations initiated by the fenced frame's embedder. We don't
+    // need this for the initial about:blank document (i.e., when
+    // `ContentFrame()` is null) because that is taken care of for us with the
+    // shadow DOM.
+    if (frame_policy_.is_fenced) {
+      frame_load_request.GetResourceRequest().SetReferrerString("");
+    }
     frame_load_request.SetClientRedirectReason(
         ClientNavigationReason::kFrameNavigation);
     WebFrameLoadType frame_load_type = WebFrameLoadType::kStandard;
@@ -596,11 +582,15 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   if (!child_frame)
     return false;
 
-  // Send 'csp' attribute to the browser.
-  CSPAttributeChanged();
+  // Propagate attributes like 'csp' or 'anonymous' to the browser process.
+  DidChangeAttributes();
 
   WebFrameLoadType child_load_type = WebFrameLoadType::kReplaceCurrentItem;
-  if (!GetDocument().LoadEventFinished() &&
+  // If the frame URL is not about:blank, see if it should do a
+  // kReloadBypassingCache navigation, following the parent frame. If the frame
+  // URL is about:blank, it should be committed synchronously as a
+  // kReplaceCurrentItem navigation (see https://crbug.com/778318).
+  if (url != BlankURL() && !GetDocument().LoadEventFinished() &&
       GetDocument().Loader()->LoadType() ==
           WebFrameLoadType::kReloadBypassingCache) {
     child_load_type = WebFrameLoadType::kReloadBypassingCache;

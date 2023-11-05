@@ -72,7 +72,9 @@ static wgpu::BackendType backendType = wgpu::BackendType::D3D12;
 static wgpu::BackendType backendType = wgpu::BackendType::Metal;
 #elif defined(DAWN_ENABLE_BACKEND_VULKAN)
 static wgpu::BackendType backendType = wgpu::BackendType::Vulkan;
-#elif defined(DAWN_ENABLE_BACKEND_OPENGL)
+#elif defined(DAWN_ENABLE_BACKEND_OPENGLES)
+static wgpu::BackendType backendType = wgpu::BackendType::OpenGLES;
+#elif defined(DAWN_ENABLE_BACKEND_DESKTOP_GL)
 static wgpu::BackendType backendType = wgpu::BackendType::OpenGL;
 #else
 #    error
@@ -193,7 +195,7 @@ wgpu::TextureView CreateDefaultDepthStencilView(const wgpu::Device& device) {
     descriptor.dimension = wgpu::TextureDimension::e2D;
     descriptor.size.width = 640;
     descriptor.size.height = 480;
-    descriptor.size.depth = 1;
+    descriptor.size.depthOrArrayLayers = 1;
     descriptor.sampleCount = 1;
     descriptor.format = wgpu::TextureFormat::Depth24PlusStencil8;
     descriptor.mipLevelCount = 1;
@@ -250,7 +252,7 @@ bool InitSample(int argc, const char** argv) {
         }
         if (std::string("-h") == argv[i] || std::string("--help") == argv[i]) {
             printf("Usage: %s [-b BACKEND] [-c COMMAND_BUFFER]\n", argv[0]);
-            printf("  BACKEND is one of: d3d12, metal, null, opengl, vulkan\n");
+            printf("  BACKEND is one of: d3d12, metal, null, opengl, opengles, vulkan\n");
             printf("  COMMAND_BUFFER is one of: none, terrible\n");
             return false;
         }

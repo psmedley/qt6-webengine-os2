@@ -6,6 +6,7 @@ module location.nearby.connections.mojom;
 
 import "device/bluetooth/public/mojom/uuid.mojom";
 import "mojo/public/mojom/base/file.mojom";
+import "mojo/public/mojom/base/time.mojom";
 
 // Generic result status of NearbyConnections API calls. These values are
 // persisted to logs. Entries should not be renumbered and numeric values should
@@ -139,6 +140,9 @@ struct AdvertisingOptions {
   // By default, this option is false. If true, this allows listening on
   // incoming Bluetooth Classic connections while BLE advertising.
   bool enable_bluetooth_listening = false;
+  // By default, this option is false. If true, this allows listening on
+  // incoming Web RTC connections while advertising.
+  bool enable_webrtc_listening = false;
   // Optional. If set, BLE advertisements will be in their "fast advertisement"
   // form, use this UUID, and non-connectable; if empty, BLE advertisements
   // will otherwise be normal and connectable.
@@ -170,6 +174,14 @@ struct ConnectionOptions {
   MediumSelection allowed_mediums;
   // Bluetooth MAC address of remote device in byte format.
   array<uint8, 6>? remote_bluetooth_mac_address;
+  // How often to send a keep alive message on the channel. An unspecified or
+  // negative value will result in the Nearby Connections default of 5 seconds
+  // being used.
+  mojo_base.mojom.TimeDelta? keep_alive_interval;
+  // The connection will time out if no message is received on the channel
+  // for this length of time. An unspecified or negative value will result in
+  // the Nearby Connections default of 30 seconds being used.
+  mojo_base.mojom.TimeDelta? keep_alive_timeout;
 };
 
 // A simple payload containing raw bytes.
@@ -259,4 +271,17 @@ enum Medium {
   kNfc = 7,
   kWifiDirect = 8,
   kWebRtc = 9,
+  kBleL2Cap = 10,
+};
+
+// Log severity levels. This is passed as a member of
+// NearbyConnectionsDependencies to set the minimum log level in the Nearby
+// Connections library. Entries should be kept in sync with the values in
+// location::nearby::api::LogMessage::Severity.
+enum LogSeverity {
+  kVerbose = -1,
+  kInfo = 0,
+  kWarning = 1,
+  kError = 2,
+  kFatal = 3,
 };

@@ -58,6 +58,7 @@ class CORE_EXPORT CSSParserContext final
                    SelectorProfile = kLiveProfile,
                    const Document* use_counter_document = nullptr);
   explicit CSSParserContext(const Document&);
+  CSSParserContext(const Document&, const KURL& base_url_override);
   CSSParserContext(const Document&,
                    const KURL& base_url_override,
                    bool origin_clean,
@@ -74,7 +75,6 @@ class CORE_EXPORT CSSParserContext final
                    bool origin_clean,
                    const WTF::TextEncoding& charset,
                    CSSParserMode,
-                   CSSParserMode match_mode,
                    SelectorProfile,
                    const Referrer& referrer,
                    bool is_html_document,
@@ -90,7 +90,6 @@ class CORE_EXPORT CSSParserContext final
   }
 
   CSSParserMode Mode() const { return mode_; }
-  CSSParserMode MatchMode() const { return match_mode_; }
   const KURL& BaseURL() const { return base_url_; }
   const WTF::TextEncoding& Charset() const { return charset_; }
   const Referrer& GetReferrer() const { return referrer_; }
@@ -174,7 +173,6 @@ class CORE_EXPORT CSSParserContext final
   const bool origin_clean_;
 
   CSSParserMode mode_;
-  CSSParserMode match_mode_;
   SelectorProfile profile_ = kLiveProfile;
   Referrer referrer_;
 

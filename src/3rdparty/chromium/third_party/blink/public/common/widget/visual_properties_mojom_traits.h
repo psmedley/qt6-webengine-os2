@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_COMMON_WIDGET_VISUAL_PROPERTIES_MOJOM_TRAITS_H_
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_WIDGET_VISUAL_PROPERTIES_MOJOM_TRAITS_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/widget/visual_properties.h"
 #include "third_party/blink/public/mojom/widget/visual_properties.mojom-shared.h"
@@ -14,9 +15,9 @@ namespace mojo {
 template <>
 struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
                                         blink::VisualProperties> {
-  static const blink::ScreenInfo& screen_info(
+  static const display::ScreenInfos& screen_infos(
       const blink::VisualProperties& r) {
-    return r.screen_info;
+    return r.screen_infos;
   }
 
   static bool auto_resize_enabled(const blink::VisualProperties& r) {
@@ -47,7 +48,7 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
     return r.compositor_viewport_pixel_rect;
   }
 
-  static base::Optional<cc::BrowserControlsParams> browser_controls_params(
+  static absl::optional<cc::BrowserControlsParams> browser_controls_params(
       const blink::VisualProperties& r) {
     return r.browser_controls_params;
   }
@@ -56,7 +57,7 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
     return r.scroll_focused_node_into_view;
   }
 
-  static base::Optional<viz::LocalSurfaceId> local_surface_id(
+  static absl::optional<viz::LocalSurfaceId> local_surface_id(
       const blink::VisualProperties& r) {
     return r.local_surface_id;
   }
@@ -95,6 +96,11 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
 
   static bool is_pinch_gesture_active(const blink::VisualProperties& r) {
     return r.is_pinch_gesture_active;
+  }
+
+  static const gfx::Rect& window_controls_overlay_rect(
+      const blink::VisualProperties& r) {
+    return r.window_controls_overlay_rect;
   }
 
   static bool Read(blink::mojom::VisualPropertiesDataView r,

@@ -14,6 +14,8 @@
 #include "chrome/browser/ash/login/quick_unlock/quick_unlock_storage.h"
 #include "chrome/browser/chromeos/android_sms/android_sms_pairing_state_tracker_impl.h"
 #include "chrome/browser/chromeos/android_sms/android_sms_urls.h"
+#include "chrome/browser/nearby_sharing/common/nearby_share_prefs.h"
+#include "chrome/browser/nearby_sharing/nearby_sharing_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/multidevice_setup/multidevice_setup_dialog.h"
 #include "chromeos/components/multidevice/logging/logging.h"
@@ -45,6 +47,8 @@ const char kPageContentDataWifiSyncStateKey[] = "wifiSyncState";
 const char kPageContentDataSmartLockStateKey[] = "smartLockState";
 const char kNotificationAccessStatus[] = "notificationAccessStatus";
 const char kIsAndroidSmsPairingComplete[] = "isAndroidSmsPairingComplete";
+const char kIsNearbyShareDisallowedByPolicy[] =
+    "isNearbyShareDisallowedByPolicy";
 
 constexpr char kAndroidSmsInfoOriginKey[] = "origin";
 constexpr char kAndroidSmsInfoEnabledKey[] = "enabled";
@@ -153,6 +157,13 @@ void MultideviceHandler::OnJavascriptAllowed() {
       base::BindRepeating(
           &MultideviceHandler::NotifySmartLockSignInAllowedChanged,
           base::Unretained(this)));
+  if (NearbySharingServiceFactory::IsNearbyShareSupportedForBrowserContext(
+          Profile::FromWebUI(web_ui()))) {
+    pref_change_registrar_.Add(
+        ::prefs::kNearbySharingEnabledPrefName,
+        base::BindRepeating(&MultideviceHandler::OnNearbySharingEnabledChanged,
+                            base::Unretained(this)));
+  }
 }
 
 void MultideviceHandler::OnJavascriptDisallowed() {
@@ -215,6 +226,10 @@ void MultideviceHandler::OnInstalledAppUrlChanged() {
   NotifyAndroidSmsInfoChange();
 }
 
+void MultideviceHandler::OnNearbySharingEnabledChanged() {
+  UpdatePageContent();
+}
+
 void MultideviceHandler::UpdatePageContent() {
   std::unique_ptr<base::DictionaryValue> page_content_dictionary =
       GeneratePageContentDataDictionary();
@@ -232,7 +247,7 @@ void MultideviceHandler::NotifyAndroidSmsInfoChange() {
 
 void MultideviceHandler::HandleShowMultiDeviceSetupDialog(
     const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   multidevice_setup::MultiDeviceSetupDialog::Show();
 }
 
@@ -256,25 +271,20 @@ void MultideviceHandler::HandleGetPageContent(const base::ListValue* args) {
 
 void MultideviceHandler::HandleSetFeatureEnabledState(
     const base::ListValue* args) {
-  std::string callback_id;
-  bool result = args->GetString(0, &callback_id);
-  DCHECK(result);
+  const auto& list = args->GetList();
+  DCHECK_GE(list.size(), 3u);
+  std::string callback_id = list[0].GetString();
 
-  int feature_as_int;
-  result = args->GetInteger(1, &feature_as_int);
-  DCHECK(result);
+  int feature_as_int = list[1].GetInt();
 
   auto feature = static_cast<multidevice_setup::mojom::Feature>(feature_as_int);
   DCHECK(multidevice_setup::mojom::IsKnownEnumValue(feature));
 
-  bool enabled;
-  result = args->GetBoolean(2, &enabled);
-  DCHECK(result);
+  bool enabled = list[2].GetBool();
 
-  base::Optional<std::string> auth_token;
-  std::string possible_token_value;
-  if (args->GetString(3, &possible_token_value))
-    auth_token = possible_token_value;
+  absl::optional<std::string> auth_token;
+  if (list.size() >= 4 && list[3].is_string())
+    auth_token = list[3].GetString();
 
   multidevice_setup_client_->SetFeatureEnabledState(
       feature, enabled, auth_token,
@@ -288,19 +298,19 @@ void MultideviceHandler::HandleSetFeatureEnabledState(
 }
 
 void MultideviceHandler::HandleRemoveHostDevice(const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   multidevice_setup_client_->RemoveHostDevice();
 }
 
 void MultideviceHandler::HandleRetryPendingHostSetup(
     const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   multidevice_setup_client_->RetrySetHostNow(
       base::BindOnce(&OnRetrySetHostNowResult));
 }
 
 void MultideviceHandler::HandleSetUpAndroidSms(const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   android_sms_app_manager_->SetUpAndLaunchAndroidSmsApp();
 }
 
@@ -348,7 +358,7 @@ void MultideviceHandler::HandleGetSmartLockSignInAllowed(
 
 std::unique_ptr<base::DictionaryValue>
 MultideviceHandler::GenerateAndroidSmsInfo() {
-  base::Optional<GURL> app_url;
+  absl::optional<GURL> app_url;
   if (android_sms_app_manager_)
     app_url = android_sms_app_manager_->GetCurrentAppUrl();
   if (!app_url)
@@ -489,6 +499,22 @@ MultideviceHandler::GeneratePageContentDataDictionary() {
   page_content_dictionary->SetInteger(kNotificationAccessStatus,
                                       static_cast<int32_t>(access_status));
 
+  // A managed pref is set by an admin policy, and because managed prefs
+  // have the highest priority, this also indicates whether the pref is
+  // actually being controlled by the policy setting. We only care when
+  // Nearby Share is disallowed by policy because the feature needs to be
+  // off and unchangeable by the user. If the Nearby Share is allowed by
+  // policy, the user can choose whether to enable or disable.
+  bool is_nearby_share_disallowed_by_policy =
+      NearbySharingServiceFactory::IsNearbyShareSupportedForBrowserContext(
+          Profile::FromWebUI(web_ui()))
+          ? !prefs_->GetBoolean(::prefs::kNearbySharingEnabledPrefName) &&
+                prefs_->IsManagedPreference(
+                    ::prefs::kNearbySharingEnabledPrefName)
+          : false;
+  page_content_dictionary->SetBoolean(kIsNearbyShareDisallowedByPolicy,
+                                      is_nearby_share_disallowed_by_policy);
+
   return page_content_dictionary;
 }
 
@@ -509,7 +535,7 @@ void MultideviceHandler::NotifySmartLockSignInAllowedChanged() {
 bool MultideviceHandler::IsAuthTokenValid(const std::string& auth_token) {
   Profile* profile = Profile::FromWebUI(web_ui());
   quick_unlock::QuickUnlockStorage* quick_unlock_storage =
-      chromeos::quick_unlock::QuickUnlockFactory::GetForProfile(profile);
+      quick_unlock::QuickUnlockFactory::GetForProfile(profile);
   return quick_unlock_storage->GetAuthToken() &&
          auth_token == quick_unlock_storage->GetAuthToken()->Identifier();
 }

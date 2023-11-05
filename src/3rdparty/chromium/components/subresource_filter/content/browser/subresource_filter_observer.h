@@ -5,9 +5,8 @@
 #ifndef COMPONENTS_SUBRESOURCE_FILTER_CONTENT_BROWSER_SUBRESOURCE_FILTER_OBSERVER_H_
 #define COMPONENTS_SUBRESOURCE_FILTER_CONTENT_BROWSER_SUBRESOURCE_FILTER_OBSERVER_H_
 
-#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/core/browser/db/v4_protocol_manager_util.h"
 #include "components/subresource_filter/content/browser/subresource_filter_safe_browsing_client.h"
-#include "components/subresource_filter/content/common/ad_evidence.h"
 #include "components/subresource_filter/core/common/activation_decision.h"
 #include "components/subresource_filter/core/common/load_policy.h"
 
@@ -24,6 +23,12 @@ class ActivationState;
 
 // Class to receive notifications of subresource filter events for a given
 // WebContents. Registered with a SubresourceFilterObserverManager.
+// !!!WARNING!!!: This observer will receive notifications from all pages
+// within a WebContents. This includes non-primary pages like those that are
+// prerendering which is probably not what clients expect. Clients should
+// make sure they're manually scoping observations to the relevant page.
+// TODO(bokan): We should probably refactor this and the manager class
+// to register against a single Page/FrameTree. #MPArch
 class SubresourceFilterObserver {
  public:
   virtual ~SubresourceFilterObserver() = default;
@@ -56,11 +61,13 @@ class SubresourceFilterObserver {
       content::NavigationHandle* navigation_handle,
       LoadPolicy load_policy) {}
 
-  // Called when a frame is tagged as an ad, along with evidence for it being
-  // an ad at tagging time. This will be called after frame creation and prior
-  // to DidFinishNavigation.
-  virtual void OnAdSubframeDetected(content::RenderFrameHost* render_frame_host,
-                                    const FrameAdEvidence& ad_evidence) {}
+  // Called when a frame is tagged or untagged as an ad, along with the frame's
+  // current status as an ad subframe and the evidence which resulted in the
+  // change. This will be called prior to commit time in the case of an initial
+  // synchronous load or at ReadyToCommitNavigation otherwise.
+  virtual void OnIsAdSubframeChanged(
+      content::RenderFrameHost* render_frame_host,
+      bool is_ad_subframe) {}
 };
 
 }  // namespace subresource_filter

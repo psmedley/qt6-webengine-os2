@@ -6,6 +6,8 @@
 
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
 
+#include <ostream>
+
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_boolean.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
@@ -78,12 +80,12 @@ Optional<FX_FILESIZE> GetHeaderOffset(
   uint8_t buf[kBufSize];
   for (FX_FILESIZE offset = 0; offset <= 1024; ++offset) {
     if (!pFile->ReadBlockAtOffset(buf, offset, kBufSize))
-      return {};
+      return pdfium::nullopt;
 
     if (memcmp(buf, "%PDF", 4) == 0)
       return offset;
   }
-  return {};
+  return pdfium::nullopt;
 }
 
 int32_t GetDirectInteger(const CPDF_Dictionary* pDict, const ByteString& key) {
@@ -197,7 +199,7 @@ std::ostream& operator<<(std::ostream& buf, const CPDF_Object* pObj) {
       buf << " " << pObj->GetString();
       break;
     case CPDF_Object::kString:
-      buf << PDF_EncodeString(pObj->GetString(), pObj->AsString()->IsHex());
+      buf << pObj->AsString()->EncodeString();
       break;
     case CPDF_Object::kName: {
       ByteString str = pObj->GetString();

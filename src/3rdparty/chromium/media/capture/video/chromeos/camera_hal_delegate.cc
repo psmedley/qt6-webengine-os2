@@ -23,8 +23,8 @@
 #include "base/system/system_monitor.h"
 #include "base/unguessable_token.h"
 #include "components/device_event_log/device_event_log.h"
-#include "media/capture/video/chromeos/ash/camera_hal_dispatcher_impl.h"
 #include "media/capture/video/chromeos/camera_buffer_factory.h"
+#include "media/capture/video/chromeos/camera_hal_dispatcher_impl.h"
 #include "media/capture/video/chromeos/camera_metadata_utils.h"
 #include "media/capture/video/chromeos/video_capture_device_chromeos_delegate.h"
 #include "media/capture/video/chromeos/video_capture_device_chromeos_halv3.h"
@@ -264,7 +264,7 @@ void CameraHalDelegate::GetSupportedFormats(
         continue;
       }
 
-      CAMERA_LOG(EVENT) << "Supported format: " << width << "x" << height
+      CAMERA_LOG(DEBUG) << "Supported format: " << width << "x" << height
                         << " fps=" << fps
                         << " format=" << cr_format.video_format;
       supported_formats->emplace_back(gfx::Size(width, height), fps,
@@ -463,6 +463,13 @@ void CameraHalDelegate::EnableVirtualDevice(const std::string& device_id,
   }
 }
 
+void CameraHalDelegate::DisableAllVirtualDevices() {
+  base::AutoLock lock(enable_virtual_device_lock_);
+  for (auto& it : enable_virtual_device_) {
+    it.second = false;
+  }
+}
+
 const VendorTagInfo* CameraHalDelegate::GetVendorTagInfoByName(
     const std::string& full_name) {
   return vendor_tag_ops_delegate_.GetInfoByName(full_name);
@@ -639,6 +646,7 @@ void CameraHalDelegate::OnGotCameraInfoOnIpcThread(
   DVLOG(1) << "Got camera info of camera " << camera_id;
   if (result) {
     LOG(ERROR) << "Failed to get camera info. Camera id: " << camera_id;
+    return;
   }
   SortCameraMetadata(&camera_info->static_camera_characteristics);
 

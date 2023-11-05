@@ -39,10 +39,16 @@ void EnableStartupTracingIfNeeded() {
 
   TraceEventDataSource::GetInstance()->RegisterStartupHooks();
 
-  // Initialize the Perfetto client library now that we're past the zygote's
-  // fork point. This is important to ensure Perfetto's track registry gets a
-  // unique uuid for generating track ids.
-  PerfettoTracedProcess::Get()->SetupClientLibrary();
+  // Create the PerfettoTracedProcess.
+  PerfettoTracedProcess::Get();
+
+  // Initialize the client library's TrackRegistry to support trace points
+  // during startup tracing. We don't setup the client library completely here
+  // yet, because we don't have field trials loaded yet (which influence which
+  // backends we enable).
+  // TODO(eseckler): Make it possible to initialize client lib backends after
+  // setting up the client library?
+  perfetto::internal::TrackRegistry::InitializeInstance();
 
   // Ensure TraceLog is initialized first.
   // https://crbug.com/764357
@@ -87,11 +93,8 @@ void InitTracingPostThreadPoolStartAndFeatureList() {
   if (g_tracing_initialized_after_threadpool_and_featurelist)
     return;
   g_tracing_initialized_after_threadpool_and_featurelist = true;
-  // TODO(nuskos): We should switch these to DCHECK once we're reasonably
-  // confident we've ensured this is called properly in all processes. Probably
-  // after M78 release has been cut (since we'll verify in the rollout of M78).
-  CHECK(base::ThreadPoolInstance::Get());
-  CHECK(base::FeatureList::GetInstance());
+  DCHECK(base::ThreadPoolInstance::Get());
+  DCHECK(base::FeatureList::GetInstance());
 
   PerfettoTracedProcess::Get()->OnThreadPoolAvailable();
 
@@ -168,7 +171,7 @@ void PropagateTracingFlagsToChildProcessCmdLine(base::CommandLine* cmd_line) {
 
   // Make sure that the startup session uses privacy filtering mode if it's
   // enabled for the browser's session.
-  if (TraceEventDataSource::GetInstance()->privacy_filtering_enabled())
+  if (TraceEventDataSource::GetInstance()->IsPrivacyFilteringEnabled())
     cmd_line->AppendSwitch(switches::kTraceStartupEnablePrivacyFiltering);
 
   cmd_line->AppendSwitchASCII(switches::kTraceStartup,

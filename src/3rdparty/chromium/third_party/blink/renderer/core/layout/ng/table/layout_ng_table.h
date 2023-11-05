@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_TABLE_LAYOUT_NG_TABLE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_TABLE_LAYOUT_NG_TABLE_H_
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/layout/layout_block.h"
-#include "third_party/blink/renderer/core/layout/ng/layout_ng_mixin.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_block.h"
 #include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table_interface.h"
 #include "third_party/blink/renderer/core/layout/ng/table/ng_table_layout_algorithm_types.h"
 
@@ -31,7 +31,7 @@ class NGTableBorders;
 // on LayoutObject. They are invalidated inside
 // LayoutObject::SetNeeds*Layout.
 
-class CORE_EXPORT LayoutNGTable : public LayoutNGMixin<LayoutBlock>,
+class CORE_EXPORT LayoutNGTable : public LayoutNGBlock,
                                   public LayoutNGTableInterface {
  public:
   explicit LayoutNGTable(Element*);
@@ -90,8 +90,6 @@ class CORE_EXPORT LayoutNGTable : public LayoutNGMixin<LayoutBlock>,
   LayoutBox* CreateAnonymousBoxWithSameTypeAs(
       const LayoutObject* parent) const override;
 
-  void Paint(const PaintInfo&) const final;
-
   LayoutUnit BorderTop() const override;
 
   LayoutUnit BorderBottom() const override;
@@ -119,7 +117,9 @@ class CORE_EXPORT LayoutNGTable : public LayoutNGMixin<LayoutBlock>,
   PhysicalRect OverflowClipRect(const PhysicalOffset&,
                                 OverlayScrollbarClipBehavior) const override;
 
+#if DCHECK_IS_ON()
   void AddVisualEffectOverflow() final;
+#endif
 
   bool VisualRectRespectsVisibility() const override {
     NOT_DESTROYED();

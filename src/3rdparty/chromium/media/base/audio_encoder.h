@@ -15,6 +15,8 @@
 #include "media/base/audio_parameters.h"
 #include "media/base/media_export.h"
 #include "media/base/status.h"
+#include "media/base/timestamp_constants.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -23,7 +25,8 @@ struct MEDIA_EXPORT EncodedAudioBuffer {
   EncodedAudioBuffer(const AudioParameters& params,
                      std::unique_ptr<uint8_t[]> data,
                      size_t size,
-                     base::TimeTicks timestamp);
+                     base::TimeTicks timestamp,
+                     base::TimeDelta duration = media::kNoTimestamp);
   EncodedAudioBuffer(EncodedAudioBuffer&&);
   ~EncodedAudioBuffer();
 
@@ -45,6 +48,11 @@ struct MEDIA_EXPORT EncodedAudioBuffer {
   // The capture time of the first sample of the current AudioBus, or a previous
   // AudioBus If this output was generated because of a call to Flush().
   const base::TimeTicks timestamp;
+
+  // The duration of the encoded samples, if they were decoded and played out.
+  // A duration of media::kNoTimestamp means we don't know the duration or don't
+  // care about it.
+  const base::TimeDelta duration;
 };
 
 // Defines an interface for audio encoders.
@@ -55,7 +63,7 @@ class MEDIA_EXPORT AudioEncoder {
     Options(const Options&);
     ~Options();
 
-    base::Optional<int> bitrate;
+    absl::optional<int> bitrate;
 
     int channels;
 
@@ -69,7 +77,7 @@ class MEDIA_EXPORT AudioEncoder {
   // invoked on the same sequence on which EncodeAudio() is called.
   using OutputCB =
       base::RepeatingCallback<void(EncodedAudioBuffer output,
-                                   base::Optional<CodecDescription>)>;
+                                   absl::optional<CodecDescription>)>;
 
   // Signature of the callback to report errors.
   using StatusCB = base::OnceCallback<void(Status error)>;

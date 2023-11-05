@@ -23,7 +23,7 @@ base::android::ScopedJavaGlobalRef<jobject> BuildJavaContextMenuParams(
 
   bool can_save = params.media_flags & blink::ContextMenuData::kMediaCanSave;
   JNIEnv* env = base::android::AttachCurrentThread();
-  base::string16 title_text =
+  std::u16string title_text =
       (params.title_text.empty() ? params.alt_text : params.title_text);
 
   return base::android::ScopedJavaGlobalRef<jobject>(
@@ -38,7 +38,7 @@ base::android::ScopedJavaGlobalRef<jobject> BuildJavaContextMenuParams(
           ConvertUTF16ToJavaString(env, title_text),
           url::GURLAndroid::FromNativeGURL(env, sanitizedReferrer),
           static_cast<int>(params.referrer_policy), can_save, params.x,
-          params.y, params.source_type));
+          params.y, params.source_type, params.opened_from_highlight));
 }
 
 content::ContextMenuParams* ContextMenuParamsFromJavaObject(

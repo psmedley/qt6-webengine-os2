@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/notreached.h"
@@ -40,6 +41,10 @@ void MetricsHandler::RegisterMessages() {
       "metricsHandler:recordTime",
       base::BindRepeating(&MetricsHandler::HandleRecordTime,
                           base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "metricsHandler:recordMediumTime",
+      base::BindRepeating(&MetricsHandler::HandleRecordMediumTime,
+                          base::Unretained(this)));
 }
 
 void MetricsHandler::HandleRecordAction(const base::ListValue* args) {
@@ -48,24 +53,14 @@ void MetricsHandler::HandleRecordAction(const base::ListValue* args) {
 }
 
 void MetricsHandler::HandleRecordInHistogram(const base::ListValue* args) {
-  std::string histogram_name;
-  double value;
-  double boundary_value;
-  if (!args->GetString(0, &histogram_name) ||
-      !args->GetDouble(1, &value) ||
-      !args->GetDouble(2, &boundary_value)) {
-    NOTREACHED();
-    return;
-  }
+  base::Value::ConstListView list = args->GetList();
+  const std::string& histogram_name = list[0].GetString();
+  int int_value = static_cast<int>(list[1].GetDouble());
+  int int_boundary_value = static_cast<int>(list[2].GetDouble());
 
-  int int_value = static_cast<int>(value);
-  int int_boundary_value = static_cast<int>(boundary_value);
-  if (int_boundary_value >= 4000 ||
-      int_value > int_boundary_value ||
-      int_value < 0) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK_GE(int_value, 0);
+  DCHECK_LE(int_value, int_boundary_value);
+  DCHECK_LT(int_boundary_value, 4000);
 
   int bucket_count = int_boundary_value;
   while (bucket_count >= 100) {
@@ -95,15 +90,10 @@ void MetricsHandler::HandleRecordBooleanHistogram(const base::ListValue* args) {
 }
 
 void MetricsHandler::HandleRecordTime(const base::ListValue* args) {
-  std::string histogram_name;
-  double value;
+  const std::string& histogram_name = args->GetList()[0].GetString();
+  double value = args->GetList()[1].GetDouble();
 
-  if (!args->GetString(0, &histogram_name) ||
-      !args->GetDouble(1, &value) ||
-      value < 0) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK_GE(value, 0);
 
   base::TimeDelta time_value = base::TimeDelta::FromMilliseconds(value);
 
@@ -112,4 +102,14 @@ void MetricsHandler::HandleRecordTime(const base::ListValue* args) {
       base::TimeDelta::FromSeconds(10), 50,
       base::HistogramBase::kUmaTargetedHistogramFlag);
   counter->AddTime(time_value);
+}
+
+void MetricsHandler::HandleRecordMediumTime(const base::ListValue* args) {
+  const std::string& histogram_name = args->GetList()[0].GetString();
+  double value = args->GetList()[1].GetDouble();
+
+  DCHECK_GE(value, 0);
+
+  base::UmaHistogramMediumTimes(histogram_name,
+                                base::TimeDelta::FromMilliseconds(value));
 }

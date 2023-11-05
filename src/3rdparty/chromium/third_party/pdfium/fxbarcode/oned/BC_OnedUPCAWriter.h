@@ -10,11 +10,9 @@
 #include <memory>
 
 #include "core/fxcrt/fx_string.h"
-#include "core/fxcrt/fx_system.h"
 #include "fxbarcode/oned/BC_OnedEANWriter.h"
 
 class CBC_OnedEAN13Writer;
-class CFX_DIBitmap;
 class CFX_Matrix;
 class CFX_RenderDevice;
 
@@ -38,7 +36,7 @@ class CBC_OnedUPCAWriter final : public CBC_OneDimEANWriter {
  private:
   bool ShowChars(WideStringView contents,
                  CFX_RenderDevice* device,
-                 const CFX_Matrix* matrix,
+                 const CFX_Matrix& matrix,
                  int32_t barWidth,
                  int32_t multiple) override;
 

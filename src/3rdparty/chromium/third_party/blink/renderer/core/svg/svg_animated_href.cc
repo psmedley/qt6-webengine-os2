@@ -14,8 +14,6 @@
 
 namespace blink {
 
-class StringOrTrustedScriptURL;
-
 void SVGAnimatedHref::Trace(Visitor* visitor) const {
   visitor->Trace(xlink_href_);
   SVGAnimatedString::Trace(visitor);
@@ -45,18 +43,17 @@ const SVGString* SVGAnimatedHref::CurrentValue() const {
   return BackingString()->SVGAnimatedString::CurrentValue();
 }
 
-void SVGAnimatedHref::baseVal(
-    StringOrTrustedScriptURL& string_or_trusted_script_url) {
+V8UnionStringOrTrustedScriptURL* SVGAnimatedHref::baseVal() {
   UseCounter::Count(ContextElement()->GetDocument(),
                     WebFeature::kSVGHrefBaseVal);
-  BackingString()->SVGAnimatedString::baseVal(string_or_trusted_script_url);
+  return BackingString()->SVGAnimatedString::baseVal();
 }
 
-void SVGAnimatedHref::setBaseVal(const StringOrTrustedScriptURL& value,
+void SVGAnimatedHref::setBaseVal(const V8UnionStringOrTrustedScriptURL* value,
                                  ExceptionState& exception_state) {
   UseCounter::Count(ContextElement()->GetDocument(),
                     WebFeature::kSVGHrefBaseVal);
-  return BackingString()->SVGAnimatedString::setBaseVal(value, exception_state);
+  BackingString()->SVGAnimatedString::setBaseVal(value, exception_state);
 }
 
 String SVGAnimatedHref::animVal() {

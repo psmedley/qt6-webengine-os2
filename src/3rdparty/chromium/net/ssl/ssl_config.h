@@ -7,14 +7,15 @@
 
 #include <stdint.h>
 
+#include "base/containers/flat_map.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "net/base/net_export.h"
 #include "net/base/network_isolation_key.h"
 #include "net/base/privacy_mode.h"
 #include "net/cert/x509_certificate.h"
 #include "net/socket/next_proto.h"
 #include "net/ssl/ssl_private_key.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -43,6 +44,8 @@ NET_EXPORT extern const uint16_t kDefaultSSLVersionMax;
 
 // A collection of SSL-related configuration settings.
 struct NET_EXPORT SSLConfig {
+  using ApplicationSettings = base::flat_map<NextProto, std::vector<uint8_t>>;
+
   // Default to revocation checking.
   SSLConfig();
   SSLConfig(const SSLConfig& other);
@@ -61,8 +64,8 @@ struct NET_EXPORT SSLConfig {
   // If specified, the minimum and maximum protocol versions that are enabled.
   // (Use the SSL_PROTOCOL_VERSION_xxx enumerators defined above.) If
   // unspecified, values from the SSLConfigService are used.
-  base::Optional<uint16_t> version_min_override;
-  base::Optional<uint16_t> version_max_override;
+  absl::optional<uint16_t> version_min_override;
+  absl::optional<uint16_t> version_max_override;
 
   // Whether early data is enabled on this connection. Note that early data has
   // weaker security properties than normal data and changes the
@@ -129,7 +132,7 @@ struct NET_EXPORT SSLConfig {
 
   // ALPS TLS extension is enabled and corresponding data is sent to server
   // for each NextProto in |application_settings|.  Data might be empty.
-  base::flat_map<NextProto, std::vector<uint8_t>> application_settings;
+  ApplicationSettings application_settings;
 
   // If the PartitionSSLSessionsByNetworkIsolationKey feature is enabled, the
   // session cache is partitioned by this value.

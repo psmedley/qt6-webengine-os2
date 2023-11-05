@@ -8,22 +8,28 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/cart/cart_db_content.pb.h"
 #include "chrome/browser/cart/cart_service.h"
+#include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
+#include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/persisted_state_db/profile_proto_db.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "components/network_session_configurator/common/network_switches.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
+#include "components/prefs/pref_service.h"
 #include "components/search/ntp_features.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
+#include "components/ukm/test_ukm_recorder.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/test/base/android/android_browser_test.h"
@@ -42,6 +48,12 @@ cart_db::ChromeCartContentProto BuildProto(const char* domain,
   return proto;
 }
 
+cart_db::ChromeCartProductProto BuildProductInfoProto(const char* product_id) {
+  cart_db::ChromeCartProductProto proto;
+  proto.set_product_id(product_id);
+  return proto;
+}
+
 cart_db::ChromeCartContentProto BuildProtoWithProducts(
     const char* domain,
     const char* cart_url,
@@ -51,6 +63,24 @@ cart_db::ChromeCartContentProto BuildProtoWithProducts(
   proto.set_merchant_cart_url(cart_url);
   for (const auto* const v : product_urls) {
     proto.add_product_image_urls(v);
+  }
+  return proto;
+}
+
+cart_db::ChromeCartContentProto BuildProtoWithProducts(
+    const char* domain,
+    const char* cart_url,
+    const std::vector<const char*>& product_urls,
+    const std::vector<const char*>& product_ids) {
+  cart_db::ChromeCartContentProto proto;
+  proto.set_key(domain);
+  proto.set_merchant_cart_url(cart_url);
+  for (const auto* const url : product_urls) {
+    proto.add_product_image_urls(url);
+  }
+  for (const auto* const id : product_ids) {
+    auto* added_product = proto.add_product_infos();
+    *added_product = BuildProductInfoProto(id);
   }
   return proto;
 }
@@ -69,6 +99,8 @@ const char kMockExampleFallbackURL[] = "https://www.guitarcenter.com/cart";
 const char kMockExampleLinkURL[] =
     "https://www.guitarcenter.com/shopping-cart/";
 const char kMockExampleURL[] = "https://www.guitarcenter.com/cart.html";
+const char kMockExampleURL2[] =
+    "https://www.guitarcenter.com/shopping-cart.html";
 
 const cart_db::ChromeCartContentProto kMockExampleProtoFallbackCart =
     BuildProto(kMockExample, kMockExampleFallbackURL);
@@ -80,8 +112,15 @@ const cart_db::ChromeCartContentProto kMockExampleProtoWithProducts =
     BuildProtoWithProducts(
         kMockExample,
         kMockExampleURL,
-        {"https://static.guitarcenter.com/product-image/123.png",
-         "https://static.guitarcenter.com/product-image/456.png"});
+        {"https://static.guitarcenter.com/product-image/foo_123-0-medium",
+         "https://images.cymax.com/Images/3/bar_456-baz_789-0-medium",
+         "https://static.guitarcenter.com/product-image/qux_357-0-medium"});
+const cart_db::ChromeCartContentProto
+    kMockExampleProtoWithProductsWithoutSaved = BuildProtoWithProducts(
+        kMockExample,
+        kMockExampleURL,
+        {"https://static.guitarcenter.com/product-image/foo_123-0-medium",
+         "https://images.cymax.com/Images/3/bar_456-baz_789-0-medium"});
 
 const char kMockAmazon[] = "amazon.com";
 const char kMockAmazonURL[] = "https://www.amazon.com/gp/cart/view.html";
@@ -97,6 +136,8 @@ const ShoppingCarts kExpectedExampleLinkCart = {
 const ShoppingCarts kExpectedExample = {{kMockExample, kMockExampleProto}};
 const ShoppingCarts kExpectedExampleWithProducts = {
     {kMockExample, kMockExampleProtoWithProducts}};
+const ShoppingCarts kExpectedExampleWithProductsWithoutSaved = {
+    {kMockExample, kMockExampleProtoWithProductsWithoutSaved}};
 const ShoppingCarts kExpectedAmazon = {{kMockAmazon, kMockAmazonProto}};
 const ShoppingCarts kEmptyExpected = {};
 
@@ -109,6 +150,8 @@ std::unique_ptr<net::test_server::HttpResponse> BasicResponse(
     return nullptr;
   if (request.relative_url == "/cart.html")
     return nullptr;
+  if (request.relative_url == "/shopping-cart.html")
+    return nullptr;
 
   auto response = std::make_unique<net::test_server::BasicHttpResponse>();
   response->set_content("dummy");
@@ -119,10 +162,13 @@ std::unique_ptr<net::test_server::HttpResponse> BasicResponse(
 // Tests CommerceHintAgent.
 class CommerceHintAgentTest : public PlatformBrowserTest {
  public:
+  using Entry = ukm::builders::Shopping_FormSubmitted;
+
   void SetUpInProcessBrowserTestFixture() override {
-    scoped_feature_list_.InitAndEnableFeatureWithParameters(
-        ntp_features::kNtpChromeCartModule,
-        {{"product-skip-pattern", "(^|\\W)(?i)(skipped)(\\W|$)"}});
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{"product-skip-pattern", "(^|\\W)(?i)(skipped)(\\W|$)"}}}},
+        {optimization_guide::features::kOptimizationHints});
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -138,7 +184,8 @@ class CommerceHintAgentTest : public PlatformBrowserTest {
     service_ = CartServiceFactory::GetForProfile(profile);
     auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
     ASSERT_TRUE(identity_manager);
-    signin::SetPrimaryAccount(identity_manager, "user@gmail.com");
+    signin::SetPrimaryAccount(identity_manager, "user@gmail.com",
+                              signin::ConsentLevel::kSync);
 
     // This is necessary to test non-localhost domains. See |NavigateToURL|.
     host_resolver()->AddRule("*", "127.0.0.1");
@@ -147,6 +194,8 @@ class CommerceHintAgentTest : public PlatformBrowserTest {
     https_server_.RegisterRequestHandler(base::BindRepeating(&BasicResponse));
     ASSERT_TRUE(https_server_.InitializeAndListen());
     https_server_.StartAcceptingConnections();
+
+    ukm_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
   }
 
  protected:
@@ -209,6 +258,9 @@ class CommerceHintAgentTest : public PlatformBrowserTest {
                       .spec(),
                   expected[i].second.merchant_cart_url());
       }
+    } else {
+      VLOG(3) << "Found " << found.size() << " but expecting "
+              << expected.size();
     }
     std::move(closure).Run();
   }
@@ -280,12 +332,22 @@ class CommerceHintAgentTest : public PlatformBrowserTest {
                 expected[i].second.merchant_cart_url());
       bool same_size = found[i].second.product_image_urls_size() ==
                        expected[i].second.product_image_urls_size();
-      if (!same_size)
+      if (!same_size) {
         fail = true;
-      if (same_size) {
+      } else {
         for (int j = 0; j < found[i].second.product_image_urls_size(); j++) {
           EXPECT_EQ(found[i].second.product_image_urls(j),
                     expected[i].second.product_image_urls(j));
+        }
+      }
+      same_size = found[i].second.product_infos_size() ==
+                  expected[i].second.product_infos_size();
+      if (!same_size) {
+        fail = true;
+      } else {
+        for (int j = 0; j < found[i].second.product_infos_size(); j++) {
+          EXPECT_EQ(found[i].second.product_infos(j).product_id(),
+                    expected[i].second.product_infos(j).product_id());
         }
       }
     }
@@ -293,9 +355,26 @@ class CommerceHintAgentTest : public PlatformBrowserTest {
     std::move(closure).Run();
   }
 
+  void ExpectUKM(const std::string& metric_name) {
+    auto entries = ukm_recorder()->GetEntriesByName(Entry::kEntryName);
+
+    ASSERT_FALSE(entries.empty());
+
+    for (const auto* const entry : entries) {
+      if (ukm_recorder()->GetEntryMetric(entry, metric_name)) {
+        SUCCEED();
+        return;
+      }
+    }
+    FAIL() << "Expected UKM \"" << metric_name << "\" was not recorded";
+  }
+
+  ukm::TestAutoSetUkmRecorder* ukm_recorder() { return ukm_recorder_.get(); }
+
   base::test::ScopedFeatureList scoped_feature_list_;
   CartService* service_;
   net::EmbeddedTestServer https_server_{net::EmbeddedTestServer::TYPE_HTTPS};
+  std::unique_ptr<ukm::TestAutoSetUkmRecorder> ukm_recorder_;
   bool satisfied_;
 };
 
@@ -345,13 +424,28 @@ IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, VisitCart) {
 }
 
 IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, ExtractCart) {
-  // This page has two products.
+  // This page has three products.
   NavigateToURL("https://www.guitarcenter.com/cart.html");
 
   WaitForProductCount(kExpectedExampleWithProducts);
 }
 
-IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, CartPriority) {
+class CommerceHintNoRateControlTest : public CommerceHintAgentTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{"cart-extraction-gap-time", "0s"}}}},
+        {optimization_guide::features::kOptimizationHints});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// TODO(crbug.com/1241582): Add the rate control back for this test after
+// figuring out why rate control makes this test flaky.
+IN_PROC_BROWSER_TEST_F(CommerceHintNoRateControlTest, CartPriority) {
   NavigateToURL("https://www.guitarcenter.com/");
   NavigateToURL("https://www.guitarcenter.com/add-to-cart?product=1");
   WaitForCartCount(kExpectedExampleFallbackCart);
@@ -365,7 +459,7 @@ IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, CartPriority) {
 }
 
 IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, VisitCheckout) {
-  service_->AddCart(kMockExample, base::nullopt, kMockExampleProto);
+  service_->AddCart(kMockExample, absl::nullopt, kMockExampleProto);
   WaitForCartCount(kExpectedExampleFallbackCart);
 
   NavigateToURL("https://www.guitarcenter.com/");
@@ -374,7 +468,7 @@ IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, VisitCheckout) {
 }
 
 IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, PurchaseByURL) {
-  service_->AddCart(kMockAmazon, base::nullopt, kMockAmazonProto);
+  service_->AddCart(kMockAmazon, absl::nullopt, kMockAmazonProto);
   WaitForCartCount(kExpectedAmazon);
 
   NavigateToURL("http://amazon.com/");
@@ -384,7 +478,7 @@ IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, PurchaseByURL) {
 }
 
 IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, PurchaseByForm) {
-  service_->AddCart(kMockExample, base::nullopt, kMockExampleProto);
+  service_->AddCart(kMockExample, absl::nullopt, kMockExampleProto);
   WaitForCartCount(kExpectedExampleFallbackCart);
 
   NavigateToURL("https://www.guitarcenter.com/purchase.html");
@@ -394,6 +488,7 @@ IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, PurchaseByForm) {
   content::TestNavigationObserver load_observer(web_contents());
   load_observer.WaitForNavigationFinished();
   WaitForCartCount(kEmptyExpected);
+  ExpectUKM("IsTransaction");
 }
 
 // TODO(crbug.com/1180268): CrOS multi-profiles implementation is different from
@@ -417,7 +512,8 @@ IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, NonSignInUser) {
   SendXHR("/add-to-cart", "product: 123");
   WaitForCartCount(kEmptyExpected);
 
-  signin::SetPrimaryAccount(identity_manager, "user@gmail.com");
+  signin::SetPrimaryAccount(identity_manager, "user@gmail.com",
+                            signin::ConsentLevel::kSync);
   NavigateToURL("https://www.guitarcenter.com/");
   SendXHR("/add-to-cart", "product: 123");
   WaitForCartCount(kExpectedExampleFallbackCart);
@@ -446,8 +542,7 @@ IN_PROC_BROWSER_TEST_F(CommerceHintAgentTest, MultipleProfiles) {
       profile_manager->GenerateNextProfileDirectoryPath();
   base::RunLoop run_loop;
   profile_manager->CreateProfileAsync(
-      profile_path2, base::BindRepeating(&UnblockOnProfileCreation, &run_loop),
-      base::string16(), std::string());
+      profile_path2, base::BindRepeating(&UnblockOnProfileCreation, &run_loop));
   run_loop.Run();
   ASSERT_EQ(profile_manager->GetNumberOfProfiles(), 2U);
 
@@ -466,21 +561,242 @@ class CommerceHintCacaoTest : public CommerceHintAgentTest {
         {});
   }
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    // This bloom filter rejects "walmart.com" as a shopping site.
-    command_line->AppendSwitchASCII("optimization_guide_hints_override",
-                                    "Eg8IDxILCBsQJxoFiUzKeE4=");
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(CommerceHintCacaoTest, Passed) {
+  auto* optimization_guide_decider =
+      OptimizationGuideKeyedServiceFactory::GetForProfile(browser()->profile());
+  // Need the non-default port here.
+  optimization_guide_decider->AddHintForTesting(
+      https_server_.GetURL("www.guitarcenter.com", "/"),
+      optimization_guide::proto::SHOPPING_PAGE_PREDICTOR, absl::nullopt);
+  optimization_guide_decider->AddHintForTesting(
+      GURL("https://www.guitarcenter.com/cart"),
+      optimization_guide::proto::SHOPPING_PAGE_PREDICTOR, absl::nullopt);
+
+  NavigateToURL("https://www.guitarcenter.com/");
+  SendXHR("/add-to-cart", "product: 123");
+  WaitForCartCount(kExpectedExampleFallbackCart);
+}
+
+// If command line argument "optimization_guide_hints_override" is not given,
+// nothing is specified in AddHintForTesting(), and the real hints are not
+// downloaded, all the URLs are considered non-shopping.
+IN_PROC_BROWSER_TEST_F(CommerceHintCacaoTest, Rejected) {
+  NavigateToURL("https://www.guitarcenter.com/");
+  SendXHR("/add-to-cart", "product: 123");
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout() * 30);
+  WaitForCartCount(kEmptyExpected);
+}
+
+class CommerceHintProductInfoTest : public CommerceHintAgentTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{ntp_features::kNtpChromeCartModuleAbandonedCartDiscountParam,
+            "true"},
+           {"partner-merchant-pattern", "(guitarcenter.com)"},
+           {"product-skip-pattern", "(^|\\W)(?i)(skipped)(\\W|$)"}}}},
+        {optimization_guide::features::kOptimizationHints});
   }
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-// Flaky. crbug.com/1183852
-IN_PROC_BROWSER_TEST_F(CommerceHintCacaoTest, DISABLED_Rejected) {
-  NavigateToURL("https://www.walmart.com/");
+IN_PROC_BROWSER_TEST_F(CommerceHintProductInfoTest, AddToCartByForm_CaptureId) {
+  NavigateToURL("https://www.guitarcenter.com/product.html");
+  SendXHR("/cart/update", "product_id=id_foo&add_to_cart=true");
+
+  const cart_db::ChromeCartContentProto expected_cart_protos =
+      BuildProtoWithProducts(kMockExample, kMockExampleLinkURL, {}, {"id_foo"});
+  const ShoppingCarts expected_carts = {{kMockExample, expected_cart_protos}};
+  WaitForProductCount(expected_carts);
+}
+
+IN_PROC_BROWSER_TEST_F(CommerceHintProductInfoTest, AddToCartByURL_CaptureId) {
+  NavigateToURL("https://www.guitarcenter.com/");
+  SendXHR("/add-to-cart?pr1id=id_foo", "");
+
+  const cart_db::ChromeCartContentProto expected_cart_protos =
+      BuildProtoWithProducts(kMockExample, kMockExampleFallbackURL, {},
+                             {"id_foo"});
+  const ShoppingCarts expected_carts = {{kMockExample, expected_cart_protos}};
+  WaitForProductCount(expected_carts);
+}
+
+IN_PROC_BROWSER_TEST_F(CommerceHintProductInfoTest,
+                       ExtractCart_CaptureId_FromURL) {
+  // This page has two products.
+  NavigateToURL("https://www.guitarcenter.com/cart.html");
+
+  const cart_db::ChromeCartContentProto expected_cart_protos =
+      BuildProtoWithProducts(
+          kMockExample, kMockExampleURL,
+          {"https://static.guitarcenter.com/product-image/foo_123-0-medium",
+           "https://images.cymax.com/Images/3/bar_456-baz_789-0-medium",
+           "https://static.guitarcenter.com/product-image/qux_357-0-medium"},
+          {"foo_123", "bar_456", "qux_357"});
+  const ShoppingCarts expected_carts = {{kMockExample, expected_cart_protos}};
+  WaitForProductCount(expected_carts);
+}
+
+IN_PROC_BROWSER_TEST_F(CommerceHintProductInfoTest,
+                       ExtractCart_CaptureId_FromElement) {
+  // This page has two products.
+  NavigateToURL("https://www.guitarcenter.com/shopping-cart.html");
+
+  const cart_db::ChromeCartContentProto expected_cart_protos =
+      BuildProtoWithProducts(
+          kMockExample, kMockExampleURL2,
+          {"https://static.guitarcenter.com/product-image/foo",
+           "https://static.guitarcenter.com/product-image/bar"},
+          {"foo_123", "bar_456"});
+  const ShoppingCarts expected_carts = {{kMockExample, expected_cart_protos}};
+  WaitForProductCount(expected_carts);
+}
+
+IN_PROC_BROWSER_TEST_F(CommerceHintProductInfoTest,
+                       RBDPartnerCartURLNotOverwrite) {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  profile->GetPrefs()->SetBoolean(prefs::kCartDiscountEnabled, true);
+  EXPECT_TRUE(service_->IsCartDiscountEnabled());
+
+  NavigateToURL("https://www.guitarcenter.com/");
   SendXHR("/add-to-cart", "product: 123");
+
+  WaitForCartCount(kExpectedExampleFallbackCart);
+  NavigateToURL("https://www.guitarcenter.com/cart.html");
+
+  WaitForCartCount(kExpectedExampleFallbackCart);
+}
+
+class CommerceHintImprovementTest : public CommerceHintAgentTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{ntp_features::kNtpChromeCartModuleHeuristicsImprovementParam,
+            "true"},
+           {"product-skip-pattern", "(^|\\W)(?i)(skipped)(\\W|$)"}}}},
+        {optimization_guide::features::kOptimizationHints});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(CommerceHintImprovementTest, ExtractCart) {
+  // This page has three products but should ignore the one in saved for later
+  // section.
+  NavigateToURL("https://www.guitarcenter.com/cart.html");
+
+  WaitForProductCount(kExpectedExampleWithProductsWithoutSaved);
+}
+
+class CommerceHintSkippAddToCartTest : public CommerceHintAgentTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{"skip-add-to-cart-mapping", R"({"guitarcenter.com": ".*"})"}}}},
+        {optimization_guide::features::kOptimizationHints});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(CommerceHintSkippAddToCartTest, AddToCartByForm) {
+  NavigateToURL("https://www.guitarcenter.com/");
+  SendXHR("/wp-admin/admin-ajax.php", "action: woocommerce_add_to_cart");
+
+  WaitForCartCount(kEmptyExpected);
+
+  // Test AddToCart that is supposed to be skipped based on resources is now
+  // overwritten.
+  const cart_db::ChromeCartContentProto qvc_cart =
+      BuildProto("qvc.com", "https://www.qvc.com/checkout/cart.html");
+  const ShoppingCarts result = {{"qvc.com", qvc_cart}};
+  NavigateToURL("https://www.qvc.com/");
+  SendXHR("/wp-admin/admin-ajax.php", "action: woocommerce_add_to_cart");
+  WaitForCartCount(result);
+}
+
+class CommerceHintCheckoutPatternTest : public CommerceHintAgentTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{"checkout-pattern-mapping",
+            R"({"guitarcenter.com": "special_checkout_text"})"}}}},
+        {optimization_guide::features::kOptimizationHints});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(CommerceHintCheckoutPatternTest, VisitCheckout) {
+  service_->AddCart(kMockExample, absl::nullopt, kMockExampleProto);
+  WaitForCartCount(kExpectedExampleFallbackCart);
+
+  NavigateToURL("https://www.guitarcenter.com/");
+  NavigateToURL("https://www.guitarcenter.com/special_checkout_text");
   WaitForCartCount(kEmptyExpected);
 }
 
+class CommerceHintPurchaseButtonPatternTest : public CommerceHintAgentTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{"purchase-button-pattern-mapping",
+            R"({"guitarcenter.com": "special text"})"}}}},
+        {optimization_guide::features::kOptimizationHints});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(CommerceHintPurchaseButtonPatternTest, PurchaseByForm) {
+  service_->AddCart(kMockExample, absl::nullopt, kMockExampleProto);
+  WaitForCartCount(kExpectedExampleFallbackCart);
+
+  NavigateToURL("https://www.guitarcenter.com/purchase.html");
+
+  std::string script = "document.getElementById('special-submit').click()";
+  ASSERT_TRUE(ExecJs(web_contents(), script));
+  content::TestNavigationObserver load_observer(web_contents());
+  load_observer.WaitForNavigationFinished();
+  WaitForCartCount(kEmptyExpected);
+}
+
+class CommerceHintPurchaseURLPatternTest : public CommerceHintAgentTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{ntp_features::kNtpChromeCartModule,
+          {{"purchase-url-pattern-mapping",
+            R"({"guitarcenter.com": "special_purchase_text"})"}}}},
+        {optimization_guide::features::kOptimizationHints});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(CommerceHintPurchaseURLPatternTest, PurchaseByURL) {
+  service_->AddCart(kMockExample, absl::nullopt, kMockExampleProto);
+  WaitForCartCount(kExpectedExampleFallbackCart);
+
+  NavigateToURL("https://www.guitarcenter.com/");
+  NavigateToURL("https://www.guitarcenter.com/special_purchase_text");
+  WaitForCartCount(kEmptyExpected);
+}
 }  // namespace

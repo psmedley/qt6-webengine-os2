@@ -113,7 +113,7 @@ Polymer({
 
   /**
    * Helper function to get the icon for a routine based on the result.
-   * @param {!RoutineResponse} result
+   * @param {!chromeos.networkDiagnostics.mojom.RoutineResult} result
    * @return {string}
    * @private
    */
@@ -147,5 +147,14 @@ Polymer({
       }
     }
     return false;
+  },
+
+  /**
+   * Helper function to toggle the expanded properties when the routine group
+   * is clicked.
+   * @private
+   */
+  onToggleExpanded_() {
+    this.set('expanded', !this.expanded);
   },
 });

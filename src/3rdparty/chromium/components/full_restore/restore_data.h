@@ -79,14 +79,38 @@ class COMPONENT_EXPORT(FULL_RESTORE) RestoreData {
   // }
   base::Value ConvertToValue() const;
 
+  // Returns true if there are app type browsers. Otherwise, returns false.
+  bool HasAppTypeBrowser();
+
+  // Returns true if there are normal browsers. Otherwise, returns false.
+  bool HasBrowser();
+
+  // Returns true if there is a AppRestoreData for the given |app_id| and
+  // |window_id|. Otherwise, returns false.
+  bool HasAppRestoreData(const std::string& app_id, int32_t window_id);
+
   // Adds |app_launch_info| to |app_id_to_launch_list_|.
   void AddAppLaunchInfo(std::unique_ptr<AppLaunchInfo> app_launch_info);
+
+  // Modify the window id for |app_id| from |old_window_id| to |new_window_id|.
+  // This function is used for ARC ghost window only, to switch the window id
+  // from the session id to the task id.
+  void ModifyWindowId(const std::string& app_id,
+                      int32_t old_window_id,
+                      int32_t new_window_id);
 
   // Modifies the window's information based on |window_info| for the window
   // with |window_id| of the app with |app_id|.
   void ModifyWindowInfo(const std::string& app_id,
                         int32_t window_id,
                         const WindowInfo& window_info);
+
+  // Modifies the window's theme colors for the window with |window_id| of the
+  // app with |app_id|,
+  void ModifyThemeColor(const std::string& app_id,
+                        int32_t window_id,
+                        uint32_t primary_color,
+                        uint32_t status_bar_color);
 
   // Modifies |chrome_app_id_to_current_window_id_| to set the next restore
   // window id for the given |app_id|.
@@ -104,8 +128,15 @@ class COMPONENT_EXPORT(FULL_RESTORE) RestoreData {
   // Removes a AppRestoreData with |window_id| for |app_id|.
   void RemoveAppRestoreData(const std::string& app_id, int window_id);
 
+  // Clears the window info for |app_id| and |window_id|.
+  void RemoveWindowInfo(const std::string& app_id, int window_id);
+
   // Removes the launch list for |app_id|.
   void RemoveApp(const std::string& app_id);
+
+  // Gets the app launch information with `window_id` for `app_id`.
+  std::unique_ptr<AppLaunchInfo> GetAppLaunchInfo(const std::string& app_id,
+                                                  int window_id);
 
   // Gets the window information with |window_id| for |app_id|.
   std::unique_ptr<WindowInfo> GetWindowInfo(const std::string& app_id,
@@ -142,11 +173,19 @@ class COMPONENT_EXPORT(FULL_RESTORE) RestoreData {
   // FetchRestoreWindowId('bb') return 0.
   int32_t FetchRestoreWindowId(const std::string& app_id);
 
+  const AppRestoreData* GetAppRestoreData(const std::string& app_id,
+                                          int window_id) const;
+
   const AppIdToLaunchList& app_id_to_launch_list() const {
     return app_id_to_launch_list_;
   }
 
  private:
+  // Returns the pointer to AppRestoreData for the given |app_id| and
+  // |window_id|. Returns null if there is no AppRestoreData.
+  AppRestoreData* GetAppRestoreDataMutable(const std::string& app_id,
+                                           int window_id);
+
   AppIdToLaunchList app_id_to_launch_list_;
 
   // Saves the next restore window_id to be handled for each chrome app.

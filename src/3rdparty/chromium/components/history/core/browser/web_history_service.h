@@ -20,9 +20,10 @@
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
-class DictionaryValue;
+class Value;
 }
 
 namespace signin {
@@ -79,10 +80,11 @@ class WebHistoryService : public KeyedService {
   };
 
   // Callback with the result of a call to QueryHistory(). Currently, the
-  // DictionaryValue is just the parsed JSON response from the server.
-  // TODO(dubroy): Extract the DictionaryValue into a structured results object.
+  // dictionary Value is just the parsed JSON response from the server.
+  // TODO(dubroy): Extract the dictionary Value into a structured results
+  // object.
   using QueryWebHistoryCallback =
-      base::OnceCallback<void(Request*, const base::DictionaryValue*)>;
+      base::OnceCallback<void(Request*, const base::Value*)>;
 
   using ExpireWebHistoryCallback = base::OnceCallback<void(bool success)>;
 
@@ -104,14 +106,14 @@ class WebHistoryService : public KeyedService {
   void AddObserver(WebHistoryServiceObserver* observer);
   void RemoveObserver(WebHistoryServiceObserver* observer);
 
-  // Searches synced history for visits matching |text_query|. The timeframe to
-  // search, along with other options, is specified in |options|. If
-  // |text_query| is empty, all visits in the timeframe will be returned.
+  // Searches synced history for visits matching `text_query`. The timeframe to
+  // search, along with other options, is specified in `options`. If
+  // `text_query` is empty, all visits in the timeframe will be returned.
   // This method is the equivalent of HistoryService::QueryHistory.
   // The caller takes ownership of the returned Request. If it is destroyed, the
   // request is cancelled.
   std::unique_ptr<Request> QueryHistory(
-      const base::string16& text_query,
+      const std::u16string& text_query,
       const QueryOptions& options,
       QueryWebHistoryCallback callback,
       const net::PartialNetworkTrafficAnnotationTag&
@@ -139,7 +141,7 @@ class WebHistoryService : public KeyedService {
       const net::PartialNetworkTrafficAnnotationTag&
           partial_traffic_annotation);
 
-  // Sets the state of audio history recording to |new_enabled_value|.
+  // Sets the state of audio history recording to `new_enabled_value`.
   virtual void SetAudioHistoryEnabled(
       bool new_enabled_value,
       AudioWebHistoryCallback callback,
@@ -172,37 +174,37 @@ class WebHistoryService : public KeyedService {
                                  const net::PartialNetworkTrafficAnnotationTag&
                                      partial_traffic_annotation);
 
-  // Extracts a JSON-encoded HTTP response into a DictionaryValue.
-  // If |request|'s HTTP response code indicates failure, or if the response
-  // body is not JSON, a null pointer is returned.
-  static std::unique_ptr<base::DictionaryValue> ReadResponse(Request* request);
+  // Extracts a JSON-encoded HTTP response into a dictionary Value.
+  // If `request`'s HTTP response code indicates failure, or if the response
+  // body is not JSON, nullopt is returned.
+  static absl::optional<base::Value> ReadResponse(Request* request);
 
-  // Called by |request| when a web history query has completed. Unpacks the
-  // response and calls |callback|, which is the original callback that was
+  // Called by `request` when a web history query has completed. Unpacks the
+  // response and calls `callback`, which is the original callback that was
   // passed to QueryHistory().
   static void QueryHistoryCompletionCallback(
       WebHistoryService::QueryWebHistoryCallback callback,
       WebHistoryService::Request* request,
       bool success);
 
-  // Called by |request| when a request to delete history from the server has
-  // completed. Unpacks the response and calls |callback|, which is the original
+  // Called by `request` when a request to delete history from the server has
+  // completed. Unpacks the response and calls `callback`, which is the original
   // callback that was passed to ExpireHistory().
   void ExpireHistoryCompletionCallback(
       WebHistoryService::ExpireWebHistoryCallback callback,
       WebHistoryService::Request* request,
       bool success);
 
-  // Called by |request| when a request to get or set audio history from the
-  // server has completed. Unpacks the response and calls |callback|, which is
+  // Called by `request` when a request to get or set audio history from the
+  // server has completed. Unpacks the response and calls `callback`, which is
   // the original callback that was passed to AudioHistory().
   void AudioHistoryCompletionCallback(
       WebHistoryService::AudioWebHistoryCallback callback,
       WebHistoryService::Request* request,
       bool success);
 
-  // Called by |request| when a web and app activity query has completed.
-  // Unpacks the response and calls |callback|, which is the original callback
+  // Called by `request` when a web and app activity query has completed.
+  // Unpacks the response and calls `callback`, which is the original callback
   // that was passed to QueryWebAndAppActivity().
   void QueryWebAndAppActivityCompletionCallback(
       WebHistoryService::QueryWebAndAppActivityCallback callback,
@@ -210,8 +212,8 @@ class WebHistoryService : public KeyedService {
       bool success);
 
 #if !defined(TOOLKIT_QT)
-  // Called by |request| when a query for other forms of browsing history has
-  // completed. Unpacks the response and calls |callback|, which is the original
+  // Called by `request` when a query for other forms of browsing history has
+  // completed. Unpacks the response and calls `callback`, which is the original
   // callback that was passed to QueryOtherFormsOfBrowsingHistory().
   void QueryOtherFormsOfBrowsingHistoryCompletionCallback(
       WebHistoryService::QueryWebAndAppActivityCallback callback,

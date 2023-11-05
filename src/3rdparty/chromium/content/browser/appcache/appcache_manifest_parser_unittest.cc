@@ -9,28 +9,18 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/stl_util.h"
 #include "base/test/gtest_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "content/browser/appcache/appcache_manifest_parser.h"
-#include "content/browser/appcache/test_origin_trial_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/common/origin_trials/trial_token.h"
-#include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
+#include "third_party/blink/public/common/origin_trials/scoped_test_origin_trial_policy.h"
 #include "url/gurl.h"
 
 namespace content {
 
-static TestOriginTrialPolicy g_origin_trial_policy;
-
 class AppCacheManifestParserTest : public testing::Test {
-  void SetUp() override {
-    blink::TrialTokenValidator::SetOriginTrialPolicyGetter(base::BindRepeating(
-        []() -> blink::OriginTrialPolicy* { return &g_origin_trial_policy; }));
-  }
-  void TearDown() override {
-    blink::TrialTokenValidator::ResetOriginTrialPolicyGetter();
-  }
+ private:
+  blink::ScopedTestOriginTrialPolicy origin_trial_policy_;
 };
 
 TEST_F(AppCacheManifestParserTest, NoData) {
@@ -790,6 +780,8 @@ TEST_F(AppCacheManifestParserTest, OriginTrial) {
 
 // tools/origin_trials/generate_token.py http://mockhost AppCache
 // --expire-days=2000
+//
+// tools/origin_trials/check_token.py extracts token expiry: 1761166418.
 #define APPCACHE_ORIGIN_TRIAL_TOKEN                                            \
   "AhiiB7vi3JiEO1/"                                                            \
   "RQIytQslLSN3WYVu3Xd32abYhTia+91ladjnXSClfU981x+"                            \
@@ -812,22 +804,7 @@ TEST_F(AppCacheManifestParserTest, OriginTrial) {
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
 
-  // Get the expected expiration date of the test token.
-  base::Time expect_token_expires;
-  {
-    blink::TrialTokenValidator validator;
-    url::Origin origin = url::Origin::Create(kUrl);
-    const char* token = APPCACHE_ORIGIN_TRIAL_TOKEN;
-    blink::TrialTokenResult expect_token_result =
-        validator.ValidateToken(token, origin, base::Time::Now());
-    expect_token_expires = expect_token_result.expiry_time;
-    ASSERT_EQ(expect_token_result.status,
-              blink::OriginTrialTokenStatus::kSuccess);
-    EXPECT_EQ(GetAppCacheOriginTrialNameForTesting(),
-              expect_token_result.feature_name);
-    EXPECT_NE(base::Time(), expect_token_expires);
-  }
-
+  const base::Time expect_token_expires = base::Time::FromDoubleT(1761166418);
   EXPECT_EQ(manifest.token_expires, expect_token_expires);
 }
 

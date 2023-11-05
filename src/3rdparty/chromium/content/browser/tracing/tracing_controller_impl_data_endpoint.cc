@@ -1,6 +1,8 @@
 // Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -94,7 +96,11 @@ class FileTraceDataEndpoint : public TracingController::TraceDataEndpoint {
     base::File temp_file = CreateAndOpenTemporaryFileInDir(file_path_.DirName(),
                                                            &pending_file_path_);
     if (temp_file.IsValid()) {
-      file_ = FileToFILE(std::move(temp_file), "w");
+      // On Android, fdsan prohibits associating a new stream with a file while
+      // it's still owned by base::File. So we have to close it first and then
+      // reopen as FILE*.
+      temp_file.Close();
+      file_ = base::OpenFile(pending_file_path_, "w");
     } else {
       LOG(WARNING) << "Unable to use temporary file " << pending_file_path_
                    << ": "
@@ -176,7 +182,7 @@ class CompressedTraceDataEndpoint
       return false;
 
     already_tried_open_ = true;
-    stream_.reset(new z_stream);
+    stream_ = std::make_unique<z_stream>();
     *stream_ = {nullptr};
     stream_->zalloc = Z_NULL;
     stream_->zfree = Z_NULL;

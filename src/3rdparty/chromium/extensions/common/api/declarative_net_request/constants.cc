@@ -20,6 +20,8 @@ const char kIsUrlFilterCaseSensitiveKey[] = "isUrlFilterCaseSensitive";
 const char kDomainsKey[] = "domains";
 const char kExcludedDomainsKey[] = "excludedDomains";
 const char kResourceTypesKey[] = "resourceTypes";
+const char kRequestMethodsKey[] = "requestMethods";
+const char kExcludedRequestMethodsKey[] = "excludedRequestMethods";
 const char kExcludedResourceTypesKey[] = "excludedResourceTypes";
 const char kDomainTypeKey[] = "domainType";
 const char kRuleActionTypeKey[] = "type";
@@ -49,6 +51,7 @@ const char kQueryTransformRemoveParamsKey[] = "removeParams";
 const char kQueryTransformAddReplaceParamsKey[] = "addOrReplaceParams";
 const char kQueryKeyKey[] = "key";
 const char kQueryValueKey[] = "value";
+const char kQueryReplaceOnlyKey[] = "replaceOnly";
 const char kRegexSubstitutionKey[] = "regexSubstitution";
 const char kRegexSubstitutionPath[] = "action.redirect.regexSubstitution";
 const char kRequestHeadersKey[] = "requestHeaders";
@@ -58,6 +61,8 @@ const char kResponseHeadersPath[] = "action.responseHeaders";
 const char kHeaderNameKey[] = "header";
 const char kHeaderOperationKey[] = "operation";
 const char kHeaderValueKey[] = "value";
+const char kTabIdsKey[] = "tabIds";
+const char kExcludedTabIdsKey[] = "excludedTabIds";
 
 }  // namespace declarative_net_request
 }  // namespace extensions

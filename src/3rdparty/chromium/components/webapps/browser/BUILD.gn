@@ -24,11 +24,14 @@ source_set("browser") {
     "installable/installable_params.h",
     "installable/installable_task_queue.cc",
     "installable/installable_task_queue.h",
+    "pwa_install_path_tracker.cc",
+    "pwa_install_path_tracker.h",
     "webapps_client.cc",
     "webapps_client.h",
   ]
   deps = [
     "//base",
+    "//components/back_forward_cache",
     "//components/content_settings/core/browser",
     "//components/permissions",
     "//components/security_state/core",
@@ -67,6 +70,11 @@ source_set("browser") {
       "android/installable/installable_ambient_badge_infobar_delegate.h",
       "android/shortcut_info.cc",
       "android/shortcut_info.h",
+      "android/webapk/webapk_icon_hasher.cc",
+      "android/webapk/webapk_icon_hasher.h",
+      "android/webapk/webapk_proto_builder.cc",
+      "android/webapk/webapk_proto_builder.h",
+      "android/webapk/webapk_types.h",
       "android/webapps_icon_utils.cc",
       "android/webapps_icon_utils.h",
       "android/webapps_utils.cc",
@@ -88,10 +96,14 @@ source_set("browser") {
       "//components/url_formatter",
       "//components/version_info",
       "//components/version_info/android:channel_getter",
+      "//components/webapk:proto",
       "//components/webapps/common:mojo_bindings",
       "//services/device/public/mojom",
+      "//third_party/smhasher:murmurhash2",
+      "//ui/android:android",
       "//ui/base",
       "//ui/gfx",
+      "//url:gurl_android",
     ]
   }
 }
@@ -106,6 +118,8 @@ source_set("test_support") {
     ":browser",
     "//base",
     "//skia",
+    "//third_party/blink/public/common:headers",
+    "//third_party/blink/public/mojom:mojom_platform_headers",
     "//url",
   ]
 }
@@ -116,6 +130,7 @@ source_set("unit_tests") {
     "banners/app_banner_settings_helper_unittest.cc",
     "installable/installable_manager_unittest.cc",
     "installable/installable_task_queue_unittest.cc",
+    "pwa_install_path_tracker_unittest.cc",
   ]
   deps = [
     ":browser",

@@ -29,6 +29,7 @@
 #include "build/chromeos_buildflags.h"
 #include "components/tracing/common/trace_to_console.h"
 #include "components/tracing/common/tracing_switches.h"
+#include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/tracing/file_tracing_provider_impl.h"
 #include "content/browser/tracing/tracing_ui.h"
@@ -54,8 +55,6 @@
 #include "v8/include/v8-version-string.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "chromeos/system/statistics_provider.h"
 #include "content/browser/tracing/cros_tracing_agent.h"
 #endif
@@ -264,7 +263,7 @@ TracingControllerImpl::GenerateMetadataDict() {
   // obtained from process maps since library can be mapped from apk directly.
   // This is not added as part of memory-infra os dumps since it is special case
   // only for chrome library.
-  base::Optional<base::StringPiece> soname =
+  absl::optional<base::StringPiece> soname =
       base::debug::ReadElfLibraryName(&__ehdr_start);
   if (soname)
     metadata_dict->SetString("chrome-library-name", *soname);
@@ -336,6 +335,9 @@ TracingControllerImpl::GenerateMetadataDict() {
   metadata_dict->SetString("gpu-gl-vendor", gpu_info.gl_vendor);
   metadata_dict->SetString("gpu-gl-renderer", gpu_info.gl_renderer);
 #endif
+  metadata_dict->SetDictionary(
+      "gpu-features", base::DictionaryValue::From(
+                          std::make_unique<base::Value>(GetFeatureStatus())));
 
   metadata_dict->SetString("clock-domain", GetClockString());
   metadata_dict->SetBoolean("highres-ticks",
@@ -480,7 +482,8 @@ bool TracingControllerImpl::StopTracing(
     return true;
   }
 
-  drainer_.reset(new mojo::DataPipeDrainer(this, std::move(consumer_handle)));
+  drainer_ =
+      std::make_unique<mojo::DataPipeDrainer>(this, std::move(consumer_handle));
 
   tracing_session_host_->DisableTracingAndEmitJson(
       agent_label, std::move(producer_handle), privacy_filtering_enabled,

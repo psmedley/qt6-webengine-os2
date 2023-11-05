@@ -11,8 +11,8 @@
 #include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ash/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/file_manager/app_id.h"
-#include "chrome/browser/chromeos/file_manager/volume_manager.h"
+#include "chrome/browser/ash/file_manager/app_id.h"
+#include "chrome/browser/ash/file_manager/volume_manager.h"
 #include "chrome/browser/extensions/api/file_system/request_file_system_notification.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/extensions/request_file_system_dialog_view.h"
@@ -33,8 +33,8 @@ namespace {
 // chrome.fileSystem.requestFileSystem.
 const char* const kRequestFileSystemComponentAllowlist[] = {
     file_manager::kFileManagerAppId, file_manager::kVideoPlayerAppId,
-    file_manager::kGalleryAppId, file_manager::kAudioPlayerAppId,
-    file_manager::kImageLoaderExtensionId, file_manager::kZipArchiverId,
+    file_manager::kAudioPlayerAppId, file_manager::kImageLoaderExtensionId,
+    file_manager::kZipArchiverId,
     // TODO(henryhsu,b/110126438): Remove this extension id, and add it only
     // for tests.
     "pkplfbidichfdicaijlchgnapepdginl"  // Testing extensions.
@@ -94,7 +94,7 @@ void ConsentProvider::RequestConsent(
   DCHECK(IsGrantableForVolume(extension, volume));
 
   // If a allowlisted component, then no need to ask or inform the user.
-  if (extension.location() == Manifest::COMPONENT &&
+  if (extension.location() == mojom::ManifestLocation::kComponent &&
       delegate_->IsAllowlistedComponent(extension)) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), CONSENT_GRANTED));
@@ -257,7 +257,7 @@ bool ConsentProviderDelegate::IsAllowlistedComponent(
 bool ConsentProviderDelegate::HasRequestDownloadsPermission(
     const Extension& extension) {
   return extension.permissions_data()->HasAPIPermission(
-      APIPermission::kFileSystemRequestDownloads);
+      mojom::APIPermissionID::kFileSystemRequestDownloads);
 }
 
 }  // namespace file_system_api

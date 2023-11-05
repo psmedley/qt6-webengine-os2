@@ -10,9 +10,12 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "components/optimization_guide/core/insertion_ordered_set.h"
 #include "components/optimization_guide/core/optimization_guide_constants.h"
 #include "components/optimization_guide/core/optimization_guide_switches.h"
+#include "components/optimization_guide/machine_learning_tflite_buildflags.h"
 #include "components/variations/hashing.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/url_util.h"
@@ -21,15 +24,9 @@ namespace optimization_guide {
 namespace features {
 
 // Enables the syncing of the Optimization Hints component, which provides
-// hints for what Previews can be applied on a page load.
-const base::Feature kOptimizationHints {
-  "OptimizationHints",
-#if defined(OS_ANDROID)
-      base::FEATURE_ENABLED_BY_DEFAULT
-#else   // !defined(OS_ANDROID)
-      base::FEATURE_DISABLED_BY_DEFAULT
-#endif  // defined(OS_ANDROID)
-};
+// hints for what optimizations can be applied on a page load.
+const base::Feature kOptimizationHints{"OptimizationHints",
+                                       base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Feature flag that contains a feature param that specifies the field trials
 // that are allowed to be sent up to the Optimization Guide Server.
@@ -37,18 +34,17 @@ const base::Feature kOptimizationHintsFieldTrials{
     "OptimizationHintsFieldTrials", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables fetching from a remote Optimization Guide Service.
-const base::Feature kRemoteOptimizationGuideFetching {
-  "OptimizationHintsFetching",
+const base::Feature kRemoteOptimizationGuideFetching{
+    "OptimizationHintsFetching", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kRemoteOptimizationGuideFetchingAnonymousDataConsent{
+  "OptimizationHintsFetchingAnonymousDataConsent",
 #if defined(OS_ANDROID)
       base::FEATURE_ENABLED_BY_DEFAULT
 #else   // !defined(OS_ANDROID)
       base::FEATURE_DISABLED_BY_DEFAULT
 #endif  // defined(OS_ANDROID)
 };
-
-const base::Feature kRemoteOptimizationGuideFetchingAnonymousDataConsent{
-    "OptimizationHintsFetchingAnonymousDataConsent",
-    base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables performance info in the context menu and fetching from a remote
 // Optimization Guide Service.
@@ -61,26 +57,41 @@ const base::Feature kOptimizationTargetPrediction{
     "OptimizationTargetPrediction", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables the downloading of models.
-const base::Feature kOptimizationGuideModelDownloading{
-    "OptimizationGuideModelDownloading", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kOptimizationGuideModelDownloading {
+  "OptimizationGuideModelDownloading",
+#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
+      base::FEATURE_ENABLED_BY_DEFAULT
+#else   // BUILD_WITH_TFLITE_LIB
+      base::FEATURE_DISABLED_BY_DEFAULT
+#endif  // !BUILD_WITH_TFLITE_LIB
+};
 
 // Enables page content to be annotated.
 const base::Feature kPageContentAnnotations{"PageContentAnnotations",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
-size_t MaxHintsFetcherTopHostBlocklistSize() {
-  // The blocklist will be limited to the most engaged hosts and will hold twice
-  // (2*N) as many hosts that the HintsFetcher request hints for. The extra N
-  // hosts on the blocklist are meant to cover the case that the engagement
-  // scores on some of the top N host engagement scores decay and they fall out
-  // of the top N.
-  return GetFieldTrialParamByFeatureAsInt(kRemoteOptimizationGuideFetching,
-                                          "top_host_blacklist_size_multiplier",
-                                          3) *
-         MaxHostsForOptimizationGuideServiceHintsFetch();
+// Enables push notification of hints.
+const base::Feature kPushNotifications{"OptimizationGuidePushNotifications",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
+// This feature flag does not turn off any behavior, it is only used for
+// experiment parameters.
+const base::Feature kPageTextExtraction{
+    "OptimizationGuidePageContentExtraction", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Enables the model file to be loaded for each execution, then unloaded on
+// completion.
+const base::Feature kLoadModelFileForEachExecution{
+    "LoadModelFileForEachExecution", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// The default value here is a bit of a guess.
+// TODO(crbug/1163244): This should be tuned once metrics are available.
+base::TimeDelta PageTextExtractionOutstandingRequestsGracePeriod() {
+  return base::TimeDelta::FromMilliseconds(GetFieldTrialParamByFeatureAsInt(
+      kPageTextExtraction, "outstanding_requests_grace_period_ms", 1000));
 }
 
-bool ShouldBatchUpdateHintsForTopHosts() {
+bool ShouldBatchUpdateHintsForActiveTabsAndTopHosts() {
   if (base::FeatureList::IsEnabled(kRemoteOptimizationGuideFetching)) {
     return GetFieldTrialParamByFeatureAsBool(kRemoteOptimizationGuideFetching,
                                              "batch_update_hints_for_top_hosts",
@@ -107,25 +118,10 @@ size_t MaxHostsForRecordingSuccessfullyCovered() {
       "max_hosts_for_recording_successfully_covered", 200);
 }
 
-double MinTopHostEngagementScoreThreshold() {
-  // The default initial site engagement score for a navigation is 3.0, 1.5
-  // points for a navigation from the omnibox and 1.5 points for the first
-  // navigation of the day.
-  return GetFieldTrialParamByFeatureAsDouble(
-      kRemoteOptimizationGuideFetching,
-      "min_top_host_engagement_score_threshold", 2.0);
-}
-
 base::TimeDelta StoredFetchedHintsFreshnessDuration() {
   return base::TimeDelta::FromDays(GetFieldTrialParamByFeatureAsInt(
       kRemoteOptimizationGuideFetching,
       "max_store_duration_for_featured_hints_in_days", 7));
-}
-
-base::TimeDelta DurationApplyLowEngagementScoreThreshold() {
-  return base::TimeDelta::FromDays(GetFieldTrialParamByFeatureAsInt(
-      kRemoteOptimizationGuideFetching,
-      "duration_apply_low_engagement_score_threshold_in_days", 30));
 }
 
 std::string GetOptimizationGuideServiceAPIKey() {
@@ -184,6 +180,10 @@ bool IsRemoteFetchingEnabled() {
   return base::FeatureList::IsEnabled(kRemoteOptimizationGuideFetching);
 }
 
+bool IsPushNotificationsEnabled() {
+  return base::FeatureList::IsEnabled(kPushNotifications);
+}
+
 bool IsRemoteFetchingForAnonymousDataConsentEnabled() {
   return base::FeatureList::IsEnabled(
       kRemoteOptimizationGuideFetchingAnonymousDataConsent);
@@ -199,23 +199,23 @@ int MaxServerBloomFilterByteSize() {
       kOptimizationHints, "max_bloom_filter_byte_size", 250 * 1024 /* 250KB */);
 }
 
-base::Optional<net::EffectiveConnectionType>
-GetMaxEffectiveConnectionTypeForNavigationHintsFetch() {
-  std::string param_value = base::GetFieldTrialParamValueByFeature(
-      kRemoteOptimizationGuideFetching,
-      "max_effective_connection_type_for_navigation_hints_fetch");
-
-  // Use a default value.
-  if (param_value.empty())
-    return net::EFFECTIVE_CONNECTION_TYPE_4G;
-
-  return net::GetEffectiveConnectionTypeForName(param_value);
-}
-
-base::TimeDelta GetHintsFetchRefreshDuration() {
+base::TimeDelta GetHostHintsFetchRefreshDuration() {
   return base::TimeDelta::FromHours(GetFieldTrialParamByFeatureAsInt(
       kRemoteOptimizationGuideFetching, "hints_fetch_refresh_duration_in_hours",
       72));
+}
+
+base::TimeDelta GetActiveTabsFetchRefreshDuration() {
+  return base::TimeDelta::FromHours(GetFieldTrialParamByFeatureAsInt(
+      kRemoteOptimizationGuideFetching,
+      "active_tabs_fetch_refresh_duration_in_hours", 1));
+}
+
+base::TimeDelta GetActiveTabsStalenessTolerance() {
+  // 90 days initially chosen since that's how long local history lasts for.
+  return base::TimeDelta::FromDays(GetFieldTrialParamByFeatureAsInt(
+      kRemoteOptimizationGuideFetching,
+      "active_tabs_staleness_tolerance_in_days", 90));
 }
 
 size_t MaxConcurrentPageNavigationFetches() {
@@ -227,6 +227,16 @@ size_t MaxConcurrentPageNavigationFetches() {
       "max_concurrent_page_navigation_fetches", 20);
 }
 
+int ActiveTabsHintsFetchRandomMinDelaySecs() {
+  return GetFieldTrialParamByFeatureAsInt(kRemoteOptimizationGuideFetching,
+                                          "fetch_random_min_delay_secs", 30);
+}
+
+int ActiveTabsHintsFetchRandomMaxDelaySecs() {
+  return GetFieldTrialParamByFeatureAsInt(kRemoteOptimizationGuideFetching,
+                                          "fetch_random_max_delay_secs", 60);
+}
+
 base::TimeDelta StoredHostModelFeaturesFreshnessDuration() {
   return base::TimeDelta::FromDays(GetFieldTrialParamByFeatureAsInt(
       kOptimizationTargetPrediction,
@@ -234,6 +244,10 @@ base::TimeDelta StoredHostModelFeaturesFreshnessDuration() {
 }
 
 base::TimeDelta StoredModelsInactiveDuration() {
+  // TODO(crbug.com/1234054) This field should not be changed without VERY
+  // careful consideration. Any model that is on device and expires will be
+  // removed and triggered to refetch so any feature relying on the model could
+  // have a period of time without a valid model.
   return base::TimeDelta::FromDays(GetFieldTrialParamByFeatureAsInt(
       kOptimizationTargetPrediction, "inactive_duration_for_models_in_days",
       30));
@@ -294,16 +308,14 @@ int PredictionModelFetchRandomMaxDelaySecs() {
                                           "fetch_random_max_delay_secs", 60);
 }
 
-base::flat_set<std::string> ExternalAppPackageNamesApprovedForFetch() {
-  std::string value = base::GetFieldTrialParamValueByFeature(
-      kRemoteOptimizationGuideFetching, "approved_external_app_packages");
-  if (value.empty())
-    return {};
+base::TimeDelta PredictionModelFetchRetryDelay() {
+  return base::TimeDelta::FromMinutes(GetFieldTrialParamByFeatureAsInt(
+      kOptimizationTargetPrediction, "fetch_retry_minutes", 2));
+}
 
-  std::vector<std::string> app_packages_list = base::SplitString(
-      value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-  return base::flat_set<std::string>(app_packages_list.begin(),
-                                     app_packages_list.end());
+base::TimeDelta PredictionModelFetchInterval() {
+  return base::TimeDelta::FromHours(GetFieldTrialParamByFeatureAsInt(
+      kOptimizationTargetPrediction, "fetch_interval_hours", 24));
 }
 
 base::flat_set<uint32_t> FieldTrialNameHashesAllowedForFetch() {
@@ -339,6 +351,61 @@ bool IsPageContentAnnotationEnabled() {
 uint64_t MaxSizeForPageContentTextDump() {
   return static_cast<uint64_t>(base::GetFieldTrialParamByFeatureAsInt(
       kPageContentAnnotations, "max_size_for_text_dump_in_bytes", 1024));
+}
+
+bool ShouldWriteContentAnnotationsToHistoryService() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      kPageContentAnnotations, "write_to_history_service", true);
+}
+
+size_t MaxContentAnnotationRequestsCached() {
+  return GetFieldTrialParamByFeatureAsInt(
+      kPageContentAnnotations, "max_content_annotation_requests_cached", 50);
+}
+
+const base::FeatureParam<bool> kContentAnnotationsExtractRelatedSearchesParam{
+    &kPageContentAnnotations, "extract_related_searches", false};
+
+bool ShouldExtractRelatedSearches() {
+  return kContentAnnotationsExtractRelatedSearchesParam.Get();
+}
+
+std::vector<optimization_guide::proto::OptimizationTarget>
+GetPageContentModelsToExecute() {
+  if (!IsPageContentAnnotationEnabled())
+    return {};
+
+  std::string value = base::GetFieldTrialParamValueByFeature(
+      kPageContentAnnotations, "models_to_execute");
+  if (value.empty()) {
+    // If param not explicitly set, run the page topics model by default.
+    return {optimization_guide::proto::OPTIMIZATION_TARGET_PAGE_TOPICS};
+  }
+
+  optimization_guide::InsertionOrderedSet<
+      optimization_guide::proto::OptimizationTarget>
+      model_targets;
+  std::vector<std::string> model_target_strings = base::SplitString(
+      value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  for (const auto& model_target_string : model_target_strings) {
+    optimization_guide::proto::OptimizationTarget model_target;
+    if (optimization_guide::proto::OptimizationTarget_Parse(model_target_string,
+                                                            &model_target)) {
+      model_targets.insert(model_target);
+    }
+  }
+
+  return model_targets.vector();
+}
+
+bool LoadModelFileForEachExecution() {
+  return base::FeatureList::IsEnabled(kLoadModelFileForEachExecution);
+}
+
+base::TimeDelta GetOnloadDelayForHintsFetching() {
+  return base::TimeDelta::FromMilliseconds(GetFieldTrialParamByFeatureAsInt(
+      kRemoteOptimizationGuideFetching, "onload_delay_for_hints_fetching_ms",
+      0));
 }
 
 }  // namespace features

@@ -92,14 +92,13 @@ PendingCredentialsState ResolvePendingCredentialsStates(
 }
 
 // Returns a PasswordForm that has all fields taken from |update| except
-// date_created, date_synced, times_used and moving_blocked_for_list that are
+// date_created, times_used and moving_blocked_for_list that are
 // taken from |original_form|.
 PasswordForm UpdateFormPreservingDifferentFieldsAcrossStores(
     const PasswordForm& original_form,
     const PasswordForm& update) {
   PasswordForm result(update);
   result.date_created = original_form.date_created;
-  result.date_synced = original_form.date_synced;
   result.times_used = original_form.times_used;
   result.moving_blocked_for_list = original_form.moving_blocked_for_list;
   return result;
@@ -126,14 +125,14 @@ void MultiStorePasswordSaveManager::SavePendingToStoreImpl(
   auto account_matches = AccountStoreMatches(matches);
   auto profile_matches = ProfileStoreMatches(matches);
 
-  base::string16 old_account_password =
+  std::u16string old_account_password =
       states.similar_saved_form_from_account_store
           ? states.similar_saved_form_from_account_store->password_value
-          : base::string16();
-  base::string16 old_profile_password =
+          : std::u16string();
+  std::u16string old_profile_password =
       states.similar_saved_form_from_profile_store
           ? states.similar_saved_form_from_profile_store->password_value
-          : base::string16();
+          : std::u16string();
 
   if (states.profile_store_state == PendingCredentialsState::NEW_LOGIN &&
       states.account_store_state == PendingCredentialsState::NEW_LOGIN) {
@@ -221,7 +220,7 @@ void MultiStorePasswordSaveManager::SavePendingToStoreImpl(
 }
 
 void MultiStorePasswordSaveManager::Blocklist(
-    const PasswordStore::FormDigest& form_digest) {
+    const PasswordFormDigest& form_digest) {
   DCHECK(!client_->IsIncognito());
   if (IsOptedInForAccountStorage() && AccountStoreIsDefault()) {
     account_store_form_saver_->Blocklist(form_digest);
@@ -233,7 +232,7 @@ void MultiStorePasswordSaveManager::Blocklist(
 }
 
 void MultiStorePasswordSaveManager::Unblocklist(
-    const PasswordStore::FormDigest& form_digest) {
+    const PasswordFormDigest& form_digest) {
   // Try to unblocklist in both stores anyway because if credentials don't
   // exist, the unblocklist operation is no-op.
   form_saver_->Unblocklist(form_digest);
@@ -286,7 +285,7 @@ void MultiStorePasswordSaveManager::MoveCredentialsToAccountStore(
       PasswordForm match_copy = *match;
       match_copy.moving_blocked_for_list.clear();
       account_store_form_saver_->Save(match_copy, account_store_matches,
-                                      /*old_password=*/base::string16());
+                                      /*old_password=*/std::u16string());
     }
     form_saver_->Remove(*match);
   }

@@ -8,16 +8,17 @@
 #include <string>
 #include <vector>
 
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/win/scoped_com_initializer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -48,9 +49,16 @@ HWND WaitForDialogWindow(const std::wstring& dialog_title) {
   static constexpr wchar_t kDialogClassName[] = L"#32770";
 
   HWND result = nullptr;
-  while (!result) {
+  base::TimeDelta max_wait_time = TestTimeouts::action_timeout();
+  base::TimeDelta retry_interval = base::TimeDelta::FromMilliseconds(20);
+  while (!result && (max_wait_time.InMilliseconds() > 0)) {
     result = ::FindWindow(kDialogClassName, dialog_title.c_str());
-    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(20));
+    base::PlatformThread::Sleep(retry_interval);
+    max_wait_time -= retry_interval;
+  }
+
+  if (!result) {
+    LOG(ERROR) << "Wait for dialog window timed out.";
   }
 
   // Check the name of the dialog specifically. That's because if multiple file
@@ -95,12 +103,16 @@ HWND WaitForDialogPrompt(HWND owner) {
   // ::FindWindow(). Instead enumerate all top-level windows and return the one
   // whose owner is the file dialog.
   EnumWindowsParam param = {owner, nullptr};
-
-  while (!param.result) {
+  base::TimeDelta max_wait_time = TestTimeouts::action_timeout();
+  base::TimeDelta retry_interval = base::TimeDelta::FromMilliseconds(20);
+  while (!param.result && (max_wait_time.InMilliseconds() > 0)) {
     ::EnumWindows(&EnumWindowsCallback, reinterpret_cast<LPARAM>(&param));
-    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(20));
+    base::PlatformThread::Sleep(retry_interval);
+    max_wait_time -= retry_interval;
   }
-
+  if (!param.result) {
+    LOG(ERROR) << "Wait for dialog prompt timed out.";
+  }
   return param.result;
 }
 
@@ -121,9 +133,15 @@ void SendCommand(HWND window, int id) {
 
   // Make sure the window is visible first or the WM_COMMAND may not have any
   // effect.
-  while (!::IsWindowVisible(window))
-    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(20));
-
+  base::TimeDelta max_wait_time = TestTimeouts::action_timeout();
+  base::TimeDelta retry_interval = base::TimeDelta::FromMilliseconds(20);
+  while (!::IsWindowVisible(window) && (max_wait_time.InMilliseconds() > 0)) {
+    base::PlatformThread::Sleep(retry_interval);
+    max_wait_time -= retry_interval;
+  }
+  if (!::IsWindowVisible(window)) {
+    LOG(ERROR) << "SendCommand timed out.";
+  }
   ::PostMessage(window, WM_COMMAND, id, 0);
 }
 
@@ -220,7 +238,7 @@ TEST_F(SelectFileDialogWinTest, CancelAllDialogs) {
       file_type_info_index = 1;
     }
 
-    dialog->SelectFile(test_case.dialog_type, base::string16(),
+    dialog->SelectFile(test_case.dialog_type, std::u16string(),
                        base::FilePath(), file_type_info.get(),
                        file_type_info_index, std::wstring(), native_window(),
                        nullptr);
@@ -248,7 +266,7 @@ TEST_F(SelectFileDialogWinTest, UploadFolderCheckStrings) {
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
   dialog->SelectFile(ui::SelectFileDialog::SELECT_UPLOAD_FOLDER,
-                     base::string16(), default_path, nullptr, 0, L"",
+                     std::u16string(), default_path, nullptr, 0, L"",
                      native_window(), nullptr);
 
   // Wait for the window to open and make sure the window title was changed from
@@ -275,7 +293,7 @@ TEST_F(SelectFileDialogWinTest, UploadFolderCheckStrings) {
 // Specifying the title when opening a dialog to select a file, select multiple
 // files or save a file doesn't do anything.
 TEST_F(SelectFileDialogWinTest, SpecifyTitle) {
-  static constexpr base::char16 kTitle[] = STRING16_LITERAL("FooBar Title");
+  static constexpr char16_t kTitle[] = u"FooBar Title";
 
   // Create some file in a test folder.
   base::ScopedTempDir scoped_temp_dir;
@@ -316,7 +334,7 @@ TEST_F(SelectFileDialogWinTest, TestSelectFile) {
 
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
-  dialog->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE, base::string16(),
+  dialog->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE, std::u16string(),
                      default_path, nullptr, 0, L"", native_window(), nullptr);
 
   // Wait for the window to open
@@ -343,7 +361,7 @@ TEST_F(SelectFileDialogWinTest, TestSaveFile) {
 
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
-  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, base::string16(),
+  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, std::u16string(),
                      default_path, &file_type_info, 1, L"", native_window(),
                      nullptr);
 
@@ -367,7 +385,7 @@ TEST_F(SelectFileDialogWinTest, OnlyBasename) {
 
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
-  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, base::string16(),
+  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, std::u16string(),
                      default_path, &file_type_info, 1, L"", native_window(),
                      nullptr);
 
@@ -394,7 +412,7 @@ TEST_F(SelectFileDialogWinTest, SaveAsDifferentExtension) {
 
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
-  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, base::string16(),
+  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, std::u16string(),
                      default_path, &file_type_info, 1, L"html", native_window(),
                      nullptr);
 
@@ -421,7 +439,7 @@ TEST_F(SelectFileDialogWinTest, OpenFileDifferentExtension) {
 
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
-  dialog->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE, base::string16(),
+  dialog->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE, std::u16string(),
                      default_path, &file_type_info, 1, L"html", native_window(),
                      nullptr);
 
@@ -444,7 +462,7 @@ TEST_F(SelectFileDialogWinTest, SelectNonExistingFile) {
 
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
-  dialog->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE, base::string16(),
+  dialog->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE, std::u16string(),
                      default_path, nullptr, 0, L"", native_window(), nullptr);
 
   HWND window = WaitForDialogWindow(kSelectFileDefaultTitle);
@@ -480,7 +498,7 @@ TEST_F(SelectFileDialogWinTest, SaveFileOverwritePrompt) {
 
   scoped_refptr<ui::SelectFileDialog> dialog =
       ui::SelectFileDialog::Create(this, nullptr);
-  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, base::string16(),
+  dialog->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE, std::u16string(),
                      default_path, &file_type_info, 1, L"", native_window(),
                      nullptr);
 

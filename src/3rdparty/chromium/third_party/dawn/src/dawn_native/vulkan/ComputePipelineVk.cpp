@@ -14,6 +14,7 @@
 
 #include "dawn_native/vulkan/ComputePipelineVk.h"
 
+#include "dawn_native/CreatePipelineAsyncTask.h"
 #include "dawn_native/vulkan/DeviceVk.h"
 #include "dawn_native/vulkan/FencedDeleter.h"
 #include "dawn_native/vulkan/PipelineLayoutVk.h"
@@ -24,12 +25,12 @@
 namespace dawn_native { namespace vulkan {
 
     // static
-    ResultOrError<ComputePipeline*> ComputePipeline::Create(
+    ResultOrError<Ref<ComputePipeline>> ComputePipeline::Create(
         Device* device,
         const ComputePipelineDescriptor* descriptor) {
         Ref<ComputePipeline> pipeline = AcquireRef(new ComputePipeline(device, descriptor));
         DAWN_TRY(pipeline->Initialize(descriptor));
-        return pipeline.Detach();
+        return pipeline;
     }
 
     MaybeError ComputePipeline::Initialize(const ComputePipelineDescriptor* descriptor) {
@@ -45,8 +46,12 @@ namespace dawn_native { namespace vulkan {
         createInfo.stage.pNext = nullptr;
         createInfo.stage.flags = 0;
         createInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        createInfo.stage.module = ToBackend(descriptor->computeStage.module)->GetHandle();
-        createInfo.stage.pName = descriptor->computeStage.entryPoint;
+        // Generate a new VkShaderModule with BindingRemapper tint transform for each pipeline
+        DAWN_TRY_ASSIGN(createInfo.stage.module,
+                        ToBackend(descriptor->compute.module)
+                            ->GetTransformedModuleHandle(descriptor->compute.entryPoint,
+                                                         ToBackend(GetLayout())));
+        createInfo.stage.pName = descriptor->compute.entryPoint;
         createInfo.stage.pSpecializationInfo = nullptr;
 
         Device* device = ToBackend(GetDevice());
@@ -78,6 +83,18 @@ namespace dawn_native { namespace vulkan {
 
     VkPipeline ComputePipeline::GetHandle() const {
         return mHandle;
+    }
+
+    void ComputePipeline::CreateAsync(Device* device,
+                                      const ComputePipelineDescriptor* descriptor,
+                                      size_t blueprintHash,
+                                      WGPUCreateComputePipelineAsyncCallback callback,
+                                      void* userdata) {
+        Ref<ComputePipeline> pipeline = AcquireRef(new ComputePipeline(device, descriptor));
+        std::unique_ptr<CreateComputePipelineAsyncTask> asyncTask =
+            std::make_unique<CreateComputePipelineAsyncTask>(pipeline, descriptor, blueprintHash,
+                                                             callback, userdata);
+        CreateComputePipelineAsyncTask::RunAsync(std::move(asyncTask));
     }
 
 }}  // namespace dawn_native::vulkan

@@ -27,12 +27,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_FUNCTIONAL_H_
 
 #include <utility>
+
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/dcheck_is_on.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/threading/thread_checker.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"
 
@@ -196,6 +197,9 @@ class ThreadCheckingCallbackWrapper<CallbackType, R(Args...)> {
  public:
   explicit ThreadCheckingCallbackWrapper(CallbackType callback)
       : callback_(std::move(callback)) {}
+  ThreadCheckingCallbackWrapper(const ThreadCheckingCallbackWrapper&) = delete;
+  ThreadCheckingCallbackWrapper& operator=(
+      const ThreadCheckingCallbackWrapper&) = delete;
 
   ~ThreadCheckingCallbackWrapper() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -223,8 +227,6 @@ class ThreadCheckingCallbackWrapper<CallbackType, R(Args...)> {
 
   SEQUENCE_CHECKER(sequence_checker_);
   CallbackType callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadCheckingCallbackWrapper);
 };
 
 }  // namespace WTF
@@ -337,9 +339,13 @@ class CrossThreadOnceFunction<R(Args...)> {
 
 // Note: now there is WTF::Bind()and WTF::BindRepeating(). See the comment block
 // above for the correct usage of those.
-template <typename FunctionType, typename... BoundParameters>
-base::OnceCallback<base::MakeUnboundRunType<FunctionType, BoundParameters...>>
-Bind(FunctionType&& function, BoundParameters&&... bound_parameters) {
+template <
+    typename FunctionType,
+    typename... BoundParameters,
+    typename UnboundRunType =
+        base::internal::MakeUnboundRunType<FunctionType, BoundParameters...>>
+base::OnceCallback<UnboundRunType> Bind(FunctionType&& function,
+                                        BoundParameters&&... bound_parameters) {
   static_assert(internal::CheckGCedTypeRestrictions<
                     std::index_sequence_for<BoundParameters...>,
                     std::decay_t<BoundParameters>...>::ok,
@@ -347,8 +353,6 @@ Bind(FunctionType&& function, BoundParameters&&... bound_parameters) {
   auto cb = base::BindOnce(std::forward<FunctionType>(function),
                            std::forward<BoundParameters>(bound_parameters)...);
 #if DCHECK_IS_ON()
-  using UnboundRunType =
-      base::MakeUnboundRunType<FunctionType, BoundParameters...>;
   using WrapperType =
       ThreadCheckingCallbackWrapper<base::OnceCallback<UnboundRunType>>;
   cb = base::BindOnce(&WrapperType::Run,
@@ -357,10 +361,14 @@ Bind(FunctionType&& function, BoundParameters&&... bound_parameters) {
   return cb;
 }
 
-template <typename FunctionType, typename... BoundParameters>
-base::RepeatingCallback<
-    base::MakeUnboundRunType<FunctionType, BoundParameters...>>
-BindRepeating(FunctionType function, BoundParameters&&... bound_parameters) {
+template <
+    typename FunctionType,
+    typename... BoundParameters,
+    typename UnboundRunType =
+        base::internal::MakeUnboundRunType<FunctionType, BoundParameters...>>
+base::RepeatingCallback<UnboundRunType> BindRepeating(
+    FunctionType function,
+    BoundParameters&&... bound_parameters) {
   static_assert(internal::CheckGCedTypeRestrictions<
                     std::index_sequence_for<BoundParameters...>,
                     std::decay_t<BoundParameters>...>::ok,
@@ -368,8 +376,6 @@ BindRepeating(FunctionType function, BoundParameters&&... bound_parameters) {
   auto cb = base::BindRepeating(
       function, std::forward<BoundParameters>(bound_parameters)...);
 #if DCHECK_IS_ON()
-  using UnboundRunType =
-      base::MakeUnboundRunType<FunctionType, BoundParameters...>;
   using WrapperType =
       ThreadCheckingCallbackWrapper<base::RepeatingCallback<UnboundRunType>>;
   cb = base::BindRepeating(&WrapperType::Run,

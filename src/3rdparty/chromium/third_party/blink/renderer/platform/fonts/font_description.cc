@@ -32,14 +32,13 @@
 
 #include "third_party/blink/public/platform/web_font_description.h"
 #include "third_party/blink/renderer/platform/language.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hasher.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_OS2)
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #endif
 
@@ -220,17 +219,35 @@ void FontDescription::SetVariantNumeric(
 float FontDescription::EffectiveFontSize() const {
   // Ensure that the effective precision matches the font-cache precision.
   // This guarantees that the same precision is used regardless of cache status.
+  // Note: HasSizeAdjust() is for the font-size-adjust property, not for the
+  // size-adjust descriptor.
   float computed_or_adjusted_size =
-      HasSizeAdjust() ? AdjustedSize() : ComputedSize();
+      HasSizeAdjust() || fields_.has_size_adjust_descriptor_ ? AdjustedSize()
+                                                             : ComputedSize();
   return floorf(computed_or_adjusted_size *
                 FontCacheKey::PrecisionMultiplier()) /
          FontCacheKey::PrecisionMultiplier();
 }
 
+FontDescription FontDescription::SizeAdjustedFontDescription(
+    float size_adjust) const {
+  // TODO(crbug.com/451346): The font-size-adjust property and size-adjust
+  // descriptor currently don't work together. For sanity, if both are set, we
+  // ignore size-adjust. Fix it when shipping font-size-adjust.
+  if (HasSizeAdjust())
+    return *this;
+
+  // size-adjust should be applied at most once.
+  DCHECK(!fields_.has_size_adjust_descriptor_);
+  FontDescription result(*this);
+  result.SetAdjustedSize(ComputedSize() * size_adjust);
+  result.fields_.has_size_adjust_descriptor_ = true;
+  return result;
+}
+
 FontCacheKey FontDescription::CacheKey(
     const FontFaceCreationParams& creation_params,
-    bool is_unique_match,
-    const FontSelectionRequest& font_selection_request) const {
+    bool is_unique_match) const {
   unsigned options =
       static_cast<unsigned>(fields_.font_optical_sizing_) << 7 |  // bit 8
       static_cast<unsigned>(fields_.synthetic_italic_) << 6 |     // bit 7
@@ -248,6 +265,12 @@ FontCacheKey FontDescription::CacheKey(
                          options | font_selection_request_.GetHash() << 9,
                          device_scale_factor_for_key, variation_settings_,
                          is_unique_match);
+#if defined(OS_ANDROID)
+  if (const LayoutLocale* locale = Locale()) {
+    if (FontCache::GetLocaleSpecificFamilyName(creation_params.Family()))
+      cache_key.SetLocale(locale->LocaleForSkFontMgr());
+  }
+#endif  // defined(OS_ANDROID)
   return cache_key;
 }
 
@@ -365,7 +388,7 @@ unsigned FontDescription::GetHash() const {
   unsigned hash = StyleHashWithoutFamilyList();
   for (const FontFamily* family = &family_list_; family;
        family = family->Next()) {
-    if (!family->Family().length())
+    if (family->Family().IsEmpty())
       continue;
     WTF::AddIntToHash(hash, WTF::AtomicStringHash::GetHash(family->Family()));
   }
@@ -563,6 +586,26 @@ String FontDescription::ToString(FontVariantCaps variant) {
       return "Unicase";
     case FontVariantCaps::kTitlingCaps:
       return "TitlingCaps";
+  }
+  return "Unknown";
+}
+
+String FontDescription::ToStringForIdl(FontVariantCaps variant) {
+  switch (variant) {
+    case FontVariantCaps::kCapsNormal:
+      return "normal";
+    case FontVariantCaps::kSmallCaps:
+      return "small-caps";
+    case FontVariantCaps::kAllSmallCaps:
+      return "all-small-caps";
+    case FontVariantCaps::kPetiteCaps:
+      return "petite-caps";
+    case FontVariantCaps::kAllPetiteCaps:
+      return "all-petite-caps";
+    case FontVariantCaps::kUnicase:
+      return "unicase";
+    case FontVariantCaps::kTitlingCaps:
+      return "titling-caps";
   }
   return "Unknown";
 }

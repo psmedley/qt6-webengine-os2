@@ -7,7 +7,6 @@
 #include <string>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/fonts/orientation_iterator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -250,22 +249,6 @@ TEST_F(RunSegmenterTest, NonEmojiPresentationSymbols) {
         "\U00002671\U0000271f\U00002720",
         USCRIPT_COMMON, OrientationIterator::kOrientationKeep,
         FontFallbackPriority::kText}});
-}
-
-TEST_F(RunSegmenterTest, StartOffset) {
-  String text = String::FromUTF8("abcשלום");
-  text.Ensure16Bit();
-
-  // skip first 3 characters
-  unsigned start_offset = 3;
-  Vector<SegmenterExpectedRun> expect;
-  expect.push_back(SegmenterExpectedRun(
-      start_offset, text.length(), USCRIPT_HEBREW,
-      OrientationIterator::kOrientationKeep, FontFallbackPriority::kText));
-
-  RunSegmenter run_segmenter(text.Characters16(), text.length() - start_offset,
-                             FontOrientation::kHorizontal, start_offset);
-  VerifyRuns(&run_segmenter, expect);
 }
 
 TEST_F(RunSegmenterTest, CJKBracketsAfterLatinLetter) {

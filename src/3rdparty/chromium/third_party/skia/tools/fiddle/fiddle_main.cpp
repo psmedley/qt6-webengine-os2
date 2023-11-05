@@ -26,6 +26,7 @@ static DEFINE_double(frame, 1.0,
 #include "src/gpu/GrDirectContextPriv.h"
 #include "src/gpu/GrGpu.h"
 #include "src/gpu/GrRenderTarget.h"
+#include "src/gpu/GrResourceProvider.h"
 #include "tools/gpu/ManagedBackendTexture.h"
 #include "tools/gpu/gl/GLTestContext.h"
 
@@ -171,7 +172,7 @@ static bool setup_backend_objects(GrDirectContext* dContext,
         // This backend object should be renderable but not textureable. Given the limitations
         // of how we're creating it though it will wind up being secretly textureable.
         // We use this fact to initialize it with data but don't allow mipmaps
-        GrMipLevel level0 = { data.get(), offscreenDims.width()*sizeof(uint32_t) };
+        GrMipLevel level0 = {data.get(), offscreenDims.width()*sizeof(uint32_t), nullptr};
 
         constexpr int kSampleCnt = 0;
         sk_sp<GrTexture> tmp = resourceProvider->createTexture(

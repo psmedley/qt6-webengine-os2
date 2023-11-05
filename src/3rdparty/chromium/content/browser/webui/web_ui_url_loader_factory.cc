@@ -176,8 +176,8 @@ void StartURLLoader(
   resource_response->headers = headers;
   // Headers from WebUI are trusted, so parsing can happen from a non-sandboxed
   // process.
-  resource_response->parsed_headers =
-      network::PopulateParsedHeaders(resource_response->headers, request.url);
+  resource_response->parsed_headers = network::PopulateParsedHeaders(
+      resource_response->headers.get(), request.url);
   resource_response->mime_type = source->source()->GetMimeType(path);
   // TODO: fill all the time related field i.e. request_time response_time
   // request_start response_start
@@ -235,7 +235,6 @@ class WebUIURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
   // network::mojom::URLLoaderFactory implementation:
   void CreateLoaderAndStart(
       mojo::PendingReceiver<network::mojom::URLLoader> loader,
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& request,
@@ -267,9 +266,7 @@ class WebUIURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
         (!request.url.has_host() ||
          allowed_hosts_.find(request.url.host()) == allowed_hosts_.end())) {
       // Temporary reporting the bad WebUI host for for http://crbug.com/837328.
-      static auto* crash_key = base::debug::AllocateCrashKeyString(
-          "webui_url", base::debug::CrashKeySize::Size64);
-      base::debug::SetCrashKeyString(crash_key, request.url.spec());
+      SCOPED_CRASH_KEY_STRING64("WebUIURLLoader", "url", request.url.spec());
 
       DVLOG(1) << "Bad host: \"" << request.url.host() << '"';
       mojo::ReportBadMessage("Incorrect host");

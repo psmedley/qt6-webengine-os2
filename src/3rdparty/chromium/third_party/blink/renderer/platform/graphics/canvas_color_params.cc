@@ -7,7 +7,6 @@
 #include "cc/paint/skia_paint_canvas.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_params.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -25,14 +24,11 @@ gfx::ColorSpace CanvasColorSpaceToGfxColorSpace(CanvasColorSpace color_space) {
   switch (color_space) {
     case CanvasColorSpace::kSRGB:
       return gfx::ColorSpace::CreateSRGB();
-      break;
     case CanvasColorSpace::kRec2020:
       return gfx::ColorSpace(gfx::ColorSpace::PrimaryID::BT2020,
                              gfx::ColorSpace::TransferID::GAMMA24);
-      break;
     case CanvasColorSpace::kP3:
       return gfx::ColorSpace::CreateDisplayP3D65();
-      break;
   }
   NOTREACHED();
 }
@@ -73,6 +69,18 @@ CanvasColorSpace CanvasColorSpaceFromName(const String& color_space_name) {
   return CanvasColorSpace::kSRGB;
 }
 
+String CanvasColorSpaceToName(CanvasColorSpace color_space) {
+  switch (color_space) {
+    case CanvasColorSpace::kSRGB:
+      return kSRGBCanvasColorSpaceName;
+    case CanvasColorSpace::kRec2020:
+      return kRec2020CanvasColorSpaceName;
+    case CanvasColorSpace::kP3:
+      return kP3CanvasColorSpaceName;
+  };
+  NOTREACHED();
+}
+
 CanvasColorParams::CanvasColorParams() = default;
 
 CanvasColorParams::CanvasColorParams(CanvasColorSpace color_space,
@@ -103,17 +111,8 @@ CanvasResourceParams CanvasColorParams::GetAsResourceParams() const {
   return CanvasResourceParams(color_space_, GetSkColorType(), alpha_type);
 }
 
-const char* CanvasColorParams::GetColorSpaceAsString() const {
-  switch (color_space_) {
-    case CanvasColorSpace::kSRGB:
-      return kSRGBCanvasColorSpaceName;
-    case CanvasColorSpace::kRec2020:
-      return kRec2020CanvasColorSpaceName;
-    case CanvasColorSpace::kP3:
-      return kP3CanvasColorSpaceName;
-  };
-  CHECK(false);
-  return "";
+String CanvasColorParams::GetColorSpaceAsString() const {
+  return CanvasColorSpaceToName(color_space_);
 }
 
 const char* CanvasColorParams::GetPixelFormatAsString() const {

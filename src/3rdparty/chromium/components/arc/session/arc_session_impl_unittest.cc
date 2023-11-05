@@ -13,10 +13,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/optional.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
@@ -27,9 +24,11 @@
 #include "components/arc/session/arc_session_impl.h"
 #include "components/arc/session/arc_start_params.h"
 #include "components/arc/session/arc_upgrade_params.h"
+#include "components/arc/test/arc_util_test_support.h"
 #include "components/arc/test/fake_arc_bridge_host.h"
 #include "components/version_info/channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace cryptohome {
 class Identification;
@@ -79,7 +78,7 @@ class FakeArcClientAdapter : public ArcClientAdapter {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(&FakeArcClientAdapter::NotifyArcInstanceStopped,
-                       base::Unretained(this)));
+                       base::Unretained(this), false /* is_system_shutdown */));
   }
 
   void SetUserInfo(const cryptohome::Identification& cryptohome_id,
@@ -87,11 +86,15 @@ class FakeArcClientAdapter : public ArcClientAdapter {
                    const std::string& serial_number) override {}
 
   void SetDemoModeDelegate(DemoModeDelegate* delegate) override {}
+  void TrimVmMemory(TrimVmMemoryCallback callback) override {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), true, std::string()));
+  }
 
   // Notifies ArcSessionImpl of the ARC instance stop event.
-  void NotifyArcInstanceStopped() {
+  void NotifyArcInstanceStopped(bool is_system_shutdown) {
     for (auto& observer : observer_list_)
-      observer.ArcInstanceStopped();
+      observer.ArcInstanceStopped(is_system_shutdown);
   }
 
   void set_arc_available(bool arc_available) { arc_available_ = arc_available; }
@@ -112,7 +115,7 @@ class FakeArcClientAdapter : public ArcClientAdapter {
   void OnArcUpgraded(chromeos::VoidDBusMethodCallback callback, bool result) {
     std::move(callback).Run(result);
     if (!result)
-      NotifyArcInstanceStopped();
+      NotifyArcInstanceStopped(false /* is_system_shutdown */);
   }
 
   bool arc_available_ = true;
@@ -123,8 +126,7 @@ class FakeArcClientAdapter : public ArcClientAdapter {
 
 class FakeDelegate : public ArcSessionImpl::Delegate {
  public:
-  explicit FakeDelegate(int32_t lcd_density = 160)
-      : lcd_density_(lcd_density) {}
+  FakeDelegate() = default;
 
   // Emulates to fail Mojo connection establishing. |callback| passed to
   // ConnectMojo will be called with nullptr.
@@ -165,13 +167,6 @@ class FakeDelegate : public ArcSessionImpl::Delegate {
     return base::ScopedFD(open("/dev/null", O_RDONLY | O_CLOEXEC));
   }
 
-  void GetLcdDensity(GetLcdDensityCallback callback) override {
-    if (lcd_density_ > 0)
-      std::move(callback).Run(lcd_density_);
-    else
-      lcd_density_callback_ = std::move(callback);
-  }
-
   void GetFreeDiskSpace(GetFreeDiskSpaceCallback callback) override {
     std::move(callback).Run(free_disk_space_);
   }
@@ -182,12 +177,6 @@ class FakeDelegate : public ArcSessionImpl::Delegate {
 
   std::unique_ptr<ArcClientAdapter> CreateClient() override {
     return std::make_unique<FakeArcClientAdapter>();
-  }
-
-  void SetLcdDensity(int32_t lcd_density) {
-    lcd_density_ = lcd_density;
-    ASSERT_TRUE(!lcd_density_callback_.is_null());
-    std::move(lcd_density_callback_).Run(lcd_density_);
   }
 
   void SetFreeDiskSpace(int64_t space) { free_disk_space_ = space; }
@@ -201,12 +190,10 @@ class FakeDelegate : public ArcSessionImpl::Delegate {
             success_ ? std::make_unique<FakeArcBridgeHost>() : nullptr));
   }
 
-  int32_t lcd_density_ = 0;
   bool success_ = true;
   bool suspend_ = false;
   int64_t free_disk_space_ = kMinimumFreeDiskSpaceBytes * 2;
   ConnectMojoCallback pending_callback_;
-  GetLcdDensityCallback lcd_density_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeDelegate);
 };
@@ -230,7 +217,7 @@ class TestArcSessionObserver : public ArcSession::Observer {
 
   ~TestArcSessionObserver() override { arc_session_->RemoveObserver(this); }
 
-  const base::Optional<OnSessionStoppedArgs>& on_session_stopped_args() const {
+  const absl::optional<OnSessionStoppedArgs>& on_session_stopped_args() const {
     return on_session_stopped_args_;
   }
 
@@ -247,7 +234,7 @@ class TestArcSessionObserver : public ArcSession::Observer {
  private:
   ArcSession* const arc_session_;            // Not owned.
   base::RunLoop* const run_loop_ = nullptr;  // Not owned.
-  base::Optional<OnSessionStoppedArgs> on_session_stopped_args_;
+  absl::optional<OnSessionStoppedArgs> on_session_stopped_args_;
 
   DISALLOW_COPY_AND_ASSIGN(TestArcSessionObserver);
 };
@@ -274,12 +261,12 @@ class FakeSchedulerConfigurationManager
       obs.OnConfigurationSet(reply_->first, reply_->second);
   }
 
-  base::Optional<std::pair<bool, size_t>> GetLastReply() const override {
+  absl::optional<std::pair<bool, size_t>> GetLastReply() const override {
     return reply_;
   }
 
  private:
-  base::Optional<std::pair<bool, size_t>> reply_;
+  absl::optional<std::pair<bool, size_t>> reply_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSchedulerConfigurationManager);
 };
@@ -311,9 +298,9 @@ class ArcSessionImplTest : public testing::Test {
 
   std::unique_ptr<ArcSessionImpl, ArcSessionDeleter> CreateArcSession(
       std::unique_ptr<ArcSessionImpl::Delegate> delegate = nullptr,
-      int32_t lcd_density = 160) {
-    auto arc_session =
-        CreateArcSessionInternal(std::move(delegate), lcd_density);
+      float default_device_scale_factor = 1.0f) {
+    auto arc_session = CreateArcSessionInternal(std::move(delegate),
+                                                default_device_scale_factor);
     fake_schedule_configuration_manager_.SetLastReply(0);
     return arc_session;
   }
@@ -321,8 +308,9 @@ class ArcSessionImplTest : public testing::Test {
   std::unique_ptr<ArcSessionImpl, ArcSessionDeleter>
   CreateArcSessionWithoutCpuInfo(
       std::unique_ptr<ArcSessionImpl::Delegate> delegate = nullptr,
-      int32_t lcd_density = 160) {
-    return CreateArcSessionInternal(std::move(delegate), lcd_density);
+      float default_device_scale_factor = 1.0f) {
+    return CreateArcSessionInternal(std::move(delegate),
+                                    default_device_scale_factor);
   }
 
   void SetupMiniContainer(ArcSessionImpl* arc_session,
@@ -348,13 +336,15 @@ class ArcSessionImplTest : public testing::Test {
  private:
   std::unique_ptr<ArcSessionImpl, ArcSessionDeleter> CreateArcSessionInternal(
       std::unique_ptr<ArcSessionImpl::Delegate> delegate,
-      int32_t lcd_density) {
+      float default_device_scale_factor) {
     if (!delegate)
-      delegate = std::make_unique<FakeDelegate>(lcd_density);
-    return std::unique_ptr<ArcSessionImpl, ArcSessionDeleter>(
-        new ArcSessionImpl(std::move(delegate),
-                           &fake_schedule_configuration_manager_,
-                           adb_sideloading_availability_delegate_.get()));
+      delegate = std::make_unique<FakeDelegate>();
+    auto arc_session =
+        std::unique_ptr<ArcSessionImpl, ArcSessionDeleter>(new ArcSessionImpl(
+            std::move(delegate), &fake_schedule_configuration_manager_,
+            adb_sideloading_availability_delegate_.get()));
+    arc_session->SetDefaultDeviceScaleFactor(default_device_scale_factor);
+    return arc_session;
   }
 
   base::test::TaskEnvironment task_environment_;
@@ -660,11 +650,34 @@ TEST_F(ArcSessionImplTest, ArcStopInstance) {
             arc_session->GetStateForTesting());
 
   // Notify ArcClientAdapter's observers of the crash event.
-  GetClient(arc_session.get())->NotifyArcInstanceStopped();
+  GetClient(arc_session.get())
+      ->NotifyArcInstanceStopped(false /* is_system_shutdown */);
 
   EXPECT_EQ(ArcSessionImpl::State::STOPPED, arc_session->GetStateForTesting());
   ASSERT_TRUE(observer.on_session_stopped_args().has_value());
   EXPECT_EQ(ArcStopReason::CRASH, observer.on_session_stopped_args()->reason);
+  EXPECT_TRUE(observer.on_session_stopped_args()->was_running);
+  EXPECT_TRUE(observer.on_session_stopped_args()->upgrade_requested);
+}
+
+// Emulating system shutdown.
+TEST_F(ArcSessionImplTest, ArcStopInstanceSystemShutdown) {
+  auto arc_session = CreateArcSession();
+  TestArcSessionObserver observer(arc_session.get());
+  arc_session->StartMiniInstance();
+  arc_session->RequestUpgrade(DefaultUpgradeParams());
+  base::RunLoop().RunUntilIdle();
+  ASSERT_EQ(ArcSessionImpl::State::RUNNING_FULL_INSTANCE,
+            arc_session->GetStateForTesting());
+
+  // Notify ArcClientAdapter's observers of the shutdown event.
+  GetClient(arc_session.get())
+      ->NotifyArcInstanceStopped(true /* is_system_shutdown */);
+
+  EXPECT_EQ(ArcSessionImpl::State::STOPPED, arc_session->GetStateForTesting());
+  ASSERT_TRUE(observer.on_session_stopped_args().has_value());
+  EXPECT_EQ(ArcStopReason::SHUTDOWN,
+            observer.on_session_stopped_args()->reason);
   EXPECT_TRUE(observer.on_session_stopped_args()->was_running);
   EXPECT_TRUE(observer.on_session_stopped_args()->upgrade_requested);
 }
@@ -780,20 +793,20 @@ TEST_F(ArcSessionImplTest, SupervisionTransitionShouldGraduate) {
   arc_session->StartMiniInstance();
 
   UpgradeParams params;
-  params.supervision_transition = ArcSupervisionTransition::CHILD_TO_REGULAR;
+  params.management_transition = ArcManagementTransition::CHILD_TO_REGULAR;
   params.locale = kDefaultLocale;
   arc_session->RequestUpgrade(std::move(params));
 
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(ArcSupervisionTransition::CHILD_TO_REGULAR,
+  EXPECT_EQ(ArcManagementTransition::CHILD_TO_REGULAR,
             GetClient(arc_session.get())
                 ->last_upgrade_params()
-                .supervision_transition);
+                .management_transition);
   EXPECT_EQ(160, GetClient(arc_session.get())->last_start_params().lcd_density);
 }
 
 TEST_F(ArcSessionImplTest, StartArcMiniContainerWithDensity) {
-  auto arc_session = CreateArcSessionWithoutCpuInfo(nullptr, 240);
+  auto arc_session = CreateArcSessionWithoutCpuInfo(nullptr, 2.f);
   arc_session->StartMiniInstance();
   EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_NUM_CORES,
             arc_session->GetStateForTesting());
@@ -805,86 +818,10 @@ TEST_F(ArcSessionImplTest, StartArcMiniContainerWithDensity) {
   EXPECT_EQ(240, GetClient(arc_session.get())->last_start_params().lcd_density);
 }
 
-TEST_F(ArcSessionImplTest, StartArcMiniContainerWithDensityAsync) {
-  auto delegate = std::make_unique<FakeDelegate>(0);
-  auto* delegate_ptr = delegate.get();
-  auto arc_session = CreateArcSessionWithoutCpuInfo(std::move(delegate));
-  arc_session->StartMiniInstance();
-  EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_LCD_DENSITY,
-            arc_session->GetStateForTesting());
-  delegate_ptr->SetLcdDensity(240);
-  EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_NUM_CORES,
-            arc_session->GetStateForTesting());
-  fake_schedule_configuration_manager_.SetLastReply(2);
-  EXPECT_EQ(ArcSessionImpl::State::STARTING_MINI_INSTANCE,
-            arc_session->GetStateForTesting());
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(240, GetClient(arc_session.get())->last_start_params().lcd_density);
-}
-
-TEST_F(ArcSessionImplTest, StartArcMiniContainerWithDensityAsyncReversedOrder) {
-  auto delegate = std::make_unique<FakeDelegate>(0);
-  auto* delegate_ptr = delegate.get();
-  auto arc_session = CreateArcSessionWithoutCpuInfo(std::move(delegate));
-  arc_session->StartMiniInstance();
-  // This time, set the CPU cores information first.
-  fake_schedule_configuration_manager_.SetLastReply(2);
-  EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_LCD_DENSITY,
-            arc_session->GetStateForTesting());
-  delegate_ptr->SetLcdDensity(240);
-  EXPECT_EQ(ArcSessionImpl::State::STARTING_MINI_INSTANCE,
-            arc_session->GetStateForTesting());
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(240, GetClient(arc_session.get())->last_start_params().lcd_density);
-}
-
-TEST_F(ArcSessionImplTest, StartArcMiniContainerWithDensityAsyncCpuInfoEarly) {
-  auto delegate = std::make_unique<FakeDelegate>(0);
-  auto* delegate_ptr = delegate.get();
-  auto arc_session = CreateArcSessionWithoutCpuInfo(std::move(delegate));
-  // Set the CPU cores information even before StartMiniInstance() request.
-  fake_schedule_configuration_manager_.SetLastReply(2);
-  arc_session->StartMiniInstance();
-  EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_LCD_DENSITY,
-            arc_session->GetStateForTesting());
-  delegate_ptr->SetLcdDensity(240);
-  EXPECT_EQ(ArcSessionImpl::State::STARTING_MINI_INSTANCE,
-            arc_session->GetStateForTesting());
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(240, GetClient(arc_session.get())->last_start_params().lcd_density);
-}
-
-TEST_F(ArcSessionImplTest, StopWhileWaitingForLcdDensity) {
-  auto delegate = std::make_unique<FakeDelegate>(0);
-  auto arc_session = CreateArcSessionWithoutCpuInfo(std::move(delegate));
-  arc_session->StartMiniInstance();
-  fake_schedule_configuration_manager_.SetLastReply(2);
-  EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_LCD_DENSITY,
-            arc_session->GetStateForTesting());
-  arc_session->Stop();
-  EXPECT_EQ(ArcSessionImpl::State::STOPPED, arc_session->GetStateForTesting());
-}
-
-TEST_F(ArcSessionImplTest, ShutdownWhileWaitingForLcdDensity) {
-  auto delegate = std::make_unique<FakeDelegate>(0);
-  auto arc_session = CreateArcSessionWithoutCpuInfo(std::move(delegate));
-  arc_session->StartMiniInstance();
-  fake_schedule_configuration_manager_.SetLastReply(2);
-  EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_LCD_DENSITY,
-            arc_session->GetStateForTesting());
-  arc_session->OnShutdown();
-  EXPECT_EQ(ArcSessionImpl::State::STOPPED, arc_session->GetStateForTesting());
-}
-
 TEST_F(ArcSessionImplTest, StopWhileWaitingForNumCores) {
-  auto delegate = std::make_unique<FakeDelegate>(0);
-  auto* delegate_ptr = delegate.get();
+  auto delegate = std::make_unique<FakeDelegate>();
   auto arc_session = CreateArcSessionWithoutCpuInfo(std::move(delegate));
   arc_session->StartMiniInstance();
-  delegate_ptr->SetLcdDensity(240);
   EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_NUM_CORES,
             arc_session->GetStateForTesting());
   arc_session->Stop();
@@ -892,11 +829,9 @@ TEST_F(ArcSessionImplTest, StopWhileWaitingForNumCores) {
 }
 
 TEST_F(ArcSessionImplTest, ShutdownWhileWaitingForNumCores) {
-  auto delegate = std::make_unique<FakeDelegate>(0);
-  auto* delegate_ptr = delegate.get();
+  auto delegate = std::make_unique<FakeDelegate>();
   auto arc_session = CreateArcSessionWithoutCpuInfo(std::move(delegate));
   arc_session->StartMiniInstance();
-  delegate_ptr->SetLcdDensity(240);
   EXPECT_EQ(ArcSessionImpl::State::WAITING_FOR_NUM_CORES,
             arc_session->GetStateForTesting());
   arc_session->OnShutdown();
@@ -949,30 +884,12 @@ class ArcSessionImplDalvikMemoryProfileTest
     : public ArcSessionImplTest,
       public ::testing::WithParamInterface<DalvikMemoryProfileVariant> {};
 
-bool GetSystemMemoryInfo(const std::string& file_name,
-                         base::SystemMemoryInfoKB* mem_info) {
-  base::FilePath base_path;
-  base::PathService::Get(base::DIR_SOURCE_ROOT, &base_path);
-  const base::FilePath test_path = base_path.Append("components")
-                                       .Append("test")
-                                       .Append("data")
-                                       .Append("arc_dalvik_profile")
-                                       .Append(file_name);
-  base::ScopedAllowBlockingForTesting allowBlocking;
-  std::string mem_info_data;
-  return base::ReadFileToString(test_path, &mem_info_data) &&
-         base::ParseProcMeminfo(mem_info_data, mem_info);
-}
-
 TEST_P(ArcSessionImplDalvikMemoryProfileTest, DalvikMemoryProfiles) {
   const DalvikMemoryProfileVariant& variant = GetParam();
 
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatureState(arc::kUseHighMemoryDalvikProfile,
-                                    true /* use */);
   auto arc_session = CreateArcSession();
   arc_session->SetSystemMemoryInfoCallbackForTesting(
-      base::BindRepeating(&GetSystemMemoryInfo, variant.file_name));
+      base::BindRepeating(&GetSystemMemoryInfoForTesting, variant.file_name));
 
   arc_session->StartMiniInstance();
   base::RunLoop().RunUntilIdle();

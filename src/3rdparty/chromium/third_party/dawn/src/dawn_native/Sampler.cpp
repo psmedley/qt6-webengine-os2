@@ -58,7 +58,14 @@ namespace dawn_native {
         DAWN_TRY(ValidateAddressMode(descriptor->addressModeU));
         DAWN_TRY(ValidateAddressMode(descriptor->addressModeV));
         DAWN_TRY(ValidateAddressMode(descriptor->addressModeW));
-        DAWN_TRY(ValidateCompareFunction(descriptor->compare));
+
+        // CompareFunction::Undefined is tagged as invalid because it can't be used, except for the
+        // SamplerDescriptor where it is a special value that means the sampler is not a
+        // comparison-sampler.
+        if (descriptor->compare != wgpu::CompareFunction::Undefined) {
+            DAWN_TRY(ValidateCompareFunction(descriptor->compare));
+        }
+
         return {};
     }
 
@@ -93,8 +100,13 @@ namespace dawn_native {
         return new SamplerBase(device, ObjectBase::kError);
     }
 
-    bool SamplerBase::HasCompareFunction() const {
+    bool SamplerBase::IsComparison() const {
         return mCompareFunction != wgpu::CompareFunction::Undefined;
+    }
+
+    bool SamplerBase::IsFiltering() const {
+        return mMinFilter == wgpu::FilterMode::Linear || mMagFilter == wgpu::FilterMode::Linear ||
+               mMipmapFilter == wgpu::FilterMode::Linear;
     }
 
     size_t SamplerBase::ComputeContentHash() {

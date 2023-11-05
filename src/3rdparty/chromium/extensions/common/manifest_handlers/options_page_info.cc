@@ -18,8 +18,6 @@
 #include "extensions/strings/grit/extensions_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using base::ASCIIToUTF16;
-
 namespace extensions {
 
 namespace keys = manifest_keys;
@@ -41,13 +39,13 @@ OptionsPageInfo* GetOptionsPageInfo(const Extension* extension) {
 bool ParseOptionsUrl(Extension* extension,
                      const std::string& url_string,
                      const std::string& manifest_field_name,
-                     base::string16* error,
+                     std::u16string* error,
                      GURL* result) {
   if (extension->is_hosted_app()) {
     // Hosted apps require an absolute URL.
     GURL options_url(url_string);
     if (!options_url.is_valid() || !options_url.SchemeIsHTTPOrHTTPS()) {
-      *error = base::ASCIIToUTF16(errors::kInvalidOptionsPageInHostedApp);
+      *error = errors::kInvalidOptionsPageInHostedApp;
       return false;
     }
     *result = options_url;
@@ -56,7 +54,7 @@ bool ParseOptionsUrl(Extension* extension,
 
   // Otherwise the options URL should be inside the extension.
   if (GURL(url_string).is_valid()) {
-    *error = base::ASCIIToUTF16(errors::kInvalidOptionsPageExpectUrlInPackage);
+    *error = errors::kInvalidOptionsPageExpectUrlInPackage;
     return false;
   }
 
@@ -111,7 +109,7 @@ std::unique_ptr<OptionsPageInfo> OptionsPageInfo::Create(
     const base::Value* options_ui_value,
     const std::string& options_page_string,
     std::vector<InstallWarning>* install_warnings,
-    base::string16* error) {
+    std::u16string* error) {
   GURL options_page;
   // Chrome styling is always opt-in.
   bool chrome_style = false;
@@ -121,7 +119,7 @@ std::unique_ptr<OptionsPageInfo> OptionsPageInfo::Create(
 
   // Parse the options_ui object.
   if (options_ui_value) {
-    base::string16 options_ui_error;
+    std::u16string options_ui_error;
 
     std::unique_ptr<OptionsUI> options_ui =
         OptionsUI::FromValue(*options_ui_value, &options_ui_error);
@@ -129,7 +127,7 @@ std::unique_ptr<OptionsPageInfo> OptionsPageInfo::Create(
       install_warnings->push_back(
           InstallWarning(base::UTF16ToASCII(options_ui_error)));
     } else {
-      base::string16 options_parse_error;
+      std::u16string options_parse_error;
       if (!ParseOptionsUrl(extension,
                            options_ui->page,
                            keys::kOptionsUI,
@@ -142,7 +140,7 @@ std::unique_ptr<OptionsPageInfo> OptionsPageInfo::Create(
         if (extension->manifest_version() < 3)
           chrome_style = *options_ui->chrome_style;
         else {
-          *error = base::ASCIIToUTF16(errors::kChromeStyleInvalidForManifestV3);
+          *error = errors::kChromeStyleInvalidForManifestV3;
           return nullptr;
         }
       }
@@ -175,7 +173,7 @@ OptionsPageManifestHandler::~OptionsPageManifestHandler() {
 }
 
 bool OptionsPageManifestHandler::Parse(Extension* extension,
-                                       base::string16* error) {
+                                       std::u16string* error) {
   std::vector<InstallWarning> install_warnings;
   const Manifest* manifest = extension->manifest();
 

@@ -115,7 +115,8 @@ angle::Result SemaphoreVk::wait(gl::Context *context,
         for (gl::Buffer *buffer : bufferBarriers)
         {
             BufferVk *bufferVk             = vk::GetImpl(buffer);
-            vk::BufferHelper &bufferHelper = bufferVk->getBuffer();
+            VkDeviceSize bufferOffset      = 0;
+            vk::BufferHelper &bufferHelper = bufferVk->getBufferAndOffset(&bufferOffset);
 
             vk::CommandBuffer *commandBuffer;
             ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer({}, &commandBuffer));
@@ -169,7 +170,8 @@ angle::Result SemaphoreVk::signal(gl::Context *context,
         for (gl::Buffer *buffer : bufferBarriers)
         {
             BufferVk *bufferVk             = vk::GetImpl(buffer);
-            vk::BufferHelper &bufferHelper = bufferVk->getBuffer();
+            VkDeviceSize bufferOffset      = 0;
+            vk::BufferHelper &bufferHelper = bufferVk->getBufferAndOffset(&bufferOffset);
 
             ANGLE_TRY(contextVk->onBufferReleaseToExternal(bufferHelper));
             vk::CommandBuffer *commandBuffer;
@@ -256,12 +258,12 @@ angle::Result SemaphoreVk::importZirconEvent(ContextVk *contextVk, GLuint handle
 
     VkImportSemaphoreZirconHandleInfoFUCHSIA importSemaphoreZirconHandleInfo = {};
     importSemaphoreZirconHandleInfo.sType =
-        VK_STRUCTURE_TYPE_TEMP_IMPORT_SEMAPHORE_ZIRCON_HANDLE_INFO_FUCHSIA;
+        VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_ZIRCON_HANDLE_INFO_FUCHSIA;
     importSemaphoreZirconHandleInfo.semaphore = mSemaphore.getHandle();
     importSemaphoreZirconHandleInfo.flags     = 0;
     importSemaphoreZirconHandleInfo.handleType =
-        VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA;
-    importSemaphoreZirconHandleInfo.handle = handle;
+        VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_ZIRCON_EVENT_BIT_FUCHSIA;
+    importSemaphoreZirconHandleInfo.zirconHandle = handle;
 
     // TODO(spang): Add vkImportSemaphoreZirconHandleFUCHSIA to volk.
     static PFN_vkImportSemaphoreZirconHandleFUCHSIA vkImportSemaphoreZirconHandleFUCHSIA =

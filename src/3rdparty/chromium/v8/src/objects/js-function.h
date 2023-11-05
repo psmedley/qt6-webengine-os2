@@ -24,6 +24,9 @@ class JSFunctionOrBoundFunction
     : public TorqueGeneratedJSFunctionOrBoundFunction<JSFunctionOrBoundFunction,
                                                       JSObject> {
  public:
+  static const int kLengthDescriptorIndex = 0;
+  static const int kNameDescriptorIndex = 1;
+
   STATIC_ASSERT(kHeaderSize == JSObject::kHeaderSize);
   TQ_OBJECT_CONSTRUCTORS(JSFunctionOrBoundFunction)
 };
@@ -37,8 +40,6 @@ class JSBoundFunction
                                      Handle<JSBoundFunction> function);
   static Maybe<int> GetLength(Isolate* isolate,
                               Handle<JSBoundFunction> function);
-  static MaybeHandle<NativeContext> GetFunctionRealm(
-      Handle<JSBoundFunction> function);
 
   // Dispatched behavior.
   DECL_PRINTER(JSBoundFunction)
@@ -55,28 +56,27 @@ class JSBoundFunction
 class JSFunction : public JSFunctionOrBoundFunction {
  public:
   // [prototype_or_initial_map]:
-  DECL_ACCESSORS(prototype_or_initial_map, HeapObject)
+  DECL_RELEASE_ACQUIRE_ACCESSORS(prototype_or_initial_map, HeapObject)
 
-  // [shared]: The information about the function that
-  // can be shared by instances.
+  // [shared]: The information about the function that can be shared by
+  // instances.
   DECL_ACCESSORS(shared, SharedFunctionInfo)
-
-  static const int kLengthDescriptorIndex = 0;
-  static const int kNameDescriptorIndex = 1;
+  DECL_RELAXED_GETTER(shared, SharedFunctionInfo)
 
   // Fast binding requires length and name accessors.
   static const int kMinDescriptorsForFastBind = 2;
 
   // [context]: The context for this function.
   inline Context context();
+  DECL_RELAXED_GETTER(context, Context)
   inline bool has_context() const;
-  inline void set_context(HeapObject context);
+  inline void set_context(HeapObject context,
+                          WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   inline JSGlobalProxy global_proxy();
   inline NativeContext native_context();
   inline int length();
 
   static Handle<Object> GetName(Isolate* isolate, Handle<JSFunction> function);
-  static Handle<NativeContext> GetFunctionRealm(Handle<JSFunction> function);
 
   // [code]: The generated code object for this function.  Executed
   // when the function is invoked, e.g. foo() or new foo(). See
@@ -86,14 +86,16 @@ class JSFunction : public JSFunctionOrBoundFunction {
   // optimized code object, or when reading from the background thread.
   // Storing a builtin doesn't require release semantics because these objects
   // are fully initialized.
-  inline Code code() const;
-  inline void set_code(Code code);
+  DECL_ACCESSORS(code, Code)
   DECL_RELEASE_ACQUIRE_ACCESSORS(code, Code)
+
+  // Returns the address of the function code's instruction start.
+  inline Address code_entry_point() const;
 
   // Get the abstract code associated with the function, which will either be
   // a Code object or a BytecodeArray.
-  template <typename LocalIsolate>
-  inline AbstractCode abstract_code(LocalIsolate* isolate);
+  template <typename IsolateT>
+  inline AbstractCode abstract_code(IsolateT* isolate);
 
   // The predicates for querying code kinds related to this function have
   // specific terminology:
@@ -121,7 +123,6 @@ class JSFunction : public JSFunctionOrBoundFunction {
   CodeKind GetActiveTier() const;
   V8_EXPORT_PRIVATE bool ActiveTierIsIgnition() const;
   bool ActiveTierIsTurbofan() const;
-  bool ActiveTierIsNCI() const;
   bool ActiveTierIsBaseline() const;
   bool ActiveTierIsIgnitionOrBaseline() const;
   bool ActiveTierIsMidtierTurboprop() const;
@@ -211,18 +212,30 @@ class JSFunction : public JSFunctionOrBoundFunction {
 
   // Resets function to clear compiled data after bytecode has been flushed.
   inline bool NeedsResetDueToFlushedBytecode();
-  inline void ResetIfBytecodeFlushed(
+  inline void ResetIfCodeFlushed(
       base::Optional<std::function<void(HeapObject object, ObjectSlot slot,
                                         HeapObject target)>>
           gc_notify_updated_slot = base::nullopt);
+
+  // Returns if the closure's code field has to be updated because it has
+  // stale baseline code.
+  inline bool NeedsResetDueToFlushedBaselineCode();
+
+  // Returns if baseline code is a candidate for flushing. This method is called
+  // from concurrent marking so we should be careful when accessing data fields.
+  inline bool ShouldFlushBaselineCode(
+      base::EnumSet<CodeFlushMode> code_flush_mode);
 
   DECL_GETTER(has_prototype_slot, bool)
 
   // The initial map for an object created by this constructor.
   DECL_GETTER(initial_map, Map)
 
-  static void SetInitialMap(Handle<JSFunction> function, Handle<Map> map,
-                            Handle<HeapObject> prototype);
+  static void SetInitialMap(Isolate* isolate, Handle<JSFunction> function,
+                            Handle<Map> map, Handle<HeapObject> prototype);
+  static void SetInitialMap(Isolate* isolate, Handle<JSFunction> function,
+                            Handle<Map> map, Handle<HeapObject> prototype,
+                            Handle<JSFunction> constructor);
   DECL_GETTER(has_initial_map, bool)
   V8_EXPORT_PRIVATE static void EnsureHasInitialMap(
       Handle<JSFunction> function);
@@ -231,6 +244,11 @@ class JSFunction : public JSFunctionOrBoundFunction {
   // [[prototype]] being new.target.prototype. Because new.target can be a
   // JSProxy, this can call back into JavaScript.
   static V8_WARN_UNUSED_RESULT MaybeHandle<Map> GetDerivedMap(
+      Isolate* isolate, Handle<JSFunction> constructor,
+      Handle<JSReceiver> new_target);
+
+  // Like GetDerivedMap, but returns a map with a RAB / GSAB ElementsKind.
+  static V8_WARN_UNUSED_RESULT Handle<Map> GetDerivedRabGsabMap(
       Isolate* isolate, Handle<JSFunction> constructor,
       Handle<JSReceiver> new_target);
 
@@ -304,7 +322,12 @@ class JSFunction : public JSFunctionOrBoundFunction {
   static constexpr int kPrototypeOrInitialMapOffset =
       FieldOffsets::kPrototypeOrInitialMapOffset;
 
+  class BodyDescriptor;
+
  private:
+  DECL_ACCESSORS(raw_code, CodeT)
+  DECL_RELEASE_ACQUIRE_ACCESSORS(raw_code, CodeT)
+
   // JSFunction doesn't have a fixed header size:
   // Hide JSFunctionOrBoundFunction::kHeaderSize to avoid confusion.
   static const int kHeaderSize;

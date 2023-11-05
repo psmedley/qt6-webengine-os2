@@ -6,10 +6,10 @@
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_PARSING_TEST_UTILS_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -61,17 +61,14 @@ class FormFieldTestBase {
       std::string name,
       std::string label,
       int max_length,
-      const std::vector<std::string>& options_contents,
-      const std::vector<std::string>& options_values,
+      const std::vector<SelectOption>& options,
       ServerFieldType expected_type);
 
   // Convenience wrapper for 'select-one' elements.
-  void AddSelectOneFormFieldData(
-      std::string name,
-      std::string label,
-      const std::vector<std::string>& options_contents,
-      const std::vector<std::string>& options_values,
-      ServerFieldType expected_type);
+  void AddSelectOneFormFieldData(std::string name,
+                                 std::string label,
+                                 const std::vector<SelectOption>& options,
+                                 ServerFieldType expected_type);
 
   // Apply parsing and verify the expected types.
   // |parsed| indicates if at least one field could be parsed successfully.
@@ -93,7 +90,7 @@ class FormFieldTestBase {
   std::vector<std::unique_ptr<AutofillField>> list_;
   std::unique_ptr<FormField> field_;
   FieldCandidatesMap field_candidates_map_;
-  std::map<FieldRendererId, ServerFieldType> expected_classifications_;
+  std::map<FieldGlobalId, ServerFieldType> expected_classifications_;
 
  private:
   uint64_t id_counter_ = 0;

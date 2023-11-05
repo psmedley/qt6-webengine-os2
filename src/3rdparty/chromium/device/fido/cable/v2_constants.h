@@ -38,6 +38,21 @@ constexpr size_t kQRKeySize = kQRSeedSize + kQRSecretSize;
 // kCompressedPublicKeySize is the size of a compressed X9.62 public key.
 constexpr size_t kCompressedPublicKeySize =
     /* type byte */ 1 + /* field element */ (256 / 8);
+// kPairingIDSize is the number of bytes in the pairing ID that is shared after
+// scanning a QR code.
+constexpr size_t kPairingIDSize = 8;
+// kTunnelServer is the hardcoded tunnel server that phones will use for network
+// communication. This specifies a Google service and the short domain seed is
+// necessary to fit within a BLE advert.
+constexpr uint16_t kTunnelServer = 0;
+// kPostHandshakeMsgPaddingGranularity is the granularity of the padding added
+// to the post-handshake message. This should be sufficiently large to pad away
+// all information about the contents of this message.
+constexpr size_t kPostHandshakeMsgPaddingGranularity = 256;
+// kFuturePostHandshakeMsgPaddingGranularity will be the granularity of the
+// padding added to the post-handshake message. This is currently only used for
+// testing.
+constexpr size_t kFuturePostHandshakeMsgPaddingGranularity = 512;
 
 }  // namespace cablev2
 }  // namespace device

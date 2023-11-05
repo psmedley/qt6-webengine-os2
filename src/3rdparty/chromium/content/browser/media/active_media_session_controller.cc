@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/media/media_keys_listener_manager_impl.h"
@@ -60,12 +61,10 @@ void ActiveMediaSessionController::MediaSessionActionsChanged(
   // Stop listening to any keys that are currently being watched, but aren't in
   // |actions|.
   for (const MediaSessionAction& action : actions_) {
-    base::Optional<ui::KeyboardCode> action_key_code =
+    absl::optional<ui::KeyboardCode> action_key_code =
         MediaSessionActionToKeyCode(action);
-
-    // We only store supported actions in |actions_|, so we should always get a
-    // value from |MediaSessionActionToKeyCode()| here.
-    DCHECK(action_key_code.has_value());
+    if (!action_key_code.has_value())
+      continue;
     if (std::find(actions.begin(), actions.end(), action) == actions.end())
       media_keys_listener_manager->StopWatchingMediaKey(*action_key_code, this);
   }
@@ -74,7 +73,7 @@ void ActiveMediaSessionController::MediaSessionActionsChanged(
   // to necessary media keys.
   actions_.clear();
   for (const MediaSessionAction& action : actions) {
-    base::Optional<ui::KeyboardCode> action_key_code =
+    absl::optional<ui::KeyboardCode> action_key_code =
         MediaSessionActionToKeyCode(action);
     if (action_key_code.has_value()) {
       // It's okay to call this even on keys we're already listening to, since
@@ -83,12 +82,17 @@ void ActiveMediaSessionController::MediaSessionActionsChanged(
                                                              this)) {
         actions_.insert(action);
       }
+    } else {
+      // If there is no media key associated with this action, then just add it
+      // to the list of actions we listen to (since we can receive certain
+      // non-key actions like SeekTo).
+      actions_.insert(action);
     }
   }
 }
 
 void ActiveMediaSessionController::MediaSessionPositionChanged(
-    const base::Optional<media_session::MediaPosition>& position) {
+    const absl::optional<media_session::MediaPosition>& position) {
   position_ = position;
 }
 
@@ -191,6 +195,10 @@ void ActiveMediaSessionController::PerformAction(MediaSessionAction action) {
     case MediaSessionAction::kEnterPictureInPicture:
     case MediaSessionAction::kExitPictureInPicture:
     case MediaSessionAction::kSwitchAudioDevice:
+    case MediaSessionAction::kToggleMicrophone:
+    case MediaSessionAction::kToggleCamera:
+    case MediaSessionAction::kHangUp:
+    case MediaSessionAction::kRaise:
       NOTREACHED();
       return;
   }
@@ -218,7 +226,7 @@ MediaSessionAction ActiveMediaSessionController::KeyCodeToMediaSessionAction(
   }
 }
 
-base::Optional<ui::KeyboardCode>
+absl::optional<ui::KeyboardCode>
 ActiveMediaSessionController::MediaSessionActionToKeyCode(
     MediaSessionAction action) const {
   switch (action) {
@@ -239,7 +247,11 @@ ActiveMediaSessionController::MediaSessionActionToKeyCode(
     case MediaSessionAction::kEnterPictureInPicture:
     case MediaSessionAction::kExitPictureInPicture:
     case MediaSessionAction::kSwitchAudioDevice:
-      return base::nullopt;
+    case MediaSessionAction::kToggleMicrophone:
+    case MediaSessionAction::kToggleCamera:
+    case MediaSessionAction::kHangUp:
+    case MediaSessionAction::kRaise:
+      return absl::nullopt;
   }
 }
 

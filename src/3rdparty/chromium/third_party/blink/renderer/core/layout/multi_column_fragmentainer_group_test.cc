@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/layout/multi_column_fragmentainer_group.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/layout/layout_multi_column_flow_thread.h"
 #include "third_party/blink/renderer/core/layout/layout_multi_column_set.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
@@ -33,7 +34,8 @@ class MultiColumnFragmentainerGroupTest : public RenderingTest {
 
 void MultiColumnFragmentainerGroupTest::SetUp() {
   RenderingTest::SetUp();
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
   flow_thread_ = LayoutMultiColumnFlowThread::CreateAnonymous(
       GetDocument(), *style.get(), /* needs_paint_layer */ true);
   column_set_ = LayoutMultiColumnSet::CreateAnonymous(*flow_thread_,

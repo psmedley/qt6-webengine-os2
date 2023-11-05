@@ -20,6 +20,9 @@ const char kAutomaticSettingsResetLearnMoreURL[] =
 const char kAdvancedProtectionDownloadLearnMoreURL[] =
     "https://support.google.com/accounts/accounts?p=safe-browsing";
 
+const char kAppNotificationsBrowserSettingsURL[] =
+    "chrome://settings/content/notifications";
+
 const char kBluetoothAdapterOffHelpURL[] =
     "https://support.google.com/chrome?p=bluetooth";
 
@@ -28,9 +31,6 @@ const char kCastCloudServicesHelpURL[] =
 
 const char kCastNoDestinationFoundURL[] =
     "https://support.google.com/chromecast/?p=no_cast_destination";
-
-const char kChooserBluetoothOverviewURL[] =
-    "https://support.google.com/chrome?p=bluetooth";
 
 const char kChooserHidOverviewUrl[] =
     "https://support.google.com/chrome?p=webhid";
@@ -83,15 +83,13 @@ const char kChromeOsHelpViaWebUIURL[] =
 const char kChromeNativeScheme[] = "chrome-native";
 
 const char kChromeSearchLocalNtpHost[] = "local-ntp";
-const char kChromeSearchLocalNtpUrl[] =
-    "chrome-search://local-ntp/local-ntp.html";
 
 const char kChromeSearchMostVisitedHost[] = "most-visited";
 const char kChromeSearchMostVisitedUrl[] = "chrome-search://most-visited/";
 
-const char kChromeSearchLocalNtpBackgroundUrl[] =
-    "chrome-search://local-ntp/background.jpg";
-const char kChromeSearchLocalNtpBackgroundFilename[] = "background.jpg";
+const char kChromeUIUntrustedNewTabPageBackgroundUrl[] =
+    "chrome-untrusted://new-tab-page/background.jpg";
+const char kChromeUIUntrustedNewTabPageBackgroundFilename[] = "background.jpg";
 
 const char kChromeSearchRemoteNtpHost[] = "remote-ntp";
 
@@ -120,9 +118,6 @@ const char kContentSettingsExceptionsLearnMoreURL[] =
 
 const char kCookiesSettingsHelpCenterURL[] =
     "https://support.google.com/chrome?p=cpn_cookies";
-
-const char kCpuX86Sse2ObsoleteURL[] =
-    "https://support.google.com/chrome/?p=chrome_update_sse3";
 
 const char kCrashReasonURL[] =
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -162,6 +157,9 @@ const char kFlashDeprecationLearnMoreURL[] =
 const char kGoogleAccountActivityControlsURL[] =
     "https://myaccount.google.com/activitycontrols/search";
 
+const char kGoogleAccountLanguagesURL[] =
+    "https://myaccount.google.com/language";
+
 const char kGoogleAccountURL[] = "https://myaccount.google.com";
 
 const char kGoogleAccountChooserURL[] =
@@ -185,7 +183,7 @@ const char kMixedContentDownloadBlockingLearnMoreUrl[] =
     "https://support.google.com/chrome/?p=mixed_content_downloads";
 
 const char kMyActivityUrlInClearBrowsingData[] =
-    "https://myactivity.google.com/myactivity/?utm_source=chrome_cbd";
+    "https://myactivity.google.com/myactivity?utm_source=chrome_cbd";
 
 const char kOmniboxLearnMoreURL[] =
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -253,6 +251,9 @@ const char kSafeBrowsingHelpCenterURL[] =
 const char kSafetyTipHelpCenterURL[] =
     "https://support.google.com/chrome/?p=safety_tip";
 
+const char kSearchHistoryUrlInClearBrowsingData[] =
+    "https://myactivity.google.com/product/search?utm_source=chrome_cbd";
+
 const char kSeeMoreSecurityTipsURL[] =
     "https://support.google.com/accounts/answer/32040";
 
@@ -278,12 +279,21 @@ const char kSyncGoogleDashboardURL[] =
 const char kSyncLearnMoreURL[] =
     "https://support.google.com/chrome/?p=settings_sign_in";
 
+#if !defined(OS_ANDROID)
+const char kSyncTrustedVaultOptInURL[] =
+    "https://passwords.google.com/encryption/enroll?"
+    "utm_source=chrome&utm_medium=desktop&utm_campaign=encryption_enroll";
+#endif
+
 const char kUpgradeHelpCenterBaseURL[] =
     "https://support.google.com/installer/?product="
     "{8A69D345-D564-463c-AFF1-A69D9E530F96}&error=";
 
 const char kWhoIsMyAdministratorHelpURL[] =
     "https://support.google.com/chrome?p=your_administrator";
+
+const char kCwsEnhancedSafeBrowsingLearnMoreURL[] =
+    "https://support.google.com/chrome?p=cws_enhanced_safe_browsing";
 
 #if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_ANDROID)
 const char kEnhancedPlaybackNotificationLearnMoreURL[] =
@@ -421,11 +431,17 @@ const char kTabletModeGesturesLearnMoreURL[] =
 const char kWifiSyncLearnMoreURL[] =
     "https://support.google.com/chromebook/?p=wifisync";
 
+const char kWifiHiddenNetworkURL[] =
+    "http://support.google.com/chromebook?p=hidden_networks";
+
 const char kNearbyShareLearnMoreURL[] =
     "https://support.google.com/chromebook?p=nearby_share";
 
 extern const char kNearbyShareManageContactsURL[] =
     "https://contacts.google.com";
+
+extern const char kFingerprintLearnMoreURL[] =
+    "https://support.google.com/chromebook?p=chromebook_fingerprint";
 
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 

@@ -15,11 +15,11 @@
 #include "cc/trees/layer_tree_host_client.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
-#include "third_party/blink/public/mojom/widget/screen_orientation.mojom-blink.h"
 #include "third_party/blink/public/platform/input/input_handler_proxy.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
 #include "third_party/blink/public/platform/web_text_input_type.h"
 #include "third_party/blink/public/web/web_lifecycle_update.h"
+#include "ui/display/mojom/screen_orientation.mojom-blink.h"
 
 namespace cc {
 class LayerTreeFrameSink;
@@ -127,7 +127,8 @@ class WidgetBaseClient {
   virtual bool SupportsBufferedTouchEvents() = 0;
 
   virtual void DidHandleKeyEvent() {}
-  virtual bool WillHandleGestureEvent(const WebGestureEvent& event) = 0;
+  virtual void WillHandleGestureEvent(const WebGestureEvent& event,
+                                      bool* suppress) = 0;
   virtual void WillHandleMouseEvent(const WebMouseEvent& event) = 0;
   virtual void ObserveGestureEventAndResult(
       const WebGestureEvent& gesture_event,
@@ -177,19 +178,19 @@ class WidgetBaseClient {
   virtual void OrientationChanged() {}
 
   // Return the original (non-emulated) screen info.
-  virtual const ScreenInfo& GetOriginalScreenInfo() = 0;
+  virtual const display::ScreenInfo& GetOriginalScreenInfo() = 0;
 
   // Indication that the surface and screen were updated.
   virtual void DidUpdateSurfaceAndScreen(
-      const ScreenInfo& previous_original_screen_info) {}
+      const display::ScreenInfo& previous_original_screen_info) {}
 
   // Return the viewport visible rect.
   virtual gfx::Rect ViewportVisibleRect() = 0;
 
   // The screen orientation override.
-  virtual base::Optional<mojom::blink::ScreenOrientation>
+  virtual absl::optional<display::mojom::blink::ScreenOrientation>
   ScreenOrientationOverride() {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Return the overridden device scale factor for testing.
@@ -218,6 +219,15 @@ class WidgetBaseClient {
   // remote in that frame tree, then the url is not known, and an empty url is
   // returned.
   virtual KURL GetURLForDebugTrace() = 0;
+
+  // In EventTiming, we count the events invoked by user interactions. Some
+  // touchstarts will be dropped before they get sent to the main thread.
+  // Meanwhile, the corresponding pointerdown will not be fired. The following
+  // pointerup will be captured in pointer_event_manager. The following touchend
+  // will not be dispatched because there's no target which is always set by
+  // touchstart. But we still want to count those touchstart, pointerdown and
+  // touchend.
+  virtual void CountDroppedPointerDownForEventTiming(unsigned count) {}
 };
 
 }  // namespace blink

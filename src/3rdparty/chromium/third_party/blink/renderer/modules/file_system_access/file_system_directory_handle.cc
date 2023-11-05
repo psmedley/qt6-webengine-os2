@@ -186,7 +186,7 @@ ScriptPromise FileSystemDirectoryHandle::resolve(
       possible_child->Transfer(),
       WTF::Bind(
           [](ScriptPromiseResolver* resolver, FileSystemAccessErrorPtr result,
-             const base::Optional<Vector<String>>& path) {
+             const absl::optional<Vector<String>>& path) {
             if (result->status != mojom::blink::FileSystemAccessStatus::kOk) {
               file_system_access_error::Reject(resolver, *result);
               return;
@@ -241,6 +241,19 @@ void FileSystemDirectoryHandle::RequestPermissionImpl(
   mojo_ptr_->RequestPermission(writable, std::move(callback));
 }
 
+void FileSystemDirectoryHandle::RemoveImpl(
+    const FileSystemRemoveOptions* options,
+    base::OnceCallback<void(mojom::blink::FileSystemAccessErrorPtr)> callback) {
+  if (!mojo_ptr_.is_bound()) {
+    std::move(callback).Run(mojom::blink::FileSystemAccessError::New(
+        mojom::blink::FileSystemAccessStatus::kInvalidState,
+        base::File::Error::FILE_ERROR_FAILED, "Context Destroyed"));
+    return;
+  }
+
+  mojo_ptr_->Remove(options->recursive(), std::move(callback));
+}
+
 void FileSystemDirectoryHandle::IsSameEntryImpl(
     mojo::PendingRemote<mojom::blink::FileSystemAccessTransferToken> other,
     base::OnceCallback<void(mojom::blink::FileSystemAccessErrorPtr, bool)>
@@ -260,7 +273,7 @@ void FileSystemDirectoryHandle::IsSameEntryImpl(
           [](base::OnceCallback<void(mojom::blink::FileSystemAccessErrorPtr,
                                      bool)> callback,
              FileSystemAccessErrorPtr result,
-             const base::Optional<Vector<String>>& path) {
+             const absl::optional<Vector<String>>& path) {
             std::move(callback).Run(std::move(result),
                                     path.has_value() && path->IsEmpty());
           },

@@ -24,16 +24,16 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "base/supports_user_data.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
+#include "components/download/public/common/download_item_rename_progress_update.h"
 #include "components/download/public/common/download_schedule.h"
 #include "components/download/public/common/download_source.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/page_transition_types.h"
 #include "url/origin.h"
 
@@ -307,7 +307,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   virtual const GURL& GetTabReferrerUrl() const = 0;
 
   // Origin of the original originator of this download, before redirects, etc.
-  virtual const base::Optional<url::Origin>& GetRequestInitiator() const = 0;
+  virtual const absl::optional<url::Origin>& GetRequestInitiator() const = 0;
 
   // For downloads initiated via <a download>, this is the suggested download
   // filename from the download attribute.
@@ -351,6 +351,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
 
   // DownloadSource prompting this download.
   virtual DownloadSource GetDownloadSource() const = 0;
+
+  // The credentials mode of the request.
+  virtual ::network::mojom::CredentialsMode GetCredentialsMode() const = 0;
 
   //    Destination State accessors --------------------------------------------
 
@@ -439,6 +442,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   // pointer.
   virtual DownloadItemRenameHandler* GetRenameHandler() = 0;
 
+  // Gets the metadata needed to recover rename handler state.
+  virtual const DownloadItemRerouteInfo& GetRerouteInfo() const = 0;
+
   //    Progress State accessors -----------------------------------------------
 
   // Simple calculation of the amount of time remaining to completion. Fills
@@ -521,7 +527,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   virtual DownloadCreationType GetDownloadCreationType() const = 0;
 
   // Gets the download schedule to start the time at particular time.
-  virtual const base::Optional<DownloadSchedule>& GetDownloadSchedule()
+  virtual const absl::optional<DownloadSchedule>& GetDownloadSchedule()
       const = 0;
 
   // External state transitions/setters ----------------------------------------
@@ -544,7 +550,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
 
   // Called when the user changes the download schedule options.
   virtual void OnDownloadScheduleChanged(
-      base::Optional<DownloadSchedule> schedule) = 0;
+      absl::optional<DownloadSchedule> schedule) = 0;
 
   // Mark the download to be auto-opened when completed.
   virtual void SetOpenWhenComplete(bool open) = 0;

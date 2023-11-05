@@ -17,10 +17,37 @@ namespace blink {
 
 using css_test_helpers::ParseDeclarationBlock;
 
+namespace {
+
+// This list does not necessarily need to be exhaustive.
+const CSSPropertyID kVisitedPropertySamples[] = {
+    CSSPropertyID::kInternalVisitedColor,
+    CSSPropertyID::kInternalVisitedBackgroundColor,
+    CSSPropertyID::kInternalVisitedBorderBlockEndColor,
+    CSSPropertyID::kInternalVisitedBorderBlockStartColor,
+    CSSPropertyID::kInternalVisitedBorderBottomColor,
+    CSSPropertyID::kInternalVisitedBorderInlineEndColor,
+    CSSPropertyID::kInternalVisitedBorderInlineStartColor,
+    CSSPropertyID::kInternalVisitedBorderLeftColor,
+    CSSPropertyID::kInternalVisitedBorderRightColor,
+    CSSPropertyID::kInternalVisitedBorderTopColor,
+    CSSPropertyID::kInternalVisitedCaretColor,
+    CSSPropertyID::kInternalVisitedColumnRuleColor,
+    CSSPropertyID::kInternalVisitedFill,
+    CSSPropertyID::kInternalVisitedOutlineColor,
+    CSSPropertyID::kInternalVisitedStroke,
+    CSSPropertyID::kInternalVisitedTextDecorationColor,
+    CSSPropertyID::kInternalVisitedTextEmphasisColor,
+    CSSPropertyID::kInternalVisitedTextFillColor,
+    CSSPropertyID::kInternalVisitedTextStrokeColor,
+};
+
+}  // namespace
+
 class CascadeExpansionTest : public PageTestBase {
  public:
   CascadeExpansion ExpansionAt(const MatchResult& result,
-                               size_t i,
+                               wtf_size_t i,
                                CascadeFilter filter = CascadeFilter()) {
     return CascadeExpansion(result.GetMatchedProperties()[i], GetDocument(),
                             filter, i);
@@ -30,15 +57,25 @@ class CascadeExpansionTest : public PageTestBase {
     Vector<CSSPropertyID> all;
     for (CSSPropertyID id : CSSPropertyIDList()) {
       const CSSProperty& property = CSSProperty::Get(id);
-      if (property.IsShorthand())
-        continue;
-      if (!property.IsAffectedByAll())
+      if (!CascadeExpansion::IsInAllExpansion(id))
         continue;
       if (filter.Rejects(property))
         continue;
       all.push_back(id);
     }
     return all;
+  }
+
+  Vector<CSSPropertyID> VisitedPropertiesInExpansion(CascadeExpansion e) {
+    Vector<CSSPropertyID> visited;
+
+    while (!e.AtEnd()) {
+      if (CSSProperty::Get(e.Id()).IsVisited())
+        visited.push_back(e.Id());
+      e.Next();
+    }
+
+    return visited;
   }
 };
 
@@ -421,6 +458,22 @@ TEST_F(CascadeExpansionTest, FilterFirstLetter) {
   EXPECT_TRUE(e.AtEnd());
 }
 
+TEST_F(CascadeExpansionTest, FilterFirstLine) {
+  MatchResult result;
+  result.FinishAddingUARules();
+  result.FinishAddingUserRules();
+  result.AddMatchedProperties(
+      ParseDeclarationBlock("display:none;font-size:1px"),
+      CSSSelector::kMatchAll, ValidPropertyFilter::kFirstLine);
+  result.FinishAddingAuthorRulesForTreeScope(GetDocument());
+
+  auto e = ExpansionAt(result, 0);
+  ASSERT_FALSE(e.AtEnd());
+  EXPECT_EQ(CSSPropertyID::kFontSize, e.Id());
+  e.Next();
+  EXPECT_TRUE(e.AtEnd());
+}
+
 TEST_F(CascadeExpansionTest, FilterCue) {
   MatchResult result;
   result.FinishAddingUARules();
@@ -560,6 +613,64 @@ TEST_F(CascadeExpansionTest, AllNonImportance) {
   EXPECT_TRUE(e.AtEnd());
 }
 
+TEST_F(CascadeExpansionTest, AllVisitedOnly) {
+  MatchResult result;
+  result.FinishAddingUARules();
+  result.FinishAddingUserRules();
+  result.AddMatchedProperties(ParseDeclarationBlock("all:unset"),
+                              CSSSelector::kMatchVisited,
+                              ValidPropertyFilter::kNoFilter);
+  result.FinishAddingAuthorRulesForTreeScope(GetDocument());
+
+  ASSERT_EQ(1u, result.GetMatchedProperties().size());
+
+  Vector<CSSPropertyID> visited =
+      VisitedPropertiesInExpansion(ExpansionAt(result, 0));
+
+  for (CSSPropertyID id : kVisitedPropertySamples) {
+    EXPECT_TRUE(visited.Contains(id))
+        << CSSProperty::Get(id).GetPropertyNameString()
+        << " should be in the expansion";
+  }
+}
+
+TEST_F(CascadeExpansionTest, AllVisitedOrLink) {
+  MatchResult result;
+  result.FinishAddingUARules();
+  result.FinishAddingUserRules();
+  result.AddMatchedProperties(ParseDeclarationBlock("all:unset"),
+                              CSSSelector::kMatchAll,
+                              ValidPropertyFilter::kNoFilter);
+  result.FinishAddingAuthorRulesForTreeScope(GetDocument());
+
+  ASSERT_EQ(1u, result.GetMatchedProperties().size());
+
+  Vector<CSSPropertyID> visited =
+      VisitedPropertiesInExpansion(ExpansionAt(result, 0));
+
+  for (CSSPropertyID id : kVisitedPropertySamples) {
+    EXPECT_TRUE(visited.Contains(id))
+        << CSSProperty::Get(id).GetPropertyNameString()
+        << " should be in the expansion";
+  }
+}
+
+TEST_F(CascadeExpansionTest, AllLinkOnly) {
+  MatchResult result;
+  result.FinishAddingUARules();
+  result.FinishAddingUserRules();
+  result.AddMatchedProperties(ParseDeclarationBlock("all:unset"),
+                              CSSSelector::kMatchLink,
+                              ValidPropertyFilter::kNoFilter);
+  result.FinishAddingAuthorRulesForTreeScope(GetDocument());
+
+  ASSERT_EQ(1u, result.GetMatchedProperties().size());
+
+  Vector<CSSPropertyID> visited =
+      VisitedPropertiesInExpansion(ExpansionAt(result, 0));
+  EXPECT_EQ(visited.size(), 0u);
+}
+
 TEST_F(CascadeExpansionTest, Position) {
   MatchResult result;
   result.FinishAddingUARules();
@@ -606,7 +717,7 @@ TEST_F(CascadeExpansionTest, Position) {
 }
 
 TEST_F(CascadeExpansionTest, MatchedPropertiesLimit) {
-  constexpr size_t max = std::numeric_limits<uint16_t>::max();
+  constexpr wtf_size_t max = std::numeric_limits<uint16_t>::max();
 
   static_assert(CascadeExpansion::kMaxMatchedPropertiesIndex == max,
                 "Unexpected max. If the limit increased, evaluate whether it "
@@ -615,12 +726,12 @@ TEST_F(CascadeExpansionTest, MatchedPropertiesLimit) {
   auto* set = ParseDeclarationBlock("left:1px");
 
   MatchResult result;
-  for (size_t i = 0; i < max + 3; ++i)
+  for (wtf_size_t i = 0; i < max + 3; ++i)
     result.AddMatchedProperties(set);
 
   ASSERT_EQ(max + 3u, result.GetMatchedProperties().size());
 
-  for (size_t i = 0; i < max + 1; ++i)
+  for (wtf_size_t i = 0; i < max + 1; ++i)
     EXPECT_FALSE(ExpansionAt(result, i).AtEnd());
 
   // The indices beyond the max should not yield anything.
@@ -629,7 +740,7 @@ TEST_F(CascadeExpansionTest, MatchedPropertiesLimit) {
 }
 
 TEST_F(CascadeExpansionTest, MatchedDeclarationsLimit) {
-  constexpr size_t max = std::numeric_limits<uint16_t>::max();
+  constexpr wtf_size_t max = std::numeric_limits<uint16_t>::max();
 
   static_assert(CascadeExpansion::kMaxDeclarationIndex == max,
                 "Unexpected max. If the limit increased, evaluate whether it "

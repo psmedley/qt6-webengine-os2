@@ -19,11 +19,13 @@ enum VendorID : uint32_t
 {
     VENDOR_ID_UNKNOWN = 0x0,
     VENDOR_ID_AMD     = 0x1002,
+    VENDOR_ID_APPLE   = 0x106B,
     VENDOR_ID_ARM     = 0x13B5,
     // Broadcom devices won't use PCI, but this is their Vulkan vendor id.
     VENDOR_ID_BROADCOM = 0x14E4,
     VENDOR_ID_GOOGLE   = 0x1AE0,
     VENDOR_ID_INTEL    = 0x8086,
+    VENDOR_ID_MESA     = 0x10005,
     VENDOR_ID_NVIDIA   = 0x10DE,
     VENDOR_ID_POWERVR  = 0x1010,
     // This is Qualcomm PCI Vendor ID.
@@ -40,12 +42,18 @@ enum AndroidDeviceID : uint32_t
     ANDROID_DEVICE_ID_NEXUS5X     = 0x4010800,
     ANDROID_DEVICE_ID_PIXEL2      = 0x5040001,
     ANDROID_DEVICE_ID_PIXEL1XL    = 0x5030004,
+    ANDROID_DEVICE_ID_PIXEL4      = 0x6040001,
     ANDROID_DEVICE_ID_SWIFTSHADER = 0xC0DE,
 };
 
 inline bool IsAMD(uint32_t vendorId)
 {
     return vendorId == VENDOR_ID_AMD;
+}
+
+inline bool IsApple(uint32_t vendorId)
+{
+    return vendorId == VENDOR_ID_APPLE;
 }
 
 inline bool IsARM(uint32_t vendorId)
@@ -113,6 +121,11 @@ inline bool IsPixel2(uint32_t vendorId, uint32_t deviceId)
     return IsQualcomm(vendorId) && deviceId == ANDROID_DEVICE_ID_PIXEL2;
 }
 
+inline bool IsPixel4(uint32_t vendorId, uint32_t deviceId)
+{
+    return IsQualcomm(vendorId) && deviceId == ANDROID_DEVICE_ID_PIXEL4;
+}
+
 inline bool IsSwiftshader(uint32_t vendorId, uint32_t deviceId)
 {
     return IsGoogle(vendorId) && deviceId == ANDROID_DEVICE_ID_SWIFTSHADER;
@@ -120,21 +133,22 @@ inline bool IsSwiftshader(uint32_t vendorId, uint32_t deviceId)
 
 const char *GetVendorString(uint32_t vendorId);
 
-// Intel
+// For Linux, Intel graphics driver version is the Mesa version. The version number has three
+// fields: major revision, minor revision and release number.
+// For Windows, The version number includes 3rd and 4th fields. Please refer the details at
+// http://www.intel.com/content/www/us/en/support/graphics-drivers/000005654.html.
+// Current implementation only supports Windows.
 class IntelDriverVersion
 {
   public:
-    // Currently, We only provide the constructor with one parameter. It mainly used in Intel
-    // version number on windows. If you want to use this class on other platforms, it's easy to
-    // be extended.
-    IntelDriverVersion(uint16_t lastPart);
+    IntelDriverVersion(uint32_t buildNumber);
     bool operator==(const IntelDriverVersion &);
     bool operator!=(const IntelDriverVersion &);
     bool operator<(const IntelDriverVersion &);
     bool operator>=(const IntelDriverVersion &);
 
   private:
-    uint16_t mVersionPart;
+    uint32_t mBuildNumber;
 };
 
 bool IsSandyBridge(uint32_t DeviceId);
@@ -145,6 +159,7 @@ bool IsCherryView(uint32_t DeviceId);
 bool IsSkylake(uint32_t DeviceId);
 bool IsBroxton(uint32_t DeviceId);
 bool IsKabylake(uint32_t DeviceId);
+bool Is9thGenIntel(uint32_t DeviceId);
 
 // Platform helpers
 inline bool IsWindows()
@@ -168,6 +183,15 @@ inline bool IsLinux()
 inline bool IsApple()
 {
 #if defined(ANGLE_PLATFORM_APPLE)
+    return true;
+#else
+    return false;
+#endif
+}
+
+inline bool IsMac()
+{
+#if defined(ANGLE_PLATFORM_APPLE) && defined(ANGLE_PLATFORM_MACOS)
     return true;
 #else
     return false;
@@ -210,6 +234,8 @@ bool operator<(const OSVersion &a, const OSVersion &b);
 bool operator>=(const OSVersion &a, const OSVersion &b);
 
 OSVersion GetMacOSVersion();
+
+OSVersion GetiOSVersion();
 
 OSVersion GetLinuxOSVersion();
 

@@ -93,8 +93,8 @@ void ClientCertSelectController::select(int index)
             scoped_refptr<net::X509Certificate> cert = certInfo->certificate();
             net::ClientCertIdentity::SelfOwningAcquirePrivateKey(
                         std::move(certInfo),
-                        base::Bind(&content::ClientCertificateDelegate::ContinueWithCertificate,
-                                   base::Passed(std::move(m_delegate)), std::move(cert)));
+                        base::BindOnce(&content::ClientCertificateDelegate::ContinueWithCertificate,
+                                       std::move(m_delegate), std::move(cert)));
             return;
         }
         std::vector<std::string> pem_encoded;
@@ -112,15 +112,15 @@ void ClientCertSelectController::select(const QSslCertificate &certificate)
     }
     QByteArray derCertificate = certificate.toDer();
     scoped_refptr<net::X509Certificate> selectedCert =
-            net::X509Certificate::CreateFromBytes(derCertificate.constData(), derCertificate.length());
+            net::X509Certificate::CreateFromBytes(base::make_span((const unsigned char *)derCertificate.constData(), derCertificate.length()));
     for (auto &certInfo : m_clientCerts) {
         scoped_refptr<net::X509Certificate> cert = certInfo->certificate();
         if (cert->EqualsExcludingChain(selectedCert.get())) {
             m_selected = true;
             net::ClientCertIdentity::SelfOwningAcquirePrivateKey(
                         std::move(certInfo),
-                        base::Bind(&content::ClientCertificateDelegate::ContinueWithCertificate,
-                                   base::Passed(std::move(m_delegate)), std::move(cert)));
+                        base::BindOnce(&content::ClientCertificateDelegate::ContinueWithCertificate,
+                                       std::move(m_delegate), std::move(cert)));
             return;
         }
     }

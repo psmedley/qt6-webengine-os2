@@ -13,6 +13,7 @@
 
 namespace v8 {
 namespace internal {
+
 template <ArgumentsType T>
 Arguments<T>::ChangeValueScope::ChangeValueScope(Isolate* isolate,
                                                  Arguments* args, int index,

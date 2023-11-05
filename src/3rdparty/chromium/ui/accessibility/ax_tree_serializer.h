@@ -9,13 +9,14 @@
 #include <stdint.h>
 
 #include <ctime>
+#include <map>
+#include <memory>
 #include <ostream>
-#include <unordered_map>
+#include <set>
 #include <unordered_set>
 #include <vector>
 
 #include "base/debug/crash_logging.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
@@ -66,7 +67,8 @@ struct ClientTreeNode;
 template <typename AXSourceNode>
 class AXTreeSerializer {
  public:
-  explicit AXTreeSerializer(AXTreeSource<AXSourceNode>* tree);
+  explicit AXTreeSerializer(AXTreeSource<AXSourceNode>* tree,
+                            bool crash_on_error = true);
   ~AXTreeSerializer();
 
   // Throw out the internal state that keeps track of the nodes the client
@@ -78,7 +80,7 @@ class AXTreeSerializer {
   // for no maximum. This is not a hard maximum - once it hits or
   // exceeds this maximum it stops walking the children of nodes, but
   // it may exceed this value a bit in order to create a consistent
-  // tree. This is only intended to be used for one-time tree snapshots.
+  // tree.
   void set_max_node_count(size_t max_node_count) {
     max_node_count_ = max_node_count;
   }
@@ -95,6 +97,11 @@ class AXTreeSerializer {
   // this only happens when the source tree has a problem like duplicate
   // ids or changing during serialization.
   bool SerializeChanges(AXSourceNode node, AXTreeUpdate* out_update);
+
+  // Get incompletely serialized nodes. This will only be nonempty if either
+  // set_max_node_count or set_timeout were used. This is only valid after a
+  // call to SerializeChanges, and it's reset with each call.
+  std::vector<AXNodeID> GetIncompleteNodeIds();
 
   // Invalidate the subtree rooted at this node, ensuring that the whole
   // subtree is re-serialized the next time any of those nodes end up
@@ -212,12 +219,22 @@ class AXTreeSerializer {
   // The maximum time to spend serializing before timing out, or 0
   // if there's no maximum.
   base::TimeDelta timeout_;
+
+  // The timer, which runs if there's a nonzero timeout and it hasn't
+  // yet expired. Once the timeout elapses, the timer is deleted.
   std::unique_ptr<base::ElapsedTimer> timer_;
+
+  // The IDs of nodes that weren't able to be completely serialized due to
+  // max_node_count_ or timeout_.
+  std::vector<AXNodeID> incomplete_node_ids_;
 
   // Keeps track of if Reset() was called. If so, we need to always
   // explicitly set node_id_to_clear to ensure that the next serialized
   // tree is treated as a completely new tree and not a partial update.
   bool did_reset_ = false;
+
+  // Whether to crash the process on serialization error or not.
+  const bool crash_on_error_;
 };
 
 // In order to keep track of what nodes the client knows about, we keep a
@@ -235,8 +252,9 @@ struct AX_EXPORT ClientTreeNode {
 
 template <typename AXSourceNode>
 AXTreeSerializer<AXSourceNode>::AXTreeSerializer(
-    AXTreeSource<AXSourceNode>* tree)
-    : tree_(tree) {}
+    AXTreeSource<AXSourceNode>* tree,
+    bool crash_on_error)
+    : tree_(tree), crash_on_error_(crash_on_error) {}
 
 template <typename AXSourceNode>
 AXTreeSerializer<AXSourceNode>::~AXTreeSerializer() {
@@ -410,10 +428,13 @@ ClientTreeNode* AXTreeSerializer<AXSourceNode>::GetClientTreeNodeParent(
         "ax_ts_missing_parent_err", base::debug::CrashKeySize::Size256);
     base::debug::SetCrashKeyString(missing_parent_err,
                                    error.str().substr(0, 230));
-#if defined(AX_FAIL_FAST_BUILD)
-    CHECK(false) << error.str();
-#endif  // defined(AX_FAIL_FAST_BUILD)
-    base::debug::DumpWithoutCrashing();
+    if (crash_on_error_) {
+      CHECK(false) << error.str();
+    } else {
+      LOG(ERROR) << error.str();
+      // Different from other errors, not calling Reset() here to avoid breaking
+      // the internal state of this class.
+    }
   }
   return parent;
 }
@@ -424,6 +445,7 @@ bool AXTreeSerializer<AXSourceNode>::SerializeChanges(
     AXTreeUpdate* out_update) {
   if (!timeout_.is_zero())
     timer_ = std::make_unique<base::ElapsedTimer>();
+  incomplete_node_ids_.clear();
 
   // Send the tree data if it's changed since the last update, or if
   // out_update->has_tree_data is already set to true.
@@ -490,6 +512,12 @@ bool AXTreeSerializer<AXSourceNode>::SerializeChanges(
   }
 
   return true;
+}
+
+template <typename AXSourceNode>
+std::vector<AXNodeID> AXTreeSerializer<AXSourceNode>::GetIncompleteNodeIds() {
+  DCHECK(max_node_count_ > 0 || !timeout_.is_zero());
+  return incomplete_node_ids_;
 }
 
 template <typename AXSourceNode>
@@ -573,8 +601,18 @@ bool AXTreeSerializer<AXSourceNode>::SerializeChangedNodes(
     should_terminate_early = true;
 
   // Also terminate early if a timeout is reached.
-  if (!timeout_.is_zero() && timer_->Elapsed() >= timeout_)
-    should_terminate_early = true;
+  if (!timeout_.is_zero()) {
+    if (timer_ && timer_->Elapsed() >= timeout_) {
+      // Terminate early and delete the timer so that we don't have to
+      // keep checking if we timed out.
+      should_terminate_early = true;
+      timer_.reset();
+    } else if (!timer_) {
+      // Already timed out; keep terminating early until the serialization
+      // is done.
+      should_terminate_early = true;
+    }
+  }
 
   // Iterate over the ids of the children of |node|.
   // Create a set of the child ids so we can quickly look
@@ -585,25 +623,10 @@ bool AXTreeSerializer<AXSourceNode>::SerializeChangedNodes(
   std::set<AXNodeID> new_ignored_ids;
   std::set<AXNodeID> new_child_ids;
   std::vector<AXSourceNode> children;
-  if (!should_terminate_early) {
-    tree_->GetChildren(node, &children);
+  if (should_terminate_early) {
+    incomplete_node_ids_.push_back(id);
   } else {
-    static bool logged_once = false;
-    if (!logged_once) {
-      logged_once = true;
-
-      LOG(WARNING) << "Warning: stopped serializing AX nodes before "
-                   << "serialization was complete.";
-      if (max_node_count_) {
-        LOG(WARNING) << "Nodes serialized so far: " << out_update->nodes.size()
-                     << ", max_node_count: " << max_node_count_;
-      }
-      if (!timeout_.is_zero()) {
-        LOG(WARNING) << "Elapsed time in ms: "
-                     << timer_->Elapsed().InMilliseconds()
-                     << ", timeout: " << timeout_.InMilliseconds();
-      }
-    }
+    tree_->GetChildren(node, &children);
   }
   for (size_t i = 0; i < children.size(); ++i) {
     AXSourceNode& child = children[i];
@@ -617,7 +640,6 @@ bool AXTreeSerializer<AXSourceNode>::SerializeChangedNodes(
 
     ClientTreeNode* client_child = ClientTreeNodeById(new_child_id);
     if (client_child && GetClientTreeNodeParent(client_child) != client_node) {
-#if defined(AX_FAIL_FAST_BUILD)
       // This condition leads to performance problems. It will
       // also reset virtual buffers, causing users to lose their place.
       std::ostringstream error;
@@ -630,17 +652,12 @@ bool AXTreeSerializer<AXSourceNode>::SerializeChangedNodes(
       static auto* reparent_err = base::debug::AllocateCrashKeyString(
           "ax_ts_reparent_err", base::debug::CrashKeySize::Size256);
       base::debug::SetCrashKeyString(reparent_err, error.str().substr(0, 230));
-      CHECK(false) << error.str();
-#endif  // defined(AX_FAIL_FAST_BUILD)
-      static bool has_sent_reparent_err = false;
-      if (!has_sent_reparent_err) {
-        std::srand(std::time(nullptr));  // use current time as seed.
-        if (std::rand() % 50 == 0) {     // Roughly 2% of the time.
-          base::debug::DumpWithoutCrashing();
-          has_sent_reparent_err = true;  // Only send once.
-        }
+      if (crash_on_error_) {
+        CHECK(false) << error.str();
+      } else {
+        LOG(ERROR) << error.str();
+        Reset();
       }
-      Reset();
       return false;
     }
   }
@@ -733,18 +750,12 @@ bool AXTreeSerializer<AXSourceNode>::SerializeChangedNodes(
         static auto* dupe_id_err = base::debug::AllocateCrashKeyString(
             "ax_ts_dupe_id_err", base::debug::CrashKeySize::Size256);
         base::debug::SetCrashKeyString(dupe_id_err, error.str().substr(0, 230));
-#if defined(AX_FAIL_FAST_BUILD)
-        CHECK(false) << error.str();
-#endif  // defined(AX_FAIL_FAST_BUILD)
-        static bool has_sent_dupe_id_err = false;
-        if (!has_sent_dupe_id_err) {
-          std::srand(std::time(nullptr));  // use current time as seed.
-          if (std::rand() % 50 == 0) {     // Roughly 2% of the time.
-            base::debug::DumpWithoutCrashing();
-            has_sent_dupe_id_err = true;  // Only send once.
-          }
+        if (crash_on_error_) {
+          CHECK(false) << error.str();
+        } else {
+          LOG(ERROR) << error.str();
+          Reset();
         }
-        Reset();
         return false;
       }
       client_id_map_[child_id] = new_child;

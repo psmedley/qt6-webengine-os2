@@ -4,7 +4,6 @@
 
 import("//media/media_options.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
-import("//third_party/webrtc/webrtc.gni")
 
 blink_modules_sources("peerconnection") {
   sources = [
@@ -56,6 +55,10 @@ blink_modules_sources("peerconnection") {
     "rtc_encoded_audio_frame.h",
     "rtc_encoded_audio_frame_delegate.cc",
     "rtc_encoded_audio_frame_delegate.h",
+    "rtc_encoded_audio_receiver_sink_optimizer.cc",
+    "rtc_encoded_audio_receiver_sink_optimizer.h",
+    "rtc_encoded_audio_receiver_source_optimizer.cc",
+    "rtc_encoded_audio_receiver_source_optimizer.h",
     "rtc_encoded_audio_underlying_sink.cc",
     "rtc_encoded_audio_underlying_sink.h",
     "rtc_encoded_audio_underlying_source.cc",
@@ -150,6 +153,7 @@ blink_modules_sources("peerconnection") {
     "//jingle:webrtc_glue",
     "//services/metrics/public/cpp:ukm_builders",
     "//third_party/abseil-cpp:absl",
+    "//third_party/blink/public/mojom:web_feature_mojo_bindings",
     "//third_party/blink/renderer/modules/crypto",
     "//third_party/blink/renderer/modules/mediastream",
     "//third_party/blink/renderer/modules/webrtc",
@@ -168,15 +172,6 @@ blink_modules_sources("peerconnection") {
 
 jumbo_source_set("test_support") {
   testonly = true
-
-  # TODO(crbug.com/1173961): avoid depending on testonly webrtc targets.
-  if (rtc_include_tests) {
-    # This target uses some webrtc targets that are not part of
-    # "webrtc_component". This target relies on the fact that including a header
-    # that is not tracked by GN works without raising any warning. However it
-    # leads to build errors if rtc_include_tests = true.
-    check_includes = false
-  }
 
   sources = [
     "fake_rtc_rtp_transceiver_impl.cc",

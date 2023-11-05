@@ -24,8 +24,7 @@
 #include "third_party/blink/renderer/core/html/html_script_element.h"
 
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/html_script_element_or_svg_script_element.h"
-#include "third_party/blink/renderer/bindings/core/v8/string_or_trusted_script.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_htmlscriptelement_svgscriptelement.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -91,6 +90,10 @@ void HTMLScriptElement::ParseAttribute(
     loader_->HandleSourceAttribute(params.new_value);
     LogUpdateAttributeIfIsolatedWorldAndInDocument("script", params);
   } else if (params.name == html_names::kAsyncAttr) {
+    // https://html.spec.whatwg.org/C/#non-blocking
+    // "In addition, whenever a script element whose |non-blocking|
+    // flag is set has an async content attribute added, the element's
+    // |non-blocking| flag must be unset."
     loader_->HandleAsyncAttribute();
   } else if (params.name == html_names::kImportanceAttr &&
              RuntimeEnabledFeatures::PriorityHintsEnabled(
@@ -128,22 +131,33 @@ void HTMLScriptElement::setText(const String& string) {
   setTextContent(string);
 }
 
-void HTMLScriptElement::text(StringOrTrustedScript& result) {
-  result.SetString(TextFromChildren());
+void HTMLScriptElement::setInnerTextForBinding(
+    const V8UnionStringTreatNullAsEmptyStringOrTrustedScript*
+        string_or_trusted_script,
+    ExceptionState& exception_state) {
+  const String& value = TrustedTypesCheckForScript(
+      string_or_trusted_script, GetExecutionContext(), exception_state);
+  if (exception_state.HadException())
+    return;
+  // https://w3c.github.io/webappsec-trusted-types/dist/spec/#setting-slot-values
+  // On setting, the innerText [...] perform the regular steps, and then set
+  // content object's [[ScriptText]] internal slot value [...].
+  HTMLElement::setInnerText(value, exception_state);
+  script_text_internal_slot_ = ParkableString(value.Impl());
 }
 
-void HTMLScriptElement::setInnerText(
-    const StringOrTrustedScript& string_or_trusted_script,
+void HTMLScriptElement::setTextContentForBinding(
+    const V8UnionStringOrTrustedScript* value,
     ExceptionState& exception_state) {
-  String value = TrustedTypesCheckForScript(
-      string_or_trusted_script, GetExecutionContext(), exception_state);
-  if (!exception_state.HadException()) {
-    // https://w3c.github.io/webappsec-trusted-types/dist/spec/#setting-slot-values
-    // On setting, the innerText [...] perform the regular steps, and then set
-    // content object's [[ScriptText]] internal slot value [...].
-    HTMLElement::setInnerText(value, exception_state);
-    script_text_internal_slot_ = ParkableString(value.Impl());
-  }
+  const String& string =
+      TrustedTypesCheckForScript(value, GetExecutionContext(), exception_state);
+  if (exception_state.HadException())
+    return;
+  // https://w3c.github.io/webappsec-trusted-types/dist/spec/#setting-slot-values
+  // On setting, [..] textContent [..] perform the regular steps, and then set
+  // content object's [[ScriptText]] internal slot value [...].
+  Node::setTextContent(string);
+  script_text_internal_slot_ = ParkableString(string.Impl());
 }
 
 void HTMLScriptElement::setTextContent(const String& string) {
@@ -154,21 +168,8 @@ void HTMLScriptElement::setTextContent(const String& string) {
   script_text_internal_slot_ = ParkableString(string.Impl());
 }
 
-void HTMLScriptElement::setTextContent(
-    const StringOrTrustedScript& string_or_trusted_script,
-    ExceptionState& exception_state) {
-  String value = TrustedTypesCheckForScript(
-      string_or_trusted_script, GetExecutionContext(), exception_state);
-  if (!exception_state.HadException()) {
-    // https://w3c.github.io/webappsec-trusted-types/dist/spec/#setting-slot-values
-    // On setting, [..] textContent [..] perform the regular steps, and then set
-    // content object's [[ScriptText]] internal slot value [...].
-    Node::setTextContent(value);
-    script_text_internal_slot_ = ParkableString(value.Impl());
-  }
-}
-
 void HTMLScriptElement::setAsync(bool async) {
+  // https://html.spec.whatwg.org/multipage/scripting.html#dom-script-async
   SetBooleanAttribute(html_names::kAsyncAttr, async);
   loader_->HandleAsyncAttribute();
 }
@@ -285,18 +286,22 @@ ExecutionContext* HTMLScriptElement::GetExecutionContext() const {
   return Node::GetExecutionContext();
 }
 
+V8HTMLOrSVGScriptElement* HTMLScriptElement::AsV8HTMLOrSVGScriptElement() {
+  if (IsInShadowTree())
+    return nullptr;
+  return MakeGarbageCollected<V8HTMLOrSVGScriptElement>(this);
+}
+
+DOMNodeId HTMLScriptElement::GetDOMNodeId() {
+  return DOMNodeIds::IdForNode(this);
+}
+
 void HTMLScriptElement::DispatchLoadEvent() {
   DispatchEvent(*Event::Create(event_type_names::kLoad));
 }
 
 void HTMLScriptElement::DispatchErrorEvent() {
   DispatchEvent(*Event::Create(event_type_names::kError));
-}
-
-void HTMLScriptElement::SetScriptElementForBinding(
-    HTMLScriptElementOrSVGScriptElement& element) {
-  if (!IsInShadowTree())
-    element.SetHTMLScriptElement(this);
 }
 
 ScriptElementBase::Type HTMLScriptElement::GetScriptElementType() {

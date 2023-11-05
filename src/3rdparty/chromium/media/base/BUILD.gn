@@ -23,6 +23,11 @@ jumbo_source_set("base") {
   visibility = media_subcomponent_deps
   visibility += [ "//media" ]
 
+  if (!enable_library_cdms) {
+    # cdm_type_conversion is not part of media_subcomponent_deps.
+    visibility += [ "//media/cdm:cdm_type_conversion" ]
+  }
+
   # TODO(dalecurtis): Replace this with empty targets on non-mac so
   # we can just include //media/base/mac in media_subcomponent_deps.
   if (is_apple) {
@@ -90,6 +95,8 @@ jumbo_source_set("base") {
     "bit_reader.h",
     "bit_reader_core.cc",
     "bit_reader_core.h",
+    "bitrate.cc",
+    "bitrate.h",
     "bitstream_buffer.cc",
     "bitstream_buffer.h",
     "buffering_state.cc",
@@ -266,8 +273,6 @@ jumbo_source_set("base") {
     "seekable_buffer.h",
     "serial_runner.cc",
     "serial_runner.h",
-    "shared_memory_pool.cc",
-    "shared_memory_pool.h",
     "silent_sink_suspender.cc",
     "silent_sink_suspender.h",
     "simple_sync_token_client.cc",
@@ -311,6 +316,8 @@ jumbo_source_set("base") {
     "use_after_free_checker.h",
     "user_input_monitor.cc",
     "user_input_monitor.h",
+    "video_aspect_ratio.cc",
+    "video_aspect_ratio.h",
     "video_bitrate_allocation.cc",
     "video_bitrate_allocation.h",
     "video_codecs.cc",
@@ -325,8 +332,6 @@ jumbo_source_set("base") {
     "video_encoder.h",
     "video_frame.cc",
     "video_frame.h",
-    "video_frame_feedback.cc",
-    "video_frame_feedback.h",
     "video_frame_layout.cc",
     "video_frame_layout.h",
     "video_frame_metadata.cc",
@@ -339,8 +344,6 @@ jumbo_source_set("base") {
     "video_thumbnail_decoder.h",
     "video_transformation.cc",
     "video_transformation.h",
-    "video_types.cc",
-    "video_types.h",
     "video_util.cc",
     "video_util.h",
     "wait_and_replace_sync_token_client.cc",
@@ -362,29 +365,28 @@ jumbo_source_set("base") {
     "//ui/gl",
   ]
   deps = [
+    "//base",
     "//base/allocator:buildflags",
-    "//base/util/values:values_util",
     "//build:chromeos_buildflags",
     "//components/system_media_controls/linux/buildflags",
     "//gpu/command_buffer/client:interface_base",
     "//gpu/command_buffer/client:raster_interface",
     "//gpu/command_buffer/common",
     "//gpu/ipc/common:common",
+    "//net",
     "//skia",
     "//third_party/libyuv",
     "//third_party/widevine/cdm:headers",
     "//ui/display:display",
     "//ui/events:events",
     "//ui/events:events_base",
+    "//ui/events:keyboard_hook",
     "//url:url",
   ]
 
   libs = []
   configs += [
     "//build/config:precompiled_headers",
-
-    # TODO(crbug.com/167187): Fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
 
     "//media:subcomponent_config",
   ]
@@ -394,6 +396,10 @@ jumbo_source_set("base") {
       "//third_party/ffmpeg",
       "//third_party/ffmpeg:ffmpeg_features",
     ]
+  }
+
+  if (is_chromeos_ash) {
+    deps += [ "//ash/constants" ]
   }
 
   if (media_use_libvpx) {
@@ -437,7 +443,10 @@ jumbo_source_set("base") {
   }
 
   if (is_win) {
-    public_deps += [ "//media/base/win:mf_cdm_proxy" ]
+    public_deps += [
+      "//media/base/win:dcomp_texture_wrapper",
+      "//media/base/win:mf_cdm_proxy",
+    ]
   }
 
   # TODO(ziyangch): Check |is_chromecast| first when using cast media pipeline
@@ -513,6 +522,8 @@ static_library("test_support") {
     "mock_filters.h",
     "mock_media_log.cc",
     "mock_media_log.h",
+    "mock_video_renderer_sink.cc",
+    "mock_video_renderer_sink.h",
     "test_data_util.cc",
     "test_data_util.h",
     "test_helpers.cc",
@@ -593,7 +604,6 @@ source_set("unit_tests") {
     "renderer_factory_selector_unittest.cc",
     "seekable_buffer_unittest.cc",
     "serial_runner_unittest.cc",
-    "shared_memory_pool_unittest.cc",
     "silent_sink_suspender_unittest.cc",
     "sinc_resampler_unittest.cc",
     "status_unittest.cc",
@@ -608,6 +618,7 @@ source_set("unit_tests") {
     "unaligned_shared_memory_unittest.cc",
     "user_input_monitor_unittest.cc",
     "vector_math_unittest.cc",
+    "video_aspect_ratio_unittest.cc",
     "video_bitrate_allocation_unittest.cc",
     "video_codecs_unittest.cc",
     "video_color_space_unittest.cc",
@@ -620,17 +631,14 @@ source_set("unit_tests") {
     "video_util_unittest.cc",
     "wall_clock_time_source_unittest.cc",
   ]
-  configs += [
-    # TODO(crbug.com/167187): Fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-    "//media:media_config",
-  ]
+  configs += [ "//media:media_config" ]
   deps = [
     "//base/test:test_support",
     "//build:chromeos_buildflags",
     "//components/viz/common",
     "//gpu/command_buffer/common",
     "//media:test_support",
+    "//net",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/libyuv",
@@ -668,11 +676,7 @@ source_set("perftests") {
     "sinc_resampler_perftest.cc",
     "vector_math_perftest.cc",
   ]
-  configs += [
-    # TODO(crbug.com/167187): Fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-    "//media:media_config",
-  ]
+  configs += [ "//media:media_config" ]
   deps = [
     "//base",
     "//base/test:test_support",

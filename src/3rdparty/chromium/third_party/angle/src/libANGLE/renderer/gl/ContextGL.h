@@ -235,6 +235,7 @@ class ContextGL : public ContextImpl
 
     // Context switching
     angle::Result onMakeCurrent(const gl::Context *context) override;
+    angle::Result onUnMakeCurrent(const gl::Context *context) override;
 
     // Caps queries
     gl::Caps getNativeCaps() const override;
@@ -267,6 +268,10 @@ class ContextGL : public ContextImpl
 
     void setNeedsFlushBeforeDeleteTextures();
     void flushIfNecessaryBeforeDeleteTextures();
+
+    void markWorkSubmitted();
+
+    const gl::Debug &getDebug() const { return mState.getDebug(); }
 
   private:
     angle::Result setDrawArraysState(const gl::Context *context,

@@ -30,7 +30,6 @@
 
 #include "third_party/blink/public/platform/web_string.h"
 
-#include "base/i18n/uchar.h"
 #include "base/strings/string_util.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_fast_path.h"
@@ -57,8 +56,9 @@ WebString& WebString::operator=(const WebString&) = default;
 WebString& WebString::operator=(WebString&&) = default;
 
 WebString::WebString(const WebUChar* data, size_t len)
-    : impl_(StringImpl::Create8BitIfPossible(base::i18n::ToUCharPtr(data),
-                                             len)) {}
+    : impl_(StringImpl::Create8BitIfPossible(
+          data,
+          base::checked_cast<wtf_size_t>(len))) {}
 
 void WebString::Reset() {
   impl_ = nullptr;
@@ -77,8 +77,7 @@ const WebLChar* WebString::Data8() const {
 }
 
 const WebUChar* WebString::Data16() const {
-  return impl_ && !Is8Bit() ? base::i18n::ToChar16Ptr(impl_->Characters16())
-                            : nullptr;
+  return impl_ && !Is8Bit() ? impl_->Characters16() : nullptr;
 }
 
 std::string WebString::Utf8(UTF8ConversionMode mode) const {
@@ -86,18 +85,23 @@ std::string WebString::Utf8(UTF8ConversionMode mode) const {
 }
 
 WebString WebString::Substring(size_t pos, size_t len) const {
-  return String(impl_->Substring(pos, len));
+  return String(impl_->Substring(base::checked_cast<wtf_size_t>(pos),
+                                 base::checked_cast<wtf_size_t>(len)));
 }
 
 WebString WebString::FromUTF8(const char* data, size_t length) {
   return String::FromUTF8(data, length);
 }
 
-WebString WebString::FromUTF16(const base::string16& s) {
+WebString WebString::FromUTF16(const char16_t* s) {
+  return WebString(s, std::char_traits<char16_t>::length(s));
+}
+
+WebString WebString::FromUTF16(const std::u16string& s) {
   return WebString(s.data(), s.length());
 }
 
-WebString WebString::FromUTF16(const base::Optional<base::string16>& s) {
+WebString WebString::FromUTF16(const absl::optional<std::u16string>& s) {
   if (!s.has_value())
     return WebString();
   return WebString(s->data(), s->length());
@@ -108,7 +112,7 @@ std::string WebString::Latin1() const {
 }
 
 WebString WebString::FromLatin1(const WebLChar* data, size_t length) {
-  return String(data, length);
+  return String(data, base::checked_cast<wtf_size_t>(length));
 }
 
 std::string WebString::Ascii() const {
@@ -146,7 +150,7 @@ bool WebString::Equals(const WebString& s) const {
 }
 
 bool WebString::Equals(const char* characters, size_t length) const {
-  return Equal(impl_.get(), characters, length);
+  return Equal(impl_.get(), characters, base::checked_cast<wtf_size_t>(length));
 }
 
 WebString::WebString(const WTF::String& s) : impl_(s.Impl()) {}

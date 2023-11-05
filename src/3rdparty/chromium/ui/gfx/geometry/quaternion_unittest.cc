@@ -4,8 +4,8 @@
 
 #include <cmath>
 
+#include "base/cxx17_backports.h"
 #include "base/numerics/math_constants.h"
-#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/quaternion.h"
 #include "ui/gfx/geometry/vector3d_f.h"
@@ -211,6 +211,27 @@ TEST(QuatTest, SlerpObtuseAngle) {
   double xz = std::sin(expected_half_angle) / std::sqrt(2);
   Quaternion expected(xz, 0, xz, -std::cos(expected_half_angle));
   EXPECT_QUATERNION(expected, interpolated);
+}
+
+TEST(QuatTest, Equals) {
+  EXPECT_TRUE(Quaternion() == Quaternion());
+  EXPECT_TRUE(Quaternion() == Quaternion(0, 0, 0, 1));
+  EXPECT_TRUE(Quaternion(1, 5.2, -8.5, 222.2) ==
+              Quaternion(1, 5.2, -8.5, 222.2));
+  EXPECT_FALSE(Quaternion() == Quaternion(1, 0, 0, 0));
+  EXPECT_FALSE(Quaternion() == Quaternion(0, 1, 0, 0));
+  EXPECT_FALSE(Quaternion() == Quaternion(0, 0, 1, 0));
+  EXPECT_FALSE(Quaternion() == Quaternion(1, 0, 0, 1));
+}
+
+TEST(QuatTest, NotEquals) {
+  EXPECT_FALSE(Quaternion() != Quaternion());
+  EXPECT_FALSE(Quaternion(1, 5.2, -8.5, 222.2) !=
+               Quaternion(1, 5.2, -8.5, 222.2));
+  EXPECT_TRUE(Quaternion() != Quaternion(1, 0, 0, 0));
+  EXPECT_TRUE(Quaternion() != Quaternion(0, 1, 0, 0));
+  EXPECT_TRUE(Quaternion() != Quaternion(0, 0, 1, 0));
+  EXPECT_TRUE(Quaternion() != Quaternion(1, 0, 0, 1));
 }
 
 }  // namespace gfx

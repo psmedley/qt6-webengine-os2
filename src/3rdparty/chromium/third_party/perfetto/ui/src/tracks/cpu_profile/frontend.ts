@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {hsluvToHex} from 'hsluv';
+
 import {searchSegment} from '../../base/binary_search';
 import {Actions} from '../../common/actions';
-import {hueForSlice} from '../../common/colorizer';
-import {TrackState} from '../../common/state';
+import {hslForSlice} from '../../common/colorizer';
 import {fromNs, toNs} from '../../common/time';
 import {globals} from '../../frontend/globals';
 import {TimeScale} from '../../frontend/time_scale';
-import {Track} from '../../frontend/track';
+import {NewTrackArgs, Track} from '../../frontend/track';
 import {trackRegistry} from '../../frontend/track_registry';
 
 import {Config, CPU_PROFILE_TRACK_KIND, Data} from './common';
@@ -28,23 +29,21 @@ const MARGIN_TOP = 4.5;
 const RECT_HEIGHT = 30.5;
 
 function colorForSample(callsiteId: number, isHovered: boolean): string {
-  const hue = hueForSlice(String(callsiteId));
-  const lightness = isHovered ? '55%' : '70%';
-  return `hsl(${hue}, 45%, ${lightness})`;
+  return hsluvToHex(hslForSlice(String(callsiteId), isHovered));
 }
 
 class CpuProfileTrack extends Track<Config, Data> {
   static readonly kind = CPU_PROFILE_TRACK_KIND;
-  static create(trackState: TrackState): CpuProfileTrack {
-    return new CpuProfileTrack(trackState);
+  static create(args: NewTrackArgs): CpuProfileTrack {
+    return new CpuProfileTrack(args);
   }
 
   private centerY = this.getHeight() / 2;
   private markerWidth = (this.getHeight() - MARGIN_TOP) / 2;
   private hoveredTs: number|undefined = undefined;
 
-  constructor(trackState: TrackState) {
-    super(trackState);
+  constructor(args: NewTrackArgs) {
+    super(args.trackId);
   }
 
   getHeight() {

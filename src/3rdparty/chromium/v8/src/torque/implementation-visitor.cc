@@ -11,19 +11,33 @@
 #include "src/base/optional.h"
 #include "src/common/globals.h"
 #include "src/torque/cc-generator.h"
+#include "src/torque/cfg.h"
 #include "src/torque/constants.h"
+#include "src/torque/cpp-builder.h"
 #include "src/torque/csa-generator.h"
 #include "src/torque/declaration-visitor.h"
 #include "src/torque/global-context.h"
 #include "src/torque/parameter-difference.h"
 #include "src/torque/server-data.h"
+#include "src/torque/source-positions.h"
 #include "src/torque/type-inference.h"
 #include "src/torque/type-visitor.h"
 #include "src/torque/types.h"
+#include "src/torque/utils.h"
 
 namespace v8 {
 namespace internal {
 namespace torque {
+
+// Sadly, 'using std::string_literals::operator""s;' is bugged in MSVC (see
+// https://developercommunity.visualstudio.com/t/Incorrect-warning-when-using-standard-st/673948).
+// TODO(nicohartmann@): Change to 'using std::string_literals::operator""s;'
+// once this is fixed.
+using namespace std::string_literals;  // NOLINT(build/namespaces)
+
+namespace {
+const char* BuiltinIncludesMarker = "// __BUILTIN_INCLUDES_MARKER__\n";
+}  // namespace
 
 VisitResult ImplementationVisitor::Visit(Expression* expr) {
   CurrentSourcePosition::Scope scope(expr->pos);
@@ -65,55 +79,55 @@ void ImplementationVisitor::BeginGeneratedFiles() {
     }
   }
 
-  for (SourceId file : SourceFileMap::AllSources()) {
-    auto& streams = GlobalContext::GeneratedPerFile(file);
+  for (SourceId source : SourceFileMap::AllSources()) {
+    auto& streams = GlobalContext::GeneratedPerFile(source);
     // Output beginning of CSA .cc file.
     {
-      std::ostream& out = streams.csa_ccfile;
+      cpp::File& file = streams.csa_cc;
 
       for (const std::string& include_path : GlobalContext::CppIncludes()) {
-        out << "#include " << StringLiteralQuote(include_path) << "\n";
+        file << "#include " << StringLiteralQuote(include_path) << "\n";
       }
 
-      for (SourceId file : SourceFileMap::AllSources()) {
-        out << "#include \"torque-generated/" +
-                   SourceFileMap::PathFromV8RootWithoutExtension(file) +
-                   "-tq-csa.h\"\n";
-      }
-      out << "\n";
+      file << "// Required Builtins:\n";
+      file << "#include \"torque-generated/" +
+                  SourceFileMap::PathFromV8RootWithoutExtension(source) +
+                  "-tq-csa.h\"\n";
+      // Now that required include files are collected while generting the file,
+      // we only know the full set at the end. Insert a marker here that is
+      // replaced with the list of includes at the very end.
+      // TODO(nicohartmann@): This is not the most beautiful way to do this,
+      // replace once the cpp file builder is available, where this can be
+      // handled easily.
+      file << BuiltinIncludesMarker;
+      file << "\n";
 
-      out << "namespace v8 {\n"
-          << "namespace internal {\n"
-          << "\n";
+      streams.csa_cc.BeginNamespace("v8", "internal");
     }
     // Output beginning of CSA .h file.
     {
-      std::ostream& out = streams.csa_headerfile;
+      cpp::File& file = streams.csa_header;
       std::string header_define =
           "V8_GEN_TORQUE_GENERATED_" +
-          UnderlinifyPath(SourceFileMap::PathFromV8Root(file)) + "_CSA_H_";
-      out << "#ifndef " << header_define << "\n";
-      out << "#define " << header_define << "\n\n";
-      out << "#include \"src/builtins/torque-csa-header-includes.h\"\n";
-      out << "\n";
+          UnderlinifyPath(SourceFileMap::PathFromV8Root(source)) + "_CSA_H_";
+      streams.csa_header.BeginIncludeGuard(header_define);
+      file << "#include \"src/builtins/torque-csa-header-includes.h\"\n";
+      file << "\n";
 
-      out << "namespace v8 {\n"
-          << "namespace internal {\n"
-          << "\n";
+      streams.csa_header.BeginNamespace("v8", "internal");
     }
     // Output beginning of class definition .cc file.
     {
-      std::ostream& out = streams.class_definition_ccfile;
-      if (contains_class_definitions.count(file) != 0) {
-        out << "#include \""
-            << SourceFileMap::PathFromV8RootWithoutExtension(file)
-            << "-inl.h\"\n\n";
-        out << "#include \"torque-generated/class-verifiers.h\"\n";
-        out << "#include \"src/objects/instance-type-inl.h\"\n\n";
+      cpp::File& file = streams.class_definition_cc;
+      if (contains_class_definitions.count(source) != 0) {
+        file << "#include \""
+             << SourceFileMap::PathFromV8RootWithoutExtension(source)
+             << "-inl.h\"\n\n";
+        file << "#include \"torque-generated/class-verifiers.h\"\n";
+        file << "#include \"src/objects/instance-type-inl.h\"\n\n";
       }
 
-      out << "namespace v8 {\n";
-      out << "namespace internal {\n";
+      streams.class_definition_cc.BeginNamespace("v8", "internal");
     }
   }
 }
@@ -121,39 +135,33 @@ void ImplementationVisitor::BeginGeneratedFiles() {
 void ImplementationVisitor::EndGeneratedFiles() {
   for (SourceId file : SourceFileMap::AllSources()) {
     auto& streams = GlobalContext::GeneratedPerFile(file);
-    {
-      std::ostream& out = streams.csa_ccfile;
 
-      out << "}  // namespace internal\n"
-          << "}  // namespace v8\n"
-          << "\n";
-    }
-    {
-      std::ostream& out = streams.csa_headerfile;
+    // Output ending of CSA .cc file.
+    streams.csa_cc.EndNamespace("v8", "internal");
 
+    // Output ending of CSA .h file.
+    {
       std::string header_define =
           "V8_GEN_TORQUE_GENERATED_" +
           UnderlinifyPath(SourceFileMap::PathFromV8Root(file)) + "_CSA_H_";
 
-      out << "}  // namespace internal\n"
-          << "}  // namespace v8\n"
-          << "\n";
-      out << "#endif  // " << header_define << "\n";
+      streams.csa_header.EndNamespace("v8", "internal");
+      streams.csa_header.EndIncludeGuard(header_define);
     }
-    {
-      std::ostream& out = streams.class_definition_ccfile;
 
-      out << "} // namespace v8\n";
-      out << "} // namespace internal\n";
-    }
+    // Output ending of class definition .cc file.
+    streams.class_definition_cc.EndNamespace("v8", "internal");
   }
 }
 
 void ImplementationVisitor::BeginDebugMacrosFile() {
+  // TODO(torque-builer): Can use builder for debug_macros_*_
   std::ostream& source = debug_macros_cc_;
   std::ostream& header = debug_macros_h_;
 
   source << "#include \"torque-generated/debug-macros.h\"\n\n";
+  source << "#include \"src/objects/swiss-name-dictionary.h\"\n";
+  source << "#include \"src/objects/ordered-hash-table.h\"\n";
   source << "#include \"tools/debug_helper/debug-macro-shims.h\"\n";
   source << "#include \"include/v8-internal.h\"\n";
   source << "\n";
@@ -166,17 +174,17 @@ void ImplementationVisitor::BeginDebugMacrosFile() {
   const char* kHeaderDefine = "V8_GEN_TORQUE_GENERATED_DEBUG_MACROS_H_";
   header << "#ifndef " << kHeaderDefine << "\n";
   header << "#define " << kHeaderDefine << "\n\n";
-  header << "#include \"src/builtins/torque-csa-header-includes.h\"\n";
   header << "#include \"tools/debug_helper/debug-helper-internal.h\"\n";
   header << "\n";
 
   header << "namespace v8 {\n"
          << "namespace internal {\n"
-         << "namespace debug_helper_internal{\n"
+         << "namespace debug_helper_internal {\n"
          << "\n";
 }
 
 void ImplementationVisitor::EndDebugMacrosFile() {
+  // TODO(torque-builder): Can use builder for debug_macros_*_
   std::ostream& source = debug_macros_cc_;
   std::ostream& header = debug_macros_h_;
 
@@ -198,33 +206,31 @@ void ImplementationVisitor::Visit(NamespaceConstant* decl) {
 
   BindingsManagersScope bindings_managers_scope;
 
-  csa_headerfile() << "  ";
-  GenerateFunctionDeclaration(csa_headerfile(), "", decl->external_name(),
-                              signature, {});
-  csa_headerfile() << ";\n";
+  cpp::Function f =
+      GenerateFunction(nullptr, decl->external_name(), signature, {});
 
-  GenerateFunctionDeclaration(csa_ccfile(), "", decl->external_name(),
-                              signature, {});
-  csa_ccfile() << " {\n";
-  csa_ccfile() << "  compiler::CodeAssembler ca_(state_);\n";
+  f.PrintDeclaration(csa_headerfile());
 
-  DCHECK(!signature.return_type->IsVoidOrNever());
+  f.PrintDefinition(csa_ccfile(), [&](std::ostream& stream) {
+    stream << "  compiler::CodeAssembler ca_(state_);\n";
 
-  assembler_ = CfgAssembler(Stack<const Type*>{});
+    DCHECK(!signature.return_type->IsVoidOrNever());
 
-  VisitResult expression_result = Visit(decl->body());
-  VisitResult return_result =
-      GenerateImplicitConvert(signature.return_type, expression_result);
+    assembler_ = CfgAssembler(Stack<const Type*>{});
 
-  CSAGenerator csa_generator{assembler().Result(), csa_ccfile()};
-  Stack<std::string> values = *csa_generator.EmitGraph(Stack<std::string>{});
+    VisitResult expression_result = Visit(decl->body());
+    VisitResult return_result =
+        GenerateImplicitConvert(signature.return_type, expression_result);
 
-  assembler_ = base::nullopt;
+    CSAGenerator csa_generator{assembler().Result(), stream};
+    Stack<std::string> values = *csa_generator.EmitGraph(Stack<std::string>{});
 
-  csa_ccfile() << "  return ";
-  CSAGenerator::EmitCSAValue(return_result, values, csa_ccfile());
-  csa_ccfile() << ";\n";
-  csa_ccfile() << "}\n\n";
+    assembler_ = base::nullopt;
+
+    stream << "  return ";
+    CSAGenerator::EmitCSAValue(return_result, values, stream);
+    stream << ";";
+  });
 }
 
 void ImplementationVisitor::Visit(TypeAlias* alias) {
@@ -238,10 +244,28 @@ void ImplementationVisitor::Visit(TypeAlias* alias) {
   }
 }
 
+class ImplementationVisitor::MacroInliningScope {
+ public:
+  MacroInliningScope(ImplementationVisitor* visitor, const Macro* macro)
+      : visitor_(visitor), macro_(macro) {
+    if (!visitor_->inlining_macros_.insert(macro).second) {
+      // Recursive macro expansion would just keep going until stack overflow.
+      // To avoid crashes, throw an error immediately.
+      ReportError("Recursive macro call to ", *macro);
+    }
+  }
+  ~MacroInliningScope() { visitor_->inlining_macros_.erase(macro_); }
+
+ private:
+  ImplementationVisitor* visitor_;
+  const Macro* macro_;
+};
+
 VisitResult ImplementationVisitor::InlineMacro(
     Macro* macro, base::Optional<LocationReference> this_reference,
     const std::vector<VisitResult>& arguments,
     const std::vector<Block*> label_blocks) {
+  MacroInliningScope macro_inlining_scope(this, macro);
   CurrentScope::Scope current_scope(macro);
   BindingsManagersScope bindings_managers_scope;
   CurrentCallable::Scope current_callable(macro);
@@ -356,24 +380,23 @@ void ImplementationVisitor::VisitMacroCommon(Macro* macro) {
   bool has_return_value =
       can_return && return_type != TypeOracle::GetVoidType();
 
-  GenerateMacroFunctionDeclaration(csa_headerfile(), macro);
-  csa_headerfile() << ";\n";
+  cpp::Function f = GenerateMacroFunctionDeclaration(macro);
+  f.PrintDeclaration(csa_headerfile());
+
+  cpp::File csa_cc(csa_ccfile());
 
   // Avoid multiple-definition errors since it is possible for multiple
   // generated -inl.inc files to all contain function definitions for the same
   // Torque macro.
+  base::Optional<cpp::IncludeGuardScope> include_guard;
   if (output_type_ == OutputType::kCC) {
-    csa_ccfile() << "#ifndef V8_INTERNAL_DEFINED_" << macro->CCName() << "\n";
-    csa_ccfile() << "#define V8_INTERNAL_DEFINED_" << macro->CCName() << "\n";
+    include_guard.emplace(&csa_cc, "V8_INTERNAL_DEFINED_"s + macro->CCName());
   } else if (output_type_ == OutputType::kCCDebug) {
-    csa_ccfile() << "#ifndef V8_INTERNAL_DEFINED_" << macro->CCDebugName()
-                 << "\n";
-    csa_ccfile() << "#define V8_INTERNAL_DEFINED_" << macro->CCDebugName()
-                 << "\n";
+    include_guard.emplace(&csa_cc,
+                          "V8_INTERNAL_DEFINED_"s + macro->CCDebugName());
   }
 
-  GenerateMacroFunctionDeclaration(csa_ccfile(), macro);
-  csa_ccfile() << " {\n";
+  f.PrintBeginDefinition(csa_ccfile());
 
   if (output_type_ == OutputType::kCC) {
     // For now, generated C++ is only for field offset computations. If we ever
@@ -492,14 +515,9 @@ void ImplementationVisitor::VisitMacroCommon(Macro* macro) {
     }
     csa_ccfile() << ";\n";
   }
-  csa_ccfile() << "}\n";
-  if (output_type_ == OutputType::kCC) {
-    csa_ccfile() << "#endif //  V8_INTERNAL_DEFINED_" << macro->CCName()
-                 << "\n";
-  } else if (output_type_ == OutputType::kCCDebug) {
-    csa_ccfile() << "#endif //  V8_INTERNAL_DEFINED_" << macro->CCDebugName()
-                 << "\n";
-  }
+  f.PrintEndDefinition(csa_ccfile());
+
+  include_guard.reset();
   csa_ccfile() << "\n";
 }
 
@@ -656,8 +674,8 @@ void ImplementationVisitor::Visit(Builtin* builtin) {
   } else {
     DCHECK(builtin->IsStub());
 
-    bool has_context_parameter = signature.HasContextParameter();
     for (size_t i = 0; i < signature.parameter_names.size(); ++i) {
+      const std::string& parameter_name = signature.parameter_names[i]->value;
       const Type* type = signature.types()[i];
       const bool mark_as_used = signature.implicit_count > i;
       std::string var = AddParameter(i, builtin, &parameters, &parameter_types,
@@ -665,14 +683,8 @@ void ImplementationVisitor::Visit(Builtin* builtin) {
       csa_ccfile() << "  " << type->GetGeneratedTypeName() << " " << var
                    << " = "
                    << "UncheckedParameter<" << type->GetGeneratedTNodeTypeName()
-                   << ">(";
-      if (i == 0 && has_context_parameter) {
-        csa_ccfile() << "Descriptor::kContext";
-      } else {
-        csa_ccfile() << "Descriptor::ParameterIndex<"
-                     << (has_context_parameter ? i - 1 : i) << ">()";
-      }
-      csa_ccfile() << ");\n";
+                   << ">(Descriptor::k" << CamelifyString(parameter_name)
+                   << ");\n";
       csa_ccfile() << "  USE(" << var << ");\n";
     }
   }
@@ -1381,10 +1393,19 @@ InitializerResults ImplementationVisitor::VisitInitializerResults(
 }
 
 LocationReference ImplementationVisitor::GenerateFieldReference(
-    VisitResult object, const Field& field, const ClassType* class_type) {
+    VisitResult object, const Field& field, const ClassType* class_type,
+    bool treat_optional_as_indexed) {
   if (field.index.has_value()) {
-    return LocationReference::HeapSlice(
+    LocationReference slice = LocationReference::HeapSlice(
         GenerateCall(class_type->GetSliceMacroName(field), {{object}, {}}));
+    if (field.index->optional && !treat_optional_as_indexed) {
+      // This field was declared using optional syntax, so any reference to it
+      // is implicitly a reference to the first item.
+      return GenerateReferenceToItemInHeapSlice(
+          slice, {TypeOracle::GetConstInt31Type(), "0"});
+    } else {
+      return slice;
+    }
   }
   DCHECK(field.offset.has_value());
   StackRange result_range = assembler().TopRange(0);
@@ -1481,18 +1502,25 @@ VisitResult ImplementationVisitor::GenerateArrayLength(VisitResult object,
     if (field.name_and_type.name == f.name_and_type.name) {
       before_current = false;
     }
+    // We can't generate field references eagerly here, because some preceding
+    // fields might be optional, and attempting to get a reference to an
+    // optional field can crash the program if the field isn't present.
+    // Instead, we use the lazy form of LocalValue to only generate field
+    // references if they are used in the length expression.
     bindings.insert(
         {f.name_and_type.name,
          f.const_qualified
              ? (before_current
-                    ? LocalValue{GenerateFieldReference(object, f, class_type)}
+                    ? LocalValue{[=]() {
+                        return GenerateFieldReference(object, f, class_type);
+                      }}
                     : LocalValue("Array lengths may only refer to fields "
                                  "defined earlier"))
              : LocalValue(
                    "Non-const fields cannot be used for array lengths.")});
   }
   return stack_scope.Yield(
-      GenerateArrayLength(*field.index, class_type->nspace(), bindings));
+      GenerateArrayLength(field.index->expr, class_type->nspace(), bindings));
 }
 
 VisitResult ImplementationVisitor::GenerateArrayLength(
@@ -1515,7 +1543,7 @@ VisitResult ImplementationVisitor::GenerateArrayLength(
                    "Non-const fields cannot be used for array lengths.")});
   }
   return stack_scope.Yield(
-      GenerateArrayLength(*field.index, class_type->nspace(), bindings));
+      GenerateArrayLength(field.index->expr, class_type->nspace(), bindings));
 }
 
 LayoutForInitialization ImplementationVisitor::GenerateLayoutForInitialization(
@@ -1725,7 +1753,24 @@ void ImplementationVisitor::GenerateImplementation(const std::string& dir) {
     GlobalContext::PerFileStreams& streams =
         GlobalContext::GeneratedPerFile(file);
 
-    WriteFile(base_filename + "-tq-csa.cc", streams.csa_ccfile.str());
+    std::string csa_cc = streams.csa_ccfile.str();
+    // Insert missing builtin includes where the marker is.
+    {
+      auto pos = csa_cc.find(BuiltinIncludesMarker);
+      CHECK_NE(pos, std::string::npos);
+      std::string includes;
+      for (const SourceId& include : streams.required_builtin_includes) {
+        std::string include_file =
+            SourceFileMap::PathFromV8RootWithoutExtension(include);
+        includes += "#include \"torque-generated/";
+        includes += include_file;
+        includes += "-tq-csa.h\"\n";
+      }
+      csa_cc.replace(pos, strlen(BuiltinIncludesMarker), std::move(includes));
+    }
+
+    // TODO(torque-builder): Pass file directly.
+    WriteFile(base_filename + "-tq-csa.cc", std::move(csa_cc));
     WriteFile(base_filename + "-tq-csa.h", streams.csa_headerfile.str());
     WriteFile(base_filename + "-tq.inc",
               streams.class_definition_headerfile.str());
@@ -1741,63 +1786,66 @@ void ImplementationVisitor::GenerateImplementation(const std::string& dir) {
   WriteFile(dir + "/debug-macros.cc", debug_macros_cc_.str());
 }
 
-void ImplementationVisitor::GenerateMacroFunctionDeclaration(std::ostream& o,
-                                                             Macro* macro) {
-  GenerateFunctionDeclaration(o, "",
-                              output_type_ == OutputType::kCC
-                                  ? macro->CCName()
-                                  : output_type_ == OutputType::kCCDebug
-                                        ? macro->CCDebugName()
-                                        : macro->ExternalName(),
-                              macro->signature(), macro->parameter_names());
+cpp::Function ImplementationVisitor::GenerateMacroFunctionDeclaration(
+    Macro* macro) {
+  return GenerateFunction(nullptr,
+                          output_type_ == OutputType::kCC
+                              ? macro->CCName()
+                              : output_type_ == OutputType::kCCDebug
+                                    ? macro->CCDebugName()
+                                    : macro->ExternalName(),
+                          macro->signature(), macro->parameter_names());
 }
 
-std::vector<std::string> ImplementationVisitor::GenerateFunctionDeclaration(
-    std::ostream& o, const std::string& macro_prefix, const std::string& name,
-    const Signature& signature, const NameVector& parameter_names,
-    bool pass_code_assembler_state) {
-  std::vector<std::string> generated_parameter_names;
-  if (output_type_ == OutputType::kCC) {
-    o << "inline ";
-  }
+cpp::Function ImplementationVisitor::GenerateFunction(
+    cpp::Class* owner, const std::string& name, const Signature& signature,
+    const NameVector& parameter_names, bool pass_code_assembler_state,
+    std::vector<std::string>* generated_parameter_names) {
+  cpp::Function f(owner, name);
+  f.SetInline(output_type_ == OutputType::kCC);
+
+  // Set return type.
+  // TODO(torque-builder): Consider an overload of SetReturnType that handles
+  // this.
   if (signature.return_type->IsVoidOrNever()) {
-    o << "void";
+    f.SetReturnType("void");
+  } else if (output_type_ == OutputType::kCCDebug) {
+    f.SetReturnType(std::string("Value<") +
+                    signature.return_type->GetDebugType() + ">");
+  } else if (output_type_ == OutputType::kCC) {
+    f.SetReturnType(signature.return_type->GetRuntimeType());
   } else {
-    if (output_type_ == OutputType::kCCDebug) {
-      o << "Value<" << signature.return_type->GetDebugType() << ">";
-    } else {
-      o << (output_type_ == OutputType::kCC
-                ? signature.return_type->GetRuntimeType()
-                : signature.return_type->GetGeneratedTypeName());
-    }
+    DCHECK_EQ(output_type_, OutputType::kCSA);
+    f.SetReturnType(signature.return_type->GetGeneratedTypeName());
   }
-  o << " " << macro_prefix << name << "(";
 
-  bool first = true;
+  bool ignore_first_parameter = true;
   if (output_type_ == OutputType::kCCDebug) {
-    first = false;
-    o << "d::MemoryAccessor accessor";
+    f.AddParameter("d::MemoryAccessor", "accessor");
   } else if (output_type_ == OutputType::kCSA && pass_code_assembler_state) {
-    first = false;
-    o << "compiler::CodeAssemblerState* state_";
+    f.AddParameter("compiler::CodeAssemblerState*", "state_");
+  } else {
+    ignore_first_parameter = false;
   }
 
+  // TODO(torque-builder): Consider an overload for AddParameter that handles
+  // this.
   DCHECK_GE(signature.types().size(), parameter_names.size());
-  for (size_t i = 0; i < signature.types().size(); ++i) {
-    if (!first) o << ", ";
-    first = false;
+  for (std::size_t i = 0; i < signature.types().size(); ++i) {
     const Type* parameter_type = signature.types()[i];
-    const std::string& generated_type_name =
-        output_type_ == OutputType::kCC
-            ? parameter_type->GetRuntimeType()
-            : output_type_ == OutputType::kCCDebug
-                  ? parameter_type->GetDebugType()
-                  : parameter_type->GetGeneratedTypeName();
-
-    generated_parameter_names.push_back(ExternalParameterName(
-        i < parameter_names.size() ? parameter_names[i]->value
-                                   : std::to_string(i)));
-    o << generated_type_name << " " << generated_parameter_names.back();
+    std::string type;
+    if (output_type_ == OutputType::kCC) {
+      type = parameter_type->GetRuntimeType();
+    } else if (output_type_ == OutputType::kCCDebug) {
+      type = parameter_type->GetDebugType();
+    } else {
+      DCHECK_EQ(output_type_, OutputType::kCSA);
+      type = parameter_type->GetGeneratedTypeName();
+    }
+    f.AddParameter(std::move(type),
+                   ExternalParameterName(i < parameter_names.size()
+                                             ? parameter_names[i]->value
+                                             : std::to_string(i)));
   }
 
   for (const LabelDeclaration& label_info : signature.labels) {
@@ -1805,11 +1853,8 @@ std::vector<std::string> ImplementationVisitor::GenerateFunctionDeclaration(
         output_type_ == OutputType::kCCDebug) {
       ReportError("Macros that generate runtime code can't have label exits");
     }
-    if (!first) o << ", ";
-    first = false;
-    generated_parameter_names.push_back(
-        ExternalLabelName(label_info.name->value));
-    o << "compiler::CodeAssemblerLabel* " << generated_parameter_names.back();
+    f.AddParameter("compiler::CodeAssemblerLabel*",
+                   ExternalLabelName(label_info.name->value));
     size_t i = 0;
     for (const Type* type : label_info.types) {
       std::string generated_type_name;
@@ -1820,16 +1865,20 @@ std::vector<std::string> ImplementationVisitor::GenerateFunctionDeclaration(
         generated_type_name += type->GetGeneratedTNodeTypeName();
         generated_type_name += ">*";
       }
-      o << ", ";
-      generated_parameter_names.push_back(
-          ExternalLabelParameterName(label_info.name->value, i));
-      o << generated_type_name << " " << generated_parameter_names.back();
+      f.AddParameter(generated_type_name,
+                     ExternalLabelParameterName(label_info.name->value, i));
       ++i;
     }
   }
 
-  o << ")";
-  return generated_parameter_names;
+  if (generated_parameter_names) {
+    *generated_parameter_names = f.GetParameterNames();
+    if (ignore_first_parameter) {
+      DCHECK(!generated_parameter_names->empty());
+      generated_parameter_names->erase(generated_parameter_names->begin());
+    }
+  }
+  return f;
 }
 
 namespace {
@@ -2284,20 +2333,25 @@ LocationReference ImplementationVisitor::GetLocationReference(
   LocationReference reference = GetLocationReference(expr->array);
   VisitResult index = Visit(expr->index);
   if (reference.IsHeapSlice()) {
-    Arguments arguments{{index}, {}};
-    const StructType* slice_type =
-        *reference.heap_slice().type()->StructSupertype();
-    Method* method = LookupMethod("AtIndex", slice_type, arguments, {});
-    // The reference has to be treated like a normal value when calling methods
-    // on the underlying slice implementation.
-    LocationReference slice_value = LocationReference::Temporary(
-        reference.GetVisitResult(), "slice as value");
-    return LocationReference::HeapReference(
-        GenerateCall(method, std::move(slice_value), arguments, {}, false));
+    return GenerateReferenceToItemInHeapSlice(reference, index);
   } else {
     return LocationReference::ArrayAccess(GenerateFetchFromLocation(reference),
                                           index);
   }
+}
+
+LocationReference ImplementationVisitor::GenerateReferenceToItemInHeapSlice(
+    LocationReference slice, VisitResult index) {
+  DCHECK(slice.IsHeapSlice());
+  Arguments arguments{{index}, {}};
+  const StructType* slice_type = *slice.heap_slice().type()->StructSupertype();
+  Method* method = LookupMethod("AtIndex", slice_type, arguments, {});
+  // The reference has to be treated like a normal value when calling methods
+  // on the underlying slice implementation.
+  LocationReference slice_value =
+      LocationReference::Temporary(slice.GetVisitResult(), "slice as value");
+  return LocationReference::HeapReference(
+      GenerateCall(method, std::move(slice_value), arguments, {}, false));
 }
 
 LocationReference ImplementationVisitor::GetLocationReference(
@@ -2345,6 +2399,10 @@ LocationReference ImplementationVisitor::GetLocationReference(
     }
   }
   Value* value = Declarations::LookupValue(name);
+  CHECK(value->Position().source.IsValid());
+  if (auto stream = CurrentFileStreams::Get()) {
+    stream->required_builtin_includes.insert(value->Position().source);
+  }
   if (GlobalContext::collect_language_server_data()) {
     LanguageServerData::AddDefinition(expr->name->pos, value->name()->pos);
   }
@@ -2600,6 +2658,11 @@ VisitResult ImplementationVisitor::GenerateCall(
     Callable* callable, base::Optional<LocationReference> this_reference,
     Arguments arguments, const TypeVector& specialization_types,
     bool is_tailcall) {
+  CHECK(callable->Position().source.IsValid());
+  if (auto stream = CurrentFileStreams::Get()) {
+    stream->required_builtin_includes.insert(callable->Position().source);
+  }
+
   const Type* return_type = callable->signature().return_type;
 
   if (is_tailcall) {
@@ -2665,7 +2728,7 @@ VisitResult ImplementationVisitor::GenerateCall(
       if (!this_value.type()->IsSubtypeOf(method->aggregate_type())) {
         ReportError("this parameter must be a subtype of ",
                     *method->aggregate_type(), " but it is of type ",
-                    this_value.type());
+                    *this_value.type());
       }
     } else {
       AddCallParameter(callable, this_value, method->aggregate_type(),
@@ -2747,6 +2810,7 @@ VisitResult ImplementationVisitor::GenerateCall(
       }
     }
 
+    // TODO(torque-builder): Consider a function builder here.
     if (return_type->IsConstexpr()) {
       DCHECK_EQ(0, arguments.labels.size());
       std::stringstream result;
@@ -2997,6 +3061,21 @@ VisitResult ImplementationVisitor::GenerateCall(
       assembler().Emit(MakeLazyNodeInstruction{getter, return_type,
                                                constexpr_arguments_for_getter});
       return VisitResult(return_type, assembler().TopRange(1));
+    } else if (intrinsic->ExternalName() == "%FieldSlice") {
+      const Type* type = specialization_types[0];
+      const ClassType* class_type = ClassType::DynamicCast(type);
+      if (!class_type) {
+        ReportError("%FieldSlice must take a class type parameter");
+      }
+      const Field& field =
+          class_type->LookupField(StringLiteralUnquote(constexpr_arguments[0]));
+      LocationReference ref = GenerateFieldReference(
+          VisitResult(type, argument_range), field, class_type,
+          /*treat_optional_as_indexed=*/true);
+      if (!ref.IsHeapSlice()) {
+        ReportError("%FieldSlice expected an indexed or optional field");
+      }
+      return ref.heap_slice();
     } else {
       assembler().Emit(CallIntrinsicInstruction{intrinsic, specialization_types,
                                                 constexpr_arguments});
@@ -3090,8 +3169,7 @@ VisitResult ImplementationVisitor::Visit(CallMethodExpression* expr) {
   TypeVector argument_types = arguments.parameters.ComputeTypeVector();
   DCHECK_EQ(expr->method->namespace_qualification.size(), 0);
   QualifiedName qualified_name = QualifiedName(method_name);
-  Callable* callable = nullptr;
-  callable = LookupMethod(method_name, target_type, arguments, {});
+  Callable* callable = LookupMethod(method_name, target_type, arguments, {});
   if (GlobalContext::collect_language_server_data()) {
     LanguageServerData::AddDefinition(expr->method->name->pos,
                                       callable->IdentifierPosition());
@@ -3399,40 +3477,39 @@ void ImplementationVisitor::GenerateBuiltinDefinitionsAndInterfaceDescriptors(
         std::string descriptor_name = builtin->ExternalName() + "Descriptor";
         bool has_context_parameter = builtin->signature().HasContextParameter();
         size_t kFirstNonContextParameter = has_context_parameter ? 1 : 0;
-        size_t parameter_count =
-            builtin->parameter_names().size() - kFirstNonContextParameter;
         TypeVector return_types = LowerType(builtin->signature().return_type);
 
-        interface_descriptors
-            << "class " << descriptor_name
-            << " : public TorqueInterfaceDescriptor<" << return_types.size()
-            << ", " << parameter_count << ", "
-            << (has_context_parameter ? "true" : "false") << "> {\n";
-        interface_descriptors << "  DECLARE_DESCRIPTOR_WITH_BASE("
-                              << descriptor_name
-                              << ", TorqueInterfaceDescriptor)\n";
+        interface_descriptors << "class " << descriptor_name
+                              << " : public StaticCallInterfaceDescriptor<"
+                              << descriptor_name << "> {\n";
 
-        interface_descriptors
-            << "  std::vector<MachineType> ReturnType() override {\n";
-        interface_descriptors << "    return {{";
-        PrintCommaSeparatedList(interface_descriptors, return_types,
-                                MachineTypeString);
-        interface_descriptors << "}};\n";
-        interface_descriptors << "  }\n";
+        interface_descriptors << " public:\n";
 
-        interface_descriptors << "  std::array<MachineType, " << parameter_count
-                              << "> ParameterTypes() override {\n";
-        interface_descriptors << "    return {";
+        if (has_context_parameter) {
+          interface_descriptors << "  DEFINE_RESULT_AND_PARAMETERS(";
+        } else {
+          interface_descriptors << "  DEFINE_RESULT_AND_PARAMETERS_NO_CONTEXT(";
+        }
+        interface_descriptors << return_types.size();
         for (size_t i = kFirstNonContextParameter;
              i < builtin->parameter_names().size(); ++i) {
-          bool last = i + 1 == builtin->parameter_names().size();
-          const Type* type = builtin->signature().parameter_types.types[i];
-          interface_descriptors << MachineTypeString(type)
-                                << (last ? "" : ", ");
+          Identifier* parameter = builtin->parameter_names()[i];
+          interface_descriptors << ", k" << CamelifyString(parameter->value);
         }
-        interface_descriptors << "};\n";
+        interface_descriptors << ")\n";
 
-        interface_descriptors << "  }\n";
+        interface_descriptors << "  DEFINE_RESULT_AND_PARAMETER_TYPES(";
+        PrintCommaSeparatedList(interface_descriptors, return_types,
+                                MachineTypeString);
+        for (size_t i = kFirstNonContextParameter;
+             i < builtin->parameter_names().size(); ++i) {
+          const Type* type = builtin->signature().parameter_types.types[i];
+          interface_descriptors << ", " << MachineTypeString(type);
+        }
+        interface_descriptors << ")\n";
+
+        interface_descriptors << "  DECLARE_DEFAULT_DESCRIPTOR("
+                              << descriptor_name << ")\n";
         interface_descriptors << "};\n\n";
       } else {
         builtin_definitions << "TFJ(" << builtin->ExternalName();
@@ -3500,16 +3577,12 @@ std::string ToString(FieldSectionType type) {
   switch (type) {
     case FieldSectionType::kNoSection:
       return "NoSection";
-      break;
     case FieldSectionType::kWeakSection:
       return "WeakFields";
-      break;
     case FieldSectionType::kStrongSection:
       return "StrongFields";
-      break;
     case FieldSectionType::kScalarSection:
       return "ScalarFields";
-      break;
   }
   UNREACHABLE();
 }
@@ -3782,12 +3855,12 @@ namespace {
 class ClassFieldOffsetGenerator : public FieldOffsetsGenerator {
  public:
   ClassFieldOffsetGenerator(std::ostream& header, std::ostream& inline_header,
-                            const ClassType* type, std::string gen_name_T)
+                            const ClassType* type, std::string gen_name)
       : FieldOffsetsGenerator(type),
         hdr_(header),
         inl_(inline_header),
         previous_field_end_("P::kHeaderSize"),
-        gen_name_T_(gen_name_T) {}
+        gen_name_(gen_name) {}
   void WriteField(const Field& f, const std::string& size_string) override {
     std::string field = "k" + CamelifyString(f.name_and_type.name) + "Offset";
     std::string field_end = field + "End";
@@ -3804,14 +3877,18 @@ class ClassFieldOffsetGenerator : public FieldOffsetsGenerator {
 
     std::string function_name = CamelifyString(f.name_and_type.name) + "Offset";
 
-    hdr_ << "  inline int " << function_name << "() const;\n";
-    inl_ << "template <class D, class P>\n";
-    inl_ << "int " << gen_name_T_ << "::" << function_name << "() const {\n";
-    // Item 1 in a flattened slice is the offset.
-    inl_ << "  return static_cast<int>(std::get<1>("
-         << Callable::PrefixNameForCCOutput(type_->GetSliceMacroName(f))
-         << "(*static_cast<const D*>(this))));\n";
-    inl_ << "}\n\n";
+    std::vector<cpp::TemplateParameter> params = {cpp::TemplateParameter("D"),
+                                                  cpp::TemplateParameter("P")};
+    cpp::Class owner(std::move(params), gen_name_);
+
+    auto getter = cpp::Function::DefaultGetter("int", &owner, function_name);
+    getter.PrintDeclaration(hdr_);
+    getter.PrintDefinition(inl_, [&](std::ostream& stream) {
+      // Item 1 in a flattened slice is the offset.
+      stream << "  return static_cast<int>(std::get<1>("
+             << Callable::PrefixNameForCCOutput(type_->GetSliceMacroName(f))
+             << "(*static_cast<const D*>(this))));\n";
+    });
   }
   void WriteMarker(const std::string& marker) override {
     hdr_ << "  static constexpr int " << marker << " = " << previous_field_end_
@@ -3822,7 +3899,7 @@ class ClassFieldOffsetGenerator : public FieldOffsetsGenerator {
   std::ostream& hdr_;
   std::ostream& inl_;
   std::string previous_field_end_;
-  std::string gen_name_T_;
+  std::string gen_name_;
 };
 
 class CppClassGenerator {
@@ -3853,9 +3930,9 @@ class CppClassGenerator {
   // active struct fields.
   void GenerateFieldAccessors(const Field& class_field,
                               std::vector<const Field*>& struct_fields);
-  void EmitLoadFieldStatement(const Field& class_field,
+  void EmitLoadFieldStatement(std::ostream& stream, const Field& class_field,
                               std::vector<const Field*>& struct_fields);
-  void EmitStoreFieldStatement(const Field& class_field,
+  void EmitStoreFieldStatement(std::ostream& stream, const Field& class_field,
                                std::vector<const Field*>& struct_fields);
 
   void GenerateClassCasts();
@@ -3885,7 +3962,7 @@ base::Optional<std::vector<Field>> GetOrderedUniqueIndexFields(
   std::set<std::string> index_names;
   for (const Field& field : type.ComputeAllFields()) {
     if (field.index) {
-      auto name_and_type = ExtractSimpleFieldArraySize(type, *field.index);
+      auto name_and_type = ExtractSimpleFieldArraySize(type, field.index->expr);
       if (!name_and_type) {
         return base::nullopt;
       }
@@ -3903,16 +3980,20 @@ base::Optional<std::vector<Field>> GetOrderedUniqueIndexFields(
 }
 
 void CppClassGenerator::GenerateClass() {
-  hdr_ << "\n";
-  hdr_ << "// Alias for HeapObject::Is" << name_
-       << "() that avoids inlining.\n";
-  hdr_ << "V8_EXPORT_PRIVATE bool Is" << name_ << "_NonInline(HeapObject o);\n";
-  hdr_ << "\n";
+  // Is<name>_NonInline(HeapObject)
+  {
+    cpp::Function f("Is"s + name_ + "_NonInline");
+    f.SetDescription("Alias for HeapObject::Is"s + name_ +
+                     "() that avoids inlining.");
+    f.SetExport(true);
+    f.SetReturnType("bool");
+    f.AddParameter("HeapObject", "o");
 
-  impl_ << "\n";
-  impl_ << "bool Is" << name_ << "_NonInline(HeapObject o) {\n";
-  impl_ << "  return o.Is" << name_ << "();\n";
-  impl_ << "}\n\n";
+    f.PrintDeclaration(hdr_);
+    f.PrintDefinition(impl_, [&](std::ostream& stream) {
+      stream << "  return o.Is" << name_ << "();";
+    });
+  }
 
   hdr_ << template_decl() << "\n";
   hdr_ << "class " << gen_name_ << " : public P {\n";
@@ -3937,14 +4018,22 @@ void CppClassGenerator::GenerateClass() {
 
   GenerateClassCasts();
 
+  std::vector<cpp::TemplateParameter> templateArgs = {
+      cpp::TemplateParameter("D"), cpp::TemplateParameter("P")};
+  cpp::Class c(std::move(templateArgs), gen_name_);
+
   if (type_->ShouldGeneratePrint()) {
     hdr_ << "\n  DECL_PRINTER(" << name_ << ")\n";
   }
 
   if (type_->ShouldGenerateVerify()) {
     IfDefScope hdr_scope(hdr_, "VERIFY_HEAP");
-    hdr_ << "  V8_EXPORT_PRIVATE void " << name_
-         << "Verify(Isolate* isolate);\n";
+    // V8_EXPORT_PRIVATE void Verify(Isolate*);
+    cpp::Function f(&c, name_ + "Verify");
+    f.SetExport();
+    f.SetReturnType("void");
+    f.AddParameter("Isolate*", "isolate");
+    f.PrintDeclaration(hdr_);
 
     IfDefScope impl_scope(impl_, "VERIFY_HEAP");
     impl_ << "\ntemplate <>\n";
@@ -3957,7 +4046,7 @@ void CppClassGenerator::GenerateClass() {
   }
 
   hdr_ << "\n";
-  ClassFieldOffsetGenerator g(hdr_, inl_, type_, gen_name_T_);
+  ClassFieldOffsetGenerator g(hdr_, inl_, type_, gen_name_);
   for (auto f : type_->fields()) {
     CurrentSourcePosition::Scope scope(f.pos);
     g.RecordOffsetFor(f);
@@ -3974,58 +4063,69 @@ void CppClassGenerator::GenerateClass() {
     const Field& last_field = type_->LastField();
     std::string last_field_item_size =
         std::get<1>(*SizeOf(last_field.name_and_type.type));
-    hdr_ << "  inline int AllocatedSize() const;\n\n";
-    inl_ << "template <class D, class P>\n";
-    inl_ << "int " << gen_name_T_ << "::AllocatedSize() const {\n";
-    inl_ << "  auto slice = "
-         << Callable::PrefixNameForCCOutput(
-                type_->GetSliceMacroName(last_field))
-         << "(*static_cast<const D*>(this));\n";
-    inl_ << "  return static_cast<int>(std::get<1>(slice)) + "
-         << last_field_item_size
-         << " * static_cast<int>(std::get<2>(slice));\n";
-    inl_ << "}\n\n";
+
+    // int AllocatedSize() const
+    {
+      cpp::Function f =
+          cpp::Function::DefaultGetter("int", &c, "AllocatedSize");
+      f.PrintDeclaration(hdr_, 2);
+
+      f.PrintDefinition(inl_, [&](std::ostream& stream) {
+        stream << "  auto slice = "
+               << Callable::PrefixNameForCCOutput(
+                      type_->GetSliceMacroName(last_field))
+               << "(*static_cast<const D*>(this));\n";
+        stream << "  return static_cast<int>(std::get<1>(slice)) + "
+               << last_field_item_size
+               << " * static_cast<int>(std::get<2>(slice));\n";
+      });
+    }
   } else if (type_->ShouldGenerateBodyDescriptor() ||
              (!type_->IsAbstract() &&
               !type_->IsSubtypeOf(TypeOracle::GetJSObjectType()))) {
-    hdr_ << "  V8_INLINE static constexpr int32_t SizeFor(";
-    bool first = true;
+    cpp::Function f(&c, "SizeFor");
+    f.SetReturnType("int32_t");
+    f.SetFlags(cpp::Function::kStatic | cpp::Function::kConstexpr |
+               cpp::Function::kV8Inline);
     for (const Field& field : *index_fields) {
-      if (!first) hdr_ << ", ";
-      hdr_ << "int " << field.name_and_type.name;
-      first = false;
+      f.AddParameter("int", field.name_and_type.name);
     }
-    hdr_ << ") {\n";
-    if (index_fields->empty()) {
-      hdr_ << "    DCHECK(kHeaderSize == kSize && kHeaderSize == "
-           << *type_->size().SingleValue() << ");\n";
-    }
-    hdr_ << "    int32_t size = kHeaderSize;\n";
-    for (const Field& field : type_->ComputeAllFields()) {
-      if (field.index) {
-        auto index_name_and_type =
-            *ExtractSimpleFieldArraySize(*type_, *field.index);
-        size_t field_size = 0;
-        std::tie(field_size, std::ignore) = field.GetFieldSizeInformation();
-        hdr_ << "    size += " << index_name_and_type.name << " * "
-             << field_size << ";\n";
+    f.PrintInlineDefinition(hdr_, [&](std::ostream& stream) {
+      if (index_fields->empty()) {
+        stream << "    DCHECK(kHeaderSize == kSize && kHeaderSize == "
+               << *type_->size().SingleValue() << ");\n";
       }
+      stream << "    int32_t size = kHeaderSize;\n";
+      for (const Field& field : type_->ComputeAllFields()) {
+        if (field.index) {
+          auto index_name_and_type =
+              *ExtractSimpleFieldArraySize(*type_, field.index->expr);
+          stream << "    size += " << index_name_and_type.name << " * "
+                 << std::get<0>(field.GetFieldSizeInformation()) << ";\n";
+        }
+      }
+      if (type_->size().Alignment() < TargetArchitecture::TaggedSize()) {
+        stream << "    size = OBJECT_POINTER_ALIGN(size);\n";
+      }
+      stream << "    return size;\n";
+    });
+
+    // V8_INLINE int32_t AllocatedSize() const
+    {
+      cpp::Function f =
+          cpp::Function::DefaultGetter("int32_t", &c, "AllocatedSize");
+      f.SetFlag(cpp::Function::kV8Inline);
+      f.PrintInlineDefinition(hdr_, [&](std::ostream& stream) {
+        stream << "    return SizeFor(";
+        bool first = true;
+        for (auto field : *index_fields) {
+          if (!first) stream << ", ";
+          stream << "this->" << field.name_and_type.name << "()";
+          first = false;
+        }
+        stream << ");\n";
+      });
     }
-    if (type_->size().Alignment() < TargetArchitecture::TaggedSize()) {
-      hdr_ << "    size = OBJECT_POINTER_ALIGN(size);\n";
-    }
-    hdr_ << "    return size;\n";
-    hdr_ << "  }\n\n";
-    hdr_ << "  V8_INLINE int32_t AllocatedSize() const {\n";
-    hdr_ << "    return SizeFor(";
-    first = true;
-    for (auto field : *index_fields) {
-      if (!first) hdr_ << ", ";
-      hdr_ << "this->" << field.name_and_type.name << "()";
-      first = false;
-    }
-    hdr_ << ");\n  }\n";
-    hdr_ << "\n";
   }
 
   hdr_ << "  friend class Factory;\n\n";
@@ -4035,18 +4135,42 @@ void CppClassGenerator::GenerateClass() {
   hdr_ << "};\n\n";
 
   if (type_->ShouldGenerateFullClassDefinition()) {
+    // If this class extends from another class which is defined in the same tq
+    // file, and that other class doesn't generate a full class definition, then
+    // the resulting .inc file would be uncompilable due to ordering
+    // requirements: the generated file must go before the hand-written
+    // definition of the base class, but it must also go after that same
+    // hand-written definition.
+    base::Optional<const ClassType*> parent = type_->parent()->ClassSupertype();
+    while (parent) {
+      if ((*parent)->GenerateCppClassDefinitions() &&
+          !(*parent)->ShouldGenerateFullClassDefinition() &&
+          (*parent)->AttributedToFile() == type_->AttributedToFile()) {
+        Error("Exported ", *type_,
+              " cannot be in the same file as its parent extern ", **parent);
+      }
+      parent = (*parent)->parent()->ClassSupertype();
+    }
+
     GenerateClassExport(type_, hdr_, inl_);
   }
 }
 
 void CppClassGenerator::GenerateClassCasts() {
-  hdr_ << "  V8_INLINE static D cast(Object object) {\n";
-  hdr_ << "    return D(object.ptr());\n";
-  hdr_ << "  }\n";
+  cpp::Function f("cast");
+  f.SetFlags(cpp::Function::kV8Inline | cpp::Function::kStatic);
+  f.SetReturnType("D");
+  f.AddParameter("Object", "object");
 
-  hdr_ << "  V8_INLINE static D unchecked_cast(Object object) {\n";
-  hdr_ << "    return bit_cast<D>(object);\n";
-  hdr_ << "  }\n";
+  // V8_INLINE static D cast(Object)
+  f.PrintInlineDefinition(hdr_, [](std::ostream& stream) {
+    stream << "  return D(object.ptr());\n";
+  });
+  // V8_INLINE static D unchecked_cast(Object)
+  f.SetName("unchecked_cast");
+  f.PrintInlineDefinition(hdr_, [](std::ostream& stream) {
+    stream << "  return bit_cast<D>(object);\n";
+  });
 }
 
 void CppClassGenerator::GenerateClassConstructors() {
@@ -4123,7 +4247,7 @@ void GenerateBoundsDCheck(std::ostream& os, const std::string& index,
   os << "  DCHECK_GE(" << index << ", 0);\n";
   std::string length_expression;
   if (base::Optional<NameAndType> array_length =
-          ExtractSimpleFieldArraySize(*type, *f.index)) {
+          ExtractSimpleFieldArraySize(*type, f.index->expr)) {
     length_expression = "this ->" + array_length->name + "()";
   } else {
     // The length is element 2 in the flattened field slice.
@@ -4164,7 +4288,7 @@ void CppClassGenerator::GenerateFieldAccessors(
     return;
   }
 
-  bool indexed = class_field.index.has_value();
+  bool indexed = class_field.index && !class_field.index->optional;
   std::string type_name = GetTypeNameForAccessor(innermost_field);
   bool can_contain_heap_objects = CanContainHeapObjects(field_type);
 
@@ -4182,57 +4306,82 @@ void CppClassGenerator::GenerateFieldAccessors(
     hdr_ << "  // Torque type: " << field_type->ToString() << "\n";
   }
 
-  hdr_ << "  inline " << type_name << " " << name << "("
-       << (indexed ? "int i" : "") << ") const;\n";
-  if (can_contain_heap_objects) {
-    hdr_ << "  inline " << type_name << " " << name << "(IsolateRoot isolate"
-         << (indexed ? ", int i" : "") << ") const;\n";
-  }
-  hdr_ << "  inline void set_" << name << "(" << (indexed ? "int i, " : "")
-       << type_name << " value"
-       << (can_contain_heap_objects
-               ? ", WriteBarrierMode mode = UPDATE_WRITE_BARRIER"
-               : "")
-       << ");\n\n";
+  std::vector<cpp::TemplateParameter> templateParameters = {
+      cpp::TemplateParameter("D"), cpp::TemplateParameter("P")};
+  cpp::Class owner(std::move(templateParameters), gen_name_);
 
-  // For tagged data, generate the extra getter that derives an IsolateRoot from
-  // the current object's pointer.
-  if (can_contain_heap_objects) {
-    inl_ << "template <class D, class P>\n";
-    inl_ << type_name << " " << gen_name_ << "<D, P>::" << name << "("
-         << (indexed ? "int i" : "") << ") const {\n";
-    inl_ << "  IsolateRoot isolate = GetIsolateForPtrCompr(*this);\n";
-    inl_ << "  return " << gen_name_ << "::" << name << "(isolate"
-         << (indexed ? ", i" : "") << ");\n";
-    inl_ << "}\n";
+  // getter
+  {
+    auto getter = cpp::Function::DefaultGetter(type_name, &owner, name);
+    if (indexed) {
+      getter.AddParameter("int", "i");
+    }
+    const char* tag_argument;
+    switch (class_field.read_synchronization) {
+      case FieldSynchronization::kNone:
+        tag_argument = "";
+        break;
+      case FieldSynchronization::kRelaxed:
+        getter.AddParameter("RelaxedLoadTag");
+        tag_argument = ", kRelaxedLoad";
+        break;
+      case FieldSynchronization::kAcquireRelease:
+        getter.AddParameter("AcquireLoadTag");
+        tag_argument = ", kAcquireLoad";
+        break;
+    }
+
+    getter.PrintDeclaration(hdr_);
+
+    // For tagged data, generate the extra getter that derives an
+    // PtrComprCageBase from the current object's pointer.
+    if (can_contain_heap_objects) {
+      getter.PrintDefinition(inl_, [&](auto& stream) {
+        stream
+            << "  PtrComprCageBase cage_base = GetPtrComprCageBase(*this);\n";
+        stream << "  return " << gen_name_ << "::" << name << "(cage_base"
+               << (indexed ? ", i" : "") << tag_argument << ");\n";
+      });
+
+      getter.InsertParameter(0, "PtrComprCageBase", "cage_base");
+      getter.PrintDeclaration(hdr_);
+    }
+
+    getter.PrintDefinition(inl_, [&](auto& stream) {
+      stream << "  " << type_name << " value;\n";
+      EmitLoadFieldStatement(stream, class_field, struct_fields);
+      stream << "  return value;\n";
+    });
   }
 
-  // Generate the getter implementation.
-  inl_ << "template <class D, class P>\n";
-  inl_ << type_name << " " << gen_name_ << "<D, P>::" << name << "(";
-  if (can_contain_heap_objects) inl_ << "IsolateRoot isolate";
-  if (can_contain_heap_objects && indexed) inl_ << ", ";
-  if (indexed) inl_ << "int i";
-  inl_ << ") const {\n";
+  // setter
+  {
+    auto setter = cpp::Function::DefaultSetter(
+        &owner, std::string("set_") + name, type_name, "value");
+    if (indexed) {
+      setter.InsertParameter(0, "int", "i");
+    }
+    switch (class_field.write_synchronization) {
+      case FieldSynchronization::kNone:
+        break;
+      case FieldSynchronization::kRelaxed:
+        setter.AddParameter("RelaxedStoreTag");
+        break;
+      case FieldSynchronization::kAcquireRelease:
+        setter.AddParameter("ReleaseStoreTag");
+        break;
+    }
+    if (can_contain_heap_objects) {
+      setter.AddParameter("WriteBarrierMode", "mode", "UPDATE_WRITE_BARRIER");
+    }
+    setter.PrintDeclaration(hdr_);
 
-  inl_ << "  " << type_name << " value;\n";
-  EmitLoadFieldStatement(class_field, struct_fields);
-  inl_ << "  return value;\n";
-  inl_ << "}\n";
+    setter.PrintDefinition(inl_, [&](auto& stream) {
+      EmitStoreFieldStatement(stream, class_field, struct_fields);
+    });
+  }
 
-  // Generate the setter implementation.
-  inl_ << "template <class D, class P>\n";
-  inl_ << "void " << gen_name_ << "<D, P>::set_" << name << "(";
-  if (indexed) {
-    inl_ << "int i, ";
-  }
-  inl_ << type_name << " value";
-  if (can_contain_heap_objects) {
-    inl_ << ", WriteBarrierMode mode";
-  }
-  inl_ << ") {\n";
-  EmitStoreFieldStatement(class_field, struct_fields);
-  inl_ << "}\n\n";
+  hdr_ << "\n";
 }
 
 std::string CppClassGenerator::GetFieldOffsetForAccessor(const Field& f) {
@@ -4270,7 +4419,8 @@ bool CppClassGenerator::CanContainHeapObjects(const Type* t) {
 }
 
 void CppClassGenerator::EmitLoadFieldStatement(
-    const Field& class_field, std::vector<const Field*>& struct_fields) {
+    std::ostream& stream, const Field& class_field,
+    std::vector<const Field*>& struct_fields) {
   const Field& innermost_field =
       struct_fields.empty() ? class_field : *struct_fields.back();
   const Type* field_type = innermost_field.name_and_type.type;
@@ -4288,24 +4438,25 @@ void CppClassGenerator::EmitLoadFieldStatement(
 
   std::string offset = field_offset;
   if (class_field.index) {
-    GenerateBoundsDCheck(inl_, "i", type_, class_field);
-    inl_ << "  int offset = " << field_offset << " + i * " << class_field_size
-         << ";\n";
+    const char* index = class_field.index->optional ? "0" : "i";
+    GenerateBoundsDCheck(stream, index, type_, class_field);
+    stream << "  int offset = " << field_offset << " + " << index << " * "
+           << class_field_size << ";\n";
     offset = "offset";
   }
 
-  inl_ << "  value = ";
+  stream << "  value = ";
 
   if (!field_type->IsSubtypeOf(TypeOracle::GetTaggedType())) {
     if (class_field.read_synchronization ==
         FieldSynchronization::kAcquireRelease) {
-      ReportError("Torque doesn't support @acquireRead on untagged data");
+      ReportError("Torque doesn't support @cppAcquireRead on untagged data");
     } else if (class_field.read_synchronization ==
                FieldSynchronization::kRelaxed) {
-      ReportError("Torque doesn't support @relaxedRead on untagged data");
+      ReportError("Torque doesn't support @cppRelaxedRead on untagged data");
     }
-    inl_ << "this->template ReadField<" << type_name << ">(" << offset
-         << ");\n";
+    stream << "this->template ReadField<" << type_name << ">(" << offset
+           << ");\n";
   } else {
     const char* load;
     switch (class_field.read_synchronization) {
@@ -4322,20 +4473,22 @@ void CppClassGenerator::EmitLoadFieldStatement(
     bool is_smi = field_type->IsSubtypeOf(TypeOracle::GetSmiType());
     const std::string load_type = is_smi ? "Smi" : type_name;
     const char* postfix = is_smi ? ".value()" : "";
-    const char* optional_isolate = is_smi ? "" : "isolate, ";
+    const char* optional_cage_base = is_smi ? "" : "cage_base, ";
 
-    inl_ << "TaggedField<" << load_type << ">::" << load << "("
-         << optional_isolate << "*this, " << offset << ")" << postfix << ";\n";
+    stream << "TaggedField<" << load_type << ">::" << load << "("
+           << optional_cage_base << "*this, " << offset << ")" << postfix
+           << ";\n";
   }
 
   if (CanContainHeapObjects(field_type)) {
-    inl_ << "  DCHECK(" << GenerateRuntimeTypeCheck(field_type, "value")
-         << ");\n";
+    stream << "  DCHECK(" << GenerateRuntimeTypeCheck(field_type, "value")
+           << ");\n";
   }
 }
 
 void CppClassGenerator::EmitStoreFieldStatement(
-    const Field& class_field, std::vector<const Field*>& struct_fields) {
+    std::ostream& stream, const Field& class_field,
+    std::vector<const Field*>& struct_fields) {
   const Field& innermost_field =
       struct_fields.empty() ? class_field : *struct_fields.back();
   const Type* field_type = innermost_field.name_and_type.type;
@@ -4353,15 +4506,16 @@ void CppClassGenerator::EmitStoreFieldStatement(
 
   std::string offset = field_offset;
   if (class_field.index) {
-    GenerateBoundsDCheck(inl_, "i", type_, class_field);
-    inl_ << "  int offset = " << field_offset << " + i * " << class_field_size
-         << ";\n";
+    const char* index = class_field.index->optional ? "0" : "i";
+    GenerateBoundsDCheck(stream, index, type_, class_field);
+    stream << "  int offset = " << field_offset << " + " << index << " * "
+           << class_field_size << ";\n";
     offset = "offset";
   }
 
   if (!field_type->IsSubtypeOf(TypeOracle::GetTaggedType())) {
-    inl_ << "  this->template WriteField<" << type_name << ">(" << offset
-         << ", value);\n";
+    stream << "  this->template WriteField<" << type_name << ">(" << offset
+           << ", value);\n";
   } else {
     bool strong_pointer = field_type->IsSubtypeOf(TypeOracle::GetObjectType());
     bool is_smi = field_type->IsSubtypeOf(TypeOracle::GetSmiType());
@@ -4388,17 +4542,17 @@ void CppClassGenerator::EmitStoreFieldStatement(
     const std::string value_to_write = is_smi ? "Smi::FromInt(value)" : "value";
 
     if (!is_smi) {
-      inl_ << "  SLOW_DCHECK(" << GenerateRuntimeTypeCheck(field_type, "value")
-           << ");\n";
+      stream << "  SLOW_DCHECK("
+             << GenerateRuntimeTypeCheck(field_type, "value") << ");\n";
     }
-    inl_ << "  " << write_macro << "(*this, " << offset << ", "
-         << value_to_write << ");\n";
+    stream << "  " << write_macro << "(*this, " << offset << ", "
+           << value_to_write << ");\n";
     if (!is_smi) {
       const char* write_barrier = strong_pointer
                                       ? "CONDITIONAL_WRITE_BARRIER"
                                       : "CONDITIONAL_WEAK_WRITE_BARRIER";
-      inl_ << "  " << write_barrier << "(*this, " << offset
-           << ", value, mode);\n";
+      stream << "  " << write_barrier << "(*this, " << offset
+             << ", value, mode);\n";
     }
   }
 }
@@ -4594,11 +4748,33 @@ void GeneratePrintDefinitionsForClass(std::ostream& impl, const ClassType* type,
             // TODO(turbofan): Print struct fields too.
             impl << "\" <struct field printing still unimplemented>\";\n";
           } else {
-            impl << "this->" << f.name_and_type.name << "();\n";
+            impl << "this->" << f.name_and_type.name;
+            switch (f.read_synchronization) {
+              case FieldSynchronization::kNone:
+                impl << "();\n";
+                break;
+              case FieldSynchronization::kRelaxed:
+                impl << "(kRelaxedLoad);\n";
+                break;
+              case FieldSynchronization::kAcquireRelease:
+                impl << "(kAcquireLoad);\n";
+                break;
+            }
           }
         } else {
           impl << "  os << \"\\n - " << f.name_and_type.name << ": \" << "
-               << "Brief(this->" << f.name_and_type.name << "());\n";
+               << "Brief(this->" << f.name_and_type.name;
+          switch (f.read_synchronization) {
+            case FieldSynchronization::kNone:
+              impl << "());\n";
+              break;
+            case FieldSynchronization::kRelaxed:
+              impl << "(kRelaxedLoad));\n";
+              break;
+            case FieldSynchronization::kAcquireRelease:
+              impl << "(kAcquireLoad));\n";
+              break;
+          }
         }
       }
     }
@@ -4822,7 +4998,7 @@ namespace {
 void GenerateFieldValueVerifier(const std::string& class_name, bool indexed,
                                 std::string offset, const Field& leaf_field,
                                 std::string indexed_field_size,
-                                std::ostream& cc_contents) {
+                                std::ostream& cc_contents, bool is_map) {
   const Type* field_type = leaf_field.name_and_type.type;
 
   bool maybe_object =
@@ -4837,8 +5013,12 @@ void GenerateFieldValueVerifier(const std::string& class_name, bool indexed,
   const std::string value = leaf_field.name_and_type.name + "__value";
 
   // Read the field.
-  cc_contents << "    " << object_type << " " << value << " = TaggedField<"
-              << object_type << ">::load(o, " << offset << ");\n";
+  if (is_map) {
+    cc_contents << "    " << object_type << " " << value << " = o.map();\n";
+  } else {
+    cc_contents << "    " << object_type << " " << value << " = TaggedField<"
+                << object_type << ">::load(o, " << offset << ");\n";
+  }
 
   // Call VerifyPointer or VerifyMaybeObjectPointer on it.
   cc_contents << "    " << object_type << "::" << verify_fn << "(isolate, "
@@ -4905,13 +5085,13 @@ void GenerateClassFieldVerifier(const std::string& class_name,
             class_name, f.index.has_value(),
             field_start_offset + " + " + std::to_string(*struct_field.offset),
             struct_field, std::to_string((*struct_type)->PackedSize()),
-            cc_contents);
+            cc_contents, f.name_and_type.name == "map");
       }
     }
   } else {
     GenerateFieldValueVerifier(class_name, f.index.has_value(),
                                field_start_offset, f, "kTaggedSize",
-                               cc_contents);
+                               cc_contents, f.name_and_type.name == "map");
   }
 
   cc_contents << "  }\n";
@@ -4929,14 +5109,10 @@ void ImplementationVisitor::GenerateClassVerifiers(
     IfDefScope verify_heap_h(h_contents, "VERIFY_HEAP");
     IfDefScope verify_heap_cc(cc_contents, "VERIFY_HEAP");
 
-    cc_contents << "\n#include \"src/objects/objects.h\"\n";
+    h_contents << "#include \"src/base/macros.h\"\n\n";
 
-    for (const std::string& include_path : GlobalContext::CppIncludes()) {
-      cc_contents << "#include " << StringLiteralQuote(include_path) << "\n";
-    }
-    cc_contents << "#include \"torque-generated/" << file_name << ".h\"\n";
-    cc_contents << "#include "
-                   "\"src/objects/all-objects-inl.h\"\n";
+    cc_contents << "#include \"torque-generated/" << file_name << ".h\"\n\n";
+    cc_contents << "#include \"src/objects/all-objects-inl.h\"\n";
 
     IncludeObjectMacrosScope object_macros(cc_contents);
 
@@ -5053,11 +5229,14 @@ void ImplementationVisitor::GenerateExportedMacrosAssembler(
     cc_contents << "#include \"src/objects/fixed-array-inl.h\"\n";
     cc_contents << "#include \"src/objects/free-space.h\"\n";
     cc_contents << "#include \"src/objects/js-regexp-string-iterator.h\"\n";
+    cc_contents << "#include \"src/objects/js-weak-refs.h\"\n";
     cc_contents << "#include \"src/objects/ordered-hash-table.h\"\n";
     cc_contents << "#include \"src/objects/property-descriptor-object.h\"\n";
+    cc_contents << "#include \"src/objects/stack-frame-info.h\"\n";
     cc_contents << "#include \"src/objects/swiss-name-dictionary.h\"\n";
     cc_contents << "#include \"src/objects/synthetic-module.h\"\n";
     cc_contents << "#include \"src/objects/template-objects.h\"\n";
+    cc_contents << "#include \"src/objects/torque-defined-classes.h\"\n";
     {
       IfDefScope intl_scope(cc_contents, "V8_INTL_SUPPORT");
       cc_contents << "#include \"src/objects/js-break-iterator.h\"\n";
@@ -5096,23 +5275,20 @@ void ImplementationVisitor::GenerateExportedMacrosAssembler(
       TorqueMacro* macro = TorqueMacro::DynamicCast(declarable.get());
       if (!(macro && macro->IsExportedToCSA())) continue;
 
-      h_contents << "  ";
-      GenerateFunctionDeclaration(h_contents, "", macro->ReadableName(),
-                                  macro->signature(), macro->parameter_names(),
-                                  false);
-      h_contents << ";\n";
+      cpp::Class assembler("TorqueGeneratedExportedMacrosAssembler");
+      std::vector<std::string> generated_parameter_names;
+      cpp::Function f = GenerateFunction(
+          &assembler, macro->ReadableName(), macro->signature(),
+          macro->parameter_names(), false, &generated_parameter_names);
 
-      std::vector<std::string> parameter_names = GenerateFunctionDeclaration(
-          cc_contents,
-          "TorqueGeneratedExportedMacrosAssembler::", macro->ReadableName(),
-          macro->signature(), macro->parameter_names(), false);
-      cc_contents << "{\n";
-      cc_contents << "return " << macro->ExternalName() << "(state_";
-      for (auto& name : parameter_names) {
-        cc_contents << ", " << name;
-      }
-      cc_contents << ");\n";
-      cc_contents << "}\n";
+      f.PrintDeclaration(h_contents);
+      f.PrintDefinition(cc_contents, [&](std::ostream& stream) {
+        stream << "return " << macro->ExternalName() << "(state_";
+        for (const auto& name : generated_parameter_names) {
+          stream << ", " << name;
+        }
+        stream << ");";
+      });
     }
 
     h_contents << " private:\n"
@@ -5122,6 +5298,24 @@ void ImplementationVisitor::GenerateExportedMacrosAssembler(
   WriteFile(output_directory + "/" + file_name + ".h", h_contents.str());
   WriteFile(output_directory + "/" + file_name + ".cc", cc_contents.str());
 }
+
+namespace {
+
+void CollectAllFields(const std::string& path, const Field& field,
+                      std::vector<std::string>& result) {
+  if (field.name_and_type.type->StructSupertype()) {
+    std::string next_path = path + field.name_and_type.name + ".";
+    const StructType* struct_type =
+        StructType::DynamicCast(field.name_and_type.type);
+    for (const auto& inner_field : struct_type->fields()) {
+      CollectAllFields(next_path, inner_field, result);
+    }
+  } else {
+    result.push_back(path + field.name_and_type.name);
+  }
+}
+
+}  // namespace
 
 void ImplementationVisitor::GenerateCSATypes(
     const std::string& output_directory) {
@@ -5153,20 +5347,13 @@ void ImplementationVisitor::GenerateCSATypes(
         first = false;
         h_contents << type->GetGeneratedTypeName();
       }
-      h_contents << "> Flatten() const {\n"
-                 << "    return std::tuple_cat(";
-      first = true;
+      std::vector<std::string> all_fields;
       for (auto& field : struct_type->fields()) {
-        if (!first) {
-          h_contents << ", ";
-        }
-        first = false;
-        if (field.name_and_type.type->StructSupertype()) {
-          h_contents << field.name_and_type.name << ".Flatten()";
-        } else {
-          h_contents << "std::make_tuple(" << field.name_and_type.name << ")";
-        }
+        CollectAllFields("", field, all_fields);
       }
+      h_contents << "> Flatten() const {\n"
+                    "    return std::make_tuple(";
+      PrintCommaSeparatedList(h_contents, all_fields);
       h_contents << ");\n";
       h_contents << "  }\n";
       h_contents << "};\n";
@@ -5200,6 +5387,7 @@ void ReportAllUnusedMacros() {
                                                  "FromConstexpr<"};
     const std::string name = macro->ReadableName();
     const bool ignore =
+        StartsWithSingleUnderscore(name) ||
         std::any_of(ignored_prefixes.begin(), ignored_prefixes.end(),
                     [&name](const std::string& prefix) {
                       return StringStartsWith(name, prefix);

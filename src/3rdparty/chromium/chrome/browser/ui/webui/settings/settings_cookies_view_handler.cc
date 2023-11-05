@@ -11,16 +11,16 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/i18n/number_formatting.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browsing_data/third_party_data_remover.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/cookies_tree_model_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/same_site_data_remover.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_ui.h"
@@ -278,10 +278,10 @@ void CookiesViewHandler::HandleGetNumCookiesString(
   int num_cookies = args->GetList()[1].GetInt();
 
   AllowJavascript();
-  const base::string16 string =
+  const std::u16string string =
       num_cookies > 0 ? l10n_util::GetPluralStringFUTF16(
                             IDS_SETTINGS_SITE_SETTINGS_NUM_COOKIES, num_cookies)
-                      : base::string16();
+                      : std::u16string();
 
   ResolveJavascriptCallback(base::Value(callback_id), base::Value(string));
 }
@@ -289,7 +289,7 @@ void CookiesViewHandler::HandleGetNumCookiesString(
 void CookiesViewHandler::HandleGetDisplayList(const base::ListValue* args) {
   CHECK_EQ(2U, args->GetList().size());
   std::string callback_id = args->GetList()[0].GetString();
-  base::string16 filter = base::UTF8ToUTF16(args->GetList()[1].GetString());
+  std::u16string filter = base::UTF8ToUTF16(args->GetList()[1].GetString());
 
   AllowJavascript();
   pending_requests_.emplace(
@@ -302,7 +302,7 @@ void CookiesViewHandler::HandleGetDisplayList(const base::ListValue* args) {
 }
 
 void CookiesViewHandler::GetDisplayList(std::string callback_id,
-                                        const base::string16& filter) {
+                                        const std::u16string& filter) {
   if (filter != filter_) {
     filter_ = filter;
     cookies_tree_model_->UpdateSearchResults(filter_);
@@ -384,11 +384,10 @@ void CookiesViewHandler::HandleRemoveThirdParty(const base::ListValue* args) {
 
   pending_requests_.emplace(
       base::BindOnce(
-          content::ClearSameSiteNoneData,
+          ClearThirdPartyData,
           base::BindOnce(&CookiesViewHandler::RecreateCookiesTreeModel,
                          callback_weak_ptr_factory_.GetWeakPtr()),
-          profile,
-          /* clear_storage */ true),
+          profile),
       base::BindOnce(&CookiesViewHandler::ResolveJavascriptCallback,
                      callback_weak_ptr_factory_.GetWeakPtr(),
                      base::Value(callback_id), base::Value()));
@@ -414,7 +413,7 @@ void CookiesViewHandler::RemoveShownItems() {
 
 void CookiesViewHandler::HandleRemoveSite(const base::ListValue* args) {
   CHECK_EQ(1U, args->GetList().size());
-  base::string16 site = base::UTF8ToUTF16(args->GetList()[0].GetString());
+  std::u16string site = base::UTF8ToUTF16(args->GetList()[0].GetString());
   AllowJavascript();
   pending_requests_.emplace(
       Request::NO_BATCH,
@@ -423,7 +422,7 @@ void CookiesViewHandler::HandleRemoveSite(const base::ListValue* args) {
   ProcessPendingRequests();
 }
 
-void CookiesViewHandler::RemoveSite(const base::string16& site) {
+void CookiesViewHandler::RemoveSite(const std::u16string& site) {
   CookieTreeNode* parent = cookies_tree_model_->GetRoot();
   const auto i = std::find_if(
       parent->children().cbegin(), parent->children().cend(),
@@ -445,10 +444,10 @@ void CookiesViewHandler::ReturnLocalDataList(const std::string& callback_id) {
   // Gather list of sites with some highlights of the categories and items.
   base::ListValue site_list;
   for (const auto& site : parent->children()) {
-    base::string16 description;
+    std::u16string description;
     for (const auto& category : site->children()) {
       if (!description.empty())
-        description += base::ASCIIToUTF16(", ");
+        description += u", ";
       const auto node_type = category->GetDetailedInfo().node_type;
       size_t item_count = category->children().size();
       switch (node_type) {
@@ -461,7 +460,8 @@ void CookiesViewHandler::ReturnLocalDataList(const std::string& callback_id) {
           FALLTHROUGH;
         case CookieTreeNode::DetailedInfo::TYPE_COOKIES:
           description += l10n_util::GetPluralStringFUTF16(
-              IDS_SETTINGS_SITE_SETTINGS_NUM_COOKIES, int{item_count});
+              IDS_SETTINGS_SITE_SETTINGS_NUM_COOKIES,
+              static_cast<int>(item_count));
           break;
         default:
           int ids_value = GetCategoryLabelID(node_type);
@@ -482,7 +482,7 @@ void CookiesViewHandler::ReturnLocalDataList(const std::string& callback_id) {
   }
 
   // Sort the list into alphabetical order based on site name.
-  std::sort(site_list.begin(), site_list.end(),
+  std::sort(site_list.GetList().begin(), site_list.GetList().end(),
             [=](const base::Value& a, const base::Value& b) {
               return *a.FindStringKey(kSite) < *b.FindStringKey(kSite);
             });

@@ -95,8 +95,8 @@ ScopedHandleVerifierInfo::ScopedHandleVerifierInfo(
 
 ScopedHandleVerifierInfo::~ScopedHandleVerifierInfo() = default;
 
-ScopedHandleVerifierInfo::ScopedHandleVerifierInfo(ScopedHandleVerifierInfo&&) noexcept =
-    default;
+ScopedHandleVerifierInfo::ScopedHandleVerifierInfo(
+    ScopedHandleVerifierInfo&&) noexcept = default;
 ScopedHandleVerifierInfo& ScopedHandleVerifierInfo::operator=(
     ScopedHandleVerifierInfo&&) noexcept = default;
 

@@ -10,6 +10,7 @@
 #include "include/core/SkRect.h"
 #include "include/gpu/GrBackendSurface.h"
 #include "src/core/SkCompressedDataUtils.h"
+#include "src/core/SkReadBuffer.h"
 #include "src/gpu/GrBackendUtils.h"
 #include "src/gpu/GrProcessor.h"
 #include "src/gpu/GrProgramDesc.h"
@@ -25,6 +26,8 @@
 #error This file must be compiled with Arc. Use -fobjc-arc flag
 #endif
 
+GR_NORETAIN_BEGIN
+
 GrMtlCaps::GrMtlCaps(const GrContextOptions& contextOptions, const id<MTLDevice> device,
                      MTLFeatureSet featureSet)
         : INHERITED(contextOptions) {
@@ -33,6 +36,10 @@ GrMtlCaps::GrMtlCaps(const GrContextOptions& contextOptions, const id<MTLDevice>
     this->initFeatureSet(featureSet);
     this->initGrCaps(device);
     this->initShaderCaps();
+    if (!contextOptions.fDisableDriverCorrectnessWorkarounds) {
+        this->applyDriverCorrectnessWorkarounds(contextOptions, device);
+    }
+
     this->initFormatTable();
     this->initStencilFormat(device);
 
@@ -138,7 +145,7 @@ static int get_surface_sample_cnt(GrSurface* surf) {
 
 static bool is_resolving_msaa(GrSurface* surf) {
     auto rt = static_cast<GrMtlRenderTarget*>(surf->asRenderTarget());
-    if (rt && rt->mtlResolveTexture()) {
+    if (rt && rt->resolveAttachment()) {
         SkASSERT(rt->numSamples() > 1);
         return true;
     }
@@ -258,7 +265,7 @@ bool GrMtlCaps::onCanCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy
                                   dst == src);
 }
 
-void GrMtlCaps::initGrCaps(const id<MTLDevice> device) {
+void GrMtlCaps::initGrCaps(id<MTLDevice> device) {
     // Max vertex attribs is the same on all devices
     fMaxVertexAttributes = 31;
 
@@ -268,6 +275,7 @@ void GrMtlCaps::initGrCaps(const id<MTLDevice> device) {
     // We always copy in/out of a transfer buffer so it's trivial to support row bytes.
     fReadPixelsRowBytesSupport = true;
     fWritePixelsRowBytesSupport = true;
+    fTransferPixelsToRowBytesSupport = true;
 
     // RenderTarget and Texture size
     if (this->isMac()) {
@@ -287,7 +295,8 @@ void GrMtlCaps::initGrCaps(const id<MTLDevice> device) {
     fMaxPreferredRenderTargetSize = fMaxRenderTargetSize;
     fMaxTextureSize = fMaxRenderTargetSize;
 
-    fMaxPushConstantsSize = 4*1024;
+    fMaxPushConstantsSize = 0; // TODO: should be 4*1024 but disabled for now
+    fTransferBufferAlignment = 1;
 
     // Init sample counts. All devices support 1 (i.e. 0 in skia).
     fSampleCounts.push_back(1);
@@ -335,7 +344,6 @@ void GrMtlCaps::initGrCaps(const id<MTLDevice> device) {
         }
     }
 
-    fMixedSamplesSupport = false;
     fGpuTracingSupport = false;
 
     fFenceSyncSupport = true;
@@ -454,7 +462,7 @@ void GrMtlCaps::initShaderCaps() {
         shaderCaps->fDualSourceBlendingSupport = false;
     }
 
-    // TODO: Re-enable this once skbug:8720 is fixed. Will also need to remove asserts in
+    // TODO(skia:8270): Re-enable this once bug 8270 is fixed. Will also need to remove asserts in
     // GrMtlPipelineStateBuilder which assert we aren't using this feature.
 #if 0
     if (this->isIOS()) {
@@ -466,13 +474,25 @@ void GrMtlCaps::initShaderCaps() {
     shaderCaps->fDstReadInShaderSupport = shaderCaps->fFBFetchSupport;
 
     shaderCaps->fIntegerSupport = true;
-    shaderCaps->fVertexIDSupport = false;
+    shaderCaps->fNonsquareMatrixSupport = true;
+    shaderCaps->fVertexIDSupport = true;
+    shaderCaps->fInfinitySupport = true;
 
     // Metal uses IEEE float and half floats so assuming those values here.
     shaderCaps->fFloatIs32Bits = true;
     shaderCaps->fHalfIs32Bits = false;
 
     shaderCaps->fMaxFragmentSamplers = 16;
+
+    shaderCaps->fCanUseFastMath = true;
+}
+
+void GrMtlCaps::applyDriverCorrectnessWorkarounds(const GrContextOptions&,
+                                                  const id<MTLDevice> device) {
+    // TODO: We may need to disable the fastmath option on Intel devices to avoid corruption
+//    if ([device.name rangeOfString:@"Intel"].location != NSNotFound) {
+//        fShaderCaps->fCanUseFastMath = false;
+//    }
 }
 
 // Define this so we can use it to initialize arrays and work around
@@ -911,7 +931,7 @@ bool GrMtlCaps::onSurfaceSupportsWritePixels(const GrSurface* surface) const {
 GrCaps::SurfaceReadPixelsSupport GrMtlCaps::surfaceSupportsReadPixels(
         const GrSurface* surface) const {
     if (auto mtlRT = static_cast<const GrMtlRenderTarget*>(surface->asRenderTarget())) {
-        if (mtlRT->numSamples() > 1 && !mtlRT->mtlResolveTexture()) {
+        if (mtlRT->numSamples() > 1 && !mtlRT->resolveAttachment()) {
             return SurfaceReadPixelsSupport::kCopyToTexture2D;
         }
     }
@@ -989,7 +1009,7 @@ GrSwizzle GrMtlCaps::onGetReadSwizzle(const GrBackendFormat& format, GrColorType
             return ctInfo.fReadSwizzle;
         }
     }
-    SkDEBUGFAILF("Illegal color type (%d) and format (%d) combination.", colorType,
+    SkDEBUGFAILF("Illegal color type (%d) and format (%d) combination.", (int)colorType,
                  static_cast<int>(mtlFormat));
     return {};
 }
@@ -1004,7 +1024,7 @@ GrSwizzle GrMtlCaps::getWriteSwizzle(const GrBackendFormat& format, GrColorType 
             return ctInfo.fWriteSwizzle;
         }
     }
-    SkDEBUGFAILF("Illegal color type (%d) and format (%d) combination.", colorType,
+    SkDEBUGFAILF("Illegal color type (%d) and format (%d) combination.", (int)colorType,
                  static_cast<int>(mtlFormat));
     return {};
 }
@@ -1076,30 +1096,20 @@ GrCaps::SupportedRead GrMtlCaps::onSupportedReadPixelsColorType(
  * pipeline. This includes blending information and primitive type. The pipeline is immutable
  * so any remaining dynamic state is set via the MtlRenderCmdEncoder.
  */
-GrProgramDesc GrMtlCaps::makeDesc(GrRenderTarget* rt,
-                                  const GrProgramInfo& programInfo,
+GrProgramDesc GrMtlCaps::makeDesc(GrRenderTarget*, const GrProgramInfo& programInfo,
                                   ProgramDescOverrideFlags overrideFlags) const {
     SkASSERT(overrideFlags == ProgramDescOverrideFlags::kNone);
     GrProgramDesc desc;
-    if (!GrProgramDesc::Build(&desc, rt, programInfo, *this)) {
-        SkASSERT(!desc.isValid());
-        return desc;
-    }
+    GrProgramDesc::Build(&desc, programInfo, *this);
 
-    GrProcessorKeyBuilder b(&desc.key());
+    GrProcessorKeyBuilder b(desc.key());
 
+    // If ordering here is changed, update getStencilPixelFormat() below
     b.add32(programInfo.backendFormat().asMtlFormat());
 
-    b.add32(programInfo.numRasterSamples());
+    b.add32(programInfo.numSamples());
 
-#ifdef SK_DEBUG
-    if (rt && programInfo.isStencilEnabled()) {
-        SkASSERT(rt->getStencilAttachment());
-    }
-#endif
-
-    b.add32(rt && rt->getStencilAttachment() ? this->preferredStencilFormat()
-                                             : MTLPixelFormatInvalid);
+    b.add32(programInfo.needsStencil() ? this->preferredStencilFormat() : MTLPixelFormatInvalid);
     b.add32((uint32_t)programInfo.isStencilEnabled());
     // Stencil samples don't seem to be tracked in the MTLRenderPipeline
 
@@ -1107,7 +1117,20 @@ GrProgramDesc GrMtlCaps::makeDesc(GrRenderTarget* rt,
 
     b.add32(programInfo.primitiveTypeKey());
 
+    b.flush();
     return desc;
+}
+
+MTLPixelFormat GrMtlCaps::getStencilPixelFormat(const GrProgramDesc& desc) {
+    // Set up read buffer to point to platform-dependent part of the key
+    SkReadBuffer readBuffer(desc.asKey() + desc.initialKeyLength()/sizeof(uint32_t),
+                            desc.keyLength() - desc.initialKeyLength());
+    // skip backend format
+    readBuffer.readUInt();
+    // skip raster samples
+    readBuffer.readUInt();
+
+    return (MTLPixelFormat) readBuffer.readUInt();
 }
 
 #if GR_TEST_UTILS
@@ -1186,3 +1209,5 @@ void GrMtlCaps::onDumpJSON(SkJSONWriter* writer) const {
 #else
 void GrMtlCaps::onDumpJSON(SkJSONWriter* writer) const { }
 #endif
+
+GR_NORETAIN_END

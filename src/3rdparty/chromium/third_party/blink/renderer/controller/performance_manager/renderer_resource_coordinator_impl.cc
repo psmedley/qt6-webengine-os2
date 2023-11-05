@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 using performance_manager::mojom::blink::IframeAttributionData;
 using performance_manager::mojom::blink::IframeAttributionDataPtr;
@@ -73,7 +74,7 @@ bool IsExtensionStableWorldId(const String& stable_world_id) {
     return false;
   if (stable_world_id.length() != 32)
     return false;
-  for (size_t i = 0; i < stable_world_id.length(); ++i) {
+  for (unsigned i = 0; i < stable_world_id.length(); ++i) {
     if (stable_world_id[i] < 'a' || stable_world_id[i] > 'p')
       return false;
   }
@@ -248,6 +249,11 @@ void RendererResourceCoordinatorImpl::OnBeforeContentFrameDetached(
       frame.GetFrameToken().GetAs<RemoteFrameToken>());
 }
 
+void RendererResourceCoordinatorImpl::FireBackgroundTracingTrigger(
+    const String& trigger_name) {
+  DispatchFireBackgroundTracingTrigger(trigger_name);
+}
+
 RendererResourceCoordinatorImpl::RendererResourceCoordinatorImpl(
     mojo::PendingRemote<ProcessCoordinationUnit> remote) {
   service_.Bind(std::move(remote));
@@ -301,6 +307,21 @@ void RendererResourceCoordinatorImpl::DispatchOnV8ContextDestroyed(
             WTF::CrossThreadUnretained(this), token));
   } else {
     service_->OnV8ContextDestroyed(token);
+  }
+}
+
+void RendererResourceCoordinatorImpl::DispatchFireBackgroundTracingTrigger(
+    const String& trigger_name) {
+  DCHECK(service_);
+  if (!IsMainThread()) {
+    blink::PostCrossThreadTask(
+        *Thread::MainThread()->GetTaskRunner(), FROM_HERE,
+        WTF::CrossThreadBindOnce(&RendererResourceCoordinatorImpl::
+                                     DispatchFireBackgroundTracingTrigger,
+                                 WTF::CrossThreadUnretained(this),
+                                 trigger_name));
+  } else {
+    service_->FireBackgroundTracingTrigger(trigger_name);
   }
 }
 

@@ -7,7 +7,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
@@ -33,6 +32,15 @@ StreamPromiseResolver* StreamPromiseResolver::CreateRejected(
   return promise;
 }
 
+StreamPromiseResolver* StreamPromiseResolver::CreateRejectedAndSilent(
+    ScriptState* script_state,
+    v8::Local<v8::Value> reason) {
+  auto* promise = MakeGarbageCollected<StreamPromiseResolver>(script_state);
+  promise->MarkAsSilent(script_state->GetIsolate());
+  promise->Reject(script_state, reason);
+  return promise;
+}
+
 StreamPromiseResolver::StreamPromiseResolver(ScriptState* script_state) {
   v8::Local<v8::Promise::Resolver> resolver;
   if (v8::Promise::Resolver::New(script_state->GetContext())
@@ -50,8 +58,11 @@ void StreamPromiseResolver::Resolve(ScriptState* script_state,
     return;
   }
   is_settled_ = true;
-  auto result = resolver_.NewLocal(script_state->GetIsolate())
-                    ->Resolve(script_state->GetContext(), value);
+  v8::Isolate* isolate = script_state->GetIsolate();
+  v8::MicrotasksScope microtasks_scope(
+      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
+  auto result =
+      resolver_.NewLocal(isolate)->Resolve(script_state->GetContext(), value);
   if (result.IsNothing()) {
     DVLOG(3) << "Assuming JS shutdown and ignoring failed Resolve";
   }
@@ -70,8 +81,11 @@ void StreamPromiseResolver::Reject(ScriptState* script_state,
     return;
   }
   is_settled_ = true;
-  auto result = resolver_.NewLocal(script_state->GetIsolate())
-                    ->Reject(script_state->GetContext(), reason);
+  v8::Isolate* isolate = script_state->GetIsolate();
+  v8::MicrotasksScope microtasks_scope(
+      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
+  auto result =
+      resolver_.NewLocal(isolate)->Reject(script_state->GetContext(), reason);
   if (result.IsNothing()) {
     DVLOG(3) << "Assuming JS shutdown and ignoring failed Reject";
   }
@@ -96,6 +110,14 @@ void StreamPromiseResolver::MarkAsHandled(v8::Isolate* isolate) {
     return;
   }
   promise->MarkAsHandled();
+}
+
+void StreamPromiseResolver::MarkAsSilent(v8::Isolate* isolate) {
+  v8::Local<v8::Promise> promise = V8Promise(isolate);
+  if (promise.IsEmpty()) {
+    return;
+  }
+  promise->MarkAsSilent();
 }
 
 v8::Promise::PromiseState StreamPromiseResolver::State(

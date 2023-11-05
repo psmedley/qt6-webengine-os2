@@ -267,6 +267,10 @@ void QWebEngineViewPrivate::showColorDialog(
     QColorDialog::connect(dialog, SIGNAL(colorSelected(QColor)), dialog, SLOT(deleteLater()));
     QColorDialog::connect(dialog, SIGNAL(rejected()), dialog, SLOT(deleteLater()));
 
+#if defined(Q_OS_MACOS)
+    dialog->setOption(QColorDialog::DontUseNativeDialog);
+#endif
+
     dialog->open();
 #else
     Q_UNUSED(controller);
@@ -497,7 +501,18 @@ QWebEnginePage *QWebEngineViewPrivate::createPageForWindow(QWebEnginePage::WebWi
 void QWebEngineViewPrivate::setToolTip(const QString &toolTipText)
 {
     Q_Q(QWebEngineView);
-    q->setToolTip(toolTipText);
+    if (toolTipText.isEmpty()) {
+        // Avoid duplicate events.
+        if (!q->toolTip().isEmpty())
+            q->setToolTip(QString());
+        // Force to hide tooltip because QWidget's default handler
+        // doesn't hide on empty text.
+        if (!QToolTip::text().isEmpty())
+            QToolTip::hideText();
+    } else if (toolTipText != q->toolTip()) {
+        q->setToolTip(toolTipText);
+    }
+
 }
 
 bool QWebEngineViewPrivate::isEnabled() const
@@ -652,7 +667,10 @@ void QWebEngineView::setPage(QWebEnginePage *newPage)
         disconnect(d->m_pageConnection);
         d->m_pageConnection = {};
     }
+
     QWebEngineViewPrivate::bindPageAndView(newPage, this);
+    if (!newPage)
+        return;
     d->m_pageConnection = connect(newPage, &QWebEnginePage::_q_aboutToDelete, this,
                                   [newPage]() { QWebEngineViewPrivate::bindPageAndView(newPage, nullptr); });
     auto profile = newPage->profile();
@@ -816,17 +834,6 @@ bool QWebEngineView::event(QEvent *ev)
 
         // We swallow spontaneous contextMenu events and synthethize those back later on when we get the
         // HandleContextMenu callback from chromium
-        ev->accept();
-        return true;
-    }
-
-    // Override QWidget's default ToolTip handler since it doesn't hide tooltip on empty text.
-    if (ev->type() == QEvent::ToolTip) {
-        if (!toolTip().isEmpty())
-            QToolTip::showText(static_cast<QHelpEvent *>(ev)->globalPos(), toolTip(), this, QRect(), toolTipDuration());
-        else
-            QToolTip::hideText();
-
         ev->accept();
         return true;
     }

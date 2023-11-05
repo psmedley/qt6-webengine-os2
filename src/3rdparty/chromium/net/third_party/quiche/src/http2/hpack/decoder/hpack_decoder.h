@@ -45,11 +45,6 @@ class QUICHE_EXPORT_PRIVATE HpackDecoder {
   HpackDecoder(const HpackDecoder&) = delete;
   HpackDecoder& operator=(const HpackDecoder&) = delete;
 
-  // Set listener to be notified of insertions into the HPACK dynamic table,
-  // and uses of those entries.
-  void set_tables_debug_listener(
-      HpackDecoderTablesDebugListener* debug_listener);
-
   // max_string_size specifies the maximum size of an on-the-wire string (name
   // or value, plain or Huffman encoded) that will be accepted. See sections
   // 5.1 and 5.2 of RFC 7541. This is a defense against OOM attacks; HTTP/2
@@ -97,11 +92,12 @@ class QUICHE_EXPORT_PRIVATE HpackDecoder {
   // detected.
   bool DetectError();
 
+  size_t GetDynamicTableSize() const {
+    return decoder_state_.GetDynamicTableSize();
+  }
+
   // Error code if an error has occurred, HpackDecodingError::kOk otherwise.
   HpackDecodingError error() const { return error_; }
-
-  // Returns the estimate of dynamically allocated memory in bytes.
-  size_t EstimateMemoryUsage() const;
 
   std::string detailed_error() const { return detailed_error_; }
 

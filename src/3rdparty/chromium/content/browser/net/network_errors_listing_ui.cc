@@ -32,7 +32,7 @@ std::unique_ptr<base::ListValue> GetNetworkErrorData() {
   base::Value error_codes = net::GetNetConstants();
   const base::DictionaryValue* net_error_codes_dict = nullptr;
 
-  for (const auto& item : error_codes.DictItems()) {
+  for (auto item : error_codes.DictItems()) {
     if (item.first == kNetworkErrorKey) {
       item.second.GetAsDictionary(&net_error_codes_dict);
       break;
@@ -43,8 +43,7 @@ std::unique_ptr<base::ListValue> GetNetworkErrorData() {
 
   for (base::DictionaryValue::Iterator itr(*net_error_codes_dict);
             !itr.IsAtEnd(); itr.Advance()) {
-    int error_code;
-    itr.value().GetAsInteger(&error_code);
+    const int error_code = itr.value().GetInt();
     // Exclude the aborted and pending codes as these don't return a page.
     if (error_code != net::Error::ERR_IO_PENDING &&
         error_code != net::Error::ERR_ABORTED) {
@@ -67,7 +66,8 @@ void HandleWebUIRequestCallback(BrowserContext* current_context,
   DCHECK(ShouldHandleWebUIRequestCallback(path));
 
   base::DictionaryValue data;
-  data.Set(kErrorCodesDataName, GetNetworkErrorData());
+  data.SetKey(kErrorCodesDataName,
+              base::Value::FromUniquePtrValue(GetNetworkErrorData()));
   std::string json_string;
   base::JSONWriter::Write(data, &json_string);
   std::move(callback).Run(base::RefCountedString::TakeString(&json_string));

@@ -23,6 +23,7 @@
 
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/forms/html_data_list_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_data_list_options_collection.h"
@@ -146,14 +147,14 @@ bool ThemePainter::Paint(const LayoutObject& o,
     case kProgressBarPart:
       COUNT_APPEARANCE(doc, ProgressBar);
       // Note that |-webkit-appearance: progress-bar| works only for <progress>.
-      return PaintProgressBar(element, o, paint_info, r);
+      return PaintProgressBar(element, o, paint_info, r, style);
     case kSliderHorizontalPart: {
       COUNT_APPEARANCE(doc, SliderHorizontal);
-      return PaintSliderTrack(element, o, paint_info, r);
+      return PaintSliderTrack(element, o, paint_info, r, style);
     }
     case kSliderVerticalPart: {
       COUNT_APPEARANCE(doc, SliderVertical);
-      return PaintSliderTrack(element, o, paint_info, r);
+      return PaintSliderTrack(element, o, paint_info, r, style);
     }
     case kSliderThumbHorizontalPart: {
       COUNT_APPEARANCE(doc, SliderThumbHorizontal);
@@ -171,15 +172,9 @@ bool ThemePainter::Paint(const LayoutObject& o,
     case kMenulistButtonPart:
       return true;
     case kTextFieldPart:
-      if (!features::IsFormControlsRefreshEnabled()) {
-        return true;
-      }
       CountAppearanceTextFieldPart(element);
       return PaintTextField(element, style, paint_info, r);
     case kTextAreaPart:
-      if (!features::IsFormControlsRefreshEnabled()) {
-        return true;
-      }
       COUNT_APPEARANCE(doc, TextArea);
       return PaintTextArea(element, style, paint_info, r);
     case kSearchFieldPart: {
@@ -211,17 +206,8 @@ bool ThemePainter::PaintBorderOnly(const Node* node,
   // Call the appropriate paint method based off the appearance value.
   switch (style.EffectiveAppearance()) {
     case kTextFieldPart:
-      if (features::IsFormControlsRefreshEnabled()) {
-        return false;
-      }
-      CountAppearanceTextFieldPart(element);
-      return PaintTextField(element, style, paint_info, r);
     case kTextAreaPart:
-      if (features::IsFormControlsRefreshEnabled()) {
-        return false;
-      }
-      COUNT_APPEARANCE(element.GetDocument(), TextArea);
-      return PaintTextArea(element, style, paint_info, r);
+      return false;
     case kMenulistButtonPart:
     case kSearchFieldPart:
     case kListboxPart:
@@ -249,8 +235,6 @@ bool ThemePainter::PaintBorderOnly(const Node* node,
       // appearance values.
       return false;
   }
-
-  return false;
 }
 
 bool ThemePainter::PaintDecorations(const Node* node,

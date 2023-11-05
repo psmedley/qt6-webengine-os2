@@ -141,6 +141,7 @@ jumbo_static_library("metrics") {
     "//build:chromeos_buildflags",
     "//components/prefs",
     "//components/variations",
+    "//components/variations/service:constants",
     "//components/version_info:version_info",
     "//crypto",
     "//extensions/buildflags",
@@ -156,7 +157,10 @@ jumbo_static_library("metrics") {
   }
 
   if (is_ios) {
-    sources += [ "drive_metrics_provider_ios.mm" ]
+    sources += [
+      "clean_exit_beacon_ios.mm",
+      "drive_metrics_provider_ios.mm",
+    ]
   }
 
   if (is_linux || is_chromeos) {
@@ -208,10 +212,20 @@ if (is_android) {
         "//components/metrics/android/java_templates/MetricsSwitches.java.tmpl"
   }
 
+  java_cpp_enum("java_enum_srcjar") {
+    # External code should depend on ":metrics_java" instead.
+    visibility = [ ":*" ]
+    sources = [ "stability_metrics_helper.h" ]
+  }
+
   android_library("metrics_java") {
     # Right now, this only includes the Java switches. But if we need more Java
     # files, they should be added here as necessary.
-    srcjar_deps = [ ":java_switches_srcjar" ]
+    srcjar_deps = [
+      ":java_enum_srcjar",
+      ":java_switches_srcjar",
+    ]
+    deps = [ "//third_party/androidx:androidx_annotation_annotation_java" ]
   }
 }
 
@@ -293,7 +307,8 @@ jumbo_static_library("net") {
     "//components/encrypted_messages:encrypted_messages",
     "//components/variations",
     "//net",
-    "//services/network/public/cpp:cpp",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
     "//third_party/metrics_proto",
     "//third_party/zlib/google:compression_utils",
     "//url",
@@ -428,6 +443,7 @@ source_set("unit_tests") {
     "call_stack_profile_metadata_unittest.cc",
     "call_stack_profile_metrics_provider_unittest.cc",
     "child_call_stack_profile_collector_unittest.cc",
+    "clean_exit_beacon_unittest.cc",
     "cloned_install_detector_unittest.cc",
     "component_metrics_provider_unittest.cc",
     "daily_event_unittest.cc",
@@ -470,6 +486,7 @@ source_set("unit_tests") {
     ":single_sample_metrics",
     ":test_support",
     ":ui",
+    "//base",
     "//base/test:test_support",
     "//build:chromeos_buildflags",
     "//components/component_updater:test_support",
@@ -478,12 +495,14 @@ source_set("unit_tests") {
     "//components/sync/base",
     "//components/sync/driver:test_support",
     "//components/variations",
+    "//components/variations/service:constants",
     "//extensions/buildflags",
     "//mojo/public/cpp/bindings",
     "//net:test_support",
     "//services/network:test_support",
     "//services/network/public/cpp:cpp",
     "//services/service_manager/public/cpp",
+    "//testing/gmock",
     "//testing/gtest",
     "//third_party/metrics_proto",
     "//third_party/zlib/google:compression_utils",

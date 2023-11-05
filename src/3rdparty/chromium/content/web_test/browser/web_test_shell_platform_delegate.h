@@ -21,6 +21,7 @@ class WebTestShellPlatformDelegate : public ShellPlatformDelegate {
                             const gfx::Size& initial_size) override;
   void DidCreateOrAttachWebContents(Shell* shell,
                                     WebContents* web_contents) override;
+  void DidCloseLastWindow() override;
   gfx::NativeWindow GetNativeWindow(Shell* shell) override;
   void CleanUp(Shell* shell) override;
   void SetContents(Shell* shell) override;
@@ -28,7 +29,7 @@ class WebTestShellPlatformDelegate : public ShellPlatformDelegate {
                        UIControl control,
                        bool is_enabled) override;
   void SetAddressBarURL(Shell* shell, const GURL& url) override;
-  void SetTitle(Shell* shell, const base::string16& title) override;
+  void SetTitle(Shell* shell, const std::u16string& title) override;
   void MainFrameCreated(Shell* shell) override;
   std::unique_ptr<JavaScriptDialogManager> CreateJavaScriptDialogManager(
       Shell* shell) override;
@@ -41,7 +42,8 @@ class WebTestShellPlatformDelegate : public ShellPlatformDelegate {
   void ResizeWebContent(Shell* shell, const gfx::Size& content_size) override;
 #if defined(OS_MAC)
   void ActivateContents(Shell* shell, WebContents* top_contents) override;
-  void DidNavigateMainFramePostCommit(Shell*, WebContents* contents) override;
+  void DidNavigatePrimaryMainFramePostCommit(Shell*,
+                                             WebContents* contents) override;
   bool HandleKeyboardEvent(Shell* shell,
                            WebContents* source,
                            const NativeWebKeyboardEvent& event) override;

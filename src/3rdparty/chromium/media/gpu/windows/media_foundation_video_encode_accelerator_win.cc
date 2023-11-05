@@ -14,6 +14,7 @@
 #include <objbase.h>
 
 #include <iterator>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -24,10 +25,12 @@
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_variant.h"
 #include "base/win/windows_version.h"
+#include "gpu/ipc/common/dxgi_helpers.h"
 #include "media/base/media_switches.h"
 #include "media/base/win/mf_helpers.h"
 #include "media/base/win/mf_initializer.h"
 #include "third_party/libyuv/include/libyuv.h"
+#include "ui/gfx/color_space_win.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
 using media::MediaBufferScopedPointer;
@@ -134,7 +137,7 @@ MediaFoundationVideoEncodeAccelerator::GetSupportedProfiles() {
   DCHECK(main_client_task_runner_->BelongsToCurrentThread());
 
   SupportedProfiles profiles;
-  target_bitrate_ = kDefaultTargetBitrate;
+  bitrate_ = Bitrate::ConstantBitrate(kDefaultTargetBitrate);
   frame_rate_ = kMaxFrameRateNumerator / kMaxFrameRateDenominator;
   IMFActivate** pp_activate = nullptr;
   uint32_t encoder_count = EnumerateHardwareEncoders(&pp_activate);
@@ -245,15 +248,18 @@ bool MediaFoundationVideoEncodeAccelerator::Initialize(const Config& config,
     }
   }
 
-  main_client_weak_factory_.reset(new base::WeakPtrFactory<Client>(client));
+  main_client_weak_factory_ =
+      std::make_unique<base::WeakPtrFactory<Client>>(client);
   main_client_ = main_client_weak_factory_->GetWeakPtr();
   input_visible_size_ = config.input_visible_size;
   if (config.initial_framerate.has_value())
     frame_rate_ = config.initial_framerate.value();
   else
     frame_rate_ = kMaxFrameRateNumerator / kMaxFrameRateDenominator;
-  target_bitrate_ = config.initial_bitrate;
+  bitrate_ = config.bitrate;
   bitstream_buffer_size_ = config.input_visible_size.GetArea();
+  gop_length_ = config.gop_length;
+  low_latency_mode_ = config.require_low_delay;
 
   if (!SetEncoderModes()) {
     DLOG(ERROR) << "Failed setting encoder parameters.";
@@ -372,9 +378,9 @@ void MediaFoundationVideoEncodeAccelerator::UseOutputBitstreamBuffer(
 }
 
 void MediaFoundationVideoEncodeAccelerator::RequestEncodingParametersChange(
-    uint32_t bitrate,
+    const media::Bitrate& bitrate,
     uint32_t framerate) {
-  DVLOG(3) << __func__ << ": bitrate=" << bitrate
+  DVLOG(3) << __func__ << ": bitrate=" << bitrate.ToString()
            << ": framerate=" << framerate;
   DCHECK(main_client_task_runner_->BelongsToCurrentThread());
 
@@ -401,6 +407,10 @@ void MediaFoundationVideoEncodeAccelerator::Destroy() {
   }
 
   delete this;
+}
+
+bool MediaFoundationVideoEncodeAccelerator::IsGpuFrameResizeSupported() {
+  return true;
 }
 
 // static
@@ -434,9 +444,8 @@ uint32_t MediaFoundationVideoEncodeAccelerator::EnumerateHardwareEncoders(
     }
   }
 
-  if (!(session_ = InitializeMediaFoundation())) {
+  if (!InitializeMediaFoundation())
     return 0;
-  }
 
   uint32_t flags = MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER;
   MFT_REGISTER_TYPE_INFO input_info;
@@ -585,7 +594,7 @@ bool MediaFoundationVideoEncodeAccelerator::InitializeInputOutputParameters(
   RETURN_ON_HR_FAILURE(hr, "Couldn't set media type", false);
   hr = imf_output_media_type_->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
   RETURN_ON_HR_FAILURE(hr, "Couldn't set video format", false);
-  hr = imf_output_media_type_->SetUINT32(MF_MT_AVG_BITRATE, target_bitrate_);
+  hr = imf_output_media_type_->SetUINT32(MF_MT_AVG_BITRATE, bitrate_.target());
   RETURN_ON_HR_FAILURE(hr, "Couldn't set bitrate", false);
   hr = MFSetAttributeRatio(imf_output_media_type_.Get(), MF_MT_FRAME_RATE,
                            frame_rate_, 1);
@@ -637,7 +646,14 @@ bool MediaFoundationVideoEncodeAccelerator::SetEncoderModes() {
 
   VARIANT var;
   var.vt = VT_UI4;
-  var.ulVal = eAVEncCommonRateControlMode_CBR;
+  switch (bitrate_.mode()) {
+    case Bitrate::Mode::kConstant:
+      var.ulVal = eAVEncCommonRateControlMode_CBR;
+      break;
+    case Bitrate::Mode::kVariable:
+      var.ulVal = eAVEncCommonRateControlMode_PeakConstrainedVBR;
+      break;
+  }
   hr = codec_api_->SetValue(&CODECAPI_AVEncCommonRateControlMode, &var);
   if (!compatible_with_win7_) {
     // Though CODECAPI_AVEncCommonRateControlMode is supported by Windows 7, but
@@ -656,10 +672,18 @@ bool MediaFoundationVideoEncodeAccelerator::SetEncoderModes() {
     }
   }
 
-  var.ulVal = target_bitrate_;
+  var.ulVal = bitrate_.target();
   hr = codec_api_->SetValue(&CODECAPI_AVEncCommonMeanBitRate, &var);
   if (!compatible_with_win7_) {
     RETURN_ON_HR_FAILURE(hr, "Couldn't set bitrate", false);
+  }
+
+  if (bitrate_.mode() == Bitrate::Mode::kVariable) {
+    var.ulVal = bitrate_.peak();
+    hr = codec_api_->SetValue(&CODECAPI_AVEncCommonMaxBitRate, &var);
+    if (!compatible_with_win7_) {
+      RETURN_ON_HR_FAILURE(hr, "Couldn't set bitrate", false);
+    }
   }
 
   if (!is_async_mft_ ||
@@ -672,11 +696,17 @@ bool MediaFoundationVideoEncodeAccelerator::SetEncoderModes() {
     }
   }
 
+  if (gop_length_.has_value()) {
+    var.ulVal = gop_length_.value();
+    hr = codec_api_->SetValue(&CODECAPI_AVEncMPVGOPSize, &var);
+    RETURN_ON_HR_FAILURE(hr, "Couldn't set low keyframe interval", false);
+  }
+
   if (!is_async_mft_ ||
       (is_async_mft_ &&
        S_OK == codec_api_->IsModifiable(&CODECAPI_AVLowLatencyMode))) {
     var.vt = VT_BOOL;
-    var.boolVal = VARIANT_TRUE;
+    var.boolVal = low_latency_mode_ ? VARIANT_TRUE : VARIANT_FALSE;
     hr = codec_api_->SetValue(&CODECAPI_AVLowLatencyMode, &var);
     if (!compatible_with_win7_) {
       RETURN_ON_HR_FAILURE(hr, "Couldn't set low latency mode", false);
@@ -847,18 +877,43 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBuffer(
     HRESULT hr = d3d_device.As(&device1);
     RETURN_ON_HR_FAILURE(hr, "Failed to query ID3D11Device1", hr);
 
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> input_texture;
     hr = device1->OpenSharedResource1(buffer_handle.dxgi_handle.Get(),
-                                      IID_PPV_ARGS(&texture));
+                                      IID_PPV_ARGS(&input_texture));
     RETURN_ON_HR_FAILURE(hr, "Failed to open shared GMB D3D texture", hr);
 
+    // Check if we need to scale the input texture
+    D3D11_TEXTURE2D_DESC input_desc = {};
+    input_texture->GetDesc(&input_desc);
+
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> sample_texture;
+    if (input_desc.Width !=
+            static_cast<uint32_t>(input_visible_size_.width()) ||
+        input_desc.Height !=
+            static_cast<uint32_t>(input_visible_size_.height())) {
+      hr = PerformD3DScaling(input_texture.Get());
+      RETURN_ON_HR_FAILURE(hr, "Failed to perform D3D video processing", hr);
+      sample_texture = scaled_d3d11_texture_;
+    } else {
+      sample_texture = input_texture;
+    }
+
     Microsoft::WRL::ComPtr<IMFMediaBuffer> input_buffer;
-    hr = MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), texture.Get(), 0,
-                                   FALSE, &input_buffer);
+    hr = MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D),
+                                   sample_texture.Get(), 0, FALSE,
+                                   &input_buffer);
     RETURN_ON_HR_FAILURE(hr, "Failed to create MF DXGI surface buffer", hr);
 
+    // Some encoder MFTs (e.g. Qualcomm) depend on the sample buffer having a
+    // valid current length. Call GetMaxLength() to compute the plane size.
+    DWORD buffer_length = 0;
+    hr = input_buffer->GetMaxLength(&buffer_length);
+    RETURN_ON_HR_FAILURE(hr, "Failed to get max buffer length", hr);
+    hr = input_buffer->SetCurrentLength(buffer_length);
+    RETURN_ON_HR_FAILURE(hr, "Failed to set current buffer length", hr);
+
     hr = input_sample_->RemoveAllBuffers();
-    RETURN_ON_HR_FAILURE(hr, "Failed remove buffers from sample", hr);
+    RETURN_ON_HR_FAILURE(hr, "Failed to remove buffers from sample", hr);
     hr = input_sample_->AddBuffer(input_buffer.Get());
     RETURN_ON_HR_FAILURE(hr, "Failed to add buffer to sample", hr);
     return S_OK;
@@ -892,7 +947,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBuffer(
       frame->row_bytes(VideoFrame::kYPlane) * frame->rows(VideoFrame::kYPlane);
   uint8_t* end = dst_uv + frame->row_bytes(VideoFrame::kUVPlane) *
                               frame->rows(VideoFrame::kUVPlane);
-  DCHECK_GE(std::ptrdiff_t{scoped_buffer.max_length()},
+  DCHECK_GE(static_cast<ptrdiff_t>(scoped_buffer.max_length()),
             end - scoped_buffer.get());
 
   if (frame->format() == PIXEL_FORMAT_NV12) {
@@ -1199,24 +1254,34 @@ void MediaFoundationVideoEncodeAccelerator::UseOutputBitstreamBufferTask(
 }
 
 void MediaFoundationVideoEncodeAccelerator::RequestEncodingParametersChangeTask(
-    uint32_t bitrate,
+    const media::Bitrate& bitrate,
     uint32_t framerate) {
   DVLOG(3) << __func__;
   DCHECK(encoder_thread_task_runner_->BelongsToCurrentThread());
+  RETURN_ON_FAILURE(bitrate.mode() == bitrate_.mode(),
+                    "Invalid bitrate mode", );
 
   frame_rate_ =
       framerate
           ? std::min(framerate, static_cast<uint32_t>(kMaxFrameRateNumerator))
           : 1;
 
-  if (target_bitrate_ != bitrate) {
-    target_bitrate_ = bitrate ? bitrate : 1;
+  if (bitrate_ != bitrate) {
+    bitrate_ = bitrate;
     VARIANT var;
     var.vt = VT_UI4;
-    var.ulVal = target_bitrate_;
+    var.ulVal = bitrate.target();
     HRESULT hr = codec_api_->SetValue(&CODECAPI_AVEncCommonMeanBitRate, &var);
     if (!compatible_with_win7_) {
-      RETURN_ON_HR_FAILURE(hr, "Couldn't update bitrate", );
+      RETURN_ON_HR_FAILURE(hr, "Couldn't update mean bitrate", );
+    }
+
+    if (bitrate.mode() == Bitrate::Mode::kVariable) {
+      var.ulVal = bitrate.peak();
+      hr = codec_api_->SetValue(&CODECAPI_AVEncCommonMaxBitRate, &var);
+      if (!compatible_with_win7_) {
+        RETURN_ON_HR_FAILURE(hr, "Couldn't set max bitrate", );
+      }
     }
   }
 }
@@ -1249,6 +1314,164 @@ void MediaFoundationVideoEncodeAccelerator::ReleaseEncoderResources() {
   imf_output_media_type_.Reset();
   input_sample_.Reset();
   output_sample_.Reset();
+}
+
+HRESULT MediaFoundationVideoEncodeAccelerator::InitializeD3DVideoProcessing(
+    ID3D11Texture2D* input_texture) {
+  D3D11_TEXTURE2D_DESC input_desc = {};
+  input_texture->GetDesc(&input_desc);
+  if (vp_desc_.InputWidth == input_desc.Width &&
+      vp_desc_.InputHeight == input_desc.Height) {
+    return S_OK;
+  }
+
+  // Input/output framerates are dummy values for passthrough.
+  D3D11_VIDEO_PROCESSOR_CONTENT_DESC vp_desc{};
+      vp_desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+      vp_desc.InputFrameRate = {60, 1};
+      vp_desc.InputWidth = input_desc.Width;
+      vp_desc.InputHeight = input_desc.Height;
+      vp_desc.OutputFrameRate = {60, 1};
+      vp_desc.OutputWidth = static_cast<UINT>(input_visible_size_.width());
+      vp_desc.OutputHeight = static_cast<UINT>(input_visible_size_.height());
+      vp_desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+
+  Microsoft::WRL::ComPtr<ID3D11Device> texture_device;
+  input_texture->GetDevice(&texture_device);
+  Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device;
+  HRESULT hr = texture_device.As(&video_device);
+  RETURN_ON_HR_FAILURE(hr, "Failed to query for ID3D11VideoDevice", hr);
+
+  Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator>
+      video_processor_enumerator;
+  hr = video_device->CreateVideoProcessorEnumerator(
+      &vp_desc, &video_processor_enumerator);
+  RETURN_ON_HR_FAILURE(hr, "CreateVideoProcessorEnumerator failed", hr);
+
+  Microsoft::WRL::ComPtr<ID3D11VideoProcessor> video_processor;
+  hr = video_device->CreateVideoProcessor(video_processor_enumerator.Get(), 0,
+                                          &video_processor);
+  RETURN_ON_HR_FAILURE(hr, "CreateVideoProcessor failed", hr);
+
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> device_context;
+  texture_device->GetImmediateContext(&device_context);
+  Microsoft::WRL::ComPtr<ID3D11VideoContext> video_context;
+  hr = device_context.As(&video_context);
+  RETURN_ON_HR_FAILURE(hr, "Failed to query for ID3D11VideoContext", hr);
+
+  // Auto stream processing (the default) can hurt power consumption.
+  video_context->VideoProcessorSetStreamAutoProcessingMode(
+      video_processor.Get(), 0, FALSE);
+
+  D3D11_TEXTURE2D_DESC scaled_desc{};
+      scaled_desc.Width = static_cast<UINT>(input_visible_size_.width());
+      scaled_desc.Height = static_cast<UINT>(input_visible_size_.height());
+      scaled_desc.MipLevels = 1;
+      scaled_desc.ArraySize = 1;
+      scaled_desc.Format = DXGI_FORMAT_NV12;
+      scaled_desc.SampleDesc = {1, 0};
+      scaled_desc.Usage = D3D11_USAGE_DEFAULT;
+      scaled_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+      scaled_desc.CPUAccessFlags = 0;
+      scaled_desc.MiscFlags = 0;
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> scaled_d3d11_texture;
+  hr = texture_device->CreateTexture2D(&scaled_desc, nullptr,
+                                       &scaled_d3d11_texture);
+  RETURN_ON_HR_FAILURE(hr, "Failed to create texture", hr);
+
+  D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC output_desc = {};
+  output_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+  output_desc.Texture2D.MipSlice = 0;
+  Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> vp_output_view;
+  hr = video_device->CreateVideoProcessorOutputView(
+      scaled_d3d11_texture.Get(), video_processor_enumerator.Get(),
+      &output_desc, &vp_output_view);
+  RETURN_ON_HR_FAILURE(hr, "CreateVideoProcessorOutputView failed", hr);
+
+  video_device_ = std::move(video_device);
+  video_processor_enumerator_ = std::move(video_processor_enumerator);
+  video_processor_ = std::move(video_processor);
+  video_context_ = std::move(video_context);
+  vp_desc_ = std::move(vp_desc);
+  scaled_d3d11_texture_ = std::move(scaled_d3d11_texture);
+  vp_output_view_ = std::move(vp_output_view);
+  return S_OK;
+}
+
+HRESULT MediaFoundationVideoEncodeAccelerator::PerformD3DScaling(
+    ID3D11Texture2D* input_texture) {
+  HRESULT hr = InitializeD3DVideoProcessing(input_texture);
+  RETURN_ON_HR_FAILURE(hr, "Couldn't initialize D3D video processing", hr);
+
+  // Set the color space for passthrough.
+  auto src_color_space = gfx::ColorSpace::CreateSRGB();
+  auto output_color_space = gfx::ColorSpace::CreateSRGB();
+
+  D3D11_VIDEO_PROCESSOR_COLOR_SPACE src_d3d11_color_space =
+      gfx::ColorSpaceWin::GetD3D11ColorSpace(src_color_space);
+  video_context_->VideoProcessorSetStreamColorSpace(video_processor_.Get(), 0,
+                                                    &src_d3d11_color_space);
+  D3D11_VIDEO_PROCESSOR_COLOR_SPACE output_d3d11_color_space =
+      gfx::ColorSpaceWin::GetD3D11ColorSpace(output_color_space);
+  video_context_->VideoProcessorSetOutputColorSpace(video_processor_.Get(),
+                                                    &output_d3d11_color_space);
+
+  {
+    absl::optional<gpu::DXGIScopedReleaseKeyedMutex> release_keyed_mutex;
+    Microsoft::WRL::ComPtr<IDXGIKeyedMutex> keyed_mutex;
+    hr = input_texture->QueryInterface(IID_PPV_ARGS(&keyed_mutex));
+    if (SUCCEEDED(hr)) {
+      // The producer may still be using this texture for a short period of
+      // time, so wait long enough to hopefully avoid glitches. For example,
+      // all levels of the texture share the same keyed mutex, so if the
+      // hardware decoder acquired the mutex to decode into a different array
+      // level then it still may block here temporarily.
+      constexpr int kMaxSyncTimeMs = 100;
+      hr = keyed_mutex->AcquireSync(0, kMaxSyncTimeMs);
+      RETURN_ON_HR_FAILURE(hr, "Failed to acquire keyed mutex", hr);
+      release_keyed_mutex.emplace(std::move(keyed_mutex), 0);
+    }
+
+    // Setup |video_context_| for VPBlt operation.
+    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC input_desc = {};
+    input_desc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+    input_desc.Texture2D.ArraySlice = 0;
+    Microsoft::WRL::ComPtr<ID3D11VideoProcessorInputView> input_view;
+    hr = video_device_->CreateVideoProcessorInputView(
+        input_texture, video_processor_enumerator_.Get(), &input_desc,
+        &input_view);
+    RETURN_ON_HR_FAILURE(hr, "CreateVideoProcessorInputView failed", hr);
+
+    D3D11_VIDEO_PROCESSOR_STREAM stream{};
+        stream.Enable = true;
+        stream.OutputIndex = 0;
+        stream.InputFrameOrField = 0;
+        stream.PastFrames = 0;
+        stream.FutureFrames = 0;
+        stream.pInputSurface = input_view.Get();
+
+    D3D11_TEXTURE2D_DESC input_texture_desc = {};
+    input_texture->GetDesc(&input_texture_desc);
+    RECT source_rect = {0, 0, static_cast<LONG>(input_texture_desc.Width),
+                        static_cast<LONG>(input_texture_desc.Height)};
+    video_context_->VideoProcessorSetStreamSourceRect(video_processor_.Get(), 0,
+                                                      TRUE, &source_rect);
+
+    D3D11_TEXTURE2D_DESC output_texture_desc = {};
+    scaled_d3d11_texture_->GetDesc(&output_texture_desc);
+    RECT dest_rect = {0, 0, static_cast<LONG>(output_texture_desc.Width),
+                      static_cast<LONG>(output_texture_desc.Height)};
+    video_context_->VideoProcessorSetOutputTargetRect(video_processor_.Get(),
+                                                      TRUE, &dest_rect);
+    video_context_->VideoProcessorSetStreamDestRect(video_processor_.Get(), 0,
+                                                    TRUE, &dest_rect);
+
+    hr = video_context_->VideoProcessorBlt(
+        video_processor_.Get(), vp_output_view_.Get(), 0, 1, &stream);
+    RETURN_ON_HR_FAILURE(hr, "VideoProcessorBlt failed", hr);
+  }
+
+  return hr;
 }
 
 }  // namespace media

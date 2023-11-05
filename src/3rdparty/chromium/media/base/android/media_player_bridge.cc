@@ -12,9 +12,9 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
-#include "base/numerics/ranges.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/base/android/media_common_android.h"
@@ -65,14 +65,15 @@ void RecordWatchTimeUMA(bool is_hls, bool has_video) {
 
 }  // namespace
 
-MediaPlayerBridge::MediaPlayerBridge(const GURL& url,
-                                     const GURL& site_for_cookies,
-                                     const url::Origin& top_frame_origin,
-                                     const std::string& user_agent,
-                                     bool hide_url_log,
-                                     Client* client,
-                                     bool allow_credentials,
-                                     bool is_hls)
+MediaPlayerBridge::MediaPlayerBridge(
+    const GURL& url,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
+    const std::string& user_agent,
+    bool hide_url_log,
+    Client* client,
+    bool allow_credentials,
+    bool is_hls)
     : prepared_(false),
       playback_completed_(false),
       pending_play_(false),
@@ -314,8 +315,8 @@ void MediaPlayerBridge::OnCookiesRetrieved(const std::string& cookies) {
 }
 
 void MediaPlayerBridge::OnAuthCredentialsRetrieved(
-    const base::string16& username,
-    const base::string16& password) {
+    const std::u16string& username,
+    const std::u16string& password) {
   GURL::ReplacementsW replacements;
   if (!username.empty()) {
     replacements.SetUsernameStr(username);
@@ -419,7 +420,7 @@ void MediaPlayerBridge::Release() {
 }
 
 void MediaPlayerBridge::SetVolume(double volume) {
-  volume_ = base::ClampToRange(volume, 0.0, 1.0);
+  volume_ = base::clamp(volume, 0.0, 1.0);
   UpdateVolumeInternal();
 }
 
@@ -570,7 +571,7 @@ GURL MediaPlayerBridge::GetUrl() {
   return url_;
 }
 
-GURL MediaPlayerBridge::GetSiteForCookies() {
+const net::SiteForCookies& MediaPlayerBridge::GetSiteForCookies() {
   return site_for_cookies_;
 }
 

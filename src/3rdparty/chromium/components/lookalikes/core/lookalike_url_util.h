@@ -9,9 +9,9 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/time/time.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "components/reputation/core/safety_tips.pb.h"
 #include "components/url_formatter/url_formatter.h"
 #include "url/gurl.h"
 
@@ -54,9 +54,12 @@ enum class LookalikeUrlMatchType {
   // you mean <url>?".
   kFailedSpoofChecks = 9,
 
+  kCharacterSwapSiteEngagement = 10,
+  kCharacterSwapTop500 = 11,
+
   // Append new items to the end of the list above; do not modify or replace
   // existing values. Comment out obsolete items.
-  kMaxValue = kFailedSpoofChecks,
+  kMaxValue = kCharacterSwapTop500,
 };
 
 // Used for UKM. There is only a single LookalikeUrlBlockingPageUserAction per
@@ -88,10 +91,12 @@ enum class NavigationSuggestionEvent {
   kMatchSkeletonTop5k = 9,
   kMatchTargetEmbeddingForSafetyTips = 10,
   kFailedSpoofChecks = 11,
+  kMatchCharacterSwapSiteEngagement = 12,
+  kMatchCharacterSwapTop500 = 13,
 
   // Append new items to the end of the list above; do not modify or
   // replace existing values. Comment out obsolete items.
-  kMaxValue = kFailedSpoofChecks,
+  kMaxValue = kMatchCharacterSwapTop500,
 };
 
 struct DomainInfo {
@@ -132,8 +137,8 @@ DomainInfo GetDomainInfo(const GURL& url);
 // Returns true if the Levenshtein distance between |str1| and |str2| is at most
 // one. This has O(max(n,m)) complexity as opposed to O(n*m) of the usual edit
 // distance computation.
-bool IsEditDistanceAtMostOne(const base::string16& str1,
-                             const base::string16& str2);
+bool IsEditDistanceAtMostOne(const std::u16string& str1,
+                             const std::u16string& str2);
 
 // Returns whether |navigated_domain| and |matched_domain| are likely to be edit
 // distance false positives, and thus the user should *not* be warned.
@@ -163,31 +168,33 @@ bool GetMatchingDomain(
     const DomainInfo& navigated_domain,
     const std::vector<DomainInfo>& engaged_sites,
     const LookalikeTargetAllowlistChecker& in_target_allowlist,
+    const reputation::SafetyTipsConfig* config_proto,
     std::string* matched_domain,
     LookalikeUrlMatchType* match_type);
 
 void RecordUMAFromMatchType(LookalikeUrlMatchType match_type);
 
 // Checks to see if a URL is a target embedding lookalike. This function sets
-// |safe_hostname| to the url of the embedded target domain.
-// At the moment we consider the following cases as Target Embedding:
-// example-google.com-site.com, example.google.com-site.com,
-// example-google-info-site.com, example.google.com.site.com,
-// example-googlé.com-site.com where the embedded target is google.com. We
-// detect embeddings of top 500 domains and engaged domains. However, to reduce
-// false positives, we do not protect domains that are shorter than 7 characters
-// long (e.g. com.ru).
-// This function checks possible targets against |in_target_allowlist| to skip
-// permitted embeddings.
-// If no target embedding is found, the return value will be set to |kNonw|.
-// When the target is embedded with another TLD instead of its actual TLD, it
-// should trigger a Safety Tip when the embedded TLD is a ccTLD. In this
-// situation, return value will be |kSafetyTip|. All the other triggers will
-// result in a |kInterstitial| return value.
+// |safe_hostname| to the url of the embedded target domain. See the unit tests
+// for what qualifies as target embedding.
 TargetEmbeddingType GetTargetEmbeddingType(
     const std::string& hostname,
     const std::vector<DomainInfo>& engaged_sites,
     const LookalikeTargetAllowlistChecker& in_target_allowlist,
+    const reputation::SafetyTipsConfig* config_proto,
+    std::string* safe_hostname);
+
+// Same as GetTargetEmbeddingType, but explicitly state whether or not a safety
+// tip is permitted via |safety_tips_allowed|. Safety tips are presently only
+// used for tail embedding (e.g. "evil-google.com"). This function may return
+// kSafetyTip preferentially to kInterstitial -- call with !safety_tips_allowed
+// if you're interested in determining if there's *also* an interstitial.
+TargetEmbeddingType SearchForEmbeddings(
+    const std::string& hostname,
+    const std::vector<DomainInfo>& engaged_sites,
+    const LookalikeTargetAllowlistChecker& in_target_allowlist,
+    const reputation::SafetyTipsConfig* config_proto,
+    bool safety_tips_allowed,
     std::string* safe_hostname);
 
 // Returns true if a navigation to an IDN should be blocked.
@@ -201,5 +208,10 @@ bool IsAllowedByEnterprisePolicy(const PrefService* pref_service,
 // Add the given hosts to the allowlist policy setting.
 void SetEnterpriseAllowlistForTesting(PrefService* pref_service,
                                       const std::vector<std::string>& hosts);
+
+// Returns true if |str1| and |str2| are identical except that two adjacent
+// characters are swapped. E.g. example.com vs exapmle.com.
+bool HasOneCharacterSwap(const std::u16string& str1,
+                         const std::u16string& str2);
 
 #endif  // COMPONENTS_LOOKALIKES_CORE_LOOKALIKE_URL_UTIL_H_

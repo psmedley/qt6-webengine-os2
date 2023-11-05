@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_model_object.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_root.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_viewport_container.h"
@@ -220,12 +221,19 @@ void SVGSVGElement::CollectStyleForPresentationAttribute(
                                             y_->CssValue());
   } else if (IsOutermostSVGSVGElement() &&
              (property == width_ || property == height_)) {
+    // SVG allows negative numbers for these attributes but CSS doesn't allow
+    // negative <length> values for the corresponding CSS properties. So remove
+    // negative values here.
     if (property == width_) {
-      AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                              width_->CssValue());
+      if (const CSSValue* width = width_->NonNegativeCssValue()) {
+        AddPropertyToPresentationAttributeStyle(
+            style, property->CssPropertyId(), *width);
+      }
     } else if (property == height_) {
-      AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                              height_->CssValue());
+      if (const CSSValue* height = height_->NonNegativeCssValue()) {
+        AddPropertyToPresentationAttributeStyle(
+            style, property->CssPropertyId(), *height);
+      }
     }
   } else {
     SVGGraphicsElement::CollectStyleForPresentationAttribute(name, value,
@@ -468,7 +476,7 @@ AffineTransform SVGSVGElement::LocalCoordinateSpaceTransform(
       TransformationMatrix matrix;
       // Adjust for the zoom level factored into CSS coordinates (WK bug
       // #96361).
-      matrix.Scale(1.0 / layout_object->StyleRef().EffectiveZoom());
+      matrix.Scale(1.0 / layout_object->View()->StyleRef().EffectiveZoom());
 
       // Apply transforms from our ancestor coordinate space, including any
       // non-SVG ancestor transforms.
@@ -643,26 +651,26 @@ FloatSize SVGSVGElement::CurrentViewportSize() const {
   return viewport_rect.Size();
 }
 
-base::Optional<float> SVGSVGElement::IntrinsicWidth() const {
+absl::optional<float> SVGSVGElement::IntrinsicWidth() const {
   const SVGLength& width_attr = *width()->CurrentValue();
   // TODO(crbug.com/979895): This is the result of a refactoring, which might
   // have revealed an existing bug that we are not handling math functions
   // involving percentages correctly. Fix it if necessary.
   if (width_attr.IsPercentage())
-    return base::nullopt;
+    return absl::nullopt;
   SVGLengthContext length_context(this);
-  return width_attr.Value(length_context);
+  return std::max(0.0f, width_attr.Value(length_context));
 }
 
-base::Optional<float> SVGSVGElement::IntrinsicHeight() const {
+absl::optional<float> SVGSVGElement::IntrinsicHeight() const {
   const SVGLength& height_attr = *height()->CurrentValue();
   // TODO(crbug.com/979895): This is the result of a refactoring, which might
   // have revealed an existing bug that we are not handling math functions
   // involving percentages correctly. Fix it if necessary.
   if (height_attr.IsPercentage())
-    return base::nullopt;
+    return absl::nullopt;
   SVGLengthContext length_context(this);
-  return height_attr.Value(length_context);
+  return std::max(0.0f, height_attr.Value(length_context));
 }
 
 AffineTransform SVGSVGElement::ViewBoxToViewTransform(

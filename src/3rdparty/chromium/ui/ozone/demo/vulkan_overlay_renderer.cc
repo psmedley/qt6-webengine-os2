@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "gpu/vulkan/init/vulkan_factory.h"
@@ -114,7 +115,7 @@ bool VulkanOverlayRenderer::Initialize() {
            VK_SUCCESS);
 
   command_pool_ = std::make_unique<gpu::VulkanCommandPool>(device_queue_.get());
-  CHECK(command_pool_->Initialize(false /* use_protected_memory */));
+  CHECK(command_pool_->Initialize());
 
   RecreateBuffers();
 
@@ -194,8 +195,8 @@ void VulkanOverlayRenderer::RenderFrame() {
             },
             /* .extent = */
             {
-                /* .width = */ buffer.size().width(),
-                /* .height = */ buffer.size().height(),
+                /* .width = */ static_cast<uint32_t>(buffer.size().width()),
+                /* .height = */ static_cast<uint32_t>(buffer.size().height()),
             },
         },
         /* .clearValueCount = */ 1,
@@ -374,8 +375,8 @@ VulkanOverlayRenderer::Buffer::Create(
       /* .renderPass = */ vk_render_pass,
       /* .attachmentCount = */ 1,
       /* .pAttachments = */ &vk_image_view,
-      /* .width = */ size.width(),
-      /* .height = */ size.height(),
+      /* .width = */ static_cast<uint32_t>(size.width()),
+      /* .height = */ static_cast<uint32_t>(size.height()),
       /* .layers = */ 1,
   };
 
@@ -387,8 +388,7 @@ VulkanOverlayRenderer::Buffer::Create(
   }
 
   auto command_buffer = std::make_unique<gpu::VulkanCommandBuffer>(
-      vulkan_device_queue, vulkan_command_pool, true /* primary */,
-      false /* use_protected_memory */);
+      vulkan_device_queue, vulkan_command_pool, true /* primary */);
   CHECK(command_buffer->Initialize());
 
   VkFence fence = vulkan_implementation->CreateVkFenceForGpuFence(vk_device);

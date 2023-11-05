@@ -9,8 +9,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/widget/widget.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
@@ -48,7 +46,7 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
 
   // |gurl| is the HTML file path for the dialog content and must be set.
   // |title| may be empty in which case ShouldShowDialogTitle() returns false.
-  SystemWebDialogDelegate(const GURL& gurl, const base::string16& title);
+  SystemWebDialogDelegate(const GURL& gurl, const std::u16string& title);
   ~SystemWebDialogDelegate() override;
 
   // Returns an identifier used for matching an instance in FindInstance.
@@ -68,11 +66,12 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
 
   // ui::WebDialogDelegate
   ui::ModalType GetDialogModalType() const override;
-  base::string16 GetDialogTitle() const override;
+  std::u16string GetDialogTitle() const override;
   GURL GetDialogContentURL() const override;
   void GetWebUIMessageHandlers(
       std::vector<content::WebUIMessageHandler*>* handlers) const override;
   void GetDialogSize(gfx::Size* size) const override;
+  FrameKind GetWebDialogFrameKind() const override;
   std::string GetDialogArgs() const override;
   void OnDialogShown(content::WebUI* webui) override;
   // Note: deletes |this|.
@@ -111,7 +110,7 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
 
  private:
   GURL gurl_;
-  base::string16 title_;
+  std::u16string title_;
   content::WebUI* webui_ = nullptr;
   ui::ModalType modal_type_;
   gfx::NativeWindow dialog_window_ = nullptr;
@@ -120,5 +119,11 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after the //chrome/browser/chromeos
+// source migration is finished.
+namespace ash {
+using ::chromeos::SystemWebDialogDelegate;
+}
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_SYSTEM_WEB_DIALOG_DELEGATE_H_

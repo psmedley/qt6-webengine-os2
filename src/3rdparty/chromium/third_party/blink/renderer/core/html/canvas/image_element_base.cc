@@ -47,7 +47,11 @@ bool ImageElementBase::IsImageElement() const {
 
 scoped_refptr<Image> ImageElementBase::GetSourceImageForCanvas(
     SourceImageStatus* status,
-    const FloatSize& default_object_size) {
+    const FloatSize& default_object_size,
+    const AlphaDisposition alpha_disposition) {
+  // UnpremultiplyAlpha is not implemented yet.
+  DCHECK_EQ(alpha_disposition, kPremultiplyAlpha);
+
   ImageResourceContent* image_content = CachedImage();
   if (!GetImageLoader().ImageComplete() || !image_content) {
     *status = kIncompleteSourceImageStatus;
@@ -121,7 +125,7 @@ IntSize ImageElementBase::BitmapSourceSize() const {
 }
 
 static bool HasDimensionsForImage(SVGImage* svg_image,
-                                  base::Optional<IntRect> crop_rect,
+                                  absl::optional<IntRect> crop_rect,
                                   const ImageBitmapOptions* options) {
   if (!svg_image->ConcreteObjectSize(FloatSize()).IsEmpty())
     return true;
@@ -134,7 +138,7 @@ static bool HasDimensionsForImage(SVGImage* svg_image,
 
 ScriptPromise ImageElementBase::CreateImageBitmap(
     ScriptState* script_state,
-    base::Optional<IntRect> crop_rect,
+    absl::optional<IntRect> crop_rect,
     const ImageBitmapOptions* options,
     ExceptionState& exception_state) {
   ImageResourceContent* image_content = CachedImage();

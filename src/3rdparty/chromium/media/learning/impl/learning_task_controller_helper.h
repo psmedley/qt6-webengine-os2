@@ -17,6 +17,7 @@
 #include "media/learning/common/learning_task_controller.h"
 #include "media/learning/impl/feature_provider.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 namespace learning {
@@ -49,7 +50,7 @@ class COMPONENT_EXPORT(LEARNING_IMPL) LearningTaskControllerHelper
   // See LearningTaskController::BeginObservation.
   void BeginObservation(base::UnguessableToken id,
                         FeatureVector features,
-                        base::Optional<ukm::SourceId> source_id);
+                        absl::optional<ukm::SourceId> source_id);
   void CompleteObservation(base::UnguessableToken id,
                            const ObservationCompletion& completion);
   void CancelObservation(base::UnguessableToken id);

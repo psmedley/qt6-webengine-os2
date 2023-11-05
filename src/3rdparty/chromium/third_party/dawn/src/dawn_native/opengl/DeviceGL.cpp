@@ -110,50 +110,52 @@ namespace dawn_native { namespace opengl {
         return result;
     }
 
-    ResultOrError<BindGroupBase*> Device::CreateBindGroupImpl(
+    ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
         const BindGroupDescriptor* descriptor) {
         DAWN_TRY(ValidateGLBindGroupDescriptor(descriptor));
         return BindGroup::Create(this, descriptor);
     }
-    ResultOrError<BindGroupLayoutBase*> Device::CreateBindGroupLayoutImpl(
+    ResultOrError<Ref<BindGroupLayoutBase>> Device::CreateBindGroupLayoutImpl(
         const BindGroupLayoutDescriptor* descriptor) {
-        return new BindGroupLayout(this, descriptor);
+        return AcquireRef(new BindGroupLayout(this, descriptor));
     }
     ResultOrError<Ref<BufferBase>> Device::CreateBufferImpl(const BufferDescriptor* descriptor) {
         return AcquireRef(new Buffer(this, descriptor));
     }
-    CommandBufferBase* Device::CreateCommandBuffer(CommandEncoder* encoder,
-                                                   const CommandBufferDescriptor* descriptor) {
-        return new CommandBuffer(encoder, descriptor);
+    ResultOrError<Ref<CommandBufferBase>> Device::CreateCommandBuffer(
+        CommandEncoder* encoder,
+        const CommandBufferDescriptor* descriptor) {
+        return AcquireRef(new CommandBuffer(encoder, descriptor));
     }
-    ResultOrError<ComputePipelineBase*> Device::CreateComputePipelineImpl(
+    ResultOrError<Ref<ComputePipelineBase>> Device::CreateComputePipelineImpl(
         const ComputePipelineDescriptor* descriptor) {
-        return new ComputePipeline(this, descriptor);
+        return ComputePipeline::Create(this, descriptor);
     }
-    ResultOrError<PipelineLayoutBase*> Device::CreatePipelineLayoutImpl(
+    ResultOrError<Ref<PipelineLayoutBase>> Device::CreatePipelineLayoutImpl(
         const PipelineLayoutDescriptor* descriptor) {
-        return new PipelineLayout(this, descriptor);
+        return AcquireRef(new PipelineLayout(this, descriptor));
     }
-    ResultOrError<QuerySetBase*> Device::CreateQuerySetImpl(const QuerySetDescriptor* descriptor) {
-        return new QuerySet(this, descriptor);
+    ResultOrError<Ref<QuerySetBase>> Device::CreateQuerySetImpl(
+        const QuerySetDescriptor* descriptor) {
+        return AcquireRef(new QuerySet(this, descriptor));
     }
-    ResultOrError<RenderPipelineBase*> Device::CreateRenderPipelineImpl(
+    ResultOrError<Ref<RenderPipelineBase>> Device::CreateRenderPipelineImpl(
         const RenderPipelineDescriptor* descriptor) {
-        return new RenderPipeline(this, descriptor);
+        return RenderPipeline::Create(this, descriptor);
     }
-    ResultOrError<SamplerBase*> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
-        return new Sampler(this, descriptor);
+    ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
+        return AcquireRef(new Sampler(this, descriptor));
     }
-    ResultOrError<ShaderModuleBase*> Device::CreateShaderModuleImpl(
+    ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
         const ShaderModuleDescriptor* descriptor,
         ShaderModuleParseResult* parseResult) {
         return ShaderModule::Create(this, descriptor, parseResult);
     }
-    ResultOrError<SwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(
         const SwapChainDescriptor* descriptor) {
-        return new SwapChain(this, descriptor);
+        return AcquireRef(new SwapChain(this, descriptor));
     }
-    ResultOrError<NewSwapChainBase*> Device::CreateSwapChainImpl(
+    ResultOrError<Ref<NewSwapChainBase>> Device::CreateSwapChainImpl(
         Surface* surface,
         NewSwapChainBase* previousSwapChain,
         const SwapChainDescriptor* descriptor) {
@@ -162,10 +164,10 @@ namespace dawn_native { namespace opengl {
     ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(const TextureDescriptor* descriptor) {
         return AcquireRef(new Texture(this, descriptor));
     }
-    ResultOrError<TextureViewBase*> Device::CreateTextureViewImpl(
+    ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
         TextureBase* texture,
         const TextureViewDescriptor* descriptor) {
-        return new TextureView(texture, descriptor);
+        return AcquireRef(new TextureView(texture, descriptor));
     }
 
     void Device::SubmitFenceSync() {
@@ -174,11 +176,71 @@ namespace dawn_native { namespace opengl {
         mFencesInFlight.emplace(sync, GetLastSubmittedCommandSerial());
     }
 
+    MaybeError Device::ValidateEGLImageCanBeWrapped(const TextureDescriptor* descriptor,
+                                                    ::EGLImage image) {
+        if (descriptor->dimension != wgpu::TextureDimension::e2D) {
+            return DAWN_VALIDATION_ERROR("EGLImage texture must be 2D");
+        }
+
+        if (descriptor->usage &
+            (wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::StorageBinding)) {
+            return DAWN_VALIDATION_ERROR("EGLImage texture cannot have sampled or storage usage");
+        }
+
+        if (descriptor->mipLevelCount != 1) {
+            return DAWN_VALIDATION_ERROR("EGLImage mip level count must be 1");
+        }
+
+        if (descriptor->size.depthOrArrayLayers != 1) {
+            return DAWN_VALIDATION_ERROR("EGLImage array layer count must be 1");
+        }
+
+        if (descriptor->sampleCount != 1) {
+            return DAWN_VALIDATION_ERROR("EGLImage sample count must be 1");
+        }
+
+        return {};
+    }
+    TextureBase* Device::CreateTextureWrappingEGLImage(const ExternalImageDescriptor* descriptor,
+                                                       ::EGLImage image) {
+        const TextureDescriptor* textureDescriptor =
+            reinterpret_cast<const TextureDescriptor*>(descriptor->cTextureDescriptor);
+
+        if (ConsumedError(ValidateTextureDescriptor(this, textureDescriptor))) {
+            return nullptr;
+        }
+        if (ConsumedError(ValidateEGLImageCanBeWrapped(textureDescriptor, image))) {
+            return nullptr;
+        }
+
+        GLuint tex;
+        gl.GenTextures(1, &tex);
+        gl.BindTexture(GL_TEXTURE_2D, tex);
+        gl.EGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+
+        GLint width, height, internalFormat;
+        gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+        gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+        gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internalFormat);
+
+        if (textureDescriptor->size.width != static_cast<uint32_t>(width) ||
+            textureDescriptor->size.height != static_cast<uint32_t>(height) ||
+            textureDescriptor->size.depthOrArrayLayers != 1) {
+            ConsumedError(DAWN_VALIDATION_ERROR("EGLImage size doesn't match descriptor"));
+            gl.DeleteTextures(1, &tex);
+            return nullptr;
+        }
+
+        // TODO(dawn:803): Validate the OpenGL texture format from the EGLImage against the format
+        // in the passed-in TextureDescriptor.
+        return new Texture(this, textureDescriptor, tex, TextureBase::TextureState::OwnedInternal);
+    }
+
     MaybeError Device::TickImpl() {
         return {};
     }
 
-    ExecutionSerial Device::CheckAndUpdateCompletedSerials() {
+    ResultOrError<ExecutionSerial> Device::CheckAndUpdateCompletedSerials() {
         ExecutionSerial fenceSerial{0};
         while (!mFencesInFlight.empty()) {
             GLsync sync = mFencesInFlight.front().first;
@@ -232,7 +294,7 @@ namespace dawn_native { namespace opengl {
 
     MaybeError Device::WaitForIdleForDestruction() {
         gl.Finish();
-        CheckPassedSerials();
+        DAWN_TRY(CheckPassedSerials());
         ASSERT(mFencesInFlight.empty());
 
         return {};

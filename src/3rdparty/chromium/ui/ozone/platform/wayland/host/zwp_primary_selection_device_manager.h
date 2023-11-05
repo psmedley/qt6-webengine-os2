@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_OZONE_PLATFORM_WAYLAND_HOST_PRIMARY_SELECTION_DEVICE_MANAGER_H_
-#define UI_OZONE_PLATFORM_WAYLAND_HOST_PRIMARY_SELECTION_DEVICE_MANAGER_H_
+#ifndef UI_OZONE_PLATFORM_WAYLAND_HOST_ZWP_PRIMARY_SELECTION_DEVICE_MANAGER_H_
+#define UI_OZONE_PLATFORM_WAYLAND_HOST_ZWP_PRIMARY_SELECTION_DEVICE_MANAGER_H_
 
 #include <memory>
 
@@ -15,8 +15,15 @@ namespace ui {
 class ZwpPrimarySelectionDevice;
 class WaylandConnection;
 
-class ZwpPrimarySelectionDeviceManager {
+class ZwpPrimarySelectionDeviceManager
+    : public wl::GlobalObjectRegistrar<ZwpPrimarySelectionDeviceManager> {
  public:
+  static void Register(WaylandConnection* connection);
+  static void Instantiate(WaylandConnection* connection,
+                          wl_registry* registry,
+                          uint32_t name,
+                          uint32_t version);
+
   using DataSource = ZwpPrimarySelectionSource;
   using DataDevice = ZwpPrimarySelectionDevice;
 
@@ -43,4 +50,4 @@ class ZwpPrimarySelectionDeviceManager {
 
 }  // namespace ui
 
-#endif  // UI_OZONE_PLATFORM_WAYLAND_HOST_PRIMARY_SELECTION_DEVICE_MANAGER_H_
+#endif  // UI_OZONE_PLATFORM_WAYLAND_HOST_ZWP_PRIMARY_SELECTION_DEVICE_MANAGER_H_

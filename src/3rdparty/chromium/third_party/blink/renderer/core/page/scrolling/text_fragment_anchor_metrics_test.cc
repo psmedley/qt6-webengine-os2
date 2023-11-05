@@ -10,6 +10,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/scroll/scroll_enums.mojom-blink.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
+#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
@@ -37,7 +38,7 @@ class TextFragmentAnchorMetricsTest : public SimTest {
 
   void RunAsyncMatchingTasks() {
     auto* scheduler =
-        ThreadScheduler::Current()->GetWebMainThreadSchedulerForTest();
+        blink::scheduler::WebThreadScheduler::MainThreadScheduler();
     blink::scheduler::RunIdleTasksForTesting(scheduler,
                                              base::BindOnce([]() {}));
     RunPendingTasks();
@@ -839,12 +840,6 @@ INSTANTIATE_TEST_SUITE_P(
 // Test that the ScrollCancelled metric gets reported when a user scroll cancels
 // the scroll into view.
 TEST_P(TextFragmentAnchorScrollMetricsTest, ScrollCancelled) {
-  // This test isn't relevant with this flag enabled. When it's enabled,
-  // there's no way to block rendering and the fragment is installed and
-  // invoked as soon as parsing finishes which means the user cannot scroll
-  // before this point.
-  ScopedBlockHTMLParserOnStyleSheetsForTest block_parser(false);
-
   SimRequest request("https://example.com/test.html#:~:text=test", "text/html");
   SimSubresourceRequest css_request("https://example.com/test.css", "text/css");
   LoadURL("https://example.com/test.html#:~:text=test");
@@ -1762,6 +1757,81 @@ TEST_F(TextFragmentAnchorMetricsTest, NoForceLoadAtTopUseCounter) {
   BeginEmptyFrame();
 
   EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kForceLoadAtTop));
+}
+
+// Tests that we correctly record the "TextFragmentBlockedByForceLoadAtTop" use
+// counter, that is, only when a text fragment appears and would otherwise have
+// been invoked but was blocked by DocumentPolicy.
+TEST_F(TextFragmentAnchorMetricsTest,
+       TextFragmentBlockedByForceLoadAtTopUseCounter) {
+  // ForceLoadAtTop is effective but TextFragmentBlocked isn't recorded because
+  // there is no text fragment.
+  {
+    SimRequest::Params params;
+    params.response_http_headers.insert("Document-Policy", "force-load-at-top");
+    SimRequest request("https://example.com/test.html", "text/html", params);
+    LoadURL("https://example.com/test.html");
+    request.Complete(R"HTML(
+      <!DOCTYPE html>
+      <p>This is a test page</p>
+    )HTML");
+    RunAsyncMatchingTasks();
+
+    // Render two frames to handle the async step added by the beforematch
+    // event.
+    Compositor().BeginFrame();
+    BeginEmptyFrame();
+
+    ASSERT_TRUE(GetDocument().IsUseCounted(WebFeature::kForceLoadAtTop));
+    EXPECT_FALSE(GetDocument().IsUseCounted(
+        WebFeature::kTextFragmentBlockedByForceLoadAtTop));
+  }
+
+  // This time there was a text fragment along with the DocumentPolicy so we
+  // record TextFragmentBlocked.
+  {
+    SimRequest::Params params;
+    params.response_http_headers.insert("Document-Policy", "force-load-at-top");
+    SimRequest request("https://example.com/test2.html#:~:text=foo",
+                       "text/html", params);
+    LoadURL("https://example.com/test2.html#:~:text=foo");
+    request.Complete(R"HTML(
+      <!DOCTYPE html>
+      <p>This is a test page</p>
+    )HTML");
+    RunAsyncMatchingTasks();
+
+    // Render two frames to handle the async step added by the beforematch
+    // event.
+    Compositor().BeginFrame();
+    BeginEmptyFrame();
+
+    ASSERT_TRUE(GetDocument().IsUseCounted(WebFeature::kForceLoadAtTop));
+    EXPECT_TRUE(GetDocument().IsUseCounted(
+        WebFeature::kTextFragmentBlockedByForceLoadAtTop));
+  }
+
+  // Ensure that an unblocked text fragment doesn't cause recording the
+  // TextFragmentBlocked counter.
+  {
+    SimRequest request("https://example.com/test3.html#:~:text=foo",
+                       "text/html");
+    LoadURL("https://example.com/test3.html#:~:text=foo");
+    request.Complete(R"HTML(
+      <!DOCTYPE html>
+      <p>This is a test page</p>
+    )HTML");
+    RunAsyncMatchingTasks();
+
+    // Render two frames to handle the async step added by the beforematch
+    // event.
+    Compositor().BeginFrame();
+    BeginEmptyFrame();
+
+    ASSERT_FALSE(GetDocument().IsUseCounted(WebFeature::kForceLoadAtTop));
+    EXPECT_FALSE(GetDocument().IsUseCounted(
+        WebFeature::kTextFragmentBlockedByForceLoadAtTop));
+  }
 }
 
 }  // namespace blink

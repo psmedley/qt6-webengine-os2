@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <memory>
 #include <set>
+#include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/containers/circular_deque.h"
@@ -12,6 +14,7 @@
 #include "base/time/time.h"
 #include "components/viz/common/quads/surface_draw_quad.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
+#include "components/viz/service/display/display_resource_provider_software.h"
 #include "components/viz/service/display/surface_aggregator.h"
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
 #include "components/viz/service/frame_sinks/compositor_frame_sink_support.h"
@@ -78,9 +81,8 @@ class TestObserver : public mojom::VideoDetectorObserver {
 class VideoDetectorTest : public testing::Test {
  public:
   VideoDetectorTest()
-      : frame_sink_manager_(&shared_bitmap_manager_),
-        surface_aggregator_(frame_sink_manager_.surface_manager(),
-                            nullptr,
+      : surface_aggregator_(frame_sink_manager_.surface_manager(),
+                            &resource_provider_,
                             false,
                             false) {}
 
@@ -142,7 +144,7 @@ class VideoDetectorTest : public testing::Test {
           render_pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
       quad->SetNew(
           shared_quad_state, gfx::Rect(0, 0, 10, 10), gfx::Rect(0, 0, 5, 5),
-          SurfaceRange(base::nullopt, frame_sink->last_activated_surface_id()),
+          SurfaceRange(absl::nullopt, frame_sink->last_activated_surface_id()),
           SK_ColorMAGENTA, /*stretch_content_to_fill_bounds=*/false);
     }
     root_frame_sink_->SubmitCompositorFrame(
@@ -205,7 +207,8 @@ class VideoDetectorTest : public testing::Test {
   }
 
   ServerSharedBitmapManager shared_bitmap_manager_;
-  FrameSinkManagerImpl frame_sink_manager_;
+  FrameSinkManagerImpl frame_sink_manager_{&shared_bitmap_manager_};
+  DisplayResourceProviderSoftware resource_provider_{&shared_bitmap_manager_};
   FakeCompositorFrameSinkClient frame_sink_client_;
   SurfaceIdAllocatorSet allocators_;
   SurfaceAggregator surface_aggregator_;

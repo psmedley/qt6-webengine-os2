@@ -34,7 +34,6 @@
 
 #include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/string_or_double.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
@@ -57,9 +56,10 @@ class TickClock;
 
 namespace blink {
 
-class PerformanceMarkOptions;
+class BackgroundTracingHelper;
 class EventCounts;
 class ExceptionState;
+class ExecutionContext;
 class LargestContentfulPaint;
 class LayoutShift;
 class MemoryInfo;
@@ -67,20 +67,21 @@ class Node;
 class PerformanceElementTiming;
 class PerformanceEventTiming;
 class PerformanceMark;
+class PerformanceMarkOptions;
 class PerformanceMeasure;
 class PerformanceNavigation;
 class PerformanceObserver;
 class PerformanceTiming;
-class ProfilerInitOptions;
 class ResourceResponse;
 class ResourceTimingInfo;
 class ScriptPromise;
 class ScriptState;
 class ScriptValue;
 class SecurityOrigin;
-class StringOrPerformanceMeasureOptions;
 class UserTiming;
 class V8ObjectBuilder;
+class V8UnionDoubleOrString;
+class V8UnionPerformanceMeasureOptionsOrString;
 
 using PerformanceEntryVector = HeapVector<Member<PerformanceEntry>>;
 using PerformanceEntryDeque = HeapDeque<Member<PerformanceEntry>>;
@@ -96,7 +97,7 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
   // Overriden by WindowPerformance but not by WorkerPerformance.
   virtual PerformanceTiming* timing() const;
   virtual PerformanceNavigation* navigation() const;
-  virtual MemoryInfo* memory() const;
+  virtual MemoryInfo* memory(ScriptState*) const;
   virtual ScriptPromise measureUserAgentSpecificMemory(
       ScriptState*,
       ExceptionState& exception_state) const;
@@ -104,17 +105,24 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
 
   // Reduce the resolution to prevent timing attacks. See:
   // http://www.w3.org/TR/hr-time-2/#privacy-security
-  static double ClampTimeResolution(double time_seconds);
+  // This returns a DOMHighResTimeStamp (double), representing clamped, jittered
+  // time in milliseconds. The actual clamping resolution varies based on the
+  // provided CrossOriginIsolatedCapability.
+  static DOMHighResTimeStamp ClampTimeResolution(
+      base::TimeDelta time,
+      bool cross_origin_isolated_capability);
 
   static DOMHighResTimeStamp MonotonicTimeToDOMHighResTimeStamp(
       base::TimeTicks time_origin,
       base::TimeTicks monotonic_time,
-      bool allow_negative_value);
+      bool allow_negative_value,
+      bool cross_origin_isolated_capability);
 
   static base::TimeDelta MonotonicTimeToTimeDelta(
       base::TimeTicks time_origin,
       base::TimeTicks monotonic_time,
-      bool allow_negative_value);
+      bool allow_negative_value,
+      bool cross_origin_isolated_capability);
 
   // Translate given platform monotonic time in seconds into a high resolution
   // DOMHighResTimeStamp in milliseconds. The result timestamp is relative to
@@ -134,9 +142,7 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
   DOMHighResTimeStamp timeOrigin() const;
 
   // Internal getter method for the time origin value.
-  double GetTimeOrigin() const {
-    return time_origin_.since_origin().InSecondsF();
-  }
+  base::TimeTicks GetTimeOriginInternal() const { return time_origin_; }
 
   PerformanceEntryVector getEntries();
   // Get BufferedEntriesByType will return all entries in the buffer regardless
@@ -179,6 +185,13 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
       ExecutionContext& context_for_use_counter);
   void AddResourceTiming(
       mojom::blink::ResourceTimingInfoPtr,
+      const AtomicString& initiator_type,
+      mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
+          worker_timing_receiver,
+      ExecutionContext* context);
+  void AddResourceTimingWithUnparsedServerTiming(
+      mojom::blink::ResourceTimingInfoPtr,
+      const String& server_timing_value,
       const AtomicString& initiator_type,
       mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
           worker_timing_receiver,
@@ -251,24 +264,20 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
                               ExceptionState&);
 
   PerformanceMeasure* measure(
-      ScriptState*,
+      ScriptState* script_state,
       const AtomicString& measure_name,
-      const StringOrPerformanceMeasureOptions& start_or_options,
-      ExceptionState&);
+      const V8UnionPerformanceMeasureOptionsOrString* start_or_options,
+      ExceptionState& exception_state);
 
   PerformanceMeasure* measure(
-      ScriptState*,
+      ScriptState* script_state,
       const AtomicString& measure_name,
-      const StringOrPerformanceMeasureOptions& start_or_options,
+      const V8UnionPerformanceMeasureOptionsOrString* start_or_options,
       const String& end,
-      ExceptionState&);
+      ExceptionState& exception_state);
 
   void clearMeasures(const AtomicString& measure_name);
   void clearMeasures() { return clearMeasures(AtomicString()); }
-
-  ScriptPromise profile(ScriptState*,
-                        const ProfilerInitOptions*,
-                        ExceptionState&);
 
   void UnregisterPerformanceObserver(PerformanceObserver&);
   void RegisterPerformanceObserver(PerformanceObserver&);
@@ -318,20 +327,19 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
                       base::TimeTicks start_time);
 
   PerformanceMeasure* MeasureInternal(
-      ScriptState*,
+      ScriptState* script_state,
       const AtomicString& measure_name,
-      const StringOrPerformanceMeasureOptions& start,
-      base::Optional<String> end_mark,
-      ExceptionState&);
+      const V8UnionPerformanceMeasureOptionsOrString* start_or_options,
+      absl::optional<String> end_mark,
+      ExceptionState& exception_state);
 
-  PerformanceMeasure* MeasureWithDetail(
-      ScriptState*,
-      const AtomicString& measure_name,
-      const base::Optional<StringOrDouble>& start,
-      const base::Optional<double>& duration,
-      const base::Optional<StringOrDouble>& end,
-      const ScriptValue& detail,
-      ExceptionState&);
+  PerformanceMeasure* MeasureWithDetail(ScriptState* script_state,
+                                        const AtomicString& measure_name,
+                                        const V8UnionDoubleOrString* start,
+                                        const absl::optional<double>& duration,
+                                        const V8UnionDoubleOrString* end,
+                                        const ScriptValue& detail,
+                                        ExceptionState& exception_state);
 
   void CopySecondaryBuffer();
   PerformanceEntryVector getEntriesByTypeInternal(
@@ -341,7 +349,9 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
 
  protected:
   Performance(base::TimeTicks time_origin,
-              scoped_refptr<base::SingleThreadTaskRunner>);
+              bool cross_origin_isolated_capability,
+              scoped_refptr<base::SingleThreadTaskRunner>,
+              ExecutionContext* context = nullptr);
 
   // Expect WindowPerformance to override this method,
   // WorkerPerformance doesn't have to override this.
@@ -381,8 +391,9 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
   Member<PerformanceEventTiming> first_input_timing_;
 
   base::TimeTicks time_origin_;
-  DOMHighResTimeStamp unix_at_zero_monotonic_;
+  base::TimeDelta unix_at_zero_monotonic_;
   const base::TickClock* tick_clock_;
+  bool cross_origin_isolated_capability_;
 
   PerformanceEntryTypeMask observer_filter_options_;
   HeapLinkedHashSet<Member<PerformanceObserver>> observers_;
@@ -391,6 +402,12 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   HeapTaskRunnerTimer<Performance> deliver_observations_timer_;
   HeapTaskRunnerTimer<Performance> resource_timing_buffer_full_timer_;
+
+  // See crbug.com/1181774.
+  Member<BackgroundTracingHelper> background_tracing_helper_;
+
+  // Running counter for LongTask observations.
+  size_t long_task_counter_ = 0;
 };
 
 }  // namespace blink

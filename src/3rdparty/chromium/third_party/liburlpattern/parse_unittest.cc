@@ -4,13 +4,30 @@
 
 #include "third_party/liburlpattern/parse.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/strings/str_format.h"
 #include "third_party/liburlpattern/pattern.h"
+
+namespace {
+
+absl::StatusOr<std::string> PassThrough(absl::string_view input) {
+  return std::string(input);
+}
+
+}  // namespace
 
 namespace liburlpattern {
 
+absl::StatusOr<std::string> ToUpper(absl::string_view input) {
+  std::string output;
+  std::transform(input.begin(), input.end(), std::back_inserter(output),
+                 [](unsigned char c) { return std::toupper(c); });
+  return output;
+}
+
 void RunParseTest(absl::string_view pattern,
-                  absl::StatusOr<std::vector<Part>> expected) {
-  auto result = Parse(pattern);
+                  absl::StatusOr<std::vector<Part>> expected,
+                  EncodeCallback callback = PassThrough) {
+  auto result = Parse(pattern, std::move(callback));
   ASSERT_EQ(result.ok(), expected.ok())
       << "parse status '" << result.status() << "' for: " << pattern;
   if (!expected.ok()) {
@@ -38,8 +55,11 @@ TEST(ParseTest, EmptyPattern) {
   RunParseTest("", std::vector<Part>());
 }
 
-TEST(ParseTest, InvalidChar) {
-  RunParseTest("/foo/ßar", absl::InvalidArgumentError("Invalid character"));
+TEST(ParseTest, EncoderCallback) {
+  std::vector<Part> expected_parts = {
+      Part(PartType::kFixed, "/FOO/BAR", Modifier::kNone),
+  };
+  RunParseTest("/foo/bar", expected_parts, ToUpper);
 }
 
 TEST(ParseTest, Fixed) {
@@ -56,10 +76,30 @@ TEST(ParseTest, FixedInGroup) {
   RunParseTest("{/foo}", expected_parts);
 }
 
+TEST(ParseTest, FixedAndFixedInGroup) {
+  std::vector<Part> expected_parts = {
+      Part(PartType::kFixed, "/foo", Modifier::kNone),
+  };
+  RunParseTest("/{foo}", expected_parts);
+}
+
+TEST(ParseTest, FixedInGroupAndFixed) {
+  std::vector<Part> expected_parts = {
+      Part(PartType::kFixed, "/foo", Modifier::kNone),
+  };
+  RunParseTest("{/}foo", expected_parts);
+}
+
+TEST(ParseTest, FixedInGroupAndFixedInGroup) {
+  std::vector<Part> expected_parts = {
+      Part(PartType::kFixed, "/foo", Modifier::kNone),
+  };
+  RunParseTest("{/}{foo}", expected_parts);
+}
+
 TEST(ParseTest, FixedAndEmptyGroup) {
   std::vector<Part> expected_parts = {
-      Part(PartType::kFixed, "/f", Modifier::kNone),
-      Part(PartType::kFixed, "oo", Modifier::kNone),
+      Part(PartType::kFixed, "/foo", Modifier::kNone),
   };
   RunParseTest("/f{}oo", expected_parts);
 }
@@ -86,16 +126,15 @@ TEST(ParseTest, FixedInGroupWithOneOrMoreModifier) {
 }
 
 TEST(ParseTest, FixedInEarlyTerminatedGroup) {
-  RunParseTest("{/foo", absl::InvalidArgumentError("expected CLOSE"));
+  RunParseTest("{/foo", absl::InvalidArgumentError("expected '}'"));
 }
 
 TEST(ParseTest, FixedInUnbalancedGroup) {
-  RunParseTest("{/foo?", absl::InvalidArgumentError("expected CLOSE"));
+  RunParseTest("{/foo?", absl::InvalidArgumentError("expected '}'"));
 }
 
 TEST(ParseTest, FixedWithModifier) {
-  RunParseTest("/foo?",
-               absl::InvalidArgumentError("Unexpected OTHER_MODIFIER"));
+  RunParseTest("/foo?", absl::InvalidArgumentError("Unexpected modifier"));
 }
 
 TEST(ParseTest, Regex) {
@@ -126,7 +165,7 @@ TEST(ParseTest, RegexWithPrefixAndSuffixInGroup) {
 }
 
 TEST(ParseTest, RegexAndRegexInGroup) {
-  RunParseTest("/f{(o)(o)}", absl::InvalidArgumentError("expected CLOSE"));
+  RunParseTest("/f{(o)(o)}", absl::InvalidArgumentError("expected '}'"));
 }
 
 TEST(ParseTest, RegexWithPrefix) {
@@ -214,11 +253,11 @@ TEST(ParseTest, WildcardFollowingWildcardWithModifierStart) {
 }
 
 TEST(ParseTest, WildcardWithMultipleModifiersPlus) {
-  RunParseTest("/**+", absl::InvalidArgumentError("expected END"));
+  RunParseTest("/**+", absl::InvalidArgumentError("expected end of pattern"));
 }
 
 TEST(ParseTest, WildcardWithMultipleModifiersQuestion) {
-  RunParseTest("/**?", absl::InvalidArgumentError("expected END"));
+  RunParseTest("/**?", absl::InvalidArgumentError("expected end of pattern"));
 }
 
 TEST(ParseTest, WildcardInGroup) {
@@ -248,6 +287,10 @@ TEST(ParseTest, Name) {
   RunParseTest("/foo:bar", expected_parts);
 }
 
+TEST(ParseTest, NameStartsWithNumber) {
+  RunParseTest("/foo/:0", absl::InvalidArgumentError("Missing parameter name"));
+}
+
 TEST(ParseTest, NameInGroup) {
   std::vector<Part> expected_parts = {
       Part(PartType::kFixed, "/foo", Modifier::kNone),
@@ -258,7 +301,7 @@ TEST(ParseTest, NameInGroup) {
 }
 
 TEST(ParseTest, NameAndNameInGroup) {
-  RunParseTest("/foo{:bar:baz}", absl::InvalidArgumentError("expected CLOSE"));
+  RunParseTest("/foo{:bar:baz}", absl::InvalidArgumentError("expected '}'"));
 }
 
 TEST(ParseTest, NameWithPrefixAndSuffixInGroup) {
@@ -316,11 +359,13 @@ TEST(ParseTest, NameWithModifierStarAndWildcard) {
 }
 
 TEST(ParseTest, NameWithModifierStarAndModifierQuestion) {
-  RunParseTest("/:foo*?", absl::InvalidArgumentError("expected END"));
+  RunParseTest("/:foo*?",
+               absl::InvalidArgumentError("expected end of pattern"));
 }
 
 TEST(ParseTest, NameWithModifierStarAndModifierPlus) {
-  RunParseTest("/:foo*+", absl::InvalidArgumentError("expected END"));
+  RunParseTest("/:foo*+",
+               absl::InvalidArgumentError("expected end of pattern"));
 }
 
 }  // namespace liburlpattern

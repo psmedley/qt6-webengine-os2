@@ -198,4 +198,4 @@ typedef Vector<std::unique_ptr<PreloadRequest>> PreloadRequestStream;
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_PARSER_PRELOAD_REQUEST_H_

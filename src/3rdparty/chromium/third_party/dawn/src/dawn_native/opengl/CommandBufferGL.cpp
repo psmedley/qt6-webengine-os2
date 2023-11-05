@@ -18,7 +18,9 @@
 #include "dawn_native/BindGroupTracker.h"
 #include "dawn_native/CommandEncoder.h"
 #include "dawn_native/Commands.h"
+#include "dawn_native/ExternalTexture.h"
 #include "dawn_native/RenderBundle.h"
+#include "dawn_native/VertexFormat.h"
 #include "dawn_native/opengl/BufferGL.h"
 #include "dawn_native/opengl/ComputePipelineGL.h"
 #include "dawn_native/opengl/DeviceGL.h"
@@ -49,57 +51,59 @@ namespace dawn_native { namespace opengl {
 
         GLenum VertexFormatType(wgpu::VertexFormat format) {
             switch (format) {
-                case wgpu::VertexFormat::UChar2:
-                case wgpu::VertexFormat::UChar4:
-                case wgpu::VertexFormat::UChar2Norm:
-                case wgpu::VertexFormat::UChar4Norm:
+                case wgpu::VertexFormat::Uint8x2:
+                case wgpu::VertexFormat::Uint8x4:
+                case wgpu::VertexFormat::Unorm8x2:
+                case wgpu::VertexFormat::Unorm8x4:
                     return GL_UNSIGNED_BYTE;
-                case wgpu::VertexFormat::Char2:
-                case wgpu::VertexFormat::Char4:
-                case wgpu::VertexFormat::Char2Norm:
-                case wgpu::VertexFormat::Char4Norm:
+                case wgpu::VertexFormat::Sint8x2:
+                case wgpu::VertexFormat::Sint8x4:
+                case wgpu::VertexFormat::Snorm8x2:
+                case wgpu::VertexFormat::Snorm8x4:
                     return GL_BYTE;
-                case wgpu::VertexFormat::UShort2:
-                case wgpu::VertexFormat::UShort4:
-                case wgpu::VertexFormat::UShort2Norm:
-                case wgpu::VertexFormat::UShort4Norm:
+                case wgpu::VertexFormat::Uint16x2:
+                case wgpu::VertexFormat::Uint16x4:
+                case wgpu::VertexFormat::Unorm16x2:
+                case wgpu::VertexFormat::Unorm16x4:
                     return GL_UNSIGNED_SHORT;
-                case wgpu::VertexFormat::Short2:
-                case wgpu::VertexFormat::Short4:
-                case wgpu::VertexFormat::Short2Norm:
-                case wgpu::VertexFormat::Short4Norm:
+                case wgpu::VertexFormat::Sint16x2:
+                case wgpu::VertexFormat::Sint16x4:
+                case wgpu::VertexFormat::Snorm16x2:
+                case wgpu::VertexFormat::Snorm16x4:
                     return GL_SHORT;
-                case wgpu::VertexFormat::Half2:
-                case wgpu::VertexFormat::Half4:
+                case wgpu::VertexFormat::Float16x2:
+                case wgpu::VertexFormat::Float16x4:
                     return GL_HALF_FLOAT;
-                case wgpu::VertexFormat::Float:
-                case wgpu::VertexFormat::Float2:
-                case wgpu::VertexFormat::Float3:
-                case wgpu::VertexFormat::Float4:
+                case wgpu::VertexFormat::Float32:
+                case wgpu::VertexFormat::Float32x2:
+                case wgpu::VertexFormat::Float32x3:
+                case wgpu::VertexFormat::Float32x4:
                     return GL_FLOAT;
-                case wgpu::VertexFormat::UInt:
-                case wgpu::VertexFormat::UInt2:
-                case wgpu::VertexFormat::UInt3:
-                case wgpu::VertexFormat::UInt4:
+                case wgpu::VertexFormat::Uint32:
+                case wgpu::VertexFormat::Uint32x2:
+                case wgpu::VertexFormat::Uint32x3:
+                case wgpu::VertexFormat::Uint32x4:
                     return GL_UNSIGNED_INT;
-                case wgpu::VertexFormat::Int:
-                case wgpu::VertexFormat::Int2:
-                case wgpu::VertexFormat::Int3:
-                case wgpu::VertexFormat::Int4:
+                case wgpu::VertexFormat::Sint32:
+                case wgpu::VertexFormat::Sint32x2:
+                case wgpu::VertexFormat::Sint32x3:
+                case wgpu::VertexFormat::Sint32x4:
                     return GL_INT;
+                default:
+                    UNREACHABLE();
             }
         }
 
         GLboolean VertexFormatIsNormalized(wgpu::VertexFormat format) {
             switch (format) {
-                case wgpu::VertexFormat::UChar2Norm:
-                case wgpu::VertexFormat::UChar4Norm:
-                case wgpu::VertexFormat::Char2Norm:
-                case wgpu::VertexFormat::Char4Norm:
-                case wgpu::VertexFormat::UShort2Norm:
-                case wgpu::VertexFormat::UShort4Norm:
-                case wgpu::VertexFormat::Short2Norm:
-                case wgpu::VertexFormat::Short4Norm:
+                case wgpu::VertexFormat::Unorm8x2:
+                case wgpu::VertexFormat::Unorm8x4:
+                case wgpu::VertexFormat::Snorm8x2:
+                case wgpu::VertexFormat::Snorm8x4:
+                case wgpu::VertexFormat::Unorm16x2:
+                case wgpu::VertexFormat::Unorm16x4:
+                case wgpu::VertexFormat::Snorm16x2:
+                case wgpu::VertexFormat::Snorm16x4:
                     return GL_TRUE;
                 default:
                     return GL_FALSE;
@@ -108,22 +112,22 @@ namespace dawn_native { namespace opengl {
 
         bool VertexFormatIsInt(wgpu::VertexFormat format) {
             switch (format) {
-                case wgpu::VertexFormat::UChar2:
-                case wgpu::VertexFormat::UChar4:
-                case wgpu::VertexFormat::Char2:
-                case wgpu::VertexFormat::Char4:
-                case wgpu::VertexFormat::UShort2:
-                case wgpu::VertexFormat::UShort4:
-                case wgpu::VertexFormat::Short2:
-                case wgpu::VertexFormat::Short4:
-                case wgpu::VertexFormat::UInt:
-                case wgpu::VertexFormat::UInt2:
-                case wgpu::VertexFormat::UInt3:
-                case wgpu::VertexFormat::UInt4:
-                case wgpu::VertexFormat::Int:
-                case wgpu::VertexFormat::Int2:
-                case wgpu::VertexFormat::Int3:
-                case wgpu::VertexFormat::Int4:
+                case wgpu::VertexFormat::Uint8x2:
+                case wgpu::VertexFormat::Uint8x4:
+                case wgpu::VertexFormat::Sint8x2:
+                case wgpu::VertexFormat::Sint8x4:
+                case wgpu::VertexFormat::Uint16x2:
+                case wgpu::VertexFormat::Uint16x4:
+                case wgpu::VertexFormat::Sint16x2:
+                case wgpu::VertexFormat::Sint16x4:
+                case wgpu::VertexFormat::Uint32:
+                case wgpu::VertexFormat::Uint32x2:
+                case wgpu::VertexFormat::Uint32x3:
+                case wgpu::VertexFormat::Uint32x4:
+                case wgpu::VertexFormat::Sint32:
+                case wgpu::VertexFormat::Sint32x2:
+                case wgpu::VertexFormat::Sint32x3:
+                case wgpu::VertexFormat::Sint32x4:
                     return true;
                 default:
                     return false;
@@ -175,7 +179,7 @@ namespace dawn_native { namespace opengl {
                         uint64_t offset = mVertexBufferOffsets[slot];
 
                         const VertexBufferInfo& vertexBuffer = mLastPipeline->GetVertexBuffer(slot);
-                        uint32_t components = VertexFormatNumComponents(attribute.format);
+                        uint32_t components = GetVertexFormatInfo(attribute.format).componentCount;
                         GLenum formatType = VertexFormatType(attribute.format);
 
                         GLboolean normalized = VertexFormatIsNormalized(attribute.format);
@@ -221,12 +225,13 @@ namespace dawn_native { namespace opengl {
             }
 
             void Apply(const OpenGLFunctions& gl) {
+                BeforeApply();
                 for (BindGroupIndex index :
                      IterateBitSet(mDirtyBindGroupsObjectChangedOrIsDynamic)) {
                     ApplyBindGroup(gl, index, mBindGroups[index], mDynamicOffsetCounts[index],
                                    mDynamicOffsets[index].data());
                 }
-                DidApply();
+                AfterApply();
             }
 
           private:
@@ -261,6 +266,7 @@ namespace dawn_native { namespace opengl {
                                     target = GL_UNIFORM_BUFFER;
                                     break;
                                 case wgpu::BufferBindingType::Storage:
+                                case kInternalStorageBufferBinding:
                                 case wgpu::BufferBindingType::ReadOnlyStorage:
                                     target = GL_SHADER_STORAGE_BUFFER;
                                     break;
@@ -359,6 +365,29 @@ namespace dawn_native { namespace opengl {
                                                 texture->GetGLFormat().internalFormat);
                             break;
                         }
+
+                        case BindingInfoType::ExternalTexture: {
+                            const std::array<Ref<TextureViewBase>, kMaxPlanesPerFormat>&
+                                textureViews = mBindGroups[index]
+                                                   ->GetBindingAsExternalTexture(bindingIndex)
+                                                   ->GetTextureViews();
+
+                            // Only single-plane formats are supported right now, so assert only one
+                            // view exists.
+                            ASSERT(textureViews[1].Get() == nullptr);
+                            ASSERT(textureViews[2].Get() == nullptr);
+
+                            TextureView* view = ToBackend(textureViews[0].Get());
+                            GLuint handle = view->GetHandle();
+                            GLenum target = view->GetGLTarget();
+                            GLuint viewIndex = indices[bindingIndex];
+
+                            for (auto unit : mPipeline->GetTextureUnitsForTextureView(viewIndex)) {
+                                gl.ActiveTexture(GL_TEXTURE0 + unit);
+                                gl.BindTexture(target, handle);
+                            }
+                            break;
+                        }
                     }
                 }
             }
@@ -430,11 +459,13 @@ namespace dawn_native { namespace opengl {
             Extent3D validTextureCopyExtent = copySize;
             const TextureBase* texture = textureCopy.texture.Get();
             Extent3D virtualSizeAtLevel = texture->GetMipLevelVirtualSize(textureCopy.mipLevel);
-            if (textureCopy.origin.x + copySize.width > virtualSizeAtLevel.width) {
+            ASSERT(textureCopy.origin.x <= virtualSizeAtLevel.width);
+            ASSERT(textureCopy.origin.y <= virtualSizeAtLevel.height);
+            if (copySize.width > virtualSizeAtLevel.width - textureCopy.origin.x) {
                 ASSERT(texture->GetFormat().isCompressed);
                 validTextureCopyExtent.width = virtualSizeAtLevel.width - textureCopy.origin.x;
             }
-            if (textureCopy.origin.y + copySize.height > virtualSizeAtLevel.height) {
+            if (copySize.height > virtualSizeAtLevel.height - textureCopy.origin.y) {
                 ASSERT(texture->GetFormat().isCompressed);
                 validTextureCopyExtent.height = virtualSizeAtLevel.height - textureCopy.origin.y;
             }
@@ -469,7 +500,7 @@ namespace dawn_native { namespace opengl {
                 blitMask |= GL_STENCIL_BUFFER_BIT;
             }
             // Iterate over all layers, doing a single blit for each.
-            for (uint32_t layer = 0; layer < copySize.depth; ++layer) {
+            for (uint32_t layer = 0; layer < copySize.depthOrArrayLayers; ++layer) {
                 // Bind all required aspects for this layer.
                 for (Aspect aspect : IterateEnumMask(src.aspect)) {
                     GLenum glAttachment;
@@ -489,7 +520,8 @@ namespace dawn_native { namespace opengl {
                         case Aspect::Plane1:
                             UNREACHABLE();
                     }
-                    if (srcTexture->GetArrayLayers() == 1) {
+                    if (srcTexture->GetArrayLayers() == 1 &&
+                        srcTexture->GetDimension() == wgpu::TextureDimension::e2D) {
                         gl.FramebufferTexture2D(GL_READ_FRAMEBUFFER, glAttachment,
                                                 srcTexture->GetGLTarget(), srcTexture->GetHandle(),
                                                 src.mipLevel);
@@ -499,7 +531,8 @@ namespace dawn_native { namespace opengl {
                                                    static_cast<GLint>(src.mipLevel),
                                                    static_cast<GLint>(src.origin.z + layer));
                     }
-                    if (dstTexture->GetArrayLayers() == 1) {
+                    if (dstTexture->GetArrayLayers() == 1 &&
+                        dstTexture->GetDimension() == wgpu::TextureDimension::e2D) {
                         gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, glAttachment,
                                                 dstTexture->GetGLTarget(), dstTexture->GetHandle(),
                                                 dst.mipLevel);
@@ -533,14 +566,14 @@ namespace dawn_native { namespace opengl {
     MaybeError CommandBuffer::Execute() {
         const OpenGLFunctions& gl = ToBackend(GetDevice())->gl;
 
-        auto TransitionForPass = [](const PassResourceUsage& usages) {
-            for (size_t i = 0; i < usages.textures.size(); i++) {
-                Texture* texture = ToBackend(usages.textures[i]);
+        auto LazyClearSyncScope = [](const SyncScopeResourceUsage& scope) {
+            for (size_t i = 0; i < scope.textures.size(); i++) {
+                Texture* texture = ToBackend(scope.textures[i]);
 
                 // Clear subresources that are not render attachments. Render attachments will be
                 // cleared in RecordBeginRenderPass by setting the loadop to clear when the texture
                 // subresource has not been initialized before the render pass.
-                usages.textureUsages[i].Iterate(
+                scope.textureUsages[i].Iterate(
                     [&](const SubresourceRange& range, wgpu::TextureUsage usage) {
                         if (usage & ~wgpu::TextureUsage::RenderAttachment) {
                             texture->EnsureSubresourceContentInitialized(range);
@@ -548,39 +581,45 @@ namespace dawn_native { namespace opengl {
                     });
             }
 
-            for (BufferBase* bufferBase : usages.buffers) {
+            for (BufferBase* bufferBase : scope.buffers) {
                 ToBackend(bufferBase)->EnsureDataInitialized();
             }
         };
 
-        const std::vector<PassResourceUsage>& passResourceUsages = GetResourceUsages().perPass;
-        uint32_t nextPassNumber = 0;
+        size_t nextComputePassNumber = 0;
+        size_t nextRenderPassNumber = 0;
 
         Command type;
         while (mCommands.NextCommandId(&type)) {
             switch (type) {
                 case Command::BeginComputePass: {
                     mCommands.NextCommand<BeginComputePassCmd>();
-                    TransitionForPass(passResourceUsages[nextPassNumber]);
+                    for (const SyncScopeResourceUsage& scope :
+                         GetResourceUsages().computePasses[nextComputePassNumber].dispatchUsages) {
+                        LazyClearSyncScope(scope);
+                    }
                     DAWN_TRY(ExecuteComputePass());
 
-                    nextPassNumber++;
+                    nextComputePassNumber++;
                     break;
                 }
 
                 case Command::BeginRenderPass: {
                     auto* cmd = mCommands.NextCommand<BeginRenderPassCmd>();
-                    TransitionForPass(passResourceUsages[nextPassNumber]);
-
+                    LazyClearSyncScope(GetResourceUsages().renderPasses[nextRenderPassNumber]);
                     LazyClearRenderPassAttachments(cmd);
                     DAWN_TRY(ExecuteRenderPass(cmd));
 
-                    nextPassNumber++;
+                    nextRenderPassNumber++;
                     break;
                 }
 
                 case Command::CopyBufferToBuffer: {
                     CopyBufferToBufferCmd* copy = mCommands.NextCommand<CopyBufferToBufferCmd>();
+                    if (copy->size == 0) {
+                        // Skip no-op copies.
+                        break;
+                    }
 
                     ToBackend(copy->source)->EnsureDataInitialized();
                     ToBackend(copy->destination)
@@ -599,13 +638,14 @@ namespace dawn_native { namespace opengl {
 
                 case Command::CopyBufferToTexture: {
                     CopyBufferToTextureCmd* copy = mCommands.NextCommand<CopyBufferToTextureCmd>();
+                    if (copy->copySize.width == 0 || copy->copySize.height == 0 ||
+                        copy->copySize.depthOrArrayLayers == 0) {
+                        // Skip no-op copies.
+                        continue;
+                    }
                     auto& src = copy->source;
                     auto& dst = copy->destination;
-                    auto& copySize = copy->copySize;
                     Buffer* buffer = ToBackend(src.buffer.Get());
-                    Texture* texture = ToBackend(dst.texture.Get());
-                    GLenum target = texture->GetGLTarget();
-                    const GLFormat& format = texture->GetGLFormat();
 
                     if (dst.aspect == Aspect::Stencil) {
                         return DAWN_VALIDATION_ERROR(
@@ -614,151 +654,34 @@ namespace dawn_native { namespace opengl {
                     ASSERT(dst.aspect == Aspect::Color);
 
                     buffer->EnsureDataInitialized();
-
-                    ASSERT(texture->GetDimension() == wgpu::TextureDimension::e2D);
-                    SubresourceRange subresources =
-                        GetSubresourcesAffectedByCopy(dst, copy->copySize);
-                    if (IsCompleteSubresourceCopiedTo(texture, copySize, dst.mipLevel)) {
-                        texture->SetIsSubresourceContentInitialized(true, subresources);
+                    SubresourceRange range = GetSubresourcesAffectedByCopy(dst, copy->copySize);
+                    if (IsCompleteSubresourceCopiedTo(dst.texture.Get(), copy->copySize,
+                                                      dst.mipLevel)) {
+                        dst.texture->SetIsSubresourceContentInitialized(true, range);
                     } else {
-                        texture->EnsureSubresourceContentInitialized(subresources);
+                        ToBackend(dst.texture)->EnsureSubresourceContentInitialized(range);
                     }
 
                     gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->GetHandle());
-                    gl.ActiveTexture(GL_TEXTURE0);
-                    gl.BindTexture(target, texture->GetHandle());
 
-                    const Format& formatInfo = texture->GetFormat();
-                    const TexelBlockInfo& blockInfo = formatInfo.GetAspectInfo(dst.aspect).block;
+                    TextureDataLayout dataLayout;
+                    dataLayout.offset = 0;
+                    dataLayout.bytesPerRow = src.bytesPerRow;
+                    dataLayout.rowsPerImage = src.rowsPerImage;
 
-                    if (formatInfo.isCompressed) {
-                        ASSERT(texture->GetDimension() == wgpu::TextureDimension::e2D);
-
-                        Extent3D copyExtent = ComputeTextureCopyExtent(dst, copySize);
-
-                        // In GLES glPixelStorei() doesn't affect CompressedTexSubImage*D() and
-                        // GL_UNPACK_COMPRESSED_BLOCK_* isn't defined, so we have to workaround
-                        // this limitation by copying the compressed texture data once per row.
-                        // See OpenGL ES 3.2 SPEC Chapter 8.4.1, "Pixel Storage Modes and Pixel
-                        // Buffer Objects" for more details.
-                        if (gl.GetVersion().IsES()) {
-                            uint64_t copyDataSizePerBlockRow =
-                                (copySize.width / blockInfo.width) * blockInfo.byteSize;
-                            size_t copyBlockRowsPerImage = copySize.height / blockInfo.height;
-
-                            if (texture->GetArrayLayers() > 1) {
-                                // TODO(jiawei.shao@intel.com): do a single copy when the data is
-                                // correctly packed.
-                                for (size_t copyZ = 0; copyZ < copyExtent.depth; ++copyZ) {
-                                    uintptr_t offsetPerImage = static_cast<uintptr_t>(
-                                        src.offset + copyZ * src.bytesPerRow * src.rowsPerImage);
-                                    uint32_t dstOriginY = dst.origin.y;
-                                    uint32_t dstOriginZ = dst.origin.z + copyZ;
-
-                                    for (size_t copyBlockRow = 0;
-                                         copyBlockRow < copyBlockRowsPerImage; ++copyBlockRow) {
-                                        gl.CompressedTexSubImage3D(
-                                            target, dst.mipLevel, dst.origin.x, dstOriginY,
-                                            dstOriginZ, copyExtent.width, blockInfo.height, 1,
-                                            format.internalFormat, copyDataSizePerBlockRow,
-                                            reinterpret_cast<void*>(
-                                                static_cast<uintptr_t>(offsetPerImage)));
-
-                                        offsetPerImage += src.bytesPerRow;
-                                        dstOriginY += blockInfo.height;
-                                    }
-                                }
-                            } else {
-                                uintptr_t offset = static_cast<uintptr_t>(src.offset);
-                                uint32_t dstOriginY = dst.origin.y;
-
-                                // TODO(jiawei.shao@intel.com): do a single copy when the data is
-                                // correctly packed.
-                                for (size_t copyBlockRow = 0; copyBlockRow < copyBlockRowsPerImage;
-                                     ++copyBlockRow) {
-                                    gl.CompressedTexSubImage2D(
-                                        target, dst.mipLevel, dst.origin.x, dstOriginY,
-                                        copyExtent.width, blockInfo.height, format.internalFormat,
-                                        copyDataSizePerBlockRow,
-                                        reinterpret_cast<void*>(static_cast<uintptr_t>(offset)));
-
-                                    offset += src.bytesPerRow;
-                                    dstOriginY += blockInfo.height;
-                                }
-                            }
-
-                        } else {
-                            gl.PixelStorei(GL_UNPACK_ROW_LENGTH,
-                                           src.bytesPerRow / blockInfo.byteSize * blockInfo.width);
-                            gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT,
-                                           src.rowsPerImage * blockInfo.height);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_SIZE, blockInfo.byteSize);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_WIDTH, blockInfo.width);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, blockInfo.height);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_DEPTH, 1);
-
-                            uint64_t copyDataSize = (copySize.width / blockInfo.width) *
-                                                    (copySize.height / blockInfo.height) *
-                                                    blockInfo.byteSize * copySize.depth;
-
-                            if (texture->GetArrayLayers() > 1) {
-                                gl.CompressedTexSubImage3D(
-                                    target, dst.mipLevel, dst.origin.x, dst.origin.y, dst.origin.z,
-                                    copyExtent.width, copyExtent.height, copyExtent.depth,
-                                    format.internalFormat, copyDataSize,
-                                    reinterpret_cast<void*>(static_cast<uintptr_t>(src.offset)));
-                            } else {
-                                gl.CompressedTexSubImage2D(
-                                    target, dst.mipLevel, dst.origin.x, dst.origin.y,
-                                    copyExtent.width, copyExtent.height, format.internalFormat,
-                                    copyDataSize,
-                                    reinterpret_cast<void*>(static_cast<uintptr_t>(src.offset)));
-                            }
-
-                            gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-                            gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_SIZE, 0);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_WIDTH, 0);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, 0);
-                            gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_DEPTH, 0);
-                        }
-                    } else {
-                        gl.PixelStorei(GL_UNPACK_ROW_LENGTH,
-                                       src.bytesPerRow / blockInfo.byteSize * blockInfo.width);
-                        gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT, src.rowsPerImage * blockInfo.height);
-                        switch (texture->GetDimension()) {
-                            case wgpu::TextureDimension::e2D:
-                                if (texture->GetArrayLayers() > 1) {
-                                    gl.TexSubImage3D(target, dst.mipLevel, dst.origin.x,
-                                                     dst.origin.y, dst.origin.z, copySize.width,
-                                                     copySize.height, copySize.depth, format.format,
-                                                     format.type,
-                                                     reinterpret_cast<void*>(
-                                                         static_cast<uintptr_t>(src.offset)));
-                                } else {
-                                    gl.TexSubImage2D(target, dst.mipLevel, dst.origin.x,
-                                                     dst.origin.y, copySize.width, copySize.height,
-                                                     format.format, format.type,
-                                                     reinterpret_cast<void*>(
-                                                         static_cast<uintptr_t>(src.offset)));
-                                }
-                                break;
-
-                            case wgpu::TextureDimension::e1D:
-                            case wgpu::TextureDimension::e3D:
-                                UNREACHABLE();
-                        }
-
-                        gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-                        gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
-                    }
-
+                    DoTexSubImage(gl, dst, reinterpret_cast<void*>(src.offset), dataLayout,
+                                  copy->copySize);
                     gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
                     break;
                 }
 
                 case Command::CopyTextureToBuffer: {
                     CopyTextureToBufferCmd* copy = mCommands.NextCommand<CopyTextureToBufferCmd>();
+                    if (copy->copySize.width == 0 || copy->copySize.height == 0 ||
+                        copy->copySize.depthOrArrayLayers == 0) {
+                        // Skip no-op copies.
+                        continue;
+                    }
                     auto& src = copy->source;
                     auto& dst = copy->destination;
                     auto& copySize = copy->copySize;
@@ -779,7 +702,7 @@ namespace dawn_native { namespace opengl {
 
                     buffer->EnsureDataInitializedAsDestination(copy);
 
-                    ASSERT(texture->GetDimension() == wgpu::TextureDimension::e2D);
+                    ASSERT(texture->GetDimension() != wgpu::TextureDimension::e1D);
                     SubresourceRange subresources =
                         GetSubresourcesAffectedByCopy(src, copy->copySize);
                     texture->EnsureSubresourceContentInitialized(subresources);
@@ -834,23 +757,25 @@ namespace dawn_native { namespace opengl {
                                               copySize.height, glFormat, glType, offset);
                                 break;
                             }
+                            // Implementation for 2D array is the same as 3D.
+                            DAWN_FALLTHROUGH;
+                        }
 
+                        case wgpu::TextureDimension::e3D: {
                             const uint64_t bytesPerImage = dst.bytesPerRow * dst.rowsPerImage;
-                            for (uint32_t layer = 0; layer < copySize.depth; ++layer) {
+                            for (uint32_t z = 0; z < copySize.depthOrArrayLayers; ++z) {
                                 gl.FramebufferTextureLayer(GL_READ_FRAMEBUFFER, glAttachment,
                                                            texture->GetHandle(), src.mipLevel,
-                                                           src.origin.z + layer);
+                                                           src.origin.z + z);
                                 gl.ReadPixels(src.origin.x, src.origin.y, copySize.width,
                                               copySize.height, glFormat, glType, offset);
 
                                 offset += bytesPerImage;
                             }
-
                             break;
                         }
 
                         case wgpu::TextureDimension::e1D:
-                        case wgpu::TextureDimension::e3D:
                             UNREACHABLE();
                     }
 
@@ -864,10 +789,15 @@ namespace dawn_native { namespace opengl {
                 case Command::CopyTextureToTexture: {
                     CopyTextureToTextureCmd* copy =
                         mCommands.NextCommand<CopyTextureToTextureCmd>();
+                    if (copy->copySize.width == 0 || copy->copySize.height == 0 ||
+                        copy->copySize.depthOrArrayLayers == 0) {
+                        // Skip no-op copies.
+                        continue;
+                    }
                     auto& src = copy->source;
                     auto& dst = copy->destination;
 
-                    // TODO(jiawei.shao@intel.com): add workaround for the case that imageExtentSrc
+                    // TODO(crbug.com/dawn/817): add workaround for the case that imageExtentSrc
                     // is not equal to imageExtentDst. For example when copySize fits in the virtual
                     // size of the source image but does not fit in the one of the destination
                     // image.
@@ -889,7 +819,8 @@ namespace dawn_native { namespace opengl {
                                             src.mipLevel, src.origin.x, src.origin.y, src.origin.z,
                                             dstTexture->GetHandle(), dstTexture->GetGLTarget(),
                                             dst.mipLevel, dst.origin.x, dst.origin.y, dst.origin.z,
-                                            copySize.width, copySize.height, copy->copySize.depth);
+                                            copySize.width, copySize.height,
+                                            copy->copySize.depthOrArrayLayers);
                     } else {
                         CopyTextureToTextureWithBlit(gl, src, dst, copySize);
                     }
@@ -897,7 +828,7 @@ namespace dawn_native { namespace opengl {
                 }
 
                 case Command::ResolveQuerySet: {
-                    // TODO(hao.x.li@intel.com): Resolve non-precise occlusion query.
+                    // TODO(crbug.com/dawn/434): Resolve non-precise occlusion query.
                     SkipCommand(&mCommands, type);
                     break;
                 }
@@ -941,7 +872,6 @@ namespace dawn_native { namespace opengl {
                     bindGroupTracker.Apply(gl);
 
                     gl.DispatchCompute(dispatch->x, dispatch->y, dispatch->z);
-                    // TODO(cwallez@chromium.org): add barriers to the API
                     gl.MemoryBarrier(GL_ALL_BARRIER_BITS);
                     break;
                 }
@@ -955,7 +885,6 @@ namespace dawn_native { namespace opengl {
 
                     gl.BindBuffer(GL_DISPATCH_INDIRECT_BUFFER, indirectBuffer->GetHandle());
                     gl.DispatchComputeIndirect(static_cast<GLintptr>(indirectBufferOffset));
-                    // TODO(cwallez@chromium.org): add barriers to the API
                     gl.MemoryBarrier(GL_ALL_BARRIER_BITS);
                     break;
                 }
@@ -1056,8 +985,6 @@ namespace dawn_native { namespace opengl {
 
                 // Attach depth/stencil buffer.
                 GLenum glAttachment = 0;
-                // TODO(kainino@chromium.org): it may be valid to just always use
-                // GL_DEPTH_STENCIL_ATTACHMENT here.
                 if (format.aspects == (Aspect::Depth | Aspect::Stencil)) {
                     glAttachment = GL_DEPTH_STENCIL_ATTACHMENT;
                 } else if (format.aspects == Aspect::Depth) {
@@ -1128,7 +1055,8 @@ namespace dawn_native { namespace opengl {
                     }
                 }
 
-                if (attachmentInfo->storeOp == wgpu::StoreOp::Clear) {
+                if (attachmentInfo->storeOp == wgpu::StoreOp::Discard ||
+                    attachmentInfo->storeOp == wgpu::StoreOp::Clear) {
                     // TODO(natlee@microsoft.com): call glDiscard to do optimization
                 }
             }
@@ -1347,8 +1275,8 @@ namespace dawn_native { namespace opengl {
                     break;
                 }
 
-                case Command::SetBlendColor: {
-                    SetBlendColorCmd* cmd = mCommands.NextCommand<SetBlendColorCmd>();
+                case Command::SetBlendConstant: {
+                    SetBlendConstantCmd* cmd = mCommands.NextCommand<SetBlendConstantCmd>();
                     const std::array<float, 4> blendColor = ConvertToFloatColor(cmd->color);
                     gl.BlendColor(blendColor[0], blendColor[1], blendColor[2], blendColor[3]);
                     break;
@@ -1388,6 +1316,140 @@ namespace dawn_native { namespace opengl {
 
         // EndRenderPass should have been called
         UNREACHABLE();
+    }
+
+    void DoTexSubImage(const OpenGLFunctions& gl,
+                       const TextureCopy& destination,
+                       const void* data,
+                       const TextureDataLayout& dataLayout,
+                       const Extent3D& copySize) {
+        Texture* texture = ToBackend(destination.texture.Get());
+        ASSERT(texture->GetDimension() != wgpu::TextureDimension::e1D);
+
+        const GLFormat& format = texture->GetGLFormat();
+        GLenum target = texture->GetGLTarget();
+        data = static_cast<const uint8_t*>(data) + dataLayout.offset;
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(target, texture->GetHandle());
+        const TexelBlockInfo& blockInfo =
+            texture->GetFormat().GetAspectInfo(destination.aspect).block;
+
+        uint32_t x = destination.origin.x;
+        uint32_t y = destination.origin.y;
+        uint32_t z = destination.origin.z;
+        if (texture->GetFormat().isCompressed) {
+            size_t rowSize = copySize.width / blockInfo.width * blockInfo.byteSize;
+            Extent3D virtSize = texture->GetMipLevelVirtualSize(destination.mipLevel);
+            uint32_t width = std::min(copySize.width, virtSize.width - x);
+
+            // In GLES glPixelStorei() doesn't affect CompressedTexSubImage*D() and
+            // GL_UNPACK_COMPRESSED_BLOCK_* isn't defined, so we have to workaround
+            // this limitation by copying the compressed texture data once per row.
+            // See OpenGL ES 3.2 SPEC Chapter 8.4.1, "Pixel Storage Modes and Pixel
+            // Buffer Objects" for more details. For Desktop GL, we use row-by-row
+            // copies only for uploads where bytesPerRow is not a multiple of byteSize.
+            if (dataLayout.bytesPerRow % blockInfo.byteSize == 0 && gl.GetVersion().IsDesktop()) {
+                size_t imageSize =
+                    rowSize * (copySize.height / blockInfo.height) * copySize.depthOrArrayLayers;
+
+                uint32_t height = std::min(copySize.height, virtSize.height - y);
+
+                gl.PixelStorei(GL_UNPACK_ROW_LENGTH,
+                               dataLayout.bytesPerRow / blockInfo.byteSize * blockInfo.width);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_SIZE, blockInfo.byteSize);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_WIDTH, blockInfo.width);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, blockInfo.height);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_DEPTH, 1);
+
+                if (texture->GetArrayLayers() == 1 &&
+                    texture->GetDimension() == wgpu::TextureDimension::e2D) {
+                    gl.CompressedTexSubImage2D(target, destination.mipLevel, x, y, width, height,
+                                               format.internalFormat, imageSize, data);
+                } else {
+                    gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT,
+                                   dataLayout.rowsPerImage * blockInfo.height);
+                    gl.CompressedTexSubImage3D(target, destination.mipLevel, x, y, z, width, height,
+                                               copySize.depthOrArrayLayers, format.internalFormat,
+                                               imageSize, data);
+                    gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+                }
+
+                gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_SIZE, 0);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_WIDTH, 0);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, 0);
+                gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_DEPTH, 0);
+            } else {
+                if (texture->GetArrayLayers() == 1 &&
+                    texture->GetDimension() == wgpu::TextureDimension::e2D) {
+                    const uint8_t* d = static_cast<const uint8_t*>(data);
+
+                    for (; y < destination.origin.y + copySize.height; y += blockInfo.height) {
+                        uint32_t height = std::min(blockInfo.height, virtSize.height - y);
+                        gl.CompressedTexSubImage2D(target, destination.mipLevel, x, y, width,
+                                                   height, format.internalFormat, rowSize, d);
+                        d += dataLayout.bytesPerRow;
+                    }
+                } else {
+                    const uint8_t* slice = static_cast<const uint8_t*>(data);
+
+                    for (; z < destination.origin.z + copySize.depthOrArrayLayers; ++z) {
+                        const uint8_t* d = slice;
+
+                        for (y = destination.origin.y; y < destination.origin.y + copySize.height;
+                             y += blockInfo.height) {
+                            uint32_t height = std::min(blockInfo.height, virtSize.height - y);
+                            gl.CompressedTexSubImage3D(target, destination.mipLevel, x, y, z, width,
+                                                       height, 1, format.internalFormat, rowSize,
+                                                       d);
+                            d += dataLayout.bytesPerRow;
+                        }
+
+                        slice += dataLayout.rowsPerImage * dataLayout.bytesPerRow;
+                    }
+                }
+            }
+        } else {
+            uint32_t width = copySize.width;
+            uint32_t height = copySize.height;
+            if (dataLayout.bytesPerRow % blockInfo.byteSize == 0) {
+                gl.PixelStorei(GL_UNPACK_ROW_LENGTH,
+                               dataLayout.bytesPerRow / blockInfo.byteSize * blockInfo.width);
+                if (texture->GetArrayLayers() == 1 &&
+                    texture->GetDimension() == wgpu::TextureDimension::e2D) {
+                    gl.TexSubImage2D(target, destination.mipLevel, x, y, width, height,
+                                     format.format, format.type, data);
+                } else {
+                    gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT,
+                                   dataLayout.rowsPerImage * blockInfo.height);
+                    gl.TexSubImage3D(target, destination.mipLevel, x, y, z, width, height,
+                                     copySize.depthOrArrayLayers, format.format, format.type, data);
+                    gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+                }
+                gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            } else {
+                if (texture->GetArrayLayers() == 1 &&
+                    texture->GetDimension() == wgpu::TextureDimension::e2D) {
+                    const uint8_t* d = static_cast<const uint8_t*>(data);
+                    for (; y < destination.origin.y + height; ++y) {
+                        gl.TexSubImage2D(target, destination.mipLevel, x, y, width, 1,
+                                         format.format, format.type, d);
+                        d += dataLayout.bytesPerRow;
+                    }
+                } else {
+                    const uint8_t* slice = static_cast<const uint8_t*>(data);
+                    for (; z < destination.origin.z + copySize.depthOrArrayLayers; ++z) {
+                        const uint8_t* d = slice;
+                        for (y = destination.origin.y; y < destination.origin.y + height; ++y) {
+                            gl.TexSubImage3D(target, destination.mipLevel, x, y, z, width, 1, 1,
+                                             format.format, format.type, d);
+                            d += dataLayout.bytesPerRow;
+                        }
+                        slice += dataLayout.rowsPerImage * dataLayout.bytesPerRow;
+                    }
+                }
+            }
+        }
     }
 
 }}  // namespace dawn_native::opengl

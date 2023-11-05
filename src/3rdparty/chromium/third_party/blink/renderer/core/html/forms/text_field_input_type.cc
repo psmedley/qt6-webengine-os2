@@ -45,7 +45,6 @@
 #include "third_party/blink/renderer/core/html/forms/text_control_inner_elements.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/core/layout/layout_details_marker.h"
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -61,12 +60,6 @@ class DataListIndicatorElement final : public HTMLDivElement {
  private:
   inline HTMLInputElement* HostInput() const {
     return To<HTMLInputElement>(OwnerShadowHost());
-  }
-
-  LayoutObject* CreateLayoutObject(const ComputedStyle&,
-                                   LegacyLayout) override {
-    UseCounter::Count(GetDocument(), WebFeature::kLegacyLayoutByDetailsMarker);
-    return new LayoutDetailsMarker(this);
   }
 
   EventDispatchHandlingState* PreDispatchEventHandler(Event& event) override {
@@ -96,9 +89,22 @@ class DataListIndicatorElement final : public HTMLDivElement {
   }
 
  public:
-  DataListIndicatorElement(Document& document) : HTMLDivElement(document) {
+  explicit DataListIndicatorElement(Document& document)
+      : HTMLDivElement(document) {}
+
+  // This function should be called after appending |this| to a UA ShadowRoot.
+  void InitializeInShadowTree() {
+    DCHECK(ContainingShadowRoot());
+    DCHECK(ContainingShadowRoot()->IsUserAgent());
     SetShadowPseudoId(AtomicString("-webkit-calendar-picker-indicator"));
     setAttribute(html_names::kIdAttr, shadow_element_names::kIdPickerIndicator);
+    setAttribute(html_names::kStyleAttr,
+                 "display:list-item; "
+                 "list-style:disclosure-open inside; "
+                 "counter-increment: list-item 0;"
+                 "block-size:1em;");
+    // Do not expose list-item role.
+    setAttribute(html_names::kAriaHiddenAttr, "true");
   }
 };
 
@@ -320,8 +326,9 @@ void TextFieldInputType::CreateShadowSubtree() {
   container->AppendChild(editing_view_port);
 
   if (should_have_data_list_indicator) {
-    container->AppendChild(
-        MakeGarbageCollected<DataListIndicatorElement>(document));
+    auto* data_list = MakeGarbageCollected<DataListIndicatorElement>(document);
+    container->AppendChild(data_list);
+    data_list->InitializeInShadowTree();
   }
   // FIXME: Because of a special handling for a spin button in
   // LayoutTextControlSingleLine, we need to put it to the last position. It's
@@ -360,9 +367,10 @@ void TextFieldInputType::ListAttributeTargetChanged() {
   if (will_have_picker_indicator) {
     Document& document = GetElement().GetDocument();
     if (Element* container = ContainerElement()) {
-      container->InsertBefore(
-          MakeGarbageCollected<DataListIndicatorElement>(document),
-          GetSpinButtonElement());
+      auto* data_list =
+          MakeGarbageCollected<DataListIndicatorElement>(document);
+      container->InsertBefore(data_list, GetSpinButtonElement());
+      data_list->InitializeInShadowTree();
     } else {
       // FIXME: The following code is similar to createShadowSubtree(),
       // but they are different. We should simplify the code by making
@@ -377,8 +385,10 @@ void TextFieldInputType::ListAttributeTargetChanged() {
           MakeGarbageCollected<EditingViewPortElement>(document);
       editing_view_port->AppendChild(inner_editor);
       rp_container->AppendChild(editing_view_port);
-      rp_container->AppendChild(
-          MakeGarbageCollected<DataListIndicatorElement>(document));
+      auto* data_list =
+          MakeGarbageCollected<DataListIndicatorElement>(document);
+      rp_container->AppendChild(data_list);
+      data_list->InitializeInShadowTree();
       if (GetElement().GetDocument().FocusedElement() == GetElement())
         GetElement().UpdateFocusAppearance(SelectionBehaviorOnFocus::kRestore);
     }

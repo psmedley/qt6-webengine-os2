@@ -207,7 +207,8 @@ SkCanvas* WaylandCanvasSurface::GetCanvas() {
   return pending_buffer_->sk_surface()->getCanvas();
 }
 
-void WaylandCanvasSurface::ResizeCanvas(const gfx::Size& viewport_size) {
+void WaylandCanvasSurface::ResizeCanvas(const gfx::Size& viewport_size,
+                                        float scale) {
   if (size_ == viewport_size)
     return;
   // TODO(https://crbug.com/930667): We could implement more efficient resizes
@@ -275,7 +276,9 @@ void WaylandCanvasSurface::ProcessUnsubmittedBuffers() {
 }
 
 void WaylandCanvasSurface::OnSubmission(uint32_t buffer_id,
-                                        const gfx::SwapResult& swap_result) {
+                                        const gfx::SwapResult& swap_result,
+                                        gfx::GpuFenceHandle release_fence) {
+  DCHECK(release_fence.is_null());
   // We may get an OnSubmission callback for a buffer that was submitted
   // before a ResizeCanvas call, which clears all our buffers. Check to
   // see if we still know about this buffer. If we know about this buffer

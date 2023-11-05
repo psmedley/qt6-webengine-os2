@@ -88,7 +88,7 @@ void ProfileInfoHandler::OnUserImageChanged(const user_manager::User& user) {
 
 void ProfileInfoHandler::OnProfileNameChanged(
     const base::FilePath& /* profile_path */,
-    const base::string16& /* old_profile_name */) {
+    const std::u16string& /* old_profile_name */) {
   PushProfileInfo();
 }
 
@@ -134,7 +134,7 @@ void ProfileInfoHandler::PushProfileInfo() {
 }
 
 std::unique_ptr<base::DictionaryValue>
-ProfileInfoHandler::GetAccountNameAndIcon() const {
+ProfileInfoHandler::GetAccountNameAndIcon() {
   std::string name;
   std::string icon_url;
 

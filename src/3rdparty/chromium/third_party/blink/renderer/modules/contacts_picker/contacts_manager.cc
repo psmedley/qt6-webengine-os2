@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/contacts_picker/contacts_manager.h"
 
-#include "base/stl_util.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_contact_info.h"
@@ -231,7 +230,7 @@ ScriptPromise ContactsManager::select(
 
 void ContactsManager::OnContactsSelected(
     ScriptPromiseResolver* resolver,
-    base::Optional<Vector<mojom::blink::ContactInfoPtr>> contacts) {
+    absl::optional<Vector<mojom::blink::ContactInfoPtr>> contacts) {
   ScriptState* script_state = resolver->GetScriptState();
 
   if (!script_state->ContextIsValid()) {

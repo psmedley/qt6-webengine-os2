@@ -10,7 +10,13 @@
 #include "base/command_line.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "printing/buildflags/buildflags.h"
 #include "sandbox/policy/export.h"
+#include "sandbox/policy/mojom/sandbox.mojom.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chromeos/assistant/buildflags.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace sandbox {
 namespace policy {
@@ -40,17 +46,21 @@ enum class SandboxType {
   kMediaFoundationCdm,
 #endif
 
-#if defined(OS_FUCHSIA)
-  // Sandbox type for the web::Context process on Fuchsia. Functionally it's an
-  // equivalent of the browser process on other platforms.
-  kWebContext,
-#endif
-
   // Renderer or worker process. Most common case.
   kRenderer,
 
-  // Utility processes. Used by most isolated services.
+  // Utility processes. Used by most isolated services.  Consider using
+  // kService for Chromium-code that makes limited use of OS APIs.
   kUtility,
+
+#if defined(OS_MAC)
+  // On Mac these are identical.
+  kService = kUtility,
+#else
+  // Services with limited use of OS APIs. Tighter than kUtility and
+  // suitable for most isolated mojo service endpoints.
+  kService,
+#endif
 
   // GPU process.
   kGpu,
@@ -67,7 +77,16 @@ enum class SandboxType {
 #if defined(OS_MAC)
   // The NaCl loader process.
   kNaClLoader,
+
+  // The mirroring service needs IOSurface access on macOS.
+  kMirroring,
 #endif  // defined(OS_MAC)
+
+#if BUILDFLAG(ENABLE_PRINTING)
+  // The print backend service process which interfaces with operating system
+  // print drivers.
+  kPrintBackend,
+#endif
 
   // The print compositor service process.
   kPrintCompositor,
@@ -79,16 +98,16 @@ enum class SandboxType {
   kIme,
   // Text-to-speech.
   kTts,
+
+#if BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+  kLibassistant,
+#endif  // BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Indicates that a process is a zygote and will get a real sandbox later.
   kZygoteIntermediateSandbox,
-#endif
-
-#if !defined(OS_MAC)
-  // Hosts WebRTC for Sharing Service, uses kUtility on OS_MAC.
-  kSharingService,
 #endif
 
   // The speech recognition service process.
@@ -100,6 +119,42 @@ enum class SandboxType {
 
   kMaxValue = kVideoCapture
 };
+
+inline constexpr sandbox::policy::SandboxType MapToSandboxType(
+    sandbox::mojom::Sandbox mojo_sandbox) {
+  switch (mojo_sandbox) {
+    case sandbox::mojom::Sandbox::kCdm:
+      return sandbox::policy::SandboxType::kCdm;
+    case sandbox::mojom::Sandbox::kPrintCompositor:
+      return sandbox::policy::SandboxType::kPrintCompositor;
+    case sandbox::mojom::Sandbox::kService:
+      return sandbox::policy::SandboxType::kService;
+    case sandbox::mojom::Sandbox::kUtility:
+      return sandbox::policy::SandboxType::kUtility;
+    case sandbox::mojom::Sandbox::kVideoCapture:
+      return sandbox::policy::SandboxType::kVideoCapture;
+#if defined(OS_WIN)
+    case sandbox::mojom::Sandbox::kMediaFoundationCdm:
+      return sandbox::policy::SandboxType::kMediaFoundationCdm;
+    case sandbox::mojom::Sandbox::kXrCompositing:
+      return sandbox::policy::SandboxType::kXrCompositing;
+#endif  // OS_WIN
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    case sandbox::mojom::Sandbox::kIme:
+      return sandbox::policy::SandboxType::kIme;
+    case sandbox::mojom::Sandbox::kTts:
+      return sandbox::policy::SandboxType::kTts;
+    case sandbox::mojom::Sandbox::kLibassistant:
+#if BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+      return sandbox::policy::SandboxType::kLibassistant;
+#else
+      CHECK(false) << "Libassistant sandbox not supported";
+      NOTREACHED();
+      return sandbox::policy::SandboxType::kService;
+#endif  // BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+  }
+}
 
 SANDBOX_POLICY_EXPORT bool IsUnsandboxedSandboxType(SandboxType sandbox_type);
 

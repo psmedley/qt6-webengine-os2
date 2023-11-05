@@ -9,7 +9,6 @@
 
 #include "base/atomicops.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
@@ -30,6 +29,8 @@ class MediaStreamComponent;
 class PLATFORM_EXPORT MediaStreamAudioTrack : public MediaStreamTrackPlatform {
  public:
   explicit MediaStreamAudioTrack(bool is_local_track);
+  MediaStreamAudioTrack(const MediaStreamAudioTrack&) = delete;
+  MediaStreamAudioTrack& operator=(const MediaStreamAudioTrack&) = delete;
 
   ~MediaStreamAudioTrack() override;
 
@@ -69,6 +70,12 @@ class PLATFORM_EXPORT MediaStreamAudioTrack : public MediaStreamTrackPlatform {
   void SetEnabled(bool enabled) override;
   void SetContentHint(
       WebMediaStreamTrack::ContentHintType content_hint) override;
+
+  // Returns the maximum number of channels preferred by any sink connected to
+  // this track.
+  int NumPreferredChannels() const;
+
+  bool IsEnabled() const;
 
   // Returns a unique class identifier. Some subclasses override and use this
   // method to provide safe down-casting to their type.
@@ -117,8 +124,6 @@ class PLATFORM_EXPORT MediaStreamAudioTrack : public MediaStreamTrackPlatform {
 
   // Provides weak pointers that are valid until Stop() is called.
   base::WeakPtrFactory<MediaStreamAudioTrack> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaStreamAudioTrack);
 };
 
 }  // namespace blink

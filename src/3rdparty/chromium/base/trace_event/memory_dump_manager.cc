@@ -25,7 +25,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/heap_profiler.h"
 #include "base/trace_event/heap_profiler_allocation_context_tracker.h"
-#include "base/trace_event/heap_profiler_event_filter.h"
 #include "base/trace_event/malloc_dump_provider.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/trace_event/memory_dump_scheduler.h"
@@ -306,9 +305,9 @@ void MemoryDumpManager::CreateProcessDump(const MemoryDumpRequestArgs& args,
   {
     AutoLock lock(lock_);
 
-    pmd_async_state.reset(new ProcessMemoryDumpAsyncState(
+    pmd_async_state = std::make_unique<ProcessMemoryDumpAsyncState>(
         args, dump_providers_, std::move(callback),
-        GetOrCreateBgTaskRunnerLocked()));
+        GetOrCreateBgTaskRunnerLocked());
   }
 
   // Start the process dump. This involves task runner hops as specified by the

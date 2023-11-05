@@ -4,12 +4,12 @@
 
 #include "net/proxy_resolution/multi_threaded_proxy_resolver.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -233,8 +233,9 @@ class MultiThreadedProxyResolverTest : public TestWithTaskEnvironment {
     std::unique_ptr<BlockableProxyResolverFactory> factory_owner(
         new BlockableProxyResolverFactory);
     factory_ = factory_owner.get();
-    resolver_factory_.reset(new SingleShotMultiThreadedProxyResolverFactory(
-        num_threads, std::move(factory_owner)));
+    resolver_factory_ =
+        std::make_unique<SingleShotMultiThreadedProxyResolverFactory>(
+            num_threads, std::move(factory_owner));
     TestCompletionCallback ready_callback;
     std::unique_ptr<ProxyResolverFactory::Request> request;
     resolver_factory_->CreateProxyResolver(
@@ -245,8 +246,7 @@ class MultiThreadedProxyResolverTest : public TestWithTaskEnvironment {
 
     // Verify that the script data reaches the synchronous resolver factory.
     ASSERT_EQ(1u, factory_->script_data().size());
-    EXPECT_EQ(ASCIIToUTF16("pac script bytes"),
-              factory_->script_data()[0]->utf16());
+    EXPECT_EQ(u"pac script bytes", factory_->script_data()[0]->utf16());
   }
 
   void ClearResolver() { resolver_.reset(); }
@@ -648,8 +648,7 @@ TEST_F(MultiThreadedProxyResolverTest, ThreeThreads_Basic) {
 
   ASSERT_EQ(3u, factory().script_data().size());
   for (int i = 0; i < 3; ++i) {
-    EXPECT_EQ(ASCIIToUTF16("pac script bytes"),
-              factory().script_data()[i]->utf16())
+    EXPECT_EQ(u"pac script bytes", factory().script_data()[i]->utf16())
         << "i=" << i;
   }
 
@@ -701,8 +700,7 @@ TEST_F(MultiThreadedProxyResolverTest, OneThreadBlocked) {
 
   // One thread has been provisioned (i.e. one ProxyResolver was created).
   ASSERT_EQ(1u, factory().resolvers().size());
-  EXPECT_EQ(ASCIIToUTF16("pac script bytes"),
-            factory().script_data()[0]->utf16());
+  EXPECT_EQ(u"pac script bytes", factory().script_data()[0]->utf16());
 
   const int kNumRequests = 4;
   TestCompletionCallback callback[kNumRequests];

@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 
@@ -34,6 +35,10 @@ constexpr base::TimeDelta kFirstInputDelayTraceEventThreshold =
     base::TimeDelta::FromMilliseconds(575);
 
 }  // namespace
+
+// A fix for FID computation.
+const base::Feature kFixFirstInputDelayForDesktop{
+    "FixFirstInputDelayForDesktop", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Required length of main thread and network quiet window for determining
 // Time to Interactive.
@@ -134,42 +139,42 @@ void InteractiveDetector::StartOrPostponeCITimer(
   }
 }
 
-base::Optional<base::TimeDelta> InteractiveDetector::GetFirstInputDelay()
+absl::optional<base::TimeDelta> InteractiveDetector::GetFirstInputDelay()
     const {
   return page_event_times_.first_input_delay;
 }
 
-WTF::Vector<base::Optional<base::TimeDelta>>
+WTF::Vector<absl::optional<base::TimeDelta>>
 InteractiveDetector::GetFirstInputDelaysAfterBackForwardCacheRestore() const {
   return page_event_times_.first_input_delays_after_back_forward_cache_restore;
 }
 
-base::Optional<base::TimeTicks> InteractiveDetector::GetFirstInputTimestamp()
+absl::optional<base::TimeTicks> InteractiveDetector::GetFirstInputTimestamp()
     const {
   return page_event_times_.first_input_timestamp;
 }
 
-base::Optional<base::TimeDelta> InteractiveDetector::GetLongestInputDelay()
+absl::optional<base::TimeDelta> InteractiveDetector::GetLongestInputDelay()
     const {
   return page_event_times_.longest_input_delay;
 }
 
-base::Optional<base::TimeTicks> InteractiveDetector::GetLongestInputTimestamp()
+absl::optional<base::TimeTicks> InteractiveDetector::GetLongestInputTimestamp()
     const {
   return page_event_times_.longest_input_timestamp;
 }
 
-base::Optional<base::TimeDelta>
+absl::optional<base::TimeDelta>
 InteractiveDetector::GetFirstInputProcessingTime() const {
   return page_event_times_.first_input_processing_time;
 }
 
-base::Optional<base::TimeTicks> InteractiveDetector::GetFirstScrollTimestamp()
+absl::optional<base::TimeTicks> InteractiveDetector::GetFirstScrollTimestamp()
     const {
   return page_event_times_.first_scroll_timestamp;
 }
 
-base::Optional<base::TimeDelta> InteractiveDetector::GetFirstScrollDelay()
+absl::optional<base::TimeDelta> InteractiveDetector::GetFirstScrollDelay()
     const {
   return page_event_times_.frist_scroll_delay;
 }
@@ -201,11 +206,25 @@ void InteractiveDetector::HandleForInputDelay(
     base::TimeTicks event_platform_timestamp,
     base::TimeTicks processing_start) {
   DCHECK(event.isTrusted());
+  DCHECK(event.type() == event_type_names::kPointerdown ||
+         event.type() == event_type_names::kPointerup ||
+         event.type() == event_type_names::kMousedown ||
+         event.type() == event_type_names::kMouseup ||
+         event.type() == event_type_names::kKeydown ||
+         event.type() == event_type_names::kClick);
 
   // This only happens sometimes on tests unrelated to InteractiveDetector. It
   // is safe to ignore events that are not properly initialized.
   if (event_platform_timestamp.is_null())
     return;
+
+  if (event.type() == event_type_names::kMouseup &&
+      !base::FeatureList::IsEnabled(kFixFirstInputDelayForDesktop))
+    return;
+
+  // These variables track the values which will be reported to histograms.
+  base::TimeDelta delay;
+  base::TimeTicks event_timestamp;
 
   // We can't report a pointerDown until the pointerUp, in case it turns into a
   // scroll.
@@ -213,22 +232,7 @@ void InteractiveDetector::HandleForInputDelay(
     pending_pointerdown_delay_ = processing_start - event_platform_timestamp;
     pending_pointerdown_timestamp_ = event_platform_timestamp;
     return;
-  }
-
-  // We receive any event relevant for EventTiming, but we only care about
-  // events relevant for FirstInputDelay.
-  bool event_is_meaningful = event.type() == event_type_names::kPointerup ||
-                             event.type() == event_type_names::kClick ||
-                             event.type() == event_type_names::kKeydown ||
-                             event.type() == event_type_names::kMousedown;
-
-  if (!event_is_meaningful)
-    return;
-
-  // These variables track the values which will be reported to histograms.
-  base::TimeDelta delay;
-  base::TimeTicks event_timestamp;
-  if (event.type() == event_type_names::kPointerup) {
+  } else if (event.type() == event_type_names::kPointerup) {
     // PointerUp by itself is not considered a significant input.
     if (pending_pointerdown_timestamp_.is_null())
       return;
@@ -240,8 +244,27 @@ void InteractiveDetector::HandleForInputDelay(
     delay = pending_pointerdown_delay_;
     event_timestamp = pending_pointerdown_timestamp_;
   } else {
-    delay = processing_start - event_platform_timestamp;
-    event_timestamp = event_platform_timestamp;
+    if (base::FeatureList::IsEnabled(kFixFirstInputDelayForDesktop)) {
+      if (event.type() == event_type_names::kMousedown) {
+        pending_mousedown_delay_ = processing_start - event_platform_timestamp;
+        pending_mousedown_timestamp_ = event_platform_timestamp;
+        return;
+      } else if (event.type() == event_type_names::kMouseup) {
+        if (pending_mousedown_timestamp_.is_null())
+          return;
+        delay = pending_mousedown_delay_;
+        event_timestamp = pending_mousedown_timestamp_;
+        pending_mousedown_delay_ = base::TimeDelta();
+        pending_mousedown_timestamp_ = base::TimeTicks();
+      } else {
+        // Record delays for click, keydown.
+        delay = processing_start - event_platform_timestamp;
+        event_timestamp = event_platform_timestamp;
+      }
+    } else {
+      delay = processing_start - event_platform_timestamp;
+      event_timestamp = event_platform_timestamp;
+    }
   }
   pending_pointerdown_delay_ = base::TimeDelta();
   pending_pointerdown_timestamp_ = base::TimeTicks();
@@ -254,22 +277,28 @@ void InteractiveDetector::HandleForInputDelay(
 
     if (delay > kFirstInputDelayTraceEventThreshold) {
       // Emit a trace event to highlight long first input delays.
-      TRACE_EVENT_ASYNC_BEGIN_WITH_TIMESTAMP0(
+      TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP0(
           "latency", "Long First Input Delay",
-          TRACE_ID_LOCAL(g_num_long_input_events), event_timestamp);
-      TRACE_EVENT_ASYNC_END_WITH_TIMESTAMP0(
+          TRACE_ID_WITH_SCOPE("Long First Input Delay",
+                              g_num_long_input_events),
+          event_timestamp);
+      TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(
           "latency", "Long First Input Delay",
-          TRACE_ID_LOCAL(g_num_long_input_events), event_timestamp + delay);
+          TRACE_ID_WITH_SCOPE("Long First Input Delay",
+                              g_num_long_input_events),
+          event_timestamp + delay);
       g_num_long_input_events++;
     }
   } else if (delay > kInputDelayTraceEventThreshold) {
     // Emit a trace event to highlight long input delays from second input and
     // onwards.
-    TRACE_EVENT_ASYNC_BEGIN_WITH_TIMESTAMP0(
-        "latency", "Long Input Delay", TRACE_ID_LOCAL(g_num_long_input_events),
+    TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP0(
+        "latency", "Long Input Delay",
+        TRACE_ID_WITH_SCOPE("Long Input Delay", g_num_long_input_events),
         event_timestamp);
-    TRACE_EVENT_ASYNC_END_WITH_TIMESTAMP0(
-        "latency", "Long Input Delay", TRACE_ID_LOCAL(g_num_long_input_events),
+    TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(
+        "latency", "Long Input Delay",
+        TRACE_ID_WITH_SCOPE("Long Input Delay", g_num_long_input_events),
         event_timestamp + delay);
     // Apply metadata on stack samples.
     base::ApplyMetadataToPastSamples(
@@ -343,7 +372,7 @@ void InteractiveDetector::EndNetworkQuietPeriod(base::TimeTicks current_time) {
 // clock_->NowTicks().
 void InteractiveDetector::UpdateNetworkQuietState(
     double request_count,
-    base::Optional<base::TimeTicks> opt_current_time) {
+    absl::optional<base::TimeTicks> opt_current_time) {
   if (request_count <= kNetworkQuietMaximumConnections &&
       active_network_quiet_window_start_.is_null()) {
     // Not using `value_or(clock_->NowTicks())` here because arguments to
@@ -360,7 +389,7 @@ void InteractiveDetector::UpdateNetworkQuietState(
 }
 
 void InteractiveDetector::OnResourceLoadBegin(
-    base::Optional<base::TimeTicks> load_begin_time) {
+    absl::optional<base::TimeTicks> load_begin_time) {
   if (!GetSupplementable())
     return;
   if (!interactive_time_.is_null())
@@ -373,7 +402,7 @@ void InteractiveDetector::OnResourceLoadBegin(
 // The optional load_finish_time, if provided, saves us a call to
 // clock_->NowTicks.
 void InteractiveDetector::OnResourceLoadEnd(
-    base::Optional<base::TimeTicks> load_finish_time) {
+    absl::optional<base::TimeTicks> load_finish_time) {
   if (!GetSupplementable())
     return;
   if (!interactive_time_.is_null())
@@ -568,6 +597,10 @@ void InteractiveDetector::CheckTimeToInteractiveReached() {
 void InteractiveDetector::OnTimeToInteractiveDetected() {
   LongTaskDetector::Instance().UnregisterObserver(this);
   network_quiet_windows_.clear();
+  LocalFrame* frame = GetSupplementable()->GetFrame();
+  DocumentLoader* loader = GetSupplementable()->Loader();
+  probe::LifecycleEvent(frame, loader, "InteractiveTime",
+                        base::TimeTicks::Now().since_origin().InSecondsF());
 
   TRACE_EVENT_MARK_WITH_TIMESTAMP2(
       "loading,rail", "InteractiveTime", interactive_time_, "frame",
@@ -648,7 +681,8 @@ void InteractiveDetector::RecordInputEventTimingUKM(
                             {"keydown", blink::InputEventType::kKeydown},
                             {"pointerup", blink::InputEventType::kPointerup}};
   ukm::builders::InputEvent(source_id)
-      .SetEventType(static_cast<int>(event_type_to_enum.at(event_type)))
+      .SetEventType(static_cast<int>(
+          event_type_to_enum.DeprecatedAtOrEmptyValue(event_type)))
       .SetInteractiveTiming_InputDelay(input_delay.InMilliseconds())
       .SetInteractiveTiming_ProcessingTime(processing_time.InMilliseconds())
       .SetInteractiveTiming_ProcessingFinishedToNextPaint(
@@ -679,7 +713,7 @@ void InteractiveDetector::OnRestoredFromBackForwardCache() {
   // Allocate the last element with 0, which indicates that the first input
   // after this navigation doesn't happen yet.
   page_event_times_.first_input_delays_after_back_forward_cache_restore
-      .push_back(base::nullopt);
+      .push_back(absl::nullopt);
 }
 
 }  // namespace blink

@@ -23,9 +23,9 @@
 #if defined(OS_CHROMEOS) || defined(OS_LINUX) || defined(OS_WIN)
 #include "base/environment.h"
 #include "base/files/file_path.h"
-#include "base/optional.h"
 #include "base/scoped_native_library.h"
 #include "base/threading/thread_restrictions.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #endif
 
 namespace {
@@ -133,7 +133,7 @@ class CoreLibraryInitializer {
 
  private:
 #if defined(OS_CHROMEOS) || defined(OS_LINUX) || defined(OS_WIN)
-  base::Optional<base::ScopedNativeLibrary> library_;
+  absl::optional<base::ScopedNativeLibrary> library_;
 #endif
 };
 
@@ -142,7 +142,9 @@ class CoreLibraryInitializer {
 extern "C" {
 
 MojoResult MojoInitialize(const struct MojoInitializeOptions* options) {
-  static base::NoDestructor<mojo::CoreLibraryInitializer> initializer;
+  static base::NoDestructor<mojo::CoreLibraryInitializer,
+                            base::AllowForTriviallyDestructibleType>
+      initializer;
 
   base::StringPiece library_path_utf8;
   if (options) {
@@ -489,6 +491,10 @@ MojoResult MojoSetDefaultProcessErrorHandler(
 }
 
 }  // extern "C"
+
+const MojoSystemThunks* MojoEmbedderGetSystemThunks() {
+  return &g_thunks;
+}
 
 void MojoEmbedderSetSystemThunks(const MojoSystemThunks* thunks) {
   // Assume embedders will always use matching versions of the Mojo Core and

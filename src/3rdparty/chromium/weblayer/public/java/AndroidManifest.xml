@@ -16,11 +16,27 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.NFC"/>
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+
+    <!-- Augmented reality support.
+         A note to clients: for AR to work, there must be manifest entries present for
+         com.google.ar.core and com.google.ar.core.min_apk_version. These can be merged
+         from the arcore client library or added manually. If being added manually,
+         the following is recommended:
+
+           <meta-data android:name="com.google.ar.core"
+                      android:value="optional" />
+           <meta-data android:name="com.google.ar.core.min_apk_version"
+                      android:value="1" />
+    -->
+    <queries>
+        <package android:name="com.google.ar.core" />
+    </queries>
 
     <application>
         <!-- The following service entries exist in order to allow us to
@@ -114,15 +130,25 @@
             </intent-filter>
         </service>
 
+        <!-- GooglePay payment app support -->
+        <meta-data
+            android:name="com.google.android.gms.wallet.api.enabled"
+            android:value="true" />
+
+        <!-- Service used by payment apps to notify the browser about changes in user selected
+             payment method, shipping address, or shipping option. -->
+        <service
+            android:name="org.chromium.weblayer.PaymentDetailsUpdateServiceWrapper"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.chromium.intent.action.UPDATE_PAYMENT_DETAILS"/>
+            </intent-filter>
+        </service>
+
         <!-- Cast support -->
         <!-- TODO(crbug.com/1148410): remove this. -->
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
             android:value="org.chromium.components.media_router.caf.CastOptionsProvider"/>
-
-        <!-- GooglePay payment app support -->
-        <meta-data
-            android:name="com.google.android.gms.wallet.api.enabled"
-            android:value="true" />
     </application>
 </manifest>

@@ -6,12 +6,13 @@
 #define UI_VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_CONTROLLER_H_
 
 #include <set>
+#include <string>
 
-#include "base/strings/string16.h"
 #include "ui/base/clipboard/clipboard_buffer.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/views/view.h"
 #include "ui/views/views_export.h"
 
 namespace ui {
@@ -33,7 +34,7 @@ class VIEWS_EXPORT TextfieldController {
   // user. It won't be called if the text is changed by calling
   // Textfield::SetText() or Textfield::AppendText().
   virtual void ContentsChanged(Textfield* sender,
-                               const base::string16& new_contents) {}
+                               const std::u16string& new_contents) {}
 
   // Called to get notified about keystrokes in the edit.
   // Returns true if the message was handled and should not be processed
@@ -84,7 +85,11 @@ class VIEWS_EXPORT TextfieldController {
   // called before regular handling of the drop. If this returns a drag
   // operation other than `ui::mojom::DragOperation::kNone`, regular handling is
   // skipped.
-  virtual ui::mojom::DragOperation OnDrop(const ui::OSExchangeData& data);
+  virtual ui::mojom::DragOperation OnDrop(const ui::DropTargetEvent& event);
+
+  // Called to get async drop callback to be run later.
+  virtual views::View::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event);
 
   // Gives the controller a chance to modify the context menu contents.
   virtual void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {}

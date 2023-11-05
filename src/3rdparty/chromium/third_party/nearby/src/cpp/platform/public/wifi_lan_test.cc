@@ -16,12 +16,12 @@
 
 #include <memory>
 
-#include "platform/base/medium_environment.h"
-#include "platform/public/count_down_latch.h"
-#include "platform/public/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
+#include "platform/base/medium_environment.h"
+#include "platform/public/count_down_latch.h"
+#include "platform/public/logging.h"
 
 namespace location {
 namespace nearby {
@@ -64,6 +64,7 @@ TEST_P(WifiLanMediumTest, CanStartAcceptingConnectionsAndConnect) {
   std::string endpoint_info_name{kEndpointName};
   CountDownLatch found_latch(1);
   CountDownLatch accepted_latch(1);
+  CancellationFlag flag;
 
   WifiLanService* discovered_service = nullptr;
   wifi_a.StartDiscovery(
@@ -102,8 +103,7 @@ TEST_P(WifiLanMediumTest, CanStartAcceptingConnectionsAndConnect) {
   {
     SingleThreadExecutor client_executor;
     client_executor.Execute(
-        [&wifi_a, &socket_a, discovered_service, &service_id]() {
-          CancellationFlag flag;
+        [&wifi_a, &socket_a, discovered_service, &service_id, &flag]() {
           socket_a = wifi_a.Connect(*discovered_service, service_id, &flag);
         });
   }
@@ -126,6 +126,7 @@ TEST_P(WifiLanMediumTest, CanCancelConnect) {
   std::string endpoint_info_name{kEndpointName};
   CountDownLatch found_latch(1);
   CountDownLatch accepted_latch(1);
+  CancellationFlag flag(true);
 
   WifiLanService* discovered_service = nullptr;
   wifi_a.StartDiscovery(
@@ -164,9 +165,7 @@ TEST_P(WifiLanMediumTest, CanCancelConnect) {
   {
     SingleThreadExecutor client_executor;
     client_executor.Execute(
-        [&wifi_a, &socket_a, discovered_service, &service_id]() {
-          // Make it as Cancelled.
-          CancellationFlag flag(true);
+        [&wifi_a, &socket_a, discovered_service, &service_id, &flag]() {
           socket_a = wifi_a.Connect(*discovered_service, service_id, &flag);
         });
   }

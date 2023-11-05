@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "fxjs/gc/heap.h"
+#include "xfa/fwl/cfwl_themepart.h"
 #include "xfa/fwl/theme/cfwl_widgettp.h"
 
 class CFGAS_GEPath;
@@ -30,7 +31,7 @@ class CFWL_CheckBoxTP final : public CFWL_WidgetTP {
   void DrawCheckSign(CFWL_Widget* pWidget,
                      CFGAS_GEGraphics* pGraphics,
                      const CFX_RectF& pRtBox,
-                     int32_t iState,
+                     Mask<CFWL_PartState> iState,
                      const CFX_Matrix& matrix);
   void DrawSignCheck(CFGAS_GEGraphics* pGraphics,
                      const CFX_RectF& rtSign,
@@ -57,7 +58,7 @@ class CFWL_CheckBoxTP final : public CFWL_WidgetTP {
                     FX_ARGB argbFill,
                     const CFX_Matrix& matrix);
 
-  void InitCheckPath(float fCheckLen);
+  void EnsureCheckPathInitialized(float fCheckLen);
 
   std::unique_ptr<CFGAS_GEPath> m_pCheckPath;
 };

@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
 #include "third_party/blink/renderer/core/xml_names.h"
@@ -89,7 +90,8 @@ class MarkupAccumulator::NamespaceContext final {
   }
 
   AtomicString LookupNamespaceURI(const AtomicString& prefix) const {
-    return prefix_ns_map_.at(prefix ? prefix : g_empty_atom);
+    return prefix_ns_map_.DeprecatedAtOrEmptyValue(prefix ? prefix
+                                                          : g_empty_atom);
   }
 
   const AtomicString& ContextNamespace() const { return context_namespace_; }
@@ -107,7 +109,7 @@ class MarkupAccumulator::NamespaceContext final {
   }
 
   const Vector<AtomicString> PrefixList(const AtomicString& ns) const {
-    return ns_prefixes_map_.at(ns ? ns : g_empty_atom);
+    return ns_prefixes_map_.DeprecatedAtOrEmptyValue(ns ? ns : g_empty_atom);
   }
 
  private:

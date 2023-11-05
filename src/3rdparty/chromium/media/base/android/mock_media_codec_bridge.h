@@ -44,7 +44,7 @@ class MockMediaCodecBridge : public MediaCodecBridge,
                        const std::string& iv,
                        const std::vector<SubsampleEntry>& subsamples,
                        EncryptionScheme encryption_scheme,
-                       base::Optional<EncryptionPattern> encryption_pattern,
+                       absl::optional<EncryptionPattern> encryption_pattern,
                        base::TimeDelta presentation_time));
   MOCK_METHOD1(QueueEOS, void(int input_buffer_index));
   MOCK_METHOD2(DequeueInputBuffer,
@@ -73,6 +73,7 @@ class MockMediaCodecBridge : public MediaCodecBridge,
   MOCK_METHOD0(IsAdaptivePlaybackSupported, bool());
   MOCK_METHOD2(OnBuffersAvailable,
                void(JNIEnv*, const base::android::JavaParamRef<jobject>&));
+  MOCK_METHOD0(GetMaxInputSize, size_t());
   CodecType GetCodecType() const override;
 
   // Return true if the codec is already drained.

@@ -46,7 +46,6 @@ bool IsOSSettingsSubPage(const std::string& sub_page) {
       chromeos::settings::mojom::kSecurityAndSignInSubpagePath,
       chromeos::settings::mojom::kFingerprintSubpagePath,
       chromeos::settings::mojom::kManageOtherPeopleSubpagePath,
-      chromeos::settings::mojom::kKerberosAccountsSubpagePath,
 
       // Device section.
       chromeos::settings::mojom::kDeviceSectionPath,
@@ -61,12 +60,13 @@ bool IsOSSettingsSubPage(const std::string& sub_page) {
       // Personalization section.
       chromeos::settings::mojom::kPersonalizationSectionPath,
       chromeos::settings::mojom::kChangePictureSubpagePath,
-      chromeos::settings::mojom::kWallpaperSubpagePath,
       chromeos::settings::mojom::kAmbientModeSubpagePath,
+      chromeos::settings::mojom::kDarkModeSubpagePath,
 
       // Search and Assistant section.
       chromeos::settings::mojom::kSearchAndAssistantSectionPath,
       chromeos::settings::mojom::kAssistantSubpagePath,
+      chromeos::settings::mojom::kSearchSubpagePath,
 
       // Apps section.
       chromeos::settings::mojom::kAppsSectionPath,
@@ -84,9 +84,6 @@ bool IsOSSettingsSubPage(const std::string& sub_page) {
       chromeos::settings::mojom::kCrostiniDevelopAndroidAppsSubpagePath,
       chromeos::settings::mojom::kCrostiniPortForwardingSubpagePath,
 
-      // On Startup section.
-      chromeos::settings::mojom::kOnStartupSectionPath,
-
       // Date and Time section.
       chromeos::settings::mojom::kDateAndTimeSectionPath,
       chromeos::settings::mojom::kTimeZoneSubpagePath,
@@ -96,8 +93,6 @@ bool IsOSSettingsSubPage(const std::string& sub_page) {
 
       // Languages and Input section.
       chromeos::settings::mojom::kLanguagesAndInputSectionPath,
-      chromeos::settings::mojom::kLanguagesAndInputDetailsSubpagePath,
-      chromeos::settings::mojom::kManageInputMethodsSubpagePath,
       chromeos::settings::mojom::kSmartInputsSubpagePath,
       chromeos::settings::mojom::kInputMethodOptionsSubpagePath,
       chromeos::settings::mojom::kLanguagesSubpagePath,

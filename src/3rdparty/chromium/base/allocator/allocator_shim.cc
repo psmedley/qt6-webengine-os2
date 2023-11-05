@@ -12,8 +12,7 @@
 #include "base/allocator/buildflags.h"
 #include "base/bits.h"
 #include "base/check_op.h"
-#include "base/macros.h"
-#include "base/process/process_metrics.h"
+#include "base/memory/page_size.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 
@@ -27,6 +26,7 @@
 #include <malloc/malloc.h>
 
 #include "base/allocator/allocator_interception_mac.h"
+#include "base/mac/mach_logging.h"
 #endif
 
 // No calls to malloc / new in this file. They would would cause re-entrancy of
@@ -141,7 +141,7 @@ ALWAYS_INLINE void* ShimCppNew(size_t size) {
   void* ptr;
   do {
     void* context = nullptr;
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) && !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
     context = malloc_default_zone();
 #endif
     ptr = chain_head->alloc_function(chain_head, size, context);
@@ -151,7 +151,7 @@ ALWAYS_INLINE void* ShimCppNew(size_t size) {
 
 ALWAYS_INLINE void* ShimCppNewNoThrow(size_t size) {
   void* context = nullptr;
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) && !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
   context = malloc_default_zone();
 #endif
   const base::allocator::AllocatorDispatch* const chain_head = GetChainHead();
@@ -163,7 +163,7 @@ ALWAYS_INLINE void* ShimCppAlignedNew(size_t size, size_t alignment) {
   void* ptr;
   do {
     void* context = nullptr;
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) && !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
     context = malloc_default_zone();
 #endif
     ptr = chain_head->alloc_aligned_function(chain_head, alignment, size,
@@ -174,7 +174,7 @@ ALWAYS_INLINE void* ShimCppAlignedNew(size_t size, size_t alignment) {
 
 ALWAYS_INLINE void ShimCppDelete(void* address) {
   void* context = nullptr;
-#if defined(OS_APPLE)
+#if defined(OS_APPLE) && !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
   context = malloc_default_zone();
 #endif
   const base::allocator::AllocatorDispatch* const chain_head = GetChainHead();
@@ -246,7 +246,7 @@ ALWAYS_INLINE void* ShimPvalloc(size_t size) {
   if (size == 0) {
     size = GetCachedPageSize();
   } else {
-    size = (size + GetCachedPageSize() - 1) & ~(GetCachedPageSize() - 1);
+    size = base::bits::AlignUp(size, GetCachedPageSize());
   }
   // The third argument is nullptr because pvalloc is glibc only and does not
   // exist on OSX/BSD systems.
@@ -323,10 +323,16 @@ ALWAYS_INLINE void ShimAlignedFree(void* address, void* context) {
 
 }  // extern "C"
 
-#if !defined(OS_WIN) && !defined(OS_APPLE)
+#if !defined(OS_WIN) && \
+    !(defined(OS_APPLE) && !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC))
 // Cpp symbols (new / delete) should always be routed through the shim layer
-// except on Windows and macOS where the malloc intercept is deep enough that it
-// also catches the cpp calls.
+// except on Windows and macOS (except for PartitionAlloc-Everywhere) where the
+// malloc intercept is deep enough that it also catches the cpp calls.
+//
+// In case of PartitionAlloc-Everywhere on macOS, malloc backed by
+// base::internal::PartitionMalloc crashes on OOM, and we need to avoid crashes
+// in case of operator new() noexcept.  Thus, operator new() noexcept needs to
+// be routed to base::internal::PartitionMallocUnchecked through the shim layer.
 #include "base/allocator/allocator_shim_override_cpp_symbols.h"
 #endif
 
@@ -338,7 +344,11 @@ ALWAYS_INLINE void ShimAlignedFree(void* address, void* context) {
 // On Windows we use plain link-time overriding of the CRT symbols.
 #include "base/allocator/allocator_shim_override_ucrt_symbols_win.h"
 #elif defined(OS_APPLE)
+#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+#include "base/allocator/allocator_shim_override_mac_default_zone.h"
+#else  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 #include "base/allocator/allocator_shim_override_mac_symbols.h"
+#endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 #else
 #include "base/allocator/allocator_shim_override_libc_symbols.h"
 #endif
@@ -371,7 +381,9 @@ ALWAYS_INLINE void ShimAlignedFree(void* address, void* context) {
 #if defined(OS_APPLE)
 namespace base {
 namespace allocator {
+
 void InitializeAllocatorShim() {
+#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
   // Prepares the default dispatch. After the intercepted malloc calls have
   // traversed the shim this will route them to the default malloc zone.
   InitializeDefaultDispatchToMacAllocator();
@@ -381,7 +393,9 @@ void InitializeAllocatorShim() {
   // This replaces the default malloc zone, causing calls to malloc & friends
   // from the codebase to be routed to ShimMalloc() above.
   base::allocator::ReplaceFunctionsForStoredZones(&functions);
+#endif  // !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 }
+
 }  // namespace allocator
 }  // namespace base
 #endif

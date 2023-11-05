@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/ranges/algorithm.h"
 #include "components/cbor/values.h"
 #include "components/cbor/writer.h"
@@ -108,10 +109,10 @@ std::vector<uint8_t> AuthenticatorGetInfoResponse::EncodeToCBOR(
                                 *response.remaining_discoverable_credentials));
   }
 
-  if (!response.algorithms.empty()) {
+  if (response.algorithms.has_value()) {
     std::vector<cbor::Value> algorithms_cbor;
-    algorithms_cbor.reserve(response.algorithms.size());
-    for (const auto& algorithm : response.algorithms) {
+    algorithms_cbor.reserve(response.algorithms->size());
+    for (const auto& algorithm : *response.algorithms) {
       // Entries are PublicKeyCredentialParameters
       // https://w3c.github.io/webauthn/#dictdef-publickeycredentialparameters
       cbor::Value::MapValue entry;
@@ -136,6 +137,11 @@ std::vector<uint8_t> AuthenticatorGetInfoResponse::EncodeToCBOR(
     device_info_map.emplace(
         0x0d,
         cbor::Value(base::strict_cast<int64_t>(*response.min_pin_length)));
+  }
+
+  if (response.max_cred_blob_length) {
+    device_info_map.emplace(
+        0x0f, base::strict_cast<int64_t>(*response.max_cred_blob_length));
   }
 
   auto encoded_bytes =

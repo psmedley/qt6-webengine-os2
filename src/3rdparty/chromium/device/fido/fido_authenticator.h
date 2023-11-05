@@ -13,8 +13,6 @@
 #include "base/containers/span.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "device/fido/authenticator_get_assertion_response.h"
@@ -26,12 +24,15 @@
 #include "device/fido/fido_request_handler_base.h"
 #include "device/fido/fido_transport_protocol.h"
 #include "device/fido/large_blob.h"
+#include "device/fido/make_credential_request_handler.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
 struct CtapGetAssertionRequest;
 struct CtapGetAssertionOptions;
 struct CtapMakeCredentialRequest;
+struct MakeCredentialOptions;
 
 namespace pin {
 struct RetriesResponse;
@@ -46,37 +47,37 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
  public:
   using MakeCredentialCallback = base::OnceCallback<void(
       CtapDeviceResponseCode,
-      base::Optional<AuthenticatorMakeCredentialResponse>)>;
+      absl::optional<AuthenticatorMakeCredentialResponse>)>;
   using GetAssertionCallback = base::OnceCallback<void(
       CtapDeviceResponseCode,
-      base::Optional<AuthenticatorGetAssertionResponse>)>;
+      absl::optional<AuthenticatorGetAssertionResponse>)>;
   using GetRetriesCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
-                              base::Optional<pin::RetriesResponse>)>;
+                              absl::optional<pin::RetriesResponse>)>;
   using GetTokenCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
-                              base::Optional<pin::TokenResponse>)>;
+                              absl::optional<pin::TokenResponse>)>;
   using SetPINCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
-                              base::Optional<pin::EmptyResponse>)>;
+                              absl::optional<pin::EmptyResponse>)>;
   using ResetCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
-                              base::Optional<pin::EmptyResponse>)>;
+                              absl::optional<pin::EmptyResponse>)>;
   using GetCredentialsMetadataCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
-                              base::Optional<CredentialsMetadataResponse>)>;
+                              absl::optional<CredentialsMetadataResponse>)>;
   using EnumerateCredentialsCallback = base::OnceCallback<void(
       CtapDeviceResponseCode,
-      base::Optional<std::vector<AggregatedEnumerateCredentialsResponse>>)>;
+      absl::optional<std::vector<AggregatedEnumerateCredentialsResponse>>)>;
   using DeleteCredentialCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
-                              base::Optional<DeleteCredentialResponse>)>;
+                              absl::optional<DeleteCredentialResponse>)>;
   using BioEnrollmentCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
-                              base::Optional<BioEnrollmentResponse>)>;
+                              absl::optional<BioEnrollmentResponse>)>;
   using LargeBlobReadCallback = base::OnceCallback<void(
       CtapDeviceResponseCode,
-      base::Optional<std::vector<std::pair<LargeBlobKey, std::vector<uint8_t>>>>
+      absl::optional<std::vector<std::pair<LargeBlobKey, std::vector<uint8_t>>>>
           callback)>;
 
   FidoAuthenticator() = default;
@@ -86,7 +87,23 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   // call is received, |callback| is invoked. Below MakeCredential() and
   // GetAssertion() must only called after |callback| is invoked.
   virtual void InitializeAuthenticator(base::OnceClosure callback) = 0;
+
+  // ExcludeAppIdCredentialsBeforeMakeCredential allows a device to probe for
+  // credential IDs from a request that used the appidExclude extension. This
+  // assumes that |MakeCredential| will be called afterwards with the same
+  // request. I.e. this function may do nothing if it believes that it can
+  // better handle the exclusion during |MakeCredential|.
+  //
+  // The optional bool is an unused response value as all the information is
+  // contained in the response code, which will be |kCtap2ErrCredentialExcluded|
+  // if an excluded credential is found. (An optional<void> is an error.)
+  virtual void ExcludeAppIdCredentialsBeforeMakeCredential(
+      CtapMakeCredentialRequest request,
+      MakeCredentialOptions options,
+      base::OnceCallback<void(CtapDeviceResponseCode, absl::optional<bool>)>);
+
   virtual void MakeCredential(CtapMakeCredentialRequest request,
+                              MakeCredentialOptions options,
                               MakeCredentialCallback callback) = 0;
   virtual void GetAssertion(CtapGetAssertionRequest request,
                             CtapGetAssertionOptions options,
@@ -113,7 +130,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   // must be set if |permissions| includes MakeCredential or GetAssertion.
   virtual void GetPINToken(std::string pin,
                            std::vector<pin::Permissions> permissions,
-                           base::Optional<std::string> rp_id,
+                           absl::optional<std::string> rp_id,
                            GetTokenCallback callback);
   // Returns |true| if the authenticator supports GetUvToken.
   virtual bool CanGetUvToken();
@@ -123,7 +140,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   // |rp_id| must be set if the PinUvAuthToken will be used for MakeCredential
   // or GetAssertion.
   virtual void GetUvToken(std::vector<pin::Permissions> permissions,
-                          base::Optional<std::string> rp_id,
+                          absl::optional<std::string> rp_id,
                           GetTokenCallback callback);
   // Returns the minimum PIN length for this authenticator's currently set PIN.
   virtual uint32_t CurrentMinPINLength();
@@ -193,7 +210,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   virtual void GetSensorInfo(BioEnrollmentCallback callback);
   virtual void BioEnrollFingerprint(
       const pin::TokenResponse&,
-      base::Optional<std::vector<uint8_t>> template_id,
+      absl::optional<std::vector<uint8_t>> template_id,
       BioEnrollmentCallback);
   virtual void BioEnrollCancel(BioEnrollmentCallback);
   virtual void BioEnrollEnumerate(const pin::TokenResponse&,
@@ -212,19 +229,19 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   virtual void WriteLargeBlob(
       const std::vector<uint8_t>& large_blob,
       const LargeBlobKey& large_blob_key,
-      base::Optional<pin::TokenResponse> pin_uv_auth_token,
+      absl::optional<pin::TokenResponse> pin_uv_auth_token,
       base::OnceCallback<void(CtapDeviceResponseCode)> callback);
   // Attempts to read large blobs from the credential encrypted with
   // |large_blob_keys|. Returns a map of keys to their blobs.
   virtual void ReadLargeBlob(
       const std::vector<LargeBlobKey>& large_blob_keys,
-      base::Optional<pin::TokenResponse> pin_uv_auth_token,
+      absl::optional<pin::TokenResponse> pin_uv_auth_token,
       LargeBlobReadCallback callback);
 
   // GetAlgorithms returns the list of supported COSEAlgorithmIdentifiers, or
   // |nullopt| if this is unknown and thus all requests should be tried in case
   // they work.
-  virtual base::Optional<base::span<const int32_t>> GetAlgorithms();
+  virtual absl::optional<base::span<const int32_t>> GetAlgorithms();
 
   // DiscoverableCredentialStorageFull returns true if creation of a
   // discoverable credential is likely to fail because authenticator storage is
@@ -248,9 +265,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   virtual bool SupportsCredProtectExtension() const;
   virtual bool SupportsHMACSecretExtension() const;
   virtual bool SupportsEnterpriseAttestation() const;
-  virtual const base::Optional<AuthenticatorSupportedOptions>& Options()
+  virtual bool SupportsCredBlobOfSize(size_t num_bytes) const;
+  virtual const absl::optional<AuthenticatorSupportedOptions>& Options()
       const = 0;
-  virtual base::Optional<FidoTransportProtocol> AuthenticatorTransport()
+  virtual absl::optional<FidoTransportProtocol> AuthenticatorTransport()
       const = 0;
   virtual bool IsInPairingMode() const = 0;
   virtual bool IsPaired() const = 0;

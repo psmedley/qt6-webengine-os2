@@ -16,9 +16,8 @@
 
 #include "src/profiling/perf/unwinding.h"
 
+#include <cinttypes>
 #include <mutex>
-
-#include <inttypes.h>
 
 #include <unwindstack/Unwinder.h>
 
@@ -212,10 +211,13 @@ base::FlatSet<DataSourceInstanceID> Unwinder::ConsumeAndUnwindReadySamples() {
     if (!entry.valid)
       continue;  // already processed
 
+    uint64_t sampled_stack_bytes = entry.sample.stack.size();
+
     // Data source might be gone due to an abrupt stop.
     auto it = data_sources_.find(entry.data_source_id);
     if (it == data_sources_.end()) {
       entry = UnwindEntry::Invalid();
+      DecrementEnqueuedFootprint(sampled_stack_bytes);
       continue;
     }
     DataSourceState& ds = it->second;
@@ -228,9 +230,14 @@ base::FlatSet<DataSourceInstanceID> Unwinder::ConsumeAndUnwindReadySamples() {
       PERFETTO_DLOG("Unwinder skipping sample for pid [%d]",
                     static_cast<int>(pid));
 
+      // free up the sampled stack as the main thread has no use for it
+      entry.sample.stack.clear();
+      entry.sample.stack.shrink_to_fit();
+
       delegate_->PostEmitUnwinderSkippedSample(entry.data_source_id,
                                                std::move(entry.sample));
       entry = UnwindEntry::Invalid();
+      DecrementEnqueuedFootprint(sampled_stack_bytes);
       continue;
     }
 
@@ -262,6 +269,7 @@ base::FlatSet<DataSourceInstanceID> Unwinder::ConsumeAndUnwindReadySamples() {
       delegate_->PostEmitSample(entry.data_source_id,
                                 std::move(unwound_sample));
       entry = UnwindEntry::Invalid();
+      DecrementEnqueuedFootprint(sampled_stack_bytes);
       continue;
     }
   }
@@ -314,7 +322,7 @@ CompletedSample Unwinder::UnwindSample(const ParsedSample& sample,
         : error_code(e), warnings(w), frames(std::move(f)) {}
     UnwindResult(const UnwindResult&) = delete;
     UnwindResult& operator=(const UnwindResult&) = delete;
-    UnwindResult(UnwindResult&&) = default;
+    UnwindResult(UnwindResult&&) __attribute__((unused)) = default;
     UnwindResult& operator=(UnwindResult&&) = default;
   };
   auto attempt_unwind = [&sample, unwind_state, pid_unwound_before,
@@ -330,8 +338,8 @@ CompletedSample Unwinder::UnwindSample(const ParsedSample& sample,
     unwindstack::Unwinder unwinder(kUnwindingMaxFrames, &unwind_state->fd_maps,
                                    regs_copy.get(), overlay_memory);
 #if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
-    unwinder.SetJitDebug(unwind_state->jit_debug.get());
-    unwinder.SetDexFiles(unwind_state->dex_files.get());
+    unwinder.SetJitDebug(unwind_state->GetJitDebug(regs_copy->Arch()));
+    unwinder.SetDexFiles(unwind_state->GetDexFiles(regs_copy->Arch()));
 #endif
     unwinder.Unwind(/*initial_map_names_to_skip=*/nullptr,
                     /*map_suffixes_to_ignore=*/nullptr);

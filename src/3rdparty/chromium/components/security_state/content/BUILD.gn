@@ -8,8 +8,6 @@ jumbo_static_library("content") {
   sources = [
     "content_utils.cc",
     "content_utils.h",
-    "ssl_status_input_event_data.cc",
-    "ssl_status_input_event_data.h",
   ]
 
   public_deps = [
@@ -19,7 +17,7 @@ jumbo_static_library("content") {
 
   deps = [
     "//base",
-#    "//components/dom_distiller/core",
+    "//components/dom_distiller/core",
     "//components/strings",
     "//content/public/browser",
     "//content/public/common",

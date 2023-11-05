@@ -23,7 +23,8 @@ def root_path():
     if path.basename(PARENT_PATH) == 'renderer':
         # Chromium repository
         return path.dirname(path.dirname(path.dirname(PARENT_PATH)))
-    elif path.basename(PARENT_PATH) == 'devtools-frontend':
+    elif path.basename(PARENT_PATH) == 'devtools-frontend' or path.basename(
+            PARENT_PATH) == 'devtools-frontend-internal':
         # External repository, integrated build
         return path.dirname(path.dirname(PARENT_PATH))
     else:
@@ -78,10 +79,6 @@ def eslint_path():
 
 def mocha_path():
     return path.join(node_modules_path(), 'mocha', 'bin', 'mocha')
-
-
-def check_localizable_resources_path():
-    return path.join(devtools_root_path(), 'scripts', 'localization', 'check_localizable_resources.js')
 
 
 def karma_path():

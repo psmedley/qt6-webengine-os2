@@ -11,7 +11,6 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_simple_task_runner.h"
 #include "build/build_config.h"
@@ -155,7 +154,7 @@ class HandledEventCallbackTracker {
                       blink::mojom::InputEventResultState ack_result,
                       const ui::LatencyInfo& latency,
                       mojom::blink::DidOverscrollParamsPtr params,
-                      base::Optional<cc::TouchAction> touch_action) {
+                      absl::optional<cc::TouchAction> touch_action) {
     callbacks_received_[index] = ReceivedCallback(
         handling_event_ ? CallbackReceivedState::kCalledWhileHandlingEvent
                         : CallbackReceivedState::kCalledAfterHandleEvent,
@@ -248,7 +247,7 @@ class MainThreadEventQueueTest : public testing::Test,
     auto handled_event = std::make_unique<HandledEvent>(event);
     handled_tasks_.push_back(std::move(handled_event));
     std::move(callback).Run(blink::mojom::InputEventResultState::kNotConsumed,
-                            event.latency_info(), nullptr, base::nullopt);
+                            event.latency_info(), nullptr, absl::nullopt);
     return true;
   }
   void SetNeedsMainFrame() override { needs_main_frame_ = true; }
@@ -1144,7 +1143,7 @@ class MainThreadEventQueueInitializationTest
                         std::unique_ptr<cc::EventMetrics> metrics,
                         HandledEventCallback callback) override {
     std::move(callback).Run(blink::mojom::InputEventResultState::kNotConsumed,
-                            event.latency_info(), nullptr, base::nullopt);
+                            event.latency_info(), nullptr, absl::nullopt);
     return true;
   }
 

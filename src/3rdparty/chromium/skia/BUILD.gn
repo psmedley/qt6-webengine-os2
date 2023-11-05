@@ -39,12 +39,11 @@ buildflag_header("buildflags") {
 
 # External-facing config for dependent code.
 config("skia_config") {
-  defines = []
+  defines = [ "SK_UNTIL_CRBUG_1187654_IS_FIXED" ]
   include_dirs = [ "//third_party/skia" ]
 
   if (!is_ios) {
     if (enable_skia_wuffs_gif) {
-      defines += [ "SK_FAVOR_WUFFS_V_0_3_OVER_V_0_2" ]
       include_dirs += [ "//third_party/wuffs/src/release/c" ]
     } else {
       include_dirs += [ "//third_party/libgifcodec" ]
@@ -61,6 +60,7 @@ config("skia_config") {
     "SK_CODEC_DECODES_WEBP",
     "SK_ENCODE_PNG",
     "SK_ENCODE_WEBP",
+    "SK_ENABLE_SKSL",
     "SK_USER_CONFIG_HEADER=\"../../skia/config/SkUserConfig.h\"",
   ]
 
@@ -256,8 +256,12 @@ component("skia") {
     "ext/opacity_filter_canvas.h",
     "ext/recursive_gaussian_convolution.cc",
     "ext/recursive_gaussian_convolution.h",
+    "ext/rgba_to_yuva.cc",
+    "ext/rgba_to_yuva.h",
     "ext/skia_histogram.cc",
     "ext/skia_histogram.h",
+    "ext/skia_matrix_44.cc",
+    "ext/skia_matrix_44.h",
     "ext/skia_memory_dump_provider.cc",
     "ext/skia_memory_dump_provider.h",
     "ext/skia_trace_memory_dump_impl.cc",
@@ -400,10 +404,7 @@ component("skia") {
   }
 
   # Remove unused util sources.
-  sources -= [
-    "//third_party/skia/src/utils/SkInterpolator.cpp",
-    "//third_party/skia/src/utils/SkParsePath.cpp",
-  ]
+  sources -= [ "//third_party/skia/src/utils/SkParsePath.cpp" ]
 
   if (is_win) {
     sources -= [

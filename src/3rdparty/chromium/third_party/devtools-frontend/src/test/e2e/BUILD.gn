@@ -22,6 +22,7 @@ node_ts_library("tests") {
     "console",
     "coverage",
     "cross_tool_integration",
+    "css_overview",
     "elements",
     "emulation",
     "host",
@@ -35,8 +36,7 @@ node_ts_library("tests") {
     "network",
     "performance",
     "profiler",
-    "puppeteer",
-    "recorder",
+    "quick_open",
     "rendering",
     "search",
     "security",
@@ -49,5 +49,8 @@ node_ts_library("tests") {
 }
 
 copy_to_gen("config") {
-  sources = [ ".mocharc.js" ]
+  sources = [
+    ".mocharc.js",
+    "test-runner-config.json",
+  ]
 }

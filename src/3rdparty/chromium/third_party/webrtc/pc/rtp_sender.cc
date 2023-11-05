@@ -74,8 +74,8 @@ RtpParameters RestoreEncodingLayers(
     const RtpParameters& parameters,
     const std::vector<std::string>& removed_rids,
     const std::vector<RtpEncodingParameters>& all_layers) {
-  RTC_DCHECK_EQ(parameters.encodings.size() + removed_rids.size(),
-                all_layers.size());
+  RTC_CHECK_EQ(parameters.encodings.size() + removed_rids.size(),
+               all_layers.size());
   RtpParameters result(parameters);
   result.encodings.clear();
   size_t index = 0;
@@ -291,8 +291,8 @@ void RtpSenderBase::SetSsrc(uint32_t ssrc) {
       // we need to copy.
       RtpParameters current_parameters =
           media_channel_->GetRtpSendParameters(ssrc_);
-      RTC_DCHECK_GE(current_parameters.encodings.size(),
-                    init_parameters_.encodings.size());
+      RTC_CHECK_GE(current_parameters.encodings.size(),
+                   init_parameters_.encodings.size());
       for (size_t i = 0; i < init_parameters_.encodings.size(); ++i) {
         init_parameters_.encodings[i].ssrc =
             current_parameters.encodings[i].ssrc;
@@ -424,9 +424,8 @@ rtc::scoped_refptr<AudioRtpSender> AudioRtpSender::Create(
     const std::string& id,
     StatsCollectorInterface* stats,
     SetStreamsObserver* set_streams_observer) {
-  return rtc::scoped_refptr<AudioRtpSender>(
-      new rtc::RefCountedObject<AudioRtpSender>(worker_thread, id, stats,
-                                                set_streams_observer));
+  return rtc::make_ref_counted<AudioRtpSender>(worker_thread, id, stats,
+                                               set_streams_observer);
 }
 
 AudioRtpSender::AudioRtpSender(rtc::Thread* worker_thread,
@@ -539,7 +538,7 @@ void AudioRtpSender::SetSend() {
   }
 #endif
 
-  // |track_->enabled()| hops to the signaling thread, so call it before we hop
+  // `track_->enabled()` hops to the signaling thread, so call it before we hop
   // to the worker thread or else it will deadlock.
   bool track_enabled = track_->enabled();
   bool success = worker_thread_->Invoke<bool>(RTC_FROM_HERE, [&] {
@@ -571,9 +570,8 @@ rtc::scoped_refptr<VideoRtpSender> VideoRtpSender::Create(
     rtc::Thread* worker_thread,
     const std::string& id,
     SetStreamsObserver* set_streams_observer) {
-  return rtc::scoped_refptr<VideoRtpSender>(
-      new rtc::RefCountedObject<VideoRtpSender>(worker_thread, id,
-                                                set_streams_observer));
+  return rtc::make_ref_counted<VideoRtpSender>(worker_thread, id,
+                                               set_streams_observer);
 }
 
 VideoRtpSender::VideoRtpSender(rtc::Thread* worker_thread,
@@ -644,7 +642,7 @@ void VideoRtpSender::ClearSend() {
     RTC_LOG(LS_WARNING) << "SetVideoSend: No video channel exists.";
     return;
   }
-  // Allow SetVideoSend to fail since |enable| is false and |source| is null.
+  // Allow SetVideoSend to fail since `enable` is false and `source` is null.
   // This the normal case when the underlying media channel has already been
   // deleted.
   worker_thread_->Invoke<bool>(RTC_FROM_HERE, [&] {

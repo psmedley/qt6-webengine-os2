@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_WORKER_HOST_DEDICATED_WORKER_SERVICE_IMPL_H_
 #define CONTENT_BROWSER_WORKER_HOST_DEDICATED_WORKER_SERVICE_IMPL_H_
 
+#include "base/containers/flat_map.h"
 #include "base/observer_list.h"
 #include "content/public/browser/dedicated_worker_service.h"
 #include "url/gurl.h"
@@ -32,7 +33,7 @@ class CONTENT_EXPORT DedicatedWorkerServiceImpl
   // Notifies all observers about a worker being destroyed.
   void NotifyBeforeWorkerDestroyed(
       const blink::DedicatedWorkerToken& worker_token,
-      GlobalFrameRoutingId ancestor_render_frame_host_id);
+      GlobalRenderFrameHostId ancestor_render_frame_host_id);
 
   // Notifies all observers that a worker's final response URL was determined.
   void NotifyWorkerFinalResponseURLDetermined(

@@ -6,42 +6,40 @@
 
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/no_destructor.h"
 #include "base/strings/strcat.h"
-#include "chrome/renderer/subresource_redirect/redirect_result.h"
 #include "chrome/renderer/subresource_redirect/robots_rules_parser.h"
 #include "chrome/renderer/subresource_redirect/robots_rules_parser_cache.h"
 #include "chrome/renderer/subresource_redirect/subresource_redirect_params.h"
 #include "components/subresource_redirect/common/subresource_redirect_features.h"
+#include "components/subresource_redirect/common/subresource_redirect_result.h"
 #include "content/public/renderer/render_frame.h"
 
 namespace subresource_redirect {
 
 namespace {
 
-// Returns the robots rules parser cache that is shared across the RenderFrames
-// in the renderer.
-RobotsRulesParserCache& GetRobotsRulesParserCache() {
-  static base::NoDestructor<RobotsRulesParserCache> instance;
-  return *instance;
-}
-
-// Converts the RobotsRulesParser::CheckResult enum to RedirectResult enum.
-RedirectResult ConvertToRedirectResult(
+// Converts the RobotsRulesParser::CheckResult enum to SubresourceRedirectResult
+// enum.
+SubresourceRedirectResult ConvertToRedirectResult(
     RobotsRulesParser::CheckResult check_result) {
   switch (check_result) {
     case RobotsRulesParser::CheckResult::kAllowed:
-      return RedirectResult::kRedirectable;
+      if (ShouldEnableLoginRobotsCheckedImageCompression() &&
+          !ShouldCompressRedirectSubresource()) {
+        return SubresourceRedirectResult::kIneligibleCompressionDisabled;
+      }
+      return SubresourceRedirectResult::kRedirectable;
     case RobotsRulesParser::CheckResult::kDisallowed:
     case RobotsRulesParser::CheckResult::kInvalidated:
-      return RedirectResult::kIneligibleRobotsDisallowed;
+    case RobotsRulesParser::CheckResult::kEntryMissing:
+      return SubresourceRedirectResult::kIneligibleRobotsDisallowed;
     case RobotsRulesParser::CheckResult::kTimedout:
     case RobotsRulesParser::CheckResult::kDisallowedAfterTimeout:
-      return RedirectResult::kIneligibleRobotsTimeout;
+      return SubresourceRedirectResult::kIneligibleRobotsTimeout;
   }
 }
 
-void RecordRedirectResultMetric(RedirectResult redirect_result) {
+void RecordRedirectResultMetric(SubresourceRedirectResult redirect_result) {
   base::UmaHistogramEnumeration(
       "SubresourceRedirect.LoginRobotsDeciderAgent.RedirectResult",
       redirect_result);
@@ -53,65 +51,67 @@ LoginRobotsDeciderAgent::LoginRobotsDeciderAgent(
     blink::AssociatedInterfaceRegistry* associated_interfaces,
     content::RenderFrame* render_frame)
     : PublicResourceDeciderAgent(associated_interfaces, render_frame) {
-  DCHECK(ShouldEnableLoginRobotsCheckedCompression());
+  DCHECK(ShouldEnableRobotsRulesFetching());
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 }
 
 LoginRobotsDeciderAgent::~LoginRobotsDeciderAgent() = default;
 
-base::Optional<RedirectResult>
+absl::optional<SubresourceRedirectResult>
 LoginRobotsDeciderAgent::ShouldRedirectSubresource(
     const GURL& url,
     ShouldRedirectDecisionCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(url.SchemeIsHTTPOrHTTPS());
   DCHECK(url.is_valid());
   num_should_redirect_checks_++;
 
-  if (redirect_result_ != RedirectResult::kRedirectable)
+  if (redirect_result_ != SubresourceRedirectResult::kRedirectable) {
+    RecordRedirectResultMetric(redirect_result_);
     return redirect_result_;
-
-  // Trigger the robots rules fetch if needed.
-  const auto origin = url::Origin::Create(url);
-  RobotsRulesParserCache& robots_rules_parser_cache =
-      GetRobotsRulesParserCache();
-  if (!robots_rules_parser_cache.DoRobotsRulesExist(origin)) {
-    // base::Unretained can be used here since the |robots_rules_parser_cache|
-    // is never destructed.
-    GetSubresourceRedirectServiceRemote()->GetRobotsRules(
-        origin,
-        base::BindOnce(&RobotsRulesParserCache::UpdateRobotsRules,
-                       base::Unretained(&robots_rules_parser_cache), origin));
   }
-  auto rules_receive_timeout =
+
+  if (num_should_redirect_checks_ <=
+      GetFirstKDisableSubresourceRedirectLimit()) {
+    DCHECK_LE(0UL, GetFirstKDisableSubresourceRedirectLimit());
+    RecordRedirectResultMetric(
+        SubresourceRedirectResult::kIneligibleFirstKDisableSubresourceRedirect);
+    return SubresourceRedirectResult::
+        kIneligibleFirstKDisableSubresourceRedirect;
+  }
+  CreateAndFetchRobotsRules(
+      url::Origin::Create(url),
       num_should_redirect_checks_ <= GetFirstKSubresourceLimit()
           ? GetRobotsRulesReceiveFirstKSubresourceTimeout()
-          : GetRobotsRulesReceiveTimeout();
+          : GetRobotsRulesReceiveTimeout());
 
-  base::Optional<RobotsRulesParser::CheckResult> result =
-      robots_rules_parser_cache.CheckRobotsRules(
-          routing_id(), url, rules_receive_timeout,
+  absl::optional<RobotsRulesParser::CheckResult> result =
+      RobotsRulesParserCache::Get().CheckRobotsRules(
+          routing_id(), url,
           base::BindOnce(
               &LoginRobotsDeciderAgent::OnShouldRedirectSubresourceResult,
               weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   if (result) {
-    RedirectResult redirect_result = ConvertToRedirectResult(*result);
+    SubresourceRedirectResult redirect_result =
+        ConvertToRedirectResult(*result);
     RecordRedirectResultMetric(redirect_result);
     return redirect_result;
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 void LoginRobotsDeciderAgent::OnShouldRedirectSubresourceResult(
     LoginRobotsDeciderAgent::ShouldRedirectDecisionCallback callback,
     RobotsRulesParser::CheckResult check_result) {
   // Verify if the navigation is still allowed to redirect.
-  if (redirect_result_ != RedirectResult::kRedirectable) {
+  if (redirect_result_ != SubresourceRedirectResult::kRedirectable) {
     RecordRedirectResultMetric(redirect_result_);
     std::move(callback).Run(redirect_result_);
     return;
   }
-  RedirectResult redirect_result = ConvertToRedirectResult(check_result);
+  SubresourceRedirectResult redirect_result =
+      ConvertToRedirectResult(check_result);
   RecordRedirectResultMetric(redirect_result);
   std::move(callback).Run(redirect_result);
 }
@@ -120,21 +120,36 @@ void LoginRobotsDeciderAgent::ReadyToCommitNavigation(
     blink::WebDocumentLoader* document_loader) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   PublicResourceDeciderAgent::ReadyToCommitNavigation(document_loader);
-  redirect_result_ = RedirectResult::kUnknown;
+  if (is_pending_navigation_loggged_in_) {
+    redirect_result_ = *is_pending_navigation_loggged_in_
+                           ? SubresourceRedirectResult::kIneligibleLoginDetected
+                           : SubresourceRedirectResult::kRedirectable;
+    // Clear the logged-in state so it won't be reused for subsequent
+    // navigations.
+    is_pending_navigation_loggged_in_ = absl::nullopt;
+  } else {
+    // Logged-in state was not sent for the current navigation.
+    redirect_result_ = SubresourceRedirectResult::kUnknown;
+  }
   num_should_redirect_checks_ = 0;
-  GetRobotsRulesParserCache().InvalidatePendingRequests(routing_id());
+  // Invalidate the previous requests that were started by previous navigation,
+  // for the current frame.
+  RobotsRulesParserCache::Get().InvalidatePendingRequests(routing_id());
 }
 
 void LoginRobotsDeciderAgent::SetLoggedInState(bool is_logged_in) {
+  // Logged-in state is sent when a new navigation is about to commit in the
+  // browser process. Save this state until the navigation is committed in the
+  // renderer process.
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  redirect_result_ = is_logged_in ? RedirectResult::kIneligibleLoginDetected
-                                  : RedirectResult::kRedirectable;
+  DCHECK(!is_pending_navigation_loggged_in_);
+  is_pending_navigation_loggged_in_ = is_logged_in;
 }
 
 void LoginRobotsDeciderAgent::RecordMetricsOnLoadFinished(
     const GURL& url,
     int64_t content_length,
-    RedirectResult redirect_result) {
+    SubresourceRedirectResult redirect_result) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // TODO(crbug.com/1148980): Record coverage metrics
 }
@@ -143,14 +158,35 @@ void LoginRobotsDeciderAgent::SetCompressPublicImagesHints(
     mojom::CompressPublicImagesHintsPtr images_hints) {
   // This mojo from browser process should not be called for robots rules based
   // subresource compression on non logged-in pages.
-  DCHECK(ShouldEnableLoginRobotsCheckedCompression());
+  DCHECK(ShouldEnableRobotsRulesFetching());
   NOTREACHED();
 }
 
-void LoginRobotsDeciderAgent::UpdateRobotsRulesForTesting(
+void LoginRobotsDeciderAgent::NotifyIneligibleBlinkDisallowedSubresource() {
+  num_should_redirect_checks_++;
+}
+
+void LoginRobotsDeciderAgent::CreateAndFetchRobotsRules(
     const url::Origin& origin,
-    const base::Optional<std::string>& rules) {
-  GetRobotsRulesParserCache().UpdateRobotsRules(origin, rules);
+    const base::TimeDelta& rules_receive_timeout) {
+  DCHECK(!origin.opaque());
+  RobotsRulesParserCache& robots_rules_parser_cache =
+      RobotsRulesParserCache::Get();
+  if (!robots_rules_parser_cache.DoRobotsRulesParserExist(origin)) {
+    // Create the robots rules parser and start the fetch as well.
+    robots_rules_parser_cache.CreateRobotsRulesParser(origin,
+                                                      rules_receive_timeout);
+    GetSubresourceRedirectServiceRemote()->GetRobotsRules(
+        origin, base::BindOnce(&RobotsRulesParserCache::UpdateRobotsRules,
+                               robots_rules_parser_cache.GetWeakPtr(), origin));
+  }
+}
+
+void LoginRobotsDeciderAgent::PreloadSubresourceOptimizationsForOrigins(
+    const std::vector<blink::WebSecurityOrigin>& origins) {
+  for (const auto& origin : origins) {
+    CreateAndFetchRobotsRules(origin, GetRobotsRulesReceiveTimeout());
+  }
 }
 
 }  // namespace subresource_redirect

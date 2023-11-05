@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
@@ -40,15 +41,24 @@ class MenuControllerTest;
 // to the MenuHost.
 class MenuHost : public Widget, public WidgetObserver {
  public:
+  struct InitParams {
+    Widget* parent = nullptr;
+    gfx::Rect bounds;
+    View* contents_view = nullptr;
+    bool do_capture = false;
+    gfx::NativeView native_view_for_gestures;
+    ui::MenuType menu_type = ui::MenuType::kRootContextMenu;
+    // Window that is stacked below a new menu window (can be different from the
+    // |parent|).
+    Widget* context = nullptr;
+  };
+
   explicit MenuHost(SubmenuView* submenu);
   ~MenuHost() override;
 
   // Initializes and shows the MenuHost.
-  // WARNING: |parent| may be NULL.
-  void InitMenuHost(Widget* parent,
-                    const gfx::Rect& bounds,
-                    View* contents_view,
-                    bool do_capture);
+  // WARNING: |init_params.parent| may be NULL.
+  void InitMenuHost(const InitParams& init_params);
 
   // Returns true if the menu host is visible.
   bool IsMenuHostVisible();
@@ -79,12 +89,15 @@ class MenuHost : public Widget, public WidgetObserver {
   void OnOwnerClosing() override;
   void OnDragWillStart() override;
   void OnDragComplete() override;
+  Widget* GetPrimaryWindowWidget() override;
 
   // WidgetObserver:
   void OnWidgetDestroying(Widget* widget) override;
 
   // Parent of the MenuHost widget.
   Widget* owner_ = nullptr;
+
+  gfx::NativeView native_view_for_gestures_ = nullptr;
 
   // The view we contain.
   SubmenuView* submenu_;
@@ -95,7 +108,7 @@ class MenuHost : public Widget, public WidgetObserver {
   // If true and capture is lost we don't notify the delegate.
   bool ignore_capture_lost_;
 
-#if !defined(OS_APPLE)
+#if !defined(OS_MAC)
   // Handles raw touch events at the moment.
   std::unique_ptr<internal::PreMenuEventDispatchHandler> pre_dispatch_handler_;
 #endif

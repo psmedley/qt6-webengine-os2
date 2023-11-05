@@ -12,8 +12,8 @@
 #include "base/containers/flat_map.h"
 #include "content/browser/background_fetch/storage/database_task.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom.h"
-#include "url/origin.h"
 
 namespace content {
 
@@ -28,7 +28,7 @@ class GetDeveloperIdsTask : public DatabaseTask {
   GetDeveloperIdsTask(
       DatabaseTaskHost* host,
       int64_t service_worker_registration_id,
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       blink::mojom::BackgroundFetchService::GetDeveloperIdsCallback callback);
 
   ~GetDeveloperIdsTask() override;
@@ -49,7 +49,7 @@ class GetDeveloperIdsTask : public DatabaseTask {
   std::string HistogramName() const override;
 
   int64_t service_worker_registration_id_;
-  url::Origin origin_;
+  blink::StorageKey storage_key_;
 
   blink::mojom::BackgroundFetchService::GetDeveloperIdsCallback callback_;
 

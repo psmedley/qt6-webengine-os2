@@ -29,7 +29,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
-#include "third_party/blink/renderer/core/frame/use_counter_helper.h"
+#include "third_party/blink/renderer/core/frame/use_counter_impl.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_field_elements.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_fields_state.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
@@ -486,9 +486,10 @@ void DateTimeEditBuilder::VisitLiteral(const String& text) {
     WTF::unicode::CharDirection dir = WTF::unicode::Direction(text[0]);
     if (dir == WTF::unicode::kSegmentSeparator ||
         dir == WTF::unicode::kWhiteSpaceNeutral ||
-        dir == WTF::unicode::kOtherNeutral)
-      element->AppendChild(Text::Create(EditElement().GetDocument(),
-                                        String(&kRightToLeftMarkCharacter, 1)));
+        dir == WTF::unicode::kOtherNeutral) {
+      element->AppendChild(Text::Create(
+          EditElement().GetDocument(), String(&kRightToLeftMarkCharacter, 1u)));
+    }
   }
   element->AppendChild(Text::Create(EditElement().GetDocument(), text));
   EditElement().FieldsWrapperElement()->AppendChild(element);

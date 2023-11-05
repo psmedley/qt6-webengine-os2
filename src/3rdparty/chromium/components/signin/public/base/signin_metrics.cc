@@ -43,10 +43,6 @@ void RecordSigninUserActionForAccessPoint(AccessPoint access_point) {
       base::RecordAction(
           base::UserMetricsAction("Signin_Signin_FromExtensions"));
       break;
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
-      base::RecordAction(
-          base::UserMetricsAction("Signin_Signin_FromAppsPageLink"));
-      break;
     case AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
       base::RecordAction(
           base::UserMetricsAction("Signin_Signin_FromBookmarkBubble"));
@@ -198,7 +194,6 @@ void RecordSigninWithDefaultUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -278,7 +273,6 @@ void RecordSigninNotDefaultUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -362,7 +356,6 @@ void RecordSigninNewAccountNoExistingAccountUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -449,7 +442,6 @@ void RecordSigninNewAccountExistingAccountUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -603,8 +595,7 @@ void LogSigninAccessPointCompleted(AccessPoint access_point,
 }
 
 void LogSigninReason(Reason reason) {
-  UMA_HISTOGRAM_ENUMERATION("Signin.SigninReason", static_cast<int>(reason),
-                            static_cast<int>(Reason::REASON_MAX));
+  UMA_HISTOGRAM_ENUMERATION("Signin.SigninReason", reason);
 }
 
 void LogSigninAccountReconciliation(int total_number_accounts,
@@ -659,10 +650,10 @@ void LogSigninAccountReconciliationDuration(base::TimeDelta duration,
 void LogSignout(ProfileSignout source_metric, SignoutDelete delete_metric) {
   UMA_HISTOGRAM_ENUMERATION("Signin.SignoutProfile", source_metric,
                             NUM_PROFILE_SIGNOUT_METRICS);
-  if (delete_metric != SignoutDelete::IGNORE_METRIC) {
+  if (delete_metric != SignoutDelete::kIgnoreMetric) {
     UMA_HISTOGRAM_BOOLEAN(
         "Signin.SignoutDeleteProfile",
-        delete_metric == SignoutDelete::DELETED ? true : false);
+        delete_metric == SignoutDelete::kDeleted ? true : false);
   }
 }
 
@@ -779,6 +770,19 @@ void RecordRefreshTokenRevokedFromSource(
   UMA_HISTOGRAM_ENUMERATION("Signin.RefreshTokenRevoked.Source", source);
 }
 
+void RecordSigninAccountType(bool is_signin_and_sync, bool is_managed_account) {
+  SigninAccountType account_type = is_managed_account
+                                       ? SigninAccountType::kManaged
+                                       : SigninAccountType::kRegular;
+  if (is_signin_and_sync) {
+    base::UmaHistogramEnumeration("Signin.AccountType.SyncConsent",
+                                  account_type);
+  } else {
+    base::UmaHistogramEnumeration("Signin.AccountType.SigninConsent",
+                                  account_type);
+  }
+}
+
 // --------------------------------------------------------------
 // User actions
 // --------------------------------------------------------------
@@ -825,10 +829,6 @@ void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE:
       base::RecordAction(base::UserMetricsAction(
           "Signin_Impression_FromExtensionInstallBubble"));
-      break;
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
-      base::RecordAction(
-          base::UserMetricsAction("Signin_Impression_FromAppsPageLink"));
       break;
     case AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
       base::RecordAction(
@@ -1026,7 +1026,6 @@ void RecordSigninImpressionWithAccountUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -1053,5 +1052,13 @@ void RecordSigninImpressionWithAccountUserActionForAccessPoint(
       break;
   }
 }
+
+#if defined(OS_IOS)
+void RecordConsistencyPromoUserAction(AccountConsistencyPromoAction action) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Signin.AccountConsistencyPromoAction", static_cast<int>(action),
+      static_cast<int>(AccountConsistencyPromoAction::MAX));
+}
+#endif  // defined(OS_IOS)
 
 }  // namespace signin_metrics

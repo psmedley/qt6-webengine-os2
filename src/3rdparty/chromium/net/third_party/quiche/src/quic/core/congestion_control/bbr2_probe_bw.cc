@@ -80,36 +80,12 @@ Bbr2Mode Bbr2ProbeBwMode::OnCongestionEvent(
 }
 
 Limits<QuicByteCount> Bbr2ProbeBwMode::GetCwndLimits() const {
-  if (!GetQuicReloadableFlag(quic_bbr2_avoid_too_low_probe_bw_cwnd)) {
-    if (cycle_.phase == CyclePhase::PROBE_CRUISE) {
-      return NoGreaterThan(
-          std::min(model_->inflight_lo(), model_->inflight_hi_with_headroom()));
-    }
-
+  if (cycle_.phase == CyclePhase::PROBE_CRUISE) {
     return NoGreaterThan(
-        std::min(model_->inflight_lo(), model_->inflight_hi()));
+        std::min(model_->inflight_lo(), model_->inflight_hi_with_headroom()));
   }
 
-  QUIC_RELOADABLE_FLAG_COUNT(quic_bbr2_avoid_too_low_probe_bw_cwnd);
-
-  QuicByteCount upper_limit =
-      std::min(model_->inflight_lo(), cycle_.phase == CyclePhase::PROBE_CRUISE
-                                          ? model_->inflight_hi_with_headroom()
-                                          : model_->inflight_hi());
-
-  if (Params().avoid_too_low_probe_bw_cwnd) {
-    // Ensure upper_limit is at least BDP + AckHeight.
-    QuicByteCount bdp_with_ack_height =
-        model_->BDP(model_->MaxBandwidth()) + model_->MaxAckHeight();
-    if (upper_limit < bdp_with_ack_height) {
-      QUIC_DVLOG(3) << sender_ << " Rasing upper_limit from " << upper_limit
-                    << " to " << bdp_with_ack_height;
-      QUIC_CODE_COUNT(quic_bbr2_avoid_too_low_probe_bw_cwnd_in_effect);
-      upper_limit = bdp_with_ack_height;
-    }
-  }
-
-  return NoGreaterThan(upper_limit);
+  return NoGreaterThan(std::min(model_->inflight_lo(), model_->inflight_hi()));
 }
 
 bool Bbr2ProbeBwMode::IsProbingForBandwidth() const {
@@ -205,10 +181,10 @@ Bbr2ProbeBwMode::AdaptUpperBoundsResult Bbr2ProbeBwMode::MaybeAdaptUpperBounds(
           model_->total_bytes_acked() -
           congestion_event.last_packet_send_state.total_bytes_acked;
     } else {
-      QUIC_BUG << "Total_bytes_acked(" << model_->total_bytes_acked()
-               << ") < send_state.total_bytes_acked("
-               << congestion_event.last_packet_send_state.total_bytes_acked
-               << ")";
+      QUIC_BUG(quic_bug_10436_1)
+          << "Total_bytes_acked(" << model_->total_bytes_acked()
+          << ") < send_state.total_bytes_acked("
+          << congestion_event.last_packet_send_state.total_bytes_acked << ")";
     }
   }
   if (model_->IsInflightTooHigh(congestion_event,
@@ -394,8 +370,9 @@ void Bbr2ProbeBwMode::ProbeInflightHighUpward(
 
       model_->set_inflight_hi(new_inflight_hi);
     } else {
-      QUIC_BUG << "Not growing inflight_hi due to wrap around. Old value:"
-               << model_->inflight_hi() << ", new value:" << new_inflight_hi;
+      QUIC_BUG(quic_bug_10436_2)
+          << "Not growing inflight_hi due to wrap around. Old value:"
+          << model_->inflight_hi() << ", new value:" << new_inflight_hi;
     }
   }
 
@@ -499,6 +476,13 @@ void Bbr2ProbeBwMode::EnterProbeDown(bool probed_too_high,
   cycle_.rounds_in_phase = 0;
   cycle_.phase_start_time = now;
   ++sender_->connection_stats_->bbr_num_cycles;
+  if (Params().bw_lo_mode_ != Bbr2Params::QuicBandwidthLoMode::DEFAULT) {
+    // Clear bandwidth lo if it was set in PROBE_UP, because losses in PROBE_UP
+    // should not permanently change bandwidth_lo.
+    // It's possible for bandwidth_lo to be set during REFILL, but if that was
+    // a valid value, it'll quickly be rediscovered.
+    model_->clear_bandwidth_lo();
+  }
 
   // Pick probe wait time.
   cycle_.rounds_since_probe =

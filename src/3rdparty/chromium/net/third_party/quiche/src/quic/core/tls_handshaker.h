@@ -16,6 +16,7 @@
 #include "quic/core/crypto/tls_connection.h"
 #include "quic/core/quic_session.h"
 #include "quic/platform/api/quic_export.h"
+#include "quic/platform/api/quic_flags.h"
 
 namespace quic {
 
@@ -56,7 +57,7 @@ class QUIC_EXPORT_PRIVATE TlsHandshaker : public TlsConnection::Delegate,
  protected:
   // Called when a new message is received on the crypto stream and is available
   // for the TLS stack to read.
-  void AdvanceHandshake();
+  virtual void AdvanceHandshake();
 
   void CloseConnection(QuicErrorCode error, const std::string& reason_phrase);
   // Closes the connection, specifying the wire error code |ietf_error|
@@ -70,10 +71,17 @@ class QUIC_EXPORT_PRIVATE TlsHandshaker : public TlsConnection::Delegate,
   bool is_connection_closed() const { return is_connection_closed_; }
 
   // Called when |SSL_do_handshake| returns 1, indicating that the handshake has
-  // finished. Note that due to 0-RTT, the handshake may "finish" twice;
-  // |SSL_in_early_data| can be used to determine whether the handshake is truly
-  // done.
+  // finished. Note that a handshake only finishes once, entering early data
+  // does not count.
   virtual void FinishHandshake() = 0;
+
+  // Called when |SSL_do_handshake| returns 1 and the connection is in early
+  // data. In that case, |AdvanceHandshake| will call |OnEnterEarlyData| and
+  // retry |SSL_do_handshake| once.
+  virtual void OnEnterEarlyData() {
+    // By default, do nothing but check the preconditions.
+    QUICHE_DCHECK(SSL_in_early_data(ssl()));
+  }
 
   // Called when a handshake message is received after the handshake is
   // complete.
@@ -154,6 +162,11 @@ class QUIC_EXPORT_PRIVATE TlsHandshaker : public TlsConnection::Delegate,
   // SendAlert causes this TlsHandshaker to close the QUIC connection with an
   // error code corresponding to the TLS alert description |desc|.
   void SendAlert(EncryptionLevel level, uint8_t desc) override;
+
+  // Informational callback from BoringSSL. Subclasses can override it to do
+  // logging, tracing, etc.
+  // See |SSL_CTX_set_info_callback| for the meaning of |type| and |value|.
+  void InfoCallback(int /*type*/, int /*value*/) override {}
 
  private:
   // ProofVerifierCallbackImpl handles the result of an asynchronous certificate

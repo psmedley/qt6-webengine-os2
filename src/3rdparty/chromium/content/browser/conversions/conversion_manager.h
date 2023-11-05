@@ -7,18 +7,28 @@
 
 #include <vector>
 
-#include "base/callback.h"
 #include "base/callback_forward.h"
-#include "content/browser/conversions/conversion_policy.h"
-#include "content/browser/conversions/conversion_report.h"
-#include "content/browser/conversions/storable_conversion.h"
-#include "content/browser/conversions/storable_impression.h"
+#include "base/compiler_specific.h"
+#include "base/containers/circular_deque.h"
 #include "content/common/content_export.h"
-#include "url/origin.h"
+
+namespace base {
+class Time;
+}  // namespace base
+
+namespace url {
+class Origin;
+}  // namespace url
 
 namespace content {
 
+class ConversionPolicy;
+class StorableConversion;
+class StorableImpression;
 class WebContents;
+
+struct ConversionReport;
+struct SentReportInfo;
 
 // Interface that mediates data flow between the network, storage layer, and
 // blink.
@@ -41,11 +51,11 @@ class CONTENT_EXPORT ConversionManager {
 
   // Persists the given |impression| to storage. Called when a navigation
   // originating from an impression tag finishes.
-  virtual void HandleImpression(const StorableImpression& impression) = 0;
+  virtual void HandleImpression(StorableImpression impression) = 0;
 
   // Process a newly registered conversion. Will create and log any new
   // conversion reports to storage.
-  virtual void HandleConversion(const StorableConversion& conversion) = 0;
+  virtual void HandleConversion(StorableConversion conversion) = 0;
 
   // Get all impressions that are currently stored in this partition. Used for
   // populating WebUI.
@@ -54,9 +64,14 @@ class CONTENT_EXPORT ConversionManager {
 
   // Get all pending reports that are currently stored in this partition. Used
   // for populating WebUI.
-  virtual void GetReportsForWebUI(
+  virtual void GetPendingReportsForWebUI(
       base::OnceCallback<void(std::vector<ConversionReport>)> callback,
       base::Time max_report_time) = 0;
+
+  // Get all reports sent in this session. Used for populating WebUI. Limited to
+  // last 100.
+  virtual const base::circular_deque<SentReportInfo>& GetSentReportsForWebUI()
+      const WARN_UNUSED_RESULT = 0;
 
   // Sends all pending reports immediately, and runs |done| once they have all
   // been sent.
@@ -64,7 +79,8 @@ class CONTENT_EXPORT ConversionManager {
 
   // Returns the ConversionPolicy that is used to control API policies such
   // as noise.
-  virtual const ConversionPolicy& GetConversionPolicy() const = 0;
+  virtual const ConversionPolicy& GetConversionPolicy() const
+      WARN_UNUSED_RESULT = 0;
 
   // Deletes all data in storage for URLs matching |filter|, between
   // |delete_begin| and |delete_end| time.

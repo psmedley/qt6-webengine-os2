@@ -6,6 +6,7 @@
 #define CHROME_RENDERER_CART_COMMERCE_HINT_AGENT_H_
 
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
 #include "third_party/blink/public/web/web_script_execution_callback.h"
@@ -33,17 +34,25 @@ class CommerceHintAgent
   static bool IsVisitCheckout(const GURL& main_frame_url);
   // Whether the main frame URL is a purchase page.
   static bool IsPurchase(const GURL& main_frame_url);
-  // Whether the button text corresponds to a purchase.
-  static bool IsPurchase(base::StringPiece button_text);
+  // Whether the button text in a page with |url| corresponds to a purchase.
+  static bool IsPurchase(const GURL& url, base::StringPiece button_text);
   // Whether the product should be skipped, based on product name.
   static bool ShouldSkip(base::StringPiece product_name);
-
-  void ExtractProducts();
+  // Whether the request with navigation URL as |navigation_url| and request URL
+  // as |request_url| should be skipped for AddToCart detection.
+  static bool ShouldSkipAddToCartRequest(const GURL& navigation_url,
+                                         const GURL& request_url);
   void OnProductsExtracted(std::unique_ptr<base::Value> result);
-  static std::string ExtractButtonText(const blink::WebFormElement& form);
+  static const std::vector<std::string> ExtractButtonTexts(
+      const blink::WebFormElement& form);
 
  private:
+  void MaybeExtractProducts();
+  void ExtractProducts();
+  void ExtractCartFromCurrentFrame();
+
   GURL starting_url_;
+  base::TimeTicks last_extraction_time_;
   base::WeakPtrFactory<CommerceHintAgent> weak_factory_{this};
 
   class JavaScriptRequest : public blink::WebScriptExecutionCallback {
@@ -51,12 +60,14 @@ class CommerceHintAgent
     explicit JavaScriptRequest(base::WeakPtr<CommerceHintAgent> agent);
     JavaScriptRequest(const JavaScriptRequest&) = delete;
     JavaScriptRequest& operator=(const JavaScriptRequest&) = delete;
+    void WillExecute() override;
     void Completed(
         const blink::WebVector<v8::Local<v8::Value>>& result) override;
 
    private:
     ~JavaScriptRequest() override;
     base::WeakPtr<CommerceHintAgent> agent_;
+    base::TimeTicks start_time_;
   };
 
   // content::RenderFrameObserver overrides
@@ -64,11 +75,12 @@ class CommerceHintAgent
   void WillSendRequest(const blink::WebURLRequest& request) override;
   void DidStartNavigation(
       const GURL& url,
-      base::Optional<blink::WebNavigationType> navigation_type) override;
+      absl::optional<blink::WebNavigationType> navigation_type) override;
   void DidCommitProvisionalLoad(ui::PageTransition transition) override;
   void DidFinishLoad() override;
   void WillSubmitForm(const blink::WebFormElement& form) override;
   void DidObserveLayoutShift(double score, bool after_input_or_scroll) override;
+  void OnMainFrameIntersectionChanged(const gfx::Rect& intersect_rect) override;
 };
 
 }  // namespace cart

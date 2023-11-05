@@ -12,10 +12,10 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_config.h"
 #include "base/trace_event/trace_event.h"
+#include "base/tracing/trace_time.h"
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
 #include "build/chromeos_buildflags.h"
-#include "services/tracing/public/cpp/perfetto/trace_time.h"
 #include "services/tracing/public/mojom/perfetto_service.mojom.h"
 
 namespace tracing {
@@ -32,7 +32,15 @@ perfetto::TraceConfig::DataSource* AddDataSourceConfig(
     const std::string& json_agent_label_filter) {
   auto* data_source = perfetto_config->add_data_sources();
   auto* source_config = data_source->mutable_config();
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  if (!strcmp(name, tracing::mojom::kTraceEventDataSourceName)) {
+    source_config->set_name("track_event");
+  } else {
+    source_config->set_name(name);
+  }
+#else
   source_config->set_name(name);
+#endif
   source_config->set_target_buffer(0);
   auto* chrome_config = source_config->mutable_chrome_config();
   chrome_config->set_trace_config(chrome_config_string);
@@ -42,6 +50,26 @@ perfetto::TraceConfig::DataSource* AddDataSourceConfig(
 
   if (!json_agent_label_filter.empty())
     chrome_config->set_json_agent_label_filter(json_agent_label_filter);
+
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  if (!strcmp(name, tracing::mojom::kTraceEventDataSourceName)) {
+    base::trace_event::TraceConfig base_config(chrome_config_string);
+    perfetto::protos::gen::TrackEventConfig te_cfg;
+    for (const auto& excluded :
+         base_config.category_filter().excluded_categories()) {
+      te_cfg.add_disabled_categories(excluded);
+    }
+    for (const auto& included :
+         base_config.category_filter().included_categories()) {
+      te_cfg.add_enabled_categories(included);
+    }
+    for (const auto& disabled :
+         base_config.category_filter().disabled_categories()) {
+      te_cfg.add_enabled_categories(disabled);
+    }
+    source_config->set_track_event_config_raw(te_cfg.SerializeAsString());
+  }
+#endif  // BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 
   return data_source;
 }
@@ -64,6 +92,10 @@ void AddDataSourceConfigs(
                tracing::mojom::kMemoryInstrumentationDataSourceName));
     AddDataSourceConfig(
         perfetto_config, tracing::mojom::kMemoryInstrumentationDataSourceName,
+        chrome_config_string, privacy_filtering_enabled, convert_to_legacy_json,
+        client_priority, json_agent_label_filter);
+    AddDataSourceConfig(
+        perfetto_config, tracing::mojom::kNativeHeapProfilerSourceName,
         chrome_config_string, privacy_filtering_enabled, convert_to_legacy_json,
         client_priority, json_agent_label_filter);
   }
@@ -205,7 +237,8 @@ perfetto::TraceConfig COMPONENT_EXPORT(TRACING_CPP)
   // conversion to BOOTTIME caused CrOS and chromecast system data source data
   // to be misaligned.
   builtin_data_sources->set_primary_trace_clock(
-      static_cast<perfetto::protos::gen::BuiltinClock>(kTraceClockId));
+      static_cast<perfetto::protos::gen::BuiltinClock>(
+          base::tracing::kTraceClockId));
 
   // Chrome emits system / trace config metadata itself.
   builtin_data_sources->set_disable_trace_config(privacy_filtering_enabled);

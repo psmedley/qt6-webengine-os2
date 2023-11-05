@@ -111,8 +111,9 @@ class ShapeOutsideInfo final {
 
   static ShapeOutsideInfo& EnsureInfo(const LayoutBox& key) {
     InfoMap& info_map = ShapeOutsideInfo::GetInfoMap();
-    if (ShapeOutsideInfo* info = info_map.at(&key))
-      return *info;
+    auto it = info_map.find(&key);
+    if (it != info_map.end())
+      return *it->value;
     InfoMap::AddResult result =
         info_map.insert(&key, base::WrapUnique(new ShapeOutsideInfo(key)));
     return *result.stored_value->value;
@@ -162,4 +163,4 @@ class ShapeOutsideInfo final {
 };
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SHAPES_SHAPE_OUTSIDE_INFO_H_

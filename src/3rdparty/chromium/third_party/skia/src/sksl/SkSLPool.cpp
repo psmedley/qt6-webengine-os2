@@ -7,7 +7,7 @@
 
 #include "src/sksl/SkSLPool.h"
 
-#include "src/sksl/SkSLDefines.h"
+#include "include/private/SkSLDefines.h"
 
 #define VLOG(...) // printf(__VA_ARGS__)
 
@@ -68,6 +68,10 @@ std::unique_ptr<Pool> Pool::Create() {
     pool->fMemPool = MemoryPool::Make(/*preallocSize=*/65536, /*minAllocSize=*/32768);
     VLOG("CREATE Pool:0x%016llX\n", (uint64_t)pool->fMemPool.get());
     return pool;
+}
+
+bool Pool::IsAttached() {
+    return get_thread_local_memory_pool();
 }
 
 void Pool::attachToThread() {

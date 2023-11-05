@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_SAFE_BROWSING_CORE_BROWSER_REFERRER_CHAIN_PROVIDER_H_
 #define COMPONENTS_SAFE_BROWSING_CORE_BROWSER_REFERRER_CHAIN_PROVIDER_H_
 
-#include "components/safe_browsing/core/proto/csd.pb.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "components/sessions/core/session_id.h"
 #include "url/gurl.h"
 
@@ -41,6 +41,11 @@ class ReferrerChainProvider {
   virtual AttributionResult IdentifyReferrerChainByEventURL(
       const GURL& event_url,
       SessionID event_tab_id,
+      int user_gesture_count_limit,
+      ReferrerChain* out_referrer_chain) = 0;
+
+  virtual AttributionResult IdentifyReferrerChainByPendingEventURL(
+      const GURL& event_url,
       int user_gesture_count_limit,
       ReferrerChain* out_referrer_chain) = 0;
 };

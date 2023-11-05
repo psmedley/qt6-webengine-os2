@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.19)
 find_package(Ninja 1.7.2 REQUIRED)
-find_package(Python2 2.7.5 REQUIRED)
-#find_package(Nodejs 10.19 REQUIRED)
+find_package(Nodejs 12 REQUIRED)
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
     create_pkg_config_host_wrapper(${CMAKE_CURRENT_BINARY_DIR})
@@ -67,7 +66,6 @@ addSyncTargets(pdf)
 
 get_configs(configs)
 get_architectures(archs)
-
 foreach(arch ${archs})
     foreach(config ${configs})
 
@@ -77,7 +75,9 @@ foreach(arch ${archs})
 
         set(buildGn pdf_${config}_${arch})
         add_gn_target(${buildGn} ${config} ${arch}
-            SOURCES DEFINES CXX_COMPILE_OPTIONS C_COMPILE_OPTIONS INCLUDES MOC_PATH
+            SOURCES DEFINES CXX_COMPILE_OPTIONS C_COMPILE_OPTIONS
+            INCLUDES MOC_PATH PNG_INCLUDES JPEG_INCLUDES HARFBUZZ_INCLUDES
+            FREETYPE_INCLUDES ZLIB_INCLUDES
         )
         resolve_target_includes(gnIncludes Pdf)
         get_forward_declaration_macro(forwardDeclarationMacro)
@@ -100,10 +100,16 @@ foreach(arch ${archs})
 
         list(APPEND gnArgArg
           qtwebengine_target="${buildDir}/${config}/${arch}:QtPdf"
+          qt_libpng_config="${buildDir}/${config}/${arch}:qt_libpng_config"
+          qt_libjpeg_config="${buildDir}/${config}/${arch}:qt_libjpeg_config"
+          qt_harfbuzz_config="${buildDir}/${config}/${arch}:qt_harfbuzz_config"
+          qt_freetype_config="${buildDir}/${config}/${arch}:qt_freetype_config"
+          enable_ipc_fuzzer=false
           enable_remoting=false
           enable_resource_allowlist_generation=false
           enable_web_speech=false
           chrome_pgo_phase=0
+          strip_absolute_paths_from_debug_symbols=false
         )
 
         if(LINUX)
@@ -114,12 +120,22 @@ foreach(arch ${archs})
               use_gnome_keyring=false)
         endif()
         if(MACOS)
-          list(APPEND gnArgArg angle_enable_vulkan=false)
+            list(APPEND gnArgArg angle_enable_vulkan=false)
+        endif()
+        if(IOS)
+            extend_gn_list(gnArgArg
+                ARGS enable_ios_bitcode
+                CONDITION QT_FEATURE_pdf_bitcode
+            )
         endif()
         if(WIN32)
           list(APPEND gnArgArg
               ninja_use_custom_environment_files=false
               safe_browsing_mode=0
+          )
+          extend_gn_list(gnArgArg
+              ARGS qt_uses_static_runtime
+              CONDITION QT_FEATURE_pdf_static_runtime
           )
         endif()
 
@@ -147,6 +163,22 @@ foreach(arch ${archs})
             ARGS pdf_enable_xfa_tiff
             CONDITION QT_FEATURE_pdf_xfa_tiff
         )
+        extend_gn_list(gnArgArg
+            ARGS pdfium_use_qt_libpng
+            CONDITION QT_FEATURE_webengine_qt_libpng
+        )
+        extend_gn_list(gnArgArg
+            ARGS use_qt_libjpeg
+            CONDITION QT_FEATURE_webengine_qt_libjpeg
+        )
+        extend_gn_list(gnArgArg
+            ARGS use_qt_harfbuzz
+            CONDITION QT_FEATURE_webengine_qt_harfbuzz
+        )
+        extend_gn_list(gnArgArg
+            ARGS use_qt_freetype
+            CONDITION QT_FEATURE_webengine_qt_freetype
+        )
 
         add_gn_command(
             CMAKE_TARGET Pdf
@@ -166,7 +198,8 @@ endforeach()
 #  PDF SETUP
 ##
 
-set(arch ${CMAKE_SYSTEM_PROCESSOR})
+get_architectures(archs)
+list(GET archs 0 arch)
 target_include_directories(Pdf PRIVATE ${buildDir}/$<CONFIG>/${arch}/gen)
 add_gn_build_aritfacts_to_target(Pdf QtPdf pdf ${buildDir} TRUE)
 add_dependencies(Pdf run_pdf_NinjaDone)

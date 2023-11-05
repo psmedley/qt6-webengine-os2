@@ -11,7 +11,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_video_capturer_source.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
@@ -20,6 +19,7 @@
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
+#include "ui/gfx/geometry/size.h"
 
 using base::test::RunOnceClosure;
 using ::testing::_;
@@ -53,7 +53,7 @@ class CanvasCaptureHandlerTest
     MediaStreamComponent* component = nullptr;
     canvas_capture_handler_ = CanvasCaptureHandler::CreateCanvasCaptureHandler(
         /*LocalFrame =*/nullptr,
-        blink::WebSize(kTestCanvasCaptureWidth, kTestCanvasCaptureHeight),
+        gfx::Size(kTestCanvasCaptureWidth, kTestCanvasCaptureHeight),
         kTestCanvasCaptureFramesPerSecond,
         blink::scheduler::GetSingleThreadTaskRunnerForTesting(), &component);
     component_ = component;
@@ -225,6 +225,32 @@ TEST_P(CanvasCaptureHandlerTest, VerifyFrame) {
                           base::Unretained(this)));
   canvas_capture_handler_->SendNewFrame(
       GenerateTestImage(opaque_frame, width, height), nullptr);
+  run_loop.RunUntilIdle();
+}
+
+// Verifies that SkImage is processed and produces VideoFrame as expected.
+TEST_F(CanvasCaptureHandlerTest, DropAlphaDeliversOpaqueFrame) {
+  const int width = 2;
+  const int height = 2;
+  InSequence s;
+  media::VideoCapturerSource* const source = GetVideoCapturerSource(
+      static_cast<blink::MediaStreamVideoCapturerSource*>(
+          component_->Source()->GetPlatformSource()));
+  EXPECT_TRUE(source);
+
+  base::RunLoop run_loop;
+  EXPECT_CALL(*this, DoOnRunning(true)).Times(1);
+  media::VideoCaptureParams params;
+  source->SetCanDiscardAlpha(true);
+  source->StartCapture(
+      params,
+      base::BindRepeating(&CanvasCaptureHandlerTest::OnVerifyDeliveredFrame,
+                          base::Unretained(this), /*opaque_frame=*/true, width,
+                          height),
+      base::BindRepeating(&CanvasCaptureHandlerTest::OnRunning,
+                          base::Unretained(this)));
+  canvas_capture_handler_->SendNewFrame(
+      GenerateTestImage(/*opaque_frame=*/false, width, height), nullptr);
   run_loop.RunUntilIdle();
 }
 

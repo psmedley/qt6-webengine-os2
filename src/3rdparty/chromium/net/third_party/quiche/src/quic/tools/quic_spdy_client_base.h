@@ -139,14 +139,19 @@ class QuicSpdyClientBase : public QuicClientBase,
   }
   bool drop_response_body() const { return drop_response_body_; }
 
-  // Set the max promise id for the client session.
-  // TODO(b/151641466): Rename this method.
-  void SetMaxAllowedPushId(PushId max) { max_allowed_push_id_ = max; }
+  void set_enable_web_transport(bool enable_web_transport) {
+    enable_web_transport_ = enable_web_transport;
+  }
+  bool enable_web_transport() const { return enable_web_transport_; }
 
   // QuicClientBase methods.
   bool goaway_received() const override;
   bool EarlyDataAccepted() override;
   bool ReceivedInchoateReject() override;
+
+  void set_max_inbound_header_list_size(size_t size) {
+    max_inbound_header_list_size_ = size;
+  }
 
  protected:
   int GetNumSentClientHellosFromSession() override;
@@ -221,9 +226,10 @@ class QuicSpdyClientBase : public QuicClientBase,
   std::unique_ptr<ClientQuicDataToResend> push_promise_data_to_resend_;
 
   bool drop_response_body_ = false;
-
-  // The max promise id to set on the client session when created.
-  PushId max_allowed_push_id_;
+  bool enable_web_transport_ = false;
+  // If not zero, used to set client's max inbound header size before session
+  // initialize.
+  size_t max_inbound_header_list_size_ = 0;
 };
 
 }  // namespace quic

@@ -130,9 +130,6 @@ std::ostream& operator<<(std::ostream& out,
     case ProcessedActionStatusProto::AUTOFILL_INCOMPLETE:
       out << "AUTOFILL_INCOMPLETE";
       break;
-    case ProcessedActionStatusProto::TOO_MANY_CANDIDATES:
-      out << "TOO_MANY_CANDIDATES";
-      break;
     case ProcessedActionStatusProto::ELEMENT_MISMATCH:
       out << "ELEMENT_MISMATCH";
       break;
@@ -141,6 +138,24 @@ std::ostream& operator<<(std::ostream& out,
       break;
     case ProcessedActionStatusProto::CLIENT_ID_RESOLUTION_FAILED:
       out << "CLIENT_ID_RESOLUTION_FAILED";
+      break;
+    case ProcessedActionStatusProto::PASSWORD_ORIGIN_MISMATCH:
+      out << "PASSWORD_ORIGIN_MISMATCH";
+      break;
+    case ProcessedActionStatusProto::TOO_MANY_OPTION_VALUES_FOUND:
+      out << "TOO_MANY_OPTION_VALUES_FOUND";
+      break;
+    case ProcessedActionStatusProto::INVALID_TARGET:
+      out << "INVALID_TARGET";
+      break;
+    case ProcessedActionStatusProto::ELEMENT_POSITION_NOT_FOUND:
+      out << "ELEMENT_POSITION_NOT_FOUND";
+      break;
+    case ProcessedActionStatusProto::CLIENT_MEMORY_KEY_NOT_AVAILABLE:
+      out << "CLIENT_MEMORY_KEY_NOT_AVAILABLE";
+      break;
+    case ProcessedActionStatusProto::EMPTY_VALUE_EXPRESSION_RESULT:
+      out << "EMPTY_VALUE_EXPRESSION_RESULT";
       break;
 
       // Intentionally no default case to make compilation fail if a new value

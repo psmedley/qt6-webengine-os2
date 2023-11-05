@@ -7,12 +7,13 @@
 #include <utility>
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "components/feed/core/proto/v2/wire/stream_structure.pb.h"
 #include "components/feed/core/v2/config.h"
 #include "components/feed/core/v2/feed_store.h"
 #include "components/feed/core/v2/feed_stream.h"
-#include "components/feed/core/v2/public/feed_stream_api.h"
+#include "components/feed/core/v2/public/feed_api.h"
 #include "components/feed/core/v2/stream_model.h"
 #include "components/feed/core/v2/tasks/load_stream_from_store_task.h"
 
@@ -31,7 +32,7 @@ GURL SpecToGURL(const std::string& url_string) {
 
 }  // namespace
 
-PrefetchImagesTask::PrefetchImagesTask(FeedStream* stream) : stream_(stream) {
+PrefetchImagesTask::PrefetchImagesTask(FeedStream* stream) : stream_(*stream) {
   max_images_per_refresh_ =
       GetFeedConfig().max_prefetch_image_requests_per_refresh;
 }
@@ -39,14 +40,19 @@ PrefetchImagesTask::PrefetchImagesTask(FeedStream* stream) : stream_(stream) {
 PrefetchImagesTask::~PrefetchImagesTask() = default;
 
 void PrefetchImagesTask::Run() {
-  if (stream_->GetModel(kInterestStream)) {
-    PrefetchImagesFromModel(*stream_->GetModel(kInterestStream));
+  if (stream_.ClearAllInProgress()) {
+    // Abort if ClearAll is in progress.
+    TaskComplete();
+    return;
+  }
+  if (stream_.GetModel(kForYouStream)) {
+    PrefetchImagesFromModel(*stream_.GetModel(kForYouStream));
     return;
   }
 
   load_from_store_task_ = std::make_unique<LoadStreamFromStoreTask>(
-      LoadStreamFromStoreTask::LoadType::kFullLoad, kInterestStream,
-      stream_->GetStore(),
+      LoadStreamFromStoreTask::LoadType::kFullLoad, &stream_, kForYouStream,
+      &stream_.GetStore(),
       /*missed_last_refresh=*/false,
       base::BindOnce(&PrefetchImagesTask::LoadStreamComplete,
                      base::Unretained(this)));
@@ -65,7 +71,8 @@ void PrefetchImagesTask::LoadStreamComplete(
   // LoadStreamTask flow has various considerations for metrics and signalling
   // surfaces to update. For this reason, we're not going to retain the loaded
   // model for use outside of this task.
-  StreamModel model;
+  StreamModel::Context model_context;
+  StreamModel model(&model_context);
   model.Update(std::move(result.update_request));
   PrefetchImagesFromModel(model);
 }
@@ -96,7 +103,7 @@ void PrefetchImagesTask::MaybePrefetchImage(const GURL& gurl) {
       previously_fetched_.size() >= max_images_per_refresh_)
     return;
   previously_fetched_.insert(gurl.spec());
-  stream_->PrefetchImage(gurl);
+  stream_.PrefetchImage(gurl);
 }
 
 }  // namespace feed

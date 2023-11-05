@@ -4,6 +4,9 @@
 
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings_builder.h"
 
+#include <string>
+#include <unordered_map>
+
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -11,8 +14,6 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/forcedark/forcedark_switches.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
-
-#include <string>
 
 namespace blink {
 
@@ -131,6 +132,19 @@ T Clamp(T value, T min_value, T max_value) {
   return std::max(min_value, std::min(value, max_value));
 }
 
+bool GetIncreaseTextContrast(const SwitchParams& switch_params) {
+  switch (features::kForceDarkIncreaseTextContrastParam.Get()) {
+    case ForceDarkIncreaseTextContrast::kUseBlinkSettings:
+      return GetIntegerSwitchParamValue<int>(switch_params,
+                                             "IncreaseTextContrast", 0);
+    case ForceDarkIncreaseTextContrast::kFalse:
+      return false;
+    case ForceDarkIncreaseTextContrast::kTrue:
+      return true;
+  }
+  NOTREACHED();
+}
+
 DarkModeSettings BuildDarkModeSettings() {
   SwitchParams switch_params = ParseDarkModeSettings();
 
@@ -156,12 +170,14 @@ DarkModeSettings BuildDarkModeSettings() {
                                kDefaultDarkModeImageGrayscalePercent),
       0.0f, 1.0f);
 
+  settings.increase_text_contrast = GetIncreaseTextContrast(switch_params);
+
   return settings;
 }
 
 }  // namespace
 
-DarkModeSettings GetCurrentDarkModeSettings() {
+const DarkModeSettings& GetCurrentDarkModeSettings() {
   static DarkModeSettings settings = BuildDarkModeSettings();
   return settings;
 }

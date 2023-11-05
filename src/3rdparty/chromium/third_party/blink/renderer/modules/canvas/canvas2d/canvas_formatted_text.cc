@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_formatted_text.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_child_layout_context.h"
@@ -15,7 +16,7 @@
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
+#include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
 
 namespace blink {
 
@@ -37,14 +38,15 @@ CanvasFormattedText* CanvasFormattedText::Create(
 }
 
 CanvasFormattedText::CanvasFormattedText(ExecutionContext* execution_context) {
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
-  style->SetDisplay(EDisplay::kBlock);
   // Refrain from extending the use of document, apart from creating layout
   // block flow. In the future we should handle execution_context's from worker
   // threads that do not have a document.
-  auto* window = To<LocalDOMWindow>(execution_context);
-  block_ = LayoutBlockFlow::CreateAnonymous(window->document(), style,
-                                            LegacyLayout::kAuto);
+  auto* document = To<LocalDOMWindow>(execution_context)->document();
+  scoped_refptr<ComputedStyle> style =
+      document->GetStyleResolver().CreateComputedStyle();
+  style->SetDisplay(EDisplay::kBlock);
+  block_ =
+      LayoutBlockFlow::CreateAnonymous(document, style, LegacyLayout::kAuto);
   block_->SetIsLayoutNGObjectForCanvasFormattedText(true);
 }
 
@@ -63,7 +65,8 @@ void CanvasFormattedText::Dispose() {
 LayoutBlockFlow* CanvasFormattedText::GetLayoutBlock(
     Document& document,
     const FontDescription& defaultFont) {
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style =
+      document.GetStyleResolver().CreateComputedStyle();
   style->SetDisplay(EDisplay::kBlock);
   style->SetFontDescription(defaultFont);
   block_->SetStyle(style);
@@ -144,9 +147,6 @@ sk_sp<PaintRecord> CanvasFormattedText::PaintFormattedText(
   LayoutBlockFlow* block = GetLayoutBlock(document, font);
   NGBlockNode block_node(block);
   NGInlineNode node(block);
-  // Call IsEmptyInline to force prepare layout.
-  if (node.IsEmptyInline())
-    return nullptr;
 
   // TODO(sushraja) Once we add support for writing mode on the canvas formatted
   // text, fix this to be not hardcoded horizontal top to bottom.
@@ -162,26 +162,15 @@ sk_sp<PaintRecord> CanvasFormattedText::PaintFormattedText(
       block_node.Layout(space, nullptr);
   const auto& fragment =
       To<NGPhysicalBoxFragment>(block_results->PhysicalFragment());
-  block->RecalcInlineChildrenVisualOverflow();
+  block->RecalcFragmentsVisualOverflow();
   bounds = FloatRect(block->PhysicalVisualOverflowRect());
 
-  PaintController paint_controller(PaintController::Usage::kTransient);
-  paint_controller.UpdateCurrentPaintChunkProperties(nullptr,
-                                                     PropertyTreeState::Root());
-  GraphicsContext graphics_context(paint_controller);
-  PhysicalOffset physical_offset((LayoutUnit(x)), (LayoutUnit(y)));
-  NGBoxFragmentPainter box_fragment_painter(fragment);
-  PaintInfo paint_info(graphics_context, CullRect::Infinite(),
-                       PaintPhase::kForeground, kGlobalPaintNormalPhase,
-                       kPaintLayerPaintingRenderingClipPathAsMask |
-                           kPaintLayerPaintingRenderingResourceSubtree);
-  box_fragment_painter.PaintObject(paint_info, physical_offset);
-  paint_controller.CommitNewDisplayItems();
-  paint_controller.FinishCycle();
-  sk_sp<PaintRecord> recording =
-      paint_controller.GetPaintArtifact().GetPaintRecord(
-          PropertyTreeState::Root());
-  return recording;
+  PaintRecordBuilder paint_record_builder;
+  PaintInfo paint_info(paint_record_builder.Context(), CullRect::Infinite(),
+                       PaintPhase::kForeground, kGlobalPaintNormalPhase, 0);
+  NGBoxFragmentPainter(fragment).PaintObject(
+      paint_info, PhysicalOffset(LayoutUnit(x), LayoutUnit(y)));
+  return paint_record_builder.EndRecording();
 }
 
 }  // namespace blink

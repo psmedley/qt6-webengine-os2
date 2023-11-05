@@ -21,7 +21,6 @@
 #include "base/time/clock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "components/captive_portal/core/captive_portal_types.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/prefs/pref_service.h"
 #include "components/security_interstitials/content/bad_clock_blocking_page.h"
@@ -186,7 +185,7 @@ class ConfigSingleton {
 
   // Returns a DynamicInterstitialInfo that matches with |ssl_info|. If is no
   // match, return null.
-  base::Optional<DynamicInterstitialInfo> MatchDynamicInterstitial(
+  absl::optional<DynamicInterstitialInfo> MatchDynamicInterstitial(
       const net::SSLInfo& ssl_info,
       bool is_overridable);
 
@@ -331,7 +330,7 @@ const std::string ConfigSingleton::MatchKnownMITMSoftware(
   return ssl_error_assistant_->MatchKnownMITMSoftware(cert);
 }
 
-base::Optional<DynamicInterstitialInfo>
+absl::optional<DynamicInterstitialInfo>
 ConfigSingleton::MatchDynamicInterstitial(const net::SSLInfo& ssl_info,
                                           bool is_overridable) {
   return ssl_error_assistant_->MatchDynamicInterstitial(ssl_info,
@@ -424,8 +423,7 @@ SSLErrorHandlerDelegateImpl::~SSLErrorHandlerDelegateImpl() {
 
 void SSLErrorHandlerDelegateImpl::CheckForCaptivePortal() {
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
-  captive_portal_service_->DetectCaptivePortal(
-      captive_portal::CaptivePortalProbeReason::kCertificateError);
+  captive_portal_service_->DetectCaptivePortal();
 #else
   NOTREACHED();
 #endif
@@ -450,10 +448,10 @@ void SSLErrorHandlerDelegateImpl::CheckSuggestedUrl(
     const GURL& suggested_url,
     CommonNameMismatchHandler::CheckUrlCallback callback) {
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory(
-      content::BrowserContext::GetDefaultStoragePartition(browser_context_)
+      browser_context_->GetDefaultStoragePartition()
           ->GetURLLoaderFactoryForBrowserProcess());
-  common_name_mismatch_handler_.reset(
-      new CommonNameMismatchHandler(request_url_, url_loader_factory));
+  common_name_mismatch_handler_ = std::make_unique<CommonNameMismatchHandler>(
+      request_url_, url_loader_factory);
 
   common_name_mismatch_handler_->CheckSuggestedUrl(suggested_url,
                                                    std::move(callback));
@@ -698,7 +696,7 @@ void SSLErrorHandler::StartHandlingError() {
     return;
   }
 
-  base::Optional<DynamicInterstitialInfo> dynamic_interstitial =
+  absl::optional<DynamicInterstitialInfo> dynamic_interstitial =
       g_config.Pointer()->MatchDynamicInterstitial(
           ssl_info_, delegate_->IsErrorOverridable());
   if (dynamic_interstitial) {
@@ -930,7 +928,7 @@ void SSLErrorHandler::Observe(
 
 void SSLErrorHandler::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() ||
+  if (!navigation_handle->IsInPrimaryMainFrame() ||
       navigation_handle->IsSameDocument()) {
     return;
   }

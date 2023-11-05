@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
@@ -198,7 +198,7 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
   gl::SetGLGetProcAddressProc(gl::MockGLInterface::GetGLProcAddress);
   gl::GLSurfaceTestSupport::InitializeOneOffWithMockBindings();
 
-  gl_.reset(new StrictMock<MockGLInterface>());
+  gl_ = std::make_unique<StrictMock<MockGLInterface>>();
   ::gl::MockGLInterface::SetGLInterface(gl_.get());
 
   SetupMockGLBehaviors();
@@ -243,9 +243,9 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
   // We initialize the ContextGroup with a MockGLES2Decoder so that
   // we can use the ContextGroup to figure out how the real GLES2Decoder
   // will initialize itself.
-  command_buffer_service_.reset(new FakeCommandBufferServiceBase());
-  mock_decoder_.reset(
-      new MockGLES2Decoder(this, command_buffer_service_.get(), &outputter_));
+  command_buffer_service_ = std::make_unique<FakeCommandBufferServiceBase>();
+  mock_decoder_ = std::make_unique<MockGLES2Decoder>(
+      this, command_buffer_service_.get(), &outputter_);
 
   EXPECT_EQ(group_->Initialize(mock_decoder_.get(), init.context_type,
                                DisallowedFeatures()),
@@ -1556,6 +1556,14 @@ void GLES2DecoderTestBase::DoCopyTexImage2D(
     GLsizei width,
     GLsizei height,
     GLint border) {
+  GLenum translated_internal_format = internal_format;
+  if (group_->feature_info()->IsWebGL2OrES3Context()) {
+    if (internal_format == GL_RGB) {
+      translated_internal_format = GL_RGB8;
+    } else if (internal_format == GL_RGBA) {
+      translated_internal_format = GL_RGBA8;
+    }
+  }
   // For GL_BGRA_EXT, we have to fall back to TexImage2D and
   // CopyTexSubImage2D, since GL_BGRA_EXT is not accepted by CopyTexImage2D.
   // In some cases this fallback further triggers set and restore of
@@ -1588,14 +1596,15 @@ void GLES2DecoderTestBase::DoCopyTexImage2D(
       EXPECT_CALL(*gl_, TexParameteri(target, GL_TEXTURE_SWIZZLE_A, _))
           .Times(testing::AtLeast(1));
     } else {
-      EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
-                                       width, height, border))
+      EXPECT_CALL(
+          *gl_, CopyTexImage2D(target, level, translated_internal_format, 0, 0,
+                               width, height, border))
           .Times(1)
           .RetiresOnSaturation();
     }
   } else {
-    EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
-                                     width, height, border))
+    EXPECT_CALL(*gl_, CopyTexImage2D(target, level, translated_internal_format,
+                                     0, 0, width, height, border))
         .Times(1)
         .RetiresOnSaturation();
   }
@@ -2434,7 +2443,7 @@ void GLES2DecoderPassthroughTestBase::SetUp() {
   context_creation_attribs_.bind_generates_resource = true;
 
   gl::init::InitializeStaticGLBindingsImplementation(
-      gl::kGLImplementationEGLANGLE, false);
+      gl::GLImplementationParts(gl::kGLImplementationEGLANGLE), false);
   gl::init::InitializeGLOneOffPlatformImplementation(false, false, true);
 
   scoped_refptr<gles2::FeatureInfo> feature_info = new gles2::FeatureInfo();
@@ -2453,10 +2462,10 @@ void GLES2DecoderPassthroughTestBase::SetUp() {
       GenerateGLContextAttribs(context_creation_attribs_, group_.get()));
   context_->MakeCurrent(surface_.get());
 
-  command_buffer_service_.reset(new FakeCommandBufferServiceBase());
+  command_buffer_service_ = std::make_unique<FakeCommandBufferServiceBase>();
 
-  decoder_.reset(new GLES2DecoderPassthroughImpl(
-      this, command_buffer_service_.get(), &outputter_, group_.get()));
+  decoder_ = std::make_unique<GLES2DecoderPassthroughImpl>(
+      this, command_buffer_service_.get(), &outputter_, group_.get());
 
   // Don't request any optional extensions at startup, individual tests will
   // request what they need.

@@ -33,7 +33,8 @@ ClientGpuMemoryBufferManager::ClientGpuMemoryBufferManager(
     mojo::PendingRemote<mojom::GpuMemoryBufferFactory> gpu)
     : thread_("GpuMemoryThread"),
       gpu_memory_buffer_support_(
-          std::make_unique<gpu::GpuMemoryBufferSupport>()) {
+          std::make_unique<gpu::GpuMemoryBufferSupport>()),
+      pool_(base::MakeRefCounted<base::UnsafeSharedMemoryPool>()) {
   CHECK(thread_.Start());
   // The thread is owned by this object. Which means the task will not run if
   // the object has been destroyed. So Unretained() is safe.
@@ -130,7 +131,8 @@ ClientGpuMemoryBufferManager::CreateGpuMemoryBuffer(
     const gfx::Size& size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
-    gpu::SurfaceHandle surface_handle) {
+    gpu::SurfaceHandle surface_handle,
+    base::WaitableEvent* shutdown_event) {
   // Note: this can be called from multiple threads at the same time. Some of
   // those threads may not have a TaskRunner set.
   DCHECK_EQ(gpu::kNullSurfaceHandle, surface_handle);
@@ -155,7 +157,8 @@ ClientGpuMemoryBufferManager::CreateGpuMemoryBuffer(
       gpu_memory_buffer_support_->CreateGpuMemoryBufferImplFromHandle(
           std::move(gmb_handle), size, format, usage,
           base::BindOnce(&NotifyDestructionOnCorrectThread,
-                         thread_.task_runner(), std::move(callback)));
+                         thread_.task_runner(), std::move(callback)),
+          this, pool_);
   if (!buffer) {
     DeletedGpuMemoryBuffer(gmb_handle_id, gpu::SyncToken());
     return nullptr;
@@ -174,6 +177,15 @@ void ClientGpuMemoryBufferManager::CopyGpuMemoryBufferAsync(
     gfx::GpuMemoryBufferHandle buffer_handle,
     base::UnsafeSharedMemoryRegion memory_region,
     base::OnceCallback<void(bool)> callback) {
+  if (!thread_.task_runner()->BelongsToCurrentThread()) {
+    thread_.task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ClientGpuMemoryBufferManager::CopyGpuMemoryBufferAsync,
+                       base::Unretained(this), std::move(buffer_handle),
+                       std::move(memory_region), std::move(callback)));
+    return;
+  }
+
   gpu_->CopyGpuMemoryBuffer(std::move(buffer_handle), std::move(memory_region),
                             std::move(callback));
 }

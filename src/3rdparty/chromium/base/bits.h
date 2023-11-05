@@ -37,7 +37,7 @@ constexpr bool IsPowerOfTwo(T value) {
 }
 
 // Round down |size| to a multiple of alignment, which must be a power of two.
-inline size_t AlignDown(size_t size, size_t alignment) {
+inline constexpr size_t AlignDown(size_t size, size_t alignment) {
   DCHECK(IsPowerOfTwo(alignment));
   return size & ~(alignment - 1);
 }
@@ -51,7 +51,7 @@ inline T* AlignDown(T* ptr, size_t alignment) {
 }
 
 // Round up |size| to a multiple of alignment, which must be a power of two.
-inline size_t AlignUp(size_t size, size_t alignment) {
+inline constexpr size_t AlignUp(size_t size, size_t alignment) {
   DCHECK(IsPowerOfTwo(alignment));
   return (size + alignment - 1) & ~(alignment - 1);
 }
@@ -62,17 +62,6 @@ template <typename T, typename = typename std::enable_if<sizeof(T) == 1>::type>
 inline T* AlignUp(T* ptr, size_t alignment) {
   return reinterpret_cast<T*>(
       AlignUp(reinterpret_cast<size_t>(ptr), alignment));
-}
-
-// Deprecated. Use AlignUp() instead.
-inline size_t Align(size_t size, size_t alignment) {
-  return AlignUp(size, alignment);
-}
-
-// Deprecated. Use AlignUp() instead.
-template <typename T, typename = typename std::enable_if<sizeof(T) == 1>::type>
-inline T* Align(T* ptr, size_t alignment) {
-  return AlignUp(ptr, alignment);
 }
 
 // CountLeadingZeroBits(value) returns the number of zero bits following the
@@ -87,7 +76,33 @@ inline T* Align(T* ptr, size_t alignment) {
 //
 // C does not have an operator to do this, but fortunately the various
 // compilers have built-ins that map to fast underlying processor instructions.
-#if defined(COMPILER_MSVC) && !defined(COMPILER_CLANG)
+//
+// Prefer the clang path on Windows, as _BitScanReverse() and friends are not
+// constexpr.
+#if defined(COMPILER_MSVC) && !defined(__clang__)
+
+constexpr inline unsigned qConstexprPopulationCount(uint64_t v) noexcept
+{
+    // See http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
+    return
+        (((v      ) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
+        (((v >> 12) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
+        (((v >> 24) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
+        (((v >> 36) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
+        (((v >> 48) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
+        (((v >> 60) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f;
+}
+
+constexpr inline unsigned qConstexprCountLeadingZeroBits(uint64_t v) noexcept
+{
+    v = v | (v >> 1);
+    v = v | (v >> 2);
+    v = v | (v >> 4);
+    v = v | (v >> 8);
+    v = v | (v >> 16);
+    v = v | (v >> 32);
+    return qConstexprPopulationCount(~v);
+}
 
 template <typename T, unsigned bits = sizeof(T) * 8>
 ALWAYS_INLINE constexpr
@@ -169,7 +184,7 @@ ALWAYS_INLINE uint64_t CountLeadingZeroBits64(uint64_t x) {
   return CountLeadingZeroBits(x);
 }
 
-#elif defined(COMPILER_GCC) || defined(COMPILER_CLANG)
+#elif defined(COMPILER_GCC) || defined(__clang__)
 
 // __builtin_clz has undefined behaviour for an input of 0, even though there's
 // clearly a return value that makes sense, and even though some processor clz

@@ -28,8 +28,8 @@ namespace {
 using StringVector = std::vector<std::string>;
 
 // Constants to make the tests more readable.
-const base::Optional<PasswordHashData> NO_GAIA_OR_ENTERPRISE_REUSE =
-    base::nullopt;
+const absl::optional<PasswordHashData> NO_GAIA_OR_ENTERPRISE_REUSE =
+    absl::nullopt;
 
 struct TestData {
   // Comma separated list of domains.
@@ -49,25 +49,29 @@ std::vector<TestData> GetTestDomainsPasswords() {
   };
 }
 
-std::unique_ptr<PasswordForm> GetForm(const std::string& domain,
-                                      const std::string& username,
-                                      const std::string& password) {
+std::unique_ptr<PasswordForm> GetForm(
+    const std::string& domain,
+    const std::string& username,
+    const std::string& password,
+    PasswordForm::Store store = PasswordForm::Store::kProfileStore) {
   auto form = std::make_unique<PasswordForm>();
   form->signon_realm = domain;
   form->password_value = ASCIIToUTF16(password);
   form->username_value = ASCIIToUTF16(username);
+  form->in_store = store;
   return form;
 }
 
 // Convert a vector of TestData structs into a vector of PasswordForms.
 std::vector<std::unique_ptr<PasswordForm>> GetForms(
-    std::vector<TestData> test_data) {
+    std::vector<TestData> test_data,
+    PasswordForm::Store store = PasswordForm::Store::kProfileStore) {
   std::vector<std::unique_ptr<PasswordForm>> result;
   for (const auto& data : test_data) {
     // Some passwords are used on multiple domains.
     for (const auto& domain : base::SplitString(
              data.domains, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
-      result.push_back(GetForm(domain, data.username, data.password));
+      result.push_back(GetForm(domain, data.username, data.password, store));
     }
   }
   return result;
@@ -109,8 +113,8 @@ std::vector<PasswordHashData> PrepareEnterprisePasswordData(
 
 void ConfigureEnterprisePasswordProtection(
     PasswordReuseDetector* reuse_detector) {
-  base::Optional<std::vector<GURL>> login_urls =
-      base::make_optional<std::vector<GURL>>();
+  absl::optional<std::vector<GURL>> login_urls =
+      absl::make_optional<std::vector<GURL>>();
   login_urls->push_back(GURL("https://login.example.com"));
   reuse_detector->UseEnterprisePasswordURLs(
       login_urls, GURL("https://changepassword.example.com/"));
@@ -122,39 +126,42 @@ TEST(PasswordReuseDetectorTest, TypingPasswordOnDifferentSite) {
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("123saved_passwo"), "https://evil.com",
+  reuse_detector.CheckReuse(u"123saved_passwo", "https://evil.com",
                             &mockConsumer);
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("123saved_passwor"),
-                            "https://evil.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"123saved_passwor", "https://evil.com",
+                            &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   std::vector<MatchingReusedCredential> credentials = {
-      {"https://accounts.google.com", ASCIIToUTF16("gUsername")}};
+      {"https://accounts.google.com", u"gUsername",
+       PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("saved_password"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 5));
-  reuse_detector.CheckReuse(ASCIIToUTF16("123saved_password"),
-                            "https://evil.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"123saved_password", "https://evil.com",
+                            &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("saved_password"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 5));
-  reuse_detector.CheckReuse(ASCIIToUTF16("saved_password"), "https://evil.com",
+  reuse_detector.CheckReuse(u"saved_password", "https://evil.com",
                             &mockConsumer);
 
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
-  credentials = {{"https://example1.com", ASCIIToUTF16("example1Username")},
-                 {"https://example2.com", ASCIIToUTF16("example2Username")}};
+  credentials = {{"https://example1.com", u"example1Username",
+                  PasswordForm::Store::kProfileStore},
+                 {"https://example2.com", u"example2Username",
+                  PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("secretword"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 5));
-  reuse_detector.CheckReuse(ASCIIToUTF16("abcdsecretword"), "https://evil.com",
+  reuse_detector.CheckReuse(u"abcdsecretword", "https://evil.com",
                             &mockConsumer);
 }
 
@@ -164,7 +171,7 @@ TEST(PasswordReuseDetectorTest, PSLMatchNoReuseEvent) {
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("123456789"), "https://m.facebook.com",
+  reuse_detector.CheckReuse(u"123456789", "https://m.facebook.com",
                             &mockConsumer);
 }
 
@@ -174,14 +181,15 @@ TEST(PasswordReuseDetectorTest, NoPSLMatchReuseEvent) {
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   const std::vector<MatchingReusedCredential> credentials = {
-      {"https://a.appspot.com", ASCIIToUTF16("appspotUsername")}};
+      {"https://a.appspot.com", u"appspotUsername",
+       PasswordForm::Store::kProfileStore}};
   // a.appspot.com and b.appspot.com are not PSL matches. So reuse event should
   // be raised.
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("abcdefghi"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 5));
-  reuse_detector.CheckReuse(ASCIIToUTF16("abcdefghi"), "https://b.appspot.com",
+  reuse_detector.CheckReuse(u"abcdefghi", "https://b.appspot.com",
                             &mockConsumer);
 }
 
@@ -191,7 +199,7 @@ TEST(PasswordReuseDetectorTest, TooShortPasswordNoReuseEvent) {
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("short"), "evil.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"short", "evil.com", &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, PasswordNotInputSuffixNoReuseEvent) {
@@ -200,10 +208,9 @@ TEST(PasswordReuseDetectorTest, PasswordNotInputSuffixNoReuseEvent) {
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("password123"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"password123", "https://evil.com", &mockConsumer);
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("123password456"), "https://evil.com",
+  reuse_detector.CheckReuse(u"123password456", "https://evil.com",
                             &mockConsumer);
 }
 
@@ -221,15 +228,125 @@ TEST(PasswordReuseDetectorTest, OnLoginsChanged) {
       EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
     } else {
       const std::vector<MatchingReusedCredential> credentials = {
-          {"https://accounts.google.com", ASCIIToUTF16("gUsername")}};
+          {"https://accounts.google.com", u"gUsername",
+           PasswordForm::Store::kProfileStore}};
       EXPECT_CALL(mockConsumer,
                   OnReuseCheckDone(true, strlen("saved_password"),
                                    Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                    UnorderedElementsAreArray(credentials), 5));
     }
-    reuse_detector.CheckReuse(ASCIIToUTF16("123saved_password"),
-                              "https://evil.com", &mockConsumer);
+    reuse_detector.CheckReuse(u"123saved_password", "https://evil.com",
+                              &mockConsumer);
   }
+}
+
+TEST(PasswordReuseDetectorTest, AddAndRemoveSameLogin) {
+  PasswordReuseDetector reuse_detector;
+  std::vector<std::unique_ptr<PasswordForm>> login_credentials =
+      GetForms(GetTestDomainsPasswords());
+  // Add the test domain passwords into the saved passwords map.
+  PasswordStoreChangeList add_changes =
+      GetChangeList(PasswordStoreChange::ADD, login_credentials);
+  reuse_detector.OnLoginsChanged(add_changes);
+
+  const std::vector<MatchingReusedCredential>
+      expected_matching_reused_credentials = {
+          {"https://accounts.google.com", u"gUsername",
+           PasswordForm::Store::kProfileStore}};
+  MockPasswordReuseDetectorConsumer mockConsumer;
+  // One of the passwords in |login_credentials| has less than the minimum
+  // requirement of characters in a password so it will not be stored.
+  int valid_passwords = login_credentials.size() - 1;
+  EXPECT_CALL(
+      mockConsumer,
+      OnReuseCheckDone(
+          /*is_reuse_found=*/true, strlen("saved_password"),
+          Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
+          UnorderedElementsAreArray(expected_matching_reused_credentials),
+          valid_passwords));
+
+  // "saved_password" is a substring of "123saved_password" so it should trigger
+  // a reuse and get the matching credentials.
+  reuse_detector.CheckReuse(u"123saved_password", "https://evil.com",
+                            &mockConsumer);
+  testing::Mock::VerifyAndClearExpectations(&mockConsumer);
+
+  // Remove the test domain passwords from the saved passwords map.
+  PasswordStoreChangeList remove_changes =
+      GetChangeList(PasswordStoreChange::REMOVE, login_credentials);
+  reuse_detector.OnLoginsChanged(remove_changes);
+  EXPECT_CALL(mockConsumer,
+              OnReuseCheckDone(/*is_reuse_found=*/false, _, _, _, _));
+  // The stored credentials were removed so no reuse should be found.
+  reuse_detector.CheckReuse(u"123saved_password", "https://evil.com",
+                            &mockConsumer);
+}
+
+TEST(PasswordReuseDetectorTest, AddAndRemoveSameLoginWithMultipleForms) {
+  PasswordReuseDetector reuse_detector;
+  // These credentials mimic a user using "secretword" on "https://example1.com"
+  // and "https://example2.com" and then changing the password on
+  // "https://example1.com" to "secretword1".
+  std::vector<std::unique_ptr<PasswordForm>> login_credentials = GetForms({
+      {"https://example1.com", "example1Username", "secretword"},
+      {"https://example1.com", "example1Username", "secretword1"},
+      {"https://example2.com", "example2Username", "secretword"},
+  });
+  // Add the test domain passwords into the saved passwords map.
+  PasswordStoreChangeList add_changes =
+      GetChangeList(PasswordStoreChange::ADD, login_credentials);
+  reuse_detector.OnLoginsChanged(add_changes);
+
+  std::vector<MatchingReusedCredential> expected_matching_reused_credentials = {
+      {"https://example1.com", u"example1Username",
+       PasswordForm::Store::kProfileStore},
+      {"https://example2.com", u"example2Username",
+       PasswordForm::Store::kProfileStore}};
+  MockPasswordReuseDetectorConsumer mockConsumer;
+  int valid_passwords = login_credentials.size();
+  EXPECT_CALL(
+      mockConsumer,
+      OnReuseCheckDone(
+          /*is_reuse_found=*/true, strlen("secretword"),
+          Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
+          UnorderedElementsAreArray(expected_matching_reused_credentials),
+          valid_passwords));
+
+  // "secretword" is a substring of "123secretword" so it should trigger
+  // a reuse and get the matching credentials.
+  reuse_detector.CheckReuse(u"123secretword", "https://evil.com",
+                            &mockConsumer);
+  testing::Mock::VerifyAndClearExpectations(&mockConsumer);
+  // Remove two matching credentials to "secretword" from the saved passwords
+  // map.
+  PasswordStoreChangeList remove_changes = GetChangeList(
+      PasswordStoreChange::REMOVE,
+      GetForms({{"https://example1.com", "example1Username", "secretword"}}));
+  reuse_detector.OnLoginsChanged(remove_changes);
+  expected_matching_reused_credentials = {{"https://example2.com",
+                                           u"example2Username",
+                                           PasswordForm::Store::kProfileStore}};
+  EXPECT_CALL(
+      mockConsumer,
+      OnReuseCheckDone(
+          /*is_reuse_found=*/true, strlen("secretword"),
+          Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
+          testing::ElementsAreArray(expected_matching_reused_credentials), _));
+  // Only two stored credentials were removed so reuse should still be found.
+  reuse_detector.CheckReuse(u"123secretword", "https://evil.com",
+                            &mockConsumer);
+  testing::Mock::VerifyAndClearExpectations(&mockConsumer);
+
+  // Remove the last matching credential to "secretword" from the saved
+  // passwords map.
+  remove_changes = GetChangeList(
+      PasswordStoreChange::REMOVE,
+      GetForms({{"https://example2.com", "example2Username", "secretword"}}));
+  reuse_detector.OnLoginsChanged(remove_changes);
+  EXPECT_CALL(mockConsumer, OnReuseCheckDone(
+                                /*is_reuse_found=*/false, _, _, _, _));
+  reuse_detector.CheckReuse(u"123secretword", "https://evil.com",
+                            &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, MatchMultiplePasswords) {
@@ -249,36 +366,35 @@ TEST(PasswordReuseDetectorTest, MatchMultiplePasswords) {
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   std::vector<MatchingReusedCredential> credentials = {
-      {"https://a.com", ASCIIToUTF16("aUsername")},
-      {"https://all.com", ASCIIToUTF16("aUsername")},
-      {"https://all.com", ASCIIToUTF16("bUsername")},
-      {"https://all.com", ASCIIToUTF16("cUsername")},
-      {"https://b.com", ASCIIToUTF16("bUsername")},
-      {"https://b2.com", ASCIIToUTF16("bUsername")},
-      {"https://c.com", ASCIIToUTF16("cUsername")}};
+      {"https://a.com", u"aUsername", PasswordForm::Store::kProfileStore},
+      {"https://all.com", u"aUsername", PasswordForm::Store::kProfileStore},
+      {"https://all.com", u"bUsername", PasswordForm::Store::kProfileStore},
+      {"https://all.com", u"cUsername", PasswordForm::Store::kProfileStore},
+      {"https://b.com", u"bUsername", PasswordForm::Store::kProfileStore},
+      {"https://b2.com", u"bUsername", PasswordForm::Store::kProfileStore},
+      {"https://c.com", u"cUsername", PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("01234567890"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 8));
-  reuse_detector.CheckReuse(ASCIIToUTF16("abcd01234567890"), "https://evil.com",
+  reuse_detector.CheckReuse(u"abcd01234567890", "https://evil.com",
                             &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
-  credentials = {{"https://a.com", ASCIIToUTF16("aUsername")},
-                 {"https://all.com", ASCIIToUTF16("aUsername")},
-                 {"https://all.com", ASCIIToUTF16("cUsername")},
-                 {"https://c.com", ASCIIToUTF16("cUsername")}};
+  credentials = {
+      {"https://a.com", u"aUsername", PasswordForm::Store::kProfileStore},
+      {"https://all.com", u"aUsername", PasswordForm::Store::kProfileStore},
+      {"https://all.com", u"cUsername", PasswordForm::Store::kProfileStore},
+      {"https://c.com", u"cUsername", PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("1234567890"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 8));
-  reuse_detector.CheckReuse(ASCIIToUTF16("1234567890"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"1234567890", "https://evil.com", &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("4567890"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"4567890", "https://evil.com", &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, GaiaPasswordNoReuse) {
@@ -291,17 +407,17 @@ TEST(PasswordReuseDetectorTest, GaiaPasswordNoReuse) {
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
   // Typing gaia password on https://accounts.google.com is OK.
-  reuse_detector.CheckReuse(ASCIIToUTF16("gaia_pw1"),
-                            "https://accounts.google.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"gaia_pw1", "https://accounts.google.com",
+                            &mockConsumer);
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("gaia_pw2"),
-                            "https://accounts.google.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"gaia_pw2", "https://accounts.google.com",
+                            &mockConsumer);
   // Only suffixes are verifed.
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("sync_password123"),
-                            "https://evil.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"sync_password123", "https://evil.com",
+                            &mockConsumer);
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("other_password"), "https://evil.com",
+  reuse_detector.CheckReuse(u"other_password", "https://evil.com",
                             &mockConsumer);
 }
 
@@ -312,7 +428,7 @@ TEST(PasswordReuseDetectorTest, GaiaPasswordReuseFound) {
 
   std::vector<PasswordHashData> gaia_password_hashes =
       PrepareGaiaPasswordData({"gaia_pw1", "gaia_pw2"});
-  base::Optional<PasswordHashData> expected_reused_password_hash(
+  absl::optional<PasswordHashData> expected_reused_password_hash(
       gaia_password_hashes[0]);
   reuse_detector.UseGaiaPasswordHash(gaia_password_hashes);
 
@@ -321,8 +437,8 @@ TEST(PasswordReuseDetectorTest, GaiaPasswordReuseFound) {
       OnReuseCheckDone(true, strlen("gaia_pw1"),
                        Matches(expected_reused_password_hash), IsEmpty(), 5));
 
-  reuse_detector.CheckReuse(ASCIIToUTF16("gaia_pw1"),
-                            "https://phishing.example.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"gaia_pw1", "https://phishing.example.com",
+                            &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, EnterprisePasswordNoReuse) {
@@ -333,26 +449,23 @@ TEST(PasswordReuseDetectorTest, EnterprisePasswordNoReuse) {
 
   std::vector<PasswordHashData> enterprise_password_hashes =
       PrepareEnterprisePasswordData({"enterprise_pw1", "enterprise_pw2"});
-  base::Optional<PasswordHashData> expected_reused_password_hash(
+  absl::optional<PasswordHashData> expected_reused_password_hash(
       enterprise_password_hashes[1]);
   reuse_detector.UseNonGaiaEnterprisePasswordHash(enterprise_password_hashes);
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
   // Typing enterprise password on change password page is OK.
-  reuse_detector.CheckReuse(ASCIIToUTF16("enterprise_pw1"),
-                            "https://changepassword.example.com/",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(
+      u"enterprise_pw1", "https://changepassword.example.com/", &mockConsumer);
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("enterprise_pw2"),
-                            "https://changepassword.example.com/",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(
+      u"enterprise_pw2", "https://changepassword.example.com/", &mockConsumer);
 
   // Suffix match is not reuse.
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("enterprise"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"enterprise", "https://evil.com", &mockConsumer);
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("other_password"), "https://evil.com",
+  reuse_detector.CheckReuse(u"other_password", "https://evil.com",
                             &mockConsumer);
 }
 
@@ -364,7 +477,7 @@ TEST(PasswordReuseDetectorTest, EnterprisePasswordReuseFound) {
 
   std::vector<PasswordHashData> enterprise_password_hashes =
       PrepareEnterprisePasswordData({"enterprise_pw1", "enterprise_pw2"});
-  base::Optional<PasswordHashData> expected_reused_password_hash(
+  absl::optional<PasswordHashData> expected_reused_password_hash(
       enterprise_password_hashes[1]);
   reuse_detector.UseNonGaiaEnterprisePasswordHash(enterprise_password_hashes);
 
@@ -372,8 +485,8 @@ TEST(PasswordReuseDetectorTest, EnterprisePasswordReuseFound) {
       mockConsumer,
       OnReuseCheckDone(true, strlen("enterprise_pw2"),
                        Matches(expected_reused_password_hash), IsEmpty(), 5));
-  reuse_detector.CheckReuse(ASCIIToUTF16("enterprise_pw2"),
-                            "https://phishing.com", &mockConsumer);
+  reuse_detector.CheckReuse(u"enterprise_pw2", "https://phishing.com",
+                            &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, MatchGaiaAndMultipleSavedPasswords) {
@@ -388,20 +501,20 @@ TEST(PasswordReuseDetectorTest, MatchGaiaAndMultipleSavedPasswords) {
   std::vector<PasswordHashData> gaia_password_hashes =
       PrepareGaiaPasswordData({gaia_password});
   ASSERT_EQ(1u, gaia_password_hashes.size());
-  base::Optional<PasswordHashData> expected_reused_password_hash(
+  absl::optional<PasswordHashData> expected_reused_password_hash(
       gaia_password_hashes[0]);
   reuse_detector.UseGaiaPasswordHash(gaia_password_hashes);
 
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   const std::vector<MatchingReusedCredential> credentials = {
-      {"https://a.com", ASCIIToUTF16("aUsername")},
-      {"https://b.com", ASCIIToUTF16("bUsername")}};
+      {"https://a.com", u"aUsername", PasswordForm::Store::kProfileStore},
+      {"https://b.com", u"bUsername", PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("01234567890"),
                                Matches(expected_reused_password_hash),
                                UnorderedElementsAreArray(credentials), 2));
-  reuse_detector.CheckReuse(ASCIIToUTF16("abcd01234567890"), "https://evil.com",
+  reuse_detector.CheckReuse(u"abcd01234567890", "https://evil.com",
                             &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
@@ -409,13 +522,12 @@ TEST(PasswordReuseDetectorTest, MatchGaiaAndMultipleSavedPasswords) {
       mockConsumer,
       OnReuseCheckDone(true, strlen("1234567890"),
                        Matches(expected_reused_password_hash), IsEmpty(), 2));
-  reuse_detector.CheckReuse(ASCIIToUTF16("xyz1234567890"), "https://evil.com",
+  reuse_detector.CheckReuse(u"xyz1234567890", "https://evil.com",
                             &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("4567890"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"4567890", "https://evil.com", &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, MatchSavedPasswordButNotGaiaPassword) {
@@ -427,12 +539,13 @@ TEST(PasswordReuseDetectorTest, MatchSavedPasswordButNotGaiaPassword) {
   reuse_detector.UseGaiaPasswordHash(PrepareGaiaPasswordData({gaia_password}));
 
   const std::vector<MatchingReusedCredential> credentials = {
-      {"https://accounts.google.com", ASCIIToUTF16("gUsername")}};
+      {"https://accounts.google.com", u"gUsername",
+       PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("saved_password"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 5));
-  reuse_detector.CheckReuse(ASCIIToUTF16("saved_password"), "https://evil.com",
+  reuse_detector.CheckReuse(u"saved_password", "https://evil.com",
                             &mockConsumer);
 }
 
@@ -442,8 +555,8 @@ TEST(PasswordReuseDetectorTest,
 
   auto account_store_form = std::make_unique<PasswordForm>();
   account_store_form->signon_realm = "https://twitter.com";
-  account_store_form->username_value = ASCIIToUTF16("twitterUsername");
-  account_store_form->password_value = ASCIIToUTF16("saved_password");
+  account_store_form->username_value = u"twitterUsername";
+  account_store_form->password_value = u"saved_password";
   account_store_form->in_store = PasswordForm::Store::kAccountStore;
   std::vector<std::unique_ptr<PasswordForm>> account_store_forms;
   account_store_forms.push_back(std::move(account_store_form));
@@ -453,7 +566,7 @@ TEST(PasswordReuseDetectorTest,
   reuse_detector.UseGaiaPasswordHash(PrepareGaiaPasswordData({gaia_password}));
 
   const std::vector<MatchingReusedCredential> credentials = {
-      {"https://twitter.com", ASCIIToUTF16("twitterUsername"),
+      {"https://twitter.com", u"twitterUsername",
        PasswordForm::Store::kAccountStore}};
 
   MockPasswordReuseDetectorConsumer mockConsumer;
@@ -462,7 +575,7 @@ TEST(PasswordReuseDetectorTest,
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials),
                                /*saved_passwords=*/1));
-  reuse_detector.CheckReuse(ASCIIToUTF16("saved_password"), "https://evil.com",
+  reuse_detector.CheckReuse(u"saved_password", "https://evil.com",
                             &mockConsumer);
 }
 
@@ -479,20 +592,20 @@ TEST(PasswordReuseDetectorTest, MatchEnterpriseAndMultipleSavedPasswords) {
   std::vector<PasswordHashData> enterprise_password_hashes =
       PrepareEnterprisePasswordData({enterprise_password});
   ASSERT_EQ(1u, enterprise_password_hashes.size());
-  base::Optional<PasswordHashData> expected_reused_password_hash(
+  absl::optional<PasswordHashData> expected_reused_password_hash(
       enterprise_password_hashes[0]);
   reuse_detector.UseNonGaiaEnterprisePasswordHash(enterprise_password_hashes);
 
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   const std::vector<MatchingReusedCredential> credentials = {
-      {"https://a.com", ASCIIToUTF16("aUsername")},
-      {"https://b.com", ASCIIToUTF16("bUsername")}};
+      {"https://a.com", u"aUsername", PasswordForm::Store::kProfileStore},
+      {"https://b.com", u"bUsername", PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("01234567890"),
                                Matches(expected_reused_password_hash),
                                UnorderedElementsAreArray(credentials), 2));
-  reuse_detector.CheckReuse(ASCIIToUTF16("abcd01234567890"), "https://evil.com",
+  reuse_detector.CheckReuse(u"abcd01234567890", "https://evil.com",
                             &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
@@ -500,13 +613,12 @@ TEST(PasswordReuseDetectorTest, MatchEnterpriseAndMultipleSavedPasswords) {
       mockConsumer,
       OnReuseCheckDone(true, strlen("1234567890"),
                        Matches(expected_reused_password_hash), IsEmpty(), 2));
-  reuse_detector.CheckReuse(ASCIIToUTF16("xyz1234567890"), "https://evil.com",
+  reuse_detector.CheckReuse(u"xyz1234567890", "https://evil.com",
                             &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("4567890"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"4567890", "https://evil.com", &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, MatchSavedPasswordButNotEnterprisePassword) {
@@ -520,12 +632,13 @@ TEST(PasswordReuseDetectorTest, MatchSavedPasswordButNotEnterprisePassword) {
       PrepareEnterprisePasswordData({enterprise_password}));
 
   const std::vector<MatchingReusedCredential> credentials = {
-      {"https://accounts.google.com", ASCIIToUTF16("gUsername")}};
+      {"https://accounts.google.com", u"gUsername",
+       PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("saved_password"),
                                Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
                                UnorderedElementsAreArray(credentials), 5));
-  reuse_detector.CheckReuse(ASCIIToUTF16("saved_password"), "https://evil.com",
+  reuse_detector.CheckReuse(u"saved_password", "https://evil.com",
                             &mockConsumer);
 }
 
@@ -545,20 +658,20 @@ TEST(PasswordReuseDetectorTest, MatchGaiaEnterpriseAndSavedPassword) {
   std::vector<PasswordHashData> enterprise_password_hashes =
       PrepareEnterprisePasswordData({enterprise_password});
   ASSERT_EQ(1u, enterprise_password_hashes.size());
-  base::Optional<PasswordHashData> expected_reused_password_hash(
+  absl::optional<PasswordHashData> expected_reused_password_hash(
       enterprise_password_hashes[0]);
   reuse_detector.UseNonGaiaEnterprisePasswordHash(enterprise_password_hashes);
 
   MockPasswordReuseDetectorConsumer mockConsumer;
 
   const std::vector<MatchingReusedCredential> credentials = {
-      {"https://a.com", ASCIIToUTF16("aUsername")},
-      {"https://b.com", ASCIIToUTF16("bUsername")}};
+      {"https://a.com", u"aUsername", PasswordForm::Store::kProfileStore},
+      {"https://b.com", u"bUsername", PasswordForm::Store::kProfileStore}};
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("01234567890"),
                                Matches(expected_reused_password_hash),
                                UnorderedElementsAreArray(credentials), 2));
-  reuse_detector.CheckReuse(ASCIIToUTF16("abcd01234567890"), "https://evil.com",
+  reuse_detector.CheckReuse(u"abcd01234567890", "https://evil.com",
                             &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
@@ -566,13 +679,12 @@ TEST(PasswordReuseDetectorTest, MatchGaiaEnterpriseAndSavedPassword) {
       mockConsumer,
       OnReuseCheckDone(true, strlen("1234567890"),
                        Matches(expected_reused_password_hash), IsEmpty(), 2));
-  reuse_detector.CheckReuse(ASCIIToUTF16("xyz1234567890"), "https://evil.com",
+  reuse_detector.CheckReuse(u"xyz1234567890", "https://evil.com",
                             &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("4567890"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"4567890", "https://evil.com", &mockConsumer);
 }
 
 TEST(PasswordReuseDetectorTest, ClearGaiaPasswordHash) {
@@ -584,26 +696,120 @@ TEST(PasswordReuseDetectorTest, ClearGaiaPasswordHash) {
       PrepareGaiaPasswordData({"gaia_pw1", "gaia_pw12"}));
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("gaia_pw1"), _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("gaia_pw1"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"gaia_pw1", "https://evil.com", &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   EXPECT_CALL(mockConsumer,
               OnReuseCheckDone(true, strlen("gaia_pw12"), _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("gaia_pw12"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"gaia_pw12", "https://evil.com", &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   reuse_detector.ClearGaiaPasswordHash("username_gaia_pw1");
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("gaia_pw1"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"gaia_pw1", "https://evil.com", &mockConsumer);
   testing::Mock::VerifyAndClearExpectations(&mockConsumer);
 
   reuse_detector.ClearAllGaiaPasswordHash();
   EXPECT_CALL(mockConsumer, OnReuseCheckDone(false, _, _, _, _));
-  reuse_detector.CheckReuse(ASCIIToUTF16("gaia_pw12"), "https://evil.com",
-                            &mockConsumer);
+  reuse_detector.CheckReuse(u"gaia_pw12", "https://evil.com", &mockConsumer);
+}
+
+TEST(PasswordReuseDetectorTest, PasswordStoreRespectedOnRemove) {
+  PasswordReuseDetector reuse_detector;
+
+  std::vector<std::unique_ptr<PasswordForm>> profile_credentials =
+      GetForms(GetTestDomainsPasswords());
+
+  std::vector<std::unique_ptr<PasswordForm>> account_credentials = GetForms(
+      {GetTestDomainsPasswords()[5]}, PasswordForm::Store::kAccountStore);
+  PasswordForm account_store_form = *account_credentials[0];
+
+  reuse_detector.OnGetPasswordStoreResults(std::move(profile_credentials));
+  reuse_detector.OnGetPasswordStoreResults(std::move(account_credentials));
+
+  MockPasswordReuseDetectorConsumer mockConsumer;
+
+  EXPECT_CALL(
+      mockConsumer,
+      OnReuseCheckDone(
+          /*is_reuse_found=*/true, strlen("secretword"),
+          Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
+          UnorderedElementsAreArray(std::vector<MatchingReusedCredential>{
+              {"https://example1.com", u"example1Username",
+               PasswordForm::Store::kProfileStore},
+              {"https://example2.com", u"example2Username",
+               PasswordForm::Store::kProfileStore},
+              {"https://example2.com", u"example2Username",
+               PasswordForm::Store::kAccountStore}}),
+          /*saved_passwords=*/6));
+
+  reuse_detector.CheckReuse(u"secretword", "https://evil.com", &mockConsumer);
+  testing::Mock::VerifyAndClearExpectations(&mockConsumer);
+
+  // Simulate the removal of the account stored credential.
+  PasswordStoreChangeList remove_changes;
+  remove_changes.push_back(
+      PasswordStoreChange(PasswordStoreChange::REMOVE, account_store_form));
+  reuse_detector.OnLoginsChanged(remove_changes);
+
+  EXPECT_CALL(
+      mockConsumer,
+      OnReuseCheckDone(
+          /*is_reuse_found=*/true, strlen("secretword"),
+          Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
+          UnorderedElementsAreArray(std::vector<MatchingReusedCredential>{
+              {"https://example1.com", u"example1Username",
+               PasswordForm::Store::kProfileStore},
+              {"https://example2.com", u"example2Username",
+               PasswordForm::Store::kProfileStore}}),
+          /*saved_passwords=*/5));
+  reuse_detector.CheckReuse(u"secretword", "https://evil.com", &mockConsumer);
+}
+
+TEST(PasswordReuseDetectorTest, AccountPasswordsCleared) {
+  PasswordReuseDetector reuse_detector;
+
+  std::vector<std::unique_ptr<PasswordForm>> profile_credentials =
+      GetForms({GetTestDomainsPasswords()[5]});
+
+  std::vector<std::unique_ptr<PasswordForm>> account_credentials =
+      GetForms({GetTestDomainsPasswords()}, PasswordForm::Store::kAccountStore);
+  PasswordForm account_store_form = *account_credentials[0];
+
+  reuse_detector.OnGetPasswordStoreResults(std::move(profile_credentials));
+  reuse_detector.OnGetPasswordStoreResults(std::move(account_credentials));
+
+  MockPasswordReuseDetectorConsumer mockConsumer;
+
+  EXPECT_CALL(
+      mockConsumer,
+      OnReuseCheckDone(
+          /*is_reuse_found=*/true, strlen("secretword"),
+          Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
+          UnorderedElementsAreArray(std::vector<MatchingReusedCredential>{
+              {"https://example1.com", u"example1Username",
+               PasswordForm::Store::kAccountStore},
+              {"https://example2.com", u"example2Username",
+               PasswordForm::Store::kAccountStore},
+              {"https://example2.com", u"example2Username",
+               PasswordForm::Store::kProfileStore}}),
+          /*saved_passwords=*/6));
+
+  reuse_detector.CheckReuse(u"secretword", "https://evil.com", &mockConsumer);
+  testing::Mock::VerifyAndClearExpectations(&mockConsumer);
+
+  reuse_detector.ClearCachedAccountStorePasswords();
+
+  EXPECT_CALL(
+      mockConsumer,
+      OnReuseCheckDone(
+          /*is_reuse_found=*/true, strlen("secretword"),
+          Matches(NO_GAIA_OR_ENTERPRISE_REUSE),
+          UnorderedElementsAreArray(std::vector<MatchingReusedCredential>{
+              {"https://example2.com", u"example2Username",
+               PasswordForm::Store::kProfileStore}}),
+          /*saved_passwords=*/1));
+  reuse_detector.CheckReuse(u"secretword", "https://evil.com", &mockConsumer);
 }
 
 }  // namespace

@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/layout/ng/mathml/layout_ng_mathml_block_with_anonymous_mrow.h"
 
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
+
 namespace blink {
 
 LayoutNGMathMLBlockWithAnonymousMrow::LayoutNGMathMLBlockWithAnonymousMrow(
@@ -18,8 +20,8 @@ void LayoutNGMathMLBlockWithAnonymousMrow::AddChild(
   LayoutBlock* anonymous_mrow = To<LayoutBlock>(FirstChild());
   if (!anonymous_mrow) {
     scoped_refptr<ComputedStyle> new_style =
-        ComputedStyle::CreateAnonymousStyleWithDisplay(StyleRef(),
-                                                       EDisplay::kBlockMath);
+        GetDocument().GetStyleResolver().CreateAnonymousStyleWithDisplay(
+            StyleRef(), EDisplay::kBlockMath);
 
     UpdateAnonymousChildStyle(nullptr, *new_style);
     anonymous_mrow = new LayoutNGMathMLBlock(nullptr);

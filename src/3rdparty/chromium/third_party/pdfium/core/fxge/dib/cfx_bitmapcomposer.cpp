@@ -6,6 +6,9 @@
 
 #include "core/fxge/dib/cfx_bitmapcomposer.h"
 
+#include <string.h>
+
+#include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxge/cfx_cliprgn.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
@@ -33,7 +36,7 @@ void CFX_BitmapComposer::Compose(const RetainPtr<CFX_DIBitmap>& pDest,
   m_BitmapAlpha = bitmap_alpha;
   m_MaskColor = mask_color;
   m_pClipMask = nullptr;
-  if (pClipRgn && pClipRgn->GetType() != CFX_ClipRgn::RectI)
+  if (pClipRgn && pClipRgn->GetType() != CFX_ClipRgn::kRectI)
     m_pClipMask = pClipRgn->GetMask();
   m_bVertical = bVertical;
   m_bFlipX = bFlipX;
@@ -56,7 +59,7 @@ bool CFX_BitmapComposer::SetInfo(int width,
   if (m_bVertical) {
     m_pScanlineV.resize(m_pBitmap->GetBPP() / 8 * width + 4);
     m_pClipScanV.resize(m_pBitmap->GetHeight());
-    if (m_pBitmap->m_pAlphaMask)
+    if (m_pBitmap->HasAlphaMask())
       m_pScanlineAlphaV.resize(width + 4);
   }
   if (m_BitmapAlpha < 255) {
@@ -122,10 +125,10 @@ void CFX_BitmapComposer::ComposeScanline(int line,
     dest_scan += static_cast<uint32_t>(offset.ValueOrDie());
   }
   uint8_t* dest_alpha_scan =
-      m_pBitmap->m_pAlphaMask
-          ? m_pBitmap->m_pAlphaMask->GetWritableScanline(line + m_DestTop) +
-                m_DestLeft
-          : nullptr;
+      m_pBitmap->GetWritableAlphaMaskScanline(line + m_DestTop);
+  if (dest_alpha_scan)
+    dest_alpha_scan += m_DestLeft;
+
   DoCompose(dest_scan, scanline, m_DestWidth, clip_scan, scan_extra_alpha,
             dest_alpha_scan);
 }
@@ -135,18 +138,19 @@ void CFX_BitmapComposer::ComposeScanlineV(int line,
                                           const uint8_t* scan_extra_alpha) {
   int Bpp = m_pBitmap->GetBPP() / 8;
   int dest_pitch = m_pBitmap->GetPitch();
-  int dest_alpha_pitch =
-      m_pBitmap->m_pAlphaMask ? m_pBitmap->m_pAlphaMask->GetPitch() : 0;
+  int dest_alpha_pitch = m_pBitmap->GetAlphaMaskPitch();
   int dest_x = m_DestLeft + (m_bFlipX ? (m_DestWidth - line - 1) : line);
-  uint8_t* dest_buf =
-      m_pBitmap->GetBuffer() + dest_x * Bpp + m_DestTop * dest_pitch;
-  uint8_t* dest_alpha_buf = m_pBitmap->m_pAlphaMask
-                                ? m_pBitmap->m_pAlphaMask->GetBuffer() +
-                                      dest_x + m_DestTop * dest_alpha_pitch
-                                : nullptr;
-  if (m_bFlipY) {
-    dest_buf += dest_pitch * (m_DestHeight - 1);
-    dest_alpha_buf += dest_alpha_pitch * (m_DestHeight - 1);
+  uint8_t* dest_buf = m_pBitmap->GetBuffer();
+  if (dest_buf) {
+    dest_buf += dest_x * Bpp + m_DestTop * dest_pitch;
+    if (m_bFlipY)
+      dest_buf += dest_pitch * (m_DestHeight - 1);
+  }
+  uint8_t* dest_alpha_buf = m_pBitmap->GetAlphaMaskBuffer();
+  if (dest_alpha_buf) {
+    dest_alpha_buf += dest_x + m_DestTop * dest_alpha_pitch;
+    if (m_bFlipY)
+      dest_alpha_buf += dest_alpha_pitch * (m_DestHeight - 1);
   }
   int y_step = dest_pitch;
   int y_alpha_step = dest_alpha_pitch;

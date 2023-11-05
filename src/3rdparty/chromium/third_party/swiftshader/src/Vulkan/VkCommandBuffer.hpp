@@ -165,6 +165,8 @@ public:
 		uint32_t subpassIndex = 0;
 
 		void bindAttachments(Attachments *attachments);
+
+		uint32_t viewCount() const;
 	};
 
 	void submit(CommandBuffer::ExecutionState &executionState);
@@ -181,7 +183,7 @@ public:
 private:
 	void resetState();
 	template<typename T, typename... Args>
-	void addCommand(Args &&... args);
+	void addCommand(Args &&...args);
 
 	enum State
 	{

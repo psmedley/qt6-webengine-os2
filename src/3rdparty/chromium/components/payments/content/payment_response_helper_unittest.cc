@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_executor.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
@@ -41,7 +42,7 @@ class PaymentResponseHelperTest : public testing::Test,
     visa_card_.set_use_count(5u);
     autofill_app_ = std::make_unique<AutofillPaymentApp>(
         "visa", visa_card_, billing_addresses_, "en-US",
-        &test_payment_request_delegate_);
+        test_payment_request_delegate_.GetWeakPtr());
   }
   ~PaymentResponseHelperTest() override {}
 
@@ -95,8 +96,8 @@ class PaymentResponseHelperTest : public testing::Test,
   autofill::AutofillProfile* test_address() { return &address_; }
   const autofill::CreditCard& test_credit_card() { return visa_card_; }
   base::WeakPtr<PaymentApp> test_app() { return autofill_app_->AsWeakPtr(); }
-  PaymentRequestDelegate* test_payment_request_delegate() {
-    return &test_payment_request_delegate_;
+  base::WeakPtr<PaymentRequestDelegate> test_payment_request_delegate() {
+    return test_payment_request_delegate_.GetWeakPtr();
   }
 
   base::WeakPtr<PaymentResponseHelperTest> GetWeakPtr() {
@@ -277,7 +278,7 @@ TEST_F(PaymentResponseHelperTest,
   mojom::PaymentOptionsPtr options = mojom::PaymentOptions::New();
   options->request_payer_phone = true;
   test_address()->SetRawInfo(autofill::PHONE_HOME_WHOLE_NUMBER,
-                             base::UTF8ToUTF16("(515) 223-1234"));
+                             u"(515) 223-1234");
   RecreateSpecWithOptions(std::move(options));
 
   PaymentResponseHelper helper("en-US", spec(), test_app(),
@@ -296,7 +297,7 @@ TEST_F(PaymentResponseHelperTest,
   mojom::PaymentOptionsPtr options = mojom::PaymentOptions::New();
   options->request_payer_phone = true;
   test_address()->SetRawInfo(autofill::PHONE_HOME_WHOLE_NUMBER,
-                             base::UTF8ToUTF16("(515) 123-1234"));
+                             u"(515) 123-1234");
   RecreateSpecWithOptions(std::move(options));
 
   PaymentResponseHelper helper("en-US", spec(), test_app(),

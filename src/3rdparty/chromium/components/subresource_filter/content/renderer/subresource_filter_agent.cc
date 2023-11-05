@@ -5,7 +5,6 @@
 #include "components/subresource_filter/content/renderer/subresource_filter_agent.h"
 
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/check.h"
@@ -13,7 +12,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
-#include "components/subresource_filter/content/common/ad_evidence.h"
 #include "components/subresource_filter/content/common/subresource_filter_utils.h"
 #include "components/subresource_filter/content/renderer/unverified_ruleset_dealer.h"
 #include "components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h"
@@ -27,6 +25,7 @@
 #include "ipc/ipc_message.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
+#include "third_party/blink/public/common/frame/frame_ad_evidence.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_document_loader.h"
@@ -67,8 +66,8 @@ void SubresourceFilterAgent::Initialize() {
       SendSubframeWasCreatedByAdScript();
 
     // As this is the initial empty document, we won't have received any message
-    // from the browser and so we must calculate the ad status here.
-    SetIsAdSubframeIfNecessary();
+    // from the browser and so we must populate the ad evidence here.
+    SetAdEvidenceForInitialEmptySubframe();
   }
 
   // `render_frame()` can be null in unit tests.
@@ -127,10 +126,6 @@ bool SubresourceFilterAgent::IsSubframeCreatedByAdScript() {
   return render_frame()->GetWebFrame()->IsSubframeCreatedByAdScript();
 }
 
-bool SubresourceFilterAgent::HasDocumentLoader() {
-  return render_frame()->GetWebFrame()->GetDocumentLoader();
-}
-
 void SubresourceFilterAgent::SetSubresourceFilterForCurrentDocument(
     std::unique_ptr<blink::WebDocumentSubresourceFilter> filter) {
   blink::WebLocalFrame* web_frame = render_frame()->GetWebFrame();
@@ -160,9 +155,14 @@ bool SubresourceFilterAgent::IsAdSubframe() {
   return render_frame()->GetWebFrame()->IsAdSubframe();
 }
 
-void SubresourceFilterAgent::SetIsAdSubframe(
-    blink::mojom::AdFrameType ad_frame_type) {
-  render_frame()->GetWebFrame()->SetIsAdSubframe(ad_frame_type);
+void SubresourceFilterAgent::SetAdEvidence(
+    const blink::FrameAdEvidence& ad_evidence) {
+  render_frame()->GetWebFrame()->SetAdEvidence(ad_evidence);
+}
+
+const absl::optional<blink::FrameAdEvidence>&
+SubresourceFilterAgent::AdEvidence() {
+  return render_frame()->GetWebFrame()->AdEvidence();
 }
 
 // static
@@ -235,10 +235,13 @@ void SubresourceFilterAgent::OnSubresourceFilterAgentRequest(
 
 void SubresourceFilterAgent::ActivateForNextCommittedLoad(
     mojom::ActivationStatePtr activation_state,
-    blink::mojom::AdFrameType ad_frame_type) {
+    const absl::optional<blink::FrameAdEvidence>& ad_evidence) {
   activation_state_for_next_document_ = *activation_state;
-  if (ad_frame_type != blink::mojom::AdFrameType::kNonAd) {
-    SetIsAdSubframe(ad_frame_type);
+  if (!IsMainFrame()) {
+    DCHECK(ad_evidence.has_value());
+    SetAdEvidence(ad_evidence.value());
+  } else {
+    DCHECK(!ad_evidence.has_value());
   }
 }
 
@@ -246,24 +249,19 @@ void SubresourceFilterAgent::OnDestruct() {
   delete this;
 }
 
-void SubresourceFilterAgent::SetIsAdSubframeIfNecessary() {
+void SubresourceFilterAgent::SetAdEvidenceForInitialEmptySubframe() {
   DCHECK(!IsAdSubframe());
+  DCHECK(!AdEvidence().has_value());
 
-  // TODO(alexmt): Store FrameAdEvidence on each frame, typically updated by the
-  // browser but also populated here when the browser has not informed the
-  // renderer.
-  FrameAdEvidence ad_evidence(IsParentAdSubframe());
+  blink::FrameAdEvidence ad_evidence(IsParentAdSubframe());
   ad_evidence.set_created_by_ad_script(
       IsSubframeCreatedByAdScript()
-          ? ScriptHeuristicEvidence::kCreatedByAdScript
-          : ScriptHeuristicEvidence::kNotCreatedByAdScript);
+          ? blink::mojom::FrameCreationStackEvidence::kCreatedByAdScript
+          : blink::mojom::FrameCreationStackEvidence::kNotCreatedByAdScript);
   ad_evidence.set_is_complete();
+  SetAdEvidence(ad_evidence);
 
   if (ad_evidence.IndicatesAdSubframe()) {
-    blink::mojom::AdFrameType ad_frame_type =
-        ad_evidence.parent_is_ad() ? blink::mojom::AdFrameType::kChildAd
-                                   : blink::mojom::AdFrameType::kRootAd;
-    SetIsAdSubframe(ad_frame_type);
     SendFrameIsAdSubframe();
   }
 }
@@ -272,6 +270,12 @@ void SubresourceFilterAgent::DidCreateNewDocument() {
   // TODO(csharrison): Use WebURL and WebSecurityOrigin for efficiency here,
   // which requires changes to the unit tests.
   const GURL& url = GetDocumentURL();
+
+  // A new browser-side host is created for each new page (i.e. new main frame
+  // document) so we have to reset the remote so we re-bind on the next
+  // message.
+  if (IsMainFrame())
+    subresource_filter_host_.reset();
 
   const mojom::ActivationState activation_state =
       ShouldInheritActivation(url) ? GetInheritedActivationStateForNewDocument()

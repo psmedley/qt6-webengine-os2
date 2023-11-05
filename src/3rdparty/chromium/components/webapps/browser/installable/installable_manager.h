@@ -7,14 +7,12 @@
 
 #include <map>
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "components/webapps/browser/installable/installable_data.h"
 #include "components/webapps/browser/installable/installable_logging.h"
@@ -25,7 +23,8 @@
 #include "content/public/browser/service_worker_context_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
-#include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
 
@@ -100,6 +99,12 @@ class InstallableManager
                            CheckWebapp);
   FRIEND_TEST_ALL_PREFIXES(InstallableManagerOfflineCapabilityBrowserTest,
                            CheckNotOfflineCapableStartUrl);
+  FRIEND_TEST_ALL_PREFIXES(InstallableManagerInPrerenderingBrowserTest,
+                           InstallableManagerInPrerendering);
+  FRIEND_TEST_ALL_PREFIXES(InstallableManagerInPrerenderingBrowserTest,
+                           NotifyManifestUrlChangedInActivation);
+  FRIEND_TEST_ALL_PREFIXES(InstallableManagerInPrerenderingBrowserTest,
+                           NotNotifyManifestUrlChangedInActivation);
 
   using IconPurpose = blink::mojom::ManifestImageResource_Purpose;
 
@@ -114,9 +119,12 @@ class InstallableManager
   };
 
   struct ManifestProperty {
+    ManifestProperty();
+    ~ManifestProperty();
+
     InstallableStatusCode error = NO_ERROR_DETECTED;
     GURL url;
-    blink::Manifest manifest;
+    blink::mojom::ManifestPtr manifest = blink::mojom::Manifest::New();
     bool fetched = false;
   };
 
@@ -190,7 +198,7 @@ class InstallableManager
   // Called when navigating to a new page or if the WebContents is destroyed
   // whilst waiting for a callback.
   // If populated, the given |error| is reported to all queued tasks.
-  void Reset(base::Optional<InstallableStatusCode> error = base::nullopt);
+  void Reset(absl::optional<InstallableStatusCode> error = absl::nullopt);
 
   // Sets the fetched bit on the installable and icon subtasks.
   // Called if no manifest (or an empty manifest) was fetched from the site.
@@ -206,10 +214,10 @@ class InstallableManager
   void CheckEligiblity();
   void FetchManifest();
   void OnDidGetManifest(const GURL& manifest_url,
-                        const blink::Manifest& manifest);
+                        blink::mojom::ManifestPtr manifest);
 
   void CheckManifestValid(bool check_webapp_manifest_display);
-  bool IsManifestValidForWebApp(const blink::Manifest& manifest,
+  bool IsManifestValidForWebApp(const blink::mojom::Manifest& manifest,
                                 bool check_webapp_manifest_display);
   void CheckServiceWorker();
   void OnDidCheckHasServiceWorker(
@@ -238,13 +246,12 @@ class InstallableManager
 
   // content::WebContentsObserver overrides
   void DidFinishNavigation(content::NavigationHandle* handle) override;
-  void DidUpdateWebManifestURL(
-      content::RenderFrameHost* rfh,
-      const base::Optional<GURL>& manifest_url) override;
+  void DidUpdateWebManifestURL(content::RenderFrameHost* rfh,
+                               const GURL& manifest_url) override;
   void WebContentsDestroyed() override;
 
   const GURL& manifest_url() const;
-  const blink::Manifest& manifest() const;
+  const blink::mojom::Manifest& manifest() const;
   bool valid_manifest();
   bool has_worker();
 

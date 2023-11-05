@@ -42,21 +42,21 @@
 #define WEB_ENGINE_LIBRARY_INFO_H
 
 #include "base/files/file_path.h"
-#include "base/strings/string16.h"
 #include <QString>
 
 enum {
     QT_RESOURCES_PAK = 5000,
     QT_RESOURCES_100P_PAK = 5001,
     QT_RESOURCES_200P_PAK = 5002,
-    QT_RESOURCES_DEVTOOLS_PAK = 5003
+    QT_RESOURCES_DEVTOOLS_PAK = 5003,
+    QT_FRAMEWORK_BUNDLE = 5004
 };
 
 class WebEngineLibraryInfo {
 public:
     static base::FilePath getPath(int key);
     // Called by localized_error in our custom chrome layer
-    static base::string16 getApplicationName();
+    static std::u16string getApplicationName();
     static std::string getResolvedLocale();
     static std::string getApplicationLocale();
 #if defined(OS_WIN)

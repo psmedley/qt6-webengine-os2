@@ -78,21 +78,45 @@ VkImageSubresourceRange ResolveRemainingLevelsLayers(VkImageSubresourceRange ran
 	};
 }
 
-Identifier::Identifier(const Image *image, VkImageViewType type, VkFormat fmt, VkComponentMapping mapping)
+Identifier::Identifier(const VkImageViewCreateInfo *pCreateInfo)
 {
-	imageViewType = type;
-	format = Format::mapTo8bit(fmt);
-	r = mapping.r;
-	g = mapping.g;
-	b = mapping.b;
-	a = mapping.a;
+	const Image *image = vk::Cast(pCreateInfo->image);
+
+	VkImageSubresourceRange subresource = ResolveRemainingLevelsLayers(pCreateInfo->subresourceRange, image);
+	vk::Format viewFormat = GetImageViewFormat(pCreateInfo).getAspectFormat(subresource.aspectMask);
+	const Image *sampledImage = image->getSampledImage(viewFormat);
+
+	vk::Format samplingFormat = (image == sampledImage) ? viewFormat : sampledImage->getFormat().getAspectFormat(subresource.aspectMask);
+	pack({ pCreateInfo->viewType, samplingFormat, ResolveComponentMapping(pCreateInfo->components, viewFormat), subresource.levelCount <= 1u });
 }
 
-Identifier::Identifier(VkFormat fmt)
+Identifier::Identifier(VkFormat bufferFormat)
 {
 	static_assert(vk::VK_IMAGE_VIEW_TYPE_END_RANGE == 6, "VkImageViewType does not allow using 7 to indicate buffer view");
-	imageViewType = 7;  // Still fits in 3-bit field
-	format = Format::mapTo8bit(fmt);
+	constexpr VkComponentMapping identityMapping = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
+	pack({ VK_IMAGE_VIEW_TYPE_1D, bufferFormat, ResolveComponentMapping(identityMapping, bufferFormat), true });
+}
+
+void Identifier::pack(const State &state)
+{
+	imageViewType = static_cast<uint32_t>(state.imageViewType);
+	format = Format::mapTo8bit(state.format);
+	r = static_cast<uint32_t>(state.mapping.r);
+	g = static_cast<uint32_t>(state.mapping.g);
+	b = static_cast<uint32_t>(state.mapping.b);
+	a = static_cast<uint32_t>(state.mapping.a);
+	singleMipLevel = state.singleMipLevel;
+}
+
+Identifier::State Identifier::getState() const
+{
+	return { static_cast<VkImageViewType>(imageViewType),
+		     Format::mapFrom8bit(static_cast<uint8_t>(format)),
+		     { static_cast<VkComponentSwizzle>(r),
+		       static_cast<VkComponentSwizzle>(g),
+		       static_cast<VkComponentSwizzle>(b),
+		       static_cast<VkComponentSwizzle>(a) },
+		     static_cast<bool>(singleMipLevel) };
 }
 
 ImageView::ImageView(const VkImageViewCreateInfo *pCreateInfo, void *mem, const vk::SamplerYcbcrConversion *ycbcrConversion)
@@ -102,7 +126,7 @@ ImageView::ImageView(const VkImageViewCreateInfo *pCreateInfo, void *mem, const 
     , components(ResolveComponentMapping(pCreateInfo->components, format))
     , subresourceRange(ResolveRemainingLevelsLayers(pCreateInfo->subresourceRange, image))
     , ycbcrConversion(ycbcrConversion)
-    , id(image, viewType, format.getAspectFormat(subresourceRange.aspectMask), components)
+    , id(pCreateInfo)
 {
 }
 
@@ -122,34 +146,34 @@ bool ImageView::imageTypesMatch(VkImageType imageType) const
 
 	switch(viewType)
 	{
-		case VK_IMAGE_VIEW_TYPE_1D:
-			return (imageType == VK_IMAGE_TYPE_1D) &&
-			       (subresourceRange.layerCount == 1);
-		case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
-			return imageType == VK_IMAGE_TYPE_1D;
-		case VK_IMAGE_VIEW_TYPE_2D:
-			return ((imageType == VK_IMAGE_TYPE_2D) ||
-			        ((imageType == VK_IMAGE_TYPE_3D) &&
-			         (imageArrayLayers == 1))) &&
-			       (subresourceRange.layerCount == 1);
-		case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
-			return (imageType == VK_IMAGE_TYPE_2D) ||
-			       ((imageType == VK_IMAGE_TYPE_3D) &&
-			        (imageArrayLayers == 1));
-		case VK_IMAGE_VIEW_TYPE_CUBE:
-			return image->isCube() &&
-			       (imageArrayLayers >= subresourceRange.layerCount) &&
-			       (subresourceRange.layerCount == 6);
-		case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
-			return image->isCube() &&
-			       (imageArrayLayers >= subresourceRange.layerCount) &&
-			       (subresourceRange.layerCount >= 6);
-		case VK_IMAGE_VIEW_TYPE_3D:
-			return (imageType == VK_IMAGE_TYPE_3D) &&
-			       (imageArrayLayers == 1) &&
-			       (subresourceRange.layerCount == 1);
-		default:
-			UNREACHABLE("Unexpected viewType %d", (int)viewType);
+	case VK_IMAGE_VIEW_TYPE_1D:
+		return (imageType == VK_IMAGE_TYPE_1D) &&
+		       (subresourceRange.layerCount == 1);
+	case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+		return imageType == VK_IMAGE_TYPE_1D;
+	case VK_IMAGE_VIEW_TYPE_2D:
+		return ((imageType == VK_IMAGE_TYPE_2D) ||
+		        ((imageType == VK_IMAGE_TYPE_3D) &&
+		         (imageArrayLayers == 1))) &&
+		       (subresourceRange.layerCount == 1);
+	case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+		return (imageType == VK_IMAGE_TYPE_2D) ||
+		       ((imageType == VK_IMAGE_TYPE_3D) &&
+		        (imageArrayLayers == 1));
+	case VK_IMAGE_VIEW_TYPE_CUBE:
+		return image->isCube() &&
+		       (imageArrayLayers >= subresourceRange.layerCount) &&
+		       (subresourceRange.layerCount == 6);
+	case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+		return image->isCube() &&
+		       (imageArrayLayers >= subresourceRange.layerCount) &&
+		       (subresourceRange.layerCount >= 6);
+	case VK_IMAGE_VIEW_TYPE_3D:
+		return (imageType == VK_IMAGE_TYPE_3D) &&
+		       (imageArrayLayers == 1) &&
+		       (subresourceRange.layerCount == 1);
+	default:
+		UNREACHABLE("Unexpected viewType %d", (int)viewType);
 	}
 
 	return false;
@@ -277,13 +301,13 @@ const Image *ImageView::getImage(Usage usage) const
 {
 	switch(usage)
 	{
-		case RAW:
-			return image;
-		case SAMPLING:
-			return image->getSampledImage(format);
-		default:
-			UNREACHABLE("usage %d", int(usage));
-			return nullptr;
+	case RAW:
+		return image;
+	case SAMPLING:
+		return image->getSampledImage(format);
+	default:
+		UNREACHABLE("usage %d", int(usage));
+		return nullptr;
 	}
 }
 

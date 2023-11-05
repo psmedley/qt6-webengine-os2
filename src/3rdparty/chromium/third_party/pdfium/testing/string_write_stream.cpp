@@ -6,29 +6,13 @@
 
 #include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/widestring.h"
-#include "third_party/base/check.h"
+#include "third_party/base/check_op.h"
 
 StringWriteStream::StringWriteStream() = default;
 
 StringWriteStream::~StringWriteStream() = default;
 
-FX_FILESIZE StringWriteStream::GetSize() {
-  return stream_.tellp();
-}
-
-bool StringWriteStream::Flush() {
-  return true;
-}
-
-bool StringWriteStream::WriteBlockAtOffset(const void* pData,
-                                           FX_FILESIZE offset,
-                                           size_t size) {
-  DCHECK(offset == 0);
+bool StringWriteStream::WriteBlock(const void* pData, size_t size) {
   stream_.write(static_cast<const char*>(pData), size);
-  return true;
-}
-
-bool StringWriteStream::WriteString(ByteStringView str) {
-  stream_.write(str.unterminated_c_str(), str.GetLength());
   return true;
 }

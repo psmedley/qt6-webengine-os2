@@ -352,6 +352,35 @@ Thread::ScopedDisallowBlockingCalls::~ScopedDisallowBlockingCalls() {
   thread_->SetAllowBlockingCalls(previous_state_);
 }
 
+#if RTC_DCHECK_IS_ON
+Thread::ScopedCountBlockingCalls::ScopedCountBlockingCalls(
+    std::function<void(uint32_t, uint32_t)> callback)
+    : thread_(Thread::Current()),
+      base_blocking_call_count_(thread_->GetBlockingCallCount()),
+      base_could_be_blocking_call_count_(
+          thread_->GetCouldBeBlockingCallCount()),
+      result_callback_(std::move(callback)) {}
+
+Thread::ScopedCountBlockingCalls::~ScopedCountBlockingCalls() {
+  if (GetTotalBlockedCallCount() >= min_blocking_calls_for_callback_) {
+    result_callback_(GetBlockingCallCount(), GetCouldBeBlockingCallCount());
+  }
+}
+
+uint32_t Thread::ScopedCountBlockingCalls::GetBlockingCallCount() const {
+  return thread_->GetBlockingCallCount() - base_blocking_call_count_;
+}
+
+uint32_t Thread::ScopedCountBlockingCalls::GetCouldBeBlockingCallCount() const {
+  return thread_->GetCouldBeBlockingCallCount() -
+         base_could_be_blocking_call_count_;
+}
+
+uint32_t Thread::ScopedCountBlockingCalls::GetTotalBlockedCallCount() const {
+  return GetBlockingCallCount() + GetCouldBeBlockingCallCount();
+}
+#endif
+
 Thread::Thread(SocketServer* ss) : Thread(ss, /*do_init=*/true) {}
 
 Thread::Thread(std::unique_ptr<SocketServer> ss)
@@ -400,13 +429,11 @@ void Thread::DoDestroy() {
   // The signal is done from here to ensure
   // that it always gets called when the queue
   // is going away.
-  SignalQueueDestroyed();
-  ThreadManager::Remove(this);
-  ClearInternal(nullptr, MQID_ANY, nullptr);
-
   if (ss_) {
     ss_->SetMessageQueue(nullptr);
   }
+  ThreadManager::Remove(this);
+  ClearInternal(nullptr, MQID_ANY, nullptr);
 }
 
 SocketServer* Thread::socketserver() {
@@ -901,6 +928,11 @@ void Thread::Send(const Location& posted_from,
   msg.message_id = id;
   msg.pdata = pdata;
   if (IsCurrent()) {
+#if RTC_DCHECK_IS_ON
+    RTC_DCHECK(this->IsInvokeToThreadAllowed(this));
+    RTC_DCHECK_RUN_ON(this);
+    could_be_blocking_call_count_++;
+#endif
     msg.phandler->OnMessage(&msg);
     return;
   }
@@ -911,6 +943,8 @@ void Thread::Send(const Location& posted_from,
 
 #if RTC_DCHECK_IS_ON
   if (current_thread) {
+    RTC_DCHECK_RUN_ON(current_thread);
+    current_thread->blocking_call_count_++;
     RTC_DCHECK(current_thread->IsInvokeToThreadAllowed(this));
     ThreadManager::Instance()->RegisterSendAndCheckForCycles(current_thread,
                                                              this);
@@ -998,7 +1032,7 @@ void Thread::ClearCurrentTaskQueue() {
 void Thread::QueuedTaskHandler::OnMessage(Message* msg) {
   RTC_DCHECK(msg);
   auto* data = static_cast<ScopedMessageData<webrtc::QueuedTask>*>(msg->pdata);
-  std::unique_ptr<webrtc::QueuedTask> task = std::move(data->data());
+  std::unique_ptr<webrtc::QueuedTask> task(data->Release());
   // Thread expects handler to own Message::pdata when OnMessage is called
   // Since MessageData is no longer needed, delete it.
   delete data;
@@ -1010,7 +1044,7 @@ void Thread::QueuedTaskHandler::OnMessage(Message* msg) {
 }
 
 void Thread::AllowInvokesToThread(Thread* thread) {
-#if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
+#if (!defined(NDEBUG) || RTC_DCHECK_IS_ON)
   if (!IsCurrent()) {
     PostTask(webrtc::ToQueuedTask(
         [thread, this]() { AllowInvokesToThread(thread); }));
@@ -1023,7 +1057,7 @@ void Thread::AllowInvokesToThread(Thread* thread) {
 }
 
 void Thread::DisallowAllInvokes() {
-#if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
+#if (!defined(NDEBUG) || RTC_DCHECK_IS_ON)
   if (!IsCurrent()) {
     PostTask(webrtc::ToQueuedTask([this]() { DisallowAllInvokes(); }));
     return;
@@ -1034,10 +1068,21 @@ void Thread::DisallowAllInvokes() {
 #endif
 }
 
+#if RTC_DCHECK_IS_ON
+uint32_t Thread::GetBlockingCallCount() const {
+  RTC_DCHECK_RUN_ON(this);
+  return blocking_call_count_;
+}
+uint32_t Thread::GetCouldBeBlockingCallCount() const {
+  RTC_DCHECK_RUN_ON(this);
+  return could_be_blocking_call_count_;
+}
+#endif
+
 // Returns true if no policies added or if there is at least one policy
-// that permits invocation to |target| thread.
+// that permits invocation to `target` thread.
 bool Thread::IsInvokeToThreadAllowed(rtc::Thread* target) {
-#if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
+#if (!defined(NDEBUG) || RTC_DCHECK_IS_ON)
   RTC_DCHECK_RUN_ON(this);
   if (!invoke_policy_enabled_) {
     return true;

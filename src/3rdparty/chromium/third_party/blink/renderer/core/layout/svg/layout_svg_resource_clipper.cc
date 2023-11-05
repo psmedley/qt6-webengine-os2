@@ -22,6 +22,7 @@
 
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_clipper.h"
 
+#include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
@@ -54,6 +55,8 @@ ClipStrategy DetermineClipStrategy(const SVGGraphicsElement& element) {
   const LayoutObject* layout_object = element.GetLayoutObject();
   if (!layout_object)
     return ClipStrategy::kNone;
+  if (DisplayLockUtilities::LockedAncestorPreventingLayout(*layout_object))
+    return ClipStrategy::kNone;
   const ComputedStyle& style = layout_object->StyleRef();
   if (style.Display() == EDisplay::kNone ||
       style.Visibility() != EVisibility::kVisible)
@@ -62,7 +65,7 @@ ClipStrategy DetermineClipStrategy(const SVGGraphicsElement& element) {
   // Only shapes, paths and texts are allowed for clipping.
   if (layout_object->IsSVGShape()) {
     strategy = ClipStrategy::kPath;
-  } else if (layout_object->IsSVGText()) {
+  } else if (layout_object->IsSVGText() || layout_object->IsNGSVGText()) {
     // Text requires masking.
     strategy = ClipStrategy::kMask;
   }
@@ -74,8 +77,12 @@ ClipStrategy DetermineClipStrategy(const SVGElement& element) {
   // (https://drafts.fxtf.org/css-masking/#ClipPathElement)
   if (auto* svg_use_element = DynamicTo<SVGUseElement>(element)) {
     const LayoutObject* use_layout_object = element.GetLayoutObject();
-    if (!use_layout_object ||
-        use_layout_object->StyleRef().Display() == EDisplay::kNone)
+    if (!use_layout_object)
+      return ClipStrategy::kNone;
+    if (DisplayLockUtilities::LockedAncestorPreventingLayout(
+            *use_layout_object))
+      return ClipStrategy::kNone;
+    if (use_layout_object->StyleRef().Display() == EDisplay::kNone)
       return ClipStrategy::kNone;
     const SVGGraphicsElement* shape_element =
         svg_use_element->VisibleTargetGraphicsElementForClipping();
@@ -120,22 +127,22 @@ void LayoutSVGResourceClipper::RemoveAllClientsFromCache() {
   MarkAllClientsForInvalidation(kClipCacheInvalidation | kPaintInvalidation);
 }
 
-base::Optional<Path> LayoutSVGResourceClipper::AsPath() {
+absl::optional<Path> LayoutSVGResourceClipper::AsPath() {
   NOT_DESTROYED();
   if (clip_content_path_validity_ == kClipContentPathValid)
-    return base::Optional<Path>(clip_content_path_);
+    return absl::optional<Path>(clip_content_path_);
   if (clip_content_path_validity_ == kClipContentPathInvalid)
-    return base::nullopt;
+    return absl::nullopt;
   DCHECK_EQ(clip_content_path_validity_, kClipContentPathUnknown);
 
   clip_content_path_validity_ = kClipContentPathInvalid;
   // If the current clip-path gets clipped itself, we have to fallback to
   // masking.
   if (StyleRef().HasClipPath())
-    return base::nullopt;
+    return absl::nullopt;
 
   unsigned op_count = 0;
-  base::Optional<SkOpBuilder> clip_path_builder;
+  absl::optional<SkOpBuilder> clip_path_builder;
   SkPath resolved_path;
   for (const SVGElement& child_element :
        Traversal<SVGElement>::ChildrenOf(*GetElement())) {
@@ -143,14 +150,14 @@ base::Optional<Path> LayoutSVGResourceClipper::AsPath() {
     if (strategy == ClipStrategy::kNone)
       continue;
     if (strategy == ClipStrategy::kMask)
-      return base::nullopt;
+      return absl::nullopt;
 
     // Multiple shapes require PathOps. In some degenerate cases PathOps can
     // exhibit quadratic behavior, so we cap the number of ops to a reasonable
     // count.
     const unsigned kMaxOps = 42;
     if (++op_count > kMaxOps)
-      return base::nullopt;
+      return absl::nullopt;
     if (clip_path_builder) {
       clip_path_builder->add(PathFromElement(child_element).GetSkPath(),
                              kUnion_SkPathOp);
@@ -168,7 +175,7 @@ base::Optional<Path> LayoutSVGResourceClipper::AsPath() {
     clip_path_builder->resolve(&resolved_path);
   clip_content_path_ = std::move(resolved_path);
   clip_content_path_validity_ = kClipContentPathValid;
-  return base::Optional<Path>(clip_content_path_);
+  return absl::optional<Path>(clip_content_path_);
 }
 
 sk_sp<const PaintRecord> LayoutSVGResourceClipper::CreatePaintRecord() {
@@ -270,7 +277,7 @@ bool LayoutSVGResourceClipper::HitTestClipContent(
 FloatRect LayoutSVGResourceClipper::ResourceBoundingBox(
     const FloatRect& reference_box) {
   NOT_DESTROYED();
-  DCHECK(!NeedsLayout());
+  DCHECK(!SelfNeedsLayout());
 
   if (local_clip_bounds_.IsEmpty())
     CalculateLocalClipBounds();

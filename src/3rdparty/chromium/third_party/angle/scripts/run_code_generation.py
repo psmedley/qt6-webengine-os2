@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 #
 # Copyright 2017 The ANGLE Project Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -55,7 +55,7 @@ def grab_from_script(script, param):
     f = open(os.path.basename(script), 'r')
     exe = get_executable_name(f.readline())
     try:
-        res = subprocess.check_output([exe, script, param]).strip()
+        res = subprocess.check_output([exe, script, param]).decode().strip()
     except Exception:
         print('Error grabbing script output: %s, executable %s' % (script, exe))
         raise
@@ -83,6 +83,8 @@ generators = {
         'src/libANGLE/renderer/gen_angle_format_table.py',
     'ANGLE load functions table':
         'src/libANGLE/renderer/gen_load_functions_table.py',
+    'ANGLE load texture border functions table':
+        'src/libANGLE/renderer/gen_load_texture_border_functions_table.py',
     'ANGLE shader preprocessor':
         'src/compiler/preprocessor/generate_parser.py',
     'ANGLE shader translator':
@@ -129,6 +131,8 @@ generators = {
         'src/common/spirv/gen_spirv_builder_and_parser.py',
     'Static builtins':
         'src/compiler/translator/gen_builtin_symbols.py',
+    'Test spec JSON':
+        'infra/specs/generate_test_spec_json.py',
     'uniform type':
         'src/common/gen_uniform_type_table.py',
     'Vulkan format':
@@ -143,8 +147,8 @@ generators = {
 def md5(fname):
     hash_md5 = hashlib.md5()
     with open(fname, "r") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
+        for chunk in iter(lambda: f.read(4096), ""):
+            hash_md5.update(chunk.encode())
     return hash_md5.hexdigest()
 
 
@@ -169,12 +173,12 @@ def any_hash_dirty(name, filenames, new_hashes, old_hashes):
 
 def any_old_hash_missing(all_new_hashes, all_old_hashes):
     result = False
-    for file, old_hashes in all_old_hashes.iteritems():
+    for file, old_hashes in all_old_hashes.items():
         if file not in all_new_hashes:
             print('"%s" does not exist. Code gen dirty.' % file)
             result = True
         else:
-            for name, _ in old_hashes.iteritems():
+            for name, _ in old_hashes.items():
                 if name not in all_new_hashes[file]:
                     print('Hash for %s is missing from "%s". Code gen is dirty.' % (name, file))
                     result = True
@@ -212,7 +216,7 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == '--verify-no-dirty':
         verify_only = True
 
-    for name, script in sorted(generators.iteritems()):
+    for name, script in sorted(generators.items()):
         info = auto_script(script)
         fname = get_hash_file_name(name)
         filenames = info['inputs'] + info['outputs'] + [script]
@@ -251,14 +255,14 @@ def main():
             sys.exit(1)
 
         # Update the output hashes again since they can be formatted.
-        for name, script in sorted(generators.iteritems()):
+        for name, script in sorted(generators.items()):
             info = auto_script(script)
             fname = get_hash_file_name(name)
             update_output_hashes(name, info['outputs'], all_new_hashes[fname])
 
         os.chdir(script_dir)
 
-        for fname, new_hashes in all_new_hashes.iteritems():
+        for fname, new_hashes in all_new_hashes.items():
             hash_fname = os.path.join(hash_dir, fname)
             json.dump(
                 new_hashes,

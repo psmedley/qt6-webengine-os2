@@ -4,13 +4,13 @@
 
 #include "ui/views/controls/button/label_button_label.h"
 
-#include "ui/views/metadata/metadata_impl_macros.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 
 namespace views {
 
 namespace internal {
 
-LabelButtonLabel::LabelButtonLabel(const base::string16& text, int text_context)
+LabelButtonLabel::LabelButtonLabel(const std::u16string& text, int text_context)
     : Label(text, text_context, style::STYLE_PRIMARY) {}
 
 LabelButtonLabel::~LabelButtonLabel() = default;
@@ -37,11 +37,13 @@ void LabelButtonLabel::OnEnabledChanged() {
 }
 
 void LabelButtonLabel::SetColorForEnableState() {
-  const base::Optional<SkColor>& color =
+  const absl::optional<SkColor>& color =
       GetEnabled() ? requested_enabled_color_ : requested_disabled_color_;
   if (color) {
     Label::SetEnabledColor(*color);
-  } else {
+  } else if (GetWidget()) {
+    // If there is no widget, we can't actually get the colors here.
+    // An OnThemeChanged() will fire once a widget is available.
     int style = GetEnabled() ? style::STYLE_PRIMARY : style::STYLE_DISABLED;
     Label::SetEnabledColor(style::GetColor(*this, GetTextContext(), style));
   }

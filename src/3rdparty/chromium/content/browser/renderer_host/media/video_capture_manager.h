@@ -151,10 +151,10 @@ class CONTENT_EXPORT VideoCaptureManager
   bool GetDeviceFormatsInUse(
       const media::VideoCaptureSessionId& capture_session_id,
       media::VideoCaptureFormats* formats_in_use);
-  // Retrieves the format currently in use.  Returns base::nullopt if the
+  // Retrieves the format currently in use.  Returns absl::nullopt if the
   // |stream_type|, |device_id| pair is not found. Returns in-use format of the
   // device otherwise.
-  base::Optional<media::VideoCaptureFormat> GetDeviceFormatInUse(
+  absl::optional<media::VideoCaptureFormat> GetDeviceFormatInUse(
       blink::mojom::MediaStreamType stream_type,
       const std::string& device_id);
 
@@ -190,6 +190,13 @@ class CONTENT_EXPORT VideoCaptureManager
                             media::VideoCaptureError error) override;
   void OnDeviceLaunchAborted() override;
   void OnDeviceConnectionLost(VideoCaptureController* controller) override;
+
+  bool is_idle_close_timer_running_for_testing() const {
+    return idle_close_timer_.IsRunning();
+  }
+  void set_idle_close_timeout_for_testing(base::TimeDelta timeout) {
+    idle_close_timeout_ = timeout;
+  }
 
  private:
   class CaptureDeviceStartRequest;
@@ -258,10 +265,10 @@ class CONTENT_EXPORT VideoCaptureManager
   void MaybePostDesktopCaptureWindowId(
       const media::VideoCaptureSessionId& session_id);
 
-#if defined(OS_ANDROID)
   void ReleaseDevices();
   void ResumeDevices();
 
+#if defined(OS_ANDROID)
   std::unique_ptr<base::android::ApplicationStatusListener>
       app_status_listener_;
   bool application_state_has_running_activities_;
@@ -315,6 +322,11 @@ class CONTENT_EXPORT VideoCaptureManager
   // Map used by DesktopCapture.
   std::map<media::VideoCaptureSessionId, gfx::NativeViewId>
       notification_window_ids_;
+
+  // Closes video device capture sessions after a timeout. Idle timeout value
+  // chosen based on UMA metrics. See https://crbug.com/1163105#c28
+  base::TimeDelta idle_close_timeout_ = base::TimeDelta::FromSeconds(15);
+  base::OneShotTimer idle_close_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureManager);
 };

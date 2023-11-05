@@ -38,6 +38,10 @@ SANDBOX_POLICY_EXPORT extern const base::Feature
     kForceSpectreVariant2Mitigation;
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
+#if defined(OS_WIN)
+// Returns whether Network Service Sandbox is enabled in LPAC mode.
+SANDBOX_POLICY_EXPORT bool IsNetworkServiceSandboxLPACEnabled();
+#endif
 }  // namespace features
 }  // namespace policy
 }  // namespace sandbox

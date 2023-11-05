@@ -4,32 +4,22 @@
 
 #include "fuchsia/engine/renderer/web_engine_render_frame_observer.h"
 
-#include "base/logging.h"
+#include "base/bind.h"
 #include "content/public/renderer/render_frame.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 
 WebEngineRenderFrameObserver::WebEngineRenderFrameObserver(
     content::RenderFrame* render_frame,
     base::OnceCallback<void(int)> on_render_frame_deleted_callback)
     : content::RenderFrameObserver(render_frame),
       url_request_rules_receiver_(render_frame),
-      cast_streaming_receiver_(render_frame),
       on_render_frame_deleted_callback_(
           std::move(on_render_frame_deleted_callback)) {
   DCHECK(render_frame);
   DCHECK(on_render_frame_deleted_callback_);
-
-  // TODO(https://crbug.com/1181062): Remove this once the root cause of this
-  // bug has been found.
-  LOG(INFO) << "WebEngineRenderFrameObserver created for RenderFrame ID "
-            << routing_id();
 }
 
-WebEngineRenderFrameObserver::~WebEngineRenderFrameObserver() {
-  // TODO(https://crbug.com/1181062): Remove this once the root cause of this
-  // bug has been found.
-  LOG(INFO) << "WebEngineRenderFrameObserver deleted for RenderFrame ID "
-            << routing_id();
-}
+WebEngineRenderFrameObserver::~WebEngineRenderFrameObserver() = default;
 
 void WebEngineRenderFrameObserver::OnDestruct() {
   std::move(on_render_frame_deleted_callback_).Run(routing_id());

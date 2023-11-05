@@ -14,8 +14,8 @@
 
 #include "platform/public/count_down_latch.h"
 
-#include "platform/public/single_thread_executor.h"
 #include "gtest/gtest.h"
+#include "platform/public/single_thread_executor.h"
 
 namespace location {
 namespace nearby {
@@ -55,6 +55,14 @@ TEST(CountDownLatch, LatchAwaitWithTimeoutCanExpire) {
   auto response = latch.Await(absl::Milliseconds(100));
   EXPECT_TRUE(response.ok());
   EXPECT_FALSE(response.result());
+}
+
+TEST(CountDownLatch, InitialCountZero_AwaitDoesNotBlock) {
+  CountDownLatch latch(0);
+
+  auto response = latch.Await();
+
+  EXPECT_TRUE(response.Ok());
 }
 
 }  // namespace

@@ -30,11 +30,11 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/containers/flat_set.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "net/cookies/site_for_cookies.h"
+#include "net/filter/source_stream.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/chunked_data_pipe_getter.mojom-blink.h"
 #include "services/network/public/mojom/cors.mojom-blink-forward.h"
@@ -43,6 +43,7 @@
 #include "services/network/public/mojom/trust_tokens.mojom-blink.h"
 #include "services/network/public/mojom/url_loader.mojom-blink.h"
 #include "services/network/public/mojom/web_bundle_handle.mojom-blink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/resource_request_blocked_reason.h"
 #include "third_party/blink/public/platform/web_url_request_extra_data.h"
@@ -54,6 +55,12 @@
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
+
+namespace network {
+namespace mojom {
+class WebBundleHandle;
+}  // namespace mojom
+}  // namespace network
 
 namespace blink {
 
@@ -238,17 +245,6 @@ class PLATFORM_EXPORT ResourceRequestHead {
     report_upload_progress_ = report_upload_progress;
   }
 
-  // Whether actual headers being sent/received should be collected and reported
-  // for the request.
-  bool ReportRawHeaders() const { return report_raw_headers_; }
-  void SetReportRawHeaders(bool report_raw_headers) {
-    report_raw_headers_ = report_raw_headers;
-  }
-
-  // Allows the request to be matched up with its requestor.
-  int RequestorID() const { return requestor_id_; }
-  void SetRequestorID(int requestor_id) { requestor_id_ = requestor_id; }
-
   // True if request was user initiated.
   bool HasUserGesture() const { return has_user_gesture_; }
   void SetHasUserGesture(bool);
@@ -372,14 +368,14 @@ class PLATFORM_EXPORT ResourceRequestHead {
     cors_preflight_policy_ = policy;
   }
 
-  const base::Optional<RedirectInfo>& GetRedirectInfo() const {
+  const absl::optional<RedirectInfo>& GetRedirectInfo() const {
     return redirect_info_;
   }
 
-  void SetSuggestedFilename(const base::Optional<String>& suggested_filename) {
+  void SetSuggestedFilename(const absl::optional<String>& suggested_filename) {
     suggested_filename_ = suggested_filename;
   }
-  const base::Optional<String>& GetSuggestedFilename() const {
+  const absl::optional<String>& GetSuggestedFilename() const {
     return suggested_filename_;
   }
 
@@ -401,16 +397,28 @@ class PLATFORM_EXPORT ResourceRequestHead {
   void SetAllowStaleResponse(bool value) { allow_stale_response_ = value; }
   bool AllowsStaleResponse() const { return allow_stale_response_; }
 
-  const base::Optional<base::UnguessableToken>& GetDevToolsToken() const {
+  const absl::optional<base::UnguessableToken>& GetDevToolsToken() const {
     return devtools_token_;
   }
   void SetDevToolsToken(
-      const base::Optional<base::UnguessableToken>& devtools_token) {
+      const absl::optional<base::UnguessableToken>& devtools_token) {
     devtools_token_ = devtools_token;
   }
 
-  const base::Optional<String>& GetDevToolsId() const { return devtools_id_; }
-  void SetDevToolsId(const base::Optional<String>& devtools_id) {
+  const scoped_refptr<
+      base::RefCountedData<base::flat_set<net::SourceStream::SourceType>>>&
+  GetDevToolsAcceptedStreamTypes() const {
+    return devtools_accepted_stream_types_;
+  }
+  void SetDevToolsAcceptedStreamTypes(
+      const scoped_refptr<
+          base::RefCountedData<base::flat_set<net::SourceStream::SourceType>>>&
+          types) {
+    devtools_accepted_stream_types_ = types;
+  }
+
+  const absl::optional<String>& GetDevToolsId() const { return devtools_id_; }
+  void SetDevToolsId(const absl::optional<String>& devtools_id) {
     devtools_id_ = devtools_id;
   }
 
@@ -431,10 +439,10 @@ class PLATFORM_EXPORT ResourceRequestHead {
   // can use this to display the initiator call stack when debugging a process
   // that later intercepts the request, e.g., in a service worker fetch event
   // handler.
-  const base::Optional<String>& GetDevToolsStackId() const {
+  const absl::optional<String>& GetDevToolsStackId() const {
     return devtools_stack_id_;
   }
-  void SetDevToolsStackId(const base::Optional<String>& devtools_stack_id) {
+  void SetDevToolsStackId(const absl::optional<String>& devtools_stack_id) {
     devtools_stack_id_ = devtools_stack_id;
   }
 
@@ -453,10 +461,10 @@ class PLATFORM_EXPORT ResourceRequestHead {
   }
 
   void SetRecursivePrefetchToken(
-      const base::Optional<base::UnguessableToken>& token) {
+      const absl::optional<base::UnguessableToken>& token) {
     recursive_prefetch_token_ = token;
   }
-  const base::Optional<base::UnguessableToken>& RecursivePrefetchToken() const {
+  const absl::optional<base::UnguessableToken>& RecursivePrefetchToken() const {
     return recursive_prefetch_token_;
   }
 
@@ -499,12 +507,12 @@ class PLATFORM_EXPORT ResourceRequestHead {
         prefetch_maybe_for_top_level_navigation;
   }
 
-  const base::Optional<network::mojom::blink::TrustTokenParams>&
+  const absl::optional<network::mojom::blink::TrustTokenParams>&
   TrustTokenParams() const {
     return trust_token_params_;
   }
   void SetTrustTokenParams(
-      base::Optional<network::mojom::blink::TrustTokenParams> params) {
+      absl::optional<network::mojom::blink::TrustTokenParams> params) {
     trust_token_params_ = std::move(params);
   }
 
@@ -527,7 +535,7 @@ class PLATFORM_EXPORT ResourceRequestHead {
     original_destination_ = value;
   }
 
-  const base::Optional<ResourceRequestHead::WebBundleTokenParams>&
+  const absl::optional<ResourceRequestHead::WebBundleTokenParams>&
   GetWebBundleTokenParams() const {
     return web_bundle_token_params_;
   }
@@ -564,7 +572,6 @@ class PLATFORM_EXPORT ResourceRequestHead {
   HTTPHeaderMap http_header_fields_;
   bool allow_stored_credentials_ : 1;
   bool report_upload_progress_ : 1;
-  bool report_raw_headers_ : 1;
   bool has_user_gesture_ : 1;
   bool has_text_fragment_token_ : 1;
   bool download_to_blob_ : 1;
@@ -578,7 +585,6 @@ class PLATFORM_EXPORT ResourceRequestHead {
   bool site_for_cookies_set_ : 1;
   ResourceLoadPriority priority_;
   int intra_priority_value_;
-  int requestor_id_;
   PreviewsState previews_state_;
   scoped_refptr<WebURLRequestExtraData> url_request_extra_data_;
   mojom::blink::RequestContextType request_context_;
@@ -592,10 +598,10 @@ class PLATFORM_EXPORT ResourceRequestHead {
   network::mojom::ReferrerPolicy referrer_policy_;
   bool is_external_request_;
   network::mojom::CorsPreflightPolicy cors_preflight_policy_;
-  base::Optional<RedirectInfo> redirect_info_;
-  base::Optional<network::mojom::blink::TrustTokenParams> trust_token_params_;
+  absl::optional<RedirectInfo> redirect_info_;
+  absl::optional<network::mojom::blink::TrustTokenParams> trust_token_params_;
 
-  base::Optional<String> suggested_filename_;
+  absl::optional<String> suggested_filename_;
 
   mutable CacheControlHeader cache_control_header_cache_;
 
@@ -608,13 +614,13 @@ class PLATFORM_EXPORT ResourceRequestHead {
 
   bool is_automatic_upgrade_ = false;
 
-  base::Optional<base::UnguessableToken> devtools_token_;
-  base::Optional<String> devtools_id_;
+  absl::optional<base::UnguessableToken> devtools_token_;
+  absl::optional<String> devtools_id_;
   String requested_with_header_;
   String client_data_header_;
   String purpose_header_;
 
-  base::Optional<String> devtools_stack_id_;
+  absl::optional<String> devtools_stack_id_;
 
   ukm::SourceId ukm_source_id_ = ukm::kInvalidSourceId;
 
@@ -644,17 +650,27 @@ class PLATFORM_EXPORT ResourceRequestHead {
   // This is used when fetching preload header requests from cross-origin
   // prefetch responses. The browser process uses this token to ensure the
   // request is cached correctly.
-  base::Optional<base::UnguessableToken> recursive_prefetch_token_;
+  absl::optional<base::UnguessableToken> recursive_prefetch_token_;
 
   // This is used when fetching either a WebBundle or a subresrouce in the
   // WebBundle. The network process uses this token to associate the request to
   // the bundle.
-  base::Optional<WebBundleTokenParams> web_bundle_token_params_;
+  absl::optional<WebBundleTokenParams> web_bundle_token_params_;
 
   // Render blocking behavior of the resource. Used in maintaining correct
   // reporting for redirects.
   RenderBlockingBehavior render_blocking_behavior_ =
       RenderBlockingBehavior::kUnset;
+
+  // If not null, the network service will not advertise any stream types
+  // (via Accept-Encoding) that are not listed. Also, it will not attempt
+  // decoding any non-listed stream types.
+  // Instead of using absl::optional, we use scoped_refptr to reduce
+  // blink memory footprint because the attribute is only used by DevTools
+  // and we should keep the footprint minimal when DevTools is closed.
+  scoped_refptr<
+      base::RefCountedData<base::flat_set<net::SourceStream::SourceType>>>
+      devtools_accepted_stream_types_;
 };
 
 class PLATFORM_EXPORT ResourceRequestBody {
@@ -702,7 +718,7 @@ class PLATFORM_EXPORT ResourceRequestBody {
 // This class is thread-bound. Do not copy/pass an instance across threads.
 //
 // Although request consists head and body, ResourceRequest is implemented by
-// inheriting ResourceRequestHead due in order to make it possible to use
+// inheriting ResourceRequestHead in order to make it possible to use
 // property accessors through both ResourceRequestHead and ResourceRequest while
 // avoiding duplicate accessor definitions.
 // For those who want to add a new property in request, please implement its

@@ -11,8 +11,9 @@
 #include "base/bind.h"
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
 #include "base/notreached.h"
-#include "base/optional.h"
+#include "base/strings/abseil_string_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -23,6 +24,7 @@
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/signed_certificate_timestamp_and_status.h"
 #include "net/dns/host_resolver.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_proxy_connect_job.h"
@@ -38,12 +40,16 @@
 #include "net/spdy/buffered_spdy_framer.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_stream.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 #include "net/test/gtest_util.h"
 #include "net/third_party/quiche/src/spdy/core/spdy_alt_svc_wire_format.h"
 #include "net/third_party/quiche/src/spdy/core/spdy_framer.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/scheme_host_port.h"
+#include "url/url_constants.h"
 
 using net::test::IsError;
 using net::test::IsOk;
@@ -277,48 +283,6 @@ void StreamReleaserCallback::OnComplete(
   SetResult(result);
 }
 
-MockECSignatureCreator::MockECSignatureCreator(crypto::ECPrivateKey* key)
-    : key_(key) {
-}
-
-bool MockECSignatureCreator::Sign(const uint8_t* data,
-                                  int data_len,
-                                  std::vector<uint8_t>* signature) {
-  std::vector<uint8_t> private_key;
-  if (!key_->ExportPrivateKey(&private_key))
-    return false;
-  std::string head = "fakesignature";
-  std::string tail = "/fakesignature";
-
-  signature->clear();
-  signature->insert(signature->end(), head.begin(), head.end());
-  signature->insert(signature->end(), private_key.begin(), private_key.end());
-  signature->insert(signature->end(), '-');
-  signature->insert(signature->end(), data, data + data_len);
-  signature->insert(signature->end(), tail.begin(), tail.end());
-  return true;
-}
-
-bool MockECSignatureCreator::DecodeSignature(
-    const std::vector<uint8_t>& signature,
-    std::vector<uint8_t>* out_raw_sig) {
-  *out_raw_sig = signature;
-  return true;
-}
-
-MockECSignatureCreatorFactory::MockECSignatureCreatorFactory() {
-  crypto::ECSignatureCreator::SetFactoryForTesting(this);
-}
-
-MockECSignatureCreatorFactory::~MockECSignatureCreatorFactory() {
-  crypto::ECSignatureCreator::SetFactoryForTesting(nullptr);
-}
-
-std::unique_ptr<crypto::ECSignatureCreator>
-MockECSignatureCreatorFactory::Create(crypto::ECPrivateKey* key) {
-  return std::make_unique<MockECSignatureCreator>(key);
-}
-
 SpdySessionDependencies::SpdySessionDependencies()
     : SpdySessionDependencies(
           ConfiguredProxyResolutionService::CreateDirect()) {}
@@ -369,8 +333,8 @@ std::unique_ptr<HttpNetworkSession>
 SpdySessionDependencies::SpdyCreateSessionWithSocketFactory(
     SpdySessionDependencies* session_deps,
     ClientSocketFactory* factory) {
-  HttpNetworkSession::Params session_params = CreateSessionParams(session_deps);
-  HttpNetworkSession::Context session_context =
+  HttpNetworkSessionParams session_params = CreateSessionParams(session_deps);
+  HttpNetworkSessionContext session_context =
       CreateSessionContext(session_deps);
   session_context.client_socket_factory = factory;
   auto http_session =
@@ -381,9 +345,9 @@ SpdySessionDependencies::SpdyCreateSessionWithSocketFactory(
 }
 
 // static
-HttpNetworkSession::Params SpdySessionDependencies::CreateSessionParams(
+HttpNetworkSessionParams SpdySessionDependencies::CreateSessionParams(
     SpdySessionDependencies* session_deps) {
-  HttpNetworkSession::Params params;
+  HttpNetworkSessionParams params;
   params.enable_spdy_ping_based_connection_checking = session_deps->enable_ping;
   params.enable_user_alternate_protocol_ports =
       session_deps->enable_user_alternate_protocol_ports;
@@ -412,9 +376,9 @@ HttpNetworkSession::Params SpdySessionDependencies::CreateSessionParams(
   return params;
 }
 
-HttpNetworkSession::Context SpdySessionDependencies::CreateSessionContext(
+HttpNetworkSessionContext SpdySessionDependencies::CreateSessionContext(
     SpdySessionDependencies* session_deps) {
-  HttpNetworkSession::Context context;
+  HttpNetworkSessionContext context;
   context.client_socket_factory = session_deps->socket_factory.get();
   context.host_resolver = session_deps->GetHostResolver();
   context.cert_verifier = session_deps->cert_verifier.get();
@@ -453,10 +417,10 @@ SpdyURLRequestContext::SpdyURLRequestContext() : storage_(this) {
   storage_.set_http_server_properties(std::make_unique<HttpServerProperties>());
   storage_.set_quic_context(std::make_unique<QuicContext>());
   storage_.set_job_factory(std::make_unique<URLRequestJobFactory>());
-  HttpNetworkSession::Params session_params;
+  HttpNetworkSessionParams session_params;
   session_params.enable_spdy_ping_based_connection_checking = false;
 
-  HttpNetworkSession::Context session_context;
+  HttpNetworkSessionContext session_context;
   session_context.client_socket_factory = &socket_factory_;
   session_context.host_resolver = host_resolver();
   session_context.cert_verifier = cert_verifier();
@@ -493,8 +457,7 @@ base::WeakPtr<SpdySession> CreateSpdySessionHelper(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
     const NetLogWithSource& net_log,
-    bool enable_ip_based_pooling,
-    bool is_trusted_proxy) {
+    bool enable_ip_based_pooling) {
   EXPECT_FALSE(http_session->spdy_session_pool()->FindAvailableSession(
       key, enable_ip_based_pooling,
       /* is_websocket = */ false, NetLogWithSource()));
@@ -507,11 +470,12 @@ base::WeakPtr<SpdySession> CreateSpdySessionHelper(
           std::make_unique<SSLConfig>() /* ssl_config_for_origin */,
           nullptr /* ssl_config_for_proxy */);
   int rv = connection->Init(
-      ClientSocketPool::GroupId(key.host_port_pair(),
-                                ClientSocketPool::SocketType::kSsl,
-                                key.privacy_mode(), NetworkIsolationKey(),
-                                false /* disable_secure_dns */),
-      socket_params, base::nullopt /* proxy_annotation_tag */, MEDIUM,
+      ClientSocketPool::GroupId(
+          url::SchemeHostPort(url::kHttpsScheme,
+                              key.host_port_pair().HostForURL(),
+                              key.host_port_pair().port()),
+          key.privacy_mode(), NetworkIsolationKey(), SecureDnsPolicy::kAllow),
+      socket_params, absl::nullopt /* proxy_annotation_tag */, MEDIUM,
       key.socket_tag(), ClientSocketPool::RespectLimits::ENABLED,
       callback.callback(), ClientSocketPool::ProxyAuthCallback(),
       http_session->GetSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL,
@@ -520,10 +484,12 @@ base::WeakPtr<SpdySession> CreateSpdySessionHelper(
   rv = callback.GetResult(rv);
   EXPECT_THAT(rv, IsOk());
 
-  base::WeakPtr<SpdySession> spdy_session =
+  base::WeakPtr<SpdySession> spdy_session;
+  rv =
       http_session->spdy_session_pool()->CreateAvailableSessionFromSocketHandle(
-          key, is_trusted_proxy, std::move(connection), net_log);
+          key, std::move(connection), net_log, &spdy_session);
   // Failure is reported asynchronously.
+  EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(spdy_session);
   EXPECT_TRUE(HasSpdySession(http_session->spdy_session_pool(), key));
   return spdy_session;
@@ -535,17 +501,7 @@ base::WeakPtr<SpdySession> CreateSpdySession(HttpNetworkSession* http_session,
                                              const SpdySessionKey& key,
                                              const NetLogWithSource& net_log) {
   return CreateSpdySessionHelper(http_session, key, net_log,
-                                 /* enable_ip_based_pooling = */ true,
-                                 /* is_trusted_proxy = */ false);
-}
-
-base::WeakPtr<SpdySession> CreateTrustedSpdySession(
-    HttpNetworkSession* http_session,
-    const SpdySessionKey& key,
-    const NetLogWithSource& net_log) {
-  return CreateSpdySessionHelper(http_session, key, net_log,
-                                 /* enable_ip_based_pooling = */ true,
-                                 /* is_trusted_proxy = */ true);
+                                 /* enable_ip_based_pooling = */ true);
 }
 
 base::WeakPtr<SpdySession> CreateSpdySessionWithIpBasedPoolingDisabled(
@@ -553,8 +509,7 @@ base::WeakPtr<SpdySession> CreateSpdySessionWithIpBasedPoolingDisabled(
     const SpdySessionKey& key,
     const NetLogWithSource& net_log) {
   return CreateSpdySessionHelper(http_session, key, net_log,
-                                 /* enable_ip_based_pooling = */ false,
-                                 /* is_trusted_proxy = */ false);
+                                 /* enable_ip_based_pooling = */ false);
 }
 
 namespace {
@@ -562,15 +517,14 @@ namespace {
 // A ClientSocket used for CreateFakeSpdySession() below.
 class FakeSpdySessionClientSocket : public MockClientSocket {
  public:
-  explicit FakeSpdySessionClientSocket(int read_result)
-      : MockClientSocket(NetLogWithSource()), read_result_(read_result) {}
+  FakeSpdySessionClientSocket() : MockClientSocket(NetLogWithSource()) {}
 
   ~FakeSpdySessionClientSocket() override = default;
 
   int Read(IOBuffer* buf,
            int buf_len,
            CompletionOnceCallback callback) override {
-    return read_result_;
+    return ERR_IO_PENDING;
   }
 
   int Write(IOBuffer* buf,
@@ -601,51 +555,34 @@ class FakeSpdySessionClientSocket : public MockClientSocket {
   }
 
   bool GetSSLInfo(SSLInfo* ssl_info) override {
-    ADD_FAILURE();
-    return false;
+    SSLConnectionStatusSetVersion(SSL_CONNECTION_VERSION_TLS1_3,
+                                  &ssl_info->connection_status);
+    SSLConnectionStatusSetCipherSuite(0x1301 /* TLS_CHACHA20_POLY1305_SHA256 */,
+                                      &ssl_info->connection_status);
+    return true;
   }
 
   int64_t GetTotalReceivedBytes() const override {
     NOTIMPLEMENTED();
     return 0;
   }
-
- private:
-  int read_result_;
 };
-
-base::WeakPtr<SpdySession> CreateFakeSpdySessionHelper(
-    SpdySessionPool* pool,
-    const SpdySessionKey& key,
-    Error expected_status) {
-  EXPECT_NE(expected_status, ERR_IO_PENDING);
-  EXPECT_FALSE(HasSpdySession(pool, key));
-  auto handle = std::make_unique<ClientSocketHandle>();
-  handle->SetSocket(std::make_unique<FakeSpdySessionClientSocket>(
-      expected_status == OK ? ERR_IO_PENDING : expected_status));
-  base::WeakPtr<SpdySession> spdy_session =
-      pool->CreateAvailableSessionFromSocketHandle(
-          key,
-          /*is_trusted_proxy=*/false, std::move(handle), NetLogWithSource());
-  // Failure is reported asynchronously.
-  EXPECT_TRUE(spdy_session);
-  EXPECT_TRUE(HasSpdySession(pool, key));
-  return spdy_session;
-}
 
 }  // namespace
 
 base::WeakPtr<SpdySession> CreateFakeSpdySession(SpdySessionPool* pool,
                                                  const SpdySessionKey& key) {
-  return CreateFakeSpdySessionHelper(pool, key, OK);
-}
-
-base::WeakPtr<SpdySession> TryCreateFakeSpdySessionExpectingFailure(
-    SpdySessionPool* pool,
-    const SpdySessionKey& key,
-    Error expected_status) {
-  DCHECK_LT(expected_status, ERR_IO_PENDING);
-  return CreateFakeSpdySessionHelper(pool, key, expected_status);
+  EXPECT_FALSE(HasSpdySession(pool, key));
+  auto handle = std::make_unique<ClientSocketHandle>();
+  handle->SetSocket(std::make_unique<FakeSpdySessionClientSocket>());
+  base::WeakPtr<SpdySession> spdy_session;
+  int rv = pool->CreateAvailableSessionFromSocketHandle(
+      key, std::move(handle), NetLogWithSource(), &spdy_session);
+  // Failure is reported asynchronously.
+  EXPECT_THAT(rv, IsOk());
+  EXPECT_TRUE(spdy_session);
+  EXPECT_TRUE(HasSpdySession(pool, key));
+  return spdy_session;
 }
 
 SpdySessionPoolPeer::SpdySessionPoolPeer(SpdySessionPool* pool) : pool_(pool) {

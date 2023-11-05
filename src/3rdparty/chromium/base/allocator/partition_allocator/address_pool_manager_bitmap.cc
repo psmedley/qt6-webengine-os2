@@ -8,6 +8,7 @@
 #include "base/lazy_instance.h"
 
 #if !defined(PA_HAS_64_BITS_POINTERS)
+
 namespace base {
 namespace internal {
 
@@ -21,11 +22,20 @@ Lock& AddressPoolManagerBitmap::GetLock() {
   return g_lock.Get();
 }
 
-std::bitset<AddressPoolManagerBitmap::kDirectMapBits>
-    AddressPoolManagerBitmap::directmap_bits_;  // GUARDED_BY(GetLock())
-std::bitset<AddressPoolManagerBitmap::kNormalBucketBits>
-    AddressPoolManagerBitmap::normal_bucket_bits_;  // GUARDED_BY(GetLock())
-
+std::bitset<AddressPoolManagerBitmap::kNonBRPPoolBits>
+    AddressPoolManagerBitmap::non_brp_pool_bits_;  // GUARDED_BY(GetLock())
+std::bitset<AddressPoolManagerBitmap::kBRPPoolBits>
+    AddressPoolManagerBitmap::brp_pool_bits_;  // GUARDED_BY(GetLock())
+#if BUILDFLAG(USE_BACKUP_REF_PTR)
+#if BUILDFLAG(NEVER_REMOVE_FROM_BRP_POOL_BLOCKLIST)
+std::array<std::atomic_bool,
+           AddressPoolManagerBitmap::kAddressSpaceSize / kSuperPageSize>
+    AddressPoolManagerBitmap::brp_forbidden_super_page_map_;
+#endif
+std::array<std::atomic_uint32_t,
+           AddressPoolManagerBitmap::kAddressSpaceSize / kSuperPageSize>
+    AddressPoolManagerBitmap::super_page_refcount_map_;
+#endif  // BUILDFLAG(USE_BACKUP_REF_PTR)
 }  // namespace internal
 }  // namespace base
 

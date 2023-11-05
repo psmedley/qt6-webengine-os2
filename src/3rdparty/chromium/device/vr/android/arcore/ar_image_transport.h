@@ -5,13 +5,16 @@
 #ifndef DEVICE_VR_ANDROID_ARCORE_AR_IMAGE_TRANSPORT_H_
 #define DEVICE_VR_ANDROID_ARCORE_AR_IMAGE_TRANSPORT_H_
 
+#include <memory>
+
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "device/vr/android/arcore/ar_renderer.h"
-#include "device/vr/public/mojom/vr_service.mojom.h"
 #include "ui/gfx/geometry/size_f.h"
+#include "ui/gfx/transform.h"
 
 namespace gl {
 class SurfaceTexture;
@@ -39,6 +42,10 @@ using XrFrameCallback = base::RepeatingCallback<void(const gfx::Transform&)>;
 // output onto the camera image using the local GL context.
 class COMPONENT_EXPORT(VR_ARCORE) ArImageTransport {
  public:
+  // If true, use shared buffer transport aka DRAW_INTO_TEXTURE_MAILBOX.
+  // If false, use Surface transport aka SUBMIT_AS_MAILBOX_HOLDER.
+  static bool UseSharedBuffer();
+
   explicit ArImageTransport(
       std::unique_ptr<MailboxToSurfaceBridge> mailbox_bridge);
   virtual ~ArImageTransport();
@@ -86,7 +93,6 @@ class COMPONENT_EXPORT(VR_ARCORE) ArImageTransport {
                                            const gpu::MailboxHolder& mailbox,
                                            const gfx::Transform& uv_transform);
 
-  bool UseSharedBuffer() { return shared_buffer_draw_; }
   void SetFrameAvailableCallback(XrFrameCallback on_frame_available);
   void ServerWaitForGpuFence(std::unique_ptr<gfx::GpuFence> gpu_fence);
 
@@ -109,10 +115,6 @@ class COMPONENT_EXPORT(VR_ARCORE) ArImageTransport {
   scoped_refptr<base::SingleThreadTaskRunner> gl_thread_task_runner_;
 
   std::unique_ptr<MailboxToSurfaceBridge> mailbox_bridge_;
-
-  // If true, use shared buffer transport aka DRAW_INTO_TEXTURE_MAILBOX.
-  // If false, use Surface transport aka SUBMIT_AS_MAILBOX_HOLDER.
-  bool shared_buffer_draw_ = false;
 
   // Used to limit framebuffer complete check to occurring once, due to it being
   // expensive.

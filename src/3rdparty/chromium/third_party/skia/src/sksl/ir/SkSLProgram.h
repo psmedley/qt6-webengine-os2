@@ -11,27 +11,24 @@
 #include <vector>
 #include <memory>
 
+#include "include/private/SkSLDefines.h"
+#include "include/private/SkSLModifiers.h"
+#include "include/private/SkSLProgramElement.h"
 #include "include/private/SkTHash.h"
 #include "src/sksl/SkSLAnalysis.h"
-#include "src/sksl/SkSLDefines.h"
 #include "src/sksl/SkSLProgramSettings.h"
 #include "src/sksl/ir/SkSLBoolLiteral.h"
 #include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/ir/SkSLFloatLiteral.h"
 #include "src/sksl/ir/SkSLIntLiteral.h"
-#include "src/sksl/ir/SkSLModifiers.h"
-#include "src/sksl/ir/SkSLProgramElement.h"
 #include "src/sksl/ir/SkSLSymbolTable.h"
 
 #ifdef SK_VULKAN
 #include "src/gpu/vk/GrVkCaps.h"
 #endif
 
-// name of the render target width uniform
-#define SKSL_RTWIDTH_NAME "u_skRTWidth"
-
-// name of the render target height uniform
-#define SKSL_RTHEIGHT_NAME "u_skRTHeight"
+// name of the uniform used to handle features that are sensitive to whether Y is flipped.
+#define SKSL_RTFLIP_NAME "u_skRTFlip"
 
 namespace SkSL {
 
@@ -43,14 +40,19 @@ class Pool;
  */
 class ProgramUsage {
 public:
-    struct VariableCounts { int fRead = 0; int fWrite = 0; };
+    struct VariableCounts {
+        int fDeclared = 0;
+        int fRead = 0;
+        int fWrite = 0;
+    };
     VariableCounts get(const Variable&) const;
     bool isDead(const Variable&) const;
 
     int get(const FunctionDeclaration&) const;
 
-    void replace(const Expression* oldExpr, const Expression* newExpr);
+    void add(const Expression* expr);
     void add(const Statement* stmt);
+    void add(const ProgramElement& element);
     void remove(const Expression* expr);
     void remove(const Statement* stmt);
     void remove(const ProgramElement& element);
@@ -66,25 +68,11 @@ struct Program {
     using Settings = ProgramSettings;
 
     struct Inputs {
-        // if true, this program requires the render target width uniform to be defined
-        bool fRTWidth;
-
-        // if true, this program requires the render target height uniform to be defined
-        bool fRTHeight;
-
-        // if true, this program must be recompiled if the flipY setting changes. If false, the
-        // program will compile to the same code regardless of the flipY setting.
-        bool fFlipY;
-
-        void reset() {
-            fRTWidth = false;
-            fRTHeight = false;
-            fFlipY = false;
+        bool fUseFlipRTUniform = false;
+        bool operator==(const Inputs& that) const {
+            return fUseFlipRTUniform == that.fUseFlipRTUniform;
         }
-
-        bool isEmpty() {
-            return !fRTWidth && !fRTHeight && !fFlipY;
-        }
+        bool operator!=(const Inputs& that) const { return !(*this == that); }
     };
 
     Program(std::unique_ptr<String> source,
@@ -112,16 +100,12 @@ struct Program {
         // Some or all of the program elements are in the pool. To free them safely, we must attach
         // the pool before destroying any program elements. (Otherwise, we may accidentally call
         // delete on a pooled node.)
-        if (fPool) {
-            fPool->attachToThread();
-        }
+        AutoAttachPoolToThread attach(fPool.get());
+
         fElements.clear();
         fContext.reset();
         fSymbols.reset();
         fModifiers.reset();
-        if (fPool) {
-            fPool->detachFromThread();
-        }
     }
 
     class ElementsCollection {
@@ -191,7 +175,18 @@ struct Program {
 
     // Can be used to iterate over *just* the elements owned by the Program, not shared builtins.
     // The iterator's value type is 'std::unique_ptr<ProgramElement>', and mutation is allowed.
+    std::vector<std::unique_ptr<ProgramElement>>& ownedElements() { return fElements; }
     const std::vector<std::unique_ptr<ProgramElement>>& ownedElements() const { return fElements; }
+
+    String description() const {
+        String result;
+        for (const ProgramElement* e : this->elements()) {
+            result += e->description();
+        }
+        return result;
+    }
+
+    const ProgramUsage* usage() const { return fUsage.get(); }
 
     std::unique_ptr<String> fSource;
     std::unique_ptr<ProgramConfig> fConfig;

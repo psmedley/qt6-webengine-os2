@@ -455,8 +455,8 @@ SI Vec<1,D> cast(const Vec<1,S>& src) { return (D)src.val; }
 
 template <typename D, int N, typename S>
 SI Vec<N,D> cast(const Vec<N,S>& src) {
-#if !defined(SKNX_NO_SIMD) && defined(__clang__)
-    return to_vec(__builtin_convertvector(to_vext(src), VExt<N,D>));
+#if !defined(SKNX_NO_SIMD) && (defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 9))
+    return to_vec<N,D>(__builtin_convertvector(to_vext<N,S>(src), VExt<N,D>));
 #else
     return join(cast<D>(src.lo), cast<D>(src.hi));
 #endif
@@ -491,10 +491,22 @@ SINT Vec<N,T> pin(const Vec<N,T>& x, const Vec<N,T>& lo, const Vec<N,T>& hi) {
 // The only real restriction is that the output also be a legal N=power-of-two sknx::Vec.
 template <int... Ix, int N, typename T>
 SI Vec<sizeof...(Ix),T> shuffle(const Vec<N,T>& x) {
-#if !defined(SKNX_NO_SIMD) && defined(__clang__)
+#if !defined(SKNX_NO_SIMD) && (defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 12))
     // TODO: can we just always use { x[Ix]... }?
     return to_vec<sizeof...(Ix),T>(__builtin_shufflevector(to_vext(x), to_vext(x), Ix...));
 #else
+#if !defined(SKNX_NO_SIMD) && defined(__GNUC__)
+    if constexpr(sizeof...(Ix) == N) {
+        if constexpr(sizeof(T) == 1)
+            return to_vec<N,T>(__builtin_shuffle(to_vext(x), VExt<N,char>{Ix...}));
+        else if constexpr(sizeof(T) == 2)
+            return to_vec<N,T>(__builtin_shuffle(to_vext(x), VExt<N,short>{Ix...}));
+        else if constexpr(sizeof(T) == 4)
+            return to_vec<N,T>(__builtin_shuffle(to_vext(x), VExt<N,int>{Ix...}));
+        else if constexpr(sizeof(T) == 8)
+            return to_vec<N,T>(__builtin_shuffle(to_vext(x), VExt<N,long long>{Ix...}));
+    } else
+#endif
     return { x[Ix]... };
 #endif
 }
@@ -534,10 +546,52 @@ SIN Vec<N,float>   abs(const Vec<N,float>& x) { return map( fabsf, x); }
 SIN Vec<N,float>   fma(const Vec<N,float>& x,
                        const Vec<N,float>& y,
                        const Vec<N,float>& z) {
+#if defined(__clang__)
     // I don't understand why Clang's codegen is terrible if we write map(fmaf, x,y,z) directly.
     auto fn = [](float x, float y, float z) { return fmaf(x,y,z); };
     return map(fn, x,y,z);
+#else
+    if constexpr(N > 8) {
+        Vec<N,float> out;
+        out.hi = fma(x.hi, y.hi, z.hi);
+        out.lo = fma(x.lo, y.lo, z.lo);
+        return out;
+    } else {
+        return map(fmaf, x,y,z);
+    }
+#endif
 }
+
+#if !defined(SKNX_NO_SIMD) && (defined(__GNUC__) || defined(__clang__))
+#if defined(__AVX2__)
+    SI Vec<4,float> fma(const Vec<4,float>& x, const Vec<4,float>& y, const Vec<4,float>& z) {
+        return to_vec<4,float>(_mm_fmadd_ps(to_vext<4,float>(x),
+                                            to_vext<4,float>(y),
+                                            to_vext<4,float>(z)));
+    }
+
+    SI Vec<8,float> fma(const Vec<8,float>& x, const Vec<8,float>& y, const Vec<8,float>& z) {
+        return to_vec<8,float>(_mm256_fmadd_ps(to_vext<8,float>(x),
+                                               to_vext<8,float>(y),
+                                               to_vext<8,float>(z)));
+    }
+#if defined(__AVX512F__)
+    SI Vec<16,float> fma(const Vec<16,float>& x, const Vec<16,float>& y, const Vec<16,float>& z) {
+        return to_vec<16,float>(_mm512_fmadd_ps(to_vext<16,float>(x),
+                                                to_vext<16,float>(y),
+                                                to_vext<16,float>(z)));
+    }
+#endif
+#elif defined(__aarch64__)
+    SI Vec<4,float> fma(const Vec<4,float>& x, const Vec<4,float>& y, const Vec<4,float>& z) {
+        // These instructions tend to work like z += xy, so the order here is z,x,y.
+        return to_vec<4,float>(vfmaq_f32(to_vext<4,float>(z),
+                                         to_vext<4,float>(x),
+                                         to_vext<4,float>(y)));
+    }
+#endif
+
+#endif // !defined(SKNX_NO_SIMD)
 
 SI Vec<1,int> lrint(const Vec<1,float>& x) {
     return (int)lrintf(x.val);

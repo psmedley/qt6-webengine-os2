@@ -15,9 +15,15 @@
 #include "build/chromeos_buildflags.h"
 #include "components/google/core/common/google_util.h"
 #include "components/signin/core/browser/cookie_settings_util.h"
+#include "components/signin/public/identity_manager/tribool.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/crosapi/mojom/crosapi.mojom.h"
+#include "chromeos/lacros/lacros_service.h"
+#endif
 
 namespace signin {
 
@@ -35,7 +41,7 @@ const char kProfileModeAttrName[] = "mode";
 const char kServiceTypeAttrName[] = "action";
 const char kSupervisedAttrName[] = "supervised";
 const char kSourceAttrName[] = "source";
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if defined(OS_ANDROID)
 const char kEligibleForConsistency[] = "eligible_for_consistency";
 const char kShowConsistencyPromo[] = "show_consistency_promo";
 #endif
@@ -78,9 +84,9 @@ std::string ChromeConnectedHeaderHelper::BuildRequestCookieIfPossible(
   // Child accounts are not supported on iOS, so it is preferred to not include
   // this information in the ChromeConnected cookie.
   return chrome_connected_helper.BuildRequestHeader(
-      false /* is_header_request */, url, gaia_id,
-      base::nullopt /* is_child_account */, profile_mode_mask, "" /* source */,
-      false /* force_account_consistency */);
+      /*is_header_request=*/false, url, gaia_id,
+      /*is_child_account=*/Tribool::kUnknown, profile_mode_mask,
+      /*source=*/std::string(), /*force_account_consistency=*/false);
 }
 
 // static
@@ -104,7 +110,7 @@ ManageAccountsParams ChromeConnectedHeaderHelper::BuildManageAccountsParams(
       params.continue_url = value;
     } else if (key_name == kIsSameTabAttrName) {
       params.is_same_tab = value == "true";
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if defined(OS_ANDROID)
     } else if (key_name == kShowConsistencyPromo) {
       params.show_consistency_promo = value == "true";
 #endif
@@ -183,7 +189,7 @@ std::string ChromeConnectedHeaderHelper::BuildRequestHeader(
     bool is_header_request,
     const GURL& url,
     const std::string& gaia_id,
-    const base::Optional<bool>& is_child_account,
+    Tribool is_child_account,
     int profile_mode_mask,
     const std::string& source,
     bool force_account_consistency) {
@@ -199,11 +205,13 @@ std::string ChromeConnectedHeaderHelper::BuildRequestHeader(
 // Sessions and Active Directory logins. Guest Sessions have already been
 // filtered upstream and we want to enforce account consistency in Public
 // Sessions and Active Directory logins.
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  force_account_consistency = true;
+#endif
+
   if (!force_account_consistency && gaia_id.empty()) {
-#if defined(OS_ANDROID) || defined(OS_IOS)
-    if (base::FeatureList::IsEnabled(kMobileIdentityConsistency) &&
-        gaia::IsGaiaSignonRealm(url.GetOrigin())) {
+#if defined(OS_ANDROID)
+    if (gaia::IsGaiaSignonRealm(url.GetOrigin())) {
       parts.push_back(
           base::StringPrintf("%s=%s", kEligibleForConsistency, "true"));
       return base::JoinString(parts, is_header_request ? "," : ":");
@@ -211,7 +219,6 @@ std::string ChromeConnectedHeaderHelper::BuildRequestHeader(
 #endif  // defined(OS_ANDROID) || defined(OS_IOS)
     return std::string();
   }
-#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
   if (!gaia_id.empty() &&
       IsUrlEligibleToIncludeGaiaId(url, is_header_request)) {
@@ -226,10 +233,17 @@ std::string ChromeConnectedHeaderHelper::BuildRequestHeader(
       account_consistency_ == AccountConsistencyMethod::kMirror;
   parts.push_back(base::StringPrintf("%s=%s", kEnableAccountConsistencyAttrName,
                                      is_mirror_enabled ? "true" : "false"));
-  if (is_child_account.has_value()) {
-    parts.push_back(
-        base::StringPrintf("%s=%s", kSupervisedAttrName,
-                           is_child_account.value() ? "true" : "false"));
+  switch (is_child_account) {
+    case Tribool::kTrue:
+      parts.push_back(base::StringPrintf("%s=%s", kSupervisedAttrName, "true"));
+      break;
+    case Tribool::kFalse:
+      parts.push_back(
+          base::StringPrintf("%s=%s", kSupervisedAttrName, "false"));
+      break;
+    case Tribool::kUnknown:
+      // Do not add the supervised parameter.
+      break;
   }
   parts.push_back(base::StringPrintf(
       "%s=%s", kConsistencyEnabledByDefaultAttrName, "false"));

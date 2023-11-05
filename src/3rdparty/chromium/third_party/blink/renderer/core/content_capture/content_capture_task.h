@@ -9,6 +9,7 @@
 
 #include "base/time/time.h"
 #include "cc/paint/node_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/content_capture/content_capture_task_histogram_reporter.h"
 #include "third_party/blink/renderer/core/content_capture/task_session.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -45,8 +46,7 @@ class CORE_EXPORT ContentCaptureTask
 
   class CORE_EXPORT TaskDelay {
    public:
-    TaskDelay(const base::TimeDelta& task_short_delay,
-              const base::TimeDelta& task_long_delay);
+    explicit TaskDelay(const base::TimeDelta& task_initial_delay);
     // Resets the |delay_exponent| and returns the initial delay.
     base::TimeDelta ResetAndGetInitialDelay();
 
@@ -56,14 +56,10 @@ class CORE_EXPORT ContentCaptureTask
     // Increases delay time of next task exponentially after the task started.
     void IncreaseDelayExponent();
 
-    base::TimeDelta task_short_delay() const { return task_short_delay_; }
-    base::TimeDelta task_long_delay() const { return task_long_delay_; }
+    base::TimeDelta task_initial_delay() const { return task_initial_delay_; }
 
    private:
-    // Schedules the task with short delay for kFirstContentChange, kScrolling
-    // and kRetryTask, with long delay for kContentChange.
-    const base::TimeDelta task_short_delay_;
-    const base::TimeDelta task_long_delay_;
+    const base::TimeDelta task_initial_delay_;
 
     // The exponent to calculate the next task delay time.
     int delay_exponent_ = 0;
@@ -149,8 +145,8 @@ class CORE_EXPORT ContentCaptureTask
   std::unique_ptr<TaskDelay> task_delay_;
 
   scoped_refptr<ContentCaptureTaskHistogramReporter> histogram_reporter_;
-  base::Optional<TaskState> task_stop_for_testing_;
-  base::Optional<Vector<cc::NodeInfo>> captured_content_for_testing_;
+  absl::optional<TaskState> task_stop_for_testing_;
+  absl::optional<Vector<cc::NodeInfo>> captured_content_for_testing_;
 };
 
 }  // namespace blink

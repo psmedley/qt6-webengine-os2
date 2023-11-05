@@ -126,8 +126,14 @@ class SrtpSession {
 
   webrtc::SequenceChecker thread_checker_;
   srtp_ctx_t_* session_ = nullptr;
+
+  // Overhead of the SRTP auth tag for RTP and RTCP in bytes.
+  // Depends on the cipher suite used and is usually the same with the exception
+  // of the kCsAesCm128HmacSha1_32 cipher suite. The additional four bytes
+  // required for RTCP protection are not included.
   int rtp_auth_tag_len_ = 0;
   int rtcp_auth_tag_len_ = 0;
+
   bool inited_ = false;
   static webrtc::GlobalMutex lock_;
   int last_send_seq_num_ = -1;

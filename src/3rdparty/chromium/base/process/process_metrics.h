@@ -12,19 +12,14 @@
 #include <stdint.h>
 
 #include <memory>
-#include <string>
-#include <utility>
-#include <vector>
 
 #include "base/base_export.h"
-#include "base/cpu.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/process/process_handle.h"
-#include "base/threading/platform_thread.h"
+#include "base/strings/string_piece.h"
 #include "base/time/time.h"
-#include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 
@@ -42,7 +37,19 @@
 #include "base/win/windows_types.h"
 #endif
 
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID) || \
+    defined(OS_AIX)
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "base/cpu.h"
+#include "base/threading/platform_thread.h"
+#endif
+
 namespace base {
+
+class Value;
 
 // Full declaration is in process_metrics_iocounters.h.
 struct IoCounters;
@@ -75,7 +82,7 @@ BASE_EXPORT int64_t TimeValToMicroseconds(const struct timeval& tv);
 // To obtain consistent memory metrics, use the memory_instrumentation service.
 //
 // For further documentation on memory, see
-// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/README.md
+// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/README.md#Memory
 class BASE_EXPORT ProcessMetrics {
  public:
   ~ProcessMetrics();
@@ -116,13 +123,13 @@ class BASE_EXPORT ProcessMetrics {
   //
   // Since this API measures usage over an interval, it will return zero on the
   // first call, and an actual value only on the second and subsequent calls.
-  double GetPlatformIndependentCPUUsage();
+  double GetPlatformIndependentCPUUsage() WARN_UNUSED_RESULT;
 
   // Returns the cumulative CPU usage across all threads of the process since
   // process start. In case of multi-core processors, a process can consume CPU
   // at a rate higher than wall-clock time, e.g. two cores at full utilization
   // will result in a time delta of 2 seconds/per 1 wall-clock second.
-  TimeDelta GetCumulativeCPUUsage();
+  TimeDelta GetCumulativeCPUUsage() WARN_UNUSED_RESULT;
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID) || \
     defined(OS_AIX)
@@ -193,14 +200,6 @@ class BASE_EXPORT ProcessMetrics {
   // and fills in the IO_COUNTERS passed in. The function returns false
   // otherwise.
   bool GetIOCounters(IoCounters* io_counters) const;
-
-  // Returns the number of bytes transferred to/from disk per second, across all
-  // threads of the process, in the interval since the last time the method was
-  // called.
-  //
-  // Since this API measures usage over an interval, it will return zero on the
-  // first call, and an actual value only on the second and subsequent calls.
-  uint64_t GetDiskUsageBytesPerSecond();
 
   // Returns the cumulative disk usage in bytes across all threads of the
   // process since process start.
@@ -287,14 +286,12 @@ class BASE_EXPORT ProcessMetrics {
   uint64_t last_energy_impact_time_;
 #endif
 
-#if !defined(OS_IOS)
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   // Queries the port provider if it's set.
   mach_port_t TaskForPid(ProcessHandle process) const;
 
   PortProvider* port_provider_;
-#endif  // defined(OS_APPLE)
-#endif  // !defined(OS_IOS)
+#endif  // defined(OS_MAC)
 
   DISALLOW_COPY_AND_ASSIGN(ProcessMetrics);
 };
@@ -302,12 +299,6 @@ class BASE_EXPORT ProcessMetrics {
 // Returns the memory committed by the system in KBytes.
 // Returns 0 if it can't compute the commit charge.
 BASE_EXPORT size_t GetSystemCommitCharge();
-
-// Returns the number of bytes in a memory page. Do not use this to compute
-// the number of pages in a block of memory for calling mincore(). On some
-// platforms, e.g. iOS, mincore() uses a different page size from what is
-// returned by GetPageSize().
-BASE_EXPORT size_t GetPageSize();
 
 // Returns the maximum number of file descriptors that can be open by a process
 // at once. If the number is unavailable, a conservative best guess is returned.
@@ -339,9 +330,10 @@ BASE_EXPORT void IncreaseFdLimitTo(unsigned int max_descriptors);
 struct BASE_EXPORT SystemMemoryInfoKB {
   SystemMemoryInfoKB();
   SystemMemoryInfoKB(const SystemMemoryInfoKB& other);
+  SystemMemoryInfoKB& operator=(const SystemMemoryInfoKB& other);
 
   // Serializes the platform specific fields to value.
-  std::unique_ptr<DictionaryValue> ToValue() const;
+  Value ToValue() const;
 
   int total = 0;
 
@@ -435,7 +427,7 @@ BASE_EXPORT bool ParseProcMeminfo(StringPiece input,
 // Data from /proc/vmstat.
 struct BASE_EXPORT VmStatInfo {
   // Serializes the platform specific fields to value.
-  std::unique_ptr<DictionaryValue> ToValue() const;
+  Value ToValue() const;
 
   unsigned long pswpin = 0;
   unsigned long pswpout = 0;
@@ -455,10 +447,11 @@ BASE_EXPORT bool ParseProcVmstat(StringPiece input, VmStatInfo* vmstat);
 // Data from /proc/diskstats about system-wide disk I/O.
 struct BASE_EXPORT SystemDiskInfo {
   SystemDiskInfo();
-  SystemDiskInfo(const SystemDiskInfo& other);
+  SystemDiskInfo(const SystemDiskInfo&);
+  SystemDiskInfo& operator=(const SystemDiskInfo&);
 
   // Serializes the platform specific fields to value.
-  std::unique_ptr<Value> ToValue() const;
+  Value ToValue() const;
 
   uint64_t reads = 0;
   uint64_t reads_merged = 0;
@@ -500,7 +493,7 @@ struct BASE_EXPORT SwapInfo {
   }
 
   // Serializes the platform specific fields to value.
-  std::unique_ptr<Value> ToValue() const;
+  Value ToValue() const;
 
   uint64_t num_reads = 0;
   uint64_t num_writes = 0;
@@ -529,7 +522,7 @@ BASE_EXPORT bool GetSwapInfo(SwapInfo* swap_info);
 // Data about GPU memory usage. These fields will be -1 if not supported.
 struct BASE_EXPORT GraphicsMemoryInfoKB {
   // Serializes the platform specific fields to value.
-  std::unique_ptr<Value> ToValue() const;
+  Value ToValue() const;
 
   int gpu_objects = -1;
   int64_t gpu_memory_size = -1;
@@ -548,7 +541,7 @@ struct BASE_EXPORT SystemPerformanceInfo {
   SystemPerformanceInfo(const SystemPerformanceInfo& other);
 
   // Serializes the platform specific fields to value.
-  std::unique_ptr<Value> ToValue() const;
+  Value ToValue() const;
 
   // Total idle time of all processes in the system (units of 100 ns).
   uint64_t idle_time = 0;
@@ -591,7 +584,7 @@ class BASE_EXPORT SystemMetrics {
   static SystemMetrics Sample();
 
   // Serializes the system metrics to value.
-  std::unique_ptr<Value> ToValue() const;
+  Value ToValue() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SystemMetricsTest, SystemMetrics);

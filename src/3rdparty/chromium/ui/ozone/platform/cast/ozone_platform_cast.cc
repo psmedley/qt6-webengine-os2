@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "chromecast/chromecast_buildflags.h"
@@ -91,6 +92,7 @@ class OzonePlatformCast : public OzonePlatform {
     NOTREACHED();
     return nullptr;
   }
+  void InitScreen(PlatformScreen* screen) override { NOTREACHED(); }
   GpuPlatformSupportHost* GetGpuPlatformSupportHost() override {
     return gpu_platform_support_host_.get();
   }

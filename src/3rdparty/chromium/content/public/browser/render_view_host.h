@@ -5,7 +5,6 @@
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 
-#include "base/callback_forward.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/common/drop_data.h"
@@ -41,7 +40,7 @@ class RenderWidgetHost;
 // DEPRECATED: RenderViewHost is being removed as part of the SiteIsolation
 // project. New code should not be added here, but to RenderWidgetHost (if it's
 // about drawing or events), RenderFrameHost (if it's frame specific), or
-// WebContents (if it's page specific).
+// Page (if it's page specific).
 //
 // For context, please see https://crbug.com/467770 and
 // https://www.chromium.org/developers/design-documents/site-isolation.
@@ -87,6 +86,9 @@ class CONTENT_EXPORT RenderViewHost {
 
   // Returns true if the RenderView is active and has not crashed.
   virtual bool IsRenderViewLive() = 0;
+
+  // Write a representation of this object into a trace.
+  virtual void WriteIntoTrace(perfetto::TracedValue context) = 0;
 
  private:
   // This interface should only be implemented inside content.

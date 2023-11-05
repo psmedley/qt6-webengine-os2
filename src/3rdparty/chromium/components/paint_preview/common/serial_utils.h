@@ -16,7 +16,7 @@
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkSerialProcs.h"
 #include "third_party/skia/include/core/SkTypeface.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace paint_preview {
 
@@ -57,15 +57,21 @@ struct ImageSerializationContext {
   // max value of uint64_t.
   uint64_t remaining_image_size{std::numeric_limits<uint64_t>::max()};
 
-  // The maximum size of the representation for serialization. Images
-  // that are larger than this when encoded or will need to be inflated to a
-  // bitmap larger than this are skipped to avoid OOMs. If this value is 0 image
-  // procs are skipped and the default behavior is used.
-  uint64_t max_representation_size{0};
+  // The maximum size of a decoded image allowed for serialization. Images that
+  // are larger than this when decoded are skipped.
+  uint64_t max_decoded_image_size_bytes{std::numeric_limits<uint64_t>::max()};
+
+  // Skip texture backed images. Must be true if serialized off the main
+  // thread.
+  bool skip_texture_backed{false};
+
+  // Will be set to true post serialization if the `remaining_image_size` budget
+  // was exceeded.
+  bool memory_budget_exceeded{false};
 };
 
 // Maps a content ID to a clip rect.
-using DeserializationContext = base::flat_map<uint32_t, gfx::Rect>;
+using DeserializationContext = base::flat_map<uint32_t, gfx::RectF>;
 
 // A pair that contains a frame's |SkPicture| and its associated scroll offsets.
 // Used in |LoadedFramesDeserialContext| to correctly replay the scroll state

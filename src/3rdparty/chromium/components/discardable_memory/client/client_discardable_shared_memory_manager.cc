@@ -9,17 +9,15 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
-#include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
 #include "base/memory/discardable_memory.h"
 #include "base/memory/discardable_shared_memory.h"
+#include "base/memory/page_size.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/memory.h"
-#include "base/process/process_metrics.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/system/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -29,22 +27,6 @@
 #include "components/crash/core/common/crash_key.h"
 
 namespace discardable_memory {
-
-// This controls whether unlocked memory is released when |ReleaseFreeMemory| is
-// called. Enabling this causes |ReleaseFreeMemory| to release all
-// unlocked memory instances, as well as release all free memory (as opposed to
-// merely releasing all free memory).
-const base::Feature kPurgeUnlockedMemory{"PurgeUnlockedMemory",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
-
-// This controls whether unlocked memory is periodically purged from the
-// foreground process. Enabling this causes a task to be scheduled at regular
-// intervals to purge unlocked memory that hasn't been touched in a while. This
-// task is stopped if no discardable memory is left, and restarted at the next
-// allocation.
-const base::Feature kSchedulePeriodicPurge{"SchedulePeriodicPurge",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
-
 namespace {
 
 // Global atomic to generate unique discardable shared memory IDs.
@@ -183,6 +165,7 @@ base::trace_event::MemoryAllocatorDump* ClientDiscardableSharedMemoryManager::
     DiscardableMemoryImpl::CreateMemoryAllocatorDump(
         const char* name,
         base::trace_event::ProcessMemoryDump* pmd) const {
+  base::AutoLock lock(manager_->lock_);
   return manager_->CreateMemoryAllocatorDump(span_.get(), name, pmd);
 }
 
@@ -204,9 +187,7 @@ ClientDiscardableSharedMemoryManager::ClientDiscardableSharedMemoryManager(
       task_runner_(base::ThreadTaskRunnerHandle::Get()),
       heap_(std::make_unique<DiscardableSharedMemoryHeap>()),
       io_task_runner_(std::move(io_task_runner)),
-      manager_mojo_(nullptr),
-      may_schedule_periodic_purge_(
-          base::FeatureList::IsEnabled(kSchedulePeriodicPurge)) {
+      manager_mojo_(nullptr) {
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       this, "ClientDiscardableSharedMemoryManager",
       base::ThreadTaskRunnerHandle::Get());
@@ -251,7 +232,7 @@ ClientDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     size_t size) {
   base::AutoLock lock(lock_);
 
-  if (may_schedule_periodic_purge_ && !is_purge_scheduled_) {
+  if (!is_purge_scheduled_) {
     task_runner_->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&ClientDiscardableSharedMemoryManager::ScheduledPurge,
@@ -321,6 +302,9 @@ ClientDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     // at least one span from the free lists.
     MemoryUsageChanged(heap_->GetSize(), heap_->GetFreelistSize());
 
+    // Memory in this span is no longer held in the freelist, so we don't want
+    // to count it towards the total of dirty freelist memory.
+    heap_->dirty_freed_memory_page_count_ -= free_span->MarkAsClean();
     auto discardable_memory =
         std::make_unique<DiscardableMemoryImpl>(this, std::move(free_span));
     allocated_memory_.insert(discardable_memory.get());
@@ -373,7 +357,7 @@ ClientDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
             reinterpret_cast<size_t>(leftover->shared_memory()->memory()),
         leftover->length() * base::GetPageSize());
     leftover->set_is_locked(false);
-    heap_->MergeIntoFreeLists(std::move(leftover));
+    heap_->MergeIntoFreeListsClean(std::move(leftover));
   }
 
   if (pages >= allocation_pages) {
@@ -405,6 +389,11 @@ bool ClientDiscardableSharedMemoryManager::OnMemoryDump(
     base::UmaHistogramCounts1M("Memory.Discardable.Size.Foreground",
                                total_size - freelist_size);
   }
+
+  base::UmaHistogramCounts1M(
+      "Memory.Discardable.FreelistSize.Dirty",
+      heap_->dirty_freed_memory_page_count_ * base::GetPageSize() / 1024);
+
   return heap_->OnMemoryDump(args, pmd);
 }
 
@@ -475,17 +464,10 @@ void ClientDiscardableSharedMemoryManager::PurgeUnlockedMemory(
     }
   }
 
-  ReleaseFreeMemoryImpl();
+  ReleaseFreeMemory();
 }
 
 void ClientDiscardableSharedMemoryManager::ReleaseFreeMemory() {
-  if (base::FeatureList::IsEnabled(kPurgeUnlockedMemory))
-    BackgroundPurge();
-  else
-    ReleaseFreeMemoryImpl();
-}
-
-void ClientDiscardableSharedMemoryManager::ReleaseFreeMemoryImpl() {
   TRACE_EVENT0("blink",
                "ClientDiscardableSharedMemoryManager::ReleaseFreeMemory()");
   base::AutoLock lock(lock_);
@@ -569,7 +551,6 @@ ClientDiscardableSharedMemoryManager::CreateMemoryAllocatorDump(
     DiscardableSharedMemoryHeap::Span* span,
     const char* name,
     base::trace_event::ProcessMemoryDump* pmd) const {
-  base::AutoLock lock(lock_);
   return heap_->CreateMemoryAllocatorDump(span, name, pmd);
 }
 

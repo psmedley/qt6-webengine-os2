@@ -26,8 +26,10 @@
 
 #include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 
+#include "base/macros.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
@@ -51,7 +53,6 @@
 #include "third_party/blink/renderer/core/events/composition_event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
@@ -61,7 +62,6 @@
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/geometry/double_rect.h"
 
 namespace blink {
 
@@ -294,6 +294,8 @@ SuggestionMarker::SuggestionType ConvertImeTextSpanType(
   switch (type) {
     case ImeTextSpan::Type::kAutocorrect:
       return SuggestionMarker::SuggestionType::kAutocorrect;
+    case ImeTextSpan::Type::kGrammarSuggestion:
+      return SuggestionMarker::SuggestionType::kGrammar;
     case ImeTextSpan::Type::kMisspellingSuggestion:
       return SuggestionMarker::SuggestionType::kMisspelling;
     case ImeTextSpan::Type::kComposition:
@@ -307,6 +309,8 @@ ImeTextSpan::Type ConvertSuggestionMarkerType(
   switch (type) {
     case SuggestionMarker::SuggestionType::kAutocorrect:
       return ImeTextSpan::Type::kAutocorrect;
+    case SuggestionMarker::SuggestionType::kGrammar:
+      return ImeTextSpan::Type::kGrammarSuggestion;
     case SuggestionMarker::SuggestionType::kMisspelling:
       return ImeTextSpan::Type::kMisspellingSuggestion;
     case SuggestionMarker::SuggestionType::kNotMisspelling:
@@ -316,8 +320,9 @@ ImeTextSpan::Type ConvertSuggestionMarkerType(
 
 // ImeTextSpans types that need to be provided to TextInputInfo can be added
 // here.
-bool ShouldGetImeTextSpansAroundPosition(ImeTextSpan::Type type) {
-  return type == ImeTextSpan::Type::kAutocorrect;
+bool ShouldGetImeTextSpans(ImeTextSpan::Type type) {
+  return type == ImeTextSpan::Type::kAutocorrect ||
+         type == ImeTextSpan::Type::kGrammarSuggestion;
 }
 
 }  // anonymous namespace
@@ -392,7 +397,7 @@ void InputMethodController::DispatchBeforeInputFromComposition(
   // TODO(editing-dev): Pass appropriate |ranges| after it's defined on spec.
   // http://w3c.github.io/editing/input-events.html#dom-inputevent-inputtype
   InputEvent* before_input_event = InputEvent::CreateBeforeInput(
-      input_type, data, InputEvent::kNotCancelable,
+      input_type, data, InputTypeIsCancelable(input_type),
       InputEvent::EventIsComposing::kIsComposing, nullptr);
   target->DispatchEvent(*before_input_event);
 }
@@ -510,6 +515,7 @@ void InputMethodController::ClearImeTextSpansByType(ImeTextSpan::Type type,
 
   switch (type) {
     case ImeTextSpan::Type::kAutocorrect:
+    case ImeTextSpan::Type::kGrammarSuggestion:
     case ImeTextSpan::Type::kMisspellingSuggestion:
     case ImeTextSpan::Type::kSuggestion:
       GetDocument().Markers().RemoveSuggestionMarkerByType(
@@ -744,6 +750,7 @@ void InputMethodController::AddImeTextSpans(
         break;
       }
       case ImeTextSpan::Type::kAutocorrect:
+      case ImeTextSpan::Type::kGrammarSuggestion:
       case ImeTextSpan::Type::kSuggestion:
       case ImeTextSpan::Type::kMisspellingSuggestion:
         const SuggestionMarker::SuggestionType suggestion_type =
@@ -1330,8 +1337,7 @@ bool InputMethodController::DeleteSelectionWithoutAdjustment() {
     TypingCommand::UpdateSelectionIfDifferentFromCurrentSelection(
         last_typing_command, &GetFrame());
 
-    last_typing_command->DeleteSelection(TypingCommand::kSmartDelete,
-                                         ASSERT_NO_EDITING_ABORT);
+    last_typing_command->DeleteSelection(true, ASSERT_NO_EDITING_ABORT);
     return true;
   }
 
@@ -1513,12 +1519,12 @@ void InputMethodController::GetLayoutBounds(gfx::Rect* control_bounds,
   // Selection bounds are currently populated only for EditContext.
   // For editable elements we use GetCompositionCharacterBounds to fetch the
   // selection bounds.
-  const DOMRect* editable_rect = element->getBoundingClientRect();
-  const DoubleRect editable_rect_double(editable_rect->x(), editable_rect->y(),
-                                        editable_rect->width(),
-                                        editable_rect->height());
-  // Return the IntRect containing the given DOMRect.
-  *control_bounds = EnclosingIntRect(editable_rect_double);
+  *control_bounds = element->BoundsInViewport();
+}
+
+void InputMethodController::DidChangeVisibility(
+    const LayoutObject& layout_object) {
+  cached_text_input_info_.DidChangeVisibility(layout_object);
 }
 
 void InputMethodController::DidLayoutSubtree(
@@ -1548,6 +1554,7 @@ WebTextInputInfo InputMethodController::TextInputInfo() const {
   if (!element)
     return info;
 
+  info.node_id = NodeIdOfFocusedElement();
   info.action = InputActionOfFocusedElement();
   info.input_mode = InputModeOfFocusedElement();
   info.virtual_keyboard_policy = VirtualKeyboardPolicyOfFocusedElement();
@@ -1733,6 +1740,10 @@ void InputMethodController::SetVirtualKeyboardVisibilityRequest(
   }  // else we don't change the last VK visibility request.
 }
 
+DOMNodeId InputMethodController::NodeIdOfFocusedElement() const {
+  return DOMNodeIds::IdForNode(GetDocument().FocusedElement());
+}
+
 WebTextInputType InputMethodController::TextInputType() const {
   if (!GetFrame().Selection().IsAvailable()) {
     // "mouse-capture-inside-shadow.html" reaches here.
@@ -1845,7 +1856,7 @@ WebVector<ui::ImeTextSpan> InputMethodController::GetImeTextSpans() const {
         To<SuggestionMarker>(node_marker_pair.second.Get());
     ImeTextSpan::Type type =
         ConvertSuggestionMarkerType(marker->GetSuggestionType());
-    if (ShouldGetImeTextSpansAroundPosition(type)) {
+    if (ShouldGetImeTextSpans(type)) {
       const Text* node = node_marker_pair.first;
       const EphemeralRange& marker_ephemeral_range =
           EphemeralRange(Position(node, marker->StartOffset()),
@@ -1858,7 +1869,8 @@ WebVector<ui::ImeTextSpan> InputMethodController::GetImeTextSpans() const {
                       marker_plain_text_range.End(), Color::kTransparent,
                       ImeTextSpanThickness::kNone,
                       ImeTextSpanUnderlineStyle::kNone, Color::kTransparent,
-                      Color::kTransparent)
+                      Color::kTransparent, Color::kTransparent, false, false,
+                      marker->Suggestions())
               .ToUiImeTextSpan());
     }
   }

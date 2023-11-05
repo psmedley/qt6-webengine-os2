@@ -46,6 +46,7 @@
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
+#include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
@@ -54,10 +55,9 @@
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/layout/list_marker.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/layout_ng_text_combine.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
@@ -66,7 +66,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/transforms/transform_operations.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "ui/base/ui_base_features.h"
 
 namespace blink {
@@ -95,17 +94,24 @@ bool IsEditableElement(Element* element, const ComputedStyle& style) {
 
 TouchAction AdjustTouchActionForElement(TouchAction touch_action,
                                         const ComputedStyle& style,
+                                        const ComputedStyle& parent_style,
                                         Element* element) {
-  // if body is the viewport defining element then ScrollsOverflow should
-  // return false as body should have overflow-x/overflow-y set to visible
-  Element* body = element ? element->GetDocument().body() : nullptr;
-  bool is_body_and_viewport =
-      element && element == body &&
-      body == element->GetDocument().ViewportDefiningElement();
-  bool is_child_document =
-      element && element == element->GetDocument().documentElement() &&
-      element->GetDocument().LocalOwner();
-  if ((!is_body_and_viewport && style.ScrollsOverflow()) || is_child_document)
+  Element* document_element = element->GetDocument().documentElement();
+  bool scrolls_overflow = style.ScrollsOverflow();
+  if (element && element == element->GetDocument().FirstBodyElement()) {
+    // Body scrolls overflow if html root overflow is not visible or the
+    // propagation of overflow is stopped by containment.
+    if (parent_style.IsOverflowVisibleAlongBothAxes()) {
+      if (!RuntimeEnabledFeatures::CSSContainedBodyPropagationEnabled() ||
+          (!parent_style.ShouldApplyAnyContainment(*document_element) &&
+           !style.ShouldApplyAnyContainment(*element))) {
+        scrolls_overflow = false;
+      }
+    }
+  }
+  bool is_child_document = element && element == document_element &&
+                           element->GetDocument().LocalOwner();
+  if (scrolls_overflow || is_child_document)
     return touch_action | TouchAction::kPan | TouchAction::kInternalPanXScrolls;
   return touch_action;
 }
@@ -208,8 +214,9 @@ static bool OverridesTextDecorationColors(const Element* element) {
          (IsA<HTMLFontElement>(element) || IsA<HTMLAnchorElement>(element));
 }
 
-// FIXME: This helper is only needed because pseudoStyleForElement passes a null
-// element to adjustComputedStyle, so we can't just use element->isInTopLayer().
+// FIXME: This helper is only needed because ResolveStyle passes a null
+// element to AdjustComputedStyle for pseudo-element styles, so we can't just
+// use element->isInTopLayer().
 static bool IsInTopLayer(const Element* element, const ComputedStyle& style) {
   return (element && element->IsInTopLayer()) ||
          style.StyleType() == kPseudoIdBackdrop;
@@ -232,23 +239,52 @@ void StyleAdjuster::AdjustStyleForEditing(ComputedStyle& style) {
     style.SetWhiteSpace(EWhiteSpace::kPreWrap);
 }
 
+void StyleAdjuster::AdjustStyleForTextCombine(ComputedStyle& style) {
+  DCHECK_EQ(style.Display(), EDisplay::kInlineBlock);
+  // Set box sizes
+  const Font& font = style.GetFont();
+  DCHECK(font.GetFontDescription().IsVerticalBaseline());
+  const auto one_em = style.ComputedFontSizeAsFixed();
+  const auto line_height = style.GetFontHeight().LineHeight();
+  const auto size =
+      LengthSize(Length::Fixed(line_height), Length::Fixed(one_em));
+  style.SetContainIntrinsicSize(size);
+  style.SetHeight(size.Height());
+  style.SetLineHeight(size.Height());
+  style.SetMaxHeight(size.Height());
+  style.SetMaxWidth(size.Width());
+  style.SetMinHeight(size.Height());
+  style.SetMinWidth(size.Width());
+  style.SetWidth(size.Width());
+  AdjustStyleForCombinedText(style);
+}
+
+void StyleAdjuster::AdjustStyleForCombinedText(ComputedStyle& style) {
+  style.ResetTextCombine();
+  style.SetLetterSpacing(0.0f);
+  style.SetTextAlign(ETextAlign::kCenter);
+  style.SetTextDecoration(TextDecoration::kNone);
+  style.SetTextEmphasisMark(TextEmphasisMark::kNone);
+  style.SetVerticalAlign(EVerticalAlign ::kMiddle);
+  style.SetWordBreak(EWordBreak::kKeepAll);
+  style.SetWordSpacing(0.0f);
+  style.SetWritingMode(WritingMode::kHorizontalTb);
+
+  style.ClearAppliedTextDecorations();
+  style.UpdateFontOrientation();
+
+  DCHECK_EQ(style.GetFont().GetFontDescription().Orientation(),
+            FontOrientation::kHorizontal);
+
+  LayoutNGTextCombine::AssertStyleIsValid(style);
+}
+
 static void AdjustStyleForFirstLetter(ComputedStyle& style) {
   if (style.StyleType() != kPseudoIdFirstLetter)
     return;
 
   // Force inline display (except for floating first-letters).
   style.SetDisplay(style.IsFloating() ? EDisplay::kBlock : EDisplay::kInline);
-
-  // CSS2 says first-letter can't be positioned.
-  style.SetPosition(EPosition::kStatic);
-}
-
-static void AdjustStyleForFirstLine(ComputedStyle& style) {
-  if (style.StyleType() != kPseudoIdFirstLine)
-    return;
-
-  // Force inline display.
-  style.SetDisplay(EDisplay::kInline);
 }
 
 static void AdjustStyleForMarker(ComputedStyle& style,
@@ -395,18 +431,6 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
     return;
   }
 
-  if (IsA<HTMLSummaryElement>(element) &&
-      !RuntimeEnabledFeatures::SummaryListItemEnabled()) {
-    // <summary> should be a list item by default, but currently it's a block
-    // and the disclosure symbol is not a ::marker (bug 590014). If an author
-    // specifies 'display: list-item', the <summary> would seem to have two
-    // markers (the real one and the disclosure symbol). To avoid this, compute
-    // to 'display: block'. This adjustment should go away with bug 590014.
-    if (style.Display() == EDisplay::kListItem)
-      style.SetDisplay(EDisplay::kBlock);
-    return;
-  }
-
   if (style.Display() == EDisplay::kContents) {
     // See https://drafts.csswg.org/css-display/#unbox-html
     // Some of these elements are handled with other adjustments above.
@@ -492,14 +516,6 @@ static void AdjustStyleForDisplay(ComputedStyle& style,
       style.StyleType() == kPseudoIdNone &&
       style.GetWritingMode() != layout_parent_style.GetWritingMode())
     style.SetDisplay(EDisplay::kInlineBlock);
-
-  // Cannot support position: sticky for table columns and column groups because
-  // current code is only doing background painting through columns / column
-  // groups.
-  if ((style.Display() == EDisplay::kTableColumnGroup ||
-       style.Display() == EDisplay::kTableColumn) &&
-      style.GetPosition() == EPosition::kSticky)
-    style.SetPosition(EPosition::kStatic);
 
   // writing-mode does not apply to table row groups, table column groups, table
   // rows, and table columns.
@@ -600,8 +616,8 @@ static void AdjustEffectiveTouchAction(ComputedStyle& style,
   // The panning-restricted cancellation should also apply to iframes, so we
   // allow (panning & local touch action) on the first descendant element of a
   // iframe element.
-  inherited_action =
-      AdjustTouchActionForElement(inherited_action, style, element);
+  inherited_action = AdjustTouchActionForElement(inherited_action, style,
+                                                 parent_style, element);
 
   TouchAction enforced_by_policy = TouchAction::kNone;
   if (element->GetDocument().IsVerticalScrollEnforced())
@@ -650,6 +666,9 @@ void StyleAdjuster::AdjustForForcedColorsMode(ComputedStyle& style) {
 
   style.SetTextShadow(ComputedStyleInitialValues::InitialTextShadow());
   style.SetBoxShadow(ComputedStyleInitialValues::InitialBoxShadow());
+  style.SetColorScheme({"light", "dark"});
+  if (style.ShouldForceColor(style.AccentColor()))
+    style.SetAccentColor(ComputedStyleInitialValues::InitialAccentColor());
   if (!style.HasUrlBackgroundImage())
     style.ClearBackgroundImage();
 }
@@ -698,9 +717,8 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
     }
 
     // We don't adjust the first letter style earlier because we may change the
-    // display setting in adjustStyeForTagName() above.
+    // display setting in AdjustStyleForHTMLElement() above.
     AdjustStyleForFirstLetter(style);
-    AdjustStyleForFirstLine(style);
     AdjustStyleForMarker(style, parent_style, state.GetElement());
 
     AdjustStyleForDisplay(style, layout_parent_style, element,
@@ -802,6 +820,20 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
     // Columns don't apply to svg text elements.
     if (IsA<SVGTextElement>(*element))
       style.ClearMultiCol();
+
+    // Copy DominantBaseline to CssDominantBaseline without 'no-change',
+    // 'reset-size', and 'use-script'.
+    auto baseline = style.DominantBaseline();
+    if (baseline == EDominantBaseline::kUseScript) {
+      // TODO(fs): The dominant-baseline and the baseline-table components
+      // are set by determining the predominant script of the character data
+      // content.
+      baseline = EDominantBaseline::kAlphabetic;
+    } else if (baseline == EDominantBaseline::kNoChange ||
+               baseline == EDominantBaseline::kResetSize) {
+      baseline = layout_parent_style.CssDominantBaseline();
+    }
+    style.SetCssDominantBaseline(baseline);
   } else if (element && element->IsMathMLElement()) {
     if (style.Display() == EDisplay::kContents) {
       // https://drafts.csswg.org/css-display/#unbox-mathml

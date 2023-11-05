@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_hid_collection_info.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_hid_report_info.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -34,19 +35,21 @@ const char kUnexpectedClose[] = "The device was closed unexpectedly.";
 const char kArrayBufferTooBig[] =
     "The provided ArrayBuffer exceeds the maximum allowed size.";
 
-Vector<uint8_t> ConvertBufferSource(
-    const ArrayBufferOrArrayBufferView& buffer) {
-  DCHECK(!buffer.IsNull());
+Vector<uint8_t> ConvertBufferSource(const V8BufferSource* buffer) {
+  DCHECK(buffer);
   Vector<uint8_t> vector;
-  if (buffer.IsArrayBuffer()) {
-    vector.Append(static_cast<uint8_t*>(buffer.GetAsArrayBuffer()->Data()),
-                  base::checked_cast<wtf_size_t>(
-                      buffer.GetAsArrayBuffer()->ByteLength()));
-  } else {
-    vector.Append(
-        static_cast<uint8_t*>(buffer.GetAsArrayBufferView()->BaseAddress()),
-        base::checked_cast<wtf_size_t>(
-            buffer.GetAsArrayBufferView()->byteLength()));
+  switch (buffer->GetContentType()) {
+    case V8BufferSource::ContentType::kArrayBuffer:
+      vector.Append(static_cast<uint8_t*>(buffer->GetAsArrayBuffer()->Data()),
+                    base::checked_cast<wtf_size_t>(
+                        buffer->GetAsArrayBuffer()->ByteLength()));
+      break;
+    case V8BufferSource::ContentType::kArrayBufferView:
+      vector.Append(
+          static_cast<uint8_t*>(buffer->GetAsArrayBufferView()->BaseAddress()),
+          base::checked_cast<wtf_size_t>(
+              buffer->GetAsArrayBufferView()->byteLength()));
+      break;
   }
   return vector;
 }
@@ -142,7 +145,7 @@ int8_t UnitFactorExponentToInt(uint8_t unit_factor_exponent) {
   DCHECK_LE(unit_factor_exponent, 0x0f);
   // Values from 0x08 to 0x0f encode negative exponents.
   if (unit_factor_exponent > 0x08)
-    return int8_t(unit_factor_exponent) - 16;
+    return static_cast<int8_t>(unit_factor_exponent) - 16;
   return unit_factor_exponent;
 }
 
@@ -216,15 +219,9 @@ HIDDevice::HIDDevice(HID* parent,
                      ExecutionContext* context)
     : ExecutionContextLifecycleObserver(context),
       parent_(parent),
-      device_info_(std::move(info)),
       connection_(context),
       receiver_(this, context) {
-  DCHECK(device_info_);
-  for (const auto& collection : device_info_->collections) {
-    // Omit information about top-level collections with protected usages.
-    if (!IsProtected(*collection->usage))
-      collections_.push_back(ToHIDCollectionInfo(*collection));
-  }
+  UpdateDeviceInfo(std::move(info));
 }
 
 HIDDevice::~HIDDevice() {
@@ -305,7 +302,8 @@ ScriptPromise HIDDevice::close(ScriptState* script_state) {
 
 ScriptPromise HIDDevice::sendReport(ScriptState* script_state,
                                     uint8_t report_id,
-                                    const ArrayBufferOrArrayBufferView& data) {
+                                    const V8BufferSource* data
+) {
   ScriptPromiseResolver* resolver =
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
@@ -318,9 +316,9 @@ ScriptPromise HIDDevice::sendReport(ScriptState* script_state,
     return promise;
   }
 
-  size_t data_size = data.IsArrayBuffer()
-                         ? data.GetAsArrayBuffer()->ByteLength()
-                         : data.GetAsArrayBufferView()->byteLength();
+  size_t data_size = data->IsArrayBuffer()
+                         ? data->GetAsArrayBuffer()->ByteLength()
+                         : data->GetAsArrayBufferView()->byteLength();
 
   if (!base::CheckedNumeric<wtf_size_t>(data_size).IsValid()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -335,10 +333,10 @@ ScriptPromise HIDDevice::sendReport(ScriptState* script_state,
   return promise;
 }
 
-ScriptPromise HIDDevice::sendFeatureReport(
-    ScriptState* script_state,
-    uint8_t report_id,
-    const ArrayBufferOrArrayBufferView& data) {
+ScriptPromise HIDDevice::sendFeatureReport(ScriptState* script_state,
+                                           uint8_t report_id,
+                                           const V8BufferSource* data
+) {
   ScriptPromiseResolver* resolver =
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
@@ -351,9 +349,9 @@ ScriptPromise HIDDevice::sendFeatureReport(
     return promise;
   }
 
-  size_t data_size = data.IsArrayBuffer()
-                         ? data.GetAsArrayBuffer()->ByteLength()
-                         : data.GetAsArrayBufferView()->byteLength();
+  size_t data_size = data->IsArrayBuffer()
+                         ? data->GetAsArrayBuffer()->ByteLength()
+                         : data->GetAsArrayBufferView()->byteLength();
 
   if (!base::CheckedNumeric<wtf_size_t>(data_size).IsValid()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -398,6 +396,16 @@ bool HIDDevice::HasPendingActivity() const {
   // The object should be considered active if it is connected and has at least
   // one event listener.
   return connection_.is_bound() && HasEventListeners();
+}
+
+void HIDDevice::UpdateDeviceInfo(device::mojom::blink::HidDeviceInfoPtr info) {
+  device_info_ = std::move(info);
+  collections_.clear();
+  for (const auto& collection : device_info_->collections) {
+    // Omit information about top-level collections with protected usages.
+    if (!IsProtected(*collection->usage))
+      collections_.push_back(ToHIDCollectionInfo(*collection));
+  }
 }
 
 void HIDDevice::Trace(Visitor* visitor) const {
@@ -480,7 +488,7 @@ void HIDDevice::FinishSendFeatureReport(ScriptPromiseResolver* resolver,
 void HIDDevice::FinishReceiveFeatureReport(
     ScriptPromiseResolver* resolver,
     bool success,
-    const base::Optional<Vector<uint8_t>>& data) {
+    const absl::optional<Vector<uint8_t>>& data) {
   MarkRequestComplete(resolver);
   if (success && data) {
     DOMArrayBuffer* dom_buffer =

@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/containers/contains.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -171,6 +172,16 @@ class TestAdTracker : public AdTracker {
   base::OnceClosure quit_closure_;
   String url_to_wait_for_;
 };
+
+void SetIsAdSubframe(LocalFrame* frame) {
+  DCHECK(frame);
+  blink::FrameAdEvidence ad_evidence(frame->Parent() &&
+                                     frame->Parent()->IsAdSubframe());
+  ad_evidence.set_created_by_ad_script(
+      mojom::FrameCreationStackEvidence::kCreatedByAdScript);
+  ad_evidence.set_is_complete();
+  frame->SetAdEvidence(ad_evidence);
+}
 
 }  // namespace
 
@@ -434,7 +445,7 @@ TEST_F(AdTrackerSimTest, ScriptDetectedByContext) {
   main_resource_->Complete("<body><iframe></iframe></body>");
   auto* child_frame =
       To<LocalFrame>(GetDocument().GetFrame()->Tree().FirstChild());
-  child_frame->SetIsAdSubframe(blink::mojom::AdFrameType::kRootAd);
+  SetIsAdSubframe(child_frame);
 
   // Now run unknown script in the child's context. It should be considered an
   // ad based on context alone.
@@ -522,7 +533,7 @@ TEST_F(AdTrackerSimTest, AdResourceDetectedByContext) {
       "<body><iframe src='ad_frame.html'></iframe></body>");
   auto* child_frame =
       To<LocalFrame>(GetDocument().GetFrame()->Tree().FirstChild());
-  child_frame->SetIsAdSubframe(blink::mojom::AdFrameType::kRootAd);
+  SetIsAdSubframe(child_frame);
 
   // Load a resource from the frame. It should be detected as an ad resource due
   // to its context.
@@ -561,7 +572,7 @@ TEST_F(AdTrackerSimTest, InlineAdScriptRunningInNonAdContext) {
   // Verify that the new frame is considered created by ad script then set it
   // as an ad subframe. This emulates the embedder tagging a frame as an ad.
   EXPECT_TRUE(child_frame->IsSubframeCreatedByAdScript());
-  child_frame->SetIsAdSubframe(blink::mojom::AdFrameType::kRootAd);
+  SetIsAdSubframe(child_frame);
 
   // Create a new sibling frame to the ad frame. The ad context calls the non-ad
   // context's (top frame) appendChild.
@@ -756,7 +767,7 @@ TEST_F(AdTrackerSimTest, FrameLoadedWhileExecutingAdScript) {
   // Verify that the new frame is considered created by ad script then set it
   // as an ad subframe. This emulates the SubresourceFilterAgent's tagging.
   EXPECT_TRUE(child_frame->IsSubframeCreatedByAdScript());
-  child_frame->SetIsAdSubframe(blink::mojom::AdFrameType::kRootAd);
+  SetIsAdSubframe(child_frame);
 
   vanilla_page.Complete("<img src=vanilla_img.jpg></img>");
   vanilla_image.Complete("");
@@ -978,11 +989,12 @@ TEST_P(AdTrackerVanillaOrAdSimTest, ExternalStylesheetInFrame) {
   if (IsAdRun()) {
     auto* subframe =
         To<LocalFrame>(GetDocument().GetFrame()->Tree().FirstChild());
-    subframe->SetIsAdSubframe(blink::mojom::AdFrameType::kRootAd);
+    SetIsAdSubframe(subframe);
   }
 
   frame.Complete(kPageWithVanillaExternalStylesheet);
   stylesheet.Complete(kStylesheetWithVanillaResources);
+  Compositor().BeginFrame();
 
   // Wait for stylesheet to fetch resources.
   ad_tracker_->WaitForSubresource(vanilla_font_url);
@@ -1060,7 +1072,7 @@ TEST_P(AdTrackerVanillaOrAdSimTest, StyleTagInSubframe) {
   if (IsAdRun()) {
     auto* subframe =
         To<LocalFrame>(GetDocument().GetFrame()->Tree().FirstChild());
-    subframe->SetIsAdSubframe(blink::mojom::AdFrameType::kRootAd);
+    SetIsAdSubframe(subframe);
   }
 
   frame.Complete(kPageWithStyleTagLoadingVanillaResources);

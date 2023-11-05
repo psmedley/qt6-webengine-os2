@@ -11,15 +11,19 @@
 
 #include "ash/public/cpp/assistant/assistant_setup.h"
 #include "ash/public/cpp/assistant/assistant_state.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chromeos/services/assistant/public/cpp/assistant_settings.h"
+#include "components/sync/protocol/user_consent_types.pb.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 
-namespace chromeos {
-
+namespace ash {
 class AssistantOptInFlowScreen;
+}
+
+namespace chromeos {
 
 // Interface for dependency injection between AssistantOptInFlowScreen
 // and its WebUI representation.
@@ -29,7 +33,7 @@ class AssistantOptInFlowScreenView {
 
   virtual ~AssistantOptInFlowScreenView() = default;
 
-  virtual void Bind(AssistantOptInFlowScreen* screen) = 0;
+  virtual void Bind(ash::AssistantOptInFlowScreen* screen) = 0;
   virtual void Unbind() = 0;
   virtual void Show() = 0;
   virtual void Hide() = 0;
@@ -47,6 +51,18 @@ class AssistantOptInFlowScreenHandler
       public ash::AssistantStateObserver,
       public chromeos::assistant::SpeakerIdEnrollmentClient {
  public:
+  struct ConsentData {
+    // Consent token used to complete the opt-in.
+    std::string consent_token;
+
+    // An opaque token for audit record.
+    std::string ui_audit_key;
+
+    // An enum denoting the Assistant activity control setting type.
+    sync_pb::UserConsentTypes::AssistantActivityControlConsent::SettingType
+        setting_type;
+  };
+
   using TView = AssistantOptInFlowScreenView;
 
   explicit AssistantOptInFlowScreenHandler(
@@ -67,7 +83,7 @@ class AssistantOptInFlowScreenHandler
   void GetAdditionalParameters(base::DictionaryValue* dict) override;
 
   // AssistantOptInFlowScreenView:
-  void Bind(AssistantOptInFlowScreen* screen) override;
+  void Bind(ash::AssistantOptInFlowScreen* screen) override;
   void Unbind() override;
   void Show() override;
   void Hide() override;
@@ -111,6 +127,9 @@ class AssistantOptInFlowScreenHandler
   void ReloadContent(const base::Value& dict);
   void AddSettingZippy(const std::string& type, const base::Value& data);
 
+  // Update value prop screen to show the next settings.
+  void UpdateValuePropScreen();
+
   // Handle response from the settings manager.
   void OnGetSettingsResponse(const std::string& settings);
   void OnUpdateSettingsResponse(const std::string& settings);
@@ -134,18 +153,12 @@ class AssistantOptInFlowScreenHandler
   // Power related
   bool DeviceHasBattery();
 
-  AssistantOptInFlowScreen* screen_ = nullptr;
+  ash::AssistantOptInFlowScreen* screen_ = nullptr;
 
   base::OnceClosure on_initialized_;
 
   // Whether the screen should be shown right after initialization.
   bool show_on_init_ = false;
-
-  // Consent token used to complete the opt-in.
-  std::string consent_token_;
-
-  // An opaque token for audit record.
-  std::string ui_audit_key_;
 
   // Whether activity control is needed for user.
   bool activity_control_needed_ = true;
@@ -171,11 +184,26 @@ class AssistantOptInFlowScreenHandler
   // Whether the screen has been initialized.
   bool initialized_ = false;
 
+  // Whether the user has opted in/out any activity control consent.
+  bool has_opted_out_any_consent_ = false;
+  bool has_opted_in_any_consent_ = false;
+
+  // Used to record related information of activity control consents which are
+  // pending for user action.
+  base::circular_deque<ConsentData> pending_consent_data_;
+
   base::WeakPtrFactory<AssistantOptInFlowScreenHandler> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AssistantOptInFlowScreenHandler);
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after the //chrome/browser/chromeos
+// source migration is finished.
+namespace ash {
+using ::chromeos::AssistantOptInFlowScreenHandler;
+using ::chromeos::AssistantOptInFlowScreenView;
+}
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_ASSISTANT_OPTIN_FLOW_SCREEN_HANDLER_H_

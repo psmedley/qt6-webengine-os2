@@ -5,18 +5,19 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_VIEW_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_VIEW_H_
 
-#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
-#if DCHECK_IS_ON()
-#include "base/memory/scoped_refptr.h"
-#endif
 #include <cstring>
 #include <type_traits>
 
 #include "base/containers/span.h"
+#include "base/dcheck_is_on.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
-#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
+
+#if DCHECK_IS_ON()
+#include "base/memory/scoped_refptr.h"
+#endif
 
 namespace WTF {
 
@@ -128,12 +129,6 @@ class WTF_EXPORT StringView {
   StringView(const UChar* chars, unsigned length)
       : impl_(StringImpl::empty16_bit_), bytes_(chars), length_(length) {}
   StringView(const UChar* chars);
-  // TODO(crbug.com/911896): Remove this constructor once `UChar` is `char16_t`
-  // on all platforms.
-  template <typename UCharT = UChar,
-            typename = std::enable_if_t<!std::is_same<UCharT, char16_t>::value>>
-  StringView(const char16_t* chars)
-      : StringView(reinterpret_cast<const UChar*>(chars)) {}
 
 #if DCHECK_IS_ON()
   ~StringView();
@@ -188,14 +183,11 @@ class WTF_EXPORT StringView {
     return {static_cast<const UChar*>(bytes_), length_};
   }
 
-  UChar32 CodepointAt(unsigned i) const {
-    SECURITY_DCHECK(i < length());
-    if (Is8Bit())
-      return (*this)[i];
-    UChar32 codepoint;
-    U16_GET(Characters16(), 0, i, length(), codepoint);
-    return codepoint;
-  }
+  UChar32 CodepointAt(unsigned i) const;
+
+  // Returns i+2 if a pair of [i] and [i+1] is a valid surrogate pair.
+  // Returns i+1 otherwise.
+  unsigned NextCodePointOffset(unsigned i) const;
 
   const void* Bytes() const { return bytes_; }
 
@@ -364,4 +356,4 @@ using WTF::EqualIgnoringASCIICase;
 using WTF::DeprecatedEqualIgnoringCase;
 using WTF::IsAllSpecialCharacters;
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_VIEW_H_

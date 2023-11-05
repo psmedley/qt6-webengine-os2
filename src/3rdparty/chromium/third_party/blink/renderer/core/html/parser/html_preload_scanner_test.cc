@@ -6,8 +6,8 @@
 
 #include <memory>
 #include "base/strings/stringprintf.h"
+#include "services/network/public/mojom/web_client_hints_types.mojom-blink.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_client_hints_type.h"
 #include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/renderer/core/css/media_values_cached.h"
@@ -968,11 +968,6 @@ TEST_F(HTMLPreloadScannerTest, testNonce) {
       {"http://example.test", "<script src='/script' nonce=''></script>", ""},
       {"http://example.test", "<script src='/script' nonce='abc'></script>",
        "abc"},
-      {"http://example.test", "<link rel='import' href='/import'>", ""},
-      {"http://example.test", "<link rel='import' href='/import' nonce=''>",
-       ""},
-      {"http://example.test", "<link rel='import' href='/import' nonce='abc'>",
-       "abc"},
       {"http://example.test", "<link rel='stylesheet' href='/style'>", ""},
       {"http://example.test", "<link rel='stylesheet' href='/style' nonce=''>",
        ""},
@@ -1514,6 +1509,19 @@ TEST_F(HTMLPreloadScannerTest, TemplateInteractions) {
   };
   for (const auto& test : test_cases)
     Test(test);
+}
+
+// Regression test for https://crbug.com/1181291
+TEST_F(HTMLPreloadScannerTest, JavascriptBaseUrl) {
+  PreloadScannerTestCase test_cases[] = {
+      {"",
+       "<base href='javascript:'><base href='javascript:notallowed'><base "
+       "href='http://example.test/'><link rel=preload href=bla as=SCRIPT>",
+       "bla", "http://example.test/", ResourceType::kScript, 0},
+  };
+
+  for (const auto& test_case : test_cases)
+    Test(test_case);
 }
 
 }  // namespace blink

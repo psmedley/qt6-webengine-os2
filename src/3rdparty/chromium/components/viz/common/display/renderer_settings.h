@@ -23,6 +23,7 @@ class VIZ_COMMON_EXPORT RendererSettings {
   RendererSettings(const RendererSettings& other);
   ~RendererSettings();
 
+  bool apply_simple_frame_rate_throttling = false;
   bool allow_antialiasing = true;
   bool force_antialiasing = false;
   bool force_blending_with_shaders = false;
@@ -35,6 +36,7 @@ class VIZ_COMMON_EXPORT RendererSettings {
   int highp_threshold_min = 0;
   bool auto_resize_output_surface = true;
   bool requires_alpha_channel = false;
+  bool disable_render_pass_bypassing = false;
 
   int slow_down_compositing_scale_factor = 1;
 
@@ -71,6 +73,7 @@ class VIZ_COMMON_EXPORT RendererSettings {
 // HostFrameSinkManager.
 struct VIZ_COMMON_EXPORT DebugRendererSettings {
   bool tint_composited_content = false;
+  bool tint_composited_content_modulate = false;
   bool show_overdraw_feedback = false;
   bool show_dc_layer_debug_borders = false;
   bool show_aggregated_damage = false;

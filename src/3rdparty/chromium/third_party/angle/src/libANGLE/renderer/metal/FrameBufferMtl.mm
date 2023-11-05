@@ -14,6 +14,7 @@
 #include "common/MemoryBuffer.h"
 #include "common/angleutils.h"
 #include "common/debug.h"
+#include "libANGLE/ErrorStrings.h"
 #include "libANGLE/renderer/metal/BufferMtl.h"
 #include "libANGLE/renderer/metal/DisplayMtl.h"
 #include "libANGLE/renderer/metal/FrameBufferMtl.h"
@@ -33,6 +34,24 @@ void OverrideMTLClearColor(const mtl::TextureRef &texture,
     *colorOut =
         mtl::EmulatedAlphaClearColor(clearColor.toMTLClearColor(), texture->getColorWritableMask());
 }
+
+const gl::InternalFormat &GetReadAttachmentInfo(const gl::Context *context,
+                                                RenderTargetMtl *renderTarget)
+{
+    GLenum implFormat;
+
+    if (renderTarget && renderTarget->getFormat())
+    {
+        implFormat = renderTarget->getFormat()->actualAngleFormat().fboImplementationInternalFormat;
+    }
+    else
+    {
+        implFormat = GL_NONE;
+    }
+
+    return gl::GetSizedInternalFormatInfo(implFormat);
+}
+
 }
 
 // FramebufferMtl implementation
@@ -55,6 +74,8 @@ void FramebufferMtl::reset()
     mDepthRenderTarget = mStencilRenderTarget = nullptr;
 
     mRenderPassFirstColorAttachmentFormat = nullptr;
+
+    mReadPixelBuffer = nullptr;
 }
 
 void FramebufferMtl::destroy(const gl::Context *context)
@@ -185,12 +206,7 @@ angle::Result FramebufferMtl::clearBufferfi(const gl::Context *context,
 const gl::InternalFormat &FramebufferMtl::getImplementationColorReadFormat(
     const gl::Context *context) const
 {
-    ContextMtl *contextMtl   = mtl::GetImpl(context);
-    GLenum sizedFormat       = mState.getReadAttachment()->getFormat().info->sizedInternalFormat;
-    angle::FormatID formatID = angle::Format::InternalFormatToID(sizedFormat);
-    const mtl::Format &mtlFormat = contextMtl->getDisplay()->getPixelFormat(formatID);
-    GLenum implFormat            = mtlFormat.actualAngleFormat().fboImplementationInternalFormat;
-    return gl::GetSizedInternalFormatInfo(implFormat);
+    return GetReadAttachmentInfo(context, getColorReadRenderTargetNoCache(context));
 }
 
 angle::Result FramebufferMtl::readPixels(const gl::Context *context,
@@ -236,7 +252,7 @@ angle::Result FramebufferMtl::readPixels(const gl::Context *context,
     if (params.packBuffer)
     {
         // If PBO is active, pixels is treated as offset.
-        params.offset = reinterpret_cast<ptrdiff_t>(pixels);
+        params.offset = reinterpret_cast<ptrdiff_t>(pixels) + outputSkipBytes;
     }
 
     if (mFlipY)
@@ -456,10 +472,10 @@ angle::Result FramebufferMtl::blitWithDraw(const gl::Context *context,
         colorBlitParams.srcLevel = srcColorRt->getLevelIndex();
         colorBlitParams.srcLayer = srcColorRt->getLayerIndex();
 
-        colorBlitParams.blitColorMask  = contextMtl->getColorMask();
-        colorBlitParams.enabledBuffers = getState().getEnabledDrawBuffers();
-        colorBlitParams.filter         = filter;
-        colorBlitParams.dstLuminance   = srcColorRt->getFormat()->actualAngleFormat().isLUMA();
+        colorBlitParams.blitWriteMaskArray = contextMtl->getWriteMaskArray();
+        colorBlitParams.enabledBuffers     = getState().getEnabledDrawBuffers();
+        colorBlitParams.filter             = filter;
+        colorBlitParams.dstLuminance       = srcColorRt->getFormat()->actualAngleFormat().isLUMA();
 
         ANGLE_TRY(contextMtl->getDisplay()->getUtils().blitColorWithDraw(
             context, renderEncoder, srcColorRt->getFormat()->actualAngleFormat(), colorBlitParams));
@@ -468,18 +484,22 @@ angle::Result FramebufferMtl::blitWithDraw(const gl::Context *context,
     return angle::Result::Continue;
 }
 
-bool FramebufferMtl::checkStatus(const gl::Context *context) const
+gl::FramebufferStatus FramebufferMtl::checkStatus(const gl::Context *context) const
 {
     if (!mState.attachmentsHaveSameDimensions())
     {
-        return false;
+        return gl::FramebufferStatus::Incomplete(
+            GL_FRAMEBUFFER_UNSUPPORTED,
+            gl::err::kFramebufferIncompleteUnsupportedMissmatchedDimensions);
     }
 
     ContextMtl *contextMtl = mtl::GetImpl(context);
     if (!contextMtl->getDisplay()->getFeatures().allowSeparatedDepthStencilBuffers.enabled &&
         mState.hasSeparateDepthAndStencilAttachments())
     {
-        return false;
+        return gl::FramebufferStatus::Incomplete(
+            GL_FRAMEBUFFER_UNSUPPORTED,
+            gl::err::kFramebufferIncompleteUnsupportedSeparateDepthStencilBuffers);
     }
 
     if (mState.getDepthAttachment() && mState.getDepthAttachment()->getFormat().info->depthBits &&
@@ -495,10 +515,10 @@ bool FramebufferMtl::checkStatus(const gl::Context *context) const
         return checkPackedDepthStencilAttachment();
     }
 
-    return true;
+    return gl::FramebufferStatus::Complete();
 }
 
-bool FramebufferMtl::checkPackedDepthStencilAttachment() const
+gl::FramebufferStatus FramebufferMtl::checkPackedDepthStencilAttachment() const
 {
     if (ANGLE_APPLE_AVAILABLE_XCI(10.14, 13.0, 12.0))
     {
@@ -509,7 +529,9 @@ bool FramebufferMtl::checkPackedDepthStencilAttachment() const
         {
             WARN() << "Packed depth stencil texture/buffer must not be mixed with other "
                       "texture/buffer.";
-            return false;
+            return gl::FramebufferStatus::Incomplete(
+                GL_FRAMEBUFFER_UNSUPPORTED,
+                gl::err::kFramebufferIncompleteUnsupportedSeparateDepthStencilBuffers);
         }
     }
     else
@@ -520,10 +542,12 @@ bool FramebufferMtl::checkPackedDepthStencilAttachment() const
         {
             WARN() << "Packed depth stencil texture/buffer must be bound to both depth & stencil "
                       "attachment point.";
-            return false;
+            return gl::FramebufferStatus::Incomplete(
+                GL_FRAMEBUFFER_UNSUPPORTED,
+                gl::err::kFramebufferIncompleteUnsupportedSeparateDepthStencilBuffers);
         }
     }
-    return true;
+    return gl::FramebufferStatus::Complete();
 }
 
 angle::Result FramebufferMtl::syncState(const gl::Context *context,
@@ -590,6 +614,9 @@ angle::Result FramebufferMtl::syncState(const gl::Context *context,
         {
             contextMtl->onDrawFrameBufferChangedState(context, this, renderPassChanged);
         }
+
+        // Recreate pixel reading buffer if needed in future.
+        mReadPixelBuffer = nullptr;
     }
 
     return angle::Result::Continue;
@@ -625,6 +652,31 @@ RenderTargetMtl *FramebufferMtl::getColorReadRenderTarget(const gl::Context *con
     }
 
     return mColorRenderTargets[mState.getReadIndex()];
+}
+
+RenderTargetMtl *FramebufferMtl::getColorReadRenderTargetNoCache(const gl::Context *context) const
+{
+    if (mState.getReadIndex() >= mColorRenderTargets.size())
+    {
+        return nullptr;
+    }
+
+    if (mBackbuffer)
+    {
+        // If we have a backbuffer/window surface, we can take the old path here and return
+        // the cached color render target.
+        return getColorReadRenderTarget(context);
+    }
+    // If we have no backbuffer, get the attachment from state color attachments, as it may have
+    // changed before syncing.
+    const gl::FramebufferAttachment *attachment = mState.getColorAttachment(mState.getReadIndex());
+    RenderTargetMtl *currentTarget              = nullptr;
+    if (attachment->getRenderTarget(context, attachment->getRenderToTextureSamples(),
+                                    &currentTarget) == angle::Result::Stop)
+    {
+        return nullptr;
+    }
+    return currentTarget;
 }
 
 int FramebufferMtl::getSamples() const
@@ -693,14 +745,16 @@ mtl::RenderCommandEncoder *FramebufferMtl::ensureRenderPassStarted(const gl::Con
 }
 
 void FramebufferMtl::setLoadStoreActionOnRenderPassFirstStart(
-    mtl::RenderPassAttachmentDesc *attachmentOut)
+    mtl::RenderPassAttachmentDesc *attachmentOut,
+    const bool forceDepthStencilMultisampleLoad)
 {
     ASSERT(mRenderPassCleanStart);
 
     mtl::RenderPassAttachmentDesc &attachment = *attachmentOut;
 
-    if (attachment.storeAction == MTLStoreActionDontCare ||
-        attachment.storeAction == MTLStoreActionMultisampleResolve)
+    if (!forceDepthStencilMultisampleLoad &&
+        (attachment.storeAction == MTLStoreActionDontCare ||
+         attachment.storeAction == MTLStoreActionMultisampleResolve))
     {
         // If we previously discarded attachment's content, then don't need to load it.
         attachment.loadAction = MTLLoadActionDontCare;
@@ -734,21 +788,29 @@ void FramebufferMtl::onStartedDrawingToFrameBuffer(const gl::Context *context)
 {
     mRenderPassCleanStart = true;
 
+    // If any of the render targets need to load their multisample textures, we should do the same
+    // for depth/stencil.
+    bool forceDepthStencilMultisampleLoad = false;
+
     // Compute loadOp based on previous storeOp and reset storeOp flags:
     for (mtl::RenderPassColorAttachmentDesc &colorAttachment : mRenderPassDesc.colorAttachments)
     {
-        setLoadStoreActionOnRenderPassFirstStart(&colorAttachment);
+        forceDepthStencilMultisampleLoad |=
+            colorAttachment.storeAction == MTLStoreActionStoreAndMultisampleResolve;
+        setLoadStoreActionOnRenderPassFirstStart(&colorAttachment, false);
     }
     // Depth load/store
-    setLoadStoreActionOnRenderPassFirstStart(&mRenderPassDesc.depthAttachment);
+    setLoadStoreActionOnRenderPassFirstStart(&mRenderPassDesc.depthAttachment,
+                                             forceDepthStencilMultisampleLoad);
 
     // Stencil load/store
-    setLoadStoreActionOnRenderPassFirstStart(&mRenderPassDesc.stencilAttachment);
+    setLoadStoreActionOnRenderPassFirstStart(&mRenderPassDesc.stencilAttachment,
+                                             forceDepthStencilMultisampleLoad);
 }
 
 void FramebufferMtl::onFrameEnd(const gl::Context *context)
 {
-    if (!mBackbuffer)
+    if (!mBackbuffer || mBackbuffer->preserveBuffer())
     {
         return;
     }
@@ -809,6 +871,92 @@ angle::Result FramebufferMtl::updateCachedRenderTarget(const gl::Context *contex
                                               &newRenderTarget));
     }
     *cachedRenderTarget = newRenderTarget;
+    return angle::Result::Continue;
+}
+
+angle::Result FramebufferMtl::getReadableViewForRenderTarget(
+    const gl::Context *context,
+    const RenderTargetMtl &rtt,
+    const gl::Rectangle &readArea,
+    mtl::TextureRef *readableDepthViewOut,
+    mtl::TextureRef *readableStencilViewOut,
+    uint32_t *readableViewLevel,
+    uint32_t *readableViewLayer,
+    gl::Rectangle *readableViewArea)
+{
+    ContextMtl *contextMtl     = mtl::GetImpl(context);
+    mtl::TextureRef srcTexture = rtt.getTexture();
+    uint32_t level             = rtt.getLevelIndex().get();
+    uint32_t slice             = rtt.getLayerIndex();
+
+    // NOTE(hqle): slice is not used atm.
+    ASSERT(slice == 0);
+
+    bool readStencil = readableStencilViewOut;
+
+    if (!srcTexture)
+    {
+        if (readableDepthViewOut)
+        {
+            *readableDepthViewOut = nullptr;
+        }
+        if (readableStencilViewOut)
+        {
+            *readableStencilViewOut = nullptr;
+        }
+        *readableViewArea = readArea;
+        return angle::Result::Continue;
+    }
+
+    bool skipCopy = srcTexture->isShaderReadable();
+    if (rtt.getFormat()->hasDepthAndStencilBits() && readStencil)
+    {
+        // If the texture is packed depth stencil, and we need stencil view,
+        // then it must support creating different format view.
+        skipCopy = skipCopy && srcTexture->supportFormatView();
+    }
+
+    if (skipCopy)
+    {
+        // Texture supports stencil view, just use it directly
+        if (readableDepthViewOut)
+        {
+            *readableDepthViewOut = srcTexture;
+        }
+        if (readableStencilViewOut)
+        {
+            *readableStencilViewOut = srcTexture;
+        }
+        *readableViewLevel = level;
+        *readableViewLayer = slice;
+        *readableViewArea  = readArea;
+    }
+    else
+    {
+        ASSERT(srcTexture->textureType() != MTLTextureType3D);
+
+        // Texture doesn't support stencil view or not shader readable, copy to an interminate
+        // texture that supports stencil view and shader read.
+        mtl::TextureRef formatableView = srcTexture->getReadableCopy(
+            contextMtl, contextMtl->getBlitCommandEncoder(), level, slice,
+            MTLRegionMake2D(readArea.x, readArea.y, readArea.width, readArea.height));
+
+        ANGLE_CHECK_GL_ALLOC(contextMtl, formatableView);
+
+        if (readableDepthViewOut)
+        {
+            *readableDepthViewOut = formatableView;
+        }
+        if (readableStencilViewOut)
+        {
+            *readableStencilViewOut = formatableView->getStencilView();
+        }
+
+        *readableViewLevel = 0;
+        *readableViewLayer = 0;
+        *readableViewArea  = gl::Rectangle(0, 0, readArea.width, readArea.height);
+    }
+
     return angle::Result::Continue;
 }
 
@@ -1042,6 +1190,8 @@ angle::Result FramebufferMtl::clearWithDraw(const gl::Context *context,
             continue;
         }
 
+        overrideClearOps.clearWriteMaskArray[0] = overrideClearOps.clearWriteMaskArray[drawbuffer];
+
         mtl::RenderCommandEncoder *encoder =
             contextMtl->getRenderTargetCommandEncoder(*renderTarget);
         ANGLE_TRY(display->getUtils().clearWithDraw(context, encoder, overrideClearOps));
@@ -1078,8 +1228,8 @@ angle::Result FramebufferMtl::clearImpl(const gl::Context *context,
         return angle::Result::Continue;
     }
 
-    clearOpts.clearColorMask = contextMtl->getColorMask();
-    uint32_t stencilMask     = contextMtl->getStencilMask();
+    clearOpts.clearWriteMaskArray = contextMtl->getWriteMaskArray();
+    uint32_t stencilMask          = contextMtl->getStencilMask();
     if (!contextMtl->getDepthMask())
     {
         // Disable depth clearing, since depth write is disable
@@ -1089,8 +1239,18 @@ angle::Result FramebufferMtl::clearImpl(const gl::Context *context,
     // Only clear enabled buffers
     clearOpts.enabledBuffers = clearColorBuffers;
 
+    bool allBuffersUnmasked = true;
+    for (size_t enabledBuffer : clearColorBuffers)
+    {
+        if (clearOpts.clearWriteMaskArray[enabledBuffer] != MTLColorWriteMaskAll)
+        {
+            allBuffersUnmasked = false;
+            break;
+        }
+    }
+
     if (clearOpts.clearArea == renderArea &&
-        (!clearOpts.clearColor.valid() || clearOpts.clearColorMask == MTLColorWriteMaskAll) &&
+        (!clearOpts.clearColor.valid() || allBuffersUnmasked) &&
         (!clearOpts.clearStencil.valid() ||
          (stencilMask & mtl::kStencilMaskAll) == mtl::kStencilMaskAll))
     {
@@ -1229,6 +1389,10 @@ angle::Result FramebufferMtl::readPixelsImpl(const gl::Context *context,
     {
         texture = renderTarget->getTexture();
         // For non-default framebuffer, MSAA read pixels is disallowed.
+        if (!texture)
+        {
+            return angle::Result::Stop;
+        }
         ANGLE_MTL_CHECK(contextMtl, texture->samples() == 1, GL_INVALID_OPERATION);
     }
 
@@ -1279,18 +1443,35 @@ angle::Result FramebufferMtl::readPixelsToPBO(const gl::Context *context,
 
     ANGLE_MTL_CHECK(contextMtl, packPixelsParams.offset <= std::numeric_limits<uint32_t>::max(),
                     GL_INVALID_OPERATION);
-    const uint32_t dstBufferOffset      = static_cast<uint32_t>(packPixelsParams.offset);
-    const uint32_t dstBufferRowPitch    = packPixelsParams.outputPitch;
-    const angle::Format &dstAngleFormat = *packPixelsParams.destFormat;
-    const bool reverseRowOrder          = packPixelsParams.reverseRowOrder;
+    uint32_t offset = static_cast<uint32_t>(packPixelsParams.offset);
 
     BufferMtl *packBufferMtl = mtl::GetImpl(packPixelsParams.packBuffer);
     mtl::BufferRef dstBuffer = packBufferMtl->getCurrentBuffer();
+
+    return readPixelsToBuffer(context, area, renderTarget, packPixelsParams.reverseRowOrder,
+                              *packPixelsParams.destFormat, offset, packPixelsParams.outputPitch,
+                              &dstBuffer);
+}
+
+angle::Result FramebufferMtl::readPixelsToBuffer(const gl::Context *context,
+                                                 const gl::Rectangle &area,
+                                                 const RenderTargetMtl *renderTarget,
+                                                 bool reverseRowOrder,
+                                                 const angle::Format &dstAngleFormat,
+                                                 uint32_t dstBufferOffset,
+                                                 uint32_t dstBufferRowPitch,
+                                                 const mtl::BufferRef *pDstBuffer) const
+{
+    ASSERT(renderTarget);
+
+    ContextMtl *contextMtl = mtl::GetImpl(context);
 
     const mtl::Format &readFormat        = *renderTarget->getFormat();
     const angle::Format &readAngleFormat = readFormat.actualAngleFormat();
 
     mtl::TextureRef texture = renderTarget->getTexture();
+
+    const mtl::BufferRef &dstBuffer = *pDstBuffer;
 
     if (dstAngleFormat.id != readAngleFormat.id || texture->samples() > 1 ||
         (dstBufferOffset % dstAngleFormat.pixelBytes) ||

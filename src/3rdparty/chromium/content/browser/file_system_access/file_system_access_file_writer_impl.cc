@@ -18,6 +18,7 @@
 #include "content/public/common/content_client.h"
 #include "crypto/secure_hash.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
+#include "net/base/io_buffer.h"
 #include "storage/browser/file_system/file_stream_reader.h"
 #include "storage/browser/file_system/file_system_operation_runner.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_error.mojom.h"
@@ -120,11 +121,6 @@ class HashCalculator : public base::RefCounted<HashCalculator> {
   int64_t file_size_ = -1;
 };
 
-void RemoveSwapFile(const storage::FileSystemURL& swap_url,
-                    storage::FileSystemOperationRunner* runner) {
-  runner->Remove(swap_url, /*recursive=*/false, base::DoNothing());
-}
-
 }  // namespace
 
 struct FileSystemAccessFileWriterImpl::WriteState {
@@ -156,21 +152,22 @@ FileSystemAccessFileWriterImpl::FileSystemAccessFileWriterImpl(
 }
 
 FileSystemAccessFileWriterImpl::~FileSystemAccessFileWriterImpl() {
-  // Purge the swap file. The swap file should be deleted after Close(), but
-  // we'll try to delete it anyways in case the writer wasn't closed cleanly.
-  DoFileSystemOperation(
-      FROM_HERE, &FileSystemOperationRunner::RemoveFile,
-      base::BindOnce(
-          [](const storage::FileSystemURL& swap_url, base::File::Error result) {
-            if (result != base::File::FILE_OK &&
-                result != base::File::FILE_ERROR_NOT_FOUND) {
-              DLOG(ERROR) << "Error Deleting Swap File, status: "
-                          << base::File::ErrorToString(result)
-                          << " path: " << swap_url.path();
-            }
-          },
-          swap_url()),
-      swap_url());
+  if (should_purge_swap_file_on_destruction_) {
+    DoFileSystemOperation(
+        FROM_HERE, &FileSystemOperationRunner::RemoveFile,
+        base::BindOnce(
+            [](const storage::FileSystemURL& swap_url,
+               base::File::Error result) {
+              if (result != base::File::FILE_OK &&
+                  result != base::File::FILE_ERROR_NOT_FOUND) {
+                DLOG(ERROR) << "Error Deleting Swap File, status: "
+                            << base::File::ErrorToString(result)
+                            << " path: " << swap_url.path();
+              }
+            },
+            swap_url()),
+        swap_url());
+  }
 }
 
 void FileSystemAccessFileWriterImpl::Write(
@@ -233,6 +230,8 @@ void FileSystemAccessFileWriterImpl::Abort(AbortCallback callback) {
 // Do not call this method if |close_callback_| is not set.
 void FileSystemAccessFileWriterImpl::CallCloseCallbackAndDeleteThis(
     blink::mojom::FileSystemAccessErrorPtr result) {
+  should_purge_swap_file_on_destruction_ =
+      result->status != blink::mojom::FileSystemAccessStatus::kOk;
   std::move(close_callback_).Run(std::move(result));
 
   // |this| is deleted after this call.
@@ -376,10 +375,8 @@ void FileSystemAccessFileWriterImpl::DoAfterWriteCheck(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (hash_result != base::File::FILE_OK) {
-    // Calculating the hash failed try deleting the swap file and invoke the
-    // callback.
-    manager()->operation_runner().PostTaskWithThisObject(
-        FROM_HERE, base::BindOnce(&RemoveSwapFile, swap_url()));
+    // Calculating the hash failed, the destructor will try to delete the swap
+    // file, so call the callback to report the error and delete `this`.
     CallCloseCallbackAndDeleteThis(file_system_access_error::FromStatus(
         FileSystemAccessStatus::kOperationAborted,
         "Failed to perform Safe Browsing check."));
@@ -404,10 +401,8 @@ void FileSystemAccessFileWriterImpl::DidAfterWriteCheck(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (result !=
       FileSystemAccessPermissionContext::AfterWriteCheckResult::kAllow) {
-    // Safe browsing check failed. In this case we should try deleting the swap
-    // file and call the callback to report that close failed.
-    manager()->operation_runner().PostTaskWithThisObject(
-        FROM_HERE, base::BindOnce(&RemoveSwapFile, swap_url()));
+    // Safe browsing check failed. The destructor will try to delete the swap
+    // file, so report close failure and delete `this`.
     CallCloseCallbackAndDeleteThis(file_system_access_error::FromStatus(
         FileSystemAccessStatus::kOperationAborted,
         "Write operation blocked by Safe Browsing."));

@@ -4,9 +4,11 @@
 
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate_impl.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
@@ -20,7 +22,7 @@
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 #include "chrome/common/extensions/api/passwords_private.h"
 #include "chrome/common/pref_names.h"
@@ -168,7 +170,7 @@ PasswordsPrivateDelegateImpl::PasswordsPrivateDelegateImpl(Profile* profile)
           std::make_unique<
               password_manager::PasswordAccountStorageSettingsWatcher>(
               profile_->GetPrefs(),
-              ProfileSyncServiceFactory::GetForProfile(profile_),
+              SyncServiceFactory::GetForProfile(profile_),
               base::BindRepeating(&PasswordsPrivateDelegateImpl::
                                       OnAccountStorageOptInStateChanged,
                                   base::Unretained(this)))),
@@ -216,8 +218,8 @@ void PasswordsPrivateDelegateImpl::GetPasswordExceptionsList(
 
 bool PasswordsPrivateDelegateImpl::ChangeSavedPassword(
     const std::vector<int>& ids,
-    const base::string16& new_username,
-    const base::string16& new_password) {
+    const std::u16string& new_username,
+    const std::u16string& new_password) {
   const std::vector<std::string> sort_keys =
       GetSortKeys(password_id_generator_, ids);
 
@@ -289,14 +291,14 @@ void PasswordsPrivateDelegateImpl::RequestPlaintextPassword(
   web_contents_ = web_contents;
   if (!password_access_authenticator_.EnsureUserIsAuthenticated(
           GetReauthPurpose(reason))) {
-    std::move(callback).Run(base::nullopt);
+    std::move(callback).Run(absl::nullopt);
     return;
   }
 
   // Request the password. When it is retrieved, ShowPassword() will be called.
   const std::string* sort_key = password_id_generator_.TryGetKey(id);
   if (!sort_key) {
-    std::move(callback).Run(base::nullopt);
+    std::move(callback).Run(absl::nullopt);
     return;
   }
 
@@ -306,16 +308,16 @@ void PasswordsPrivateDelegateImpl::RequestPlaintextPassword(
     // Copying occurs here so javascript doesn't need plaintext password.
     callback = base::BindOnce(
         [](PlaintextPasswordCallback callback,
-           base::Optional<base::string16> password) {
+           absl::optional<std::u16string> password) {
           if (!password) {
-            std::move(callback).Run(base::nullopt);
+            std::move(callback).Run(absl::nullopt);
             return;
           }
           ui::ScopedClipboardWriter clipboard_writer(
               ui::ClipboardBuffer::kCopyPaste);
           clipboard_writer.WriteText(*password);
           clipboard_writer.MarkAsConfidential();
-          std::move(callback).Run(base::string16());
+          std::move(callback).Run(std::u16string());
         },
         std::move(callback));
   }
@@ -340,9 +342,9 @@ bool PasswordsPrivateDelegateImpl::OsReauthCall(
               ->GetAccountId());
   if (user_cannot_manually_enter_password)
     return true;
-  chromeos::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
-      chromeos::quick_unlock::QuickUnlockFactory::GetForProfile(profile_);
-  const chromeos::quick_unlock::AuthToken* auth_token =
+  ash::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
+      ash::quick_unlock::QuickUnlockFactory::GetForProfile(profile_);
+  const ash::quick_unlock::AuthToken* auth_token =
       quick_unlock_storage->GetAuthToken();
   if (!auth_token || !auth_token->GetAge())
     return false;
@@ -377,8 +379,9 @@ void PasswordsPrivateDelegateImpl::SetPasswordList(
                                         password_manager::IgnoreStore(true)));
 
     if (!form->federation_origin.opaque()) {
-      entry.federation_text.reset(new std::string(l10n_util::GetStringFUTF8(
-          IDS_PASSWORDS_VIA_FEDERATION, GetDisplayFederation(*form))));
+      entry.federation_text =
+          std::make_unique<std::string>(l10n_util::GetStringFUTF8(
+              IDS_PASSWORDS_VIA_FEDERATION, GetDisplayFederation(*form)));
     }
 
     entry.from_account_store = form->IsUsingAccountStore();
@@ -482,7 +485,7 @@ PasswordsPrivateDelegateImpl::GetExportProgressStatus() {
 
 bool PasswordsPrivateDelegateImpl::IsOptedInForAccountStorage() {
   return password_manager::features_util::IsOptedInForAccountStorage(
-      profile_->GetPrefs(), ProfileSyncServiceFactory::GetForProfile(profile_));
+      profile_->GetPrefs(), SyncServiceFactory::GetForProfile(profile_));
 }
 
 void PasswordsPrivateDelegateImpl::SetAccountStorageOptIn(
@@ -524,7 +527,7 @@ void PasswordsPrivateDelegateImpl::GetPlaintextInsecurePassword(
   web_contents_ = web_contents;
   if (!password_access_authenticator_.EnsureUserIsAuthenticated(
           GetReauthPurpose(reason))) {
-    std::move(callback).Run(base::nullopt);
+    std::move(callback).Run(absl::nullopt);
     return;
   }
 

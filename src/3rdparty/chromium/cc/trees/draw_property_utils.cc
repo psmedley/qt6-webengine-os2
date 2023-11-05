@@ -12,11 +12,13 @@
 #include "base/containers/adapters.h"
 #include "base/containers/stack.h"
 #include "base/logging.h"
+#include "build/build_config.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/draw_properties.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/picture_layer.h"
+#include "cc/paint/filter_operation.h"
 #include "cc/trees/clip_node.h"
 #include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_impl.h"
@@ -412,15 +414,23 @@ bool IsTransformToRootOf3DRenderingContextBackFaceVisible(
 
   const TransformNode& transform_node =
       *transform_tree.Node(transform_tree_index);
-  if (transform_node.delegates_to_parent_for_backface)
+  const TransformNode* root_node = &transform_node;
+  if (transform_node.delegates_to_parent_for_backface) {
     transform_tree_index = transform_node.parent_id;
+    root_node = transform_tree.Node(transform_tree_index);
+  }
 
   int root_id = transform_tree_index;
   int sorting_context_id = transform_node.sorting_context_id;
 
-  while (root_id > 0 && transform_tree.Node(root_id - 1)->sorting_context_id ==
-                            sorting_context_id)
-    root_id--;
+  while (root_id > TransformTree::kRootNodeId) {
+    int parent_id = root_node->parent_id;
+    const TransformNode* parent_node = transform_tree.Node(parent_id);
+    if (parent_node->sorting_context_id != sorting_context_id)
+      break;
+    root_id = parent_id;
+    root_node = parent_node;
+  }
 
   // TODO(chrishtr): cache this on the transform trees if needed, similar to
   // |to_target| and |to_screen|.
@@ -428,8 +438,7 @@ bool IsTransformToRootOf3DRenderingContextBackFaceVisible(
   if (transform_tree_index != root_id)
     property_trees->transform_tree.CombineTransformsBetween(
         transform_tree_index, root_id, &to_3d_root);
-  to_3d_root.PreconcatTransform(
-      property_trees->transform_tree.Node(root_id)->to_parent);
+  to_3d_root.PreconcatTransform(root_node->to_parent);
   return to_3d_root.IsBackFaceVisible();
 }
 
@@ -829,9 +838,7 @@ void ComputeClips(PropertyTrees* property_trees) {
     bool success = ApplyClipNodeToAccumulatedClip(
         property_trees, include_expanding_clips, target_effect_id,
         target_transform_id, clip_node, &accumulated_clip);
-    if (!success)
-      LOG(ERROR) << "Compute clip failure";
-//    DCHECK(success);
+    DCHECK(success);
     clip_node->cached_accumulated_rect_in_screen_space = accumulated_clip;
   }
   clip_tree->set_needs_update(false);
@@ -1116,20 +1123,86 @@ void RecordRenderSurfaceReasonsForTracing(
 void UpdateElasticOverscroll(
     PropertyTrees* property_trees,
     TransformNode* overscroll_elasticity_transform_node,
-    const gfx::Vector2dF& elastic_overscroll) {
+    ElementId overscroll_elasticity_effect_element_id,
+    const gfx::Vector2dF& elastic_overscroll,
+    const ScrollNode* inner_viewport) {
+#if defined(OS_ANDROID)
+  // On android, elastic overscroll is implemented by stretching the content
+  // from the overscrolled edge.
+  if (!overscroll_elasticity_effect_element_id &&
+      !overscroll_elasticity_transform_node) {
+    DCHECK(elastic_overscroll.IsZero());
+    return;
+  }
+  if (overscroll_elasticity_effect_element_id) {
+    if (elastic_overscroll.IsZero() || !inner_viewport) {
+      property_trees->effect_tree.OnFilterAnimated(
+          overscroll_elasticity_effect_element_id, FilterOperations());
+      return;
+    }
+    // The inner viewport container size takes into account the size change as a
+    // result of the top controls, see ScrollTree::container_bounds.
+    gfx::Size scroller_size =
+        property_trees->scroll_tree.container_bounds(inner_viewport->id);
+
+    property_trees->effect_tree.OnFilterAnimated(
+        overscroll_elasticity_effect_element_id,
+        FilterOperations(
+            std::vector<FilterOperation>({FilterOperation::CreateStretchFilter(
+                -elastic_overscroll.x() / scroller_size.width(),
+                -elastic_overscroll.y() / scroller_size.height())})));
+    return;
+  }
+
+  // If there is no overscroll elasticity effect node, we apply a stretch
+  // transform.
+  overscroll_elasticity_transform_node->local.MakeIdentity();
+  overscroll_elasticity_transform_node->origin.SetPoint(0.f, 0.f, 0.f);
+  overscroll_elasticity_transform_node->to_screen_is_potentially_animated =
+      !elastic_overscroll.IsZero();
+
+  if (!elastic_overscroll.IsZero() && inner_viewport) {
+    // The inner viewport container size takes into account the size change as a
+    // result of the top controls, see ScrollTree::container_bounds.
+    gfx::Size scroller_size =
+        property_trees->scroll_tree.container_bounds(inner_viewport->id);
+
+    overscroll_elasticity_transform_node->local.Scale(
+        1.f + std::abs(elastic_overscroll.x()) / scroller_size.width(),
+        1.f + std::abs(elastic_overscroll.y()) / scroller_size.height());
+
+    // If overscrolling to the right, stretch from right.
+    if (elastic_overscroll.x() > 0.f) {
+      overscroll_elasticity_transform_node->origin.set_x(scroller_size.width());
+    }
+
+    // If overscrolling off the bottom, stretch from bottom.
+    if (elastic_overscroll.y() > 0.f) {
+      overscroll_elasticity_transform_node->origin.set_y(
+          scroller_size.height());
+    }
+  }
+  overscroll_elasticity_transform_node->needs_local_transform_update = true;
+  property_trees->transform_tree.set_needs_update(true);
+#else  // defined(OS_ANDROID)
   if (!overscroll_elasticity_transform_node) {
     DCHECK(elastic_overscroll.IsZero());
     return;
   }
 
+  // On other platforms, we modify the translation offset to match the
+  // overscroll amount.
   if (overscroll_elasticity_transform_node->scroll_offset ==
       gfx::ScrollOffset(elastic_overscroll))
     return;
 
   overscroll_elasticity_transform_node->scroll_offset =
       gfx::ScrollOffset(elastic_overscroll);
+
   overscroll_elasticity_transform_node->needs_local_transform_update = true;
   property_trees->transform_tree.set_needs_update(true);
+
+#endif  // defined(OS_ANDROID)
 }
 
 void ComputeDrawPropertiesOfVisibleLayers(const LayerImplList* layer_list,
@@ -1189,7 +1262,6 @@ void ComputeDrawPropertiesOfVisibleLayers(const LayerImplList* layer_list,
     if (!only_draws_visible_content) {
       drawable_bounds = gfx::Rect(layer->bounds());
     }
-
     gfx::Rect visible_bounds_in_target_space =
         MathUtil::MapEnclosingClippedRect(
             layer->draw_properties().target_space_transform, drawable_bounds);
@@ -1211,7 +1283,6 @@ bool NodeMayContainBackdropBlurFilter(const EffectNode& node) {
     default:
       return false;
   }
-  return false;
 }
 #endif
 
@@ -1241,7 +1312,7 @@ bool CC_EXPORT LayerShouldBeSkippedForDrawPropertiesComputation(
   if (!transform_node->node_and_ancestors_are_animated_or_invertible ||
       !effect_node->is_drawn)
     return true;
-  if (layer->layer_tree_impl()->settings().enable_transform_interop) {
+  if (layer->layer_tree_impl()->settings().enable_backface_visibility_interop) {
     return layer->should_check_backface_visibility() &&
            IsLayerBackFaceVisible(layer, layer->transform_tree_index(),
                                   property_trees);
@@ -1253,7 +1324,7 @@ bool CC_EXPORT LayerShouldBeSkippedForDrawPropertiesComputation(
 bool CC_EXPORT IsLayerBackFaceVisible(LayerImpl* layer,
                                       int transform_tree_index,
                                       const PropertyTrees* property_trees) {
-  if (layer->layer_tree_impl()->settings().enable_transform_interop) {
+  if (layer->layer_tree_impl()->settings().enable_backface_visibility_interop) {
     return IsTransformToRootOf3DRenderingContextBackFaceVisible(
         layer, transform_tree_index, property_trees);
   } else {
@@ -1265,7 +1336,9 @@ bool CC_EXPORT IsLayerBackFaceVisible(LayerImpl* layer,
 bool CC_EXPORT IsLayerBackFaceVisible(Layer* layer,
                                       int transform_tree_index,
                                       const PropertyTrees* property_trees) {
-  if (layer->layer_tree_host()->GetSettings().enable_transform_interop) {
+  if (layer->layer_tree_host()
+          ->GetSettings()
+          .enable_backface_visibility_interop) {
     return IsTransformToRootOf3DRenderingContextBackFaceVisible(
         layer, transform_tree_index, property_trees);
   } else {
@@ -1442,9 +1515,11 @@ void CalculateDrawProperties(
   UpdatePageScaleFactor(property_trees,
                         layer_tree_impl->PageScaleTransformNode(),
                         layer_tree_impl->current_page_scale_factor());
-  UpdateElasticOverscroll(property_trees,
-                          layer_tree_impl->OverscrollElasticityTransformNode(),
-                          layer_tree_impl->current_elastic_overscroll());
+  UpdateElasticOverscroll(
+      property_trees, layer_tree_impl->OverscrollElasticityTransformNode(),
+      layer_tree_impl->OverscrollElasticityEffectElementId(),
+      layer_tree_impl->current_elastic_overscroll(),
+      layer_tree_impl->InnerViewportScrollNode());
   // Similarly, the device viewport and device transform are shared
   // by both trees.
   property_trees->clip_tree.SetViewportClip(

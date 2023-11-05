@@ -166,8 +166,15 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsPendingSubstitutionValue() const {
     return class_type_ == kPendingSubstitutionValueClass;
   }
+  bool IsPendingSystemFontValue() const {
+    return class_type_ == kPendingSystemFontValueClass;
+  }
   bool IsInvalidVariableValue() const {
-    return class_type_ == kInvalidVariableValueClass;
+    return class_type_ == kInvalidVariableValueClass ||
+           class_type_ == kCyclicVariableValueClass;
+  }
+  bool IsCyclicVariableValue() const {
+    return class_type_ == kCyclicVariableValueClass;
   }
   bool IsAxisValue() const { return class_type_ == kAxisClass; }
   bool IsShorthandWrapperValue() const {
@@ -261,7 +268,9 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kVariableReferenceClass,
     kCustomPropertyDeclarationClass,
     kPendingSubstitutionValueClass,
+    kPendingSystemFontValueClass,
     kInvalidVariableValueClass,
+    kCyclicVariableValueClass,
     kLayoutFunctionClass,
 
     kCSSContentDistributionClass,

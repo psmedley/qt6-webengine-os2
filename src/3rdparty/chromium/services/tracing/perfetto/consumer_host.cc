@@ -12,9 +12,8 @@
 #include <vector>
 
 #include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/logging.h"
-#include "base/numerics/ranges.h"
-#include "base/stl_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -584,7 +583,7 @@ void ConsumerHost::TracingSession::OnTraceStats(
     return;
   }
 
-  if (!success || stats.buffer_stats_size() != 1) {
+  if (!(success && stats.buffer_stats_size())) {
     std::move(request_buffer_usage_callback_).Run(false, 0.0f, false);
     return;
   }

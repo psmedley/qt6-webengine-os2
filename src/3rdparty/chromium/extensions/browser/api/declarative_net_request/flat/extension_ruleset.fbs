@@ -26,6 +26,7 @@ enum ActionType : ubyte {
 table QueryKeyValue {
   key : string (required);
   value : string (required);
+  replace_only: bool = false;
 }
 
 table UrlTransform {
@@ -79,6 +80,16 @@ table UrlRuleMetadata {
   /// for "modifyHeaders" rules.
   request_headers: [ModifyHeaderInfo];
   response_headers: [ModifyHeaderInfo];
+}
+
+// Extension embedder conditions for a flat::UrlRule. This is stored as a nested
+// flatbuffer in `flat::UrlRule::embedder_conditions`. The constructed
+// flatbuffer must use `kEmbedderConditionsBufferIdentifier` as the file
+// identifier.
+table EmbedderConditions {
+  // Sorted list of tab IDs to include/exclude.
+  tab_ids_included : [int];
+  tab_ids_excluded : [int];
 }
 
 /// This provides a mapping from an index type to its index within

@@ -13,7 +13,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/callback_forward.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -443,17 +442,17 @@ void BluetoothLowEnergyConnectFunction::DoWork() {
 
   event_router->Connect(
       persistent, extension(), params_->device_address,
-      base::BindOnce(&BluetoothLowEnergyConnectFunction::SuccessCallback, this),
-      base::BindOnce(&BluetoothLowEnergyConnectFunction::ErrorCallback, this));
+      base::BindOnce(&BluetoothLowEnergyConnectFunction::ConnectCallback,
+                     this));
 }
 
-void BluetoothLowEnergyConnectFunction::SuccessCallback() {
-  Respond(NoArguments());
-}
-
-void BluetoothLowEnergyConnectFunction::ErrorCallback(
+void BluetoothLowEnergyConnectFunction::ConnectCallback(
     BluetoothLowEnergyEventRouter::Status status) {
-  Respond(Error(StatusToString(status)));
+  if (status != BluetoothLowEnergyEventRouter::kStatusSuccess) {
+    Respond(Error(StatusToString(status)));
+    return;
+  }
+  Respond(NoArguments());
 }
 
 BluetoothLowEnergyDisconnectFunction::BluetoothLowEnergyDisconnectFunction() {}

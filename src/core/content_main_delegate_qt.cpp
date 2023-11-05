@@ -83,6 +83,7 @@
 #endif
 
 #if defined(OS_MAC)
+#include "base/trace_event/trace_event.h"
 #include "content/public/common/content_features.h"
 #include "media/gpu/mac/vt_video_decode_accelerator_mac.h"
 #endif
@@ -219,7 +220,7 @@ void ContentMainDelegateQt::PreSandboxStartup()
 #endif
 
 #if defined(OS_MAC)
-    if (base::FeatureList::IsEnabled(features::kMacV2GPUSandbox)) {
+    {
         TRACE_EVENT0("gpu", "Initialize VideoToolbox");
         media::InitializeVideoToolbox();
     }

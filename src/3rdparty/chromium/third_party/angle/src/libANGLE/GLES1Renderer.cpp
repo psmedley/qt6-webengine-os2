@@ -455,6 +455,29 @@ int GLES1Renderer::VertexArrayIndex(ClientVertexArrayType type, const GLES1State
 }
 
 // static
+ClientVertexArrayType GLES1Renderer::VertexArrayType(int attribIndex)
+{
+    switch (attribIndex)
+    {
+        case kVertexAttribIndex:
+            return ClientVertexArrayType::Vertex;
+        case kNormalAttribIndex:
+            return ClientVertexArrayType::Normal;
+        case kColorAttribIndex:
+            return ClientVertexArrayType::Color;
+        case kPointSizeAttribIndex:
+            return ClientVertexArrayType::PointSize;
+        default:
+            if (attribIndex < kTextureCoordAttribIndexBase + kTexUnitCount)
+            {
+                return ClientVertexArrayType::TextureCoord;
+            }
+            UNREACHABLE();
+            return ClientVertexArrayType::InvalidEnum;
+    }
+}
+
+// static
 int GLES1Renderer::TexCoordArrayIndex(unsigned int unit)
 {
     return kTextureCoordAttribIndexBase + unit;
@@ -559,8 +582,8 @@ angle::Result GLES1Renderer::linkProgram(Context *context,
 
     *programOut = program;
 
-    programObject->attachShader(context, getShader(vertexShader));
-    programObject->attachShader(context, getShader(fragmentShader));
+    programObject->attachShader(getShader(vertexShader));
+    programObject->attachShader(getShader(fragmentShader));
 
     for (auto it : attribLocs)
     {
@@ -595,6 +618,14 @@ angle::Result GLES1Renderer::initializeRendererProgram(Context *context, State *
 {
     if (mRendererProgramInitialized)
     {
+        // If we're already done the initialization/compilation, but there has been some
+        // state change, just reload the compiled program.
+        GLES1State &gles1State = glState->gles1();
+        if (gles1State.shouldHandleDirtyProgram())
+        {
+            Program *programObject = getProgram(mProgramState.program);
+            ANGLE_TRY(glState->setProgram(context, programObject));
+        }
         return angle::Result::Continue;
     }
 

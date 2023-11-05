@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "components/webapps/services/web_app_origin_association/public/mojom/web_app_origin_association_parser.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class Value;
@@ -35,10 +36,10 @@ class WebAppOriginAssociationParser {
  private:
   std::vector<mojom::AssociatedWebAppPtr> ParseAssociatedWebApps(
       const base::Value& root_dict);
-  base::Optional<mojom::AssociatedWebAppPtr> ParseAssociatedWebApp(
+  absl::optional<mojom::AssociatedWebAppPtr> ParseAssociatedWebApp(
       const base::Value& app_dict);
-  base::Optional<GURL> ParseManifestURL(const base::Value& app_dict);
-  base::Optional<std::vector<std::string>> ParsePaths(
+  absl::optional<GURL> ParseManifestURL(const base::Value& app_dict);
+  absl::optional<std::vector<std::string>> ParsePaths(
       const base::Value& app_details_dict,
       const std::string& key);
   void AddErrorInfo(const std::string& error_msg,

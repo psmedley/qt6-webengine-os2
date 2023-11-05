@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "ash/constants/ash_pref_names.h"
 #include "base/bind.h"
 #include "base/values.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
@@ -24,6 +25,7 @@
 #include "components/arc/mojom/net.mojom.h"
 #include "components/arc/session/arc_bridge_service.h"
 #include "components/onc/onc_constants.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/api/vpn_provider/vpn_service.h"
@@ -37,6 +39,7 @@ namespace {
 
 const char kAddThirdPartyVpnMessage[] = "addThirdPartyVpn";
 const char kConfigureThirdPartyVpnMessage[] = "configureThirdPartyVpn";
+const char kShowCarrierAccountDetail[] = "showCarrierAccountDetail";
 const char kShowCellularSetupUI[] = "showCellularSetupUI";
 const char kRequestGmsCoreNotificationsDisabledDeviceNames[] =
     "requestGmsCoreNotificationsDisabledDeviceNames";
@@ -46,6 +49,12 @@ const char kSendGmsCoreNotificationsDisabledDeviceNames[] =
 Profile* GetProfileForPrimaryUser() {
   return ProfileHelper::Get()->GetProfileByUser(
       user_manager::UserManager::Get()->GetPrimaryUser());
+}
+
+bool IsVpnConfigAllowed() {
+  PrefService* prefs = GetProfileForPrimaryUser()->GetPrefs();
+  DCHECK(prefs);
+  return prefs->GetBoolean(prefs::kVpnConfigAllowed);
 }
 
 }  // namespace
@@ -83,6 +92,10 @@ void InternetHandler::RegisterMessages() {
           &InternetHandler::RequestGmsCoreNotificationsDisabledDeviceNames,
           base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      kShowCarrierAccountDetail,
+      base::BindRepeating(&InternetHandler::ShowCarrierAccountDetail,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       kShowCellularSetupUI,
       base::BindRepeating(&InternetHandler::ShowCellularSetupUI,
                           base::Unretained(this)));
@@ -111,6 +124,10 @@ void InternetHandler::AddThirdPartyVpn(const base::ListValue* args) {
         << "Only the primary user and non-child accounts can add VPNs";
     return;
   }
+  if (!IsVpnConfigAllowed()) {
+    NET_LOG(ERROR) << "Cannot add VPN; prohibited by policy";
+    return;
+  }
 
   // Request to launch Arc VPN provider.
   const auto* arc_app_list_prefs = ArcAppListPrefs::Get(profile_);
@@ -136,6 +153,10 @@ void InternetHandler::ConfigureThirdPartyVpn(const base::ListValue* args) {
   }
   if (profile_ != GetProfileForPrimaryUser()) {
     NET_LOG(ERROR) << "Only the primary user can configure VPNs";
+    return;
+  }
+  if (!IsVpnConfigAllowed()) {
+    NET_LOG(ERROR) << "Cannot configure VPN; prohibited by policy";
     return;
   }
 
@@ -184,6 +205,15 @@ void InternetHandler::RequestGmsCoreNotificationsDisabledDeviceNames(
   SetGmsCoreNotificationsDisabledDeviceNames();
 }
 
+void InternetHandler::ShowCarrierAccountDetail(const base::ListValue* args) {
+  std::string guid;
+  if (args->GetSize() < 1 || !args->GetString(0, &guid)) {
+    NOTREACHED() << "Invalid args for: " << kShowCarrierAccountDetail;
+    return;
+  }
+  chromeos::NetworkConnect::Get()->ShowCarrierAccountDetail(guid);
+}
+
 void InternetHandler::ShowCellularSetupUI(const base::ListValue* args) {
   std::string guid;
   if (args->GetSize() < 1 || !args->GetString(0, &guid)) {
@@ -225,7 +255,7 @@ void InternetHandler::SendGmsCoreNotificationsDisabledDeviceNames() {
                     device_names_value);
 }
 
-gfx::NativeWindow InternetHandler::GetNativeWindow() const {
+gfx::NativeWindow InternetHandler::GetNativeWindow() {
   return web_ui()->GetWebContents()->GetTopLevelNativeWindow();
 }
 

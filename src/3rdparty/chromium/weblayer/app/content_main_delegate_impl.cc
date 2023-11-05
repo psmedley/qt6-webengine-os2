@@ -8,15 +8,19 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
+#include "base/containers/flat_set.h"
 #include "base/cpu.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/strings/string_split.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/content_capture/common/content_capture_features.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
+#include "components/variations/variations_ids_provider.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -27,6 +31,7 @@
 #include "third_party/blink/public/platform/web_runtime_features.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#include "weblayer/browser/background_fetch/background_fetch_delegate_factory.h"
 #include "weblayer/browser/content_browser_client_impl.h"
 #include "weblayer/common/content_client_impl.h"
 #include "weblayer/common/weblayer_paths.h"
@@ -47,6 +52,7 @@
 #include "content/public/browser/android/compositor.h"
 #include "ui/base/resource/resource_bundle_android.h"
 #include "ui/base/ui_base_switches.h"
+#include "weblayer/browser/android/application_info_helper.h"
 #include "weblayer/browser/android/exception_filter.h"
 #include "weblayer/browser/android_descriptors.h"
 #include "weblayer/common/crash_reporter/crash_keys.h"
@@ -85,11 +91,20 @@ void ConfigureFeaturesIfNotSet(
     const std::vector<base::Feature>& features_to_disable) {
   auto* cl = base::CommandLine::ForCurrentProcess();
   std::vector<std::string> enabled_features;
+  base::flat_set<std::string> feature_names_enabled_via_command_line;
   std::string enabled_features_str =
       cl->GetSwitchValueASCII(::switches::kEnableFeatures);
   for (const auto& f :
        base::FeatureList::SplitFeatureListString(enabled_features_str)) {
     enabled_features.emplace_back(f);
+
+    // "<" is used as separator for field trial/groups.
+    std::vector<base::StringPiece> parts = base::SplitStringPiece(
+        f, "<", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    // Split with supplied params should always return at least one entry.
+    DCHECK(!parts.empty());
+    if (parts[0].length() > 0)
+      feature_names_enabled_via_command_line.insert(std::string(parts[0]));
   }
 
   std::vector<std::string> disabled_features;
@@ -102,7 +117,7 @@ void ConfigureFeaturesIfNotSet(
 
   for (const auto& feature : features_to_enable) {
     if (!base::Contains(disabled_features, feature.name) &&
-        !base::Contains(enabled_features, feature.name)) {
+        !base::Contains(feature_names_enabled_via_command_line, feature.name)) {
       enabled_features.push_back(feature.name);
     }
   }
@@ -111,7 +126,7 @@ void ConfigureFeaturesIfNotSet(
 
   for (const auto& feature : features_to_disable) {
     if (!base::Contains(disabled_features, feature.name) &&
-        !base::Contains(enabled_features, feature.name)) {
+        !base::Contains(feature_names_enabled_via_command_line, feature.name)) {
       disabled_features.push_back(feature.name);
     }
   }
@@ -148,29 +163,28 @@ bool ContentMainDelegateImpl::BasicStartupComplete(int* exit_code) {
   // This also turns off Push messaging.
   cl->AppendSwitch(::switches::kDisableNotifications);
 
-  std::vector<base::Feature> enabled_features = {};
+  std::vector<base::Feature> enabled_features = {
+#if defined(OS_ANDROID)
+    // Overlay promotion requires some guarantees we don't have on WebLayer
+    // (e.g. ensuring fullscreen, no movement of the parent view). Given that
+    // we're unsure about the benefits when used embedded in a parent app, we
+    // will only promote to overlays if needed for secure videos.
+    media::kUseAndroidOverlayForSecureOnly,
+#endif
+  };
+
   std::vector<base::Feature> disabled_features = {
-    // TODO(crbug.com/1025627): make webauth work with WebLayer.
-    ::features::kWebAuth,
-    // TODO(crbug.com/1177948): enable WebAR.
-    ::features::kWebXr,
-    ::features::kWebXrArModule,
-    ::features::kWebXrHitTest,
-    // TODO(crbug.com/1057770): make Background Fetch work with WebLayer.
-    ::features::kBackgroundFetch,
-    // TODO(crbug.com/1130989): Support GetInstalledRelatedApps on WebLayer.
-    ::features::kInstalledApp,
     // TODO(crbug.com/1091212): make Notification triggers work with
     // WebLayer.
     ::features::kNotificationTriggers,
     // TODO(crbug.com/1091211): Support PeriodicBackgroundSync on WebLayer.
     ::features::kPeriodicBackgroundSync,
-    // TODO(crbug.com/1131017): Support SurfaceViews on WebLayer.
-    media::kOverlayFullscreenVideo,
     // TODO(crbug.com/1174856): Support Portals.
     blink::features::kPortals,
     // TODO(crbug.com/1174566): Enable by default after experiment.
     content_capture::features::kContentCapture,
+    // TODO(crbug.com/1144912): Support BackForwardCache on WebLayer.
+    ::features::kBackForwardCache,
 
 #if defined(OS_ANDROID)
     // TODO(crbug.com/1131016): Support Picture in Picture API on WebLayer.
@@ -184,6 +198,10 @@ bool ContentMainDelegateImpl::BasicStartupComplete(int* exit_code) {
 #endif
   };
 
+  // TODO(crbug.com/1057770): make Background Fetch work with WebLayer.
+  if (!BackgroundFetchDelegateFactory::IsEnabled())
+    disabled_features.push_back(::features::kBackgroundFetch);
+
 #if defined(OS_ANDROID)
   if (base::android::BuildInfo::GetInstance()->sdk_int() >=
       base::android::SDK_VERSION_OREO) {
@@ -191,8 +209,12 @@ bool ContentMainDelegateImpl::BasicStartupComplete(int* exit_code) {
         autofill::features::kAutofillExtractAllDatalists);
     enabled_features.push_back(
         autofill::features::kAutofillSkipComparingInferredLabels);
-    disabled_features.push_back(
-        autofill::features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
+  }
+
+  if (GetApplicationMetadataAsBoolean(
+          "org.chromium.weblayer.ENABLE_LOGGING_OF_JS_CONSOLE_MESSAGES",
+          /*default_value=*/false)) {
+    enabled_features.push_back(features::kLogJsConsoleMessages);
   }
 #endif
 
@@ -200,9 +222,6 @@ bool ContentMainDelegateImpl::BasicStartupComplete(int* exit_code) {
 
   // TODO(crbug.com/1097105): Support Web GPU on WebLayer.
   blink::WebRuntimeFeatures::EnableWebGPU(false);
-
-  // TODO(crbug.com/1097107): Add support for Content Indexing on WebLayer.
-  blink::WebRuntimeFeatures::EnableContentIndex(false);
 
 #if defined(OS_ANDROID)
   content::Compositor::Initialize();
@@ -223,6 +242,14 @@ bool ContentMainDelegateImpl::ShouldCreateFeatureList() {
   // TODO(weblayer-dev): Support feature lists on desktop.
   return true;
 #endif
+}
+
+variations::VariationsIdsProvider*
+ContentMainDelegateImpl::CreateVariationsIdsProvider() {
+  // As the embedder supplies the set of ids, the signed-in state does not make
+  // sense and is ignored.
+  return variations::VariationsIdsProvider::Create(
+      variations::VariationsIdsProvider::Mode::kIgnoreSignedInState);
 }
 
 void ContentMainDelegateImpl::PreSandboxStartup() {
@@ -365,7 +392,7 @@ void ContentMainDelegateImpl::InitializeResourceBundle() {
         .LoadSecondaryLocaleDataWithPakFileRegion(base::File(pak_fd),
                                                   pak_region);
 
-    std::vector<std::pair<int, ui::ScaleFactor>> extra_paks = {
+    std::vector<std::pair<int, ui::ResourceScaleFactor>> extra_paks = {
         {kWebLayerMainPakDescriptor, ui::SCALE_FACTOR_NONE},
         {kWebLayer100PercentPakDescriptor, ui::SCALE_FACTOR_100P}};
 

@@ -1,5 +1,6 @@
-import { assert } from '../../../../../common/framework/util/util.js';
+import { assert } from '../../../../../common/util/util.js';
 import { GPUTest } from '../../../../gpu_test.js';
+import { checkElementsEqualEither } from '../../../../util/check_contents.js';
 
 const kSize = 4;
 
@@ -10,7 +11,6 @@ export const kAllWriteOps = ['render', 'render-via-bundle', 'compute', 'b2b-copy
 export class BufferSyncTest extends GPUTest {
   // Create a buffer, and initialize it to a specified value for all elements.
   async createBufferWithValue(initValue: number): Promise<GPUBuffer> {
-    const fence = this.queue.createFence();
     const buffer = this.device.createBuffer({
       mappedAtCreation: true,
       size: kSize,
@@ -18,28 +18,25 @@ export class BufferSyncTest extends GPUTest {
     });
     new Uint32Array(buffer.getMappedRange()).fill(initValue);
     buffer.unmap();
-    this.queue.signal(fence, 1);
-    await fence.onCompletion(1);
+    await this.queue.onSubmittedWorkDone();
     return buffer;
   }
 
   // Create a texture, and initialize it to a specified value for all elements.
   async createTextureWithValue(initValue: number): Promise<GPUTexture> {
-    const fence = this.queue.createFence();
     const data = new Uint32Array(kSize / 4).fill(initValue);
     const texture = this.device.createTexture({
-      size: { width: kSize / 4, height: 1, depth: 1 },
+      size: { width: kSize / 4, height: 1, depthOrArrayLayers: 1 },
       format: 'r32uint',
       usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
     });
-    this.device.defaultQueue.writeTexture(
+    this.device.queue.writeTexture(
       { texture, mipLevel: 0, origin: { x: 0, y: 0, z: 0 } },
       data,
       { offset: 0, bytesPerRow: kSize, rowsPerImage: 1 },
-      { width: kSize / 4, height: 1, depth: 1 }
+      { width: kSize / 4, height: 1, depthOrArrayLayers: 1 }
     );
-    this.queue.signal(fence, 1);
-    await fence.onCompletion(1);
+    await this.queue.onSubmittedWorkDone();
     return texture;
   }
 
@@ -57,18 +54,18 @@ export class BufferSyncTest extends GPUTest {
   createStorageWriteComputePipeline(value: number): GPUComputePipeline {
     const wgslCompute = `
       [[block]] struct Data {
-        [[offset(0)]] a : i32;
+        a : i32;
       };
 
-      [[set(0), binding(0)]] var<storage_buffer> data : Data;
-      [[stage(compute)]] fn main() -> void {
+      [[group(0), binding(0)]] var<storage, read_write> data : Data;
+      [[stage(compute), workgroup_size(1)]] fn main() {
         data.a = ${value};
         return;
       }
     `;
 
     return this.device.createComputePipeline({
-      computeStage: {
+      compute: {
         module: this.device.createShaderModule({
           code: wgslCompute,
         }),
@@ -81,59 +78,56 @@ export class BufferSyncTest extends GPUTest {
   createStorageWriteRenderPipeline(value: number): GPURenderPipeline {
     const wgslShaders = {
       vertex: `
-      [[builtin(position)]] var<out> Position : vec4<f32>;
-      [[stage(vertex)]] fn vert_main() -> void {
-        Position = vec4<f32>(0.5, 0.5, 0.0, 1.0);
-        return;
+      [[stage(vertex)]] fn vert_main() -> [[builtin(position)]] vec4<f32> {
+        return vec4<f32>(0.5, 0.5, 0.0, 1.0);
       }
     `,
 
       fragment: `
-      [[location(0)]] var<out> outColor : vec4<f32>;
       [[block]] struct Data {
-        [[offset(0)]] a : i32;
+        a : i32;
       };
 
-      [[set(0), binding(0)]] var<storage_buffer> data : Data;
-      [[stage(fragment)]] fn frag_main() -> void {
+      [[group(0), binding(0)]] var<storage, read_write> data : Data;
+      [[stage(fragment)]] fn frag_main() -> [[location(0)]] vec4<f32> {
         data.a = ${value};
-        outColor = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        return;
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
       }
     `,
     };
 
     return this.device.createRenderPipeline({
-      vertexStage: {
+      vertex: {
         module: this.device.createShaderModule({
           code: wgslShaders.vertex,
         }),
         entryPoint: 'vert_main',
       },
-      fragmentStage: {
+      fragment: {
         module: this.device.createShaderModule({
           code: wgslShaders.fragment,
         }),
         entryPoint: 'frag_main',
+        targets: [{ format: 'rgba8unorm' }],
       },
-      primitiveTopology: 'point-list',
-      colorStates: [{ format: 'rgba8unorm' }],
+      primitive: { topology: 'point-list' },
     });
   }
 
   beginSimpleRenderPass(encoder: GPUCommandEncoder): GPURenderPassEncoder {
     const view = this.device
       .createTexture({
-        size: { width: 1, height: 1, depth: 1 },
+        size: { width: 1, height: 1, depthOrArrayLayers: 1 },
         format: 'rgba8unorm',
-        usage: GPUTextureUsage.OUTPUT_ATTACHMENT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT,
       })
       .createView();
     return encoder.beginRenderPass({
       colorAttachments: [
         {
-          attachment: view,
+          view,
           loadValue: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+          storeOp: 'store',
         },
       ],
     });
@@ -192,14 +186,14 @@ export class BufferSyncTest extends GPUTest {
     encoder.copyTextureToBuffer(
       { texture: tmpTexture, mipLevel: 0, origin: { x: 0, y: 0, z: 0 } },
       { buffer, bytesPerRow: 256 },
-      { width: 1, height: 1, depth: 1 }
+      { width: 1, height: 1, depthOrArrayLayers: 1 }
     );
   }
 
   // Write buffer via writeBuffer API on queue
   writeByWriteBuffer(buffer: GPUBuffer, value: number) {
     const data = new Uint32Array(kSize / 4).fill(value);
-    this.device.defaultQueue.writeBuffer(buffer, 0, data);
+    this.device.queue.writeBuffer(buffer, 0, data);
   }
 
   // Issue write operation via render pass, compute pass, copy, etc.
@@ -246,14 +240,14 @@ export class BufferSyncTest extends GPUTest {
     } else {
       const encoder = this.device.createCommandEncoder();
       await this.encodeWriteOp(encoder, writeOp, buffer, value);
-      this.device.defaultQueue.submit([encoder.finish()]);
+      this.device.queue.submit([encoder.finish()]);
     }
   }
 
   verifyData(buffer: GPUBuffer, expectedValue: number) {
     const bufferData = new Uint32Array(1);
     bufferData[0] = expectedValue;
-    this.expectContents(buffer, bufferData);
+    this.expectGPUBufferValuesEqual(buffer, bufferData);
   }
 
   verifyDataTwoValidValues(buffer: GPUBuffer, expectedValue1: number, expectedValue2: number) {
@@ -261,6 +255,10 @@ export class BufferSyncTest extends GPUTest {
     bufferData1[0] = expectedValue1;
     const bufferData2 = new Uint32Array(1);
     bufferData2[0] = expectedValue2;
-    this.expectContentsTwoValidValues(buffer, bufferData1, bufferData2);
+    this.expectGPUBufferValuesPassCheck(
+      buffer,
+      a => checkElementsEqualEither(a, [bufferData1, bufferData2]),
+      { type: Uint32Array, typedLength: 1 }
+    );
   }
 }

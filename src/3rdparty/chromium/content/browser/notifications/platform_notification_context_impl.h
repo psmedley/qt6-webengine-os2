@@ -16,7 +16,6 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "content/browser/notifications/notification_database.h"
 #include "content/browser/notifications/notification_id_generator.h"
@@ -25,6 +24,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/platform_notification_context.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/notifications/notification_service.mojom.h"
 
 class GURL;
@@ -32,6 +32,10 @@ class GURL;
 namespace base {
 class SequencedTaskRunner;
 }
+
+namespace blink {
+class StorageKey;
+}  // namespace blink
 
 namespace url {
 class Origin;
@@ -66,8 +70,10 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
   void Shutdown();
 
   // Creates a BlinkNotificationServiceImpl that is owned by this context.
+  // |document_url| is empty when originating from a worker.
   void CreateService(
       const url::Origin& origin,
+      const GURL& document_url,
       mojo::PendingReceiver<blink::mojom::NotificationService> receiver);
 
   // Removes |service| from the list of owned services, for example because the
@@ -99,6 +105,7 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
                               DeleteResultCallback callback) override;
   void DeleteAllNotificationDataWithTag(
       const std::string& tag,
+      absl::optional<bool> is_shown_by_browser,
       const GURL& origin,
       DeleteAllResultCallback callback) override;
   void DeleteAllNotificationDataForBlockedOrigins(
@@ -121,7 +128,8 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
 
   // ServiceWorkerContextCoreObserver implementation.
   void OnRegistrationDeleted(int64_t registration_id,
-                             const GURL& pattern) override;
+                             const GURL& pattern,
+                             const blink::StorageKey& key) override;
   void OnStorageWiped() override;
 
  private:
@@ -273,10 +281,12 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
   // database. Optionally filtered by |tag|. Must only be called on the
   // |task_runner_| thread. |callback| will be invoked on the UI thread when the
   // operation has completed.
-  void DoDeleteAllNotificationDataForOrigins(std::set<GURL> origins,
-                                             const std::string& tag,
-                                             DeleteAllResultCallback callback,
-                                             bool initialized);
+  void DoDeleteAllNotificationDataForOrigins(
+      std::set<GURL> origins,
+      const std::string& tag,
+      absl::optional<bool> is_shown_by_browser,
+      DeleteAllResultCallback callback,
+      bool initialized);
 
   // Actually writes the notification resources to the database. Must only be
   // called on the |task_runner_| thread. |callback| will be invoked on the UI
@@ -326,7 +336,7 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
   NotificationIdGenerator notification_id_generator_;
 
   // Keeps track of the next trigger timestamp.
-  base::Optional<base::Time> next_trigger_;
+  absl::optional<base::Time> next_trigger_;
 
   // Calls through to PlatformNotificationService methods.
   std::unique_ptr<PlatformNotificationServiceProxy> service_proxy_;

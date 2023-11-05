@@ -56,6 +56,7 @@ namespace dawn_native { namespace vulkan {
                         }
                         return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                     case wgpu::BufferBindingType::Storage:
+                    case kInternalStorageBufferBinding:
                     case wgpu::BufferBindingType::ReadOnlyStorage:
                         if (bindingInfo.buffer.hasDynamicOffset) {
                             return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
@@ -67,6 +68,7 @@ namespace dawn_native { namespace vulkan {
             case BindingInfoType::Sampler:
                 return VK_DESCRIPTOR_TYPE_SAMPLER;
             case BindingInfoType::Texture:
+            case BindingInfoType::ExternalTexture:
                 return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
             case BindingInfoType::StorageTexture:
                 return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -74,12 +76,12 @@ namespace dawn_native { namespace vulkan {
     }
 
     // static
-    ResultOrError<BindGroupLayout*> BindGroupLayout::Create(
+    ResultOrError<Ref<BindGroupLayout>> BindGroupLayout::Create(
         Device* device,
         const BindGroupLayoutDescriptor* descriptor) {
         Ref<BindGroupLayout> bgl = AcquireRef(new BindGroupLayout(device, descriptor));
         DAWN_TRY(bgl->Initialize());
-        return bgl.Detach();
+        return bgl;
     }
 
     MaybeError BindGroupLayout::Initialize() {
@@ -90,12 +92,13 @@ namespace dawn_native { namespace vulkan {
         bindings.reserve(GetBindingCount());
 
         for (const auto& it : GetBindingMap()) {
-            BindingNumber bindingNumber = it.first;
             BindingIndex bindingIndex = it.second;
             const BindingInfo& bindingInfo = GetBindingInfo(bindingIndex);
 
             VkDescriptorSetLayoutBinding vkBinding;
-            vkBinding.binding = static_cast<uint32_t>(bindingNumber);
+            vkBinding.binding = static_cast<uint32_t>(bindingIndex);
+            // TODO(dawn:728) In the future, special handling will be needed for external textures
+            // here because they encompass multiple views.
             vkBinding.descriptorType = VulkanDescriptorType(bindingInfo);
             vkBinding.descriptorCount = 1;
             vkBinding.stageFlags = VulkanShaderStageFlags(bindingInfo.visibility);
@@ -120,6 +123,8 @@ namespace dawn_native { namespace vulkan {
         std::map<VkDescriptorType, uint32_t> descriptorCountPerType;
 
         for (BindingIndex bindingIndex{0}; bindingIndex < GetBindingCount(); ++bindingIndex) {
+            // TODO(dawn:728) In the future, special handling will be needed for external textures
+            // here because they encompass multiple views.
             VkDescriptorType vulkanType = VulkanDescriptorType(GetBindingInfo(bindingIndex));
 
             // map::operator[] will return 0 if the key doesn't exist.
@@ -158,13 +163,14 @@ namespace dawn_native { namespace vulkan {
         return mHandle;
     }
 
-    ResultOrError<BindGroup*> BindGroupLayout::AllocateBindGroup(
+    ResultOrError<Ref<BindGroup>> BindGroupLayout::AllocateBindGroup(
         Device* device,
         const BindGroupDescriptor* descriptor) {
         DescriptorSetAllocation descriptorSetAllocation;
         DAWN_TRY_ASSIGN(descriptorSetAllocation, mDescriptorSetAllocator->Allocate());
 
-        return mBindGroupAllocator.Allocate(device, descriptor, descriptorSetAllocation);
+        return AcquireRef(
+            mBindGroupAllocator.Allocate(device, descriptor, descriptorSetAllocation));
     }
 
     void BindGroupLayout::DeallocateBindGroup(BindGroup* bindGroup,

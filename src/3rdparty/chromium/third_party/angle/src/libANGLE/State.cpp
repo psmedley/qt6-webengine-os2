@@ -293,10 +293,12 @@ State::State(const State *shareContextState,
              bool clientArraysEnabled,
              bool robustResourceInit,
              bool programBinaryCacheEnabled,
-             EGLenum contextPriority)
+             EGLenum contextPriority,
+             bool hasProtectedContent)
     : mID({gIDCounter++}),
       mClientType(clientType),
       mContextPriority(contextPriority),
+      mHasProtectedContent(hasProtectedContent),
       mClientVersion(clientVersion),
       mShareGroup(shareGroup),
       mBufferManager(AllocateOrGetSharedResourceManager(shareContextState, &State::mBufferManager)),
@@ -347,7 +349,6 @@ State::State(const State *shareContextState,
       mProvokingVertex(gl::ProvokingVertexConvention::LastVertexConvention),
       mVertexArray(nullptr),
       mActiveSampler(0),
-      mValidAtomicCounterBufferCount(0),
       mPrimitiveRestart(false),
       mDebug(debug),
       mMultiSampling(false),
@@ -359,7 +360,15 @@ State::State(const State *shareContextState,
       mMaxShaderCompilerThreads(std::numeric_limits<GLuint>::max()),
       mPatchVertices(3),
       mOverlay(overlay),
-      mNoSimultaneousConstantColorAndAlphaBlendFunc(false)
+      mNoSimultaneousConstantColorAndAlphaBlendFunc(false),
+      mBoundingBoxMinX(-1.0f),
+      mBoundingBoxMinY(-1.0f),
+      mBoundingBoxMinZ(-1.0f),
+      mBoundingBoxMinW(1.0f),
+      mBoundingBoxMaxX(1.0f),
+      mBoundingBoxMaxY(1.0f),
+      mBoundingBoxMaxZ(1.0f),
+      mBoundingBoxMaxW(1.0f)
 {}
 
 State::~State() {}
@@ -571,17 +580,19 @@ void State::reset(const Context *context)
     {
         UpdateIndexedBufferBinding(context, &buf, nullptr, BufferBinding::Uniform, 0, 0);
     }
+    mBoundUniformBuffersMask.reset();
 
     for (OffsetBindingPointer<Buffer> &buf : mAtomicCounterBuffers)
     {
         UpdateIndexedBufferBinding(context, &buf, nullptr, BufferBinding::AtomicCounter, 0, 0);
     }
-    mValidAtomicCounterBufferCount = 0;
+    mBoundAtomicCounterBuffersMask.reset();
 
     for (OffsetBindingPointer<Buffer> &buf : mShaderStorageBuffers)
     {
         UpdateIndexedBufferBinding(context, &buf, nullptr, BufferBinding::ShaderStorage, 0, 0);
     }
+    mBoundShaderStorageBuffersMask.reset();
 
     mClipDistancesEnabled.reset();
 
@@ -1420,9 +1431,9 @@ bool State::getEnableFeature(GLenum feature) const
         case GL_TEXTURE_COORD_ARRAY:
             return mGLES1State.mTexCoordArrayEnabled[mGLES1State.mClientActiveTexture];
         case GL_TEXTURE_2D:
-            return mGLES1State.mTexUnitEnables[mActiveSampler].test(TextureType::_2D);
+            return mGLES1State.isTextureTargetEnabled(getActiveSampler(), TextureType::_2D);
         case GL_TEXTURE_CUBE_MAP:
-            return mGLES1State.mTexUnitEnables[mActiveSampler].test(TextureType::CubeMap);
+            return mGLES1State.isTextureTargetEnabled(getActiveSampler(), TextureType::CubeMap);
         case GL_LIGHTING:
             return mGLES1State.mLightingEnabled;
         case GL_LIGHT0:
@@ -1728,6 +1739,9 @@ void State::setDrawFramebufferBinding(Framebuffer *framebuffer)
 
     if (mDrawFramebuffer)
     {
+        mDrawFramebuffer->setWriteControlMode(getFramebufferSRGB() ? SrgbWriteControlMode::Default
+                                                                   : SrgbWriteControlMode::Linear);
+
         if (mDrawFramebuffer->hasAnyDirtyBit())
         {
             mDirtyObjects.set(DIRTY_OBJECT_DRAW_FRAMEBUFFER);
@@ -2042,27 +2056,17 @@ angle::Result State::setIndexedBufferBinding(const Context *context,
             setBufferBinding(context, target, buffer);
             break;
         case BufferBinding::Uniform:
+            mBoundUniformBuffersMask.set(index, buffer != nullptr);
             UpdateIndexedBufferBinding(context, &mUniformBuffers[index], buffer, target, offset,
                                        size);
             break;
         case BufferBinding::AtomicCounter:
-            if (!mAtomicCounterBuffers[index].get() && buffer)
-            {
-                // going from an invalid binding to a valid one, increment the count
-                mValidAtomicCounterBufferCount++;
-                ASSERT(mValidAtomicCounterBufferCount <=
-                       static_cast<uint32_t>(getCaps().maxAtomicCounterBufferBindings));
-            }
-            else if (mAtomicCounterBuffers[index].get() && !buffer)
-            {
-                // going from a valid binding to an invalid one, decrement the count
-                mValidAtomicCounterBufferCount--;
-                ASSERT(mValidAtomicCounterBufferCount >= 0);
-            }
+            mBoundAtomicCounterBuffersMask.set(index, buffer != nullptr);
             UpdateIndexedBufferBinding(context, &mAtomicCounterBuffers[index], buffer, target,
                                        offset, size);
             break;
         case BufferBinding::ShaderStorage:
+            mBoundShaderStorageBuffersMask.set(index, buffer != nullptr);
             UpdateIndexedBufferBinding(context, &mShaderStorageBuffers[index], buffer, target,
                                        offset, size);
             break;
@@ -2111,6 +2115,7 @@ angle::Result State::detachBuffer(Context *context, const Buffer *buffer)
     if (curTransformFeedback)
     {
         ANGLE_TRY(curTransformFeedback->detachBuffer(context, bufferID));
+        context->getStateCache().onActiveTransformFeedbackChange(context);
     }
 
     if (getVertexArray()->detachBuffer(context, bufferID))
@@ -2119,29 +2124,38 @@ angle::Result State::detachBuffer(Context *context, const Buffer *buffer)
         context->getStateCache().onVertexArrayStateChange(context);
     }
 
-    for (auto &buf : mUniformBuffers)
+    for (size_t uniformBufferIndex : mBoundUniformBuffersMask)
     {
-        if (buf.id() == bufferID)
+        OffsetBindingPointer<Buffer> &binding = mUniformBuffers[uniformBufferIndex];
+
+        if (binding.id() == bufferID)
         {
-            UpdateIndexedBufferBinding(context, &buf, nullptr, BufferBinding::Uniform, 0, 0);
+            UpdateIndexedBufferBinding(context, &binding, nullptr, BufferBinding::Uniform, 0, 0);
+            mBoundUniformBuffersMask.reset(uniformBufferIndex);
         }
     }
 
-    for (auto &buf : mAtomicCounterBuffers)
+    for (size_t atomicCounterBufferIndex : mBoundAtomicCounterBuffersMask)
     {
-        if (buf.id() == bufferID)
+        OffsetBindingPointer<Buffer> &binding = mAtomicCounterBuffers[atomicCounterBufferIndex];
+
+        if (binding.id() == bufferID)
         {
-            UpdateIndexedBufferBinding(context, &buf, nullptr, BufferBinding::AtomicCounter, 0, 0);
-            mValidAtomicCounterBufferCount--;
-            ASSERT(mValidAtomicCounterBufferCount >= 0);
+            UpdateIndexedBufferBinding(context, &binding, nullptr, BufferBinding::AtomicCounter, 0,
+                                       0);
+            mBoundAtomicCounterBuffersMask.reset(atomicCounterBufferIndex);
         }
     }
 
-    for (auto &buf : mShaderStorageBuffers)
+    for (size_t shaderStorageBufferIndex : mBoundShaderStorageBuffersMask)
     {
-        if (buf.id() == bufferID)
+        OffsetBindingPointer<Buffer> &binding = mShaderStorageBuffers[shaderStorageBufferIndex];
+
+        if (binding.id() == bufferID)
         {
-            UpdateIndexedBufferBinding(context, &buf, nullptr, BufferBinding::ShaderStorage, 0, 0);
+            UpdateIndexedBufferBinding(context, &binding, nullptr, BufferBinding::ShaderStorage, 0,
+                                       0);
+            mBoundShaderStorageBuffersMask.reset(shaderStorageBufferIndex);
         }
     }
 
@@ -2272,7 +2286,8 @@ void State::setFramebufferSRGB(bool sRGB)
     if (mFramebufferSRGB != sRGB)
     {
         mFramebufferSRGB = sRGB;
-        mDirtyBits.set(DIRTY_BIT_FRAMEBUFFER_SRGB);
+        mDirtyBits.set(DIRTY_BIT_FRAMEBUFFER_SRGB_WRITE_CONTROL_MODE);
+        setDrawFramebufferDirty();
     }
 }
 
@@ -3294,6 +3309,9 @@ angle::Result State::syncReadFramebuffer(const Context *context, Command command
 angle::Result State::syncDrawFramebuffer(const Context *context, Command command)
 {
     ASSERT(mDrawFramebuffer);
+    mDrawFramebuffer->setWriteControlMode(context->getState().getFramebufferSRGB()
+                                              ? SrgbWriteControlMode::Default
+                                              : SrgbWriteControlMode::Linear);
     return mDrawFramebuffer->syncState(context, GL_DRAW_FRAMEBUFFER, command);
 }
 
@@ -3574,7 +3592,7 @@ void State::onActiveTextureChange(const Context *context, size_t textureUnit)
                                      : nullptr;
         updateTextureBinding(context, textureUnit, activeTexture);
 
-        mExecutable->onStateChange(angle::SubjectMessage::SubjectChanged);
+        mExecutable->onStateChange(angle::SubjectMessage::ProgramTextureOrImageBindingChanged);
     }
 }
 
@@ -3611,7 +3629,7 @@ void State::onImageStateChange(const Context *context, size_t unit)
             mDirtyObjects.set(DIRTY_OBJECT_IMAGES_INIT);
         }
 
-        mExecutable->onStateChange(angle::SubjectMessage::SubjectChanged);
+        mExecutable->onStateChange(angle::SubjectMessage::ProgramTextureOrImageBindingChanged);
     }
 }
 
@@ -3619,6 +3637,16 @@ void State::onUniformBufferStateChange(size_t uniformBufferIndex)
 {
     // This could be represented by a different dirty bit. Using the same one keeps it simple.
     mDirtyBits.set(DIRTY_BIT_UNIFORM_BUFFER_BINDINGS);
+}
+
+void State::onAtomicCounterBufferStateChange(size_t atomicCounterBufferIndex)
+{
+    mDirtyBits.set(DIRTY_BIT_ATOMIC_COUNTER_BUFFER_BINDING);
+}
+
+void State::onShaderStorageBufferStateChange(size_t shaderStorageBufferIndex)
+{
+    mDirtyBits.set(DIRTY_BIT_SHADER_STORAGE_BUFFER_BINDING);
 }
 
 AttributesMask State::getAndResetDirtyCurrentValues() const

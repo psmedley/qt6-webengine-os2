@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/flat_set.h"
 #include "base/observer_list_types.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/bluetooth_chooser.h"
@@ -41,10 +40,8 @@ class CONTENT_EXPORT BluetoothDelegate {
   // render frame host.
   class CONTENT_EXPORT FramePermissionObserver : public base::CheckedObserver {
    public:
-    // Notify observer that an object permission was revoked for
-    // |requesting_origin| and |embedding_origin|.
-    virtual void OnPermissionRevoked(const url::Origin& requesting_origin,
-                                     const url::Origin& embedding_origin) = 0;
+    // Notify observer that an object permission was revoked for |origin|.
+    virtual void OnPermissionRevoked(const url::Origin& origin) = 0;
 
     // Returns the frame that the observer wishes to watch.
     virtual RenderFrameHost* GetRenderFrameHost() = 0;

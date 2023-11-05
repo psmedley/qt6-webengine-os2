@@ -11,6 +11,7 @@
 #include "base/atomic_sequence_num.h"
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
+#include "base/containers/contains.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -78,7 +79,7 @@ spdy::SettingsMap AddDefaultHttp2Settings(spdy::SettingsMap http2_settings) {
 
 }  // unnamed namespace
 
-HttpNetworkSession::Params::Params()
+HttpNetworkSessionParams::HttpNetworkSessionParams()
     : enable_server_push_cancellation(false),
       ignore_certificate_errors(false),
       testing_fixed_http_port(0),
@@ -91,7 +92,7 @@ HttpNetworkSession::Params::Params()
       http2_end_stream_with_data_frame(false),
       time_func(&base::TimeTicks::Now),
       enable_http2_alternative_service(false),
-      enable_websocket_over_http2(false),
+      enable_websocket_over_http2(true),
       enable_quic(true),
       enable_quic_proxies_for_https_urls(false),
       disable_idle_sockets_close_on_memory_pressure(false),
@@ -101,11 +102,12 @@ HttpNetworkSession::Params::Params()
       base::FeatureList::IsEnabled(features::kEnableTLS13EarlyData);
 }
 
-HttpNetworkSession::Params::Params(const Params& other) = default;
+HttpNetworkSessionParams::HttpNetworkSessionParams(
+    const HttpNetworkSessionParams& other) = default;
 
-HttpNetworkSession::Params::~Params() = default;
+HttpNetworkSessionParams::~HttpNetworkSessionParams() = default;
 
-HttpNetworkSession::Context::Context()
+HttpNetworkSessionContext::HttpNetworkSessionContext()
     : client_socket_factory(nullptr),
       host_resolver(nullptr),
       cert_verifier(nullptr),
@@ -129,13 +131,14 @@ HttpNetworkSession::Context::Context()
           QuicCryptoClientStreamFactory::GetDefaultFactory()) {
 }
 
-HttpNetworkSession::Context::Context(const Context& other) = default;
+HttpNetworkSessionContext::HttpNetworkSessionContext(
+    const HttpNetworkSessionContext& other) = default;
 
-HttpNetworkSession::Context::~Context() = default;
+HttpNetworkSessionContext::~HttpNetworkSessionContext() = default;
 
 // TODO(mbelshe): Move the socket factories into HttpStreamFactory.
-HttpNetworkSession::HttpNetworkSession(const Params& params,
-                                       const Context& context)
+HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
+                                       const HttpNetworkSessionContext& context)
     : net_log_(context.net_log),
       http_server_properties_(context.http_server_properties),
       cert_verifier_(context.cert_verifier),
@@ -204,8 +207,13 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
           CreateCommonConnectJobParams(true /* for_websockets */),
           WEBSOCKET_SOCKET_POOL);
 
-  if (params_.enable_http2)
+  if (params_.enable_http2) {
     next_protos_.push_back(kProtoHTTP2);
+    if (base::FeatureList::IsEnabled(features::kAlpsForHttp2)) {
+      // Enable ALPS for HTTP/2 with empty data.
+      application_settings_[kProtoHTTP2] = {};
+    }
+  }
 
   next_protos_.push_back(kProtoHTTP11);
 
@@ -357,13 +365,10 @@ void HttpNetworkSession::SetServerPushDelegate(
   quic_stream_factory_.set_server_push_delegate(push_delegate_.get());
 }
 
-void HttpNetworkSession::GetAlpnProtos(NextProtoVector* alpn_protos) const {
-  *alpn_protos = next_protos_;
-}
-
 void HttpNetworkSession::GetSSLConfig(SSLConfig* server_config,
                                       SSLConfig* proxy_config) const {
-  GetAlpnProtos(&server_config->alpn_protos);
+  server_config->alpn_protos = GetAlpnProtos();
+  server_config->application_settings = GetApplicationSettings();
   server_config->ignore_certificate_errors = params_.ignore_certificate_errors;
   *proxy_config = *server_config;
   server_config->early_data_enabled = params_.enable_early_data;

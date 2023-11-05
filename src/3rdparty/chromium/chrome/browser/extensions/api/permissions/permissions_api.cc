@@ -191,9 +191,8 @@ PermissionsRequestFunction::PermissionsRequestFunction() {}
 PermissionsRequestFunction::~PermissionsRequestFunction() {}
 
 ExtensionFunction::ResponseAction PermissionsRequestFunction::Run() {
-  if (!user_gesture() &&
-      !ignore_user_gesture_for_tests &&
-      extension_->location() != Manifest::COMPONENT) {
+  if (!user_gesture() && !ignore_user_gesture_for_tests &&
+      extension_->location() != mojom::ManifestLocation::kComponent) {
     return RespondNow(Error(kUserGestureRequiredError));
   }
 
@@ -300,8 +299,10 @@ ExtensionFunction::ResponseAction PermissionsRequestFunction::Run() {
           ->GetPermissionMessages(message_provider->GetAllPermissionIDs(
               *total_new_permissions, extension()->GetType()))
           .empty();
-  if (has_no_warnings || extension_->location() == Manifest::COMPONENT) {
-    OnInstallPromptDone(ExtensionInstallPrompt::Result::ACCEPTED);
+  if (has_no_warnings ||
+      extension_->location() == mojom::ManifestLocation::kComponent) {
+    OnInstallPromptDone(ExtensionInstallPrompt::DoneCallbackPayload(
+        ExtensionInstallPrompt::Result::ACCEPTED));
     return did_respond() ? AlreadyResponded() : RespondLater();
   }
 
@@ -310,14 +311,16 @@ ExtensionFunction::ResponseAction PermissionsRequestFunction::Run() {
   if (auto_confirm_for_tests != DO_NOT_SKIP) {
     prompted_permissions_for_testing_ = total_new_permissions->Clone();
     if (auto_confirm_for_tests == PROCEED)
-      OnInstallPromptDone(ExtensionInstallPrompt::Result::ACCEPTED);
+      OnInstallPromptDone(ExtensionInstallPrompt::DoneCallbackPayload(
+          ExtensionInstallPrompt::Result::ACCEPTED));
     else if (auto_confirm_for_tests == ABORT)
-      OnInstallPromptDone(ExtensionInstallPrompt::Result::USER_CANCELED);
+      OnInstallPromptDone(ExtensionInstallPrompt::DoneCallbackPayload(
+          ExtensionInstallPrompt::Result::USER_CANCELED));
     return did_respond() ? AlreadyResponded() : RespondLater();
   }
 
-  install_ui_.reset(new ExtensionInstallPrompt(
-      Profile::FromBrowserContext(browser_context()), native_window));
+  install_ui_ = std::make_unique<ExtensionInstallPrompt>(
+      Profile::FromBrowserContext(browser_context()), native_window);
   install_ui_->ShowDialog(
       base::BindOnce(&PermissionsRequestFunction::OnInstallPromptDone,
                      base::RetainedRef(this)),
@@ -332,27 +335,28 @@ ExtensionFunction::ResponseAction PermissionsRequestFunction::Run() {
 }
 
 void PermissionsRequestFunction::OnInstallPromptDone(
-    ExtensionInstallPrompt::Result result) {
-  if (result != ExtensionInstallPrompt::Result::ACCEPTED) {
+    ExtensionInstallPrompt::DoneCallbackPayload payload) {
+  if (payload.result != ExtensionInstallPrompt::Result::ACCEPTED) {
     Respond(ArgumentList(api::permissions::Request::Results::Create(false)));
     return;
   }
   PermissionsUpdater permissions_updater(browser_context());
-  if (!requested_withheld_->IsEmpty()) {
-    requesting_withheld_permissions_ = true;
+  requesting_withheld_permissions_ = !requested_withheld_->IsEmpty();
+  requesting_optional_permissions_ = !requested_optional_->IsEmpty();
+  if (requesting_withheld_permissions_) {
     permissions_updater.GrantRuntimePermissions(
         *extension(), *requested_withheld_,
         base::BindOnce(&PermissionsRequestFunction::OnRuntimePermissionsGranted,
                        base::RetainedRef(this)));
   }
-  if (!requested_optional_->IsEmpty()) {
-    requesting_optional_permissions_ = true;
+  if (requesting_optional_permissions_) {
     permissions_updater.GrantOptionalPermissions(
         *extension(), *requested_optional_,
         base::BindOnce(
             &PermissionsRequestFunction::OnOptionalPermissionsGranted,
             base::RetainedRef(this)));
   }
+
   // Grant{Runtime|Optional}Permissions calls above can finish synchronously.
   if (!did_respond())
     RespondIfRequestsFinished();

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/performance_manager/public/freezing/freezing.h"
 #include "components/performance_manager/public/graph/node_data_describer_registry.h"
@@ -41,7 +40,7 @@ void FreezingVoteAggregator::OnVoteSubmitted(FreezingVoterId voter_id,
 
   // Remember the previous chosen vote before adding the new vote. There
   // could be none if this is the first vote submitted for |page_node|.
-  base::Optional<FreezingVoteValue> old_chosen_vote_value;
+  absl::optional<FreezingVoteValue> old_chosen_vote_value;
   if (!vote_data.IsEmpty())
     old_chosen_vote_value = vote_data.GetChosenVote().value();
 

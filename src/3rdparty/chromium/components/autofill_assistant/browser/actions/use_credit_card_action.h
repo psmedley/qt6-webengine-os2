@@ -7,12 +7,10 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "components/autofill_assistant/browser/actions/action.h"
 #include "components/autofill_assistant/browser/actions/fallback_handler/required_fields_fallback_handler.h"
 
@@ -34,9 +32,7 @@ class UseCreditCardAction : public Action {
   // Overrides Action:
   void InternalProcessAction(ProcessActionCallback callback) override;
 
-  void EndAction(const ClientStatus& final_status,
-                 const base::Optional<ClientStatus>& optional_details_status =
-                     base::nullopt);
+  void EndAction(const ClientStatus& status);
 
   // Fill the form using data in client memory. Return whether filling succeeded
   // or not through OnFormFilled.
@@ -46,7 +42,11 @@ class UseCreditCardAction : public Action {
   // Called after getting full credit card with its cvc.
   void OnGetFullCard(const ClientStatus& status,
                      std::unique_ptr<autofill::CreditCard> card,
-                     const base::string16& cvc);
+                     const std::u16string& cvc);
+
+  void InitFallbackHandler(const autofill::CreditCard& card,
+                           const std::u16string& cvc,
+                           bool is_resolved);
 
   // Called when the form credit card has been filled.
   void ExecuteFallback(const ClientStatus& status);
@@ -64,4 +64,4 @@ class UseCreditCardAction : public Action {
 };
 
 }  // namespace autofill_assistant
-#endif  // COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_ACTIONS_AUTOFILL_ACTION_H_
+#endif  // COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_ACTIONS_USE_CREDIT_CARD_ACTION_H_

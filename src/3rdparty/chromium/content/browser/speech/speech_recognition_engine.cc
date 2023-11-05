@@ -5,10 +5,12 @@
 #include "content/browser/speech/speech_recognition_engine.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "base/big_endian.h"
 #include "base/bind.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -17,6 +19,7 @@
 #include "content/browser/speech/audio_buffer.h"
 #include "content/public/browser/google_streaming_api.pb.h"
 #include "google_apis/google_api_keys.h"
+#include "media/base/audio_timestamp_helper.h"
 #include "mojo/public/c/system/types.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "net/base/escape.h"
@@ -33,6 +36,8 @@ const char kWebServiceBaseUrl[] =
     "https://www.google.com/speech-api/full-duplex/v1";
 const char kDownstreamUrl[] = "/down?";
 const char kUpstreamUrl[] = "/up?";
+
+constexpr char kWebSpeechAudioDuration[] = "Accessibility.WebSpeech.Duration";
 
 // Used to override |kWebServiceBaseUrl| when non-null, only set in tests.
 const char* web_service_base_url_for_tests = nullptr;
@@ -114,11 +119,15 @@ void SpeechRecognitionEngine::SetConfig(const Config& config) {
 }
 
 void SpeechRecognitionEngine::StartRecognition() {
+  upstream_audio_duration_ = base::TimeDelta();
   FSMEventArgs event_args(EVENT_START_RECOGNITION);
   DispatchEvent(event_args);
 }
 
 void SpeechRecognitionEngine::EndRecognition() {
+  base::UmaHistogramLongTimes100(kWebSpeechAudioDuration,
+                                 upstream_audio_duration_);
+
   FSMEventArgs event_args(EVENT_END_RECOGNITION);
   DispatchEvent(event_args);
 }
@@ -293,8 +302,8 @@ SpeechRecognitionEngine::ConnectBothStreams(const FSMEventArgs&) {
   DCHECK(!upstream_loader_.get());
   DCHECK(!downstream_loader_.get());
 
-  encoder_.reset(new AudioEncoder(config_.audio_sample_rate,
-                                  config_.audio_num_bits_per_sample));
+  encoder_ = std::make_unique<AudioEncoder>(config_.audio_sample_rate,
+                                            config_.audio_num_bits_per_sample);
   DCHECK(encoder_.get());
   const std::string request_key = GenerateRequestKey();
 
@@ -304,9 +313,8 @@ SpeechRecognitionEngine::ConnectBothStreams(const FSMEventArgs&) {
                            !config_.auth_token.empty() &&
                            !config_.auth_scope.empty());
   if (use_framed_post_data_) {
-    preamble_encoder_.reset(new AudioEncoder(
-        config_.preamble->sample_rate,
-        config_.preamble->sample_depth * 8));
+    preamble_encoder_ = std::make_unique<AudioEncoder>(
+        config_.preamble->sample_rate, config_.preamble->sample_depth * 8);
   }
 
   const char* web_service_base_url = !web_service_base_url_for_tests
@@ -494,6 +502,10 @@ SpeechRecognitionEngine::TransmitAudioUpstream(
   DCHECK(upstream_loader_.get());
   DCHECK(event_args.audio_data.get());
   const AudioChunk& audio = *(event_args.audio_data.get());
+
+  base::TimeDelta duration = media::AudioTimestampHelper::FramesToTime(
+      audio.NumSamples(), config_.audio_sample_rate);
+  upstream_audio_duration_ += duration;
 
   DCHECK_EQ(audio.bytes_per_sample(), config_.audio_num_bits_per_sample / 8);
   encoder_->Encode(audio);

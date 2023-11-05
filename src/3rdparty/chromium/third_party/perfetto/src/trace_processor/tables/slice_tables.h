@@ -80,7 +80,8 @@ PERFETTO_TP_TABLE(PERFETTO_TP_SCHED_SLICE_TABLE_DEF);
   C(base::Optional<uint32_t>, cpu)                          \
   C(uint32_t, utid)                                         \
   C(StringPool::Id, state)                                  \
-  C(base::Optional<uint32_t>, io_wait)
+  C(base::Optional<uint32_t>, io_wait)                      \
+  C(base::Optional<StringPool::Id>, blocked_function)
 
 PERFETTO_TP_TABLE(PERFETTO_TP_THREAD_STATE_TABLE_DEF);
 
@@ -144,9 +145,39 @@ PERFETTO_TP_TABLE(PERFETTO_TP_EXPECTED_FRAME_TIMELINE_SLICES_DEF);
   C(int32_t, on_time_finish)                                          \
   C(int32_t, gpu_composition)                                         \
   C(StringPool::Id, jank_type)                                        \
-  C(StringPool::Id, prediction_type)
+  C(StringPool::Id, prediction_type)                                  \
+  C(StringPool::Id, jank_tag)
 
 PERFETTO_TP_TABLE(PERFETTO_TP_ACTUAL_FRAME_TIMELINE_SLICES_DEF);
+
+// @param thread_instruction_count The value of the CPU instruction counter at
+// the start of the slice.
+// @param thread_instruction_delta The change in value from
+// @param thread_instruction_count to the end of the slice.
+#define PERFETTO_TP_THREAD_SLICE_DEF(NAME, PARENT, C)  \
+  NAME(ThreadSliceTable, "thread_slice")               \
+  PARENT(PERFETTO_TP_SLICE_TABLE_DEF, C)               \
+  C(base::Optional<int64_t>, thread_ts)                \
+  C(base::Optional<int64_t>, thread_dur)               \
+  C(base::Optional<int64_t>, thread_instruction_count) \
+  C(base::Optional<int64_t>, thread_instruction_delta)
+
+PERFETTO_TP_TABLE(PERFETTO_TP_THREAD_SLICE_DEF);
+
+#define PERFETTO_TP_EXPERIMENTAL_FLAT_SLICE_TABLE_DEF(NAME, PARENT, C) \
+  NAME(ExperimentalFlatSliceTable, "experimental_flat_slice")          \
+  PERFETTO_TP_ROOT_TABLE(PARENT, C)                                    \
+  C(int64_t, ts)                                                       \
+  C(int64_t, dur)                                                      \
+  C(TrackTable::Id, track_id)                                          \
+  C(StringPool::Id, category)                                          \
+  C(StringPool::Id, name)                                              \
+  C(uint32_t, arg_set_id)                                              \
+  C(base::Optional<SliceTable::Id>, source_id)                         \
+  C(int64_t, start_bound, Column::Flag::kHidden)                       \
+  C(int64_t, end_bound, Column::Flag::kHidden)
+
+PERFETTO_TP_TABLE(PERFETTO_TP_EXPERIMENTAL_FLAT_SLICE_TABLE_DEF);
 
 }  // namespace tables
 }  // namespace trace_processor

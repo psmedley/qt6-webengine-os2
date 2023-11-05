@@ -10,27 +10,27 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/scoped_observation.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/extensions/install_observer.h"
+#include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
-#include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/components/app_registrar_observer.h"
-#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_id.h"
+#include "chrome/browser/web_applications/os_integration_manager.h"
 #include "chrome/browser/web_applications/policy/web_app_policy_manager.h"
 #include "chrome/browser/web_applications/policy/web_app_policy_manager_observer.h"
+#include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/sync/model/string_ordinal.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class ExtensionEnableFlow;
 class PrefChangeRegistrar;
@@ -57,7 +57,7 @@ class AppLauncherHandler
     : public content::WebUIMessageHandler,
       public extensions::ExtensionUninstallDialog::Delegate,
       public ExtensionEnableFlowDelegate,
-      public content::NotificationObserver,
+      public extensions::InstallObserver,
       public web_app::AppRegistrarObserver,
       public web_app::WebAppPolicyManagerObserver,
       public extensions::ExtensionRegistryObserver {
@@ -82,10 +82,9 @@ class AppLauncherHandler
   // WebUIMessageHandler:
   void RegisterMessages() override;
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // extensions::InstallObserver
+  void OnAppsReordered(
+      const absl::optional<std::string>& extension_id) override;
 
   // extensions::ExtensionRegistryObserver:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
@@ -175,7 +174,7 @@ class AppLauncherHandler
     AppInstallInfo();
     ~AppInstallInfo();
 
-    base::string16 title;
+    std::u16string title;
     GURL app_url;
     syncer::StringOrdinal page_ordinal;
   };
@@ -192,7 +191,7 @@ class AppLauncherHandler
 
   // ExtensionUninstallDialog::Delegate:
   void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
-                                        const base::string16& error) override;
+                                        const std::u16string& error) override;
 
   // ExtensionEnableFlowDelegate:
   void ExtensionEnableFlowFinished() override;
@@ -207,9 +206,6 @@ class AppLauncherHandler
       std::unique_ptr<AppInstallInfo> install_info,
       const favicon_base::FaviconImageResult& image_result);
 
-  // Sends |highlight_app_id_| to the js.
-  void SetAppToBeHighlighted();
-
   void OnExtensionPreferenceChanged();
 
   // Called when an extension is removed (unloaded or uninstalled). Updates the
@@ -218,7 +214,7 @@ class AppLauncherHandler
                         bool is_uninstall);
 
   // True if the extension should be displayed.
-  bool ShouldShow(const extensions::Extension* extension) const;
+  bool ShouldShow(const extensions::Extension* extension);
 
   // Handle installing OS hooks for Web App installs from chrome://apps page.
   void InstallOsHooks(const web_app::AppId& app_id);
@@ -228,20 +224,20 @@ class AppLauncherHandler
   extensions::ExtensionService* const extension_service_;
 
   // The apps are represented in the web apps model, which outlives us since
-  // it's owned by our containing profile. Populated iff
-  // features::kDesktopPWAsWithoutExtensions is enabled.
+  // it's owned by our containing profile.
   web_app::WebAppProvider* const web_app_provider_;
 
-  base::ScopedObservation<web_app::AppRegistrar, web_app::AppRegistrarObserver>
+  base::ScopedObservation<web_app::WebAppRegistrar,
+                          web_app::AppRegistrarObserver>
       web_apps_observation_{this};
 
   base::ScopedObservation<web_app::WebAppPolicyManager,
                           web_app::WebAppPolicyManagerObserver>
       web_apps_policy_manager_observation_{this};
 
-  // We monitor changes to the extension system so that we can reload the apps
-  // when necessary.
-  content::NotificationRegistrar registrar_;
+  base::ScopedObservation<extensions::InstallTracker,
+                          extensions::InstallObserver>
+      install_tracker_observation_{this};
 
   // Monitor extension preference changes so that the Web UI can be notified.
   PrefChangeRegistrar extension_pref_change_registrar_;
@@ -272,16 +268,11 @@ class AppLauncherHandler
 
   // When populated, we have attempted to install a bookmark app, and are still
   // waiting to hear about success or failure from the extensions system.
-  base::Optional<syncer::StringOrdinal>
+  absl::optional<syncer::StringOrdinal>
       attempting_web_app_install_page_ordinal_;
 
   // True if we have executed HandleGetApps() at least once.
   bool has_loaded_apps_;
-
-  // The ID of the app to be highlighted on the NTP (i.e. shown on the page
-  // and pulsed). This is done for new installs. The actual higlighting occurs
-  // when the app is added to the page (via getAppsCallback or appAdded).
-  std::string highlight_app_id_;
 
   // Used for favicon loading tasks.
   base::CancelableTaskTracker cancelable_task_tracker_;

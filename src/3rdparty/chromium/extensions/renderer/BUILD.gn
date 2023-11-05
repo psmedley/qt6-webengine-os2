@@ -265,6 +265,7 @@ jumbo_source_set("renderer") {
     "//skia",
     "//storage/common",
     "//third_party/blink/public:blink",
+    "//third_party/blink/public/common",
     "//third_party/blink/public/strings:strings",
     "//third_party/cld_3/src/src:cld_3",
     "//third_party/zlib/google:compression_utils",
@@ -325,6 +326,7 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "activity_log_converter_strategy_unittest.cc",
+    "api/automation/automation_internal_custom_bindings_unittests.cc",
     "api_activity_logger_unittest.cc",
     "bindings/api_binding_bridge_unittest.cc",
     "bindings/api_binding_hooks_test_delegate.cc",

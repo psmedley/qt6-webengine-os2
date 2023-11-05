@@ -62,7 +62,7 @@ class VIEWS_EXPORT MenuModelAdapter : public MenuDelegate,
                                                int item_id);
 
   // MenuModelDelegate:
-  void OnIconChanged(int index) override {}
+  void OnIconChanged(int command_id) override {}
   void OnMenuStructureChanged() override;
   void OnMenuClearingDelegate() override;
 
@@ -79,8 +79,8 @@ class VIEWS_EXPORT MenuModelAdapter : public MenuDelegate,
   void ExecuteCommand(int id, int mouse_event_flags) override;
   bool IsTriggerableEvent(MenuItemView* source, const ui::Event& e) override;
   bool GetAccelerator(int id, ui::Accelerator* accelerator) const override;
-  base::string16 GetLabel(int id) const override;
-  void GetLabelStyle(int id, LabelStyle* style) const override;
+  std::u16string GetLabel(int id) const override;
+  const gfx::FontList* GetLabelFontList(int id) const override;
   bool IsCommandEnabled(int id) const override;
   bool IsCommandVisible(int id) const override;
   bool IsItemChecked(int id) const override;

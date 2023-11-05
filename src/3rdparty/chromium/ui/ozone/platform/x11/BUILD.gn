@@ -3,11 +3,12 @@
 # found in the LICENSE file.
 
 import("//build/config/chromeos/ui_mode.gni")
-import("//build/config/linux/gtk/gtk.gni")
 import("//gpu/vulkan/features.gni")
 import("//ui/base/ui_features.gni")
 
 visibility = [ "//ui/ozone/*" ]
+
+assert(is_linux || is_chromeos)
 
 source_set("x11") {
   sources = [
@@ -25,6 +26,10 @@ source_set("x11") {
     "x11_canvas_surface.h",
     "x11_clipboard_ozone.cc",
     "x11_clipboard_ozone.h",
+    "x11_global_shortcut_listener_ozone.cc",
+    "x11_global_shortcut_listener_ozone.h",
+    "x11_keyboard_hook_ozone.cc",
+    "x11_keyboard_hook_ozone.h",
     "x11_menu_utils.cc",
     "x11_menu_utils.h",
     "x11_screen_ozone.cc",
@@ -33,6 +38,8 @@ source_set("x11") {
     "x11_surface_factory.h",
     "x11_user_input_monitor.cc",
     "x11_user_input_monitor.h",
+    "x11_utils.cc",
+    "x11_utils.h",
   ]
 
   deps = [
@@ -82,10 +89,6 @@ source_set("x11") {
 
   if (enable_vulkan) {
     deps += [ "//gpu/vulkan/x" ]
-  }
-
-  if (use_gtk) {
-    deps += [ "//ui/gtk/x" ]
   }
 
   if (use_xkbcommon) {

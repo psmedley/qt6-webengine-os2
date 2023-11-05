@@ -28,6 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "base/callback_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_touch_event.h"
@@ -223,6 +224,8 @@ WebViewImpl* TouchActionTest::SetupTest(String file) {
   // Set size to enable hit testing, and avoid line wrapping for consistency
   // with browser.
   web_view->MainFrameViewWidget()->Resize(gfx::Size(900, 1600));
+  web_view->MainFrameWidget()->UpdateLifecycle(WebLifecycleUpdate::kAll,
+                                               DocumentUpdateReason::kTest);
 
   // Scroll to verify the code properly transforms windows to client co-ords.
   const int kScrollOffset = 100;

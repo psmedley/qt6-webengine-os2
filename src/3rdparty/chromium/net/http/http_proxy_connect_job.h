@@ -48,7 +48,6 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
                         scoped_refptr<SSLSocketParams> ssl_params,
                         bool is_quic,
                         const HostPortPair& endpoint,
-                        bool is_trusted_proxy,
                         bool tunnel,
                         const NetworkTrafficAnnotationTag traffic_annotation,
                         const NetworkIsolationKey& network_isolation_key);
@@ -61,7 +60,6 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
   }
   bool is_quic() const { return is_quic_; }
   const HostPortPair& endpoint() const { return endpoint_; }
-  bool is_trusted_proxy() const { return is_trusted_proxy_; }
   bool tunnel() const { return tunnel_; }
   const NetworkIsolationKey& network_isolation_key() const {
     return network_isolation_key_;
@@ -78,7 +76,6 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
   const scoped_refptr<SSLSocketParams> ssl_params_;
   bool is_quic_;
   const HostPortPair endpoint_;
-  const bool is_trusted_proxy_;
   const bool tunnel_;
   const NetworkIsolationKey network_isolation_key_;
   const NetworkTrafficAnnotationTag traffic_annotation_;
@@ -91,6 +88,20 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
 class NET_EXPORT_PRIVATE HttpProxyConnectJob : public ConnectJob,
                                                public ConnectJob::Delegate {
  public:
+  class NET_EXPORT_PRIVATE Factory {
+   public:
+    Factory() = default;
+    virtual ~Factory() = default;
+
+    virtual std::unique_ptr<HttpProxyConnectJob> Create(
+        RequestPriority priority,
+        const SocketTag& socket_tag,
+        const CommonConnectJobParams* common_connect_job_params,
+        scoped_refptr<HttpProxySocketParams> params,
+        ConnectJob::Delegate* delegate,
+        const NetLogWithSource* net_log);
+  };
+
   HttpProxyConnectJob(RequestPriority priority,
                       const SocketTag& socket_tag,
                       const CommonConnectJobParams* common_connect_job_params,
@@ -204,7 +215,7 @@ class NET_EXPORT_PRIVATE HttpProxyConnectJob : public ConnectJob,
 
   void OnAuthChallenge();
 
-  const HostPortPair& GetDestination();
+  const HostPortPair& GetDestination() const;
 
   std::string GetUserAgent() const;
 

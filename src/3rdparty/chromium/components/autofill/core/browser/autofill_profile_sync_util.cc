@@ -94,6 +94,11 @@ std::unique_ptr<EntityData> CreateEntityDataFromAutofillProfile(
   specifics->set_guid(entry.guid());
   specifics->set_origin(entry.origin());
 
+  if (!entry.profile_label().empty())
+    specifics->set_profile_label(entry.profile_label());
+
+  specifics->set_disallow_settings_visible_updates(
+      entry.disallow_settings_visible_updates());
   specifics->set_use_count(entry.use_count());
   specifics->set_use_date(entry.use_date().ToTimeT());
   specifics->set_address_home_language_code(
@@ -253,6 +258,15 @@ std::unique_ptr<AutofillProfile> CreateAutofillProfileFromSpecifics(
   profile->SetClientValidityFromBitfieldValue(
       specifics.validity_state_bitfield());
 
+  // Set the profile label if it exists.
+  if (specifics.has_profile_label())
+    profile->set_profile_label(specifics.profile_label());
+
+  // Set the `disallow_settings_visible_updates state` if it exists.
+  if (specifics.has_disallow_settings_visible_updates())
+    profile->set_disallow_settings_visible_updates(
+        specifics.disallow_settings_visible_updates());
+
   // Set repeated fields.
   profile->SetRawInfoWithVerificationStatus(
       NAME_HONORIFIC_PREFIX,
@@ -393,7 +407,7 @@ std::unique_ptr<AutofillProfile> CreateAutofillProfileFromSpecifics(
   // by a newer version of Chrome), or a country name (if set by an older
   // version of Chrome).
   // TODO(jkrcal): Move this migration logic into Address::SetRawInfo()?
-  base::string16 country_name_or_code =
+  std::u16string country_name_or_code =
       base::ASCIIToUTF16(specifics.address_home_country());
   std::string country_code =
       CountryNames::GetInstance()->GetCountryCode(country_name_or_code);

@@ -10,13 +10,12 @@
 #include <vector>
 
 #include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "extensions/browser/api/declarative/deduping_factory.h"
 #include "extensions/browser/api/declarative_webrequest/request_stage.h"
@@ -38,7 +37,7 @@ using base::ListValue;
 using base::Value;
 
 namespace helpers = extension_web_request_api_helpers;
-namespace keys = extensions::declarative_webrequest_constants;
+namespace keys_wrca = extensions::declarative_webrequest_constants;
 
 namespace extensions {
 
@@ -51,39 +50,39 @@ struct WebRequestConditionAttributeFactory {
 
   WebRequestConditionAttributeFactory() : factory(5) {
     factory.RegisterFactoryMethod(
-        keys::kResourceTypeKey,
+        keys_wrca::kResourceTypeKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeResourceType::Create);
 
     factory.RegisterFactoryMethod(
-        keys::kContentTypeKey,
+        keys_wrca::kContentTypeKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeContentType::Create);
     factory.RegisterFactoryMethod(
-        keys::kExcludeContentTypeKey,
+        keys_wrca::kExcludeContentTypeKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeContentType::Create);
 
     factory.RegisterFactoryMethod(
-        keys::kRequestHeadersKey,
+        keys_wrca::kRequestHeadersKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeRequestHeaders::Create);
     factory.RegisterFactoryMethod(
-        keys::kExcludeRequestHeadersKey,
+        keys_wrca::kExcludeRequestHeadersKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeRequestHeaders::Create);
 
     factory.RegisterFactoryMethod(
-        keys::kResponseHeadersKey,
+        keys_wrca::kResponseHeadersKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeResponseHeaders::Create);
     factory.RegisterFactoryMethod(
-        keys::kExcludeResponseHeadersKey,
+        keys_wrca::kExcludeResponseHeadersKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeResponseHeaders::Create);
 
     factory.RegisterFactoryMethod(
-        keys::kStagesKey,
+        keys_wrca::kStagesKey,
         DedupingFactory<WebRequestConditionAttribute>::IS_PARAMETERIZED,
         &WebRequestConditionAttributeStages::Create);
   }
@@ -138,11 +137,11 @@ WebRequestConditionAttributeResourceType::Create(
     const base::Value* value,
     std::string* error,
     bool* bad_message) {
-  DCHECK(instance_type == keys::kResourceTypeKey);
+  DCHECK(instance_type == keys_wrca::kResourceTypeKey);
   const base::ListValue* value_as_list = nullptr;
   if (!value->GetAsList(&value_as_list)) {
     *error = ErrorUtils::FormatErrorMessage(kInvalidValue,
-                                            keys::kResourceTypeKey);
+                                            keys_wrca::kResourceTypeKey);
     return nullptr;
   }
 
@@ -157,7 +156,7 @@ WebRequestConditionAttributeResourceType::Create(
         !ParseWebRequestResourceType(resource_type_string,
                                      &passed_types.back())) {
       *error = ErrorUtils::FormatErrorMessage(kInvalidValue,
-                                              keys::kResourceTypeKey);
+                                              keys_wrca::kResourceTypeKey);
       return nullptr;
     }
   }
@@ -185,7 +184,7 @@ WebRequestConditionAttributeResourceType::GetType() const {
 }
 
 std::string WebRequestConditionAttributeResourceType::GetName() const {
-  return keys::kResourceTypeKey;
+  return keys_wrca::kResourceTypeKey;
 }
 
 bool WebRequestConditionAttributeResourceType::Equals(
@@ -218,26 +217,24 @@ WebRequestConditionAttributeContentType::Create(
       const base::Value* value,
       std::string* error,
       bool* bad_message) {
-  DCHECK(name == keys::kContentTypeKey || name == keys::kExcludeContentTypeKey);
+  DCHECK(name == keys_wrca::kContentTypeKey || name == keys_wrca::kExcludeContentTypeKey);
 
-  const base::ListValue* value_as_list = nullptr;
-  if (!value->GetAsList(&value_as_list)) {
+  if (!value->is_list()) {
     *error = ErrorUtils::FormatErrorMessage(kInvalidValue, name);
     return nullptr;
   }
   std::vector<std::string> content_types;
-  for (auto it = value_as_list->begin(); it != value_as_list->end(); ++it) {
-    std::string content_type;
-    if (!it->GetAsString(&content_type)) {
+  for (const auto& entry : value->GetList()) {
+    if (!entry.is_string()) {
       *error = ErrorUtils::FormatErrorMessage(kInvalidValue, name);
       return nullptr;
     }
-    content_types.push_back(content_type);
+    content_types.push_back(entry.GetString());
   }
 
   return scoped_refptr<const WebRequestConditionAttribute>(
       new WebRequestConditionAttributeContentType(
-          content_types, name == keys::kContentTypeKey));
+          content_types, name == keys_wrca::kContentTypeKey));
 }
 
 int WebRequestConditionAttributeContentType::GetStages() const {
@@ -271,7 +268,7 @@ WebRequestConditionAttributeContentType::GetType() const {
 }
 
 std::string WebRequestConditionAttributeContentType::GetName() const {
-  return (inclusive_ ? keys::kContentTypeKey : keys::kExcludeContentTypeKey);
+  return (inclusive_ ? keys_wrca::kContentTypeKey : keys_wrca::kExcludeContentTypeKey);
 }
 
 bool WebRequestConditionAttributeContentType::Equals(
@@ -372,15 +369,15 @@ HeaderMatcher::~HeaderMatcher() {}
 std::unique_ptr<const HeaderMatcher> HeaderMatcher::Create(
     const base::ListValue* tests) {
   std::vector<std::unique_ptr<const HeaderMatchTest>> header_tests;
-  for (auto it = tests->begin(); it != tests->end(); ++it) {
+  for (const auto& entry : tests->GetList()) {
     const base::DictionaryValue* tests = nullptr;
-    if (!it->GetAsDictionary(&tests))
-      return std::unique_ptr<const HeaderMatcher>();
+    if (!entry.GetAsDictionary(&tests))
+      return nullptr;
 
     std::unique_ptr<const HeaderMatchTest> header_test(
         HeaderMatchTest::Create(tests));
     if (header_test.get() == nullptr)
-      return std::unique_ptr<const HeaderMatcher>();
+      return nullptr;
     header_tests.push_back(std::move(header_test));
   }
 
@@ -408,9 +405,8 @@ std::unique_ptr<HeaderMatcher::StringMatchTest>
 HeaderMatcher::StringMatchTest::Create(const base::Value& data,
                                        MatchType type,
                                        bool case_sensitive) {
-  std::string str;
-  CHECK(data.GetAsString(&str));
-  return base::WrapUnique(new StringMatchTest(str, type, case_sensitive));
+  return base::WrapUnique(
+      new StringMatchTest(data.GetString(), type, case_sensitive));
 }
 
 HeaderMatcher::StringMatchTest::~StringMatchTest() {}
@@ -466,29 +462,29 @@ HeaderMatcher::HeaderMatchTest::Create(const base::DictionaryValue* tests) {
        !it.IsAtEnd(); it.Advance()) {
     bool is_name = false;  // Is this test for header name?
     StringMatchTest::MatchType match_type;
-    if (it.key() == keys::kNamePrefixKey) {
+    if (it.key() == keys_wrca::kNamePrefixKey) {
       is_name = true;
       match_type = StringMatchTest::kPrefix;
-    } else if (it.key() == keys::kNameSuffixKey) {
+    } else if (it.key() == keys_wrca::kNameSuffixKey) {
       is_name = true;
       match_type = StringMatchTest::kSuffix;
-    } else if (it.key() == keys::kNameContainsKey) {
+    } else if (it.key() == keys_wrca::kNameContainsKey) {
       is_name = true;
       match_type = StringMatchTest::kContains;
-    } else if (it.key() == keys::kNameEqualsKey) {
+    } else if (it.key() == keys_wrca::kNameEqualsKey) {
       is_name = true;
       match_type = StringMatchTest::kEquals;
-    } else if (it.key() == keys::kValuePrefixKey) {
+    } else if (it.key() == keys_wrca::kValuePrefixKey) {
       match_type = StringMatchTest::kPrefix;
-    } else if (it.key() == keys::kValueSuffixKey) {
+    } else if (it.key() == keys_wrca::kValueSuffixKey) {
       match_type = StringMatchTest::kSuffix;
-    } else if (it.key() == keys::kValueContainsKey) {
+    } else if (it.key() == keys_wrca::kValueContainsKey) {
       match_type = StringMatchTest::kContains;
-    } else if (it.key() == keys::kValueEqualsKey) {
+    } else if (it.key() == keys_wrca::kValueEqualsKey) {
       match_type = StringMatchTest::kEquals;
     } else {
       NOTREACHED();  // JSON schema type checking should prevent this.
-      return std::unique_ptr<const HeaderMatchTest>();
+      return nullptr;
     }
     const base::Value* content = &it.value();
 
@@ -498,7 +494,7 @@ HeaderMatcher::HeaderMatchTest::Create(const base::DictionaryValue* tests) {
       case base::Value::Type::LIST: {
         const base::ListValue* list = nullptr;
         CHECK(content->GetAsList(&list));
-        for (const auto& it : *list) {
+        for (const auto& it : list->GetList()) {
           tests->push_back(StringMatchTest::Create(it, match_type, !is_name));
         }
         break;
@@ -510,7 +506,7 @@ HeaderMatcher::HeaderMatchTest::Create(const base::DictionaryValue* tests) {
       }
       default: {
         NOTREACHED();  // JSON schema type checking should prevent this.
-        return std::unique_ptr<const HeaderMatchTest>();
+        return nullptr;
       }
     }
   }
@@ -556,7 +552,7 @@ std::unique_ptr<const HeaderMatcher> PrepareHeaderMatcher(
   const base::ListValue* value_as_list = nullptr;
   if (!value->GetAsList(&value_as_list)) {
     *error = ErrorUtils::FormatErrorMessage(kInvalidValue, name);
-    return std::unique_ptr<const HeaderMatcher>();
+    return nullptr;
   }
 
   std::unique_ptr<const HeaderMatcher> header_matcher(
@@ -575,8 +571,8 @@ WebRequestConditionAttributeRequestHeaders::Create(
     const base::Value* value,
     std::string* error,
     bool* bad_message) {
-  DCHECK(name == keys::kRequestHeadersKey ||
-         name == keys::kExcludeRequestHeadersKey);
+  DCHECK(name == keys_wrca::kRequestHeadersKey ||
+         name == keys_wrca::kExcludeRequestHeadersKey);
 
   std::unique_ptr<const HeaderMatcher> header_matcher(
       PrepareHeaderMatcher(name, value, error));
@@ -585,7 +581,7 @@ WebRequestConditionAttributeRequestHeaders::Create(
 
   return scoped_refptr<const WebRequestConditionAttribute>(
       new WebRequestConditionAttributeRequestHeaders(
-          std::move(header_matcher), name == keys::kRequestHeadersKey));
+          std::move(header_matcher), name == keys_wrca::kRequestHeadersKey));
 }
 
 int WebRequestConditionAttributeRequestHeaders::GetStages() const {
@@ -618,8 +614,8 @@ WebRequestConditionAttributeRequestHeaders::GetType() const {
 }
 
 std::string WebRequestConditionAttributeRequestHeaders::GetName() const {
-  return (positive_ ? keys::kRequestHeadersKey
-                    : keys::kExcludeRequestHeadersKey);
+  return (positive_ ? keys_wrca::kRequestHeadersKey
+                    : keys_wrca::kExcludeRequestHeadersKey);
 }
 
 bool WebRequestConditionAttributeRequestHeaders::Equals(
@@ -648,8 +644,8 @@ WebRequestConditionAttributeResponseHeaders::Create(
     const base::Value* value,
     std::string* error,
     bool* bad_message) {
-  DCHECK(name == keys::kResponseHeadersKey ||
-         name == keys::kExcludeResponseHeadersKey);
+  DCHECK(name == keys_wrca::kResponseHeadersKey ||
+         name == keys_wrca::kExcludeResponseHeadersKey);
 
   std::unique_ptr<const HeaderMatcher> header_matcher(
       PrepareHeaderMatcher(name, value, error));
@@ -658,7 +654,7 @@ WebRequestConditionAttributeResponseHeaders::Create(
 
   return scoped_refptr<const WebRequestConditionAttribute>(
       new WebRequestConditionAttributeResponseHeaders(
-          std::move(header_matcher), name == keys::kResponseHeadersKey));
+          std::move(header_matcher), name == keys_wrca::kResponseHeadersKey));
 }
 
 int WebRequestConditionAttributeResponseHeaders::GetStages() const {
@@ -698,8 +694,8 @@ WebRequestConditionAttributeResponseHeaders::GetType() const {
 }
 
 std::string WebRequestConditionAttributeResponseHeaders::GetName() const {
-  return (positive_ ? keys::kResponseHeadersKey
-                    : keys::kExcludeResponseHeadersKey);
+  return (positive_ ? keys_wrca::kResponseHeadersKey
+                    : keys_wrca::kExcludeResponseHeadersKey);
 }
 
 bool WebRequestConditionAttributeResponseHeaders::Equals(
@@ -724,22 +720,21 @@ namespace {
 // sets corresponding bits (see RequestStage) in |out_stages|. Returns true on
 // success, false otherwise.
 bool ParseListOfStages(const base::Value& value, int* out_stages) {
-  const base::ListValue* list = nullptr;
-  if (!value.GetAsList(&list))
+  if (!value.is_list())
     return false;
 
   int stages = 0;
-  std::string stage_name;
-  for (auto it = list->begin(); it != list->end(); ++it) {
-    if (!(it->GetAsString(&stage_name)))
+  for (const auto& entry : value.GetList()) {
+    if (!entry.is_string())
       return false;
-    if (stage_name == keys::kOnBeforeRequestEnum) {
+    const std::string& stage_name = entry.GetString();
+    if (stage_name == keys_wrca::kOnBeforeRequestEnum) {
       stages |= ON_BEFORE_REQUEST;
-    } else if (stage_name == keys::kOnBeforeSendHeadersEnum) {
+    } else if (stage_name == keys_wrca::kOnBeforeSendHeadersEnum) {
       stages |= ON_BEFORE_SEND_HEADERS;
-    } else if (stage_name == keys::kOnHeadersReceivedEnum) {
+    } else if (stage_name == keys_wrca::kOnHeadersReceivedEnum) {
       stages |= ON_HEADERS_RECEIVED;
-    } else if (stage_name == keys::kOnAuthRequiredEnum) {
+    } else if (stage_name == keys_wrca::kOnAuthRequiredEnum) {
       stages |= ON_AUTH_REQUIRED;
     } else {
       NOTREACHED();  // JSON schema checks prevent getting here.
@@ -759,12 +754,12 @@ WebRequestConditionAttributeStages::Create(const std::string& name,
                                            const base::Value* value,
                                            std::string* error,
                                            bool* bad_message) {
-  DCHECK(name == keys::kStagesKey);
+  DCHECK(name == keys_wrca::kStagesKey);
 
   int allowed_stages = 0;
   if (!ParseListOfStages(*value, &allowed_stages)) {
     *error = ErrorUtils::FormatErrorMessage(kInvalidValue,
-                                                     keys::kStagesKey);
+                                                     keys_wrca::kStagesKey);
     return nullptr;
   }
 
@@ -788,7 +783,7 @@ WebRequestConditionAttributeStages::GetType() const {
 }
 
 std::string WebRequestConditionAttributeStages::GetName() const {
-  return keys::kStagesKey;
+  return keys_wrca::kStagesKey;
 }
 
 bool WebRequestConditionAttributeStages::Equals(

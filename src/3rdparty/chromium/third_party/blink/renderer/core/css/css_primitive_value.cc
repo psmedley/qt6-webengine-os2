@@ -205,16 +205,25 @@ CSSPrimitiveValue* CSSPrimitiveValue::CreateFromLength(const Length& length,
   return nullptr;
 }
 
+// TODO(crbug.com/1133390): When we support <frequency>, we must clamp like
+// <time>.
 double CSSPrimitiveValue::ComputeSeconds() const {
-  if (IsCalculated())
-    return To<CSSMathFunctionValue>(this)->ComputeSeconds();
-  return To<CSSNumericLiteralValue>(this)->ComputeSeconds();
+  double result = IsCalculated()
+                      ? To<CSSMathFunctionValue>(this)->ComputeSeconds()
+                      : To<CSSNumericLiteralValue>(this)->ComputeSeconds();
+  if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled())
+    result = CSSValueClampingUtils::ClampTime(result);
+  return result;
 }
 
 double CSSPrimitiveValue::ComputeDegrees() const {
-  if (IsCalculated())
-    return To<CSSMathFunctionValue>(this)->ComputeDegrees();
-  return To<CSSNumericLiteralValue>(this)->ComputeDegrees();
+  double result = IsCalculated()
+                      ? To<CSSMathFunctionValue>(this)->ComputeDegrees()
+                      : To<CSSNumericLiteralValue>(this)->ComputeDegrees();
+  if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
+    result = CSSValueClampingUtils::ClampAngle(result);
+  }
+  return result;
 }
 
 double CSSPrimitiveValue::ComputeDotsPerPixel() const {
@@ -377,7 +386,7 @@ Length CSSPrimitiveValue::ConvertToLength(
   if (IsPercentage()) {
     if (IsNumericLiteralValue() ||
         !To<CSSMathFunctionValue>(this)->AllowsNegativePercentageReference()) {
-      double value = GetDoubleValue();
+      double value = GetDoubleValueWithoutClamping();
       if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
         value = CSSValueClampingUtils::ClampLength(value);
       }
@@ -389,6 +398,10 @@ Length CSSPrimitiveValue::ConvertToLength(
 }
 
 double CSSPrimitiveValue::GetDoubleValue() const {
+  return CSSValueClampingUtils::ClampDouble(GetDoubleValueWithoutClamping());
+}
+
+double CSSPrimitiveValue::GetDoubleValueWithoutClamping() const {
   return IsCalculated() ? To<CSSMathFunctionValue>(this)->DoubleValue()
                         : To<CSSNumericLiteralValue>(this)->DoubleValue();
 }
@@ -464,6 +477,24 @@ bool CSSPrimitiveValue::UnitTypeToLengthUnitType(UnitType unit_type,
     case CSSPrimitiveValue::UnitType::kViewportMax:
       length_type = kUnitTypeViewportMax;
       return true;
+    case CSSPrimitiveValue::UnitType::kContainerWidth:
+      length_type = kUnitTypeContainerWidth;
+      return true;
+    case CSSPrimitiveValue::UnitType::kContainerHeight:
+      length_type = kUnitTypeContainerHeight;
+      return true;
+    case CSSPrimitiveValue::UnitType::kContainerInlineSize:
+      length_type = kUnitTypeContainerInlineSize;
+      return true;
+    case CSSPrimitiveValue::UnitType::kContainerBlockSize:
+      length_type = kUnitTypeContainerBlockSize;
+      return true;
+    case CSSPrimitiveValue::UnitType::kContainerMin:
+      length_type = kUnitTypeContainerMin;
+      return true;
+    case CSSPrimitiveValue::UnitType::kContainerMax:
+      length_type = kUnitTypeContainerMax;
+      return true;
     default:
       return false;
   }
@@ -492,6 +523,18 @@ CSSPrimitiveValue::UnitType CSSPrimitiveValue::LengthUnitTypeToUnitType(
       return CSSPrimitiveValue::UnitType::kViewportMin;
     case kUnitTypeViewportMax:
       return CSSPrimitiveValue::UnitType::kViewportMax;
+    case kUnitTypeContainerWidth:
+      return CSSPrimitiveValue::UnitType::kContainerWidth;
+    case kUnitTypeContainerHeight:
+      return CSSPrimitiveValue::UnitType::kContainerHeight;
+    case kUnitTypeContainerInlineSize:
+      return CSSPrimitiveValue::UnitType::kContainerInlineSize;
+    case kUnitTypeContainerBlockSize:
+      return CSSPrimitiveValue::UnitType::kContainerBlockSize;
+    case kUnitTypeContainerMin:
+      return CSSPrimitiveValue::UnitType::kContainerMin;
+    case kUnitTypeContainerMax:
+      return CSSPrimitiveValue::UnitType::kContainerMax;
     case kLengthUnitTypeCount:
       break;
   }
@@ -562,6 +605,18 @@ const char* CSSPrimitiveValue::UnitTypeToString(UnitType type) {
       return "vmin";
     case UnitType::kViewportMax:
       return "vmax";
+    case UnitType::kContainerWidth:
+      return "qw";
+    case UnitType::kContainerHeight:
+      return "qh";
+    case UnitType::kContainerInlineSize:
+      return "qi";
+    case UnitType::kContainerBlockSize:
+      return "qb";
+    case UnitType::kContainerMin:
+      return "qmin";
+    case UnitType::kContainerMax:
+      return "qmax";
     default:
       break;
   }

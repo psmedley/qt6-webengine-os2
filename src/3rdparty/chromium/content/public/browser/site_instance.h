@@ -9,13 +9,18 @@
 #include <stdint.h>
 
 #include "base/memory/ref_counted.h"
+#include "base/types/id_type.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browsing_instance_id.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/site_instance_process_assignment.h"
 #include "url/gurl.h"
 
 namespace content {
 class BrowserContext;
 class RenderProcessHost;
+
+using SiteInstanceId = base::IdType32<class SiteInstanceIdTag>;
 
 ///////////////////////////////////////////////////////////////////////////////
 // SiteInstance interface.
@@ -91,12 +96,12 @@ class RenderProcessHost;
 class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
  public:
   // Returns a unique ID for this SiteInstance.
-  virtual int32_t GetId() = 0;
+  virtual SiteInstanceId GetId() = 0;
 
   // Returns a unique ID for the BrowsingInstance (i.e., group of related
   // browsing contexts) to which this SiteInstance belongs. This allows callers
   // to identify which SiteInstances can asynchronously script each other.
-  virtual int32_t GetBrowsingInstanceId() = 0;
+  virtual BrowsingInstanceId GetBrowsingInstanceId() = 0;
 
   // Whether this SiteInstance has a running process associated with it.
   // This may return true before the first call to GetProcess(), in cases where
@@ -113,11 +118,11 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   // For sites that require process-per-site mode (e.g., NTP), this will
   // ensure only one RenderProcessHost for the site exists within the
   // BrowserContext.
-  virtual content::RenderProcessHost* GetProcess() = 0;
+  virtual RenderProcessHost* GetProcess() = 0;
 
   // Browser context to which this SiteInstance (and all related
   // SiteInstances) belongs.
-  virtual content::BrowserContext* GetBrowserContext() = 0;
+  virtual BrowserContext* GetBrowserContext() = 0;
 
   // Get the web site that this SiteInstance is rendering pages for. This
   // includes the scheme and registered domain, but not the port.
@@ -176,14 +181,16 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   // affects performance.
   virtual SiteInstanceProcessAssignment GetLastProcessAssignmentOutcome() = 0;
 
+  // Write a representation of this object into a trace.
+  virtual void WriteIntoTrace(perfetto::TracedValue context) = 0;
+
   // Factory method to create a new SiteInstance.  This will create a new
   // BrowsingInstance, so it should only be used when creating a new tab from
   // scratch (or similar circumstances).
   //
   // The render process host factory may be nullptr.  See SiteInstance
   // constructor.
-  static scoped_refptr<SiteInstance> Create(
-      content::BrowserContext* browser_context);
+  static scoped_refptr<SiteInstance> Create(BrowserContext* browser_context);
 
   // Factory method to get the appropriate SiteInstance for the given URL, in
   // a new BrowsingInstance.  Use this instead of Create when you know the URL,
@@ -192,14 +199,14 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   // default SiteInstance for sites that don't require a dedicated process on
   // Android).
   static scoped_refptr<SiteInstance> CreateForURL(
-      content::BrowserContext* browser_context,
+      BrowserContext* browser_context,
       const GURL& url);
 
   // Factory method to create a SiteInstance for a <webview> guest in a new
   // BrowsingInstance.
   // TODO(734722): Replace this method once SecurityPrincipal is available.
   static scoped_refptr<SiteInstance> CreateForGuest(
-      content::BrowserContext* browser_context,
+      BrowserContext* browser_context,
       const GURL& guest_site_url);
 
   // Determine if a URL should "use up" a site.  URLs such as about:blank or
@@ -209,22 +216,30 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   // Starts requiring a dedicated process for |url|'s site.  On platforms where
   // strict site isolation is disabled, this may be used as a runtime signal
   // that a certain site should become process-isolated, because its security
-  // is important to the user (e.g., if the user has typed a password on that
-  // site).  The site will be determined from |url|'s scheme and eTLD+1. If
-  // |context| is non-null, the site will be isolated only within that
-  // BrowserContext; if |context| is null, the site will be isolated globally
-  // for all BrowserContexts.
+  // is important to the user (e.g., if the user has typed a password or logged
+  // in via OAuth on that site).  The site will be determined from |url|'s
+  // scheme and eTLD+1. If |context| is non-null, the site will be isolated
+  // only within that BrowserContext; if |context| is null, the site will be
+  // isolated globally for all BrowserContexts. |source| specifies why the new
+  // site is being isolated.
   //
   // Note that this has no effect if site isolation is turned off, such as via
   // the kDisableSiteIsolation cmdline flag or enterprise policy -- see also
   // SiteIsolationPolicy::AreDynamicIsolatedOriginsEnabled().
   //
-  // Currently this function assumes that the site is added *persistently*: it
-  // will ask the embedder to save the site as part of profile data for
-  // |context|, so that it survives restarts.  The site will be cleared from
-  // profile data if the user clears browsing data.  Future uses of this
-  // function may want to avoid persistence by passing in a new flag.
-  static void StartIsolatingSite(BrowserContext* context, const GURL& url);
+  // The |should_persist| parameter controls whether the site is added
+  // *persistently*.  When true (this is the default), this function will ask
+  // the embedder to save the site as part of profile data for |context|, so
+  // that it survives restarts. The site will be cleared from profile data if
+  // the user clears browsing data.  When false, the isolation will last only
+  // until the end of the current browsing session.  This is appropriate if the
+  // site's persistence is not desired or is managed separately (e.g., sites
+  // isolated due to OAuth logins are saved and in another component).
+  static void StartIsolatingSite(
+      BrowserContext* context,
+      const GURL& url,
+      ChildProcessSecurityPolicy::IsolatedOriginSource source,
+      bool should_persist = true);
 
  protected:
   friend class base::RefCounted<SiteInstance>;

@@ -169,6 +169,10 @@ class NamedTriggerRule : public BackgroundTracingRule {
       named_rule->set_event_type(MetadataProto::NamedRule::SESSION_RESTORE);
     } else if (named_event_ == "reached-code-config") {
       named_rule->set_event_type(MetadataProto::NamedRule::REACHED_CODE);
+    } else if (named_event_ ==
+               BackgroundTracingManager::kContentTriggerConfig) {
+      named_rule->set_event_type(MetadataProto::NamedRule::CONTENT_TRIGGER);
+      // TODO(chrisha): Set the |content_trigger_name_hash|.
     } else if (named_event_ == "preemptive_test") {
       named_rule->set_event_type(MetadataProto::NamedRule::TEST_RULE);
     }
@@ -237,7 +241,6 @@ class HistogramRule : public BackgroundTracingRule,
   }
 
   ~HistogramRule() override {
-    base::StatisticsRecorder::ClearCallback(histogram_name_);
     if (installed_) {
       BackgroundTracingManagerImpl::GetInstance()->RemoveAgentObserver(this);
     }
@@ -245,12 +248,12 @@ class HistogramRule : public BackgroundTracingRule,
 
   // BackgroundTracingRule implementation
   void Install() override {
-    base::StatisticsRecorder::SetCallback(
+    histogram_sample_callback_ = std::make_unique<
+        base::StatisticsRecorder::ScopedHistogramSampleObserver>(
         histogram_name_,
         base::BindRepeating(&HistogramRule::OnHistogramChangedCallback,
                             base::Unretained(this), histogram_lower_value_,
                             histogram_upper_value_, repeat_));
-
     BackgroundTracingManagerImpl::GetInstance()->AddAgentObserver(this);
     installed_ = true;
   }
@@ -353,6 +356,8 @@ class HistogramRule : public BackgroundTracingRule,
   int histogram_upper_value_;
   bool repeat_;
   bool installed_;
+  std::unique_ptr<base::StatisticsRecorder::ScopedHistogramSampleObserver>
+      histogram_sample_callback_;
 };
 
 class TraceForNSOrTriggerOrFullRule : public BackgroundTracingRule {

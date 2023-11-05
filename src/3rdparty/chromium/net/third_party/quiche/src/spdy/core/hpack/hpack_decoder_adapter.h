@@ -17,7 +17,6 @@
 #include "http2/hpack/decoder/hpack_decoder.h"
 #include "http2/hpack/decoder/hpack_decoder_listener.h"
 #include "http2/hpack/decoder/hpack_decoder_tables.h"
-#include "http2/hpack/hpack_string.h"
 #include "http2/hpack/http2_hpack_constants.h"
 #include "common/platform/api/quiche_export.h"
 #include "spdy/core/hpack/hpack_header_table.h"
@@ -68,8 +67,11 @@ class QUICHE_EXPORT_PRIVATE HpackDecoderAdapter {
   // a SpdyHeadersHandlerInterface.
   const SpdyHeaderBlock& decoded_block() const;
 
-  void SetHeaderTableDebugVisitor(
-      std::unique_ptr<HpackHeaderTable::DebugVisitorInterface> visitor);
+  // Returns the current dynamic table size, including the 32 bytes per entry
+  // overhead mentioned in RFC 7541 section 4.1.
+  size_t GetDynamicTableSize() const {
+    return hpack_decoder_.GetDynamicTableSize();
+  }
 
   // Set how much encoded data this decoder is willing to buffer.
   // TODO(jamessynge): Resolve definition of this value, as it is currently
@@ -83,8 +85,6 @@ class QUICHE_EXPORT_PRIVATE HpackDecoderAdapter {
   // accepted.
   void set_max_header_block_bytes(size_t max_header_block_bytes);
 
-  size_t EstimateMemoryUsage() const;
-
   // Error code if an error has occurred, Error::kOk otherwise.
   http2::HpackDecodingError error() const { return error_; }
 
@@ -92,8 +92,7 @@ class QUICHE_EXPORT_PRIVATE HpackDecoderAdapter {
 
  private:
   class QUICHE_EXPORT_PRIVATE ListenerAdapter
-      : public http2::HpackDecoderListener,
-        public http2::HpackDecoderTablesDebugListener {
+      : public http2::HpackDecoderListener {
    public:
     ListenerAdapter();
     ~ListenerAdapter() override;
@@ -105,22 +104,11 @@ class QUICHE_EXPORT_PRIVATE HpackDecoderAdapter {
     void set_handler(SpdyHeadersHandlerInterface* handler);
     const SpdyHeaderBlock& decoded_block() const { return decoded_block_; }
 
-    void SetHeaderTableDebugVisitor(
-        std::unique_ptr<HpackHeaderTable::DebugVisitorInterface> visitor);
-
     // Override the HpackDecoderListener methods:
     void OnHeaderListStart() override;
-    void OnHeader(const http2::HpackString& name,
-                  const http2::HpackString& value) override;
+    void OnHeader(const std::string& name, const std::string& value) override;
     void OnHeaderListEnd() override;
     void OnHeaderErrorDetected(absl::string_view error_message) override;
-
-    // Override the HpackDecoderTablesDebugListener methods:
-    int64_t OnEntryInserted(const http2::HpackStringPair& entry,
-                            size_t insert_count) override;
-    void OnUseEntry(const http2::HpackStringPair& entry,
-                    size_t insert_count,
-                    int64_t time_added) override;
 
     void AddToTotalHpackBytes(size_t delta) { total_hpack_bytes_ += delta; }
     size_t total_hpack_bytes() const { return total_hpack_bytes_; }
@@ -139,10 +127,6 @@ class QUICHE_EXPORT_PRIVATE HpackDecoderAdapter {
 
     // Total bytes of the name and value strings in the current HPACK block.
     size_t total_uncompressed_bytes_;
-
-    // visitor_ is used by a QUIC experiment regarding HPACK; remove
-    // when the experiment is done.
-    std::unique_ptr<HpackHeaderTable::DebugVisitorInterface> visitor_;
   };
 
   // Converts calls to HpackDecoderListener into calls to

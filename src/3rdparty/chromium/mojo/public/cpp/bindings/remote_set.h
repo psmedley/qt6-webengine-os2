@@ -11,11 +11,11 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/sequenced_task_runner.h"
-#include "base/stl_util.h"
-#include "base/util/type_safety/id_type.h"
+#include "base/types/id_type.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -27,7 +27,7 @@ namespace internal {
 struct RemoteSetElementIdTypeTag {};
 }  // namespace internal
 
-using RemoteSetElementId = util::IdTypeU32<internal::RemoteSetElementIdTypeTag>;
+using RemoteSetElementId = base::IdTypeU32<internal::RemoteSetElementIdTypeTag>;
 
 // Shared implementation of a set of remotes, used by both RemoteSet and
 // AssociatedRemoteSet aliases (see below).
@@ -119,6 +119,15 @@ class RemoteSetImpl {
   // Indicates whether a remote with the given ID is present in the set.
   bool Contains(RemoteSetElementId id) { return base::Contains(storage_, id); }
 
+  // Returns an `Interface*` for the given ID, that can be used to issue
+  // interface calls.
+  Interface* Get(RemoteSetElementId id) {
+    auto it = storage_.find(id);
+    if (it == storage_.end())
+      return nullptr;
+    return it->second.get();
+  }
+
   // Sets a callback to invoke any time a remote in the set is disconnected.
   // Note that the remote in question is already removed from the set by the
   // time the callback is run for its disconnection.
@@ -139,7 +148,7 @@ class RemoteSetImpl {
 
   void FlushForTesting() {
     for (auto& it : storage_) {
-        it.second.FlushForTesting();
+      it.second.FlushForTesting();
     }
   }
 

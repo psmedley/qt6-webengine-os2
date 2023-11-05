@@ -2,12 +2,12 @@
 // is used.
 
 struct foo {
-  [[offset (0)]] b : f32;
-  [[offset (8)]] a : array<f32>;
+  b : f32;
+  a : array<f32>;
 };
 
-[[stage(vertex)]]
-fn main() -> void {
+[[stage(fragment)]]
+fn main() {
   var f : foo;
   f.c = 2;
   return;

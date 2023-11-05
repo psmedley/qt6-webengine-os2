@@ -23,7 +23,8 @@
 
 namespace utils {
 
-    class ComboVertexStateDescriptor : public wgpu::VertexStateDescriptor {
+    // Primarily used by tests to easily set up the vertex buffer state portion of a RenderPipeline.
+    class ComboVertexStateDescriptor {
       public:
         ComboVertexStateDescriptor();
 
@@ -32,25 +33,30 @@ namespace utils {
         ComboVertexStateDescriptor(ComboVertexStateDescriptor&&) = delete;
         ComboVertexStateDescriptor& operator=(ComboVertexStateDescriptor&&) = delete;
 
+        uint32_t vertexBufferCount;
         std::array<wgpu::VertexBufferLayoutDescriptor, kMaxVertexBuffers> cVertexBuffers;
         std::array<wgpu::VertexAttributeDescriptor, kMaxVertexAttributes> cAttributes;
     };
 
     class ComboRenderPipelineDescriptor : public wgpu::RenderPipelineDescriptor {
       public:
-        ComboRenderPipelineDescriptor(const wgpu::Device& device);
+        ComboRenderPipelineDescriptor();
 
         ComboRenderPipelineDescriptor(const ComboRenderPipelineDescriptor&) = delete;
         ComboRenderPipelineDescriptor& operator=(const ComboRenderPipelineDescriptor&) = delete;
         ComboRenderPipelineDescriptor(ComboRenderPipelineDescriptor&&) = delete;
         ComboRenderPipelineDescriptor& operator=(ComboRenderPipelineDescriptor&&) = delete;
 
-        wgpu::ProgrammableStageDescriptor cFragmentStage;
+        wgpu::DepthStencilState* EnableDepthStencil(
+            wgpu::TextureFormat format = wgpu::TextureFormat::Depth24PlusStencil8);
 
-        ComboVertexStateDescriptor cVertexState;
-        wgpu::RasterizationStateDescriptor cRasterizationState;
-        std::array<wgpu::ColorStateDescriptor, kMaxColorAttachments> cColorStates;
-        wgpu::DepthStencilStateDescriptor cDepthStencilState;
+        std::array<wgpu::VertexBufferLayout, kMaxVertexBuffers> cBuffers;
+        std::array<wgpu::VertexAttribute, kMaxVertexAttributes> cAttributes;
+        std::array<wgpu::ColorTargetState, kMaxColorAttachments> cTargets;
+        std::array<wgpu::BlendState, kMaxColorAttachments> cBlends;
+
+        wgpu::FragmentState cFragment;
+        wgpu::DepthStencilState cDepthStencil;
     };
 
 }  // namespace utils

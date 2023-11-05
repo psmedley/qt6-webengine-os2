@@ -6,6 +6,11 @@
 
 #include "mojo/public/cpp/base/time_mojom_traits.h"
 #include "net/dns/public/dns_over_https_server_config.h"
+#include "net/dns/public/host_resolver_source.h"
+#include "net/dns/public/mdns_listener_update_type.h"
+#include "net/dns/public/resolve_error_info.h"
+#include "net/dns/public/secure_dns_mode.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "services/network/public/cpp/ip_address_mojom_traits.h"
 #include "services/network/public/cpp/ip_endpoint_mojom_traits.h"
 #include "services/network/public/mojom/host_resolver.mojom.h"
@@ -24,7 +29,7 @@ using network::mojom::ResolveHostParameters;
 
 namespace {
 
-DnsConfigOverrides::Tristate ToTristate(base::Optional<bool> optional) {
+DnsConfigOverrides::Tristate ToTristate(absl::optional<bool> optional) {
   if (!optional)
     return DnsConfigOverrides::Tristate::NO_OVERRIDE;
   if (optional.value())
@@ -32,10 +37,10 @@ DnsConfigOverrides::Tristate ToTristate(base::Optional<bool> optional) {
   return DnsConfigOverrides::Tristate::TRISTATE_FALSE;
 }
 
-base::Optional<bool> FromTristate(DnsConfigOverrides::Tristate tristate) {
+absl::optional<bool> FromTristate(DnsConfigOverrides::Tristate tristate) {
   switch (tristate) {
     case DnsConfigOverrides::Tristate::NO_OVERRIDE:
-      return base::nullopt;
+      return absl::nullopt;
     case DnsConfigOverrides::Tristate::TRISTATE_TRUE:
       return true;
     case DnsConfigOverrides::Tristate::TRISTATE_FALSE:
@@ -45,7 +50,7 @@ base::Optional<bool> FromTristate(DnsConfigOverrides::Tristate tristate) {
 
 bool ReadDnsOverHttpsServerData(
     mojo::ArrayDataView<DnsOverHttpsServerDataView> data,
-    base::Optional<std::vector<net::DnsOverHttpsServerConfig>>* out) {
+    absl::optional<std::vector<net::DnsOverHttpsServerConfig>>* out) {
   if (data.is_null()) {
     out->reset();
     return true;
@@ -68,7 +73,7 @@ bool ReadDnsOverHttpsServerData(
 }
 
 OptionalSecureDnsMode ToOptionalSecureDnsMode(
-    base::Optional<net::SecureDnsMode> optional) {
+    absl::optional<net::SecureDnsMode> optional) {
   if (!optional)
     return OptionalSecureDnsMode::NO_OVERRIDE;
   switch (optional.value()) {
@@ -83,11 +88,11 @@ OptionalSecureDnsMode ToOptionalSecureDnsMode(
 
 }  // namespace
 
-base::Optional<net::SecureDnsMode> FromOptionalSecureDnsMode(
+absl::optional<net::SecureDnsMode> FromOptionalSecureDnsMode(
     OptionalSecureDnsMode mode) {
   switch (mode) {
     case OptionalSecureDnsMode::NO_OVERRIDE:
-      return base::nullopt;
+      return absl::nullopt;
     case OptionalSecureDnsMode::OFF:
       return net::SecureDnsMode::kOff;
     case OptionalSecureDnsMode::AUTOMATIC:
@@ -119,11 +124,11 @@ StructTraits<DnsConfigOverridesDataView, net::DnsConfigOverrides>::
 }
 
 // static
-base::Optional<std::vector<DnsOverHttpsServerPtr>>
+absl::optional<std::vector<DnsOverHttpsServerPtr>>
 StructTraits<DnsConfigOverridesDataView, net::DnsConfigOverrides>::
     dns_over_https_servers(const net::DnsConfigOverrides& overrides) {
   if (!overrides.dns_over_https_servers)
-    return base::nullopt;
+    return absl::nullopt;
 
   std::vector<DnsOverHttpsServerPtr> out_servers;
   for (net::DnsOverHttpsServerConfig server :
@@ -132,7 +137,7 @@ StructTraits<DnsConfigOverridesDataView, net::DnsConfigOverrides>::
         DnsOverHttpsServer::New(server.server_template, server.use_post));
   }
 
-  return base::make_optional(std::move(out_servers));
+  return absl::make_optional(std::move(out_servers));
 }
 
 // static
@@ -217,6 +222,7 @@ DnsQueryType EnumTraits<DnsQueryType, net::DnsQueryType>::ToMojom(
     case net::DnsQueryType::HTTPS:
       return DnsQueryType::HTTPS;
     case net::DnsQueryType::INTEGRITY:
+    case net::DnsQueryType::HTTPS_EXPERIMENTAL:
       NOTIMPLEMENTED();
       return DnsQueryType::UNSPECIFIED;
   }
@@ -294,33 +300,31 @@ bool EnumTraits<ResolveHostParameters::Source, net::HostResolverSource>::
 
 // static
 MdnsListenClient::UpdateType
-EnumTraits<MdnsListenClient::UpdateType,
-           net::HostResolver::MdnsListener::Delegate::UpdateType>::
-    ToMojom(net::HostResolver::MdnsListener::Delegate::UpdateType input) {
+EnumTraits<MdnsListenClient::UpdateType, net::MdnsListenerUpdateType>::ToMojom(
+    net::MdnsListenerUpdateType input) {
   switch (input) {
-    case net::HostResolver::MdnsListener::Delegate::UpdateType::ADDED:
+    case net::MdnsListenerUpdateType::kAdded:
       return MdnsListenClient::UpdateType::ADDED;
-    case net::HostResolver::MdnsListener::Delegate::UpdateType::CHANGED:
+    case net::MdnsListenerUpdateType::kChanged:
       return MdnsListenClient::UpdateType::CHANGED;
-    case net::HostResolver::MdnsListener::Delegate::UpdateType::REMOVED:
+    case net::MdnsListenerUpdateType::kRemoved:
       return MdnsListenClient::UpdateType::REMOVED;
   }
 }
 
 // static
-bool EnumTraits<MdnsListenClient::UpdateType,
-                net::HostResolver::MdnsListener::Delegate::UpdateType>::
+bool EnumTraits<MdnsListenClient::UpdateType, net::MdnsListenerUpdateType>::
     FromMojom(MdnsListenClient::UpdateType input,
-              net::HostResolver::MdnsListener::Delegate::UpdateType* output) {
+              net::MdnsListenerUpdateType* output) {
   switch (input) {
     case MdnsListenClient::UpdateType::ADDED:
-      *output = net::HostResolver::MdnsListener::Delegate::UpdateType::ADDED;
+      *output = net::MdnsListenerUpdateType::kAdded;
       return true;
     case MdnsListenClient::UpdateType::CHANGED:
-      *output = net::HostResolver::MdnsListener::Delegate::UpdateType::CHANGED;
+      *output = net::MdnsListenerUpdateType::kChanged;
       return true;
     case MdnsListenClient::UpdateType::REMOVED:
-      *output = net::HostResolver::MdnsListener::Delegate::UpdateType::REMOVED;
+      *output = net::MdnsListenerUpdateType::kRemoved;
       return true;
   }
 }
@@ -337,8 +341,6 @@ EnumTraits<network::mojom::SecureDnsMode, net::SecureDnsMode>::ToMojom(
     case net::SecureDnsMode::kSecure:
       return network::mojom::SecureDnsMode::SECURE;
   }
-  NOTREACHED();
-  return network::mojom::SecureDnsMode::OFF;
 }
 
 // static
@@ -356,7 +358,31 @@ bool EnumTraits<network::mojom::SecureDnsMode, net::SecureDnsMode>::FromMojom(
       *out = net::SecureDnsMode::kSecure;
       return true;
   }
-  return false;
+}
+
+// static
+network::mojom::SecureDnsPolicy
+EnumTraits<network::mojom::SecureDnsPolicy, net::SecureDnsPolicy>::ToMojom(
+    net::SecureDnsPolicy secure_dns_mode) {
+  switch (secure_dns_mode) {
+    case net::SecureDnsPolicy::kAllow:
+      return network::mojom::SecureDnsPolicy::ALLOW;
+    case net::SecureDnsPolicy::kDisable:
+      return network::mojom::SecureDnsPolicy::DISABLE;
+  }
+}
+
+// static
+bool EnumTraits<network::mojom::SecureDnsPolicy, net::SecureDnsPolicy>::
+    FromMojom(network::mojom::SecureDnsPolicy in, net::SecureDnsPolicy* out) {
+  switch (in) {
+    case network::mojom::SecureDnsPolicy::ALLOW:
+      *out = net::SecureDnsPolicy::kAllow;
+      return true;
+    case network::mojom::SecureDnsPolicy::DISABLE:
+      *out = net::SecureDnsPolicy::kDisable;
+      return true;
+  }
 }
 
 // static

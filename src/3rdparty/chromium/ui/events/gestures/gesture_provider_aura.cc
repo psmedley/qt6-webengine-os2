@@ -39,7 +39,9 @@ GestureProviderAura::GestureProviderAura(GestureConsumer* consumer,
       kDoubleTapPlatformSupport);
 }
 
-GestureProviderAura::~GestureProviderAura() {}
+GestureProviderAura::~GestureProviderAura() {
+  client_->OnGestureProviderAuraWillBeDestroyed(this);
+}
 
 bool GestureProviderAura::OnTouchEvent(TouchEvent* event) {
   if (!pointer_state_.OnTouch(*event))
@@ -69,6 +71,10 @@ void GestureProviderAura::OnTouchEventAck(
 
 void GestureProviderAura::ResetGestureHandlingState() {
   filtered_gesture_provider_.ResetGestureHandlingState();
+}
+
+void GestureProviderAura::SendSynthesizedEndEvents() {
+  filtered_gesture_provider_.SendSynthesizedEndEvents();
 }
 
 void GestureProviderAura::OnGestureEvent(const GestureEventData& gesture) {
@@ -110,4 +116,4 @@ void GestureProviderAura::OnTouchEnter(int pointer_id, float x, float y) {
                   false /* is_source_touch_event_set_blocking */);
 }
 
-}  // namespace content
+}  // namespace ui

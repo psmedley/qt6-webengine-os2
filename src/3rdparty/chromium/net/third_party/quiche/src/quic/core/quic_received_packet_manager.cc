@@ -205,11 +205,7 @@ QuicTime::Delta QuicReceivedPacketManager::GetMaxAckDelay(
   // before sending an ack.
   QuicTime::Delta ack_delay = std::min(
       local_max_ack_delay_, rtt_stats.min_rtt() * ack_decimation_delay_);
-  if (GetQuicReloadableFlag(quic_ack_delay_alarm_granularity)) {
-    QUIC_RELOADABLE_FLAG_COUNT(quic_ack_delay_alarm_granularity);
-    ack_delay = std::max(ack_delay, kAlarmGranularity);
-  }
-  return ack_delay;
+  return std::max(ack_delay, kAlarmGranularity);
 }
 
 void QuicReceivedPacketManager::MaybeUpdateAckFrequency(
@@ -309,7 +305,7 @@ QuicPacketNumber QuicReceivedPacketManager::GetLargestObserved() const {
 QuicPacketNumber QuicReceivedPacketManager::PeerFirstSendingPacketNumber()
     const {
   if (!least_received_packet_number_.IsInitialized()) {
-    QUIC_BUG << "No packets have been received yet";
+    QUIC_BUG(quic_bug_10849_1) << "No packets have been received yet";
     return QuicPacketNumber(1);
   }
   return least_received_packet_number_;

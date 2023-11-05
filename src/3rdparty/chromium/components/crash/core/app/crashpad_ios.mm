@@ -63,6 +63,16 @@ void ProcessIntermediateDumps(
   GetCrashpadClient().ProcessIntermediateDumps(annotations);
 }
 
+void ProcessIntermediateDump(
+    const base::FilePath& file,
+    const std::map<std::string, std::string>& annotations) {
+  GetCrashpadClient().ProcessIntermediateDump(file, annotations);
+}
+
+void StartProcessingPendingReports() {
+  GetCrashpadClient().StartProcessingPendingReports();
+}
+
 namespace internal {
 
 base::FilePath PlatformCrashpadInitialization(

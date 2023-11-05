@@ -47,7 +47,8 @@ class PrimaryAccountAccessTokenFetcherTest
       StrictMock<MockCallback<AccessTokenFetcher::TokenCallback>>;
 
   PrimaryAccountAccessTokenFetcherTest()
-      : access_token_info_("access token",
+      : identity_test_env_(std::make_unique<IdentityTestEnvironment>()),
+        access_token_info_("access token",
                            base::Time::Now() + base::TimeDelta::FromHours(1),
                            "id_token") {}
 
@@ -61,7 +62,7 @@ class PrimaryAccountAccessTokenFetcherTest
     std::set<std::string> scopes = {
         GaiaConstants::kChromeSafeBrowsingOAuth2Scope};
     return std::make_unique<PrimaryAccountAccessTokenFetcher>(
-        "test_consumer", identity_test_env_.identity_manager(), scopes,
+        "test_consumer", identity_test_env_->identity_manager(), scopes,
         std::move(callback), mode, consent);
   }
 
@@ -73,11 +74,17 @@ class PrimaryAccountAccessTokenFetcherTest
     return CreateFetcher(std::move(callback), mode, consent);
   }
 
-  IdentityTestEnvironment* identity_test_env() { return &identity_test_env_; }
+  IdentityTestEnvironment* identity_test_env() {
+    return identity_test_env_.get();
+  }
+
+  void ShutdownIdentityManager() { identity_test_env_.reset(); }
 
   // Signs the user in to the primary account, returning the account ID.
   CoreAccountId SignIn() {
-    return identity_test_env_.MakePrimaryAccountAvailable("me@gmail.com")
+    return identity_test_env_
+        ->MakePrimaryAccountAvailable("me@gmail.com",
+                                      signin::ConsentLevel::kSync)
         .account_id;
   }
 
@@ -89,7 +96,7 @@ class PrimaryAccountAccessTokenFetcherTest
 
  private:
   base::test::TaskEnvironment task_environment_;
-  IdentityTestEnvironment identity_test_env_;
+  std::unique_ptr<IdentityTestEnvironment> identity_test_env_;
   AccessTokenInfo access_token_info_;
 };
 
@@ -170,7 +177,8 @@ TEST_P(PrimaryAccountAccessTokenFetcherTest,
        OneShotCallsBackWhenNoRefreshToken) {
   base::RunLoop run_loop;
 
-  identity_test_env()->SetPrimaryAccount("me@gmail.com");
+  identity_test_env()->SetPrimaryAccount("me@gmail.com",
+                                         signin::ConsentLevel::kSync);
 
   // Signed in, but there is no refresh token -> we should get called back.
   auto fetcher = CreateFetcher(
@@ -220,7 +228,9 @@ TEST_P(PrimaryAccountAccessTokenFetcherTest, ShouldWaitForRefreshToken) {
   TestTokenCallback callback;
 
   CoreAccountId account_id =
-      identity_test_env()->SetPrimaryAccount("me@gmail.com").account_id;
+      identity_test_env()
+          ->SetPrimaryAccount("me@gmail.com", signin::ConsentLevel::kSync)
+          .account_id;
 
   // Signed in, but there is no refresh token -> we should not get called back
   // (yet).
@@ -250,7 +260,9 @@ TEST_P(PrimaryAccountAccessTokenFetcherTest,
   // Signed-in to account_id, but there's only a refresh token for a different
   // account.
   CoreAccountId account_id =
-      identity_test_env()->SetPrimaryAccount("me@gmail.com").account_id;
+      identity_test_env()
+          ->SetPrimaryAccount("me@gmail.com", signin::ConsentLevel::kSync)
+          .account_id;
   identity_test_env()->MakeAccountAvailable(account_id.ToString() + "2");
 
   // The fetcher should wait for the correct refresh token.
@@ -333,6 +345,43 @@ TEST_P(PrimaryAccountAccessTokenFetcherTest,
       GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
 }
 
+// Shutting down the identity manager while a fetch is in progress should not
+// crash. Regression test for https://crbug.com/1187288
+TEST_P(PrimaryAccountAccessTokenFetcherTest, IdentityManagerShutdown) {
+  TestTokenCallback callback;
+
+  CoreAccountId account_id = SignIn();
+
+  // Signed in and refresh token already exists, so this should result in a
+  // request for an access token.
+  auto fetcher = CreateFetcher(
+      callback.Get(),
+      PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
+
+  EXPECT_CALL(
+      callback,
+      Run(GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED),
+          AccessTokenInfo()));
+  ShutdownIdentityManager();
+}
+
+// Shutting down the identity manager while waiting for the account should not
+// crash. Regression test for https://crbug.com/1187288
+TEST_P(PrimaryAccountAccessTokenFetcherTest, IdentityManagerShutdownNoAccount) {
+  TestTokenCallback callback;
+
+  // The account is not present, the fetcher starts waiting for the account.
+  auto fetcher = CreateFetcher(
+      callback.Get(),
+      PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
+
+  EXPECT_CALL(
+      callback,
+      Run(GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED),
+          AccessTokenInfo()));
+  ShutdownIdentityManager();
+}
+
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
 
 TEST_P(PrimaryAccountAccessTokenFetcherTest,
@@ -407,7 +456,7 @@ TEST_P(PrimaryAccountAccessTokenFetcherTest,
 // whether or not sync consent is required.
 INSTANTIATE_TEST_SUITE_P(All,
                          PrimaryAccountAccessTokenFetcherTest,
-                         testing::Values(ConsentLevel::kNotRequired,
+                         testing::Values(ConsentLevel::kSignin,
                                          ConsentLevel::kSync));
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -418,12 +467,13 @@ TEST_F(PrimaryAccountAccessTokenFetcherTest,
   TestTokenCallback callback;
 
   // Simulate login.
-  identity_test_env()->MakeUnconsentedPrimaryAccountAvailable("me@gmail.com");
+  identity_test_env()->MakePrimaryAccountAvailable(
+      "me@gmail.com", signin::ConsentLevel::kSignin);
 
   // Perform an immediate fetch with consent not required.
   auto fetcher = CreateFetcher(
       callback.Get(), PrimaryAccountAccessTokenFetcher::Mode::kImmediate,
-      ConsentLevel::kNotRequired);
+      ConsentLevel::kSignin);
 
   // We should get called back with the token.
   EXPECT_CALL(callback, Run(GoogleServiceAuthError::AuthErrorNone(),
@@ -438,7 +488,8 @@ TEST_F(PrimaryAccountAccessTokenFetcherTest,
   TestTokenCallback callback;
 
   // Simulate login.
-  identity_test_env()->MakeUnconsentedPrimaryAccountAvailable("me@gmail.com");
+  identity_test_env()->MakePrimaryAccountAvailable(
+      "me@gmail.com", signin::ConsentLevel::kSignin);
 
   // Try an immediate fetch with consent required.
   auto fetcher = CreateFetcher(
@@ -457,11 +508,12 @@ TEST_F(PrimaryAccountAccessTokenFetcherTest,
   auto fetcher =
       CreateFetcher(callback.Get(),
                     PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
-                    ConsentLevel::kNotRequired);
+                    ConsentLevel::kSignin);
   EXPECT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
 
   // Simulate login.
-  identity_test_env()->MakeUnconsentedPrimaryAccountAvailable("me@gmail.com");
+  identity_test_env()->MakePrimaryAccountAvailable(
+      "me@gmail.com", signin::ConsentLevel::kSignin);
 
   // Once the access token request is fulfilled, we should get called back with
   // the access token.

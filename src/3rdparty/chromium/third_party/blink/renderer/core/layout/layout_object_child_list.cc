@@ -27,6 +27,8 @@
 #include "third_party/blink/renderer/core/layout/layout_object_child_list.h"
 
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
+#include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/layout/layout_counter.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -232,8 +234,14 @@ void LayoutObjectChildList::InsertChildNode(LayoutObject* owner,
   if (new_child->WasNotifiedOfSubtreeChange())
     owner->NotifyAncestorsOfSubtreeChange();
 
-  if (owner->ForceLegacyLayout() && !new_child->IsLayoutNGObject())
-    new_child->SetForceLegacyLayout();
+  if (UNLIKELY(!new_child->IsLayoutNGObject())) {
+    if (owner->ForceLegacyLayout()) {
+      new_child->SetForceLegacyLayout();
+    } else if (const auto* element = DynamicTo<Element>(new_child->GetNode())) {
+      if (element->ShouldForceLegacyLayout())
+        new_child->SetForceLegacyLayout();
+    }
+  }
 
   // Mark the ancestor chain for paint invalidation checking.
   owner->SetShouldCheckForPaintInvalidation();
@@ -264,8 +272,11 @@ void LayoutObjectChildList::InsertChildNode(LayoutObject* owner,
 void LayoutObjectChildList::InvalidatePaintOnRemoval(LayoutObject& old_child) {
   if (!old_child.IsRooted())
     return;
-  if (old_child.IsBody() && old_child.View())
+  if (old_child.View() &&
+      (old_child.IsBody() || old_child.IsDocumentElement())) {
     old_child.View()->SetShouldDoFullPaintInvalidation();
+    old_child.View()->SetBackgroundNeedsFullPaintInvalidation();
+  }
   ObjectPaintInvalidator paint_invalidator(old_child);
   paint_invalidator.SlowSetPaintingLayerNeedsRepaint();
 }

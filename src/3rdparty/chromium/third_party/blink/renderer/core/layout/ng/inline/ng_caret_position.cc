@@ -150,7 +150,7 @@ unsigned GetTextOffsetBefore(const Node& node) {
   // atomic inline box.
   DCHECK(node.GetLayoutObject()->IsAtomicInlineLevel());
   const Position before_node = Position::BeforeNode(node);
-  base::Optional<unsigned> maybe_offset_before =
+  absl::optional<unsigned> maybe_offset_before =
       NGOffsetMapping::GetFor(before_node)->GetTextContentOffset(before_node);
   // We should have offset mapping for atomic inline boxes.
   DCHECK(maybe_offset_before.has_value());
@@ -180,7 +180,7 @@ CaretPositionResolution TryResolveCaretPositionByBoxFragmentSide(
   const NGCaretPositionType position_type =
       offset == offset_before ? NGCaretPositionType::kBeforeBox
                               : NGCaretPositionType::kAfterBox;
-  NGCaretPosition candidate{cursor, position_type, base::nullopt};
+  NGCaretPosition candidate{cursor, position_type, absl::nullopt};
 
   if (offset == offset_before &&
       CanResolveCaretPositionBeforeFragment(cursor, affinity)) {
@@ -248,8 +248,7 @@ bool IsUpstreamAfterLineBreak(const NGCaretPosition& caret_position) {
 
 NGCaretPosition BetterCandidateBetween(const NGCaretPosition& current,
                                        const NGCaretPosition& other,
-                                       unsigned offset,
-                                       TextAffinity affinity) {
+                                       unsigned offset) {
   DCHECK(!other.IsNull());
   if (current.IsNull())
     return other;
@@ -258,7 +257,10 @@ NGCaretPosition BetterCandidateBetween(const NGCaretPosition& current,
   // Make sure all of them are captured and handled here.
 
   // Only known case: either |current| or |other| is upstream after line break.
-  DCHECK_EQ(affinity, TextAffinity::kUpstream);
+  DCHECK(current.ToPositionInDOMTreeWithAffinity().Affinity() ==
+             TextAffinity::kUpstream ||
+         other.ToPositionInDOMTreeWithAffinity().Affinity() ==
+             TextAffinity::kUpstream);
   if (IsUpstreamAfterLineBreak(current)) {
     DCHECK(!IsUpstreamAfterLineBreak(other));
     return other;
@@ -279,7 +281,7 @@ NGCaretPosition ComputeNGCaretPosition(const LayoutBlockFlow& context,
   NGCaretPosition candidate;
   if (layout_text && layout_text->HasInlineFragments())
     cursor.MoveTo(*layout_text);
-  for (; cursor; cursor.MoveToNext()) {
+  for (; cursor; cursor.MoveToNextIncludingFragmentainer()) {
     const CaretPositionResolution resolution =
         TryResolveCaretPositionWithFragment(cursor, offset, affinity);
 
@@ -298,8 +300,8 @@ NGCaretPosition ComputeNGCaretPosition(const LayoutBlockFlow& context,
     }
 
     DCHECK_EQ(ResolutionType::kFoundCandidate, resolution.type);
-    candidate = BetterCandidateBetween(candidate, resolution.caret_position,
-                                       offset, affinity);
+    candidate =
+        BetterCandidateBetween(candidate, resolution.caret_position, offset);
   }
 
   return AdjustCaretPositionForBidiText(candidate);
@@ -319,7 +321,7 @@ NGCaretPosition ComputeNGCaretPosition(
     NOTREACHED() << context;
     return NGCaretPosition();
   }
-  const base::Optional<unsigned> maybe_offset =
+  const absl::optional<unsigned> maybe_offset =
       mapping->GetTextContentOffset(position);
   if (!maybe_offset.has_value()) {
     // We can reach here with empty text nodes.

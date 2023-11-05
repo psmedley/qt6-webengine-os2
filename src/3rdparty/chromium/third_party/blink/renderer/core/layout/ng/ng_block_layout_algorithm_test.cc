@@ -41,20 +41,17 @@ class NGBlockLayoutAlgorithmTest : public NGBaseLayoutAlgorithmTest {
         {WritingMode::kHorizontalTb, TextDirection::kLtr},
         LogicalSize(LayoutUnit(), LayoutUnit()));
     NGFragmentGeometry fragment_geometry =
-        CalculateInitialMinMaxFragmentGeometry(space, node);
+        CalculateInitialFragmentGeometry(space, node, /* is_intrinsic */ true);
 
     NGBlockLayoutAlgorithm algorithm({node, fragment_geometry, space});
-    MinMaxSizesInput input(
-        /* percentage_resolution_block_size */ LayoutUnit(),
-        MinMaxSizesType::kContent);
-    return algorithm.ComputeMinMaxSizes(input).sizes;
+    return algorithm.ComputeMinMaxSizes(MinMaxSizesFloatInput()).sizes;
   }
 
   scoped_refptr<const NGLayoutResult> RunCachedLayoutResult(
       const NGConstraintSpace& space,
       const NGBlockNode& node) {
     NGLayoutCacheStatus cache_status;
-    base::Optional<NGFragmentGeometry> initial_fragment_geometry;
+    absl::optional<NGFragmentGeometry> initial_fragment_geometry;
     return To<LayoutBlockFlow>(node.GetLayoutBox())
         ->CachedLayoutResult(space, nullptr, nullptr,
                              &initial_fragment_geometry, &cache_status);
@@ -189,7 +186,7 @@ TEST_F(NGBlockLayoutAlgorithmTest, MinInlineSizeCaching) {
 }
 
 TEST_F(NGBlockLayoutAlgorithmTest, PercentageBlockSizeQuirkDescendantsCaching) {
-  // Quirks mode triggers the interesting parent-child %-resolution behaviour.
+  // Quirks mode triggers the interesting parent-child %-resolution behavior.
   GetDocument().SetCompatibilityMode(Document::kQuirksMode);
 
   SetBodyInnerHTML(R"HTML(
@@ -230,7 +227,7 @@ TEST_F(NGBlockLayoutAlgorithmTest, PercentageBlockSizeQuirkDescendantsCaching) {
         /* is_new_formatting_context */ false);
     builder.SetAvailableSize(size);
     builder.SetPercentageResolutionSize(size);
-    builder.SetStretchInlineSizeIfAuto(true);
+    builder.SetInlineAutoBehavior(NGAutoBehavior::kStretchImplicit);
     return builder.ToConstraintSpace();
   };
 
@@ -263,11 +260,11 @@ TEST_F(NGBlockLayoutAlgorithmTest, PercentageBlockSizeQuirkDescendantsCaching) {
   EXPECT_EQ(run_test("box3"), nullptr);
 
   // Test 4: A flexbox (legacy descendant), which doesn't use the quirks mode
-  // behaviour.
+  // behavior.
   EXPECT_NE(run_test("box4"), nullptr);
 
   // Test 5: A flexbox (legacy descendant), which doesn't use the quirks mode
-  // behaviour, but is %-sized.
+  // behavior, but is %-sized.
   EXPECT_EQ(run_test("box5"), nullptr);
 
   // Test 6: An OOF positioned descentant which has a %-height, should not
@@ -275,11 +272,11 @@ TEST_F(NGBlockLayoutAlgorithmTest, PercentageBlockSizeQuirkDescendantsCaching) {
   EXPECT_NE(run_test("box6"), nullptr);
 
   // Test 7: A replaced element (legacy descendant), shouldn't use the quirks
-  // mode behaviour.
+  // mode behavior.
   EXPECT_NE(run_test("box7"), nullptr);
 
   // Test 8: A replaced element (legacy descendant), shouldn't use the quirks
-  // mode behaviour, but is %-sized.
+  // mode behavior, but is %-sized.
   EXPECT_EQ(run_test("box8"), nullptr);
 }
 
@@ -859,7 +856,7 @@ TEST_F(NGBlockLayoutAlgorithmTest, CollapsingMarginsCase7) {
 }
 
 // An empty block level element (with margins collapsing through it) has
-// non-trivial behaviour with margins collapsing.
+// non-trivial behavior with margins collapsing.
 TEST_F(NGBlockLayoutAlgorithmTest, CollapsingMarginsEmptyBlockWithClearance) {
   SetBodyInnerHTML(R"HTML(
     <!DOCTYPE html>
@@ -972,15 +969,15 @@ TEST_F(NGBlockLayoutAlgorithmTest, CollapsingMarginsEmptyBlockWithClearance) {
   // 40 = (90 + (-70 + 20)).
   EXPECT_EQ(LayoutUnit(40), abs->Location().Y());
 
-  // #inflow has similar behaviour to #abs, but includes its margin.
+  // #inflow has similar behavior to #abs, but includes its margin.
   // 70 = (90 + (-70 + 50))
   EXPECT_EQ(LayoutUnit(70), inflow->Location().Y());
 
   // A margin strut which resolves to 60 (-10 + 70) means that #zero doesn't
-  // get adjusted to clear the float, and we have normal behaviour.
+  // get adjusted to clear the float, and we have normal behavior.
   //
   // NOTE: This case below has wildly different results on different browsers,
-  // we may have to change the behaviour here in the future for web compat.
+  // we may have to change the behavior here in the future for web compat.
   run_test(
       /* #zero-top margin-bottom */ Length::Fixed(0),
       /* #zero-inner margin-top */ Length::Fixed(70),
@@ -995,7 +992,7 @@ TEST_F(NGBlockLayoutAlgorithmTest, CollapsingMarginsEmptyBlockWithClearance) {
   // 50 = (0 + (-20 + 70)).
   EXPECT_EQ(LayoutUnit(50), abs->Location().Y());
 
-  // #inflow has similar behaviour to #abs, but includes its margin.
+  // #inflow has similar behavior to #abs, but includes its margin.
   // 60 = (0 + (-20 + 80))
   EXPECT_EQ(LayoutUnit(60), inflow->Location().Y());
 
@@ -2497,21 +2494,26 @@ TEST_F(NGBlockLayoutAlgorithmTest,
   EXPECT_EQ(*after->LastBaseline(), LayoutUnit(400));
 }
 
-// TODO(dgrogan): Move this to ng_flex_layout_algorithm_test.cc if there ever is
-// one.
-TEST_F(NGBlockLayoutAlgorithmTest, DetailsFlexDoesntCrash) {
-  SetBodyInnerHTML(R"HTML(
-    <details style="display:flex"></details>
-  )HTML");
-  UpdateAllLifecyclePhasesForTest();
-  // No crash is good.
-}
-
 TEST_F(NGBlockLayoutAlgorithmTest, LayoutRubyTextCrash) {
   // crbug.com/1102186. This test passes if no DCHECK failure.
   SetBodyInnerHTML(R"HTML(
     <ruby>base<rt style="writing-mode:vertical-rl">annotation</ruby>
   )HTML");
+  UpdateAllLifecyclePhasesForTest();
+}
+
+TEST_F(NGBlockLayoutAlgorithmTest, HandleTextControlPlaceholderCrash) {
+  // crbug.com/1209025. This test passes if no crash.
+  SetBodyInnerHTML(R"HTML(
+<style>
+input::first-line {
+ color: red;
+}
+</style>
+<input id="i1" readonly>)HTML");
+  UpdateAllLifecyclePhasesForTest();
+  auto* input = GetDocument().getElementById("i1");
+  input->setAttribute(html_names::kPlaceholderAttr, "z");
   UpdateAllLifecyclePhasesForTest();
 }
 

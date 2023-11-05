@@ -4,6 +4,7 @@
 
 #include "cc/base/features.h"
 
+#include "base/feature_list.h"
 #include "build/build_config.h"
 
 namespace features {
@@ -20,6 +21,10 @@ const base::Feature kAnimatedImageResume = {"AnimatedImageResume",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables impulse-style scroll animations in place of the default ones.
+//
+// Note: Do not enable this on the Mac. The animation does not match the system
+// scroll animation curve to such an extent that it makes Chromium stand out in
+// a bad way.
 const base::Feature kImpulseScrollAnimations = {
     "ImpulseScrollAnimations",
     base::FEATURE_DISABLED_BY_DEFAULT};
@@ -34,35 +39,8 @@ const base::Feature kSynchronizedScrolling = {
     base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
 
-#if !defined(OS_ANDROID)
-// Enables latency recovery on the impl thread.
-const base::Feature kImplLatencyRecovery = {"ImplLatencyRecovery",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables latency recovery on the main thread.
-const base::Feature kMainLatencyRecovery = {"MainLatencyRecovery",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-#endif  // !defined(OS_ANDROID)
-
-bool IsImplLatencyRecoveryEnabled() {
-#if defined(OS_ANDROID)
-  // TODO(crbug.com/933846): LatencyRecovery is causing jank on Android. Disable
-  // for now, with plan to disable more widely on all platforms.
-  return false;
-#else
-  return base::FeatureList::IsEnabled(kImplLatencyRecovery);
-#endif
-}
-
-bool IsMainLatencyRecoveryEnabled() {
-#if defined(OS_ANDROID)
-  // TODO(crbug.com/933846): LatencyRecovery is causing jank on Android. Disable
-  // for now, with plan to disable more widely on all platforms.
-  return false;
-#else
-  return base::FeatureList::IsEnabled(kMainLatencyRecovery);
-#endif
-}
+const base::Feature kRemoveMobileViewportDoubleTap{
+    "RemoveMobileViewportDoubleTap", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kScrollUnification{"ScrollUnification",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
@@ -71,11 +49,16 @@ const base::Feature kSchedulerSmoothnessForAnimatedScrolls{
     "SmoothnessModeForAnimatedScrolls", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kWheelEventRegions{"WheelEventRegions",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
+                                       base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kHudDisplayForPerformanceMetrics{
     "HudDisplayForPerformanceMetrics", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kJankInjectionAblationFeature{
     "JankInjectionAblation", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kPreferNewContentForCheckerboardedScrolls{
+    "PreferNewContentForCheckerboardedScrolls",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
 }  // namespace features

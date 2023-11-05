@@ -6,7 +6,7 @@
 // TranslatorMetal:
 //   A GLSL-based translator that outputs shaders that fit GL_KHR_vulkan_glsl.
 //   It takes into account some considerations for Metal backend also.
-//   The shaders are then fed into glslang to spit out SPIR-V (libANGLE-side).
+//   The shaders are then fed into glslang to spit out SPIR-V.
 //   See: https://www.khronos.org/registry/vulkan/specs/misc/GL_KHR_vulkan_glsl.txt
 //
 //   The SPIR-V will then be translated to Metal Shading Language later in Metal backend.
@@ -16,7 +16,7 @@
 
 #include "angle_gl.h"
 #include "common/utilities.h"
-#include "compiler/translator/OutputVulkanGLSLForMetal.h"
+#include "compiler/translator/OutputVulkanGLSL.h"
 #include "compiler/translator/StaticType.h"
 #include "compiler/translator/tree_ops/InitializeVariables.h"
 #include "compiler/translator/tree_util/BuiltIn.h"
@@ -42,10 +42,11 @@ const char kRasterizerDiscardEnabledConstName[] = "ANGLERasterizerDisabled";
 namespace
 {
 // Metal specific driver uniforms
-constexpr const char kHalfRenderArea[] = "halfRenderArea";
-constexpr const char kFlipXY[]         = "flipXY";
-constexpr const char kNegFlipXY[]      = "negFlipXY";
-constexpr const char kCoverageMask[]   = "coverageMask";
+constexpr const char kHalfRenderArea[]     = "halfRenderArea";
+constexpr const char kFlipXY[]             = "flipXY";
+constexpr const char kNegFlipXY[]          = "negFlipXY";
+constexpr const char kEmulatedInstanceID[] = "emulatedInstanceID";
+constexpr const char kCoverageMask[]       = "coverageMask";
 
 constexpr ImmutableString kSampleMaskWriteFuncName = ImmutableString("ANGLEWriteSampleMask");
 
@@ -116,18 +117,21 @@ ANGLE_NO_DISCARD bool InitializeUnusedOutputs(TIntermBlock *root,
 }  // anonymous namespace
 
 // class DriverUniformMetal
-TFieldList *DriverUniformMetal::createUniformFields(TSymbolTable *symbolTable) const
+// The fields here must match the DriverUniforms structure defined in ContextMtl.h.
+TFieldList *DriverUniformMetal::createUniformFields(TSymbolTable *symbolTable)
 {
     TFieldList *driverFieldList = DriverUniform::createUniformFields(symbolTable);
 
-    constexpr size_t kNumGraphicsDriverUniformsMetal = 4;
+    constexpr size_t kNumGraphicsDriverUniformsMetal = 5;
     constexpr std::array<const char *, kNumGraphicsDriverUniformsMetal>
-        kGraphicsDriverUniformNamesMetal = {{kHalfRenderArea, kFlipXY, kNegFlipXY, kCoverageMask}};
+        kGraphicsDriverUniformNamesMetal = {
+            {kHalfRenderArea, kFlipXY, kNegFlipXY, kEmulatedInstanceID, kCoverageMask}};
 
     const std::array<TType *, kNumGraphicsDriverUniformsMetal> kDriverUniformTypesMetal = {{
         new TType(EbtFloat, 2),  // halfRenderArea
         new TType(EbtFloat, 2),  // flipXY
         new TType(EbtFloat, 2),  // negFlipXY
+        new TType(EbtUInt),      // kEmulatedInstanceID - unused in SPIR-V Metal compiler
         new TType(EbtUInt),      // kCoverageMask
     }};
 
@@ -179,16 +183,12 @@ bool TranslatorMetal::translate(TIntermBlock *root,
                                 ShCompileOptions compileOptions,
                                 PerformanceDiagnostics *perfDiagnostics)
 {
-    TInfoSinkBase &sink = getInfoSink().obj;
-
-    TOutputVulkanGLSL outputGLSL(sink, getArrayIndexClampingStrategy(), getHashFunction(),
-                                 getNameMap(), &getSymbolTable(), getShaderType(),
-                                 getShaderVersion(), getOutputType(), false, true, compileOptions);
+    TInfoSinkBase sink;
 
     SpecConstMetal specConst(&getSymbolTable(), compileOptions, getShaderType());
     DriverUniformMetal driverUniforms;
-    if (!TranslatorVulkan::translateImpl(root, compileOptions, perfDiagnostics, &specConst,
-                                         &driverUniforms, &outputGLSL))
+    if (!TranslatorVulkan::translateImpl(sink, root, compileOptions, perfDiagnostics, &specConst,
+                                         &driverUniforms))
     {
         return false;
     }
@@ -210,14 +210,14 @@ bool TranslatorMetal::translate(TIntermBlock *root,
         }
 
         // Insert rasterizer discard logic
-        if (!insertRasterizerDiscardLogic(root))
+        if (!insertRasterizerDiscardLogic(sink, root))
         {
             return false;
         }
     }
     else if (getShaderType() == GL_FRAGMENT_SHADER)
     {
-        if (!insertSampleMaskWritingLogic(root, &driverUniforms))
+        if (!insertSampleMaskWritingLogic(sink, root, &driverUniforms))
         {
             return false;
         }
@@ -244,9 +244,10 @@ bool TranslatorMetal::translate(TIntermBlock *root,
     }
 
     // Write translated shader.
+    TOutputVulkanGLSL outputGLSL(this, sink, true, compileOptions);
     root->traverse(&outputGLSL);
 
-    return true;
+    return compileToSpirv(sink);
 }
 
 // Metal needs to inverse the depth if depthRange is is reverse order, i.e. depth near > depth far
@@ -280,10 +281,16 @@ bool TranslatorMetal::transformDepthBeforeCorrection(TIntermBlock *root,
 // Add sample_mask writing to main, guarded by the specialization constant
 // kCoverageMaskEnabledConstName
 ANGLE_NO_DISCARD bool TranslatorMetal::insertSampleMaskWritingLogic(
+    TInfoSinkBase &sink,
     TIntermBlock *root,
     const DriverUniformMetal *driverUniforms)
 {
-    TInfoSinkBase &sink       = getInfoSink().obj;
+    // This transformation leaves the tree in an inconsistent state by using a variable that's
+    // defined in text, outside of the knowledge of the AST.  Same with defining the function in
+    // text.
+    mValidateASTOptions.validateVariableReferences = false;
+    mValidateASTOptions.validateFunctionCall       = false;
+
     TSymbolTable *symbolTable = &getSymbolTable();
 
     // Insert coverageMaskEnabled specialization constant and sample_mask writing function.
@@ -334,9 +341,13 @@ ANGLE_NO_DISCARD bool TranslatorMetal::insertSampleMaskWritingLogic(
     return RunAtTheEndOfShader(this, root, ifCall, symbolTable);
 }
 
-ANGLE_NO_DISCARD bool TranslatorMetal::insertRasterizerDiscardLogic(TIntermBlock *root)
+ANGLE_NO_DISCARD bool TranslatorMetal::insertRasterizerDiscardLogic(TInfoSinkBase &sink,
+                                                                    TIntermBlock *root)
 {
-    TInfoSinkBase &sink       = getInfoSink().obj;
+    // This transformation leaves the tree in an inconsistent state by using a variable that's
+    // defined in text, outside of the knowledge of the AST.
+    mValidateASTOptions.validateVariableReferences = false;
+
     TSymbolTable *symbolTable = &getSymbolTable();
 
     // Insert rasterizationDisabled specialization constant.

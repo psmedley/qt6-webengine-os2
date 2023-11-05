@@ -24,6 +24,7 @@
 #include "chrome/browser/component_updater/crl_set_component_installer.h"
 #include "chrome/browser/component_updater/first_party_sets_component_installer.h"
 #include "chrome/browser/net/chrome_mojo_proxy_resolver_factory.h"
+#include "chrome/browser/net/convert_explicitly_allowed_network_ports_pref.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ssl/sct_reporting_service.h"
 #include "chrome/browser/ssl/ssl_config_service_manager.h"
@@ -65,6 +66,7 @@
 #include "services/network/network_service.h"
 #include "services/network/public/cpp/cross_thread_pending_shared_url_loader_factory.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/mojom/cert_verifier_service.mojom.h"
 #include "services/network/public/mojom/network_context.mojom.h"
@@ -73,9 +75,9 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/net/dhcp_wpad_url_client.h"
-#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
@@ -163,8 +165,8 @@ network::mojom::HttpAuthDynamicParamsPtr CreateHttpAuthDynamicParams(
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // TODO: Use KerberosCredentialsManager to determine whether Kerberos is
   // enabled instead of relying directly on the preference.
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  policy::BrowserPolicyConnectorAsh* connector =
+      g_browser_process->platform_part()->browser_policy_connector_ash();
   auth_dynamic_params->allow_gssapi_library_load =
       connector->IsActiveDirectoryManaged() ||
       local_state->GetBoolean(prefs::kKerberosEnabled);
@@ -196,6 +198,18 @@ bool ShouldUseBuiltinCertVerifier(PrefService* local_state) {
 }
 #endif
 
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+// TODO(https://crbug.com/1228958): update function with enterprise policy for
+// Chrome root store usage once this is created.
+bool ShouldUseChromeRootStore(PrefService* local_state) {
+  // Note: intentionally checking the feature state here rather than falling
+  // back to ChromeRootImpl::kRootDefault, as browser-side network context
+  // initializition for TrialComparisonCertVerifier depends on knowing which
+  // verifier will be used.
+  return base::FeatureList::IsEnabled(net::features::kChromeRootStoreUsed);
+}
+#endif
+
 }  // namespace
 
 // SharedURLLoaderFactory backed by a SystemNetworkContextManager and its
@@ -212,7 +226,6 @@ class SystemNetworkContextManager::URLLoaderFactoryForSystem
 
   void CreateLoaderAndStart(
       mojo::PendingReceiver<network::mojom::URLLoader> receiver,
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& url_request,
@@ -223,7 +236,7 @@ class SystemNetworkContextManager::URLLoaderFactoryForSystem
     if (!manager_)
       return;
     manager_->GetURLLoaderFactory()->CreateLoaderAndStart(
-        std::move(receiver), routing_id, request_id, options, url_request,
+        std::move(receiver), request_id, options, url_request,
         std::move(client), traffic_annotation);
   }
 
@@ -343,8 +356,8 @@ SystemNetworkContextManager::SystemNetworkContextManager(
           ->GetPolicies(policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME,
                                                 std::string()))
           .GetValue(policy::key::kQuicAllowed);
-  if (value)
-    value->GetAsBoolean(&is_quic_allowed_);
+  if (value && value->is_bool())
+    is_quic_allowed_ = value->GetBool();
 #endif
   shared_url_loader_factory_ = new URLLoaderFactoryForSystem(this);
 
@@ -390,6 +403,12 @@ SystemNetworkContextManager::SystemNetworkContextManager(
       prefs::kEnableReferrers, local_state_,
       base::BindRepeating(&SystemNetworkContextManager::UpdateReferrersEnabled,
                           base::Unretained(this)));
+
+  pref_change_registrar_.Add(
+      prefs::kExplicitlyAllowedNetworkPorts,
+      base::BindRepeating(
+          &SystemNetworkContextManager::UpdateExplicitlyAllowedNetworkPorts,
+          base::Unretained(this)));
 }
 
 SystemNetworkContextManager::~SystemNetworkContextManager() {
@@ -445,6 +464,8 @@ void SystemNetworkContextManager::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kBuiltinCertificateVerifierEnabled,
                                 false);
 #endif
+
+  registry->RegisterListPref(prefs::kExplicitlyAllowedNetworkPorts);
 }
 
 // static
@@ -490,6 +511,39 @@ void SystemNetworkContextManager::OnNetworkServiceCreated(
   network_service->ConfigureHttpAuthPrefs(
       CreateHttpAuthDynamicParams(local_state_));
 
+  // Configure the Certificate Transparency logs.
+#if !defined(OS_ANDROID)
+  if (g_enable_certificate_transparency) {
+    std::vector<std::string> operated_by_google_logs =
+        certificate_transparency::GetLogsOperatedByGoogle();
+    std::vector<std::pair<std::string, base::TimeDelta>> disqualified_logs =
+        certificate_transparency::GetDisqualifiedLogs();
+    std::vector<network::mojom::CTLogInfoPtr> log_list_mojo;
+    for (const auto& ct_log : certificate_transparency::GetKnownLogs()) {
+      network::mojom::CTLogInfoPtr log_info = network::mojom::CTLogInfo::New();
+      log_info->public_key = std::string(ct_log.log_key, ct_log.log_key_length);
+      log_info->name = ct_log.log_name;
+
+      std::string log_id = crypto::SHA256HashString(log_info->public_key);
+      log_info->operated_by_google =
+          std::binary_search(std::begin(operated_by_google_logs),
+                             std::end(operated_by_google_logs), log_id);
+      auto it = std::lower_bound(
+          std::begin(disqualified_logs), std::end(disqualified_logs), log_id,
+          [](const auto& disqualified_log, const std::string& log_id) {
+            return disqualified_log.first < log_id;
+          });
+      if (it != std::end(disqualified_logs) && it->first == log_id) {
+        log_info->disqualified_at = it->second;
+      }
+      log_list_mojo.push_back(std::move(log_info));
+    }
+    network_service->UpdateCtLogList(
+        std::move(log_list_mojo),
+        certificate_transparency::GetLogListTimestamp());
+  }
+#endif
+
   int max_connections_per_proxy =
       local_state_->GetInteger(prefs::kMaxConnectionsPerProxy);
   if (max_connections_per_proxy != -1)
@@ -524,14 +578,13 @@ void SystemNetworkContextManager::OnNetworkServiceCreated(
   config->should_use_preference =
       command_line.HasSwitch(switches::kEnableEncryptionSelection);
   chrome::GetDefaultUserDataDirectory(&config->user_data_path);
-  content::GetNetworkService()->SetCryptConfig(std::move(config));
+  network_service->SetCryptConfig(std::move(config));
 #endif
 #if defined(OS_WIN) || defined(OS_MAC)
   // The OSCrypt keys are process bound, so if network service is out of
   // process, send it the required key.
   if (content::IsOutOfProcessNetworkService()) {
-    content::GetNetworkService()->SetEncryptionKey(
-        OSCrypt::GetRawEncryptionKey());
+    network_service->SetEncryptionKey(OSCrypt::GetRawEncryptionKey());
   }
 #endif
 
@@ -551,9 +604,11 @@ void SystemNetworkContextManager::OnNetworkServiceCreated(
               // invocation of this callback.
               network::mojom::NetworkService* network_service =
                   content::GetNetworkService();
-              network_service->SetPreloadedFirstPartySets(raw_sets);
+              network_service->SetFirstPartySets(raw_sets);
             }));
   }
+
+  UpdateExplicitlyAllowedNetworkPorts();
 }
 
 void SystemNetworkContextManager::DisableQuic() {
@@ -591,10 +646,13 @@ void SystemNetworkContextManager::ConfigureDefaultNetworkContextParams(
 
   std::string quic_user_agent_id;
 
-  if (base::FeatureList::IsEnabled(blink::features::kFreezeUserAgent)) {
+  if (base::FeatureList::IsEnabled(blink::features::kReduceUserAgent)) {
     quic_user_agent_id = "";
   } else {
-    quic_user_agent_id = chrome::GetChannelName();
+    // Extended stable reports as regular stable due to the similarity, and to
+    // avoid adding more signal to the user agent string.
+    quic_user_agent_id =
+        chrome::GetChannelName(chrome::WithExtendedStable(false));
     if (!quic_user_agent_id.empty())
       quic_user_agent_id.push_back(' ');
     quic_user_agent_id.append(
@@ -636,33 +694,8 @@ void SystemNetworkContextManager::ConfigureDefaultNetworkContextParams(
 
   if (g_enable_certificate_transparency) {
     network_context_params->enforce_chrome_ct_policy = true;
-    network_context_params->ct_log_update_time = base::GetBuildTime();
-
-    std::vector<std::string> operated_by_google_logs =
-        certificate_transparency::GetLogsOperatedByGoogle();
-    std::vector<std::pair<std::string, base::TimeDelta>> disqualified_logs =
-        certificate_transparency::GetDisqualifiedLogs();
-    for (const auto& ct_log : certificate_transparency::GetKnownLogs()) {
-      // TODO(rsleevi): https://crbug.com/702062 - Remove this duplication.
-      network::mojom::CTLogInfoPtr log_info = network::mojom::CTLogInfo::New();
-      log_info->public_key = std::string(ct_log.log_key, ct_log.log_key_length);
-      log_info->name = ct_log.log_name;
-
-      std::string log_id = crypto::SHA256HashString(log_info->public_key);
-      log_info->operated_by_google =
-          std::binary_search(std::begin(operated_by_google_logs),
-                             std::end(operated_by_google_logs), log_id);
-      auto it = std::lower_bound(
-          std::begin(disqualified_logs), std::end(disqualified_logs), log_id,
-          [](const auto& disqualified_log, const std::string& log_id) {
-            return disqualified_log.first < log_id;
-          });
-      if (it != std::end(disqualified_logs) && it->first == log_id) {
-        log_info->disqualified_at = it->second;
-      }
-      network_context_params->ct_logs.push_back(std::move(log_info));
-    }
   }
+
 #endif
 
 #if BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
@@ -672,6 +705,15 @@ void SystemNetworkContextManager::ConfigureDefaultNetworkContextParams(
                 kBuiltin
           : cert_verifier::mojom::CertVerifierCreationParams::CertVerifierImpl::
                 kSystem;
+#endif
+
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+  cert_verifier_creation_params->use_chrome_root_store =
+      ShouldUseChromeRootStore(local_state_)
+          ? cert_verifier::mojom::CertVerifierCreationParams::ChromeRootImpl::
+                kRootChrome
+          : cert_verifier::mojom::CertVerifierCreationParams::ChromeRootImpl::
+                kRootSystem;
 #endif
 }
 
@@ -723,7 +765,7 @@ SystemNetworkContextManager::GetHttpAuthDynamicParamsForTesting() {
 }
 
 void SystemNetworkContextManager::SetEnableCertificateTransparencyForTesting(
-    base::Optional<bool> enabled) {
+    absl::optional<bool> enabled) {
   g_enable_certificate_transparency =
       enabled.value_or(kCertificateTransparencyEnabled);
 }
@@ -743,12 +785,20 @@ SystemNetworkContextManager::CreateNetworkContextParams() {
   // These are needed for PAC scripts that use FTP URLs.
 #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   network_context_params->enable_ftp_url_support =
-      base::FeatureList::IsEnabled(blink::features::kFtpProtocol);
+      base::FeatureList::IsEnabled(network::features::kFtpProtocol);
 #endif
 
   proxy_config_monitor_.AddToNetworkContextParams(network_context_params.get());
 
   return network_context_params;
+}
+
+void SystemNetworkContextManager::UpdateExplicitlyAllowedNetworkPorts() {
+  // Currently there are no uses of net::IsPortAllowedForScheme() in the browser
+  // process. If someone adds one then we'll have to also call
+  // net::SetExplicitlyAllowedPorts() directly here, on the appropriate thread.
+  content::GetNetworkService()->SetExplicitlyAllowedPorts(
+      ConvertExplicitlyAllowedNetworkPortsPref(local_state_));
 }
 
 void SystemNetworkContextManager::UpdateReferrersEnabled() {

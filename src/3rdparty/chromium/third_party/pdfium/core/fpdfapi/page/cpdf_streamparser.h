@@ -7,6 +7,7 @@
 #ifndef CORE_FPDFAPI_PAGE_CPDF_STREAMPARSER_H_
 #define CORE_FPDFAPI_PAGE_CPDF_STREAMPARSER_H_
 
+#include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/string_pool_template.h"
 #include "core/fxcrt/weak_ptr.h"
 #include "third_party/base/span.h"
@@ -47,7 +48,6 @@ class CPDF_StreamParser {
   ByteString ReadString();
   ByteString ReadHexString();
   bool PositionIsInBounds() const;
-  bool WordBufferMatches(const char* pWord) const;
 
   uint32_t m_Pos = 0;       // Current byte position within |m_pBuf|.
   uint32_t m_WordSize = 0;  // Current byte position within |m_WordBuffer|.

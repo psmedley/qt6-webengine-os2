@@ -28,7 +28,6 @@
 #include "base/ranges/algorithm.h"
 #include "base/run_loop.h"
 #include "base/scoped_native_library.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
@@ -47,9 +46,10 @@
 #endif
 
 // STACK_SAMPLING_PROFILER_SUPPORTED is used to conditionally enable the tests
-// below for supported platforms (currently Win x64 and Mac x64).
-#if (defined(OS_WIN) && defined(ARCH_CPU_X86_64)) || \
-    (defined(OS_MAC) && defined(ARCH_CPU_X86_64)) || \
+// below for supported platforms (currently Win x64, Mac x64 and iOS 64).
+#if (defined(OS_WIN) && defined(ARCH_CPU_X86_64)) ||  \
+    (defined(OS_MAC) && defined(ARCH_CPU_X86_64)) ||  \
+    (defined(OS_IOS) && defined(ARCH_CPU_64_BITS)) || \
     (defined(OS_ANDROID) && BUILDFLAG(ENABLE_ARM_CFI_TABLE))
 #define STACK_SAMPLING_PROFILER_SUPPORTED 1
 #endif
@@ -508,12 +508,13 @@ PROFILER_TEST_F(StackSamplingProfilerTest, MAYBE_Alloca) {
 // Checks that a stack that runs through another library produces a stack with
 // the expected functions.
 // macOS ASAN is not yet supported - crbug.com/718628.
+// iOS chrome doesn't support loading native libraries.
 // Android is not supported when EXCLUDE_UNWIND_TABLES |other_library| doesn't
 // have unwind tables.
 // TODO(https://crbug.com/1100175): Enable this test again for Android with
 // ASAN. This is now disabled because the android-asan bot fails.
-#if (defined(ADDRESS_SANITIZER) && defined(OS_APPLE)) ||         \
-    (defined(OS_ANDROID) && BUILDFLAG(EXCLUDE_UNWIND_TABLES)) || \
+#if (defined(ADDRESS_SANITIZER) && defined(OS_APPLE)) || defined(OS_IOS) || \
+    (defined(OS_ANDROID) && BUILDFLAG(EXCLUDE_UNWIND_TABLES)) ||            \
     (defined(OS_ANDROID) && defined(ADDRESS_SANITIZER))
 #define MAYBE_OtherLibrary DISABLED_OtherLibrary
 #else
@@ -553,7 +554,8 @@ PROFILER_TEST_F(StackSamplingProfilerTest, MAYBE_UnloadingLibrary) {
 // produces a stack, and doesn't crash.
 // macOS ASAN is not yet supported - crbug.com/718628.
 // Android is not supported since modules are found before unwinding.
-#if (defined(ADDRESS_SANITIZER) && defined(OS_APPLE)) || defined(OS_ANDROID)
+#if (defined(ADDRESS_SANITIZER) && defined(OS_APPLE)) || \
+    defined(OS_ANDROID) || defined(OS_IOS)
 #define MAYBE_UnloadedLibrary DISABLED_UnloadedLibrary
 #else
 #define MAYBE_UnloadedLibrary UnloadedLibrary
@@ -803,9 +805,9 @@ PROFILER_TEST_F(StackSamplingProfilerTest, DestroyProfilerWhileProfiling) {
         BindLambdaForTesting([&profile](Profile result_profile) {
           profile = std::move(result_profile);
         }));
-    profiler.reset(new StackSamplingProfiler(
+    profiler = std::make_unique<StackSamplingProfiler>(
         target_thread_token, params, std::move(profile_builder),
-        CreateCoreUnwindersFactoryForTesting(module_cache())));
+        CreateCoreUnwindersFactoryForTesting(module_cache()));
     profiler->Start();
     profiler.reset();
 
@@ -1340,8 +1342,8 @@ PROFILER_TEST_F(StackSamplingProfilerTest, AddAuxUnwinder_BeforeStart) {
 
 PROFILER_TEST_F(StackSamplingProfilerTest, AddAuxUnwinder_AfterStart) {
   SamplingParams params;
-  params.sampling_interval = TimeDelta::FromMilliseconds(0);
-  params.samples_per_profile = 1;
+  params.sampling_interval = TimeDelta::FromMilliseconds(10);
+  params.samples_per_profile = 2;
 
   UnwindScenario scenario(BindRepeating(&CallWithPlainFunction));
 
@@ -1380,9 +1382,11 @@ PROFILER_TEST_F(StackSamplingProfilerTest, AddAuxUnwinder_AfterStart) {
 
   // The sample should have one frame from the context values and one from the
   // TestAuxUnwinder.
-  ASSERT_EQ(1u, profile.samples.size());
-  const std::vector<Frame>& frames = profile.samples[0];
+  ASSERT_EQ(2u, profile.samples.size());
 
+  // Whether the aux unwinder is available for the first sample is racy, so rely
+  // on the second sample.
+  const std::vector<Frame>& frames = profile.samples[1];
   ASSERT_EQ(2u, frames.size());
   EXPECT_EQ(23u, frames[1].instruction_pointer);
   EXPECT_EQ(nullptr, frames[1].module);

@@ -13,12 +13,34 @@
 #include "cppgc/visitor.h"
 
 namespace cppgc {
-
 namespace internal {
+
+// Wrapper around PersistentBase that allows accessing poisoned memory when
+// using ASAN. This is needed as the GC of the heap that owns the value
+// of a CTP, may clear it (heap termination, weakness) while the object
+// holding the CTP may be poisoned as itself may be deemed dead.
+class CrossThreadPersistentBase : public PersistentBase {
+ public:
+  CrossThreadPersistentBase() = default;
+  explicit CrossThreadPersistentBase(const void* raw) : PersistentBase(raw) {}
+
+  V8_CLANG_NO_SANITIZE("address") const void* GetValueFromGC() const {
+    return raw_;
+  }
+
+  V8_CLANG_NO_SANITIZE("address")
+  PersistentNode* GetNodeFromGC() const { return node_; }
+
+  V8_CLANG_NO_SANITIZE("address")
+  void ClearFromGC() const {
+    raw_ = nullptr;
+    node_ = nullptr;
+  }
+};
 
 template <typename T, typename WeaknessPolicy, typename LocationPolicy,
           typename CheckingPolicy>
-class BasicCrossThreadPersistent final : public PersistentBase,
+class BasicCrossThreadPersistent final : public CrossThreadPersistentBase,
                                          public LocationPolicy,
                                          private WeaknessPolicy,
                                          private CheckingPolicy {
@@ -28,35 +50,54 @@ class BasicCrossThreadPersistent final : public PersistentBase,
 
   ~BasicCrossThreadPersistent() { Clear(); }
 
-  BasicCrossThreadPersistent(  // NOLINT
+  BasicCrossThreadPersistent(
       const SourceLocation& loc = SourceLocation::Current())
       : LocationPolicy(loc) {}
 
-  BasicCrossThreadPersistent(  // NOLINT
+  BasicCrossThreadPersistent(
       std::nullptr_t, const SourceLocation& loc = SourceLocation::Current())
       : LocationPolicy(loc) {}
 
-  BasicCrossThreadPersistent(  // NOLINT
+  BasicCrossThreadPersistent(
       SentinelPointer s, const SourceLocation& loc = SourceLocation::Current())
-      : PersistentBase(s), LocationPolicy(loc) {}
+      : CrossThreadPersistentBase(s), LocationPolicy(loc) {}
 
-  BasicCrossThreadPersistent(  // NOLINT
+  BasicCrossThreadPersistent(
       T* raw, const SourceLocation& loc = SourceLocation::Current())
-      : PersistentBase(raw), LocationPolicy(loc) {
+      : CrossThreadPersistentBase(raw), LocationPolicy(loc) {
     if (!IsValid(raw)) return;
-    PersistentRegion& region = this->GetPersistentRegion(raw);
+    PersistentRegionLock guard;
+    CrossThreadPersistentRegion& region = this->GetPersistentRegion(raw);
     SetNode(region.AllocateNode(this, &Trace));
     this->CheckPointer(raw);
   }
 
-  BasicCrossThreadPersistent(  // NOLINT
+  class UnsafeCtorTag {
+   private:
+    UnsafeCtorTag() = default;
+    template <typename U, typename OtherWeaknessPolicy,
+              typename OtherLocationPolicy, typename OtherCheckingPolicy>
+    friend class BasicCrossThreadPersistent;
+  };
+
+  BasicCrossThreadPersistent(
+      UnsafeCtorTag, T* raw,
+      const SourceLocation& loc = SourceLocation::Current())
+      : CrossThreadPersistentBase(raw), LocationPolicy(loc) {
+    if (!IsValid(raw)) return;
+    CrossThreadPersistentRegion& region = this->GetPersistentRegion(raw);
+    SetNode(region.AllocateNode(this, &Trace));
+    this->CheckPointer(raw);
+  }
+
+  BasicCrossThreadPersistent(
       T& raw, const SourceLocation& loc = SourceLocation::Current())
       : BasicCrossThreadPersistent(&raw, loc) {}
 
   template <typename U, typename MemberBarrierPolicy,
             typename MemberWeaknessTag, typename MemberCheckingPolicy,
             typename = std::enable_if_t<std::is_base_of<T, U>::value>>
-  BasicCrossThreadPersistent(  // NOLINT
+  BasicCrossThreadPersistent(
       internal::BasicMember<U, MemberBarrierPolicy, MemberWeaknessTag,
                             MemberCheckingPolicy>
           member,
@@ -75,7 +116,7 @@ class BasicCrossThreadPersistent final : public PersistentBase,
   template <typename U, typename OtherWeaknessPolicy,
             typename OtherLocationPolicy, typename OtherCheckingPolicy,
             typename = std::enable_if_t<std::is_base_of<T, U>::value>>
-  BasicCrossThreadPersistent(  // NOLINT
+  BasicCrossThreadPersistent(
       const BasicCrossThreadPersistent<U, OtherWeaknessPolicy,
                                        OtherLocationPolicy,
                                        OtherCheckingPolicy>& other,
@@ -120,7 +161,7 @@ class BasicCrossThreadPersistent final : public PersistentBase,
     GetNode()->UpdateOwner(this);
     other.SetValue(nullptr);
     other.SetNode(nullptr);
-    this->CheckPointer(GetValue());
+    this->CheckPointer(Get());
     return *this;
   }
 
@@ -173,9 +214,17 @@ class BasicCrossThreadPersistent final : public PersistentBase,
     const void* old_value = GetValue();
     if (IsValid(old_value)) {
       PersistentRegionLock guard;
-      PersistentRegion& region = this->GetPersistentRegion(old_value);
-      region.FreeNode(GetNode());
-      SetNode(nullptr);
+      old_value = GetValue();
+      // The fast path check (IsValid()) does not acquire the lock. Reload
+      // the value to ensure the reference has not been cleared.
+      if (IsValid(old_value)) {
+        CrossThreadPersistentRegion& region =
+            this->GetPersistentRegion(old_value);
+        region.FreeNode(GetNode());
+        SetNode(nullptr);
+      } else {
+        CPPGC_DCHECK(!GetNode());
+      }
     }
     SetValue(nullptr);
   }
@@ -209,7 +258,7 @@ class BasicCrossThreadPersistent final : public PersistentBase,
    *
    * \returns the object.
    */
-  operator T*() const { return Get(); }  // NOLINT
+  operator T*() const { return Get(); }
 
   /**
    * Dereferences the stored object.
@@ -225,9 +274,12 @@ class BasicCrossThreadPersistent final : public PersistentBase,
   BasicCrossThreadPersistent<U, OtherWeaknessPolicy, OtherLocationPolicy,
                              OtherCheckingPolicy>
   To() const {
+    using OtherBasicCrossThreadPersistent =
+        BasicCrossThreadPersistent<U, OtherWeaknessPolicy, OtherLocationPolicy,
+                                   OtherCheckingPolicy>;
     PersistentRegionLock guard;
-    return BasicCrossThreadPersistent<U, OtherWeaknessPolicy,
-                                      OtherLocationPolicy, OtherCheckingPolicy>(
+    return OtherBasicCrossThreadPersistent(
+        typename OtherBasicCrossThreadPersistent::UnsafeCtorTag(),
         static_cast<U*>(Get()));
   }
 
@@ -254,14 +306,22 @@ class BasicCrossThreadPersistent final : public PersistentBase,
     const void* old_value = GetValue();
     if (IsValid(old_value)) {
       PersistentRegionLock guard;
-      PersistentRegion& region = this->GetPersistentRegion(old_value);
-      if (IsValid(ptr) && (&region == &this->GetPersistentRegion(ptr))) {
-        SetValue(ptr);
-        this->CheckPointer(ptr);
-        return;
+      old_value = GetValue();
+      // The fast path check (IsValid()) does not acquire the lock. Reload
+      // the value to ensure the reference has not been cleared.
+      if (IsValid(old_value)) {
+        CrossThreadPersistentRegion& region =
+            this->GetPersistentRegion(old_value);
+        if (IsValid(ptr) && (&region == &this->GetPersistentRegion(ptr))) {
+          SetValue(ptr);
+          this->CheckPointer(ptr);
+          return;
+        }
+        region.FreeNode(GetNode());
+        SetNode(nullptr);
+      } else {
+        CPPGC_DCHECK(!GetNode());
       }
-      region.FreeNode(GetNode());
-      SetNode(nullptr);
     }
     SetValue(ptr);
     if (!IsValid(ptr)) return;
@@ -274,7 +334,8 @@ class BasicCrossThreadPersistent final : public PersistentBase,
     PersistentRegionLock::AssertLocked();
     const void* old_value = GetValue();
     if (IsValid(old_value)) {
-      PersistentRegion& region = this->GetPersistentRegion(old_value);
+      CrossThreadPersistentRegion& region =
+          this->GetPersistentRegion(old_value);
       if (IsValid(ptr) && (&region == &this->GetPersistentRegion(ptr))) {
         SetValue(ptr);
         this->CheckPointer(ptr);
@@ -290,10 +351,17 @@ class BasicCrossThreadPersistent final : public PersistentBase,
   }
 
   void ClearFromGC() const {
-    if (IsValid(GetValue())) {
-      WeaknessPolicy::GetPersistentRegion(GetValue()).FreeNode(GetNode());
-      PersistentBase::ClearFromGC();
+    if (IsValid(GetValueFromGC())) {
+      WeaknessPolicy::GetPersistentRegion(GetValueFromGC())
+          .FreeNode(GetNodeFromGC());
+      CrossThreadPersistentBase::ClearFromGC();
     }
+  }
+
+  // See Get() for details.
+  V8_CLANG_NO_SANITIZE("cfi-unrelated-cast")
+  T* GetFromGC() const {
+    return static_cast<T*>(const_cast<void*>(GetValueFromGC()));
   }
 
   friend class cppgc::Visitor;

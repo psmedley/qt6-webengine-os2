@@ -9,15 +9,14 @@
 
 #include "base/callback_forward.h"
 #include "base/containers/circular_deque.h"
-#include "base/containers/flat_map.h"
 #include "base/containers/queue.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
+#include "base/memory/unsafe_shared_memory_pool.h"
 #include "base/synchronization/lock.h"
 #include "media/base/media_export.h"
-#include "media/base/shared_memory_pool.h"
 #include "media/base/video_encoder.h"
 #include "media/video/video_encode_accelerator.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -114,9 +113,9 @@ class MEDIA_EXPORT VideoEncodeAcceleratorAdapter
       const gfx::Size& size,
       scoped_refptr<VideoFrame> src_frame);
 
-  scoped_refptr<SharedMemoryPool> output_pool_;
-  scoped_refptr<SharedMemoryPool> input_pool_;
-  std::unique_ptr<SharedMemoryPool::SharedMemoryHandle> output_handle_holder_;
+  scoped_refptr<base::UnsafeSharedMemoryPool> output_pool_;
+  scoped_refptr<base::UnsafeSharedMemoryPool> input_pool_;
+  std::unique_ptr<base::UnsafeSharedMemoryPool::Handle> output_handle_holder_;
   size_t input_buffer_size_;
 
   std::unique_ptr<VideoEncodeAccelerator> accelerator_;
@@ -142,19 +141,11 @@ class MEDIA_EXPORT VideoEncodeAcceleratorAdapter
   scoped_refptr<base::SequencedTaskRunner> callback_task_runner_;
 
   State state_ = State::kNotInitialized;
-  base::Optional<bool> flush_support_;
+  absl::optional<bool> flush_support_;
 
   // True if underlying instance of VEA can handle GPU backed frames with a
   // size different from what VEA was configured for.
   bool gpu_resize_supported_ = false;
-
-  struct PendingEncode {
-    PendingEncode();
-    ~PendingEncode();
-    StatusCB done_callback;
-    scoped_refptr<VideoFrame> frame;
-    bool key_frame;
-  };
 
   // These are encodes that have not been sent to the accelerator.
   std::vector<std::unique_ptr<PendingEncode>> pending_encodes_;
@@ -166,6 +157,8 @@ class MEDIA_EXPORT VideoEncodeAcceleratorAdapter
   VideoCodecProfile profile_ = VIDEO_CODEC_PROFILE_UNKNOWN;
   Options options_;
   OutputCB output_cb_;
+
+  gfx::Size input_coded_size_;
 };
 
 }  // namespace media

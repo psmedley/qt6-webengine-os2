@@ -49,7 +49,6 @@
 #include <QRect>
 #include <QString>
 #include <QUrl>
-#include <base/strings/nullable_string16.h>
 #include "base/files/file_path.h"
 #include "base/time/time.h"
 #include "net/cookies/canonical_cookie.h"
@@ -57,13 +56,11 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
-#include "third_party/skia/include/core/SkMatrix44.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "url/gurl.h"
 
-QT_FORWARD_DECLARE_CLASS(QMatrix4x4)
 QT_FORWARD_DECLARE_CLASS(QSslCertificate)
 
 namespace gfx {
@@ -77,24 +74,23 @@ class X509Certificate;
 
 namespace QtWebEngineCore {
 
-inline QString toQt(const base::string16 &string)
-{
 #if defined(OS_WIN) || defined(OS_OS2)
+inline QString toQt(const std::wstring &string)
+{
     return QString::fromStdWString(string);
-#else
-    return QString::fromUtf16(reinterpret_cast<const char16_t *>(string.data()), string.size());
+}
 #endif
+
+inline QString toQt(const std::u16string &string)
+{
+    return QString::fromStdU16String(string);
 }
 
-inline QString toQt(const base::Optional<base::string16> &string)
+inline QString toQt(const absl::optional<std::u16string> &string)
 {
     if (!string.has_value())
         return QString();
-#if defined(OS_WIN) || defined(OS_OS2)
-    return QString::fromStdWString(string->data());
-#else
-    return QString::fromUtf16(string->data());
-#endif
+    return QString::fromStdU16String(*string);
 }
 
 inline QString toQString(const std::string &string)
@@ -113,25 +109,16 @@ inline QString toQt(const std::string &string)
     return toQString(string);
 }
 
-inline base::string16 toString16(const QString &qString)
+inline std::u16string toString16(const QString &qString)
 {
-#if defined(OS_WIN) || defined(OS_OS2)
-    return base::string16(qString.toStdWString());
-#else
-    return base::string16((const char16_t *)qString.utf16());
-#endif
+    return qString.toStdU16String();
 }
 
-inline base::NullableString16 toNullableString16(const QString &qString)
-{
-    return base::NullableString16(toString16(qString), qString.isNull());
-}
-
-inline base::Optional<base::string16> toOptionalString16(const QString &qString)
+inline absl::optional<std::u16string> toOptionalString16(const QString &qString)
 {
     if (qString.isNull())
-        return base::nullopt;
-    return base::make_optional(toString16(qString));
+        return absl::nullopt;
+    return absl::make_optional(qString.toStdU16String());
 }
 
 inline QUrl toQt(const GURL &url)
@@ -225,8 +212,6 @@ SkBitmap toSkBitmap(const QImage &image);
 QIcon toQIcon(const gfx::Image &image);
 QIcon toQIcon(const std::vector<SkBitmap> &bitmaps);
 
-void convertToQt(const SkMatrix44 &m, QMatrix4x4 &c);
-
 inline QDateTime toQt(base::Time time)
 {
     return QDateTime::fromMSecsSinceEpoch(time.ToJavaTime());
@@ -266,7 +251,7 @@ inline base::FilePath toFilePath(const QString &str)
 
 int flagsFromModifiers(Qt::KeyboardModifiers modifiers);
 
-inline QStringList fromVector(const std::vector<base::string16> &vector)
+inline QStringList fromVector(const std::vector<std::u16string> &vector)
 {
     QStringList result;
     for (auto s: vector) {

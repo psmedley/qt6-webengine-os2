@@ -13,6 +13,11 @@
 #include "src/gpu/ops/GrMeshDrawOp.h"
 #include "src/gpu/text/GrTextBlob.h"
 
+#if !defined(SK_BUILD_FOR_IOS) || \
+            (defined(__IPHONE_9_0) && __IPHONE_OS_VERSION_MIN_REQUIRED > __IPHONE_9_0)
+    #define GR_HAS_THREAD_LOCAL
+#endif
+
 class GrRecordingContext;
 
 class GrAtlasTextOp final : public GrMeshDrawOp {
@@ -22,10 +27,18 @@ public:
     ~GrAtlasTextOp() override {
         for (const Geometry* g = fHead; g != nullptr;) {
             const Geometry* next = g->fNext;
-            delete g;
+            g->~Geometry();
             g = next;
         }
     }
+
+#if defined(GR_HAS_THREAD_LOCAL)
+    void* operator new(size_t s);
+    void operator delete(void* b) noexcept;
+    static void ClearCache();
+#else
+    static void ClearCache() {}
+#endif
 
     static const int kVerticesPerGlyph = GrAtlasSubRun::kVerticesPerGlyph;
     static const int kIndicesPerGlyph = 6;
@@ -36,31 +49,43 @@ public:
                  SkPoint drawOrigin,
                  SkIRect clipRect,
                  sk_sp<GrTextBlob> blob,
+                 GrAtlasSubRunOwner subRunOwner,
                  const SkPMColor4f& color)
             : fSubRun{subRun}
+            , fBlob{std::move(blob)}
+            , fSubRunDtor{std::move(subRunOwner)}
             , fDrawMatrix{drawMatrix}
             , fDrawOrigin{drawOrigin}
             , fClipRect{clipRect}
-            , fBlob{std::move(blob)}
-            , fColor{color} {}
+            , fColor{color} {
+                SkASSERT(fBlob != nullptr || fSubRunDtor != nullptr);
+                SkASSERT(SkToBool(fSubRunDtor) != SkToBool(fBlob));
+        }
 
-        static Geometry* Make(GrRecordingContext* rc,
-                              const GrAtlasSubRun& subRun,
-                              const SkMatrix& drawMatrix,
-                              SkPoint drawOrigin,
-                              SkIRect clipRect,
-                              sk_sp<GrTextBlob> blob,
-                              const SkPMColor4f& color);
+        static Geometry* MakeForBlob(const GrAtlasSubRun& subRun,
+                                     const SkMatrix& drawMatrix,
+                                     SkPoint drawOrigin,
+                                     SkIRect clipRect,
+                                     sk_sp<GrTextBlob> blob,
+                                     const SkPMColor4f& color,
+                                     SkArenaAlloc* alloc);
+
         void fillVertexData(void* dst, int offset, int count) const;
 
         const GrAtlasSubRun& fSubRun;
+
+        // Either this Geometry holds a ref to the GrTextBlob in the case of a text blob based
+        // SubRun (WithCaching case), or it holds a unique_ptr to a SubRun allocated on the
+        // GrTextBlobAllocator in the NoCache case. It must hold one, and can't hold both.
+        sk_sp<GrTextBlob> fBlob;  // mutable to make unref call in Op dtor.
+        GrAtlasSubRunOwner fSubRunDtor;
+
         const SkMatrix fDrawMatrix;
         const SkPoint fDrawOrigin;
 
         // fClipRect is only used in the DirectMaskSubRun case to do geometric clipping.
         // TransformedMaskSubRun, and SDFTSubRun don't use this field, and expect an empty rect.
         const SkIRect fClipRect;
-        sk_sp<GrTextBlob> fBlob;  // mutable to make unref call in Op dtor.
 
         // Color is updated after processor analysis if it was determined the shader resolves to
         // a constant color that we then evaluate on the CPU.
@@ -71,12 +96,11 @@ public:
 
     const char* name() const override { return "AtlasTextOp"; }
 
-    void visitProxies(const VisitProxyFunc& func) const override;
+    void visitProxies(const GrVisitProxyFunc&) const override;
 
     FixedFunctionFlags fixedFunctionFlags() const override;
 
-    GrProcessorSet::Analysis finalize(const GrCaps&, const GrAppliedClip*,
-                                      bool hasMixedSampledCoverage, GrClampType) override;
+    GrProcessorSet::Analysis finalize(const GrCaps&, const GrAppliedClip*, GrClampType) override;
 
     enum class MaskType : uint32_t {
         kGrayscaleCoverage,
@@ -91,11 +115,11 @@ public:
     };
     static constexpr int kMaskTypeCount = static_cast<int>(MaskType::kLast) + 1;
 
-#if GR_TEST_UTILS
-    static GrOp::Owner CreateOpTestingOnly(GrSurfaceDrawContext* rtc,
-                                           const SkPaint& skPaint,
-                                           const SkFont& font,
-                                           const SkMatrixProvider& mtxProvider,
+#if GR_TEST_UTILS && SK_GPU_V1
+    static GrOp::Owner CreateOpTestingOnly(skgpu::v1::SurfaceDrawContext*,
+                                           const SkPaint&,
+                                           const SkFont&,
+                                           const SkMatrixProvider&,
                                            const char* text,
                                            int x,
                                            int y);
@@ -147,8 +171,9 @@ private:
     void onCreateProgramInfo(const GrCaps*,
                              SkArenaAlloc*,
                              const GrSurfaceProxyView& writeView,
+                             bool usesMSAASurface,
                              GrAppliedClip&&,
-                             const GrXferProcessor::DstProxyView&,
+                             const GrDstProxyView&,
                              GrXferBarrierFlags renderPassXferBarriers,
                              GrLoadOp colorLoadOp) override {
         // We cannot surface the GrAtlasTextOp's programInfo at record time. As currently
@@ -159,13 +184,13 @@ private:
     void onPrePrepareDraws(GrRecordingContext*,
                            const GrSurfaceProxyView& writeView,
                            GrAppliedClip*,
-                           const GrXferProcessor::DstProxyView&,
+                           const GrDstProxyView&,
                            GrXferBarrierFlags renderPassXferBarriers,
                            GrLoadOp colorLoadOp) override {
         // TODO [PI]: implement
     }
 
-    void onPrepareDraws(Target*) override;
+    void onPrepareDraws(GrMeshDrawTarget*) override;
     void onExecute(GrOpFlushState*, const SkRect& chainBounds) override;
 
 #if GR_TEST_UTILS
@@ -203,7 +228,7 @@ private:
     }
 
     inline void createDrawForGeneratedGlyphs(
-            GrMeshDrawOp::Target* target, FlushInfo* flushInfo) const;
+            GrMeshDrawTarget* target, FlushInfo* flushInfo) const;
 
     MaskType maskType() const { return static_cast<MaskType>(fMaskType); }
 

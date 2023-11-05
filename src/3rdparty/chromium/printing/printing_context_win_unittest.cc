@@ -65,7 +65,7 @@ class MockPrintingContextWin : public PrintingContextSystemDialogWin {
 
  protected:
   // This is a fake PrintDlgEx implementation that sets the right fields in
-  // |lppd| to trigger a bug in older revisions of PrintingContext.
+  // `lppd` to trigger a bug in older revisions of PrintingContext.
   HRESULT ShowPrintDialog(PRINTDLGEX* lppd) override {
     // The interesting bits:
     // Pretend the user hit print
@@ -145,7 +145,8 @@ class MockPrintingContextWin : public PrintingContextSystemDialogWin {
   }
 };
 
-TEST_F(PrintingContextTest, PrintAll) {
+// Disabled - see crbug.com/1231528 for context.
+TEST_F(PrintingContextTest, DISABLED_PrintAll) {
   if (IsTestCaseDisabled())
     return;
 
@@ -160,7 +161,8 @@ TEST_F(PrintingContextTest, PrintAll) {
   EXPECT_EQ(0u, settings.ranges().size());
 }
 
-TEST_F(PrintingContextTest, Color) {
+// Disabled - see crbug.com/1231528 for context.
+TEST_F(PrintingContextTest, DISABLED_Color) {
   if (IsTestCaseDisabled())
     return;
 
@@ -175,7 +177,8 @@ TEST_F(PrintingContextTest, Color) {
   EXPECT_NE(settings.color(), mojom::ColorModel::kUnknownColorModel);
 }
 
-TEST_F(PrintingContextTest, Base) {
+// Disabled - see crbug.com/1231528 for context.
+TEST_F(PrintingContextTest, DISABLED_Base) {
   if (IsTestCaseDisabled())
     return;
 

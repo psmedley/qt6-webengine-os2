@@ -7,10 +7,10 @@
 #include "third_party/blink/renderer/platform/wtf/stack_util.h"
 
 #include "base/notreached.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
 #if defined(OS_WIN)
+#include <intrin.h>
 #include <stddef.h>
 #include <windows.h>
 #include <winnt.h>

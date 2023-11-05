@@ -26,12 +26,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_CSS_AGENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_CSS_AGENT_H_
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_rule_list.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
-#include "third_party/blink/renderer/core/execution_context/security_context.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_dom_agent.h"
@@ -83,7 +82,7 @@ class CORE_EXPORT InspectorCSSAgent final
     STACK_ALLOCATED();
 
    public:
-    InlineStyleOverrideScope(SecurityContext* context)
+    explicit InlineStyleOverrideScope(ExecutionContext* context)
         : content_security_policy_(context->GetContentSecurityPolicy()) {
       content_security_policy_->SetOverrideAllowInlineStyle(true);
     }
@@ -98,6 +97,7 @@ class CORE_EXPORT InspectorCSSAgent final
 
   static CSSStyleRule* AsCSSStyleRule(CSSRule*);
   static CSSMediaRule* AsCSSMediaRule(CSSRule*);
+  static CSSContainerRule* AsCSSContainerRule(CSSRule*);
 
   static void CollectAllDocumentStyleSheets(Document*,
                                             HeapVector<Member<CSSStyleSheet>>&);
@@ -113,6 +113,8 @@ class CORE_EXPORT InspectorCSSAgent final
                     InspectorNetworkAgent*,
                     InspectorResourceContentLoader*,
                     InspectorResourceContainer*);
+  InspectorCSSAgent(const InspectorCSSAgent&) = delete;
+  InspectorCSSAgent& operator=(const InspectorCSSAgent&) = delete;
   ~InspectorCSSAgent() override;
   void Trace(Visitor*) const override;
 
@@ -186,6 +188,11 @@ class CORE_EXPORT InspectorCSSAgent final
       std::unique_ptr<protocol::CSS::SourceRange>,
       const String& text,
       std::unique_ptr<protocol::CSS::CSSMedia>*) override;
+  protocol::Response setContainerQueryText(
+      const String& style_sheet_id,
+      std::unique_ptr<protocol::CSS::SourceRange>,
+      const String& text,
+      std::unique_ptr<protocol::CSS::CSSContainerQuery>*) override;
   protocol::Response createStyleSheet(const String& frame_id,
                                       String* style_sheet_id) override;
   protocol::Response addRule(const String& style_sheet_id,
@@ -255,6 +262,9 @@ class CORE_EXPORT InspectorCSSAgent final
   class SetElementStyleAction;
   class AddRuleAction;
 
+  void BuildRulesMap(InspectorStyleSheet* style_sheet,
+                     HeapHashMap<Member<const StyleRule>, Member<CSSStyleRule>>*
+                         rule_to_css_rule);
   static void CollectStyleSheets(CSSStyleSheet*,
                                  HeapVector<Member<CSSStyleSheet>>&);
 
@@ -318,6 +328,17 @@ class CORE_EXPORT InspectorCSSAgent final
   std::unique_ptr<protocol::Array<int>>
   BuildArrayForComputedStyleUpdatedNodes();
 
+  // Container Queries implementation
+  std::unique_ptr<protocol::CSS::CSSContainerQuery> BuildContainerQueryObject(
+      const MediaList*,
+      CSSStyleSheet*,
+      const AtomicString&);
+  void CollectContainerQueriesFromRule(
+      CSSRule*,
+      protocol::Array<protocol::CSS::CSSContainerQuery>*);
+  std::unique_ptr<protocol::Array<protocol::CSS::CSSContainerQuery>>
+  BuildContainerQueries(CSSRule*);
+
   // InspectorDOMAgent::DOMListener implementation
   void DidAddDocument(Document*) override;
   void WillRemoveDOMNode(Node*) override;
@@ -372,7 +393,6 @@ class CORE_EXPORT InspectorCSSAgent final
 
   friend class InspectorResourceContentLoaderCallback;
   friend class StyleSheetBinder;
-  DISALLOW_COPY_AND_ASSIGN(InspectorCSSAgent);
 };
 
 }  // namespace blink

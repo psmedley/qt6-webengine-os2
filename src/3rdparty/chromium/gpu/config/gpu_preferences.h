@@ -46,6 +46,12 @@ enum class GrContextType : uint32_t {
   kLast = kDawn,
 };
 
+enum class DawnBackendValidationLevel : uint32_t {
+  kDisabled = 0,
+  kPartial = 1,
+  kFull = 2,
+};
+
 // NOTE: if you modify this structure then you must also modify the
 // following two files to keep them in sync:
 //   src/gpu/ipc/common/gpu_preferences.mojom
@@ -71,7 +77,7 @@ struct GPU_EXPORT GpuPreferences {
   // Disables hardware acceleration of video decode, where available.
   bool disable_accelerated_video_decode = false;
 
-  // Disables hardware acceleration of video decode, where available.
+  // Disables hardware acceleration of video encode, where available.
   bool disable_accelerated_video_encode = false;
 
   // Causes the GPU process to display a dialog on launch.
@@ -159,10 +165,6 @@ struct GPU_EXPORT GpuPreferences {
   // compilation info logs.
   bool gl_shader_interm_output = false;
 
-  // Emulate ESSL lowp and mediump float precisions by mutating the shaders to
-  // round intermediate values in ANGLE.
-  bool emulate_shader_precision = false;
-
   // ===================================
   // Settings from //gpu/config/gpu_switches.h
 
@@ -218,9 +220,6 @@ struct GPU_EXPORT GpuPreferences {
   // Enable using vulkan protected memory.
   bool enable_vulkan_protected_memory = false;
 
-  // Enforce using vulkan protected memory.
-  bool enforce_vulkan_protected_memory = false;
-
   // Use vulkan VK_KHR_surface for presenting.
   bool disable_vulkan_surface = false;
 
@@ -249,8 +248,16 @@ struct GPU_EXPORT GpuPreferences {
   // Enable the WebGPU command buffer.
   bool enable_webgpu = false;
 
+  // Enable usage of SPIR-V with WebGPU. This is unsafe since SPIR-V from the
+  // renderer process isn't fully validated.
+  bool enable_webgpu_spirv = false;
+
   // Enable validation layers in Dawn backends.
-  bool enable_dawn_backend_validation = false;
+  DawnBackendValidationLevel enable_dawn_backend_validation =
+      DawnBackendValidationLevel::kDisabled;
+
+  // Force the use of the WebGPU/Compat (GLES) backend for all WebGPU content.
+  bool force_webgpu_compat = false;
 
   // The Dawn features(toggles) enabled on the creation of Dawn devices.
   std::vector<std::string> enabled_dawn_features_list;
@@ -279,7 +286,7 @@ struct GPU_EXPORT GpuPreferences {
   // ===================================
   // Settings from //media/base/media_switches.h
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
   // Enable the hardware-accelerated direct video decoder on ChromeOS.
   bool enable_chromeos_direct_video_decoder = false;
 #endif

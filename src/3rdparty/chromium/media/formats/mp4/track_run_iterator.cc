@@ -9,10 +9,10 @@
 #include <limits>
 #include <memory>
 
+#include "base/cxx17_backports.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/checked_math.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
 #include "build/chromecast_buildflags.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/demuxer.h"
@@ -316,8 +316,8 @@ bool TrackRunIterator::Init(const MovieFragment& moof) {
     std::unique_ptr<BufferReader> sample_encryption_reader;
     uint32_t sample_encryption_entries_count = 0;
     if (!sample_encryption_data.empty()) {
-      sample_encryption_reader.reset(new BufferReader(
-          sample_encryption_data.data(), sample_encryption_data.size()));
+      sample_encryption_reader = std::make_unique<BufferReader>(
+          sample_encryption_data.data(), sample_encryption_data.size());
       RCHECK(sample_encryption_reader->Read4(&sample_encryption_entries_count));
     }
 

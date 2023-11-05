@@ -46,8 +46,9 @@ namespace dawn_native { namespace d3d12 {
 
         MaybeError Initialize();
 
-        CommandBufferBase* CreateCommandBuffer(CommandEncoder* encoder,
-                                               const CommandBufferDescriptor* descriptor) override;
+        ResultOrError<Ref<CommandBufferBase>> CreateCommandBuffer(
+            CommandEncoder* encoder,
+            const CommandBufferDescriptor* descriptor) override;
 
         MaybeError TickImpl() override;
 
@@ -64,9 +65,9 @@ namespace dawn_native { namespace d3d12 {
 
         const PlatformFunctions* GetFunctions() const;
         ComPtr<IDXGIFactory4> GetFactory() const;
-        ResultOrError<IDxcLibrary*> GetOrCreateDxcLibrary() const;
-        ResultOrError<IDxcCompiler*> GetOrCreateDxcCompiler() const;
-        ResultOrError<IDxcValidator*> GetOrCreateDxcValidator() const;
+        ComPtr<IDxcLibrary> GetDxcLibrary() const;
+        ComPtr<IDxcCompiler> GetDxcCompiler() const;
+        ComPtr<IDxcValidator> GetDxcValidator() const;
 
         ResultOrError<CommandRecordingContext*> GetPendingCommandContext();
 
@@ -121,10 +122,12 @@ namespace dawn_native { namespace d3d12 {
 
         StagingDescriptorAllocator* GetDepthStencilViewAllocator() const;
 
-        Ref<TextureBase> WrapSharedHandle(const ExternalImageDescriptor* descriptor,
-                                          HANDLE sharedHandle,
-                                          ExternalMutexSerial acquireMutexKey,
-                                          bool isSwapChainTexture);
+        Ref<TextureBase> CreateExternalTexture(const TextureDescriptor* descriptor,
+                                               ComPtr<ID3D12Resource> d3d12Texture,
+                                               ExternalMutexSerial acquireMutexKey,
+                                               ExternalMutexSerial releaseMutexKey,
+                                               bool isSwapChainTexture,
+                                               bool isInitialized);
         ResultOrError<ComPtr<IDXGIKeyedMutex>> CreateKeyedMutexForTexture(
             ID3D12Resource* d3d12Resource);
         void ReleaseKeyedMutexForTexture(ComPtr<IDXGIKeyedMutex> dxgiKeyedMutex);
@@ -139,46 +142,51 @@ namespace dawn_native { namespace d3d12 {
       private:
         using DeviceBase::DeviceBase;
 
-        ResultOrError<BindGroupBase*> CreateBindGroupImpl(
+        ResultOrError<Ref<BindGroupBase>> CreateBindGroupImpl(
             const BindGroupDescriptor* descriptor) override;
-        ResultOrError<BindGroupLayoutBase*> CreateBindGroupLayoutImpl(
+        ResultOrError<Ref<BindGroupLayoutBase>> CreateBindGroupLayoutImpl(
             const BindGroupLayoutDescriptor* descriptor) override;
         ResultOrError<Ref<BufferBase>> CreateBufferImpl(
             const BufferDescriptor* descriptor) override;
-        ResultOrError<ComputePipelineBase*> CreateComputePipelineImpl(
+        ResultOrError<Ref<ComputePipelineBase>> CreateComputePipelineImpl(
             const ComputePipelineDescriptor* descriptor) override;
-        ResultOrError<PipelineLayoutBase*> CreatePipelineLayoutImpl(
+        ResultOrError<Ref<PipelineLayoutBase>> CreatePipelineLayoutImpl(
             const PipelineLayoutDescriptor* descriptor) override;
-        ResultOrError<QuerySetBase*> CreateQuerySetImpl(
+        ResultOrError<Ref<QuerySetBase>> CreateQuerySetImpl(
             const QuerySetDescriptor* descriptor) override;
-        ResultOrError<RenderPipelineBase*> CreateRenderPipelineImpl(
+        ResultOrError<Ref<RenderPipelineBase>> CreateRenderPipelineImpl(
             const RenderPipelineDescriptor* descriptor) override;
-        ResultOrError<SamplerBase*> CreateSamplerImpl(const SamplerDescriptor* descriptor) override;
-        ResultOrError<ShaderModuleBase*> CreateShaderModuleImpl(
+        ResultOrError<Ref<SamplerBase>> CreateSamplerImpl(
+            const SamplerDescriptor* descriptor) override;
+        ResultOrError<Ref<ShaderModuleBase>> CreateShaderModuleImpl(
             const ShaderModuleDescriptor* descriptor,
             ShaderModuleParseResult* parseResult) override;
-        ResultOrError<SwapChainBase*> CreateSwapChainImpl(
+        ResultOrError<Ref<SwapChainBase>> CreateSwapChainImpl(
             const SwapChainDescriptor* descriptor) override;
-        ResultOrError<NewSwapChainBase*> CreateSwapChainImpl(
+        ResultOrError<Ref<NewSwapChainBase>> CreateSwapChainImpl(
             Surface* surface,
             NewSwapChainBase* previousSwapChain,
             const SwapChainDescriptor* descriptor) override;
         ResultOrError<Ref<TextureBase>> CreateTextureImpl(
             const TextureDescriptor* descriptor) override;
-        ResultOrError<TextureViewBase*> CreateTextureViewImpl(
+        ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
             TextureBase* texture,
             const TextureViewDescriptor* descriptor) override;
+        void CreateComputePipelineAsyncImpl(const ComputePipelineDescriptor* descriptor,
+                                            size_t blueprintHash,
+                                            WGPUCreateComputePipelineAsyncCallback callback,
+                                            void* userdata) override;
 
         void ShutDownImpl() override;
         MaybeError WaitForIdleForDestruction() override;
 
         MaybeError CheckDebugLayerAndGenerateErrors();
 
-        void ApplyUseDxcToggle();
+        MaybeError ApplyUseDxcToggle();
 
         ComPtr<ID3D12Fence> mFence;
         HANDLE mFenceEvent = nullptr;
-        ExecutionSerial CheckAndUpdateCompletedSerials() override;
+        ResultOrError<ExecutionSerial> CheckAndUpdateCompletedSerials() override;
 
         ComPtr<ID3D12Device> mD3d12Device;  // Device is owned by adapter and will not be outlived.
         ComPtr<ID3D12CommandQueue> mCommandQueue;

@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "services/network/origin_policy/origin_policy_parser.h"
-#include "base/strings/stringprintf.h"
 #include "services/network/public/mojom/origin_policy_manager.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -17,7 +16,7 @@ namespace {
 
 void AssertEmptyPolicy(
     const network::OriginPolicyContentsPtr& policy_contents) {
-  ASSERT_FALSE(policy_contents->feature_policy.has_value());
+  ASSERT_FALSE(policy_contents->permissions_policy.has_value());
   ASSERT_EQ(0u, policy_contents->ids.size());
   ASSERT_EQ(0u, policy_contents->content_security_policies.size());
   ASSERT_EQ(0u, policy_contents->content_security_policies_report_only.size());
@@ -452,7 +451,7 @@ TEST(OriginPolicyParser, FeatureOne) {
       } )");
 
   ASSERT_EQ("geolocation 'self' http://maps.google.com",
-            policy_contents->feature_policy);
+            policy_contents->permissions_policy);
 }
 
 TEST(OriginPolicyParser, FeatureTwo) {
@@ -466,7 +465,7 @@ TEST(OriginPolicyParser, FeatureTwo) {
 
   ASSERT_EQ(
       "geolocation 'self' http://maps.google.com; camera https://example.com",
-      policy_contents->feature_policy);
+      policy_contents->permissions_policy);
 }
 
 TEST(OriginPolicyParser, FeatureTwoFeatures) {
@@ -477,7 +476,7 @@ TEST(OriginPolicyParser, FeatureTwoFeatures) {
         "features": { "policy": "camera https://example.com" }
       } )");
 
-  ASSERT_EQ("camera https://example.com", policy_contents->feature_policy);
+  ASSERT_EQ("camera https://example.com", policy_contents->permissions_policy);
 }
 
 TEST(OriginPolicyParser, FeatureTwoPolicy) {
@@ -490,7 +489,7 @@ TEST(OriginPolicyParser, FeatureTwoPolicy) {
         }
       } )");
 
-  ASSERT_EQ("camera https://example.com", policy_contents->feature_policy);
+  ASSERT_EQ("camera https://example.com", policy_contents->permissions_policy);
 }
 
 // At this level we don't validate the syntax, so commas get passed through.
@@ -507,7 +506,7 @@ TEST(OriginPolicyParser, FeatureComma) {
 
   ASSERT_EQ(
       "geolocation 'self' http://maps.google.com, camera https://example.com",
-      policy_contents->feature_policy);
+      policy_contents->permissions_policy);
 }
 
 // Similarly, complete garbage will be passed through; this is expected.
@@ -520,7 +519,7 @@ TEST(OriginPolicyParser, FeatureGarbage) {
         }
       } )");
 
-  ASSERT_EQ("Lorem ipsum! dolor sit amet", policy_contents->feature_policy);
+  ASSERT_EQ("Lorem ipsum! dolor sit amet", policy_contents->permissions_policy);
 }
 
 TEST(OriginPolicyParser, FeatureNonDict) {
@@ -530,7 +529,7 @@ TEST(OriginPolicyParser, FeatureNonDict) {
         "features": "geolocation 'self' http://maps.google.com"
       } )");
 
-  ASSERT_FALSE(policy_contents->feature_policy.has_value());
+  ASSERT_FALSE(policy_contents->permissions_policy.has_value());
 }
 
 TEST(OriginPolicyParser, FeatureNonString) {
@@ -542,7 +541,7 @@ TEST(OriginPolicyParser, FeatureNonString) {
         }
       } )");
 
-  ASSERT_FALSE(policy_contents->feature_policy.has_value());
+  ASSERT_FALSE(policy_contents->permissions_policy.has_value());
 }
 
 }  // namespace network

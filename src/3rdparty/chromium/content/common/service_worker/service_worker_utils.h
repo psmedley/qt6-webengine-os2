@@ -10,10 +10,8 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "content/common/content_export.h"
-#include "content/public/common/content_switches.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "third_party/blink/public/common/fetch/fetch_api_request_headers_map.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
@@ -69,6 +67,8 @@ class ServiceWorkerUtils {
 
   CONTENT_EXPORT static const char* FetchResponseSourceToSuffix(
       network::mojom::FetchResponseSource source);
+
+  CONTENT_EXPORT static bool IsWebSecurityDisabled();
 
  private:
   static bool IsPathRestrictionSatisfiedInternal(

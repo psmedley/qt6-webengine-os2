@@ -32,8 +32,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_PING_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_PING_LOADER_H_
 
-#include <memory>
-
 #include "third_party/blink/public/platform/web_url_loader_client.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -47,6 +45,7 @@ class Blob;
 class DOMArrayBufferView;
 class DOMArrayBuffer;
 class EncodedFormData;
+class ExecutionContext;
 class FormData;
 class LocalFrame;
 class KURL;
@@ -68,7 +67,7 @@ class CORE_EXPORT PingLoader {
   static void SendLinkAuditPing(LocalFrame*,
                                 const KURL& ping_url,
                                 const KURL& destination_url);
-  static void SendViolationReport(LocalFrame*,
+  static void SendViolationReport(ExecutionContext* execution_context,
                                   const KURL& report_url,
                                   scoped_refptr<EncodedFormData> report);
 

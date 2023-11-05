@@ -10,6 +10,8 @@
 #include <memory>
 
 #include "base/check.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_typedefs.h"
+#include "third_party/blink/renderer/modules/webgpu/dawn_enum_conversions.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
@@ -19,39 +21,23 @@
 
 namespace blink {
 
-class DoubleSequenceOrGPUColorDict;
 class GPUColorDict;
 class GPUProgrammableStage;
 class GPUImageCopyTexture;
 class GPUImageDataLayout;
-class UnsignedLongEnforceRangeSequenceOrGPUExtent3DDict;
-class UnsignedLongEnforceRangeSequenceOrGPUOrigin3DDict;
-class V8GPUIndexFormat;
-
-// Convert WebGPU bitfield values to Dawn enums. These have the same value.
-template <typename DawnEnum>
-DawnEnum AsDawnEnum(uint32_t webgpu_enum) {
-  return static_cast<DawnEnum>(webgpu_enum);
-}
-
-// Convert WebGPU string enums to Dawn enums.
-template <typename DawnEnum>
-DawnEnum AsDawnEnum(const WTF::String& webgpu_enum);
-WGPUIndexFormat AsDawnEnum(const V8GPUIndexFormat& webgpu_enum);
 
 // These conversions are used multiple times and are declared here. Conversions
 // used only once, for example for object construction, are defined
 // individually.
 WGPUColor AsDawnColor(const Vector<double>&);
 WGPUColor AsDawnType(const GPUColorDict*);
-WGPUColor AsDawnType(const DoubleSequenceOrGPUColorDict*);
-WGPUExtent3D AsDawnType(
-    const UnsignedLongEnforceRangeSequenceOrGPUExtent3DDict*,
-    GPUDevice* device);
-WGPUOrigin3D AsDawnType(
-    const UnsignedLongEnforceRangeSequenceOrGPUOrigin3DDict*);
+WGPUColor AsDawnType(const V8GPUColor* webgpu_color);
+WGPUExtent3D AsDawnType(const V8GPUExtent3D* webgpu_extent);
+WGPUOrigin3D AsDawnType(const V8GPUOrigin3D* webgpu_extent);
 WGPUTextureCopyView AsDawnType(const GPUImageCopyTexture* webgpu_view,
                                GPUDevice* device);
+WGPUTextureFormat AsDawnType(SkColorType color_type);
+
 const char* ValidateTextureDataLayout(const GPUImageDataLayout* webgpu_layout,
                                       WGPUTextureDataLayout* layout);
 using OwnedProgrammableStageDescriptor =

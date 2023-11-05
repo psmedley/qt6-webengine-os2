@@ -176,6 +176,7 @@ void DownloadDriverImpl::Start(
   download_url_params->set_guid(guid);
   download_url_params->set_transient(true);
   download_url_params->set_method(request_params.method);
+  download_url_params->set_credentials_mode(request_params.credentials_mode);
   download_url_params->set_file_path(file_path);
   if (request_params.fetch_error_body)
     download_url_params->set_fetch_error_body(true);
@@ -189,6 +190,9 @@ void DownloadDriverImpl::Start(
                           weak_ptr_factory_.GetWeakPtr(), guid));
   download_url_params->set_require_safety_checks(
       request_params.require_safety_checks);
+  download_url_params->set_update_first_party_url_on_redirect(
+      request_params.update_first_party_url_on_redirect);
+
   download_manager_coordinator_->DownloadUrl(std::move(download_url_params));
 }
 
@@ -233,13 +237,13 @@ void DownloadDriverImpl::Resume(const std::string& guid) {
     item->Resume(true);
 }
 
-base::Optional<DriverEntry> DownloadDriverImpl::Find(const std::string& guid) {
+absl::optional<DriverEntry> DownloadDriverImpl::Find(const std::string& guid) {
   if (!download_manager_coordinator_)
-    return base::nullopt;
+    return absl::nullopt;
   DownloadItem* item = download_manager_coordinator_->GetDownloadByGuid(guid);
   if (item)
     return CreateDriverEntry(item);
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 std::set<std::string> DownloadDriverImpl::GetActiveDownloads() {

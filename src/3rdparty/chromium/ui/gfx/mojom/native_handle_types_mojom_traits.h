@@ -12,6 +12,7 @@
 #include "mojo/public/cpp/bindings/struct_traits.h"
 #include "mojo/public/cpp/bindings/union_traits.h"
 #include "mojo/public/cpp/system/platform_handle.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/mojom/native_handle_types.mojom-shared.h"
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(USE_OZONE)
@@ -55,7 +56,7 @@ struct COMPONENT_EXPORT(GFX_NATIVE_HANDLE_TYPES_SHARED_MOJOM_TRAITS)
 #endif
 
 #if defined(OS_FUCHSIA)
-  static const base::Optional<base::UnguessableToken>& buffer_collection_id(
+  static const absl::optional<base::UnguessableToken>& buffer_collection_id(
       const gfx::NativePixmapHandle& pixmap_handle) {
     return pixmap_handle.buffer_collection_id;
   }

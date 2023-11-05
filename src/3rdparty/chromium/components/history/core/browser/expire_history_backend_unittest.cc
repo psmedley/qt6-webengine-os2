@@ -13,13 +13,12 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/scoped_observation.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/current_thread.h"
 #include "base/test/task_environment.h"
@@ -28,6 +27,7 @@
 #include "components/history/core/browser/history_backend_notifier.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_impl.h"
 #include "components/history/core/browser/top_sites_observer.h"
@@ -63,7 +63,7 @@ base::Time PretendNow() {
   return out_time;
 }
 
-// Returns whether |url| can be added to history.
+// Returns whether `url` can be added to history.
 bool MockCanAddURLToHistory(const GURL& url) {
   return url.is_valid();
 }
@@ -100,7 +100,7 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
 
   // EXPECTs that each URL-specific history thing (basically, everything but
   // favicons) is gone, the reason being either that it was automatically
-  // |expired|, or manually deleted.
+  // `expired`, or manually deleted.
   void EnsureURLInfoGone(const URLRow& row, bool expired);
 
   const DeletionInfo* GetLastDeletionInfo() {
@@ -110,7 +110,7 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
   }
 
   // Returns whether HistoryBackendNotifier::NotifyURLsModified was
-  // called for |url|.
+  // called for `url`.
   bool ModifiedNotificationSentDueToExpiry(const GURL& url);
   bool ModifiedNotificationSentDueToUserAction(const GURL& url);
 
@@ -156,7 +156,7 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
     ASSERT_TRUE(tmp_dir_.CreateUniqueTempDir());
 
     base::FilePath history_name = path().Append(kHistoryFilename);
-    main_db_.reset(new TestHistoryDatabase);
+    main_db_ = std::make_unique<TestHistoryDatabase>();
     if (main_db_->Init(history_name) != sql::INIT_OK)
       main_db_.reset();
 
@@ -165,7 +165,7 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
     if (thumb_db_->Init(thumb_name) != sql::INIT_OK)
       thumb_db_.reset();
 
-    pref_service_.reset(new TestingPrefServiceSimple);
+    pref_service_ = std::make_unique<TestingPrefServiceSimple>();
     TopSitesImpl::RegisterPrefs(pref_service_->registry());
 
     expirer_.SetDatabases(main_db_.get(), thumb_db_.get());
@@ -205,13 +205,14 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
                         const RedirectList& redirects,
                         base::Time visit_time) override {}
   void NotifyURLsModified(const URLRows& rows,
-                          UrlsModifiedReason reason) override {
+                          bool is_from_expiration) override {
     urls_modified_notifications_.push_back(
-        std::make_pair(reason == UrlsModifiedReason::kExpired, rows));
+        std::make_pair(is_from_expiration, rows));
   }
   void NotifyURLsDeleted(DeletionInfo deletion_info) override {
     urls_deleted_notifications_.push_back(std::move(deletion_info));
   }
+  void NotifyVisitDeleted(const VisitRow& visit) override {}
 };
 
 // The example data consists of 4 visits. The middle two visits are to the
@@ -288,36 +289,6 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3],
   main_db_->AddVisit(&visit_row4, SOURCE_BROWSED);
 }
 
-void ExpireHistoryTest::AddExampleSourceData(const GURL& url, URLID* id) {
-  if (!main_db_)
-    return;
-
-  base::Time last_visit_time = PretendNow();
-  // Add one URL.
-  URLRow url_row1(url);
-  url_row1.set_last_visit(last_visit_time);
-  url_row1.set_visit_count(4);
-  URLID url_id = main_db_->AddURL(url_row1);
-  *id = url_id;
-
-  // Four times for each visit.
-  VisitRow visit_row1(url_id, last_visit_time - base::TimeDelta::FromDays(4), 0,
-                      ui::PAGE_TRANSITION_TYPED, 0, true, false);
-  main_db_->AddVisit(&visit_row1, SOURCE_SYNCED);
-
-  VisitRow visit_row2(url_id, last_visit_time - base::TimeDelta::FromDays(3), 0,
-                      ui::PAGE_TRANSITION_TYPED, 0, true, false);
-  main_db_->AddVisit(&visit_row2, SOURCE_BROWSED);
-
-  VisitRow visit_row3(url_id, last_visit_time - base::TimeDelta::FromDays(2), 0,
-                      ui::PAGE_TRANSITION_TYPED, 0, true, false);
-  main_db_->AddVisit(&visit_row3, SOURCE_EXTENSION);
-
-  VisitRow visit_row4(url_id, last_visit_time, 0, ui::PAGE_TRANSITION_TYPED, 0,
-                      true, false);
-  main_db_->AddVisit(&visit_row4, SOURCE_FIREFOX_IMPORTED);
-}
-
 bool ExpireHistoryTest::HasFavicon(favicon_base::FaviconID favicon_id) {
   if (!thumb_db_ || favicon_id == 0)
     return false;
@@ -336,8 +307,8 @@ favicon_base::FaviconID ExpireHistoryTest::GetFavicon(
 }
 
 void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row, bool expired) {
-  // The passed in |row| must originate from |main_db_| so that its ID will be
-  // set to what had been in effect in |main_db_| before the deletion.
+  // The passed in `row` must originate from `main_db_` so that its ID will be
+  // set to what had been in effect in `main_db_` before the deletion.
   ASSERT_NE(0, row.id());
 
   // Verify the URL no longer exists.
@@ -540,6 +511,35 @@ TEST_F(ExpireHistoryTest, DeleteURLWithoutFavicon) {
   // All the normal data except the favicon should be gone.
   EnsureURLInfoGone(last_row, false);
   EXPECT_TRUE(HasFavicon(favicon_id));
+}
+
+// Deletes a URL with context annotations attached to the visits. Verifies the
+// context annotations are also deleted.
+TEST_F(ExpireHistoryTest, DeleteURLAndContextAnnotations) {
+  URLID url_ids[3];
+  base::Time visit_times[4];
+  AddExampleData(url_ids, visit_times);
+
+  // Add some stub context annotations for the last URL row.
+  URLRow last_row;
+  ASSERT_TRUE(main_db_->GetURLRow(url_ids[2], &last_row));
+
+  VisitVector visits;
+  main_db_->GetVisitsForURL(url_ids[2], &visits);
+  ASSERT_EQ(1U, visits.size());
+  int test_visit_id = visits[0].visit_id;
+  main_db_->AddContextAnnotationsForVisit(test_visit_id, {});
+
+  // Verify that the context annotation is there for that visit.
+  VisitContextAnnotations unused;
+  EXPECT_TRUE(main_db_->GetContextAnnotationsForVisit(test_visit_id, &unused));
+
+  // Delete the URL and its dependencies.
+  expirer_.DeleteURL(last_row.url(), base::Time::Max());
+
+  // All the normal data + the favicon should be gone.
+  EnsureURLInfoGone(last_row, false);
+  EXPECT_FALSE(main_db_->GetContextAnnotationsForVisit(test_visit_id, &unused));
 }
 
 // DeleteURL should delete the history of starred urls, but the URL should

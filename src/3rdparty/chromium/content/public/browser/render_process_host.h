@@ -46,6 +46,7 @@
 #include "third_party/blink/public/mojom/permissions/permission.mojom-forward.h"
 #include "third_party/blink/public/mojom/quota/quota_manager_host.mojom-forward.h"
 #include "third_party/blink/public/mojom/websockets/websocket_connector.mojom-forward.h"
+#include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(OS_ANDROID)
@@ -59,6 +60,10 @@ class PersistentMemoryAllocator;
 class TimeDelta;
 class Token;
 }
+
+namespace blink {
+class StorageKey;
+}  // namespace blink
 
 namespace network {
 struct CrossOriginEmbedderPolicy;
@@ -192,14 +197,20 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // non-guest RenderFrames in the same process if IsForGuestsOnly() is false.
   virtual bool IsForGuestsOnly() = 0;
 
+  // Indicates whether the current RenderProcessHost is running with JavaScript
+  // JIT disabled.
+  virtual bool IsJitDisabled() = 0;
+
   // Returns the storage partition associated with this process.
   virtual StoragePartition* GetStoragePartition() = 0;
 
-  // Try to shut down the associated renderer process without running unload
-  // handlers, etc, giving it the specified exit code.  Returns true
-  // if it was able to shut down.  On Windows, this must not be called before
-  // RenderProcessReady was called on a RenderProcessHostObserver, otherwise
-  // RenderProcessExited may never be called.
+  // Terminate the associated renderer process without running unload handlers,
+  // waiting for the process to exit, etc. If supported by the OS, set the
+  // process exit code to |exit_code|. Returns false if the shutdown request
+  // will not be dispatched. If called before
+  // RenderProcessHostObserver::RenderProcessReady,
+  // RenderProcessHostObserver::RenderProcessExited may never be called since
+  // Shutdown() will race with child process startup.
   virtual bool Shutdown(int exit_code) = 0;
 
   // Returns true if shutdown was started by calling |Shutdown()|.
@@ -340,11 +351,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
       bool incoming,
       bool outgoing,
       WebRtcRtpPacketCallback packet_callback) = 0;
-
-  // Start/stop event log output from WebRTC on this RPH for the peer connection
-  // identified locally within the RPH using the ID |lid|.
-  virtual void EnableWebRtcEventLogOutput(int lid, int output_period_ms) = 0;
-  virtual void DisableWebRtcEventLogOutput(int lid) = 0;
 #endif
 
   // Asks the renderer process to bind |receiver|. |receiver| arrives in the
@@ -365,11 +371,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual std::unique_ptr<base::PersistentMemoryAllocator>
   TakeMetricsAllocator() = 0;
 
-  // Returns the time the first call to Init completed successfully (after a new
-  // renderer process was created); further calls to Init won't change this
-  // value.
-  // Note: Do not use! Will disappear after PlzNavitate is completed.
-  virtual const base::TimeTicks& GetInitTimeForNavigationMetrics() = 0;
+  // Returns the time of the last call to Init that was completed successfully
+  // (after a new renderer process was created); further calls to Init would
+  // change this value only when they caused the new process to be created after
+  // a crash.
+  virtual const base::TimeTicks& GetLastInitTime() = 0;
 
   // Returns true if this process currently has backgrounded priority.
   virtual bool IsProcessBackgrounded() = 0;
@@ -399,6 +405,9 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   //    Keeps the process alive briefly to give subframe unload handlers a
   //    chance to execute after their parent frame navigates or is detached.
   //    See https://crbug.com/852204.
+  //  - Process reuse timer (experimental):
+  //    Keeps the process alive for a set period of time in case it can be
+  //    reused for the same site. See https://crbug.com/894253.
   virtual void IncrementKeepAliveRefCount() = 0;
   virtual void DecrementKeepAliveRefCount() = 0;
 
@@ -466,11 +475,12 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
 
   // The following several methods are for internal use only, and are only
   // exposed here to support MockRenderProcessHost usage in tests.
+  virtual void CancelAllProcessShutdownDelays() = 0;
   virtual void BindCacheStorage(
       const network::CrossOriginEmbedderPolicy& cross_origin_embedder_policy,
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter_remote,
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       mojo::PendingReceiver<blink::mojom::CacheStorage> receiver) = 0;
   virtual void BindFileSystemManager(
       const url::Origin& origin,
@@ -483,7 +493,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // |render_frame_id| is the frame associated with |receiver|, or
   // MSG_ROUTING_NONE if |receiver| is associated with a worker.
   virtual void BindIndexedDB(
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       mojo::PendingReceiver<blink::mojom::IDBFactory> receiver) = 0;
   virtual void BindBucketManagerHost(
       const url::Origin& origin,
@@ -515,6 +525,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
       const url::Origin& origin,
       mojo::PendingReceiver<payments::mojom::PaymentManager> receiver) = 0;
   virtual void CreateNotificationService(
+      int render_frame_id,
       const url::Origin& origin,
       mojo::PendingReceiver<blink::mojom::NotificationService> receiver) = 0;
   virtual void CreateWebSocketConnector(
@@ -549,6 +560,9 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // crashes related to RenderProcessHost objects staying alive longer than
   // the BrowserContext they are associated with.
   virtual std::string GetInfoForBrowserContextDestructionCrashReporting() = 0;
+
+  // Write a representation of this object into a trace.
+  virtual void WriteIntoTrace(perfetto::TracedValue context) = 0;
 
 #if BUILDFLAG(CLANG_PROFILING_INSIDE_SANDBOX)
   // Ask the renderer process to dump its profiling data to disk. Invokes
@@ -600,6 +614,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
 
   // This also calls out to ContentBrowserClient::GetApplicationLocale and
   // modifies the current process' command line.
+  // NOTE: This function is fundamentally unsafe and *should not be used*. By
+  // the time a ContentBrowserClient exists in test fixtures, it is already
+  // unsafe to modify the command-line. The command-line should only be modified
+  // from SetUpCommandLine, which is before the ContentClient is created. See
+  // crbug.com/1197147
   static void SetRunRendererInProcess(bool value);
 
   // This forces a renderer that is running "in process" to shut down.

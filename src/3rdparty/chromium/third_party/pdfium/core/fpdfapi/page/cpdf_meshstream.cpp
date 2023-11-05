@@ -103,8 +103,7 @@ CPDF_MeshStream::CPDF_MeshStream(
       m_funcs(funcs),
       m_pShadingStream(pShadingStream),
       m_pCS(pCS),
-      m_pStream(pdfium::MakeRetain<CPDF_StreamAcc>(pShadingStream)) {
-}
+      m_pStream(pdfium::MakeRetain<CPDF_StreamAcc>(pShadingStream)) {}
 
 CPDF_MeshStream::~CPDF_MeshStream() = default;
 
@@ -204,10 +203,9 @@ std::tuple<float, float, float> CPDF_MeshStream::ReadColor() {
   }
 
   float result[kMaxComponents] = {};
-  int nResults;
   for (const auto& func : m_funcs) {
     if (func && func->CountOutputs() <= kMaxComponents)
-      func->Call(color_value, 1, result, &nResults);
+      func->Call(pdfium::make_span(color_value, 1), result);
   }
 
   m_pCS->GetRGB(result, &r, &g, &b);

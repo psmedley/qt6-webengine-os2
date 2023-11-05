@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -24,7 +25,6 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/process/launch.h"
 #include "base/process/process_metrics.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "sandbox/linux/suid/common/sandbox.h"
 #include "sandbox/linux/suid/common/suid_unsafe_environment_variables.h"
@@ -128,7 +128,7 @@ base::FilePath SetuidSandboxHost::GetSandboxBinaryPath() {
 
   // In user-managed builds, including development builds, an environment
   // variable is required to enable the sandbox. See
-  // https://chromium.googlesource.com/chromium/src/+/master/docs/linux/suid_sandbox_development.md
+  // https://chromium.googlesource.com/chromium/src/+/main/docs/linux/suid_sandbox_development.md
   struct stat st;
   if (sandbox_binary.empty() && stat(base::kProcSelfExe, &st) == 0 &&
       st.st_uid == getuid()) {

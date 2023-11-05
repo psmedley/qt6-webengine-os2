@@ -25,15 +25,7 @@ DisplayResourceProviderSoftware::~DisplayResourceProviderSoftware() {
 
 const DisplayResourceProvider::ChildResource*
 DisplayResourceProviderSoftware::LockForRead(ResourceId id) {
-  // TODO(vasilyt): Todo below was added for Android and GPU resources and was
-  // copied here during refactoring. This shouldn't be necessary for software
-  // renderer case and should be removed.
-  // TODO(ericrk): We should never fail TryGetResource, but we appear to be
-  // doing so on Android in rare cases. Handle this gracefully until a better
-  // solution can be found. https://crbug.com/811858
-  ChildResource* resource = TryGetResource(id);
-  if (!resource)
-    return nullptr;
+  ChildResource* resource = GetResource(id);
 
   DCHECK(!resource->is_gpu_resource_type());
 
@@ -58,15 +50,7 @@ DisplayResourceProviderSoftware::LockForRead(ResourceId id) {
 
 void DisplayResourceProviderSoftware::UnlockForRead(ResourceId id) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  ChildResource* resource = TryGetResource(id);
-  // TODO(vasilyt): Todo below was added for Android and GPU resources and was
-  // copied here during refactoring. This shouldn't be necessary for software
-  // renderer case and should be removed.
-  // TODO(ericrk): We should never fail to find id, but we appear to be
-  // doing so on Android in rare cases. Handle this gracefully until a better
-  // solution can be found. https://crbug.com/811858
-  if (!resource)
-    return;
+  ChildResource* resource = GetResource(id);
 
   DCHECK(!resource->is_gpu_resource_type());
   DCHECK_GT(resource->lock_for_read_count, 0);
@@ -108,6 +92,7 @@ DisplayResourceProviderSoftware::DeleteAndReturnUnusedResourcesToChildImpl(
     const bool is_lost = can_delete == CanDeleteNowResult::kYesButLoseResource;
 
     to_return.emplace_back(child_id, resource.sync_token(),
+                           std::move(resource.release_fence),
                            resource.imported_count, is_lost);
 
     child_info.child_to_parent_map.erase(child_id);

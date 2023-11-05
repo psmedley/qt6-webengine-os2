@@ -6,12 +6,13 @@
 
 #include <utility>
 
+#include "absl/memory/memory.h"
+#include "quic/core/http/quic_server_initiated_spdy_stream.h"
 #include "quic/core/http/quic_spdy_session.h"
 #include "quic/core/quic_connection.h"
 #include "quic/core/quic_utils.h"
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_logging.h"
-#include "quic/platform/api/quic_ptr_util.h"
 #include "quic/tools/quic_simple_server_stream.h"
 
 namespace quic {
@@ -51,7 +52,7 @@ QuicSimpleServerSession::CreateQuicCryptoServerStream(
 }
 
 void QuicSimpleServerSession::OnStreamFrame(const QuicStreamFrame& frame) {
-  if (!IsIncomingStream(frame.stream_id)) {
+  if (!IsIncomingStream(frame.stream_id) && !WillNegotiateWebTransport()) {
     QUIC_LOG(WARNING) << "Client shouldn't send data on server push stream";
     connection()->CloseConnection(
         QUIC_INVALID_STREAM_ID, "Client sent data on server push stream",
@@ -61,39 +62,6 @@ void QuicSimpleServerSession::OnStreamFrame(const QuicStreamFrame& frame) {
   QuicSpdySession::OnStreamFrame(frame);
 }
 
-void QuicSimpleServerSession::PromisePushResources(
-    const std::string& request_url,
-    const std::list<QuicBackendResponse::ServerPushInfo>& resources,
-    QuicStreamId original_stream_id,
-    const spdy::SpdyStreamPrecedence& /* original_precedence */,
-    const spdy::Http2HeaderBlock& original_request_headers) {
-  if (!server_push_enabled()) {
-    return;
-  }
-
-  for (const QuicBackendResponse::ServerPushInfo& resource : resources) {
-    spdy::Http2HeaderBlock headers = SynthesizePushRequestHeaders(
-        request_url, resource, original_request_headers);
-    // TODO(b/136295430): Use sequential push IDs for IETF QUIC.
-    auto new_highest_promised_stream_id =
-        highest_promised_stream_id_ +
-        QuicUtils::StreamIdDelta(transport_version());
-    if (VersionUsesHttp3(transport_version()) &&
-        !CanCreatePushStreamWithId(new_highest_promised_stream_id)) {
-      return;
-    }
-    highest_promised_stream_id_ = new_highest_promised_stream_id;
-    SendPushPromise(original_stream_id, highest_promised_stream_id_,
-                    headers.Clone());
-    promised_streams_.push_back(
-        PromisedStreamInfo(std::move(headers), highest_promised_stream_id_,
-                           spdy::SpdyStreamPrecedence(resource.priority)));
-  }
-
-  // Procese promised push request as many as possible.
-  HandlePromisedPushRequests();
-}
-
 QuicSpdyStream* QuicSimpleServerSession::CreateIncomingStream(QuicStreamId id) {
   if (!ShouldCreateIncomingStream(id)) {
     return nullptr;
@@ -101,7 +69,7 @@ QuicSpdyStream* QuicSimpleServerSession::CreateIncomingStream(QuicStreamId id) {
 
   QuicSpdyStream* stream = new QuicSimpleServerStream(
       id, this, BIDIRECTIONAL, quic_simple_server_backend_);
-  ActivateStream(QuicWrapUnique(stream));
+  ActivateStream(absl::WrapUnique(stream));
   return stream;
 }
 
@@ -109,14 +77,26 @@ QuicSpdyStream* QuicSimpleServerSession::CreateIncomingStream(
     PendingStream* pending) {
   QuicSpdyStream* stream = new QuicSimpleServerStream(
       pending, this, BIDIRECTIONAL, quic_simple_server_backend_);
-  ActivateStream(QuicWrapUnique(stream));
+  ActivateStream(absl::WrapUnique(stream));
   return stream;
 }
 
-QuicSimpleServerStream*
-QuicSimpleServerSession::CreateOutgoingBidirectionalStream() {
-  QUICHE_DCHECK(false);
-  return nullptr;
+QuicSpdyStream* QuicSimpleServerSession::CreateOutgoingBidirectionalStream() {
+  if (!WillNegotiateWebTransport()) {
+    QUIC_BUG(QuicSimpleServerSession CreateOutgoingBidirectionalStream without
+                 WebTransport support)
+        << "QuicSimpleServerSession::CreateOutgoingBidirectionalStream called "
+           "in a session without WebTransport support.";
+    return nullptr;
+  }
+  if (!ShouldCreateOutgoingBidirectionalStream()) {
+    return nullptr;
+  }
+
+  QuicServerInitiatedSpdyStream* stream = new QuicServerInitiatedSpdyStream(
+      GetNextOutgoingBidirectionalStreamId(), this, BIDIRECTIONAL);
+  ActivateStream(absl::WrapUnique(stream));
+  return stream;
 }
 
 QuicSimpleServerStream*
@@ -128,7 +108,7 @@ QuicSimpleServerSession::CreateOutgoingUnidirectionalStream() {
   QuicSimpleServerStream* stream = new QuicSimpleServerStream(
       GetNextOutgoingUnidirectionalStreamId(), this, WRITE_UNIDIRECTIONAL,
       quic_simple_server_backend_);
-  ActivateStream(QuicWrapUnique(stream));
+  ActivateStream(absl::WrapUnique(stream));
   return stream;
 }
 

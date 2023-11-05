@@ -14,13 +14,12 @@
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/fuchsia/fuchsia_logging.h"
-#include "base/stl_util.h"
 #include "base/threading/thread_restrictions.h"
 
 namespace cr_fuchsia {
 
 bool ReadUTF8FromVMOAsUTF16(const fuchsia::mem::Buffer& buffer,
-                            base::string16* output) {
+                            std::u16string* output) {
   std::string output_utf8;
   if (!StringFromMemBuffer(buffer, &output_utf8))
     return false;
@@ -48,7 +47,7 @@ fuchsia::mem::Buffer MemBufferFromString16(const base::StringPiece16& data,
                                            base::StringPiece name) {
   return MemBufferFromString(
       base::StringPiece(reinterpret_cast<const char*>(data.data()),
-                        data.size() * sizeof(base::char16)),
+                        data.size() * sizeof(char16_t)),
       name);
 }
 
@@ -107,8 +106,8 @@ fuchsia::mem::Buffer CloneBuffer(const fuchsia::mem::Buffer& buffer,
                                  base::StringPiece name) {
   fuchsia::mem::Buffer output;
   output.size = buffer.size;
-  zx_status_t status = buffer.vmo.create_child(ZX_VMO_CHILD_COPY_ON_WRITE, 0,
-                                               buffer.size, &output.vmo);
+  zx_status_t status = buffer.vmo.create_child(
+      ZX_VMO_CHILD_SNAPSHOT_AT_LEAST_ON_WRITE, 0, buffer.size, &output.vmo);
   ZX_CHECK(status == ZX_OK, status) << "zx_vmo_create_child";
 
   status = output.vmo.set_property(ZX_PROP_NAME, name.data(), name.size());

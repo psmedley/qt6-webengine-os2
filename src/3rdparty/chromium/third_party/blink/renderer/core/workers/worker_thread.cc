@@ -31,6 +31,7 @@
 #include <utility>
 
 #include "base/metrics/histogram_functions.h"
+#include "base/threading/thread_restrictions.h"
 #include "third_party/blink/public/common/loader/worker_main_script_load_parameters.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -56,7 +57,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/loader/fetch/worker_resource_timing_notifier.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/worker_thread.h"
@@ -75,18 +75,6 @@ namespace {
 
 constexpr base::TimeDelta kForcibleTerminationDelay =
     base::TimeDelta::FromSeconds(2);
-
-void TerminateThreadsInSet(HashSet<WorkerThread*> threads) {
-  for (WorkerThread* thread : threads)
-    thread->TerminateForTesting();
-
-  for (WorkerThread* thread : threads)
-    thread->WaitForShutdownForTesting();
-
-  // Destruct base::Thread and join the underlying system threads.
-  for (WorkerThread* thread : threads)
-    thread->ClearWorkerBackingThread();
-}
 
 }  // namespace
 
@@ -115,6 +103,9 @@ class WorkerThread::RefCountedWaitableEvent
     return base::AdoptRef<RefCountedWaitableEvent>(new RefCountedWaitableEvent);
   }
 
+  RefCountedWaitableEvent(const RefCountedWaitableEvent&) = delete;
+  RefCountedWaitableEvent& operator=(const RefCountedWaitableEvent&) = delete;
+
   void Wait() { event_.Wait(); }
   void Signal() { event_.Signal(); }
 
@@ -122,8 +113,6 @@ class WorkerThread::RefCountedWaitableEvent
   RefCountedWaitableEvent() = default;
 
   base::WaitableEvent event_;
-
-  DISALLOW_COPY_AND_ASSIGN(RefCountedWaitableEvent);
 };
 
 // A class that is passed into V8 Interrupt and via a PostTask. Once both have
@@ -134,6 +123,8 @@ class WorkerThread::InterruptData {
  public:
   InterruptData(WorkerThread* worker_thread, mojom::FrameLifecycleState state)
       : worker_thread_(worker_thread), state_(state) {}
+  InterruptData(const InterruptData&) = delete;
+  InterruptData& operator=(const InterruptData&) = delete;
 
   bool ShouldRemoveFromList() { return seen_interrupt_ && seen_post_task_; }
   void MarkPostTaskCalled() { seen_post_task_ = true; }
@@ -147,8 +138,6 @@ class WorkerThread::InterruptData {
   mojom::FrameLifecycleState state_;
   bool seen_interrupt_ = false;
   bool seen_post_task_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(InterruptData);
 };
 
 WorkerThread::~WorkerThread() {
@@ -166,7 +155,7 @@ WorkerThread::~WorkerThread() {
 
 void WorkerThread::Start(
     std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params,
-    const base::Optional<WorkerBackingThreadStartupData>& thread_startup_data,
+    const absl::optional<WorkerBackingThreadStartupData>& thread_startup_data,
     std::unique_ptr<WorkerDevToolsParams> devtools_params) {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   devtools_worker_token_ = devtools_params->devtools_worker_token;
@@ -302,15 +291,6 @@ void WorkerThread::TerminateForTesting() {
   // terminate the V8 script execution to ensure the task runs.
   Terminate();
   EnsureScriptExecutionTerminates(ExitCode::kSyncForciblyTerminated);
-}
-
-void WorkerThread::TerminateAllWorkersForTesting() {
-  DCHECK(IsMainThread());
-
-  // Keep this lock to prevent WorkerThread instances from being destroyed.
-  MutexLocker lock(ThreadSetMutex());
-  TerminateThreadsInSet(InitializingWorkerThreads());
-  TerminateThreadsInSet(WorkerThreads());
 }
 
 void WorkerThread::WillProcessTask(const base::PendingTask& pending_task,
@@ -579,6 +559,7 @@ void WorkerThread::InitializeSchedulerOnWorkerThread(
       TaskType::kUserInteraction,
       TaskType::kWakeLock,
       TaskType::kWebGL,
+      TaskType::kWebGPU,
       TaskType::kWebLocks,
       TaskType::kWebSocket,
       TaskType::kWorkerAnimation};
@@ -593,7 +574,7 @@ void WorkerThread::InitializeSchedulerOnWorkerThread(
 
 void WorkerThread::InitializeOnWorkerThread(
     std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params,
-    const base::Optional<WorkerBackingThreadStartupData>& thread_startup_data,
+    const absl::optional<WorkerBackingThreadStartupData>& thread_startup_data,
     std::unique_ptr<WorkerDevToolsParams> devtools_params) {
   DCHECK(IsCurrentThread());
   worker_reporting_proxy_.WillInitializeWorkerContext();
@@ -616,7 +597,6 @@ void WorkerThread::InitializeOnWorkerThread(
     const KURL url_for_debugger = global_scope_creation_params->script_url;
 
     console_message_storage_ = MakeGarbageCollected<ConsoleMessageStorage>();
-    inspector_issue_storage_ = MakeGarbageCollected<InspectorIssueStorage>();
     global_scope_ =
         CreateWorkerGlobalScope(std::move(global_scope_creation_params));
     worker_reporting_proxy_.DidCreateWorkerGlobalScope(GlobalScope());
@@ -863,8 +843,7 @@ void WorkerThread::PauseOrFreezeOnWorkerThread(
          state == mojom::FrameLifecycleState::kPaused);
   pause_or_freeze_count_++;
   GlobalScope()->SetLifecycleState(state);
-  GlobalScope()->SetDefersLoadingForResourceFetchers(
-      WebURLLoader::DeferType::kDeferred);
+  GlobalScope()->SetDefersLoadingForResourceFetchers(LoaderFreezeMode::kStrict);
 
   // If already paused return early.
   if (pause_or_freeze_count_ > 1)
@@ -883,8 +862,7 @@ void WorkerThread::PauseOrFreezeOnWorkerThread(
         &nested_runner_, nested_runner.get());
     nested_runner->Run();
   }
-  GlobalScope()->SetDefersLoadingForResourceFetchers(
-      WebURLLoader::DeferType::kNotDeferred);
+  GlobalScope()->SetDefersLoadingForResourceFetchers(LoaderFreezeMode::kNone);
   GlobalScope()->SetLifecycleState(mojom::FrameLifecycleState::kRunning);
 }
 

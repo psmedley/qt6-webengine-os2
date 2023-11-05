@@ -9,16 +9,27 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
+#include "base/dcheck_is_on.h"
 #include "base/hash/hash.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/pickle.h"
+#include "base/ranges/algorithm.h"
+#include "base/strings/stringprintf.h"
+#include "base/types/pass_key.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/browser/content_script_tracker.h"
 #include "extensions/browser/extension_api_frame_id_map.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/url_loader_factory_manager.h"
+#include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/common/extension_messages.h"
+#include "extensions/common/mojom/host_id.mojom.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 
@@ -30,19 +41,6 @@ namespace extensions {
 
 namespace {
 
-// Generates an injection key based on the host ID and either the file URL, if
-// available, or the code string. The format of the key is
-// "<type><host_id><digest>", where <type> is one of "F" (file) and "C" (code),
-// <host_id> is the host ID, and <digest> is an unspecified hash digest of the
-// file URL or the code string, respectively.
-const std::string GenerateInjectionKey(const HostID& host_id,
-                                       const GURL& script_url,
-                                       const std::string& code) {
-  const std::string& source = script_url.is_valid() ? script_url.spec() : code;
-  return base::StringPrintf("%c%s%zu", script_url.is_valid() ? 'F' : 'C',
-                            host_id.id().c_str(), base::FastHash(source));
-}
-
 // A handler for a single injection request. On creation this will send the
 // injection request to the renderer, and it will be destroyed after either the
 // corresponding response comes from the renderer, or the renderer is destroyed.
@@ -52,16 +50,16 @@ class Handler : public content::WebContentsObserver {
   using ScriptsExecutedOnceCallback = base::OnceCallback<
       void(content::WebContents*, const ExecutingScriptsMap&, const GURL&)>;
 
-  Handler(ScriptsExecutedOnceCallback observer,
+  Handler(base::PassKey<ScriptExecutor> pass_key,
+          ScriptsExecutedOnceCallback observer,
           content::WebContents* web_contents,
-          const ExtensionMsg_ExecuteCode_Params& params,
+          mojom::ExecuteCodeParamsPtr params,
           ScriptExecutor::FrameScope scope,
-          const std::vector<int>& frame_ids,
+          const std::set<int>& frame_ids,
           ScriptExecutor::ScriptFinishedCallback callback)
       : content::WebContentsObserver(web_contents),
         observer_(std::move(observer)),
-        host_id_(params.host_id),
-        request_id_(params.request_id),
+        host_id_(params->host_id->type, params->host_id->id),
         callback_(std::move(callback)) {
     for (int frame_id : frame_ids) {
       content::RenderFrameHost* frame =
@@ -87,32 +85,43 @@ class Handler : public content::WebContentsObserver {
     // If there is a single frame specified (and it was valid), we consider it
     // the "root" frame, which is used in result ordering and error collection.
     if (frame_ids.size() == 1 && pending_render_frames_.size() == 1)
-      root_rfh_id_ = frame_ids[0];
+      root_rfh_id_ = *frame_ids.begin();
 
-    // If we are to include subframes, iterate over all frames in the
-    // WebContents and add them iff they are a child of an included frame.
+    // If we are to include subframes, iterate over all descendants of frames in
+    // `pending_render_frames_` and add them if they are alive (and not already
+    // contained in `pending_frames`).
     if (scope == ScriptExecutor::INCLUDE_SUB_FRAMES) {
-      auto check_frame =
-          [](std::vector<content::RenderFrameHost*>* pending_frames,
-             content::RenderFrameHost* frame) {
-            if (!frame->IsRenderFrameLive() ||
-                base::Contains(*pending_frames, frame)) {
-              return;
-            }
+      auto append_frame = [](content::WebContents* web_contents,
+                             std::vector<raw_ptr<content::RenderFrameHost>>*
+                                 pending_frames,
+                             content::RenderFrameHost* frame) {
+        // Avoid inner web contents. If we need to execute scripts on
+        // inner WebContents this class needs to be updated.
+        // See crbug.com/1301320.
+        if (content::WebContents::FromRenderFrameHost(frame) != web_contents) {
+          return content::RenderFrameHost::FrameIterationAction::kSkipChildren;
+        }
+        if (!frame->IsRenderFrameLive() ||
+            base::Contains(*pending_frames, frame)) {
+          return content::RenderFrameHost::FrameIterationAction::kContinue;
+        }
 
-            for (auto* pending_frame : *pending_frames) {
-              if (frame->IsDescendantOf(pending_frame)) {
-                pending_frames->push_back(frame);
-                break;
-              }
-            }
-          };
-      web_contents->ForEachFrame(
-          base::BindRepeating(check_frame, &pending_render_frames_));
+        pending_frames->push_back(frame);
+        return content::RenderFrameHost::FrameIterationAction::kContinue;
+      };
+
+      // We iterate over the requested frames. Note we can't use an iterator
+      // as the for loop will mutate `pending_render_frames_`.
+      size_t requested_frame_count = pending_render_frames_.size();
+      for (size_t i = 0; i < requested_frame_count; ++i) {
+        pending_render_frames_.at(i)->ForEachRenderFrameHost(
+            base::BindRepeating(append_frame, web_contents,
+                                &pending_render_frames_));
+      }
     }
 
     for (content::RenderFrameHost* frame : pending_render_frames_)
-      SendExecuteCode(params, frame);
+      SendExecuteCode(pass_key, params.Clone(), frame);
 
     if (pending_render_frames_.empty())
       Finish();
@@ -135,27 +144,6 @@ class Handler : public content::WebContentsObserver {
     }
     pending_render_frames_.clear();
     Finish();
-  }
-
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* render_frame_host) override {
-    // Unpack by hand to check the request_id, since there may be multiple
-    // requests in flight but only one is for this.
-    if (message.type() != ExtensionHostMsg_ExecuteCodeFinished::ID)
-      return false;
-
-    int message_request_id;
-    base::PickleIterator iter(message);
-    CHECK(iter.ReadInt(&message_request_id));
-
-    if (message_request_id != request_id_)
-      return false;
-
-    IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(Handler, message, render_frame_host)
-      IPC_MESSAGE_HANDLER(ExtensionHostMsg_ExecuteCodeFinished,
-                          OnExecuteCodeFinished)
-    IPC_END_MESSAGE_MAP()
-    return true;
   }
 
   void RenderFrameDeleted(
@@ -182,21 +170,32 @@ class Handler : public content::WebContentsObserver {
 
   // Sends an ExecuteCode message to the given frame host, and increments
   // the number of pending messages.
-  void SendExecuteCode(const ExtensionMsg_ExecuteCode_Params& params,
+  void SendExecuteCode(base::PassKey<ScriptExecutor> pass_key,
+                       mojom::ExecuteCodeParamsPtr params,
                        content::RenderFrameHost* frame) {
     DCHECK(frame->IsRenderFrameLive());
     DCHECK(base::Contains(pending_render_frames_, frame));
-    URLLoaderFactoryManager::WillExecuteCode(frame, host_id_);
-    frame->Send(new ExtensionMsg_ExecuteCode(frame->GetRoutingID(), params));
+    ContentScriptTracker::WillExecuteCode(pass_key, frame, host_id_);
+    ExtensionWebContentsObserver::GetForWebContents(web_contents())
+        ->GetLocalFrame(frame)
+        ->ExecuteCode(std::move(params),
+                      base::BindOnce(&Handler::OnExecuteCodeFinished,
+                                     weak_ptr_factory_.GetWeakPtr(),
+                                     frame->GetProcess()->GetID(),
+                                     frame->GetRoutingID()));
   }
 
   // Handles the ExecuteCodeFinished message.
-  void OnExecuteCodeFinished(content::RenderFrameHost* render_frame_host,
-                             int request_id,
+  void OnExecuteCodeFinished(int render_process_id,
+                             int render_frame_id,
                              const std::string& error,
                              const GURL& on_url,
-                             const base::Optional<base::Value>& result) {
-    DCHECK_EQ(request_id_, request_id);
+                             absl::optional<base::Value> result) {
+    auto* render_frame_host =
+        content::RenderFrameHost::FromID(render_process_id, render_frame_id);
+    if (!render_frame_host)
+      return;
+
     DCHECK(!pending_render_frames_.empty());
     size_t erased = base::Erase(pending_render_frames_, render_frame_host);
     DCHECK_EQ(1u, erased);
@@ -233,8 +232,8 @@ class Handler : public content::WebContentsObserver {
                        });
       DCHECK(root_frame_result != results_.end());
       if (root_frame_result->error.empty() &&
-          host_id_.type() == HostID::EXTENSIONS) {
-        std::move(observer_).Run(web_contents(), {{host_id_.id(), {}}},
+          host_id_.type == mojom::HostID::HostType::kExtensions) {
+        std::move(observer_).Run(web_contents(), {{host_id_.id, {}}},
                                  root_frame_result->url);
       }
     }
@@ -248,14 +247,11 @@ class Handler : public content::WebContentsObserver {
   ScriptsExecutedOnceCallback observer_;
 
   // The id of the host (the extension or the webui) doing the injection.
-  HostID host_id_;
-
-  // The request id of the injection.
-  int request_id_ = 0;
+  mojom::HostID host_id_;
 
   // The id of the primary frame of the injection, if only a single frame is
   // explicitly specified.
-  base::Optional<int> root_rfh_id_;
+  absl::optional<int> root_rfh_id_;
 
   // The hosts of the still-running injections. Note: this is a vector because
   // order matters (some tests - and therefore perhaps some extensions - rely on
@@ -264,13 +260,15 @@ class Handler : public content::WebContentsObserver {
   // TODO(devlin): Extensions *shouldn't* rely on order here, because there's
   // never a guarantee. We should probably just adjust the test and disregard
   // order (except the root frame).
-  std::vector<content::RenderFrameHost*> pending_render_frames_;
+  std::vector<raw_ptr<content::RenderFrameHost>> pending_render_frames_;
 
   // The results of the injection.
   std::vector<ScriptExecutor::FrameResult> results_;
 
   // The callback to run after all injections complete.
   ScriptExecutor::ScriptFinishedCallback callback_;
+
+  base::WeakPtrFactory<Handler> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(Handler);
 };
@@ -289,55 +287,64 @@ ScriptExecutor::ScriptExecutor(content::WebContents* web_contents)
 
 ScriptExecutor::~ScriptExecutor() {}
 
-void ScriptExecutor::ExecuteScript(const HostID& host_id,
-                                   UserScript::ActionType action_type,
-                                   const std::string& code,
+// static
+std::string ScriptExecutor::GenerateInjectionKey(const mojom::HostID& host_id,
+                                                 const GURL& script_url,
+                                                 const std::string& code) {
+  const std::string& source = script_url.is_valid() ? script_url.spec() : code;
+  return base::StringPrintf("%c%s%zu", script_url.is_valid() ? 'F' : 'C',
+                            host_id.id.c_str(), base::FastHash(source));
+}
+
+void ScriptExecutor::ExecuteScript(const mojom::HostID& host_id,
+                                   mojom::CodeInjectionPtr injection,
                                    ScriptExecutor::FrameScope frame_scope,
-                                   const std::vector<int>& frame_ids,
+                                   const std::set<int>& frame_ids,
                                    ScriptExecutor::MatchAboutBlank about_blank,
-                                   UserScript::RunLocation run_at,
+                                   mojom::RunLocation run_at,
                                    ScriptExecutor::ProcessType process_type,
                                    const GURL& webview_src,
-                                   const GURL& script_url,
-                                   bool user_gesture,
-                                   CSSOrigin css_origin,
-                                   ScriptExecutor::ResultType result_type,
                                    ScriptFinishedCallback callback) {
-  if (host_id.type() == HostID::EXTENSIONS) {
+  if (host_id.type == mojom::HostID::HostType::kExtensions) {
     // Don't execute if the extension has been unloaded.
     const Extension* extension =
         ExtensionRegistry::Get(web_contents_->GetBrowserContext())
-            ->enabled_extensions().GetByID(host_id.id());
+            ->enabled_extensions()
+            .GetByID(host_id.id);
     if (!extension)
       return;
   } else {
     CHECK(process_type == WEB_VIEW_PROCESS);
   }
 
-  ExtensionMsg_ExecuteCode_Params params;
-  params.request_id = next_request_id_++;
-  params.host_id = host_id;
-  params.action_type = action_type;
-  params.code = code;
-  params.match_about_blank = (about_blank == MATCH_ABOUT_BLANK);
-  params.run_at = run_at;
-  params.is_web_view = (process_type == WEB_VIEW_PROCESS);
-  params.webview_src = webview_src;
-  params.script_url = script_url;
-  params.wants_result = (result_type == JSON_SERIALIZED_RESULT);
-  params.user_gesture = user_gesture;
-  params.css_origin = css_origin;
+#if DCHECK_IS_ON()
+  if (injection->is_css()) {
+    bool expect_injection_key =
+        host_id.type == mojom::HostID::HostType::kExtensions;
+    if (injection->get_css()->operation ==
+        mojom::CSSInjection::Operation::kRemove) {
+      DCHECK(expect_injection_key)
+          << "Only extensions (with injection keys supplied) can remove CSS.";
+    }
+    DCHECK(base::ranges::all_of(
+        injection->get_css()->sources,
+        [expect_injection_key](const mojom::CSSSourcePtr& source) {
+          return expect_injection_key == source->key.has_value();
+        }));
+  }
+#endif
 
-  // Generate the unique key that represents this CSS injection or removal
-  // from an extension (i.e. tabs.insertCSS or tabs.removeCSS).
-  if (host_id.type() == HostID::EXTENSIONS &&
-      (action_type == UserScript::ADD_CSS ||
-       action_type == UserScript::REMOVE_CSS))
-    params.injection_key = GenerateInjectionKey(host_id, script_url, code);
+  auto params = mojom::ExecuteCodeParams::New();
+  params->host_id = host_id.Clone();
+  params->injection = std::move(injection);
+  params->match_about_blank = (about_blank == MATCH_ABOUT_BLANK);
+  params->run_at = run_at;
+  params->is_web_view = (process_type == WEB_VIEW_PROCESS);
+  params->webview_src = webview_src;
 
   // Handler handles IPCs and deletes itself on completion.
-  new Handler(observer_, web_contents_, params, frame_scope, frame_ids,
-              std::move(callback));
+  new Handler(base::PassKey<ScriptExecutor>(), observer_, web_contents_,
+              std::move(params), frame_scope, frame_ids, std::move(callback));
 }
 
 }  // namespace extensions

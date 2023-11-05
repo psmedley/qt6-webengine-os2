@@ -25,31 +25,37 @@ static DEFINE_bool(hwtess, false, "Enables support for tessellation shaders (if 
 static DEFINE_int(maxTessellationSegments, 0,
                   "Overrides the max number of tessellation segments supported by the caps.");
 
-static DEFINE_bool(cc, false, "Allow coverage counting shortcuts to render paths?");
+static DEFINE_bool(alwaysHwTess, false,
+        "Always try to use hardware tessellation, regardless of how small a path may be.");
 
 static DEFINE_string(pr, "",
               "Set of enabled gpu path renderers. Defined as a list of: "
-              "[~]none [~]dashline [~]nvpr [~]ccpr [~]aahairline [~]aaconvex [~]aalinearizing "
-              "[~]small [~]tri [~]tess [~]all");
+              "[~]none [~]dashline [~]aahairline [~]aaconvex [~]aalinearizing [~]small [~]tri "
+              "[~]atlas [~]tess [~]all");
 
-static DEFINE_int(internalSamples, 4,
-                  "Number of samples for internal draws that use MSAA or mixed samples.");
+static DEFINE_int(internalSamples, -1,
+        "Number of samples for internal draws that use MSAA, or default value if negative.");
+
+static DEFINE_int(maxAtlasSize, -1,
+        "Maximum width and height of internal texture atlases, or default value if negative.");
 
 static DEFINE_bool(disableDriverCorrectnessWorkarounds, false,
                    "Disables all GPU driver correctness workarounds");
 
-static DEFINE_bool(reduceOpsTaskSplitting, false, "Improve opsTask sorting");
-static DEFINE_bool(dontReduceOpsTaskSplitting, false, "Allow more opsTask splitting");
+static DEFINE_bool(dontReduceOpsTaskSplitting, false,
+                   "Don't reorder tasks to reduce render passes");
+
+static DEFINE_bool(skgpuv2, false, "use the new GPU backend");
+
+static DEFINE_int(gpuResourceCacheLimit, -1,
+                  "Maximum number of bytes to use for budgeted GPU resources. "
+                  "Default is -1, which means GrResourceCache::kDefaultMaxSize.");
 
 static GpuPathRenderers get_named_pathrenderers_flags(const char* name) {
     if (!strcmp(name, "none")) {
         return GpuPathRenderers::kNone;
     } else if (!strcmp(name, "dashline")) {
         return GpuPathRenderers::kDashLine;
-    } else if (!strcmp(name, "nvpr")) {
-        return GpuPathRenderers::kStencilAndCover;
-    } else if (!strcmp(name, "ccpr")) {
-        return GpuPathRenderers::kCoverageCounting;
     } else if (!strcmp(name, "aahairline")) {
         return GpuPathRenderers::kAAHairline;
     } else if (!strcmp(name, "aaconvex")) {
@@ -60,6 +66,8 @@ static GpuPathRenderers get_named_pathrenderers_flags(const char* name) {
         return GpuPathRenderers::kSmall;
     } else if (!strcmp(name, "tri")) {
         return GpuPathRenderers::kTriangulating;
+    } else if (!strcmp(name, "atlas")) {
+        return GpuPathRenderers::kAtlas;
     } else if (!strcmp(name, "tess")) {
         return GpuPathRenderers::kTessellation;
     } else if (!strcmp(name, "default")) {
@@ -94,20 +102,30 @@ void SetCtxOptionsFromCommonFlags(GrContextOptions* ctxOptions) {
         : nullptr;
 
     ctxOptions->fExecutor                            = gGpuExecutor.get();
-    ctxOptions->fDisableCoverageCountingPaths        = !FLAGS_cc;
     ctxOptions->fAllowPathMaskCaching                = FLAGS_cachePathMasks;
     ctxOptions->fAllPathsVolatile                    = FLAGS_allPathsVolatile;
     ctxOptions->fSuppressGeometryShaders             = !FLAGS_gs;
-    ctxOptions->fSuppressTessellationShaders         = !FLAGS_hwtess;
+    ctxOptions->fEnableExperimentalHardwareTessellation = FLAGS_hwtess;
     ctxOptions->fMaxTessellationSegmentsOverride     = FLAGS_maxTessellationSegments;
+    ctxOptions->fAlwaysPreferHardwareTessellation    = FLAGS_alwaysHwTess;
     ctxOptions->fGpuPathRenderers                    = collect_gpu_path_renderers_from_flags();
-    ctxOptions->fInternalMultisampleCount            = FLAGS_internalSamples;
     ctxOptions->fDisableDriverCorrectnessWorkarounds = FLAGS_disableDriverCorrectnessWorkarounds;
+    ctxOptions->fResourceCacheLimitOverride          = FLAGS_gpuResourceCacheLimit;
 
-    if (FLAGS_reduceOpsTaskSplitting) {
-        SkASSERT(!FLAGS_dontReduceOpsTaskSplitting);
-        ctxOptions->fReduceOpsTaskSplitting = GrContextOptions::Enable::kYes;
-    } else if (FLAGS_dontReduceOpsTaskSplitting) {
+    if (FLAGS_internalSamples >= 0) {
+        ctxOptions->fInternalMultisampleCount = FLAGS_internalSamples;
+    }
+    if (FLAGS_maxAtlasSize >= 0) {
+        ctxOptions->fMaxTextureAtlasSize = FLAGS_maxAtlasSize;
+    }
+
+    if (FLAGS_dontReduceOpsTaskSplitting) {
         ctxOptions->fReduceOpsTaskSplitting = GrContextOptions::Enable::kNo;
+    } else {
+        ctxOptions->fReduceOpsTaskSplitting = GrContextOptions::Enable::kYes;
+    }
+
+    if (FLAGS_skgpuv2) {
+        ctxOptions->fUseSkGpuV2 = GrContextOptions::Enable::kYes;
     }
 }

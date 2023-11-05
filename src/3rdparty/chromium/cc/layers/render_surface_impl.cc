@@ -9,7 +9,6 @@
 #include <algorithm>
 
 #include "base/check_op.h"
-#include "base/strings/stringprintf.h"
 #include "cc/base/math_util.h"
 #include "cc/debug/debug_colors.h"
 #include "cc/layers/append_quads_data.h"
@@ -145,7 +144,7 @@ const FilterOperations& RenderSurfaceImpl::BackdropFilters() const {
   return OwningEffectNode()->backdrop_filters;
 }
 
-base::Optional<gfx::RRectF> RenderSurfaceImpl::BackdropFilterBounds() const {
+absl::optional<gfx::RRectF> RenderSurfaceImpl::BackdropFilterBounds() const {
   return OwningEffectNode()->backdrop_filter_bounds;
 }
 
@@ -159,6 +158,10 @@ bool RenderSurfaceImpl::HasCopyRequest() const {
 
 viz::SubtreeCaptureId RenderSurfaceImpl::SubtreeCaptureId() const {
   return OwningEffectNode()->subtree_capture_id;
+}
+
+gfx::Size RenderSurfaceImpl::SubtreeSize() const {
+  return OwningEffectNode()->subtree_size;
 }
 
 bool RenderSurfaceImpl::ShouldCacheRenderSurface() const {
@@ -185,6 +188,11 @@ int RenderSurfaceImpl::EffectTreeIndex() const {
 const EffectNode* RenderSurfaceImpl::OwningEffectNode() const {
   return layer_tree_impl_->property_trees()->effect_tree.Node(
       EffectTreeIndex());
+}
+
+const DocumentTransitionSharedElementId&
+RenderSurfaceImpl::GetDocumentTransitionSharedElementId() const {
+  return OwningEffectNode()->document_transition_shared_element_id;
 }
 
 void RenderSurfaceImpl::SetClipRect(const gfx::Rect& clip_rect) {
@@ -387,6 +395,10 @@ RenderSurfaceImpl::CreateRenderPass() {
   pass->backdrop_filter_bounds = BackdropFilterBounds();
   pass->generate_mipmap = TrilinearFiltering();
   pass->subtree_capture_id = SubtreeCaptureId();
+  // The subtree size may be slightly larger than our content rect during
+  // some animations, so we clamp it here.
+  pass->subtree_size = SubtreeSize();
+  pass->subtree_size.SetToMin(content_rect().size());
   pass->cache_render_pass = ShouldCacheRenderSurface();
   pass->has_damage_from_contributing_content =
       HasDamageFromeContributingContent();
@@ -408,10 +420,14 @@ void RenderSurfaceImpl::AppendQuads(DrawMode draw_mode,
   bool contents_opaque = false;
   viz::SharedQuadState* shared_quad_state =
       render_pass->CreateAndAppendSharedQuadState();
-  shared_quad_state->SetAll(
-      draw_transform(), content_rect(), content_rect(), mask_filter_info(),
-      draw_properties_.clip_rect, draw_properties_.is_clipped, contents_opaque,
-      draw_properties_.draw_opacity, BlendMode(), sorting_context_id);
+  absl::optional<gfx::Rect> clip_rect;
+  if (draw_properties_.is_clipped) {
+    clip_rect = draw_properties_.clip_rect;
+  }
+  shared_quad_state->SetAll(draw_transform(), content_rect(), content_rect(),
+                            mask_filter_info(), clip_rect, contents_opaque,
+                            draw_properties_.draw_opacity, BlendMode(),
+                            sorting_context_id);
 
   if (layer_tree_impl_->debug_state().show_debug_borders.test(
           DebugBorderType::RENDERPASS)) {

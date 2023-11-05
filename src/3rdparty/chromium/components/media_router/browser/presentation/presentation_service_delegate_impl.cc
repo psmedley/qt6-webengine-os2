@@ -5,12 +5,14 @@
 #include "components/media_router/browser/presentation/presentation_service_delegate_impl.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/containers/small_map.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
@@ -57,7 +59,7 @@ using DelegateObserver = content::PresentationServiceDelegate::Observer;
 // Gets the last committed URL for the render frame specified by
 // |render_frame_host_id|.
 url::Origin GetLastCommittedURLForFrame(
-    content::GlobalFrameRoutingId render_frame_host_id) {
+    content::GlobalRenderFrameHostId render_frame_host_id) {
   RenderFrameHost* render_frame_host = RenderFrameHost::FromID(
       render_frame_host_id.child_id, render_frame_host_id.frame_routing_id);
   DCHECK(render_frame_host);
@@ -84,9 +86,10 @@ bool ArePresentationRequestsEqual(
 // is destroyed.
 class PresentationFrame {
  public:
-  PresentationFrame(const content::GlobalFrameRoutingId& render_frame_host_id,
-                    content::WebContents* web_contents,
-                    MediaRouter* router);
+  PresentationFrame(
+      const content::GlobalRenderFrameHostId& render_frame_host_id,
+      content::WebContents* web_contents,
+      MediaRouter* router);
   ~PresentationFrame();
 
   // Mirror corresponding APIs in PresentationServiceDelegateImpl.
@@ -130,7 +133,7 @@ class PresentationFrame {
                      std::unique_ptr<BrowserPresentationConnectionProxy>>
       browser_connection_proxies_;
 
-  content::GlobalFrameRoutingId render_frame_host_id_;
+  content::GlobalRenderFrameHostId render_frame_host_id_;
 
   // References to the owning WebContents, and the corresponding MediaRouter.
   content::WebContents* web_contents_;
@@ -138,7 +141,7 @@ class PresentationFrame {
 };
 
 PresentationFrame::PresentationFrame(
-    const content::GlobalFrameRoutingId& render_frame_host_id,
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
     content::WebContents* web_contents,
     MediaRouter* router)
     : render_frame_host_id_(render_frame_host_id),
@@ -173,9 +176,9 @@ bool PresentationFrame::SetScreenAvailabilityListener(
   if (sinks_observer && sinks_observer->listener() == listener)
     return false;
 
-  sinks_observer.reset(new PresentationMediaSinksObserver(
+  sinks_observer = std::make_unique<PresentationMediaSinksObserver>(
       router_, listener, source,
-      GetLastCommittedURLForFrame(render_frame_host_id_)));
+      GetLastCommittedURLForFrame(render_frame_host_id_));
 
   if (!sinks_observer->Init()) {
     url_to_sinks_observer_.erase(source.id());
@@ -330,8 +333,8 @@ bool PresentationServiceDelegateImpl::AddScreenAvailabilityListener(
     int render_frame_id,
     content::PresentationScreenAvailabilityListener* listener) {
   DCHECK(listener);
-  content::GlobalFrameRoutingId render_frame_host_id(render_process_id,
-                                                     render_frame_id);
+  content::GlobalRenderFrameHostId render_frame_host_id(render_process_id,
+                                                        render_frame_id);
   auto* presentation_frame = GetOrAddPresentationFrame(render_frame_host_id);
   return presentation_frame->SetScreenAvailabilityListener(listener);
 }
@@ -341,8 +344,8 @@ void PresentationServiceDelegateImpl::RemoveScreenAvailabilityListener(
     int render_frame_id,
     content::PresentationScreenAvailabilityListener* listener) {
   DCHECK(listener);
-  content::GlobalFrameRoutingId render_frame_host_id(render_process_id,
-                                                     render_frame_id);
+  content::GlobalRenderFrameHostId render_frame_host_id(render_process_id,
+                                                        render_frame_id);
   const auto it = presentation_frames_.find(render_frame_host_id);
   if (it != presentation_frames_.end())
     it->second->RemoveScreenAvailabilityListener(listener);
@@ -350,8 +353,8 @@ void PresentationServiceDelegateImpl::RemoveScreenAvailabilityListener(
 
 void PresentationServiceDelegateImpl::Reset(int render_process_id,
                                             int render_frame_id) {
-  content::GlobalFrameRoutingId render_frame_host_id(render_process_id,
-                                                     render_frame_id);
+  content::GlobalRenderFrameHostId render_frame_host_id(render_process_id,
+                                                        render_frame_id);
   const auto it = presentation_frames_.find(render_frame_host_id);
   if (it != presentation_frames_.end()) {
     it->second->Reset();
@@ -366,11 +369,11 @@ void PresentationServiceDelegateImpl::Reset(int render_process_id,
 }
 
 PresentationFrame* PresentationServiceDelegateImpl::GetOrAddPresentationFrame(
-    const content::GlobalFrameRoutingId& render_frame_host_id) {
+    const content::GlobalRenderFrameHostId& render_frame_host_id) {
   auto& presentation_frame = presentation_frames_[render_frame_host_id];
   if (!presentation_frame) {
-    presentation_frame.reset(
-        new PresentationFrame(render_frame_host_id, web_contents_, router_));
+    presentation_frame = std::make_unique<PresentationFrame>(
+        render_frame_host_id, web_contents_, router_);
   }
   return presentation_frame.get();
 }
@@ -390,7 +393,7 @@ void PresentationServiceDelegateImpl::SetDefaultPresentationUrls(
 }
 
 void PresentationServiceDelegateImpl::OnJoinRouteResponse(
-    const content::GlobalFrameRoutingId& render_frame_host_id,
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
     const GURL& presentation_url,
     const std::string& presentation_id,
     content::PresentationConnectionCallback success_cb,
@@ -415,7 +418,7 @@ void PresentationServiceDelegateImpl::OnJoinRouteResponse(
 }
 
 void PresentationServiceDelegateImpl::OnStartPresentationSucceeded(
-    const content::GlobalFrameRoutingId& render_frame_host_id,
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
     content::PresentationConnectionCallback success_cb,
     const PresentationInfo& new_presentation_info,
     mojom::RoutePresentationConnectionPtr connection,
@@ -431,7 +434,7 @@ void PresentationServiceDelegateImpl::OnStartPresentationSucceeded(
 }
 
 void PresentationServiceDelegateImpl::AddPresentation(
-    const content::GlobalFrameRoutingId& render_frame_host_id,
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
     const PresentationInfo& presentation_info,
     const MediaRoute& route) {
   auto* presentation_frame = GetOrAddPresentationFrame(render_frame_host_id);
@@ -440,7 +443,7 @@ void PresentationServiceDelegateImpl::AddPresentation(
 }
 
 void PresentationServiceDelegateImpl::RemovePresentation(
-    const content::GlobalFrameRoutingId& render_frame_host_id,
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
     const std::string& presentation_id) {
   const auto it = presentation_frames_.find(render_frame_host_id);
   if (it != presentation_frames_.end())
@@ -542,8 +545,8 @@ void PresentationServiceDelegateImpl::CloseConnection(
     int render_process_id,
     int render_frame_id,
     const std::string& presentation_id) {
-  const content::GlobalFrameRoutingId rfh_id(render_process_id,
-                                             render_frame_id);
+  const content::GlobalRenderFrameHostId rfh_id(render_process_id,
+                                                render_frame_id);
   auto route_id = GetRouteId(rfh_id, presentation_id);
   if (route_id.empty()) {
     return;
@@ -568,8 +571,8 @@ void PresentationServiceDelegateImpl::Terminate(
     int render_process_id,
     int render_frame_id,
     const std::string& presentation_id) {
-  const content::GlobalFrameRoutingId rfh_id(render_process_id,
-                                             render_frame_id);
+  const content::GlobalRenderFrameHostId rfh_id(render_process_id,
+                                                render_frame_id);
   auto route_id = GetRouteId(rfh_id, presentation_id);
   if (route_id.empty()) {
     return;
@@ -584,11 +587,16 @@ void PresentationServiceDelegateImpl::ListenForConnectionStateChange(
     const PresentationInfo& connection,
     const content::PresentationConnectionStateChangedCallback&
         state_changed_cb) {
-  content::GlobalFrameRoutingId render_frame_host_id(render_process_id,
-                                                     render_frame_id);
+  content::GlobalRenderFrameHostId render_frame_host_id(render_process_id,
+                                                        render_frame_id);
   const auto it = presentation_frames_.find(render_frame_host_id);
   if (it != presentation_frames_.end())
-    it->second->ListenForConnectionStateChange(connection, state_changed_cb);
+    it->second->ListenForConnectionStateChange(
+        connection,
+        base::BindRepeating(
+            &PresentationServiceDelegateImpl::OnConnectionStateChanged,
+            weak_factory_.GetWeakPtr(), render_frame_host_id, connection,
+            state_changed_cb));
 }
 
 void PresentationServiceDelegateImpl::AddObserver(
@@ -637,6 +645,16 @@ void PresentationServiceDelegateImpl::OnPresentationResponse(
     DCHECK(!connection);
   }
 }
+std::vector<MediaRoute> PresentationServiceDelegateImpl::GetMediaRoutes() {
+  std::vector<MediaRoute> routes;
+  for (const auto& presentation_frame : presentation_frames_) {
+    for (const auto& route :
+         presentation_frame.second->presentation_id_to_route()) {
+      routes.push_back(route.second);
+    }
+  }
+  return routes;
+}
 
 base::WeakPtr<WebContentsPresentationManager>
 PresentationServiceDelegateImpl::GetWeakPtr() {
@@ -647,8 +665,8 @@ bool PresentationServiceDelegateImpl::HasScreenAvailabilityListenerForTest(
     int render_process_id,
     int render_frame_id,
     const MediaSource::Id& source_id) const {
-  content::GlobalFrameRoutingId render_frame_host_id(render_process_id,
-                                                     render_frame_id);
+  content::GlobalRenderFrameHostId render_frame_host_id(render_process_id,
+                                                        render_frame_id);
   const auto it = presentation_frames_.find(render_frame_host_id);
   return it != presentation_frames_.end() &&
          it->second->HasScreenAvailabilityListenerForTest(source_id);
@@ -668,8 +686,8 @@ PresentationServiceDelegateImpl::GetFlingingController(
     int render_process_id,
     int render_frame_id,
     const std::string& presentation_id) {
-  const content::GlobalFrameRoutingId rfh_id(render_process_id,
-                                             render_frame_id);
+  const content::GlobalRenderFrameHostId rfh_id(render_process_id,
+                                                render_frame_id);
   MediaRoute::Id route_id = GetRouteId(rfh_id, presentation_id);
 
   if (route_id.empty())
@@ -679,7 +697,7 @@ PresentationServiceDelegateImpl::GetFlingingController(
 }
 
 MediaRoute::Id PresentationServiceDelegateImpl::GetRouteId(
-    const content::GlobalFrameRoutingId& render_frame_host_id,
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
     const std::string& presentation_id) const {
   const auto it = presentation_frames_.find(render_frame_host_id);
   return it != presentation_frames_.end()
@@ -694,12 +712,12 @@ bool PresentationServiceDelegateImpl::ShouldCancelAutoJoinForOrigin(
       user_prefs::UserPrefs::Get(web_contents_->GetBrowserContext())
           ->GetList(prefs::kMediaRouterTabMirroringSources);
   return origins &&
-         origins->Find(base::Value(origin.Serialize())) != origins->end();
+         base::Contains(origins->GetList(), base::Value(origin.Serialize()));
 }
 #endif  // !defined(OS_ANDROID)
 
 void PresentationServiceDelegateImpl::EnsurePresentationConnection(
-    const content::GlobalFrameRoutingId& render_frame_host_id,
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
     const PresentationInfo& presentation_info,
     mojom::RoutePresentationConnectionPtr* connection) {
   // This is where we ensure we have a valid Mojo pipe pair when starting or
@@ -726,15 +744,22 @@ void PresentationServiceDelegateImpl::NotifyDefaultPresentationChanged(
 }
 
 void PresentationServiceDelegateImpl::NotifyMediaRoutesChanged() {
-  std::vector<MediaRoute> routes;
-  for (const auto& presentation_frame : presentation_frames_) {
-    for (const auto& route :
-         presentation_frame.second->presentation_id_to_route()) {
-      routes.push_back(route.second);
-    }
-  }
+  auto routes = GetMediaRoutes();
   for (auto& presentation_observer : presentation_observers_)
     presentation_observer.OnMediaRoutesChanged(routes);
+}
+
+void PresentationServiceDelegateImpl::OnConnectionStateChanged(
+    const content::GlobalRenderFrameHostId& render_frame_host_id,
+    const PresentationInfo& connection,
+    const content::PresentationConnectionStateChangedCallback& state_changed_cb,
+    const content::PresentationConnectionStateChangeInfo& info) {
+  if (info.state == blink::mojom::PresentationConnectionState::CLOSED ||
+      info.state == blink::mojom::PresentationConnectionState::TERMINATED) {
+    RemovePresentation(render_frame_host_id, connection.id);
+  }
+
+  state_changed_cb.Run(info);
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(PresentationServiceDelegateImpl)

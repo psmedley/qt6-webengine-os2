@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
+#include <utility>
 
 #include "base/timer/lap_timer.h"
 #include "base/values.h"
@@ -31,7 +33,7 @@ const int kDefaultRasterizeRepeatCount = 100;
 void RunBenchmark(RasterSource* raster_source,
                   ImageDecodeCache* image_decode_cache,
                   const gfx::Rect& content_rect,
-                  float contents_scale,
+                  const gfx::Vector2dF& contents_scale,
                   size_t repeat_count,
                   base::TimeDelta* min_time,
                   bool* is_solid_color) {
@@ -48,8 +50,8 @@ void RunBenchmark(RasterSource* raster_source,
                          base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
                          kTimeCheckInterval);
     SkColor color = SK_ColorTRANSPARENT;
-    gfx::Rect layer_rect =
-        gfx::ScaleToEnclosingRect(content_rect, 1.f / contents_scale);
+    gfx::Rect layer_rect = gfx::ScaleToEnclosingRect(
+        content_rect, 1.f / contents_scale.x(), 1.f / contents_scale.y());
     *is_solid_color =
         raster_source->PerformSolidColorAnalysis(layer_rect, &color);
 
@@ -61,7 +63,7 @@ void RunBenchmark(RasterSource* raster_source,
 
       // Pass an empty settings to make sure that the decode cache is used to
       // replace all images.
-      base::Optional<PlaybackImageProvider::Settings> image_settings;
+      absl::optional<PlaybackImageProvider::Settings> image_settings;
       image_settings.emplace();
       image_settings->images_to_skip = {};
       image_settings->image_to_current_frame_index = {};
@@ -125,6 +127,14 @@ class FixedInvalidationPictureLayerTilingClient
     return base_client_->IsDirectlyCompositedImage();
   }
 
+  bool ScrollInteractionInProgress() const override {
+    return base_client_->ScrollInteractionInProgress();
+  }
+
+  bool CurrentScrollDidCheckerboardLargeArea() const override {
+    return base_client_->CurrentScrollDidCheckerboardLargeArea();
+  }
+
  private:
   PictureLayerTilingClient* base_client_;
   Region invalidation_;
@@ -157,8 +167,8 @@ void RasterizeAndRecordBenchmarkImpl::DidCompleteCommit(
   }
 
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-  result->SetDouble("rasterize_time_ms",
-                    rasterize_results_.total_best_time.InMillisecondsF());
+  result->SetDoubleKey("rasterize_time_ms",
+                       rasterize_results_.total_best_time.InMillisecondsF());
   result->SetInteger("pixels_rasterized", rasterize_results_.pixels_rasterized);
   result->SetInteger("pixels_rasterized_with_non_solid_color",
                      rasterize_results_.pixels_rasterized_with_non_solid_color);
@@ -230,7 +240,7 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
     DCHECK(*it);
 
     gfx::Rect content_rect = (*it)->content_rect();
-    float contents_scale = (*it)->raster_transform().scale();
+    const gfx::Vector2dF& contents_scale = (*it)->raster_transform().scale();
 
     base::TimeDelta min_time;
     bool is_solid_color = false;

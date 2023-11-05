@@ -77,7 +77,7 @@ class MockRendererAudioInputStreamFactoryClient
           client_receiver,
       media::mojom::ReadOnlyAudioDataPipePtr data_pipe,
       bool initially_muted,
-      const base::Optional<base::UnguessableToken>& stream_id) override {
+      const absl::optional<base::UnguessableToken>& stream_id) override {
     // Loopback streams have no stream ids.
     EXPECT_FALSE(stream_id.has_value());
     input_stream_.Bind(std::move(input_stream));
@@ -94,10 +94,10 @@ class MockRendererAudioInputStreamFactoryClient
   mojo::PendingReceiver<media::mojom::AudioInputStreamClient> client_receiver_;
 };
 
-class MockStreamFactory : public audio::FakeStreamFactory {
+class MockStreamFactory final : public audio::FakeStreamFactory {
  public:
-  MockStreamFactory() {}
-  ~MockStreamFactory() final {}
+  MockStreamFactory() = default;
+  ~MockStreamFactory() override = default;
 
   // State of an expected stream creation. |device_id| and |params| are set
   // ahead of time and verified during request. The other fields are filled in
@@ -116,7 +116,7 @@ class MockStreamFactory : public audio::FakeStreamFactory {
     base::UnguessableToken group_id;
     mojo::ScopedSharedBufferHandle key_press_count_buffer;
     CreateLoopbackStreamCallback created_callback;
-    mojo::PendingAssociatedReceiver<audio::mojom::LocalMuter> muter_receiver;
+    mojo::PendingAssociatedReceiver<media::mojom::LocalMuter> muter_receiver;
   };
 
   void ExpectStreamCreation(StreamRequestData* ex) {
@@ -133,7 +133,7 @@ class MockStreamFactory : public audio::FakeStreamFactory {
       const media::AudioParameters& params,
       uint32_t shared_memory_count,
       const base::UnguessableToken& group_id,
-      CreateLoopbackStreamCallback created_callback) final {
+      CreateLoopbackStreamCallback created_callback) override {
     // No way to cleanly exit the test here in case of failure, so use CHECK.
     CHECK(stream_request_data_);
     EXPECT_EQ(stream_request_data_->group_id, group_id);
@@ -147,8 +147,8 @@ class MockStreamFactory : public audio::FakeStreamFactory {
   }
 
   void BindMuter(
-      mojo::PendingAssociatedReceiver<audio::mojom::LocalMuter> receiver,
-      const base::UnguessableToken& group_id) final {
+      mojo::PendingAssociatedReceiver<media::mojom::LocalMuter> receiver,
+      const base::UnguessableToken& group_id) override {
     stream_request_data_->muter_receiver = std::move(receiver);
     IsMuting(group_id);
   }
@@ -178,7 +178,7 @@ struct TestEnvironment {
   StrictMock<MockRendererAudioInputStreamFactoryClient> renderer_factory_client;
   std::unique_ptr<AudioLoopbackStreamBroker> broker;
   MockStreamFactory stream_factory;
-  mojo::Remote<audio::mojom::StreamFactory> factory_ptr{
+  mojo::Remote<media::mojom::AudioStreamFactory> factory_ptr{
       stream_factory.MakeRemote()};
 };
 

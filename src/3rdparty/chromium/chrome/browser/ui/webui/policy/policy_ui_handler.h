@@ -31,11 +31,12 @@
 #include "extensions/browser/extension_registry_observer.h"
 #endif
 
-class PolicyStatusProvider;
+class PrefChangeRegistrar;
 struct GoogleUpdatePoliciesAndState;
 
 namespace policy {
 class PolicyMap;
+class PolicyStatusProvider;
 }
 
 // The JavaScript message handler for the chrome://policy page.
@@ -81,11 +82,11 @@ class PolicyUIHandler : public content::WebUIMessageHandler,
   void FileSelectionCanceled(void* params) override;
 
  private:
-  base::Value GetPolicyNames() const;
-  base::Value GetPolicyValues() const;
+  base::Value GetPolicyNames();
+  base::Value GetPolicyValues();
 
   void AddExtensionPolicyNames(base::Value* names,
-                               policy::PolicyDomain policy_domain) const;
+                               policy::PolicyDomain policy_domain);
 
   void HandleExportPoliciesJson(const base::ListValue* args);
   void HandleListenPoliciesUpdates(const base::ListValue* args);
@@ -107,19 +108,23 @@ class PolicyUIHandler : public content::WebUIMessageHandler,
   void ReloadUpdaterPoliciesAndState();
 #endif  // defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
-  // Send the status of cloud policy to the UI. For each scope that has cloud
-  // policy enabled (device and/or user), a dictionary containing status
-  // information is sent.
+  // Send the status of cloud policy to the UI.
   void SendStatus();
 
-  // Build a JSON string of all the policies.
-  std::string GetPoliciesAsJson() const;
+  // Get the status of cloud policy. For each scope that has cloud policy
+  // enabled (device and/or user), a dictionary containing status information.
+  // If |for_webui| is true, values needed for webui will be included
+  // additionally.
+  base::DictionaryValue GetStatusValue(bool for_webui) const;
 
-  void WritePoliciesToJSONFile(const base::FilePath& path) const;
+  // Build a JSON string of all the policies.
+  std::string GetPoliciesAsJson();
+
+  void WritePoliciesToJSONFile(const base::FilePath& path);
 
   void OnRefreshPoliciesDone();
 
-  policy::PolicyService* GetPolicyService() const;
+  policy::PolicyService* GetPolicyService();
 
   std::string device_domain_;
 
@@ -128,14 +133,16 @@ class PolicyUIHandler : public content::WebUIMessageHandler,
   // Providers that supply status dictionaries for user and device policy,
   // respectively. These are created on initialization time as appropriate for
   // the platform (Chrome OS / desktop) and type of policy that is in effect.
-  std::unique_ptr<PolicyStatusProvider> user_status_provider_;
-  std::unique_ptr<PolicyStatusProvider> device_status_provider_;
-  std::unique_ptr<PolicyStatusProvider> machine_status_provider_;
-  std::unique_ptr<PolicyStatusProvider> updater_status_provider_;
+  std::unique_ptr<policy::PolicyStatusProvider> user_status_provider_;
+  std::unique_ptr<policy::PolicyStatusProvider> device_status_provider_;
+  std::unique_ptr<policy::PolicyStatusProvider> machine_status_provider_;
+  std::unique_ptr<policy::PolicyStatusProvider> updater_status_provider_;
 
 #if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
   std::unique_ptr<policy::PolicyMap> updater_policies_;
 #endif  // defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
 
   base::WeakPtrFactory<PolicyUIHandler> weak_factory_{this};
 

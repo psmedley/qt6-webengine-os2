@@ -12,7 +12,6 @@
 
 #include "base/callback_forward.h"
 #include "base/i18n/rtl.h"
-#include "base/optional.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
@@ -36,6 +35,7 @@
 #include "services/device/public/mojom/geolocation_context.mojom.h"
 #include "services/device/public/mojom/wake_lock.mojom.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -43,6 +43,7 @@
 #include "third_party/blink/public/mojom/frame/blocked_navigation_types.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom-forward.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom.h"
+#include "third_party/blink/public/mojom/media/capture_handle_config.mojom.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/base/window_open_disposition.h"
@@ -73,6 +74,7 @@ class Origin;
 
 namespace blink {
 namespace mojom {
+class DisplayCutoutHost;
 class FullscreenOptions;
 }
 class PageState;
@@ -81,6 +83,12 @@ struct WebPreferences;
 }
 }  // namespace blink
 
+namespace device {
+namespace mojom {
+class ScreenOrientation;
+}
+}  // namespace device
+
 namespace ui {
 class ClipboardFormatType;
 }
@@ -88,10 +96,10 @@ class ClipboardFormatType;
 namespace content {
 class AgentSchedulingGroupHost;
 class FrameTreeNode;
+class PrerenderHostRegistry;
 class RenderFrameHostImpl;
 class RenderWidgetHostImpl;
 class SessionStorageNamespace;
-class WebContents;
 struct AXEventNotificationDetails;
 struct AXLocationChangeNotificationDetails;
 struct ContextMenuParams;
@@ -103,6 +111,12 @@ class CreateNewWindowParams;
 
 // An interface implemented by an object interested in knowing about the state
 // of the RenderFrameHost.
+//
+// Layering note: Generally, WebContentsImpl should be the only implementation
+// of this interface. In particular, WebContents::FromRenderFrameHost() assumes
+// this. This delegate interface is useful for renderer_host/ to make requests
+// to WebContentsImpl, as renderer_host/ is not permitted to know the
+// WebContents type (see //renderer_host/DEPS).
 class CONTENT_EXPORT RenderFrameHostDelegate {
  public:
   // Callback used with HandleClipboardPaste() method.  If the clipboard paste
@@ -120,15 +134,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual bool OnMessageReceived(RenderFrameHostImpl* render_frame_host,
                                  const IPC::Message& message);
 
-  // Allows the delegate to filter incoming associated interface requests.
-  virtual void OnAssociatedInterfaceRequest(
-      RenderFrameHost* render_frame_host,
-      const std::string& interface_name,
-      mojo::ScopedInterfaceEndpointHandle handle) {}
-
   // Allows the delegate to filter incoming interface requests.
   virtual void OnInterfaceRequest(
-      RenderFrameHost* render_frame_host,
+      RenderFrameHostImpl* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle* interface_pipe) {}
 
@@ -144,9 +152,12 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       const GURL& initiator_url,
       blink::mojom::NavigationBlockedReason reason) {}
 
-  // Notifies the browser that a frame finished loading.
-  virtual void OnDidFinishLoad(RenderFrameHost* render_frame_host,
+  // Called when blink.mojom.LocalFrameHost::DidFinishLoad() is invoked.
+  virtual void OnDidFinishLoad(RenderFrameHostImpl* render_frame_host,
                                const GURL& url) {}
+
+  // Notifies that the manifest URL is updated.
+  virtual void OnManifestUrlChanged(const PageImpl& page) {}
 
   // Gets the last committed URL. See WebContents::GetLastCommittedURL for a
   // description of the semantics.
@@ -156,22 +167,22 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // |untrusted_stack_trace| is not present for most messages; only when
   // requested in advance and only for exceptions.
   virtual bool DidAddMessageToConsole(
-      RenderFrameHost* source_frame,
+      RenderFrameHostImpl* source_frame,
       blink::mojom::ConsoleMessageLevel log_level,
-      const base::string16& message,
+      const std::u16string& message,
       int32_t line_no,
-      const base::string16& source_id,
-      const base::Optional<base::string16>& untrusted_stack_trace);
+      const std::u16string& source_id,
+      const absl::optional<std::u16string>& untrusted_stack_trace);
 
   // Called when a RenderFrame for |render_frame_host| is created in the
   // renderer process. Use |RenderFrameDeleted| to listen for when this
   // RenderFrame goes away.
-  virtual void RenderFrameCreated(RenderFrameHost* render_frame_host) {}
+  virtual void RenderFrameCreated(RenderFrameHostImpl* render_frame_host) {}
 
   // Called when a RenderFrame for |render_frame_host| is deleted or the
   // renderer process in which it runs it has died. Use |RenderFrameCreated| to
   // listen for when RenderFrame objects are created.
-  virtual void RenderFrameDeleted(RenderFrameHost* render_frame_host) {}
+  virtual void RenderFrameDeleted(RenderFrameHostImpl* render_frame_host) {}
 
   // A context menu should be shown, to be built using the context information
   // provided in the supplied params.
@@ -182,65 +193,69 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       const ContextMenuParams& params) {}
 
   // A JavaScript alert, confirmation or prompt dialog should be shown.
-  virtual void RunJavaScriptDialog(RenderFrameHost* render_frame_host,
-                                   const base::string16& message,
-                                   const base::string16& default_prompt,
+  virtual void RunJavaScriptDialog(RenderFrameHostImpl* render_frame_host,
+                                   const std::u16string& message,
+                                   const std::u16string& default_prompt,
                                    JavaScriptDialogType type,
+                                   bool disable_third_party_subframe_suppresion,
                                    JavaScriptDialogCallback callback) {}
 
-  virtual void RunBeforeUnloadConfirm(RenderFrameHost* render_frame_host,
+  virtual void RunBeforeUnloadConfirm(RenderFrameHostImpl* render_frame_host,
                                       bool is_reload,
                                       JavaScriptDialogCallback callback) {}
 
   // Notifies when new blink::mojom::FaviconURLPtr candidates are received from
   // the renderer process.
   virtual void UpdateFaviconURL(
-      RenderFrameHost* source,
-      std::vector<blink::mojom::FaviconURLPtr> candidates) {}
+      RenderFrameHostImpl* source,
+      const std::vector<blink::mojom::FaviconURLPtr>& candidates) {}
 
   // The frame changed its window.name property.
-  virtual void DidChangeName(RenderFrameHost* render_frame_host,
+  virtual void DidChangeName(RenderFrameHostImpl* render_frame_host,
                              const std::string& name) {}
 
-  // The sticky user activation bit has been set on the frame. This will not be
-  // called for new RenderFrameHosts whose underlying FrameTreeNode was already
-  // activated.
-  virtual void DidReceiveFirstUserActivation(
-      RenderFrameHost* render_frame_host) {}
+  // Called when a frame receives user activation. This may be called multiple
+  // times for the same frame. Does not include frames activated by the
+  // same-origin visibility heuristic, see `UserActivationState` for details.
+  virtual void DidReceiveUserActivation(
+      RenderFrameHostImpl* render_frame_host) {}
+
+  // Binds a DisplayCutoutHost object associated to |render_frame_host|.
+  virtual void BindDisplayCutoutHost(
+      RenderFrameHostImpl* render_frame_host,
+      mojo::PendingAssociatedReceiver<blink::mojom::DisplayCutoutHost>
+          receiver) {}
 
   // The display style of the frame has changed.
-  virtual void DidChangeDisplayState(RenderFrameHost* render_frame_host,
+  virtual void DidChangeDisplayState(RenderFrameHostImpl* render_frame_host,
                                      bool is_display_none) {}
 
   // The size of the frame has changed.
-  virtual void FrameSizeChanged(RenderFrameHost* render_frame_host,
+  virtual void FrameSizeChanged(RenderFrameHostImpl* render_frame_host,
                                 const gfx::Size& frame_size) {}
 
   // The DOMContentLoaded handler in the frame has completed.
-  virtual void DOMContentLoaded(RenderFrameHost* render_frame_host) {}
+  virtual void DOMContentLoaded(RenderFrameHostImpl* render_frame_host) {}
 
   // The onload handler in the frame has completed. Only called for the top-
   // level frame.
-  virtual void DocumentOnLoadCompleted(RenderFrameHost* render_frame_host) {}
+  virtual void DocumentOnLoadCompleted(RenderFrameHostImpl* render_frame_host) {
+  }
 
   // The page's title was changed and should be updated. Only called for the
   // top-level frame.
-  virtual void UpdateTitle(RenderFrameHost* render_frame_host,
-                           const base::string16& title,
+  virtual void UpdateTitle(RenderFrameHostImpl* render_frame_host,
+                           const std::u16string& title,
                            base::i18n::TextDirection title_direction) {}
 
   // The destination URL has changed and should be updated.
-  virtual void UpdateTargetURL(RenderFrameHost* render_frame_host,
+  virtual void UpdateTargetURL(RenderFrameHostImpl* render_frame_host,
                                const GURL& url) {}
-
-  // Return this object cast to a WebContents, if it is one. If the object is
-  // not a WebContents, returns null.
-  virtual WebContents* GetAsWebContents();
 
   // Creates a MediaPlayerHost object associated to |frame_host| via its
   // associated MediaWebContentsObserver, and binds |receiver| to it.
   virtual void CreateMediaPlayerHostForRenderFrameHost(
-      RenderFrameHost* frame_host,
+      RenderFrameHostImpl* frame_host,
       mojo::PendingAssociatedReceiver<media::mojom::MediaPlayerHost> receiver) {
   }
 
@@ -253,15 +268,21 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Checks if we have permission to access the microphone or camera. Note that
   // this does not query the user. |type| must be MEDIA_DEVICE_AUDIO_CAPTURE
   // or MEDIA_DEVICE_VIDEO_CAPTURE.
-  virtual bool CheckMediaAccessPermission(RenderFrameHost* render_frame_host,
-                                          const url::Origin& security_origin,
-                                          blink::mojom::MediaStreamType type);
+  virtual bool CheckMediaAccessPermission(
+      RenderFrameHostImpl* render_frame_host,
+      const url::Origin& security_origin,
+      blink::mojom::MediaStreamType type);
 
   // Returns the ID of the default device for the given media device |type|.
   // If the returned value is an empty string, it means that there is no
   // default device for the given |type|.
   virtual std::string GetDefaultMediaDeviceID(
       blink::mojom::MediaStreamType type);
+
+  // Setter for the capture handle config, which allows a captured application
+  // to opt-in to exposing information to its capturer(s).
+  virtual void SetCaptureHandleConfig(
+      blink::mojom::CaptureHandleConfigPtr config) {}
 
   // Get the accessibility mode for the WebContents that owns this frame.
   virtual ui::AXMode GetAccessibilityMode();
@@ -289,10 +310,13 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Returns whether entering fullscreen with EnterFullscreenMode() is allowed.
   virtual bool CanEnterFullscreenMode();
 
+  // Returns whether this frame is already fullscreen.
+  virtual bool HasEnteredFullscreenMode();
+
   // Notification that the frame with the given host wants to enter fullscreen
   // mode. Must only be called if CanEnterFullscreenMode returns true.
   virtual void EnterFullscreenMode(
-      RenderFrameHost* requesting_frame,
+      RenderFrameHostImpl* requesting_frame,
       const blink::mojom::FullscreenOptions& options) {}
 
   // Notification that the frame wants to go out of fullscreen mode.
@@ -303,9 +327,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // Notification that this frame has changed fullscreen state.
   virtual void FullscreenStateChanged(
-      RenderFrameHost* rfh,
+      RenderFrameHostImpl* rfh,
       bool is_fullscreen,
-      blink::mojom::FullscreenOptionsPtr options) {}
+      blink::mojom::FullscreenOptionsPtr options);
 
 #if defined(OS_ANDROID)
   // Updates information to determine whether a user gesture should carryover to
@@ -319,7 +343,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // |target_rfh| from a source frame in the given SiteInstance.  This defaults
   // to false and overrides the RenderFrameHost's decision if true.
   virtual bool ShouldRouteMessageEvent(
-      RenderFrameHost* target_rfh,
+      RenderFrameHostImpl* target_rfh,
       SiteInstance* source_site_instance) const;
 
   // Ensure that |source_rfh| has swapped-out RenderViews and
@@ -333,7 +357,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // moved down into RenderFrameProxyHost::RouteMessageEvent when <webview>
   // refactoring for --site-per-process mode is further along.  See
   // https://crbug.com/330264.
-  virtual void EnsureOpenerProxiesExist(RenderFrameHost* source_rfh) {}
+  virtual void EnsureOpenerProxiesExist(RenderFrameHostImpl* source_rfh) {}
 
   // Set the |node| frame as focused in the current FrameTree as well as
   // possibly changing focus in distinct but related inner/outer WebContents.
@@ -349,10 +373,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // frames and inner contents. If an inner WebContents does not have a focused
   // frame, return its main frame, since the attachment frame in its outer
   // WebContents is not live.
-  virtual RenderFrameHost* GetFocusedFrameIncludingInnerWebContents();
-
-  // Returns the main frame for the delegate.
-  virtual RenderFrameHostImpl* GetMainFrame();
+  virtual RenderFrameHostImpl* GetFocusedFrameIncludingInnerWebContents();
 
   // Called by when |source_rfh| advances focus to a RenderFrameProxyHost.
   virtual void OnAdvanceFocus(RenderFrameHostImpl* source_rfh) {}
@@ -388,13 +409,12 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Note: this is not called "CreateWindow" because that will clash with
   // the Windows function which is actually a #define.
   //
-  // On success, a non-owning pointer to the new RenderFrameHostDelegate is
-  // returned.
+  // On success, a non-owning pointer to the new FrameTree is returned.
   //
   // The caller is expected to handle cleanup if this operation fails or is
   // suppressed by checking if the return value is null.
-  virtual RenderFrameHostDelegate* CreateNewWindow(
-      RenderFrameHost* opener,
+  virtual FrameTree* CreateNewWindow(
+      RenderFrameHostImpl* opener,
       const mojom::CreateNewWindowParams& params,
       bool is_new_browsing_instance,
       bool has_user_gesture,
@@ -409,7 +429,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   //
   // Note: this is not called "ShowWindow" because that will clash with
   // the Windows function which is actually a #define.
-  virtual void ShowCreatedWindow(RenderFrameHost* opener,
+  virtual void ShowCreatedWindow(RenderFrameHostImpl* opener,
                                  int main_frame_widget_route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_rect,
@@ -417,7 +437,8 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // The main frame document element is ready. This happens when the document
   // has finished parsing.
-  virtual void DocumentAvailableInMainFrame() {}
+  virtual void DocumentAvailableInMainFrame(
+      RenderFrameHost* render_frame_host) {}
 
   // Reports that passive mixed content was found at the specified url.
   virtual void PassiveInsecureContentFound(const GURL& resource_url) {}
@@ -435,36 +456,28 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   GetJavaRenderFrameHostDelegate();
 #endif
 
-  // Whether the delegate is being destroyed, in which case the RenderFrameHost
-  // should not be asked to create a RenderFrame.
-  virtual bool IsBeingDestroyed();
-
   // Notified that the render frame started loading a subresource.
   virtual void SubresourceResponseStarted() {}
 
   // Notified that the render finished loading a subresource for the frame
   // associated with |render_frame_host|.
   virtual void ResourceLoadComplete(
-      RenderFrameHost* render_frame_host,
+      RenderFrameHostImpl* render_frame_host,
       const GlobalRequestID& request_id,
       blink::mojom::ResourceLoadInfoPtr resource_load_info) {}
 
   // Request to print a frame that is in a different process than its parent.
-  virtual void PrintCrossProcessSubframe(const gfx::Rect& rect,
-                                         int document_cookie,
-                                         RenderFrameHost* render_frame_host) {}
+  virtual void PrintCrossProcessSubframe(
+      const gfx::Rect& rect,
+      int document_cookie,
+      RenderFrameHostImpl* render_frame_host) {}
 
   // Request to paint preview a frame that is in a different process that its
   // parent.
   virtual void CapturePaintPreviewOfCrossProcessSubframe(
       const gfx::Rect& rect,
       const base::UnguessableToken& guid,
-      RenderFrameHost* render_frame_host) {}
-
-  // Updates the Picture-in-Picture controller with the relevant viz::SurfaceId
-  // of the video to be in Picture-in-Picture mode.
-  virtual void UpdatePictureInPictureSurfaceId(const viz::SurfaceId& surface_id,
-                                               const gfx::Size& natural_size) {}
+      RenderFrameHostImpl* render_frame_host) {}
 
   // Returns a copy of the current WebPreferences associated with this
   // RenderFrameHost's WebContents. If it does not exist, this will create one
@@ -480,31 +493,22 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Returns the visibility of the delegate.
   virtual Visibility GetVisibility();
 
-  // Get the UKM source ID for current content from the last committed
-  // navigation, either a cross-document or same-document navigation. This is
-  // for providing data about the content to the URL-keyed metrics service.
-  // Use this method if UKM events should be attributed to the latest
-  // navigation, that is, attribute events to the new source after each
-  // same-document navigation, if any.
-  virtual ukm::SourceId
-  GetUkmSourceIdForLastCommittedSourceIncludingSameDocument() const;
-
   // Notify observers if WebAudio AudioContext has started (or stopped) playing
   // audible sounds.
-  virtual void AudioContextPlaybackStarted(RenderFrameHost* host,
+  virtual void AudioContextPlaybackStarted(RenderFrameHostImpl* host,
                                            int context_id) {}
-  virtual void AudioContextPlaybackStopped(RenderFrameHost* host,
+  virtual void AudioContextPlaybackStopped(RenderFrameHostImpl* host,
                                            int context_id) {}
 
   // Notifies observers if the frame has changed audible state.
-  virtual void OnFrameAudioStateChanged(RenderFrameHost* host,
+  virtual void OnFrameAudioStateChanged(RenderFrameHostImpl* host,
                                         bool is_audible) {}
 
-  // Returns the main frame of the inner delegate that is attached to this
-  // delegate using |frame_tree_node|. Returns nullptr if no such inner delegate
-  // exists.
-  virtual RenderFrameHostImpl* GetMainFrameForInnerDelegate(
-      FrameTreeNode* frame_tree_node);
+  // Returns FrameTreeNodes that are logically owned by another frame even
+  // though this relationship is not yet reflected in their frame trees. This
+  // can happen, for example, with unattached guests and orphaned portals.
+  virtual std::vector<FrameTreeNode*> GetUnattachedOwnedNodes(
+      RenderFrameHostImpl* owner);
 
   // Registers a new URL handler for the given protocol.
   virtual void RegisterProtocolHandler(RenderFrameHostImpl* host,
@@ -528,13 +532,13 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Determines if a clipboard paste using |data| of type |data_type| is allowed
   // in this renderer frame.  Possible data types supported for paste can be
   // seen in the ClipboardHostImpl class.  Text based formats will use the
-  // data_type ui::ClipboardFormatType::GetPlainTextType() unless it is known
+  // data_type ui::ClipboardFormatType::PlainTextType() unless it is known
   // to be of a more specific type, like RTF or HTML, in which case a type
-  // such as ui::ClipboardFormatType::GetRtfType() or
-  // ui::ClipboardFormatType::GetHtmlType() is used.
+  // such as ui::ClipboardFormatType::RtfType() or
+  // ui::ClipboardFormatType::HtmlType() is used.
   //
   // It is also possible for the data type to be
-  // ui::ClipboardFormatType::GetWebCustomDataType() indicating that the paste
+  // ui::ClipboardFormatType::WebCustomDataType() indicating that the paste
   // uses a custom data format.  It is up to the implementation to attempt to
   // understand the type if possible.  It is acceptable to deny pastes of
   // unknown data types.
@@ -556,7 +560,13 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   virtual void OnTextAutosizerPageInfoChanged(
       RenderFrameHostImpl* source,
-      blink::mojom::TextAutosizerPageInfoPtr page_info) {}
+      blink::mojom::TextAutosizerPageInfoPtr page_info);
+
+  // Binds a ScreenOrientation object associated to |render_frame_host|.
+  virtual void BindScreenOrientation(
+      RenderFrameHost* render_frame_host,
+      mojo::PendingAssociatedReceiver<device::mojom::ScreenOrientation>
+          receiver) {}
 
   // Return true if we have seen a recent orientation change, which is used to
   // decide if we should consume user activation when entering fullscreen.
@@ -565,6 +575,10 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Return true if the page has a transient affordance to enter fullscreen
   // without consuming user activation.
   virtual bool IsTransientAllowFullscreenActive() const;
+
+  // Return true if the back forward cache is supported. This is not an
+  // indication that the cache will be used.
+  virtual bool IsBackForwardCacheSupported();
 
   // The page is trying to open a new widget (e.g. a select popup). The
   // widget should be created associated with the given
@@ -621,21 +635,30 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // links.
   virtual void SavableResourceLinksError(RenderFrameHostImpl* source) {}
 
-  // Called when |RenderFrameHostImpl::lifecycle_state()| changes i.e., when
-  // RenderFrameHost LifecycleState changes from old_state to new_state.
+  // Called when |RenderFrameHost::GetLifecycleState()| changes i.e.,
+  // when RenderFrameHost LifecycleState changes from old_state to
+  // new_state.
   virtual void RenderFrameHostStateChanged(
       RenderFrameHost* host,
-      RenderFrameHostImpl::LifecycleState old_state,
-      RenderFrameHostImpl::LifecycleState new_state) {}
+      RenderFrameHost::LifecycleState old_state,
+      RenderFrameHost::LifecycleState new_state) {}
 
   // The page is trying to move the main frame's representation in the client.
   virtual void SetWindowRect(const gfx::Rect& new_bounds) {}
+
+  // The page's preferred size changed.
+  virtual void UpdateWindowPreferredSize(const gfx::Size& pref_size) {}
 
   // Returns the list of top-level RenderFrameHosts hosting active documents
   // that belong to the same browsing context group as |render_frame_host|.
   virtual std::vector<RenderFrameHostImpl*>
   GetActiveTopLevelDocumentsInBrowsingContextGroup(
       RenderFrameHostImpl* render_frame_host);
+
+  // Returns the PrerenderHostRegistry to start/cancel prerendering. This
+  // doesn't return nullptr except for some tests. This should only be called
+  // when blink::features::IsPrerender2Enabled() is true.
+  virtual PrerenderHostRegistry* GetPrerenderHostRegistry();
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   virtual void OnPepperInstanceCreated(RenderFrameHostImpl* source,

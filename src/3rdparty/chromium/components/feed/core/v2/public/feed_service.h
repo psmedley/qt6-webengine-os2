@@ -8,10 +8,9 @@
 #include <memory>
 #include <string>
 
-#include "base/files/file_path.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "components/feed/core/v2/public/feed_stream_api.h"
+#include "components/feed/core/v2/public/feed_api.h"
 #include "components/feed/core/v2/public/types.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/leveldb_proto/public/proto_database.h"
@@ -37,10 +36,6 @@ class Entry;
 namespace network {
 class SharedURLLoaderFactory;
 }  // namespace network
-namespace offline_pages {
-class OfflinePageModel;
-class PrefetchService;
-}  // namespace offline_pages
 namespace signin {
 class IdentityManager;
 }  // namespace signin
@@ -69,6 +64,8 @@ class FeedService : public KeyedService {
     virtual std::string GetLanguageTag() = 0;
     // Returns display metrics for the device.
     virtual DisplayMetrics GetDisplayMetrics() = 0;
+    // Returns true if autoplay is enabled.
+    virtual bool IsAutoplayEnabled() = 0;
     // Clear all stored data.
     virtual void ClearAll() = 0;
     // Fetch the image and store it in the disk cache.
@@ -81,7 +78,7 @@ class FeedService : public KeyedService {
   // Used for testing only.
   explicit FeedService(std::unique_ptr<FeedStream> stream);
 
-  // Construct a new FeedStreamApi along with FeedService.
+  // Construct a new FeedApi along with FeedService.
   FeedService(
       std::unique_ptr<Delegate> delegate,
       std::unique_ptr<RefreshTaskScheduler> refresh_task_scheduler,
@@ -92,38 +89,46 @@ class FeedService : public KeyedService {
           key_value_store_database,
       signin::IdentityManager* identity_manager,
       history::HistoryService* history_service,
-      offline_pages::PrefetchService* prefetch_service,
-      offline_pages::OfflinePageModel* offline_page_model,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       scoped_refptr<base::SequencedTaskRunner> background_task_runner,
       const std::string& api_key,
       const ChromeInfo& chrome_info);
+  static std::unique_ptr<FeedService> CreateForTesting(FeedApi* api);
   ~FeedService() override;
   FeedService(const FeedService&) = delete;
   FeedService& operator=(const FeedService&) = delete;
 
-  FeedStreamApi* GetStream();
+  FeedApi* GetStream();
 
   void ClearCachedData();
 
-  RefreshTaskScheduler* GetRefreshTaskScheduler() {
+  RefreshTaskScheduler* GetRefreshTaskScheduler() const {
     return refresh_task_scheduler_.get();
   }
 
   // Whether Feedv2 is enabled. If false, the FeedService should not be created.
   static bool IsEnabled(const PrefService& pref_service);
 
+  // Returns the client ID for reliability logging.
+  static uint64_t GetReliabilityLoggingId(const std::string& metrics_id,
+                                          PrefService* pref_service);
+
+  //  Whether autoplay is enabled.
+  static bool IsAutoplayEnabled(const PrefService& pref_service);
+
  private:
   class StreamDelegateImpl;
   class NetworkDelegateImpl;
   class HistoryObserverImpl;
   class IdentityManagerObserverImpl;
+
+  FeedService();
 #if defined(OS_ANDROID)
   void OnApplicationStateChange(base::android::ApplicationState state);
 #endif
 
-  // These components are owned for construction of |FeedStreamApi|. These will
-  // be null if |FeedStreamApi| is created externally.
+  // These components are owned for construction of |FeedApi|. These will
+  // be null if |FeedApi| is created externally.
   std::unique_ptr<Delegate> delegate_;
   std::unique_ptr<StreamDelegateImpl> stream_delegate_;
   std::unique_ptr<MetricsReporter> metrics_reporter_;
@@ -141,6 +146,7 @@ class FeedService : public KeyedService {
       application_status_listener_;
 #endif
   std::unique_ptr<FeedStream> stream_;
+  FeedApi* api_;  // Points to `stream_`, overridden for testing.
 };
 
 }  // namespace feed

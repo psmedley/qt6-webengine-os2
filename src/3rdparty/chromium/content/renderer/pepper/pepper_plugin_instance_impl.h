@@ -20,8 +20,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/layer.h"
@@ -58,6 +56,7 @@
 #include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/ppb_gamepad_api.h"
 #include "ppapi/thunk/resource_creation_api.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/web/web_associated_url_loader_client.h"
@@ -69,6 +68,11 @@
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 #include "v8/include/v8.h"
+
+// Windows defines 'PostMessage', so we have to undef it.
+#ifdef PostMessage
+#undef PostMessage
+#endif
 
 struct PP_Point;
 
@@ -112,11 +116,6 @@ class PluginModule;
 class PluginObject;
 class PPB_Graphics3D_Impl;
 class RenderFrameImpl;
-
-// Windows defines 'PostMessage', so we have to undef it.
-#ifdef PostMessage
-#undef PostMessage
-#endif
 
 // Represents one time a plugin appears on one web page.
 //
@@ -239,29 +238,29 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
                    const gfx::Rect& unobscured);
 
   // Handlers for composition events.
-  void OnImeSetComposition(const base::string16& text,
+  void OnImeSetComposition(const std::u16string& text,
                            const std::vector<ui::ImeTextSpan>& ime_text_spans,
                            int selection_start,
                            int selection_end);
-  void OnImeCommitText(const base::string16& text,
+  void OnImeCommitText(const std::u16string& text,
                        const gfx::Range& replacement_range,
                        int relative_cursor_pos);
   void OnImeFinishComposingText(bool keep_selection);
-  void HandlePepperImeCommit(const base::string16& text);
-  bool HandleCompositionStart(const base::string16& text);
+  void HandlePepperImeCommit(const std::u16string& text);
+  bool HandleCompositionStart(const std::u16string& text);
   bool HandleCompositionUpdate(
-      const base::string16& text,
+      const std::u16string& text,
       const std::vector<ui::ImeTextSpan>& ime_text_spans,
       int selection_start,
       int selection_end);
-  bool HandleCompositionEnd(const base::string16& text);
-  bool HandleTextInput(const base::string16& text);
+  bool HandleCompositionEnd(const std::u16string& text);
+  bool HandleTextInput(const std::u16string& text);
 
   // Gets the current text input status.
   ui::TextInputType text_input_type() const { return text_input_type_; }
   gfx::Rect GetCaretBounds() const;
   bool IsPluginAcceptingCompositionEvents() const;
-  void GetSurroundingText(base::string16* text, gfx::Range* range) const;
+  void GetSurroundingText(std::u16string* text, gfx::Range* range) const;
 
   // Notifications about focus changes, see has_webkit_focus_ below.
   void SetWebKitFocus(bool has_focus);
@@ -277,8 +276,8 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   void AddPluginObject(PluginObject* plugin_object);
   void RemovePluginObject(PluginObject* plugin_object);
 
-  base::string16 GetSelectedText(bool html);
-  base::string16 GetLinkAtPosition(const gfx::Point& point);
+  std::u16string GetSelectedText(bool html);
+  std::u16string GetLinkAtPosition(const gfx::Point& point);
   void RequestSurroundingText(size_t desired_number_of_characters);
   bool StartFind(const std::string& search_text,
                  bool case_sensitive,
@@ -292,7 +291,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   void PrintEnd();
   bool GetPrintPresetOptionsFromDocument(
       blink::WebPrintPresetOptions* preset_options);
-  bool IsPdfPlugin();
 
   bool CanRotateView();
   void RotateView(blink::WebPlugin::RotationType type);
@@ -378,7 +376,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool IsRectTopmost(const gfx::Rect& rect) override;
   int MakePendingFileRefRendererHost(const base::FilePath& path) override;
   void SetEmbedProperty(PP_Var key, PP_Var value) override;
-  void SetSelectedText(const base::string16& selected_text) override;
+  void SetSelectedText(const std::u16string& selected_text) override;
   void SetLinkUnderCursor(const std::string& url) override;
   void SetTextInputType(ui::TextInputType type) override;
   void PostMessageToJavaScript(PP_Var message) override;
@@ -482,7 +480,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool PrepareTransferableResource(
       cc::SharedBitmapIdRegistrar* bitmap_registrar,
       viz::TransferableResource* transferable_resource,
-      std::unique_ptr<viz::SingleReleaseCallback>* release_callback) override;
+      viz::ReleaseCallback* release_callback) override;
 
   // RenderFrameObserver
   void AccessibilityModeChanged(const ui::AXMode& mode) override;
@@ -599,10 +597,10 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
 
   // Internal helper functions for HandleCompositionXXX().
   bool SendCompositionEventToPlugin(PP_InputEvent_Type type,
-                                    const base::string16& text);
+                                    const std::u16string& text);
   bool SendCompositionEventWithImeTextSpanInformationToPlugin(
       PP_InputEvent_Type type,
-      const base::string16& text,
+      const std::u16string& text,
       const std::vector<ui::ImeTextSpan>& ime_text_spans,
       int selection_start,
       int selection_end);
@@ -804,7 +802,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
     gfx::Rect caret;
     gfx::Rect caret_bounds;
   };
-  base::Optional<TextInputCaretInfo> text_input_caret_info_;
+  absl::optional<TextInputCaretInfo> text_input_caret_info_;
   ui::TextInputType text_input_type_;
 
   // Text selection status.
@@ -827,7 +825,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool external_document_load_;
 
   // The link currently under the cursor.
-  base::string16 link_under_cursor_;
+  std::u16string link_under_cursor_;
 
   // We store the isolate at construction so that we can be sure to use the
   // Isolate in which this Instance was created when interacting with v8.
@@ -836,7 +834,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool is_deleted_;
 
   // The text that is currently selected in the plugin.
-  base::string16 selected_text_;
+  std::u16string selected_text_;
 
   // The most recently committed texture. This is kept around in case the layer
   // needs to be regenerated.
@@ -862,7 +860,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
 
   // Current text input composition text. Empty if no composition is in
   // progress.
-  base::string16 composition_text_;
+  std::u16string composition_text_;
 
   mojo::AssociatedRemote<mojom::PepperPluginInstanceHost> pepper_host_remote_;
   mojo::AssociatedReceiver<mojom::PepperPluginInstance> pepper_receiver_{this};

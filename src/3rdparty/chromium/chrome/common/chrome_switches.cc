@@ -14,7 +14,6 @@ namespace switches {
 // -----------------------------------------------------------------------------
 // Can't find the switch you are looking for? Try looking in:
 // ash/constants/ash_switches.cc
-// ash/public/cpp/ash_switches.cc
 // base/base_switches.cc
 // etc.
 //
@@ -65,6 +64,10 @@ const char kAppModeAuthCode[]               = "app-mode-auth-code";
 // Value of OAuth2 refresh token for --force-app-mode.
 const char kAppModeOAuth2Token[]            = "app-mode-oauth-token";
 
+// This is used along with kAppId to indicate an app was launched during
+// OS login, and which mode the app was launched in.
+const char kAppRunOnOsLoginMode[] = "app-run-on-os-login-mode";
+
 // The URL that the webstore APIs download extensions from.
 // Note: the URL must contain one '%s' for the extension ID.
 const char kAppsGalleryDownloadURL[]        = "apps-gallery-download-url";
@@ -91,6 +94,15 @@ const char kAutoOpenDevToolsForTabs[]       = "auto-open-devtools-for-tabs";
 // would match "Built-in display" and "External display", whichever comes first.
 const char kAutoSelectDesktopCaptureSource[] =
     "auto-select-desktop-capture-source";
+
+// This flag makes Chrome auto-select a tab with the provided title when
+// the media-picker should otherwise be displayed to the user. This switch
+// is very similar to kAutoSelectDesktopCaptureSource, but limits selection
+// to tabs. This solves the issue of kAutoSelectDesktopCaptureSource being
+// liable to accidentally capturing the Chromium window instead of the tab,
+// as both have the same title if the tab is focused.
+const char kAutoSelectTabCaptureSourceByTitle[] =
+    "auto-select-tab-capture-source-by-title";
 
 // How often (in seconds) to check for updates. Should only be used for testing
 // purposes.
@@ -161,6 +173,8 @@ const char kDebugPackedApps[]               = "debug-packed-apps";
 // Values for the enable-desktop-pwas-attention-badging-cros flag.
 const char kDesktopPWAsAttentionBadgingCrOSApiAndNotifications[] =
     "api-and-notifications";
+const char kDesktopPWAsAttentionBadgingCrOSApiOverridesNotifications[] =
+    "api-overrides-notifications";
 const char kDesktopPWAsAttentionBadgingCrOSApiOnly[] = "api-only";
 const char kDesktopPWAsAttentionBadgingCrOSNotificationsOnly[] =
     "notifications-only";
@@ -176,9 +190,6 @@ const char kDiagnosticsFormat[]             = "diagnostics-format";
 
 // Tells the diagnostics mode to do the requested recovery step(s).
 const char kDiagnosticsRecovery[]           = "diagnostics-recovery";
-
-// Disable auto-reload of error pages.
-const char kDisableAutoReload[] = "disable-auto-reload";
 
 // Disable several subsystems which run network requests in the background.
 // This is for use when doing network performance testing to avoid noise in the
@@ -201,7 +212,7 @@ const char kDisableComponentUpdate[]        = "disable-component-update";
 
 // Disables installation of default apps on first run. This is used during
 // automated testing.
-const char kDisableDefaultApps[]            = "disable-default-apps";
+const char kDisablePreinstalledApps[] = "disable-default-apps";
 
 // Disables Domain Reliability Monitoring.
 const char kDisableDomainReliability[]      = "disable-domain-reliability";
@@ -225,6 +236,11 @@ const char kDisablePrintPreview[]           = "disable-print-preview";
 // disable that check. This switch is used during automated testing.
 const char kDisablePromptOnRepost[]         = "disable-prompt-on-repost";
 
+// Disable stack profiling. Stack profiling may change performance. Disabling
+// stack profiling is beneficial when comparing performance metrics with a
+// build that has it disabled by default.
+const char kDisableStackProfiler[] = "disable-stack-profiler";
+
 // Some tests seem to require the application to close when the last
 // browser window is closed. Thus, we need a switch to force this behavior
 // for ChromeOS Aura, disable "zero window mode".
@@ -244,9 +260,6 @@ const char kDiskCacheSize[]                 = "disk-cache-size";
 // given file. The file is overwritten if it exists.
 const char kDumpBrowserHistograms[]         = "dump-browser-histograms";
 
-// Enable auto-reload of error pages.
-const char kEnableAutoReload[] = "enable-auto-reload";
-
 // If the WebRTC logging private API is active, enables audio debug recordings.
 const char kEnableAudioDebugRecordingsFromExtension[] =
     "enable-audio-debug-recordings-from-extension";
@@ -261,10 +274,6 @@ const char kEnableCloudPrintProxy[]         = "enable-cloud-print-proxy";
 // Enables CriticalPersistedTabData - redesign/replacement for TabState
 const char kEnableCriticalPersistedTabData[] =
     "enable-critical-persisted-tab-data";
-
-// Enable device discovery notifications.
-const char kEnableDeviceDiscoveryNotifications[] =
-    "enable-device-discovery-notifications";
 
 // Enables Domain Reliability Monitoring.
 const char kEnableDomainReliability[] = "enable-domain-reliability";
@@ -287,6 +296,10 @@ const char kEnableNetBenchmarking[]         = "enable-net-benchmarking";
 // content mode, powerful feature restrictions, etc.)
 const char kEnablePotentiallyAnnoyingSecurityFeatures[] =
     "enable-potentially-annoying-security-features";
+
+// Allows overriding the list of restricted ports by passing a comma-separated
+// list of port numbers.
+const char kExplicitlyAllowedPorts[] = "explicitly-allowed-ports";
 
 // Name of the command line flag to force content verification to be on in one
 // of various modes.
@@ -317,6 +330,11 @@ const char kForceFirstRun[]                 = "force-first-run";
 // Forces Chrome to use a stacked tab strip layout.
 const char kForceStackedTabStripLayout[]    = "force-stacked-tab-strip-layout";
 
+// Does not show the crash restore bubble when the browser is started during the
+// system startup phase in ChromeOS, if the ChromeOS full restore feature is
+// enabled, because the ChromeOS full restore notification is shown for the user
+// to select restore or not.
+const char kHideCrashRestoreBubble[] = "hide-crash-restore-bubble";
 
 // Specifies which page will be displayed in newly-opened tabs. We need this
 // for testing purposes so that the UI tests don't depend on what comes up for
@@ -344,10 +362,6 @@ const char kKioskMode[]                     = "kiosk";
 
 // Enable automatically pressing the print button in print preview.
 const char kKioskModePrinting[]             = "kiosk-printing";
-
-// Loads the Media Router component extension on startup.
-const char kLoadMediaRouterComponentExtension[] =
-    "load-media-router-component-extension";
 
 // Makes Chrome default browser
 const char kMakeDefaultBrowser[]            = "make-default-browser";
@@ -420,20 +434,15 @@ const char kPackExtension[]                 = "pack-extension";
 // Optional PEM private key to use in signing packaged .crx.
 const char kPackExtensionKey[]              = "pack-extension-key";
 
-// Development flag for permission request API. This flag is needed until
-// the API is finalized.
-// TODO(bauerb): Remove when this flag is not needed anymore.
-const char kPermissionRequestApiScope[]     = "permission-request-api-scope";
-
-// Development flag for permission request API. This flag is needed until
-// the API is finalized.
-// TODO(bauerb): Remove when this flag is not needed anymore.
-const char kPermissionRequestApiUrl[]       = "permission-request-api-url";
-
 // Used to mock the response received from the Web Permission Prediction
 // Service. Used for testing.
 const char kPredictionServiceMockLikelihood[] =
     "prediction-service-mock-likelihood";
+
+// A directory where Chrome looks for json files describing default/preinstalled
+// web apps. This overrides any default directory to load preinstalled web apps
+// from.
+const char kPreinstalledWebAppsDir[] = "preinstalled-web-apps-dir";
 
 // Use IPv6 only for privet HTTP.
 const char kPrivetIPv6Only[]                   = "privet-ipv6-only";
@@ -473,9 +482,6 @@ const char kRestoreLastSession[]            = "restore-last-session";
 // See http://crbug.com/120416 for how to remove this switch.
 const char kSavePageAsMHTML[]               = "save-page-as-mhtml";
 
-// Sets the Reporting API delay to under a second to allow much quicker reports.
-const char kShortReportingDelay[] = "short-reporting-delay";
-
 // Does not show an infobar when an extension attaches to a page using
 // chrome.debugger page. Required to attach to extension background pages.
 const char kSilentDebuggerExtensionAPI[]    = "silent-debugger-extension-api";
@@ -502,15 +508,8 @@ const char kSimulateUpgrade[]               = "simulate-upgrade";
 // Specifies the maximum SSL/TLS version ("tls1.2" or "tls1.3").
 const char kSSLVersionMax[] = "ssl-version-max";
 
-// Specifies the minimum SSL/TLS version ("tls1", "tls1.1", "tls1.2", or
-// "tls1.3").
+// Specifies the minimum SSL/TLS version ("tls1.2" or "tls1.3").
 const char kSSLVersionMin[] = "ssl-version-min";
-
-// TLS 1.0 mode for the |kSSLVersionMin| switch.
-const char kSSLVersionTLSv1[] = "tls1";
-
-// TLS 1.1 mode for the |kSSLVersionMin| switch.
-const char kSSLVersionTLSv11[] = "tls1.1";
 
 // TLS 1.2 mode for |kSSLVersionMax| and |kSSLVersionMin| switches.
 const char kSSLVersionTLSv12[] = "tls1.2";
@@ -638,9 +637,6 @@ const char kForceShowUpdateMenuItemCustomSummary[] = "custom_summary";
 
 // Sets the market URL for Chrome for use in testing.
 const char kMarketUrlForTesting[] = "market-url-for-testing";
-
-// Custom WebAPK server URL for the sake of testing.
-const char kWebApkServerUrl[] = "webapk-server-url";
 #endif  // defined(OS_ANDROID)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -702,10 +698,6 @@ const char kDisableHostedAppShimCreation[] = "disable-hosted-app-shim-creation";
 
 // Enable user metrics from within the installer.
 const char kEnableUserMetrics[] = "enable-user-metrics";
-
-// Shows a notification when quitting Chrome with hosted apps running. Default
-// behavior is to also quit all hosted apps.
-const char kHostedAppQuitNotification[] = "enable-hosted-app-quit-notification";
 
 // This is how the metrics client ID is passed from the browser process to its
 // children. With Crashpad, the metrics client ID is distinct from the crash
@@ -805,11 +797,16 @@ const char kAllowNaClSocketAPI[]            = "allow-nacl-socket-api";
 #endif
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC) || \
-    defined(OS_WIN)
+    defined(OS_WIN) || defined(OS_FUCHSIA)
 const char kEnableNewAppMenuIcon[] = "enable-new-app-menu-icon";
 
 // Causes the browser to launch directly in guest mode.
 const char kGuest[] = "guest";
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_ANDROID)
+// Custom WebAPK server URL for the sake of testing.
+const char kWebApkServerUrl[] = "webapk-server-url";
 #endif
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH) && !defined(OS_ANDROID)

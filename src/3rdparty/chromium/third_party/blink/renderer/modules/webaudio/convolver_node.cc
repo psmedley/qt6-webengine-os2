@@ -30,6 +30,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_convolver_options.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/platform/audio/reverb.h"
@@ -43,7 +44,7 @@
 // a good value.  But, the Reverb object is multi-threaded, so we want this as
 // high as possible without losing too much accuracy.  Very large FFTs will have
 // worse phase errors. Given these constraints 32768 is a good compromise.
-const size_t MaxFFTSize = 32768;
+const unsigned MaxFFTSize = 32768;
 
 namespace blink {
 
@@ -186,8 +187,8 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
 
   // Create the reverb with the given impulse response.
   std::unique_ptr<Reverb> reverb = std::make_unique<Reverb>(
-      buffer_bus.get(), audio_utilities::kRenderQuantumFrames, MaxFFTSize,
-      Context() && Context()->HasRealtimeConstraint(), normalize_);
+      buffer_bus.get(), GetDeferredTaskHandler().RenderQuantumFrames(),
+      MaxFFTSize, Context() && Context()->HasRealtimeConstraint(), normalize_);
 
   {
     // The context must be locked since changing the buffer can
@@ -298,7 +299,7 @@ void ConvolverHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
   Context()->AssertGraphOwner();
 
   DCHECK(input);
-  DCHECK_EQ(input, &this->Input(0));
+  DCHECK_EQ(input, &Input(0));
 
   if (shared_buffer_) {
     unsigned number_of_output_channels = ComputeNumberOfOutputChannels(

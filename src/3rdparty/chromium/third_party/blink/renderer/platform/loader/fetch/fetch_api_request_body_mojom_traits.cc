@@ -85,12 +85,14 @@ bool StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
     switch (element.type()) {
       case network::DataElement::Tag::kBytes: {
         const auto& bytes = element.As<network::DataElementBytes>();
-        form_data->AppendData(bytes.bytes().data(), bytes.bytes().size());
+        form_data->AppendData(
+            bytes.bytes().data(),
+            base::checked_cast<wtf_size_t>(bytes.bytes().size()));
         break;
       }
       case network::DataElement::Tag::kFile: {
         const auto& file = element.As<network::DataElementFile>();
-        base::Optional<base::Time> expected_modification_time;
+        absl::optional<base::Time> expected_modification_time;
         if (!file.expected_modification_time().is_null()) {
           expected_modification_time = file.expected_modification_time();
         }

@@ -95,7 +95,7 @@ void CXFA_FFPushButton::UpdateWidgetProperty() {
     default:
       break;
   }
-  GetNormalWidget()->ModifyStylesEx(dwStyleEx, 0xFFFFFFFF);
+  GetNormalWidget()->ModifyStyleExts(dwStyleEx, 0xFFFFFFFF);
 }
 
 bool CXFA_FFPushButton::PerformLayout() {
@@ -213,7 +213,7 @@ void CXFA_FFPushButton::OnProcessEvent(CFWL_Event* pEvent) {
 void CXFA_FFPushButton::OnDrawWidget(CFGAS_GEGraphics* pGraphics,
                                      const CFX_Matrix& matrix) {
   auto* pWidget = GetNormalWidget();
-  if (pWidget->GetStylesEx() & XFA_FWL_PSBSTYLEEXT_HiliteInverted) {
+  if (pWidget->GetStyleExts() & XFA_FWL_PSBSTYLEEXT_HiliteInverted) {
     if ((pWidget->GetStates() & FWL_STATE_PSB_Pressed) &&
         (pWidget->GetStates() & FWL_STATE_PSB_Hovered)) {
       CFX_RectF rtFill(0, 0, pWidget->GetWidgetRect().Size());
@@ -222,13 +222,13 @@ void CXFA_FFPushButton::OnDrawWidget(CFGAS_GEGraphics* pGraphics,
       CFGAS_GEPath path;
       path.AddRectangle(rtFill.left, rtFill.top, rtFill.width, rtFill.height);
       pGraphics->SetFillColor(CFGAS_GEColor(ArgbEncode(128, 128, 255, 255)));
-      pGraphics->FillPath(&path, CFX_FillRenderOptions::FillType::kWinding,
-                          &matrix);
+      pGraphics->FillPath(path, CFX_FillRenderOptions::FillType::kWinding,
+                          matrix);
     }
     return;
   }
 
-  if (pWidget->GetStylesEx() & XFA_FWL_PSBSTYLEEXT_HiliteOutLine) {
+  if (pWidget->GetStyleExts() & XFA_FWL_PSBSTYLEEXT_HiliteOutLine) {
     if ((pWidget->GetStates() & FWL_STATE_PSB_Pressed) &&
         (pWidget->GetStates() & FWL_STATE_PSB_Hovered)) {
       float fLineWidth = GetLineWidth();
@@ -238,7 +238,7 @@ void CXFA_FFPushButton::OnDrawWidget(CFGAS_GEGraphics* pGraphics,
       CFGAS_GEPath path;
       CFX_RectF rect = pWidget->GetWidgetRect();
       path.AddRectangle(0, 0, rect.width, rect.height);
-      pGraphics->StrokePath(&path, &matrix);
+      pGraphics->StrokePath(path, matrix);
     }
   }
 }

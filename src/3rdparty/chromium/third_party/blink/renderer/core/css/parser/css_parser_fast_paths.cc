@@ -6,7 +6,7 @@
 
 #include "build/build_config.h"
 #include "third_party/blink/public/public_buildflags.h"
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_function_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_inherited_value.h"
@@ -366,7 +366,8 @@ static bool ParseColorNumberOrPercentage(const CharacterType*& string,
 }
 
 template <typename CharacterType>
-static inline bool IsTenthAlpha(const CharacterType* string, const int length) {
+static inline bool IsTenthAlpha(const CharacterType* string,
+                                const wtf_size_t length) {
   // "0.X"
   if (length == 3 && string[0] == '0' && string[1] == '.' &&
       IsASCIIDigit(string[2]))
@@ -396,7 +397,7 @@ static inline bool ParseAlphaValue(const CharacterType*& string,
 
   value = 0;
 
-  size_t length = end - string;
+  wtf_size_t length = static_cast<wtf_size_t>(end - string);
   if (length < 2)
     return false;
 
@@ -549,7 +550,7 @@ static CSSValue* ParseColor(CSSPropertyID property_id,
       });
   if (!parse_result)
     return nullptr;
-  return cssvalue::CSSColorValue::Create(color);
+  return cssvalue::CSSColor::Create(color);
 }
 
 CSSValue* CSSParserFastPaths::ParseColor(const String& string,
@@ -1116,6 +1117,10 @@ bool CSSParserFastPaths::IsKeywordPropertyID(CSSPropertyID property_id) {
     default:
       return false;
   }
+}
+
+bool CSSParserFastPaths::IsValidSystemFont(CSSValueID value_id) {
+  return value_id >= CSSValueID::kCaption && value_id <= CSSValueID::kStatusBar;
 }
 
 static CSSValue* ParseKeywordValue(CSSPropertyID property_id,

@@ -11,6 +11,7 @@
 #include "net/cookies/site_for_cookies.h"
 #include "services/network/public/cpp/schemeful_site_mojom_traits.h"
 #include "services/network/public/mojom/isolation_info.mojom-shared.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/mojom/origin_mojom_traits.h"
 #include "url/origin.h"
 
@@ -34,12 +35,12 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE)
     return input.request_type();
   }
 
-  static const base::Optional<url::Origin>& top_frame_origin(
+  static const absl::optional<url::Origin>& top_frame_origin(
       const net::IsolationInfo& input) {
     return input.top_frame_origin();
   }
 
-  static const base::Optional<url::Origin>& frame_origin(
+  static const absl::optional<url::Origin>& frame_origin(
       const net::IsolationInfo& input) {
     return input.frame_origin();
   }
@@ -48,12 +49,17 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE)
     return input.opaque_and_non_transient();
   }
 
+  static const absl::optional<base::UnguessableToken>& nonce(
+      const net::IsolationInfo& input) {
+    return input.nonce_;
+  }
+
   static const net::SiteForCookies& site_for_cookies(
       const net::IsolationInfo& input) {
     return input.site_for_cookies();
   }
 
-  static const base::Optional<std::set<net::SchemefulSite>> party_context(
+  static const absl::optional<std::set<net::SchemefulSite>> party_context(
       const net::IsolationInfo& input) {
     return input.party_context_;
   }

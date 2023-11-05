@@ -30,6 +30,7 @@ enum class StatusCode : StatusCodeType {
   // General errors: 0x00
   kAborted = 0x00000001,
   kInvalidArgument = 0x00000002,
+  kKeyFrameRequired = 0x00000003,
 
   // Decoder Errors: 0x01
   kDecoderInitializeNeverCompleted = 0x00000101,
@@ -94,6 +95,7 @@ enum class StatusCode : StatusCodeType {
   kGetQuantBufferFailed = 0x00000328,
   kReleaseQuantBufferFailed = 0x00000329,
   kBitstreamBufferSliceTooBig = 0x00000330,
+  kCreateSharedImageFailed = 0x00000331,
 
   // MojoDecoder Errors: 0x04
   kMojoDecoderNoWrappedDecoder = 0x00000401,
@@ -172,6 +174,10 @@ enum class StatusCode : StatusCodeType {
   // Android only. Used as a signal to fallback MediaPlayerRenderer, and thus
   // not exactly an 'error' per say.
   kPipelineErrorDemuxerErrorDetectedHLS = 0x00000916,
+  // Used when hardware context is reset (e.g. OS sleep/resume), where we should
+  // recreate the Renderer instead of fail the playback. See
+  // https://crbug.com/1208618
+  kPipelineErrorHardwareContextReset = 0x00000917,
 
   // Frame operation errors: 0x0A
   kUnsupportedFrameFormatError = 0x00000A01,

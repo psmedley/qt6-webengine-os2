@@ -17,6 +17,7 @@
 
 #include <string>
 
+#include "gtest/gtest.h"
 #include "core/internal/bwu_manager.h"
 #include "core/internal/client_proxy.h"
 #include "core/internal/endpoint_channel_manager.h"
@@ -29,7 +30,6 @@
 #include "platform/public/condition_variable.h"
 #include "platform/public/count_down_latch.h"
 #include "platform/public/future.h"
-#include "gtest/gtest.h"
 
 // Test-only class to help run end-to-end simulations for nearby connections
 // protocol.
@@ -54,7 +54,15 @@ class SimulationUser {
   explicit SimulationUser(
       const std::string& device_name,
       BooleanMediumSelector allowed = BooleanMediumSelector())
-      : info_{ByteArray{device_name}},
+      : connection_options_{
+            .keep_alive_interval_millis = FeatureFlags::GetInstance()
+                    .GetFlags()
+                    .keep_alive_interval_millis,
+            .keep_alive_timeout_millis = FeatureFlags::GetInstance()
+                    .GetFlags()
+                    .keep_alive_timeout_millis,
+        },
+        info_{ByteArray{device_name}},
         options_{
             .strategy = Strategy::kP2pCluster,
             .allowed = allowed,

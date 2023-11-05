@@ -286,7 +286,9 @@ const NGOffsetMappingUnit* NGOffsetMapping::GetMappingUnitForPosition(
   const unsigned offset = node_and_offset.second;
   unsigned range_start;
   unsigned range_end;
-  std::tie(range_start, range_end) = ranges_.at(&node);
+  auto it = ranges_.find(&node);
+  std::tie(range_start, range_end) =
+      it != ranges_.end() ? it->value : std::pair<unsigned, unsigned>(0, 0);
   if (range_start == range_end || units_[range_start].DOMStart() > offset)
     return nullptr;
   // Find the last unit where unit.dom_start <= offset
@@ -311,7 +313,9 @@ NGOffsetMapping::UnitVector NGOffsetMapping::GetMappingUnitsForDOMRange(
   const unsigned end_offset = ToNodeOffsetPair(range.EndPosition()).second;
   unsigned range_start;
   unsigned range_end;
-  std::tie(range_start, range_end) = ranges_.at(&node);
+  auto it = ranges_.find(&node);
+  std::tie(range_start, range_end) =
+      it != ranges_.end() ? it->value : std::pair<unsigned, unsigned>(0, 0);
 
   if (range_start == range_end || units_[range_start].DOMStart() > end_offset ||
       units_[range_end - 1].DOMEnd() < start_offset)
@@ -332,7 +336,7 @@ NGOffsetMapping::UnitVector NGOffsetMapping::GetMappingUnitsForDOMRange(
                        });
 
   UnitVector result;
-  result.ReserveCapacity(result_end - result_begin);
+  result.ReserveCapacity(static_cast<unsigned>(result_end - result_begin));
   for (const auto& unit : base::make_span(result_begin, result_end)) {
     // If the unit isn't fully within the range, create a new unit that's
     // within the range.
@@ -405,12 +409,12 @@ NGOffsetMapping::GetMappingUnitsForTextContentOffsetRange(unsigned start,
   return base::make_span(result_begin, result_end);
 }
 
-base::Optional<unsigned> NGOffsetMapping::GetTextContentOffset(
+absl::optional<unsigned> NGOffsetMapping::GetTextContentOffset(
     const Position& position) const {
   DCHECK(NGOffsetMapping::AcceptsPosition(position)) << position;
   const NGOffsetMappingUnit* unit = GetMappingUnitForPosition(position);
   if (!unit)
-    return base::nullopt;
+    return absl::nullopt;
   return unit->ConvertDOMOffsetToTextContent(ToNodeOffsetPair(position).second);
 }
 
@@ -483,12 +487,12 @@ bool NGOffsetMapping::IsAfterNonCollapsedContent(
          unit->GetType() != NGOffsetMappingUnitType::kCollapsed;
 }
 
-base::Optional<UChar> NGOffsetMapping::GetCharacterBefore(
+absl::optional<UChar> NGOffsetMapping::GetCharacterBefore(
     const Position& position) const {
   DCHECK(NGOffsetMapping::AcceptsPosition(position));
-  base::Optional<unsigned> text_content_offset = GetTextContentOffset(position);
+  absl::optional<unsigned> text_content_offset = GetTextContentOffset(position);
   if (!text_content_offset || !*text_content_offset)
-    return base::nullopt;
+    return absl::nullopt;
   return text_[*text_content_offset - 1];
 }
 

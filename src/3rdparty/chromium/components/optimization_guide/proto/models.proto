@@ -9,7 +9,7 @@ option java_outer_classname = "ModelsProto";
 
 package optimization_guide.proto;
 
-import "common_types.proto";
+import "components/optimization_guide/proto/common_types.proto";
 
 // A generic handle for any type of model.
 message Model {
@@ -18,7 +18,9 @@ message Model {
   oneof model {
     DecisionTree decision_tree = 1;
     Ensemble ensemble = 2;
-    // The URL that the model can be downloaded from.
+    // When passed from the server, this is the URL that the model can be
+    // downloaded from. When used internally within Chrome, this contains the
+    // absolute file path where the model file is saved on disk.
     string download_url = 5;
   }
   // The tag number is high to allow models to be added and an uncommon number
@@ -151,10 +153,10 @@ message DoubleValue {
 
 // Requests prediction models to be used for a set of optimization targets.
 message GetModelsRequest {
+  reserved 2;
+
   // Information about the requested models.
   repeated ModelInfo requested_models = 1;
-  // The set of hosts to get additional metadata for, if applicable.
-  repeated string hosts = 2;
   // Context in which this request is made.
   //
   // If the context matches one that requires more urgency (i.e.
@@ -163,6 +165,12 @@ message GetModelsRequest {
   optional RequestContext request_context = 3;
   // The field trials that are currently active when this request is made.
   repeated FieldTrial active_field_trials = 4;
+  // The locale to associate with this request.
+  //
+  // It is the IETF language tag, defined in BCP 47. The region subtag is not
+  // included when it adds no distinguishing information to the language tag
+  // (e.g. both "en-US" and "fr" are correct here).
+  optional string locale = 5;
 }
 
 // Response to the GetModels request.
@@ -191,26 +199,37 @@ message PredictionModel {
   optional Model model = 2;
 }
 
-//  Metadata for a prediction model for a specific optimization target.
+message AdditionalModelFile {
+  // When sent by the server, this contains the basenames of the additional
+  // files that should be kept and sent to this model's consumers. When used
+  // only locally within Chrome, the full path is given.
+  optional string file_path = 1;
+}
+
+// Metadata for a prediction model for a specific optimization target.
+//
+// Next ID: 8
 message ModelInfo {
+  reserved 3;
+
   // The optimization target for which the model predicts.
   optional OptimizationTarget optimization_target = 1;
   // The version of the model, which is specific to the optimization target.
   optional int64 version = 2;
-  // The set of model features that are supported by the model.
-  //
-  // If in the request, this represents the set of features that the client
-  // understands how to evaluate. If in the response, this represents the set
-  // of features referenced by the model.
-  //
-  // New use cases should use the model_metadata field instead.
-  repeated ClientModelFeature supported_model_features = 3 [deprecated = true];
   // The set of model types the requesting client can use to make predictions.
   repeated ModelType supported_model_types = 4;
   // The set of host model features that are referenced by the model.
   //
   // Note that this should only be populated if part of the response.
   repeated string supported_host_model_features = 5;
+  // Additional files required by this model version.
+  //
+  // If populated, these files are included in the downloaded archive for this
+  // model and should be passed along to the consumer.
+  //
+  // This does not need to be sent to the server in the request for an update to
+  // this model. The server will ignore this if sent.
+  repeated AdditionalModelFile additional_files = 7;
   // Mechanism used for model owners to attach metadata to the request or
   // response.
   //
@@ -230,30 +249,16 @@ enum OptimizationTarget {
   OPTIMIZATION_TARGET_LANGUAGE_DETECTION = 2;
   // Target for determining topics present on a page.
   OPTIMIZATION_TARGET_PAGE_TOPICS = 3;
-}
-
-// The features that only the client can compute during prediction and also
-// knows how to evaluate.
-enum ClientModelFeature {
-  CLIENT_MODEL_FEATURE_UNKNOWN = 0;
-  // The effective connection type for the page load.
-  CLIENT_MODEL_FEATURE_EFFECTIVE_CONNECTION_TYPE = 1;
-  // How the current page load transitioned from the previous one.
-  CLIENT_MODEL_FEATURE_PAGE_TRANSITION = 2;
-  // The site engagement score of the main frame host for the page load.
-  CLIENT_MODEL_FEATURE_SITE_ENGAGEMENT_SCORE = 3;
-  // Whether the origin for the page load matches the origin of the previous
-  // page load.
-  CLIENT_MODEL_FEATURE_SAME_ORIGIN_NAVIGATION = 4;
-  // The mean of the duration from navigation to first contentful paint for the
-  // session.
-  CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_SESSION_MEAN = 5;
-  // The standard deviation of the duration from navigation to first
-  // contentful paint for the session.
-  CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_SESSION_STANDARD_DEVIATION = 6;
-  // The duration from navigation to first contentful paint for the previous
-  // page load, if applicable.
-  CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_PREVIOUS_PAGE_LOAD = 7;
+  // Target for segmentation: New tab page user.
+  OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB = 4;
+  // Target for segmentation: Share user.
+  OPTIMIZATION_TARGET_SEGMENTATION_SHARE = 5;
+  // Target for segmentation: Voice user.
+  OPTIMIZATION_TARGET_SEGMENTATION_VOICE = 6;
+  // Target for model validation.
+  OPTIMIZATION_TARGET_MODEL_VALIDATION = 7;
+  // Target for determining entities present on a page.
+  OPTIMIZATION_TARGET_PAGE_ENTITIES = 8;
 }
 
 // The types of models that can be evaluated.
@@ -263,6 +268,9 @@ enum ModelType {
   MODEL_TYPE_DECISION_TREE = 1;
   // A model using only operations that are supported by TensorflowLite 2.3.0.
   MODEL_TYPE_TFLITE_2_3_0 = 2;
+  // A model using only operations that are supported by TensorflowLite 2.3.0
+  // with updated FULLY_CONNECTED and BATCH_MUL versions for quantized models.
+  MODEL_TYPE_TFLITE_2_3_0_1 = 3;
 }
 
 // A set of model features and the host that it applies to.

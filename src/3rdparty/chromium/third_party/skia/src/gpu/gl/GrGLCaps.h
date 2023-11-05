@@ -93,7 +93,7 @@ public:
 
     enum class TransferBufferType {
         kNone,
-        kNV_PBO,    // NV__pixel_buffer_object
+        kNV_PBO,    // NV_pixel_buffer_object
         kARB_PBO,   // ARB_pixel_buffer_object
         kChromium,  // CHROMIUM_pixel_transfer_buffer_object
     };
@@ -266,9 +266,22 @@ public:
     }
 
     /**
-     * What functionality is supported by glBlitFramebuffer.
+     * Is it unsupported to only resolve a sub-rectangle of a framebuffer?
      */
-    uint32_t blitFramebufferSupportFlags() const { return fBlitFramebufferFlags; }
+    bool framebufferResolvesMustBeFullSize() const {
+        SkASSERT(fMSFBOType != kNone_MSFBOType);
+        return fMSFBOType == kES_Apple_MSFBOType ||
+               (fBlitFramebufferFlags & kResolveMustBeFull_BlitFrambufferFlag);
+    }
+
+    /**
+     * Can we resolve a single-sample framebuffer into an MSAA framebuffer?
+     */
+    bool canResolveSingleToMSAA() const {
+        SkASSERT(fMSFBOType != kNone_MSFBOType);
+        return fMSFBOType != kES_Apple_MSFBOType &&
+               !(fBlitFramebufferFlags & GrGLCaps::kNoMSAADst_BlitFramebufferFlag);
+    }
 
     /**
      * Is the MSAA FBO extension one where the texture is multisampled when bound to an FBO and
@@ -321,9 +334,6 @@ public:
     //commands supported?
     bool baseVertexBaseInstanceSupport() const { return fBaseVertexBaseInstanceSupport; }
 
-    /// Use indices or vertices in CPU arrays rather than VBOs for dynamic content.
-    bool useNonVBOVertexAndIndexDynamicData() const { return fUseNonVBOVertexAndIndexDynamicData; }
-
     SurfaceReadPixelsSupport surfaceSupportsReadPixels(const GrSurface*) const override;
 
     SupportedWrite supportedWritePixelsColorType(GrColorType surfaceColorType,
@@ -348,12 +358,6 @@ public:
     bool doManualMipmapping() const { return fDoManualMipmapping; }
 
     void onDumpJSON(SkJSONWriter*) const override;
-
-    bool rgba8888PixelsOpsAreSlow() const { return fRGBA8888PixelsOpsAreSlow; }
-    bool partialFBOReadIsSlow() const { return fPartialFBOReadIsSlow; }
-    bool rgbaToBgraReadbackConversionsAreSlow() const {
-        return fRGBAToBGRAReadbackConversionsAreSlow;
-    }
 
     bool useBufferDataNullHint() const { return fUseBufferDataNullHint; }
 
@@ -384,11 +388,6 @@ public:
     // face culling on and off seems to resolve this.
     bool requiresCullFaceEnableDisableWhenDrawingLinesAfterNonLines() const {
         return fRequiresCullFaceEnableDisableWhenDrawingLinesAfterNonLines;
-    }
-
-    // Some Adreno drivers refuse to ReadPixels from an MSAA buffer that has stencil attached.
-    bool detachStencilFromMSAABuffersBeforeReadPixels() const {
-        return fDetachStencilFromMSAABuffersBeforeReadPixels;
     }
 
     // Older Android versions seem to have an issue with setting GL_TEXTURE_BASE_LEVEL or
@@ -452,6 +451,8 @@ public:
     /** Skip checks for GL errors, shader compilation success, program link success. */
     bool skipErrorChecks() const { return fSkipErrorChecks; }
 
+    bool clientCanDisableMultisample() const { return fClientCanDisableMultisample; }
+
     GrBackendFormat getBackendFormatFromCompressionType(SkImage::CompressionType) const override;
 
     GrSwizzle getWriteSwizzle(const GrBackendFormat&, GrColorType) const override;
@@ -479,7 +480,6 @@ private:
 
     void init(const GrContextOptions&, const GrGLContextInfo&, const GrGLInterface*);
     void initGLSL(const GrGLContextInfo&, const GrGLInterface*);
-    bool hasPathRenderingSupport(const GrGLContextInfo&, const GrGLInterface*);
 
     struct FormatWorkarounds {
         bool fDisableSRGBRenderWithMSAAForMacAMD = false;
@@ -489,6 +489,10 @@ private:
         bool fDontDisableTexStorageOnAndroid = false;
         bool fDisallowDirectRG8ReadPixels = false;
         bool fDisallowBGRA8ReadPixels = false;
+        bool fDisallowR8ForPowerVRSGX54x = false;
+        bool fDisallowUnorm16Transfers = false;
+        bool fDisallowTextureUnorm16 = false;
+        bool fDisallowETC2Compression = false;
     };
 
     void applyDriverCorrectnessWorkarounds(const GrGLContextInfo&, const GrContextOptions&,
@@ -517,7 +521,9 @@ private:
 
     GrSwizzle onGetReadSwizzle(const GrBackendFormat&, GrColorType) const override;
 
-    GrDstSampleType onGetDstSampleTypeForProxy(const GrRenderTargetProxy*) const override;
+    GrDstSampleFlags onGetDstSampleFlagsForProxy(const GrRenderTargetProxy*) const override;
+
+    bool onSupportsDynamicMSAA(const GrRenderTargetProxy*) const override;
 
     GrGLStandard fStandard = kNone_GrGLStandard;
 
@@ -540,17 +546,13 @@ private:
     bool fES2CompatibilitySupport : 1;
     bool fDrawRangeElementsSupport : 1;
     bool fBaseVertexBaseInstanceSupport : 1;
-    bool fUseNonVBOVertexAndIndexDynamicData : 1;
     bool fIsCoreProfile : 1;
     bool fBindFragDataLocationSupport : 1;
-    bool fRGBA8888PixelsOpsAreSlow : 1;
-    bool fPartialFBOReadIsSlow : 1;
     bool fBindUniformLocationSupport : 1;
     bool fRectangleTextureSupport : 1;
     bool fMipmapLevelControlSupport : 1;
     bool fMipmapLodControlSupport : 1;
-    bool fRGBAToBGRAReadbackConversionsAreSlow : 1;
-    bool fUseBufferDataNullHint                : 1;
+    bool fUseBufferDataNullHint : 1;
     bool fClearTextureSupport : 1;
     bool fProgramBinarySupport : 1;
     bool fProgramParameterSupport : 1;
@@ -561,6 +563,7 @@ private:
     bool fFBFetchRequiresEnablePerSample : 1;
     bool fSRGBWriteControl : 1;
     bool fSkipErrorChecks : 1;
+    bool fClientCanDisableMultisample : 1;
 
     // Driver workarounds
     bool fDoManualMipmapping : 1;
@@ -569,11 +572,11 @@ private:
     bool fDisallowTexSubImageForUnormConfigTexturesEverBoundToFBO : 1;
     bool fUseDrawInsteadOfAllRenderTargetWrites : 1;
     bool fRequiresCullFaceEnableDisableWhenDrawingLinesAfterNonLines : 1;
-    bool fDetachStencilFromMSAABuffersBeforeReadPixels : 1;
     bool fDontSetBaseOrMaxLevelForExternalTextures : 1;
     bool fNeverDisableColorWrites : 1;
     bool fMustSetAnyTexParameterToEnableMipmapping : 1;
     bool fAllowBGRA8CopyTexSubImage : 1;
+    bool fDisallowDynamicMSAA : 1;
     int fMaxInstancesPerDrawWithoutCrashing = 0;
 
     uint32_t fBlitFramebufferFlags = kNoSupport_BlitFramebufferFlag;
@@ -687,12 +690,17 @@ private:
         }
 
         enum {
-            kTexturable_Flag                 = 0x1,
+            kTexturable_Flag                 = 0x01,
             /** kFBOColorAttachment means that even if the format cannot be a GrRenderTarget, we can
                 still attach it to a FBO for blitting or reading pixels. */
-            kFBOColorAttachment_Flag         = 0x2,
-            kFBOColorAttachmentWithMSAA_Flag = 0x4,
-            kUseTexStorage_Flag              = 0x8,
+            kFBOColorAttachment_Flag         = 0x02,
+            kFBOColorAttachmentWithMSAA_Flag = 0x04,
+            kUseTexStorage_Flag              = 0x08,
+            /**
+             * Are pixel buffer objects supported in/out of this format? Ignored if PBOs are not
+             * supported at all.
+             */
+            kTransfers_Flag                  = 0x10,
         };
         uint32_t fFlags = 0;
 

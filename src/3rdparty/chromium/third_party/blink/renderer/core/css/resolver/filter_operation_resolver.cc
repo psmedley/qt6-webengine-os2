@@ -83,6 +83,8 @@ static void CountFilterUse(FilterOperation::OperationType operation_type,
   switch (operation_type) {
     case FilterOperation::NONE:
     case FilterOperation::BOX_REFLECT:
+    case FilterOperation::CONVOLVE_MATRIX:
+    case FilterOperation::COMPONENT_TRANSFER:
       NOTREACHED();
       return;
     case FilterOperation::REFERENCE:
@@ -99,6 +101,12 @@ static void CountFilterUse(FilterOperation::OperationType operation_type,
       break;
     case FilterOperation::HUE_ROTATE:
       feature = WebFeature::kCSSFilterHueRotate;
+      break;
+    case FilterOperation::LUMINANCE_TO_ALPHA:
+      feature = WebFeature::kCSSFilterLuminanceToAlpha;
+      break;
+    case FilterOperation::COLOR_MATRIX:
+      feature = WebFeature::kCSSFilterColorMatrix;
       break;
     case FilterOperation::INVERT:
       feature = WebFeature::kCSSFilterInvert;
@@ -254,8 +262,10 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
   CSSToLengthConversionData::FontSizes font_sizes(
       kOffScreenCanvasEmFontSize, kOffScreenCanvasRemFontSize, &font, zoom);
   CSSToLengthConversionData::ViewportSize viewport_size(0, 0);
+  CSSToLengthConversionData::ContainerSizes container_sizes;
   CSSToLengthConversionData conversion_data(nullptr,  // ComputedStyle
                                             font_sizes, viewport_size,
+                                            container_sizes,
                                             1);  // zoom
 
   for (auto& curr_value : To<CSSValueList>(in_value)) {

@@ -5,8 +5,6 @@
 #ifndef CONTENT_BROWSER_MEDIA_MEDIA_INTERFACE_FACTORY_HOLDER_H_
 #define CONTENT_BROWSER_MEDIA_MEDIA_INTERFACE_FACTORY_HOLDER_H_
 
-#include <string>
-
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
@@ -38,9 +36,6 @@ class MediaInterfaceFactoryHolder {
 
  private:
   void ConnectToMediaService();
-
-  // Callback for connection error from |interface_factory_remote_|.
-  void OnMediaServiceConnectionError();
 
   MediaServiceGetter media_service_getter_;
   FrameServicesGetter frame_services_getter_;

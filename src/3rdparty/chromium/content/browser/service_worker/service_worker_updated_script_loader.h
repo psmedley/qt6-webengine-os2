@@ -86,13 +86,14 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override;
+      const absl::optional<GURL>& new_url) override;
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override;
   void PauseReadingBodyFromNet() override;
   void ResumeReadingBodyFromNet() override;
 
   // network::mojom::URLLoaderClient for the network load:
+  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
   void OnReceiveResponse(
       network::mojom::URLResponseHeadPtr response_head) override;
   void OnReceiveRedirect(
@@ -159,10 +160,7 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
 
   const GURL request_url_;
 
-  // This is network::mojom::RequestDestination::kServiceWorker for the main
-  // script or network::mojom::RequestDestination::kScript for an imported
-  // script.
-  const network::mojom::RequestDestination request_destination_;
+  const bool is_main_script_;
 
   // Loader options to pass to the network loader.
   const uint32_t options_;

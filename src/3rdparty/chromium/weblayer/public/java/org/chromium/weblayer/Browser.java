@@ -31,7 +31,9 @@ import java.util.Set;
 public class Browser {
     // Set to null once destroyed (or for tests).
     private IBrowser mImpl;
-    private BrowserFragment mFragment;
+    // The Fragment the Browser is associated with. The value of this may change.
+    @Nullable
+    private Fragment mFragment;
     private final ObserverList<TabListCallback> mTabListCallbacks;
     private final UrlBarController mUrlBarController;
 
@@ -47,7 +49,7 @@ public class Browser {
         mBrowserRestoreCallbacks = null;
     }
 
-    Browser(IBrowser impl, BrowserFragment fragment) {
+    Browser(IBrowser impl, Fragment fragment) {
         mImpl = impl;
         mFragment = fragment;
         mTabListCallbacks = new ObserverList<TabListCallback>();
@@ -60,6 +62,22 @@ public class Browser {
         } catch (RemoteException e) {
             throw new APICallException(e);
         }
+    }
+
+    /**
+     * Changes the fragment. During configuration changes the fragment may change.
+     */
+    void setFragment(@Nullable BrowserFragment fragment) {
+        mFragment = fragment;
+    }
+
+    /**
+     * Returns the fragment this Browser is associated with. During configuration changes the
+     * fragment may change, and be null for some amount of time.
+     */
+    @Nullable
+    public Fragment getFragment() {
+        return mFragment;
     }
 
     private void throwIfDestroyed() {
@@ -505,6 +523,31 @@ public class Browser {
         ThreadCheck.ensureOnUiThread();
         throwIfDestroyed();
         return mUrlBarController;
+    }
+
+    /**
+     * Normally when the Browser is detached the visibility of the page is set to hidden. When the
+     * visibility is hidden video may stop, or other side effects may result. At certain times,
+     * such as fullscreen or rotation, it may be necessary to transiently detach the Browser.
+     * Calling this method with a value of false results in WebLayer not hiding the page on the next
+     * detach. Once the Browser is reattached, the value is implicitly reset to true. Calling this
+     * method when the Browser is already detached does nothing.
+     *
+     * @param changeVisibility Whether WebLayer should change visibility as the result of a detach.
+     *
+     * @since 91
+     */
+    public void setChangeVisibilityOnNextDetach(boolean changeVisibility) {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 91) {
+            throw new UnsupportedOperationException();
+        }
+        throwIfDestroyed();
+        try {
+            mImpl.setChangeVisibilityOnNextDetach(changeVisibility);
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
     }
 
     private final class BrowserClientImpl extends IBrowserClient.Stub {

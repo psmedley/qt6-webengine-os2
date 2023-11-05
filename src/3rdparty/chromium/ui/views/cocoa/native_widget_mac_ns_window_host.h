@@ -146,7 +146,9 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   void SetBoundsInScreen(const gfx::Rect& bounds);
 
   // Tell the window to transition to being fullscreen or not-fullscreen.
-  void SetFullscreen(bool fullscreen);
+  // If `delay` is given, this sets the target fullscreen state and then posts
+  // a delayed task to request the window transition. See crbug.com/1210548.
+  void SetFullscreen(bool fullscreen, base::TimeDelta delay = {});
 
   // The ultimate fullscreen state that is being targeted (irrespective of any
   // active transitions).
@@ -162,7 +164,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   void CreateCompositor(const Widget::InitParams& params);
 
   // Set the window's title, returning true if the title has changed.
-  bool SetWindowTitle(const base::string16& title);
+  bool SetWindowTitle(const std::u16string& title);
 
   // Called when the owning Widget's Init method has completed.
   void OnWidgetInitDone();
@@ -218,11 +220,24 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   // Used by NativeWidgetPrivate::GetGlobalCapture.
   static NSView* GetGlobalCaptureView();
 
+  // Add, update and remove the remote window controls overlay view for a PWA.
+  void AddRemoteWindowControlsOverlayView(
+      remote_cocoa::mojom::WindowControlsOverlayNSViewType overlay_type);
+  void UpdateRemoteWindowControlsOverlayView(
+      const gfx::Rect& bounds,
+      remote_cocoa::mojom::WindowControlsOverlayNSViewType overlay_type);
+  void RemoveRemoteWindowControlsOverlayView(
+      remote_cocoa::mojom::WindowControlsOverlayNSViewType overlay_type);
+
  private:
   friend class TextInputHost;
 
   void UpdateCompositorProperties();
   void DestroyCompositor();
+
+  // This is used to request a delayed fullscreen window transition after some
+  // other window placement occurs; see SetFullscreen() and crbug.com/1210548.
+  static void SetFullscreenAfterDelay(uint64_t bridged_native_widget_id);
 
   // Sort |attached_native_view_host_views_| by the order in which their
   // NSViews should appear as subviews. This does a recursive pre-order
@@ -272,7 +287,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   bool GetIsDraggableBackgroundAt(const gfx::Point& location_in_content,
                                   bool* is_draggable_background) override;
   bool GetTooltipTextAt(const gfx::Point& location_in_content,
-                        base::string16* new_tooltip_text) override;
+                        std::u16string* new_tooltip_text) override;
   bool GetWidgetIsModal(bool* widget_is_modal) override;
   bool GetIsFocusedViewTextual(bool* is_textual) override;
   void OnWindowGeometryChanged(
@@ -293,7 +308,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   void DoDialogButtonAction(ui::DialogButton button) override;
   bool GetDialogButtonInfo(ui::DialogButton type,
                            bool* button_exists,
-                           base::string16* button_label,
+                           std::u16string* button_label,
                            bool* is_button_enabled,
                            bool* is_button_default) override;
   bool GetDoDialogButtonsExist(bool* buttons_exist) override;
@@ -436,7 +451,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   std::unique_ptr<TooltipManager> tooltip_manager_;
   std::unique_ptr<TextInputHost> text_input_host_;
 
-  base::string16 window_title_;
+  std::u16string window_title_;
 
   // The display that the window is currently on.
   display::Display display_;

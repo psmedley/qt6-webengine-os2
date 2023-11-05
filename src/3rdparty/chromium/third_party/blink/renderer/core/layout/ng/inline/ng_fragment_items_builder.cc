@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/svg/ng_svg_text_layout_algorithm.h"
 
 namespace blink {
 
@@ -221,7 +222,8 @@ NGFragmentItemsBuilder::AddPreviousItems(
 
   DCHECK(items_.IsEmpty());
   const NGFragmentItems::Span source_items = items.Items();
-  const wtf_size_t estimated_size = source_items.size();
+  const wtf_size_t estimated_size =
+      base::checked_cast<wtf_size_t>(source_items.size());
   items_.ReserveCapacity(estimated_size);
 
   // Convert offsets to logical. The logic is opposite to |ConvertToPhysical|.
@@ -357,13 +359,13 @@ void NGFragmentItemsBuilder::ConvertToPhysical(const PhysicalSize& outer_size) {
   is_converted_to_physical_ = true;
 }
 
-base::Optional<LogicalOffset> NGFragmentItemsBuilder::LogicalOffsetFor(
+absl::optional<LogicalOffset> NGFragmentItemsBuilder::LogicalOffsetFor(
     const LayoutObject& layout_object) const {
   for (const ItemWithOffset& item : items_) {
     if (item->GetLayoutObject() == &layout_object)
       return item.offset;
   }
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 void NGFragmentItemsBuilder::MoveChildrenInBlockDirection(LayoutUnit delta) {
@@ -383,6 +385,10 @@ void NGFragmentItemsBuilder::ToFragmentItems(const PhysicalSize& outer_size,
                                              void* data) {
   DCHECK(text_content_);
   ConvertToPhysical(outer_size);
+  if (node_.IsSvgText()) {
+    NGSvgTextLayoutAlgorithm(node_, GetWritingMode())
+        .Layout(TextContent(false), items_);
+  }
   new (data) NGFragmentItems(this);
 }
 

@@ -6,6 +6,7 @@
 
 #include <unicode/uscript.h>
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/platform/fonts/character_range.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/font_test_utilities.h"
@@ -29,6 +30,22 @@ class ShapeResultViewTest : public testing::Test {
   FontDescription font_description;
   Font font;
 };
+
+// http://crbug.com/1221008
+TEST_F(ShapeResultViewTest,
+       ExpandRangeToIncludePartialGlyphsWithCombiningCharacter) {
+  String string(u"abc\u0E35\u0E35\u0E35\u0E35");
+  HarfBuzzShaper shaper(string);
+  scoped_refptr<const ShapeResult> result =
+      shaper.Shape(&font, TextDirection::kLtr);
+  scoped_refptr<const ShapeResultView> view = ShapeResultView::Create(
+      result.get(), result->StartIndex(), result->EndIndex());
+  unsigned from = 0;
+  unsigned end = string.length();
+  view->ExpandRangeToIncludePartialGlyphs(&from, &end);
+  EXPECT_EQ(0u, from);
+  EXPECT_EQ(string.length(), end);
+}
 
 TEST_F(ShapeResultViewTest, LatinSingleView) {
   String string =
@@ -350,6 +367,22 @@ TEST_F(ShapeResultViewTest, TrimEndOfView) {
       ShapeResultView::Create(view1.get(), 5, 19);
   EXPECT_EQ(view2->NumCharacters(), 14u);
   EXPECT_EQ(view2->NumGlyphs(), 14u);
+}
+
+TEST_F(ShapeResultViewTest, MarkerAndTrailingSpace) {
+  String string = u"\u2067\u2022\u0020";
+  TextDirection direction = TextDirection::kRtl;
+  LayoutUnit symbol_width = LayoutUnit(7);
+  scoped_refptr<const ShapeResult> result =
+      ShapeResult::CreateForSpaces(&font, direction, 1, 2, symbol_width);
+
+  ShapeResultView::Segment segment = {result.get(), 1, 2};
+  auto shape_result_view = ShapeResultView::Create(&segment, 1);
+  scoped_refptr<ShapeResult> shape_result =
+      shape_result_view->CreateShapeResult();
+
+  Vector<CharacterRange> ranges;
+  shape_result->IndividualCharacterRanges(&ranges);
 }
 
 }  // namespace blink

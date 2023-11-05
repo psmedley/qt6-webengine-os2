@@ -23,6 +23,7 @@
 
 #include <memory>
 
+#include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "fxbarcode/oned/BC_OnedCode128Writer.h"
 
@@ -52,7 +53,7 @@ bool CBC_Code128::Encode(WideStringView contents) {
 }
 
 bool CBC_Code128::RenderDevice(CFX_RenderDevice* device,
-                               const CFX_Matrix* matrix) {
+                               const CFX_Matrix& matrix) {
   return GetOnedCode128Writer()->RenderDeviceResult(
       device, matrix, m_renderContents.AsStringView());
 }

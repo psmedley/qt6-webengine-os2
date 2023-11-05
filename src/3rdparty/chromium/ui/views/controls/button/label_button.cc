@@ -14,6 +14,8 @@
 #include "build/build_config.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
@@ -24,7 +26,7 @@
 #include "ui/views/animation/ink_drop.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/label_button_border.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
+#include "ui/views/image_model_utils.h"
 #include "ui/views/painter.h"
 #include "ui/views/style/platform_style.h"
 #include "ui/views/view_class_properties.h"
@@ -33,7 +35,7 @@
 namespace views {
 
 LabelButton::LabelButton(PressedCallback callback,
-                         const base::string16& text,
+                         const std::u16string& text,
                          int button_context)
     : Button(std::move(callback)),
       cached_normal_font_list_(
@@ -55,21 +57,17 @@ LabelButton::LabelButton(PressedCallback callback,
   SetTextInternal(text);
 }
 
-LabelButton::~LabelButton() = default;
+LabelButton::~LabelButton() {
+  // TODO(pbos): Revisit explicit removal of InkDrop for classes that override
+  // Add/RemoveLayerBeneathView(). This is done so that the InkDrop doesn't
+  // access the non-override versions in ~View.
+  views::InkDrop::Remove(this);
+}
 
 gfx::ImageSkia LabelButton::GetImage(ButtonState for_state) const {
   for_state = ImageStateForState(for_state);
-
-  const auto& image_model = button_state_image_models_[for_state];
-  if (image_model.IsImage())
-    return image_model.GetImage().AsImageSkia();
-
-  if (image_model.IsVectorIcon()) {
-    return ui::ThemedVectorIcon(image_model.GetVectorIcon())
-        .GetImageSkia(GetNativeTheme());
-  }
-
-  return gfx::ImageSkia();
+  return GetImageSkiaFromImageModel(button_state_image_models_[for_state],
+                                    GetNativeTheme());
 }
 
 void LabelButton::SetImage(ButtonState for_state, const gfx::ImageSkia& image) {
@@ -90,11 +88,15 @@ void LabelButton::SetImageModel(ButtonState for_state,
     UpdateImage();
 }
 
-const base::string16& LabelButton::GetText() const {
+bool LabelButton::HasImage(ButtonState for_state) const {
+  return !button_state_image_models_[for_state].IsEmpty();
+}
+
+const std::u16string& LabelButton::GetText() const {
   return label_->GetText();
 }
 
-void LabelButton::SetText(const base::string16& text) {
+void LabelButton::SetText(const std::u16string& text) {
   SetTextInternal(text);
 }
 
@@ -117,7 +119,7 @@ void LabelButton::SetTextColor(ButtonState for_state, SkColor color) {
   explicitly_set_colors_[for_state] = true;
 }
 
-void LabelButton::SetEnabledTextColors(base::Optional<SkColor> color) {
+void LabelButton::SetEnabledTextColors(absl::optional<SkColor> color) {
   ButtonState states[] = {STATE_NORMAL, STATE_HOVERED, STATE_PRESSED};
   if (color.has_value()) {
     for (auto state : states)
@@ -424,7 +426,8 @@ ui::NativeTheme::State LabelButton::GetForegroundThemeState(
 }
 
 void LabelButton::UpdateImage() {
-  image_->SetImage(GetImage(GetVisualState()));
+  if (GetWidget())
+    image_->SetImage(GetImage(GetVisualState()));
 }
 
 void LabelButton::AddLayerBeneathView(ui::Layer* new_layer) {
@@ -512,7 +515,7 @@ void LabelButton::StateChanged(ButtonState old_state) {
   VisualStateChanged();
 }
 
-void LabelButton::SetTextInternal(const base::string16& text) {
+void LabelButton::SetTextInternal(const std::u16string& text) {
   SetAccessibleName(text);
   label_->SetText(text);
 
@@ -533,7 +536,7 @@ void LabelButton::ClearTextIfShrunkDown() {
       height() <= preferred_size.height()) {
     // Once the button shrinks down to its preferred size (that disregards the
     // current text), we finish the operation by clearing the text.
-    SetText(base::string16());
+    SetText(std::u16string());
   }
 }
 
@@ -548,8 +551,8 @@ gfx::Size LabelButton::GetUnclampedSizeWithoutLabel() const {
     size.Enlarge(GetImageLabelSpacing(), 0);
 
   // Make the size at least as large as the minimum size needed by the border.
-  if (border())
-    size.SetToMax(border()->GetMinimumSize());
+  if (GetBorder())
+    size.SetToMax(GetBorder()->GetMinimumSize());
 
   return size;
 }
@@ -570,12 +573,20 @@ Button::ButtonState LabelButton::GetVisualState() const {
 }
 
 void LabelButton::VisualStateChanged() {
-  UpdateImage();
-  UpdateBackgroundColor();
+  if (GetWidget()) {
+    UpdateImage();
+    UpdateBackgroundColor();
+  }
   label_->SetEnabled(GetVisualState() != STATE_DISABLED);
 }
 
 void LabelButton::ResetColorsFromNativeTheme() {
+  if (!GetWidget()) {
+    // If there is no widget, we can't actually get the real colors here.
+    // An OnThemeChanged() will fire once a widget is available.
+    return;
+  }
+
   const ui::NativeTheme* theme = GetNativeTheme();
   // Since this is a LabelButton, use the label colors.
   SkColor colors[STATE_COUNT] = {
@@ -613,7 +624,7 @@ void LabelButton::FlipCanvasOnPaintForRTLUIChanged() {
 }
 
 BEGIN_METADATA(LabelButton, Button)
-ADD_PROPERTY_METADATA(base::string16, Text)
+ADD_PROPERTY_METADATA(std::u16string, Text)
 ADD_PROPERTY_METADATA(gfx::HorizontalAlignment, HorizontalAlignment)
 ADD_PROPERTY_METADATA(gfx::Size, MinSize)
 ADD_PROPERTY_METADATA(gfx::Size, MaxSize)

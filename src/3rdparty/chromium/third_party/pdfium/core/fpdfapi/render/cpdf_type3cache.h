@@ -7,11 +7,12 @@
 #ifndef CORE_FPDFAPI_RENDER_CPDF_TYPE3CACHE_H_
 #define CORE_FPDFAPI_RENDER_CPDF_TYPE3CACHE_H_
 
+#include <stdint.h>
+
 #include <map>
 #include <memory>
 
 #include "core/fxcrt/fx_string.h"
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
 
@@ -25,7 +26,7 @@ class CPDF_Type3Cache final : public Retainable, public Observable {
   CONSTRUCT_VIA_MAKE_RETAIN;
 
   const CFX_GlyphBitmap* LoadGlyph(uint32_t charcode,
-                                   const CFX_Matrix* pMatrix);
+                                   const CFX_Matrix& mtMatrix);
 
  private:
   explicit CPDF_Type3Cache(CPDF_Type3Font* pFont);
@@ -33,7 +34,7 @@ class CPDF_Type3Cache final : public Retainable, public Observable {
 
   std::unique_ptr<CFX_GlyphBitmap> RenderGlyph(CPDF_Type3GlyphMap* pSize,
                                                uint32_t charcode,
-                                               const CFX_Matrix* pMatrix);
+                                               const CFX_Matrix& mtMatrix);
 
   RetainPtr<CPDF_Type3Font> const m_pFont;
   std::map<ByteString, std::unique_ptr<CPDF_Type3GlyphMap>> m_SizeMap;

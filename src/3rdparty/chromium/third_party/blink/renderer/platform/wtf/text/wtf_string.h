@@ -83,20 +83,15 @@ class WTF_EXPORT String {
 
   // Construct a string with UTF-16 data, from a null-terminated source.
   String(const UChar*);
-  // TODO(crbug.com/911896): Remove this constructor once `UChar` is `char16_t`
-  // on all platforms.
-  template <typename UCharT = UChar,
-            typename = std::enable_if_t<!std::is_same<UCharT, char16_t>::value>>
-  String(const char16_t* chars)
-      : String(reinterpret_cast<const UChar*>(chars)) {}
 
   // Construct a string with latin1 data.
   String(const LChar* characters, unsigned length);
   String(const char* characters, unsigned length);
 
 #if defined(ARCH_CPU_64_BITS)
-  // Only define a size_t constructor if size_t is 64 bit otherwise
+  // Only define size_t constructors if size_t is 64 bit otherwise
   // we'd have a duplicate define.
+  String(const UChar* characters, size_t length);
   String(const char* characters, size_t length);
 #endif  // defined(ARCH_CPU_64_BITS)
 
@@ -186,7 +181,7 @@ class WTF_EXPORT String {
   std::string Utf8(UTF8ConversionMode = kLenientUTF8Conversion) const
       WARN_UNUSED_RESULT;
 
-  UChar operator[](unsigned index) const {
+  UChar operator[](wtf_size_t index) const {
     if (!impl_ || index >= impl_->length())
       return 0;
     return (*impl_)[index];
@@ -208,17 +203,17 @@ class WTF_EXPORT String {
       WARN_UNUSED_RESULT;
 
   // Find characters.
-  wtf_size_t find(UChar c, unsigned start = 0) const {
+  wtf_size_t find(UChar c, wtf_size_t start = 0) const {
     return impl_ ? impl_->Find(c, start) : kNotFound;
   }
-  wtf_size_t find(LChar c, unsigned start = 0) const {
+  wtf_size_t find(LChar c, wtf_size_t start = 0) const {
     return impl_ ? impl_->Find(c, start) : kNotFound;
   }
-  wtf_size_t find(char c, unsigned start = 0) const {
+  wtf_size_t find(char c, wtf_size_t start = 0) const {
     return find(static_cast<LChar>(c), start);
   }
   wtf_size_t Find(CharacterMatchFunctionPtr match_function,
-                  unsigned start = 0) const {
+                  wtf_size_t start = 0) const {
     return impl_ ? impl_->Find(match_function, start) : kNotFound;
   }
   wtf_size_t Find(base::RepeatingCallback<bool(UChar)> match_callback,
@@ -227,7 +222,7 @@ class WTF_EXPORT String {
   // Find substrings.
   wtf_size_t Find(
       const StringView& value,
-      unsigned start = 0,
+      wtf_size_t start = 0,
       TextCaseSensitivity case_sensitivity = kTextCaseSensitive) const {
     return impl_
                ? DISPATCH_CASE_OP(case_sensitivity, impl_->Find, (value, start))
@@ -558,7 +553,7 @@ class WTF_EXPORT String {
   void Show() const;
 #endif
 
-  void WriteIntoTracedValue(perfetto::TracedValue context) const;
+  void WriteIntoTrace(perfetto::TracedValue context) const;
 
  private:
   friend struct HashTraits<String>;
@@ -721,7 +716,6 @@ using WTF::g_empty_string;
 using WTF::g_empty_string16_bit;
 using WTF::Equal;
 using WTF::Find;
-using WTF::IsSpaceOrNewline;
 
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_WTF_STRING_H_

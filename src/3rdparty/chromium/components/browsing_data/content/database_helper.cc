@@ -14,7 +14,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "components/browsing_data/content/browsing_data_helper.h"
@@ -35,8 +34,9 @@ using storage::DatabaseIdentifier;
 namespace browsing_data {
 
 DatabaseHelper::DatabaseHelper(content::BrowserContext* browser_context)
-    : tracker_(BrowserContext::GetDefaultStoragePartition(browser_context)
-                   ->GetDatabaseTracker()) {}
+    : tracker_(
+          browser_context->GetDefaultStoragePartition()->GetDatabaseTracker()) {
+}
 
 DatabaseHelper::~DatabaseHelper() {}
 

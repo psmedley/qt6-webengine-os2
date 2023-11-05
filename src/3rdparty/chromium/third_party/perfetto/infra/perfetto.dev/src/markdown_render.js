@@ -23,7 +23,6 @@ const CS_BASE_URL =
     'https://cs.android.com/android/platform/superproject/+/master:external/perfetto';
 
 const ROOT_DIR = path.dirname(path.dirname(path.dirname(__dirname)));
-const DOCS_DIR = path.join(ROOT_DIR, 'docs');
 
 let outDir = '';
 let curMdFile = '';
@@ -159,6 +158,15 @@ function renderParagraph(text) {
   if (cssClass != '') {
     cssClass = ` class="callout ${cssClass}"`;
   }
+
+  // Rudimentary support of definition lists.
+  var colonStart = text.search("\n:")
+  if (colonStart != -1) {
+    var key = text.substring(0, colonStart);
+    var value = text.substring(colonStart + 2);
+    return `<dl><dt><p>${key}</p></dt><dd><p>${value}</p></dd></dl>`
+  }
+
   return `<p${cssClass}>${text}</p>\n`;
 }
 

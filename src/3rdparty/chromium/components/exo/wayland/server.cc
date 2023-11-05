@@ -41,7 +41,9 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/strings/stringprintf.h"
 #include "build/chromeos_buildflags.h"
+#include "components/exo/buildflags.h"
 #include "components/exo/display.h"
 #include "components/exo/wayland/serial_tracker.h"
 #include "components/exo/wayland/wayland_display_output.h"
@@ -82,6 +84,11 @@
 #include "components/exo/wayland/zwp_text_input_manager.h"
 #include "components/exo/wayland/zxdg_decoration_manager.h"
 #include "components/exo/wayland/zxdg_shell.h"
+
+#if BUILDFLAG(ENABLE_WESTON_TEST)
+#include <weston-test-server-protocol.h>
+#include "components/exo/wayland/weston_test.h"
+#endif
 #endif
 
 #if defined(USE_OZONE)
@@ -125,13 +132,20 @@ bool IsDrmAtomicAvailable() {
 #endif
 }
 
+void wayland_log(const char* fmt, va_list argp) {
+  LOG(WARNING) << "libwayland: " << base::StringPrintV(fmt, argp);
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // Server, public:
 
-Server::Server(Display* display)
-    : display_(display), wl_display_(wl_display_create()) {
+Server::Server(Display* display) : display_(display) {
+  wl_log_set_handler_server(wayland_log);
+
+  wl_display_.reset(wl_display_create());
+
   serial_tracker_ = std::make_unique<SerialTracker>(wl_display_.get());
   wl_global_create(wl_display_.get(), &wl_compositor_interface,
                    kWlCompositorVersion, this, bind_compositor);
@@ -142,7 +156,6 @@ Server::Server(Display* display)
 #endif
   wl_global_create(wl_display_.get(), &wl_subcompositor_interface, 1, display_,
                    bind_subcompositor);
-  display::Screen::GetScreen()->AddObserver(this);
   for (const auto& display : display::Screen::GetScreen()->GetAllDisplays())
     OnDisplayAdded(display);
   wl_global_create(wl_display_.get(), &zcr_vsync_feedback_v1_interface, 1,
@@ -175,7 +188,7 @@ Server::Server(Display* display)
     // If DRM atomic is not supported, linux-explicit-sync interface is
     // disabled.
     wl_global_create(wl_display_.get(),
-                     &zwp_linux_explicit_synchronization_v1_interface, 1,
+                     &zwp_linux_explicit_synchronization_v1_interface, 2,
                      display_, bind_linux_explicit_synchronization);
   }
   wl_global_create(wl_display_.get(), &zaura_shell_interface,
@@ -190,13 +203,17 @@ Server::Server(Display* display)
   wl_global_create(wl_display_.get(), &zcr_keyboard_configuration_v1_interface,
                    zcr_keyboard_configuration_v1_interface.version, display_,
                    bind_keyboard_configuration);
-  wl_global_create(wl_display_.get(), &zcr_keyboard_extension_v1_interface, 1,
-                   display_, bind_keyboard_extension);
   wl_global_create(wl_display_.get(), &zcr_notification_shell_v1_interface, 1,
                    display_, bind_notification_shell);
+
+  remote_shell_data_ = std::make_unique<WaylandRemoteShellData>(
+      display_,
+      WaylandRemoteShellData::OutputResourceProvider(base::BindRepeating(
+          &Server::GetOutputResource, base::Unretained(this))));
   wl_global_create(wl_display_.get(), &zcr_remote_shell_v1_interface,
-                   zcr_remote_shell_v1_interface.version, display_,
-                   bind_remote_shell);
+                   zcr_remote_shell_v1_interface.version,
+                   remote_shell_data_.get(), bind_remote_shell);
+
   wl_global_create(wl_display_.get(), &zcr_stylus_tools_v1_interface, 1,
                    display_, bind_stylus_tools);
   wl_global_create(wl_display_.get(),
@@ -216,6 +233,17 @@ Server::Server(Display* display)
   wl_global_create(wl_display_.get(), &zcr_extended_drag_v1_interface, 1,
                    display_, bind_extended_drag);
 
+#if BUILDFLAG(ENABLE_WESTON_TEST)
+  weston_test_data_ = std::make_unique<WestonTestState>();
+  wl_global_create(wl_display_.get(), &weston_test_interface,
+                   kWestonTestVersion, weston_test_data_.get(), bind_weston_test);
+#endif
+
+  zcr_keyboard_extension_data_ =
+      std::make_unique<WaylandKeyboardExtension>(serial_tracker_.get());
+  wl_global_create(wl_display_.get(), &zcr_keyboard_extension_v1_interface, 2,
+                   zcr_keyboard_extension_data_.get(), bind_keyboard_extension);
+
   zwp_text_manager_data_ = std::make_unique<WaylandTextInputManager>(
       display_->seat()->xkb_tracker(), serial_tracker_.get());
   wl_global_create(wl_display_.get(), &zwp_text_input_manager_v1_interface, 1,
@@ -230,7 +258,7 @@ Server::Server(Display* display)
       std::make_unique<WaylandXdgShell>(display_, serial_tracker_.get());
   wl_global_create(wl_display_.get(), &xdg_wm_base_interface, 1,
                    xdg_shell_data_.get(), bind_xdg_shell);
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if defined(USE_FULLSCREEN_SHELL)
   wl_global_create(wl_display_.get(), &zwp_fullscreen_shell_v1_interface, 1,
@@ -239,7 +267,6 @@ Server::Server(Display* display)
 }
 
 Server::~Server() {
-  display::Screen::GetScreen()->RemoveObserver(this);
   // TODO(https://crbug.com/1124106): Investigate if we can eliminate Shutdown
   // methods.
   serial_tracker_->Shutdown();

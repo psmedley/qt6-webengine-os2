@@ -6,10 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_COMMON_SCHEDULER_HELPER_H_
 
 #include <stddef.h>
-#include <memory>
 
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/task/sequence_manager/sequence_manager.h"
 #include "base/task/simple_task_executor.h"
 #include "base/threading/thread_checker.h"
@@ -34,6 +32,8 @@ class PLATFORM_EXPORT SchedulerHelper
   // object is destroyed.
   explicit SchedulerHelper(
       base::sequence_manager::SequenceManager* sequence_manager);
+  SchedulerHelper(const SchedulerHelper&) = delete;
+  SchedulerHelper& operator=(const SchedulerHelper&) = delete;
   ~SchedulerHelper() override;
 
   // Must be invoked before running any task from the scheduler, on the thread
@@ -142,9 +142,7 @@ class PLATFORM_EXPORT SchedulerHelper
   Observer* observer_;  // NOT OWNED
 
   UkmTaskSampler ukm_task_sampler_;
-  base::Optional<base::SimpleTaskExecutor> simple_task_executor_;
-
-  DISALLOW_COPY_AND_ASSIGN(SchedulerHelper);
+  absl::optional<base::SimpleTaskExecutor> simple_task_executor_;
 };
 
 }  // namespace scheduler

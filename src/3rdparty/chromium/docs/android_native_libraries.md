@@ -166,10 +166,10 @@ Builds on | Variant | Chrome | Library | Webview
 **What is it?**
  * RELRO refers to the ELF segment `GNU_RELRO`. It contains data that the linker marks as read-only after it applies relocations.
    * To inspect the size of the segment: `readelf --segments libchrome.so`
-   * For `lib(mono)chrome.so` on arm32, it's about 2mb.
+   * For `lib(mono)chrome.so` the region occupies about 2.4MiB on arm32 and 4.7 MiB on arm64
  * If two processes map this segment to the same virtual address space, then pages of memory within the segment which contain only relative relocations (99% of them) will be byte-for-byte identical.
-   * Note: For `fork()`ed processes, all pages are already shared (via `fork()`'s copy-on-write semantics), so RELRO sharing does not apply to them.
- * "RELRO sharing" is when this segment is copied into shared memory and shared by multiple processes.
+ * "RELRO sharing" is when this segment is moved into shared memory and shared by multiple processes.
+ * Processes `fork()`ed from the app zygote (where the library is loaded) share RELRO (via `fork()`'s copy-on-write semantics), but this region is not shared with other process types (privileged, utility, GPU)
 
 **How does it work?**
  * For Android < N (crazy linker):

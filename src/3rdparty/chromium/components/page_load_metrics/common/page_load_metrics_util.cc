@@ -6,12 +6,36 @@
 
 #include <algorithm>
 
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/string_util.h"
+#include "components/page_load_metrics/common/page_load_metrics_constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 namespace page_load_metrics {
 
-base::Optional<std::string> GetGoogleHostnamePrefix(const GURL& url) {
+namespace {
+
+// Default timer delay when the PageLoadMetricsTimerDelay feature is disabled.
+const int kDefaultDisabledBufferTimerDelayMillis = 1000;
+
+// Default timer delay when the PageLoadMetricsTimerDelay feature is enabled.
+// Can be overridden by the BufferTimerDelayMillis field trial parameter.
+const int kDefaultEnabledBufferTimerDelayMillis = 100;
+
+// Maximum timer delay value.
+const int kMaxBufferTimerDelayMillis = 1000;
+
+// Additional delay for the browser timer relative to the renderer timer, to
+// allow for some variability in task queuing duration and IPC latency.
+const int kExtraBufferTimerDelayMillis = 50;
+
+// Parameter for the PageLoadMetricsTimerDelay feature which specifies a custom
+// timer delay value.
+const char* kBufferTimerDelayParamName = "BufferTimerDelayMillis";
+
+}  // namespace
+
+absl::optional<std::string> GetGoogleHostnamePrefix(const GURL& url) {
   const size_t registry_length =
       net::registry_controlled_domains::GetRegistryLength(
           url,
@@ -27,7 +51,7 @@ base::Optional<std::string> GetGoogleHostnamePrefix(const GURL& url) {
   const base::StringPiece hostname = url.host_piece();
   if (registry_length == 0 || registry_length == std::string::npos ||
       registry_length >= hostname.length()) {
-    return base::Optional<std::string>();
+    return absl::optional<std::string>();
   }
 
   // Removes the tld and the preceding dot.
@@ -39,7 +63,7 @@ base::Optional<std::string> GetGoogleHostnamePrefix(const GURL& url) {
 
   if (!base::EndsWith(hostname_minus_registry, ".google",
                       base::CompareCase::INSENSITIVE_ASCII)) {
-    return base::Optional<std::string>();
+    return absl::optional<std::string>();
   }
 
   return std::string(hostname_minus_registry.substr(
@@ -50,16 +74,34 @@ bool IsGoogleHostname(const GURL& url) {
   return GetGoogleHostnamePrefix(url).has_value();
 }
 
-base::Optional<base::TimeDelta> OptionalMin(
-    const base::Optional<base::TimeDelta>& a,
-    const base::Optional<base::TimeDelta>& b) {
+absl::optional<base::TimeDelta> OptionalMin(
+    const absl::optional<base::TimeDelta>& a,
+    const absl::optional<base::TimeDelta>& b) {
   if (a && !b)
     return a;
   if (b && !a)
     return b;
   if (!a && !b)
     return a;  // doesn't matter which
-  return base::Optional<base::TimeDelta>(std::min(a.value(), b.value()));
+  return absl::optional<base::TimeDelta>(std::min(a.value(), b.value()));
+}
+
+int GetBufferTimerDelayMillis(TimerType timer_type) {
+  int result = kDefaultDisabledBufferTimerDelayMillis;
+
+  if (base::FeatureList::IsEnabled(kPageLoadMetricsTimerDelayFeature)) {
+    result = base::GetFieldTrialParamByFeatureAsInt(
+        kPageLoadMetricsTimerDelayFeature, kBufferTimerDelayParamName,
+        kDefaultEnabledBufferTimerDelayMillis /* default value */);
+  }
+
+  DCHECK(timer_type == TimerType::kBrowser ||
+         timer_type == TimerType::kRenderer);
+  if (timer_type == TimerType::kBrowser) {
+    result += kExtraBufferTimerDelayMillis;
+  }
+
+  return std::min(result, kMaxBufferTimerDelayMillis);
 }
 
 }  // namespace page_load_metrics

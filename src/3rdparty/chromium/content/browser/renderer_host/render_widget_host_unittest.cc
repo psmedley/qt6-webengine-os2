@@ -14,7 +14,6 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -64,6 +63,7 @@
 #include "third_party/blink/public/mojom/input/input_handler.mojom-shared.h"
 #include "third_party/blink/public/mojom/input/touch_event.mojom.h"
 #include "third_party/blink/public/mojom/page/drag.mojom.h"
+#include "ui/display/display_util.h"
 #include "ui/display/screen.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/blink/blink_features.h"
@@ -142,7 +142,7 @@ class TestView : public TestRenderWidgetHostView {
     local_surface_id_allocator_.GenerateId();
   }
 
-  void SetScreenInfo(const blink::ScreenInfo& screen_info) {
+  void SetScreenInfo(const display::ScreenInfo& screen_info) {
     if (screen_info_ == screen_info)
       return;
     screen_info_ = screen_info;
@@ -151,7 +151,7 @@ class TestView : public TestRenderWidgetHostView {
 
   void InvalidateLocalSurfaceId() { local_surface_id_allocator_.Invalidate(); }
 
-  void GetScreenInfo(blink::ScreenInfo* screen_info) override {
+  void GetScreenInfo(display::ScreenInfo* screen_info) override {
     *screen_info = screen_info_;
   }
 
@@ -238,7 +238,7 @@ class TestView : public TestRenderWidgetHostView {
   gfx::Size mock_compositor_viewport_pixel_size_;
   blink::mojom::InputEventResultState ack_result_;
   viz::ParentLocalSurfaceIdAllocator local_surface_id_allocator_;
-  blink::ScreenInfo screen_info_;
+  display::ScreenInfo screen_info_;
   gfx::Insets insets_;
 
  private:
@@ -309,9 +309,9 @@ class MockInputEventObserver : public RenderWidgetHost::InputEventObserver {
  public:
   MOCK_METHOD1(OnInputEvent, void(const blink::WebInputEvent&));
 #if defined(OS_ANDROID)
-  MOCK_METHOD1(OnImeTextCommittedEvent, void(const base::string16& text_str));
+  MOCK_METHOD1(OnImeTextCommittedEvent, void(const std::u16string& text_str));
   MOCK_METHOD1(OnImeSetComposingTextEvent,
-               void(const base::string16& text_str));
+               void(const std::u16string& text_str));
   MOCK_METHOD0(OnImeFinishComposingTextEvent, void());
 #endif
 };
@@ -444,7 +444,7 @@ class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
 
   void ExecuteEditCommand(
       const std::string& command,
-      const base::Optional<base::string16>& value) override {}
+      const absl::optional<std::u16string>& value) override {}
 
   void Undo() override {}
   void Redo() override {}
@@ -812,6 +812,67 @@ class RenderWidgetHostWithSourceTest
 
 // -----------------------------------------------------------------------------
 
+// Tests that renderer doesn't change bounds while browser has its
+// bounds changed (and until bounds are acked), which might be a result
+// of a system's display compositor/server changing bounds of an
+// application.
+TEST_F(RenderWidgetHostTest, DoNotAcceptPopupBoundsUntilScreenRectsAcked) {
+  // The host should wait for the screen rects ack now as SendScreenRects were
+  // called during the initialization step.
+  EXPECT_TRUE(host_->waiting_for_screen_rects_ack_);
+
+  // Execute pending callbacks and clear screen rects.
+  ClearScreenRects();
+
+  // Lets mojo to pass the message from the renderer to the browser (from widget
+  // to host).
+  base::RunLoop().RunUntilIdle();
+
+  // The host shouldn't wait for ack now as it has received it.
+  EXPECT_FALSE(host_->waiting_for_screen_rects_ack_);
+
+  // Change the bounds of the view and send screen rects.
+  view_->SetBounds({10, 20, 300, 200});
+  // Pass updated bounds from the browser to the renderer.
+  host_->SendScreenRects();
+
+  // The host should wait for the screen rects ack now.
+  EXPECT_TRUE(host_->waiting_for_screen_rects_ack_);
+
+  // Store the current view's bounds and pretend popup bounds are
+  // being changed. However, they mustn't be changed as the host is still
+  // waiting for the screen rects ack. This ensures that the renderer
+  // doesn't clobber browser's bounds.
+  auto old_view_bounds = view_->GetViewBounds();
+  auto new_popup_view_bounds = gfx::Rect(5, 5, 20, 20);
+  // Act like a renderer sending new bounds to the browser.
+  static_cast<blink::mojom::PopupWidgetHost*>(host_.get())
+      ->SetPopupBounds(new_popup_view_bounds, base::DoNothing());
+  // The view still has the old bounds...
+  EXPECT_EQ(old_view_bounds, view_->GetViewBounds());
+  // which are not the same as the new bounds that were tried to be
+  // set.
+  EXPECT_NE(view_->GetViewBounds(), new_popup_view_bounds);
+
+  // Clear the screen rects and send the ack callback back to the host.
+  ClearScreenRects();
+
+  // Allows mojo to pass the message from the renderer to the browser
+  // (ClearScreenRects executed a callback via mojo that notifies the browser
+  // that the renderer completed processing the new rects).
+  base::RunLoop().RunUntilIdle();
+
+  // The change must have been acked by now.
+  EXPECT_FALSE(host_->waiting_for_screen_rects_ack_);
+
+  // Pretend that the renderer changes the popup bounds again...
+  static_cast<blink::mojom::PopupWidgetHost*>(host_.get())
+      ->SetPopupBounds(new_popup_view_bounds, base::DoNothing());
+  // And the host must accept them now as the screen rects have been
+  // acked.
+  EXPECT_EQ(new_popup_view_bounds, view_->GetViewBounds());
+}
+
 TEST_F(RenderWidgetHostTest, SynchronizeVisualProperties) {
   ClearVisualProperties();
 
@@ -876,7 +937,7 @@ TEST_F(RenderWidgetHostTest, SynchronizeVisualProperties) {
   EXPECT_EQ(original_size.size(), host_->old_visual_properties_->new_size);
   cc::RenderFrameMetadata metadata;
   metadata.viewport_size_in_pixels = original_size.size();
-  metadata.local_surface_id = base::nullopt;
+  metadata.local_surface_id = absl::nullopt;
   static_cast<RenderFrameMetadataProvider::Observer&>(*host_)
       .OnLocalSurfaceIdChanged(metadata);
   EXPECT_FALSE(host_->visual_properties_ack_pending_);
@@ -909,7 +970,7 @@ TEST_F(RenderWidgetHostTest, SynchronizeVisualProperties) {
   // sent. Since this isn't the second_size, the message handler should
   // immediately send a new resize message for the new size to the renderer.
   metadata.viewport_size_in_pixels = original_size.size();
-  metadata.local_surface_id = base::nullopt;
+  metadata.local_surface_id = absl::nullopt;
   static_cast<RenderFrameMetadataProvider::Observer&>(*host_)
       .OnLocalSurfaceIdChanged(metadata);
   EXPECT_TRUE(host_->visual_properties_ack_pending_);
@@ -921,7 +982,7 @@ TEST_F(RenderWidgetHostTest, SynchronizeVisualProperties) {
 
   // Send the visual properties ACK for the latest size.
   metadata.viewport_size_in_pixels = third_size.size();
-  metadata.local_surface_id = base::nullopt;
+  metadata.local_surface_id = absl::nullopt;
   static_cast<RenderFrameMetadataProvider::Observer&>(*host_)
       .OnLocalSurfaceIdChanged(metadata);
   EXPECT_FALSE(host_->visual_properties_ack_pending_);
@@ -987,13 +1048,13 @@ TEST_F(RenderWidgetHostTest, SynchronizeVisualProperties) {
 // Test that a resize event is sent if SynchronizeVisualProperties() is called
 // after a ScreenInfo change.
 TEST_F(RenderWidgetHostTest, ResizeScreenInfo) {
-  blink::ScreenInfo screen_info;
+  display::ScreenInfo screen_info;
   screen_info.device_scale_factor = 1.f;
   screen_info.rect = gfx::Rect(0, 0, 800, 600);
   screen_info.available_rect = gfx::Rect(0, 0, 800, 600);
   screen_info.orientation_angle = 0;
   screen_info.orientation_type =
-      blink::mojom::ScreenOrientation::kPortraitPrimary;
+      display::mojom::ScreenOrientation::kPortraitPrimary;
 
   ClearVisualProperties();
   view_->SetScreenInfo(screen_info);
@@ -1007,7 +1068,7 @@ TEST_F(RenderWidgetHostTest, ResizeScreenInfo) {
 
   screen_info.orientation_angle = 180;
   screen_info.orientation_type =
-      blink::mojom::ScreenOrientation::kLandscapePrimary;
+      display::mojom::ScreenOrientation::kLandscapePrimary;
 
   ClearVisualProperties();
   view_->SetScreenInfo(screen_info);
@@ -1046,13 +1107,13 @@ TEST_F(RenderWidgetHostTest, OverrideScreenInfoDuringFullscreenMode) {
   const gfx::Rect kScreenBounds(0, 0, 800, 600);
   const gfx::Rect kViewBounds(55, 66, 600, 500);
 
-  blink::ScreenInfo screen_info;
+  display::ScreenInfo screen_info;
   screen_info.device_scale_factor = 1.f;
   screen_info.rect = kScreenBounds;
   screen_info.available_rect = kScreenBounds;
   screen_info.orientation_angle = 0;
   screen_info.orientation_type =
-      blink::mojom::ScreenOrientation::kPortraitPrimary;
+      display::mojom::ScreenOrientation::kPortraitPrimary;
   view_->SetScreenInfo(screen_info);
 
   ClearVisualProperties();
@@ -1065,8 +1126,8 @@ TEST_F(RenderWidgetHostTest, OverrideScreenInfoDuringFullscreenMode) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1u, widget_.ReceivedVisualProperties().size());
   blink::VisualProperties props = widget_.ReceivedVisualProperties().at(0);
-  EXPECT_EQ(kScreenBounds, props.screen_info.rect);
-  EXPECT_EQ(kScreenBounds, props.screen_info.available_rect);
+  EXPECT_EQ(kScreenBounds, props.screen_infos.current().rect);
+  EXPECT_EQ(kScreenBounds, props.screen_infos.current().available_rect);
 
   // Enter fullscreen and do another VisualProperties sync.
   delegate_->set_is_fullscreen(true);
@@ -1075,8 +1136,9 @@ TEST_F(RenderWidgetHostTest, OverrideScreenInfoDuringFullscreenMode) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(2u, widget_.ReceivedVisualProperties().size());
   props = widget_.ReceivedVisualProperties().at(1);
-  EXPECT_EQ(kViewBounds.size(), props.screen_info.rect.size());
-  EXPECT_EQ(kViewBounds.size(), props.screen_info.available_rect.size());
+  EXPECT_EQ(kViewBounds.size(), props.screen_infos.current().rect.size());
+  EXPECT_EQ(kViewBounds.size(),
+            props.screen_infos.current().available_rect.size());
 
   // Exit fullscreen and do another VisualProperties sync.
   delegate_->set_is_fullscreen(false);
@@ -1085,19 +1147,19 @@ TEST_F(RenderWidgetHostTest, OverrideScreenInfoDuringFullscreenMode) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(3u, widget_.ReceivedVisualProperties().size());
   props = widget_.ReceivedVisualProperties().at(2);
-  EXPECT_EQ(kScreenBounds, props.screen_info.rect);
-  EXPECT_EQ(kScreenBounds, props.screen_info.available_rect);
+  EXPECT_EQ(kScreenBounds, props.screen_infos.current().rect);
+  EXPECT_EQ(kScreenBounds, props.screen_infos.current().available_rect);
 }
 
 TEST_F(RenderWidgetHostTest, RootWindowSegments) {
   gfx::Rect screen_rect(0, 0, 800, 600);
-  blink::ScreenInfo screen_info;
+  display::ScreenInfo screen_info;
   screen_info.device_scale_factor = 1.f;
   screen_info.rect = screen_rect;
   screen_info.available_rect = screen_rect;
   screen_info.orientation_angle = 0;
   screen_info.orientation_type =
-      blink::mojom::ScreenOrientation::kPortraitPrimary;
+      display::mojom::ScreenOrientation::kPortraitPrimary;
   view_->SetScreenInfo(screen_info);
 
   // Set a vertical display feature which must result in two window segments,
@@ -1311,7 +1373,7 @@ TEST_F(RenderWidgetHostTest, HideShowMessages) {
   process_->sink().ClearMessages();
   cc::RenderFrameMetadata metadata;
   metadata.viewport_size_in_pixels = gfx::Size(100, 100);
-  metadata.local_surface_id = base::nullopt;
+  metadata.local_surface_id = absl::nullopt;
   static_cast<RenderFrameMetadataProvider::Observer&>(*host_)
       .OnLocalSurfaceIdChanged(metadata);
 
@@ -2287,7 +2349,7 @@ TEST_F(RenderWidgetHostTest, OnVerticalScrollDirectionChanged) {
 }
 
 TEST_F(RenderWidgetHostTest, SetCursorWithBitmap) {
-  ui::Cursor cursor;
+  ui::Cursor cursor(ui::mojom::CursorType::kCustom);
 
   SkBitmap bitmap;
   bitmap.allocN32Pixels(1, 1);

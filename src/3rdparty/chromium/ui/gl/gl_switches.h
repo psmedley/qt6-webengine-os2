@@ -35,7 +35,9 @@ GL_EXPORT extern const char kANGLEImplementationOpenGLESEGLName[];
 GL_EXPORT extern const char kANGLEImplementationNullName[];
 GL_EXPORT extern const char kANGLEImplementationVulkanName[];
 GL_EXPORT extern const char kANGLEImplementationSwiftShaderName[];
+GL_EXPORT extern const char kANGLEImplementationSwiftShaderForWebGLName[];
 GL_EXPORT extern const char kANGLEImplementationMetalName[];
+GL_EXPORT extern const char kANGLEImplementationNoneName[];
 
 GL_EXPORT extern const char kANGLEImplementationD3D11NULLName[];
 GL_EXPORT extern const char kANGLEImplementationOpenGLNULLName[];
@@ -84,6 +86,9 @@ GL_EXPORT extern const char kDirectCompositionVideoSwapChainFormat[];
 // These flags are used by the test harness code, not passed in by users.
 GL_EXPORT extern const char kDisableGLDrawingForTests[];
 GL_EXPORT extern const char kOverrideUseSoftwareGLForTests[];
+
+// This flag is used when not enabling GPU hardware in headless mode
+GL_EXPORT extern const char kOverrideUseSoftwareGLForHeadless[];
 
 GL_EXPORT extern const char* const kGLSwitchesCopiedFromGpuProcessHost[];
 GL_EXPORT extern const int kGLSwitchesCopiedFromGpuProcessHostNumSwitches;

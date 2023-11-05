@@ -16,10 +16,31 @@
 #include "gpu/config/vulkan_info.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif
+
 namespace gpu {
 namespace {
-uint64_t g_submit_count = 0u;
-uint64_t g_import_semaphore_into_gl_count = 0u;
+
+#if defined(OS_ANDROID)
+int GetEMUIVersion() {
+  const auto* build_info = base::android::BuildInfo::GetInstance();
+  base::StringPiece manufacturer(build_info->manufacturer());
+
+  // TODO(crbug.com/1096222): check Honor devices as well.
+  if (manufacturer != "HUAWEI")
+    return -1;
+
+  // Huawei puts EMUI version in the build version incremental.
+  // Example: 11.0.0.130C00
+  int version = 0;
+  if (sscanf(build_info->version_incremental(), "%d.", &version) != 1)
+    return -1;
+
+  return version;
+}
+#endif
 }
 
 bool SubmitSignalVkSemaphores(VkQueue vk_queue,
@@ -68,21 +89,10 @@ bool SubmitWaitVkSemaphore(VkQueue vk_queue,
 VkSemaphore CreateExternalVkSemaphore(
     VkDevice vk_device,
     VkExternalSemaphoreHandleTypeFlags handle_types) {
-  base::ScopedClosureRunner uma_runner(base::BindOnce(
-      [](base::Time time) {
-        UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-            "GPU.Vulkan.CreateExternalVkSemaphore", base::Time::Now() - time,
-            base::TimeDelta::FromMicroseconds(1),
-            base::TimeDelta::FromMicroseconds(200), 50);
-      },
-      base::Time::Now()));
-
-  VkExportSemaphoreCreateInfo export_info;
-      export_info.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+  VkExportSemaphoreCreateInfo export_info = {VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO};
       export_info.handleTypes = handle_types;
 
-  VkSemaphoreCreateInfo sem_info;
-      sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  VkSemaphoreCreateInfo sem_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
       sem_info.pNext = &export_info;
 
   VkSemaphore semaphore = VK_NULL_HANDLE;
@@ -103,14 +113,6 @@ std::string VkVersionToString(uint32_t version) {
                             VK_VERSION_PATCH(version));
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL QueueSubmitHook(VkQueue queue,
-                         uint32_t submitCount,
-                         const VkSubmitInfo* pSubmits,
-                         VkFence fence) {
-  g_submit_count++;
-  return vkQueueSubmit(queue, submitCount, pSubmits, fence);
-}
-
 VkResult CreateGraphicsPipelinesHook(
     VkDevice device,
     VkPipelineCache pipelineCache,
@@ -128,22 +130,6 @@ VkResult CreateGraphicsPipelinesHook(
       base::Time::Now()));
   return vkCreateGraphicsPipelines(device, pipelineCache, createInfoCount,
                                    pCreateInfos, pAllocator, pPipelines);
-}
-
-void RecordImportingVKSemaphoreIntoGL() {
-  g_import_semaphore_into_gl_count++;
-}
-
-void ReportUMAPerSwapBuffers() {
-  static uint64_t last_submit_count = 0u;
-  static uint64_t last_semaphore_count = 0u;
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.Vulkan.QueueSubmitPerSwapBuffers",
-                              g_submit_count - last_submit_count, 1, 50, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "GPU.Vulkan.ImportSemaphoreGLPerSwapBuffers",
-      g_import_semaphore_into_gl_count - last_semaphore_count, 1, 50, 50);
-  last_submit_count = g_submit_count;
-  last_semaphore_count = g_import_semaphore_into_gl_count;
 }
 
 bool CheckVulkanCompabilities(const VulkanInfo& vulkan_info,
@@ -187,10 +173,13 @@ bool CheckVulkanCompabilities(const VulkanInfo& vulkan_info,
   }
 
   if (device_info.properties.vendorID == kVendorARM) {
-    // https://crbug.com/1096222: Display problem with Huawei and Honor devices
-    // with Mali GPU. The Mali driver version is < 19.0.0.
-    if (device_info.properties.driverVersion < VK_MAKE_VERSION(19, 0, 0))
+    int emui_version = GetEMUIVersion();
+    // TODO(crbug.com/1096222) Display problem with Huawei EMUI < 11 and Honor
+    // devices with Mali GPU. The Mali driver version is < 19.0.0.
+    if (device_info.properties.driverVersion < VK_MAKE_VERSION(19, 0, 0) &&
+        emui_version < 11) {
       return false;
+    }
 
     // Remove "Mali-" prefix.
     base::StringPiece device_name(device_info.properties.deviceName);
@@ -215,6 +204,9 @@ bool CheckVulkanCompabilities(const VulkanInfo& vulkan_info,
 
   // https:://crbug.com/1165783: Performance is not yet as good as GL.
   if (device_info.properties.vendorID == kVendorQualcomm) {
+    if (device_info.properties.deviceName ==
+        base::StringPiece("Adreno (TM) 630"))
+      return true;
     return false;
   }
 

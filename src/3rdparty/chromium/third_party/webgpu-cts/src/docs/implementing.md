@@ -29,14 +29,12 @@ Later, there may be multiple `GPUDevice`s to allow multiple test cases to run co
 
 ## Test parameterization
 
-The CTS provides helpers (`params().combine()`) for creating large cartesian products of test parameters.
-The harnesses runs one "test case" for each one.
+The CTS provides helpers (`.params()` and friends) for creating large cartesian products of test parameters.
+These generate "test cases" further subdivided into "test subcases".
+See `basic,*` in `examples.spec.ts` for examples, and the [helper index](./helper_index.txt)
+for a list of capabilities.
 
-TODO(github.com/gpuweb/cts/issues/305): document test subcases, once they exist.
-
-See `basic,params_builder` in `examples.spec.ts` for an example.
-
-Test parameterization and `.combine()` should be applied liberally to ensure the maximum coverage
+Test parameterization should be applied liberally to ensure the maximum coverage
 possible within reasonable time. You can skip some with `.filter()`. And remember: computers are
 pretty fast - thousands of test cases can be reasonable.
 
@@ -50,8 +48,8 @@ to parameterize tests), instead of making your own list. Use the info tables (su
 Since there are no synchronous operations in WebGPU, almost every test is asynchronous in some
 way. For example:
 
-  - Checking the result of a readback.
-  - Capturing the result of a `popErrorScope()`.
+- Checking the result of a readback.
+- Capturing the result of a `popErrorScope()`.
 
 That said, test functions don't always need to be `async`; see below.
 
@@ -80,7 +78,7 @@ does:
 **Example:**
 
 ```typescript
-t.expectContents(srcBuffer, expectedData);
+t.expectGPUBufferValuesEqual(srcBuffer, expectedData);
 ```
 
 does:

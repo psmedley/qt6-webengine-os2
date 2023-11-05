@@ -4,6 +4,7 @@
 
 #include "net/cert/trial_comparison_cert_verifier.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -41,7 +42,8 @@ namespace {
 MATCHER_P(CertChainMatches, expected_cert, "") {
   CertificateList actual_certs =
       X509Certificate::CreateCertificateListFromBytes(
-          arg.data(), arg.size(), X509Certificate::FORMAT_PEM_CERT_SEQUENCE);
+          base::as_bytes(base::make_span(arg)),
+          X509Certificate::FORMAT_PEM_CERT_SEQUENCE);
   if (actual_certs.empty()) {
     *result_listener << "failed to parse arg";
     return false;
@@ -76,7 +78,7 @@ class RepeatedTestClosure {
   void WaitForResult() {
     DCHECK(!run_loop_);
     if (!have_result_) {
-      run_loop_.reset(new base::RunLoop());
+      run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
       run_loop_.reset();
       DCHECK(have_result_);

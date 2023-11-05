@@ -275,6 +275,13 @@ struct SK_API SkIRect {
         fBottom = height;
     }
 
+    void setSize(SkISize size) {
+        fLeft = 0;
+        fTop = 0;
+        fRight = size.width();
+        fBottom = size.height();
+    }
+
     /** Returns SkIRect offset by (dx, dy).
 
         If dx is negative, SkIRect returned is moved to the left.
@@ -522,8 +529,7 @@ struct SK_API SkIRect {
         @return   true if a and b have area in common
     */
     static bool Intersects(const SkIRect& a, const SkIRect& b) {
-        SkIRect dummy;
-        return dummy.intersect(a, b);
+        return SkIRect{}.intersect(a, b);
     }
 
     /** Sets SkIRect to the union of itself and r.

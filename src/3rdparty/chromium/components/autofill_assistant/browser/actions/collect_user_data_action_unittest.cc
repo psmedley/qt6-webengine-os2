@@ -4,22 +4,27 @@
 
 #include "components/autofill_assistant/browser/actions/collect_user_data_action.h"
 
+#include <string>
 #include <utility>
 
 #include "base/guid.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/mock_callback.h"
+#include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
+#include "components/autofill_assistant/browser/cud_condition.pb.h"
 #include "components/autofill_assistant/browser/mock_personal_data_manager.h"
 #include "components/autofill_assistant/browser/mock_website_login_manager.h"
 #include "components/autofill_assistant/browser/test_util.h"
+#include "components/autofill_assistant/browser/user_data_util.h"
 #include "components/autofill_assistant/browser/user_model.h"
 #include "components/strings/grit/components_strings.h"
+#include "content/public/test/browser_task_environment.h"
+#include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -36,6 +41,13 @@ const char kMemoryLocation[] = "billing";
 namespace autofill_assistant {
 namespace {
 
+RequiredDataPiece MakeRequiredDataPiece(autofill::ServerFieldType field) {
+  RequiredDataPiece required_data_piece;
+  required_data_piece.mutable_condition()->set_key(static_cast<int>(field));
+  required_data_piece.mutable_condition()->mutable_not_empty();
+  return required_data_piece;
+}
+
 void SetDateProto(DateProto* proto, int year, int month, int day) {
   proto->set_year(year);
   proto->set_month(month);
@@ -47,17 +59,20 @@ using ::testing::_;
 using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::Invoke;
-using ::testing::IsSupersetOf;
+using ::testing::NotNull;
 using ::testing::Property;
 using ::testing::Return;
 using ::testing::SizeIs;
 using ::testing::StrEq;
 using ::testing::UnorderedElementsAre;
 
-class CollectUserDataActionTest : public content::RenderViewHostTestHarness {
+class CollectUserDataActionTest : public testing::Test {
  public:
   void SetUp() override {
-    RenderViewHostTestHarness::SetUp();
+    web_contents_ = content::WebContentsTester::CreateTestWebContents(
+        &browser_context_, nullptr);
+    content::WebContentsTester::For(web_contents_.get())
+        ->SetLastCommittedURL(GURL(kFakeUrl));
 
     ON_CALL(mock_action_delegate_, GetPersonalDataManager)
         .WillByDefault(Return(&mock_personal_data_manager_));
@@ -65,6 +80,8 @@ class CollectUserDataActionTest : public content::RenderViewHostTestHarness {
         .WillByDefault(Return(&mock_website_login_manager_));
     ON_CALL(mock_action_delegate_, GetUserData)
         .WillByDefault(Return(&user_data_));
+    ON_CALL(mock_action_delegate_, GetUserModel)
+        .WillByDefault(Return(&user_model_));
     ON_CALL(mock_action_delegate_, WriteUserData(_))
         .WillByDefault(Invoke(
             [this](base::OnceCallback<void(UserData*, UserData::FieldChange*)>
@@ -78,21 +95,46 @@ class CollectUserDataActionTest : public content::RenderViewHostTestHarness {
               std::move(collect_user_data_options->confirm_callback)
                   .Run(&user_data_, &user_model_);
             }));
-
-    ON_CALL(mock_website_login_manager_, OnGetLoginsForUrl(_, _))
+    ON_CALL(mock_website_login_manager_, GetLoginsForUrl(_, _))
         .WillByDefault(
             RunOnceCallback<1>(std::vector<WebsiteLoginManager::Login>{
                 WebsiteLoginManager::Login(GURL(kFakeUrl), kFakeUsername)}));
-    ON_CALL(mock_website_login_manager_, OnGetPasswordForLogin(_, _))
+    ON_CALL(mock_website_login_manager_, GetPasswordForLogin(_, _))
         .WillByDefault(RunOnceCallback<1>(true, kFakePassword));
-
-    content::WebContentsTester::For(web_contents())
-        ->SetLastCommittedURL(GURL(kFakeUrl));
     ON_CALL(mock_action_delegate_, GetWebContents())
-        .WillByDefault(Return(web_contents()));
+        .WillByDefault(Return(web_contents_.get()));
+  }
+
+  void ExpectSelectedProfileMatches(const std::string& profile_name,
+                                    const autofill::AutofillProfile* profile) {
+    if (profile == nullptr) {
+      EXPECT_EQ(user_data_.selected_address(profile_name), nullptr);
+      EXPECT_EQ(user_model_.GetSelectedAutofillProfile(profile_name), nullptr);
+      return;
+    }
+
+    EXPECT_EQ(user_data_.selected_address(profile_name)->Compare(*profile), 0);
+    EXPECT_EQ(
+        user_model_.GetSelectedAutofillProfile(profile_name)->Compare(*profile),
+        0);
+  }
+
+  void ExpectSelectedCardMatches(const autofill::CreditCard* card) {
+    if (card == nullptr) {
+      EXPECT_EQ(user_data_.selected_card(), nullptr);
+      EXPECT_EQ(user_model_.GetSelectedCreditCard(), nullptr);
+      return;
+    }
+
+    EXPECT_EQ(user_data_.selected_card()->Compare(*card), 0);
+    EXPECT_EQ(user_model_.GetSelectedCreditCard()->Compare(*card), 0);
   }
 
  protected:
+  content::BrowserTaskEnvironment task_environment_;
+  content::RenderViewHostTestEnabler rvh_test_enabler_;
+  content::TestBrowserContext browser_context_;
+  std::unique_ptr<content::WebContents> web_contents_;
   base::MockCallback<Action::ProcessActionCallback> callback_;
   MockPersonalDataManager mock_personal_data_manager_;
   MockWebsiteLoginManager mock_website_login_manager_;
@@ -278,10 +320,9 @@ TEST_F(CollectUserDataActionTest, SelectLogin) {
   login_option->set_payload("payload");
 
   // Action should fetch the logins, but not the passwords.
-  EXPECT_CALL(mock_website_login_manager_, OnGetLoginsForUrl(GURL(kFakeUrl), _))
+  EXPECT_CALL(mock_website_login_manager_, GetLoginsForUrl(GURL(kFakeUrl), _))
       .Times(1);
-  EXPECT_CALL(mock_website_login_manager_, OnGetPasswordForLogin(_, _))
-      .Times(0);
+  EXPECT_CALL(mock_website_login_manager_, GetPasswordForLogin(_, _)).Times(0);
 
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
@@ -314,14 +355,13 @@ TEST_F(CollectUserDataActionTest, SelectLoginMissingUsername) {
   login_option->mutable_password_manager();
   login_option->set_payload("payload");
 
-  ON_CALL(mock_website_login_manager_, OnGetLoginsForUrl(_, _))
+  ON_CALL(mock_website_login_manager_, GetLoginsForUrl(_, _))
       .WillByDefault(RunOnceCallback<1>(std::vector<WebsiteLoginManager::Login>{
           WebsiteLoginManager::Login(GURL(kFakeUrl), /*username=*/"")}));
   // Action should fetch the logins, but not the passwords.
-  EXPECT_CALL(mock_website_login_manager_, OnGetLoginsForUrl(GURL(kFakeUrl), _))
+  EXPECT_CALL(mock_website_login_manager_, GetLoginsForUrl(GURL(kFakeUrl), _))
       .Times(1);
-  EXPECT_CALL(mock_website_login_manager_, OnGetPasswordForLogin(_, _))
-      .Times(0);
+  EXPECT_CALL(mock_website_login_manager_, GetPasswordForLogin(_, _)).Times(0);
 
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
@@ -361,7 +401,7 @@ TEST_F(CollectUserDataActionTest, LoginChoiceAutomaticIfNoOtherOptions) {
   login_option->mutable_password_manager();
   login_option->set_payload("password_manager");
 
-  ON_CALL(mock_website_login_manager_, OnGetLoginsForUrl(_, _))
+  ON_CALL(mock_website_login_manager_, GetLoginsForUrl(_, _))
       .WillByDefault(
           RunOnceCallback<1>(std::vector<WebsiteLoginManager::Login>{}));
 
@@ -399,7 +439,7 @@ TEST_F(CollectUserDataActionTest,
   login_option->mutable_password_manager();
   login_option->set_payload("password_manager");
 
-  ON_CALL(mock_website_login_manager_, OnGetLoginsForUrl(_, _))
+  ON_CALL(mock_website_login_manager_, GetLoginsForUrl(_, _))
       .WillByDefault(
           RunOnceCallback<1>(std::vector<WebsiteLoginManager::Login>{}));
 
@@ -432,7 +472,7 @@ TEST_F(CollectUserDataActionTest, EarlyActionReturnIfOnlyLoginRequested) {
   login_option->mutable_password_manager();
   login_option->set_payload("password_manager");
 
-  ON_CALL(mock_website_login_manager_, OnGetLoginsForUrl(_, _))
+  ON_CALL(mock_website_login_manager_, GetLoginsForUrl(_, _))
       .WillByDefault(
           RunOnceCallback<1>(std::vector<WebsiteLoginManager::Login>{}));
 
@@ -571,7 +611,7 @@ TEST_F(CollectUserDataActionTest, SelectLoginFailsIfNoOptionAvailable) {
   login_option->mutable_password_manager();
   login_option->set_payload("password_manager");
 
-  ON_CALL(mock_website_login_manager_, OnGetLoginsForUrl(_, _))
+  ON_CALL(mock_website_login_manager_, GetLoginsForUrl(_, _))
       .WillByDefault(
           RunOnceCallback<1>(std::vector<WebsiteLoginManager::Login>{}));
 
@@ -594,52 +634,35 @@ TEST_F(CollectUserDataActionTest, SelectContactDetails) {
 
   autofill::AutofillProfile contact_profile;
   contact_profile.SetRawInfo(autofill::ServerFieldType::NAME_FULL,
-                             base::UTF8ToUTF16("Marion Mitchell Morrison"));
-  contact_profile.SetRawInfo(autofill::ServerFieldType::NAME_FIRST,
-                             base::UTF8ToUTF16("Marion"));
+                             u"Marion Mitchell Morrison");
+  contact_profile.SetRawInfo(autofill::ServerFieldType::NAME_FIRST, u"Marion");
   contact_profile.SetRawInfo(autofill::ServerFieldType::NAME_MIDDLE,
-                             base::UTF8ToUTF16("Mitchell"));
-  contact_profile.SetRawInfo(autofill::ServerFieldType::NAME_LAST,
-                             base::UTF8ToUTF16("Morrison"));
+                             u"Mitchell");
+  contact_profile.SetRawInfo(autofill::ServerFieldType::NAME_LAST, u"Morrison");
   contact_profile.SetRawInfo(autofill::ServerFieldType::EMAIL_ADDRESS,
-                             base::UTF8ToUTF16("marion@me.xyz"));
+                             u"marion@me.xyz");
   contact_profile.SetRawInfo(autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER,
-                             base::UTF8ToUTF16("16505678910"));
+                             u"16505678910");
 
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            user_data_.selected_addresses_[kMemoryLocation] =
-                std::make_unique<autofill::AutofillProfile>(contact_profile);
+            user_model_.SetSelectedAutofillProfile(
+                kMemoryLocation,
+                std::make_unique<autofill::AutofillProfile>(contact_profile),
+                &user_data_);
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, &user_model_);
           }));
 
-  std::vector<std::string> expected_non_empty_fields = {
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_FULL)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_FIRST)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_MIDDLE)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_LAST)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::EMAIL_ADDRESS)),
-      base::NumberToString(static_cast<int>(
-          autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER))};
-
+  EXPECT_CALL(mock_personal_data_manager_, RecordUseOf(_)).Times(1);
   EXPECT_CALL(
       callback_,
       Run(Pointee(AllOf(
           Property(&ProcessedActionProto::status, ACTION_APPLIED),
-          Property(
-              &ProcessedActionProto::collect_user_data_result,
-              AllOf(
-                  Property(&CollectUserDataResultProto::payer_email,
-                           "marion@me.xyz"),
-                  Property(&CollectUserDataResultProto::non_empty_contact_field,
-                           IsSupersetOf(expected_non_empty_fields))))))));
+          Property(&ProcessedActionProto::collect_user_data_result,
+                   AllOf(Property(&CollectUserDataResultProto::payer_email,
+                                  "marion@me.xyz")))))));
 
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
@@ -647,11 +670,10 @@ TEST_F(CollectUserDataActionTest, SelectContactDetails) {
   EXPECT_EQ(user_data_.has_selected_address(kMemoryLocation), true);
   auto* profile = user_data_.selected_address(kMemoryLocation);
   EXPECT_EQ(profile->GetRawInfo(autofill::NAME_FULL),
-            base::UTF8ToUTF16("Marion Mitchell Morrison"));
+            u"Marion Mitchell Morrison");
   EXPECT_EQ(profile->GetRawInfo(autofill::PHONE_HOME_WHOLE_NUMBER),
-            base::UTF8ToUTF16("16505678910"));
-  EXPECT_EQ(profile->GetRawInfo(autofill::EMAIL_ADDRESS),
-            base::UTF8ToUTF16("marion@me.xyz"));
+            u"16505678910");
+  EXPECT_EQ(profile->GetRawInfo(autofill::EMAIL_ADDRESS), u"marion@me.xyz");
 }
 
 TEST_F(CollectUserDataActionTest,
@@ -675,18 +697,16 @@ TEST_F(CollectUserDataActionTest,
       ContactDetailsProto::PHONE_HOME_WHOLE_NUMBER);
   contact_details_proto->set_max_number_full_lines(3);
 
-  EXPECT_CALL(mock_action_delegate_, CollectUserData(_)).Times(1);
-  ON_CALL(mock_action_delegate_, CollectUserData(_))
-      .WillByDefault(
-          Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(collect_user_data_options->contact_summary_max_lines, 2);
-            EXPECT_EQ(collect_user_data_options->contact_full_max_lines, 3);
-            EXPECT_THAT(collect_user_data_options->contact_summary_fields,
-                        ElementsAre(EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER));
-            EXPECT_THAT(
-                collect_user_data_options->contact_full_fields,
-                ElementsAre(NAME_FULL, EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER));
-          }));
+  EXPECT_CALL(mock_action_delegate_, CollectUserData(_))
+      .WillOnce(Invoke([=](CollectUserDataOptions* collect_user_data_options) {
+        EXPECT_EQ(collect_user_data_options->contact_summary_max_lines, 2);
+        EXPECT_EQ(collect_user_data_options->contact_full_max_lines, 3);
+        EXPECT_THAT(collect_user_data_options->contact_summary_fields,
+                    ElementsAre(EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER));
+        EXPECT_THAT(
+            collect_user_data_options->contact_full_fields,
+            ElementsAre(NAME_FULL, EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER));
+      }));
 
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
@@ -704,17 +724,15 @@ TEST_F(CollectUserDataActionTest,
   contact_details_proto->set_request_payer_email(true);
   contact_details_proto->set_request_payer_phone(true);
 
-  EXPECT_CALL(mock_action_delegate_, CollectUserData(_)).Times(1);
-  ON_CALL(mock_action_delegate_, CollectUserData(_))
-      .WillByDefault(
-          Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(collect_user_data_options->contact_summary_max_lines, 1);
-            EXPECT_EQ(collect_user_data_options->contact_full_max_lines, 2);
-            EXPECT_THAT(collect_user_data_options->contact_summary_fields,
-                        ElementsAre(EMAIL_ADDRESS, NAME_FULL));
-            EXPECT_THAT(collect_user_data_options->contact_full_fields,
-                        ElementsAre(NAME_FULL, EMAIL_ADDRESS));
-          }));
+  EXPECT_CALL(mock_action_delegate_, CollectUserData(_))
+      .WillOnce(Invoke([=](CollectUserDataOptions* collect_user_data_options) {
+        EXPECT_EQ(collect_user_data_options->contact_summary_max_lines, 1);
+        EXPECT_EQ(collect_user_data_options->contact_full_max_lines, 2);
+        EXPECT_THAT(collect_user_data_options->contact_summary_fields,
+                    ElementsAre(EMAIL_ADDRESS, NAME_FULL));
+        EXPECT_THAT(collect_user_data_options->contact_full_fields,
+                    ElementsAre(NAME_FULL, EMAIL_ADDRESS));
+      }));
 
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
@@ -741,38 +759,29 @@ TEST_F(CollectUserDataActionTest, SelectPaymentMethod) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            user_data_.selected_card_ =
-                std::make_unique<autofill::CreditCard>(credit_card);
-            user_data_.selected_addresses_["billing_address"] =
-                std::make_unique<autofill::AutofillProfile>(billing_profile);
+            user_model_.SetSelectedCreditCard(
+                std::make_unique<autofill::CreditCard>(credit_card),
+                &user_data_);
+            user_model_.SetSelectedAutofillProfile(
+                "billing_address",
+                std::make_unique<autofill::AutofillProfile>(billing_profile),
+                &user_data_);
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, &user_model_);
           }));
 
-  std::vector<std::string> expected_non_empty_fields = {
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_FIRST)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_MIDDLE)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_LAST))};
-
-  EXPECT_CALL(
-      callback_,
-      Run(Pointee(AllOf(
-          Property(&ProcessedActionProto::status, ACTION_APPLIED),
-          Property(
-              &ProcessedActionProto::collect_user_data_result,
-              AllOf(Property(&CollectUserDataResultProto::card_issuer_network,
-                             "visa"),
-                    Property(&CollectUserDataResultProto::
-                                 non_empty_billing_address_field,
-                             IsSupersetOf(expected_non_empty_fields))))))));
+  EXPECT_CALL(mock_personal_data_manager_, RecordUseOf(_)).Times(2);
+  EXPECT_CALL(callback_,
+              Run(Pointee(AllOf(
+                  Property(&ProcessedActionProto::status, ACTION_APPLIED),
+                  Property(&ProcessedActionProto::collect_user_data_result,
+                           AllOf(Property(
+                               &CollectUserDataResultProto::card_issuer_network,
+                               "visa")))))));
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
 
-  EXPECT_EQ(user_data_.selected_card_.get() != nullptr, true);
-  EXPECT_THAT(user_data_.selected_card_->Compare(credit_card), Eq(0));
+  ExpectSelectedCardMatches(&credit_card);
 }
 
 TEST_F(CollectUserDataActionTest, SelectShippingAddress) {
@@ -790,49 +799,25 @@ TEST_F(CollectUserDataActionTest, SelectShippingAddress) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            user_data_.selected_addresses_[kMemoryLocation] =
-                std::make_unique<autofill::AutofillProfile>(shipping_address);
+            user_model_.SetSelectedAutofillProfile(
+                kMemoryLocation,
+                std::make_unique<autofill::AutofillProfile>(shipping_address),
+                &user_data_);
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, &user_model_);
           }));
 
-  std::vector<std::string> expected_non_empty_fields = {
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_FIRST)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_MIDDLE)),
-      base::NumberToString(
-          static_cast<int>(autofill::ServerFieldType::NAME_LAST))};
-
+  EXPECT_CALL(mock_personal_data_manager_, RecordUseOf(_)).Times(1);
   EXPECT_CALL(
       callback_,
-      Run(Pointee(AllOf(
-          Property(&ProcessedActionProto::status, ACTION_APPLIED),
-          Property(
-              &ProcessedActionProto::collect_user_data_result,
-              Property(
-                  &CollectUserDataResultProto::non_empty_shipping_address_field,
-                  IsSupersetOf(expected_non_empty_fields)))))));
+      Run(Pointee(Property(&ProcessedActionProto::status, ACTION_APPLIED))));
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
 
   EXPECT_TRUE(user_data_.has_selected_address(kMemoryLocation));
-  EXPECT_EQ(user_data_.selected_addresses_[kMemoryLocation]->Compare(
-                shipping_address),
-            0);
-}
-
-TEST_F(CollectUserDataActionTest, MandatoryPostalCodeWithoutErrorMessageFails) {
-  ActionProto action_proto;
-  action_proto.mutable_collect_user_data()->set_request_payment_method(true);
-  action_proto.mutable_collect_user_data()->set_require_billing_postal_code(
-      true);
-
-  EXPECT_CALL(
-      callback_,
-      Run(Pointee(Property(&ProcessedActionProto::status, INVALID_ACTION))));
-  CollectUserDataAction action(&mock_action_delegate_, action_proto);
-  action.ProcessAction(callback_.Get());
+  EXPECT_EQ(
+      user_data_.selected_address(kMemoryLocation)->Compare(shipping_address),
+      0);
 }
 
 TEST_F(CollectUserDataActionTest, ContactDetailsCanHandleUtf8) {
@@ -845,85 +830,90 @@ TEST_F(CollectUserDataActionTest, ContactDetailsCanHandleUtf8) {
   contact_details_proto->set_request_payer_name(true);
   contact_details_proto->set_request_payer_email(true);
 
-  // Name = 艾丽森 in UTF-8.
   autofill::AutofillProfile contact_profile;
-  contact_profile.SetRawInfo(
-      autofill::ServerFieldType::NAME_FULL,
-      base::UTF8ToUTF16("\xE8\x89\xBE\xE4\xB8\xBD\xE6\xA3\xAE"));
-  contact_profile.SetRawInfo(
-      autofill::ServerFieldType::EMAIL_ADDRESS,
-      base::UTF8ToUTF16("\xE8\x89\xBE\xE4\xB8\xBD\xE6\xA3\xAE@example.com"));
+  contact_profile.SetRawInfo(autofill::ServerFieldType::NAME_FULL, u"艾丽森");
+  contact_profile.SetRawInfo(autofill::ServerFieldType::EMAIL_ADDRESS,
+                             u"艾丽森@example.com");
 
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            user_data_.selected_addresses_[kMemoryLocation] =
-                std::make_unique<autofill::AutofillProfile>(contact_profile);
+            user_model_.SetSelectedAutofillProfile(
+                kMemoryLocation,
+                std::make_unique<autofill::AutofillProfile>(contact_profile),
+                &user_data_);
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, &user_model_);
           }));
 
-  EXPECT_CALL(
-      callback_,
-      Run(Pointee(AllOf(
-          Property(&ProcessedActionProto::status, ACTION_APPLIED),
-          Property(
-              &ProcessedActionProto::collect_user_data_result,
-              Property(&CollectUserDataResultProto::payer_email,
-                       "\xE8\x89\xBE\xE4\xB8\xBD\xE6\xA3\xAE@example.com"))))));
+  EXPECT_CALL(callback_,
+              Run(Pointee(AllOf(
+                  Property(&ProcessedActionProto::status, ACTION_APPLIED),
+                  Property(&ProcessedActionProto::collect_user_data_result,
+                           Property(&CollectUserDataResultProto::payer_email,
+                                    "艾丽森@example.com"))))));
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
 
   EXPECT_EQ(user_data_.has_selected_address(kMemoryLocation), true);
   auto* profile = user_data_.selected_address(kMemoryLocation);
-  EXPECT_EQ(profile->GetRawInfo(autofill::NAME_FULL),
-            base::UTF8ToUTF16("\xE8\x89\xBE\xE4\xB8\xBD\xE6\xA3\xAE"));
-  EXPECT_EQ(
-      profile->GetRawInfo(autofill::EMAIL_ADDRESS),
-      base::UTF8ToUTF16("\xE8\x89\xBE\xE4\xB8\xBD\xE6\xA3\xAE@example.com"));
+  EXPECT_EQ(profile->GetRawInfo(autofill::NAME_FULL), u"艾丽森");
+  EXPECT_EQ(profile->GetRawInfo(autofill::EMAIL_ADDRESS),
+            u"艾丽森@example.com");
 }
 
-TEST_F(CollectUserDataActionTest, UserDataComplete_Contact) {
+TEST_F(CollectUserDataActionTest, UserDataCompleteContact) {
   UserData user_data;
   CollectUserDataOptions options;
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 
   options.contact_details_name = "profile";
-  user_data.selected_addresses_["profile"] =
-      std::make_unique<autofill::AutofillProfile>(base::GenerateGUID(),
-                                                  kFakeUrl);
-  options.request_payer_email = true;
+  autofill::AutofillProfile profile(base::GenerateGUID(), kFakeUrl);
+  user_model_.SetSelectedAutofillProfile(
+      "profile", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
+
+  options.required_contact_data_pieces.push_back(
+      MakeRequiredDataPiece(autofill::ServerFieldType::EMAIL_ADDRESS));
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
-  user_data.selected_addresses_["profile"]->SetRawInfo(
-      autofill::ServerFieldType::EMAIL_ADDRESS,
-      base::UTF8ToUTF16("joedoe@example.com"));
+  profile.SetRawInfo(autofill::ServerFieldType::EMAIL_ADDRESS,
+                     u"joedoe@example.com");
+  user_model_.SetSelectedAutofillProfile(
+      "profile", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 
-  options.request_payer_name = true;
+  options.required_contact_data_pieces.push_back(
+      MakeRequiredDataPiece(autofill::ServerFieldType::NAME_FULL));
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
-  user_data.selected_addresses_["profile"]->SetRawInfo(
-      autofill::ServerFieldType::NAME_FULL, base::UTF8ToUTF16("Joe Doe"));
+  profile.SetRawInfo(autofill::ServerFieldType::NAME_FULL, u"Joe Doe");
+  user_model_.SetSelectedAutofillProfile(
+      "profile", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 
-  options.request_payer_phone = true;
+  options.required_contact_data_pieces.push_back(MakeRequiredDataPiece(
+      autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER));
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
-  user_data.selected_addresses_["profile"]->SetRawInfo(
-      autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER,
-      base::UTF8ToUTF16("+1 23 456 789 01"));
+  profile.SetRawInfo(autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER,
+                     u"+1 23 456 789 01");
+  user_model_.SetSelectedAutofillProfile(
+      "profile", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 }
 
-TEST_F(CollectUserDataActionTest, UserDataComplete_Payment) {
+TEST_F(CollectUserDataActionTest, UserDataCompletePayment) {
   UserData user_data;
   CollectUserDataOptions options;
 
@@ -933,59 +923,73 @@ TEST_F(CollectUserDataActionTest, UserDataComplete_Payment) {
                                                          options));
 
   // Valid credit card, but no billing address.
-  user_data.selected_card_ =
-      std::make_unique<autofill::CreditCard>(base::GenerateGUID(), kFakeUrl);
-  autofill::test::SetCreditCardInfo(user_data.selected_card_.get(),
-                                    "Marion Mitchell", "4111 1111 1111 1111",
-                                    "01", "2050",
+  autofill::CreditCard card(base::GenerateGUID(), kFakeUrl);
+  autofill::test::SetCreditCardInfo(&card, "Marion Mitchell",
+                                    "4111 1111 1111 1111", "01", "2050",
                                     /* billing_address_id = */ "");
+  user_model_.SetSelectedCreditCard(
+      std::make_unique<autofill::CreditCard>(card), &user_data);
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
   // Incomplete billing address.
-  user_data.selected_addresses_["billing_address"] =
-      std::make_unique<autofill::AutofillProfile>(base::GenerateGUID(),
-                                                  kFakeUrl);
-  autofill::test::SetProfileInfo(
-      user_data.selected_addresses_["billing_address"].get(), "Marion",
-      "Mitchell", "Morrison", "marion@me.xyz", "Fox", "123 Zoo St.", "unit 5",
-      "Hollywood", "CA",
-      /* zipcode = */ "", "US", "16505678910");
-  user_data.selected_card_->set_billing_address_id(
-      user_data.selected_addresses_["billing_address"]->guid());
+  autofill::AutofillProfile profile(base::GenerateGUID(), kFakeUrl);
+  user_model_.SetSelectedAutofillProfile(
+      "billing_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
+
+  autofill::test::SetProfileInfo(&profile, "Marion", "Mitchell", "Morrison",
+                                 "marion@me.xyz", "Fox", "123 Zoo St.",
+                                 "unit 5", "Hollywood", "CA",
+                                 /* zipcode = */ "", "US", "16505678910");
+
+  user_model_.SetSelectedAutofillProfile(
+      "billing_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
+  card.set_billing_address_id(
+      user_data.selected_address("billing_address")->guid());
+  user_model_.SetSelectedCreditCard(
+      std::make_unique<autofill::CreditCard>(card), &user_data);
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
-  user_data.selected_addresses_["billing_address"]->SetRawInfo(
-      autofill::ADDRESS_HOME_ZIP, base::UTF8ToUTF16("91601"));
+  profile.SetRawInfo(autofill::ADDRESS_HOME_ZIP, u"91601");
+  user_model_.SetSelectedAutofillProfile(
+      "billing_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 
   // Zip code is optional in Argentinian address.
-  user_data.selected_addresses_["billing_address"]->SetRawInfo(
-      autofill::ADDRESS_HOME_ZIP, base::UTF8ToUTF16(""));
-  user_data.selected_addresses_["billing_address"]->SetRawInfo(
-      autofill::ADDRESS_HOME_COUNTRY, base::UTF8ToUTF16("AR"));
+  profile.SetRawInfo(autofill::ADDRESS_HOME_ZIP, u"");
+  profile.SetRawInfo(autofill::ADDRESS_HOME_COUNTRY, u"AR");
+  user_model_.SetSelectedAutofillProfile(
+      "billing_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 
-  options.require_billing_postal_code = true;
+  options.required_billing_address_data_pieces.push_back(
+      MakeRequiredDataPiece(autofill::ServerFieldType::ADDRESS_HOME_ZIP));
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
-  user_data.selected_addresses_["billing_address"]->SetRawInfo(
-      autofill::ADDRESS_HOME_ZIP, base::UTF8ToUTF16("B1675"));
+  profile.SetRawInfo(autofill::ADDRESS_HOME_ZIP, u"B1675");
+  user_model_.SetSelectedAutofillProfile(
+      "billing_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 
   // Expired credit card.
-  user_data.selected_card_->SetRawInfo(autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                                       base::UTF8ToUTF16("2019"));
+  card.SetRawInfo(autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2019");
+  user_model_.SetSelectedCreditCard(
+      std::make_unique<autofill::CreditCard>(card), &user_data);
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 }
 
-TEST_F(CollectUserDataActionTest, UserDataComplete_Terms) {
+TEST_F(CollectUserDataActionTest, UserDataCompleteTerms) {
   UserData user_data;
   CollectUserDataOptions options;
 
@@ -1002,7 +1006,7 @@ TEST_F(CollectUserDataActionTest, UserDataComplete_Terms) {
                                                         options));
 }
 
-TEST_F(CollectUserDataActionTest, UserDataComplete_Login) {
+TEST_F(CollectUserDataActionTest, UserDataCompleteLogin) {
   UserData user_data;
   CollectUserDataOptions options;
 
@@ -1015,33 +1019,49 @@ TEST_F(CollectUserDataActionTest, UserDataComplete_Login) {
                                                         options));
 }
 
-TEST_F(CollectUserDataActionTest, UserDataComplete_ShippingAddress) {
+TEST_F(CollectUserDataActionTest, UserDataCompleteShippingAddress) {
   UserData user_data;
   CollectUserDataOptions options;
   options.request_shipping = true;
   options.shipping_address_name = "shipping_address";
+  options.required_shipping_address_data_pieces.push_back(
+      MakeRequiredDataPiece(autofill::ServerFieldType::EMAIL_ADDRESS));
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
   // Incomplete address.
-  user_data.selected_addresses_["shipping_address"] =
-      std::make_unique<autofill::AutofillProfile>(base::GenerateGUID(),
-                                                  kFakeUrl);
-  autofill::test::SetProfileInfo(
-      user_data.selected_addresses_["shipping_address"].get(), "Marion",
-      "Mitchell", "Morrison", "marion@me.xyz", "Fox", "123 Zoo St.", "unit 5",
-      "Hollywood", "CA",
-      /* zipcode = */ "", "US", "16505678910");
+  autofill::AutofillProfile profile(base::GenerateGUID(), kFakeUrl);
+  user_model_.SetSelectedAutofillProfile(
+      "shipping_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
+  autofill::test::SetProfileInfo(&profile, "Marion", "Mitchell", "Morrison", "",
+                                 "Fox", "123 Zoo St.", "unit 5", "Hollywood",
+                                 "CA",
+                                 /* zipcode = */ "", "US", "16505678910");
+  user_model_.SetSelectedAutofillProfile(
+      "shipping_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                          options));
 
-  user_data.selected_addresses_["shipping_address"]->SetRawInfo(
-      autofill::ADDRESS_HOME_ZIP, base::UTF8ToUTF16("91601"));
+  // Complete for Assistant but not for AddressEditor.
+  profile.SetRawInfo(autofill::EMAIL_ADDRESS, u"marion@me.xyz");
+  user_model_.SetSelectedAutofillProfile(
+      "shipping_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
+  EXPECT_FALSE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
+                                                         options));
+
+  // Complete.
+  profile.SetRawInfo(autofill::ADDRESS_HOME_ZIP, u"91601");
+  user_model_.SetSelectedAutofillProfile(
+      "shipping_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data);
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
                                                         options));
 }
 
-TEST_F(CollectUserDataActionTest, UserDataComplete_DateTimeRange) {
+TEST_F(CollectUserDataActionTest, UserDataCompleteDateTimeRange) {
   UserData user_data;
   CollectUserDataOptions options;
   options.request_date_time_range = true;
@@ -1110,8 +1130,7 @@ TEST_F(CollectUserDataActionTest, UserDataComplete_DateTimeRange) {
                                                         options));
 }
 
-TEST_F(CollectUserDataActionTest,
-       UserDataComplete_ChecksGenericUiCompleteness) {
+TEST_F(CollectUserDataActionTest, UserDataCompleteChecksGenericUiCompleteness) {
   UserData user_data;
   CollectUserDataOptions options;
   EXPECT_TRUE(CollectUserDataAction::IsUserDataComplete(user_data, user_model_,
@@ -1404,7 +1423,7 @@ TEST_F(CollectUserDataActionTest, TextInputSectionWritesToClientMemory) {
           Invoke([this](CollectUserDataOptions* collect_user_data_options) {
             ValueProto value;
             value.mutable_strings()->add_values("modified");
-            user_data_.additional_values_["key2"] = value;
+            user_data_.SetAdditionalValue("key2", value);
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, &user_model_);
           }));
@@ -1430,9 +1449,9 @@ TEST_F(CollectUserDataActionTest, TextInputSectionWritesToClientMemory) {
   input_field_3->set_input_type(TextInputProto::INPUT_ALPHANUMERIC);
   input_field_3->set_client_memory_key("key3");
 
-  EXPECT_FALSE(user_data_.has_additional_value("key1"));
-  EXPECT_FALSE(user_data_.has_additional_value("key2"));
-  EXPECT_FALSE(user_data_.has_additional_value("key3"));
+  EXPECT_FALSE(user_data_.HasAdditionalValue("key1"));
+  EXPECT_FALSE(user_data_.HasAdditionalValue("key2"));
+  EXPECT_FALSE(user_data_.HasAdditionalValue("key3"));
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
 
   EXPECT_CALL(
@@ -1451,9 +1470,9 @@ TEST_F(CollectUserDataActionTest, TextInputSectionWritesToClientMemory) {
   value2.mutable_strings()->add_values("modified");
   ValueProto value3;
   value3.mutable_strings()->add_values("");
-  EXPECT_EQ(*user_data_.additional_value("key1"), value1);
-  EXPECT_EQ(*user_data_.additional_value("key2"), value2);
-  EXPECT_EQ(*user_data_.additional_value("key3"), value3);
+  EXPECT_EQ(*user_data_.GetAdditionalValue("key1"), value1);
+  EXPECT_EQ(*user_data_.GetAdditionalValue("key2"), value2);
+  EXPECT_EQ(*user_data_.GetAdditionalValue("key3"), value3);
 }
 
 TEST_F(CollectUserDataActionTest, AllowedBasicCardNetworks) {
@@ -1473,21 +1492,21 @@ TEST_F(CollectUserDataActionTest, AllowedBasicCardNetworks) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([this](CollectUserDataOptions* collect_user_data_options) {
-            user_data_.selected_addresses_["billing_address"] =
-                std::make_unique<autofill::AutofillProfile>(
-                    base::GenerateGUID(), kFakeUrl);
-            autofill::test::SetProfileInfo(
-                user_data_.selected_addresses_["billing_address"].get(),
-                "Marion", "Mitchell", "Morrison", "marion@me.xyz", "Fox",
-                "123 Zoo St.", "unit 5", "Hollywood", "CA", "96043", "US",
-                "16505678910");
-
-            user_data_.selected_card_ = std::make_unique<autofill::CreditCard>(
-                base::GenerateGUID(), kFakeUrl);
+            autofill::AutofillProfile profile(base::GenerateGUID(), kFakeUrl);
+            autofill::test::SetProfileInfo(&profile, "Marion", "Mitchell",
+                                           "Morrison", "marion@me.xyz", "Fox",
+                                           "123 Zoo St.", "unit 5", "Hollywood",
+                                           "CA", "96043", "US", "16505678910");
+            user_model_.SetSelectedAutofillProfile(
+                "billing_address",
+                std::make_unique<autofill::AutofillProfile>(profile),
+                &user_data_);
+            autofill::CreditCard card(base::GenerateGUID(), kFakeUrl);
             autofill::test::SetCreditCardInfo(
-                user_data_.selected_card_.get(), "Marion Mitchell",
-                "4111 1111 1111 1111", "01", "2050",
-                user_data_.selected_addresses_["billing_address"]->guid());
+                &card, "Marion Mitchell", "4111 1111 1111 1111", "01", "2050",
+                user_data_.selected_address("billing_address")->guid());
+            user_model_.SetSelectedCreditCard(
+                std::make_unique<autofill::CreditCard>(card), &user_data_);
 
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, &user_model_);
@@ -1525,9 +1544,9 @@ TEST_F(CollectUserDataActionTest, OverwriteExistingUserData) {
   value2.mutable_strings()->add_values("val2");
   ValueProto value3;
   value3.mutable_strings()->add_values("val3");
-  user_data_.additional_values_["key1"] = value1;
-  user_data_.additional_values_["key2"] = value2;
-  user_data_.additional_values_["key3"] = value3;
+  user_data_.SetAdditionalValue("key1", value1);
+  user_data_.SetAdditionalValue("key2", value2);
+  user_data_.SetAdditionalValue("key3", value3);
 
   // Set options.
   ActionProto action_proto;
@@ -1564,11 +1583,11 @@ TEST_F(CollectUserDataActionTest, OverwriteExistingUserData) {
   action.ProcessAction(callback_.Get());
 
   EXPECT_EQ(user_data_.terms_and_conditions_, NOT_SELECTED);
-  EXPECT_EQ(user_data_.additional_values_["key1"].strings().values(0),
+  EXPECT_EQ(user_data_.GetAdditionalValue("key1")->strings().values(0),
             "initial");
-  EXPECT_EQ(user_data_.additional_values_["key2"].strings().values(0),
+  EXPECT_EQ(user_data_.GetAdditionalValue("key2")->strings().values(0),
             "initial");
-  EXPECT_EQ(user_data_.additional_values_["key3"].strings().values(0), "val3");
+  EXPECT_EQ(user_data_.GetAdditionalValue("key3")->strings().values(0), "val3");
 }
 
 TEST_F(CollectUserDataActionTest, AttachesProfiles) {
@@ -1587,8 +1606,10 @@ TEST_F(CollectUserDataActionTest, AttachesProfiles) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            user_data_.selected_addresses_[kMemoryLocation] =
-                std::make_unique<autofill::AutofillProfile>(profile);
+            user_model_.SetSelectedAutofillProfile(
+                kMemoryLocation,
+                std::make_unique<autofill::AutofillProfile>(profile),
+                &user_data_);
 
             EXPECT_THAT(user_data_.available_profiles_, SizeIs(1));
             EXPECT_EQ(user_data_.available_profiles_[0]->Compare(profile), 0);
@@ -1627,12 +1648,8 @@ TEST_F(CollectUserDataActionTest, InitialSelectsProfileAndShippingAddress) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(
-                user_data_.selected_addresses_["profile"]->Compare(profile), 0);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["shipping-address"]->Compare(
-                    profile),
-                0);
+            ExpectSelectedProfileMatches("profile", &profile);
+            ExpectSelectedProfileMatches("shipping-address", &profile);
 
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, nullptr);
@@ -1750,9 +1767,7 @@ TEST_F(CollectUserDataActionTest, InitialSelectsProfileFromDefaultEmail) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(
-                user_data_.selected_addresses_["profile"]->Compare(profile_b),
-                0);
+            ExpectSelectedProfileMatches("profile", &profile_b);
 
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, nullptr);
@@ -1792,12 +1807,8 @@ TEST_F(CollectUserDataActionTest, KeepsSelectedProfileAndShippingAddress) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(
-                user_data_.selected_addresses_["profile"]->Compare(profile), 0);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["shipping_address"]->Compare(
-                    profile),
-                0);
+            ExpectSelectedProfileMatches("profile", &profile);
+            ExpectSelectedProfileMatches("shipping_address", &profile);
 
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, nullptr);
@@ -1812,10 +1823,12 @@ TEST_F(CollectUserDataActionTest, KeepsSelectedProfileAndShippingAddress) {
   contact_details->set_contact_details_name("profile");
 
   // Set previous user data.
-  user_data_.selected_addresses_["profile"] =
-      std::make_unique<autofill::AutofillProfile>(profile);
-  user_data_.selected_addresses_["shipping_address"] =
-      std::make_unique<autofill::AutofillProfile>(profile);
+  user_model_.SetSelectedAutofillProfile(
+      "profile", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data_);
+  user_model_.SetSelectedAutofillProfile(
+      "shipping_address", std::make_unique<autofill::AutofillProfile>(profile),
+      &user_data_);
 
   EXPECT_CALL(
       callback_,
@@ -1840,11 +1853,8 @@ TEST_F(CollectUserDataActionTest, ResetsContactAndShippingIfNoLongerInList) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(user_data_.selected_addresses_["profile"], nullptr);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["shipping_address"]->Compare(
-                    profile),
-                0);
+            ExpectSelectedProfileMatches("profile", nullptr);
+            ExpectSelectedProfileMatches("shipping_address", &profile);
 
             // Do not call the callback. We're only interested in the state.
           }));
@@ -1863,10 +1873,13 @@ TEST_F(CollectUserDataActionTest, ResetsContactAndShippingIfNoLongerInList) {
                                  "berta.west@gmail.com", "", "", "", "", "", "",
                                  "", "");
 
-  user_data_.selected_addresses_["profile"] =
-      std::make_unique<autofill::AutofillProfile>(selected_profile);
-  user_data_.selected_addresses_["shipping_address"] =
-      std::make_unique<autofill::AutofillProfile>(selected_profile);
+  user_model_.SetSelectedAutofillProfile(
+      "profile", std::make_unique<autofill::AutofillProfile>(selected_profile),
+      &user_data_);
+  user_model_.SetSelectedAutofillProfile(
+      "shipping_address",
+      std::make_unique<autofill::AutofillProfile>(selected_profile),
+      &user_data_);
 
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
@@ -2031,11 +2044,8 @@ TEST_F(CollectUserDataActionTest, InitialSelectsCardAndAddress) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(user_data_.selected_card_->Compare(card_with_address), 0);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["billing_address"]->Compare(
-                    billing_address),
-                0);
+            ExpectSelectedCardMatches(&card_with_address);
+            ExpectSelectedProfileMatches("billing_address", &billing_address);
 
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, nullptr);
@@ -2081,11 +2091,8 @@ TEST_F(CollectUserDataActionTest, KeepsSelectedCardAndAddress) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(user_data_.selected_card_->Compare(card_with_address), 0);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["billing_address"]->Compare(
-                    billing_address),
-                0);
+            ExpectSelectedCardMatches(&card_with_address);
+            ExpectSelectedProfileMatches("billing_address", &billing_address);
 
             std::move(collect_user_data_options->confirm_callback)
                 .Run(&user_data_, nullptr);
@@ -2098,10 +2105,13 @@ TEST_F(CollectUserDataActionTest, KeepsSelectedCardAndAddress) {
   collect_user_data->set_billing_address_name("billing_address");
 
   // Set previous user data.
-  user_data_.selected_card_ =
-      std::make_unique<autofill::CreditCard>(card_with_address);
-  user_data_.selected_addresses_["billing_address"] =
-      std::make_unique<autofill::AutofillProfile>(billing_address);
+  user_model_.SetSelectedCreditCard(
+      std::make_unique<autofill::CreditCard>(card_with_address), &user_data_);
+
+  user_model_.SetSelectedAutofillProfile(
+      "billing_address",
+      std::make_unique<autofill::AutofillProfile>(billing_address),
+      &user_data_);
 
   EXPECT_CALL(
       callback_,
@@ -2136,9 +2146,8 @@ TEST_F(CollectUserDataActionTest, ResetsCardAndAddressIfNoLongerInList) {
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(user_data_.selected_card_, nullptr);
-            EXPECT_EQ(user_data_.selected_addresses_["billing_address"],
-                      nullptr);
+            ExpectSelectedCardMatches(nullptr);
+            ExpectSelectedProfileMatches("billing_address", nullptr);
 
             // Do not call the callback. We're only interested in the state.
           }));
@@ -2159,10 +2168,12 @@ TEST_F(CollectUserDataActionTest, ResetsCardAndAddressIfNoLongerInList) {
       &selected_address, "Berta", "", "West", "berta.west@gmail.com", "",
       "Baker Street 221b", "", "London", "", "WC2N 5DU", "UK", "+44");
 
-  user_data_.selected_card_ =
-      std::make_unique<autofill::CreditCard>(selected_card);
-  user_data_.selected_addresses_["billing_address"] =
-      std::make_unique<autofill::AutofillProfile>(selected_address);
+  user_model_.SetSelectedCreditCard(
+      std::make_unique<autofill::CreditCard>(selected_card), &user_data_);
+  user_model_.SetSelectedAutofillProfile(
+      "billing_address",
+      std::make_unique<autofill::AutofillProfile>(selected_address),
+      &user_data_);
 
   CollectUserDataAction action(&mock_action_delegate_, action_proto);
   action.ProcessAction(callback_.Get());
@@ -2238,6 +2249,8 @@ TEST_F(CollectUserDataActionTest, GenericUiModelWritesToProtoResult) {
 }
 
 TEST_F(CollectUserDataActionTest, ClearUserDataIfRequested) {
+  base::Time current = base::Time::Now();
+
   ON_CALL(mock_personal_data_manager_, IsAutofillCreditCardEnabled)
       .WillByDefault(Return(true));
   ON_CALL(mock_personal_data_manager_, IsAutofillProfileEnabled)
@@ -2245,52 +2258,51 @@ TEST_F(CollectUserDataActionTest, ClearUserDataIfRequested) {
   ON_CALL(mock_personal_data_manager_, ShouldSuggestServerCards)
       .WillByDefault(Return(true));
 
-  autofill::AutofillProfile address_a;
-  autofill::test::SetProfileInfo(&address_a, "Adam", "", "West",
+  autofill::AutofillProfile address_new;
+  autofill::test::SetProfileInfo(&address_new, "Adam", "", "West",
                                  "adam.west@gmail.com", "", "Baker Street 221b",
                                  "", "London", "", "WC2N 5DU", "UK", "+44");
-  autofill::AutofillProfile address_b;
+  address_new.set_use_date(current);
+
+  autofill::AutofillProfile address_old;
   autofill::test::SetProfileInfo(
-      &address_b, "Berta", "", "West", "berta.west@gmail.com", "",
+      &address_old, "Berta", "", "West", "berta.west@gmail.com", "",
       "Baker Street 221b", "", "London", "", "WC2N 5DU", "UK", "+44");
+  address_old.set_use_date(current - base::TimeDelta::FromDays(2));
 
-  ON_CALL(mock_personal_data_manager_, GetProfileByGUID("card_a"))
-      .WillByDefault(Return(&address_a));
-  ON_CALL(mock_personal_data_manager_, GetProfileByGUID("card_b"))
-      .WillByDefault(Return(&address_b));
+  ON_CALL(mock_personal_data_manager_, GetProfileByGUID("card_new"))
+      .WillByDefault(Return(&address_new));
+  ON_CALL(mock_personal_data_manager_, GetProfileByGUID("card_old"))
+      .WillByDefault(Return(&address_old));
 
-  autofill::CreditCard card_a;
-  autofill::test::SetCreditCardInfo(&card_a, "Adam West", "4111111111111111",
+  autofill::CreditCard card_new;
+  autofill::test::SetCreditCardInfo(&card_new, "Adam West", "4111111111111111",
                                     "1", "2050",
-                                    /* billing_address_id= */ "card_a");
+                                    /* billing_address_id= */ "card_new");
+  card_new.set_use_date(current);
 
-  autofill::CreditCard card_b;
-  autofill::test::SetCreditCardInfo(&card_b, "Berta West", "4111111111111111",
+  autofill::CreditCard card_old;
+  autofill::test::SetCreditCardInfo(&card_old, "Berta West", "4111111111111111",
                                     "1", "2050",
-                                    /* billing_address_id= */ "card_b");
+                                    /* billing_address_id= */ "card_old");
+  card_old.set_use_date(current - base::TimeDelta::FromDays(2));
 
   ON_CALL(mock_personal_data_manager_, GetCreditCards())
       .WillByDefault(
-          Return(std::vector<autofill::CreditCard*>({&card_a, &card_b})));
+          Return(std::vector<autofill::CreditCard*>({&card_new, &card_old})));
 
   ON_CALL(mock_personal_data_manager_, GetProfiles)
-      .WillByDefault(Return(
-          std::vector<autofill::AutofillProfile*>({&address_a, &address_b})));
+      .WillByDefault(Return(std::vector<autofill::AutofillProfile*>(
+          {&address_new, &address_old})));
 
   ON_CALL(mock_action_delegate_, CollectUserData(_))
       .WillByDefault(
           Invoke([=](CollectUserDataOptions* collect_user_data_options) {
-            EXPECT_EQ(user_data_.selected_card_->Compare(card_a), 0);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["billing"]->Compare(address_a),
-                0);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["contact"]->Compare(address_a),
-                0);
-            EXPECT_EQ(
-                user_data_.selected_addresses_["shipping"]->Compare(address_a),
-                0);
-            EXPECT_EQ(user_data_.selected_login_, base::nullopt);
+            ExpectSelectedCardMatches(&card_new);
+            ExpectSelectedProfileMatches("billing", &address_new);
+            ExpectSelectedProfileMatches("contact", &address_new);
+            ExpectSelectedProfileMatches("shipping", &address_new);
+            EXPECT_EQ(user_data_.selected_login_, absl::nullopt);
 
             // Do not call the callback. We're only interested in the state.
           }));
@@ -2313,13 +2325,17 @@ TEST_F(CollectUserDataActionTest, ClearUserDataIfRequested) {
 
   // Set previous user data to the second card/profile. If clear works
   // correctly, the action should default to the first card/profile.
-  user_data_.selected_card_ = std::make_unique<autofill::CreditCard>(card_b);
-  user_data_.selected_addresses_["billing"] =
-      std::make_unique<autofill::AutofillProfile>(address_b);
-  user_data_.selected_addresses_["contact"] =
-      std::make_unique<autofill::AutofillProfile>(address_b);
-  user_data_.selected_addresses_["shipping"] =
-      std::make_unique<autofill::AutofillProfile>(address_b);
+  user_model_.SetSelectedCreditCard(
+      std::make_unique<autofill::CreditCard>(card_old), &user_data_);
+  user_model_.SetSelectedAutofillProfile(
+      "billing", std::make_unique<autofill::AutofillProfile>(address_old),
+      &user_data_);
+  user_model_.SetSelectedAutofillProfile(
+      "contact", std::make_unique<autofill::AutofillProfile>(address_old),
+      &user_data_);
+  user_model_.SetSelectedAutofillProfile(
+      "shipping", std::make_unique<autofill::AutofillProfile>(address_old),
+      &user_data_);
   user_data_.selected_login_ =
       WebsiteLoginManager::Login(GURL("http://www.example.com"), "username");
 
@@ -2343,7 +2359,7 @@ TEST_F(CollectUserDataActionTest, LinkClickWritesPartialUserData) {
           Invoke([this](CollectUserDataOptions* collect_user_data_options) {
             ValueProto value;
             value.mutable_strings()->add_values("modified");
-            user_data_.additional_values_["key1"] = value;
+            user_data_.SetAdditionalValue("key1", value);
             std::move(collect_user_data_options->terms_link_callback)
                 .Run(1, &user_data_, &user_model_);
           }));

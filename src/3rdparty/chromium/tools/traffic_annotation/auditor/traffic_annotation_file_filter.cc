@@ -13,7 +13,6 @@
 #include "base/process/launch.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -34,7 +33,6 @@ const char* kRelevantKeywords[] = {
     "BranchedCompleteNetworkTrafficAnnotation",
     "CreateMutableNetworkTrafficAnnotationTag",
     "NO_TRAFFIC_ANNOTATION_YET",
-    "NO_PARTIAL_TRAFFIC_ANNOTATION_YET",
     "MISSING_TRAFFIC_ANNOTATION",
     "TRAFFIC_ANNOTATION_FOR_TESTS",
     "PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS",

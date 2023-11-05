@@ -98,9 +98,9 @@ class AbstractPreferenceMergeTest : public testing::Test {
     ASSERT_TRUE(pref);
     base::Value::Type type = pref->GetType();
     if (type == base::Value::Type::DICTIONARY)
-      empty_value.reset(new base::DictionaryValue);
+      empty_value = std::make_unique<base::DictionaryValue>();
     else if (type == base::Value::Type::LIST)
-      empty_value.reset(new base::ListValue);
+      empty_value = std::make_unique<base::ListValue>();
     else
       FAIL();
     pref_service_->Set(pref_name.c_str(), *empty_value);
@@ -249,12 +249,12 @@ TEST_F(ListPreferenceMergeTest, Equals) {
     local_list_value->AppendString(server_url1_);
   }
 
-  std::unique_ptr<base::Value> original(server_url_list_.DeepCopy());
+  base::Value original = server_url_list_.Clone();
   const PrefService::Preference* pref =
       pref_service_->FindPreference(kListPrefName);
   std::unique_ptr<base::Value> merged_value(pref_sync_service_->MergePreference(
       pref->name(), *pref->GetValue(), server_url_list_));
-  EXPECT_TRUE(merged_value->Equals(original.get()));
+  EXPECT_TRUE(*merged_value == original);
 }
 
 class DictionaryPreferenceMergeTest : public AbstractPreferenceMergeTest {

@@ -4,7 +4,7 @@
 
 #include "components/safe_browsing/core/common/safebrowsing_constants.h"
 
-#include "components/safe_browsing/core/features.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "net/base/net_errors.h"
 
 namespace safe_browsing {
@@ -19,6 +19,11 @@ const char kCustomCancelReasonForURLLoader[] = "SafeBrowsing";
 const int kNetErrorCodeForSafeBrowsing = net::ERR_BLOCKED_BY_CLIENT;
 
 const char kSafeBrowsingEnabledHistogramName[] = "SafeBrowsing.Pref.General";
+
+const char kArtificialCachedPhishGuardVerdictFlag[] =
+    "mark_as_phish_guard_phishing";
+
+const char kAuthHeaderBearer[] = "Bearer ";
 
 const std::vector<std::string> GetExcludedCountries() {
   // Safe Browsing endpoint doesn't exist.

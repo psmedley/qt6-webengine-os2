@@ -5,7 +5,6 @@
 #ifndef CONTENT_BROWSER_SMS_SMS_PARSER_H_
 #define CONTENT_BROWSER_SMS_SMS_PARSER_H_
 
-#include "base/optional.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/sms_fetcher.h"
 #include "url/origin.h"

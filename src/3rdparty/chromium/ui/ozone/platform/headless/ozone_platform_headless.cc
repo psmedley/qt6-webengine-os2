@@ -86,6 +86,7 @@ class OzonePlatformHeadless : public OzonePlatform {
   std::unique_ptr<PlatformScreen> CreateScreen() override {
     return std::make_unique<HeadlessScreen>();
   }
+  void InitScreen(PlatformScreen* screen) override {}
   std::unique_ptr<InputMethod> CreateInputMethod(
       internal::InputMethodDelegate* delegate,
       gfx::AcceleratedWidget widget) override {
@@ -135,6 +136,7 @@ OzonePlatform* CreateOzonePlatformHeadless() {
   if (cmd->HasSwitch(switches::kOzoneDumpFile))
     location = cmd->GetSwitchValuePath(switches::kOzoneDumpFile);
   cmd->AppendSwitch(switches::kDisableRunningAsSystemCompositor);
+
   return new OzonePlatformHeadless(location);
 }
 

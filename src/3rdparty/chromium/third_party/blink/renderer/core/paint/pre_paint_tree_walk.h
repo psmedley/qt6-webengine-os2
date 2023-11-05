@@ -5,23 +5,27 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PRE_PAINT_TREE_WALK_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PRE_PAINT_TREE_WALK_H_
 
-#include "third_party/blink/renderer/core/paint/clip_rect.h"
+#include "base/dcheck_is_on.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/paint/paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_builder.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
 
 class LayoutObject;
 class LocalFrameView;
-class NGFragmentChildIterator;
+struct NGLink;
+class NGPhysicalBoxFragment;
+class NGPhysicalFragment;
 
 // This class walks the whole layout tree, beginning from the root
 // LocalFrameView, across frame boundaries. Helper classes are called for each
 // tree node to perform actual actions.  It expects to be invoked in InPrePaint
 // phase.
-class CORE_EXPORT PrePaintTreeWalk {
-  DISALLOW_NEW();
+class CORE_EXPORT PrePaintTreeWalk final {
+  STACK_ALLOCATED();
 
  public:
   PrePaintTreeWalk() = default;
@@ -30,58 +34,23 @@ class CORE_EXPORT PrePaintTreeWalk {
   static bool ObjectRequiresPrePaint(const LayoutObject&);
   static bool ObjectRequiresTreeBuilderContext(const LayoutObject&);
 
- private:
-  friend PaintInvalidatorContext::ParentContextAccessor;
+  struct ContainingFragment {
+    const NGPhysicalBoxFragment* fragment = nullptr;
+    wtf_size_t fragmentainer_idx = WTF::kNotFound;
+  };
 
-  // PrePaintTreewalkContext is large and can lead to stack overflows
-  // when recursion is deep so these context objects are allocated on the heap.
-  // See: https://crbug.com/698653.
-  struct PrePaintTreeWalkContext {
-    PrePaintTreeWalkContext() { tree_builder_context.emplace(); }
-    PrePaintTreeWalkContext(
-        const PrePaintTreeWalkContext& parent_context,
-        const PaintInvalidatorContext::ParentContextAccessor&
-            parent_context_accessor,
-        bool needs_tree_builder_context)
-        : paint_invalidator_context(parent_context_accessor),
-          ancestor_scroll_container_paint_layer(
-              parent_context.ancestor_scroll_container_paint_layer),
-          inside_blocking_touch_event_handler(
-              parent_context.inside_blocking_touch_event_handler),
-          effective_allowed_touch_action_changed(
-              parent_context.effective_allowed_touch_action_changed),
-          inside_blocking_wheel_event_handler(
-              parent_context.inside_blocking_wheel_event_handler),
-          blocking_wheel_event_handler_changed(
-              parent_context.blocking_wheel_event_handler_changed),
-          clip_changed(parent_context.clip_changed),
-          paint_invalidation_container(
-              parent_context.paint_invalidation_container),
-          paint_invalidation_container_for_stacked_contents(
-              parent_context
-                  .paint_invalidation_container_for_stacked_contents) {
-      if (needs_tree_builder_context || DCHECK_IS_ON()) {
-        DCHECK(parent_context.tree_builder_context);
-        tree_builder_context.emplace(*parent_context.tree_builder_context);
-      }
-#if DCHECK_IS_ON()
-      if (needs_tree_builder_context)
-        DCHECK(parent_context.tree_builder_context->is_actually_needed);
-      tree_builder_context->is_actually_needed = needs_tree_builder_context;
-#endif
-    }
+  // This provides a default base copy constructor for PrePaintTreeWalkContext.
+  // It contains all fields except for tree_builder_context which needs special
+  // treatment in the copy constructor.
+  struct PrePaintTreeWalkContextBase {
+    STACK_ALLOCATED();
 
-    base::Optional<PaintPropertyTreeBuilderContext> tree_builder_context;
+   protected:
+    PrePaintTreeWalkContextBase() = default;
+    PrePaintTreeWalkContextBase(const PrePaintTreeWalkContextBase&) = default;
+
+   public:
     PaintInvalidatorContext paint_invalidator_context;
-
-    bool NeedsTreeBuilderContext() const {
-#if DCHECK_IS_ON()
-      DCHECK(tree_builder_context);
-      return tree_builder_context->is_actually_needed;
-#else
-      return tree_builder_context.has_value();
-#endif
-    }
 
     // The ancestor in the PaintLayer tree which is a scroll container. Note
     // that it is tree ancestor, not containing block or stacking ancestor.
@@ -107,9 +76,60 @@ class CORE_EXPORT PrePaintTreeWalk {
     // enabled.
     bool clip_changed = false;
 
+    // True if we're fragment-traversing an object whose fragment wasn't found
+    // and walked when walking the layout object tree. This may happen for
+    // out-of-flow positioned and floated fragments inside block fragmentation,
+    // when an ancestor object doesn't have a fragment representation in a
+    // fragmentainer even if the OOF / float is there.
+    bool is_inside_orphaned_object = false;
+
     const LayoutBoxModelObject* paint_invalidation_container = nullptr;
     const LayoutBoxModelObject*
         paint_invalidation_container_for_stacked_contents = nullptr;
+
+    ContainingFragment current_fragmentainer;
+    ContainingFragment absolute_positioned_container;
+    ContainingFragment fixed_positioned_container;
+
+    // When walking down the tree and discovering containers for OOFs, not every
+    // such container has the fragment actually containing OOF descendants; they
+    // may instead be inside a fragment generated by a parent (this happens for
+    // inline continuations, for instance). So keep track of the innermost valid
+    // container fragment for OOFs, and set
+    // absolute_positioned_container_fragment and
+    // fixed_positioned_container_fragment to this one as appropriate.
+    const NGPhysicalBoxFragment* oof_container_candidate_fragment = nullptr;
+  };
+
+  struct PrePaintTreeWalkContext : public PrePaintTreeWalkContextBase {
+    PrePaintTreeWalkContext() { tree_builder_context.emplace(); }
+    PrePaintTreeWalkContext(const PrePaintTreeWalkContext& parent_context,
+                            bool needs_tree_builder_context)
+        : PrePaintTreeWalkContextBase(parent_context) {
+      if (needs_tree_builder_context || DCHECK_IS_ON()) {
+        DCHECK(parent_context.tree_builder_context);
+        tree_builder_context.emplace(*parent_context.tree_builder_context);
+      }
+#if DCHECK_IS_ON()
+      if (needs_tree_builder_context)
+        DCHECK(parent_context.tree_builder_context->is_actually_needed);
+      tree_builder_context->is_actually_needed = needs_tree_builder_context;
+#endif
+    }
+
+    PrePaintTreeWalkContext(const PrePaintTreeWalkContext&) = delete;
+    PrePaintTreeWalkContext& operator=(const PrePaintTreeWalkContext&) = delete;
+
+    bool NeedsTreeBuilderContext() const {
+#if DCHECK_IS_ON()
+      DCHECK(tree_builder_context);
+      return tree_builder_context->is_actually_needed;
+#else
+      return tree_builder_context.has_value();
+#endif
+    }
+
+    absl::optional<PaintPropertyTreeBuilderContext> tree_builder_context;
   };
 
   static bool ContextRequiresChildPrePaint(const PrePaintTreeWalkContext&);
@@ -121,12 +141,20 @@ class CORE_EXPORT PrePaintTreeWalk {
                                     const PrePaintTreeWalkContext&);
 #endif
 
-  const PrePaintTreeWalkContext& ContextAt(wtf_size_t index) {
-    DCHECK_LT(index, context_storage_.size());
-    return context_storage_[index];
-  }
+  // Upon entering a child LayoutObject, create an NGPrePaintInfo, and populate
+  // everything except its FragmentData. We need to get a bit further inside the
+  // child (WalkInternal()) before we can set up FragmentData (if we get there
+  // at all).
+  NGPrePaintInfo CreatePrePaintInfo(const NGLink& child,
+                                    const PrePaintTreeWalkContext& context);
 
-  void Walk(LocalFrameView&);
+  // Locate and/or set up a FragmentData object for the current object /
+  // physical fragment.
+  FragmentData* GetOrCreateFragmentData(const LayoutObject&,
+                                        const PrePaintTreeWalkContext&,
+                                        const NGPrePaintInfo&);
+
+  void Walk(LocalFrameView&, const PrePaintTreeWalkContext& parent_context);
 
   // This is to minimize stack frame usage during recursion. Modern compilers
   // (MSVC in particular) can inline across compilation units, resulting in
@@ -134,14 +162,44 @@ class CORE_EXPORT PrePaintTreeWalk {
   // makes sure the stack frame is freed prior to making a recursive call.
   // See https://crbug.com/781301 .
   NOINLINE void WalkInternal(const LayoutObject&,
-                             const NGFragmentChildIterator*,
-                             PrePaintTreeWalkContext&);
-  void WalkNGChildren(const LayoutObject* parent, NGFragmentChildIterator*);
-  void WalkLegacyChildren(const LayoutObject&);
-  void WalkChildren(const LayoutObject*, const NGFragmentChildIterator*);
-  void Walk(const LayoutObject&, const NGFragmentChildIterator*);
+                             PrePaintTreeWalkContext&,
+                             NGPrePaintInfo*);
+
+  // Add any "missable" children to a list. Missable children are children that
+  // we might not find during LayoutObject traversal. This happens when an
+  // ancestor LayoutObject (of the missable child) has no fragment inside a
+  // given fragmentainer, e.g. when there's an OOF fragment, but its containing
+  // block has no fragment inside that fragmentainer. Later, during the child
+  // walk, when a missable child is actually walked, it's removed from the
+  // list.
+  //
+  // Returns true if there are any missable children inside the fragment, false
+  // otherwise.
+  bool CollectMissableChildren(PrePaintTreeWalkContext&,
+                               const NGPhysicalBoxFragment&);
+
+  // Walk any missed children (i.e. those collected by CollectMissableChildren()
+  // and not walked by Walk()) after child object traversal.
+  void WalkMissedChildren(const NGPhysicalBoxFragment&,
+                          PrePaintTreeWalkContext&);
+
+  void WalkFragmentationContextRootChildren(const LayoutObject&,
+                                            const NGPhysicalBoxFragment&,
+                                            PrePaintTreeWalkContext&);
+  void WalkLayoutObjectChildren(const LayoutObject&,
+                                const NGPhysicalBoxFragment*,
+                                PrePaintTreeWalkContext&);
+  void WalkChildren(const LayoutObject&,
+                    const NGPhysicalBoxFragment*,
+                    PrePaintTreeWalkContext&,
+                    bool is_inside_fragment_child = false);
+  void Walk(const LayoutObject&,
+            const PrePaintTreeWalkContext& parent_context,
+            NGPrePaintInfo*);
 
   bool NeedsTreeBuilderContextUpdate(const LocalFrameView&,
+                                     const PrePaintTreeWalkContext&);
+  bool NeedsTreeBuilderContextUpdate(const LayoutObject&,
                                      const PrePaintTreeWalkContext&);
   void UpdateAuxiliaryObjectProperties(const LayoutObject&,
                                        PrePaintTreeWalkContext&);
@@ -158,15 +216,27 @@ class CORE_EXPORT PrePaintTreeWalk {
   void InvalidatePaintForHitTesting(const LayoutObject&,
                                     PrePaintTreeWalkContext&);
 
-  void ResizeContextStorageIfNeeded();
-
   void UpdatePaintInvalidationContainer(const LayoutObject& object,
                                         const PaintLayer* painting_layer,
                                         PrePaintTreeWalkContext& context,
                                         bool is_ng_painting);
 
   PaintInvalidator paint_invalidator_;
-  Vector<PrePaintTreeWalkContext> context_storage_;
+
+  // List of fragments that may be missed during LayoutObject walking. See
+  // CollectMissableChildren() and WalkMissedChildren().
+  HashSet<const NGPhysicalFragment*> pending_missables_;
+
+  // List of fixedpos objects that may be missed during fragment traversal. This
+  // can happen if a fixedpos is nested in another OOF inside a multicol, and
+  // the OOF parent is a pending missable (see |pending_missables_|). If that
+  // fixedpos' containing block is located outside of the multicol, we can would
+  // miss it during normal fragment traversal.
+  HashSet<const LayoutObject*> pending_fixedpos_missables_;
+
+  // List of fixedpos objects that have already been walked. This helps to avoid
+  // re-walking any fixedpos objects handled by |pending_fixedpos_missables_|.
+  HashSet<const LayoutObject*> walked_fixedpos_;
 
   // TODO(https://crbug.com/841364): Remove is_wheel_event_regions_enabled
   // argument once kWheelEventRegions feature flag is removed.

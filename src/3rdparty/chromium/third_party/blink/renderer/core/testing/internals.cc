@@ -30,12 +30,11 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
-#include "base/optional.h"
 #include "base/process/process_handle.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/trees/layer_tree_host.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/widget/device_emulation_params.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
 #include "third_party/blink/public/mojom/favicon/favicon_url.mojom-blink.h"
@@ -50,7 +49,6 @@
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/properties/css_unresolved_property.h"
-#include "third_party/blink/renderer/core/css/select_rule_feature_set.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
@@ -97,8 +95,10 @@
 #include "third_party/blink/renderer/core/geometry/dom_point.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect_list.h"
+#include "third_party/blink/renderer/core/html/canvas/canvas_context_creation_attributes_core.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_font_cache.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
+#include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -122,6 +122,7 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/loader/history_item.h"
+#include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -138,6 +139,7 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/script/import_map.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
+#include "third_party/blink/renderer/core/scroll/mac_scrollbar_animator.h"
 #include "third_party/blink/renderer/core/scroll/programmatic_scroll_animator.h"
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
@@ -194,6 +196,7 @@
 #include "third_party/blink/renderer/platform/wtf/dtoa.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding_registry.h"
+#include "third_party/blink/renderer/platform/wtf/threading.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-blink.h"
 #include "ui/base/ui_base_features.h"
@@ -208,11 +211,14 @@ namespace {
 
 std::unique_ptr<ScopedMockOverlayScrollbars> g_mock_overlay_scrollbars;
 
-class UseCounterHelperObserverImpl final : public UseCounterHelper::Observer {
+class UseCounterImplObserverImpl final : public UseCounterImpl::Observer {
  public:
-  UseCounterHelperObserverImpl(ScriptPromiseResolver* resolver,
-                               WebFeature feature)
+  UseCounterImplObserverImpl(ScriptPromiseResolver* resolver,
+                             WebFeature feature)
       : resolver_(resolver), feature_(feature) {}
+  UseCounterImplObserverImpl(const UseCounterImplObserverImpl&) = delete;
+  UseCounterImplObserverImpl& operator=(const UseCounterImplObserverImpl&) =
+      delete;
 
   bool OnCountFeature(WebFeature feature) final {
     if (feature_ != feature)
@@ -222,14 +228,13 @@ class UseCounterHelperObserverImpl final : public UseCounterHelper::Observer {
   }
 
   void Trace(Visitor* visitor) const override {
-    UseCounterHelper::Observer::Trace(visitor);
+    UseCounterImpl::Observer::Trace(visitor);
     visitor->Trace(resolver_);
   }
 
  private:
   Member<ScriptPromiseResolver> resolver_;
   WebFeature feature_;
-  DISALLOW_COPY_AND_ASSIGN(UseCounterHelperObserverImpl);
 };
 
 class TestReadableStreamSource : public UnderlyingSourceBase {
@@ -254,9 +259,9 @@ class TestReadableStreamSource : public UnderlyingSourceBase {
    public:
     explicit Generator(int max_count) : max_count_(max_count) {}
 
-    base::Optional<int> Generate() {
+    absl::optional<int> Generate() {
       if (count_ >= max_count_) {
-        return base::nullopt;
+        return absl::nullopt;
       }
       ++count_;
       return current_++;
@@ -601,7 +606,7 @@ TestWritableStreamSink::Optimizer::PerformInProcessOptimization(
 
 }  // namespace
 
-static base::Optional<DocumentMarker::MarkerType> MarkerTypeFrom(
+static absl::optional<DocumentMarker::MarkerType> MarkerTypeFrom(
     const String& marker_type) {
   if (EqualIgnoringASCIICase(marker_type, "Spelling"))
     return DocumentMarker::kSpelling;
@@ -615,16 +620,16 @@ static base::Optional<DocumentMarker::MarkerType> MarkerTypeFrom(
     return DocumentMarker::kActiveSuggestion;
   if (EqualIgnoringASCIICase(marker_type, "Suggestion"))
     return DocumentMarker::kSuggestion;
-  return base::nullopt;
+  return absl::nullopt;
 }
 
-static base::Optional<DocumentMarker::MarkerTypes> MarkerTypesFrom(
+static absl::optional<DocumentMarker::MarkerTypes> MarkerTypesFrom(
     const String& marker_type) {
   if (marker_type.IsEmpty() || EqualIgnoringASCIICase(marker_type, "all"))
     return DocumentMarker::MarkerTypes::All();
-  base::Optional<DocumentMarker::MarkerType> type = MarkerTypeFrom(marker_type);
+  absl::optional<DocumentMarker::MarkerType> type = MarkerTypeFrom(marker_type);
   if (!type)
-    return base::nullopt;
+    return absl::nullopt;
   return DocumentMarker::MarkerTypes(type.value());
 }
 
@@ -665,8 +670,6 @@ void Internals::ResetToConsistentState(Page* page) {
   frame->View()->LayoutViewport()->SetScrollOffset(
       ScrollOffset(), mojom::blink::ScrollType::kProgrammatic);
   OverrideUserPreferredLanguagesForTesting(Vector<AtomicString>());
-  if (page->DeprecatedLocalMainFrame()->GetEditor().IsOverwriteModeEnabled())
-    page->DeprecatedLocalMainFrame()->GetEditor().ToggleOverwriteModeEnabled();
 
   if (ScrollingCoordinator* scrolling_coordinator =
           page->GetScrollingCoordinator()) {
@@ -711,10 +714,6 @@ unsigned Internals::workerThreadCount() const {
   return WorkerThread::WorkerThreadCount();
 }
 
-bool Internals::isFormControlsRefreshEnabled() const {
-  return ::features::IsFormControlsRefreshEnabled();
-}
-
 GCObservation* Internals::observeGC(ScriptValue script_value) {
   v8::Local<v8::Value> observed_value = script_value.V8Value();
   DCHECK(!observed_value.IsEmpty());
@@ -754,6 +753,18 @@ unsigned Internals::needsLayoutCount(ExceptionState& exception_state) const {
   context_frame->View()->CountObjectsNeedingLayout(needs_layout_objects,
                                                    total_objects, is_partial);
   return needs_layout_objects;
+}
+
+unsigned Internals::layoutCountForTesting(
+    ExceptionState& exception_state) const {
+  LocalFrame* context_frame = GetFrame();
+  if (!context_frame) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
+                                      "No context frame is available.");
+    return 0;
+  }
+
+  return context_frame->View()->LayoutCountForTesting();
 }
 
 unsigned Internals::hitTestCount(Document* doc,
@@ -1010,62 +1021,50 @@ uint32_t Internals::countElementShadow(const Node* root,
   return To<ShadowRoot>(root)->ChildShadowRootCount();
 }
 
+namespace {
+
+bool CheckForFlatTreeExceptions(Node* node, ExceptionState& exception_state) {
+  if (node && !node->IsShadowRoot())
+    return false;
+  exception_state.ThrowDOMException(
+      DOMExceptionCode::kInvalidAccessError,
+      "The node argument doesn't participate in the flat tree.");
+  return true;
+}
+
+}  // namespace
+
 Node* Internals::nextSiblingInFlatTree(Node* node,
                                        ExceptionState& exception_state) {
-  DCHECK(node);
-  if (!node->CanParticipateInFlatTree()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        "The node argument doesn't particite in the flat tree.");
+  if (CheckForFlatTreeExceptions(node, exception_state))
     return nullptr;
-  }
   return FlatTreeTraversal::NextSibling(*node);
 }
 
 Node* Internals::firstChildInFlatTree(Node* node,
                                       ExceptionState& exception_state) {
-  DCHECK(node);
-  if (!node->CanParticipateInFlatTree()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        "The node argument doesn't particite in the flat tree");
+  if (CheckForFlatTreeExceptions(node, exception_state))
     return nullptr;
-  }
   return FlatTreeTraversal::FirstChild(*node);
 }
 
 Node* Internals::lastChildInFlatTree(Node* node,
                                      ExceptionState& exception_state) {
-  DCHECK(node);
-  if (!node->CanParticipateInFlatTree()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        "The node argument doesn't particite in the flat tree.");
+  if (CheckForFlatTreeExceptions(node, exception_state))
     return nullptr;
-  }
   return FlatTreeTraversal::LastChild(*node);
 }
 
 Node* Internals::nextInFlatTree(Node* node, ExceptionState& exception_state) {
-  DCHECK(node);
-  if (!node->CanParticipateInFlatTree()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        "The node argument doesn't particite in the flat tree.");
+  if (CheckForFlatTreeExceptions(node, exception_state))
     return nullptr;
-  }
   return FlatTreeTraversal::Next(*node);
 }
 
 Node* Internals::previousInFlatTree(Node* node,
                                     ExceptionState& exception_state) {
-  DCHECK(node);
-  if (!node->CanParticipateInFlatTree()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        "The node argument doesn't particite in the flat tree.");
+  if (CheckForFlatTreeExceptions(node, exception_state))
     return nullptr;
-  }
   return FlatTreeTraversal::Previous(*node);
 }
 
@@ -1284,7 +1283,7 @@ void Internals::setMarker(Document* document,
     return;
   }
 
-  base::Optional<DocumentMarker::MarkerType> type = MarkerTypeFrom(marker_type);
+  absl::optional<DocumentMarker::MarkerType> type = MarkerTypeFrom(marker_type);
   if (!type) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
@@ -1312,7 +1311,7 @@ unsigned Internals::markerCountForNode(Text* text,
                                        const String& marker_type,
                                        ExceptionState& exception_state) {
   DCHECK(text);
-  base::Optional<DocumentMarker::MarkerTypes> marker_types =
+  absl::optional<DocumentMarker::MarkerTypes> marker_types =
       MarkerTypesFrom(marker_type);
   if (!marker_types) {
     exception_state.ThrowDOMException(
@@ -1348,7 +1347,7 @@ DocumentMarker* Internals::MarkerAt(Text* text,
                                     unsigned index,
                                     ExceptionState& exception_state) {
   DCHECK(text);
-  base::Optional<DocumentMarker::MarkerTypes> marker_types =
+  absl::optional<DocumentMarker::MarkerTypes> marker_types =
       MarkerTypesFrom(marker_type);
   if (!marker_types) {
     exception_state.ThrowDOMException(
@@ -1411,13 +1410,13 @@ unsigned Internals::markerUnderlineColorForNode(
   return style_marker->UnderlineColor().Rgb();
 }
 
-static base::Optional<TextMatchMarker::MatchStatus> MatchStatusFrom(
+static absl::optional<TextMatchMarker::MatchStatus> MatchStatusFrom(
     const String& match_status) {
   if (EqualIgnoringASCIICase(match_status, "kActive"))
     return TextMatchMarker::MatchStatus::kActive;
   if (EqualIgnoringASCIICase(match_status, "kInactive"))
     return TextMatchMarker::MatchStatus::kInactive;
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 void Internals::addTextMatchMarker(const Range* range,
@@ -1427,7 +1426,7 @@ void Internals::addTextMatchMarker(const Range* range,
   if (!range->OwnerDocument().View())
     return;
 
-  base::Optional<TextMatchMarker::MatchStatus> match_status_enum =
+  absl::optional<TextMatchMarker::MatchStatus> match_status_enum =
       MatchStatusFrom(match_status);
   if (!match_status_enum) {
     exception_state.ThrowDOMException(
@@ -1457,7 +1456,7 @@ static bool ParseColor(const String& value,
   return true;
 }
 
-static base::Optional<ImeTextSpanThickness> ThicknessFrom(
+static absl::optional<ImeTextSpanThickness> ThicknessFrom(
     const String& thickness) {
   if (EqualIgnoringASCIICase(thickness, "none"))
     return ImeTextSpanThickness::kNone;
@@ -1465,10 +1464,10 @@ static base::Optional<ImeTextSpanThickness> ThicknessFrom(
     return ImeTextSpanThickness::kThin;
   if (EqualIgnoringASCIICase(thickness, "thick"))
     return ImeTextSpanThickness::kThick;
-  return base::nullopt;
+  return absl::nullopt;
 }
 
-static base::Optional<ImeTextSpanUnderlineStyle> UnderlineStyleFrom(
+static absl::optional<ImeTextSpanUnderlineStyle> UnderlineStyleFrom(
     const String& underline_style) {
   if (EqualIgnoringASCIICase(underline_style, "none"))
     return ImeTextSpanUnderlineStyle::kNone;
@@ -1480,7 +1479,7 @@ static base::Optional<ImeTextSpanUnderlineStyle> UnderlineStyleFrom(
     return ImeTextSpanUnderlineStyle::kDash;
   if (EqualIgnoringASCIICase(underline_style, "squiggle"))
     return ImeTextSpanUnderlineStyle::kSquiggle;
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 namespace {
@@ -1501,7 +1500,7 @@ void addStyleableMarkerHelper(const Range* range,
   DCHECK(range);
   range->OwnerDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
-  base::Optional<ImeTextSpanThickness> thickness =
+  absl::optional<ImeTextSpanThickness> thickness =
       ThicknessFrom(thickness_value);
   if (!thickness) {
     exception_state.ThrowDOMException(
@@ -1510,7 +1509,7 @@ void addStyleableMarkerHelper(const Range* range,
     return;
   }
 
-  base::Optional<ImeTextSpanUnderlineStyle> underline_style =
+  absl::optional<ImeTextSpanUnderlineStyle> underline_style =
       UnderlineStyleFrom(underline_style_value);
   if (!underline_style_value) {
     exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
@@ -2239,7 +2238,7 @@ HitTestLayerRectList* Internals::touchEventTargetLayerRects(
                          IntSize(layer->bounds()));
 
       Vector<IntRect> layer_hit_test_rects;
-      for (const auto& hit_test_rect : touch_action_region.GetAllRegions())
+      for (auto hit_test_rect : touch_action_region.GetAllRegions())
         layer_hit_test_rects.push_back(IntRect(hit_test_rect));
       MergeRects(layer_hit_test_rects);
 
@@ -2381,24 +2380,7 @@ bool Internals::canHyphenate(const AtomicString& locale) {
 }
 
 void Internals::setMockHyphenation(const AtomicString& locale) {
-  LayoutLocale::SetHyphenationForTesting(locale,
-                                         base::AdoptRef(new MockHyphenation));
-}
-
-bool Internals::isOverwriteModeEnabled(Document* document) {
-  DCHECK(document);
-  if (!document->GetFrame())
-    return false;
-
-  return document->GetFrame()->GetEditor().IsOverwriteModeEnabled();
-}
-
-void Internals::toggleOverwriteModeEnabled(Document* document) {
-  DCHECK(document);
-  if (!document->GetFrame())
-    return;
-
-  document->GetFrame()->GetEditor().ToggleOverwriteModeEnabled();
+  LayoutLocale::SetHyphenationForTesting(locale, MockHyphenation::Create());
 }
 
 unsigned Internals::numberOfLiveNodes() const {
@@ -2560,7 +2542,7 @@ DOMRectList* Internals::nonFastScrollableRects(
   Vector<IntRect> layer_non_fast_scrollable_rects;
   for (auto* layer : *layer_tree_host) {
     const cc::Region& non_fast_region = layer->non_fast_scrollable_region();
-    for (const gfx::Rect& non_fast_rect : non_fast_region) {
+    for (gfx::Rect non_fast_rect : non_fast_region) {
       gfx::RectF layer_rect(non_fast_rect);
 
       // Map |layer_rect| into screen space.
@@ -2776,7 +2758,7 @@ void Internals::mediaPlayerPlayingRemotelyChanged(
 void Internals::setPersistent(HTMLVideoElement* video_element,
                               bool persistent) {
   DCHECK(video_element);
-  video_element->OnBecamePersistentVideo(persistent);
+  video_element->SetPersistentState(persistent);
 }
 
 void Internals::forceStaleStateForMediaElement(HTMLMediaElement* media_element,
@@ -2813,6 +2795,9 @@ void Internals::setMediaControlsTestMode(HTMLMediaElement* media_element,
 
 void Internals::registerURLSchemeAsBypassingContentSecurityPolicy(
     const String& scheme) {
+#if DCHECK_IS_ON()
+  WTF::SetIsBeforeThreadCreatedForTest();  // Required for next operation:
+#endif
   SchemeRegistry::RegisterURLSchemeAsBypassingContentSecurityPolicy(scheme);
 }
 
@@ -2826,12 +2811,18 @@ void Internals::registerURLSchemeAsBypassingContentSecurityPolicy(
     else if (policy_area == "style")
       policy_areas_enum |= SchemeRegistry::kPolicyAreaStyle;
   }
+#if DCHECK_IS_ON()
+  WTF::SetIsBeforeThreadCreatedForTest();  // Required for next operation:
+#endif
   SchemeRegistry::RegisterURLSchemeAsBypassingContentSecurityPolicy(
       scheme, static_cast<SchemeRegistry::PolicyAreas>(policy_areas_enum));
 }
 
 void Internals::removeURLSchemeRegisteredAsBypassingContentSecurityPolicy(
     const String& scheme) {
+#if DCHECK_IS_ON()
+  WTF::SetIsBeforeThreadCreatedForTest();  // Required for next operation:
+#endif
   SchemeRegistry::RemoveURLSchemeRegisteredAsBypassingContentSecurityPolicy(
       scheme);
 }
@@ -3075,6 +3066,14 @@ static const char* CursorTypeToString(
       return "DragAndDropCopy";
     case ui::mojom::blink::CursorType::kDndLink:
       return "DragAndDropLink";
+    case ui::mojom::blink::CursorType::kNorthSouthNoResize:
+      return "NorthSouthNoResize";
+    case ui::mojom::blink::CursorType::kEastWestNoResize:
+      return "EastWestNoResize";
+    case ui::mojom::blink::CursorType::kNorthEastSouthWestNoResize:
+      return "NorthEastSouthWestNoResize";
+    case ui::mojom::blink::CursorType::kNorthWestSouthEastNoResize:
+      return "NorthWestSouthEastNoResize";
   }
 
   NOTREACHED();
@@ -3308,23 +3307,6 @@ void Internals::resetTypeAheadSession(HTMLSelectElement* select) {
   select->ResetTypeAheadSessionForTesting();
 }
 
-bool Internals::loseSharedGraphicsContext3D() {
-  std::unique_ptr<WebGraphicsContext3DProvider> shared_provider =
-      Platform::Current()->CreateSharedOffscreenGraphicsContext3DProvider();
-  if (!shared_provider)
-    return false;
-  gpu::gles2::GLES2Interface* shared_gl = shared_provider->ContextGL();
-  if (!shared_gl)
-    return false;
-  shared_gl->LoseContextCHROMIUM(GL_GUILTY_CONTEXT_RESET_EXT,
-                                 GL_INNOCENT_CONTEXT_RESET_EXT);
-  // To prevent tests that call loseSharedGraphicsContext3D from being
-  // flaky, we call finish so that the context is guaranteed to be lost
-  // synchronously (i.e. before returning).
-  shared_gl->Finish();
-  return true;
-}
-
 void Internals::forceCompositingUpdate(Document* document,
                                        ExceptionState& exception_state) {
   DCHECK(document);
@@ -3510,6 +3492,26 @@ unsigned Internals::canvasFontCacheMaxFonts() {
   return CanvasFontCache::MaxFonts();
 }
 
+void Internals::forceLoseCanvasContext(HTMLCanvasElement* canvas,
+                                       const String& context_type) {
+  CanvasContextCreationAttributesCore attr;
+  CanvasRenderingContext* context =
+      canvas->GetCanvasRenderingContext(context_type, attr);
+  if (!context)
+    return;
+  context->LoseContext(CanvasRenderingContext::kSyntheticLostContext);
+}
+
+void Internals::forceLoseCanvasContext(OffscreenCanvas* offscreencanvas,
+                                       const String& context_type) {
+  CanvasContextCreationAttributesCore attr;
+  CanvasRenderingContext* context = offscreencanvas->GetCanvasRenderingContext(
+      document_->GetExecutionContext(), context_type, attr);
+  if (!context)
+    return;
+  context->LoseContext(CanvasRenderingContext::kSyntheticLostContext);
+}
+
 void Internals::setScrollChain(ScrollState* scroll_state,
                                const HeapVector<Member<Element>>& elements,
                                ExceptionState&) {
@@ -3630,8 +3632,8 @@ ScriptPromise Internals::observeUseCounter(ScriptState* script_state,
     return promise;
   }
 
-  loader->GetUseCounterHelper().AddObserver(
-      MakeGarbageCollected<UseCounterHelperObserverImpl>(
+  loader->GetUseCounter().AddObserver(
+      MakeGarbageCollected<UseCounterImplObserverImpl>(
           resolver, static_cast<WebFeature>(use_counter_feature)));
   return promise;
 }
@@ -3664,8 +3666,12 @@ bool Internals::setScrollbarVisibilityInScrollableArea(Node* node,
                                                        bool visible) {
   if (ScrollableArea* scrollable_area = ScrollableAreaForNode(node)) {
     scrollable_area->SetScrollbarsHiddenForTesting(!visible);
-    scrollable_area->GetScrollAnimator().SetScrollbarsVisibleForTesting(
-        visible);
+
+    if (MacScrollbarAnimator* scrollbar_animator =
+            scrollable_area->GetMacScrollbarAnimator()) {
+      scrollbar_animator->SetScrollbarsVisibleForTesting(visible);
+    }
+
     return scrollable_area->GetPageScrollbarTheme().UsesOverlayScrollbars();
   }
   return false;
@@ -3865,10 +3871,12 @@ void Internals::setIsAdSubframe(HTMLIFrameElement* iframe,
   }
   LocalFrame* parent_frame = iframe->GetDocument().GetFrame();
   LocalFrame* child_frame = To<LocalFrame>(iframe->ContentFrame());
-  bool parent_is_ad = parent_frame && parent_frame->IsAdSubframe();
-  child_frame->SetIsAdSubframe(parent_is_ad
-                                   ? blink::mojom::AdFrameType::kChildAd
-                                   : blink::mojom::AdFrameType::kRootAd);
+  blink::FrameAdEvidence ad_evidence(parent_frame &&
+                                     parent_frame->IsAdSubframe());
+  ad_evidence.set_created_by_ad_script(
+      mojom::FrameCreationStackEvidence::kCreatedByAdScript);
+  ad_evidence.set_is_complete();
+  child_frame->SetAdEvidence(ad_evidence);
 }
 
 ReadableStream* Internals::createReadableStream(
@@ -3894,7 +3902,7 @@ ReadableStream* Internals::createReadableStream(
       MakeGarbageCollected<TestReadableStreamSource>(script_state, type);
   source->Attach(std::make_unique<TestReadableStreamSource::Generator>(10));
   return ReadableStream::CreateWithCountQueueingStrategy(
-      script_state, source, queue_size,
+      script_state, source, queue_size, AllowPerChunkTransferring(false),
       source->CreateTransferringOptimizer(script_state));
 }
 
@@ -3946,6 +3954,14 @@ ScriptValue Internals::createWritableStreamAndSink(
             ToV8(resolver->Promise(), script_state))
       .Check();
   return ScriptValue(script_state->GetIsolate(), object);
+}
+
+void Internals::setAllowPerChunkTransferring(ReadableStream* stream) {
+  if (!stream) {
+    return;
+  }
+  stream->SetAllowPerChunkTransferringForTesting(
+      AllowPerChunkTransferring(true));
 }
 
 }  // namespace blink

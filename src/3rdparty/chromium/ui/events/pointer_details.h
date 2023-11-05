@@ -41,8 +41,11 @@ struct EVENTS_BASE_EXPORT PointerDetails {
                  float tilt_y = 0.0f,
                  float tangential_pressure = 0.0f);
   PointerDetails(const PointerDetails& other);
+  PointerDetails& operator=(const PointerDetails& other);
 
   bool operator==(const PointerDetails& other) const;
+
+  std::string ToString() const;
 
   // The type of pointer device.
   EventPointerType pointer_type = EventPointerType::kUnknown;

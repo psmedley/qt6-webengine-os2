@@ -115,6 +115,11 @@ bool IsIntegerFormat(GLenum unsizedFormat);
 // Returns the product of the sizes in the vector, or 1 if the vector is empty. Doesn't currently
 // perform overflow checks.
 unsigned int ArraySizeProduct(const std::vector<unsigned int> &arraySizes);
+// Returns the product of the sizes in the vector except for the outermost dimension, or 1 if the
+// vector is empty.
+unsigned int InnerArraySizeProduct(const std::vector<unsigned int> &arraySizes);
+// Returns the outermost array dimension, or 1 if the vector is empty.
+unsigned int OutermostArraySize(const std::vector<unsigned int> &arraySizes);
 
 // Return the array index at the end of name, and write the length of name before the final array
 // index into nameLengthWithoutArrayIndexOut. In case name doesn't include an array index, return
@@ -148,8 +153,7 @@ struct UniformTypeInfo final : angle::NonCopyable
                                      size_t externalSize,
                                      bool isSampler,
                                      bool isMatrixType,
-                                     bool isImageType,
-                                     const char *glslAsFloat);
+                                     bool isImageType);
 
     GLenum type;
     GLenum componentType;
@@ -166,7 +170,6 @@ struct UniformTypeInfo final : angle::NonCopyable
     bool isSampler;
     bool isMatrixType;
     bool isImageType;
-    const char *glslAsFloat;
 };
 
 inline constexpr UniformTypeInfo::UniformTypeInfo(GLenum type,
@@ -183,8 +186,7 @@ inline constexpr UniformTypeInfo::UniformTypeInfo(GLenum type,
                                                   size_t externalSize,
                                                   bool isSampler,
                                                   bool isMatrixType,
-                                                  bool isImageType,
-                                                  const char *glslAsFloat)
+                                                  bool isImageType)
     : type(type),
       componentType(componentType),
       textureType(textureType),
@@ -199,8 +201,7 @@ inline constexpr UniformTypeInfo::UniformTypeInfo(GLenum type,
       externalSize(externalSize),
       isSampler(isSampler),
       isMatrixType(isMatrixType),
-      isImageType(isImageType),
-      glslAsFloat(glslAsFloat)
+      isImageType(isImageType)
 {}
 
 const UniformTypeInfo &GetUniformTypeInfo(GLenum uniformType);
@@ -245,7 +246,18 @@ enum class SrgbOverride
     Linear
 };
 
+// For use with EXT_sRGB_write_control
+// A render target may be forced to convert to a linear colorspace, or may be allowed to do whatever
+// colorspace conversion is appropriate for its format. There is no option to force linear->sRGB, it
+// can only convert from sRGB->linear
+enum class SrgbWriteControlMode
+{
+    Default = 0,
+    Linear  = 1
+};
+
 ShaderType GetShaderTypeFromBitfield(size_t singleShaderType);
+GLbitfield GetBitfieldFromShaderType(ShaderType shaderType);
 bool ShaderTypeSupportsTransformFeedback(ShaderType shaderType);
 // Given a set of shader stages, returns the last vertex processing stage.  This is the stage that
 // interfaces the fragment shader.

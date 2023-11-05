@@ -64,7 +64,8 @@ class PLATFORM_EXPORT Length {
     kExtendToZoom,
     kDeviceWidth,
     kDeviceHeight,
-    kNone
+    kNone,    // only valid for max-width, max-height, or contain-intrinsic-size
+    kContent  // only valid for flex-basis
   };
 
   Length() : int_value_(0), quirk_(false), type_(kAuto), is_float_(false) {}
@@ -94,7 +95,7 @@ class PLATFORM_EXPORT Length {
     float_value_ = clampTo<float>(v);
   }
 
-  explicit Length(scoped_refptr<CalculationValue>);
+  explicit Length(scoped_refptr<const CalculationValue>);
 
   Length(const Length& length) {
     memcpy(this, &length, sizeof(Length));
@@ -152,6 +153,7 @@ class PLATFORM_EXPORT Length {
   static Length DeviceHeight() { return Length(kDeviceHeight); }
   static Length None() { return Length(kNone); }
   static Length FitContent() { return Length(kFitContent); }
+  static Length Content() { return Length(kContent); }
   template <typename NUMBER_TYPE>
   static Length Percent(NUMBER_TYPE number) {
     return Length(number, kPercent);
@@ -184,12 +186,12 @@ class PLATFORM_EXPORT Length {
 
   PixelsAndPercent GetPixelsAndPercent() const;
 
-  CalculationValue& GetCalculationValue() const;
+  const CalculationValue& GetCalculationValue() const;
 
   // If |this| is calculated, returns the underlying |CalculationValue|. If not,
   // returns a |CalculationValue| constructed from |GetPixelsAndPercent()|. Hits
   // a DCHECK if |this| is not a specified value (e.g., 'auto').
-  scoped_refptr<CalculationValue> AsCalculationValue() const;
+  scoped_refptr<const CalculationValue> AsCalculationValue() const;
 
   Length::Type GetType() const { return static_cast<Length::Type>(type_); }
   bool Quirk() const { return quirk_; }
@@ -233,7 +235,8 @@ class PLATFORM_EXPORT Length {
   // as `auto`. https://www.w3.org/TR/css-sizing-3/#valdef-width-min-content
   bool IsContentOrIntrinsic() const {
     return GetType() == kMinContent || GetType() == kMaxContent ||
-           GetType() == kFitContent || GetType() == kMinIntrinsic;
+           GetType() == kFitContent || GetType() == kMinIntrinsic ||
+           GetType() == kContent;
   }
   bool IsAutoOrContentOrIntrinsic() const {
     return GetType() == kAuto || IsContentOrIntrinsic();
@@ -253,6 +256,7 @@ class PLATFORM_EXPORT Length {
   bool IsCalculatedEqual(const Length&) const;
   bool IsMinContent() const { return GetType() == kMinContent; }
   bool IsMaxContent() const { return GetType() == kMaxContent; }
+  bool IsContent() const { return GetType() == kContent; }
   bool IsMinIntrinsic() const { return GetType() == kMinIntrinsic; }
   bool IsFillAvailable() const { return GetType() == kFillAvailable; }
   bool IsFitContent() const { return GetType() == kFitContent; }

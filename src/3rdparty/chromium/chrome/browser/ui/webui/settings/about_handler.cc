@@ -17,7 +17,6 @@
 #include "base/macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,6 +33,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -53,11 +53,11 @@
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/constants/ash_switches.h"
 #include "base/i18n/time_formatting.h"
+#include "chrome/browser/ash/arc/arc_util.h"
+#include "chrome/browser/ash/ownership/owner_settings_service_ash.h"
+#include "chrome/browser/ash/ownership/owner_settings_service_ash_factory.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/ash/settings/cros_settings.h"
-#include "chrome/browser/chromeos/arc/arc_util.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
-#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/tpm_firmware_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -66,7 +66,7 @@
 #include "chrome/browser/ui/webui/help/version_updater_chromeos.h"
 #include "chrome/browser/ui/webui/webui_util.h"
 #include "chromeos/dbus/power/power_manager_client.h"
-#include "chromeos/dbus/update_engine_client.h"
+#include "chromeos/dbus/update_engine/update_engine_client.h"
 #include "chromeos/dbus/util/version_loader.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
@@ -100,7 +100,7 @@ struct RegulatoryLabel {
 
 // Returns message that informs user that for update it's better to
 // connect to a network of one of the allowed types.
-base::string16 GetAllowedConnectionTypesMessage() {
+std::u16string GetAllowedConnectionTypesMessage() {
   if (help_utils_chromeos::IsUpdateOverCellularAllowed(
           /*interactive=*/true)) {
     const bool metered = chromeos::NetworkHandler::Get()
@@ -123,8 +123,8 @@ bool CanChangeChannel(Profile* profile) {
     bool value = false;
     // On a managed machine we delegate this setting to the affiliated users
     // only if the policy value is true.
-    chromeos::CrosSettings::Get()->GetBoolean(
-        chromeos::kReleaseChannelDelegated, &value);
+    ash::CrosSettings::Get()->GetBoolean(chromeos::kReleaseChannelDelegated,
+                                         &value);
     if (!value)
       return false;
 
@@ -136,9 +136,9 @@ bool CanChangeChannel(Profile* profile) {
   }
 
   // On non-managed machines, only the local owner can change the channel.
-  chromeos::OwnerSettingsServiceChromeOS* service =
-      chromeos::OwnerSettingsServiceChromeOSFactory::GetInstance()
-          ->GetForBrowserContext(profile);
+  ash::OwnerSettingsServiceAsh* service =
+      ash::OwnerSettingsServiceAshFactory::GetInstance()->GetForBrowserContext(
+          profile);
   return service && service->IsOwner();
 }
 
@@ -233,6 +233,12 @@ std::string UpdateStatusToString(VersionUpdater::Status status) {
     case VersionUpdater::FAILED_OFFLINE:
     case VersionUpdater::FAILED_CONNECTION_TYPE_DISALLOWED:
       status_str = "failed";
+      break;
+    case VersionUpdater::FAILED_HTTP:
+      status_str = "failed_http";
+      break;
+    case VersionUpdater::FAILED_DOWNLOAD:
+      status_str = "failed_download";
       break;
     case VersionUpdater::DISABLED:
       status_str = "disabled";
@@ -338,6 +344,8 @@ void AboutHandler::RegisterMessages() {
   content::URLDataSource::Add(profile_,
                               std::make_unique<chromeos::ImageSource>());
 #endif
+  content::URLDataSource::Add(profile_,
+                              std::make_unique<ThemeSource>(profile_));
 }
 
 void AboutHandler::OnJavascriptAllowed() {
@@ -370,12 +378,16 @@ void AboutHandler::OnDeviceAutoUpdatePolicyChanged(
     const base::Value* previous_policy,
     const base::Value* current_policy) {
   bool previous_auto_update_disabled = false;
-  if (previous_policy)
-    CHECK(previous_policy->GetAsBoolean(&previous_auto_update_disabled));
+  if (previous_policy) {
+    CHECK(previous_policy->is_bool());
+    previous_auto_update_disabled = previous_policy->GetBool();
+  }
 
   bool current_auto_update_disabled = false;
-  if (current_policy)
-    CHECK(current_policy->GetAsBoolean(&current_auto_update_disabled));
+  if (current_policy) {
+    CHECK(current_policy->is_bool());
+    current_auto_update_disabled = current_policy->GetBool();
+  }
 
   if (current_auto_update_disabled != previous_auto_update_disabled) {
     // Refresh the update status to refresh the status of the UI.
@@ -409,7 +421,7 @@ void AboutHandler::PromoteUpdater(const base::ListValue* args) {
 #endif
 
 void AboutHandler::HandleOpenFeedbackDialog(const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   Browser* browser =
       chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
   chrome::OpenFeedbackDialog(browser,
@@ -417,7 +429,7 @@ void AboutHandler::HandleOpenFeedbackDialog(const base::ListValue* args) {
 }
 
 void AboutHandler::HandleOpenHelpPage(const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   Browser* browser =
       chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
   chrome::ShowHelp(browser, chrome::HELP_SOURCE_WEBUI);
@@ -425,7 +437,7 @@ void AboutHandler::HandleOpenHelpPage(const base::ListValue* args) {
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 void AboutHandler::HandleOpenDiagnostics(const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   chrome::ShowDiagnosticsApp(profile_);
 }
 
@@ -443,7 +455,7 @@ void AboutHandler::HandleCheckInternetConnection(const base::ListValue* args) {
 }
 
 void AboutHandler::HandleLaunchReleaseNotes(const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   // We can always show the release notes since the Help app caches it, or can
   // show an appropriate error state (e.g. No internet connection).
   base::RecordAction(base::UserMetricsAction("ReleaseNotes.LaunchedAboutPage"));
@@ -452,7 +464,7 @@ void AboutHandler::HandleLaunchReleaseNotes(const base::ListValue* args) {
 }
 
 void AboutHandler::HandleOpenOsHelpPage(const base::ListValue* args) {
-  DCHECK(args->empty());
+  DCHECK(args->GetList().empty());
   Browser* browser =
       chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
   chrome::ShowHelp(browser, chrome::HELP_SOURCE_WEBUI_CHROME_OS);
@@ -466,7 +478,7 @@ void AboutHandler::HandleSetChannel(const base::ListValue* args) {
     return;
   }
 
-  base::string16 channel;
+  std::u16string channel;
   bool is_powerwash_allowed;
   if (!args->GetString(0, &channel) ||
       !args->GetBoolean(1, &is_powerwash_allowed)) {
@@ -551,8 +563,8 @@ void AboutHandler::OnGetTargetChannel(std::string callback_id,
   // For the LTS pilot simply check whether the device policy is set and ignore
   // its value.
   std::string value;
-  bool is_lts = chromeos::CrosSettings::Get()->GetString(
-      chromeos::kReleaseLtsTag, &value);
+  bool is_lts =
+      ash::CrosSettings::Get()->GetString(chromeos::kReleaseLtsTag, &value);
   channel_info->SetBoolean("isLts", is_lts);
 
   ResolveJavascriptCallback(base::Value(callback_id), *channel_info);
@@ -654,7 +666,7 @@ void AboutHandler::SetUpdateStatus(VersionUpdater::Status status,
                                    bool powerwash,
                                    const std::string& version,
                                    int64_t size,
-                                   const base::string16& message) {
+                                   const std::u16string& message) {
   // Only UPDATING state should have progress set.
   DCHECK(status == VersionUpdater::UPDATING || progress == 0);
 
@@ -670,7 +682,7 @@ void AboutHandler::SetUpdateStatus(VersionUpdater::Status status,
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   if (status == VersionUpdater::FAILED_OFFLINE ||
       status == VersionUpdater::FAILED_CONNECTION_TYPE_DISALLOWED) {
-    base::string16 types_msg = GetAllowedConnectionTypesMessage();
+    std::u16string types_msg = GetAllowedConnectionTypesMessage();
     if (!types_msg.empty())
       event->SetString("connectionTypes", types_msg);
     else
@@ -694,7 +706,7 @@ void AboutHandler::SetPromotionState(VersionUpdater::PromotionState state) {
   bool actionable = state == VersionUpdater::PROMOTE_DISABLED ||
                     state == VersionUpdater::PROMOTE_ENABLED;
 
-  base::string16 text = base::string16();
+  std::u16string text = std::u16string();
   if (actionable)
     text = l10n_util::GetStringUTF16(IDS_ABOUT_CHROME_AUTOUPDATE_ALL);
   else if (state == VersionUpdater::PROMOTED)

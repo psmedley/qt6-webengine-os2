@@ -13,10 +13,19 @@
 #include <memory>
 
 #include "base/containers/flat_map.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "ui/gfx/color_space_win.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/dc_renderer_layer_params.h"
+#include "ui/gl/delegated_ink_point_renderer_gpu.h"
 #include "ui/gl/hdr_metadata_helper_win.h"
+
+namespace gfx {
+namespace mojom {
+class DelegatedInkPointRenderer;
+}  // namespace mojom
+class DelegatedInkMetadata;
+}  // namespace gfx
 
 namespace gl {
 
@@ -55,6 +64,10 @@ class DCLayerTree {
  public:
   using VideoProcessorMap =
       base::flat_map<VideoProcessorType, VideoProcessorWrapper>;
+  using DelegatedInkRenderer =
+      DelegatedInkPointRendererGpu<IDCompositionInkTrailDevice,
+                                   IDCompositionDelegatedInkTrail,
+                                   DCompositionInkTrailPoint>;
 
   DCLayerTree(bool disable_nv12_dynamic_textures, bool disable_vp_scaling);
 
@@ -71,7 +84,7 @@ class DCLayerTree {
       DirectCompositionChildSurfaceWin* root_surface);
 
   // Schedule an overlay layer for the next CommitAndClearPendingOverlays call.
-  bool ScheduleDCLayer(const ui::DCRendererLayerParams& params);
+  bool ScheduleDCLayer(std::unique_ptr<ui::DCRendererLayerParams> params);
 
   // Called by SwapChainPresenter to initialize video processor that can handle
   // at least given input and output size.  The video processor is shared across
@@ -109,7 +122,28 @@ class DCLayerTree {
 
   bool SupportsDelegatedInk();
 
+  void SetDelegatedInkTrailStartPoint(
+      std::unique_ptr<gfx::DelegatedInkMetadata>);
+
+  void InitDelegatedInkPointRendererReceiver(
+      mojo::PendingReceiver<gfx::mojom::DelegatedInkPointRenderer>
+          pending_receiver);
+
+  DelegatedInkRenderer* GetInkRendererForTesting() const {
+    return ink_renderer_.get();
+  }
+
  private:
+  // This will add an ink visual to the visual tree to enable delegated ink
+  // trails. This will initially always be called directly before an OS
+  // delegated ink API is used. After that, it can also be added anytime the
+  // visual tree is rebuilt.
+  void AddDelegatedInkVisualToTree();
+
+  // The ink renderer must be initialized before an OS API is used in order to
+  // set up the delegated ink visual and delegated ink trail object.
+  bool InitializeInkRenderer();
+
   const bool disable_nv12_dynamic_textures_;
   const bool disable_vp_scaling_;
 
@@ -153,6 +187,12 @@ class DCLayerTree {
 
   // dealing with hdr metadata
   std::unique_ptr<HDRMetadataHelperWin> hdr_metadata_helper_;
+
+  // Renderer for drawing delegated ink trails using OS APIs. This is created
+  // when the DCLayerTree is created, but can only be queried to check if the
+  // platform supports delegated ink trails. It must be initialized via the
+  // Initialize() method in order to be used for drawing delegated ink trails.
+  std::unique_ptr<DelegatedInkRenderer> ink_renderer_;
 
   DISALLOW_COPY_AND_ASSIGN(DCLayerTree);
 };

@@ -14,7 +14,7 @@ namespace blink {
 namespace {
 
 struct SameSizeAsNGBlockBreakToken : NGBreakToken {
-  unsigned numbers[3];
+  unsigned numbers[4];
 };
 
 ASSERT_SIZE(NGBlockBreakToken, SameSizeAsNGBlockBreakToken);
@@ -38,12 +38,16 @@ NGBlockBreakToken::NGBlockBreakToken(PassKey key,
                                      const NGBoxFragmentBuilder& builder)
     : NGBreakToken(kBlockBreakToken, builder.node_),
       consumed_block_size_(builder.consumed_block_size_),
+      consumed_block_size_legacy_adjustment_(
+          builder.consumed_block_size_legacy_adjustment_),
       sequence_number_(builder.sequence_number_),
       num_children_(builder.child_break_tokens_.size()) {
   break_appeal_ = builder.break_appeal_;
   has_seen_all_children_ = builder.has_seen_all_children_;
   is_caused_by_column_spanner_ = builder.FoundColumnSpanner();
   is_at_block_end_ = builder.is_at_block_end_;
+  has_unpositioned_list_marker_ =
+      static_cast<bool>(builder.UnpositionedListMarker());
   for (wtf_size_t i = 0; i < builder.child_break_tokens_.size(); ++i) {
     child_break_tokens_[i] = builder.child_break_tokens_[i].get();
     child_break_tokens_[i]->AddRef();
@@ -87,6 +91,13 @@ String NGBlockBreakToken::ToString() const {
   string_builder.Append(" consumed:");
   string_builder.Append(consumed_block_size_.ToString());
   string_builder.Append("px");
+
+  if (consumed_block_size_legacy_adjustment_) {
+    string_builder.Append(" legacy adjustment:");
+    string_builder.Append(consumed_block_size_legacy_adjustment_.ToString());
+    string_builder.Append("px");
+  }
+
   return string_builder.ToString();
 }
 

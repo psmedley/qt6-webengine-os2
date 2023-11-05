@@ -5,16 +5,16 @@
 #import "ui/views/controls/scrollbar/cocoa_scroll_bar.h"
 
 #include "base/bind.h"
-#include "base/stl_util.h"
+#include "base/i18n/rtl.h"
 #include "cc/paint/paint_shader.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/scrollbar/base_scroll_bar_thumb.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace views {
 
@@ -423,6 +423,7 @@ ui::NativeTheme::ExtraParams CocoaScrollBar::GetPainterParams() const {
   }
   params.scrollbar_extra.is_overlay =
       GetScrollerStyle() == NSScrollerStyleOverlay;
+  params.scrollbar_extra.scale_from_dip = 1.0f;
   return params;
 }
 

@@ -10,6 +10,7 @@
 
 #include "base/component_export.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/unguessable_token.h"
 #include "net/http/http_response_headers.h"
 #include "services/network/public/mojom/cors.mojom-shared.h"
 #include "services/network/public/mojom/ip_address_space.mojom-shared.h"
@@ -56,6 +57,12 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) CorsErrorStatus {
   // Only set if `cors_error == kInsecurePrivateNetwork`.
   mojom::IPAddressSpace resource_address_space =
       mojom::IPAddressSpace::kUnknown;
+
+  // True when there is an "authorization" header on the request and it is
+  // covered by the wildcard in the preflight response.
+  // TODO(crbug.com/1176753): Remove this once the investigation is done.
+  bool has_authorization_covered_by_wildcard_on_preflight = false;
+  base::UnguessableToken issue_id = base::UnguessableToken::Create();
 };
 
 // CorsErrorStatus instances are streamable for ease of debugging.

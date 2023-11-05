@@ -40,9 +40,9 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node.h"
-#include "third_party/blink/renderer/core/html/imports/html_imports_controller.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/platform/bindings/active_script_wrappable_manager.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
@@ -51,29 +51,47 @@
 #include "third_party/blink/renderer/platform/heap/heap_stats_collector.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/buildflags.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
-Node* V8GCController::OpaqueRootForGC(v8::Isolate*, Node* node) {
+namespace {
+
+const Node& OpaqueRootForGC(v8::Isolate*, const Node* node) {
   DCHECK(node);
   if (node->isConnected())
-    return &node->GetDocument().TreeRootDocument();
+    return node->GetDocument();
 
   if (auto* attr = DynamicTo<Attr>(node)) {
     Node* owner_element = attr->ownerElement();
     if (!owner_element)
-      return node;
+      return *node;
     node = owner_element;
   }
 
   while (Node* parent = node->ParentOrShadowHostOrTemplateHostNode())
     node = parent;
 
-  return node;
+  return *node;
+}
+
+}  // namespace
+
+// static
+v8::EmbedderGraph::Node::Detachedness V8GCController::DetachednessFromWrapper(
+    v8::Isolate* isolate,
+    const v8::Local<v8::Value>& v8_value,
+    uint16_t class_id,
+    void*) {
+  if (class_id != WrapperTypeInfo::kNodeClassId)
+    return v8::EmbedderGraph::Node::Detachedness::kUnknown;
+  const auto& root_node =
+      OpaqueRootForGC(isolate, V8Node::ToImpl(v8_value.As<v8::Object>()));
+  if (root_node.isConnected() && root_node.GetExecutionContext())
+    return v8::EmbedderGraph::Node::Detachedness::kAttached;
+  return v8::EmbedderGraph::Node::Detachedness::kDetached;
 }
 
 #if !BUILDFLAG(USE_V8_OILPAN)
@@ -112,14 +130,18 @@ void V8GCController::GcPrologue(v8::Isolate* isolate,
     case v8::kGCTypeIncrementalMarking:
       // Recomputing ASWs is opportunistic during incremental marking as they
       // only need to be recomputing during the atomic pause for corectness.
-      per_isolate_data->GetActiveScriptWrappableManager()
-          ->RecomputeActiveScriptWrappables(
-              ActiveScriptWrappableManager::RecomputeMode::kOpportunistic);
+      if (per_isolate_data->GetActiveScriptWrappableManager()) {
+        per_isolate_data->GetActiveScriptWrappableManager()
+            ->RecomputeActiveScriptWrappables(
+                ActiveScriptWrappableManager::RecomputeMode::kOpportunistic);
+      }
       break;
     case v8::kGCTypeMarkSweepCompact:
-      per_isolate_data->GetActiveScriptWrappableManager()
-          ->RecomputeActiveScriptWrappables(
-              ActiveScriptWrappableManager::RecomputeMode::kRequired);
+      if (per_isolate_data->GetActiveScriptWrappableManager()) {
+        per_isolate_data->GetActiveScriptWrappableManager()
+            ->RecomputeActiveScriptWrappables(
+                ActiveScriptWrappableManager::RecomputeMode::kRequired);
+      }
       break;
     default:
       break;
@@ -150,9 +172,11 @@ void V8GCController::GcEpilogue(v8::Isolate* isolate,
     current_thread_state->NotifyGarbageCollection(type, flags);
   }
 
-  TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
-                       "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data",
-                       inspector_update_counters_event::Data());
+  TRACE_EVENT_INSTANT1(
+      TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters",
+      TRACE_EVENT_SCOPE_THREAD, "data", [&](perfetto::TracedValue context) {
+        inspector_update_counters_event::Data(std::move(context));
+      });
 }
 
 }  // namespace blink

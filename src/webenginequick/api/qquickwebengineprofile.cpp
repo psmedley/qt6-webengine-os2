@@ -181,6 +181,8 @@ QQuickWebEngineProfilePrivate::~QQuickWebEngineProfilePrivate()
 
     if (m_profileAdapter != QtWebEngineCore::ProfileAdapter::defaultProfileAdapter())
         delete m_profileAdapter;
+    else if (m_profileAdapter)
+        m_profileAdapter->releaseAllWebContentsAdapterClients();
 }
 
 void QQuickWebEngineProfilePrivate::addWebContentsAdapterClient(QtWebEngineCore::WebContentsAdapterClient *adapter)
@@ -954,7 +956,7 @@ QQuickWebEngineSettings *QQuickWebEngineProfile::settings() const
 }
 
 /*!
-    \qmlproperty list<WebEngineScript> WebEngineProfile::userScripts
+    \qmlproperty WebEngineScriptCollection WebEngineProfile::userScripts
     \since 1.5
 
     Returns the collection of WebEngineScript objects that are injected into

@@ -9,12 +9,12 @@
 #include <tuple>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
+#include "base/json/values_util.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/no_destructor.h"
-#include "base/optional.h"
 #include "base/strings/string_util.h"
-#include "base/util/values/values_util.h"
 #include "build/build_config.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -23,6 +23,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_handle.h"
 #include "media/base/media_drm_key_type.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/origin.h"
 #include "url/url_constants.h"
 
@@ -147,7 +148,7 @@ class OriginData {
   base::Value ToDictValue() const {
     base::Value dict(base::Value::Type::DICTIONARY);
 
-    dict.SetKey(kOriginId, util::UnguessableTokenToValue(origin_id_));
+    dict.SetKey(kOriginId, base::UnguessableTokenToValue(origin_id_));
     dict.SetKey(kCreationTime, base::Value(provision_time_.ToDoubleT()));
 
     return dict;
@@ -165,8 +166,8 @@ class OriginData {
     if (!origin_id_value)
       return nullptr;
 
-    base::Optional<base::UnguessableToken> origin_id =
-        util::ValueToUnguessableToken(*origin_id_value);
+    absl::optional<base::UnguessableToken> origin_id =
+        base::ValueToUnguessableToken(*origin_id_value);
     if (!origin_id)
       return nullptr;
 
@@ -314,7 +315,7 @@ void ClearSessionDataForTimePeriod(base::Value* sessions_dict,
   DCHECK(sessions_dict->is_dict());
 
   std::vector<std::string> sessions_to_clear;
-  for (const auto& key_value : sessions_dict->DictItems()) {
+  for (const auto key_value : sessions_dict->DictItems()) {
     const std::string& session_id = key_value.first;
 
     base::Value* session_dict = &key_value.second;
@@ -358,7 +359,7 @@ std::vector<base::UnguessableToken> ClearMatchingLicenseData(
   std::vector<std::string> origins_to_delete;
   std::vector<base::UnguessableToken> origin_ids_to_unprovision;
 
-  for (const auto& key_value : storage_dict->DictItems()) {
+  for (const auto key_value : storage_dict->DictItems()) {
     const std::string& origin_str = key_value.first;
 
     if (filter && !filter.Run(GURL(origin_str)))
@@ -438,7 +439,7 @@ bool SessionsModifiedBetween(const base::Value* sessions_dict,
                              base::Time start,
                              base::Time end) {
   DCHECK(sessions_dict->is_dict());
-  for (const auto& key_value : sessions_dict->DictItems()) {
+  for (const auto key_value : sessions_dict->DictItems()) {
     const base::Value* session_dict = &key_value.second;
     if (!session_dict->is_dict())
       continue;
@@ -612,7 +613,7 @@ std::set<GURL> MediaDrmStorageImpl::GetAllOrigins(
     return std::set<GURL>();
 
   std::set<GURL> origin_set;
-  for (const auto& key_value : *storage_dict) {
+  for (const auto key_value : storage_dict->DictItems()) {
     GURL origin(key_value.first);
     if (origin.is_valid())
       origin_set.insert(origin);
@@ -637,7 +638,7 @@ std::vector<GURL> MediaDrmStorageImpl::GetOriginsModifiedBetween(
   // before |end|. If there are any errors in prefs::kMediaDrmStorage,
   // ignore them.
   std::vector<GURL> matching_origins;
-  for (const auto& key_value : storage_dict->DictItems()) {
+  for (const auto key_value : storage_dict->DictItems()) {
     GURL origin(key_value.first);
     if (!origin.is_valid())
       continue;
@@ -716,7 +717,7 @@ MediaDrmStorageImpl::MediaDrmStorageImpl(
     GetOriginIdCB get_origin_id_cb,
     AllowEmptyOriginIdCB allow_empty_origin_id_cb,
     mojo::PendingReceiver<media::mojom::MediaDrmStorage> receiver)
-    : FrameServiceBase(render_frame_host, std::move(receiver)),
+    : DocumentServiceBase(render_frame_host, std::move(receiver)),
       pref_service_(pref_service),
       get_origin_id_cb_(get_origin_id_cb),
       allow_empty_origin_id_cb_(allow_empty_origin_id_cb) {
@@ -746,7 +747,7 @@ MediaDrmStorageImpl::~MediaDrmStorageImpl() {
   DVLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (init_cb_)
-    std::move(init_cb_).Run(false, base::nullopt);
+    std::move(init_cb_).Run(false, absl::nullopt);
 }
 
 void MediaDrmStorageImpl::Initialize(InitializeCallback callback) {
@@ -791,7 +792,7 @@ void MediaDrmStorageImpl::OnOriginIdObtained(
 }
 
 void MediaDrmStorageImpl::OnEmptyOriginIdAllowed(bool allowed) {
-  std::move(init_cb_).Run(allowed, base::nullopt);
+  std::move(init_cb_).Run(allowed, absl::nullopt);
 }
 
 void MediaDrmStorageImpl::OnProvisioned(OnProvisionedCallback callback) {

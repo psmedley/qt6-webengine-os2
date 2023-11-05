@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/containers/span.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "net/ntlm/ntlm.h"
@@ -25,8 +25,8 @@ std::vector<uint8_t> GenerateAuthMsg(const NtlmClient& client,
                                      base::span<const uint8_t> challenge_msg) {
   return client.GenerateAuthenticateMessage(
       test::kNtlmDomain, test::kUser, test::kPassword, test::kHostnameAscii,
-      test::kChannelBindings, test::kNtlmSpn, test::kClientTimestamp,
-      test::kClientChallenge, challenge_msg);
+      reinterpret_cast<const char*>(test::kChannelBindings), test::kNtlmSpn,
+      test::kClientTimestamp, test::kClientChallenge, challenge_msg);
 }
 
 std::vector<uint8_t> GenerateAuthMsg(const NtlmClient& client,
@@ -66,7 +66,7 @@ bool ReadStringPayload(NtlmBufferReader* reader, std::string* str) {
 // Reads bytes from a payload and assigns them to a string16. This makes
 // no assumptions about the underlying encoding. This will fail if there
 // are an odd number of bytes in the payload.
-bool ReadString16Payload(NtlmBufferReader* reader, base::string16* str) {
+bool ReadString16Payload(NtlmBufferReader* reader, std::u16string* str) {
   SecurityBuffer sec_buf;
   if (!reader->ReadSecurityBuffer(&sec_buf) || (sec_buf.length % 2 != 0))
     return false;
@@ -81,8 +81,7 @@ bool ReadString16Payload(NtlmBufferReader* reader, base::string16* str) {
   }
 #endif
 
-  str->assign(reinterpret_cast<const base::char16*>(raw.data()),
-              raw.size() / 2);
+  str->assign(reinterpret_cast<const char16_t*>(raw.data()), raw.size() / 2);
   return true;
 }
 
@@ -380,9 +379,9 @@ TEST(NtlmClientTest, ClientDoesNotDowngradeSessionSecurity) {
   ASSERT_EQ(0, memcmp(test::kExpectedNtlmResponseWithV1SS, actual_ntlm_response,
                       kResponseLenV1));
 
-  base::string16 domain;
-  base::string16 username;
-  base::string16 hostname;
+  std::u16string domain;
+  std::u16string username;
+  std::u16string hostname;
   ASSERT_TRUE(ReadString16Payload(&reader, &domain));
   ASSERT_EQ(test::kNtlmDomain, domain);
   ASSERT_TRUE(ReadString16Payload(&reader, &username));

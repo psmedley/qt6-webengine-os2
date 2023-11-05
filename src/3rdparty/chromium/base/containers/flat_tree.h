@@ -11,10 +11,10 @@
 #include <utility>
 #include <vector>
 
+#include "base/as_const.h"
 #include "base/compiler_specific.h"
 #include "base/functional/not_fn.h"
 #include "base/ranges/algorithm.h"
-#include "base/stl_util.h"
 #include "base/template_util.h"
 
 namespace base {
@@ -262,11 +262,11 @@ class flat_tree {
   // construction of the flat_tree.
 
   iterator begin();
-  const_iterator begin() const;
+  constexpr const_iterator begin() const;
   const_iterator cbegin() const;
 
   iterator end();
-  const_iterator end() const;
+  constexpr const_iterator end() const;
   const_iterator cend() const;
 
   reverse_iterator rbegin();
@@ -602,7 +602,7 @@ flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::flat_tree(
     InputIterator last,
     const KeyCompare& comp)
     : comp_(comp), body_(first, last) {
-//  DCHECK(is_sorted_and_unique(*this, value_comp()));
+  DCHECK(is_sorted_and_unique(*this, value_comp()));
 }
 
 template <class Key, class GetKeyFromValue, class KeyCompare, class Container>
@@ -611,7 +611,7 @@ flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::flat_tree(
     const container_type& items,
     const KeyCompare& comp)
     : comp_(comp), body_(items) {
-//  DCHECK(is_sorted_and_unique(*this, value_comp()));
+  DCHECK(is_sorted_and_unique(*this, value_comp()));
 }
 
 template <class Key, class GetKeyFromValue, class KeyCompare, class Container>
@@ -698,9 +698,9 @@ auto flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::begin()
 }
 
 template <class Key, class GetKeyFromValue, class KeyCompare, class Container>
-auto flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::begin()
+constexpr auto flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::begin()
     const -> const_iterator {
-  return body_.cbegin();
+  return ranges::begin(body_);
 }
 
 template <class Key, class GetKeyFromValue, class KeyCompare, class Container>
@@ -715,9 +715,9 @@ auto flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::end() -> iterator {
 }
 
 template <class Key, class GetKeyFromValue, class KeyCompare, class Container>
-auto flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::end()
+constexpr auto flat_tree<Key, GetKeyFromValue, KeyCompare, Container>::end()
     const -> const_iterator {
-  return body_.cend();
+  return ranges::end(body_);
 }
 
 template <class Key, class GetKeyFromValue, class KeyCompare, class Container>
@@ -1091,3 +1091,4 @@ size_t EraseIf(
 }  // namespace base
 
 #endif  // BASE_CONTAINERS_FLAT_TREE_H_
+

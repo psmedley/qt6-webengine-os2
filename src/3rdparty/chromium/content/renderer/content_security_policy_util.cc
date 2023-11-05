@@ -49,8 +49,8 @@ network::mojom::CSPSourceListPtr BuildCSPSourceList(
       std::move(hashes), source_list.allow_self, source_list.allow_star,
       source_list.allow_response_redirects, source_list.allow_inline,
       source_list.allow_eval, source_list.allow_wasm_eval,
-      source_list.allow_dynamic, source_list.allow_unsafe_hashes,
-      source_list.report_sample);
+      source_list.allow_wasm_unsafe_eval, source_list.allow_dynamic,
+      source_list.allow_unsafe_hashes, source_list.report_sample);
 }
 
 blink::WebVector<blink::WebString> ToWebVectorOfWebStrings(
@@ -93,15 +93,16 @@ blink::WebCSPSourceList ToWebCSPSourceList(
           source_list->allow_inline,
           source_list->allow_eval,
           source_list->allow_wasm_eval,
+          source_list->allow_wasm_unsafe_eval,
           source_list->allow_dynamic,
           source_list->allow_unsafe_hashes,
           source_list->report_sample};
 }
 
-base::Optional<blink::WebCSPTrustedTypes> ToOptionalWebCSPTrustedTypes(
+absl::optional<blink::WebCSPTrustedTypes> ToOptionalWebCSPTrustedTypes(
     network::mojom::CSPTrustedTypesPtr trusted_types) {
   if (!trusted_types)
-    return base::nullopt;
+    return absl::nullopt;
   return blink::WebCSPTrustedTypes{
       ToWebVectorOfWebStrings(std::move(trusted_types->list)),
       trusted_types->allow_any, trusted_types->allow_duplicates};

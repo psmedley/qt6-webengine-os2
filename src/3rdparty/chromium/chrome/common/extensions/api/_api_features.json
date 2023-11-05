@@ -130,6 +130,7 @@
     "contexts": ["webui"],
     "matches": [
       "chrome://bookmarks/*",
+      "chrome://read-later.top-chrome/*",
       "chrome://welcome/*"
     ]
   }],
@@ -182,10 +183,6 @@
     "dependencies": ["permission:browsingData"],
     "contexts": ["blessed_extension"]
   },
-  "cast.channel": {
-    "dependencies": ["permission:cast"],
-    "contexts": ["blessed_extension"]
-  },
   "certificateProvider": {
     "dependencies": ["permission:certificateProvider"],
     "contexts": ["blessed_extension"]
@@ -225,7 +222,6 @@
       "chrome://add-supervision/*",
       "chrome://chrome-signin/*",
       "chrome://discards/*",
-      "chrome://hats/*",
       "chrome://mobilesetup/*",
       "chrome://oobe/*",
       "chrome://os-settings/*",
@@ -249,11 +245,6 @@
     "dependencies": ["permission:contextMenus"],
     "contexts": ["blessed_extension"]
   },
-  "contextMenusInternal": {
-    "internal": true,
-    "channel": "stable",
-    "contexts": ["blessed_extension"]
-  },
   "cookies": {
     "dependencies": ["permission:cookies"],
     "contexts": ["blessed_extension"]
@@ -269,6 +260,7 @@
       "webui"
     ],
     "matches": [
+      "chrome://camera-app/*",
       "chrome://media-app/*"
     ]
   },
@@ -276,6 +268,7 @@
     "channel": "stable",
     "contexts": ["webui_untrusted"],
     "matches": [
+      "chrome-untrusted://camera-app/*",
       "chrome-untrusted://help-app/*",
       "chrome-untrusted://media-app/*"
     ]
@@ -346,15 +339,30 @@
     "channel": "stable",
     "contexts": ["blessed_extension", "content_script"]
   },
-  "downloads": {
-    "dependencies": ["permission:downloads"],
-    "contexts": ["blessed_extension"]
-  },
-  "downloadsInternal": {
-    "internal": true,
-    "channel": "stable",
-    "contexts": ["blessed_extension"]
-  },
+  "downloads": [
+    {
+      "dependencies": ["permission:downloads"],
+      "contexts": ["blessed_extension"]
+    },
+    {
+      "channel": "stable",
+      "contexts": ["webui"],
+      "matches": ["chrome://download-shelf.top-chrome/*"]
+    }
+  ],
+  "downloadsInternal": [
+    {
+      "internal": true,
+      "channel": "stable",
+      "contexts": ["blessed_extension"]
+    },
+    {
+      "internal": true,
+      "channel": "stable",
+      "contexts": ["webui"],
+      "matches": ["chrome://download-shelf.top-chrome/*"]
+    }
+  ],
   "echoPrivate": {
     "dependencies": ["permission:echoPrivate"],
     "contexts": ["blessed_extension"]
@@ -585,10 +593,6 @@
       "chrome://settings/*"
     ]
   }],
-  "launcherSearchProvider": {
-    "dependencies": ["permission:launcherSearchProvider"],
-    "contexts": ["blessed_extension"]
-  },
   "login": {
     "dependencies": ["permission:login"],
     "contexts": ["blessed_extension"],
@@ -631,11 +635,6 @@
     "channel": "stable",
     "matches": ["<all_urls>"]
   },
-  "networking.castPrivate": {
-    "channel": "stable",
-    "contexts": ["blessed_extension"],
-    "dependencies": ["permission:networking.castPrivate"]
-  },
   "notifications": {
     "dependencies": ["permission:notifications"],
     "contexts": ["blessed_extension"]
@@ -646,8 +645,7 @@
   },
   "pageAction": {
     "dependencies": ["manifest:page_action"],
-    "contexts": ["blessed_extension"],
-    "disallow_for_service_workers": true
+    "contexts": ["blessed_extension"]
   },
   "pageCapture": {
     "dependencies": ["permission:pageCapture"],
@@ -741,6 +739,18 @@
     "dependencies": ["permission:scripting"],
     "contexts": ["blessed_extension"]
   },
+  "scripting.registerContentScripts": {
+    "channel": "trunk",
+    "min_manifest_version": 3
+  },
+  "scripting.getRegisteredContentScripts": {
+    "channel": "trunk",
+    "min_manifest_version": 3
+  },
+  "scripting.unregisterContentScripts": {
+    "channel": "trunk",
+    "min_manifest_version": 3
+  },
   "search": {
     "dependencies": ["permission:search"],
     "contexts": ["blessed_extension"]
@@ -760,10 +770,6 @@
       "chrome://settings/*"
     ]
   }],
-  "autofillAssistantPrivate": {
-    "dependencies": ["permission:autofillAssistantPrivate"],
-    "contexts": ["blessed_extension"]
-  },
   "signedInDevices": {
     "dependencies": ["permission:signedInDevices"],
     "contexts": ["blessed_extension"]
@@ -795,12 +801,14 @@
     "contexts": ["webui"],
     "matches": [
       "chrome://bookmarks/*",
-      "chrome://tab-strip/*"
+      "chrome://read-later.top-chrome/*",
+      "chrome://tab-strip.top-chrome/*"
     ]
   }, {
     "channel": "stable",
     "contexts": ["webui_untrusted"],
     "matches": [
+      "chrome-untrusted://crosh/*",
       "chrome-untrusted://terminal/*"
     ],
     "platforms": ["chromeos"]
@@ -815,6 +823,9 @@
     "max_manifest_version": 2
   },
   "tabs.insertCSS": {
+    "max_manifest_version": 2
+  },
+  "tabs.removeCSS": {
     "max_manifest_version": 2
   },
   "tabs.onActiveChanged": {
@@ -946,14 +957,19 @@
     "contexts": ["webui"],
     "matches": [
       "chrome://bookmarks/*",
-      "chrome://tab-strip/*"
+      "chrome://tab-strip.top-chrome/*"
     ]
   }, {
     "channel": "stable",
     "contexts": ["webui_untrusted"],
     "matches": [
+      "chrome-untrusted://crosh/*",
       "chrome-untrusted://terminal/*"
     ],
     "platforms": ["chromeos"]
-  }]
+  }],
+  "wmDesksPrivate": {
+    "dependencies": ["permission:wmDesksPrivate"],
+    "contexts": ["blessed_extension"]
+  }
 }

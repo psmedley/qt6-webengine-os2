@@ -6,7 +6,6 @@
 
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -115,26 +114,26 @@ void SystemMediaControlsLinux::SetPlaybackStatus(PlaybackStatus value) {
                            status());
 }
 
-void SystemMediaControlsLinux::SetTitle(const base::string16& value) {
+void SystemMediaControlsLinux::SetTitle(const std::u16string& value) {
   SetMetadataPropertyInternal(
       "xesam:title", MakeDbusVariant(DbusString(base::UTF16ToUTF8(value))));
 }
 
-void SystemMediaControlsLinux::SetArtist(const base::string16& value) {
+void SystemMediaControlsLinux::SetArtist(const std::u16string& value) {
   SetMetadataPropertyInternal(
       "xesam:artist",
       MakeDbusVariant(MakeDbusArray(DbusString(base::UTF16ToUTF8(value)))));
 }
 
-void SystemMediaControlsLinux::SetAlbum(const base::string16& value) {
+void SystemMediaControlsLinux::SetAlbum(const std::u16string& value) {
   SetMetadataPropertyInternal(
       "xesam:album", MakeDbusVariant(DbusString(base::UTF16ToUTF8(value))));
 }
 
 void SystemMediaControlsLinux::ClearMetadata() {
-  SetTitle(base::string16());
-  SetArtist(base::string16());
-  SetAlbum(base::string16());
+  SetTitle(std::u16string());
+  SetArtist(std::u16string());
+  SetAlbum(std::u16string());
 }
 
 std::string SystemMediaControlsLinux::GetServiceName() const {

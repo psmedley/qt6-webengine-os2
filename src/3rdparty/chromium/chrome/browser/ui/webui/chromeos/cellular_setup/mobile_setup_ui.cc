@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <memory>
+#include <string>
 
 #include <string>
 #include <vector>
@@ -15,7 +16,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -65,20 +66,21 @@ const char kJsConnectivityChangedCallback[] =
     "mobile.MobileSetupPortal.onConnectivityChanged";
 
 // TODO(tbarzic): Localize these strings.
-const char kDefaultActivationError[] =
-    "$1 is unable to connect to $2 at this time. Please try again later.";
-const char kCellularDisabledError[] =
-    "Mobile network connections are not currently enabled on this device.";
-const char kNoCellularDeviceError[] = "Mobile network modem is not present.";
-const char kNoCellularServiceError[] =
-    "$1 is unable to connect at this time due to insufficient coverage.";
+const char16_t kDefaultActivationError[] =
+    u"$1 is unable to connect to $2 at this time. Please try again later.";
+const char16_t kCellularDisabledError[] =
+    u"Mobile network connections are not currently enabled on this device.";
+const char16_t kNoCellularDeviceError[] =
+    u"Mobile network modem is not present.";
+const char16_t kNoCellularServiceError[] =
+    u"$1 is unable to connect at this time due to insufficient coverage.";
 
 bool ActivationErrorRequiresCarrier(
     ash::MobileActivator::ActivationError error) {
   return error == ash::MobileActivator::ActivationError::kActivationFailed;
 }
 
-base::string16 GetActivationErrorMessage(
+std::u16string GetActivationErrorMessage(
     ash::MobileActivator::ActivationError error,
     const std::string& carrier) {
   // If the activation error message requires the carrier name, and none was
@@ -92,22 +94,21 @@ base::string16 GetActivationErrorMessage(
 
   switch (error) {
     case ash::MobileActivator::ActivationError::kNone:
-      return base::string16();
+      return std::u16string();
     case ash::MobileActivator::ActivationError::kActivationFailed: {
       return base::ReplaceStringPlaceholders(
-          base::UTF8ToUTF16(kDefaultActivationError),
-          std::vector<base::string16>(
+          kDefaultActivationError,
+          std::vector<std::u16string>(
               {ui::GetChromeOSDeviceName(), base::UTF8ToUTF16(carrier)}),
           nullptr);
     }
     case ash::MobileActivator::ActivationError::kCellularDisabled:
-      return base::UTF8ToUTF16(kCellularDisabledError);
+      return kCellularDisabledError;
     case ash::MobileActivator::ActivationError::kNoCellularDevice:
-      return base::UTF8ToUTF16(kNoCellularDeviceError);
+      return kNoCellularDeviceError;
     case ash::MobileActivator::ActivationError::kNoCellularService:
       return base::ReplaceStringPlaceholders(
-          base::UTF8ToUTF16(kNoCellularServiceError),
-          ui::GetChromeOSDeviceName(), nullptr);
+          kNoCellularServiceError, ui::GetChromeOSDeviceName(), nullptr);
   }
   NOTREACHED() << "Unexpected activation error";
   return GetActivationErrorMessage(

@@ -75,13 +75,13 @@ CPDF_Dictionary* GetConfig(CPDF_Document* pDoc,
 ByteString GetUsageTypeString(CPDF_OCContext::UsageType eType) {
   ByteString csState;
   switch (eType) {
-    case CPDF_OCContext::Design:
+    case CPDF_OCContext::kDesign:
       csState = "Design";
       break;
-    case CPDF_OCContext::Print:
+    case CPDF_OCContext::kPrint:
       csState = "Print";
       break;
-    case CPDF_OCContext::Export:
+    case CPDF_OCContext::kExport:
       csState = "Export";
       break;
     default:
@@ -183,8 +183,9 @@ bool CPDF_OCContext::GetOCGVisible(const CPDF_Dictionary* pOCGDict) const {
 }
 
 bool CPDF_OCContext::CheckObjectVisible(const CPDF_PageObject* pObj) const {
-  for (size_t i = 0; i < pObj->m_ContentMarks.CountItems(); ++i) {
-    const CPDF_ContentMarkItem* item = pObj->m_ContentMarks.GetItem(i);
+  const CPDF_ContentMarks* pMarks = pObj->GetContentMarks();
+  for (size_t i = 0; i < pMarks->CountItems(); ++i) {
+    const CPDF_ContentMarkItem* item = pMarks->GetItem(i);
     if (item->GetName() == "OC" &&
         item->GetParamType() == CPDF_ContentMarkItem::kPropertiesDict &&
         !CheckOCGVisible(item->GetParam())) {

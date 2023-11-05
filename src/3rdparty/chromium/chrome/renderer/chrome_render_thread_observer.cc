@@ -36,6 +36,7 @@
 #include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/url_constants.h"
 #include "components/visitedlink/renderer/visitedlink_reader.h"
+#include "components/web_cache/public/features.h"
 #include "content/public/child/child_thread.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/resource_usage_reporter_type_converters.h"
@@ -81,6 +82,13 @@ class RendererResourceDelegate
 
   void OnRequestComplete() override {
     // Update the browser about our cache.
+
+    // No need to update the browser if the WebCache manager doesn't need this
+    // information.
+    if (base::FeatureList::IsEnabled(
+            web_cache::kTrimWebCacheOnMemoryPressureOnly)) {
+      return;
+    }
     // Rate limit informing the host of our cache stats.
     if (!weak_factory_.HasWeakPtrs()) {
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
@@ -105,6 +113,8 @@ class RendererResourceDelegate
 
  private:
   void InformHostOfCacheStats() {
+    DCHECK(!base::FeatureList::IsEnabled(
+        web_cache::kTrimWebCacheOnMemoryPressureOnly));
     WebCache::UsageStats stats;
     WebCache::GetUsageStats(&stats);
     if (!cache_stats_recorder_) {
@@ -228,7 +238,11 @@ void ChromeRenderThreadObserver::UnregisterMojoInterfaces(
 void ChromeRenderThreadObserver::SetInitialConfiguration(
     bool is_incognito_process,
     mojo::PendingReceiver<chrome::mojom::ChromeOSListener>
-        chromeos_listener_receiver) {
+        chromeos_listener_receiver,
+    mojo::PendingRemote<content_settings::mojom::ContentSettingsManager>
+        content_settings_manager) {
+  if (content_settings_manager)
+    content_settings_manager_.Bind(std::move(content_settings_manager));
   is_incognito_process_ = is_incognito_process;
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   if (chromeos_listener_receiver) {

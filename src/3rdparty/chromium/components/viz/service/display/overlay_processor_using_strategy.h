@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "components/viz/common/display/overlay_strategy.h"
@@ -64,7 +63,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
     // |render_pass_list|. Most strategies should look at the primary
     // RenderPass, the last element.
     virtual bool Attempt(
-        const SkMatrix44& output_color_matrix,
+        const skia::Matrix44& output_color_matrix,
         const FilterOperationsMap& render_pass_backdrop_filters,
         DisplayResourceProvider* resource_provider,
         AggregatedRenderPassList* render_pass_list,
@@ -78,7 +77,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
     // should not attempt a specific candidate it should merely identify them
     // and save the necessary data required to for a later attempt.
     virtual void ProposePrioritized(
-        const SkMatrix44& output_color_matrix,
+        const skia::Matrix44& output_color_matrix,
         const FilterOperationsMap& render_pass_backdrop_filters,
         DisplayResourceProvider* resource_provider,
         AggregatedRenderPassList* render_pass_list,
@@ -93,7 +92,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
     // represent overlays to |render_pass_list|. Most strategies should look at
     // the primary RenderPass, the last element.
     virtual bool AttemptPrioritized(
-        const SkMatrix44& output_color_matrix,
+        const skia::Matrix44& output_color_matrix,
         const FilterOperationsMap& render_pass_backdrop_filters,
         DisplayResourceProvider* resource_provider,
         AggregatedRenderPassList* render_pass_list,
@@ -136,23 +135,27 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
   void ProcessForOverlays(
       DisplayResourceProvider* resource_provider,
       AggregatedRenderPassList* render_passes,
-      const SkMatrix44& output_color_matrix,
+      const skia::Matrix44& output_color_matrix,
       const FilterOperationsMap& render_pass_filters,
       const FilterOperationsMap& render_pass_backdrop_filters,
       SurfaceDamageRectList surface_damage_rect_list,
       OutputSurfaceOverlayPlane* output_surface_plane,
       CandidateList* overlay_candidates,
       gfx::Rect* damage_rect,
-      std::vector<gfx::Rect>* content_bounds) final;
+      std::vector<gfx::Rect>* content_bounds)
+      // TODO(petermcneeley) : Restore to "final" once
+      // |OverlayProcessorDelegated| has been reintegrated into
+      // |OverlayProcessorOzone|.
+      override;
 
-  // This function takes a pointer to the base::Optional instance so the
+  // This function takes a pointer to the absl::optional instance so the
   // instance can be reset. When overlay strategy covers the entire output
   // surface, we no longer need the output surface as a separate overlay. This
   // is also used by SurfaceControl to adjust rotation.
   // TODO(weiliangc): Internalize the |output_surface_plane| inside the overlay
   // processor.
   void AdjustOutputSurfaceOverlay(
-      base::Optional<OutputSurfaceOverlayPlane>* output_surface_plane) override;
+      absl::optional<OutputSurfaceOverlayPlane>* output_surface_plane) override;
 
   OverlayProcessorUsingStrategy();
 
@@ -175,6 +178,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
 
   gfx::Rect overlay_damage_rect_;
   bool previous_is_underlay = false;
+  bool previous_has_mask_filter_ = false;
   gfx::Rect previous_frame_overlay_rect_;
 
   struct OverlayPrioritizationConfig {
@@ -206,7 +210,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
   // through as a const member because the underlay strategy changes the
   // |primary_plane|'s blending setting.
   bool AttemptWithStrategies(
-      const SkMatrix44& output_color_matrix,
+      const skia::Matrix44& output_color_matrix,
       const OverlayProcessorInterface::FilterOperationsMap&
           render_pass_backdrop_filters,
       DisplayResourceProvider* resource_provider,
@@ -224,7 +228,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
   // through as a const member because the underlay strategy changes the
   // |primary_plane|'s blending setting.
   bool AttemptWithStrategiesPrioritized(
-      const SkMatrix44& output_color_matrix,
+      const skia::Matrix44& output_color_matrix,
       const OverlayProcessorInterface::FilterOperationsMap&
           render_pass_backdrop_filters,
       DisplayResourceProvider* resource_provider,

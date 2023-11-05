@@ -7,10 +7,12 @@
 #include <memory>
 #include <utility>
 
-#include "base/stl_util.h"
+#include "base/check.h"
+#include "base/debug/crash_logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/pointer/touch_editing_controller.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -23,7 +25,6 @@
 #include "ui/touch_selection/touch_selection_menu_runner.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace views {
 namespace {
@@ -47,9 +48,14 @@ TouchSelectionMenuViews::TouchSelectionMenuViews(
     aura::Window* context)
     : BubbleDialogDelegateView(nullptr, BubbleBorder::BOTTOM_CENTER),
       owner_(owner),
-      client_(client) {
+      client_(client),
+      client_type_(client_->GetType()) {
   DCHECK(owner_);
   DCHECK(client_);
+
+  // TODO(jamescook): Remove after investigation of https://crbug.com/1146270
+  SCOPED_CRASH_KEY_STRING64("TouchSelectionMenuViews", "client", client_type_);
+  CHECK(ui::TouchSelectionMenuClient::IsValid(client_)) << client_type_;
 
   DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
   set_shadow(BubbleBorder::STANDARD_SHADOW);
@@ -133,21 +139,17 @@ void TouchSelectionMenuViews::CreateButtons() {
   }
 
   // Finally, add ellipsis button.
-  CreateButton(base::ASCIIToUTF16("..."),
-               base::BindRepeating(
-                   [](TouchSelectionMenuViews* menu) {
-                     menu->CloseMenu();
-                     menu->client_->RunContextMenu();
-                   },
-                   base::Unretained(this)))
+  CreateButton(u"...",
+               base::BindRepeating(&TouchSelectionMenuViews::EllipsisPressed,
+                                   base::Unretained(this)))
       ->SetID(ButtonViewId::kEllipsisButton);
   InvalidateLayout();
 }
 
 LabelButton* TouchSelectionMenuViews::CreateButton(
-    const base::string16& title,
+    const std::u16string& title,
     Button::PressedCallback callback) {
-  base::string16 label = gfx::RemoveAccelerator(title);
+  std::u16string label = gfx::RemoveAccelerator(title);
   auto* button = AddChildView(std::make_unique<LabelButton>(
       std::move(callback), label, style::CONTEXT_TOUCH_MENU));
   constexpr gfx::Size kMenuButtonMinSize = gfx::Size(63, 38);
@@ -178,7 +180,9 @@ void TouchSelectionMenuViews::OnPaint(gfx::Canvas* canvas) {
 }
 
 void TouchSelectionMenuViews::WindowClosing() {
-  DCHECK(!owner_ || owner_->menu_ == this);
+  // TODO(jamescook): Change back to DCHECK after investigation of
+  // https://crbug.com/1146270
+  CHECK(!owner_ || owner_->menu_ == this);
   BubbleDialogDelegateView::WindowClosing();
   if (owner_)
     DisconnectOwner();
@@ -187,7 +191,20 @@ void TouchSelectionMenuViews::WindowClosing() {
 void TouchSelectionMenuViews::ButtonPressed(int command,
                                             const ui::Event& event) {
   CloseMenu();
+
+  // TODO(jamescook): Remove after investigation of https://crbug.com/1146270
+  SCOPED_CRASH_KEY_STRING64("TouchSelectionMenuViews", "client", client_type_);
+  CHECK(ui::TouchSelectionMenuClient::IsValid(client_)) << client_type_;
   client_->ExecuteCommand(command, event.flags());
+}
+
+void TouchSelectionMenuViews::EllipsisPressed(const ui::Event& event) {
+  CloseMenu();
+
+  // TODO(jamescook): Remove after investigation of https://crbug.com/1146270
+  SCOPED_CRASH_KEY_STRING64("TouchSelectionMenuViews", "client", client_type_);
+  CHECK(ui::TouchSelectionMenuClient::IsValid(client_)) << client_type_;
+  client_->RunContextMenu();
 }
 
 BEGIN_METADATA(TouchSelectionMenuViews, BubbleDialogDelegateView)

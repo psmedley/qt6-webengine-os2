@@ -7,12 +7,13 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
 #include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/views/metadata/metadata_header_macros.h"
 #include "ui/views/metadata/view_factory.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -21,6 +22,10 @@ namespace gfx {
 class ImageSkia;
 class Rect;
 }  // namespace gfx
+
+namespace ui {
+class ImageModel;
+}  // namespace ui
 
 namespace views {
 class BubbleDialogDelegate;
@@ -57,7 +62,7 @@ class VIEWS_EXPORT WidgetDelegate {
     // The accessible title for the window, often more descriptive than the
     // plain title. If no accessible title is present the result of
     // GetWindowTitle() will be used.
-    base::string16 accessible_title;
+    std::u16string accessible_title;
 
     // Whether the window should display controls for the user to minimize,
     // maximize, or resize it.
@@ -89,7 +94,7 @@ class VIEWS_EXPORT WidgetDelegate {
 
     // The widget's initially focused view, if any. This can only be set before
     // this WidgetDelegate is used to initialize a Widget.
-    base::Optional<View*> initially_focused_view;
+    absl::optional<View*> initially_focused_view;
 
     // The widget's internal name, used to identify it in window-state
     // restoration (if this widget participates in that) and in debugging
@@ -117,7 +122,7 @@ class VIEWS_EXPORT WidgetDelegate {
 
     // The widget's title, if any.
     // TODO(ellyjones): Should it be illegal to have show_title && !title?
-    base::string16 title;
+    std::u16string title;
   };
 
   WidgetDelegate();
@@ -137,10 +142,6 @@ class VIEWS_EXPORT WidgetDelegate {
   // Called when the work area (the desktop area minus task bars,
   // menu bars, etc.) changes in size.
   virtual void OnWorkAreaChanged();
-
-  // Called when the widget's initialization is beginning, right after the
-  // ViewsDelegate decides to use this WidgetDelegate for a Widget.
-  virtual void OnWidgetInitializing() {}
 
   // Called when the widget's initialization is complete.
   virtual void OnWidgetInitialized() {}
@@ -163,7 +164,7 @@ class VIEWS_EXPORT WidgetDelegate {
   virtual DialogDelegate* AsDialogDelegate();
 
   // Returns true if the window can be resized.
-  virtual bool CanResize() const;
+  bool CanResize() const;
 
   // Returns true if the window can be maximized.
   virtual bool CanMaximize() const;
@@ -181,10 +182,10 @@ class VIEWS_EXPORT WidgetDelegate {
   virtual ax::mojom::Role GetAccessibleWindowRole();
 
   // Returns the title to be read with screen readers.
-  virtual base::string16 GetAccessibleWindowTitle() const;
+  virtual std::u16string GetAccessibleWindowTitle() const;
 
   // Returns the text to be displayed in the window title.
-  virtual base::string16 GetWindowTitle() const;
+  virtual std::u16string GetWindowTitle() const;
 
   // Returns true if the window should show a title in the title bar.
   virtual bool ShouldShowWindowTitle() const;
@@ -194,10 +195,10 @@ class VIEWS_EXPORT WidgetDelegate {
 
   // Returns the app icon for the window. On Windows, this is the ICON_BIG used
   // in Alt-Tab list and Win7's taskbar.
-  virtual gfx::ImageSkia GetWindowAppIcon();
+  virtual ui::ImageModel GetWindowAppIcon();
 
   // Returns the icon to be displayed in the window.
-  virtual gfx::ImageSkia GetWindowIcon();
+  virtual ui::ImageModel GetWindowIcon();
 
   // Returns true if a window icon should be shown.
   bool ShouldShowWindowIcon() const;
@@ -242,11 +243,15 @@ class VIEWS_EXPORT WidgetDelegate {
   // of these methods.
   virtual void WindowClosing();
 
-  // It should not be necessary to override this method in new code; instead,
-  // consider using either SetOwnedByWidget() if you need that ownership
-  // behavior, or RegisterDeleteDelegateCallback() if you need to attach
-  // behavior before deletion but want the default deletion behavior.
-  virtual void DeleteDelegate();
+  // Called when removed from a Widget. This first runs callbacks registered
+  // through RegisterDeleteDelegateCallback() and then either deletes `this` or
+  // not depending on SetOwnedByWidget(). If `this` is owned by Widget then the
+  // delegate is destructed at the end.
+  //
+  // WARNING: Use SetOwnedByWidget(true) and use delete-delegate callbacks to do
+  // pre-destruction cleanup instead of using self-deleting callbacks. The
+  // latter may become a DCHECK in the future.
+  void DeleteDelegate();
 
   // Called when the user begins/ends to change the bounds of the window.
   virtual void OnWindowBeginUserBoundsChange() {}
@@ -326,7 +331,7 @@ class VIEWS_EXPORT WidgetDelegate {
   // Setters for data parameters of the WidgetDelegate. If you use these
   // setters, there is no need to override the corresponding virtual getters.
   void SetAccessibleRole(ax::mojom::Role role);
-  void SetAccessibleTitle(base::string16 title);
+  void SetAccessibleTitle(std::u16string title);
   void SetCanMaximize(bool can_maximize);
   void SetCanMinimize(bool can_minimize);
   void SetCanResize(bool can_resize);
@@ -340,7 +345,7 @@ class VIEWS_EXPORT WidgetDelegate {
   void SetShowCloseButton(bool show_close_button);
   void SetShowIcon(bool show_icon);
   void SetShowTitle(bool show_title);
-  void SetTitle(const base::string16& title);
+  void SetTitle(const std::u16string& title);
   void SetTitle(int title_message_id);
 #if defined(USE_AURA)
   void SetCenterTitle(bool center_title);
@@ -348,24 +353,15 @@ class VIEWS_EXPORT WidgetDelegate {
 
   template <typename T>
   T* SetContentsView(std::unique_ptr<T> contents) {
-    DCHECK(!contents->owned_by_client());
     T* raw_contents = contents.get();
-    SetContentsViewImpl(contents.release());
+    SetContentsViewImpl(std::move(contents));
     return raw_contents;
-  }
-
-  template <typename T>
-  T* SetContentsView(T* contents) {
-    DCHECK(contents->owned_by_client());
-    SetContentsViewImpl(contents);
-    return contents;
   }
 
   // A convenience wrapper that does all three of SetCanMaximize,
   // SetCanMinimize, and SetCanResize.
   void SetHasWindowSizeControls(bool has_controls);
 
-  void RegisterWidgetInitializingCallback(base::OnceClosure callback);
   void RegisterWidgetInitializedCallback(base::OnceClosure callback);
   void RegisterWindowWillCloseCallback(base::OnceClosure callback);
   void RegisterWindowClosingCallback(base::OnceClosure callback);
@@ -402,7 +398,7 @@ class VIEWS_EXPORT WidgetDelegate {
 
   friend class Widget;
 
-  void SetContentsViewImpl(View* contents);
+  void SetContentsViewImpl(std::unique_ptr<View> contents);
 
   // The Widget that was initialized with this instance as its WidgetDelegate,
   // if any.
@@ -419,10 +415,13 @@ class VIEWS_EXPORT WidgetDelegate {
   // Managed by Widget. Ensures |this| outlives its Widget.
   bool can_delete_this_ = true;
 
-  // The first two are stored as unique_ptrs to make it easier to check in the
+  // Used to ensure that a client Delete callback doesn't actually destruct the
+  // WidgetDelegate if the client has given ownership to the Widget.
+  bool* destructor_ran_ = nullptr;
+
+  // This is stored as a unique_ptr to make it easier to check in the
   // registration methods whether a callback is being registered too late in the
   // WidgetDelegate's lifecycle.
-  std::unique_ptr<ClosureVector> widget_initializing_callbacks_;
   std::unique_ptr<ClosureVector> widget_initialized_callbacks_;
   ClosureVector window_will_close_callbacks_;
   ClosureVector window_closing_callbacks_;

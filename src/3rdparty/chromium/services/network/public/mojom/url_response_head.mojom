@@ -7,7 +7,6 @@ module network.mojom;
 import "mojo/public/mojom/base/time.mojom";
 import "mojo/public/mojom/base/unguessable_token.mojom";
 import "services/network/public/mojom/fetch_api.mojom";
-import "services/network/public/mojom/http_raw_request_response_info.mojom";
 import "services/network/public/mojom/ip_endpoint.mojom";
 import "services/network/public/mojom/load_timing_info.mojom";
 import "services/network/public/mojom/network_param.mojom";
@@ -67,11 +66,6 @@ struct URLResponseHead {
   // Tools.  Includes socket ID and socket reuse information.
   LoadTimingInfo load_timing;
 
-  // Actual request and response headers, as obtained from the network stack.
-  // Only present if the renderer set report_raw_headers to true and had the
-  // CanReadRawCookies permission.
-  HttpRawRequestResponseInfo? raw_request_response_info;
-
   // True if the response was delivered using SPDY.
   bool was_fetched_via_spdy = false;
 
@@ -103,10 +97,7 @@ struct URLResponseHead {
 
   // True if a service worker responded to the request. If the service worker
   // received a fetch event and did not call respondWith(), or was bypassed due
-  // to absence of a fetch event handler, this function typically returns false
-  // but returns true if "fallback to renderer" was required (however in this
-  // case the response is not an actual resource and the request will be
-  // reissued by the renderer).
+  // to absence of a fetch event handler, this is false.
   bool was_fetched_via_service_worker = false;
 
   // Source of a serviceworker response - CacheStorage, HttpCache, Network or
@@ -118,12 +109,6 @@ struct URLResponseHead {
   // `respondWith(new Response(...))`.
   FetchResponseSource service_worker_response_source =
       FetchResponseSource.kUnspecified;
-
-  // True when a request whose mode is |CORS| or |CORS-with-forced-preflight|
-  // is sent to a ServiceWorker but FetchEvent.respondWith is not called. So the
-  // renderer has to resend the request with skip service worker flag
-  // considering the CORS preflight logic.
-  bool was_fallback_required_by_service_worker = false;
 
   // The URL list of the Response object the service worker passed to
   // respondWith() to create this response. For example, if the service worker
@@ -154,7 +139,7 @@ struct URLResponseHead {
 
   // Only provided if kURLLoadOptionSendSSLInfoWithResponse was specified to
   // the URLLoaderFactory::CreateLoaderAndStart option or
-  // if ResourceRequest::report_raw_headers is set. When set via
+  // if ResourceRequest::devtools_request_id is set. When set via
   // |report_raw_headers|, the SSLInfo is not guaranteed to be fully populated
   // and may only contain certain fields of interest (namely, connection
   // parameters and certificate information).
@@ -239,4 +224,14 @@ struct URLResponseHead {
   // The URL of WebBundle this response was loaded from. This value is only
   // populated for resources loaded from a WebBundle.
   url.mojom.Url web_bundle_url;
+
+  // True when there is an "authorization" header on the request and it is
+  // covered by the wildcard in the preflight response.
+  // TODO(crbug.com/1176753): Remove this once the investigation is done.
+  bool has_authorization_covered_by_wildcard_on_preflight = false;
+
+  // The request's |includeCredentials| value from the "HTTP-network fetch"
+  // algorithm.
+  // See: https://fetch.spec.whatwg.org/#concept-http-network-fetch
+  bool request_include_credentials = true;
 };

@@ -4,6 +4,7 @@
 
 #include "components/background_sync/background_sync_controller_impl.h"
 
+#include "base/containers/contains.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
@@ -78,9 +79,8 @@ void BackgroundSyncControllerImpl::OnContentSettingChanged(
     if (!IsContentSettingBlocked(origin))
       continue;
 
-    auto* storage_partition =
-        content::BrowserContext::GetStoragePartitionForSite(
-            browser_context_, origin.GetURL(), /* can_create= */ false);
+    auto* storage_partition = browser_context_->GetStoragePartitionForUrl(
+        origin.GetURL(), /* can_create= */ false);
     if (!storage_partition)
       continue;
 

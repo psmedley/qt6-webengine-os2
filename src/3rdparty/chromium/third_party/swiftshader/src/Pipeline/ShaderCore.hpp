@@ -329,6 +329,7 @@ inline T SIMD::Pointer::Load(OutOfBoundsBehavior robustness, Int mask, bool atom
 			// Offsets are sequential. Perform regular load.
 			return rr::Load(rr::Pointer<T>(base + staticOffsets[0]), alignment, atomic, order);
 		}
+
 		if(hasStaticEqualOffsets())
 		{
 			// Load one, replicate.
@@ -339,14 +340,14 @@ inline T SIMD::Pointer::Load(OutOfBoundsBehavior robustness, Int mask, bool atom
 	{
 		switch(robustness)
 		{
-			case OutOfBoundsBehavior::Nullify:
-			case OutOfBoundsBehavior::RobustBufferAccess:
-			case OutOfBoundsBehavior::UndefinedValue:
-				mask &= isInBounds(sizeof(float), robustness);  // Disable out-of-bounds reads.
-				break;
-			case OutOfBoundsBehavior::UndefinedBehavior:
-				// Nothing to do. Application/compiler must guarantee no out-of-bounds accesses.
-				break;
+		case OutOfBoundsBehavior::Nullify:
+		case OutOfBoundsBehavior::RobustBufferAccess:
+		case OutOfBoundsBehavior::UndefinedValue:
+			mask &= isInBounds(sizeof(float), robustness);  // Disable out-of-bounds reads.
+			break;
+		case OutOfBoundsBehavior::UndefinedBehavior:
+			// Nothing to do. Application/compiler must guarantee no out-of-bounds accesses.
+			break;
 		}
 	}
 
@@ -371,20 +372,17 @@ inline T SIMD::Pointer::Load(OutOfBoundsBehavior robustness, Int mask, bool atom
 		bool zeroMaskedLanes = true;
 		switch(robustness)
 		{
-			case OutOfBoundsBehavior::Nullify:
-			case OutOfBoundsBehavior::RobustBufferAccess:  // Must either return an in-bounds value, or zero.
-				zeroMaskedLanes = true;
-				break;
-			case OutOfBoundsBehavior::UndefinedValue:
-			case OutOfBoundsBehavior::UndefinedBehavior:
-				zeroMaskedLanes = false;
-				break;
+		case OutOfBoundsBehavior::Nullify:
+		case OutOfBoundsBehavior::RobustBufferAccess:  // Must either return an in-bounds value, or zero.
+			zeroMaskedLanes = true;
+			break;
+		case OutOfBoundsBehavior::UndefinedValue:
+		case OutOfBoundsBehavior::UndefinedBehavior:
+			zeroMaskedLanes = false;
+			break;
 		}
 
-		if(hasStaticSequentialOffsets(sizeof(float)))
-		{
-			return rr::MaskedLoad(rr::Pointer<T>(base + staticOffsets[0]), mask, alignment, zeroMaskedLanes);
-		}
+		// TODO(b/195446858): Optimize static sequential offsets case by using masked load.
 
 		return rr::Gather(rr::Pointer<EL>(base), offs, mask, alignment, zeroMaskedLanes);
 	}
@@ -431,14 +429,14 @@ inline void SIMD::Pointer::Store(T val, OutOfBoundsBehavior robustness, Int mask
 
 	switch(robustness)
 	{
-		case OutOfBoundsBehavior::Nullify:
-		case OutOfBoundsBehavior::RobustBufferAccess:       // TODO: Allows writing anywhere within bounds. Could be faster than masking.
-		case OutOfBoundsBehavior::UndefinedValue:           // Should not be used for store operations. Treat as robust buffer access.
-			mask &= isInBounds(sizeof(float), robustness);  // Disable out-of-bounds writes.
-			break;
-		case OutOfBoundsBehavior::UndefinedBehavior:
-			// Nothing to do. Application/compiler must guarantee no out-of-bounds accesses.
-			break;
+	case OutOfBoundsBehavior::Nullify:
+	case OutOfBoundsBehavior::RobustBufferAccess:       // TODO: Allows writing anywhere within bounds. Could be faster than masking.
+	case OutOfBoundsBehavior::UndefinedValue:           // Should not be used for store operations. Treat as robust buffer access.
+		mask &= isInBounds(sizeof(float), robustness);  // Disable out-of-bounds writes.
+		break;
+	case OutOfBoundsBehavior::UndefinedBehavior:
+		// Nothing to do. Application/compiler must guarantee no out-of-bounds accesses.
+		break;
 	}
 
 	if(!atomic && order == std::memory_order_relaxed)
@@ -458,20 +456,15 @@ inline void SIMD::Pointer::Store(T val, OutOfBoundsBehavior robustness, Int mask
 				*rr::Pointer<EL>(base + staticOffsets[0], alignment) = As<EL>(scalarVal);
 			}
 		}
-		else if(hasStaticSequentialOffsets(sizeof(float)))
+		else if(hasStaticSequentialOffsets(sizeof(float)) &&
+		        isStaticallyInBounds(sizeof(float), robustness))
 		{
-			if(isStaticallyInBounds(sizeof(float), robustness))
-			{
-				// Pointer has no elements OOB, and the store is not atomic.
-				// Perform a RMW.
-				auto p = rr::Pointer<SIMD::Int>(base + staticOffsets[0], alignment);
-				auto prev = *p;
-				*p = (prev & ~mask) | (As<SIMD::Int>(val) & mask);
-			}
-			else
-			{
-				rr::MaskedStore(rr::Pointer<T>(base + staticOffsets[0]), val, mask, alignment);
-			}
+			// TODO(b/195446858): Optimize using masked store.
+			// Pointer has no elements OOB, and the store is not atomic.
+			// Perform a read-modify-write.
+			auto p = rr::Pointer<SIMD::Int>(base + staticOffsets[0], alignment);
+			auto prev = *p;
+			*p = (prev & ~mask) | (As<SIMD::Int>(val) & mask);
 		}
 		else
 		{

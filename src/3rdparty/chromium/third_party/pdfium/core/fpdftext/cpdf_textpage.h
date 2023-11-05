@@ -19,7 +19,6 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/base/optional.h"
 
-class CPDF_Font;
 class CPDF_FormObject;
 class CPDF_Page;
 class CPDF_TextObject;
@@ -46,7 +45,7 @@ class CPDF_TextPage {
     CharType m_CharType = CharType::kNormal;
     CFX_PointF m_Origin;
     CFX_FloatRect m_CharBox;
-    UnownedPtr<CPDF_TextObject> m_pTextObj;
+    UnownedPtr<const CPDF_TextObject> m_pTextObj;
     CFX_Matrix m_Matrix;
   };
 
@@ -98,7 +97,7 @@ class CPDF_TextPage {
     TransformedTextObject(const TransformedTextObject& that);
     ~TransformedTextObject();
 
-    UnownedPtr<CPDF_TextObject> m_pTextObj;
+    UnownedPtr<const CPDF_TextObject> m_pTextObj;
     CFX_Matrix m_formMatrix;
   };
 
@@ -141,7 +140,7 @@ class CPDF_TextPage {
   std::deque<CharInfo> m_TempCharList;
   CFX_WideTextBuf m_TextBuf;
   CFX_WideTextBuf m_TempTextBuf;
-  UnownedPtr<CPDF_TextObject> m_pPrevTextObj;
+  UnownedPtr<const CPDF_TextObject> m_pPrevTextObj;
   CFX_Matrix m_PrevMatrix;
   const bool m_rtl;
   const CFX_Matrix m_DisplayMatrix;

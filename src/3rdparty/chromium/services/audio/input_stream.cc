@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "media/audio/audio_manager.h"
@@ -26,6 +27,10 @@ namespace audio {
 namespace {
 const int kMaxInputChannels = 3;
 
+using InputStreamErrorCode = media::mojom::InputStreamErrorCode;
+using DisconnectReason =
+    media::mojom::AudioInputStreamObserver::DisconnectReason;
+
 const char* ErrorCodeToString(InputController::ErrorCode error) {
   switch (error) {
     case (InputController::STREAM_CREATE_ERROR):
@@ -34,6 +39,10 @@ const char* ErrorCodeToString(InputController::ErrorCode error) {
       return "STREAM_OPEN_ERROR";
     case (InputController::STREAM_ERROR):
       return "STREAM_ERROR";
+    case (InputController::STREAM_OPEN_SYSTEM_PERMISSIONS_ERROR):
+      return "STREAM_OPEN_SYSTEM_PERMISSIONS_ERROR";
+    case (InputController::STREAM_OPEN_DEVICE_IN_USE_ERROR):
+      return "STREAM_OPEN_DEVICE_IN_USE_ERROR";
     default:
       NOTREACHED();
   }
@@ -62,6 +71,7 @@ InputStream::InputStream(
     mojo::PendingRemote<media::mojom::AudioLog> log,
     media::AudioManager* audio_manager,
     std::unique_ptr<UserInputMonitor> user_input_monitor,
+    InputStreamActivityMonitor* activity_monitor,
     const std::string& device_id,
     const media::AudioParameters& params,
     uint32_t shared_memory_count,
@@ -83,6 +93,7 @@ InputStream::InputStream(
           &foreign_socket_)),
       user_input_monitor_(std::move(user_input_monitor)) {
   DCHECK(audio_manager);
+  DCHECK(activity_monitor);
   DCHECK(receiver_.is_bound());
   DCHECK(client_);
   DCHECK(created_callback_);
@@ -95,8 +106,9 @@ InputStream::InputStream(
   SendLogMessage("%s", GetCtorLogString(device_id, params, enable_agc).c_str());
 
   // |this| owns these objects, so unretained is safe.
-  base::RepeatingClosure error_handler = base::BindRepeating(
-      &InputStream::OnStreamError, base::Unretained(this), false);
+  base::RepeatingClosure error_handler =
+      base::BindRepeating(&InputStream::OnStreamError, base::Unretained(this),
+                          absl::optional<DisconnectReason>());
   receiver_.set_disconnect_handler(error_handler);
   client_.set_disconnect_handler(error_handler);
 
@@ -109,18 +121,18 @@ InputStream::InputStream(
   // Only MONO, STEREO and STEREO_AND_KEYBOARD_MIC channel layouts are expected,
   // see AudioManagerBase::MakeAudioInputStream().
   if (params.channels() > kMaxInputChannels) {
-    OnStreamError(true);
+    OnStreamPlatformError();
     return;
   }
 
   if (!writer_) {
-    OnStreamError(true);
+    OnStreamPlatformError();
     return;
   }
 
-  controller_ = InputController::Create(audio_manager, this, writer_.get(),
-                                        user_input_monitor_.get(), params,
-                                        device_id, enable_agc);
+  controller_ = InputController::Create(
+      audio_manager, this, writer_.get(), user_input_monitor_.get(),
+      activity_monitor, params, device_id, enable_agc);
 }
 
 InputStream::~InputStream() {
@@ -132,15 +144,14 @@ InputStream::~InputStream() {
 
   if (observer_) {
     observer_.ResetWithReason(
-        static_cast<uint32_t>(media::mojom::AudioInputStreamObserver::
-                                  DisconnectReason::kTerminatedByClient),
+        static_cast<uint32_t>(DisconnectReason::kTerminatedByClient),
         std::string());
   }
 
   if (created_callback_) {
     // Didn't manage to create the stream. Call the callback anyways as mandated
     // by mojo.
-    std::move(created_callback_).Run(nullptr, false, base::nullopt);
+    std::move(created_callback_).Run(nullptr, false, absl::nullopt);
   }
 
   if (!controller_) {
@@ -184,7 +195,7 @@ void InputStream::SetVolume(double volume) {
 
   if (volume < 0 || volume > 1) {
     mojo::ReportBadMessage("Invalid volume");
-    OnStreamError(true);
+    OnStreamPlatformError();
     return;
   }
 
@@ -203,7 +214,7 @@ void InputStream::OnCreated(bool initially_muted) {
   base::ReadOnlySharedMemoryRegion shared_memory_region =
       writer_->TakeSharedMemoryRegion();
   if (!shared_memory_region.IsValid()) {
-    OnStreamError(true);
+    OnStreamPlatformError();
     return;
   }
 
@@ -216,22 +227,47 @@ void InputStream::OnCreated(bool initially_muted) {
            initially_muted, id_);
 }
 
+DisconnectReason InputErrorToDisconnectReason(InputController::ErrorCode code) {
+  switch (code) {
+    case InputController::STREAM_OPEN_SYSTEM_PERMISSIONS_ERROR:
+      return DisconnectReason::kSystemPermissions;
+    case InputController::STREAM_OPEN_DEVICE_IN_USE_ERROR:
+      return DisconnectReason::kDeviceInUse;
+    default:
+      break;
+  }
+  return DisconnectReason::kPlatformError;
+}
+
+InputStreamErrorCode InputControllerErrorToStreamError(
+    InputController::ErrorCode code) {
+  switch (code) {
+    case InputController::STREAM_OPEN_SYSTEM_PERMISSIONS_ERROR:
+      return InputStreamErrorCode::kSystemPermissions;
+    case InputController::STREAM_OPEN_DEVICE_IN_USE_ERROR:
+      return InputStreamErrorCode::kDeviceInUse;
+    default:
+      break;
+  }
+  return InputStreamErrorCode::kUnknown;
+}
+
 void InputStream::OnError(InputController::ErrorCode error_code) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
   TRACE_EVENT_NESTABLE_ASYNC_INSTANT0("audio", "Error", this);
 
-  client_->OnError();
+  client_->OnError(InputControllerErrorToStreamError(error_code));
   if (log_)
     log_->OnError();
   SendLogMessage("%s({error_code=%s})", __func__,
                  ErrorCodeToString(error_code));
-  OnStreamError(true);
+  OnStreamError(InputErrorToDisconnectReason(error_code));
 }
 
 void InputStream::OnLog(base::StringPiece message) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
   if (log_)
-    log_->OnLogMessage(message.as_string() + " [id=" + id_.ToString() + "]");
+    log_->OnLogMessage(std::string(message) + " [id=" + id_.ToString() + "]");
 }
 
 void InputStream::OnMuted(bool is_muted) {
@@ -239,18 +275,20 @@ void InputStream::OnMuted(bool is_muted) {
   client_->OnMutedStateChanged(is_muted);
 }
 
-void InputStream::OnStreamError(bool signalPlatformError) {
+void InputStream::OnStreamPlatformError() {
+  OnStreamError(DisconnectReason::kPlatformError);
+}
+
+void InputStream::OnStreamError(
+    absl::optional<DisconnectReason> reason_to_report) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
   TRACE_EVENT_NESTABLE_ASYNC_INSTANT0("audio", "OnStreamError", this);
 
-  if (signalPlatformError && observer_) {
-    observer_.ResetWithReason(
-        static_cast<uint32_t>(media::mojom::AudioInputStreamObserver::
-                                  DisconnectReason::kPlatformError),
-        std::string());
-  }
-
-  if (signalPlatformError) {
+  if (reason_to_report.has_value()) {
+    if (observer_) {
+      observer_.ResetWithReason(static_cast<uint32_t>(reason_to_report.value()),
+                                std::string());
+    }
     SendLogMessage("%s()", __func__);
   }
 

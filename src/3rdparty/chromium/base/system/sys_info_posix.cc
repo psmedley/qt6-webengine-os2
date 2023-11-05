@@ -104,8 +104,8 @@ bool IsStatsZeroIfUnlimited(const base::FilePath& path) {
 
   switch (stats.f_type) {
     case TMPFS_MAGIC:
-    case HUGETLBFS_MAGIC:
-    case RAMFS_MAGIC:
+    case static_cast<int>(HUGETLBFS_MAGIC):
+    case static_cast<int>(RAMFS_MAGIC):
       return true;
   }
   return false;

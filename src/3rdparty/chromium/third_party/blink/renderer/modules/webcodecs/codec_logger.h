@@ -30,9 +30,6 @@ class ExecutionContext;
 // call Neuter() if the ExecutionContext passed to the constructor is destroyed.
 class MODULES_EXPORT CodecLogger final {
  public:
-  // Creates a CodecLogger backed by a NullMediaLog, which does nothing.
-  CodecLogger();
-
   // Attempts to create CodecLogger backed by a BatchingMediaLog. Falls back to
   // a NullMediaLog on failure.
   CodecLogger(ExecutionContext*,
@@ -61,7 +58,12 @@ class MODULES_EXPORT CodecLogger final {
   // destroyed.
   void Neuter();
 
+  // Records the first media::Status passed to MakeException.
+  media::StatusCode status_code() const { return status_code_; }
+
  private:
+  media::StatusCode status_code_ = media::StatusCode::kOk;
+
   // |parent_media_log_| must be destroyed if ever the ExecutionContext is
   // destroyed, since the blink::MediaInspectorContext* pointer given to
   // InspectorMediaEventHandler might no longer be valid.
@@ -71,6 +73,9 @@ class MODULES_EXPORT CodecLogger final {
   // We might destroy |parent_media_log_| at any point, so keep a clone which
   // can be safely accessed, and whose raw pointer can be given callbacks.
   std::unique_ptr<media::MediaLog> media_log_;
+
+  // Keep task runner around for posting the media log to upon destruction.
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

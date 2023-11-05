@@ -17,7 +17,7 @@ namespace {
 // Describes the amount to shift the numerator/denominator of the fraction when
 // a fraction bar is present. Data is populated from the OpenType MATH table.
 // If the OpenType MATH table is not present fallback values are used.
-// https://mathml-refresh.github.io/mathml-core/#fraction-with-nonzero-line-thickness
+// https://w3c.github.io/mathml-core/#fraction-with-nonzero-line-thickness
 struct FractionParameters {
   LayoutUnit numerator_gap_min;
   LayoutUnit denominator_gap_min;
@@ -72,7 +72,7 @@ FractionParameters GetFractionParameters(const ComputedStyle& style) {
 // Describes the amount to shift the numerator/denominator of the fraction when
 // a fraction bar is not present. Data is populated from the OpenType MATH
 // table. If the OpenType MATH table is not present fallback values are used.
-// https://mathml-refresh.github.io/mathml-core/#fraction-with-zero-line-thickness
+// https://w3c.github.io/mathml-core/#fraction-with-zero-line-thickness
 struct FractionStackParameters {
   LayoutUnit gap_min;
   LayoutUnit top_shift_up;
@@ -258,8 +258,7 @@ scoped_refptr<const NGLayoutResult> NGMathFractionLayoutAlgorithm::Layout() {
 
   LayoutUnit block_size = ComputeBlockSizeForFragment(
       ConstraintSpace(), Style(), BorderPadding(), total_block_size,
-      container_builder_.InitialBorderBoxSize().inline_size,
-      Node().ShouldBeConsideredAsReplaced());
+      container_builder_.InitialBorderBoxSize().inline_size);
 
   container_builder_.SetIntrinsicBlockSize(total_block_size);
   container_builder_.SetFragmentsTotalBlockSize(block_size);
@@ -270,30 +269,29 @@ scoped_refptr<const NGLayoutResult> NGMathFractionLayoutAlgorithm::Layout() {
 }
 
 MinMaxSizesResult NGMathFractionLayoutAlgorithm::ComputeMinMaxSizes(
-    const MinMaxSizesInput& child_input) const {
+    const MinMaxSizesFloatInput&) const {
   if (auto result = CalculateMinMaxSizesIgnoringChildren(
           Node(), BorderScrollbarPadding()))
     return *result;
 
   MinMaxSizes sizes;
-  bool depends_on_percentage_block_size = false;
+  bool depends_on_block_constraints = false;
 
   for (NGLayoutInputNode child = Node().FirstChild(); child;
        child = child.NextSibling()) {
     if (child.IsOutOfFlowPositioned())
       continue;
-    auto child_result = ComputeMinAndMaxContentContribution(
-        Style(), To<NGBlockNode>(child), child_input);
-    NGBoxStrut margins = ComputeMinMaxMargins(Style(), child);
-    child_result.sizes += margins.InlineSum();
+
+    const auto child_result = ComputeMinAndMaxContentContributionForMathChild(
+        Style(), ConstraintSpace(), To<NGBlockNode>(child),
+        ChildAvailableSize().block_size);
 
     sizes.Encompass(child_result.sizes);
-    depends_on_percentage_block_size |=
-        child_result.depends_on_percentage_block_size;
+    depends_on_block_constraints |= child_result.depends_on_block_constraints;
   }
 
   sizes += BorderScrollbarPadding().InlineSum();
-  return MinMaxSizesResult(sizes, depends_on_percentage_block_size);
+  return MinMaxSizesResult(sizes, depends_on_block_constraints);
 }
 
 }  // namespace blink

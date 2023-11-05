@@ -6,7 +6,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_DEDICATED_WORKER_MESSAGING_PROXY_H_
 
 #include <memory>
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
@@ -34,6 +33,9 @@ class CORE_EXPORT DedicatedWorkerMessagingProxy
     : public ThreadedMessagingProxyBase {
  public:
   DedicatedWorkerMessagingProxy(ExecutionContext*, DedicatedWorker*);
+  DedicatedWorkerMessagingProxy(const DedicatedWorkerMessagingProxy&) = delete;
+  DedicatedWorkerMessagingProxy& operator=(
+      const DedicatedWorkerMessagingProxy&) = delete;
   ~DedicatedWorkerMessagingProxy() override;
 
   // These methods should only be used on the parent context thread.
@@ -79,7 +81,7 @@ class CORE_EXPORT DedicatedWorkerMessagingProxy
  private:
   friend class DedicatedWorkerMessagingProxyForTest;
 
-  base::Optional<WorkerBackingThreadStartupData> CreateBackingThreadStartupData(
+  absl::optional<WorkerBackingThreadStartupData> CreateBackingThreadStartupData(
       v8::Isolate*);
 
   std::unique_ptr<WorkerThread> CreateWorkerThread() override;
@@ -105,8 +107,6 @@ class CORE_EXPORT DedicatedWorkerMessagingProxy
   // Passed to DedicatedWorkerThread on worker thread creation.
   mojo::PendingRemote<mojom::blink::DedicatedWorkerHost>
       pending_dedicated_worker_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(DedicatedWorkerMessagingProxy);
 };
 
 }  // namespace blink

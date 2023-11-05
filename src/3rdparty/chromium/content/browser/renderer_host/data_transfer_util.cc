@@ -11,13 +11,13 @@
 #include "base/check.h"
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
-#include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/chromeos_buildflags.h"
 #include "content/browser/file_system_access/file_system_access_manager_impl.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "storage/browser/file_system/external_mount_points.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_data_transfer_token.mojom.h"
 #include "third_party/blink/public/mojom/page/drag.mojom.h"
 #include "ui/base/clipboard/clipboard_constants.h"
@@ -118,7 +118,7 @@ blink::mojom::DragDataPtr DropDataToDragData(
     item->file_system_id = file_system_file.filesystem_id;
     items.push_back(blink::mojom::DragItem::NewFileSystemFile(std::move(item)));
   }
-  for (const std::pair<base::string16, base::string16> data :
+  for (const std::pair<std::u16string, std::u16string> data :
        drop_data.custom_data) {
     blink::mojom::DragItemStringPtr item = blink::mojom::DragItemString::New();
     item->string_type = base::UTF16ToUTF8(data.first);
@@ -134,8 +134,8 @@ blink::mojom::DragDataPtr DropDataToDragData(
       // browser messages, in which case the field is unused and this will hit
       // a DCHECK.
       drop_data.filesystem_id.empty()
-          ? base::nullopt
-          : base::Optional<std::string>(
+          ? absl::nullopt
+          : absl::optional<std::string>(
                 base::UTF16ToUTF8(drop_data.filesystem_id)),
       drop_data.referrer_policy);
 }
@@ -155,7 +155,7 @@ blink::mojom::DragDataPtr DropMetaDataToDragData(
       // will contain an empty URL (which means no URL is dragged) if the URL in
       // WebDragData is empty.
       if (base::EqualsASCII(meta_data_item.mime_type, ui::kMimeTypeURIList)) {
-        item->string_data = base::UTF8ToUTF16("about:dragdrop-placeholder");
+        item->string_data = u"about:dragdrop-placeholder";
       }
       items.push_back(blink::mojom::DragItem::NewString(std::move(item)));
       continue;
@@ -182,7 +182,7 @@ blink::mojom::DragDataPtr DropMetaDataToDragData(
       continue;
     }
   }
-  return blink::mojom::DragData::New(std::move(items), base::nullopt,
+  return blink::mojom::DragData::New(std::move(items), absl::nullopt,
                                      network::mojom::ReferrerPolicy::kDefault);
 }
 

@@ -36,7 +36,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT SelectFileDialogBridge
 
   // mojom::SelectFileDialog:
   void Show(mojom::SelectFileDialogType type,
-            const base::string16& title,
+            const std::u16string& title,
             const base::FilePath& default_path,
             mojom::SelectFileTypeInfoPtr file_types,
             int file_type_index,
@@ -50,10 +50,12 @@ class REMOTE_COCOA_APP_SHIM_EXPORT SelectFileDialogBridge
 
  private:
   // Sets the accessory view for |dialog_| and sets
-  // |extension_dropdown_handler_|.
+  // |extension_dropdown_handler_|. |is_save_panel| specifies whether this is
+  // for a save panel or not.
   void SetAccessoryView(mojom::SelectFileTypeInfoPtr file_types,
                         int file_type_index,
-                        const base::FilePath::StringType& default_extension);
+                        const base::FilePath::StringType& default_extension,
+                        bool is_save_panel);
 
   // Called when the panel completes.
   void OnPanelEnded(bool did_cancel);

@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "chrome/browser/chromeos/login/test/https_forwarder.h"
-#include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
+#include "chrome/browser/ash/login/test/https_forwarder.h"
+#include "chrome/browser/ash/policy/core/device_policy_cros_browser_test.h"
 #include "chrome/browser/extensions/mixin_based_extension_apitest.h"
 #include "chromeos/tpm/stub_install_attributes.h"
 #include "components/account_id/account_id.h"
@@ -55,9 +55,9 @@ class PlatformKeysTestBase : public extensions::MixinBasedExtensionApiTest {
   virtual void PrepareTestSystemSlotOnIO(
       crypto::ScopedTestSystemNSSKeySlot* system_slot);
 
-  SystemTokenStatus system_token_status() { return system_token_status_; }
-  EnrollmentStatus enrollment_status() { return enrollment_status_; }
-  UserStatus user_status() { return user_status_; }
+  SystemTokenStatus system_token_status() const { return system_token_status_; }
+  EnrollmentStatus enrollment_status() const { return enrollment_status_; }
+  UserStatus user_status() const { return user_status_; }
 
   policy::MockConfigurationPolicyProvider* mock_policy_provider() {
     return &mock_policy_provider_;
@@ -72,13 +72,13 @@ class PlatformKeysTestBase : public extensions::MixinBasedExtensionApiTest {
 
   // Load |page_url| in a new browser in the current profile and wait for PASSED
   // or FAILED notification. The functionality of this function is reduced
-  // functionality of RunExtensionSubtest(), but we don't use it here because it
+  // functionality of RunExtensionTest(), but we don't use it here because it
   // requires function InProcessBrowserTest::browser() to return non-NULL
   // pointer. Unfortunately it returns the value which is set in constructor and
   // can't be modified. Because on login flow there is no browser, the function
   // InProcessBrowserTest::browser() always returns NULL. Besides this we need
-  // only very little functionality from RunExtensionSubtest(). Thus so that
-  // don't make RunExtensionSubtest() too complex we just introduce a new
+  // only very little functionality from RunExtensionTest(). Thus so that
+  // don't make RunExtensionTest() too complex we just introduce a new
   // function.
   bool TestExtension(const std::string& page_url);
 
@@ -97,7 +97,8 @@ class PlatformKeysTestBase : public extensions::MixinBasedExtensionApiTest {
 
   policy::DevicePolicyCrosTestHelper device_policy_test_helper_;
   std::unique_ptr<crypto::ScopedTestSystemNSSKeySlot> test_system_slot_;
-  policy::MockConfigurationPolicyProvider mock_policy_provider_;
+  testing::NiceMock<policy::MockConfigurationPolicyProvider>
+      mock_policy_provider_;
   FakeGaia fake_gaia_;
   chromeos::HTTPSForwarder gaia_https_forwarder_;
   chromeos::ScopedStubInstallAttributes install_attributes_;

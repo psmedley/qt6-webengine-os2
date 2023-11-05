@@ -7,9 +7,11 @@
 #include "base/auto_reset.h"
 #include "base/metrics/field_trial_params.h"
 #include "third_party/blink/public/common/input/web_touch_event.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -18,6 +20,7 @@
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/event_handling_util.h"
+#include "third_party/blink/renderer/core/input/gesture_manager.h"
 #include "third_party/blink/renderer/core/input/mouse_event_manager.h"
 #include "third_party/blink/renderer/core/input/touch_action_util.h"
 #include "third_party/blink/renderer/core/layout/hit_test_canvas_result.h"
@@ -25,6 +28,9 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/pointer_lock_controller.h"
+#include "third_party/blink/renderer/core/timing/dom_window_performance.h"
+#include "third_party/blink/renderer/core/timing/event_timing.h"
+#include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
@@ -41,6 +47,7 @@ const char kSkipTouchEventFilterTrialTypeParamName[] = "type";
 size_t ToPointerTypeIndex(WebPointerProperties::PointerType t) {
   return static_cast<size_t>(t);
 }
+
 bool HasPointerEventListener(const EventHandlerRegistry& registry) {
   return registry.HasEventHandlers(EventHandlerRegistry::kPointerEvent) ||
          registry.HasEventHandlers(
@@ -104,6 +111,7 @@ void PointerEventManager::Trace(Visitor* visitor) const {
   visitor->Trace(pending_pointer_capture_target_);
   visitor->Trace(touch_event_manager_);
   visitor->Trace(mouse_event_manager_);
+  visitor->Trace(gesture_manager_);
 }
 
 PointerEventManager::PointerEventBoundaryEventDispatcher::
@@ -173,6 +181,11 @@ WebInputEventResult PointerEventManager::DispatchPointerEvent(
   const PointerId pointer_id = pointer_event->pointerId();
   const AtomicString& event_type = pointer_event->type();
   bool should_filter = ShouldFilterEvent(pointer_event);
+  // We are about to dispatch this event. It has to be trusted at this point.
+  pointer_event->SetTrusted(true);
+  std::unique_ptr<EventTiming> event_timing;
+  if (frame_ && frame_->DomWindow())
+    event_timing = EventTiming::Create(frame_->DomWindow(), *pointer_event);
 
   if (should_filter &&
       !HasPointerEventListener(frame_->GetEventHandlerRegistry()))
@@ -254,7 +267,8 @@ void PointerEventManager::SetElementUnderPointer(PointerEvent* pointer_event,
                                                  Element* target) {
   if (element_under_pointer_.Contains(pointer_event->pointerId())) {
     EventTargetAttributes* node =
-        element_under_pointer_.at(pointer_event->pointerId());
+        element_under_pointer_.DeprecatedAtOrEmptyValue(
+            pointer_event->pointerId());
     if (!target) {
       element_under_pointer_.erase(pointer_event->pointerId());
     } else if (target != node->target) {
@@ -307,7 +321,9 @@ void PointerEventManager::HandlePointerInterruption(
     // target before.
     Element* target = nullptr;
     if (element_under_pointer_.Contains(pointer_event->pointerId())) {
-      target = element_under_pointer_.at(pointer_event->pointerId())->target;
+      target = element_under_pointer_
+                   .DeprecatedAtOrEmptyValue(pointer_event->pointerId())
+                   ->target;
     }
 
     DispatchPointerEvent(
@@ -434,10 +450,10 @@ PointerEventManager::ComputePointerEventTarget(
     }
   } else {
     // Set the target of pointer event to the captured element as this
-    // pointer is captured otherwise it would have gone to the if block
+    // pointer is captured otherwise it would have gone to the |if| block
     // and perform a hit-test.
     pointer_event_target.target_element =
-        pending_pointer_capture_target_.at(pointer_id);
+        pending_pointer_capture_target_.DeprecatedAtOrEmptyValue(pointer_id);
     pointer_event_target.target_frame =
         pointer_event_target.target_element->GetDocument().GetFrame();
   }
@@ -497,8 +513,10 @@ WebInputEventResult PointerEventManager::SendTouchPointerEvent(
   ProcessCaptureAndPositionOfPointerEvent(pointer_event, target);
 
   // Setting the implicit capture for touch
-  if (pointer_event->type() == event_type_names::kPointerdown)
-    SetPointerCapture(pointer_event->pointerId(), target);
+  if (pointer_event->type() == event_type_names::kPointerdown) {
+    SetPointerCapture(pointer_event->pointerId(), target,
+                      /* explicit_capture */ false);
+  }
 
   WebInputEventResult result = DispatchPointerEvent(
       GetEffectiveTargetForPointerEvent(target, pointer_event->pointerId()),
@@ -988,7 +1006,7 @@ void PointerEventManager::RemoveTargetFromPointerCapturingMapping(
 
 Element* PointerEventManager::GetCapturingElement(PointerId pointer_id) {
   if (pointer_capture_target_.Contains(pointer_id))
-    return pointer_capture_target_.at(pointer_id);
+    return pointer_capture_target_.DeprecatedAtOrEmptyValue(pointer_id);
   return nullptr;
 }
 
@@ -1007,8 +1025,17 @@ void PointerEventManager::ElementRemoved(Element* target) {
 }
 
 bool PointerEventManager::SetPointerCapture(PointerId pointer_id,
-                                            Element* target) {
-  UseCounter::Count(frame_->GetDocument(), WebFeature::kPointerEventSetCapture);
+                                            Element* target,
+                                            bool explicit_capture) {
+  if (explicit_capture) {
+    UseCounter::Count(frame_->GetDocument(),
+                      WebFeature::kPointerEventSetCapture);
+    if (pointer_id == PointerEventFactory::kMouseId &&
+        target != mouse_event_manager_->MouseDownElement()) {
+      UseCounter::Count(frame_->GetDocument(),
+                        WebFeature::kExplicitPointerCaptureClickTargetDiff);
+    }
+  }
   if (pointer_event_factory_.IsActiveButtonsState(pointer_id)) {
     if (pointer_id != dispatching_pointer_id_) {
       UseCounter::Count(frame_->GetDocument(),
@@ -1029,7 +1056,8 @@ bool PointerEventManager::ReleasePointerCapture(PointerId pointer_id,
   // but |m_pendingPointerCaptureTarget| indicated the element that gets the
   // very next pointer event. They will be the same if there was no change in
   // capturing of a particular |pointerId|. See crbug.com/614481.
-  if (pending_pointer_capture_target_.at(pointer_id) == target) {
+  if (pending_pointer_capture_target_.DeprecatedAtOrEmptyValue(pointer_id) ==
+      target) {
     ReleasePointerCapture(pointer_id);
     return true;
   }
@@ -1042,7 +1070,8 @@ void PointerEventManager::ReleaseMousePointerCapture() {
 
 bool PointerEventManager::HasPointerCapture(PointerId pointer_id,
                                             const Element* target) const {
-  return pending_pointer_capture_target_.at(pointer_id) == target;
+  return pending_pointer_capture_target_.DeprecatedAtOrEmptyValue(pointer_id) ==
+         target;
 }
 
 void PointerEventManager::ReleasePointerCapture(PointerId pointer_id) {
@@ -1050,8 +1079,10 @@ void PointerEventManager::ReleasePointerCapture(PointerId pointer_id) {
 }
 
 Element* PointerEventManager::GetMouseCaptureTarget() {
-  if (pending_pointer_capture_target_.Contains(PointerEventFactory::kMouseId))
-    return pending_pointer_capture_target_.at(PointerEventFactory::kMouseId);
+  if (pending_pointer_capture_target_.Contains(PointerEventFactory::kMouseId)) {
+    return pending_pointer_capture_target_.DeprecatedAtOrEmptyValue(
+        PointerEventFactory::kMouseId);
+  }
   return nullptr;
 }
 
@@ -1067,7 +1098,7 @@ bool PointerEventManager::IsPointerIdActiveOnFrame(PointerId pointer_id,
                                                    LocalFrame* frame) const {
   Element* last_element_receiving_event =
       element_under_pointer_.Contains(pointer_id)
-          ? element_under_pointer_.at(pointer_id)->target
+          ? element_under_pointer_.DeprecatedAtOrEmptyValue(pointer_id)->target
           : nullptr;
   return last_element_receiving_event &&
          last_element_receiving_event->GetDocument().GetFrame() == frame;
@@ -1098,9 +1129,10 @@ void PointerEventManager::SetLastPointerPositionForFrameBoundary(
     Element* new_target) {
   PointerId pointer_id =
       pointer_event_factory_.GetPointerEventId(web_pointer_event);
-  Element* last_target = element_under_pointer_.Contains(pointer_id)
-                             ? element_under_pointer_.at(pointer_id)->target
-                             : nullptr;
+  Element* last_target =
+      element_under_pointer_.Contains(pointer_id)
+          ? element_under_pointer_.DeprecatedAtOrEmptyValue(pointer_id)->target
+          : nullptr;
   if (!new_target) {
     pointer_event_factory_.RemoveLastPosition(pointer_id);
   } else if (!last_target || new_target->GetDocument().GetFrame() !=
@@ -1113,6 +1145,15 @@ void PointerEventManager::SetLastPointerPositionForFrameBoundary(
 
 void PointerEventManager::RemoveLastMousePosition() {
   pointer_event_factory_.RemoveLastPosition(PointerEventFactory::kMouseId);
+}
+
+void PointerEventManager::SetGestureManager(GestureManager* gesture_manager) {
+  gesture_manager_ = Member<GestureManager>(gesture_manager);
+}
+
+int PointerEventManager::GetPointerEventId(
+    const WebPointerProperties& web_pointer_properties) const {
+  return pointer_event_factory_.GetPointerEventId(web_pointer_properties);
 }
 
 }  // namespace blink

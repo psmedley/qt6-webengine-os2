@@ -7,12 +7,14 @@
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "components/performance_manager/graph/graph_impl.h"
 #include "components/performance_manager/public/graph/node.h"
 
 namespace performance_manager {
 
 NodeAttachedData::NodeAttachedData() = default;
+
 NodeAttachedData::~NodeAttachedData() = default;
 
 // static

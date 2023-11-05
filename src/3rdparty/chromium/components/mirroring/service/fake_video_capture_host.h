@@ -16,7 +16,7 @@
 
 namespace mirroring {
 
-class FakeVideoCaptureHost final : public media::mojom::VideoCaptureHost {
+class FakeVideoCaptureHost : public media::mojom::VideoCaptureHost {
  public:
   explicit FakeVideoCaptureHost(
       mojo::PendingReceiver<media::mojom::VideoCaptureHost> receiver);
@@ -27,7 +27,7 @@ class FakeVideoCaptureHost final : public media::mojom::VideoCaptureHost {
   MOCK_METHOD3(ReleaseBuffer,
                void(const base::UnguessableToken&,
                     int32_t,
-                    const media::VideoFrameFeedback&));
+                    const media::VideoCaptureFeedback&));
   MOCK_METHOD1(Pause, void(const base::UnguessableToken&));
   MOCK_METHOD3(Resume,
                void(const base::UnguessableToken&,

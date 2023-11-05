@@ -33,21 +33,9 @@ CORE_EXPORT LogicalOffset
 ComputeRelativeOffsetForInline(const NGConstraintSpace& space,
                                const ComputedStyle& child_style);
 
-// Un-apply any offset caused by relative positioning. When re-using a previous
-// fragment's offset (from the cache), we need to convert from "paint offset" to
-// "layout offset" before re-adding the fragment, in order to get overflow
-// calculation right.
-inline void RemoveRelativeOffset(const NGBoxFragmentBuilder& builder,
-                                 const NGPhysicalFragment& fragment,
-                                 LogicalOffset* offset) {
-  if (fragment.Style().GetPosition() != EPosition::kRelative)
-    return;
-  if (const auto* box_fragment = DynamicTo<NGPhysicalBoxFragment>(&fragment)) {
-    *offset -= ComputeRelativeOffsetForBoxFragment(
-        *box_fragment, builder.GetWritingDirection(),
-        builder.ChildAvailableSize());
-  }
-}
+CORE_EXPORT LogicalOffset
+ComputeRelativeOffsetForOOFInInline(const NGConstraintSpace& space,
+                                    const ComputedStyle& child_style);
 
 }  // namespace blink
 

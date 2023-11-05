@@ -9,6 +9,7 @@ jumbo_component("stub") {
 
   deps = [
     "//base",
+    "//ui/base",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/platform_window",

@@ -5,10 +5,12 @@
 #include "net/disk_cache/blockfile/backend_impl.h"
 
 #include <limits>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -20,7 +22,6 @@
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -317,7 +318,7 @@ int BackendImpl::SyncInit() {
     // Create a recurrent timer of 30 secs.
     DCHECK(background_queue_.BackgroundIsCurrentSequence());
     int timer_delay = unit_test_ ? 1000 : 30000;
-    timer_.reset(new base::RepeatingTimer());
+    timer_ = std::make_unique<base::RepeatingTimer>();
     timer_->Start(FROM_HERE, TimeDelta::FromMilliseconds(timer_delay), this,
                   &BackendImpl::OnStatsTimer);
   }
@@ -339,7 +340,9 @@ void BackendImpl::CleanupCache() {
 
     if (user_flags_ & kNoRandom) {
       // This is a net_unittest, verify that we are not 'leaking' entries.
-      File::WaitForPendingIO(&num_pending_io_);
+      // TODO(https://crbug.com/1184679): Refactor this and eliminate the
+      //    WaitForPendingIOForTesting API.
+      File::WaitForPendingIOForTesting(&num_pending_io_);
       DCHECK(!num_refs_);
     } else {
       File::DropPendingIO();
@@ -1604,13 +1607,8 @@ int BackendImpl::NewEntry(Addr address, scoped_refptr<EntryImpl>* entry) {
   IncreaseNumRefs();
   *entry = nullptr;
 
-  TimeTicks start = TimeTicks::Now();
   if (!cache_entry->entry()->Load())
     return ERR_READ_FAILURE;
-
-  if (IsLoaded()) {
-    CACHE_UMA(AGE_MS, "LoadTime", 0, start);
-  }
 
   if (!cache_entry->SanityCheck()) {
     LOG(WARNING) << "Messed up entry found.";
@@ -1994,9 +1992,6 @@ void BackendImpl::ReportStats() {
 
   stats_.ResetRatios();
   stats_.SetCounter(Stats::TRIM_ENTRY, 0);
-
-  if (GetCacheType() == net::DISK_CACHE)
-    block_files_.ReportStats();
 }
 
 void BackendImpl::UpgradeTo2_1() {

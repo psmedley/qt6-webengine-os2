@@ -327,11 +327,13 @@
 
 
 /*!
-    \qmlproperty list<WebEngineScript> WebEngineView::userScripts
+    \qmlproperty WebEngineScriptCollection WebEngineView::userScripts
     \readonly
     \since QtWebEngine 1.1
 
-    List of WebEngineScript objects attached to the view.
+    The user scripts' collection associated with the view.
+
+    \sa WebEngineScriptCollection
 */
 
 /*!
@@ -1472,4 +1474,20 @@
     render process changed.
 
     \sa renderProcessPid
+*/
+
+/*!
+    \qmlsignal WebEngineView::touchSelectionMenuRequested(TouchSelectionMenuRequest *request)
+    \since QtWebEngine 6.3
+    \readonly
+
+    This signal is emitted when a touch selection menu is requested at a specified position.
+
+    The \a request can be handled by using the methods of the TouchSelectionMenuRequest
+    type.
+
+    \note Signal handlers need to call \c{request.accepted = true} to prevent a default touch
+    selection menu from showing up.
+
+    \sa TouchSelectionMenuRequest
 */

@@ -4,6 +4,8 @@
 
 #include "components/download/internal/background_service/in_memory_download.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/guid.h"
 #include "base/message_loop/message_pump_type.h"
@@ -13,6 +15,7 @@
 #include "base/threading/thread.h"
 #include "net/base/io_buffer.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "storage/browser/blob/blob_reader.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -88,9 +91,9 @@ class InMemoryDownloadTest : public testing::Test {
   ~InMemoryDownloadTest() override = default;
 
   void SetUp() override {
-    io_thread_.reset(new base::Thread("Network and Blob IO thread"));
+    io_thread_ = std::make_unique<base::Thread>("Network and Blob IO thread");
     base::Thread::Options options(base::MessagePumpType::IO, 0);
-    io_thread_->StartWithOptions(options);
+    io_thread_->StartWithOptions(std::move(options));
 
     base::RunLoop loop;
     io_thread_->task_runner()->PostTask(

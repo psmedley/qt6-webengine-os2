@@ -103,6 +103,7 @@ struct Sampler
 	bool compareEnable;
 	VkCompareOp compareOp;
 	VkBorderColor border;
+	VkClearColorValue customBorder;
 	bool unnormalizedCoordinates;
 
 	VkSamplerYcbcrModelConversion ycbcrModel;
@@ -111,24 +112,24 @@ struct Sampler
 
 	float mipLodBias = 0.0f;
 	float maxAnisotropy = 0.0f;
-	float minLod = 0.0f;
-	float maxLod = 0.0f;
+	float minLod = -1000.0f;
+	float maxLod = 1000.0f;
 
 	bool is1D() const
 	{
 		switch(textureType)
 		{
-			case VK_IMAGE_VIEW_TYPE_1D:
-			case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
-				return true;
-			case VK_IMAGE_VIEW_TYPE_2D:
-			case VK_IMAGE_VIEW_TYPE_3D:
-			case VK_IMAGE_VIEW_TYPE_CUBE:
-			case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
-			case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
-				return false;
-			default:
-				UNSUPPORTED("VkImageViewType %d", (int)textureType);
+		case VK_IMAGE_VIEW_TYPE_1D:
+		case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+			return true;
+		case VK_IMAGE_VIEW_TYPE_2D:
+		case VK_IMAGE_VIEW_TYPE_3D:
+		case VK_IMAGE_VIEW_TYPE_CUBE:
+		case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+		case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+			return false;
+		default:
+			UNSUPPORTED("VkImageViewType %d", (int)textureType);
 		}
 
 		return false;
@@ -138,17 +139,17 @@ struct Sampler
 	{
 		switch(textureType)
 		{
-			case VK_IMAGE_VIEW_TYPE_2D:
-			case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
-				return true;
-			case VK_IMAGE_VIEW_TYPE_1D:
-			case VK_IMAGE_VIEW_TYPE_3D:
-			case VK_IMAGE_VIEW_TYPE_CUBE:
-			case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
-			case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
-				return false;
-			default:
-				UNSUPPORTED("VkImageViewType %d", (int)textureType);
+		case VK_IMAGE_VIEW_TYPE_2D:
+		case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+			return true;
+		case VK_IMAGE_VIEW_TYPE_1D:
+		case VK_IMAGE_VIEW_TYPE_3D:
+		case VK_IMAGE_VIEW_TYPE_CUBE:
+		case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+		case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+			return false;
+		default:
+			UNSUPPORTED("VkImageViewType %d", (int)textureType);
 		}
 
 		return false;
@@ -158,17 +159,17 @@ struct Sampler
 	{
 		switch(textureType)
 		{
-			case VK_IMAGE_VIEW_TYPE_3D:
-				return true;
-			case VK_IMAGE_VIEW_TYPE_1D:
-			case VK_IMAGE_VIEW_TYPE_2D:
-			case VK_IMAGE_VIEW_TYPE_CUBE:
-			case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
-			case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
-			case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
-				return false;
-			default:
-				UNSUPPORTED("VkImageViewType %d", (int)textureType);
+		case VK_IMAGE_VIEW_TYPE_3D:
+			return true;
+		case VK_IMAGE_VIEW_TYPE_1D:
+		case VK_IMAGE_VIEW_TYPE_2D:
+		case VK_IMAGE_VIEW_TYPE_CUBE:
+		case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+		case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+		case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+			return false;
+		default:
+			UNSUPPORTED("VkImageViewType %d", (int)textureType);
 		}
 
 		return false;
@@ -178,17 +179,17 @@ struct Sampler
 	{
 		switch(textureType)
 		{
-			case VK_IMAGE_VIEW_TYPE_CUBE:
-			case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
-				return true;
-			case VK_IMAGE_VIEW_TYPE_1D:
-			case VK_IMAGE_VIEW_TYPE_2D:
-			case VK_IMAGE_VIEW_TYPE_3D:
-			case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
-			case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
-				return false;
-			default:
-				UNSUPPORTED("VkImageViewType %d", (int)textureType);
+		case VK_IMAGE_VIEW_TYPE_CUBE:
+		case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+			return true;
+		case VK_IMAGE_VIEW_TYPE_1D:
+		case VK_IMAGE_VIEW_TYPE_2D:
+		case VK_IMAGE_VIEW_TYPE_3D:
+		case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+		case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+			return false;
+		default:
+			UNSUPPORTED("VkImageViewType %d", (int)textureType);
 		}
 
 		return false;
@@ -198,17 +199,17 @@ struct Sampler
 	{
 		switch(textureType)
 		{
-			case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
-			case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
-			case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
-				return true;
-			case VK_IMAGE_VIEW_TYPE_1D:
-			case VK_IMAGE_VIEW_TYPE_2D:
-			case VK_IMAGE_VIEW_TYPE_3D:
-			case VK_IMAGE_VIEW_TYPE_CUBE:
-				return false;
-			default:
-				UNSUPPORTED("VkImageViewType %d", (int)textureType);
+		case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+		case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+		case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+			return true;
+		case VK_IMAGE_VIEW_TYPE_1D:
+		case VK_IMAGE_VIEW_TYPE_2D:
+		case VK_IMAGE_VIEW_TYPE_3D:
+		case VK_IMAGE_VIEW_TYPE_CUBE:
+			return false;
+		default:
+			UNSUPPORTED("VkImageViewType %d", (int)textureType);
 		}
 
 		return false;

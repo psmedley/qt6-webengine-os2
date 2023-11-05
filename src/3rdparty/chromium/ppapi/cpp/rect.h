@@ -839,5 +839,5 @@ inline bool operator!=(const FloatRect& lhs, const FloatRect& rhs) {
 
 }  // namespace pp
 
-#endif
+#endif  // PPAPI_CPP_RECT_H_
 

@@ -3,10 +3,11 @@
 // found in the LICENSE file.
 
 #include "net/base/hash_value.h"
-#include "base/strings/string_util.h"
 
 #include <stdlib.h>
+
 #include <algorithm>
+#include <ostream>
 
 #include "base/base64.h"
 #include "base/check_op.h"

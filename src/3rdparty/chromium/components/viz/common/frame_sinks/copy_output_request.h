@@ -6,17 +6,17 @@
 #define COMPONENTS_VIZ_COMMON_FRAME_SINKS_COPY_OUTPUT_REQUEST_H_
 
 #include <memory>
+#include <utility>
 
 #include "base/callback.h"
-#include "base/optional.h"
 #include "base/sequenced_task_runner.h"
 #include "base/unguessable_token.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
-#include "components/viz/common/resources/single_release_callback.h"
 #include "components/viz/common/viz_common_export.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
 
@@ -44,17 +44,27 @@ class CopyOutputRequestDataView;
 class VIZ_COMMON_EXPORT CopyOutputRequest {
  public:
   using ResultFormat = CopyOutputResult::Format;
+  // Specifies intended destination for the results. For software compositing,
+  // only the system-memory results are supported - even if the
+  // CopyOutputRequest is issued with ResultDestination::kNativeTextures, the
+  // results will still be returned via ResultDestination::kSystemMemory.
+  using ResultDestination = CopyOutputResult::Destination;
 
   using CopyOutputRequestCallback =
       base::OnceCallback<void(std::unique_ptr<CopyOutputResult> result)>;
 
+  // Creates new CopyOutputRequest. I420_PLANES format returned via
+  // kNativeTextures is currently not supported.
   CopyOutputRequest(ResultFormat result_format,
+                    ResultDestination result_destination,
                     CopyOutputRequestCallback result_callback);
 
   ~CopyOutputRequest();
 
   // Returns the requested result format.
   ResultFormat result_format() const { return result_format_; }
+  // Returns the requested result destination.
+  ResultDestination result_destination() const { return result_destination_; }
 
   // Requests that the result callback be run as a task posted to the given
   // |task_runner|. If this is not set, the result callback could be run from
@@ -116,7 +126,8 @@ class VIZ_COMMON_EXPORT CopyOutputRequest {
   // same TaskRunner as that to which the current task was posted.
   bool SendsResultsInCurrentSequence() const;
 
-  // Creates a RGBA_BITMAP request that ignores results, for testing purposes.
+  // Creates a RGBA request with ResultDestination::kSystemMemory that ignores
+  // results, for testing purposes.
   static std::unique_ptr<CopyOutputRequest> CreateStubForTesting();
 
  private:
@@ -127,13 +138,14 @@ class VIZ_COMMON_EXPORT CopyOutputRequest {
                                    std::unique_ptr<CopyOutputRequest>>;
 
   const ResultFormat result_format_;
+  const ResultDestination result_destination_;
   CopyOutputRequestCallback result_callback_;
   scoped_refptr<base::SequencedTaskRunner> result_task_runner_;
   gfx::Vector2d scale_from_;
   gfx::Vector2d scale_to_;
-  base::Optional<base::UnguessableToken> source_;
-  base::Optional<gfx::Rect> area_;
-  base::Optional<gfx::Rect> result_selection_;
+  absl::optional<base::UnguessableToken> source_;
+  absl::optional<gfx::Rect> area_;
+  absl::optional<gfx::Rect> result_selection_;
 
   DISALLOW_COPY_AND_ASSIGN(CopyOutputRequest);
 };

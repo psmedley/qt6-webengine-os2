@@ -38,7 +38,7 @@ std::unique_ptr<DawnContextProvider> DawnContextProvider::Create() {
 }
 
 DawnContextProvider::DawnContextProvider() {
-  // TODO(sgilhuly): This may return a GPU that is not the active one. Currently
+  // TODO(rivr): This may return a GPU that is not the active one. Currently
   // the only known way to avoid this is platform-specific; e.g. on Mac, create
   // a Dawn device, get the actual Metal device from it, and compare against
   // MTLCreateSystemDefaultDevice().
@@ -53,6 +53,9 @@ wgpu::Device DawnContextProvider::CreateDevice(dawn_native::BackendType type) {
   instance_.DiscoverDefaultAdapters();
   DawnProcTable backend_procs = dawn_native::GetProcs();
   dawnProcSetProcs(&backend_procs);
+
+  // If a new toggle is added here, ForceDawnTogglesForSkia() which collects
+  // info for about:gpu should be updated as well.
 
   // Disable validation in non-DCHECK builds.
   dawn_native::DeviceDescriptor descriptor;

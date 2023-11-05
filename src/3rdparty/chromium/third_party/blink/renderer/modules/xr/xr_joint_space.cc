@@ -10,28 +10,54 @@
 namespace blink {
 
 XRJointSpace::XRJointSpace(
+    XRHand* hand,
     XRSession* session,
     std::unique_ptr<TransformationMatrix> mojo_from_joint,
     device::mojom::blink::XRHandJoint joint,
     float radius,
     device::mojom::blink::XRHandedness handedness)
     : XRSpace(session),
+      hand_(hand),
       mojo_from_joint_space_(std::move(mojo_from_joint)),
       joint_(joint),
       radius_(radius),
       handedness_(handedness) {}
 
-base::Optional<TransformationMatrix> XRJointSpace::MojoFromNative() {
+absl::optional<TransformationMatrix> XRJointSpace::MojoFromNative() {
   return *mojo_from_joint_space_.get();
+}
+
+device::mojom::blink::XRNativeOriginInformationPtr XRJointSpace::NativeOrigin()
+    const {
+  device::mojom::blink::XRHandJointSpaceInfoPtr joint_space_info =
+      device::mojom::blink::XRHandJointSpaceInfo::New();
+  joint_space_info->handedness = this->handedness();
+  joint_space_info->joint = this->joint();
+  return device::mojom::blink::XRNativeOriginInformation::NewHandJointSpaceInfo(
+      std::move(joint_space_info));
 }
 
 bool XRJointSpace::EmulatedPosition() const {
   return false;
 }
 
-base::Optional<device::mojom::blink::XRNativeOriginInformation>
-XRJointSpace::NativeOrigin() const {
-  return XRNativeOriginInformation::Create(this);
+XRPose* XRJointSpace::getPose(XRSpace* other_space) {
+  // If any of the spaces belonging to the same XRHand return null when
+  // populating the pose, all the spaces of that XRHand must also return
+  // null when populating the pose.
+  if (handHasMissingPoses()) {
+    return nullptr;
+  }
+
+  // Return the base class' value if we are tracked.
+  return XRSpace::getPose(other_space);
+}
+
+void XRJointSpace::UpdateTracking(
+    std::unique_ptr<TransformationMatrix> mojo_from_joint,
+    float radius) {
+  mojo_from_joint_space_ = std::move(mojo_from_joint);
+  radius_ = radius;
 }
 
 bool XRJointSpace::IsStationary() const {
@@ -46,7 +72,12 @@ std::string XRJointSpace::ToString() const {
   return "XRJointSpace";
 }
 
+bool XRJointSpace::handHasMissingPoses() const {
+  return hand_->hasMissingPoses();
+}
+
 void XRJointSpace::Trace(Visitor* visitor) const {
+  visitor->Trace(hand_);
   XRSpace::Trace(visitor);
 }
 

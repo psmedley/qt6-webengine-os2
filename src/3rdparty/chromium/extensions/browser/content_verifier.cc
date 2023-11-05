@@ -10,11 +10,11 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer/elapsed_timer.h"
@@ -431,7 +431,7 @@ ContentVerifier::~ContentVerifier() {
 
 void ContentVerifier::Start() {
   ExtensionRegistry* registry = ExtensionRegistry::Get(context_);
-  observer_.Add(registry);
+  observation_.Observe(registry);
 }
 
 void ContentVerifier::Shutdown() {
@@ -439,7 +439,7 @@ void ContentVerifier::Shutdown() {
   delegate_->Shutdown();
   content::GetIOThreadTaskRunner({})->PostTask(
       FROM_HERE, base::BindOnce(&ContentVerifier::ShutdownOnIO, this));
-  observer_.RemoveAll();
+  observation_.Reset();
 }
 
 void ContentVerifier::ShutdownOnIO() {
@@ -594,6 +594,11 @@ void ContentVerifier::OnExtensionUnloaded(
                                 extension->id(), extension->version()));
 }
 
+ContentVerifierKey ContentVerifier::GetContentVerifierKey() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  return delegate_->GetPublicKey();
+}
+
 GURL ContentVerifier::GetSignatureFetchUrlForTest(
     const ExtensionId& extension_id,
     const base::Version& extension_version) {
@@ -695,7 +700,7 @@ void ContentVerifier::BindURLLoaderFactoryReceiverOnUIThread(
   if (shutdown_on_ui_)
     return;
 
-  content::BrowserContext::GetDefaultStoragePartition(context_)
+  context_->GetDefaultStoragePartition()
       ->GetURLLoaderFactoryForBrowserProcess()
       ->Clone(std::move(url_loader_factory_receiver));
 }
@@ -717,7 +722,7 @@ bool ContentVerifier::ShouldVerifyAnyPaths(
   const std::set<CanonicalRelativePath>& indexed_ruleset_paths =
       *(data->canonical_indexed_ruleset_paths);
 
-  base::Optional<std::set<std::string>> all_locale_candidates;
+  absl::optional<std::set<std::string>> all_locale_candidates;
 
   const CanonicalRelativePath manifest_file =
       content_verifier_utils::CanonicalizeRelativePath(
@@ -804,6 +809,11 @@ bool ContentVerifier::ShouldVerifyAnyPathsForTesting(
     const std::set<base::FilePath>& relative_unix_paths) {
   return ShouldVerifyAnyPaths(extension_id, extension_root,
                               relative_unix_paths);
+}
+
+void ContentVerifier::OverrideDelegateForTesting(
+    std::unique_ptr<ContentVerifierDelegate> delegate) {
+  delegate_ = std::move(delegate);
 }
 
 }  // namespace extensions

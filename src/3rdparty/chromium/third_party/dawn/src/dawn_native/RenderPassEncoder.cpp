@@ -51,7 +51,7 @@ namespace dawn_native {
     RenderPassEncoder::RenderPassEncoder(DeviceBase* device,
                                          CommandEncoder* commandEncoder,
                                          EncodingContext* encodingContext,
-                                         PassResourceUsageTracker usageTracker,
+                                         RenderPassResourceUsageTracker usageTracker,
                                          Ref<AttachmentState> attachmentState,
                                          QuerySetBase* occlusionQuerySet,
                                          uint32_t renderTargetWidth,
@@ -80,20 +80,15 @@ namespace dawn_native {
     void RenderPassEncoder::TrackQueryAvailability(QuerySetBase* querySet, uint32_t queryIndex) {
         DAWN_ASSERT(querySet != nullptr);
 
-        // Gets the iterator for that querySet or create a new vector of bool set to false
-        // if the querySet wasn't registered.
-        auto it = mQueryAvailabilityMap.emplace(querySet, querySet->GetQueryCount()).first;
-        it->second[queryIndex] = 1;
+        // Track the query availability with true on render pass for rewrite validation and query
+        // reset on render pass on Vulkan
+        mUsageTracker.TrackQueryAvailability(querySet, queryIndex);
 
         // Track it again on command encoder for zero-initializing when resolving unused queries.
         mCommandEncoder->TrackQueryAvailability(querySet, queryIndex);
     }
 
-    const QueryAvailabilityMap& RenderPassEncoder::GetQueryAvailabilityMap() const {
-        return mQueryAvailabilityMap;
-    }
-
-    void RenderPassEncoder::EndPass() {
+    void RenderPassEncoder::APIEndPass() {
         if (mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
                 if (IsValidationEnabled()) {
                     DAWN_TRY(ValidateProgrammableEncoderEnd());
@@ -110,7 +105,7 @@ namespace dawn_native {
         }
     }
 
-    void RenderPassEncoder::SetStencilReference(uint32_t reference) {
+    void RenderPassEncoder::APISetStencilReference(uint32_t reference) {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
             SetStencilReferenceCmd* cmd =
                 allocator->Allocate<SetStencilReferenceCmd>(Command::SetStencilReference);
@@ -120,21 +115,28 @@ namespace dawn_native {
         });
     }
 
-    void RenderPassEncoder::SetBlendColor(const Color* color) {
+    void RenderPassEncoder::APISetBlendConstant(const Color* color) {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
-            SetBlendColorCmd* cmd = allocator->Allocate<SetBlendColorCmd>(Command::SetBlendColor);
+            SetBlendConstantCmd* cmd =
+                allocator->Allocate<SetBlendConstantCmd>(Command::SetBlendConstant);
             cmd->color = *color;
 
             return {};
         });
     }
 
-    void RenderPassEncoder::SetViewport(float x,
-                                        float y,
-                                        float width,
-                                        float height,
-                                        float minDepth,
-                                        float maxDepth) {
+    void RenderPassEncoder::APISetBlendColor(const Color* color) {
+        GetDevice()->EmitDeprecationWarning(
+            "SetBlendColor has been deprecated in favor of SetBlendConstant.");
+        APISetBlendConstant(color);
+    }
+
+    void RenderPassEncoder::APISetViewport(float x,
+                                           float y,
+                                           float width,
+                                           float height,
+                                           float minDepth,
+                                           float maxDepth) {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
                 if ((isnan(x) || isnan(y) || isnan(width) || isnan(height) || isnan(minDepth) ||
@@ -170,10 +172,10 @@ namespace dawn_native {
         });
     }
 
-    void RenderPassEncoder::SetScissorRect(uint32_t x,
-                                           uint32_t y,
-                                           uint32_t width,
-                                           uint32_t height) {
+    void RenderPassEncoder::APISetScissorRect(uint32_t x,
+                                              uint32_t y,
+                                              uint32_t width,
+                                              uint32_t height) {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
                 if (width > mRenderTargetWidth || height > mRenderTargetHeight ||
@@ -194,7 +196,8 @@ namespace dawn_native {
         });
     }
 
-    void RenderPassEncoder::ExecuteBundles(uint32_t count, RenderBundleBase* const* renderBundles) {
+    void RenderPassEncoder::APIExecuteBundles(uint32_t count,
+                                              RenderBundleBase* const* renderBundles) {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
                 for (uint32_t i = 0; i < count; ++i) {
@@ -218,13 +221,14 @@ namespace dawn_native {
             for (uint32_t i = 0; i < count; ++i) {
                 bundles[i] = renderBundles[i];
 
-                const PassResourceUsage& usages = bundles[i]->GetResourceUsage();
+                const RenderPassResourceUsage& usages = bundles[i]->GetResourceUsage();
                 for (uint32_t i = 0; i < usages.buffers.size(); ++i) {
                     mUsageTracker.BufferUsedAs(usages.buffers[i], usages.bufferUsages[i]);
                 }
 
                 for (uint32_t i = 0; i < usages.textures.size(); ++i) {
-                    mUsageTracker.AddTextureUsage(usages.textures[i], usages.textureUsages[i]);
+                    mUsageTracker.AddRenderBundleTextureUsage(usages.textures[i],
+                                                              usages.textureUsages[i]);
                 }
             }
 
@@ -232,7 +236,7 @@ namespace dawn_native {
         });
     }
 
-    void RenderPassEncoder::BeginOcclusionQuery(uint32_t queryIndex) {
+    void RenderPassEncoder::APIBeginOcclusionQuery(uint32_t queryIndex) {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
                 if (mOcclusionQuerySet.Get() == nullptr) {
@@ -253,9 +257,7 @@ namespace dawn_native {
                 }
 
                 DAWN_TRY(ValidateQueryIndexOverwrite(mOcclusionQuerySet.Get(), queryIndex,
-                                                     GetQueryAvailabilityMap()));
-
-                mCommandEncoder->TrackUsedQuerySet(mOcclusionQuerySet.Get());
+                                                     mUsageTracker.GetQueryAvailabilityMap()));
             }
 
             // Record the current query index for endOcclusionQuery.
@@ -271,7 +273,7 @@ namespace dawn_native {
         });
     }
 
-    void RenderPassEncoder::EndOcclusionQuery() {
+    void RenderPassEncoder::APIEndOcclusionQuery() {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
                 if (!mOcclusionQueryActive) {
@@ -282,6 +284,7 @@ namespace dawn_native {
             }
 
             TrackQueryAvailability(mOcclusionQuerySet.Get(), mCurrentOcclusionQueryIndex);
+
             mOcclusionQueryActive = false;
 
             EndOcclusionQueryCmd* cmd =
@@ -293,13 +296,13 @@ namespace dawn_native {
         });
     }
 
-    void RenderPassEncoder::WriteTimestamp(QuerySetBase* querySet, uint32_t queryIndex) {
+    void RenderPassEncoder::APIWriteTimestamp(QuerySetBase* querySet, uint32_t queryIndex) {
         mEncodingContext->TryEncode(this, [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
                 DAWN_TRY(GetDevice()->ValidateObject(querySet));
                 DAWN_TRY(ValidateTimestampQuery(querySet, queryIndex));
-                DAWN_TRY(
-                    ValidateQueryIndexOverwrite(querySet, queryIndex, GetQueryAvailabilityMap()));
+                DAWN_TRY(ValidateQueryIndexOverwrite(querySet, queryIndex,
+                                                     mUsageTracker.GetQueryAvailabilityMap()));
             }
 
             TrackQueryAvailability(querySet, queryIndex);

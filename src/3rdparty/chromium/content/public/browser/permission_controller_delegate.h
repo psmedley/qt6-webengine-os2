@@ -5,7 +5,7 @@
 #ifndef CONTENT_PUBLIC_BROWSER_PERMISSION_CONTROLLER_DELEGATE_H_
 #define CONTENT_PUBLIC_BROWSER_PERMISSION_CONTROLLER_DELEGATE_H_
 
-#include "base/util/type_safety/id_type.h"
+#include "base/types/id_type.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/devtools_permission_overrides.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
@@ -21,7 +21,7 @@ class CONTENT_EXPORT PermissionControllerDelegate {
   using PermissionOverrides = DevToolsPermissionOverrides::PermissionOverrides;
 
   // Identifier for an active subscription.
-  using SubscriptionId = util::IdType64<PermissionControllerDelegate>;
+  using SubscriptionId = base::IdType64<PermissionControllerDelegate>;
 
   virtual ~PermissionControllerDelegate() = default;
 
@@ -29,11 +29,7 @@ class CONTENT_EXPORT PermissionControllerDelegate {
   // render_frame_host.
   // When the permission request is handled, whether it failed, timed out or
   // succeeded, the |callback| will be run.
-  // Returns a request id which can be used to cancel the permission (see
-  // CancelPermissionRequest). This can be kNoPendingOperation if
-  // there is no further need to cancel the permission in which case |callback|
-  // was invoked.
-  virtual int RequestPermission(
+  virtual void RequestPermission(
       PermissionType permission,
       RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
@@ -46,11 +42,7 @@ class CONTENT_EXPORT PermissionControllerDelegate {
   // succeeded, the |callback| will be run. The order of statuses in the
   // returned vector will correspond to the order of requested permission
   // types.
-  // Returns a request id which can be used to cancel the request (see
-  // CancelPermissionRequest). This can be kNoPendingOperation if
-  // there is no further need to cancel the permission in which case |callback|
-  // was invoked.
-  virtual int RequestPermissions(
+  virtual void RequestPermissions(
       const std::vector<PermissionType>& permission,
       RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
@@ -105,7 +97,7 @@ class CONTENT_EXPORT PermissionControllerDelegate {
   // are tracked by the delegate. This method should only be called by the
   // PermissionController owning the delegate.
   virtual void SetPermissionOverridesForDevTools(
-      const base::Optional<url::Origin>& origin,
+      const absl::optional<url::Origin>& origin,
       const PermissionOverrides& overrides) {}
 
   // Removes overrides that have been set, if any, for all origins. If delegate
@@ -116,7 +108,7 @@ class CONTENT_EXPORT PermissionControllerDelegate {
   // DevToolsPermissionOverrides.
   virtual bool IsPermissionOverridableByDevTools(
       PermissionType permission,
-      const base::Optional<url::Origin>& origin);
+      const absl::optional<url::Origin>& origin);
 };
 
 }  // namespace content

@@ -5,6 +5,7 @@
 #include "components/autofill/core/browser/data_model/autofill_structured_address.h"
 
 #include <utility>
+#include "base/containers/contains.h"
 #include "base/i18n/case_conversion.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
@@ -21,17 +22,16 @@ namespace autofill {
 
 namespace structured_address {
 
-base::string16 AddressComponentWithRewriter::RewriteValue(
-    const base::string16& value) const {
+std::u16string AddressComponentWithRewriter::RewriteValue(
+    const std::u16string& value) const {
   // Retrieve the country name from the structured tree the node resides in.
-  base::string16 country = GetRootNode().GetValueForType(ADDRESS_HOME_COUNTRY);
+  std::u16string country = GetRootNode().GetValueForType(ADDRESS_HOME_COUNTRY);
   // If no country is available (this should not be the case for a valid
   // importable profile), use the US as a fallback country for the rewriter.
-  return RewriterCache::Rewrite(
-      !country.empty() ? country : base::ASCIIToUTF16("US"), value);
+  return RewriterCache::Rewrite(!country.empty() ? country : u"US", value);
 }
 
-base::string16 AddressComponentWithRewriter::ValueForComparison() const {
+std::u16string AddressComponentWithRewriter::ValueForComparison() const {
   return RewriteValue(NormalizedValue());
 }
 
@@ -137,8 +137,8 @@ bool StreetAddress::HasNewerValuePrecendenceInMerging(
   // If the verification statuses are the same, do not use the newer component
   // if the older one has new lines but the newer one doesn't.
   if (GetVerificationStatus() == newer_component.GetVerificationStatus()) {
-    if (GetValue().find('\n') != base::string16::npos &&
-        newer_component.GetValue().find('\n') == base::string16::npos) {
+    if (GetValue().find('\n') != std::u16string::npos &&
+        newer_component.GetValue().find('\n') == std::u16string::npos) {
       return false;
     }
     return true;
@@ -146,36 +146,32 @@ bool StreetAddress::HasNewerValuePrecendenceInMerging(
   return false;
 }
 
-base::string16 StreetAddress::GetBestFormatString() const {
+std::u16string StreetAddress::GetBestFormatString() const {
   std::string country_code =
       base::UTF16ToUTF8(GetRootNode().GetValueForType(ADDRESS_HOME_COUNTRY));
 
   if (country_code == "BR") {
-    return base::UTF8ToUTF16(
-        "${ADDRESS_HOME_STREET_NAME}${ADDRESS_HOME_HOUSE_NUMBER;, }"
-        "${ADDRESS_HOME_FLOOR;, ;º andar}${ADDRESS_HOME_APT_NUM;, apto ;}");
+    return u"${ADDRESS_HOME_STREET_NAME}${ADDRESS_HOME_HOUSE_NUMBER;, }"
+           u"${ADDRESS_HOME_FLOOR;, ;º andar}${ADDRESS_HOME_APT_NUM;, apto ;}";
   }
 
   if (country_code == "DE") {
-    return base::ASCIIToUTF16(
-        "${ADDRESS_HOME_STREET_NAME} ${ADDRESS_HOME_HOUSE_NUMBER}"
-        "${ADDRESS_HOME_FLOOR;, ;. Stock}${ADDRESS_HOME_APT_NUM;, ;. Wohnung}");
+    return u"${ADDRESS_HOME_STREET_NAME} ${ADDRESS_HOME_HOUSE_NUMBER}"
+           u"${ADDRESS_HOME_FLOOR;, ;. Stock}${ADDRESS_HOME_APT_NUM;, ;. "
+           u"Wohnung}";
   }
 
   if (country_code == "MX") {
-    return base::ASCIIToUTF16(
-        "${ADDRESS_HOME_STREET_NAME} ${ADDRESS_HOME_HOUSE_NUMBER}"
-        "${ADDRESS_HOME_FLOOR; - Piso ;}${ADDRESS_HOME_APT_NUM; - ;}");
+    return u"${ADDRESS_HOME_STREET_NAME} ${ADDRESS_HOME_HOUSE_NUMBER}"
+           u"${ADDRESS_HOME_FLOOR; - Piso ;}${ADDRESS_HOME_APT_NUM; - ;}";
   }
   if (country_code == "ES") {
-    return base::UTF8ToUTF16(
-        "${ADDRESS_HOME_STREET_NAME} ${ADDRESS_HOME_HOUSE_NUMBER}"
-        "${ADDRESS_HOME_FLOOR;, ;º}${ADDRESS_HOME_APT_NUM;, ;ª}");
+    return u"${ADDRESS_HOME_STREET_NAME} ${ADDRESS_HOME_HOUSE_NUMBER}"
+           u"${ADDRESS_HOME_FLOOR;, ;º}${ADDRESS_HOME_APT_NUM;, ;ª}";
   }
   // Use the format for US/UK as the default.
-  return base::ASCIIToUTF16(
-      "${ADDRESS_HOME_HOUSE_NUMBER} ${ADDRESS_HOME_STREET_NAME} "
-      "${ADDRESS_HOME_FLOOR;FL } ${ADDRESS_HOME_APT_NUM;APT }");
+  return u"${ADDRESS_HOME_HOUSE_NUMBER} ${ADDRESS_HOME_STREET_NAME} "
+         u"${ADDRESS_HOME_FLOOR;FL } ${ADDRESS_HOME_APT_NUM;APT }";
 }
 
 void StreetAddress::UnsetValue() {
@@ -183,24 +179,23 @@ void StreetAddress::UnsetValue() {
   address_lines_.clear();
 }
 
-void StreetAddress::SetValue(base::string16 value, VerificationStatus status) {
+void StreetAddress::SetValue(std::u16string value, VerificationStatus status) {
   AddressComponent::SetValue(value, status);
   CalculateAddressLines();
 }
 
 void StreetAddress::CalculateAddressLines() {
   // Recalculate |address_lines_| after changing the street address.
-  address_lines_ =
-      base::SplitString(GetValue(), base::ASCIIToUTF16("\n"),
-                        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+  address_lines_ = base::SplitString(GetValue(), u"\n", base::TRIM_WHITESPACE,
+                                     base::SPLIT_WANT_ALL);
 
   // If splitting of the address line results in more than 3 entries, join the
   // additional entries into the third line.
   if (address_lines_.size() > 3) {
     address_lines_[2] =
-        base::JoinString(std::vector<base::string16>(address_lines_.begin() + 2,
+        base::JoinString(std::vector<std::u16string>(address_lines_.begin() + 2,
                                                      address_lines_.end()),
-                         base::ASCIIToUTF16(" "));
+                         u" ");
     // Drop the addition address lines.
     while (address_lines_.size() > 3)
       address_lines_.pop_back();
@@ -208,30 +203,30 @@ void StreetAddress::CalculateAddressLines() {
 }
 
 bool StreetAddress::IsValueValid() const {
-  return !base::Contains(address_lines_, base::string16());
+  return !base::Contains(address_lines_, std::u16string());
 }
 
 bool StreetAddress::ConvertAndGetTheValueForAdditionalFieldTypeName(
     const std::string& type_name,
-    base::string16* value) const {
+    std::u16string* value) const {
   if (type_name == AutofillType::ServerFieldTypeToString(ADDRESS_HOME_LINE1)) {
     if (value) {
       *value =
-          address_lines_.size() > 0 ? address_lines_.at(0) : base::string16();
+          address_lines_.size() > 0 ? address_lines_.at(0) : std::u16string();
     }
     return true;
   }
   if (type_name == AutofillType::ServerFieldTypeToString(ADDRESS_HOME_LINE2)) {
     if (value) {
       *value =
-          address_lines_.size() > 1 ? address_lines_.at(1) : base::string16();
+          address_lines_.size() > 1 ? address_lines_.at(1) : std::u16string();
     }
     return true;
   }
   if (type_name == AutofillType::ServerFieldTypeToString(ADDRESS_HOME_LINE3)) {
     if (value) {
       *value =
-          address_lines_.size() > 2 ? address_lines_.at(2) : base::string16();
+          address_lines_.size() > 2 ? address_lines_.at(2) : std::u16string();
     }
     return true;
   }
@@ -242,7 +237,7 @@ bool StreetAddress::ConvertAndGetTheValueForAdditionalFieldTypeName(
 // Implements support for setting the value of the individual address lines.
 bool StreetAddress::ConvertAndSetValueForAdditionalFieldTypeName(
     const std::string& type_name,
-    const base::string16& value,
+    const std::u16string& value,
     const VerificationStatus& status) {
   size_t index = 0;
   if (type_name == AutofillType::ServerFieldTypeToString(ADDRESS_HOME_LINE1)) {
@@ -259,7 +254,7 @@ bool StreetAddress::ConvertAndSetValueForAdditionalFieldTypeName(
 
   // Make sure that there are three address lines stored.
   if (index >= address_lines_.size())
-    address_lines_.resize(index + 1, base::string16());
+    address_lines_.resize(index + 1, std::u16string());
 
   bool change = address_lines_[index] != value;
   if (change)
@@ -271,8 +266,7 @@ bool StreetAddress::ConvertAndSetValueForAdditionalFieldTypeName(
   // By calling the base class implementation, the recreation of the address
   // lines from the street address is omitted.
   if (change) {
-    AddressComponent::SetValue(
-        base::JoinString(address_lines_, base::ASCIIToUTF16("\n")), status);
+    AddressComponent::SetValue(base::JoinString(address_lines_, u"\n"), status);
   }
 
   return true;
@@ -337,7 +331,7 @@ PostalCode::PostalCode(AddressComponent* parent)
 
 PostalCode::~PostalCode() = default;
 
-base::string16 PostalCode::NormalizedValue() const {
+std::u16string PostalCode::NormalizedValue() const {
   return NormalizeValue(GetValue(), /*keep_white_space=*/false);
 }
 

@@ -74,7 +74,7 @@ class SubprocessMetricsProvider
   void MergeHistogramDeltas() override;
 
   // content::BrowserChildProcessObserver:
-  void BrowserChildProcessHostConnected(
+  void BrowserChildProcessLaunchedAndConnected(
       const content::ChildProcessData& data) override;
   void BrowserChildProcessHostDisconnected(
       const content::ChildProcessData& data) override;
@@ -99,7 +99,7 @@ class SubprocessMetricsProvider
   // Gets a histogram allocator from a subprocess. This must be called on
   // the IO thread.
   static std::unique_ptr<base::PersistentHistogramAllocator>
-  GetSubprocessHistogramAllocatorOnIOThread(int id);
+  GetSubprocessHistogramAllocatorOnProcessThread(int id);
 
   THREAD_CHECKER(thread_checker_);
 

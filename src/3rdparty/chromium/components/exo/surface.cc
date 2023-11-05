@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "build/build_config.h"
@@ -29,7 +30,6 @@
 #include "components/viz/common/quads/surface_draw_quad.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/common/resources/resource_id.h"
-#include "components/viz/common/resources/single_release_callback.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/aura/client/aura_constants.h"
@@ -47,6 +47,7 @@
 #include "ui/events/event.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/geometry/dip_util.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/gpu_fence.h"
@@ -122,7 +123,7 @@ bool IsDeskContainer(aura::Window* container) {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   return ash::desks_util::IsDeskContainer(container);
 #else
-  return container->id() == ash::kShellWindowId_DefaultContainerDeprecated;
+  return container->GetId() == ash::kShellWindowId_DefaultContainerDeprecated;
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
@@ -167,7 +168,7 @@ class CustomWindowDelegate : public aura::WindowDelegate {
   void OnWindowDestroyed(aura::Window* window) override { delete this; }
   void OnWindowTargetVisibilityChanged(bool visible) override {}
   void OnWindowOcclusionChanged(
-      aura::Window::OcclusionState occlusion_state) override {
+      aura::Window::OcclusionState GetOcclusionState) override {
     surface_->OnWindowOcclusionChanged();
   }
   bool HasHitTestMask() const override { return true; }
@@ -202,10 +203,8 @@ class CustomWindowTargeter : public aura::WindowTargeter {
     if (!surface || !surface->IsInputEnabled(surface))
       return false;
 
-    gfx::Point local_point = event.location();
-    if (window->parent())
-      aura::Window::ConvertPointToTarget(window->parent(), window,
-                                         &local_point);
+    gfx::Point local_point =
+        ConvertEventLocationToWindowCoordinates(window, event);
     return surface->HitTest(local_point);
   }
 
@@ -228,9 +227,19 @@ const std::string& GetApplicationId(aura::Window* window) {
 
 int surface_id = 0;
 
+void ImmediateExplicitRelease(
+    Buffer::PerCommitExplicitReleaseCallback callback) {
+  if (callback)
+    std::move(callback).Run(/*release_fence=*/gfx::GpuFenceHandle());
+}
+
 }  // namespace
 
 DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(std::string, kClientSurfaceIdKey, nullptr)
+
+// A property key to store the window session Id set by client or full_restore
+// component.
+DEFINE_UI_CLASS_PROPERTY_KEY(int32_t, kWindowSessionId, -1)
 
 ScopedSurface::ScopedSurface(Surface* surface, SurfaceObserver* observer)
     : surface_(surface), observer_(observer) {
@@ -276,6 +285,13 @@ Surface::~Surface() {
                                        pending_state_.presentation_callbacks);
   for (const auto& presentation_callback : state_.presentation_callbacks)
     presentation_callback.Run(gfx::PresentationFeedback());
+
+  // Call explicit release on all explicit release callbacks that have been
+  // committed.
+  ImmediateExplicitRelease(
+      std::move(state_.per_commit_explicit_release_callback_));
+  ImmediateExplicitRelease(
+      std::move(cached_state_.per_commit_explicit_release_callback_));
 
   WMHelper::GetInstance()->ResetDragDropDelegate(window_.get());
 }
@@ -342,7 +358,7 @@ void Surface::SetInputRegion(const cc::Region& region) {
 void Surface::ResetInputRegion() {
   TRACE_EVENT0("exo", "Surface::ResetInputRegion");
 
-  pending_state_.basic_state.input_region = base::nullopt;
+  pending_state_.basic_state.input_region = absl::nullopt;
 }
 
 void Surface::SetInputOutset(int outset) {
@@ -377,6 +393,10 @@ void Surface::AddSubSurface(Surface* sub_surface) {
   pending_sub_surfaces_.push_back(std::make_pair(sub_surface, gfx::Point()));
   sub_surfaces_.push_back(std::make_pair(sub_surface, gfx::Point()));
   sub_surfaces_changed_ = true;
+
+  // Propagate the kSkipImeProcessing property to the new child.
+  if (window_->GetProperty(aura::client::kSkipImeProcessing))
+    sub_surface->window()->SetProperty(aura::client::kSkipImeProcessing, true);
 
   // The shell might have not be added to the root yet.
   if (window_->GetRootWindow()) {
@@ -592,6 +612,16 @@ void Surface::UnsetSnap() {
     delegate_->UnsetSnap();
 }
 
+void Surface::SetCanGoBack() {
+  if (delegate_)
+    delegate_->SetCanGoBack();
+}
+
+void Surface::UnsetCanGoBack() {
+  if (delegate_)
+    delegate_->UnsetCanGoBack();
+}
+
 void Surface::SetColorSpace(gfx::ColorSpace color_space) {
   TRACE_EVENT1("exo", "Surface::SetColorSpace", "color_space",
                color_space.ToString());
@@ -627,6 +657,32 @@ std::string Surface::GetClientSurfaceId() const {
   return value ? *value : std::string();
 }
 
+void Surface::SetWindowSessionId(int32_t window_session_id) {
+  if (window_session_id > 0)
+    window_->SetProperty(kWindowSessionId, window_session_id);
+  else
+    window_->ClearProperty(kWindowSessionId);
+}
+
+int32_t Surface::GetWindowSessionId() {
+  return window_->GetProperty(kWindowSessionId);
+}
+
+void Surface::SetPip() {
+  if (delegate_)
+    delegate_->SetPip();
+}
+
+void Surface::UnsetPip() {
+  if (delegate_)
+    delegate_->UnsetPip();
+}
+
+void Surface::SetAspectRatio(const gfx::SizeF& aspect_ratio) {
+  if (delegate_)
+    delegate_->SetAspectRatio(aspect_ratio);
+}
+
 void Surface::SetEmbeddedSurfaceId(
     base::RepeatingCallback<viz::SurfaceId()> surface_id_callback) {
   get_current_surface_id_ = std::move(surface_id_callback);
@@ -650,6 +706,17 @@ bool Surface::HasPendingAcquireFence() const {
   return !!pending_state_.acquire_fence;
 }
 
+void Surface::SetPerCommitBufferReleaseCallback(
+    Buffer::PerCommitExplicitReleaseCallback callback) {
+  TRACE_EVENT0("exo", "Surface::SetPerCommitBufferReleaseCallback");
+
+  pending_state_.per_commit_explicit_release_callback_ = std::move(callback);
+}
+
+bool Surface::HasPendingPerCommitBufferReleaseCallback() const {
+  return !!pending_state_.per_commit_explicit_release_callback_;
+}
+
 void Surface::Commit() {
   TRACE_EVENT1("exo", "Surface::Commit", "buffer_id",
                static_cast<const void*>(
@@ -669,6 +736,8 @@ void Surface::Commit() {
   has_pending_contents_ = false;
   cached_state_.buffer = std::move(pending_state_.buffer);
   cached_state_.acquire_fence = std::move(pending_state_.acquire_fence);
+  cached_state_.per_commit_explicit_release_callback_ =
+      std::move(pending_state_.per_commit_explicit_release_callback_);
   cached_state_.frame_callbacks.splice(cached_state_.frame_callbacks.end(),
                                        pending_state_.frame_callbacks);
   cached_state_.damage.Union(pending_state_.damage);
@@ -790,6 +859,8 @@ void Surface::CommitSurfaceHierarchy(bool synchronized) {
 
       state_.buffer = std::move(cached_state_.buffer);
       state_.acquire_fence = std::move(cached_state_.acquire_fence);
+      state_.per_commit_explicit_release_callback_ =
+          std::move(cached_state_.per_commit_explicit_release_callback_);
       if (state_.basic_state.alpha)
         needs_update_resource_ = true;
     }
@@ -797,6 +868,8 @@ void Surface::CommitSurfaceHierarchy(bool synchronized) {
     // a new buffer, and it was already moved to state_.acquire_fence. Note that
     // it is a commit-time client error to commit a fence without a buffer.
     DCHECK(!cached_state_.acquire_fence);
+    // Similarly for the per commit buffer release callback.
+    DCHECK(!cached_state_.per_commit_explicit_release_callback_);
 
     if (needs_update_buffer_transform)
       UpdateBufferTransform(cached_invert_y);
@@ -908,8 +981,14 @@ void Surface::AppendSurfaceHierarchyContentsToFrame(
         device_scale_factor, resource_manager, frame);
   }
 
-  if (needs_update_resource_)
+  // Update the resource, or if not required, ensure we call the buffer release
+  // callback, since the buffer will not be used for this commit.
+  if (needs_update_resource_) {
     UpdateResource(resource_manager);
+  } else {
+    ImmediateExplicitRelease(
+        std::move(state_.per_commit_explicit_release_callback_));
+  }
 
   AppendContentsToFrame(origin, device_scale_factor, frame);
 
@@ -1068,7 +1147,8 @@ void Surface::UpdateResource(FrameSinkResourceManager* resource_manager) {
     if (state_.buffer.buffer()->ProduceTransferableResource(
             resource_manager, std::move(state_.acquire_fence),
             state_.basic_state.only_visible_on_secure_output,
-            &current_resource_)) {
+            &current_resource_,
+            std::move(state_.per_commit_explicit_release_callback_))) {
       current_resource_has_alpha_ =
           FormatHasAlpha(state_.buffer.buffer()->GetFormat());
       // Planar buffers are sampled as RGB. Technically, the driver is supposed
@@ -1091,6 +1171,8 @@ void Surface::UpdateResource(FrameSinkResourceManager* resource_manager) {
     current_resource_.id = viz::kInvalidResourceId;
     current_resource_.size = gfx::Size();
     current_resource_has_alpha_ = false;
+    ImmediateExplicitRelease(
+        std::move(state_.per_commit_explicit_release_callback_));
   }
 }
 
@@ -1137,8 +1219,8 @@ void Surface::AppendContentsToFrame(const gfx::Point& origin,
     damage_rect += origin.OffsetFromOrigin();
     damage_rect.Intersect(output_rect);
     if (device_scale_factor <= 1) {
-      render_pass->damage_rect.Union(gfx::ToEnclosingRect(
-          gfx::ConvertRectToPixels(damage_rect, device_scale_factor)));
+      damage_rect = gfx::ToEnclosingRect(
+          gfx::ConvertRectToPixels(damage_rect, device_scale_factor));
     } else {
       // The damage will eventually be rescaled by 1/device_scale_factor. Since
       // that scale factor is <1, taking the enclosed rect here means that that
@@ -1146,7 +1228,7 @@ void Surface::AppendContentsToFrame(const gfx::Point& origin,
       // which makes the enclosing rect equal to |damage_rect|.
       gfx::RectF scaled_damage(damage_rect);
       scaled_damage.Scale(device_scale_factor);
-      render_pass->damage_rect.Union(gfx::ToEnclosedRect(scaled_damage));
+      damage_rect = gfx::ToEnclosedRect(scaled_damage);
     }
   }
   state_.damage.Clear();
@@ -1199,14 +1281,12 @@ void Surface::AppendContentsToFrame(const gfx::Point& origin,
   viz::SharedQuadState* quad_state =
       render_pass->CreateAndAppendSharedQuadState();
 
-  quad_state->SetAll(quad_to_target_transform, quad_rect /*quad_layer_rect=*/,
-                     quad_rect /*visible_quad_layer_rect=*/,
-                     gfx::MaskFilterInfo() /*mask_filter_info=*/,
-                     gfx::Rect() /*clip_rect=*/, false /*is_clipped=*/,
-                     are_contents_opaque, state_.basic_state.alpha /*opacity=*/,
-                     SkBlendMode::kSrcOver /*blend_mode=*/,
-                     0 /*sorting_context_id=*/);
-  quad_state->no_damage = damage_rect.IsEmpty();
+  quad_state->SetAll(
+      quad_to_target_transform, quad_rect /*quad_layer_rect=*/,
+      quad_rect /*visible_quad_layer_rect=*/,
+      gfx::MaskFilterInfo() /*mask_filter_info=*/, absl::nullopt /*clip_rect=*/,
+      are_contents_opaque, state_.basic_state.alpha /*opacity=*/,
+      SkBlendMode::kSrcOver /*blend_mode=*/, 0 /*sorting_context_id=*/);
 
   if (current_resource_.id) {
     gfx::RectF uv_crop(gfx::SizeF(1, 1));
@@ -1243,7 +1323,6 @@ void Surface::AppendContentsToFrame(const gfx::Point& origin,
       if (latest_embedded_surface_id_.is_valid() &&
           !embedded_surface_size_.IsEmpty()) {
         if (!state_.basic_state.crop.IsEmpty()) {
-          quad_state->is_clipped = true;
           quad_state->clip_rect = output_rect;
         }
         viz::SurfaceDrawQuad* surface_quad =
@@ -1272,7 +1351,15 @@ void Surface::AppendContentsToFrame(const gfx::Point& origin,
           gfx::ProtectedVideoType::kClear);
       if (current_resource_.is_overlay_candidate)
         texture_quad->set_resource_size_in_pixels(current_resource_.size);
+
       frame->resource_list.push_back(current_resource_);
+
+      if (!damage_rect.IsEmpty()) {
+        texture_quad->damage_rect = damage_rect;
+        render_pass->has_per_quad_damage = true;
+        // Clear handled damage so it will not be added to the |render_pass|.
+        damage_rect = gfx::Rect();
+      }
     }
   } else {
     viz::SolidColorDrawQuad* solid_quad =
@@ -1280,6 +1367,8 @@ void Surface::AppendContentsToFrame(const gfx::Point& origin,
     solid_quad->SetNew(quad_state, quad_rect, quad_rect, SK_ColorBLACK,
                        false /* force_anti_aliasing_off */);
   }
+
+  render_pass->damage_rect.Union(damage_rect);
 }
 
 void Surface::UpdateContentSize() {
@@ -1316,12 +1405,32 @@ void Surface::UpdateContentSize() {
   }
 }
 
+void Surface::SetFrameLocked(bool lock) {
+  for (SurfaceObserver& observer : observers_)
+    observer.OnFrameLockingChanged(this, lock);
+}
+
 void Surface::OnWindowOcclusionChanged() {
   if (!state_.basic_state.is_tracking_occlusion)
     return;
 
   for (SurfaceObserver& observer : observers_)
     observer.OnWindowOcclusionChanged(this);
+}
+
+void Surface::OnDeskChanged(int state) {
+  for (SurfaceObserver& observer : observers_)
+    observer.OnDeskChanged(this, state);
+}
+
+void Surface::MoveToDesk(int desk_index) {
+  if (delegate_)
+    delegate_->MoveToDesk(desk_index);
+}
+
+void Surface::SetVisibleOnAllWorkspaces() {
+  if (delegate_)
+    delegate_->SetVisibleOnAllWorkspaces();
 }
 
 }  // namespace exo

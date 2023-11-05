@@ -53,6 +53,11 @@ void RecordChromeMainEntryTime(base::TimeTicks ticks);
 void RecordBrowserMainMessageLoopStart(base::TimeTicks ticks,
                                        bool is_first_run);
 
+// Call this with the time recorded just after the message loop first reaches
+// idle. Must be called after RecordApplicationStartTime(), because it computes
+// time deltas based on application start time.
+void RecordBrowserMainLoopFirstIdle(base::TimeTicks ticks);
+
 // Call this with the time when the first browser window became visible.
 void RecordBrowserWindowDisplay(base::TimeTicks ticks);
 
@@ -80,12 +85,6 @@ void RecordBrowserWindowFirstPaint(base::TimeTicks ticks);
 // |RecordMainEntryPointTime|. Returns a null TimeTicks if a value has not been
 // recorded yet. This method is expected to be called from the UI thread.
 base::TimeTicks MainEntryPointTicks();
-
-// Record metrics for the web-footer experiment. See https://crbug.com/993502.
-// These functions must be called after RecordApplicationStartTime(), because
-// they compute time deltas based on application start time.
-void RecordWebFooterDidFirstVisuallyNonEmptyPaint(base::TimeTicks ticks);
-void RecordWebFooterCreation(base::TimeTicks ticks);
 
 // Call this to record an arbitrary startup timing histogram with startup
 // temperature and a trace event. Records the time between `completion_ticks`

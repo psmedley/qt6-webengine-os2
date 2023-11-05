@@ -8,7 +8,7 @@ option optimize_for = LITE_RUNTIME;
 // This file defines messages used for interacting directly with containers
 // running inside of a VM.
 package vm_tools.cicerone;
-option go_package = "vm_cicerone_proto";
+option go_package = "chromiumos/system_api/vm_cicerone_proto";
 
 // Message sent to cicerone when a VM has started up. This is just for
 // tracking purposes by cicerone.
@@ -742,6 +742,9 @@ message LxdContainerStartingSignal {
     // One or more steps failed and the container could not be started. No
     // more signals are expected.
     FAILED = 3;
+
+    // Still starting, this is sent as a heartbeat on an interval.
+    STARTING = 4;
   }
 
   // The current status of starting the container.
@@ -1550,6 +1553,21 @@ message FileWatchTriggeredSignal {
   string path = 4;
 }
 
+// Sent by garcon to notify that a container is running low on disk space.
+message LowDiskSpaceTriggeredSignal {
+  // Name of the VM the container is in.
+  string vm_name = 1;
+
+  // Name of the container within the VM.
+  string container_name = 2;
+
+  // The owner of the VM and container.
+  string owner_id = 3;
+
+  // How much free space is left in bytes.
+  uint64 free_bytes = 4;
+}
+
 // Sent by vsh to register session information such as the container shell pid,
 // keyed from the host vsh pid. Crostini terminal will look up this info for
 // features such as starting new terminals in the same cwd.
@@ -1603,4 +1621,22 @@ message GetVshSessionResponse {
 
   // Process ID of shell spawned from vshd running in container.
   int32 container_shell_pid = 3;
+}
+
+// Sent by chrome in response to a SelectFile dialog request.
+message FileSelectedSignal {
+  // Name of the VM.
+  string vm_name = 1;
+
+  // Name of the container within the VM.
+  string container_name = 2;
+
+  // The owner of the VM.
+  string owner_id = 3;
+
+  // Token sent in request to match with response signal.
+  string select_file_token = 4;
+
+  // Files selected by user in SelectFile dialog.
+  repeated string files = 5;
 }

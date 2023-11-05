@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -31,6 +31,7 @@ _API_LEVEL_VERSION_CODE = [
     (28, 'P'),
     (29, 'Q'),
     (30, 'R'),
+    (31, 'S'),
 ]
 
 
@@ -302,9 +303,10 @@ def _OptimizeWithR8(options,
                                                      tmp_output)
     base_context = split_contexts_by_name['base']
 
-    cmd = build_utils.JavaCmd(options.warnings_as_errors) + [
+    # R8 OOMs with the default xmx=1G.
+    cmd = build_utils.JavaCmd(options.warnings_as_errors, xmx='2G') + [
         '-Dcom.android.tools.r8.allowTestProguardOptions=1',
-        '-Dcom.android.tools.r8.verticalClassMerging=1',
+        '-Dcom.android.tools.r8.disableHorizontalClassMerging=1',
     ]
     if options.disable_outlining:
       cmd += ['-Dcom.android.tools.r8.disableOutlining=1']
@@ -365,20 +367,28 @@ def _OptimizeWithR8(options,
 
     cmd += sorted(base_context.input_jars)
 
-    try:
-      stderr_filter = dex.CreateStderrFilter(
-          options.show_desugar_default_interface_warnings)
-      logging.debug('Running R8')
-      build_utils.CheckOutput(cmd,
-                              print_stdout=print_stdout,
-                              stderr_filter=stderr_filter,
-                              fail_on_output=options.warnings_as_errors)
-    except build_utils.CalledProcessError as err:
-      debugging_link = ('\n\nR8 failed. Please see {}.'.format(
-          'https://chromium.googlesource.com/chromium/src/+/HEAD/build/'
-          'android/docs/java_optimization.md#Debugging-common-failures\n'))
-      raise build_utils.CalledProcessError(err.cwd, err.args,
-                                           err.output + debugging_link)
+    # https://crbug.com/1231986
+    for i in range(4):
+      if i == 3:
+        cmd += ['--thread-count', '1']
+      try:
+        stderr_filter = dex.CreateStderrFilter(
+            options.show_desugar_default_interface_warnings)
+        logging.debug('Running R8')
+        build_utils.CheckOutput(cmd,
+                                print_stdout=print_stdout,
+                                stderr_filter=stderr_filter,
+                                fail_on_output=options.warnings_as_errors)
+        break
+      except build_utils.CalledProcessError as err:
+        # https://crbug.com/1231986
+        if 'ArrayIndexOutOfBoundsException' not in err.output or i == 3:
+          # Python will print the original exception as well.
+          raise Exception(
+              'R8 failed. Please see '
+              'https://chromium.googlesource.com/chromium/src/+/HEAD/build/'
+              'android/docs/java_optimization.md#Debugging-common-failures')
+        logging.warning('Retrying R8 due to crbug/1231986')
 
     base_has_imported_lib = False
     if options.desugar_jdk_libs_json:
@@ -444,7 +454,8 @@ def _OutputKeepRules(r8_path, input_paths, classpath, targets_re_string,
   build_utils.CheckOutput(cmd, print_stderr=False, fail_on_output=False)
 
 
-def _CheckForMissingSymbols(r8_path, dex_files, classpath, warnings_as_errors):
+def _CheckForMissingSymbols(r8_path, dex_files, classpath, warnings_as_errors,
+                            error_title):
   cmd = build_utils.JavaCmd(warnings_as_errors) + [
       '-cp', r8_path, 'com.android.tools.r8.tracereferences.TraceReferences',
       '--map-diagnostics:MissingDefinitionsDiagnostic', 'error', 'warning',
@@ -463,46 +474,35 @@ def _CheckForMissingSymbols(r8_path, dex_files, classpath, warnings_as_errors):
 
         # TODO(agrieve): Create interface jars for these missing classes rather
         #     than allowlisting here.
-        'dalvik/system',
-        'libcore/io',
-        'sun/misc/Unsafe',
+        'dalvik.system',
+        'libcore.io',
+        'sun.misc.Unsafe',
 
         # Found in: com/facebook/fbui/textlayoutbuilder/StaticLayoutHelper
-        ('android/text/StaticLayout;<init>(Ljava/lang/CharSequence;IILandroid'
-         '/text/TextPaint;ILandroid/text/Layout$Alignment;Landroid/text/'
-         'TextDirectionHeuristic;FFZLandroid/text/TextUtils$TruncateAt;II)V'),
-
-        # Found in
-        # com/google/android/gms/cast/framework/media/internal/ResourceProvider
-        # Missing due to setting "strip_resources = true".
-        'com/google/android/gms/cast/framework/R',
-
-        # Found in com/google/android/gms/common/GoogleApiAvailability
-        # Missing due to setting "strip_drawables = true".
-        'com/google/android/gms/base/R$drawable',
+        'android.text.StaticLayout.<init>',
 
         # Explicictly guarded by try (NoClassDefFoundError) in Flogger's
         # PlatformProvider.
-        'com/google/common/flogger/backend/google/GooglePlatform',
-        'com/google/common/flogger/backend/system/DefaultPlatform',
+        'com.google.common.flogger.backend.google.GooglePlatform',
+        'com.google.common.flogger.backend.system.DefaultPlatform',
 
         # trichrome_webview_google_bundle contains this missing reference.
         # TODO(crbug.com/1142530): Fix this missing reference properly.
-        'org/chromium/base/library_loader/NativeLibraries',
+        'org.chromium.build.NativeLibraries',
 
         # TODO(agrieve): Exclude these only when use_jacoco_coverage=true.
-        'Ljava/lang/instrument/ClassFileTransformer',
-        'Ljava/lang/instrument/IllegalClassFormatException',
-        'Ljava/lang/instrument/Instrumentation',
-        'Ljava/lang/management/ManagementFactory',
-        'Ljavax/management/MBeanServer',
-        'Ljavax/management/ObjectInstance',
-        'Ljavax/management/ObjectName',
-        'Ljavax/management/StandardMBean',
+        'java.lang.instrument.ClassFileTransformer',
+        'java.lang.instrument.IllegalClassFormatException',
+        'java.lang.instrument.Instrumentation',
+        'java.lang.management.ManagementFactory',
+        'javax.management.MBeanServer',
+        'javax.management.ObjectInstance',
+        'javax.management.ObjectName',
+        'javax.management.StandardMBean',
 
         # Explicitly guarded by try (NoClassDefFoundError) in Firebase's
         # KotlinDetector: com.google.firebase.platforminfo.KotlinDetector.
-        'Lkotlin/KotlinVersion',
+        'kotlin.KotlinVersion',
     ]
 
     had_unfiltered_items = '  ' in stderr
@@ -510,8 +510,7 @@ def _CheckForMissingSymbols(r8_path, dex_files, classpath, warnings_as_errors):
         stderr, '|'.join(re.escape(x) for x in ignored_lines))
     if stderr:
       if '  ' in stderr:
-        stderr = """
-DEX contains references to non-existent symbols after R8 optimization.
+        stderr = error_title + """
 Tip: Build with:
         is_java_debug=false
         treat_warnings_as_errors=false
@@ -527,7 +526,7 @@ out/Release/apks/YourApk.apk > dex.txt
           stderr += """
 You may need to update build configs to run FragmentActivityReplacer for
 additional targets. See
-https://chromium.googlesource.com/chromium/src.git/+/master/docs/ui/android/bytecode_rewriting.md.
+https://chromium.googlesource.com/chromium/src.git/+/main/docs/ui/android/bytecode_rewriting.md.
 """
       elif had_unfiltered_items:
         # Left only with empty headings. All indented items filtered out.
@@ -553,15 +552,19 @@ def _CombineConfigs(configs, dynamic_config_data, exclude_generated=False):
     if exclude_generated and config.endswith('.resources.proguard.txt'):
       continue
 
-    ret.append('# File: ' + config)
     with open(config) as config_file:
       contents = config_file.read().rstrip()
+
+    if not contents.strip():
+      # Ignore empty files.
+      continue
 
     # Fix up line endings (third_party configs can have windows endings).
     contents = contents.replace('\r', '')
     # Remove numbers from generated rule comments to make file more
     # diff'able.
     contents = re.sub(r' #generated:\d+', '', contents)
+    ret.append('# File: ' + config)
     ret.append(contents)
     ret.append('')
 
@@ -573,7 +576,11 @@ def _CombineConfigs(configs, dynamic_config_data, exclude_generated=False):
 
 
 def _CreateDynamicConfig(options):
-  ret = []
+  # Our scripts already fail on output. Adding -ignorewarnings makes R8 output
+  # warnings rather than throw exceptions so we can selectively ignore them via
+  # dex.py's ignore list. Context: https://crbug.com/1180222
+  ret = ["-ignorewarnings"]
+
   if options.sourcefile:
     ret.append("-renamesourcefileattribute '%s' # OMIT FROM EXPECTATIONS" %
                options.sourcefile)
@@ -581,7 +588,7 @@ def _CreateDynamicConfig(options):
   if options.enable_obfuscation:
     ret.append("-repackageclasses ''")
   else:
-    ret.append("-keepnames,allowoptimization class *** { *; }")
+    ret.append("-dontobfuscate")
 
   if options.apply_mapping:
     ret.append("-applymapping '%s'" % options.apply_mapping)
@@ -685,14 +692,17 @@ def main():
       all_dex_files.append(options.output_path)
     if options.dex_dests:
       all_dex_files.extend(options.dex_dests)
+    error_title = 'DEX contains references to non-existent symbols after R8.'
     _CheckForMissingSymbols(options.r8_path, all_dex_files, options.classpath,
-                            options.warnings_as_errors)
+                            options.warnings_as_errors, error_title)
     # Also ensure that base module doesn't have any references to child dex
     # symbols.
     # TODO(agrieve): Remove this check once r8 desugaring is fixed to not put
     #     synthesized classes in the base module.
+    error_title = 'Base module DEX contains references symbols within DFMs.'
     _CheckForMissingSymbols(options.r8_path, [base_context.final_output_path],
-                            options.classpath, options.warnings_as_errors)
+                            options.classpath, options.warnings_as_errors,
+                            error_title)
 
   for output in options.extra_mapping_output_paths:
     shutil.copy(options.mapping_output, output)

@@ -5,6 +5,8 @@
 #include "content/gpu/gpu_child_thread.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/allocator/allocator_extension.h"
@@ -20,6 +22,7 @@
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
+#include "content/common/process_visibility_tracker.h"
 #include "content/gpu/browser_exposed_gpu_interfaces.h"
 #include "content/gpu/gpu_service_factory.h"
 #include "content/public/browser/content_browser_client.h"
@@ -48,33 +51,6 @@
 #include "media/mojo/clients/mojo_android_overlay.h"
 #endif
 
-#if defined(TOOLKIT_QT)
-// Used from //gpu/ipc/client/command_buffer_proxy_impl.cc
-bool CreateCommandBufferSyncQt(
-    const GPUCreateCommandBufferConfig &init_params,
-    int channel_id,
-    int32_t route_id,
-    base::UnsafeSharedMemoryRegion *region,
-    gpu::ContextResult *result,
-    gpu::Capabilities *capabilities)
-{
-  content::GpuChildThread* child_thread = content::GpuChildThread::instance();
-  if (child_thread) {
-    gpu::GpuChannelManager* gpu_channel_manager =
-        child_thread->gpu_channel_manager();
-    // With in-process UI-thread GPU, sync IPC would deadlock; so call directly:
-    if (gpu_channel_manager->task_runner()->BelongsToCurrentThread()) {
-      gpu::GpuChannel* gpu_channel =
-          gpu_channel_manager->LookupChannel(channel_id);
-      gpu_channel->OnCreateCommandBuffer(
-          init_params, route_id, std::move(*region), result, capabilities);
-      return true;
-    }
-  }
-  return false;
-}
-#endif
-
 namespace content {
 namespace {
 
@@ -85,12 +61,13 @@ void HandleBadMessage(const std::string& error) {
   base::debug::DumpWithoutCrashing();
 }
 
-ChildThreadImpl::Options GetOptions() {
+ChildThreadImpl::Options GetOptions(
+    const InProcessChildThreadParams* in_process_params = nullptr) {
   ChildThreadImpl::Options::Builder builder;
-
   builder.ConnectToBrowser(true);
   builder.ExposesInterfacesToBrowser();
-
+  if (in_process_params)
+    builder.InBrowserProcess(*in_process_params);
   return builder.Build();
 }
 
@@ -134,11 +111,7 @@ GpuChildThread::GpuChildThread(base::RepeatingClosure quit_closure,
 GpuChildThread::GpuChildThread(const InProcessChildThreadParams& params,
                                std::unique_ptr<gpu::GpuInit> gpu_init)
     : GpuChildThread(base::DoNothing(),
-                     ChildThreadImpl::Options::Builder()
-                         .InBrowserProcess(params)
-                         .ConnectToBrowser(true)
-                         .ExposesInterfacesToBrowser()
-                         .Build(),
+                     GetOptions(&params),
                      std::move(gpu_init)) {}
 
 GpuChildThread::GpuChildThread(base::RepeatingClosure quit_closure,
@@ -173,38 +146,13 @@ void GpuChildThread::Init(const base::Time& process_start_time) {
   }
 #endif
 
-  blink::AssociatedInterfaceRegistry* associated_registry =
-      &associated_interfaces_;
-  associated_registry->AddInterface(base::BindRepeating(
-      &GpuChildThread::CreateVizMainService, base::Unretained(this)));
-
   memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
       FROM_HERE, base::BindRepeating(&GpuChildThread::OnMemoryPressure,
                                      base::Unretained(this)));
 }
 
-void GpuChildThread::CreateVizMainService(
-    mojo::PendingAssociatedReceiver<viz::mojom::VizMain> pending_receiver) {
-  viz_main_.BindAssociated(std::move(pending_receiver));
-}
-
 bool GpuChildThread::in_process_gpu() const {
   return viz_main_.gpu_service()->gpu_info().in_process_gpu;
-}
-
-bool GpuChildThread::Send(IPC::Message* msg) {
-  // The GPU process must never send a synchronous IPC message to the browser
-  // process. This could result in deadlock.
-  DCHECK(!msg->is_sync());
-
-  return ChildThreadImpl::Send(msg);
-}
-
-void GpuChildThread::OnAssociatedInterfaceRequest(
-    const std::string& name,
-    mojo::ScopedInterfaceEndpointHandle handle) {
-  if (!associated_interfaces_.TryBindInterface(name, &handle))
-    ChildThreadImpl::OnAssociatedInterfaceRequest(name, std::move(handle));
 }
 
 void GpuChildThread::OnInitializationFailed() {
@@ -225,13 +173,21 @@ void GpuChildThread::OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) {
   gpu_channel_manager()->set_share_group(GetContentClient()->browser()->GetInProcessGpuShareGroup());
 #endif
 
+  if (!IsInBrowserProcess()) {
+    gpu_service->SetVisibilityChangedCallback(
+        base::BindRepeating([](bool visible) {
+          ProcessVisibilityTracker::GetInstance()->OnProcessVisibilityChanged(
+              visible);
+        }));
+  }
+
   // Only set once per process instance.
-  service_factory_.reset(new GpuServiceFactory(
+  service_factory_ = std::make_unique<GpuServiceFactory>(
       gpu_service->gpu_preferences(),
       gpu_service->gpu_channel_manager()->gpu_driver_bug_workarounds(),
       gpu_service->gpu_feature_info(),
       gpu_service->media_gpu_channel_manager()->AsWeakPtr(),
-      gpu_service->gpu_memory_buffer_factory(), std::move(overlay_factory_cb)));
+      gpu_service->gpu_memory_buffer_factory(), std::move(overlay_factory_cb));
   for (auto& receiver : pending_service_receivers_)
     BindServiceInterface(std::move(receiver));
   pending_service_receivers_.clear();

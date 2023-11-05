@@ -39,6 +39,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/browsing_data/content/browsing_data_helper.h"
+#include "components/embedder_support/switches.h"
 #include "components/error_page/content/browser/net_error_auto_reloader.h"
 #include "components/google/core/common/google_util.h"
 #include "components/language/core/browser/pref_names.h"
@@ -78,16 +79,7 @@
 #include "net/url_request/url_request_test_job.h"
 #include "services/network/public/cpp/features.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
-#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chromeos/tpm/stub_install_attributes.h"
-#include "components/policy/core/common/policy_types.h"
-#else
 #include "chrome/browser/policy/profile_policy_connector_builder.h"
-#endif
 #include "build/chromeos_buildflags.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 
@@ -117,13 +109,10 @@ IsDisplayingText(content::RenderFrameHost* render_frame_host,
     }
     var node = document.evaluate("//*[contains(text(),'%s')]", document,
       null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-    domAutomationController.send(isNodeVisible(node));
+    isNodeVisible(node);
   )", text.c_str());
   // clang-format on
-  bool result = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(render_frame_host, command,
-                                                   &result));
-  return result;
+  return content::EvalJs(render_frame_host, command).ExtractBool();
 }
 
 bool WARN_UNUSED_RESULT IsDisplayingText(Browser* browser,
@@ -134,20 +123,19 @@ bool WARN_UNUSED_RESULT IsDisplayingText(Browser* browser,
 
 // Expands the more box on the currently displayed error page.
 void ToggleHelpBox(Browser* browser) {
-  EXPECT_TRUE(content::ExecuteScript(
-      browser->tab_strip_model()->GetActiveWebContents(),
-      "document.getElementById('details-button').click();"));
+  EXPECT_TRUE(
+      content::ExecJs(browser->tab_strip_model()->GetActiveWebContents(),
+                      "document.getElementById('details-button').click();"));
 }
 
 // Returns true if the diagnostics link suggestion is displayed.
 bool WARN_UNUSED_RESULT IsDisplayingDiagnosticsLink(Browser* browser) {
   std::string command = base::StringPrintf(
       "var diagnose_link = document.getElementById('diagnose-link');"
-      "domAutomationController.send(diagnose_link != null);");
-  bool result = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      browser->tab_strip_model()->GetActiveWebContents(), command, &result));
-  return result;
+      "diagnose_link != null;");
+  return content::EvalJs(browser->tab_strip_model()->GetActiveWebContents(),
+                         command)
+      .ExtractBool();
 }
 
 // Checks that the error page is being displayed with the specified error
@@ -422,7 +410,7 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, DNSError_DoReload) {
   // notification that they've run, and scripts that trigger a navigation may
   // not send that notification.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.getElementById('reload-button').click();"),
+      u"document.getElementById('reload-button').click();",
       base::NullCallback());
   nav_observer.Wait();
   ExpectDisplayingErrorPage(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -444,7 +432,7 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest,
   // Do a same-document navigation on the error page, which should not result
   // in a new navigation.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.location='#';"), base::NullCallback());
+      u"document.location='#';", base::NullCallback());
   content::WaitForLoadStop(web_contents);
   // Page being displayed should not change.
   ExpectDisplayingErrorPage(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -455,7 +443,7 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest,
   // notification that they've run, and scripts that trigger a navigation may
   // not send that notification.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.getElementById('reload-button').click();"),
+      u"document.getElementById('reload-button').click();",
       base::NullCallback());
   nav_observer2.Wait();
   ExpectDisplayingErrorPage(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -612,19 +600,14 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, CheckEasterEgg) {
   // Check for no disabled message container.
   std::string command = base::StringPrintf(
       "var hasDisableContainer = document.querySelectorAll('.snackbar').length;"
-      "domAutomationController.send(hasDisableContainer);");
-  int32_t result;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
-               web_contents, command, &result));
-  EXPECT_EQ(0, result);
+      "hasDisableContainer;");
+  EXPECT_EQ(0, content::EvalJs(web_contents, command));
 
   // Presence of the canvas container.
   command = base::StringPrintf(
-    "var runnerCanvas = document.querySelectorAll('.runner-canvas').length;"
-    "domAutomationController.send(runnerCanvas);");
-  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
-               web_contents, command, &result));
-  EXPECT_EQ(1, result);
+      "var runnerCanvas = document.querySelectorAll('.runner-canvas').length;"
+      "runnerCanvas;");
+  EXPECT_EQ(1, content::EvalJs(web_contents, command));
 }
 
 // Test error page in incognito mode. The only difference is that no network
@@ -655,7 +638,7 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, Incognito) {
 class ErrorPageAutoReloadTest : public InProcessBrowserTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kEnableAutoReload);
+    command_line->AppendSwitch(embedder_support::kEnableAutoReload);
   }
 
   void TearDownOnMainThread() override { url_loader_interceptor_.reset(); }
@@ -773,7 +756,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
     browser()->tab_strip_model()->GetActiveWebContents();
   content::TestNavigationObserver nav_observer(web_contents, 1);
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.getElementById('reload-button').click();"),
+      u"document.getElementById('reload-button').click();",
       base::NullCallback());
   nav_observer.Wait();
   EXPECT_FALSE(IsDisplayingText(
@@ -798,13 +781,13 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest,
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  const base::string16 kExpectedTitle = base::ASCIIToUTF16("Test One");
+  const std::u16string kExpectedTitle = u"Test One";
   content::TitleWatcher title_watcher(web_contents, kExpectedTitle);
 
   // Same-document navigation on an error page should not interrupt the
   // scheduled auto-reload which should still be pending on the WebContents.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.location='#';"), base::NullCallback());
+      u"document.location='#';", base::NullCallback());
 
   // Wait for the second auto reload to happen. It will succeed and update the
   // WebContents' title.
@@ -827,54 +810,29 @@ class ErrorPageOfflineTest : public ErrorPageTest {
 
  protected:
   void SetUpInProcessBrowserTestFixture() override {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    if (enroll_) {
-      // Set up fake install attributes.
-      test_install_attributes_ =
-          std::make_unique<chromeos::ScopedStubInstallAttributes>(
-              chromeos::StubInstallAttributes::CreateCloudManaged("example.com",
-                                                                  "fake-id"));
-    }
-#endif
-
     // Sets up a mock policy provider for user and device policies.
-    EXPECT_CALL(policy_provider_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
-    EXPECT_CALL(policy_provider_, IsFirstPolicyLoadComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    policy_provider_.SetDefaultReturns(
+        /*is_initialization_complete_return=*/true,
+        /*is_first_policy_load_complete_return=*/true);
 
     policy::PolicyMap policy_map;
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    if (enroll_)
-      SetEnterpriseUsersDefaults(&policy_map);
-#endif
     if (set_allow_dinosaur_easter_egg_) {
       policy_map.Set(policy::key::kAllowDinosaurEasterEgg,
                      policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                      policy::POLICY_SOURCE_CLOUD,
                      base::Value(value_of_allow_dinosaur_easter_egg_), nullptr);
     }
-    policy_provider_.UpdateChromePolicy(policy_map);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
-        &policy_provider_);
-#else
-    policy::PushProfilePolicyConnectorProviderForTesting(&policy_provider_);
+#if defined(OS_CHROMEOS)
+    SetEnterpriseUsersProfileDefaults(&policy_map);
 #endif
 
+    policy_provider_.UpdateChromePolicy(policy_map);
+    policy::PushProfilePolicyConnectorProviderForTesting(&policy_provider_);
     ErrorPageTest::SetUpInProcessBrowserTestFixture();
   }
 
   std::string NavigateToPageAndReadText() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    // Check enterprise enrollment
-    policy::BrowserPolicyConnectorChromeOS* connector =
-        g_browser_process->platform_part()
-        ->browser_policy_connector_chromeos();
-    EXPECT_EQ(enroll_, connector->IsEnterpriseManaged());
-#endif
-
     ui_test_utils::NavigateToURL(
         browser(),
         URLRequestFailedJob::GetMockHttpUrl(net::ERR_INTERNET_DISCONNECTED));
@@ -884,13 +842,9 @@ class ErrorPageOfflineTest : public ErrorPageTest {
 
     std::string command = base::StringPrintf(
         "var hasText = document.querySelector('.snackbar');"
-        "domAutomationController.send(hasText ? hasText.innerText : '');");
+        "hasText ? hasText.innerText : '';");
 
-    std::string result;
-    EXPECT_TRUE(
-        content::ExecuteScriptAndExtractString(web_contents, command, &result));
-
-    return result;
+    return content::EvalJs(web_contents, command).ExtractString();
   }
 
   // Whether to set AllowDinosaurEasterEgg policy
@@ -899,15 +853,6 @@ class ErrorPageOfflineTest : public ErrorPageTest {
   // The value of AllowDinosaurEasterEgg policy we want to set
   bool value_of_allow_dinosaur_easter_egg_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // Whether to enroll this CrOS device
-  bool enroll_ = true;
-
-  std::unique_ptr<chromeos::ScopedStubInstallAttributes>
-      test_install_attributes_;
-#endif
-
-  // Mock policy provider for both user and device policies.
   testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
   std::unique_ptr<content::URLLoaderInterceptor> url_loader_interceptor_;
 };
@@ -930,17 +875,6 @@ class ErrorPageOfflineTestWithAllowDinosaurFalse : public ErrorPageOfflineTest {
   }
 };
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-class ErrorPageOfflineTestUnEnrolledChromeOS : public ErrorPageOfflineTest {
- protected:
-  void SetUpInProcessBrowserTestFixture() override {
-    set_allow_dinosaur_easter_egg_ = false;
-    enroll_ = false;
-    ErrorPageOfflineTest::SetUpInProcessBrowserTestFixture();
-  }
-};
-#endif
-
 IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTestWithAllowDinosaurTrue,
                        CheckEasterEggIsAllowed) {
   std::string result = NavigateToPageAndReadText();
@@ -955,7 +889,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTestWithAllowDinosaurFalse,
   EXPECT_EQ(disabled_text, result);
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTest, CheckEasterEggIsDisabled) {
   std::string result = NavigateToPageAndReadText();
   std::string disabled_text =
@@ -965,16 +899,6 @@ IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTest, CheckEasterEggIsDisabled) {
 #else
 IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTest, CheckEasterEggIsAllowed) {
   std::string result = NavigateToPageAndReadText();
-  EXPECT_EQ("", result);
-}
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTestUnEnrolledChromeOS,
-                       CheckEasterEggIsAllowed) {
-  std::string result = NavigateToPageAndReadText();
-  std::string disabled_text =
-      l10n_util::GetStringUTF8(IDS_ERRORPAGE_FUN_DISABLED);
   EXPECT_EQ("", result);
 }
 #endif

@@ -125,8 +125,8 @@ public:
                                            content::RenderWidgetHostViewBase *target_view,
                                            gfx::PointF *transformed_point) override;
     void Destroy() override;
-    void SetTooltipText(const base::string16 &tooltip_text) override;
-    void DisplayTooltipText(const base::string16& tooltip_text) override;
+    void UpdateTooltipUnderCursor(const std::u16string &tooltip_text) override;
+    void UpdateTooltip(const std::u16string& tooltip_text) override;
     void WheelEventAck(const blink::WebMouseWheelEvent &event,
                        blink::mojom::InputEventResultState ack_result) override;
     void GestureEventAck(const blink::WebGestureEvent &event,
@@ -136,7 +136,7 @@ public:
     void OnDidUpdateVisualPropertiesComplete(const cc::RenderFrameMetadata &metadata);
 
     // Overridden from RenderWidgetHostViewBase:
-    void GetScreenInfo(blink::ScreenInfo *results) override;
+    void GetScreenInfo(display::ScreenInfo *screen_info) override;
     gfx::Rect GetBoundsInRootWindow() override;
     void ProcessAckedTouchEvent(const content::TouchEventWithLatencyInfo &touch,
                                 blink::mojom::InputEventResultState ack_result) override;
@@ -153,9 +153,15 @@ public:
     void DidStopFlinging() override;
     std::unique_ptr<content::SyntheticGestureTarget> CreateSyntheticGestureTarget() override;
     ui::Compositor *GetCompositor() override;
-    base::Optional<content::DisplayFeature> GetDisplayFeature() override;
+    absl::optional<content::DisplayFeature> GetDisplayFeature() override;
     void SetDisplayFeatureForTesting(const content::DisplayFeature*) override;
 #if defined(OS_MAC)
+    void ShowSharePicker(
+        const std::string &title,
+        const std::string &text,
+        const std::string &url,
+        const std::vector<std::string> &file_paths,
+            blink::mojom::ShareService::ShareCallback callback) override { QT_NOT_YET_IMPLEMENTED }
     void SetActive(bool active) override { QT_NOT_YET_IMPLEMENTED }
     void SpeakSelection() override { QT_NOT_YET_IMPLEMENTED }
     void ShowDefinitionForSelection() override { QT_NOT_YET_IMPLEMENTED }
@@ -198,7 +204,7 @@ public:
     ui::TextInputType getTextInputType() const;
 
     void synchronizeVisualProperties(
-            const base::Optional<viz::LocalSurfaceId> &childSurfaceId);
+            const absl::optional<viz::LocalSurfaceId> &childSurfaceId);
 
 private:
     friend class DelegatedFrameHostClientQt;
@@ -230,7 +236,7 @@ private:
     DelegatedFrameHostClientQt m_delegatedFrameHostClient { this };
 
     // VIZ
-    blink::ScreenInfo m_screenInfo;
+    display::ScreenInfo m_screenInfo;
     std::unique_ptr<content::DelegatedFrameHost> m_delegatedFrameHost;
     std::unique_ptr<ui::Layer> m_rootLayer;
     std::unique_ptr<ui::Compositor> m_uiCompositor;

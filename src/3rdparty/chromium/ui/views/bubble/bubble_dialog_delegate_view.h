@@ -12,16 +12,16 @@
 #include "build/build_config.h"
 #include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/base/class_property.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/metadata/metadata_header_macros.h"
 #include "ui/views/metadata/view_factory.h"
 #include "ui/views/view_tracker.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_delegate.h"
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
 #include "ui/base/cocoa/bubble_closer.h"
 #endif
 
@@ -36,16 +36,10 @@ class Button;
 class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
                                           public ui::PropertyHandler {
  public:
-  enum class CloseReason {
-    DEACTIVATION,
-    CLOSE_BUTTON,
-    UNKNOWN,
-  };
-
-  BubbleDialogDelegate();
-  BubbleDialogDelegate(View* anchor_view,
-                       BubbleBorder::Arrow arrow,
-                       BubbleBorder::Shadow shadow);
+  BubbleDialogDelegate(
+      View* anchor_view,
+      BubbleBorder::Arrow arrow,
+      BubbleBorder::Shadow shadow = BubbleBorder::DIALOG_SHADOW);
   BubbleDialogDelegate(const BubbleDialogDelegate& other) = delete;
   BubbleDialogDelegate& operator=(const BubbleDialogDelegate& other) = delete;
   ~BubbleDialogDelegate() override;
@@ -56,6 +50,10 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
       Widget* widget) override;
   ClientView* CreateClientView(Widget* widget) override;
   ax::mojom::Role GetAccessibleWindowRole() override;
+
+  // Create and initialize the bubble Widget with proper bounds.
+  static Widget* CreateBubble(
+      std::unique_ptr<BubbleDialogDelegate> bubble_delegate);
 
   //////////////////////////////////////////////////////////////////////////////
   // The anchor view and rectangle:
@@ -79,17 +77,8 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   // TODO(ellyjones): Remove overrides of GetAnchorRect() and make this not
   // virtual.
   virtual gfx::Rect GetAnchorRect() const;
-  const base::Optional<gfx::Rect>& anchor_rect() const { return anchor_rect_; }
+  const absl::optional<gfx::Rect>& anchor_rect() const { return anchor_rect_; }
   void SetAnchorRect(const gfx::Rect& rect);
-
-  // The anchor view insets are applied to the anchor view's bounds. This is
-  // used to align the bubble properly with the visual center of the anchor View
-  // when the anchor View's visual center is not the same as the center of its
-  // bounding box.
-  // TODO(https://crbug.com/869928): Remove this concept in favor of
-  // View::GetAnchorBoundsInScreen().
-  const gfx::Insets& anchor_view_insets() const { return anchor_view_insets_; }
-  void set_anchor_view_insets(const gfx::Insets& i) { anchor_view_insets_ = i; }
 
   //////////////////////////////////////////////////////////////////////////////
   // The anchor widget:
@@ -178,12 +167,23 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   gfx::NativeView parent_window() const { return parent_window_; }
   void set_parent_window(gfx::NativeView window) { parent_window_ = window; }
 
+  bool has_parent() { return has_parent_; }
+  void set_has_parent(bool has_parent) { has_parent_ = has_parent; }
+
   // Whether the bubble accepts mouse events or not.
   bool accept_events() const { return accept_events_; }
   void set_accept_events(bool accept_events) { accept_events_ = accept_events; }
 
   // Whether focus can traverse from the anchor view into the bubble. Only
   // meaningful if there is an anchor view.
+  // TODO(pbos): See if this can be inferred from if the bubble is activatable
+  // or if there's anything focusable within the dialog. This is currently used
+  // for bubbles that should never receive focus and we should be able have
+  // focus go through a bubble if nothing's focusable within it. Without this
+  // set to `false`, the existence of an InfoBubble in the QR reader bubble will
+  // break focus order in the parent dialog. This is a bug for which
+  // set_focus_traversable_from_anchor_view(false) is used as a workaround. See
+  // if fixing that bug removes the need for this for other dialogs.
   void set_focus_traversable_from_anchor_view(bool focusable) {
     focus_traversable_from_anchor_view_ = focusable;
   }
@@ -244,9 +244,6 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
                                                   gfx::Rect screen_rect);
 
  protected:
-  // Create and initialize the bubble Widget with proper bounds.
-  static Widget* CreateBubble(BubbleDialogDelegate* bubble_delegate);
-
   // Override this method if you want to position the bubble regardless of its
   // anchor, while retaining the other anchor view logic.
   virtual gfx::Rect GetBubbleBounds();
@@ -266,6 +263,7 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
 
   // Override this to perform initialization after the Widget is created but
   // before it is shown.
+  // TODO(pbos): Turn this into a (Once?)Callback and add set_init(cb).
   virtual void Init() {}
 
   // TODO(ellyjones): Replace uses of this with uses of set_color(), and/or
@@ -295,15 +293,21 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   class AnchorViewObserver;
   class AnchorWidgetObserver;
   class BubbleWidgetObserver;
+  class ThemeObserver;
 
   FRIEND_TEST_ALL_PREFIXES(BubbleDialogDelegateViewTest,
                            VisibleWidgetShowsInkDropOnAttaching);
   FRIEND_TEST_ALL_PREFIXES(BubbleDialogDelegateViewTest,
                            AttachedWidgetShowsInkDropWhenVisible);
+  FRIEND_TEST_ALL_PREFIXES(BubbleDialogDelegateViewTest,
+                           MultipleBubbleAnchorHighlightTestInOrder);
+  FRIEND_TEST_ALL_PREFIXES(BubbleDialogDelegateViewTest,
+                           MultipleBubbleAnchorHighlightTestOutOfOrder);
 
   friend class AnchorViewObserver;
   friend class AnchorWidgetObserver;
   friend class BubbleWidgetObserver;
+  friend class ThemeObserver;
 
   friend class BubbleBorderDelegate;
   friend class BubbleWindowTargeter;
@@ -322,6 +326,17 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
 
   void OnDeactivate();
 
+  // Update the bubble color from the NativeTheme unless it was explicitly set.
+  void UpdateColorsFromTheme();
+
+  // Notify this bubble that it is now the primary anchored bubble. When a new
+  // bubble becomes the primary anchor, the previous primary silently loses its
+  // primary status. This method is only called when this bubble becomes primary
+  // after losing it.
+  void NotifyAnchoredBubbleIsPrimary();
+
+  void SetAnchoredDialogKey();
+
   gfx::Insets title_margins_;
   BubbleBorder::Arrow arrow_ = BubbleBorder::NONE;
   BubbleBorder::Shadow shadow_;
@@ -331,14 +346,10 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   std::unique_ptr<AnchorViewObserver> anchor_view_observer_;
   std::unique_ptr<AnchorWidgetObserver> anchor_widget_observer_;
   std::unique_ptr<BubbleWidgetObserver> bubble_widget_observer_;
-  base::CallbackListSubscription paint_as_active_subscription_;
-  std::unique_ptr<Widget::PaintAsActiveLock> paint_as_active_lock_;
+  std::unique_ptr<ThemeObserver> theme_observer_;
   bool adjust_if_offscreen_ = true;
   bool focus_traversable_from_anchor_view_ = true;
   ViewTracker highlighted_button_tracker_;
-
-  // Insets applied to the |anchor_view_| bounds.
-  gfx::Insets anchor_view_insets_;
 
   // A flag controlling bubble closure on deactivation.
   bool close_on_deactivate_ = true;
@@ -347,15 +358,18 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   // provided) should be highlighted when this bubble is shown.
   bool highlight_button_when_shown_ = true;
 
-  mutable base::Optional<gfx::Rect> anchor_rect_;
+  mutable absl::optional<gfx::Rect> anchor_rect_;
 
   bool accept_events_ = true;
   gfx::NativeView parent_window_ = nullptr;
 
+  // By default, all BubbleDialogDelegates have parent windows.
+  bool has_parent_ = true;
+
   // Pointer to this bubble's ClientView.
   ClientView* client_view_ = nullptr;
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   // Special handler for close_on_deactivate() on Mac. Window (de)activation is
   // suppressed by the WindowServer when clicking rapidly, so the bubble must
   // monitor clicks as well for the desired behavior.
@@ -364,8 +378,10 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
 };
 
 // BubbleDialogDelegateView is a BubbleDialogDelegate that is also a View.
-// If you can, it is better to subclass View and construct a
-// BubbleDialogDelegate instance as a member of your subclass.
+// Prefer using a BubbleDialogDelegate that sets a separate View as its contents
+// view.
+// TODO(pbos): Migrate existing uses of BubbleDialogDelegateView to directly
+// inherit or use BubbleDialogDelegate.
 class VIEWS_EXPORT BubbleDialogDelegateView : public BubbleDialogDelegate,
                                               public View {
  public:
@@ -394,7 +410,6 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public BubbleDialogDelegate,
   // View:
   Widget* GetWidget() override;
   const Widget* GetWidget() const override;
-  void AddedToWidget() override;
 
  protected:
   // Disallow overrides of GetMinimumSize and GetMaximumSize(). These would only
@@ -405,17 +420,9 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public BubbleDialogDelegate,
   gfx::Size GetMinimumSize() const final;
   gfx::Size GetMaximumSize() const final;
 
-  void OnThemeChanged() override;
-
-  // Perform view initialization on the contents for bubble sizing.
-  void Init() override;
-
  private:
   FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, CreateDelegate);
   FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, NonClientHitTest);
-
-  // Update the bubble color from the NativeTheme unless it was explicitly set.
-  void UpdateColorsFromTheme();
 };
 
 BEGIN_VIEW_BUILDER(VIEWS_EXPORT, BubbleDialogDelegateView, View)

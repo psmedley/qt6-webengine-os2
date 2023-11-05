@@ -16,6 +16,8 @@
 
 namespace net {
 
+class CookieInclusionStatus;
+
 class NET_EXPORT ParsedCookie {
  public:
   typedef std::pair<std::string, std::string> TokenValuePair;
@@ -27,7 +29,12 @@ class NET_EXPORT ParsedCookie {
   // Construct from a cookie string like "BLAH=1; path=/; domain=.google.com"
   // Format is according to RFC 6265. Cookies with both name and value empty
   // will be considered invalid.
-  ParsedCookie(const std::string& cookie_line);
+  // `status_out` is a nullable output param which will be populated with
+  // informative exclusion reasons if the resulting ParsedCookie is invalid.
+  // The CookieInclusionStatus will not be altered if the resulting ParsedCookie
+  // is valid.
+  explicit ParsedCookie(const std::string& cookie_line,
+                        CookieInclusionStatus* status_out = nullptr);
   ~ParsedCookie();
 
   // You should not call any other methods except for SetName/SetValue on the
@@ -54,6 +61,8 @@ class NET_EXPORT ParsedCookie {
       CookieSameSiteString* samesite_string = nullptr) const;
   CookiePriority Priority() const;
   bool IsSameParty() const { return same_party_index_ != 0; }
+  bool IsPartitioned() const { return partitioned_index_ != 0; }
+  bool HasTruncatedNameOrValue() const { return truncated_name_or_value_; }
 
   // Returns the number of attributes, for example, returning 2 for:
   //   "BLAH=hah; path=/; domain=.google.com"
@@ -80,6 +89,7 @@ class NET_EXPORT ParsedCookie {
   bool SetSameSite(const std::string& same_site);
   bool SetPriority(const std::string& priority);
   bool SetIsSameParty(bool is_same_party);
+  bool SetIsPartitioned(bool is_partitioned);
 
   // Returns the cookie description as it appears in a HTML response header.
   std::string ToCookieLine() const;
@@ -113,11 +123,15 @@ class NET_EXPORT ParsedCookie {
   static std::string ParseTokenString(const std::string& token);
   static std::string ParseValueString(const std::string& value);
 
+  // Returns |true| if the parsed version of |value| matches |value|.
+  static bool ValueMatchesParsedValue(const std::string& value);
+
   // Is the string valid as the value of a cookie attribute?
   static bool IsValidCookieAttributeValue(const std::string& value);
 
  private:
-  void ParseTokenValuePairs(const std::string& cookie_line);
+  void ParseTokenValuePairs(const std::string& cookie_line,
+                            CookieInclusionStatus& status_out);
   void SetupAttributes();
 
   // Sets a key/value pair for a cookie. |index| has to point to one of the
@@ -141,6 +155,12 @@ class NET_EXPORT ParsedCookie {
   // |index| refers to a position in |pairs_|.
   void ClearAttributePair(size_t index);
 
+  // Records metrics on cookie name+value and attribute value lengths.
+  // This is being recorded to evaluate whether to change length limits for
+  // cookies, such that limits are applied to name+value, and individual
+  // attribute lengths, rather than to the whole set-cookie line.
+  void RecordCookieAttributeValueLengthHistograms() const;
+
   PairList pairs_;
   // These will default to 0, but that should never be valid since the
   // 0th index is the user supplied cookie name/value, not an attribute.
@@ -153,6 +173,10 @@ class NET_EXPORT ParsedCookie {
   size_t same_site_index_ = 0;
   size_t priority_index_ = 0;
   size_t same_party_index_ = 0;
+  size_t partitioned_index_ = 0;
+  // For metrics on cookie name/value truncation. See usage at the bottom of
+  // `ParseTokenValuePairs()` for more details.
+  bool truncated_name_or_value_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ParsedCookie);
 };

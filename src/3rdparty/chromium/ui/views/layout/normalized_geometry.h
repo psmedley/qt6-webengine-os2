@@ -8,7 +8,6 @@
 #include <string>
 #include <utility>
 
-#include "base/optional.h"
 #include "ui/views/layout/flex_layout_types.h"
 #include "ui/views/views_export.h"
 

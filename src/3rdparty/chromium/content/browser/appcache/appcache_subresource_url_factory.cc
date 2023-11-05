@@ -25,6 +25,7 @@
 #include "services/network/public/cpp/request_mode.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 
@@ -46,7 +47,6 @@ class SubresourceLoader : public network::mojom::URLLoader,
  public:
   SubresourceLoader(
       mojo::PendingReceiver<network::mojom::URLLoader> url_loader_receiver,
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& request,
@@ -57,7 +57,6 @@ class SubresourceLoader : public network::mojom::URLLoader,
       : remote_receiver_(this, std::move(url_loader_receiver)),
         remote_client_(std::move(client)),
         request_(request),
-        routing_id_(routing_id),
         request_id_(request_id),
         options_(options),
         traffic_annotation_(annotation),
@@ -84,7 +83,7 @@ class SubresourceLoader : public network::mojom::URLLoader,
     }
     handler_ = host_->CreateRequestHandler(
         std::make_unique<AppCacheRequest>(request_), request_.destination,
-        request_.should_reset_appcache);
+        request_.should_reset_appcache, FrameTreeNode::kFrameTreeNodeInvalidId);
     if (!handler_) {
       CreateAndStartNetworkLoader();
       return;
@@ -118,8 +117,8 @@ class SubresourceLoader : public network::mojom::URLLoader,
   void CreateAndStartNetworkLoader() {
     DCHECK(!appcache_loader_);
     network_loader_factory_->CreateLoaderAndStart(
-        network_loader_.BindNewPipeAndPassReceiver(), routing_id_, request_id_,
-        options_, request_, local_client_receiver_.BindNewPipeAndPassRemote(),
+        network_loader_.BindNewPipeAndPassReceiver(), request_id_, options_,
+        request_, local_client_receiver_.BindNewPipeAndPassRemote(),
         traffic_annotation_);
     if (has_set_priority_)
       network_loader_->SetPriority(priority_, intra_priority_value_);
@@ -133,14 +132,14 @@ class SubresourceLoader : public network::mojom::URLLoader,
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override {
+      const absl::optional<GURL>& new_url) override {
     DCHECK(modified_headers.IsEmpty() && modified_cors_exempt_headers.IsEmpty())
         << "Redirect with modified headers was not supported yet. "
            "crbug.com/845683";
     if (!handler_) {
       network_loader_->FollowRedirect(
           removed_headers, {} /* modified_headers */,
-          {} /* modified_cors_exempt_headers */, base::nullopt /* new_url */);
+          {} /* modified_cors_exempt_headers */, absl::nullopt /* new_url */);
       return;
     }
     DCHECK(network_loader_);
@@ -159,7 +158,7 @@ class SubresourceLoader : public network::mojom::URLLoader,
     } else {
       network_loader_->FollowRedirect(
           {} /* removed_headers */, {} /* modified_headers */,
-          {} /* modified_cors_exempt_headers */, base::nullopt /* new_url */);
+          {} /* modified_cors_exempt_headers */, absl::nullopt /* new_url */);
     }
   }
 
@@ -186,6 +185,8 @@ class SubresourceLoader : public network::mojom::URLLoader,
 
   // network::mojom::URLLoaderClient implementation
   // Called by either the appcache or network loader, whichever is in use.
+  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override {
+  }
   void OnReceiveResponse(
       network::mojom::URLResponseHeadPtr response_head) override {
     // Don't MaybeFallback for appcache produced responses.
@@ -291,7 +292,6 @@ class SubresourceLoader : public network::mojom::URLLoader,
   mojo::Remote<network::mojom::URLLoaderClient> remote_client_;
 
   network::ResourceRequest request_;
-  int32_t routing_id_;
   int32_t request_id_;
   uint32_t options_;
   net::MutableNetworkTrafficAnnotationTag traffic_annotation_;
@@ -363,7 +363,6 @@ bool AppCacheSubresourceURLFactory::CreateURLLoaderFactory(
 
 void AppCacheSubresourceURLFactory::CreateLoaderAndStart(
     mojo::PendingReceiver<network::mojom::URLLoader> url_loader_receiver,
-    int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& request,
@@ -374,10 +373,8 @@ void AppCacheSubresourceURLFactory::CreateLoaderAndStart(
   if (request.request_initiator.has_value() && appcache_host_ &&
       !appcache_host_->security_policy_handle()->CanAccessDataForOrigin(
           request.request_initiator.value())) {
-    static auto* initiator_origin_key = base::debug::AllocateCrashKeyString(
-        "initiator_origin", base::debug::CrashKeySize::Size64);
-    base::debug::SetCrashKeyString(
-        initiator_origin_key, request.request_initiator.value().Serialize());
+    SCOPED_CRASH_KEY_STRING64("AppCacheURLLoader", "initiator_origin",
+                              request.request_initiator.value().Serialize());
 
     mojo::ReportBadMessage(
         "APPCACHE_SUBRESOURCE_URL_FACTORY_INVALID_INITIATOR");
@@ -391,8 +388,8 @@ void AppCacheSubresourceURLFactory::CreateLoaderAndStart(
     return;
   }
 
-  new SubresourceLoader(std::move(url_loader_receiver), routing_id, request_id,
-                        options, request, std::move(client), traffic_annotation,
+  new SubresourceLoader(std::move(url_loader_receiver), request_id, options,
+                        request, std::move(client), traffic_annotation,
                         appcache_host_, network_loader_factory_);
 }
 

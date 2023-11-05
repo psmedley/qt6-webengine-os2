@@ -27,12 +27,22 @@
 #endif
 
 #if defined(USE_X11) || defined(USE_OZONE_PLATFORM_X11)
+#include "ui/base/x/visual_picker_glx.h"                 // nogncheck
 #include "ui/gfx/linux/gpu_memory_buffer_support_x11.h"  // nogncheck
+#include "ui/gfx/x/glx.h"                                // nogncheck
 #include "ui/gl/gl_implementation.h"                     // nogncheck
-#include "ui/gl/gl_visual_picker_glx.h"                  // nogncheck
 #endif
 
 namespace gl {
+namespace {
+
+int GetIntegerv(unsigned int name) {
+  int value = 0;
+  glGetIntegerv(name, &value);
+  return value;
+}
+
+}  // namespace
 
 // Used by chrome://gpucrash and gpu_benchmarking_extension's
 // CrashForTesting.
@@ -91,8 +101,7 @@ bool UsePassthroughCommandDecoder(const base::CommandLine* command_line) {
     return false;
   } else {
     // Unrecognized or missing switch, use the default.
-    return base::FeatureList::IsEnabled(
-        features::kDefaultPassthroughCommandDecoder);
+    return features::UsePassthroughCommandDecoder();
   }
 }
 
@@ -167,12 +176,9 @@ void CollectX11GpuExtraInfo(bool enable_native_gpu_memory_buffers,
   }
 
   if (GetGLImplementation() == kGLImplementationDesktopGL) {
-    // Create the GLVisualPickerGLX singleton now while the GbmSupportX11
+    // Create the VisualPickerGlx singleton now while the GbmSupportX11
     // singleton is busy being created on another thread.
-    GLVisualPickerGLX* visual_picker = GLVisualPickerGLX::GetInstance();
-
-    info.system_visual = visual_picker->system_visual();
-    info.rgba_visual = visual_picker->rgba_visual();
+    auto* visual_picker = ui::VisualPickerGlx::GetInstance();
 
     // With GLX, only BGR(A) buffer formats are supported.  EGL does not have
     // this restriction.
@@ -191,5 +197,37 @@ void CollectX11GpuExtraInfo(bool enable_native_gpu_memory_buffers,
   }
 }
 #endif  // defined(USE_X11) || BUILDFLAG(OZONE_PLATFORM_X11)
+
+#if defined(OS_MAC)
+
+ScopedEnableTextureRectangleInShaderCompiler::
+    ScopedEnableTextureRectangleInShaderCompiler(gl::GLApi* gl_api) {
+  if (gl_api) {
+    DCHECK(!gl_api->glIsEnabledFn(GL_TEXTURE_RECTANGLE_ANGLE));
+    gl_api->glEnableFn(GL_TEXTURE_RECTANGLE_ANGLE);
+    gl_api_ = gl_api;
+  } else {
+    gl_api_ = nullptr;  // Signal to the destructor that this is a no-op.
+  }
+}
+
+ScopedEnableTextureRectangleInShaderCompiler::
+    ~ScopedEnableTextureRectangleInShaderCompiler() {
+  if (gl_api_)
+    gl_api_->glDisableFn(GL_TEXTURE_RECTANGLE_ANGLE);
+}
+
+#endif  // defined(OS_MAC)
+
+ScopedPixelStore::ScopedPixelStore(unsigned int name, int value)
+    : name_(name), old_value_(GetIntegerv(name)), value_(value) {
+  if (value_ != old_value_)
+    glPixelStorei(name_, value_);
+}
+
+ScopedPixelStore::~ScopedPixelStore() {
+  if (value_ != old_value_)
+    glPixelStorei(name_, old_value_);
+}
 
 }  // namespace gl

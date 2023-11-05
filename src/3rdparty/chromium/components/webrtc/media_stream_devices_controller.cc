@@ -19,7 +19,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom.h"
 
 #if defined(OS_ANDROID)
 #include "components/permissions/android/android_permission_util.h"
@@ -130,7 +130,7 @@ void MediaStreamDevicesController::RequestPermissions(
       if (permission_status.content_setting == CONTENT_SETTING_BLOCK) {
         controller->denial_reason_ =
             blink::mojom::MediaStreamRequestResult::PERMISSION_DENIED;
-        controller->RunCallback(/*blocked_by_feature_policy=*/false);
+        controller->RunCallback(/*blocked_by_permissions_policy=*/false);
         return;
       }
 
@@ -374,7 +374,8 @@ MediaStreamDevices MediaStreamDevicesController::GetDevices(
   return devices;
 }
 
-void MediaStreamDevicesController::RunCallback(bool blocked_by_feature_policy) {
+void MediaStreamDevicesController::RunCallback(
+    bool blocked_by_permissions_policy) {
   CHECK(callback_);
 
   MediaStreamDevices devices;
@@ -397,8 +398,9 @@ void MediaStreamDevicesController::RunCallback(bool blocked_by_feature_policy) {
     request_result = denial_reason_;
   }
 
-  std::move(callback_).Run(devices, request_result, blocked_by_feature_policy,
-                           audio_setting_, video_setting_);
+  std::move(callback_).Run(devices, request_result,
+                           blocked_by_permissions_policy, audio_setting_,
+                           video_setting_);
 }
 
 ContentSetting MediaStreamDevicesController::GetContentSetting(
@@ -448,10 +450,10 @@ bool MediaStreamDevicesController::IsUserAcceptAllowed(
   if (!window_android)
     return false;
 
-  std::vector<std::string> android_permissions;
-  permissions::GetAndroidPermissionsForContentSetting(content_type,
-                                                      &android_permissions);
-  for (const auto& android_permission : android_permissions) {
+  std::vector<std::string> required_android_permissions;
+  permissions::AppendRequiredAndroidPermissionsForContentSetting(
+      content_type, &required_android_permissions);
+  for (const auto& android_permission : required_android_permissions) {
     if (!window_android->HasPermission(android_permission) &&
         !window_android->CanRequestPermission(android_permission)) {
       return false;
@@ -487,14 +489,21 @@ bool MediaStreamDevicesController::PermissionIsBlockedForReason(
 
 void MediaStreamDevicesController::PromptAnsweredGroupedRequest(
     const std::vector<ContentSetting>& responses) {
+  if (content::RenderFrameHost::FromID(request_.render_process_id,
+                                       request_.render_frame_id) == nullptr) {
+    // The frame requesting media devices was removed while we were waiting for
+    // a user response on permissions. Nothing more to do.
+    return;
+  }
+
   bool need_audio = ShouldRequestAudio();
   bool need_video = ShouldRequestVideo();
-  bool blocked_by_feature_policy = need_audio || need_video;
+  bool blocked_by_permissions_policy = need_audio || need_video;
   // The audio setting will always be the first one in the vector, if it was
   // requested.
   if (need_audio) {
     audio_setting_ = responses.front();
-    blocked_by_feature_policy &=
+    blocked_by_permissions_policy &=
         audio_setting_ == CONTENT_SETTING_BLOCK &&
         PermissionIsBlockedForReason(
             ContentSettingsType::MEDIASTREAM_MIC,
@@ -503,7 +512,7 @@ void MediaStreamDevicesController::PromptAnsweredGroupedRequest(
 
   if (need_video) {
     video_setting_ = responses.at(need_audio ? 1 : 0);
-    blocked_by_feature_policy &=
+    blocked_by_permissions_policy &=
         video_setting_ == CONTENT_SETTING_BLOCK &&
         PermissionIsBlockedForReason(
             ContentSettingsType::MEDIASTREAM_CAMERA,
@@ -519,7 +528,7 @@ void MediaStreamDevicesController::PromptAnsweredGroupedRequest(
           blink::mojom::MediaStreamRequestResult::PERMISSION_DISMISSED;
   }
 
-  RunCallback(blocked_by_feature_policy);
+  RunCallback(blocked_by_permissions_policy);
 }
 
 bool MediaStreamDevicesController::HasAvailableDevices(

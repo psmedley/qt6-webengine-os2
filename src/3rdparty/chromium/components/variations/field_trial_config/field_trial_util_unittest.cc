@@ -9,11 +9,10 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/test/scoped_feature_list.h"
@@ -24,6 +23,7 @@
 #include "components/variations/variations_seed_processor.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/device_form_factor.h"
 
 namespace variations {
@@ -31,7 +31,7 @@ namespace {
 
 class TestOverrideStringCallback {
  public:
-  typedef std::map<uint32_t, base::string16> OverrideMap;
+  typedef std::map<uint32_t, std::u16string> OverrideMap;
 
   TestOverrideStringCallback()
       : callback_(base::BindRepeating(&TestOverrideStringCallback::Override,
@@ -46,7 +46,7 @@ class TestOverrideStringCallback {
   const OverrideMap& overrides() const { return overrides_; }
 
  private:
-  void Override(uint32_t hash, const base::string16& string) {
+  void Override(uint32_t hash, const std::u16string& string) {
     overrides_[hash] = string;
   }
 
@@ -142,7 +142,7 @@ TEST_F(FieldTrialUtilTest, AssociateParamsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        array_kFieldTrialConfig_params_0,
        2,
@@ -162,7 +162,7 @@ TEST_F(FieldTrialUtilTest, AssociateParamsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        array_kFieldTrialConfig_params_0,
        2,
@@ -178,7 +178,7 @@ TEST_F(FieldTrialUtilTest, AssociateParamsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        array_kFieldTrialConfig_params_1,
        2,
@@ -246,7 +246,7 @@ TEST_F(FieldTrialUtilTest,
          1,
          {},
          0,
-         base::nullopt,
+         absl::nullopt,
          nullptr,
          array_kFieldTrialConfig_params,
          2,
@@ -294,7 +294,7 @@ TEST_F(FieldTrialUtilTest,
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        array_kFieldTrialConfig_params,
        2,
@@ -338,7 +338,7 @@ TEST_F(FieldTrialUtilTest,
        2,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        array_kFieldTrialConfig_params,
        2,
@@ -385,7 +385,7 @@ TEST_F(FieldTrialUtilTest,
   const FieldTrialTestingExperimentParams array_kFieldTrialConfig_params[] =
       {{"x", "1"}, {"y", "2"}};
   const FieldTrialTestingExperiment array_kFieldTrialConfig_experiments[] = {
-      {"TestGroup", &platform, 1, form_factors, 4, base::nullopt, nullptr,
+      {"TestGroup", &platform, 1, form_factors, 4, absl::nullopt, nullptr,
        array_kFieldTrialConfig_params, 2, nullptr, 0, nullptr, 0, nullptr,
        nullptr, 0},
   };
@@ -420,7 +420,7 @@ TEST_F(FieldTrialUtilTest,
   const FieldTrialTestingExperimentParams array_kFieldTrialConfig_params[] =
         {{"x", "1"}, {"y", "2"}};
   const FieldTrialTestingExperiment array_kFieldTrialConfig_experiments[] = {
-      {"TestGroup", &platform, 1, &form_factor, 1, base::nullopt, nullptr,
+      {"TestGroup", &platform, 1, &form_factor, 1, absl::nullopt, nullptr,
        array_kFieldTrialConfig_params, 2, nullptr, 0, nullptr, 0, nullptr,
        nullptr, 0},
   };
@@ -466,7 +466,7 @@ TEST_F(FieldTrialUtilTest,
     const FieldTrialTestingExperimentParams array_kFieldTrialConfig_params[] =
         {{"x", "1"}, {"y", "2"}};
     const FieldTrialTestingExperiment array_kFieldTrialConfig_experiments[] = {
-        {"TestGroup", &platform, 1, &form_factor, 1, base::nullopt, nullptr,
+        {"TestGroup", &platform, 1, &form_factor, 1, absl::nullopt, nullptr,
          array_kFieldTrialConfig_params, 2, nullptr, 0, nullptr, 0, nullptr,
          nullptr, 0},
     };
@@ -507,7 +507,7 @@ TEST_F(FieldTrialUtilTest, AssociateFeaturesFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -525,7 +525,7 @@ TEST_F(FieldTrialUtilTest, AssociateFeaturesFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -541,7 +541,7 @@ TEST_F(FieldTrialUtilTest, AssociateFeaturesFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -591,7 +591,7 @@ TEST_F(FieldTrialUtilTest, AssociateForcingFlagsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -608,7 +608,7 @@ TEST_F(FieldTrialUtilTest, AssociateForcingFlagsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -624,7 +624,7 @@ TEST_F(FieldTrialUtilTest, AssociateForcingFlagsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -642,7 +642,7 @@ TEST_F(FieldTrialUtilTest, AssociateForcingFlagsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -658,7 +658,7 @@ TEST_F(FieldTrialUtilTest, AssociateForcingFlagsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -674,7 +674,7 @@ TEST_F(FieldTrialUtilTest, AssociateForcingFlagsFromFieldTrialConfig) {
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        nullptr,
        nullptr,
        0,
@@ -716,7 +716,7 @@ TEST_F(FieldTrialUtilTest,
   const OverrideUIString array_kFieldTrialConfig_override_ui_string[] =
         {{1234, "test1"}, {5678, "test2"}};
   const FieldTrialTestingExperiment array_kFieldTrialConfig_experiments[] = {
-      {"TestGroup", &platform, 1, nullptr, 0, base::nullopt, nullptr,
+      {"TestGroup", &platform, 1, nullptr, 0, absl::nullopt, nullptr,
        array_kFieldTrialConfig_params, 2, nullptr, 0, nullptr, 0, nullptr,
        array_kFieldTrialConfig_override_ui_string, 2},
   };
@@ -747,9 +747,9 @@ TEST_F(FieldTrialUtilTest,
       override_callback_.overrides();
   EXPECT_EQ(2u, overrides.size());
   auto it = overrides.find(1234);
-  EXPECT_EQ(base::ASCIIToUTF16("test1"), it->second);
+  EXPECT_EQ(u"test1", it->second);
   it = overrides.find(5678);
-  EXPECT_EQ(base::ASCIIToUTF16("test2"), it->second);
+  EXPECT_EQ(u"test2", it->second);
 }
 
 TEST_F(FieldTrialUtilTest,
@@ -848,7 +848,7 @@ TEST_F(FieldTrialUtilTest,
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        min_os_version.c_str(),
        array_kFieldTrialConfig_params,
        2,
@@ -895,7 +895,7 @@ TEST_F(FieldTrialUtilTest,
        1,
        {},
        0,
-       base::nullopt,
+       absl::nullopt,
        min_os_version.c_str(),
        array_kFieldTrialConfig_params,
        2,

@@ -17,7 +17,9 @@
 #include "base/at_exit.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/debug/debugger.h"
 #include "base/debug/leak_annotations.h"
 #include "base/debug/stack_trace.h"
@@ -39,7 +41,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/hang_watcher.h"
@@ -50,11 +51,11 @@
 #include "components/discardable_memory/service/discardable_shared_memory_manager.h"
 #include "components/download/public/common/download_task_runner.h"
 #include "components/power_scheduler/power_mode_arbiter.h"
+#include "components/variations/variations_ids_provider.h"
 #include "content/app/mojo/mojo_init.h"
 #include "content/app/mojo_ipc_support.h"
-#include "content/app/partition_alloc_support.h"
 #include "content/browser/browser_main.h"
-#include "content/browser/browser_process_sub_thread.h"
+#include "content/browser/browser_process_io_thread.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/gpu/gpu_main_thread_factory.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -67,10 +68,12 @@
 #include "content/common/android/cpu_time_metrics.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/mojo_core_library_support.h"
+#include "content/common/partition_alloc_support.h"
 #include "content/common/url_schemes.h"
 #include "content/gpu/in_process_gpu_thread.h"
 #include "content/public/app/content_main_delegate.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/tracing_delegate.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_descriptor_keys.h"
@@ -99,7 +102,9 @@
 #include "sandbox/policy/sandbox_type.h"
 #include "sandbox/policy/switches.h"
 #include "services/network/public/cpp/features.h"
+#include "services/tracing/public/cpp/perfetto/perfetto_traced_process.h"
 #include "services/tracing/public/cpp/trace_startup.h"
+#include "services/tracing/public/cpp/tracing_features.h"
 #include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
@@ -128,10 +133,6 @@
 #if !defined(OS_MAC) && !defined(OS_OS2)
 #include "content/public/common/zygote/zygote_fork_delegate_linux.h"
 #endif
-#if !defined(OS_MAC) && !defined(OS_ANDROID) && !defined(OS_OS2)
-#include "content/zygote/zygote_main.h"
-#include "sandbox/linux/services/libc_interceptor.h"
-#endif
 
 #endif  // OS_POSIX || OS_FUCHSIA
 
@@ -157,12 +158,14 @@
 #endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#include "base/stack_canary_linux.h"
 #include "content/browser/sandbox_host_linux.h"
 #include "content/browser/zygote_host/zygote_host_impl_linux.h"
 #include "content/common/zygote/zygote_communication_linux.h"
 #include "content/common/zygote/zygote_handle_impl_linux.h"
 #include "content/public/common/zygote/sandbox_support_linux.h"
 #include "content/public/common/zygote/zygote_handle.h"
+#include "content/zygote/zygote_main.h"
 #include "media/base/media_switches.h"
 
 #if BUILDFLAG(ENABLE_WEBRTC)
@@ -173,8 +176,9 @@
 
 #if defined(OS_ANDROID)
 #include "base/system/sys_info.h"
+#include "components/power_scheduler/power_scheduler.h"
+#include "content/browser/android/battery_metrics.h"
 #include "content/browser/android/browser_startup_controller.h"
-#include "content/common/android/cpu_affinity.h"
 #endif
 
 namespace content {
@@ -328,10 +332,8 @@ void PreloadPepperPlugins() {
       base::NativeLibraryLoadError error;
       base::NativeLibrary library =
           base::LoadNativeLibrary(plugin.path, &error);
-      VLOG_IF(1, !library) << "Unable to load plugin " << plugin.path.value()
-                           << " " << error.ToString();
-
-      ignore_result(library);  // Prevent release-mode warning.
+      LOG_IF(ERROR, !library) << "Unable to load plugin " << plugin.path.value()
+                              << " " << error.ToString();
     }
   }
 }
@@ -346,9 +348,8 @@ void PreloadLibraryCdms() {
   for (const auto& cdm : cdms) {
     base::NativeLibraryLoadError error;
     base::NativeLibrary library = base::LoadNativeLibrary(cdm.path, &error);
-    VLOG_IF(1, !library) << "Unable to load CDM " << cdm.path.value()
-                         << " (error: " << error.ToString() << ")";
-    ignore_result(library);  // Prevent release-mode warning.
+    LOG_IF(ERROR, !library) << "Unable to load CDM " << cdm.path.value()
+                            << " (error: " << error.ToString() << ")";
   }
 }
 #endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
@@ -464,6 +465,19 @@ void InstallConsoleControlHandler(bool is_browser_process) {
 }
 #endif  // defined(OS_WIN)
 
+bool ShouldAllowSystemTracingConsumer() {
+// System tracing consumer support is currently only supported on ChromeOS.
+// TODO(crbug.com/1173395): Also enable for Lacros-Chrome.
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // The consumer should only be enabled when the delegate allows it.
+  TracingDelegate* delegate =
+      GetContentClient()->browser()->GetTracingDelegate();
+  return delegate && delegate->IsSystemWideTracingEnabled();
+#else   // BUILDFLAG(IS_CHROMEOS_ASH)
+  return false;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+}
+
 }  // namespace
 
 class ContentClientCreator {
@@ -511,7 +525,9 @@ struct MainFunction {
 // subprocesses that are launched via the zygote.  This function
 // fills in some process-launching bits around ZygoteMain().
 // Returns the exit code of the subprocess.
-int RunZygote(ContentMainDelegate* delegate) {
+// This function must be marked with NO_STACK_PROTECTOR or it may crash on
+// return, see the --change-stack-guard-on-fork command line flag.
+int NO_STACK_PROTECTOR RunZygote(ContentMainDelegate* delegate) {
   static const MainFunction kMainFunctions[] = {
     {switches::kGpuProcess, GpuMain},
     {switches::kRendererProcess, RendererMain},
@@ -534,12 +550,23 @@ int RunZygote(ContentMainDelegate* delegate) {
     return 1;
   }
 
-  delegate->ZygoteForked();
-
   // Zygote::HandleForkRequest may have reallocated the command
   // line so update it here with the new version.
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
+
+  // Re-randomize our stack canary, so processes don't share a single
+  // stack canary.
+  base::ScopedClosureRunner stack_canary_debug_message;
+  if (command_line.GetSwitchValueASCII(switches::kChangeStackGuardOnFork) ==
+      switches::kChangeStackGuardOnForkEnabled) {
+    base::ResetStackCanaryIfPossible();
+    stack_canary_debug_message.ReplaceClosure(
+        base::BindOnce(&base::SetStackSmashingEmitsDebugMessage));
+  }
+
+  delegate->ZygoteForked();
+
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
@@ -592,9 +619,12 @@ int RunBrowserProcessMain(const MainFunctionParams& main_function_params,
 
 // Run the FooMain() for a given process type.
 // Returns the exit code for this process.
-int RunOtherNamedProcessTypeMain(const std::string& process_type,
-                                 const MainFunctionParams& main_function_params,
-                                 ContentMainDelegate* delegate) {
+// This function must be marked with NO_STACK_PROTECTOR or it may crash on
+// return, see the --change-stack-guard-on-fork command line flag.
+int NO_STACK_PROTECTOR
+RunOtherNamedProcessTypeMain(const std::string& process_type,
+                             const MainFunctionParams& main_function_params,
+                             ContentMainDelegate* delegate) {
 #if defined(OS_WIN)
   if (delegate->ShouldHandleConsoleControlEvents())
     InstallConsoleControlHandler(/*is_browser_process=*/false);
@@ -702,7 +732,7 @@ int ContentMainRunnerImpl::Initialize(const ContentMainParams& params) {
     // When running browser tests, don't create a second AtExitManager as that
     // interfers with shutdown when objects created before ContentMain is
     // called are destructed when it returns.
-    exit_manager_.reset(new base::AtExitManager);
+    exit_manager_ = std::make_unique<base::AtExitManager>();
   }
 #endif  // !OS_ANDROID
 
@@ -870,15 +900,10 @@ int ContentMainRunnerImpl::Initialize(const ContentMainParams& params) {
           params.sandbox_info))
     return TerminateForFatalInitializationError();
 #elif defined(OS_MAC)
-  // Only the GPU process still runs the V1 sandbox.
-  bool v2_enabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      sandbox::switches::kSeatbeltClientName);
-
-  if (!v2_enabled && process_type == switches::kGpuProcess) {
-    if (!InitializeSandbox()) {
-      return TerminateForFatalInitializationError();
-    }
-  } else if (v2_enabled) {
+  if (!sandbox::policy::IsUnsandboxedSandboxType(
+          sandbox::policy::SandboxTypeFromCommandLine(command_line))) {
+    // Verify that the sandbox was initialized prior to ContentMain using the
+    // SeatbeltExecServer.
     CHECK(sandbox::Seatbelt::IsSandboxed());
   }
 #endif
@@ -906,7 +931,9 @@ int ContentMainRunnerImpl::Initialize(const ContentMainParams& params) {
   return -1;
 }
 
-int ContentMainRunnerImpl::Run(bool start_minimal_browser) {
+// This function must be marked with NO_STACK_PROTECTOR or it may crash on
+// return, see the --change-stack-guard-on-fork command line flag.
+int NO_STACK_PROTECTOR ContentMainRunnerImpl::Run(bool start_minimal_browser) {
   DCHECK(is_initialized_);
   DCHECK(!is_shutdown_);
   const base::CommandLine& command_line =
@@ -982,7 +1009,7 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams& main_params,
     const bool has_thread_pool =
         GetContentClient()->browser()->CreateThreadPool("Browser");
 
-    delegate_->PreCreateMainMessageLoop();
+    delegate_->PreBrowserMain();
 #if defined(OS_WIN)
     if (l10n_util::GetLocaleOverrides().empty()) {
       // Override the configured locale with the user's preferred UI language.
@@ -995,8 +1022,14 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams& main_params,
     // Register the TaskExecutor for posting task to the BrowserThreads. It is
     // incorrect to post to a BrowserThread before this point. This instantiates
     // and binds the MessageLoopForUI on the main thread (but it's only labeled
-    // as BrowserThread::UI in BrowserMainLoop::MainMessageLoopStart).
+    // as BrowserThread::UI in BrowserMainLoop::CreateMainMessageLoop).
     BrowserTaskExecutor::Create();
+
+    auto* provider = delegate_->CreateVariationsIdsProvider();
+    if (!provider) {
+      variations::VariationsIdsProvider::Create(
+          variations::VariationsIdsProvider::Mode::kUseSignedInState);
+    }
 
     delegate_->PostEarlyInitialization(main_params.ui_task != nullptr);
 
@@ -1004,6 +1037,8 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams& main_params,
     // but before the IO thread is started.
     if (base::HangWatcher::IsEnabled()) {
       hang_watcher_ = new base::HangWatcher();
+      unregister_thread_closure_ = base::HangWatcher::RegisterThread(
+          base::HangWatcher::ThreadType::kUIThread);
       hang_watcher_->Start();
       ANNOTATE_LEAKING_OBJECT_PTR(hang_watcher_);
     }
@@ -1015,14 +1050,26 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams& main_params,
 
     BrowserTaskExecutor::PostFeatureListSetup();
 
+    tracing::PerfettoTracedProcess::Get()
+        ->SetAllowSystemTracingConsumerCallback(
+            base::BindRepeating(&ShouldAllowSystemTracingConsumer));
     tracing::InitTracingPostThreadPoolStartAndFeatureList();
+
+    // PowerMonitor is needed in reduced mode. BrowserMainLoop will safely skip
+    // initializing it again if it has already been initialized.
+    base::PowerMonitor::Initialize(
+        std::make_unique<base::PowerMonitorDeviceSource>());
 
 #if defined(OS_ANDROID)
     SetupCpuTimeMetrics();
+
+    // Requires base::PowerMonitor to be initialized first.
+    AndroidBatteryMetrics::GetInstance();
+
     // For child processes, this requires allowing of the
     // sched_setaffinity() syscall in the sandbox (baseline_policy_android.cc).
     // When this call is removed, the sandbox allowlist should be updated too.
-    SetupCpuAffinityPollingOnce();
+    power_scheduler::PowerScheduler::GetInstance()->Setup();
 #endif
 
     if (should_start_minimal_browser)
@@ -1030,11 +1077,6 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams& main_params,
 
     discardable_shared_memory_manager_ =
         std::make_unique<discardable_memory::DiscardableSharedMemoryManager>();
-
-    // PowerMonitor is needed in reduced mode. BrowserMainLoop will safely skip
-    // initializing it again if it has already been initialized.
-    base::PowerMonitor::Initialize(
-        std::make_unique<base::PowerMonitorDeviceSource>());
 
     // Requires base::PowerMonitor to be initialized first.
     power_scheduler::PowerModeArbiter::GetInstance()->OnThreadPoolAvailable();
@@ -1059,7 +1101,7 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams& main_params,
 
   // No specified process type means this is the Browser process.
   internal::PartitionAllocSupport::Get()->ReconfigureAfterFeatureListInit("");
-  internal::PartitionAllocSupport::Get()->ReconfigureAfterThreadPoolInit("");
+  internal::PartitionAllocSupport::Get()->ReconfigureAfterTaskRunnerInit("");
 
   if (should_start_minimal_browser) {
     DVLOG(0) << "Chrome is running in minimal browser mode.";

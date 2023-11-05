@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/optional.h"
 #include "content/public/browser/background_fetch_delegate.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
 
@@ -68,9 +68,6 @@ class MockBackgroundFetchDelegate : public BackgroundFetchDelegate {
   ~MockBackgroundFetchDelegate() override;
 
   // BackgroundFetchDelegate implementation:
-  void GetPermissionForOrigin(const url::Origin& origin,
-                              const WebContents::Getter& wc_getter,
-                              GetPermissionForOriginCallback callback) override;
   void GetIconDisplaySize(
       BackgroundFetchDelegate::GetIconDisplaySizeCallback callback) override;
   void CreateDownloadJob(
@@ -80,14 +77,15 @@ class MockBackgroundFetchDelegate : public BackgroundFetchDelegate {
                    const std::string& guid,
                    const std::string& method,
                    const GURL& url,
+                   ::network::mojom::CredentialsMode credentials_mode,
                    const net::NetworkTrafficAnnotationTag& traffic_annotation,
                    const net::HttpRequestHeaders& headers,
                    bool has_request_body) override;
   void Abort(const std::string& job_unique_id) override;
   void MarkJobComplete(const std::string& job_unique_id) override;
   void UpdateUI(const std::string& job_unique_id,
-                const base::Optional<std::string>& title,
-                const base::Optional<SkBitmap>& icon) override;
+                const absl::optional<std::string>& title,
+                const absl::optional<SkBitmap>& icon) override;
 
   void RegisterResponse(const GURL& url,
                         std::unique_ptr<TestResponse> response);

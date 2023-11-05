@@ -39,14 +39,11 @@
 #include "services/network/public/mojom/ip_address_space.mojom-shared.h"
 #include "services/network/public/mojom/load_timing_info.mojom.h"
 #include "third_party/blink/public/platform/web_http_header_visitor.h"
-#include "third_party/blink/public/platform/web_http_load_info.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_load_info.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
@@ -124,10 +121,6 @@ void WebURLResponse::SetLoadTiming(
   timing->SetPushStart(mojo_timing.push_start);
   timing->SetPushEnd(mojo_timing.push_end);
   resource_response_->SetResourceLoadTiming(std::move(timing));
-}
-
-void WebURLResponse::SetHTTPLoadInfo(const WebHTTPLoadInfo& value) {
-  resource_response_->SetResourceLoadInfo(value);
 }
 
 base::Time WebURLResponse::ResponseTime() const {
@@ -289,8 +282,9 @@ void WebURLResponse::SetSecurityDetails(
         static_cast<ResourceResponse::SignedCertificateTimestamp>(iter));
   }
   Vector<String> san_list;
-  san_list.Append(web_security_details.san_list.Data(),
-                  web_security_details.san_list.size());
+  san_list.Append(
+      web_security_details.san_list.Data(),
+      base::checked_cast<wtf_size_t>(web_security_details.san_list.size()));
   Vector<AtomicString> certificate;
   for (const auto& iter : web_security_details.certificate) {
     AtomicString cert = iter;
@@ -306,12 +300,12 @@ void WebURLResponse::SetSecurityDetails(
       sct_list);
 }
 
-base::Optional<WebURLResponse::WebSecurityDetails>
+absl::optional<WebURLResponse::WebSecurityDetails>
 WebURLResponse::SecurityDetailsForTesting() {
-  const base::Optional<ResourceResponse::SecurityDetails>& security_details =
+  const absl::optional<ResourceResponse::SecurityDetails>& security_details =
       resource_response_->GetSecurityDetails();
   if (!security_details.has_value())
-    return base::nullopt;
+    return absl::nullopt;
   SignedCertificateTimestampList sct_list;
   for (const auto& iter : security_details->sct_list) {
     sct_list.emplace_back(SignedCertificateTimestamp(
@@ -362,10 +356,6 @@ void WebURLResponse::SetServiceWorkerResponseSource(
   resource_response_->SetServiceWorkerResponseSource(value);
 }
 
-void WebURLResponse::SetWasFallbackRequiredByServiceWorker(bool value) {
-  resource_response_->SetWasFallbackRequiredByServiceWorker(value);
-}
-
 void WebURLResponse::SetType(network::mojom::FetchResponseType value) {
   resource_response_->SetType(value);
 }
@@ -384,7 +374,8 @@ int64_t WebURLResponse::GetPadding() const {
 
 void WebURLResponse::SetUrlListViaServiceWorker(
     const WebVector<WebURL>& url_list_via_service_worker) {
-  Vector<KURL> url_list(url_list_via_service_worker.size());
+  Vector<KURL> url_list(
+      base::checked_cast<wtf_size_t>(url_list_via_service_worker.size()));
   std::transform(url_list_via_service_worker.begin(),
                  url_list_via_service_worker.end(), url_list.begin(),
                  [](const WebURL& url) { return url; });
@@ -413,7 +404,8 @@ WebVector<WebString> WebURLResponse::CorsExposedHeaderNames() const {
 void WebURLResponse::SetCorsExposedHeaderNames(
     const WebVector<WebString>& header_names) {
   Vector<String> exposed_header_names;
-  exposed_header_names.Append(header_names.Data(), header_names.size());
+  exposed_header_names.Append(
+      header_names.Data(), base::checked_cast<wtf_size_t>(header_names.size()));
   resource_response_->SetCorsExposedHeaderNames(exposed_header_names);
 }
 
@@ -470,7 +462,7 @@ void WebURLResponse::SetWasCookieInRequest(bool was_cookie_in_request) {
 }
 
 void WebURLResponse::SetRecursivePrefetchToken(
-    const base::Optional<base::UnguessableToken>& token) {
+    const absl::optional<base::UnguessableToken>& token) {
   resource_response_->SetRecursivePrefetchToken(token);
 }
 
@@ -489,6 +481,14 @@ WebString WebURLResponse::AlpnNegotiatedProtocol() const {
 void WebURLResponse::SetAlpnNegotiatedProtocol(
     const WebString& alpn_negotiated_protocol) {
   resource_response_->SetAlpnNegotiatedProtocol(alpn_negotiated_protocol);
+}
+
+bool WebURLResponse::HasAuthorizationCoveredByWildcardOnPreflight() const {
+  return resource_response_->HasAuthorizationCoveredByWildcardOnPreflight();
+}
+
+void WebURLResponse::SetHasAuthorizationCoveredByWildcardOnPreflight(bool b) {
+  resource_response_->SetHasAuthorizationCoveredByWildcardOnPreflight(b);
 }
 
 bool WebURLResponse::WasAlternateProtocolAvailable() const {
@@ -523,7 +523,7 @@ bool WebURLResponse::FromArchive() const {
 }
 
 void WebURLResponse::SetDnsAliases(const WebVector<WebString>& aliases) {
-  Vector<String> dns_aliases(aliases.size());
+  Vector<String> dns_aliases(base::checked_cast<wtf_size_t>(aliases.size()));
   std::transform(aliases.begin(), aliases.end(), dns_aliases.begin(),
                  [](const WebString& h) { return WTF::String(h); });
   resource_response_->SetDnsAliases(std::move(dns_aliases));
@@ -538,13 +538,22 @@ void WebURLResponse::SetWebBundleURL(const WebURL& url) {
 }
 
 void WebURLResponse::SetAuthChallengeInfo(
-    const base::Optional<net::AuthChallengeInfo>& auth_challenge_info) {
+    const absl::optional<net::AuthChallengeInfo>& auth_challenge_info) {
   resource_response_->SetAuthChallengeInfo(auth_challenge_info);
 }
 
-const base::Optional<net::AuthChallengeInfo>&
+const absl::optional<net::AuthChallengeInfo>&
 WebURLResponse::AuthChallengeInfo() const {
   return resource_response_->AuthChallengeInfo();
+}
+
+void WebURLResponse::SetRequestIncludeCredentials(
+    bool request_include_credentials) {
+  resource_response_->SetRequestIncludeCredentials(request_include_credentials);
+}
+
+bool WebURLResponse::RequestIncludeCredentials() const {
+  return resource_response_->RequestIncludeCredentials();
 }
 
 WebURLResponse::WebURLResponse(ResourceResponse& r) : resource_response_(&r) {}

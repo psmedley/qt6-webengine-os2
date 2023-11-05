@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "net/base/address_family.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 namespace mirroring {
 
@@ -114,7 +115,7 @@ void UdpSocketClient::StartReceiving(
 
 void UdpSocketClient::OnSocketConnected(
     int result,
-    const base::Optional<net::IPEndPoint>& addr) {
+    const absl::optional<net::IPEndPoint>& addr) {
   DVLOG(2) << __func__ << ": result=" << result;
 
   if (result == net::OK) {
@@ -146,8 +147,8 @@ void UdpSocketClient::StopReceiving() {
 
 void UdpSocketClient::OnReceived(
     int32_t result,
-    const base::Optional<net::IPEndPoint>& src_addr,
-    base::Optional<base::span<const uint8_t>> data) {
+    const absl::optional<net::IPEndPoint>& src_addr,
+    absl::optional<base::span<const uint8_t>> data) {
   DVLOG(3) << __func__ << ": result=" << result;
   DCHECK_GT(num_packets_pending_receive_, 0);
   DCHECK(!packet_receiver_callback_.is_null());

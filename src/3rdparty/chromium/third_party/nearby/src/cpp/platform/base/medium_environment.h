@@ -17,6 +17,8 @@
 
 #include <atomic>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/strings/string_view.h"
 #include "platform/api/bluetooth_adapter.h"
 #include "platform/api/bluetooth_classic.h"
 #include "platform/api/webrtc.h"
@@ -25,8 +27,6 @@
 #include "platform/base/listeners.h"
 #include "platform/base/nsd_service_info.h"
 #include "platform/public/single_thread_executor.h"
-#include "absl/container/flat_hash_map.h"
-#include "absl/strings/string_view.h"
 
 namespace location {
 namespace nearby {
@@ -152,6 +152,11 @@ class MediumEnvironment {
   void SetUseValidPeerConnection(bool use_valid_peer_connection);
 
   bool GetUseValidPeerConnection();
+
+  // Used to set latency when creating the peer connection in tests.
+  void SetPeerConnectionLatency(absl::Duration peer_connection_latency);
+
+  absl::Duration GetPeerConnectionLatency();
 
   // Adds medium-related info to allow for scanning/advertising to work.
   // This provides acccess to this medium from other mediums, when protocol
@@ -319,6 +324,7 @@ class MediumEnvironment {
       wifi_lan_mediums_;
 
   bool use_valid_peer_connection_ = true;
+  absl::Duration peer_connection_latency_ = absl::ZeroDuration();
 };
 
 }  // namespace nearby

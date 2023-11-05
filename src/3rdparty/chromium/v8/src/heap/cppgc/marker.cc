@@ -191,7 +191,7 @@ MarkerBase::~MarkerBase() {
     MarkingWorklists::EphemeronPairItem item;
     while (mutator_marking_state_.discovered_ephemeron_pairs_worklist().Pop(
         &item)) {
-      DCHECK(!HeapObjectHeader::FromPayload(item.key).IsMarked());
+      DCHECK(!HeapObjectHeader::FromObject(item.key).IsMarked());
     }
 #else
     marking_worklists_.discovered_ephemeron_pairs_worklist()->Clear();
@@ -231,6 +231,8 @@ void MarkerBase::StartMarking() {
 }
 
 void MarkerBase::EnterAtomicPause(MarkingConfig::StackState stack_state) {
+  StatsCollector::EnabledScope top_stats_scope(heap().stats_collector(),
+                                               StatsCollector::kAtomicMark);
   StatsCollector::EnabledScope stats_scope(heap().stats_collector(),
                                            StatsCollector::kMarkAtomicPrologue);
 
@@ -241,6 +243,7 @@ void MarkerBase::EnterAtomicPause(MarkingConfig::StackState stack_state) {
   }
   config_.stack_state = stack_state;
   config_.marking_type = MarkingConfig::MarkingType::kAtomic;
+  mutator_marking_state_.set_in_atomic_pause();
 
   // Lock guards against changes to {Weak}CrossThreadPersistent handles, that
   // may conflict with marking. E.g., a WeakCrossThreadPersistent may be
@@ -261,29 +264,38 @@ void MarkerBase::EnterAtomicPause(MarkingConfig::StackState stack_state) {
 }
 
 void MarkerBase::LeaveAtomicPause() {
-  StatsCollector::EnabledScope stats_scope(heap().stats_collector(),
-                                           StatsCollector::kMarkAtomicEpilogue);
-  DCHECK(!incremental_marking_handle_);
-  ResetRememberedSet(heap());
-  heap().stats_collector()->NotifyMarkingCompleted(
-      // GetOverallMarkedBytes also includes concurrently marked bytes.
-      schedule_.GetOverallMarkedBytes());
-  is_marking_ = false;
+  {
+    StatsCollector::EnabledScope top_stats_scope(heap().stats_collector(),
+                                                 StatsCollector::kAtomicMark);
+    StatsCollector::EnabledScope stats_scope(
+        heap().stats_collector(), StatsCollector::kMarkAtomicEpilogue);
+    DCHECK(!incremental_marking_handle_);
+    ResetRememberedSet(heap());
+    heap().stats_collector()->NotifyMarkingCompleted(
+        // GetOverallMarkedBytes also includes concurrently marked bytes.
+        schedule_.GetOverallMarkedBytes());
+    is_marking_ = false;
+  }
   {
     // Weakness callbacks are forbidden from allocating objects.
     cppgc::subtle::DisallowGarbageCollectionScope disallow_gc_scope(heap_);
     ProcessWeakness();
   }
+  // TODO(chromium:1056170): It would be better if the call to Unlock was
+  // covered by some cppgc scope.
   g_process_mutex.Pointer()->Unlock();
+  heap().SetStackStateOfPrevGC(config_.stack_state);
 }
 
 void MarkerBase::FinishMarking(MarkingConfig::StackState stack_state) {
   DCHECK(is_marking_);
-  StatsCollector::EnabledScope stats_scope(heap().stats_collector(),
-                                           StatsCollector::kAtomicMark);
   EnterAtomicPause(stack_state);
-  CHECK(AdvanceMarkingWithLimits(v8::base::TimeDelta::Max(), SIZE_MAX));
-  mutator_marking_state_.Publish();
+  {
+    StatsCollector::EnabledScope stats_scope(heap().stats_collector(),
+                                             StatsCollector::kAtomicMark);
+    CHECK(AdvanceMarkingWithLimits(v8::base::TimeDelta::Max(), SIZE_MAX));
+    mutator_marking_state_.Publish();
+  }
   LeaveAtomicPause();
 }
 
@@ -366,6 +378,10 @@ bool MarkerBase::IncrementalMarkingStep(MarkingConfig::StackState stack_state) {
 }
 
 void MarkerBase::AdvanceMarkingOnAllocation() {
+  StatsCollector::EnabledScope stats_scope(heap().stats_collector(),
+                                           StatsCollector::kIncrementalMark);
+  StatsCollector::EnabledScope nested_scope(heap().stats_collector(),
+                                            StatsCollector::kMarkOnAllocation);
   if (AdvanceMarkingWithLimits()) {
     // Schedule another incremental task for finalizing without a stack.
     ScheduleIncrementalMarkingTask();
@@ -406,7 +422,9 @@ bool MarkerBase::ProcessWorklistsWithDeadline(
     size_t marked_bytes_deadline, v8::base::TimeTicks time_deadline) {
   StatsCollector::EnabledScope stats_scope(
       heap().stats_collector(), StatsCollector::kMarkTransitiveClosure);
+  bool saved_did_discover_new_ephemeron_pairs;
   do {
+    mutator_marking_state_.ResetDidDiscoverNewEphemeronPairs();
     if ((config_.marking_type == MarkingConfig::MarkingType::kAtomic) ||
         schedule_.ShouldFlushEphemeronPairs()) {
       mutator_marking_state_.FlushDiscoveredEphemeronPairs();
@@ -457,7 +475,7 @@ bool MarkerBase::ProcessWorklistsWithDeadline(
               mutator_marking_state_.marking_worklist(),
               [this](const MarkingWorklists::MarkingItem& item) {
                 const HeapObjectHeader& header =
-                    HeapObjectHeader::FromPayload(item.base_object_payload);
+                    HeapObjectHeader::FromObject(item.base_object_payload);
                 DCHECK(!header.IsInConstruction<AccessMode::kNonAtomic>());
                 DCHECK(header.IsMarked<AccessMode::kNonAtomic>());
                 mutator_marking_state_.AccountMarkedBytes(header);
@@ -481,8 +499,21 @@ bool MarkerBase::ProcessWorklistsWithDeadline(
               })) {
         return false;
       }
+      if (!DrainWorklistWithBytesAndTimeDeadline(
+              mutator_marking_state_, marked_bytes_deadline, time_deadline,
+              mutator_marking_state_.retrace_marked_objects_worklist(),
+              [this](HeapObjectHeader* header) {
+                // Retracing does not increment marked bytes as the object has
+                // already been processed before.
+                DynamicallyTraceMarkedObject<AccessMode::kNonAtomic>(visitor(),
+                                                                     *header);
+              })) {
+        return false;
+      }
     }
 
+    saved_did_discover_new_ephemeron_pairs =
+        mutator_marking_state_.DidDiscoverNewEphemeronPairs();
     {
       StatsCollector::EnabledScope stats_scope(
           heap().stats_collector(), StatsCollector::kMarkProcessEphemerons);
@@ -496,7 +527,8 @@ bool MarkerBase::ProcessWorklistsWithDeadline(
         return false;
       }
     }
-  } while (!mutator_marking_state_.marking_worklist().IsLocalAndGlobalEmpty());
+  } while (!mutator_marking_state_.marking_worklist().IsLocalAndGlobalEmpty() ||
+           saved_did_discover_new_ephemeron_pairs);
   return true;
 }
 
@@ -508,9 +540,9 @@ void MarkerBase::MarkNotFullyConstructedObjects() {
       mutator_marking_state_.not_fully_constructed_worklist().Extract();
   for (HeapObjectHeader* object : objects) {
     DCHECK(object);
-    if (!mutator_marking_state_.MarkNoPush(*object)) continue;
-    // TraceConservativelyIfNeeded will either push to a worklist
-    // or trace conservatively and call AccountMarkedBytes.
+    // TraceConservativelyIfNeeded delegates to either in-construction or
+    // fully constructed handling. Both handlers have their own marked bytes
+    // accounting and markbit handling (bailout).
     conservative_visitor().TraceConservativelyIfNeeded(*object);
   }
 }

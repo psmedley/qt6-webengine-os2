@@ -80,7 +80,7 @@ qt_internal_add_docs(WebEngineCore
 
 add_custom_command(
     OUTPUT chromium_attributions.qdoc
-    COMMAND ${Python2_EXECUTABLE} chromium/tools/licenses.py
+    COMMAND ${Python3_EXECUTABLE} chromium/tools/licenses.py
         --file-template ../core/doc/about_credits.tmpl
         --entry-template ../core/doc/about_credits_entry.tmpl
         credits ${CMAKE_CURRENT_BINARY_DIR}/chromium_attributions.qdoc
@@ -95,7 +95,6 @@ add_dependencies(generate_docs_WebEngineCore generate_chromium_attributions)
 #  WEBENGINECORE RESOURCES
 ##
 
-set(arch ${CMAKE_SYSTEM_PROCESSOR})
 #TODO: use simply filter / globbing-expressions
 set(localeList am ar bg bn ca cs da de el en-GB en-US es-419 es et fa fi fil fr
     gu he hi hr hu id it ja kn ko lt lv ml mr ms nb nl pl pt-BR pt-PT ro ru sk
@@ -107,6 +106,8 @@ set(resourceList qtwebengine_resources.pak
     qtwebengine_devtools_resources.pak)
 
 get_install_config(config)
+get_architectures(archs)
+list(GET archs 0 arch)
 
 foreach(loc ${localeList})
     get_filename_component(locSourcePath ${buildDir}/${config}/${arch}/qtwebengine_locales/${loc}.pak REALPATH)
@@ -141,6 +142,14 @@ if(QT_FEATURE_framework)
 
     add_custom_command(OUTPUT ${allResourceFiles} DEPENDS ${buildDir}/${config}/${arch}/QtWebEngineCore.stamp)
     add_custom_target(generate_resources_${config} DEPENDS ${allResourceFiles})
+
+    addCopyCommand(WebEngineCore "${localeFiles}"
+        "${QT_BUILD_DIR}/${INSTALL_LIBDIR}/QtWebEngineCore.framework/Versions/A/Resources/qtwebengine_locales/"
+    )
+    addCopyCommand(WebEngineCore "${resourceFiles}"
+        "${QT_BUILD_DIR}/${INSTALL_LIBDIR}/QtWebEngineCore.framework/Versions/A/Resources/"
+    )
+
 else()
     install(FILES ${localeFiles}
         DESTINATION ${INSTALL_TRANSLATIONSDIR}/qtwebengine_locales

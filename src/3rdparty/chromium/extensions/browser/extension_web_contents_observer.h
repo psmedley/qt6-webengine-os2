@@ -10,6 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/types/pass_key.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/common/mojom/frame.mojom.h"
@@ -23,6 +24,7 @@ class WebContents;
 
 namespace extensions {
 class Extension;
+class ExtensionFrameHost;
 
 // A web contents observer used for renderer and extension processes. Grants the
 // renderer access to certain URL scheme patterns for extensions and notifies
@@ -57,6 +59,12 @@ class ExtensionWebContentsObserver
   static ExtensionWebContentsObserver* GetForWebContents(
       content::WebContents* web_contents);
 
+  // Binds the LocalFrameHost interface to the ExtensionFrameHost associated
+  // with the RenderFrameHost.
+  static void BindLocalFrameHost(
+      mojo::PendingAssociatedReceiver<mojom::LocalFrameHost> receiver,
+      content::RenderFrameHost* rfh);
+
   // This must be called by clients directly after the EWCO has been created.
   void Initialize();
 
@@ -73,7 +81,8 @@ class ExtensionWebContentsObserver
 
   // Returns mojom::LocalFrame* corresponding |render_frame_host|. It emplaces
   // AssociatedRemote<mojom::LocalFrame> to |local_frame_map_| if the map
-  // doesn't have it. Note that it does not return nullptr.
+  // doesn't have it. Note that it could return nullptr if |render_frame_host|
+  // is not live.
   mojom::LocalFrame* GetLocalFrame(content::RenderFrameHost* render_frame_host);
 
  protected:
@@ -90,6 +99,10 @@ class ExtensionWebContentsObserver
   virtual void InitializeRenderFrame(
       content::RenderFrameHost* render_frame_host);
 
+  // Creates ExtensionFrameHost which implements mojom::LocalFrameHost.
+  virtual std::unique_ptr<ExtensionFrameHost> CreateExtensionFrameHost(
+      content::WebContents* web_contents);
+
   // ExtensionFunctionDispatcher::Delegate overrides.
   content::WebContents* GetAssociatedWebContents() const override;
 
@@ -102,10 +115,6 @@ class ExtensionWebContentsObserver
       content::NavigationHandle* navigation_handle) override;
   void MediaPictureInPictureChanged(bool is_picture_in_picture) override;
 
-  // Subclasses should call this first before doing their own message handling.
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* render_frame_host) override;
-
   // Per the documentation in WebContentsObserver, these two methods are invoked
   // when a Pepper plugin instance is attached/detached in the page DOM.
   void PepperInstanceCreated() override;
@@ -117,9 +126,9 @@ class ExtensionWebContentsObserver
       content::RenderFrameHost* render_frame_host) const;
 
  private:
-  void OnRequest(content::RenderFrameHost* render_frame_host,
-                 const ExtensionHostMsg_Request_Params& params);
+  using PassKey = base::PassKey<ExtensionWebContentsObserver>;
 
+  friend class ExtensionFrameHostBrowserTest;
   // The BrowserContext associated with the WebContents being observed.
   content::BrowserContext* browser_context_;
 
@@ -127,6 +136,8 @@ class ExtensionWebContentsObserver
 
   // Whether this object has been initialized.
   bool initialized_;
+
+  std::unique_ptr<ExtensionFrameHost> extension_frame_host_;
 
   // A map of render frame host to mojo remotes.
   std::map<content::RenderFrameHost*, mojo::AssociatedRemote<mojom::LocalFrame>>

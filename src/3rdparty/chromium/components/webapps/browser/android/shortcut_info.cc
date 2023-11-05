@@ -4,12 +4,15 @@
 
 #include "components/webapps/browser/android/shortcut_info.h"
 
+#include <string>
+
 #include "base/feature_list.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/webapps/browser/android/webapps_icon_utils.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/manifest/manifest_icon_selector.h"
+#include "third_party/blink/public/common/manifest/manifest_util.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 
 namespace webapps {
 
@@ -47,10 +50,10 @@ ShortcutInfo::~ShortcutInfo() = default;
 // static
 std::unique_ptr<ShortcutInfo> ShortcutInfo::CreateShortcutInfo(
     const GURL& manifest_url,
-    const blink::Manifest& manifest,
+    const blink::mojom::Manifest& manifest,
     const GURL& primary_icon_url) {
   auto shortcut_info = std::make_unique<ShortcutInfo>(GURL());
-  if (!manifest.IsEmpty()) {
+  if (!blink::IsEmptyManifest(manifest)) {
     shortcut_info->UpdateFromManifest(manifest);
     shortcut_info->manifest_url = manifest_url;
     shortcut_info->best_primary_icon_url = primary_icon_url;
@@ -60,18 +63,31 @@ std::unique_ptr<ShortcutInfo> ShortcutInfo::CreateShortcutInfo(
       WebappsIconUtils::GetIdealSplashImageSizeInPx();
   shortcut_info->minimum_splash_image_size_in_px =
       WebappsIconUtils::GetMinimumSplashImageSizeInPx();
-  shortcut_info->splash_image_url =
-      blink::ManifestIconSelector::FindBestMatchingSquareIcon(
-          manifest.icons, shortcut_info->ideal_splash_image_size_in_px,
-          shortcut_info->minimum_splash_image_size_in_px,
-          blink::mojom::ManifestImageResource_Purpose::ANY);
+  if (WebappsIconUtils::DoesAndroidSupportMaskableIcons()) {
+    shortcut_info->splash_image_url =
+        blink::ManifestIconSelector::FindBestMatchingSquareIcon(
+            manifest.icons, shortcut_info->ideal_splash_image_size_in_px,
+            shortcut_info->minimum_splash_image_size_in_px,
+            blink::mojom::ManifestImageResource_Purpose::MASKABLE);
+    shortcut_info->is_splash_image_maskable = true;
+  }
+  // If did not fetch maskable icon for splash image, or can not find a best
+  // match, fallback to ANY icon.
+  if (!shortcut_info->splash_image_url.is_valid()) {
+    shortcut_info->splash_image_url =
+        blink::ManifestIconSelector::FindBestMatchingSquareIcon(
+            manifest.icons, shortcut_info->ideal_splash_image_size_in_px,
+            shortcut_info->minimum_splash_image_size_in_px,
+            blink::mojom::ManifestImageResource_Purpose::ANY);
+    shortcut_info->is_splash_image_maskable = false;
+  }
 
   return shortcut_info;
 }
 
-void ShortcutInfo::UpdateFromManifest(const blink::Manifest& manifest) {
-  base::string16 s_name = manifest.short_name.value_or(base::string16());
-  base::string16 f_name = manifest.name.value_or(base::string16());
+void ShortcutInfo::UpdateFromManifest(const blink::mojom::Manifest& manifest) {
+  std::u16string s_name = manifest.short_name.value_or(std::u16string());
+  std::u16string f_name = manifest.name.value_or(std::u16string());
   if (!s_name.empty() || !f_name.empty()) {
     short_name = s_name;
     name = f_name;
@@ -82,7 +98,7 @@ void ShortcutInfo::UpdateFromManifest(const blink::Manifest& manifest) {
   }
   user_title = short_name;
 
-  description = manifest.description.value_or(base::string16());
+  description = manifest.description.value_or(std::u16string());
 
   // Set the url based on the manifest value, if any.
   if (manifest.start_url.is_valid())
@@ -109,12 +125,14 @@ void ShortcutInfo::UpdateFromManifest(const blink::Manifest& manifest) {
   }
 
   // Set the theme color based on the manifest value, if any.
-  if (manifest.theme_color)
-    theme_color = manifest.theme_color;
+  theme_color = manifest.has_theme_color
+                    ? absl::make_optional(manifest.theme_color)
+                    : absl::nullopt;
 
   // Set the background color based on the manifest value, if any.
-  if (manifest.background_color)
-    background_color = manifest.background_color;
+  background_color = manifest.has_background_color
+                         ? absl::make_optional(manifest.background_color)
+                         : absl::nullopt;
 
   // Set the icon urls based on the icons in the manifest, if any.
   icon_urls.clear();

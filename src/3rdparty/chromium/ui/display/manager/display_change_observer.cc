@@ -14,7 +14,7 @@
 
 #include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "build/chromeos_buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/user_activity/user_activity_detector.h"
@@ -82,7 +82,8 @@ ManagedDisplayInfo::ManagedDisplayModeList GetModeListWithAllRefreshRates(
 // including the HDR ones if present and |allow_high_bit_depth| is set.
 gfx::DisplayColorSpaces FillDisplayColorSpaces(
     const gfx::ColorSpace& snapshot_color_space,
-    bool allow_high_bit_depth) {
+    bool allow_high_bit_depth,
+    const absl::optional<gfx::HDRStaticMetadata>& hdr_static_metadata) {
   // ChromeOS VMs (e.g. amd64-generic or betty) have INVALID Primaries; just
   // pass the color space along.
   if (!snapshot_color_space.IsValid()) {
@@ -127,6 +128,8 @@ gfx::DisplayColorSpaces FillDisplayColorSpaces(
     display_color_spaces.SetOutputColorSpaceAndBufferFormat(
         gfx::ContentColorUsage::kHDR, true /* needs_alpha */, hdr_color_space,
         gfx::BufferFormat::RGBA_1010102);
+
+    display_color_spaces.set_hdr_static_metadata(hdr_static_metadata);
   }
   return display_color_spaces;
 }
@@ -397,7 +400,8 @@ ManagedDisplayInfo DisplayChangeObserver::CreateManagedDisplayInfo(
   const bool allow_high_bit_depth =
       base::FeatureList::IsEnabled(features::kUseHDRTransferFunction);
   new_info.set_display_color_spaces(
-      FillDisplayColorSpaces(snapshot->color_space(), allow_high_bit_depth));
+      FillDisplayColorSpaces(snapshot->color_space(), allow_high_bit_depth,
+                             snapshot->hdr_static_metadata()));
   constexpr int32_t kNormalBitDepth = 8;
   new_info.set_bits_per_channel(
       allow_high_bit_depth ? snapshot->bits_per_channel() : kNormalBitDepth);
@@ -424,11 +428,14 @@ float DisplayChangeObserver::FindDeviceScaleFactor(
   constexpr gfx::Size k225DisplaySizeHackNocturne(3000, 2000);
   // Keep the Chell's scale factor 2.252 until we make decision.
   constexpr gfx::Size k2DisplaySizeHackChell(3200, 1800);
+  constexpr gfx::Size k18DisplaySizeHackCoachZ(2160, 1440);
 
   if (size_in_pixels == k225DisplaySizeHackNocturne) {
     return kDsf_2_252;
   } else if (size_in_pixels == k2DisplaySizeHackChell) {
     return 2.f;
+  } else if (size_in_pixels == k18DisplaySizeHackCoachZ) {
+    return kDsf_1_8;
   } else {
     for (size_t i = 0; i < base::size(kThresholdTableForInternal); ++i) {
       if (dpi >= kThresholdTableForInternal[i].dpi)

@@ -6,7 +6,6 @@
 #define CONTENT_BROWSER_SSL_SSL_MANAGER_H_
 
 #include <memory>
-#include <string>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -71,6 +70,7 @@ class CONTENT_EXPORT SSLManager {
   // appropriately. If the result could change the visible SSL state,
   // they notify the WebContents of the change via
   // DidChangeVisibleSecurityState();
+  // These methods are not called for resource preloads.
   void DidDisplayMixedContent();
   void DidContainInsecureFormAction();
   void DidDisplayContentWithCertErrors();

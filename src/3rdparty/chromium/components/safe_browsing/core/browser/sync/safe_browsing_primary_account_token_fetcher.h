@@ -9,6 +9,7 @@
 
 #include "base/containers/flat_map.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "components/safe_browsing/core/browser/safe_browsing_token_fetch_tracker.h"
 #include "components/safe_browsing/core/browser/safe_browsing_token_fetcher.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
@@ -35,12 +36,15 @@ class SafeBrowsingPrimaryAccountTokenFetcher : public SafeBrowsingTokenFetcher {
 
   // SafeBrowsingTokenFetcher:
   void Start(Callback callback) override;
+  void OnInvalidAccessToken(const std::string& invalid_access_token) override;
 
  private:
   void OnTokenFetched(int request_id,
                       GoogleServiceAuthError error,
                       signin::AccessTokenInfo access_token_info);
   void OnTokenTimeout(int request_id);
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   // Reference to the identity manager to fetch from.
   signin::IdentityManager* identity_manager_;

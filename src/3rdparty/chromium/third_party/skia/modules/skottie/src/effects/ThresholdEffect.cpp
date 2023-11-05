@@ -15,15 +15,16 @@
 
 namespace skottie::internal {
 
+#ifdef SK_ENABLE_SKSL
+
 namespace  {
 
 // Convert to black & white, based on input luminance and a threshold uniform.
 static constexpr char gThresholdSkSL[] = R"(
-    uniform shader input;
     uniform half   t;
 
-    half4 main() {
-        half4 c = unpremul(sample(input));
+    half4 main(half4 color) {
+        half4 c = unpremul(color);
 
         half lum = dot(c.rgb, half3(0.2126, 0.7152, 0.0722)),
               bw = step(t, lum);
@@ -34,7 +35,7 @@ static constexpr char gThresholdSkSL[] = R"(
 
 static sk_sp<SkRuntimeEffect> threshold_effect() {
     static const SkRuntimeEffect* effect =
-        SkRuntimeEffect::Make(SkString(gThresholdSkSL), {}).effect.release();
+        SkRuntimeEffect::MakeForColorFilter(SkString(gThresholdSkSL), {}).effect.release();
     SkASSERT(effect);
 
     return sk_ref_sp(effect);
@@ -57,9 +58,8 @@ public:
 
 private:
     void onSync() override {
-        sk_sp<SkColorFilter> input; // nullptr -> input color
-        auto cf = threshold_effect()
-                      ->makeColorFilter(SkData::MakeWithCopy(&fLevel, sizeof(fLevel)), &input, 1);
+        auto cf =
+                threshold_effect()->makeColorFilter(SkData::MakeWithCopy(&fLevel, sizeof(fLevel)));
 
         this->node()->setColorFilter(std::move(cf));
     }
@@ -71,11 +71,18 @@ private:
 
 } // namespace
 
+#endif  // SK_ENABLE_SKSL
+
 sk_sp<sksg::RenderNode> EffectBuilder::attachThresholdEffect(const skjson::ArrayValue& jprops,
                                                              sk_sp<sksg::RenderNode> layer) const {
+#ifdef SK_ENABLE_SKSL
     return fBuilder->attachDiscardableAdapter<ThresholdAdapter>(jprops,
                                                                 std::move(layer),
                                                                 *fBuilder);
+#else
+    // TODO(skia:12197)
+    return layer;
+#endif
 }
 
 } // namespace skottie::internal

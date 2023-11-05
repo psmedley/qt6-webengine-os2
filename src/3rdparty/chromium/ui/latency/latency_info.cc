@@ -14,7 +14,6 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "services/tracing/public/cpp/perfetto/flow_event_utils.h"
 #include "services/tracing/public/cpp/perfetto/macros.h"
@@ -55,43 +54,6 @@ ChromeLatencyInfo::LatencyComponentType GetComponentProtoEnum(
 
 bool IsInputLatencyBeginComponent(ui::LatencyComponentType type) {
   return type == ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT;
-}
-
-// This class is for converting latency info to trace buffer friendly format.
-class LatencyInfoTracedValue
-    : public base::trace_event::ConvertableToTraceFormat {
- public:
-  static std::unique_ptr<ConvertableToTraceFormat> FromValue(
-      std::unique_ptr<base::Value> value);
-
-  void AppendAsTraceFormat(std::string* out) const override;
-
- private:
-  explicit LatencyInfoTracedValue(base::Value* value);
-  ~LatencyInfoTracedValue() override;
-
-  std::unique_ptr<base::Value> value_;
-
-  DISALLOW_COPY_AND_ASSIGN(LatencyInfoTracedValue);
-};
-
-std::unique_ptr<base::trace_event::ConvertableToTraceFormat>
-LatencyInfoTracedValue::FromValue(std::unique_ptr<base::Value> value) {
-  return std::unique_ptr<base::trace_event::ConvertableToTraceFormat>(
-      new LatencyInfoTracedValue(value.release()));
-}
-
-LatencyInfoTracedValue::~LatencyInfoTracedValue() {
-}
-
-void LatencyInfoTracedValue::AppendAsTraceFormat(std::string* out) const {
-  std::string tmp;
-  base::JSONWriter::Write(*value_, &tmp);
-  *out += tmp;
-}
-
-LatencyInfoTracedValue::LatencyInfoTracedValue(base::Value* value)
-    : value_(value) {
 }
 
 constexpr const char kTraceCategoriesForAsyncEvents[] =
@@ -306,9 +268,14 @@ void LatencyInfo::Terminate() {
   terminated_ = true;
 
   if (*g_latency_info_enabled.Get().latency_info_enabled) {
+    base::TimeTicks gpu_swap_end_timestamp;
+    if (!this->FindLatency(INPUT_EVENT_LATENCY_FRAME_SWAP_COMPONENT,
+                           &gpu_swap_end_timestamp)) {
+      gpu_swap_end_timestamp = base::TimeTicks::Now();
+    }
     TRACE_EVENT_END(
         kTraceCategoriesForAsyncEvents, perfetto::Track::Global(trace_id_),
-        [this](perfetto::EventContext ctx) {
+        gpu_swap_end_timestamp, [this](perfetto::EventContext ctx) {
           ChromeLatencyInfo* info = ctx.event()->set_chrome_latency_info();
           for (const auto& lc : latency_components_) {
             ChromeLatencyInfo::ComponentInfo* component =

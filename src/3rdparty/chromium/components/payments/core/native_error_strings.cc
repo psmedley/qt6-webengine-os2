@@ -134,6 +134,9 @@ const char kPaymentHandlerInsecureNavigation[] =
     "The payment handler navigated to a page with insecure context, invalid "
     "certificate state, or malicious content.";
 
+const char kPaymentHandlerInstallFailed[] =
+    "Failed to install the payment handler.";
+
 const char kPaymentHandlerActivityDied[] =
     "The payment handler is closed because the Android activity is destroyed.";
 
@@ -223,6 +226,24 @@ const char kCredentialIdsRequired[] =
 const char kTimeoutTooLong[] =
     "The \"secure-payment-confirmation\" method requires at most 1 hour "
     "\"timeout\" field.";
+
+const char kChallengeRequired[] =
+    "The \"secure-payment-confirmation\" method requires a non-empty "
+    "\"challenge\" field.";
+
+const char kInstrumentRequired[] =
+    "The \"secure-payment-confirmation\" method requires a "
+    "\"instrument\" field.";
+
+const char kInstrumentDisplayNameRequired[] =
+    "The \"secure-payment-confirmation\" method requires a non-empty "
+    "\"instrument.displayName\" field.";
+
+const char kValidInstrumentIconRequired[] =
+    "The \"secure-payment-confirmation\" method requires a valid URL in the "
+    "\"instrument.icon\" field.";
+
+const char kInvalidIcon[] = "The icon is not valid.";
 
 }  // namespace errors
 }  // namespace payments

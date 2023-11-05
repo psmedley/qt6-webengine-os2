@@ -5,37 +5,42 @@
 #include "services/network/first_party_sets/first_party_sets.h"
 
 #include <initializer_list>
-#include <memory>
+#include <set>
+#include <utility>
+#include <vector>
 
+#include "base/containers/contains.h"
 #include "base/logging.h"
-#include "base/optional.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/string_split.h"
 #include "net/base/schemeful_site.h"
+#include "net/cookies/cookie_constants.h"
+#include "net/cookies/same_party_context.h"
 #include "services/network/first_party_sets/first_party_set_parser.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace network {
 
 namespace {
 
-base::Optional<
+absl::optional<
     std::pair<net::SchemefulSite, base::flat_set<net::SchemefulSite>>>
 CanonicalizeSet(const std::vector<std::string>& origins) {
   if (origins.empty())
-    return base::nullopt;
+    return absl::nullopt;
 
-  const base::Optional<net::SchemefulSite> maybe_owner =
+  const absl::optional<net::SchemefulSite> maybe_owner =
       FirstPartySetParser::CanonicalizeRegisteredDomain(origins[0],
                                                         true /* emit_errors */);
   if (!maybe_owner.has_value()) {
     LOG(ERROR) << "First-Party Set owner is not valid; aborting.";
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   const net::SchemefulSite& owner = *maybe_owner;
   base::flat_set<net::SchemefulSite> members;
   for (auto it = origins.begin() + 1; it != origins.end(); ++it) {
-    const base::Optional<net::SchemefulSite> maybe_member =
+    const absl::optional<net::SchemefulSite> maybe_member =
         FirstPartySetParser::CanonicalizeRegisteredDomain(
             *it, true /* emit_errors */);
     if (maybe_member.has_value() && maybe_member != owner)
@@ -44,11 +49,16 @@ CanonicalizeSet(const std::vector<std::string>& origins) {
 
   if (members.empty()) {
     LOG(ERROR) << "No valid First-Party Set members were specified; aborting.";
-    return base::nullopt;
+    return absl::nullopt;
   }
 
-  return base::make_optional(
+  return absl::make_optional(
       std::make_pair(std::move(owner), std::move(members)));
+}
+
+net::SamePartyContext::Type ContextTypeFromBool(bool is_same_party) {
+  return is_same_party ? net::SamePartyContext::Type::kSameParty
+                       : net::SamePartyContext::Type::kCrossParty;
 }
 
 }  // namespace
@@ -66,35 +76,84 @@ void FirstPartySets::SetManuallySpecifiedSet(const std::string& flag_value) {
 
 base::flat_map<net::SchemefulSite, net::SchemefulSite>*
 FirstPartySets::ParseAndSet(base::StringPiece raw_sets) {
-  std::unique_ptr<base::flat_map<net::SchemefulSite, net::SchemefulSite>>
-      parsed = FirstPartySetParser::ParsePreloadedSets(raw_sets);
-  if (parsed) {
-    sets_.swap(*parsed);
-  } else {
-    // On any error, we clear the sets, to avoid using the old data and to make
-    // the failure as obvious as possible.
-    sets_.clear();
-  }
+  sets_ = FirstPartySetParser::ParseSetsFromComponentUpdater(raw_sets);
   ApplyManuallySpecifiedSet();
   return &sets_;
 }
 
 bool FirstPartySets::IsContextSamePartyWithSite(
     const net::SchemefulSite& site,
-    const net::SchemefulSite& top_frame_site,
+    const net::SchemefulSite* top_frame_site,
+    const std::set<net::SchemefulSite>& party_context,
+    bool infer_singleton_sets) const {
+  const net::SchemefulSite* site_owner = FindOwner(site, infer_singleton_sets);
+  if (!site_owner)
+    return false;
+
+  const auto is_owned_by_site_owner =
+      [this, site_owner,
+       infer_singleton_sets](const net::SchemefulSite& context_site) -> bool {
+    const net::SchemefulSite* context_owner =
+        FindOwner(context_site, infer_singleton_sets);
+    return context_owner && *context_owner == *site_owner;
+  };
+
+  if (top_frame_site && !is_owned_by_site_owner(*top_frame_site))
+    return false;
+
+  return base::ranges::all_of(party_context, is_owned_by_site_owner);
+}
+
+net::SamePartyContext FirstPartySets::ComputeContext(
+    const net::SchemefulSite& site,
+    const net::SchemefulSite* top_frame_site,
     const std::set<net::SchemefulSite>& party_context) const {
+  net::SamePartyContext::Type context_type = ContextTypeFromBool(
+      IsContextSamePartyWithSite(site, top_frame_site, party_context,
+                                 false /* infer_singleton_sets */));
+  net::SamePartyContext::Type ancestors = ContextTypeFromBool(
+      IsContextSamePartyWithSite(site, top_frame_site, party_context,
+                                 true /* infer_singleton_sets */));
+  net::SamePartyContext::Type top_resource =
+      ContextTypeFromBool(IsContextSamePartyWithSite(
+          site, top_frame_site, {}, true /* infer_singleton_sets */));
+
+  return net::SamePartyContext(context_type, ancestors, top_resource);
+}
+
+net::FirstPartySetsContextType FirstPartySets::ComputeContextType(
+    const net::SchemefulSite& site,
+    const absl::optional<net::SchemefulSite>& top_frame_site,
+    const std::set<net::SchemefulSite>& party_context) const {
+  constexpr bool infer_singleton_sets = true;
+  const net::SchemefulSite* site_owner = FindOwner(site, infer_singleton_sets);
+  // Note: the `party_context` consists of the intermediate frames (for frame
+  // requests) or intermediate frames and current frame for subresource
+  // requests.
+  const bool is_homogeneous = base::ranges::all_of(
+      party_context, [&](const net::SchemefulSite& middle_site) {
+        return *FindOwner(middle_site, infer_singleton_sets) == *site_owner;
+      });
+  if (!top_frame_site.has_value()) {
+    return is_homogeneous
+               ? net::FirstPartySetsContextType::kTopFrameIgnoredHomogeneous
+               : net::FirstPartySetsContextType::kTopFrameIgnoredMixed;
+  }
+  if (*FindOwner(*top_frame_site, infer_singleton_sets) != *site_owner)
+    return net::FirstPartySetsContextType::kTopResourceMismatch;
+
+  return is_homogeneous
+             ? net::FirstPartySetsContextType::kHomogeneous
+             : net::FirstPartySetsContextType::kTopResourceMatchMixed;
+}
+
+const net::SchemefulSite* FirstPartySets::FindOwner(
+    const net::SchemefulSite& site,
+    bool infer_singleton_sets) const {
   const auto it = sets_.find(site);
   if (it == sets_.end())
-    return false;
-  const net::SchemefulSite& site_owner = it->second;
-  const auto is_owned_by_site_owner =
-      [this, &site_owner](const net::SchemefulSite& context_site) {
-        const auto context_owner = sets_.find(context_site);
-        return context_owner != sets_.end() &&
-               context_owner->second == site_owner;
-      };
-  return is_owned_by_site_owner(top_frame_site) &&
-         base::ranges::all_of(party_context, is_owned_by_site_owner);
+    return infer_singleton_sets ? &site : nullptr;
+  return &it->second;
 }
 
 bool FirstPartySets::IsInNontrivialFirstPartySet(
@@ -135,12 +194,9 @@ void FirstPartySets::ApplyManuallySpecifiedSet() {
 
   // Erase the intersection between the manually-specified set and the
   // CU-supplied set, and any members whose owner was in the intersection.
-  sets_.erase(base::ranges::remove_if(sets_,
-                                      [&was_manually_provided](const auto& p) {
-                                        return was_manually_provided(p.first) ||
-                                               was_manually_provided(p.second);
-                                      }),
-              sets_.end());
+  base::EraseIf(sets_, [&was_manually_provided](const auto& p) {
+    return was_manually_provided(p.first) || was_manually_provided(p.second);
+  });
 
   // Now remove singleton sets. We already removed any sites that were part
   // of the intersection, or whose owner was part of the intersection. This
@@ -151,13 +207,9 @@ void FirstPartySets::ApplyManuallySpecifiedSet() {
     if (it.first != it.second)
       owners_with_members.insert(it.second);
   }
-  sets_.erase(base::ranges::remove_if(
-                  sets_,
-                  [&owners_with_members](const auto& p) {
-                    return p.first == p.second &&
-                           !base::Contains(owners_with_members, p.first);
-                  }),
-              sets_.end());
+  base::EraseIf(sets_, [&owners_with_members](const auto& p) {
+    return p.first == p.second && !base::Contains(owners_with_members, p.first);
+  });
 
   // Next, we must add the manually-added set to the parsed value.
   for (const net::SchemefulSite& member : manual_members) {

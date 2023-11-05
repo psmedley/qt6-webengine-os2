@@ -16,9 +16,9 @@
 #include "src/core/SkTextBlobPriv.h"
 
 #if SK_SUPPORT_GPU
-#include "src/gpu/text/GrSDFTOptions.h"
+#include "src/gpu/text/GrSDFTControl.h"
 class GrColorInfo;
-class GrSurfaceDrawContext;
+namespace skgpu { namespace v1 { class SurfaceDrawContext; }}
 #endif
 
 class SkGlyphRunPainterInterface;
@@ -62,11 +62,13 @@ public:
     // The following two ctors are used exclusively by the GPU, and will always use the global
     // strike cache.
     SkGlyphRunListPainter(const SkSurfaceProps&, const GrColorInfo&);
-    explicit SkGlyphRunListPainter(const GrSurfaceDrawContext& surfaceDrawContext);
+    explicit SkGlyphRunListPainter(const skgpu::v1::SurfaceDrawContext&);
 #endif  // SK_SUPPORT_GPU
 
     class BitmapDevicePainter {
     public:
+        BitmapDevicePainter() = default;
+        BitmapDevicePainter(const BitmapDevicePainter&) = default;
         virtual ~BitmapDevicePainter() = default;
 
         virtual void paintPaths(
@@ -74,10 +76,12 @@ public:
                 const SkPaint& paint) const = 0;
 
         virtual void paintMasks(SkDrawableGlyphBuffer* drawables, const SkPaint& paint) const = 0;
+        virtual void drawBitmap(const SkBitmap&, const SkMatrix&, const SkRect* dstOrNull,
+                                const SkSamplingOptions&, const SkPaint&) const = 0;
     };
 
     void drawForBitmapDevice(
-            const SkGlyphRunList& glyphRunList, const SkMatrix& deviceMatrix,
+            const SkGlyphRunList& glyphRunList, const SkPaint& paint, const SkMatrix& deviceMatrix,
             const BitmapDevicePainter* bitmapDevice);
 
 #if SK_SUPPORT_GPU
@@ -85,12 +89,10 @@ public:
     // callbacks will be called.
     void processGlyphRun(const SkGlyphRun& glyphRun,
                          const SkMatrix& drawMatrix,
-                         SkPoint drawOrigin,
                          const SkPaint& drawPaint,
-                         const SkSurfaceProps& props,
-                         bool contextSupportsDistanceFieldText,
-                         const GrSDFTOptions& options,
-                         SkGlyphRunPainterInterface* process);
+                         const GrSDFTControl& control,
+                         SkGlyphRunPainterInterface* process,
+                         const char* tag = nullptr);
 #endif  // SK_SUPPORT_GPU
 
 private:
@@ -135,6 +137,7 @@ class SkGlyphRunPainterInterface {
 public:
     virtual ~SkGlyphRunPainterInterface() = default;
 
+#if SK_GPU_V1
     virtual void processDeviceMasks(const SkZip<SkGlyphVariant, SkPoint>& drawables,
                                     const SkStrikeSpec& strikeSpec) = 0;
 
@@ -150,6 +153,7 @@ public:
                                    const SkFont& runFont,
                                    SkScalar minScale,
                                    SkScalar maxScale) = 0;
+#endif // SK_GPU_V1
 };
 
 #endif  // SkGlyphRunPainter_DEFINED

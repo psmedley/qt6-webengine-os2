@@ -46,10 +46,9 @@ SharedQuadState* CreateSharedQuadState(AggregatedRenderPass* render_pass,
                                        const gfx::Rect& rect) {
   const gfx::Rect layer_rect = rect;
   const gfx::Rect visible_layer_rect = rect;
-  const gfx::Rect clip_rect = rect;
   SharedQuadState* shared_state = render_pass->CreateAndAppendSharedQuadState();
   shared_state->SetAll(gfx::Transform(), layer_rect, visible_layer_rect,
-                       gfx::MaskFilterInfo(), clip_rect, /*is_clipped=*/false,
+                       gfx::MaskFilterInfo(), /*clip_rect=*/absl::nullopt,
                        /*are_contents_opaque=*/false, /*opacity=*/1.0f,
                        SkBlendMode::kSrcOver,
                        /*sorting_context_id=*/0);
@@ -76,11 +75,16 @@ void DeleteSharedImage(scoped_refptr<ContextProvider> context_provider,
 class SkiaReadbackPixelTest : public cc::PixelTest,
                               public testing::WithParamInterface<bool> {
  public:
+  CopyOutputResult::Format RequestFormat() const {
+    return CopyOutputResult::Format::RGBA;
+  }
+
   // TODO(kylechar): Add parameter to also test RGBA_TEXTURE when it's
   // supported with the Skia readback API.
-  CopyOutputResult::Format RequestFormat() const {
-    return CopyOutputResult::Format::RGBA_BITMAP;
+  CopyOutputResult::Destination RequestDestination() const {
+    return CopyOutputResult::Destination::kSystemMemory;
   }
+
   bool ScaleByHalf() const { return GetParam(); }
 
   void SetUp() override {
@@ -115,8 +119,8 @@ class SkiaReadbackPixelTest : public cc::PixelTest,
         mailbox, GL_LINEAR, GL_TEXTURE_2D, sync_token, size,
         /*is_overlay_candidate=*/false);
     gl_resource.format = format;
-    auto release_callback = SingleReleaseCallback::Create(
-        base::BindOnce(&DeleteSharedImage, child_context_provider_, mailbox));
+    auto release_callback =
+        base::BindOnce(&DeleteSharedImage, child_context_provider_, mailbox);
     return child_resource_provider_->ImportResource(
         gl_resource, std::move(release_callback));
   }
@@ -168,7 +172,7 @@ TEST_P(SkiaReadbackPixelTest, ExecutesCopyRequest) {
   std::unique_ptr<CopyOutputResult> result;
   base::RunLoop loop;
   auto request = std::make_unique<CopyOutputRequest>(
-      RequestFormat(),
+      RequestFormat(), RequestDestination(),
       base::BindOnce(
           [](std::unique_ptr<CopyOutputResult>* result_out,
              base::OnceClosure quit_closure,
@@ -212,7 +216,8 @@ TEST_P(SkiaReadbackPixelTest, ExecutesCopyRequest) {
   EXPECT_EQ(result_selection, result->rect());
 
   // Examine the image in the |result|, and compare it to the baseline PNG file.
-  const SkBitmap actual = result->AsSkBitmap();
+  auto scoped_bitmap = result->ScopedAccessSkBitmap();
+  auto actual = scoped_bitmap.bitmap();
 
   base::FilePath expected_path = GetExpectedPath();
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(

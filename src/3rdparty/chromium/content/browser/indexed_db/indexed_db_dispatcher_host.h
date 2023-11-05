@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "base/sequence_checker.h"
-#include "base/strings/string16.h"
 #include "components/services/storage/public/mojom/blob_storage_context.mojom-forward.h"
 #include "components/services/storage/public/mojom/file_system_access_context.mojom-forward.h"
 #include "content/browser/indexed_db/indexed_db_external_object.h"
@@ -23,8 +22,8 @@
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/unique_associated_receiver_set.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
-#include "url/origin.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -51,7 +50,7 @@ class CONTENT_EXPORT IndexedDBDispatcherHost : public blink::mojom::IDBFactory {
   ~IndexedDBDispatcherHost() override;
 
   void AddReceiver(
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       mojo::PendingReceiver<blink::mojom::IDBFactory> pending_receiver);
 
   void AddDatabaseBinding(
@@ -60,7 +59,7 @@ class CONTENT_EXPORT IndexedDBDispatcherHost : public blink::mojom::IDBFactory {
           pending_receiver);
 
   mojo::PendingAssociatedRemote<blink::mojom::IDBCursor> CreateCursorBinding(
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       std::unique_ptr<IndexedDBCursor> cursor);
   void RemoveCursorBinding(mojo::ReceiverId receiver_id);
 
@@ -79,7 +78,7 @@ class CONTENT_EXPORT IndexedDBDispatcherHost : public blink::mojom::IDBFactory {
   void CreateAndBindTransactionImpl(
       mojo::PendingAssociatedReceiver<blink::mojom::IDBTransaction>
           transaction_receiver,
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       base::WeakPtr<IndexedDBTransaction> transaction);
 
   // Bind this receiver to read from this given file.
@@ -94,7 +93,7 @@ class CONTENT_EXPORT IndexedDBDispatcherHost : public blink::mojom::IDBFactory {
   // Create external objects from |objects| and store the results in
   // |mojo_objects|.  |mojo_objects| must be the same length as |objects|.
   void CreateAllExternalObjects(
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       const std::vector<IndexedDBExternalObject>& objects,
       std::vector<blink::mojom::IDBExternalObjectPtr>* mojo_objects);
 
@@ -111,14 +110,14 @@ class CONTENT_EXPORT IndexedDBDispatcherHost : public blink::mojom::IDBFactory {
                 pending_callbacks,
             mojo::PendingAssociatedRemote<blink::mojom::IDBDatabaseCallbacks>
                 database_callbacks_remote,
-            const base::string16& name,
+            const std::u16string& name,
             int64_t version,
             mojo::PendingAssociatedReceiver<blink::mojom::IDBTransaction>
                 transaction_receiver,
             int64_t transaction_id) override;
   void DeleteDatabase(mojo::PendingAssociatedRemote<blink::mojom::IDBCallbacks>
                           pending_callbacks,
-                      const base::string16& name,
+                      const std::u16string& name,
                       bool force_close) override;
   void AbortTransactionsAndCompactDatabase(
       AbortTransactionsAndCompactDatabaseCallback callback) override;
@@ -137,7 +136,7 @@ class CONTENT_EXPORT IndexedDBDispatcherHost : public blink::mojom::IDBFactory {
   // Shared task runner used to read blob files on.
   const scoped_refptr<base::TaskRunner> file_task_runner_;
 
-  mojo::ReceiverSet<blink::mojom::IDBFactory, url::Origin> receivers_;
+  mojo::ReceiverSet<blink::mojom::IDBFactory, blink::StorageKey> receivers_;
   mojo::UniqueAssociatedReceiverSet<blink::mojom::IDBDatabase>
       database_receivers_;
   mojo::UniqueAssociatedReceiverSet<blink::mojom::IDBCursor> cursor_receivers_;

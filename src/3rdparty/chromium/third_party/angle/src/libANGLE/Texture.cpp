@@ -144,6 +144,7 @@ TextureState::TextureState(TextureType type)
       mImmutableFormat(false),
       mImmutableLevels(0),
       mUsage(GL_NONE),
+      mHasProtectedContent(false),
       mImageDescs((IMPLEMENTATION_MAX_TEXTURE_LEVELS + 1) * (type == TextureType::CubeMap ? 6 : 1)),
       mCropRect(0, 0, 0, 0),
       mGenerateMipmapHint(GL_FALSE),
@@ -263,6 +264,12 @@ const ImageDesc &TextureState::getBaseLevelDesc() const
     return getImageDesc(getBaseImageTarget(), getEffectiveBaseLevel());
 }
 
+const ImageDesc &TextureState::getLevelZeroDesc() const
+{
+    ASSERT(mType != TextureType::CubeMap || isCubeComplete());
+    return getImageDesc(getBaseImageTarget(), 0);
+}
+
 void TextureState::setCrop(const Rectangle &rect)
 {
     mCropRect = rect;
@@ -319,7 +326,7 @@ bool TextureState::computeSamplerCompleteness(const SamplerState &samplerState,
         return true;
     }
 
-    if (mBaseLevel > mMaxLevel)
+    if (!mImmutableFormat && mBaseLevel > mMaxLevel)
     {
         return false;
     }
@@ -558,16 +565,36 @@ GLuint TextureState::getEnabledLevelCount() const
 
     // The mip chain will have either one or more sequential levels, or max levels,
     // but not a sparse one.
-    for (size_t descIndex = baseLevel; descIndex < mImageDescs.size();)
+    Optional<Extents> expectedSize;
+    for (size_t enabledLevel = baseLevel; enabledLevel <= maxLevel; ++enabledLevel, ++levelCount)
     {
-        if (!mImageDescs[descIndex].size.empty())
+        // Note: for cube textures, we only check the first face.
+        TextureTarget target     = TextureTypeToTarget(mType, 0);
+        size_t descIndex         = GetImageDescIndex(target, enabledLevel);
+        const Extents &levelSize = mImageDescs[descIndex].size;
+
+        if (levelSize.empty())
         {
-            levelCount++;
+            break;
         }
-        descIndex = (mType == TextureType::CubeMap) ? descIndex + 6 : descIndex + 1;
+        if (expectedSize.valid())
+        {
+            Extents newSize = expectedSize.value();
+            newSize.width   = std::max(1, newSize.width >> 1);
+            newSize.height  = std::max(1, newSize.height >> 1);
+
+            if (!IsArrayTextureType(mType))
+            {
+                newSize.depth = std::max(1, newSize.depth >> 1);
+            }
+
+            if (newSize != levelSize)
+            {
+                break;
+            }
+        }
+        expectedSize = levelSize;
     }
-    // The original image already takes account into the levelCount.
-    levelCount = std::min(maxLevel - baseLevel + 1, levelCount);
 
     return levelCount;
 }
@@ -627,9 +654,9 @@ void TextureState::setImageDesc(TextureTarget target, size_t level, const ImageD
         // initialization which is already very expensive.
         bool allImagesInitialized = true;
 
-        for (const ImageDesc &desc : mImageDescs)
+        for (const ImageDesc &initDesc : mImageDescs)
         {
-            if (desc.initState == InitState::MayNeedInit)
+            if (initDesc.initState == InitState::MayNeedInit)
             {
                 allImagesInitialized = false;
                 break;
@@ -718,7 +745,6 @@ Texture::Texture(rx::GLImplFactory *factory, TextureID id, TextureType type)
       mTexture(factory->createTexture(mState)),
       mImplObserver(this, rx::kTextureImageImplObserverMessageIndex),
       mBufferObserver(this, kBufferSubjectIndex),
-      mLabel(),
       mBoundSurface(nullptr),
       mBoundStream(nullptr)
 {
@@ -758,13 +784,13 @@ Texture::~Texture()
 
 void Texture::setLabel(const Context *context, const std::string &label)
 {
-    mLabel = label;
+    mState.mLabel = label;
     signalDirtyState(DIRTY_BIT_LABEL);
 }
 
 const std::string &Texture::getLabel() const
 {
-    return mLabel;
+    return mState.mLabel;
 }
 
 void Texture::setSwizzleRed(const Context *context, GLenum swizzleRed)
@@ -1040,6 +1066,16 @@ GLenum Texture::getUsage() const
     return mState.mUsage;
 }
 
+void Texture::setProtectedContent(Context *context, bool hasProtectedContent)
+{
+    mState.mHasProtectedContent = hasProtectedContent;
+}
+
+bool Texture::hasProtectedContent() const
+{
+    return mState.mHasProtectedContent;
+}
+
 const TextureState &Texture::getTextureState() const
 {
     return mState;
@@ -1147,7 +1183,15 @@ void Texture::signalDirtyState(size_t dirtyBit)
     mDirtyBits.set(dirtyBit);
     invalidateCompletenessCache();
     mState.mCachedSamplerFormatValid = false;
-    onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+
+    if (dirtyBit == DIRTY_BIT_BASE_LEVEL || dirtyBit == DIRTY_BIT_MAX_LEVEL)
+    {
+        onStateChange(angle::SubjectMessage::SubjectChanged);
+    }
+    else
+    {
+        onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+    }
 }
 
 angle::Result Texture::setImage(Context *context,
@@ -1517,12 +1561,11 @@ angle::Result Texture::setStorage(Context *context,
 
     mState.mImmutableFormat = true;
     mState.mImmutableLevels = static_cast<GLuint>(levels);
-
-    ANGLE_TRY(mTexture->setStorage(context, type, levels, internalFormat, size));
-
     mState.clearImageDescs();
     mState.setImageDescChain(0, static_cast<GLuint>(levels - 1), size, Format(internalFormat),
                              InitState::MayNeedInit);
+
+    ANGLE_TRY(mTexture->setStorage(context, type, levels, internalFormat, size));
 
     // Changing the texture to immutable can trigger a change in the base and max levels:
     // GLES 3.0.4 section 3.8.10 pg 158:
@@ -1566,7 +1609,7 @@ angle::Result Texture::setImageExternal(Context *context,
 
 angle::Result Texture::setStorageMultisample(Context *context,
                                              TextureType type,
-                                             GLsizei samples,
+                                             GLsizei samplesIn,
                                              GLint internalFormat,
                                              const Extents &size,
                                              bool fixedSampleLocations)
@@ -1579,16 +1622,16 @@ angle::Result Texture::setStorageMultisample(Context *context,
 
     // Potentially adjust "samples" to a supported value
     const TextureCaps &formatCaps = context->getTextureCaps().get(internalFormat);
-    samples                       = formatCaps.getNearestSamples(samples);
-
-    ANGLE_TRY(mTexture->setStorageMultisample(context, type, samples, internalFormat, size,
-                                              fixedSampleLocations));
+    GLsizei samples               = formatCaps.getNearestSamples(samplesIn);
 
     mState.mImmutableFormat = true;
     mState.mImmutableLevels = static_cast<GLuint>(1);
     mState.clearImageDescs();
     mState.setImageDescChainMultisample(size, Format(internalFormat), samples, fixedSampleLocations,
                                         InitState::MayNeedInit);
+
+    ANGLE_TRY(mTexture->setStorageMultisample(context, type, samples, internalFormat, size,
+                                              fixedSampleLocations));
 
     signalDirtyStorage(InitState::MayNeedInit);
 
@@ -1652,6 +1695,16 @@ angle::Result Texture::generateMipmap(Context *context)
         return angle::Result::Continue;
     }
 
+    // If any dimension is zero, this is a no-op:
+    //
+    // > Otherwise, if level_base is not defined, or if any dimension is zero, all mipmap levels are
+    // > left unchanged. This is not an error.
+    const ImageDesc &baseImageInfo = mState.getImageDesc(mState.getBaseImageTarget(), baseLevel);
+    if (baseImageInfo.size.empty())
+    {
+        return angle::Result::Continue;
+    }
+
     ANGLE_TRY(syncState(context, Command::GenerateMipmap));
 
     // Clear the base image(s) immediately if needed
@@ -1676,7 +1729,6 @@ angle::Result Texture::generateMipmap(Context *context)
 
     // Propagate the format and size of the base mip to the smaller ones. Cube maps are guaranteed
     // to have faces of the same size and format so any faces can be picked.
-    const ImageDesc &baseImageInfo = mState.getImageDesc(mState.getBaseImageTarget(), baseLevel);
     mState.setImageDescChain(baseLevel, maxLevel, baseImageInfo.size, baseImageInfo.format,
                              InitState::Initialized);
 
@@ -1702,6 +1754,7 @@ angle::Result Texture::bindTexImageFromSurface(Context *context, egl::Surface *s
     Extents size(surface->getWidth(), surface->getHeight(), 1);
     ImageDesc desc(size, surface->getBindTexImageFormat(), InitState::Initialized);
     mState.setImageDesc(NonCubeTextureTypeToTarget(mState.mType), 0, desc);
+    mState.mHasProtectedContent = surface->hasProtectedContent();
     signalDirtyStorage(InitState::Initialized);
     return angle::Result::Continue;
 }
@@ -1715,6 +1768,7 @@ angle::Result Texture::releaseTexImageFromSurface(const Context *context)
     // Erase the image info for level 0
     ASSERT(mState.mType == TextureType::_2D || mState.mType == TextureType::Rectangle);
     mState.clearImageDesc(NonCubeTextureTypeToTarget(mState.mType), 0);
+    mState.mHasProtectedContent = false;
     signalDirtyStorage(InitState::Initialized);
     return angle::Result::Continue;
 }
@@ -1805,6 +1859,7 @@ angle::Result Texture::setEGLImageTarget(Context *context,
     mState.clearImageDescs();
     mState.setImageDesc(NonCubeTextureTypeToTarget(type), 0,
                         ImageDesc(size, imageTarget->getFormat(), initState));
+    mState.mHasProtectedContent = imageTarget->hasProtectedContent();
     signalDirtyStorage(initState);
 
     return angle::Result::Continue;

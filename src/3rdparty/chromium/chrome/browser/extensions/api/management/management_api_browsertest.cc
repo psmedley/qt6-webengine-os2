@@ -43,6 +43,14 @@ namespace test_utils = extension_function_test_utils;
 namespace extensions {
 
 class ExtensionManagementApiBrowserTest : public ExtensionBrowserTest {
+ public:
+  ExtensionManagementApiBrowserTest() = default;
+  ~ExtensionManagementApiBrowserTest() override = default;
+  ExtensionManagementApiBrowserTest(const ExtensionManagementApiBrowserTest&) =
+      delete;
+  ExtensionManagementApiBrowserTest& operator=(
+      const ExtensionManagementApiBrowserTest&) = delete;
+
  protected:
   bool CrashEnabledExtension(const std::string& extension_id) {
     ExtensionHost* background_host =
@@ -63,6 +71,14 @@ using ContextType = ExtensionBrowserTest::ContextType;
 class ExtensionManagementApiTestWithBackgroundType
     : public ExtensionManagementApiBrowserTest,
       public testing::WithParamInterface<ContextType> {
+ public:
+  ExtensionManagementApiTestWithBackgroundType() = default;
+  ~ExtensionManagementApiTestWithBackgroundType() override = default;
+  ExtensionManagementApiTestWithBackgroundType(
+      const ExtensionManagementApiTestWithBackgroundType&) = delete;
+  ExtensionManagementApiTestWithBackgroundType& operator=(
+      const ExtensionManagementApiTestWithBackgroundType&) = delete;
+
  protected:
   const Extension* LoadExtensionWithParamOptions(const base::FilePath& path) {
     return LoadExtension(path, {.load_as_service_worker =
@@ -111,7 +127,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
 
 IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
                        NoDemoModeAppLaunchSourceReported) {
-  EXPECT_FALSE(chromeos::DemoSession::IsDeviceInDemoMode());
+  EXPECT_FALSE(ash::DemoSession::IsDeviceInDemoMode());
 
   base::HistogramTester histogram_tester;
   // Should see 0 apps launched from the API in the histogram at first.
@@ -130,9 +146,9 @@ IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
 
 IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
                        DemoModeAppLaunchSourceReported) {
-  chromeos::DemoSession::SetDemoConfigForTesting(
-      chromeos::DemoSession::DemoModeConfig::kOnline);
-  EXPECT_TRUE(chromeos::DemoSession::IsDeviceInDemoMode());
+  ash::DemoSession::SetDemoConfigForTesting(
+      ash::DemoSession::DemoModeConfig::kOnline);
+  EXPECT_TRUE(ash::DemoSession::IsDeviceInDemoMode());
 
   base::HistogramTester histogram_tester;
   // Should see 0 apps launched from the Launcher in the histogram at first.
@@ -148,7 +164,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
   // Should see 1 app launched from the highlights app  in the histogram.
   histogram_tester.ExpectUniqueSample(
       "DemoMode.AppLaunchSource",
-      chromeos::DemoSession::AppLaunchSource::kExtensionApi, 1);
+      ash::DemoSession::AppLaunchSource::kExtensionApi, 1);
 }
 
 #endif
@@ -163,25 +179,34 @@ IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
   ASSERT_TRUE(listener1.WaitUntilSatisfied());
 }
 
-// TODO(crbug.com/1181677): Test disabled due to many failures.
 IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
-                       DISABLED_SelfUninstall) {
-  ExtensionTestMessageListener listener1("success", false);
-  ASSERT_TRUE(LoadExtension(
+                       SelfUninstall) {
+  // Wait for the helper script to finish before loading the primary
+  // extension. This ensures that the onUninstall event listener is
+  // added before we proceed to the uninstall step.
+  ExtensionTestMessageListener listener1("ready", false);
+  ASSERT_TRUE(LoadExtensionWithParamOptions(
       test_data_dir_.AppendASCII("management/self_uninstall_helper")));
-  ASSERT_TRUE(
-      LoadExtension(test_data_dir_.AppendASCII("management/self_uninstall")));
   ASSERT_TRUE(listener1.WaitUntilSatisfied());
+  ExtensionTestMessageListener listener2("success", false);
+  ASSERT_TRUE(LoadExtensionWithParamOptions(
+      test_data_dir_.AppendASCII("management/self_uninstall")));
+  ASSERT_TRUE(listener2.WaitUntilSatisfied());
 }
 
 IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType,
                        SelfUninstallNoPermissions) {
-  ExtensionTestMessageListener listener1("success", false);
-  ASSERT_TRUE(LoadExtension(
+  // Wait for the helper script to finish before loading the primary
+  // extension. This ensures that the onUninstall event listener is
+  // added before we proceed to the uninstall step.
+  ExtensionTestMessageListener listener1("ready", false);
+  ASSERT_TRUE(LoadExtensionWithParamOptions(
       test_data_dir_.AppendASCII("management/self_uninstall_helper")));
-  ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("management/self_uninstall_noperm")));
   ASSERT_TRUE(listener1.WaitUntilSatisfied());
+  ExtensionTestMessageListener listener2("success", false);
+  ASSERT_TRUE(LoadExtensionWithParamOptions(
+      test_data_dir_.AppendASCII("management/self_uninstall_noperm")));
+  ASSERT_TRUE(listener2.WaitUntilSatisfied());
 }
 
 IN_PROC_BROWSER_TEST_P(ExtensionManagementApiTestWithBackgroundType, Get) {

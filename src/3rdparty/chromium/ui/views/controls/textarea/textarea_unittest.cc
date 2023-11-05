@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "base/format_macros.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "ui/events/event.h"
@@ -20,7 +22,7 @@
 
 namespace {
 
-const base::char16 kHebrewLetterSamekh = 0x05E1;
+const char16_t kHebrewLetterSamekh = 0x05E1;
 
 }  // namespace
 
@@ -90,22 +92,22 @@ TEST_F(TextareaTest, MAYBE_InsertNewlineTest) {
     SendKeyEvent(static_cast<ui::KeyboardCode>(ui::VKEY_A + i));
     SendKeyEvent(ui::VKEY_RETURN);
   }
-  EXPECT_STR_EQ("a\nb\nc\nd\ne\n", textarea_->GetText());
+  EXPECT_EQ(u"a\nb\nc\nd\ne\n", textarea_->GetText());
 }
 
 TEST_F(TextareaTest, PasteNewlineTest) {
-  const std::string& kText = "abc\n   \n";
-  textarea_->SetText(base::ASCIIToUTF16(kText));
+  const std::u16string kText = u"abc\n   \n";
+  textarea_->SetText(kText);
   textarea_->SelectAll(false);
   textarea_->ExecuteCommand(Textfield::kCopy, 0);
-  textarea_->SetText(base::string16());
+  textarea_->SetText(std::u16string());
   textarea_->ExecuteCommand(Textfield::kPaste, 0);
-  EXPECT_STR_EQ(kText, textarea_->GetText());
+  EXPECT_EQ(kText, textarea_->GetText());
 }
 
 // Re-enable when crbug.com/1163587 is fixed.
 TEST_F(TextareaTest, DISABLED_CursorMovement) {
-  textarea_->SetText(base::ASCIIToUTF16("one\n\ntwo three"));
+  textarea_->SetText(u"one\n\ntwo three");
 
   // Move Up/Down at the front of the line.
   RunMoveUpDownTest(0, ui::VKEY_DOWN, {4, 5, 14});
@@ -156,23 +158,23 @@ TEST_F(TextareaTest, CursorViewBounds) {
 }
 
 TEST_F(TextareaTest, LineSelection) {
-  textarea_->SetText(base::ASCIIToUTF16("12\n34567 89"));
+  textarea_->SetText(u"12\n34567 89");
 
   // Place the cursor after "5".
   textarea_->SetEditableSelectionRange(gfx::Range(6));
 
   // Select line towards right.
   SendEndEvent(true);
-  EXPECT_STR_EQ("67 89", textarea_->GetSelectedText());
+  EXPECT_EQ(u"67 89", textarea_->GetSelectedText());
 
   // Select line towards left. On Mac, the existing selection should be extended
   // to cover the whole line.
   SendHomeEvent(true);
 
   if (Textarea::kLineSelectionBehavior == gfx::SELECTION_EXTEND)
-    EXPECT_STR_EQ("34567 89", textarea_->GetSelectedText());
+    EXPECT_EQ(u"34567 89", textarea_->GetSelectedText());
   else
-    EXPECT_STR_EQ("345", textarea_->GetSelectedText());
+    EXPECT_EQ(u"345", textarea_->GetSelectedText());
 
   EXPECT_TRUE(textarea_->GetSelectedRange().is_reversed());
 
@@ -180,9 +182,9 @@ TEST_F(TextareaTest, LineSelection) {
   SendEndEvent(true);
 
   if (Textarea::kLineSelectionBehavior == gfx::SELECTION_EXTEND)
-    EXPECT_STR_EQ("34567 89", textarea_->GetSelectedText());
+    EXPECT_EQ(u"34567 89", textarea_->GetSelectedText());
   else
-    EXPECT_STR_EQ("67 89", textarea_->GetSelectedText());
+    EXPECT_EQ(u"67 89", textarea_->GetSelectedText());
 
   EXPECT_FALSE(textarea_->GetSelectedRange().is_reversed());
 }
@@ -194,7 +196,7 @@ TEST_F(TextareaTest, LineSelection) {
 #define MAYBE_MoveUpDownAndModifySelection MoveUpDownAndModifySelection
 #endif  // defined(OS_MAC)
 TEST_F(TextareaTest, MAYBE_MoveUpDownAndModifySelection) {
-  textarea_->SetText(base::ASCIIToUTF16("12\n34567 89"));
+  textarea_->SetText(u"12\n34567 89");
   textarea_->SetEditableSelectionRange(gfx::Range(6));
   EXPECT_EQ(1U, GetCursorLine());
 
@@ -224,7 +226,7 @@ TEST_F(TextareaTest, MAYBE_MoveUpDownAndModifySelection) {
 }
 
 TEST_F(TextareaTest, MovePageUpDownAndModifySelection) {
-  textarea_->SetText(base::ASCIIToUTF16("12\n34567 89"));
+  textarea_->SetText(u"12\n34567 89");
   textarea_->SetEditableSelectionRange(gfx::Range(6));
 
   EXPECT_TRUE(
@@ -261,10 +263,10 @@ TEST_F(TextareaTest, OverflowTest) {
   const size_t count = 50U;
   textarea_->SetBounds(0, 0, 60, 40);
 
-  textarea_->SetText(base::string16(count, 'a'));
+  textarea_->SetText(std::u16string(count, 'a'));
   EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 
-  textarea_->SetText(base::string16(count, kHebrewLetterSamekh));
+  textarea_->SetText(std::u16string(count, kHebrewLetterSamekh));
   EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 }
 
@@ -274,10 +276,10 @@ TEST_F(TextareaTest, OverflowInRTLTest) {
   std::string locale = base::i18n::GetConfiguredLocale();
   base::i18n::SetICUDefaultLocale("he");
 
-  textarea_->SetText(base::string16(count, 'a'));
+  textarea_->SetText(std::u16string(count, 'a'));
   EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 
-  textarea_->SetText(base::string16(count, kHebrewLetterSamekh));
+  textarea_->SetText(std::u16string(count, kHebrewLetterSamekh));
   EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 
   // Reset locale.

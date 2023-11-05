@@ -68,6 +68,8 @@ SecurityInterstitialPage::TypeID SecurityInterstitialPage::GetTypeForTesting() {
 }
 
 std::string SecurityInterstitialPage::GetHTMLContents() {
+  // TODO(crbug.com/1187061): Change to base::Value once webui functions have
+  // been converted to take base::Value* instead of base::DictionaryValue*.
   base::DictionaryValue load_time_data;
   PopulateInterstitialStrings(&load_time_data);
   webui::SetLoadTimeDataDefaults(controller()->GetApplicationLocale(),
@@ -97,7 +99,7 @@ void SecurityInterstitialPage::SetUpMetrics() {
   }
 }
 
-base::string16 SecurityInterstitialPage::GetFormattedHostName() const {
+std::u16string SecurityInterstitialPage::GetFormattedHostName() const {
   return security_interstitials::common_string_util::GetFormattedHostName(
       request_url_);
 }

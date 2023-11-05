@@ -4,9 +4,8 @@
 
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
-#include "third_party/blink/renderer/bindings/core/v8/readable_stream_default_reader_or_readable_stream_byob_reader.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_abort_signal.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_iterator_result_value.h"
@@ -16,6 +15,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_stream_pipe_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_underlying_source.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_readablestreambyobreader_readablestreamdefaultreader.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_writable_stream.h"
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 
 namespace blink {
@@ -96,6 +95,8 @@ class ReadableStream::PipeToEngine final
  public:
   PipeToEngine(ScriptState* script_state, PipeOptions* pipe_options)
       : script_state_(script_state), pipe_options_(pipe_options) {}
+  PipeToEngine(const PipeToEngine&) = delete;
+  PipeToEngine& operator=(const PipeToEngine&) = delete;
 
   // This is the main entrypoint for ReadableStreamPipeTo().
   ScriptPromise Start(ReadableStream* readable, WritableStream* destination) {
@@ -345,7 +346,7 @@ class ReadableStream::PipeToEngine final
       return Undefined();
     }
 
-    base::Optional<double> desired_size = writer_->GetDesiredSizeInternal();
+    absl::optional<double> desired_size = writer_->GetDesiredSizeInternal();
     if (!desired_size.has_value()) {
       // This can happen if abort() is queued but not yet started when
       // pipeTo() is called. In that case [[storedError]] is not set yet, and
@@ -702,13 +703,13 @@ class ReadableStream::PipeToEngine final
   TraceWrapperV8Reference<v8::Value> shutdown_error_;
   bool is_shutting_down_ = false;
   bool is_reading_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PipeToEngine);
 };
 
 class ReadableStream::TeeEngine final : public GarbageCollected<TeeEngine> {
  public:
   TeeEngine() = default;
+  TeeEngine(const TeeEngine&) = delete;
+  TeeEngine& operator=(const TeeEngine&) = delete;
 
   // Create the streams and start copying data.
   void Start(ScriptState*, ReadableStream*, ExceptionState&);
@@ -746,8 +747,6 @@ class ReadableStream::TeeEngine final : public GarbageCollected<TeeEngine> {
   TraceWrapperV8Reference<v8::Value> reason_[2];
   Member<ReadableStream> branch_[2];
   Member<ReadableStreamDefaultController> controller_[2];
-
-  DISALLOW_COPY_AND_ASSIGN(TeeEngine);
 };
 
 class ReadableStream::TeeEngine::PullAlgorithm final : public StreamAlgorithm {
@@ -1104,6 +1103,7 @@ ReadableStream* ReadableStream::CreateWithCountQueueingStrategy(
     size_t high_water_mark) {
   return CreateWithCountQueueingStrategy(script_state, underlying_source,
                                          high_water_mark,
+                                         AllowPerChunkTransferring(false),
                                          /*optimizer=*/nullptr);
 }
 
@@ -1111,45 +1111,45 @@ ReadableStream* ReadableStream::CreateWithCountQueueingStrategy(
     ScriptState* script_state,
     UnderlyingSourceBase* underlying_source,
     size_t high_water_mark,
+    AllowPerChunkTransferring allow_per_chunk_transferring,
     std::unique_ptr<ReadableStreamTransferringOptimizer> optimizer) {
   auto* isolate = script_state->GetIsolate();
-
-  // It's safer to use a workalike rather than a real CountQueuingStrategy
-  // object. We use the default "size" function as it is implemented in C++ and
-  // so much faster than calling into JavaScript. Since the create object has a
-  // null prototype, there is no danger of us finding some other "size" function
-  // via the prototype chain.
-  v8::Local<v8::Name> high_water_mark_string =
-      V8AtomicString(isolate, "highWaterMark");
-  v8::Local<v8::Value> high_water_mark_value =
-      v8::Number::New(isolate, high_water_mark);
-
-  auto strategy_object =
-      v8::Object::New(isolate, v8::Null(isolate), &high_water_mark_string,
-                      &high_water_mark_value, 1);
-
-  ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kConstructionContext,
+  ExceptionState exception_state(isolate, ExceptionState::kConstructionContext,
                                  "ReadableStream");
-
-  v8::Local<v8::Value> underlying_source_v8 =
-      ToV8(underlying_source, script_state);
+  v8::MicrotasksScope microtasks_scope(
+      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
 
   auto* stream = MakeGarbageCollected<ReadableStream>();
-  stream->InitInternal(
-      script_state,
-      ScriptValue(script_state->GetIsolate(), underlying_source_v8),
-      ScriptValue(script_state->GetIsolate(), strategy_object), true,
-      exception_state);
-
+  stream->InitWithCountQueueingStrategy(
+      script_state, underlying_source, high_water_mark,
+      allow_per_chunk_transferring, std::move(optimizer), exception_state);
   if (exception_state.HadException()) {
     exception_state.ClearException();
     DLOG(WARNING)
         << "Ignoring an exception in CreateWithCountQueuingStrategy().";
   }
-
-  stream->transferring_optimizer_ = std::move(optimizer);
   return stream;
+}
+
+void ReadableStream::InitWithCountQueueingStrategy(
+    ScriptState* script_state,
+    UnderlyingSourceBase* underlying_source,
+    size_t high_water_mark,
+    AllowPerChunkTransferring allow_per_chunk_transferring,
+    std::unique_ptr<ReadableStreamTransferringOptimizer> optimizer,
+    ExceptionState& exception_state) {
+  auto* isolate = script_state->GetIsolate();
+
+  auto strategy = CreateTrivialQueuingStrategy(isolate, high_water_mark);
+
+  v8::Local<v8::Value> underlying_source_v8 =
+      ToV8(underlying_source, script_state);
+
+  InitInternal(script_state, ScriptValue(isolate, underlying_source_v8),
+               strategy, true, exception_state);
+
+  allow_per_chunk_transferring_ = allow_per_chunk_transferring;
+  transferring_optimizer_ = std::move(optimizer);
 }
 
 ReadableStream* ReadableStream::Create(ScriptState* script_state,
@@ -1227,21 +1227,22 @@ ScriptPromise ReadableStream::cancel(ScriptState* script_state,
   return ScriptPromise(script_state, result);
 }
 
-void ReadableStream::getReader(
+V8ReadableStreamReader* ReadableStream::getReader(
     ScriptState* script_state,
-    ReadableStreamDefaultReaderOrReadableStreamBYOBReader& return_value,
     ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#rs-get-reader
   // 1. If options["mode"] does not exist, return ?
   // AcquireReadableStreamDefaultReader(this).
-  return_value.SetReadableStreamDefaultReader(
-      AcquireDefaultReader(script_state, this, true, exception_state));
+  ReadableStreamDefaultReader* reader =
+      AcquireDefaultReader(script_state, this, true, exception_state);
+  if (!reader)
+    return nullptr;
+  return MakeGarbageCollected<V8ReadableStreamReader>(reader);
 }
 
-void ReadableStream::getReader(
+V8ReadableStreamReader* ReadableStream::getReader(
     ScriptState* script_state,
-    ReadableStreamGetReaderOptions* options,
-    ReadableStreamDefaultReaderOrReadableStreamBYOBReader& return_value,
+    const ReadableStreamGetReaderOptions* options,
     ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#rs-get-reader
   if (options->hasMode()) {
@@ -1250,19 +1251,23 @@ void ReadableStream::getReader(
     UseCounter::Count(ExecutionContext::From(script_state),
                       WebFeature::kReadableStreamBYOBReader);
 
-    return_value.SetReadableStreamBYOBReader(
-        AcquireBYOBReader(script_state, this, exception_state));
-  } else {
-    getReader(script_state, return_value, exception_state);
+    ReadableStreamBYOBReader* reader =
+        AcquireBYOBReader(script_state, this, exception_state);
+    if (!reader)
+      return nullptr;
+    return MakeGarbageCollected<V8ReadableStreamReader>(reader);
   }
+
+  return getReader(script_state, exception_state);
 }
 
 ReadableStreamDefaultReader* ReadableStream::GetDefaultReaderForTesting(
     ScriptState* script_state,
     ExceptionState& exception_state) {
-  ReadableStreamDefaultReaderOrReadableStreamBYOBReader return_value;
-  getReader(script_state, return_value, exception_state);
-  return return_value.GetAsReadableStreamDefaultReader();
+  auto* result = getReader(script_state, exception_state);
+  if (!result)
+    return nullptr;
+  return result->GetAsReadableStreamDefaultReader();
 }
 
 ReadableStream* ReadableStream::pipeThrough(ScriptState* script_state,
@@ -1414,7 +1419,7 @@ void ReadableStream::InitInternal(ScriptState* script_state,
     }
 
     // 6. If typeString is "bytes",
-    if (type_string == V8AtomicString(isolate, "bytes")) {
+    if (type_string->StringEquals(V8AtomicString(isolate, "bytes"))) {
       UseCounter::Count(ExecutionContext::From(script_state),
                         WebFeature::kReadableStreamWithByteSource);
 
@@ -1572,7 +1577,8 @@ void ReadableStream::Serialize(ScriptState* script_state,
   // 5. Let writable be a new WritableStream in the current Realm.
   // 6. Perform ! SetUpCrossRealmTransformWritable(writable, port1).
   auto* writable = CreateCrossRealmTransformWritable(
-      script_state, port, /*optimizer=*/nullptr, exception_state);
+      script_state, port, allow_per_chunk_transferring_, /*optimizer=*/nullptr,
+      exception_state);
   if (exception_state.HadException()) {
     return;
   }

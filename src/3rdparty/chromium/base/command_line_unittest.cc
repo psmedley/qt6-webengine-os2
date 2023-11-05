@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/stl_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -319,6 +318,15 @@ TEST(CommandLineTest, GetCommandLineStringForShell) {
   EXPECT_EQ(
       cl.GetCommandLineStringForShell(),
       FILE_PATH_LITERAL("program --switch /switch2 -- --single-argument %1"));
+}
+
+TEST(CommandLineTest, GetCommandLineStringWithUnsafeInsertSequences) {
+  CommandLine cl(FilePath(FILE_PATH_LITERAL("program")));
+  cl.AppendSwitchASCII("switch", "%1");
+  cl.AppendSwitch("%2");
+  cl.AppendArg("%3");
+  EXPECT_EQ(FILE_PATH_LITERAL("program --switch=%1 --%2 %3"),
+            cl.GetCommandLineStringWithUnsafeInsertSequences());
 }
 #endif  // defined(OS_WIN)
 

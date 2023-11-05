@@ -19,7 +19,7 @@ TEST_F(QuicHostnameUtilsTest, IsValidSNI) {
   // IP as SNI.
   EXPECT_FALSE(QuicHostnameUtils::IsValidSNI("192.168.0.1"));
   // SNI without any dot.
-  EXPECT_FALSE(QuicHostnameUtils::IsValidSNI("somedomain"));
+  EXPECT_TRUE(QuicHostnameUtils::IsValidSNI("somedomain"));
   // Invalid by RFC2396 but unfortunately domains of this form exist.
   EXPECT_TRUE(QuicHostnameUtils::IsValidSNI("some_domain.com"));
   // An empty string must be invalid otherwise the QUIC client will try sending

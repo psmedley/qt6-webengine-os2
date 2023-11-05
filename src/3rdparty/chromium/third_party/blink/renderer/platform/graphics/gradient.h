@@ -29,7 +29,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GRADIENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GRADIENT_H_
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
@@ -89,6 +88,8 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
       ColorInterpolation = ColorInterpolation::kUnpremultiplied,
       DegenerateHandling = DegenerateHandling::kAllow);
 
+  Gradient(const Gradient&) = delete;
+  Gradient& operator=(const Gradient&) = delete;
   virtual ~Gradient();
 
   Type GetType() const { return type_; }
@@ -106,7 +107,7 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
   }
   void AddColorStops(const Vector<Gradient::ColorStop>&);
 
-  void ApplyToFlags(PaintFlags&, const SkMatrix& local_matrix);
+  void ApplyToFlags(PaintFlags&, const SkMatrix& local_matrix) const;
 
  protected:
   Gradient(Type, GradientSpreadMethod, ColorInterpolation, DegenerateHandling);
@@ -125,11 +126,9 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
   }
 
  private:
-  sk_sp<PaintShader> CreateShaderInternal(const SkMatrix& local_matrix);
+  sk_sp<PaintShader> CreateShaderInternal(const SkMatrix& local_matrix) const;
 
-  sk_sp<SkColorFilter> color_filter_;
-
-  void SortStopsIfNecessary();
+  void SortStopsIfNecessary() const;
   void FillSkiaStops(ColorBuffer&, OffsetBuffer&) const;
 
   const Type type_;
@@ -137,14 +136,13 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
   const ColorInterpolation color_interpolation_;
   const DegenerateHandling degenerate_handling_;
 
-  Vector<ColorStop, 2> stops_;
-  bool stops_sorted_;
+  mutable Vector<ColorStop, 2> stops_;
+  mutable bool stops_sorted_;
 
   mutable sk_sp<PaintShader> cached_shader_;
-
-  DISALLOW_COPY_AND_ASSIGN(Gradient);
+  mutable sk_sp<SkColorFilter> color_filter_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GRADIENT_H_

@@ -4,6 +4,9 @@
 
 #include "third_party/blink/renderer/core/frame/policy_container.h"
 
+#include "base/macros.h"
+#include "third_party/blink/renderer/core/frame/csp/conversion_util.h"
+
 namespace blink {
 
 PolicyContainer::PolicyContainer(
@@ -31,7 +34,9 @@ std::unique_ptr<PolicyContainer> PolicyContainer::CreateFromWebPolicyContainer(
   mojom::blink::PolicyContainerPoliciesPtr policies =
       mojom::blink::PolicyContainerPolicies::New(
           container->policies.referrer_policy,
-          container->policies.ip_address_space);
+          container->policies.ip_address_space,
+          ConvertToMojoBlink(
+              std::move(container->policies.content_security_policies)));
   return std::make_unique<PolicyContainer>(std::move(container->remote),
                                            std::move(policies));
 }
@@ -52,9 +57,23 @@ void PolicyContainer::UpdateReferrerPolicy(
   policy_container_host_remote_->SetReferrerPolicy(policy);
 }
 
-const mojom::blink::PolicyContainerPoliciesPtr& PolicyContainer::GetPolicies()
+void PolicyContainer::SetIPAddressSpace(
+    network::mojom::blink::IPAddressSpace ip_address_space) {
+  policies_->ip_address_space = ip_address_space;
+}
+
+const mojom::blink::PolicyContainerPolicies& PolicyContainer::GetPolicies()
     const {
-  return policies_;
+  return *policies_;
+}
+
+void PolicyContainer::AddContentSecurityPolicies(
+    Vector<network::mojom::blink::ContentSecurityPolicyPtr> policies) {
+  for (const auto& policy : policies) {
+    policies_->content_security_policies.push_back(policy->Clone());
+  }
+  policy_container_host_remote_->AddContentSecurityPolicies(
+      std::move(policies));
 }
 
 mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>

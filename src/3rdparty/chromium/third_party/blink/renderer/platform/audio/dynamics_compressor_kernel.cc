@@ -63,7 +63,7 @@ DynamicsCompressorKernel::DynamicsCompressorKernel(float sample_rate,
   Reset();
 
   metering_release_k_ =
-      float(audio_utilities::DiscreteTimeConstantForSampleRate(
+      static_cast<float>(audio_utilities::DiscreteTimeConstantForSampleRate(
           kMeteringReleaseTimeConstant, sample_rate));
 }
 
@@ -220,7 +220,7 @@ void DynamicsCompressorKernel::Process(
     float release_zone4) {
   DCHECK_EQ(pre_delay_buffers_.size(), number_of_channels);
 
-  float sample_rate = this->SampleRate();
+  float sample_rate = SampleRate();
 
   float dry_mix = 1 - effect_blend;
   float wet_mix = effect_blend;

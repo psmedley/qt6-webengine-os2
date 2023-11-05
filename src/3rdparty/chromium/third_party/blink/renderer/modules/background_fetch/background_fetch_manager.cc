@@ -9,9 +9,9 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "services/network/public/mojom/ip_address_space.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/request_or_usv_string.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/bindings/modules/v8/request_or_usv_string_or_request_or_usv_string_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_request_requestorusvstringsequence_usvstring.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_request_usvstring.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_background_fetch_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_image_resource.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -49,9 +49,6 @@ namespace {
 // Message for the TypeError thrown when an empty request sequence is seen.
 const char kEmptyRequestSequenceErrorMessage[] =
     "At least one request must be given.";
-
-// Message for the TypeError thrown when a null request is seen.
-const char kNullRequestErrorMessage[] = "Requests must not be null.";
 
 ScriptPromise RejectWithTypeError(ScriptState* script_state,
                                   const KURL& request_url,
@@ -161,7 +158,7 @@ BackgroundFetchManager::BackgroundFetchManager(
 ScriptPromise BackgroundFetchManager::fetch(
     ScriptState* script_state,
     const String& id,
-    const RequestOrUSVStringOrRequestOrUSVStringSequence& requests,
+    const V8UnionRequestInfoOrRequestOrUSVStringSequence* requests,
     const BackgroundFetchOptions* options,
     ExceptionState& exception_state) {
   if (!registration_->active()) {
@@ -384,73 +381,73 @@ ScriptPromise BackgroundFetchManager::get(ScriptState* script_state,
 Vector<mojom::blink::FetchAPIRequestPtr>
 BackgroundFetchManager::CreateFetchAPIRequestVector(
     ScriptState* script_state,
-    const RequestOrUSVStringOrRequestOrUSVStringSequence& requests,
+    const V8UnionRequestInfoOrRequestOrUSVStringSequence* requests,
     ExceptionState& exception_state,
     bool* has_requests_with_body) {
+  DCHECK(requests);
   DCHECK(has_requests_with_body);
 
   Vector<mojom::blink::FetchAPIRequestPtr> fetch_api_requests;
   *has_requests_with_body = false;
 
-  if (requests.IsRequestOrUSVStringSequence()) {
-    HeapVector<RequestOrUSVString> request_vector =
-        requests.GetAsRequestOrUSVStringSequence();
+  switch (requests->GetContentType()) {
+    case V8UnionRequestInfoOrRequestOrUSVStringSequence::ContentType::
+        kRequestOrUSVStringSequence: {
+      const HeapVector<Member<V8RequestInfo>>& request_vector =
+          requests->GetAsRequestOrUSVStringSequence();
 
-    // Throw a TypeError when the developer has passed an empty sequence.
-    if (!request_vector.size()) {
-      exception_state.ThrowTypeError(kEmptyRequestSequenceErrorMessage);
-      return Vector<mojom::blink::FetchAPIRequestPtr>();
-    }
-
-    fetch_api_requests.resize(request_vector.size());
-
-    for (wtf_size_t i = 0; i < request_vector.size(); ++i) {
-      const RequestOrUSVString& request_or_url = request_vector[i];
-
-      Request* request = nullptr;
-      if (request_or_url.IsRequest()) {
-        request = request_or_url.GetAsRequest();
-      } else if (request_or_url.IsUSVString()) {
-        request = Request::Create(script_state, request_or_url.GetAsUSVString(),
-                                  exception_state);
-        if (exception_state.HadException())
-          return Vector<mojom::blink::FetchAPIRequestPtr>();
-      } else {
-        exception_state.ThrowTypeError(kNullRequestErrorMessage);
-        return Vector<mojom::blink::FetchAPIRequestPtr>();
+      // Throw a TypeError when the developer has passed an empty sequence.
+      if (request_vector.IsEmpty()) {
+        exception_state.ThrowTypeError(kEmptyRequestSequenceErrorMessage);
+        return {};
       }
 
-      DCHECK(request);
-      *has_requests_with_body |= request->HasBody();
-      fetch_api_requests[i] = request->CreateFetchAPIRequest();
-      fetch_api_requests[i]->blob = ExtractBlobHandle(request, exception_state);
-      if (exception_state.HadException())
-        return Vector<mojom::blink::FetchAPIRequestPtr>();
+      fetch_api_requests.ReserveCapacity(request_vector.size());
+      for (const auto& request_info : request_vector) {
+        Request* request = nullptr;
+        switch (request_info->GetContentType()) {
+          case V8RequestInfo::ContentType::kRequest:
+            request = request_info->GetAsRequest();
+            break;
+          case V8RequestInfo::ContentType::kUSVString:
+            request = Request::Create(
+                script_state, request_info->GetAsUSVString(), exception_state);
+            if (exception_state.HadException())
+              return {};
+            break;
+        }
+        *has_requests_with_body |= request->HasBody();
+        fetch_api_requests.push_back(request->CreateFetchAPIRequest());
+        fetch_api_requests.back()->blob =
+            ExtractBlobHandle(request, exception_state);
+        if (exception_state.HadException())
+          return {};
+      }
+      break;
     }
-  } else if (requests.IsRequest()) {
-    auto* request = requests.GetAsRequest();
-    DCHECK(request);
-
-    *has_requests_with_body = request->HasBody();
-    fetch_api_requests.resize(1);
-    fetch_api_requests[0] = request->CreateFetchAPIRequest();
-    fetch_api_requests[0]->blob =
-        ExtractBlobHandle(requests.GetAsRequest(), exception_state);
-    if (exception_state.HadException())
-      return Vector<mojom::blink::FetchAPIRequestPtr>();
-  } else if (requests.IsUSVString()) {
-    Request* request = Request::Create(script_state, requests.GetAsUSVString(),
-                                       exception_state);
-    if (exception_state.HadException())
-      return Vector<mojom::blink::FetchAPIRequestPtr>();
-
-    DCHECK(request);
-    *has_requests_with_body = request->HasBody();
-    fetch_api_requests.resize(1);
-    fetch_api_requests[0] = request->CreateFetchAPIRequest();
-  } else {
-    exception_state.ThrowTypeError(kNullRequestErrorMessage);
-    return Vector<mojom::blink::FetchAPIRequestPtr>();
+    case V8UnionRequestInfoOrRequestOrUSVStringSequence::ContentType::
+        kRequest: {
+      Request* request = requests->GetAsRequest();
+      *has_requests_with_body = request->HasBody();
+      fetch_api_requests.push_back(request->CreateFetchAPIRequest());
+      fetch_api_requests.back()->blob =
+          ExtractBlobHandle(request, exception_state);
+      if (exception_state.HadException())
+        return {};
+      break;
+    }
+    case V8UnionRequestInfoOrRequestOrUSVStringSequence::ContentType::
+        kUSVString: {
+      Request* request = Request::Create(
+          script_state, requests->GetAsUSVString(), exception_state);
+      if (exception_state.HadException())
+        return {};
+      *has_requests_with_body = request->HasBody();
+      fetch_api_requests.push_back(request->CreateFetchAPIRequest());
+      fetch_api_requests.back()->blob =
+          ExtractBlobHandle(request, exception_state);
+      break;
+    }
   }
 
   return fetch_api_requests;

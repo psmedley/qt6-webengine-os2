@@ -38,6 +38,9 @@ class ChangePictureHandler : public ::settings::SettingsPageUIHandler,
   ChangePictureHandler();
   ~ChangePictureHandler() override;
 
+  // The name of the histogram that records when a user changes a device image.
+  static const char kUserImageChangedHistogramName[];
+
   // WebUIMessageHandler implementation.
   void RegisterMessages() override;
   void OnJavascriptAllowed() override;
@@ -47,6 +50,8 @@ class ChangePictureHandler : public ::settings::SettingsPageUIHandler,
   void OnCameraPresenceCheckDone(bool is_camera_present) override;
 
  private:
+  friend class ChangePictureHandlerTest;
+
   // Sends list of available default images to the page.
   void SendDefaultImages();
 
@@ -112,7 +117,7 @@ class ChangePictureHandler : public ::settings::SettingsPageUIHandler,
                           base::RefCountedBytes* image_bytes);
 
   // Returns handle to browser window or NULL if it can't be found.
-  gfx::NativeWindow GetBrowserWindow() const;
+  gfx::NativeWindow GetBrowserWindow();
 
   // Overriden from ImageDecoder::ImageRequest:
   void OnImageDecoded(const SkBitmap& decoded_image) override;
@@ -120,7 +125,7 @@ class ChangePictureHandler : public ::settings::SettingsPageUIHandler,
 
   // Returns user related to current WebUI. If this user doesn't exist,
   // returns active user.
-  const user_manager::User* GetUser() const;
+  const user_manager::User* GetUser();
 
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
 

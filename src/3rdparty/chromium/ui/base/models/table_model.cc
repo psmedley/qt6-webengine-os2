@@ -8,7 +8,7 @@
 #include "base/i18n/string_compare.h"
 #include "base/notreached.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/image/image_skia.h"
+#include "ui/base/models/image_model.h"
 
 namespace ui {
 
@@ -38,24 +38,26 @@ TableColumn::TableColumn(int id, Alignment alignment, int width, float percent)
 
 TableColumn::TableColumn(const TableColumn& other) = default;
 
+TableColumn& TableColumn::operator=(const TableColumn& other) = default;
+
 // TableModel -----------------------------------------------------------------
 
 // Used for sorting.
 static icu::Collator* collator = NULL;
 
-gfx::ImageSkia TableModel::GetIcon(int row) {
-  return gfx::ImageSkia();
+ui::ImageModel TableModel::GetIcon(int row) {
+  return ui::ImageModel();
 }
 
-base::string16 TableModel::GetTooltip(int row) {
-  return base::string16();
+std::u16string TableModel::GetTooltip(int row) {
+  return std::u16string();
 }
 
 int TableModel::CompareValues(int row1, int row2, int column_id) {
   DCHECK(row1 >= 0 && row1 < RowCount() &&
          row2 >= 0 && row2 < RowCount());
-  base::string16 value1 = GetText(row1, column_id);
-  base::string16 value2 = GetText(row2, column_id);
+  std::u16string value1 = GetText(row1, column_id);
+  std::u16string value2 = GetText(row2, column_id);
   icu::Collator* collator = GetCollator();
 
   if (collator)

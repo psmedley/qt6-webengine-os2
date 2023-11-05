@@ -5,8 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_GAMEPAD_GAMEPAD_SHARED_MEMORY_READER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_GAMEPAD_GAMEPAD_SHARED_MEMORY_READER_H_
 
-#include <memory>
-
 #include "base/macros.h"
 #include "device/gamepad/public/mojom/gamepad.mojom-blink.h"
 #include "device/gamepad/public/mojom/gamepad_hardware_buffer.h"
@@ -56,8 +54,7 @@ class GamepadSharedMemoryReader
                         const device::Gamepad& gamepad) override;
   void GamepadDisconnected(uint32_t index,
                            const device::Gamepad& gamepad) override;
-  void GamepadButtonOrAxisChanged(uint32_t index,
-                                  const device::Gamepad& gamepad) override;
+  void GamepadChanged(device::mojom::blink::GamepadChangesPtr changes) override;
 
   base::ReadOnlySharedMemoryRegion renderer_shared_buffer_region_;
   base::ReadOnlySharedMemoryMapping renderer_shared_buffer_mapping_;
@@ -66,12 +63,9 @@ class GamepadSharedMemoryReader
   bool ever_interacted_with_ = false;
 
   HeapMojoReceiver<device::mojom::blink::GamepadObserver,
-                   GamepadSharedMemoryReader,
-                   HeapMojoWrapperMode::kWithoutContextObserver>
+                   GamepadSharedMemoryReader>
       receiver_;
-  HeapMojoRemote<device::mojom::blink::GamepadMonitor,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      gamepad_monitor_remote_;
+  HeapMojoRemote<device::mojom::blink::GamepadMonitor> gamepad_monitor_remote_;
   blink::GamepadListener* listener_ = nullptr;
 };
 

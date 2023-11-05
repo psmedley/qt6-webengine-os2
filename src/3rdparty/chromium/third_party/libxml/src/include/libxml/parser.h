@@ -169,6 +169,8 @@ typedef enum {
     XML_PARSE_READER = 5
 } xmlParserMode;
 
+typedef struct _xmlStartTag xmlStartTag;
+
 /**
  * xmlParserCtxt:
  *
@@ -280,7 +282,7 @@ struct _xmlParserCtxt {
     int                nsMax;         /* the size of the arrays */
     const xmlChar *   *nsTab;         /* the array of prefix/namespace name */
     int               *attallocs;     /* which attribute were allocated */
-    void *            *pushTab;       /* array of data for push */
+    xmlStartTag       *pushTab;       /* array of data for push */
     xmlHashTablePtr    attsDefault;   /* defaulted attributes if any */
     xmlHashTablePtr    attsSpecial;   /* non-CDATA attributes if any */
     int                nsWellFormed;  /* is the document XML Namespace okay */
@@ -994,13 +996,16 @@ XMLPUBFUN xmlParserCtxtPtr XMLCALL
 /*
  * Reading/setting optional parsing features.
  */
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlGetFeaturesList	(int *len,
 					 const char **result);
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlGetFeature		(xmlParserCtxtPtr ctxt,
 					 const char *name,
 					 void *result);
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlSetFeature		(xmlParserCtxtPtr ctxt,
 					 const char *name,

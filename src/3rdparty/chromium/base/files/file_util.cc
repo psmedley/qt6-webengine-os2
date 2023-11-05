@@ -12,6 +12,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <vector>
 
 #include "base/check_op.h"
 #include "base/files/file_enumerator.h"
@@ -24,12 +25,18 @@
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
+
 namespace base {
 
 #if !defined(OS_NACL_NONSFI)
+#if !defined(OS_WIN)
 OnceCallback<void(const FilePath&)> GetDeleteFileCallback() {
   return BindOnce(IgnoreResult(&DeleteFile));
 }
+#endif  // !defined(OS_WIN)
 
 OnceCallback<void(const FilePath&)> GetDeletePathRecursivelyCallback() {
   return BindOnce(IgnoreResult(&DeletePathRecursively));
@@ -50,6 +57,17 @@ bool Move(const FilePath& from_path, const FilePath& to_path) {
 }
 
 bool CopyFileContents(File& infile, File& outfile) {
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
+  bool retry_slow = false;
+  bool res =
+      internal::CopyFileContentsWithSendfile(infile, outfile, retry_slow);
+  if (res || !retry_slow) {
+    return res;
+  }
+  // Any failures which allow retrying using read/write will not have modified
+  // either file offset or size.
+#endif
+
   static constexpr size_t kBufferSize = 32768;
   std::vector<char> buffer(kBufferSize);
 
@@ -197,6 +215,12 @@ bool ReadStreamToStringWithMaxSize(FILE* stream,
       chunk_size = size.QuadPart;
   }
 #else   // defined(OS_WIN)
+  // In cases where the reported file size is 0, use a smaller chunk size to
+  // minimize memory allocated and cost of string::resize() in case the read
+  // size is small (i.e. proc files). If the file is larger than this, the read
+  // loop will reset |chunk_size| to kDefaultChunkSize.
+  constexpr int64_t kSmallChunkSize = 4096;
+  chunk_size = kSmallChunkSize - 1;
   stat_wrapper_t file_info = {};
   if (!File::Fstat(fileno(stream), &file_info) && file_info.st_size > 0)
     chunk_size = file_info.st_size;

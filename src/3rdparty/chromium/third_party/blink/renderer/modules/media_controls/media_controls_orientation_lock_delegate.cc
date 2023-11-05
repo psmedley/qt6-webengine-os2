@@ -8,10 +8,10 @@
 
 #include "build/build_config.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
-#include "third_party/blink/public/common/widget/screen_info.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/screen.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#include "ui/display/screen_info.h"
 
 #if defined(OS_ANDROID)
 #include "third_party/blink/public/platform/platform.h"
@@ -157,7 +158,7 @@ void MediaControlsOrientationLockDelegate::MaybeListenToDeviceOrientation() {
   if (!RuntimeEnabledFeatures::VideoRotateToFullscreenEnabled())
     return;
 
-  if (is_auto_rotate_enabled_by_user_override_for_testing_ != base::nullopt) {
+  if (is_auto_rotate_enabled_by_user_override_for_testing_ != absl::nullopt) {
     GotIsAutoRotateEnabledByUser(
         is_auto_rotate_enabled_by_user_override_for_testing_.value());
     return;
@@ -270,13 +271,13 @@ MediaControlsOrientationLockDelegate::ComputeOrientationLock() const {
 
   ChromeClient& chrome_client = frame->GetChromeClient();
   switch (chrome_client.GetScreenInfo(*frame).orientation_type) {
-    case mojom::blink::ScreenOrientation::kPortraitPrimary:
-    case mojom::blink::ScreenOrientation::kPortraitSecondary:
+    case display::mojom::blink::ScreenOrientation::kPortraitPrimary:
+    case display::mojom::blink::ScreenOrientation::kPortraitSecondary:
       return device::mojom::blink::ScreenOrientationLockType::PORTRAIT;
-    case mojom::blink::ScreenOrientation::kLandscapePrimary:
-    case mojom::blink::ScreenOrientation::kLandscapeSecondary:
+    case display::mojom::blink::ScreenOrientation::kLandscapePrimary:
+    case display::mojom::blink::ScreenOrientation::kLandscapeSecondary:
       return device::mojom::blink::ScreenOrientationLockType::LANDSCAPE;
-    case mojom::blink::ScreenOrientation::kUndefined:
+    case display::mojom::blink::ScreenOrientation::kUndefined:
       return device::mojom::blink::ScreenOrientationLockType::LANDSCAPE;
   }
 

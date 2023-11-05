@@ -27,6 +27,7 @@
 #include <limits>
 
 #include "build/build_config.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/oscillator_node.h"
 #include "third_party/blink/renderer/modules/webaudio/periodic_wave.h"
@@ -56,8 +57,8 @@ OscillatorHandler::OscillatorHandler(AudioNode& node,
       detune_(&detune),
       first_render_(true),
       virtual_read_index_(0),
-      phase_increments_(audio_utilities::kRenderQuantumFrames),
-      detune_values_(audio_utilities::kRenderQuantumFrames) {
+      phase_increments_(GetDeferredTaskHandler().RenderQuantumFrames()),
+      detune_values_(GetDeferredTaskHandler().RenderQuantumFrames()) {
   if (wave_table) {
     // A PeriodicWave overrides any value for the oscillator type,
     // forcing the type to be 'custom".

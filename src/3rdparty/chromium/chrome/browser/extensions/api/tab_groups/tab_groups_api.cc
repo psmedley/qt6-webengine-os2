@@ -5,11 +5,11 @@
 #include "chrome/browser/extensions/api/tab_groups/tab_groups_api.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/strings/pattern.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/tab_groups/tab_groups_constants.h"
 #include "chrome/browser/extensions/api/tab_groups/tab_groups_util.h"
@@ -52,9 +52,9 @@ bool IndexSupportsGroupMove(TabStripModel* tab_strip,
     return false;
   }
 
-  base::Optional<tab_groups::TabGroupId> target_group =
+  absl::optional<tab_groups::TabGroupId> target_group =
       tab_strip->GetTabGroupForTab(target_index);
-  base::Optional<tab_groups::TabGroupId> adjacent_group =
+  absl::optional<tab_groups::TabGroupId> adjacent_group =
       tab_strip->GetTabGroupForTab(target_index - 1);
 
   if (target_group.has_value() && target_group == adjacent_group) {
@@ -123,8 +123,7 @@ ExtensionFunction::ResponseAction TabGroupsQueryFunction::Run() {
       }
     }
 
-    TabStripModel* tab_strip =
-        ExtensionTabUtil::GetEditableTabStripModel(browser);
+    TabStripModel* tab_strip = browser->tab_strip_model();
     if (!tab_strip)
       return RespondNow(Error(tabs_constants::kTabStripNotEditableQueryError));
     for (const tab_groups::TabGroupId& id :
@@ -183,7 +182,7 @@ ExtensionFunction::ResponseAction TabGroupsUpdateFunction::Run() {
   if (params->update_properties.color != api::tab_groups::COLOR_NONE)
     color = tab_groups_util::ColorToColorId(params->update_properties.color);
 
-  base::string16 title = visual_data->title();
+  std::u16string title = visual_data->title();
   if (params->update_properties.title.get())
     title = base::UTF8ToUTF16(*params->update_properties.title);
 
@@ -291,7 +290,7 @@ bool TabGroupsMoveFunction::MoveGroup(int group_id,
         // Detach tabs from the same index each time, since each detached tab is
         // removed from the model, and groups are always contiguous.
         std::unique_ptr<content::WebContents> web_contents =
-            source_tab_strip->DetachWebContentsAt(tabs.start());
+            source_tab_strip->DetachWebContentsAtForInsertion(tabs.start());
 
         // Attach tabs in consecutive indices, to insert them in the same order.
         target_tab_strip->InsertWebContentsAt(new_index + i,

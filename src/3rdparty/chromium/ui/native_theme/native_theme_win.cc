@@ -14,9 +14,8 @@
 #include "base/callback.h"
 #include "base/check.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/notreached.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
@@ -26,6 +25,7 @@
 #include "cc/paint/paint_flags.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/skia_utils_win.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
@@ -247,7 +247,8 @@ void NativeThemeWin::Paint(cc::PaintCanvas* canvas,
                            State state,
                            const gfx::Rect& rect,
                            const ExtraParams& extra,
-                           ColorScheme color_scheme) const {
+                           ColorScheme color_scheme,
+                           const absl::optional<SkColor>& accent_color) const {
   if (rect.IsEmpty())
     return;
 
@@ -322,6 +323,23 @@ void NativeThemeWin::ConfigureWebInstance() {
   web_instance->set_system_colors(GetSystemColors());
 }
 
+bool NativeThemeWin::AllowColorPipelineRedirection(
+    ColorScheme color_scheme) const {
+  return true;
+}
+
+SkColor NativeThemeWin::GetSystemColorDeprecated(ColorId color_id,
+                                                 ColorScheme color_scheme,
+                                                 bool apply_processing) const {
+  absl::optional<SkColor> color;
+  if (color_scheme == ColorScheme::kPlatformHighContrast &&
+      (color = GetPlatformHighContrastColor(color_id))) {
+    return color.value();
+  }
+  return NativeTheme::GetSystemColorDeprecated(color_id, color_scheme,
+                                               apply_processing);
+}
+
 NativeThemeWin::~NativeThemeWin() {
   // TODO(https://crbug.com/787692): Calling CloseHandles() here breaks
   // certain tests and the reliability bots.
@@ -350,7 +368,7 @@ void NativeThemeWin::OnSysColorChange() {
     set_forced_colors(IsUsingHighContrastThemeInternal());
   set_preferred_color_scheme(CalculatePreferredColorScheme());
   set_preferred_contrast(CalculatePreferredContrast());
-  NotifyObservers();
+  NotifyOnNativeThemeUpdated();
 }
 
 void NativeThemeWin::UpdateSystemColors() {
@@ -590,18 +608,7 @@ void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
   }
 }
 
-SkColor NativeThemeWin::GetSystemColor(ColorId color_id,
-                                       ColorScheme color_scheme) const {
-  if (color_scheme == ColorScheme::kDefault)
-    color_scheme = GetDefaultSystemColorScheme();
-
-  base::Optional<SkColor> color;
-  if (color_scheme == ColorScheme::kPlatformHighContrast)
-    color = GetPlatformHighContrastColor(color_id);
-  return color.value_or(NativeTheme::GetSystemColor(color_id, color_scheme));
-}
-
-base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
+absl::optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
     ColorId color_id) const {
   switch (color_id) {
     // Window Background
@@ -615,7 +622,7 @@ base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
     case kColorId_TableBackgroundAlternate:
     case kColorId_TooltipBackground:
     case kColorId_ProminentButtonDisabledColor:
-    case kColorId_NotificationDefaultBackground:
+    case kColorId_NotificationBackground:
       return system_colors_[SystemThemeColor::kWindow];
 
     // Window Text
@@ -631,7 +638,6 @@ base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
     case kColorId_TooltipIcon:
     case kColorId_TooltipText:
     case kColorId_ThrobberSpinningColor:
-    case kColorId_ThrobberLightColor:
     case kColorId_AlertSeverityLow:
     case kColorId_AlertSeverityMedium:
     case kColorId_AlertSeverityHigh:
@@ -681,6 +687,7 @@ base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
     case kColorId_ProminentButtonColor:
     case kColorId_ProminentButtonFocusedColor:
     case kColorId_ButtonBorderColor:
+    case kColorId_DropdownSelectedBackgroundColor:
     case kColorId_FocusedMenuItemBackgroundColor:
     case kColorId_LabelTextSelectionBackgroundFocused:
     case kColorId_TextfieldSelectionBackgroundFocused:
@@ -703,7 +710,7 @@ base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
       return system_colors_[SystemThemeColor::kHighlightText];
 
     default:
-      return base::nullopt;
+      return absl::nullopt;
   }
 }
 
@@ -754,10 +761,15 @@ NativeTheme::PreferredContrast NativeThemeWin::CalculatePreferredContrast()
   if (!InForcedColorsMode())
     return NativeTheme::CalculatePreferredContrast();
 
-  // According to the spec [1], "when the user agent can determine whether the
-  // forced color palette chosen by the user has a high or low contrast, one of
-  // 'prefers-contrast: more' or 'prefers-contrast: less' must match in addition
-  // to 'prefers-contrast: forced'."
+  // TODO(sartang@microsoft.com): Update the spec page at
+  // https://www.w3.org/TR/css-color-adjust-1/#forced, it currently does not
+  // mention the relation between forced-colors-active and prefers-contrast.
+  //
+  // According to spec [1], "in addition to forced-colors: active, the user
+  // agent must also match one of prefers-contrast: more or
+  // prefers-contrast: less if it can determine that the forced color
+  // palette chosen by the user has a particularly high or low contrast,
+  // and must make prefers-contrast: custom match otherwise".
   //
   // Using WCAG definitions [2], we have decided to match 'more' in Forced
   // Colors Mode if the contrast ratio between the foreground and background
@@ -771,7 +783,8 @@ NativeTheme::PreferredContrast NativeThemeWin::CalculatePreferredContrast()
   // These ratios will act as an experimental baseline that we can adjust based
   // on user feedback.
   //
-  // [1] https://www.w3.org/TR/css-color-adjust-1/#forced
+  // [1]
+  // https://drafts.csswg.org/mediaqueries-5/#valdef-media-forced-colors-active
   // [2] https://www.w3.org/WAI/WCAG21/Understanding/contrast-enhanced
   SkColor bg_color = system_colors_[SystemThemeColor::kWindow];
   SkColor fg_color = system_colors_[SystemThemeColor::kWindowText];
@@ -779,7 +792,7 @@ NativeTheme::PreferredContrast NativeThemeWin::CalculatePreferredContrast()
   if (contrast_ratio >= 7)
     return NativeTheme::PreferredContrast::kMore;
   return contrast_ratio <= 2.5 ? NativeTheme::PreferredContrast::kLess
-                               : NativeTheme::PreferredContrast::kNoPreference;
+                               : NativeTheme::PreferredContrast::kCustom;
 }
 
 NativeTheme::ColorScheme NativeThemeWin::GetDefaultSystemColorScheme() const {
@@ -1517,13 +1530,17 @@ int NativeThemeWin::GetWindowsState(Part part,
     case kInnerSpinButton:
       switch (state) {
         case kDisabled:
-          return extra.inner_spin.spin_up ? UPS_DISABLED : DNS_DISABLED;
+          return extra.inner_spin.spin_up ? static_cast<int>(UPS_DISABLED)
+                                          : static_cast<int>(DNS_DISABLED);
         case kHovered:
-          return extra.inner_spin.spin_up ? UPS_HOT : DNS_HOT;
+          return extra.inner_spin.spin_up ? static_cast<int>(UPS_HOT)
+                                          : static_cast<int>(DNS_HOT);
         case kNormal:
-          return extra.inner_spin.spin_up ? UPS_NORMAL : DNS_NORMAL;
+          return extra.inner_spin.spin_up ? static_cast<int>(UPS_NORMAL)
+                                          : static_cast<int>(DNS_NORMAL);
         case kPressed:
-          return extra.inner_spin.spin_up ? UPS_PRESSED : DNS_PRESSED;
+          return extra.inner_spin.spin_up ? static_cast<int>(UPS_PRESSED)
+                                          : static_cast<int>(DNS_PRESSED);
         case kNumStates:
           NOTREACHED();
           return 0;
@@ -1683,7 +1700,7 @@ void NativeThemeWin::UpdateDarkModeStatus() {
   }
   set_use_dark_colors(dark_mode_enabled);
   set_preferred_color_scheme(CalculatePreferredColorScheme());
-  NotifyObservers();
+  NotifyOnNativeThemeUpdated();
 }
 
 }  // namespace ui

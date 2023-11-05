@@ -10,9 +10,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -99,7 +99,7 @@ class SnapshotBrowserTest : public ContentBrowserTest {
       const net::test_server::HttpRequest& request) {
     GURL absolute_url = embedded_test_server()->GetURL(request.relative_url);
     if (absolute_url.path() != "/test")
-      return std::unique_ptr<net::test_server::HttpResponse>();
+      return nullptr;
 
     std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
         new net::test_server::BasicHttpResponse());
@@ -110,13 +110,13 @@ class SnapshotBrowserTest : public ContentBrowserTest {
   }
 
   void WaitForAllWindowsToBeReady() {
-    const base::string16 expected_title = base::UTF8ToUTF16("Ready");
+    const std::u16string expected_title = u"Ready";
     // The subordinate windows may load asynchronously. Wait for all of
     // them to execute their script before proceeding.
     auto browser_list = Shell::windows();
     for (Shell* browser : browser_list) {
       TitleWatcher watcher(GetWebContents(browser), expected_title);
-      const base::string16& actual_title = watcher.WaitAndGetTitle();
+      const std::u16string& actual_title = watcher.WaitAndGetTitle();
       EXPECT_EQ(expected_title, actual_title);
     }
   }
@@ -147,13 +147,10 @@ class SnapshotBrowserTest : public ContentBrowserTest {
 
   void SyncSnapshotCallback(content::RenderWidgetHostImpl* rwhi,
                             const gfx::Image& image) {
-    bool found = false;
     for (auto iter = expected_snapshots_.begin();
          iter != expected_snapshots_.end(); ++iter) {
       const SerialSnapshot& expected = *iter;
       if (expected.host == rwhi) {
-        found = true;
-
         const SkBitmap* bitmap = image.ToSkBitmap();
         SkColor color = bitmap->getColor(1, 1);
 
@@ -229,10 +226,8 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, SingleWindowTest) {
     std::string colorString = base::StringPrintf(
         "#%02x%02x%02x", expected.color.r, expected.color.g, expected.color.b);
     std::string script = std::string("fillWithColor(\"") + colorString + "\");";
-    std::string result;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractString(GetWebContents(shell()),
-                                                       script, &result));
-    EXPECT_EQ(result, colorString);
+    EXPECT_EQ(colorString, EvalJs(GetWebContents(shell()), script,
+                                  EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
     expected_snapshots_.push_back(expected);
 
@@ -269,10 +264,8 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
   SetupTestServer();
 
   for (int i = 0; i < 3; ++i) {
-    bool result = false;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-        GetWebContents(shell()), "openNewWindow()", &result));
-    EXPECT_TRUE(result);
+    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()",
+                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
   }
 
   base::RunLoop().RunUntilIdle();
@@ -299,10 +292,8 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
                              expected.color.g, expected.color.b);
       std::string script =
           std::string("fillWithColor(\"") + colorString + "\");";
-      std::string result;
-      EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-          GetWebContents(browser), script, &result));
-      EXPECT_EQ(result, colorString);
+      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script,
+                                    EXECUTE_SCRIPT_USE_MANUAL_REPLY));
       expected_snapshots_.push_back(expected);
       // Get the snapshot from the surface rather than the window. The
       // on-screen display path is verified by the GPU tests, and it
@@ -324,10 +315,8 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_AsyncMultiWindowTest) {
   SetupTestServer();
 
   for (int i = 0; i < 3; ++i) {
-    bool result = false;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-        GetWebContents(shell()), "openNewWindow()", &result));
-    EXPECT_TRUE(result);
+    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()",
+                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
   }
 
   base::RunLoop().RunUntilIdle();
@@ -366,10 +355,8 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_AsyncMultiWindowTest) {
                                                    expected.g, expected.b);
       std::string script =
           std::string("fillWithColor(\"") + colorString + "\");";
-      std::string result;
-      EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-          GetWebContents(browser), script, &result));
-      EXPECT_EQ(result, colorString);
+      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script,
+                                    EXECUTE_SCRIPT_USE_MANUAL_REPLY));
       // Get the snapshot from the surface rather than the window. The
       // on-screen display path is verified by the GPU tests, and it
       // seems difficult to figure out the colorspace transformation

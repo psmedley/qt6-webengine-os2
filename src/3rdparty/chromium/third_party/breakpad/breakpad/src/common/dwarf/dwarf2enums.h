@@ -31,7 +31,7 @@
 #ifndef COMMON_DWARF_DWARF2ENUMS_H__
 #define COMMON_DWARF_DWARF2ENUMS_H__
 
-namespace dwarf2reader {
+namespace google_breakpad {
 
 // These enums do not follow the google3 style only because they are
 // known universally (specs, other implementations) by the names in
@@ -95,6 +95,10 @@ enum DwarfTag {
   DW_TAG_unspecified_type = 0x3b,
   DW_TAG_partial_unit = 0x3c,
   DW_TAG_imported_unit = 0x3d,
+  // DWARF 4.
+  DW_TAG_type_unit = 0x41,
+  // DWARF 5.
+  DW_TAG_skeleton_unit = 0x4a,
   // SGI/MIPS Extensions.
   DW_TAG_MIPS_loop = 0x4081,
   // HP extensions.  See:
@@ -271,8 +275,10 @@ enum DwarfAttribute {
   // DWARF 4
   DW_AT_linkage_name  = 0x6e,
   // DWARF 5
+  DW_AT_str_offsets_base = 0x72,
   DW_AT_addr_base = 0x73,
   DW_AT_rnglists_base = 0x74,
+  DW_AT_dwo_name = 0x76,
   // SGI/MIPS extensions.
   DW_AT_MIPS_fde = 0x2001,
   DW_AT_MIPS_loop_begin = 0x2002,
@@ -734,5 +740,5 @@ enum DwarfPointerEncoding
     DW_EH_PE_indirect	= 0x80
   };
 
-}  // namespace dwarf2reader
+}  // namespace google_breakpad
 #endif  // COMMON_DWARF_DWARF2ENUMS_H__

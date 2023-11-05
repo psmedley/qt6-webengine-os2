@@ -7,11 +7,12 @@
 
 #include <string>
 #include <vector>
-#include "base/optional.h"
+#include "base/unguessable_token.h"
 #include "content/public/browser/content_browser_client.h"
 #include "net/base/isolation_info.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/websocket.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/websockets/websocket_connector.mojom.h"
 #include "url/origin.h"
 
@@ -39,9 +40,11 @@ class WebSocketConnectorImpl final : public blink::mojom::WebSocketConnector {
   void Connect(const GURL& url,
                const std::vector<std::string>& requested_protocols,
                const net::SiteForCookies& site_for_cookies,
-               const base::Optional<std::string>& user_agent,
+               const absl::optional<std::string>& user_agent,
                mojo::PendingRemote<network::mojom::WebSocketHandshakeClient>
-                   handshake_client) override;
+                   handshake_client,
+               const absl::optional<base::UnguessableToken>&
+                   throttling_profile_id) override;
 
  private:
   static void ConnectCalledByContentBrowserClient(

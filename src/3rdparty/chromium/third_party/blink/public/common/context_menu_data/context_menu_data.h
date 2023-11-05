@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/context_menu_data/menu_item_info.h"
 #include "third_party/blink/public/common/input/web_menu_source_type.h"
 #include "third_party/blink/public/common/navigation/impression.h"
@@ -90,7 +91,7 @@ struct ContextMenuData {
 
   // If the node is a link, the impression declared by the link's conversion
   // measurement attributes.
-  base::Optional<Impression> impression;
+  absl::optional<Impression> impression;
 
   // The raw text of the selection in context.
   std::string selected_text;
@@ -108,10 +109,10 @@ struct ContextMenuData {
   std::string suggested_filename;
 
   // The editable (possibily) misspelled word.
-  base::string16 misspelled_word;
+  std::u16string misspelled_word;
 
   // If misspelledWord is not empty, holds suggestions from the dictionary.
-  std::vector<base::string16> dictionary_suggestions;
+  std::vector<std::u16string> dictionary_suggestions;
 
   // Whether context is editable.
   bool is_editable;
@@ -152,6 +153,10 @@ struct ContextMenuData {
   int selection_start_offset;
 
   WebMenuSourceType source_type;
+
+  // True when the context contains text selected by a text fragment. See
+  // TextFragmentAnchor.
+  bool opened_from_highlight = false;
 
   ContextMenuData()
       : media_type(blink::mojom::ContextMenuDataMediaType::kNone),

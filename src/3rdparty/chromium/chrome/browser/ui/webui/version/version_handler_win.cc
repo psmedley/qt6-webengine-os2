@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/webui/version/version_handler_win.h"
 
 #include "base/bind.h"
-#include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/win/windows_version.h"
@@ -29,8 +28,7 @@ void VersionHandlerWindows::HandleRequestVersionInfo(
 }
 
 void VersionHandlerWindows::OnVersion(const std::string& version) {
-  base::Value arg(version);
-  CallJavascriptFunction("returnOsVersion", arg);
+  FireWebUIListener("return-os-version", base::Value(version));
 }
 
 // static

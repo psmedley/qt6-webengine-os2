@@ -11,10 +11,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/base/models/image_model.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/view.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
@@ -48,15 +49,19 @@ WidgetDelegate::Params::Params() = default;
 WidgetDelegate::Params::~Params() = default;
 
 WidgetDelegate::WidgetDelegate()
-    : widget_initializing_callbacks_(std::make_unique<ClosureVector>()),
-      widget_initialized_callbacks_(std::make_unique<ClosureVector>()),
+    : widget_initialized_callbacks_(std::make_unique<ClosureVector>()),
       client_view_factory_(
           base::BindOnce(&CreateDefaultClientView, base::Unretained(this))),
       non_client_frame_view_factory_(
           base::BindRepeating(&CreateDefaultNonClientFrameView)),
       overlay_view_factory_(base::BindOnce(&CreateDefaultOverlayView)) {}
+
 WidgetDelegate::~WidgetDelegate() {
   CHECK(can_delete_this_) << "A WidgetDelegate must outlive its Widget";
+  if (destructor_ran_) {
+    DCHECK(!*destructor_ran_);
+    *destructor_ran_ = true;
+  }
 }
 
 void WidgetDelegate::SetCanActivate(bool can_activate) {
@@ -113,12 +118,12 @@ ax::mojom::Role WidgetDelegate::GetAccessibleWindowRole() {
   return params_.accessible_role;
 }
 
-base::string16 WidgetDelegate::GetAccessibleWindowTitle() const {
+std::u16string WidgetDelegate::GetAccessibleWindowTitle() const {
   return params_.accessible_title.empty() ? GetWindowTitle()
                                           : params_.accessible_title;
 }
 
-base::string16 WidgetDelegate::GetWindowTitle() const {
+std::u16string WidgetDelegate::GetWindowTitle() const {
   return params_.title;
 }
 
@@ -138,17 +143,17 @@ bool WidgetDelegate::ShouldShowCloseButton() const {
   return params_.show_close_button;
 }
 
-gfx::ImageSkia WidgetDelegate::GetWindowAppIcon() {
+ui::ImageModel WidgetDelegate::GetWindowAppIcon() {
   // Prefer app icon if available.
   if (!params_.app_icon.isNull())
-    return params_.app_icon;
+    return ui::ImageModel::FromImageSkia(params_.app_icon);
   // Fall back to the window icon.
   return GetWindowIcon();
 }
 
 // Returns the icon to be displayed in the window.
-gfx::ImageSkia WidgetDelegate::GetWindowIcon() {
-  return params_.icon;
+ui::ImageModel WidgetDelegate::GetWindowIcon() {
+  return ui::ImageModel::FromImageSkia(params_.icon);
 }
 
 bool WidgetDelegate::ShouldShowWindowIcon() const {
@@ -189,10 +194,6 @@ bool WidgetDelegate::GetSavedWindowPlacement(
 
 void WidgetDelegate::WidgetInitializing(Widget* widget) {
   widget_ = widget;
-  for (auto&& callback : *widget_initializing_callbacks_)
-    std::move(callback).Run();
-  widget_initializing_callbacks_.reset();
-  OnWidgetInitializing();
 }
 
 void WidgetDelegate::WidgetInitialized() {
@@ -220,10 +221,27 @@ void WidgetDelegate::WindowClosing() {
 }
 
 void WidgetDelegate::DeleteDelegate() {
-  for (auto&& callback : delete_delegate_callbacks_)
+  bool owned_by_widget = params_.owned_by_widget;
+  ClosureVector delete_callbacks;
+  delete_callbacks.swap(delete_delegate_callbacks_);
+
+  bool destructor_ran = false;
+  destructor_ran_ = &destructor_ran;
+  for (auto&& callback : delete_callbacks)
     std::move(callback).Run();
-  if (params_.owned_by_widget)
+
+  // If the WidgetDelegate is owned by the Widget, it is illegal for the
+  // DeleteDelegate callbacks to destruct it; if it is not owned by the Widget,
+  // the DeleteDelete callbacks are allowed but not required to destroy it.
+  if (owned_by_widget) {
+    DCHECK(!destructor_ran);
     delete this;
+  } else {
+    // If the destructor didn't get run, reset destructor_ran_ so that when it
+    // does run it doesn't try to scribble over where our stack was.
+    if (!destructor_ran)
+      destructor_ran_ = nullptr;
+  }
 }
 
 Widget* WidgetDelegate::GetWidget() {
@@ -284,25 +302,25 @@ void WidgetDelegate::SetAccessibleRole(ax::mojom::Role role) {
   params_.accessible_role = role;
 }
 
-void WidgetDelegate::SetAccessibleTitle(base::string16 title) {
+void WidgetDelegate::SetAccessibleTitle(std::u16string title) {
   params_.accessible_title = std::move(title);
 }
 
 void WidgetDelegate::SetCanMaximize(bool can_maximize) {
-  std::exchange(params_.can_maximize, can_maximize);
-  if (GetWidget() && params_.can_maximize != can_maximize)
+  bool old_can_maximize = std::exchange(params_.can_maximize, can_maximize);
+  if (GetWidget() && params_.can_maximize != old_can_maximize)
     GetWidget()->OnSizeConstraintsChanged();
 }
 
 void WidgetDelegate::SetCanMinimize(bool can_minimize) {
-  std::exchange(params_.can_minimize, can_minimize);
-  if (GetWidget() && params_.can_minimize != can_minimize)
+  bool old_can_minimize = std::exchange(params_.can_minimize, can_minimize);
+  if (GetWidget() && params_.can_minimize != old_can_minimize)
     GetWidget()->OnSizeConstraintsChanged();
 }
 
 void WidgetDelegate::SetCanResize(bool can_resize) {
-  std::exchange(params_.can_resize, can_resize);
-  if (GetWidget() && params_.can_resize != can_resize)
+  bool old_can_resize = std::exchange(params_.can_resize, can_resize);
+  if (GetWidget() && params_.can_resize != old_can_resize)
     GetWidget()->OnSizeConstraintsChanged();
 }
 
@@ -355,7 +373,7 @@ void WidgetDelegate::SetShowTitle(bool show_title) {
   params_.show_title = show_title;
 }
 
-void WidgetDelegate::SetTitle(const base::string16& title) {
+void WidgetDelegate::SetTitle(const std::u16string& title) {
   if (params_.title == title)
     return;
   params_.title = title;
@@ -377,12 +395,6 @@ void WidgetDelegate::SetHasWindowSizeControls(bool has_controls) {
   SetCanMaximize(has_controls);
   SetCanMinimize(has_controls);
   SetCanResize(has_controls);
-}
-
-void WidgetDelegate::RegisterWidgetInitializingCallback(
-    base::OnceClosure callback) {
-  DCHECK(widget_initializing_callbacks_);
-  widget_initializing_callbacks_->emplace_back(std::move(callback));
 }
 
 void WidgetDelegate::RegisterWidgetInitializedCallback(
@@ -421,13 +433,11 @@ void WidgetDelegate::SetOverlayViewFactory(OverlayViewFactory factory) {
   overlay_view_factory_ = std::move(factory);
 }
 
-void WidgetDelegate::SetContentsViewImpl(View* contents) {
-  // Note: DCHECKing the ownership of contents is done in the public setters,
-  // which are inlined in the header.
+void WidgetDelegate::SetContentsViewImpl(std::unique_ptr<View> contents) {
+  DCHECK(!contents->owned_by_client());
   DCHECK(!unowned_contents_view_);
-  if (!contents->owned_by_client())
-    owned_contents_view_ = base::WrapUnique(contents);
-  unowned_contents_view_ = contents;
+  owned_contents_view_ = std::move(contents);
+  unowned_contents_view_ = owned_contents_view_.get();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -435,7 +445,6 @@ void WidgetDelegate::SetContentsViewImpl(View* contents) {
 
 WidgetDelegateView::WidgetDelegateView() {
   // A WidgetDelegate should be deleted on DeleteDelegate.
-  set_owned_by_client();
   SetOwnedByWidget(true);
 }
 

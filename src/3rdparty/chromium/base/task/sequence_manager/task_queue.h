@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task/common/checked_lock.h"
 #include "base/task/sequence_manager/lazy_now.h"
@@ -16,7 +15,8 @@
 #include "base/task/task_observer.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
-#include "base/trace_event/base_tracing.h"
+#include "base/trace_event/base_tracing_forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
@@ -46,20 +46,47 @@ class TimeDomain;
 // task queue always gets unregistered on the main thread.
 class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
  public:
-  class Observer {
+  // Interface that lets a task queue be throttled by changing the wake up time
+  // and optionally, by inserting fences. A wake up in this context is a
+  // notification at a given time that lets this TaskQueue know of newly ripe
+  // delayed tasks if it's enabled. By delaying the desired wake up time to a
+  // different allowed wake up time, the Throttler can hold off delayed tasks
+  // that would otherwise by allowed to run sooner.
+  class BASE_EXPORT Throttler {
    public:
-    virtual ~Observer() = default;
+    // Invoked when the TaskQueue's next allowed wake up time is reached and is
+    // enabled, even if blocked by a fence. That wake up is defined by the last
+    // value returned from GetNextAllowedWakeUp().
+    // This is always called on the thread this TaskQueue is associated with.
+    virtual void OnWakeUp(LazyNow* lazy_now) = 0;
 
-    // Notify observer that the time at which this queue wants to run
-    // the next task has changed. |next_wakeup| can be in the past
-    // (e.g. TimeTicks() can be used to notify about immediate work).
-    // Can be called on any thread
-    // All methods but SetObserver, SetTimeDomain and GetTimeDomain can be
-    // called on |queue|.
-    //
-    // TODO(altimin): Make it Optional<TimeTicks> to tell
-    // observer about cancellations.
-    virtual void OnQueueNextWakeUpChanged(TimeTicks next_wake_up) = 0;
+    // Invoked when the TaskQueue newly gets a pending immediate task and is
+    // enabled, even if blocked by a fence. Redundant calls are possible when
+    // the TaskQueue already had a pending immediate task.
+    // The implementation may use this to:
+    // - Restrict task execution by inserting/updating a fence.
+    // - Update the TaskQueue's next delayed wake up via UpdateDelayedWakeUp().
+    //   This allows the Throttler to perform additional operations later from
+    //   OnWakeUp().
+    // This is always called on the thread this TaskQueue is associated with.
+    virtual void OnHasImmediateTask() = 0;
+
+    // Invoked when the TaskQueue is enabled and wants to know when to schedule
+    // the next delayed wake-up (which happens at least every time this queue is
+    // about to cause the next wake up) provided |next_desired_wake_up|, the
+    // wake-up for the next pending delayed task in this queue (pending delayed
+    // tasks that are ripe may be ignored), or nullopt if there's no pending
+    // delayed task. |has_ready_task| indicates whether there are immediate
+    // tasks or ripe delayed tasks. The implementation should return the next
+    // allowed wake up, or nullopt if no future wake-up is necessary.
+    // This is always called on the thread this TaskQueue is associated with.
+    virtual absl::optional<DelayedWakeUp> GetNextAllowedWakeUp(
+        LazyNow* lazy_now,
+        absl::optional<DelayedWakeUp> next_desired_wake_up,
+        bool has_ready_task) = 0;
+
+   protected:
+    ~Throttler() = default;
   };
 
   // Shuts down the queue. All tasks currently queued will be discarded.
@@ -68,6 +95,10 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
   // Shuts down the queue when there are no more tasks queued.
   void ShutdownTaskQueueGracefully();
 
+  // Queues with higher priority are selected to run before queues of lower
+  // priority. Note that there is no starvation protection, i.e., a constant
+  // stream of high priority work can mean that tasks in lower priority queues
+  // won't get to run.
   // TODO(scheduler-dev): Could we define a more clear list of priorities?
   // See https://crbug.com/847858.
   enum QueuePriority : uint8_t {
@@ -76,24 +107,16 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
     // private queues which perform control operations.
     kControlPriority = 0,
 
-    // The selector will prioritize highest over high, normal and low; and
-    // high over normal and low; and normal over low. However it will ensure
-    // neither of the lower priority queues can be completely starved by higher
-    // priority tasks. All three of these queues will always take priority over
-    // and can starve the best effort queue.
     kHighestPriority = 1,
-
     kVeryHighPriority = 2,
-
     kHighPriority = 3,
-
-    // Queues with normal priority are the default.
-    kNormalPriority = 4,
+    kNormalPriority = 4,  // Queues with normal priority are the default.
     kLowPriority = 5,
 
     // Queues with best effort priority will only be run if all other queues are
-    // empty. They can be starved by the other queues.
+    // empty.
     kBestEffortPriority = 6,
+
     // Must be the last entry.
     kQueuePriorityCount = 7,
     kFirstQueuePriority = kControlPriority,
@@ -244,23 +267,24 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
   // Returns the number of pending tasks in the queue.
   size_t GetNumberOfPendingTasks() const;
 
-  // Returns true if the queue has work that's ready to execute now.
+  // Returns true iff this queue has immediate tasks or delayed tasks that are
+  // ripe for execution. Ignores the queue's enabled state and fences.
   // NOTE: this must be called on the thread this TaskQueue was created by.
-  bool HasTaskToRunImmediately() const;
+  // TODO(etiennep): Rename to HasReadyTask() and add LazyNow parameter.
+  bool HasTaskToRunImmediatelyOrReadyDelayedTask() const;
 
-  // Returns requested run time of next scheduled wake-up for a delayed task
-  // which is not ready to run. If there are no such tasks (immediate tasks
-  // don't count) or the queue is disabled it returns nullopt.
+  // Returns a wake-up for the next pending delayed task (pending delayed tasks
+  // that are ripe may be ignored), ignoring Throttler is any. If there are no
+  // such tasks (immediate tasks don't count) or the queue is disabled it
+  // returns nullopt.
   // NOTE: this must be called on the thread this TaskQueue was created by.
-  Optional<TimeTicks> GetNextScheduledWakeUp();
+  absl::optional<DelayedWakeUp> GetNextDesiredWakeUp();
 
   // Can be called on any thread.
   virtual const char* GetName() const;
 
-#if BUILDFLAG(ENABLE_BASE_TRACING)
   // Serialise this object into a trace.
-  void WriteIntoTracedValue(perfetto::TracedValue context) const;
-#endif
+  void WriteIntoTrace(perfetto::TracedValue context) const;
 
   // Set the priority of the queue to |priority|. NOTE this must be called on
   // the thread this TaskQueue was created by.
@@ -327,7 +351,17 @@ class BASE_EXPORT TaskQueue : public RefCountedThreadSafe<TaskQueue> {
   // Returns true if the queue has a fence which is blocking execution of tasks.
   bool BlockedByFence() const;
 
-  void SetObserver(Observer* observer);
+  // Associates |throttler| to this queue. Only one throttler can be associated
+  // with this queue. |throttler| must outlive this TaskQueue, or remain valid
+  // until ResetThrottler().
+  void SetThrottler(Throttler* throttler);
+  // Disassociates the current throttler from this queue, if any.
+  void ResetThrottler();
+
+  // Updates the task queue's next wake up time in its time domain, taking into
+  // account the desired run time of queued tasks and policies enforced by the
+  // throttler if any.
+  void UpdateDelayedWakeUp(LazyNow* lazy_now);
 
   // Controls whether or not the queue will emit traces events when tasks are
   // posted to it while disabled. This only applies for the current or next

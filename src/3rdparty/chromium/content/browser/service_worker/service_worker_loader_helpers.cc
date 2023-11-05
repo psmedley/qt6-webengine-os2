@@ -54,9 +54,7 @@ bool CheckResponseHead(
 
   // Remain consistent with logic in
   // blink::InstalledServiceWorkerModuleScriptFetcher::Fetch()
-  if (!blink::IsSupportedJavascriptMimeType(response_head.mime_type) &&
-      !(base::FeatureList::IsEnabled(blink::features::kJSONModules) &&
-        blink::IsJSONMimeType(response_head.mime_type))) {
+  if (!blink::IsSupportedJavascriptMimeType(response_head.mime_type)) {
     *out_completion_status =
         network::URLLoaderCompletionStatus(net::ERR_INSECURE_RESPONSE);
     *out_error_message =
@@ -101,19 +99,26 @@ bool ShouldValidateBrowserCacheForScript(
 #if DCHECK_IS_ON()
 void CheckVersionStatusBeforeWorkerScriptLoad(
     ServiceWorkerVersion::Status status,
-    network::mojom::RequestDestination resource_destination) {
-  switch (resource_destination) {
+    bool is_main_script,
+    blink::mojom::ScriptType script_type) {
+  if (is_main_script) {
     // The service worker main script should be fetched during worker startup.
-    case network::mojom::RequestDestination::kServiceWorker:
-      DCHECK_EQ(status, ServiceWorkerVersion::NEW);
-      break;
-    // importScripts() should be called until completion of the install event.
-    case network::mojom::RequestDestination::kScript:
+    DCHECK_EQ(status, ServiceWorkerVersion::NEW);
+    return;
+  }
+
+  // Non-main scripts are fetched by importScripts() for classic scripts or
+  // static-import for module scripts.
+  switch (script_type) {
+    case blink::mojom::ScriptType::kClassic:
+      // importScripts() should be called until completion of the install event.
       DCHECK(status == ServiceWorkerVersion::NEW ||
              status == ServiceWorkerVersion::INSTALLING);
       break;
-    default:
-      NOTREACHED() << resource_destination;
+    case blink::mojom::ScriptType::kModule:
+      // Static-import should be handled during worker startup along with the
+      // main script.
+      DCHECK_EQ(status, ServiceWorkerVersion::NEW);
       break;
   }
 }
@@ -201,15 +206,23 @@ network::ResourceRequest CreateRequestForServiceWorkerScript(
           static_cast<int>(blink::mojom::ResourceType::kScript);
     }
   } else {
-    // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-module-worker-script-tree
-    // Set the "Service-Worker" header for the service worker script request:
-    // https://w3c.github.io/ServiceWorker/#service-worker-script-request
-    request.headers.SetHeader("Service-Worker", "script");
+    if (is_main_script) {
+      // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-module-worker-script-tree
+      // Set the "Service-Worker" header for the service worker script request:
+      // https://w3c.github.io/ServiceWorker/#service-worker-script-request
+      request.headers.SetHeader("Service-Worker", "script");
 
-    // The "Fetch a module worker script graph" uses "cors" as mode and "omit"
-    // as credentials mode.
+      // The "Fetch a module worker script graph" uses "same-origin" as mode for
+      // main script and "cors" otherwise.
+      // https://w3c.github.io/ServiceWorker/#update-algorithm
+      request.mode = network::mojom::RequestMode::kSameOrigin;
+    } else {
+      request.mode = network::mojom::RequestMode::kCors;
+    }
+
+    // The "Fetch a module worker script graph" uses "omit" as credentials
+    // mode.
     // https://w3c.github.io/ServiceWorker/#update-algorithm
-    request.mode = network::mojom::RequestMode::kCors;
     request.credentials_mode = network::mojom::CredentialsMode::kOmit;
 
     // The request's destination is "serviceworker" for the main and

@@ -6,6 +6,7 @@
 
 #import "content/browser/web_contents/web_contents_view_mac.h"
 
+#include <memory>
 #include <string>
 
 #import "base/mac/mac_util.h"
@@ -20,7 +21,6 @@
 #import "content/app_shim_remote_cocoa/web_contents_view_cocoa.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
-#include "content/browser/renderer_host/display_util.h"
 #include "content/browser/renderer_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -34,6 +34,7 @@
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
+#include "ui/display/display_util.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
 
 using blink::DragOperationsMask;
@@ -266,8 +267,8 @@ void WebContentsViewMac::ShowPopupMenu(
     std::vector<blink::mojom::MenuItemPtr> menu_items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  popup_menu_helper_.reset(
-      new PopupMenuHelper(this, render_frame_host, std::move(popup_client)));
+  popup_menu_helper_ = std::make_unique<PopupMenuHelper>(
+      this, render_frame_host, std::move(popup_client));
   popup_menu_helper_->ShowPopupMenu(bounds, item_height, item_font_size,
                                     selected_item, std::move(menu_items),
                                     right_aligned, allow_multiple_selection);
@@ -376,10 +377,9 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForChildWidget(
   return view;
 }
 
-void WebContentsViewMac::SetPageTitle(const base::string16& title) {
+void WebContentsViewMac::SetPageTitle(const std::u16string& title) {
   // Meaningless on the Mac; widgets don't have a "title" attribute
 }
-
 
 void WebContentsViewMac::RenderViewReady() {}
 

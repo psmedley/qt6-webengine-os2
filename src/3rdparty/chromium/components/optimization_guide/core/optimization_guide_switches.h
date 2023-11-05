@@ -9,7 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "base/optional.h"
+#include "components/optimization_guide/proto/models.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace optimization_guide {
 namespace proto {
@@ -28,8 +29,10 @@ extern const char kOptimizationGuideServiceAPIKey[];
 extern const char kPurgeHintsStore[];
 extern const char kPurgeModelAndFeaturesStore[];
 extern const char kDisableFetchingHintsAtNavigationStartForTesting[];
+extern const char kDisableFetchHintsForActiveTabsOnDeferredStartup[];
 extern const char kDisableCheckingUserPermissionsForTesting[];
 extern const char kDisableModelDownloadVerificationForTesting[];
+extern const char kModelOverride[];
 
 // Returns whether the hint component should be processed.
 // Available hint components are only processed if a proto override isn't being
@@ -48,11 +51,14 @@ bool ShouldPurgeModelAndFeaturesStoreOnStartup();
 // Parses a list of hosts to have hints fetched for. This overrides scheduling
 // of the first hints fetch and forces it to occur immediately. If no hosts are
 // provided, nullopt is returned.
-base::Optional<std::vector<std::string>>
+absl::optional<std::vector<std::string>>
 ParseHintsFetchOverrideFromCommandLine();
 
 // Whether the hints fetcher timer should be overridden.
 bool ShouldOverrideFetchHintsTimer();
+
+// Disables fetching hints for active tabs on deferred startup.
+bool DisableFetchHintsForActiveTabsOnDeferredStartup();
 
 // Whether the prediction model and host model features fetcher timer should be
 // overridden.
@@ -75,6 +81,16 @@ bool ShouldOverrideCheckingUserPermissionsToFetchHintsForTesting();
 
 // Returns true if the verification of model downloads should be skipped.
 bool ShouldSkipModelDownloadVerificationForTesting();
+
+// Returns whether at least one model was provided via command-line.
+bool IsModelOverridePresent();
+
+// Returns the file path string and metadata for the model provided via
+// command-line for |optimization_target|, if applicable.
+absl::optional<
+    std::pair<std::string, absl::optional<optimization_guide::proto::Any>>>
+GetModelOverrideForOptimizationTarget(
+    optimization_guide::proto::OptimizationTarget optimization_target);
 
 }  // namespace switches
 }  // namespace optimization_guide

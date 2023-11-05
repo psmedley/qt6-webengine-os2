@@ -154,9 +154,8 @@ class MimeHandlerViewTest : public extensions::ExtensionApiTest {
 
 class UserActivationUpdateWaiter {
  public:
-  explicit UserActivationUpdateWaiter(content::WebContents* web_contents) {
-    user_activation_interceptor_.Init(web_contents->GetMainFrame());
-  }
+  explicit UserActivationUpdateWaiter(content::WebContents* web_contents)
+      : user_activation_interceptor_(web_contents->GetMainFrame()) {}
   ~UserActivationUpdateWaiter() = default;
 
   void Wait() {
@@ -205,7 +204,7 @@ IN_PROC_BROWSER_TEST_F(MimeHandlerViewTest, EmbedWithInitialCrossOriginFrame) {
 // potential race between the cross-origin renderer initiated navigation and
 // the navigation to "about:blank" started from the browser.
 //
-// Disabled due to flakiness: https://crbug.com/1002788.
+// Disabled on all platforms due to flakiness: https://crbug.com/1182355.
 IN_PROC_BROWSER_TEST_F(MimeHandlerViewTest,
                        DISABLED_NavigationRaceFromEmbedder) {
   const std::string kTestName = "test_navigation_race_embedder";
@@ -229,8 +228,9 @@ IN_PROC_BROWSER_TEST_F(MimeHandlerViewTest,
 // other cross-origin content. On the embedder side, when the first page loads,
 // the <object> loads some text/csv content to create a MimeHandlerViewGuest.
 // The test passes if MHV loads.
+// TODO(crbug.com/1182355): Disabled due to flakes.
 IN_PROC_BROWSER_TEST_F(MimeHandlerViewTest,
-                       NavigationRaceFromCrossProcessRenderer) {
+                       DISABLED_NavigationRaceFromCrossProcessRenderer) {
   const std::string kTestName = "test_navigation_race_cross_origin";
   auto cross_origin_url =
       embedded_test_server()->GetURL("b.com", "/test_page.html").spec();
@@ -421,7 +421,7 @@ IN_PROC_BROWSER_TEST_F(MimeHandlerViewTest, BeforeUnload_ShowDialog) {
       ui_test_utils::WaitForAppModalDialog();
   EXPECT_TRUE(before_unload_dialog->is_before_unload_dialog());
   EXPECT_FALSE(before_unload_dialog->is_reload());
-  before_unload_dialog->OnAccept(base::string16(), false);
+  before_unload_dialog->OnAccept(std::u16string(), false);
 }
 
 IN_PROC_BROWSER_TEST_F(MimeHandlerViewTest,
@@ -466,7 +466,7 @@ IN_PROC_BROWSER_TEST_F(MimeHandlerViewTest,
       ui_test_utils::WaitForAppModalDialog();
   EXPECT_TRUE(before_unload_dialog->is_before_unload_dialog());
   EXPECT_FALSE(before_unload_dialog->is_reload());
-  before_unload_dialog->OnAccept(base::string16(), false);
+  before_unload_dialog->OnAccept(std::u16string(), false);
 }
 
 // Helper class to wait for document load event in the main frame.
@@ -476,7 +476,8 @@ class DocumentLoadComplete : public content::WebContentsObserver {
       : content::WebContentsObserver(web_contents) {}
   ~DocumentLoadComplete() override {}
 
-  void DocumentOnLoadCompletedInMainFrame() override {
+  void DocumentOnLoadCompletedInMainFrame(
+      content::RenderFrameHost* render_frame_host) override {
     did_load_ = true;
     run_loop_.Quit();
   }

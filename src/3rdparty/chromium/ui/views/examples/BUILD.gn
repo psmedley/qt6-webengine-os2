@@ -12,6 +12,8 @@ jumbo_component("views_examples_lib") {
   testonly = true
 
   sources = [
+    "animation_example.cc",
+    "animation_example.h",
     "ax_example.cc",
     "ax_example.h",
     "box_layout_example.cc",
@@ -38,6 +40,8 @@ jumbo_component("views_examples_lib") {
     "example_combobox_model.h",
     "examples_window.cc",
     "examples_window.h",
+    "fade_animation.cc",
+    "fade_animation.h",
     "flex_layout_example.cc",
     "flex_layout_example.h",
     "label_example.cc",
@@ -56,6 +60,8 @@ jumbo_component("views_examples_lib") {
     "multiline_example.h",
     "native_theme_example.cc",
     "native_theme_example.h",
+    "notification_example.cc",
+    "notification_example.h",
     "progress_bar_example.cc",
     "progress_bar_example.h",
     "radio_button_example.cc",
@@ -87,9 +93,6 @@ jumbo_component("views_examples_lib") {
     "widget_example.h",
   ]
 
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-
   defines = [
     "GFX_VECTOR_ICONS_UNSAFE",
     "VIEWS_EXAMPLES_IMPLEMENTATION",
@@ -106,6 +109,7 @@ jumbo_component("views_examples_lib") {
     "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/message_center",
     "//ui/native_theme",
     "//ui/resources",
     "//ui/resources:ui_test_pak",

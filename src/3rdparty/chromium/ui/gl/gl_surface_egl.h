@@ -13,7 +13,6 @@
 #include <EGL/eglext.h>
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "base/command_line.h"
@@ -104,6 +103,7 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   static EGLDisplay GetHardwareDisplay();
   static EGLDisplay InitializeDisplay(EGLDisplayPlatform native_display);
   static EGLNativeDisplayType GetNativeDisplay();
+  static DisplayType GetDisplayType();
 
   // These aren't particularly tied to surfaces, but since we already
   // have the static InitializeOneOff here, it's easiest to reuse its
@@ -128,6 +128,8 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   static bool IsANGLEFeatureControlSupported();
   static bool IsANGLEPowerPreferenceSupported();
   static bool IsANGLEExternalContextAndSurfaceSupported();
+
+  static GLSurface* createSurfaceless(const gfx::Size& size);
 
  protected:
   ~GLSurfaceEGL() override;
@@ -179,6 +181,7 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect,
                             bool enable_blend,
+                            const gfx::Rect& damage_rect,
                             std::unique_ptr<gfx::GpuFence> gpu_fence) override;
   gfx::SurfaceOrigin GetOrigin() const override;
   EGLTimestampClient* GetEGLTimestampClient() override;
@@ -188,6 +191,7 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL,
 
   bool GetFrameTimestampInfoIfAvailable(base::TimeTicks* presentation_time,
                                         base::TimeDelta* composite_interval,
+                                        base::TimeTicks* writes_done_time,
                                         uint32_t* presentation_flags,
                                         int frame_id) override;
 
@@ -238,6 +242,7 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL,
   // PresentationFeedback support.
   int presentation_feedback_index_ = -1;
   int composition_start_index_ = -1;
+  int writes_done_index_ = -1;
   uint32_t presentation_flags_ = 0;
 
   base::queue<SwapInfo> swap_info_queue_;

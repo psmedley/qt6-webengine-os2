@@ -7,12 +7,14 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "components/viz/common/resources/resource_format.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/config/gpu_switches.h"
 #include "gpu/config/skia_limits.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
+#include "third_party/skia/include/gpu/GrContextThreadSafeProxy.h"
 #include "third_party/skia/include/gpu/gl/GrGLTypes.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_bindings.h"
@@ -83,9 +85,10 @@ GrContextOptions GetDefaultGrContextOptions(GrContextType type) {
                                             &glyph_cache_max_texture_bytes);
   options.fDisableCoverageCountingPaths = true;
   options.fGlyphCacheTextureMaximumBytes = glyph_cache_max_texture_bytes;
-  // TODO(csmartdalton): enable internal multisampling after the related Skia
-  // rolls are in.
-  options.fInternalMultisampleCount = 0;
+  // TODO(junov, csmartdalton): Find a way to control fInternalMultisampleCount
+  // in a more granular way.  For OOPR-Canvas we want 8, but for other purposes,
+  // a texture atlas with sample count of 4 would be sufficient
+  options.fInternalMultisampleCount = 8;
   if (type == GrContextType::kMetal)
     options.fRuntimeProgramCacheSize = 1024;
 
@@ -96,8 +99,10 @@ GrContextOptions GetDefaultGrContextOptions(GrContextType type) {
   return options;
 }
 
-GLuint GetGrGLBackendTextureFormat(const gles2::FeatureInfo* feature_info,
-                                   viz::ResourceFormat resource_format) {
+GLuint GetGrGLBackendTextureFormat(
+    const gles2::FeatureInfo* feature_info,
+    viz::ResourceFormat resource_format,
+    sk_sp<GrContextThreadSafeProxy> gr_context_thread_safe) {
   const gl::GLVersionInfo* version_info = &feature_info->gl_version_info();
   GLuint internal_format = gl::GetInternalFormat(
       version_info, viz::TextureStorageFormat(resource_format));
@@ -107,10 +112,32 @@ GLuint GetGrGLBackendTextureFormat(const gles2::FeatureInfo* feature_info,
   use_version_es2 = base::FeatureList::IsEnabled(features::kUseGles2ForOopR);
 #endif
 
-  // Use R8 when using later GLs where LUMINANCE8 is deprecated
-  if (feature_info->gl_version_info().NeedsLuminanceAlphaEmulation() &&
-      internal_format == GL_LUMINANCE8) {
-    internal_format = GL_R8_EXT;
+  // Use R8 and R16F when using later GLs where ALPHA8, LUMINANCE8, ALPHA16F and
+  // LUMINANCE16F are deprecated
+  if (feature_info->gl_version_info().NeedsLuminanceAlphaEmulation()) {
+    switch (internal_format) {
+      case GL_ALPHA8_EXT:
+      case GL_LUMINANCE8:
+        internal_format = GL_R8_EXT;
+        break;
+      case GL_ALPHA16F_EXT:
+      case GL_LUMINANCE16F_EXT:
+        internal_format = GL_R16F_EXT;
+        break;
+    }
+  }
+
+  // Map ETC1 to ETC2 type depending on conversion by skia
+  if (resource_format == viz::ResourceFormat::ETC1) {
+    GrGLFormat gr_gl_format =
+        gr_context_thread_safe
+            ->compressedBackendFormat(SkImage::kETC1_CompressionType)
+            .asGLFormat();
+    if (gr_gl_format == GrGLFormat::kCOMPRESSED_ETC1_RGB8) {
+      internal_format = GL_ETC1_RGB8_OES;
+    } else if (gr_gl_format == GrGLFormat::kCOMPRESSED_RGB8_ETC2) {
+      internal_format = GL_COMPRESSED_RGB8_ETC2;
+    }
   }
 
   // We tell Skia to use es2 which does not have GL_R8_EXT
@@ -127,6 +154,7 @@ bool GetGrBackendTexture(const gles2::FeatureInfo* feature_info,
                          const gfx::Size& size,
                          GLuint service_id,
                          viz::ResourceFormat resource_format,
+                         sk_sp<GrContextThreadSafeProxy> gr_context_thread_safe,
                          GrBackendTexture* gr_texture) {
   if (target != GL_TEXTURE_2D && target != GL_TEXTURE_RECTANGLE_ARB &&
       target != GL_TEXTURE_EXTERNAL_OES) {
@@ -137,8 +165,8 @@ bool GetGrBackendTexture(const gles2::FeatureInfo* feature_info,
   GrGLTextureInfo texture_info;
   texture_info.fID = service_id;
   texture_info.fTarget = target;
-  texture_info.fFormat =
-      GetGrGLBackendTextureFormat(feature_info, resource_format);
+  texture_info.fFormat = GetGrGLBackendTextureFormat(
+      feature_info, resource_format, gr_context_thread_safe);
   *gr_texture = GrBackendTexture(size.width(), size.height(), GrMipMapped::kNo,
                                  texture_info);
   return true;
@@ -245,7 +273,7 @@ GrVkImageInfo CreateGrVkImageInfo(VulkanImage* image) {
 GrVkYcbcrConversionInfo CreateGrVkYcbcrConversionInfo(
     VkPhysicalDevice physical_device,
     VkImageTiling tiling,
-    const base::Optional<VulkanYCbCrInfo>& ycbcr_info) {
+    const absl::optional<VulkanYCbCrInfo>& ycbcr_info) {
   if (!ycbcr_info)
     return GrVkYcbcrConversionInfo();
 
@@ -303,7 +331,7 @@ bool ShouldVulkanSyncCpuForSkiaSubmit(
     viz::VulkanContextProvider* context_provider) {
 #if BUILDFLAG(ENABLE_VULKAN)
   if (context_provider) {
-    const base::Optional<uint32_t>& sync_cpu_memory_limit =
+    const absl::optional<uint32_t>& sync_cpu_memory_limit =
         context_provider->GetSyncCpuMemoryLimit();
     if (sync_cpu_memory_limit.has_value()) {
       uint64_t total_allocated_bytes = gpu::vma::GetTotalAllocatedMemory(

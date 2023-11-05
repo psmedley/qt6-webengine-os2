@@ -49,7 +49,7 @@ class CodecImageTest : public testing::Test {
         .WillByDefault(Return(MEDIA_CODEC_OK));
 
     gl::init::InitializeStaticGLBindingsImplementation(
-        gl::kGLImplementationEGLGLES2, false);
+        gl::GLImplementationParts(gl::kGLImplementationEGLGLES2), false);
     gl::init::InitializeGLOneOffPlatformImplementation(false, false, false);
 
     surface_ = new gl::PbufferGLSurfaceEGL(gfx::Size(320, 240));
@@ -90,9 +90,10 @@ class CodecImageTest : public testing::Test {
     auto codec_buffer_wait_coordinator =
         kind == kTextureOwner ? codec_buffer_wait_coordinator_ : nullptr;
     auto buffer_renderer = std::make_unique<CodecOutputBufferRenderer>(
-        std::move(buffer), codec_buffer_wait_coordinator);
+        std::move(buffer), codec_buffer_wait_coordinator, /*lock=*/nullptr);
 
-    scoped_refptr<CodecImage> image = new CodecImage(buffer_renderer->size());
+    scoped_refptr<CodecImage> image =
+        new CodecImage(buffer_renderer->size(), /*lock=*/nullptr);
     image->Initialize(
         std::move(buffer_renderer), kind == kTextureOwner,
         base::BindRepeating(&PromotionHintReceiver::OnPromotionHint,
@@ -207,20 +208,6 @@ TEST_F(CodecImageTest, CopyTexImageTriggersFrontBufferRendering) {
   ASSERT_TRUE(i->was_rendered_to_front_buffer());
 }
 
-TEST_F(CodecImageTestExplicitBind, CopyTexImageTriggersFrontBufferRendering) {
-  auto i = NewImage(kTextureOwner);
-  // Verify that the release comes before the wait.
-  InSequence s;
-  EXPECT_CALL(*codec_, ReleaseOutputBuffer(_, true));
-  EXPECT_CALL(*codec_buffer_wait_coordinator_, WaitForFrameAvailable());
-  EXPECT_CALL(*codec_buffer_wait_coordinator_->texture_owner(),
-              UpdateTexImage());
-  EXPECT_CALL(*codec_buffer_wait_coordinator_->texture_owner(),
-              EnsureTexImageBound());
-  i->CopyTexImage(GL_TEXTURE_EXTERNAL_OES);
-  ASSERT_TRUE(i->was_rendered_to_front_buffer());
-}
-
 TEST_F(CodecImageTest, ScheduleOverlayPlaneTriggersFrontBufferRendering) {
   auto i = NewImage(kOverlay);
   EXPECT_CALL(*codec_, ReleaseOutputBuffer(_, true));
@@ -294,9 +281,6 @@ TEST_F(CodecImageTest, RenderToFrontBufferRestoresTextureBindings) {
 }
 
 TEST_F(CodecImageTestExplicitBind, RenderToFrontBufferDoesNotBindTexture) {
-  codec_buffer_wait_coordinator_->texture_owner()->expect_update_tex_image =
-      false;
-
   GLuint pre_bound_texture = 0;
   glGenTextures(1, &pre_bound_texture);
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, pre_bound_texture);
@@ -320,11 +304,9 @@ TEST_F(CodecImageTest, RenderToFrontBufferRestoresGLContext) {
   ASSERT_TRUE(context->MakeCurrent(surface.get()));
 
   auto i = NewImage(kTextureOwner);
-  // Our context should not be current when UpdateTexImage() is called.
+  // UpdateTexImage sets it's own context.
   EXPECT_CALL(*codec_buffer_wait_coordinator_->texture_owner(),
-              UpdateTexImage())
-      .WillOnce(
-          Invoke([&]() { ASSERT_FALSE(context->IsCurrent(surface.get())); }));
+              UpdateTexImage());
   i->RenderToFrontBuffer();
   // Our context should have been restored.
   ASSERT_TRUE(context->IsCurrent(surface.get()));
@@ -380,17 +362,19 @@ TEST_F(CodecImageTest, RenderAfterUnusedDoesntCrash) {
   i->NotifyUnused();
   EXPECT_FALSE(i->RenderToTextureOwnerBackBuffer());
   EXPECT_FALSE(i->RenderToTextureOwnerFrontBuffer(
-      CodecImage::BindingsMode::kEnsureTexImageBound));
+      CodecImage::BindingsMode::kBindImage,
+      codec_buffer_wait_coordinator_->texture_owner()->GetTextureId()));
 }
 
 TEST_F(CodecImageTest, CodedSizeVsVisibleSize) {
   const gfx::Size coded_size(128, 128);
   const gfx::Size visible_size(100, 100);
   auto buffer = CodecOutputBuffer::CreateForTesting(0, visible_size);
-  auto buffer_renderer =
-      std::make_unique<CodecOutputBufferRenderer>(std::move(buffer), nullptr);
+  auto buffer_renderer = std::make_unique<CodecOutputBufferRenderer>(
+      std::move(buffer), nullptr, /*lock=*/nullptr);
 
-  scoped_refptr<CodecImage> image = new CodecImage(coded_size);
+  scoped_refptr<CodecImage> image =
+      new CodecImage(coded_size, /*lock=*/nullptr);
   image->Initialize(std::move(buffer_renderer), false,
                     PromotionHintAggregator::NotifyPromotionHintCB());
 

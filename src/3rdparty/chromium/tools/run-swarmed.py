@@ -102,6 +102,11 @@ def _Spawn(args):
     runner_args.append('--gtest_filter=' + args.gtest_filter)
   if args.gtest_repeat:
     runner_args.append('--gtest_repeat=' + args.gtest_repeat)
+  if args.test_launcher_shard_index and args.test_launcher_total_shards:
+    runner_args.append('--test-launcher-shard-index=' +
+                       args.test_launcher_shard_index)
+    runner_args.append('--test-launcher-total-shards=' +
+                       args.test_launcher_total_shards)
   elif args.target_os == 'fuchsia':
     filter_file = \
         'testing/buildbot/filters/fuchsia.' + args.target_name + '.filter'
@@ -184,6 +189,12 @@ def main():
   parser.add_argument(
       '--gtest_repeat',
       help='Number of times to repeat the specified set of tests.')
+  parser.add_argument(
+      '--test-launcher-shard-index',
+      help='Shard index to run. Use with --test-launcher-total-shards.')
+  parser.add_argument('--test-launcher-total-shards',
+                      help='Number of shards to split the test into. Use with'
+                      ' --test-launcher-shard-index.')
   parser.add_argument('--no-test-flags', action='store_true',
                       help='Do not add --test-launcher-summary-output and '
                            '--system-log-file flags to the comment.')
@@ -238,7 +249,7 @@ def main():
 
   print('If you get authentication errors, follow:')
   print(
-      '  https://www.chromium.org/developers/testing/isolated-testing/for-swes#TOC-Login-on-the-services'
+      '  https://chromium.googlesource.com/chromium/src/+/HEAD/docs/workflow/debugging-with-swarming.md#authenticating'
   )
 
   print('Uploading to isolate server, this can take a while...')

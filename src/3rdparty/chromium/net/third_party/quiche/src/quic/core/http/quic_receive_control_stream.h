@@ -33,9 +33,8 @@ class QUIC_EXPORT_PRIVATE QuicReceiveControlStream
   // Implementation of QuicStream.
   void OnDataAvailable() override;
 
-  // HttpDecoderVisitor implementation.
+  // HttpDecoder::Visitor implementation.
   void OnError(HttpDecoder* decoder) override;
-  bool OnCancelPushFrame(const CancelPushFrame& frame) override;
   bool OnMaxPushIdFrame(const MaxPushIdFrame& frame) override;
   bool OnGoAwayFrame(const GoAwayFrame& frame) override;
   bool OnSettingsFrameStart(QuicByteCount header_length) override;
@@ -48,23 +47,17 @@ class QUIC_EXPORT_PRIVATE QuicReceiveControlStream
                            QuicByteCount payload_length) override;
   bool OnHeadersFramePayload(absl::string_view payload) override;
   bool OnHeadersFrameEnd() override;
-  bool OnPushPromiseFrameStart(QuicByteCount header_length) override;
-  bool OnPushPromiseFramePushId(PushId push_id,
-                                QuicByteCount push_id_length,
-                                QuicByteCount header_block_length) override;
-  bool OnPushPromiseFramePayload(absl::string_view payload) override;
-  bool OnPushPromiseFrameEnd() override;
   bool OnPriorityUpdateFrameStart(QuicByteCount header_length) override;
   bool OnPriorityUpdateFrame(const PriorityUpdateFrame& frame) override;
   bool OnAcceptChFrameStart(QuicByteCount header_length) override;
   bool OnAcceptChFrame(const AcceptChFrame& frame) override;
+  void OnWebTransportStreamFrameType(QuicByteCount header_length,
+                                     WebTransportSessionId session_id) override;
   bool OnUnknownFrameStart(uint64_t frame_type,
                            QuicByteCount header_length,
                            QuicByteCount payload_length) override;
   bool OnUnknownFramePayload(absl::string_view payload) override;
   bool OnUnknownFrameEnd() override;
-
-  void SetUnblocked() { sequencer()->SetUnblocked(); }
 
   QuicSpdySession* spdy_session() { return spdy_session_; }
 

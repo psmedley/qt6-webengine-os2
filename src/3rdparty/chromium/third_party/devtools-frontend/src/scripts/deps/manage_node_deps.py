@@ -38,45 +38,65 @@ LICENSES = [
 
 # List all DEPS here.
 DEPS = {
-    "@rollup/plugin-commonjs": "17.1.0",
-    "@types/chai": "4.2.15",
+    "@types/chai": "4.2.21",
     "@types/codemirror": "0.0.108",
-    "@types/karma-chai-sinon": "0.1.15",
-    "@types/estree": "0.0.46",
-    "@types/filesystem": "0.0.29",
-    "@types/node": "14.14.30",
-    "@types/mocha": "8.2.0",
-    "@types/sinon": "9.0.10",
-    "@typescript-eslint/parser": "4.15.0",
-    "@typescript-eslint/eslint-plugin": "4.15.0",
+    "@types/estree": "0.0.50",
+    "@types/filesystem": "0.0.32",
+    "@types/istanbul-lib-coverage": "2.0.3",
+    "@types/istanbul-lib-instrument": "1.7.4",
+    "@types/istanbul-lib-report": "3.0.0",
+    "@types/istanbul-lib-source-maps": "4.0.1",
+    "@types/istanbul-reports": "3.0.1",
+    "@types/karma-chai-sinon": "0.1.16",
+    "@types/node": "15.6.2",
+    "@types/marked": "2.0.4",
+    "@types/mocha": "9.0.0",
+    "@types/rimraf": "3.0.1",
+    "@types/sinon": "10.0.2",
+    "@typescript-eslint/parser": "4.28.5",
+    "@typescript-eslint/eslint-plugin": "4.28.5",
+    "@web/rollup-plugin-import-meta-assets": "1.0.7",
     "bl": "4.1.0",
-    "chai": "4.3.0",
+    "chai": "4.3.4",
+    "chokidar": "3.5.1",
+    "clean-css": "5.1.3",
+    "convert-source-map": "1.7.0",
     "escodegen": "2.0.0",
-    "eslint": "7.19.0",
-    "eslint-plugin-import": "2.22.1",
+    "eslint": "7.31.0",
+    "eslint-plugin-import": "2.23.4",
     "eslint-plugin-lit-a11y": "1.0.1",
-    "eslint-plugin-mocha": "8.0.0",
-    "eslint-plugin-rulesdir": "0.1.0",
-    "karma": "6.1.0",
+    "eslint-plugin-mocha": "9.0.0",
+    "eslint-plugin-rulesdir": "0.2.0",
+    "istanbul-lib-instrument": "4.0.3",
+    "istanbul-lib-report": "3.0.0",
+    "karma": "6.3.0",
     "karma-chai": "0.1.0",
     "karma-chrome-launcher": "3.1.0",
     "karma-coverage": "2.0.3",
     "karma-mocha": "2.0.1",
+    "karma-mocha-reporter": "2.2.5",
     "karma-sinon": "1.0.5",
     "karma-sourcemap-loader": "0.3.8",
     "karma-spec-reporter": "0.0.32",
     "license-checker": "25.0.1",
-    "mocha": "8.3.0",
-    "puppeteer": "7.1.0",
+    "mocha": "9.0.0",
+    # Purposefully not the latest; we keep this in sync with what stylelint
+    # depends on
+    "postcss": "7.0.35",
+    "puppeteer": "10.0.0",
     "recast": "0.20.4",
     "rimraf": "3.0.2",
-    "rollup": "2.38.5",
+    "rollup": "2.55.0",
+    "rollup-plugin-minify-html-template-literals": "1.2.0",
     "rollup-plugin-terser": "7.0.2",
-    "sinon": "9.2.4",
+    "sinon": "10.0.0",
     "source-map-support": "0.5.19",
-    "stylelint": "13.10.0",
-    "stylelint-config-standard": "20.0.0",
-    "typescript": "4.2.1-rc",
+    "stylelint": "13.13.1",
+    "stylelint-config-standard": "21.0.0",
+    "svgo": "2.3.1",
+    "terser": "5.6.1",
+    "typescript": "4.3.5",
+    "ws": "7.5.3",
     "yargs": "16.2.0",
 }
 
@@ -227,7 +247,7 @@ def addOwnersFile():
     with open(path.join(devtools_paths.node_modules_path(), 'OWNERS'),
               'w+') as owners_file:
         try:
-            owners_file.write('file://INFRA_OWNERS\n')
+            owners_file.write('file://config/owner/INFRA_OWNERS\n')
         except:
             print('Unable to write OWNERS file')
             return True
@@ -264,7 +284,8 @@ def run_npm_command(npm_command_args=None):
     if run_custom_command:
         runs_analysis_command = npm_command_args[:1] == [
             'outdated'
-        ] or npm_command_args[:1] == ['audit']
+        ] or npm_command_args[:1] == ['audit'
+                                      ] or npm_command_args[:1] == ['ls']
 
     # By default, run the CI version of npm, which prevents updates to the versions of modules.
     # However, when we are analyzing the installed NPM dependencies, we don't need to run

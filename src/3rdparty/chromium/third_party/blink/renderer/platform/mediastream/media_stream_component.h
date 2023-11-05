@@ -102,6 +102,9 @@ class PLATFORM_EXPORT MediaStreamComponent final
     platform_track_ = std::move(platform_track);
   }
   void GetSettings(MediaStreamTrackPlatform::Settings&);
+  MediaStreamTrackPlatform::CaptureHandle GetCaptureHandle();
+
+  String ToString() const;
 
   void Trace(Visitor*) const;
 
@@ -121,7 +124,7 @@ class PLATFORM_EXPORT MediaStreamComponent final
     void Wrap(WebAudioSourceProvider*);
 
     // blink::AudioSourceProvider
-    void ProvideInput(AudioBus*, uint32_t frames_to_process) override;
+    void ProvideInput(AudioBus*, int frames_to_process) override;
 
    private:
     WebAudioSourceProvider* web_audio_source_provider_;

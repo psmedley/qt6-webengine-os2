@@ -128,10 +128,9 @@ echo "Compiling bitcode"
   ${GN_GPU} \
   ${GN_FONT} \
   skia_use_expat=true \
-  skia_enable_ccpr=true \
+  skia_enable_skgpu_v2=false \
   skia_enable_svg=true \
   skia_enable_skshaper=true \
-  skia_enable_nvpr=false \
   skia_enable_skparagraph=true \
   skia_enable_pdf=false"
 
@@ -141,8 +140,8 @@ parse_targets() {
     basename $LIBPATH
   done
 }
-${NINJA} -C ${BUILD_DIR} libskia.a libskshaper.a \
-  $(parse_targets $SHAPER_LIB $GM_LIB)
+${NINJA} -C ${BUILD_DIR} libskia.a libskshaper.a libskunicode.a \
+  $(parse_targets $GM_LIB)
 
 echo "Generating final wasm"
 
@@ -151,7 +150,6 @@ echo "Generating final wasm"
 SKIA_DEFINES="
 -DSK_DISABLE_AAA \
 -DSK_FORCE_8_BYTE_ALIGNMENT \
--DGR_OP_ALLOCATE_USE_NEW \
 -DSK_HAS_WUFFS_LIBRARY \
 -DSK_HAS_HEIF_LIBRARY \
 -DSK_ENCODE_WEBP \
@@ -174,6 +172,7 @@ fi
 
 GMS_TO_BUILD="gm/*.cpp"
 TESTS_TO_BUILD="tests/*.cpp"
+
 # When developing locally, it can be faster to focus only on the gms or tests you care about
 # (since they all have to be recompiled/relinked) every time. To do so, mark the following as true
 if false; then
@@ -232,6 +231,7 @@ EMCC_DEBUG=1 ${EMCXX} \
     $TESTS_TO_BUILD \
     $GM_LIB \
     $BUILD_DIR/libskshaper.a \
+    $BUILD_DIR/libskunicode.a \
     $BUILD_DIR/libsvg.a \
     $BUILD_DIR/libskia.a \
     $BUILTIN_FONT \

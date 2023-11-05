@@ -33,12 +33,11 @@
 #include "services/network/public/mojom/trust_tokens.mojom-shared.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url_request.h"
-#include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view_or_blob_or_usv_string.h"
-#include "third_party/blink/renderer/bindings/core/v8/document_or_xml_http_request_body_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview_blob_document_formdata_urlsearchparams_usvstring.h"
 #include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/dom/document_parser.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -94,10 +93,10 @@
 #include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
 #include "third_party/blink/renderer/platform/network/parsed_content_type.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -135,7 +134,7 @@ void FindCharsetInMediaType(const String& media_type,
                             unsigned& charset_len) {
   charset_len = 0;
 
-  size_t pos = charset_pos;
+  unsigned pos = charset_pos;
   unsigned length = media_type.length();
 
   while (pos < length) {
@@ -324,6 +323,15 @@ v8::Local<v8::String> XMLHttpRequest::responseText(
 
 v8::Local<v8::String> XMLHttpRequest::ResponseJSONSource() {
   DCHECK_EQ(response_type_code_, kResponseTypeJSON);
+
+  const auto& head = response_body_head_;
+  if (state_ == kDone && !error_ && head.size() >= 2) {
+    if ((head[0] == 0xfe && head[1] == 0xff) ||
+        (head[0] == 0xff && head[1] == 0xfe)) {
+      Deprecation::CountDeprecation(GetExecutionContext(),
+                                    WebFeature::kXHRJSONEncodingDetection);
+    }
+  }
 
   if (error_ || state_ != kDone)
     return v8::Local<v8::String>();
@@ -565,9 +573,9 @@ void XMLHttpRequest::DispatchReadyStateChangeEvent() {
 
   ScopedEventDispatchProtect protect(&event_dispatch_recursion_level_);
   if (async_ || (state_ <= kOpened || state_ == kDone)) {
-    TRACE_EVENT1("devtools.timeline", "XHRReadyStateChange", "data",
-                 inspector_xhr_ready_state_change_event::Data(
-                     GetExecutionContext(), this));
+    DEVTOOLS_TIMELINE_TRACE_EVENT("XHRReadyStateChange",
+                                  inspector_xhr_ready_state_change_event::Data,
+                                  GetExecutionContext(), this);
     XMLHttpRequestProgressEventThrottle::DeferredEventAction action =
         XMLHttpRequestProgressEventThrottle::kIgnore;
     if (state_ == kDone) {
@@ -581,8 +589,8 @@ void XMLHttpRequest::DispatchReadyStateChangeEvent() {
   }
 
   if (state_ == kDone && !error_) {
-    TRACE_EVENT1("devtools.timeline", "XHRLoad", "data",
-                 inspector_xhr_load_event::Data(GetExecutionContext(), this));
+    DEVTOOLS_TIMELINE_TRACE_EVENT("XHRLoad", inspector_xhr_load_event::Data,
+                                  GetExecutionContext(), this);
     DispatchProgressEventFromSnapshot(event_type_names::kLoad);
     DispatchProgressEventFromSnapshot(event_type_names::kLoadend);
   }
@@ -731,9 +739,9 @@ bool XMLHttpRequest::InitSend(ExceptionState& exception_state) {
 
   if (!async_) {
     if (GetExecutionContext()->IsWindow()) {
-      bool sync_xhr_disabled_by_feature_policy =
+      bool sync_xhr_disabled_by_permissions_policy =
           !GetExecutionContext()->IsFeatureEnabled(
-              mojom::blink::FeaturePolicyFeature::kSyncXHR,
+              mojom::blink::PermissionsPolicyFeature::kSyncXHR,
               ReportOptions::kReportOnFailure,
               "Synchronous requests are disabled by permissions policy.");
 
@@ -743,9 +751,9 @@ bool XMLHttpRequest::InitSend(ExceptionState& exception_state) {
               ReportOptions::kReportOnFailure,
               "Synchronous requests are disabled by document policy.");
 
-      // SyncXHR can be controlled by either feature policy or document policy
-      // during the migration period. See crbug.com/1146505.
-      if (sync_xhr_disabled_by_feature_policy ||
+      // SyncXHR can be controlled by either permissions policy or document
+      // policy during the migration period. See crbug.com/1146505.
+      if (sync_xhr_disabled_by_permissions_policy ||
           sync_xhr_disabled_by_document_policy) {
         HandleNetworkError();
         ThrowForLoadFailureIfNeeded(exception_state, String());
@@ -763,54 +771,37 @@ bool XMLHttpRequest::InitSend(ExceptionState& exception_state) {
   return true;
 }
 
-void XMLHttpRequest::send(
-    const DocumentOrBlobOrArrayBufferOrArrayBufferViewOrFormDataOrURLSearchParamsOrUSVString&
-        body,
-    ExceptionState& exception_state) {
+void XMLHttpRequest::send(const V8UnionDocumentOrXMLHttpRequestBodyInit* body,
+                          ExceptionState& exception_state) {
   probe::WillSendXMLHttpOrFetchNetworkRequest(GetExecutionContext(), Url());
 
-  if (body.IsNull()) {
-    send(String(), exception_state);
-    return;
+  if (!body)
+    return send(String(), exception_state);
+
+  switch (body->GetContentType()) {
+    case V8UnionDocumentOrXMLHttpRequestBodyInit::ContentType::kArrayBuffer:
+      return send(body->GetAsArrayBuffer(), exception_state);
+    case V8UnionDocumentOrXMLHttpRequestBodyInit::ContentType::kArrayBufferView:
+      return send(body->GetAsArrayBufferView().Get(), exception_state);
+    case V8UnionDocumentOrXMLHttpRequestBodyInit::ContentType::kBlob:
+      return send(body->GetAsBlob(), exception_state);
+    case V8UnionDocumentOrXMLHttpRequestBodyInit::ContentType::kDocument:
+      return send(body->GetAsDocument(), exception_state);
+    case V8UnionDocumentOrXMLHttpRequestBodyInit::ContentType::kFormData:
+      return send(body->GetAsFormData(), exception_state);
+    case V8UnionDocumentOrXMLHttpRequestBodyInit::ContentType::kURLSearchParams:
+      return send(body->GetAsURLSearchParams(), exception_state);
+    case V8UnionDocumentOrXMLHttpRequestBodyInit::ContentType::kUSVString:
+      return send(body->GetAsUSVString(), exception_state);
   }
 
-  if (body.IsDocument()) {
-    send(body.GetAsDocument(), exception_state);
-    return;
-  }
-
-  if (body.IsBlob()) {
-    send(body.GetAsBlob(), exception_state);
-    return;
-  }
-
-  if (body.IsArrayBuffer()) {
-    send(body.GetAsArrayBuffer(), exception_state);
-    return;
-  }
-
-  if (body.IsArrayBufferView()) {
-    send(body.GetAsArrayBufferView().Get(), exception_state);
-    return;
-  }
-
-  if (body.IsFormData()) {
-    send(body.GetAsFormData(), exception_state);
-    return;
-  }
-
-  if (body.IsURLSearchParams()) {
-    send(body.GetAsURLSearchParams(), exception_state);
-    return;
-  }
-
-  DCHECK(body.IsUSVString());
-  send(body.GetAsUSVString(), exception_state);
+  NOTREACHED();
 }
 
 bool XMLHttpRequest::AreMethodAndURLValidForSend() {
   return method_ != http_names::kGET && method_ != http_names::kHEAD &&
-         url_.ProtocolIsInHTTPFamily();
+         SchemeRegistry::ShouldTreatURLSchemeAsSupportingFetchAPI(
+             url_.Protocol());
 }
 
 void XMLHttpRequest::send(Document* document, ExceptionState& exception_state) {
@@ -953,7 +944,8 @@ void XMLHttpRequest::SendBytesData(const void* data,
   scoped_refptr<EncodedFormData> http_body;
 
   if (AreMethodAndURLValidForSend()) {
-    http_body = EncodedFormData::Create(data, length);
+    http_body =
+        EncodedFormData::Create(data, base::checked_cast<wtf_size_t>(length));
   }
 
   CreateRequest(std::move(http_body), exception_state);
@@ -1178,11 +1170,6 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
 void XMLHttpRequest::abort() {
   DVLOG(1) << this << " abort()";
 
-  // internalAbort() clears the response. Save the data needed for
-  // dispatching ProgressEvents.
-  int64_t expected_length = response_.ExpectedContentLength();
-  int64_t received_length = received_length_;
-
   InternalAbort();
 
   // The script never gets any chance to call abort() on a sync XHR between
@@ -1198,8 +1185,7 @@ void XMLHttpRequest::abort() {
     if ((state_ == kOpened && send_flag_) || state_ == kHeadersReceived ||
         state_ == kLoading) {
       DCHECK(!loader_);
-      HandleRequestError(DOMExceptionCode::kNoError, event_type_names::kAbort,
-                         received_length, expected_length);
+      HandleRequestError(DOMExceptionCode::kNoError, event_type_names::kAbort);
     }
   }
   if (state_ == kDone)
@@ -1316,36 +1302,24 @@ void XMLHttpRequest::DispatchProgressEventFromSnapshot(
 void XMLHttpRequest::HandleNetworkError() {
   DVLOG(1) << this << " handleNetworkError()";
 
-  // Response is cleared next, save needed progress event data.
-  int64_t expected_length = response_.ExpectedContentLength();
-  int64_t received_length = received_length_;
-
   InternalAbort();
 
-  HandleRequestError(DOMExceptionCode::kNetworkError, event_type_names::kError,
-                     received_length, expected_length);
+  HandleRequestError(DOMExceptionCode::kNetworkError, event_type_names::kError);
 }
 
 void XMLHttpRequest::HandleDidCancel() {
   DVLOG(1) << this << " handleDidCancel()";
-
-  // Response is cleared next, save needed progress event data.
-  int64_t expected_length = response_.ExpectedContentLength();
-  int64_t received_length = received_length_;
 
   InternalAbort();
 
   pending_abort_event_ = PostCancellableTask(
       *GetExecutionContext()->GetTaskRunner(TaskType::kNetworking), FROM_HERE,
       WTF::Bind(&XMLHttpRequest::HandleRequestError, WrapPersistent(this),
-                DOMExceptionCode::kAbortError, event_type_names::kAbort,
-                received_length, expected_length));
+                DOMExceptionCode::kAbortError, event_type_names::kAbort));
 }
 
 void XMLHttpRequest::HandleRequestError(DOMExceptionCode exception_code,
-                                        const AtomicString& type,
-                                        int64_t received_length,
-                                        int64_t expected_length) {
+                                        const AtomicString& type) {
   DVLOG(1) << this << " handleRequestError()";
 
   probe::DidFinishXHR(GetExecutionContext(), this);
@@ -1371,13 +1345,9 @@ void XMLHttpRequest::HandleRequestError(DOMExceptionCode exception_code,
       upload_->HandleRequestError(type);
   }
 
-  // Note: The below event dispatch may be called while |hasPendingActivity() ==
-  // false|, when |handleRequestError| is called after |internalAbort()|.  This
-  // is safe, however, as |this| will be kept alive from a strong ref
-  // |Event::m_target|.
-  DispatchProgressEvent(type, received_length, expected_length);
-  DispatchProgressEvent(event_type_names::kLoadend, received_length,
-                        expected_length);
+  DispatchProgressEvent(type, /*received_length=*/0, /*expected_length=*/0);
+  DispatchProgressEvent(event_type_names::kLoadend, /*received_length=*/0,
+                        /*expected_length=*/0);
 }
 
 // https://xhr.spec.whatwg.org/#the-overridemimetype()-method
@@ -1463,17 +1433,17 @@ void XMLHttpRequest::setTrustToken(const TrustToken* trust_token,
     return;
   }
 
-  bool operation_requires_feature_policy =
+  bool operation_requires_permissions_policy =
       params->type ==
           network::mojom::blink::TrustTokenOperationType::kRedemption ||
       params->type == network::mojom::blink::TrustTokenOperationType::kSigning;
-  if (operation_requires_feature_policy &&
+  if (operation_requires_permissions_policy &&
       !GetExecutionContext()->IsFeatureEnabled(
-          mojom::blink::FeaturePolicyFeature::kTrustTokenRedemption)) {
+          mojom::blink::PermissionsPolicyFeature::kTrustTokenRedemption)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotAllowedError,
         "Trust Tokens redemption and signing require the "
-        "trust-token-redemption Feature Policy feature.");
+        "trust-token-redemption Permissions Policy feature.");
     return;
   }
 
@@ -1685,7 +1655,7 @@ String XMLHttpRequest::statusText() const {
   return String();
 }
 
-void XMLHttpRequest::DidFail(const ResourceError& error) {
+void XMLHttpRequest::DidFail(uint64_t, const ResourceError& error) {
   DVLOG(1) << this << " didFail()";
   ScopedEventDispatchProtect protect(&event_dispatch_recursion_level_);
 
@@ -1718,7 +1688,7 @@ void XMLHttpRequest::DidFail(const ResourceError& error) {
   HandleNetworkError();
 }
 
-void XMLHttpRequest::DidFailRedirectCheck() {
+void XMLHttpRequest::DidFailRedirectCheck(uint64_t) {
   DVLOG(1) << this << " didFailRedirectCheck()";
   ScopedEventDispatchProtect protect(&event_dispatch_recursion_level_);
 
@@ -1761,6 +1731,7 @@ void XMLHttpRequest::DidFinishLoadingInternal() {
 
   if (decoder_) {
     auto text = decoder_->Flush();
+
     if (!text.IsEmpty() && !response_text_overflow_) {
       response_text_.Concat(isolate_, text);
       response_text_overflow_ = response_text_.IsEmpty();
@@ -1882,11 +1853,9 @@ void XMLHttpRequest::ParseDocumentChunk(const char* data, unsigned len) {
 }
 
 std::unique_ptr<TextResourceDecoder> XMLHttpRequest::CreateDecoder() const {
-  const TextResourceDecoderOptions decoder_options_for_utf8_plain_text(
-      TextResourceDecoderOptions::kPlainTextContent, UTF8Encoding());
   if (response_type_code_ == kResponseTypeJSON) {
-    return std::make_unique<TextResourceDecoder>(
-        decoder_options_for_utf8_plain_text);
+    return std::make_unique<TextResourceDecoder>(TextResourceDecoderOptions(
+        TextResourceDecoderOptions::CreateUTF8Decode()));
   }
 
   WTF::TextEncoding final_response_charset = FinalResponseCharset();
@@ -1910,8 +1879,9 @@ std::unique_ptr<TextResourceDecoder> XMLHttpRequest::CreateDecoder() const {
         return std::make_unique<TextResourceDecoder>(decoder_options_for_xml);
       FALLTHROUGH;
     case kResponseTypeText:
-      return std::make_unique<TextResourceDecoder>(
-          decoder_options_for_utf8_plain_text);
+      return std::make_unique<TextResourceDecoder>(TextResourceDecoderOptions(
+          TextResourceDecoderOptions::kPlainTextContent, UTF8Encoding()));
+
     case kResponseTypeDocument:
       if (ResponseIsHTML()) {
         return std::make_unique<TextResourceDecoder>(TextResourceDecoderOptions(
@@ -1945,6 +1915,13 @@ void XMLHttpRequest::DidReceiveData(const char* data, unsigned len) {
 
   if (!len)
     return;
+
+  // Store the first few bytes of the response body so that we can check the BOM
+  // later.
+  for (wtf_size_t i = 0;
+       i < len && response_body_head_.size() < kResponseBodyHeadSize; ++i) {
+    response_body_head_.push_back(static_cast<uint8_t>(data[i]));
+  }
 
   if (response_type_code_ == kResponseTypeDocument && ResponseIsHTML()) {
     ParseDocumentChunk(data, len);
@@ -2037,15 +2014,10 @@ void XMLHttpRequest::DidDownloadToBlob(scoped_refptr<BlobDataHandle> blob) {
 void XMLHttpRequest::HandleDidTimeout() {
   DVLOG(1) << this << " handleDidTimeout()";
 
-  // Response is cleared next, save needed progress event data.
-  int64_t expected_length = response_.ExpectedContentLength();
-  int64_t received_length = received_length_;
-
   InternalAbort();
 
   HandleRequestError(DOMExceptionCode::kTimeoutError,
-                     event_type_names::kTimeout, received_length,
-                     expected_length);
+                     event_type_names::kTimeout);
 }
 
 void XMLHttpRequest::ContextDestroyed() {

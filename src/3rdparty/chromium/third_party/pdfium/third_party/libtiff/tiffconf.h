@@ -7,8 +7,9 @@
 #ifndef _TIFFCONF_
 #define _TIFFCONF_
 
+#include <stdint.h>
+
 #include "build/build_config.h"
-#include "core/fxcrt/fx_system.h"
 
 //NOTE: The tiff codec requires an ANSI C compiler environment for building and 
 //    presumes an ANSI C environment for use.
@@ -26,8 +27,10 @@
 #define HAVE_IEEEFP 1
 
 /* Define to 1 if you have the <string.h> header file. */
-//#define HAVE_STRING_H 1
-//fx_system.h already include the string.h in ANSIC
+#define HAVE_STRING_H 1
+
+/* Define to 1 if you have snprintf(). */
+#define HAVE_SNPRINTF 1
 
 /* Define to 1 if you have the <search.h> header file. */
 #if defined(OS_WIN)
@@ -40,10 +43,7 @@
 /* According typedef int  int32_t; in the fx_system.h*/
 #define SIZEOF_INT 4
 
-/* Sunliang.Liu 20110325. We should config the correct long size for tif 
-   fax4decode optimize in tif_fax3.c  -- Linux64 decode issue. 
-   TESTDOC: Bug #23661 - z1.tif. */
-#if _FX_CPU_ == _FX_X64_ || _FX_CPU_ == _FX_IA64_
+#if defined(ARCH_CPU_64_BITS)
 /* The size of `unsigned long', as computed by sizeof. */
 #define SIZEOF_UNSIGNED_LONG 8
 #else
@@ -97,7 +97,7 @@
 
 #else           // linux/unix
 
-#if 0 //_FX_CPU_ == _FX_X64_  // linux/unix 64
+#if defined(ARCH_CPU_64_BITS)
 
 /* Signed 64-bit type formatter */
 #define TIFF_INT64_FORMAT "%ld"
@@ -107,6 +107,9 @@
 
 /* Signed 64-bit type */
 #define TIFF_INT64_T signed long
+
+/* Unsigned 64-bit type */
+#define TIFF_UINT64_T unsigned long
 
 #else           // linux/unix 32
 
@@ -119,10 +122,10 @@
 /* Signed 64-bit type */
 #define TIFF_INT64_T signed long long
 
-#endif            // end _FX_CPU_
-
 /* Unsigned 64-bit type */
 #define TIFF_UINT64_T unsigned long long
+
+#endif  // define(ARCH_CPU_64_BITS)
 
 #endif
 

@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
+#include "base/containers/contains.h"
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
@@ -23,12 +24,15 @@
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/values.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/base/proxy_server.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source.h"
+#include "net/socket/connect_job_factory.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "url/gurl.h"
 
 using base::TimeDelta;
 
@@ -69,47 +73,6 @@ const char TransportClientSocketPool::kSocketPoolDestroyed[] =
 const char TransportClientSocketPool::kSslConfigChanged[] =
     "SSL configuration changed";
 
-// ConnectJobFactory implementation that creates the standard ConnectJob
-// classes, using SocketParams.
-class TransportClientSocketPool::ConnectJobFactoryImpl
-    : public TransportClientSocketPool::ConnectJobFactory {
- public:
-  ConnectJobFactoryImpl(const ProxyServer& proxy_server,
-                        bool is_for_websockets,
-                        const CommonConnectJobParams* common_connect_job_params)
-      : proxy_server_(proxy_server),
-        is_for_websockets_(is_for_websockets),
-        common_connect_job_params_(common_connect_job_params) {
-    // This class should not be used with WebSockets. Note that
-    // |common_connect_job_params| may be nullptr in tests.
-    DCHECK(!common_connect_job_params ||
-           !common_connect_job_params->websocket_endpoint_lock_manager);
-  }
-
-  ~ConnectJobFactoryImpl() override = default;
-
-  // TransportClientSocketPool::ConnectJobFactory methods.
-  std::unique_ptr<ConnectJob> NewConnectJob(
-      ClientSocketPool::GroupId group_id,
-      scoped_refptr<ClientSocketPool::SocketParams> socket_params,
-      const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
-      RequestPriority request_priority,
-      SocketTag socket_tag,
-      ConnectJob::Delegate* delegate) const override {
-    return CreateConnectJob(group_id, socket_params, proxy_server_,
-                            proxy_annotation_tag, is_for_websockets_,
-                            common_connect_job_params_, request_priority,
-                            socket_tag, delegate);
-  }
-
- private:
-  const ProxyServer proxy_server_;
-  const bool is_for_websockets_;
-  const CommonConnectJobParams* common_connect_job_params_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConnectJobFactoryImpl);
-};
-
 TransportClientSocketPool::Request::Request(
     ClientSocketHandle* handle,
     CompletionOnceCallback callback,
@@ -119,7 +82,7 @@ TransportClientSocketPool::Request::Request(
     RespectLimits respect_limits,
     Flags flags,
     scoped_refptr<SocketParams> socket_params,
-    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+    const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     const NetLogWithSource& net_log)
     : handle_(handle),
       callback_(std::move(callback)),
@@ -160,17 +123,16 @@ TransportClientSocketPool::TransportClientSocketPool(
     const ProxyServer& proxy_server,
     bool is_for_websockets,
     const CommonConnectJobParams* common_connect_job_params)
-    : TransportClientSocketPool(
-          max_sockets,
-          max_sockets_per_group,
-          unused_idle_socket_timeout,
-          ClientSocketPool::used_idle_socket_timeout(),
-          proxy_server,
-          std::make_unique<ConnectJobFactoryImpl>(proxy_server,
-                                                  is_for_websockets,
-                                                  common_connect_job_params),
-          common_connect_job_params->ssl_client_context,
-          true /* connect_backup_jobs_enabled */) {}
+    : TransportClientSocketPool(max_sockets,
+                                max_sockets_per_group,
+                                unused_idle_socket_timeout,
+                                ClientSocketPool::used_idle_socket_timeout(),
+                                proxy_server,
+                                is_for_websockets,
+                                common_connect_job_params,
+                                std::make_unique<ConnectJobFactory>(),
+                                common_connect_job_params->ssl_client_context,
+                                true /* connect_backup_jobs_enabled */) {}
 
 TransportClientSocketPool::~TransportClientSocketPool() {
   // Clean up any idle sockets and pending connect jobs.  Assert that we have no
@@ -196,15 +158,17 @@ TransportClientSocketPool::CreateForTesting(
     base::TimeDelta unused_idle_socket_timeout,
     base::TimeDelta used_idle_socket_timeout,
     const ProxyServer& proxy_server,
+    bool is_for_websockets,
+    const CommonConnectJobParams* common_connect_job_params,
     std::unique_ptr<ConnectJobFactory> connect_job_factory,
     SSLClientContext* ssl_client_context,
     bool connect_backup_jobs_enabled) {
   return base::WrapUnique<TransportClientSocketPool>(
       new TransportClientSocketPool(
           max_sockets, max_sockets_per_group, unused_idle_socket_timeout,
-          used_idle_socket_timeout, proxy_server,
-          std::move(connect_job_factory), ssl_client_context,
-          connect_backup_jobs_enabled));
+          used_idle_socket_timeout, proxy_server, is_for_websockets,
+          common_connect_job_params, std::move(connect_job_factory),
+          ssl_client_context, connect_backup_jobs_enabled));
 }
 
 TransportClientSocketPool::CallbackResultPair::CallbackResultPair()
@@ -260,7 +224,7 @@ void TransportClientSocketPool::RemoveHigherLayeredPool(
 int TransportClientSocketPool::RequestSocket(
     const GroupId& group_id,
     scoped_refptr<SocketParams> params,
-    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+    const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     RequestPriority priority,
     const SocketTag& socket_tag,
     RespectLimits respect_limits,
@@ -312,7 +276,7 @@ int TransportClientSocketPool::RequestSocket(
 void TransportClientSocketPool::RequestSockets(
     const GroupId& group_id,
     scoped_refptr<SocketParams> params,
-    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+    const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     int num_sockets,
     const NetLogWithSource& net_log) {
   if (net_log.IsCapturing()) {
@@ -433,9 +397,9 @@ int TransportClientSocketPool::RequestSocketInternal(const GroupId& group_id,
   group = GetOrCreateGroup(group_id);
   connecting_socket_count_++;
   std::unique_ptr<ConnectJob> owned_connect_job(
-      connect_job_factory_->NewConnectJob(
-          group_id, request.socket_params(), request.proxy_annotation_tag(),
-          request.priority(), request.socket_tag(), group));
+      CreateConnectJob(group_id, request.socket_params(), proxy_server_,
+                       request.proxy_annotation_tag(), request.priority(),
+                       request.socket_tag(), group));
   owned_connect_job->net_log().AddEvent(
       NetLogEventType::SOCKET_POOL_CONNECT_JOB_CREATED, [&] {
         return NetLogCreateConnectJobParams(false /* backup_job */, &group_id);
@@ -597,6 +561,9 @@ void TransportClientSocketPool::CancelRequest(const GroupId& group_id,
   CHECK(base::Contains(group_map_, group_id));
   Group* group = GetOrCreateGroup(group_id);
 
+  // TODO(crbug.com/1164929): Remove this CHECK once the investigation is done.
+  CHECK_EQ(group_id, group->group_id());
+
   std::unique_ptr<Request> request = group->FindAndRemoveBoundRequest(handle);
   if (request) {
     --connecting_socket_count_;
@@ -607,6 +574,9 @@ void TransportClientSocketPool::CancelRequest(const GroupId& group_id,
 
   // Search |unbound_requests_| for matching handle.
   request = group->FindAndRemoveUnboundRequest(handle);
+
+  // TODO(crbug.com/1164929): Remove this CHECK once the investigation is done.
+  CHECK(base::Contains(group_map_, group_id));
   if (request) {
     request->net_log().AddEvent(NetLogEventType::CANCELLED);
     request->net_log().EndEvent(NetLogEventType::SOCKET_POOL);
@@ -614,9 +584,23 @@ void TransportClientSocketPool::CancelRequest(const GroupId& group_id,
     // Let the job run, unless |cancel_connect_job| is true, or we're at the
     // socket limit and there are no other requests waiting on the job.
     bool reached_limit = ReachedMaxSocketsLimit();
+
+    // TODO(crbug.com/1164929): Remove this CHECK once the investigation is
+    // done.
+    CHECK(base::Contains(group_map_, group_id));
+
     if (group->jobs().size() > group->unbound_request_count() &&
         (cancel_connect_job || reached_limit)) {
+      // TODO(crbug.com/1164929): Remove this CHECK once the investigation is
+      // done.
+      CHECK(base::Contains(group_map_, group_id));
+
       RemoveConnectJob(group->jobs().begin()->get(), group);
+
+      // TODO(crbug.com/1164929): Remove this CHECK once the investigation is
+      // done.
+      CHECK(base::Contains(group_map_, group_id));
+
       if (group->IsEmpty())
         RemoveGroup(group->group_id());
       if (reached_limit)
@@ -809,10 +793,15 @@ TransportClientSocketPool::TransportClientSocketPool(
     base::TimeDelta unused_idle_socket_timeout,
     base::TimeDelta used_idle_socket_timeout,
     const ProxyServer& proxy_server,
+    bool is_for_websockets,
+    const CommonConnectJobParams* common_connect_job_params,
     std::unique_ptr<ConnectJobFactory> connect_job_factory,
     SSLClientContext* ssl_client_context,
     bool connect_backup_jobs_enabled)
-    : idle_socket_count_(0),
+    : ClientSocketPool(is_for_websockets,
+                       common_connect_job_params,
+                       std::move(connect_job_factory)),
+      idle_socket_count_(0),
       connecting_socket_count_(0),
       handed_out_socket_count_(0),
       max_sockets_(max_sockets),
@@ -820,7 +809,6 @@ TransportClientSocketPool::TransportClientSocketPool(
       unused_idle_socket_timeout_(unused_idle_socket_timeout),
       used_idle_socket_timeout_(used_idle_socket_timeout),
       proxy_server_(proxy_server),
-      connect_job_factory_(std::move(connect_job_factory)),
       connect_backup_jobs_enabled_(connect_backup_jobs_enabled &&
                                    g_connect_backup_jobs_enabled),
       ssl_client_context_(ssl_client_context) {
@@ -844,6 +832,7 @@ void TransportClientSocketPool::OnSSLConfigChanged(
   }
 }
 
+// TODO(crbug.com/1206799): Get `server` as SchemeHostPort?
 void TransportClientSocketPool::OnSSLConfigForServerChanged(
     const HostPortPair& server) {
   // Current time value. Retrieving it once at the function start rather than
@@ -862,8 +851,10 @@ void TransportClientSocketPool::OnSSLConfigForServerChanged(
   bool refreshed_any = false;
   for (auto it = group_map_.begin(); it != group_map_.end();) {
     auto to_refresh = it++;
-    if (proxy_matches || (to_refresh->first.socket_type() == SocketType::kSsl &&
-                          to_refresh->first.destination() == server)) {
+    if (proxy_matches || (GURL::SchemeIsCryptographic(
+                              to_refresh->first.destination().scheme()) &&
+                          HostPortPair::FromSchemeHostPort(
+                              to_refresh->first.destination()) == server)) {
       refreshed_any = true;
       // Note this call may destroy the group and invalidate |to_refresh|.
       RefreshGroup(to_refresh, now, kSslConfigChanged);
@@ -1311,7 +1302,7 @@ void TransportClientSocketPool::OnConnectJobComplete(Group* group,
 
   // Check if the ConnectJob is already bound to a Request. If so, result is
   // returned to that specific request.
-  base::Optional<Group::BoundRequest> bound_request =
+  absl::optional<Group::BoundRequest> bound_request =
       group->FindAndRemoveBoundRequestForConnectJob(job);
   Request* request = nullptr;
   std::unique_ptr<Request> owned_request;
@@ -1613,8 +1604,9 @@ void TransportClientSocketPool::Group::OnBackupJobTimerFired(
 
   Request* request = unbound_requests_.FirstMax().value().get();
   std::unique_ptr<ConnectJob> owned_backup_job =
-      client_socket_pool_->connect_job_factory_->NewConnectJob(
-          group_id, request->socket_params(), request->proxy_annotation_tag(),
+      client_socket_pool_->CreateConnectJob(
+          group_id, request->socket_params(),
+          client_socket_pool_->proxy_server_, request->proxy_annotation_tag(),
           request->priority(), request->socket_tag(), this);
   owned_backup_job->net_log().AddEvent(
       NetLogEventType::SOCKET_POOL_CONNECT_JOB_CREATED, [&] {
@@ -1710,6 +1702,12 @@ void TransportClientSocketPool::Group::RemoveAllUnboundJobs() {
   }
   unassigned_jobs_.clear();
   never_assigned_job_count_ = 0;
+
+  // Diagnostics check for crbug.com/1231248. `Group`s are deleted only on
+  // removal from `TransportClientSocketPool::group_map_`, so if this check
+  // fails, `this` has been deleted, likely through some reentrancy issue.
+  CHECK(client_socket_pool_->HasGroup(group_id_));
+
   // Delete active jobs.
   jobs_.clear();
   // Stop backup job timer.
@@ -1834,7 +1832,7 @@ TransportClientSocketPool::Group::BindRequestToConnectJob(
   return request;
 }
 
-base::Optional<TransportClientSocketPool::Group::BoundRequest>
+absl::optional<TransportClientSocketPool::Group::BoundRequest>
 TransportClientSocketPool::Group::FindAndRemoveBoundRequestForConnectJob(
     ConnectJob* connect_job) {
   for (auto bound_pair = bound_requests_.begin();
@@ -1845,7 +1843,7 @@ TransportClientSocketPool::Group::FindAndRemoveBoundRequestForConnectJob(
     bound_requests_.erase(bound_pair);
     return std::move(ret);
   }
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 std::unique_ptr<TransportClientSocketPool::Request>

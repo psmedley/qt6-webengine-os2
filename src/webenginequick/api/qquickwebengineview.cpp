@@ -49,6 +49,7 @@
 #include "qquickwebenginescriptcollection_p_p.h"
 #include "qquickwebenginesettings_p.h"
 #include "qquickwebenginetouchhandleprovider_p_p.h"
+#include "qquickwebenginetouchselectionmenurequest_p.h"
 #include "qquickwebengineview_p.h"
 #include "qquickwebengineview_p_p.h"
 
@@ -430,6 +431,12 @@ void QQuickWebEngineViewPrivate::didUpdateTargetURL(const QUrl &hoveredUrl)
 void QQuickWebEngineViewPrivate::selectionChanged()
 {
     updateEditActions();
+}
+
+void QQuickWebEngineViewPrivate::zoomUpdateIsNeeded()
+{
+    Q_Q(QQuickWebEngineView);
+    q->setZoomFactor(m_zoomFactor);
 }
 
 void QQuickWebEngineViewPrivate::recentlyAudibleChanged(bool recentlyAudible)
@@ -851,10 +858,8 @@ void QQuickWebEngineViewPrivate::initializationFinished()
         emit q->backgroundColorChanged();
     }
 
-    if (!qFuzzyCompare(adapter->currentZoomFactor(), m_zoomFactor)) {
-        adapter->setZoomFactor(m_zoomFactor);
-        emit q->zoomFactorChanged(m_zoomFactor);
-    }
+    // apply if it was set before first ever navigation already
+    q->setZoomFactor(m_zoomFactor);
 
 #if QT_CONFIG(webengine_webchannel)
     if (m_webChannel)
@@ -1107,9 +1112,11 @@ void QQuickWebEngineView::stop()
 void QQuickWebEngineView::setZoomFactor(qreal arg)
 {
     Q_D(QQuickWebEngineView);
-    if (d->adapter->isInitialized() &&  !qFuzzyCompare(d->m_zoomFactor, d->adapter->currentZoomFactor())) {
+    if (d->adapter->isInitialized() && !qFuzzyCompare(arg, zoomFactor())) {
         d->adapter->setZoomFactor(arg);
-        emit zoomFactorChanged(arg);
+        // MEMO: should reset if factor was not applied due to being invalid
+        d->m_zoomFactor = zoomFactor();
+        emit zoomFactorChanged(d->m_zoomFactor);
     } else {
         d->m_zoomFactor = arg;
     }
@@ -1267,10 +1274,20 @@ QtWebEngineCore::TouchHandleDrawableClient *QQuickWebEngineViewPrivate::createTo
 void QQuickWebEngineViewPrivate::showTouchSelectionMenu(QtWebEngineCore::TouchSelectionMenuController *menuController, const QRect &selectionBounds, const QSize &handleSize)
 {
     Q_UNUSED(handleSize);
+    Q_Q(QQuickWebEngineView);
 
     const int kSpacingBetweenButtons = 2;
     const int kMenuButtonMinWidth = 63;
     const int kMenuButtonMinHeight = 38;
+
+    QQuickWebEngineTouchSelectionMenuRequest *request = new QQuickWebEngineTouchSelectionMenuRequest(
+                selectionBounds, menuController);
+    qmlEngine(q)->newQObject(request);
+    Q_EMIT q->touchSelectionMenuRequested(request);
+
+    if (request->isAccepted()) {
+        return;
+    }
 
     int buttonCount = menuController->buttonCount();
     if (buttonCount == 1) {
@@ -2205,10 +2222,11 @@ QQuickContextMenuBuilder::QQuickContextMenuBuilder(QWebEngineContextMenuRequest 
 
 void QQuickContextMenuBuilder::appendExtraItems(QQmlEngine *engine)
 {
+    Q_UNUSED(engine);
     m_view->d_ptr->ui()->addMenuSeparator(m_menu);
     if (QObject *menuExtras = m_view->d_ptr->contextMenuExtraItems->create(qmlContext(m_view))) {
         menuExtras->setParent(m_menu);
-        QQmlListReference entries(m_menu, defaultPropertyName(m_menu), engine);
+        QQmlListReference entries(m_menu, defaultPropertyName(m_menu));
         if (entries.isValid())
             entries.append(menuExtras);
     }

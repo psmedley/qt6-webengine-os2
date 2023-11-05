@@ -262,7 +262,8 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
                           TransformState&,
                           MapCoordinatesFlags mode) const override;
 
-  PhysicalRect AbsoluteBoundingBoxRectHandlingEmptyInline() const final;
+  PhysicalRect AbsoluteBoundingBoxRectHandlingEmptyInline(
+      MapCoordinatesFlags = 0) const final;
 
   PhysicalRect VisualRectInDocument(
       VisualRectFlags = kDefaultVisualRectFlags) const override;
@@ -285,6 +286,7 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
 
   void InvalidateDisplayItemClients(PaintInvalidationReason) const override;
 
+  void LocalQuadsForSelf(Vector<FloatQuad>& quads) const override;
   void AbsoluteQuadsForSelf(Vector<FloatQuad>& quads,
                             MapCoordinatesFlags mode = 0) const override;
 
@@ -293,6 +295,11 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
       bool ignore_scroll_offset) const final;
 
  private:
+  bool AbsoluteTransformDependsOnPoint(const LayoutObject& object) const;
+  void QuadsForSelfInternal(Vector<FloatQuad>& quads,
+                            MapCoordinatesFlags mode,
+                            bool map_to_absolute) const;
+
   LayoutObjectChildList* VirtualChildren() final {
     NOT_DESTROYED();
     return Children();
@@ -360,8 +367,8 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
                  LayoutObject* new_child,
                  LayoutBoxModelObject* old_cont);
 
-  // Create an anoymous block for block children of this inline.
-  LayoutBlockFlow* CreateAnonymousContainerForBlockChildren();
+  // Create an anonymous block for block children of this inline.
+  LayoutBlockFlow* CreateAnonymousContainerForBlockChildren(bool split_flow);
 
   void UpdateLayout() final {
     NOT_DESTROYED();
@@ -441,7 +448,7 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
 
   LayoutBoxModelObject* ContinuationBefore(LayoutObject* before_child);
 
-  base::Optional<PhysicalOffset> FirstLineBoxTopLeftInternal() const;
+  absl::optional<PhysicalOffset> FirstLineBoxTopLeftInternal() const;
   PhysicalOffset AnchorPhysicalLocation() const;
 
   LayoutObjectChildList children_;

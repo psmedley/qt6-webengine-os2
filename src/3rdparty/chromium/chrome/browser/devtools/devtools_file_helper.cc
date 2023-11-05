@@ -11,13 +11,13 @@
 #include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/hash/md5.h"
+#include "base/json/values_util.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
-#include "base/util/values/values_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_file_watcher.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -28,6 +28,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
@@ -42,7 +43,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
-using base::Bind;
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadManager;
@@ -117,7 +117,7 @@ class SelectFileDialog : public ui::SelectFileDialog::Listener {
       file_type_info.extensions[0].push_back(ext);
     }
     select_file_dialog_->SelectFile(
-        type, base::string16(), default_path, &file_type_info, 0, ext,
+        type, std::u16string(), default_path, &file_type_info, 0, ext,
         platform_util::GetTopLevel(web_contents->GetNativeView()), nullptr);
   }
 
@@ -137,7 +137,7 @@ void WriteToFile(const base::FilePath& path, const std::string& content) {
 void AppendToFile(const base::FilePath& path, const std::string& content) {
   DCHECK(!path.empty());
 
-  base::AppendToFile(path, content.c_str(), content.size());
+  base::AppendToFile(path, content);
 }
 
 storage::IsolatedContext* isolated_context() {
@@ -250,7 +250,7 @@ void DevToolsFileHelper::Save(const std::string& url,
 
   const base::Value* path_value;
   if (file_map->Get(base::MD5String(url), &path_value)) {
-    base::Optional<base::FilePath> path = util::ValueToFilePath(*path_value);
+    absl::optional<base::FilePath> path = base::ValueToFilePath(*path_value);
     if (path)
       initial_path = std::move(*path);
   }
@@ -267,8 +267,9 @@ void DevToolsFileHelper::Save(const std::string& url,
       initial_path = g_last_save_path.Pointer()->DirName().AppendASCII(
           suggested_file_name);
     } else {
-      base::FilePath download_path = DownloadPrefs::FromDownloadManager(
-          BrowserContext::GetDownloadManager(profile_))->DownloadPath();
+      base::FilePath download_path =
+          DownloadPrefs::FromDownloadManager(profile_->GetDownloadManager())
+              ->DownloadPath();
       initial_path = download_path.AppendASCII(suggested_file_name);
     }
   }
@@ -302,7 +303,7 @@ void DevToolsFileHelper::SaveAsFileSelected(const std::string& url,
   DictionaryPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsEditedFiles);
   base::DictionaryValue* files_map = update.Get();
-  files_map->SetKey(base::MD5String(url), util::FilePathToValue(path));
+  files_map->SetKey(base::MD5String(url), base::FilePathToValue(path));
   std::string file_system_path = path.AsUTF8Unsafe();
   std::move(callback).Run(file_system_path);
   file_task_runner_->PostTask(FROM_HERE, BindOnce(&WriteToFile, path, content));
@@ -347,9 +348,9 @@ void DevToolsFileHelper::InnerAddFileSystem(
     RemoveFileSystem(file_system_path);
 
   std::string path_display_name = path.AsEndingWithSeparator().AsUTF8Unsafe();
-  base::string16 message = l10n_util::GetStringFUTF16(
-      IDS_DEV_TOOLS_CONFIRM_ADD_FILE_SYSTEM_MESSAGE,
-      base::UTF8ToUTF16(path_display_name));
+  std::u16string message =
+      l10n_util::GetStringFUTF16(IDS_DEV_TOOLS_CONFIRM_ADD_FILE_SYSTEM_MESSAGE,
+                                 base::UTF8ToUTF16(path_display_name));
   show_info_bar_callback.Run(
       message, BindOnce(&DevToolsFileHelper::AddUserConfirmedFileSystem,
                         weak_factory_.GetWeakPtr(), type, path));
@@ -369,13 +370,20 @@ void DevToolsFileHelper::AddUserConfirmedFileSystem(const std::string& type,
   DictionaryPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsFileSystemPaths);
   base::DictionaryValue* file_systems_paths_value = update.Get();
-  file_systems_paths_value->SetWithoutPathExpansion(
-      file_system_path, std::make_unique<base::Value>(type));
+  file_systems_paths_value->SetKey(file_system_path, base::Value(type));
 }
 
 void DevToolsFileHelper::FailedToAddFileSystem(const std::string& error) {
   delegate_->FileSystemAdded(error, nullptr);
 }
+
+namespace {
+
+void RunOnUIThread(base::OnceClosure callback) {
+  content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE, std::move(callback));
+}
+
+}  // namespace
 
 std::vector<DevToolsFileHelper::FileSystem>
 DevToolsFileHelper::GetFileSystems() {
@@ -386,10 +394,12 @@ DevToolsFileHelper::GetFileSystems() {
         base::BindRepeating(&DevToolsFileHelper::FilePathsChanged,
                             weak_factory_.GetWeakPtr()),
         base::SequencedTaskRunnerHandle::Get()));
+    auto change_handler_on_ui = base::BindRepeating(
+        &DevToolsFileHelper::FileSystemPathsSettingChangedOnUI,
+        weak_factory_.GetWeakPtr());
     pref_change_registrar_.Add(
         prefs::kDevToolsFileSystemPaths,
-        base::BindRepeating(&DevToolsFileHelper::FileSystemPathsSettingChanged,
-                            base::Unretained(this)));
+        base::BindRepeating(RunOnUIThread, change_handler_on_ui));
   }
   for (auto file_system_path : file_system_paths_) {
     base::FilePath path =
@@ -443,7 +453,8 @@ void DevToolsFileHelper::ShowItemInFolder(const std::string& file_system_path) {
                      weak_factory_.GetWeakPtr(), path));
 }
 
-void DevToolsFileHelper::FileSystemPathsSettingChanged() {
+void DevToolsFileHelper::FileSystemPathsSettingChangedOnUI() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   PathToType remaining;
   remaining.swap(file_system_paths_);
   DCHECK(file_watcher_.get());

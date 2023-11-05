@@ -25,6 +25,17 @@ namespace declarativeNetRequest {
     other
   };
 
+  // This describes the HTTP request method of a network request.
+  enum RequestMethod {
+    delete,
+    get,
+    head,
+    options,
+    patch,
+    post,
+    put
+  };
+
   // This describes whether the request is first or third party to the frame in
   // which it originated. A request is said to be first party if it has the same
   // domain (eTLD+1) as the frame in which the request originated.
@@ -91,6 +102,10 @@ namespace declarativeNetRequest {
   dictionary QueryKeyValue {
     DOMString key;
     DOMString value;
+
+    // If true, the query key is replaced only if it's already present.
+    // Otherwise, the key is also added if it's missing. Defaults to false.
+    boolean? replaceOnly;
   };
 
   // Describes modification to the url query.
@@ -151,8 +166,7 @@ namespace declarativeNetRequest {
      DOMString? regexSubstitution;
   };
 
-  [noinline_doc]
-  dictionary RuleCondition {
+  [noinline_doc] dictionary RuleCondition {
 
     // The pattern which is matched against the network request url.
     // Supported constructs:
@@ -249,10 +263,35 @@ namespace declarativeNetRequest {
     // "main_frame" are blocked.
     ResourceType[]? excludedResourceTypes;
 
+    // List of HTTP request methods which the rule can match. An empty list is
+    // not allowed.
+    //
+    // Note: Specifying a <code>requestMethods</code> rule condition will also
+    // exclude non-HTTP(s) requests, whereas specifying
+    // <code>excludedRequestMethods</code> will not.
+    RequestMethod[]? requestMethods;
+
+    // List of request methods which the rule won't match. Only one of
+    // <code>requestMethods</code> and <code>excludedRequestMethods</code>
+    // should be specified. If neither of them is specified, all request methods
+    // are matched.
+    RequestMethod[]? excludedRequestMethods;
+
     // Specifies whether the network request is first-party or third-party to
     // the domain from which it originated. If omitted, all requests are
     // accepted.
     DomainType? domainType;
+
+    // List of $(ref:tabs.Tab.id) which the rule should match. An ID of
+    // $(ref:tabs.TAB_ID_NONE) matches requests which don't originate from a
+    // tab. An empty list is not allowed. Only supported for session-scoped
+    // rules.
+    long[]? tabIds;
+
+    // List of $(ref:tabs.Tab.id) which the rule should not match. An ID of
+    // $(ref:tabs.TAB_ID_NONE) excludes requests which don't originate from a
+    // tab. Only supported for session-scoped rules.
+    long[]? excludedTabIds;
   };
 
   dictionary ModifyHeaderInfo {
@@ -471,13 +510,14 @@ namespace declarativeNetRequest {
     // to the rule set. This can happen for multiple reasons, such as invalid
     // rule format, duplicate rule ID, rule count limit exceeded, internal
     // errors, and others.
-    static void updateDynamicRules(UpdateRuleOptions options,
-                                   optional EmptyCallback callback);
+    [supportsPromises] static void updateDynamicRules(
+        UpdateRuleOptions options,
+        optional EmptyCallback callback);
 
     // Returns the current set of dynamic rules for the extension.
     // |callback|: Called with the set of dynamic rules. An error might be
     // raised in case of transient internal errors.
-    static void getDynamicRules(GetRulesCallback callback);
+    [supportsPromises] static void getDynamicRules(GetRulesCallback callback);
 
     // Modifies the current set of session scoped rules for the extension.
     // The rules with IDs listed in <code>options.removeRuleIds</code> are first
@@ -495,12 +535,13 @@ namespace declarativeNetRequest {
     // an error, $(ref:runtime.lastError) will be set and no change will be made
     // to the rule set. This can happen for multiple reasons, such as invalid
     // rule format, duplicate rule ID, rule count limit exceeded, and others.
-    static void updateSessionRules(UpdateRuleOptions options,
-                                   optional EmptyCallback callback);
+    [supportsPromises] static void updateSessionRules(
+        UpdateRuleOptions options,
+        optional EmptyCallback callback);
 
     // Returns the current set of session scoped rules for the extension.
     // |callback|: Called with the set of session scoped rules.
-    static void getSessionRules(GetRulesCallback callback);
+    [supportsPromises] static void getSessionRules(GetRulesCallback callback);
 
     // Updates the set of enabled static rulesets for the extension. The
     // rulesets with IDs listed in <code>options.disableRulesetIds</code> are
@@ -514,13 +555,15 @@ namespace declarativeNetRequest {
     // $(ref:runtime.lastError) will be set and no change will be made to set of
     // enabled rulesets. This can happen for multiple reasons, such as invalid
     // ruleset IDs, rule count limit exceeded, or internal errors.
-    static void updateEnabledRulesets(UpdateRulesetOptions options,
-                                      optional EmptyCallback callback);
+    [supportsPromises] static void updateEnabledRulesets(
+        UpdateRulesetOptions options,
+        optional EmptyCallback callback);
 
     // Returns the ids for the current set of enabled static rulesets.
     // |callback|: Called with a list of ids, where each id corresponds to an
     // enabled static $(ref:Ruleset).
-    static void getEnabledRulesets(GetEnabledRulesetsCallback callback);
+    [supportsPromises] static void getEnabledRulesets(
+        GetEnabledRulesetsCallback callback);
 
     // Returns all rules matched for the extension. Callers can optionally
     // filter the list of matched rules by specifying a |filter|. This method is
@@ -535,13 +578,14 @@ namespace declarativeNetRequest {
     // case of an error, $(ref:runtime.lastError) will be set and no rules will
     // be returned. This can happen for multiple reasons, such as insufficient
     // permissions, or exceeding the quota.
-    static void getMatchedRules(optional MatchedRulesFilter filter,
-                                GetMatchedRulesCallback callback);
+    [supportsPromises] static void getMatchedRules(
+        optional MatchedRulesFilter filter,
+        GetMatchedRulesCallback callback);
 
     // Configures if the action count for tabs should be displayed as the
     // extension action's badge text and provides a way for that action count to
     // be incremented.
-    static void setExtensionActionOptions(
+    [supportsPromises] static void setExtensionActionOptions(
         ExtensionActionOptions options,
         optional EmptyCallback callback);
 
@@ -550,12 +594,13 @@ namespace declarativeNetRequest {
     // |regexOptions|: The regular expression to check.
     // |callback|: Called with details consisting of whether the regular
     // expression is supported and the reason if not.
-    static void isRegexSupported(RegexOptions regexOptions,
-                                 IsRegexSupportedCallback callback);
+    [supportsPromises] static void isRegexSupported(
+        RegexOptions regexOptions,
+        IsRegexSupportedCallback callback);
 
     // Returns the number of static rules an extension can enable before the
     // <a href="#global-rule-limit">global static rule limit</a> is reached.
-    static void getAvailableStaticRuleCount(
+    [supportsPromises] static void getAvailableStaticRuleCount(
         GetAvailableStaticRuleCountCallback callback);
   };
 
@@ -591,7 +636,11 @@ namespace declarativeNetRequest {
 
     // The maximum number of static <code>Rulesets</code> an extension can
     // specify as part of the <code>"rule_resources"</code> manifest key.
-    [value=10] static long MAX_NUMBER_OF_STATIC_RULESETS();
+    [value=50] static long MAX_NUMBER_OF_STATIC_RULESETS();
+
+    // The maximum number of static <code>Rulesets</code> an extension can
+    // enable at any one time.
+    [value=10] static long MAX_NUMBER_OF_ENABLED_STATIC_RULESETS();
 
     // Ruleset ID for the dynamic rules added by the extension.
     [value="_dynamic"] static DOMString DYNAMIC_RULESET_ID();

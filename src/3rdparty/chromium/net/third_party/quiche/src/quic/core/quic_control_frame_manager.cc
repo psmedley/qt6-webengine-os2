@@ -17,7 +17,6 @@
 #include "quic/core/quic_utils.h"
 #include "quic/platform/api/quic_bug_tracker.h"
 #include "quic/platform/api/quic_flag_utils.h"
-#include "quic/platform/api/quic_map_util.h"
 
 namespace quic {
 
@@ -138,7 +137,7 @@ void QuicControlFrameManager::WriteOrBufferNewConnectionId(
     const QuicConnectionId& connection_id,
     uint64_t sequence_number,
     uint64_t retire_prior_to,
-    QuicUint128 stateless_reset_token) {
+    const StatelessResetToken& stateless_reset_token) {
   QUIC_DVLOG(1) << "Writing NEW_CONNECTION_ID frame";
   WriteOrBufferQuicFrame(QuicFrame(new QuicNewConnectionIdFrame(
       ++last_control_frame_id_, connection_id, sequence_number,
@@ -161,27 +160,28 @@ void QuicControlFrameManager::WriteOrBufferNewToken(absl::string_view token) {
 void QuicControlFrameManager::OnControlFrameSent(const QuicFrame& frame) {
   QuicControlFrameId id = GetControlFrameId(frame);
   if (id == kInvalidControlFrameId) {
-    QUIC_BUG
+    QUIC_BUG(quic_bug_12727_1)
         << "Send or retransmit a control frame with invalid control frame id";
     return;
   }
   if (frame.type == WINDOW_UPDATE_FRAME) {
     QuicStreamId stream_id = frame.window_update_frame->stream_id;
-    if (QuicContainsKey(window_update_frames_, stream_id) &&
+    if (window_update_frames_.contains(stream_id) &&
         id > window_update_frames_[stream_id]) {
       // Consider the older window update of the same stream as acked.
       OnControlFrameIdAcked(window_update_frames_[stream_id]);
     }
     window_update_frames_[stream_id] = id;
   }
-  if (QuicContainsKey(pending_retransmissions_, id)) {
+  if (pending_retransmissions_.contains(id)) {
     // This is retransmitted control frame.
     pending_retransmissions_.erase(id);
     return;
   }
   if (id > least_unsent_) {
-    QUIC_BUG << "Try to send control frames out of order, id: " << id
-             << " least_unsent: " << least_unsent_;
+    QUIC_BUG(quic_bug_10517_1)
+        << "Try to send control frames out of order, id: " << id
+        << " least_unsent: " << least_unsent_;
     delegate_->OnControlFrameManagerError(
         QUIC_INTERNAL_ERROR, "Try to send control frames out of order");
     return;
@@ -196,7 +196,7 @@ bool QuicControlFrameManager::OnControlFrameAcked(const QuicFrame& frame) {
   }
   if (frame.type == WINDOW_UPDATE_FRAME) {
     QuicStreamId stream_id = frame.window_update_frame->stream_id;
-    if (QuicContainsKey(window_update_frames_, stream_id) &&
+    if (window_update_frames_.contains(stream_id) &&
         window_update_frames_[stream_id] == id) {
       window_update_frames_.erase(stream_id);
     }
@@ -211,7 +211,7 @@ void QuicControlFrameManager::OnControlFrameLost(const QuicFrame& frame) {
     return;
   }
   if (id >= least_unsent_) {
-    QUIC_BUG << "Try to mark unsent control frame as lost";
+    QUIC_BUG(quic_bug_10517_2) << "Try to mark unsent control frame as lost";
     delegate_->OnControlFrameManagerError(
         QUIC_INTERNAL_ERROR, "Try to mark unsent control frame as lost");
     return;
@@ -222,9 +222,10 @@ void QuicControlFrameManager::OnControlFrameLost(const QuicFrame& frame) {
     // This frame has already been acked.
     return;
   }
-  if (!QuicContainsKey(pending_retransmissions_, id)) {
+  if (!pending_retransmissions_.contains(id)) {
     pending_retransmissions_[id] = true;
-    QUIC_BUG_IF(pending_retransmissions_.size() > control_frames_.size())
+    QUIC_BUG_IF(quic_bug_12727_2,
+                pending_retransmissions_.size() > control_frames_.size())
         << "least_unacked_: " << least_unacked_
         << ", least_unsent_: " << least_unsent_;
   }
@@ -252,7 +253,7 @@ bool QuicControlFrameManager::WillingToWrite() const {
 }
 
 QuicFrame QuicControlFrameManager::NextPendingRetransmission() const {
-  QUIC_BUG_IF(pending_retransmissions_.empty())
+  QUIC_BUG_IF(quic_bug_12727_3, pending_retransmissions_.empty())
       << "Unexpected call to NextPendingRetransmission() with empty pending "
       << "retransmission list.";
   QuicControlFrameId id = pending_retransmissions_.begin()->first;
@@ -279,7 +280,7 @@ bool QuicControlFrameManager::RetransmitControlFrame(const QuicFrame& frame,
     return true;
   }
   if (id >= least_unsent_) {
-    QUIC_BUG << "Try to retransmit unsent control frame";
+    QUIC_BUG(quic_bug_10517_3) << "Try to retransmit unsent control frame";
     delegate_->OnControlFrameManagerError(
         QUIC_INTERNAL_ERROR, "Try to retransmit unsent control frame");
     return false;
@@ -333,7 +334,7 @@ bool QuicControlFrameManager::OnControlFrameIdAcked(QuicControlFrameId id) {
     return false;
   }
   if (id >= least_unsent_) {
-    QUIC_BUG << "Try to ack unsent control frame";
+    QUIC_BUG(quic_bug_10517_4) << "Try to ack unsent control frame";
     delegate_->OnControlFrameManagerError(QUIC_INTERNAL_ERROR,
                                           "Try to ack unsent control frame");
     return false;

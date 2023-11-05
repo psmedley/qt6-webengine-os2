@@ -127,6 +127,13 @@ struct FieldAccess {
 #endif
   {
     DCHECK_GE(offset, 0);
+    DCHECK_IMPLIES(
+        machine_type.IsMapWord(),
+        offset == HeapObject::kMapOffset && base_is_tagged != kUntaggedBase);
+    DCHECK_IMPLIES(machine_type.IsMapWord(),
+                   (write_barrier_kind == kMapWriteBarrier ||
+                    write_barrier_kind == kNoWriteBarrier ||
+                    write_barrier_kind == kAssertNoWriteBarrier));
   }
 
   int tag() const { return base_is_tagged == kTaggedBase ? kHeapObjectTag : 0; }
@@ -599,6 +606,30 @@ bool operator==(NumberOperationParameters const&,
 const NumberOperationParameters& NumberOperationParametersOf(const Operator* op)
     V8_WARN_UNUSED_RESULT;
 
+class SpeculativeBigIntAsUintNParameters {
+ public:
+  SpeculativeBigIntAsUintNParameters(int bits, const FeedbackSource& feedback)
+      : bits_(bits), feedback_(feedback) {
+    DCHECK_GE(bits_, 0);
+    DCHECK_LE(bits_, 64);
+  }
+
+  int bits() const { return bits_; }
+  const FeedbackSource& feedback() const { return feedback_; }
+
+ private:
+  int bits_;
+  FeedbackSource feedback_;
+};
+
+size_t hash_value(SpeculativeBigIntAsUintNParameters const&);
+V8_EXPORT_PRIVATE std::ostream& operator<<(
+    std::ostream&, const SpeculativeBigIntAsUintNParameters&);
+bool operator==(SpeculativeBigIntAsUintNParameters const&,
+                SpeculativeBigIntAsUintNParameters const&);
+const SpeculativeBigIntAsUintNParameters& SpeculativeBigIntAsUintNParametersOf(
+    const Operator* op) V8_WARN_UNUSED_RESULT;
+
 int FormalParameterCountOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 
 class AllocateParameters {
@@ -665,19 +696,33 @@ std::ostream& operator<<(std::ostream&, const NewArgumentsElementsParameters&);
 const NewArgumentsElementsParameters& NewArgumentsElementsParametersOf(
     const Operator*) V8_WARN_UNUSED_RESULT;
 
+struct FastApiCallFunction {
+  Address address;
+  const CFunctionInfo* signature;
+
+  bool operator==(const FastApiCallFunction& rhs) const {
+    return address == rhs.address && signature == rhs.signature;
+  }
+};
+typedef ZoneVector<FastApiCallFunction> FastApiCallFunctionVector;
+
 class FastApiCallParameters {
  public:
-  explicit FastApiCallParameters(const CFunctionInfo* signature,
+  explicit FastApiCallParameters(const FastApiCallFunctionVector& c_functions,
                                  FeedbackSource const& feedback,
                                  CallDescriptor* descriptor)
-      : signature_(signature), feedback_(feedback), descriptor_(descriptor) {}
+      : c_functions_(c_functions),
+        feedback_(feedback),
+        descriptor_(descriptor) {}
 
-  const CFunctionInfo* signature() const { return signature_; }
+  const FastApiCallFunctionVector& c_functions() const { return c_functions_; }
   FeedbackSource const& feedback() const { return feedback_; }
   CallDescriptor* descriptor() const { return descriptor_; }
 
  private:
-  const CFunctionInfo* signature_;
+  // A single FastApiCall node can represent multiple overloaded functions.
+  const FastApiCallFunctionVector c_functions_;
+
   const FeedbackSource feedback_;
   CallDescriptor* descriptor_;
 };
@@ -798,6 +843,7 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   const Operator* SpeculativeNumberBitwiseAnd(NumberOperationHint hint);
   const Operator* SpeculativeNumberBitwiseOr(NumberOperationHint hint);
   const Operator* SpeculativeNumberBitwiseXor(NumberOperationHint hint);
+  const Operator* SpeculativeNumberPow(NumberOperationHint hint);
 
   const Operator* SpeculativeNumberLessThan(NumberOperationHint hint);
   const Operator* SpeculativeNumberLessThanOrEqual(NumberOperationHint hint);
@@ -806,7 +852,8 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   const Operator* SpeculativeBigIntAdd(BigIntOperationHint hint);
   const Operator* SpeculativeBigIntSubtract(BigIntOperationHint hint);
   const Operator* SpeculativeBigIntNegate(BigIntOperationHint hint);
-  const Operator* BigIntAsUintN(int bits);
+  const Operator* SpeculativeBigIntAsUintN(int bits,
+                                           const FeedbackSource& feedback);
 
   const Operator* ReferenceEqual();
   const Operator* SameValue();
@@ -1054,12 +1101,16 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   // Abort if the value input does not inhabit the given type
   const Operator* AssertType(Type type);
 
+  // Abort if the value does not match the node's computed type after
+  // SimplifiedLowering.
+  const Operator* VerifyType();
+
   const Operator* DateNow();
 
   // Represents the inputs necessary to construct a fast and a slow API call.
-  const Operator* FastApiCall(const CFunctionInfo* signature,
-                              FeedbackSource const& feedback,
-                              CallDescriptor* descriptor);
+  const Operator* FastApiCall(
+      const FastApiCallFunctionVector& c_candidate_functions,
+      FeedbackSource const& feedback, CallDescriptor* descriptor);
 
  private:
   Zone* zone() const { return zone_; }
@@ -1112,26 +1163,22 @@ class FastApiCallNode final : public SimplifiedNodeWrapperBase {
  public:
   explicit constexpr FastApiCallNode(Node* node)
       : SimplifiedNodeWrapperBase(node) {
-    CONSTEXPR_DCHECK(node->opcode() == IrOpcode::kFastApiCall);
+    DCHECK_EQ(IrOpcode::kFastApiCall, node->opcode());
   }
 
   const FastApiCallParameters& Parameters() const {
     return FastApiCallParametersOf(node()->op());
   }
 
-#define INPUTS(V)              \
-  V(Target, target, 0, Object) \
-  V(Receiver, receiver, 1, Object)
+#define INPUTS(V) V(Receiver, receiver, 0, Object)
   INPUTS(DEFINE_INPUT_ACCESSORS)
 #undef INPUTS
 
   // Besides actual arguments, FastApiCall nodes also take:
-  static constexpr int kFastTargetInputCount = 1;
   static constexpr int kSlowTargetInputCount = 1;
   static constexpr int kFastReceiverInputCount = 1;
   static constexpr int kSlowReceiverInputCount = 1;
-  static constexpr int kExtraInputCount =
-      kFastTargetInputCount + kFastReceiverInputCount;
+  static constexpr int kExtraInputCount = kFastReceiverInputCount;
 
   static constexpr int kArityInputCount = 1;
   static constexpr int kNewTargetInputCount = 1;
@@ -1148,8 +1195,7 @@ class FastApiCallNode final : public SimplifiedNodeWrapperBase {
 
   // This is the arity fed into FastApiCallArguments.
   static constexpr int ArityForArgc(int c_arg_count, int js_arg_count) {
-    return c_arg_count + kFastTargetInputCount + js_arg_count +
-           kEffectAndControlInputCount;
+    return c_arg_count + js_arg_count + kEffectAndControlInputCount;
   }
 
   int FastCallArgumentCount() const;
@@ -1167,9 +1213,7 @@ class FastApiCallNode final : public SimplifiedNodeWrapperBase {
         NodeProperties::GetValueInput(node(), FastCallArgumentIndex(i)));
   }
 
-  int FirstSlowCallArgumentIndex() const {
-    return FastCallArgumentCount() + FastApiCallNode::kFastTargetInputCount;
-  }
+  int FirstSlowCallArgumentIndex() const { return FastCallArgumentCount(); }
   int SlowCallArgumentIndex(int i) const {
     return FirstSlowCallArgumentIndex() + i;
   }
@@ -1184,7 +1228,7 @@ class TierUpCheckNode final : public SimplifiedNodeWrapperBase {
  public:
   explicit constexpr TierUpCheckNode(Node* node)
       : SimplifiedNodeWrapperBase(node) {
-    CONSTEXPR_DCHECK(node->opcode() == IrOpcode::kTierUpCheck);
+    DCHECK_EQ(IrOpcode::kTierUpCheck, node->opcode());
   }
 
 #define INPUTS(V)                                       \
@@ -1201,7 +1245,7 @@ class UpdateInterruptBudgetNode final : public SimplifiedNodeWrapperBase {
  public:
   explicit constexpr UpdateInterruptBudgetNode(Node* node)
       : SimplifiedNodeWrapperBase(node) {
-    CONSTEXPR_DCHECK(node->opcode() == IrOpcode::kUpdateInterruptBudget);
+    DCHECK_EQ(IrOpcode::kUpdateInterruptBudget, node->opcode());
   }
 
   int delta() const { return OpParameter<int>(node()->op()); }

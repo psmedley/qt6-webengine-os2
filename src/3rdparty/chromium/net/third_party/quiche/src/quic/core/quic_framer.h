@@ -225,7 +225,8 @@ class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
   virtual void OnPacketComplete() = 0;
 
   // Called to check whether |token| is a valid stateless reset token.
-  virtual bool IsValidStatelessResetToken(QuicUint128 token) const = 0;
+  virtual bool IsValidStatelessResetToken(
+      const StatelessResetToken& token) const = 0;
 
   // Called when an IETF stateless reset packet has been parsed and validated
   // with the stateless reset token.
@@ -470,10 +471,14 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   static std::unique_ptr<QuicEncryptedPacket> BuildPublicResetPacket(
       const QuicPublicResetPacket& packet);
 
+  // Returns the minimal stateless reset packet length.
+  static size_t GetMinStatelessResetPacketLength();
+
   // Returns a new IETF stateless reset packet.
   static std::unique_ptr<QuicEncryptedPacket> BuildIetfStatelessResetPacket(
       QuicConnectionId connection_id,
-      QuicUint128 stateless_reset_token);
+      size_t received_packet_length,
+      StatelessResetToken stateless_reset_token);
 
   // Returns a new version negotiation packet.
   static std::unique_ptr<QuicEncryptedPacket> BuildVersionNegotiationPacket(
@@ -629,6 +634,8 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
 
   Perspective perspective() const { return perspective_; }
 
+  QuicStreamFrameDataProducer* data_producer() const { return data_producer_; }
+
   void set_data_producer(QuicStreamFrameDataProducer* data_producer) {
     data_producer_ = data_producer;
   }
@@ -641,6 +648,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
 
   uint64_t current_received_frame_type() const {
     return current_received_frame_type_;
+  }
+
+  uint64_t previously_received_frame_type() const {
+    return previously_received_frame_type_;
   }
 
   // The connection ID length the framer expects on incoming IETF short headers
@@ -826,8 +837,13 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
       QuicPacketNumber base_packet_number,
       uint64_t* packet_number);
   bool ProcessFrameData(QuicDataReader* reader, const QuicPacketHeader& header);
+
+  static bool IsIetfFrameTypeExpectedForEncryptionLevel(uint64_t frame_type,
+                                                        EncryptionLevel level);
+
   bool ProcessIetfFrameData(QuicDataReader* reader,
-                            const QuicPacketHeader& header);
+                            const QuicPacketHeader& header,
+                            EncryptionLevel decrypted_level);
   bool ProcessStreamFrame(QuicDataReader* reader,
                           uint8_t frame_type,
                           QuicStreamFrame* frame);
@@ -1112,6 +1128,8 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // The value of the current key phase bit, which is toggled when the keys are
   // changed.
   bool current_key_phase_bit_;
+  // Whether we have performed a key update at least once.
+  bool key_update_performed_ = false;
   // Tracks the first packet received in the current key phase. Will be
   // uninitialized before the first one-RTT packet has been received or after a
   // locally initiated key update but before the first packet from the peer in
@@ -1176,6 +1194,11 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // the Transport Connection Close when there is an error during frame
   // processing.
   uint64_t current_received_frame_type_;
+
+  // TODO(haoyuewang) Remove this debug utility.
+  // The type of the IETF frame preceding the frame currently being processed. 0
+  // when not processing a frame or only 1 frame has been processed.
+  uint64_t previously_received_frame_type_;
 };
 
 // Look for and parse the error code from the "<quic_error_code>:" text that

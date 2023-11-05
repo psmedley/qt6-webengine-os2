@@ -14,13 +14,19 @@
 #include "content/browser/utility_process_host.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/test_service.mojom.h"
 #include "content/test/sandbox_status.test-mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "printing/buildflags/buildflags.h"
 #include "sandbox/policy/linux/sandbox_linux.h"
 #include "sandbox/policy/switches.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chromeos/assistant/buildflags.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 using sandbox::policy::SandboxLinux;
 using sandbox::policy::SandboxType;
@@ -70,32 +76,39 @@ class UtilityProcessSandboxBrowserTest
     done_closure_ =
         base::BindOnce(&UtilityProcessSandboxBrowserTest::DoneRunning,
                        base::Unretained(this), run_loop.QuitClosure());
-    GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(
-            &UtilityProcessSandboxBrowserTest::RunUtilityProcessOnIOThread,
-            base::Unretained(this)));
-    run_loop.Run();
+    if (base::FeatureList::IsEnabled(features::kProcessHostOnUI)) {
+      RunUtilityProcessOnProcessThread();
+    } else {
+      GetIOThreadTaskRunner({})->PostTask(
+          FROM_HERE, base::BindOnce(&UtilityProcessSandboxBrowserTest::
+                                        RunUtilityProcessOnProcessThread,
+                                    base::Unretained(this)));
+      run_loop.Run();
+    }
   }
 
  private:
-  void RunUtilityProcessOnIOThread() {
-    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  void RunUtilityProcessOnProcessThread() {
+    DCHECK_CURRENTLY_ON(base::FeatureList::IsEnabled(features::kProcessHostOnUI)
+                            ? content::BrowserThread::UI
+                            : content::BrowserThread::IO);
     UtilityProcessHost* host = new UtilityProcessHost();
     host->SetSandboxType(GetParam());
-    host->SetName(base::ASCIIToUTF16("SandboxTestProcess"));
+    host->SetName(u"SandboxTestProcess");
     host->SetMetricsName(kTestProcessName);
     EXPECT_TRUE(host->Start());
 
     host->GetChildProcess()->BindReceiver(
         service_.BindNewPipeAndPassReceiver());
     service_->GetSandboxStatus(base::BindOnce(
-        &UtilityProcessSandboxBrowserTest::OnGotSandboxStatusOnIOThread,
+        &UtilityProcessSandboxBrowserTest::OnGotSandboxStatusOnProcessThread,
         base::Unretained(this)));
   }
 
-  void OnGotSandboxStatusOnIOThread(int32_t sandbox_status) {
-    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  void OnGotSandboxStatusOnProcessThread(int32_t sandbox_status) {
+    DCHECK_CURRENTLY_ON(base::FeatureList::IsEnabled(features::kProcessHostOnUI)
+                            ? content::BrowserThread::UI
+                            : content::BrowserThread::IO);
 
     // Aside from kNoSandbox, every utility process launched explicitly with a
     // sandbox type should always end up with a sandbox.
@@ -110,7 +123,7 @@ class UtilityProcessSandboxBrowserTest
       case SandboxType::kCdm:
       case SandboxType::kPpapi:
       case SandboxType::kPrintCompositor:
-      case SandboxType::kSharingService:
+      case SandboxType::kService:
       case SandboxType::kUtility: {
         constexpr int kExpectedFullSandboxFlags =
             SandboxLinux::kPIDNS | SandboxLinux::kNetNS |
@@ -124,8 +137,14 @@ class UtilityProcessSandboxBrowserTest
 #if BUILDFLAG(IS_CHROMEOS_ASH)
       case SandboxType::kIme:
       case SandboxType::kTts:
-#endif
+#if BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+      case SandboxType::kLibassistant:
+#endif  // BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
       case SandboxType::kNetwork:
+#if BUILDFLAG(ENABLE_PRINTING)
+      case SandboxType::kPrintBackend:
+#endif
       case SandboxType::kSpeechRecognition: {
         constexpr int kExpectedPartialSandboxFlags =
             SandboxLinux::kSeccompBPF | SandboxLinux::kYama |
@@ -168,5 +187,10 @@ INSTANTIATE_TEST_SUITE_P(
       name[0] = base::ToUpperASCII(name[0]);
       return name;
     });
+
+// In some configurations (e.g. Linux ASAN) GetSandboxTypesToTest() returns an
+// empty list. Suppress runtime warnings about unparameterized tests. See
+// https://crbug.com/1192206
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(UtilityProcessSandboxBrowserTest);
 
 }  // namespace content

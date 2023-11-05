@@ -61,12 +61,13 @@ leveldb::Status DeleteValue(leveldb::DB* db, const std::string& key) {
 
 LazyLevelDb::LazyLevelDb(const std::string& uma_client_name,
                          const base::FilePath& path)
-    : db_path_(path), open_options_(leveldb_env::Options()) {
+    : db_path_(path) {
   open_options_.create_if_missing = true;
   open_options_.paranoid_checks = true;
 
   read_options_.verify_checksums = true;
 
+  // TODO(crbug.com/1226956): Remove reference to extensions.
   // Used in lieu of UMA_HISTOGRAM_ENUMERATION because the histogram name is
   // not a constant.
   open_histogram_ = base::LinearHistogram::FactoryGet(
@@ -86,7 +87,7 @@ LazyLevelDb::LazyLevelDb(const std::string& uma_client_name,
 LazyLevelDb::~LazyLevelDb() = default;
 
 ValueStore::Status LazyLevelDb::Read(const std::string& key,
-                                     base::Optional<base::Value>* value) {
+                                     absl::optional<base::Value>* value) {
   DCHECK(value);
 
   std::string value_as_json;
@@ -101,7 +102,7 @@ ValueStore::Status LazyLevelDb::Read(const std::string& key,
   if (!s.ok())
     return ToValueStoreError(s);
 
-  base::Optional<base::Value> read_value =
+  absl::optional<base::Value> read_value =
       base::JSONReader::Read(value_as_json);
   if (!read_value) {
     return ValueStore::Status(ValueStore::CORRUPTION, FixCorruption(&key),

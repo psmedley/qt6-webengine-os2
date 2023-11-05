@@ -96,7 +96,7 @@ SandboxInternalsUI::SandboxInternalsUI(content::WebUI* web_ui)
   content::WebUIDataSource::Add(profile, CreateDataSource());
 }
 
-void SandboxInternalsUI::RenderFrameCreated(
+void SandboxInternalsUI::WebUIRenderFrameCreated(
     content::RenderFrameHost* render_frame_host) {
 #if defined(OS_ANDROID)
   mojo::AssociatedRemote<chrome::mojom::SandboxStatusExtension> sandbox_status;
@@ -106,4 +106,4 @@ void SandboxInternalsUI::RenderFrameCreated(
 #endif
 }
 
-SandboxInternalsUI::~SandboxInternalsUI() {}
+SandboxInternalsUI::~SandboxInternalsUI() = default;

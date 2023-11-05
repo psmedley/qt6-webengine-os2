@@ -105,7 +105,7 @@ void ProfileIODataQt::shutdownOnUIThread()
     if (m_clearHttpCacheInProgress) {
         m_clearHttpCacheInProgress = false;
         content::BrowsingDataRemover *remover =
-                content::BrowserContext::GetBrowsingDataRemover(m_profileAdapter->profile());
+                m_profileAdapter->profile()->GetBrowsingDataRemover();
         remover->RemoveObserver(&m_removerObserver);
     }
 
@@ -150,7 +150,7 @@ void ProfileIODataQt::clearHttpCache()
     if (!m_clearHttpCacheInProgress) {
         m_clearHttpCacheInProgress = true;
         content::BrowsingDataRemover *remover =
-                content::BrowserContext::GetBrowsingDataRemover(m_profileAdapter->profile());
+                m_profileAdapter->profile()->GetBrowsingDataRemover();
         remover->AddObserver(&m_removerObserver);
         remover->RemoveAndReply(base::Time(), base::Time::Max(),
             content::BrowsingDataRemover::DATA_TYPE_CACHE,
@@ -163,7 +163,7 @@ void ProfileIODataQt::clearHttpCache()
 void ProfileIODataQt::removeBrowsingDataRemoverObserver()
 {
     content::BrowsingDataRemover *remover =
-            content::BrowserContext::GetBrowsingDataRemover(m_profileAdapter->profile());
+            m_profileAdapter->profile()->GetBrowsingDataRemover();
     remover->RemoveObserver(&m_removerObserver);
 }
 
@@ -198,8 +198,8 @@ void ProfileIODataQt::resetNetworkContext()
 {
     Q_ASSERT(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
     setFullConfiguration();
-    content::BrowserContext::ForEachStoragePartition(
-            m_profile, base::BindRepeating([](content::StoragePartition *storage) {
+    m_profile->ForEachStoragePartition(
+            base::BindRepeating([](content::StoragePartition *storage) {
                 auto storage_impl = static_cast<content::StoragePartitionImpl *>(storage);
                 storage_impl->ResetURLLoaderFactories();
                 storage_impl->ResetNetworkContext();
@@ -259,12 +259,8 @@ void ProfileIODataQt::ConfigureNetworkContextParams(bool in_memory,
     }
     if (!m_inMemoryOnly && !in_memory) {
         network_context_params->http_server_properties_path = toFilePath(m_dataPath).AppendASCII("Network Persistent State");
-        network_context_params->transport_security_persister_path = toFilePath(m_dataPath);
+        network_context_params->transport_security_persister_file_path = toFilePath(m_dataPath).AppendASCII("TransportSecurity");
     }
-
-#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
-    network_context_params->enable_ftp_url_support = true;
-#endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 
     network_context_params->enforce_chrome_ct_policy = false;
 

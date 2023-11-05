@@ -10,13 +10,15 @@
 #include <sstream>
 
 #include "base/check_op.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
+#include "build/config/compiler/compiler_buildflags.h"
 
 #if BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 #include <pthread.h>
+
 #include "base/process/process_handle.h"
 #include "base/threading/platform_thread.h"
 #endif
@@ -173,22 +175,22 @@ uintptr_t GetStackEnd() {
     main_stack_end = stack_end;
   }
   return stack_end;  // 0 in case of error
+#elif defined(OS_APPLE)
+  // No easy way to get end of the stack for non-main threads,
+  // see crbug.com/617730.
+  return reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+#else
 
-#elif (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(__GLIBC__)
-
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(__GLIBC__)
   if (GetCurrentProcId() == PlatformThread::CurrentId()) {
     // For the main thread we have a shortcut.
     return reinterpret_cast<uintptr_t>(__libc_stack_end);
   }
-
-// No easy way to get end of the stack for non-main threads,
-// see crbug.com/617730.
-#elif defined(OS_APPLE)
-  return reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
 #endif
 
   // Don't know how to get end of the stack.
   return 0;
+#endif
 }
 #endif  // BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)
 
@@ -203,6 +205,39 @@ StackTrace::StackTrace(const void* const* trace, size_t count) {
   if (count)
     memcpy(trace_, trace, count * sizeof(trace_[0]));
   count_ = count;
+}
+
+// static
+bool StackTrace::WillSymbolizeToStreamForTesting() {
+#if BUILDFLAG(SYMBOL_LEVEL) == 0
+  // Symbols are not expected to be reliable when gn args specifies
+  // symbol_level=0.
+  return false;
+#elif defined(__UCLIBC__) || defined(_AIX)
+  // StackTrace::OutputToStream() is not implemented under uclibc, nor AIX.
+  // See https://crbug.com/706728
+  return false;
+#elif defined(OFFICIAL_BUILD) && \
+    ((defined(OS_POSIX) && !defined(OS_APPLE)) || defined(OS_FUCHSIA))
+  // On some platforms stack traces require an extra data table that bloats our
+  // binaries, so they're turned off for official builds.
+  return false;
+#elif defined(OFFICIAL_BUILD) && defined(OS_APPLE)
+  // Official Mac OS X builds contain enough information to unwind the stack,
+  // but not enough to symbolize the output.
+  return false;
+#elif defined(OS_FUCHSIA) || defined(OS_ANDROID)
+  // Under Fuchsia and Android, StackTrace emits executable build-Ids and
+  // address offsets which are symbolized on the test host system, rather than
+  // being symbolized in-process.
+  return false;
+#elif defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER) || \
+    defined(MEMORY_SANITIZER)
+  // Sanitizer configurations (ASan, TSan, MSan) emit unsymbolized stacks.
+  return false;
+#else
+  return true;
+#endif
 }
 
 const void *const *StackTrace::Addresses(size_t* count) const {
@@ -234,7 +269,7 @@ std::string StackTrace::ToStringWithPrefix(const char* prefix_string) const {
 }
 
 std::ostream& operator<<(std::ostream& os, const StackTrace& s) {
-#if !defined(__UCLIBC__) & !defined(_AIX) && !defined(OS_OS2)
+#if !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
   s.OutputToStream(&os);
 #else
   os << "StackTrace::OutputToStream not implemented.";
@@ -254,12 +289,12 @@ bool IsWithinRange(uintptr_t address, const AddressRange& range) {
 }
 
 size_t TraceStackFramePointersInternal(
-    base::Optional<uintptr_t> fp,
+    absl::optional<uintptr_t> fp,
     uintptr_t stack_end,
     size_t max_depth,
     size_t skip_initial,
     bool enable_scanning,
-    base::Optional<AddressRange> caller_function_range,
+    absl::optional<AddressRange> caller_function_range,
     const void** out_trace) {
   // If |fp| is not provided then try to unwind the current stack. In this case
   // the caller function cannot pass in it's own frame pointer to unwind
@@ -343,7 +378,7 @@ TraceStackFramePointers_start:
       reinterpret_cast<uintptr_t>(&&TraceStackFramePointers_start),
       reinterpret_cast<uintptr_t>(&&TraceStackFramePointers_end)};
   size_t depth = TraceStackFramePointersInternal(
-      /*fp=*/base::nullopt, GetStackEnd(), max_depth, skip_initial,
+      /*fp=*/absl::nullopt, GetStackEnd(), max_depth, skip_initial,
       enable_scanning, current_fn_range, out_trace);
 TraceStackFramePointers_end:
   return depth;
@@ -356,7 +391,7 @@ size_t TraceStackFramePointersFromBuffer(uintptr_t fp,
                                          size_t skip_initial,
                                          bool enable_scanning) {
   return TraceStackFramePointersInternal(fp, stack_end, max_depth, skip_initial,
-                                         enable_scanning, base::nullopt,
+                                         enable_scanning, absl::nullopt,
                                          out_trace);
 }
 

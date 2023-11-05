@@ -11,10 +11,12 @@ mojom_component("base") {
     "big_buffer.mojom",
     "big_string.mojom",
     "binder.mojom",
+    "byte_string.mojom",
     "file.mojom",
     "file_error.mojom",
     "file_info.mojom",
     "file_path.mojom",
+    "generic_pending_associated_receiver.mojom",
     "generic_pending_receiver.mojom",
     "memory_allocator_dump_cross_process_uid.mojom",
     "memory_pressure_level.mojom",
@@ -62,6 +64,16 @@ mojom_component("base") {
         "//mojo/public/cpp/base",
         "//mojo/public/cpp/base:shared_typemap_traits",
       ]
+    },
+    {
+      types = [
+        {
+          mojom = "mojo_base.mojom.ByteString"
+          cpp = "std::string"
+        },
+      ]
+      traits_headers = [ "//mojo/public/cpp/base/byte_string_mojom_traits.h" ]
+      traits_public_deps = [ "//mojo/public/cpp/base:shared_typemap_traits" ]
     },
     {
       types = [
@@ -137,6 +149,21 @@ mojom_component("base") {
         "//base",
         "//mojo/public/cpp/base",
         "//mojo/public/cpp/base:shared_typemap_traits",
+      ]
+    },
+    {
+      types = [
+        {
+          mojom = "mojo_base.mojom.GenericPendingAssociatedReceiver"
+          cpp = "::mojo::GenericPendingAssociatedReceiver"
+          move_only = true
+          nullable_is_same_type = true
+        },
+      ]
+      traits_headers = [ "//mojo/public/cpp/base/generic_pending_associated_receiver_mojom_traits.h" ]
+      traits_public_deps = [
+        "//mojo/public/cpp/base:shared_typemap_traits",
+        "//mojo/public/cpp/bindings",
       ]
     },
     {
@@ -392,11 +419,11 @@ mojom_component("base") {
       types = [
         {
           mojom = "mojo_base.mojom.String16"
-          cpp = "::base::string16"
+          cpp = "::std::u16string"
         },
         {
           mojom = "mojo_base.mojom.BigString16"
-          cpp = "::base::string16"
+          cpp = "::std::u16string"
         },
       ]
       traits_headers = [ "//mojo/public/cpp/base/string16_mojom_traits.h" ]

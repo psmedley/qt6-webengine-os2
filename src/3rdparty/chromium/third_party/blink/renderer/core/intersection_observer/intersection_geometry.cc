@@ -55,7 +55,7 @@ void ApplyMargin(
     PhysicalRect& expand_rect,
     const Vector<Length>& margin,
     float zoom,
-    const base::Optional<PhysicalRect>& resolution_rect = base::nullopt) {
+    const absl::optional<PhysicalRect>& resolution_rect = absl::nullopt) {
   if (margin.IsEmpty())
     return;
 
@@ -125,8 +125,8 @@ std::pair<PhysicalRect, bool> InitializeTargetRect(const LayoutObject* target,
                      (flags & IntersectionGeometry::kUseOverflowClipEdge) ==
                          IntersectionGeometry::kUseOverflowClipEdge);
   } else if (target->IsLayoutInline()) {
-    result.first = target->AbsoluteToLocalRect(
-        PhysicalRect::EnclosingRect(target->AbsoluteBoundingBoxFloatRect()));
+    result.first = PhysicalRect::EnclosingRect(
+        To<LayoutBoxModelObject>(target)->LocalBoundingBoxFloatRect());
   } else {
     result.first = To<LayoutText>(target)->PhysicalLinesBoundingBox();
   }
@@ -307,6 +307,7 @@ void IntersectionGeometry::ComputeGeometry(const RootGeometry& root_geometry,
                                            const Vector<Length>& target_margin,
                                            CachedRects* cached_rects) {
   DCHECK(cached_rects || !ShouldUseCachedRects());
+  flags_ |= kDidComputeGeometry;
   // Initially:
   //   target_rect_ is in target's coordinate system
   //   root_rect_ is in root's coordinate system
@@ -513,9 +514,10 @@ bool IntersectionGeometry::ClipToRoot(const LayoutObject* root,
     intersection_rect = unclipped_intersection_rect;
     if (local_ancestor) {
       if (local_ancestor->IsScrollContainer()) {
-        PhysicalOffset scroll_offset = -PhysicalOffset(
-            LayoutPoint(local_ancestor->ScrollOrigin()) +
-            local_ancestor->PixelSnappedScrolledContentOffset());
+        PhysicalOffset scroll_offset =
+            -(PhysicalOffset(local_ancestor->ScrollOrigin()) +
+              PhysicalOffset(
+                  local_ancestor->PixelSnappedScrolledContentOffset()));
         intersection_rect.Move(scroll_offset);
         unclipped_intersection_rect.Move(scroll_offset);
       }

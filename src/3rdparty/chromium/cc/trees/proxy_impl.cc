@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,6 +31,7 @@
 #include "cc/trees/proxy_main.h"
 #include "cc/trees/render_frame_metadata_observer.h"
 #include "cc/trees/task_runner_provider.h"
+#include "components/power_scheduler/power_mode_arbiter.h"
 #include "components/viz/common/frame_sinks/delay_based_time_source.h"
 #include "components/viz/common/frame_timing_details.h"
 #include "components/viz/common/gpu/context_provider.h"
@@ -88,11 +90,14 @@ ProxyImpl::ProxyImpl(base::WeakPtr<ProxyMain> proxy_main_weak_ptr,
       new CompositorTimingHistory(
           scheduler_settings.using_synchronous_renderer_compositor,
           CompositorTimingHistory::RENDERER_UMA,
-          layer_tree_host->rendering_stats_instrumentation(),
-          host_impl_->compositor_frame_reporting_controller()));
-  scheduler_.reset(new Scheduler(this, scheduler_settings, layer_tree_host_id_,
-                                 task_runner_provider_->ImplThreadTaskRunner(),
-                                 std::move(compositor_timing_history)));
+          layer_tree_host->rendering_stats_instrumentation()));
+  scheduler_ = std::make_unique<Scheduler>(
+      this, scheduler_settings, layer_tree_host_id_,
+      task_runner_provider_->ImplThreadTaskRunner(),
+      std::move(compositor_timing_history), layer_tree_host->TakeMainPipeline(),
+      layer_tree_host->TakeCompositorPipeline(),
+      host_impl_->compositor_frame_reporting_controller(),
+      power_scheduler::PowerModeArbiter::GetInstance());
 
   DCHECK_EQ(scheduler_->visible(), host_impl_->visible());
 }
@@ -180,6 +185,12 @@ void ProxyImpl::SetNeedsRedrawOnImpl(const gfx::Rect& damage_rect) {
 void ProxyImpl::SetNeedsCommitOnImpl() {
   DCHECK(IsImplThread());
   SetNeedsCommitOnImplThread();
+}
+
+void ProxyImpl::SetTargetLocalSurfaceIdOnImpl(
+    const viz::LocalSurfaceId& target_local_surface_id) {
+  DCHECK(IsImplThread());
+  host_impl_->SetTargetLocalSurfaceId(target_local_surface_id);
 }
 
 void ProxyImpl::BeginMainFrameAbortedOnImpl(
@@ -399,6 +410,7 @@ void ProxyImpl::RenewTreePriority() {
   DCHECK(IsImplThread());
 
   bool scroll_type_considered_interaction = false;
+  bool prefer_new_content = false;
   bool non_scroll_interaction_in_progress =
       host_impl_->IsPinchGestureActive() ||
       host_impl_->page_scale_animation_active();
@@ -425,8 +437,14 @@ void ProxyImpl::RenewTreePriority() {
         user_interaction_in_progress);
   }
 
+  if (host_impl_->CurrentScrollDidCheckerboardLargeArea() &&
+      base::FeatureList::IsEnabled(
+          features::kPreferNewContentForCheckerboardedScrolls)) {
+    prefer_new_content = true;
+  }
+
   // Schedule expiration if smoothness currently takes priority.
-  if (user_interaction_in_progress)
+  if (user_interaction_in_progress && !prefer_new_content)
     smoothness_priority_expiration_notifier_.Schedule();
 
   // We use the same priority for both trees by default.
@@ -526,7 +544,7 @@ void ProxyImpl::DidPresentCompositorFrameOnImplThread(
     const viz::FrameTimingDetails& details) {
   auto main_thread_callbacks = std::move(activated.main_thread_callbacks);
   host_impl_->NotifyDidPresentCompositorFrameOnImplThread(
-      frame_token, std::move(activated), details);
+      frame_token, std::move(activated.compositor_thread_callbacks), details);
 
   MainThreadTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&ProxyMain::DidPresentCompositorFrame,
@@ -614,6 +632,8 @@ void ProxyImpl::ScheduledActionSendBeginMainFrame(
   begin_main_frame_state->commit_data = host_impl_->ProcessCompositorDeltas();
   begin_main_frame_state->completed_image_decode_requests =
       host_impl_->TakeCompletedImageDecodeRequests();
+  begin_main_frame_state->finished_transition_request_sequence_ids =
+      host_impl_->TakeFinishedTransitionRequestSequenceIds();
   begin_main_frame_state->mutator_events = host_impl_->TakeMutatorEvents();
   begin_main_frame_state->active_sequence_trackers =
       host_impl_->FrameSequenceTrackerActiveTypes();
@@ -771,7 +791,8 @@ DrawResult ProxyImpl::DrawInternal(bool forced_draw) {
       DCHECK_NE(frame.frame_token, 0u);
       // Drawing implies we submitted a frame to the LayerTreeFrameSink.
       scheduler_->DidSubmitCompositorFrame(frame.frame_token,
-                                           host_impl_->TakeEventsMetrics());
+                                           host_impl_->TakeEventsMetrics(),
+                                           frame.has_missing_content);
     }
     result = DRAW_SUCCESS;
   } else {

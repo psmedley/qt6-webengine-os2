@@ -46,7 +46,7 @@ std::unique_ptr<PrintingContext> PrintingContext::Create(Delegate* delegate) {
 #if BUILDFLAG(ENABLE_PRINTING)
   return std::make_unique<PrintingContextSystemDialogWin>(delegate);
 #else
-  // The code in printing/ is still built when the GN |enable_basic_printing|
+  // The code in printing/ is still built when the GN `enable_basic_printing`
   // variable is set to false. Just return PrintingContextWin as a dummy
   // context.
   return std::make_unique<PrintingContextWin>(delegate);
@@ -78,8 +78,13 @@ PrintingContext::Result PrintingContextWin::UseDefaultSettings() {
 
   scoped_refptr<PrintBackend> backend =
       PrintBackend::CreateInstance(delegate_->GetAppLocale());
-  std::wstring default_printer =
-      base::UTF8ToWide(backend->GetDefaultPrinterName());
+  std::string default_printer_name;
+  mojom::ResultCode result =
+      backend->GetDefaultPrinterName(default_printer_name);
+  if (result != mojom::ResultCode::kSuccess)
+    return FAILED;
+
+  std::wstring default_printer = base::UTF8ToWide(default_printer_name);
   if (!default_printer.empty()) {
     ScopedPrinterHandle printer;
     if (printer.OpenPrinterWithName(default_printer.c_str())) {
@@ -271,7 +276,7 @@ PrintingContext::Result PrintingContextWin::InitWithSettingsForTest(
 }
 
 PrintingContext::Result PrintingContextWin::NewDocument(
-    const base::string16& document_name) {
+    const std::u16string& document_name) {
   DCHECK(!in_print_job_);
   if (!context_)
     return OnError();

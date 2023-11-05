@@ -20,7 +20,6 @@
 #include "p2p/base/dtls_transport_internal.h"
 #include "pc/ice_transport.h"
 #include "rtc_base/synchronization/mutex.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -30,8 +29,7 @@ class IceTransportWithPointer;
 
 // This implementation wraps a cricket::DtlsTransport, and takes
 // ownership of it.
-class DtlsTransport : public DtlsTransportInterface,
-                      public sigslot::has_slots<> {
+class DtlsTransport : public DtlsTransportInterface {
  public:
   // This object must be constructed and updated on a consistent thread,
   // the same thread as the one the cricket::DtlsTransportInternal object
@@ -62,7 +60,7 @@ class DtlsTransport : public DtlsTransportInterface,
 
  private:
   void OnInternalDtlsState(cricket::DtlsTransportInternal* transport,
-                           cricket::DtlsTransportState state);
+                           DtlsTransportState state);
   void UpdateInformation();
 
   DtlsTransportObserverInterface* observer_ = nullptr;

@@ -37,7 +37,6 @@ const int PlatformStyle::kMinLabelButtonHeight = 30;
 const bool PlatformStyle::kDialogDefaultButtonCanBeCancel = false;
 const bool PlatformStyle::kSelectWordOnRightClick = true;
 const bool PlatformStyle::kSelectAllOnRightClickWhenUnfocused = true;
-const bool PlatformStyle::kTextfieldScrollsToStartOnFocusChange = true;
 const bool PlatformStyle::kTextfieldUsesDragCursorWhenDraggable = false;
 const bool PlatformStyle::kTableViewSupportsKeyboardNavigationByCell = false;
 const bool PlatformStyle::kTreeViewSelectionPaintsEntireRow = true;
@@ -65,7 +64,7 @@ void PlatformStyle::OnTextfieldEditFailed() {
 }
 
 // static
-gfx::Range PlatformStyle::RangeToDeleteBackwards(const base::string16& text,
+gfx::Range PlatformStyle::RangeToDeleteBackwards(const std::u16string& text,
                                                  size_t cursor_position) {
   if (cursor_position == 0)
     return gfx::Range();

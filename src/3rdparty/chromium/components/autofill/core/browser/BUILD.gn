@@ -43,6 +43,8 @@ jumbo_static_library("browser") {
     "address_rewriter.h",
     "autocomplete_history_manager.cc",
     "autocomplete_history_manager.h",
+    "autofill_ablation_study.cc",
+    "autofill_ablation_study.h",
     "autofill_address_policy_handler.cc",
     "autofill_address_policy_handler.h",
     "autofill_address_util.cc",
@@ -66,33 +68,37 @@ jumbo_static_library("browser") {
     "autofill_external_delegate.h",
     "autofill_field.cc",
     "autofill_field.h",
-    "autofill_handler.cc",
-    "autofill_handler.h",
-    "autofill_handler_proxy.cc",
-    "autofill_handler_proxy.h",
     "autofill_manager.cc",
     "autofill_manager.h",
-    "autofill_manager_test_delegate.h",
     "autofill_metrics.cc",
     "autofill_metrics.h",
     "autofill_observer.cc",
     "autofill_observer.h",
+    "autofill_profile_import_process.cc",
+    "autofill_profile_import_process.h",
+    "autofill_profile_save_strike_database.cc",
+    "autofill_profile_save_strike_database.h",
     "autofill_profile_sync_util.cc",
     "autofill_profile_sync_util.h",
+    "autofill_profile_update_strike_database.cc",
+    "autofill_profile_update_strike_database.h",
     "autofill_profile_validation_util.cc",
     "autofill_profile_validation_util.h",
     "autofill_profile_validator.cc",
     "autofill_profile_validator.h",
-    "autofill_provider.cc",
-    "autofill_provider.h",
     "autofill_regex_constants.cc",
     "autofill_regex_constants.h",
     "autofill_regexes.cc",
     "autofill_regexes.h",
     "autofill_subject.cc",
     "autofill_subject.h",
+    "autofill_suggestion_generator.cc",
+    "autofill_suggestion_generator.h",
     "autofill_type.cc",
     "autofill_type.h",
+    "browser_autofill_manager.cc",
+    "browser_autofill_manager.h",
+    "browser_autofill_manager_test_delegate.h",
     "data_model/address.cc",
     "data_model/address.h",
     "data_model/autofill_data_model.cc",
@@ -117,12 +123,16 @@ jumbo_static_library("browser") {
     "data_model/autofill_structured_address_regex_provider.h",
     "data_model/autofill_structured_address_utils.cc",
     "data_model/autofill_structured_address_utils.h",
+    "data_model/autofillable_data.cc",
+    "data_model/autofillable_data.h",
     "data_model/borrowed_transliterator.cc",
     "data_model/borrowed_transliterator.h",
     "data_model/contact_info.cc",
     "data_model/contact_info.h",
     "data_model/credit_card.cc",
     "data_model/credit_card.h",
+    "data_model/credit_card_art_image.cc",
+    "data_model/credit_card_art_image.h",
     "data_model/credit_card_cloud_token_data.cc",
     "data_model/credit_card_cloud_token_data.h",
     "data_model/data_model_utils.cc",
@@ -153,6 +163,8 @@ jumbo_static_library("browser") {
     "form_parsing/field_candidates.h",
     "form_parsing/form_field.cc",
     "form_parsing/form_field.h",
+    "form_parsing/merchant_promo_code_field.cc",
+    "form_parsing/merchant_promo_code_field.h",
     "form_parsing/name_field.cc",
     "form_parsing/name_field.h",
     "form_parsing/phone_field.cc",
@@ -185,6 +197,8 @@ jumbo_static_library("browser") {
     "geo/country_names.h",
     "geo/country_names_for_locale.cc",
     "geo/country_names_for_locale.h",
+    "geo/mock_alternative_state_name_map_updater.cc",
+    "geo/mock_alternative_state_name_map_updater.h",
     "geo/phone_number_i18n.cc",
     "geo/phone_number_i18n.h",
     "geo/region_data_loader.h",
@@ -242,12 +256,8 @@ jumbo_static_library("browser") {
     "payments/payments_util.cc",
     "payments/payments_util.h",
     "payments/risk_data_loader.h",
-    "payments/strike_database.cc",
-    "payments/strike_database.h",
-    "payments/strike_database_integrator_base.cc",
-    "payments/strike_database_integrator_base.h",
-    "payments/strike_database_integrator_test_strike_database.cc",
-    "payments/strike_database_integrator_test_strike_database.h",
+    "payments/wait_for_signal_or_timeout.cc",
+    "payments/wait_for_signal_or_timeout.h",
     "payments/webauthn_callback_types.h",
     "personal_data_manager.cc",
     "personal_data_manager.h",
@@ -258,6 +268,14 @@ jumbo_static_library("browser") {
     "randomized_encoder.h",
     "rationalization_util.cc",
     "rationalization_util.h",
+    "strike_database.cc",
+    "strike_database.h",
+    "strike_database_base.cc",
+    "strike_database_base.h",
+    "strike_database_integrator_base.cc",
+    "strike_database_integrator_base.h",
+    "strike_database_integrator_test_strike_database.cc",
+    "strike_database_integrator_test_strike_database.h",
     "sync_utils.h",
     "ui/accessory_sheet_data.cc",
     "ui/accessory_sheet_data.h",
@@ -272,6 +290,8 @@ jumbo_static_library("browser") {
     "ui/address_form_label_formatter.h",
     "ui/address_phone_form_label_formatter.cc",
     "ui/address_phone_form_label_formatter.h",
+    "ui/autofill_image_fetcher.cc",
+    "ui/autofill_image_fetcher.h",
     "ui/autofill_popup_delegate.h",
     "ui/contact_form_label_formatter.cc",
     "ui/contact_form_label_formatter.h",
@@ -344,6 +364,8 @@ jumbo_static_library("browser") {
 
   if (is_ios) {
     sources += [
+      "autofill_save_update_address_profile_delegate_ios.cc",
+      "autofill_save_update_address_profile_delegate_ios.h",
       "keyboard_accessory_metrics_logger.h",
       "keyboard_accessory_metrics_logger.mm",
     ]
@@ -358,6 +380,8 @@ jumbo_static_library("browser") {
       "payments/autofill_save_card_infobar_delegate_mobile.cc",
       "payments/autofill_save_card_infobar_delegate_mobile.h",
       "payments/autofill_save_card_infobar_mobile.h",
+      "payments/autofill_save_card_ui_utils_mobile.cc",
+      "payments/autofill_save_card_ui_utils_mobile.h",
       "ui/mobile_label_formatter.cc",
       "ui/mobile_label_formatter.h",
       "ui/payments/card_expiration_date_fix_flow_controller.h",
@@ -379,7 +403,6 @@ jumbo_static_library("browser") {
       "payments/credit_card_fido_authenticator.h",
       "payments/fido_authentication_strike_database.cc",
       "payments/fido_authentication_strike_database.h",
-      "payments/internal_authenticator.h",
     ]
   }
 
@@ -391,11 +414,18 @@ jumbo_static_library("browser") {
     "//components/autofill/core/browser/proto",
     "//components/autofill/core/common",
     "//components/autofill/core/common/mojom:mojo_types",
+    "//components/leveldb_proto",
     "//components/resources",
     "//components/security_interstitials/core",
     "//components/security_state/core",
+    "//components/translate/core/browser",
     "//skia",
+    "//third_party/abseil-cpp:absl",
     "//third_party/libaddressinput",
+    "//ui/base",
+    "//ui/gfx/geometry",
+    "//ui/gfx/range",
+    "//url",
   ]
   deps = [
     ":autofill_address_rewriter_resources",
@@ -404,12 +434,13 @@ jumbo_static_library("browser") {
     "//base:i18n",
     "//build:branding_buildflags",
     "//build:chromeos_buildflags",
+    "//components/feature_engagement",
     "//components/google/core/common",
     "//components/history/core/browser",
+    "//components/image_fetcher/core",
     "//components/infobars/core",
     "//components/keyed_service/core",
     "//components/language/core/browser",
-    "//components/leveldb_proto",
     "//components/os_crypt",
     "//components/policy/core/browser",
     "//components/policy/core/common",
@@ -420,8 +451,8 @@ jumbo_static_library("browser") {
     "//components/signin/public/identity_manager",
     "//components/strings",
     "//components/sync",
-    "//components/translate/core/browser",
     "//components/translate/core/common",
+    "//components/variations",
     "//components/variations/net",
     "//components/variations/service:service",
     "//components/version_info",
@@ -440,15 +471,17 @@ jumbo_static_library("browser") {
     "//third_party/re2",
     "//third_party/zlib/google:compression_utils",
     "//ui/accessibility:accessibility",
-    "//ui/base",
-    "//ui/gfx",
-    "//ui/gfx/geometry",
-    "//ui/gfx/range",
-    "//url",
   ]
 
   if (!is_ios) {
-    deps += [ "//third_party/blink/public/common" ]
+    deps += [
+      "//components/webauthn/core/browser",
+      "//third_party/blink/public/common",
+    ]
+  }
+
+  if (is_android) {
+    deps += [ "//components/messages/android:feature_flags" ]
   }
 
   if (!is_android && !is_ios) {
@@ -467,8 +500,6 @@ jumbo_static_library("browser") {
       "//ui/native_theme:native_theme_browser",
     ]
   }
-
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 }
 
 jumbo_static_library("test_support") {
@@ -513,20 +544,21 @@ jumbo_static_library("test_support") {
     "test_autofill_driver.h",
     "test_autofill_external_delegate.cc",
     "test_autofill_external_delegate.h",
-    "test_autofill_manager.cc",
-    "test_autofill_manager.h",
     "test_autofill_profile_validator.cc",
     "test_autofill_profile_validator.h",
     "test_autofill_profile_validator_delayed.cc",
     "test_autofill_profile_validator_delayed.h",
-    "test_autofill_provider.h",
     "test_autofill_tick_clock.cc",
     "test_autofill_tick_clock.h",
+    "test_browser_autofill_manager.cc",
+    "test_browser_autofill_manager.h",
     "test_event_waiter.h",
     "test_form_data_importer.cc",
     "test_form_data_importer.h",
     "test_form_structure.cc",
     "test_form_structure.h",
+    "test_inmemory_strike_database.cc",
+    "test_inmemory_strike_database.h",
     "test_personal_data_manager.cc",
     "test_personal_data_manager.h",
     "ui/suggestion_test_helpers.h",
@@ -546,6 +578,7 @@ jumbo_static_library("test_support") {
     "//base/test:test_support",
     "//components/autofill/core/browser",
     "//components/autofill/core/common",
+    "//components/feature_engagement",
     "//components/leveldb_proto",
     "//components/os_crypt",
     "//components/os_crypt:test_support",
@@ -581,7 +614,10 @@ jumbo_static_library("test_support") {
 
     public_deps += [ "//components/autofill/content/browser" ]
 
-    deps += [ "//third_party/blink/public/common" ]
+    deps += [
+      "//components/webauthn/core/browser",
+      "//third_party/blink/public/common",
+    ]
   }
 
   if (!is_ios && !is_android) {
@@ -608,6 +644,20 @@ bundle_data("unit_tests_bundle_data") {
     "//components/test/data/autofill/merge/output/primarycase.out",
     "//components/test/data/autofill/merge/output/singlemerge.out",
     "//components/test/data/autofill/merge/output/validation.out",
+    "//components/test/data/autofill/merge_structured_names/input/ambiguous.in",
+    "//components/test/data/autofill/merge_structured_names/input/case.in",
+    "//components/test/data/autofill/merge_structured_names/input/email.in",
+    "//components/test/data/autofill/merge_structured_names/input/identical.in",
+    "//components/test/data/autofill/merge_structured_names/input/primarycase.in",
+    "//components/test/data/autofill/merge_structured_names/input/singlemerge.in",
+    "//components/test/data/autofill/merge_structured_names/input/validation.in",
+    "//components/test/data/autofill/merge_structured_names/output/ambiguous.out",
+    "//components/test/data/autofill/merge_structured_names/output/case.out",
+    "//components/test/data/autofill/merge_structured_names/output/email.out",
+    "//components/test/data/autofill/merge_structured_names/output/identical.out",
+    "//components/test/data/autofill/merge_structured_names/output/primarycase.out",
+    "//components/test/data/autofill/merge_structured_names/output/singlemerge.out",
+    "//components/test/data/autofill/merge_structured_names/output/validation.out",
   ]
   outputs = [ "{{bundle_resources_dir}}/" +
               "{{source_root_relative_dir}}/{{source_file_part}}" ]
@@ -621,23 +671,28 @@ source_set("unit_tests") {
     "address_profile_save_manager_unittest.cc",
     "address_rewriter_unittest.cc",
     "autocomplete_history_manager_unittest.cc",
+    "autofill_ablation_study_unittest.cc",
     "autofill_address_policy_handler_unittest.cc",
+    "autofill_address_util_unittest.cc",
     "autofill_credit_card_policy_handler_unittest.cc",
     "autofill_data_util_unittest.cc",
     "autofill_download_manager_unittest.cc",
     "autofill_driver_factory_unittest.cc",
     "autofill_experiments_unittest.cc",
     "autofill_external_delegate_unittest.cc",
-    "autofill_manager_unittest.cc",
     "autofill_merge_unittest.cc",
     "autofill_metrics_unittest.cc",
+    "autofill_profile_import_process_unittest.cc",
+    "autofill_profile_save_strike_database_unittest.cc",
     "autofill_profile_sync_util_unittest.cc",
+    "autofill_profile_update_strike_database_unittest.cc",
     "autofill_profile_validation_util_unittest.cc",
     "autofill_profile_validator_unittest.cc",
-    "autofill_provider_unittest.cc",
     "autofill_regexes_unittest.cc",
     "autofill_subject_unittest.cc",
+    "autofill_suggestion_generator_unittest.cc",
     "autofill_type_unittest.cc",
+    "browser_autofill_manager_unittest.cc",
     "data_model/address_unittest.cc",
     "data_model/autofill_data_model_unittest.cc",
     "data_model/autofill_profile_comparator_unittest.cc",
@@ -654,11 +709,13 @@ source_set("unit_tests") {
     "data_model/credit_card_unittest.cc",
     "data_model/phone_number_unittest.cc",
     "field_filler_unittest.cc",
+    "field_types_unittest.cc",
     "form_data_importer_unittest.cc",
     "form_parsing/address_field_unittest.cc",
     "form_parsing/credit_card_field_unittest.cc",
     "form_parsing/field_candidates_unittest.cc",
     "form_parsing/form_field_unittest.cc",
+    "form_parsing/merchant_promo_code_field_unittest.cc",
     "form_parsing/name_field_unittest.cc",
     "form_parsing/parsing_test_utils.cc",
     "form_parsing/parsing_test_utils.h",
@@ -679,6 +736,7 @@ source_set("unit_tests") {
     "logging/log_buffer_submitter_unittest.cc",
     "logging/log_manager_unittest.cc",
     "logging/log_router_unittest.cc",
+    "pattern_provider/default_regex_patterns_unittest.cc",
     "pattern_provider/pattern_configuration_parser_unittest.cc",
     "pattern_provider/pattern_provider_unittest.cc",
     "payments/autofill_offer_manager_unittest.cc",
@@ -690,12 +748,16 @@ source_set("unit_tests") {
     "payments/payments_client_unittest.cc",
     "payments/payments_service_url_unittest.cc",
     "payments/payments_util_unittest.cc",
-    "payments/strike_database_integrator_test_strike_database_unittest.cc",
-    "payments/strike_database_unittest.cc",
+    "payments/wait_for_signal_or_timeout_unittest.cc",
     "personal_data_manager_unittest.cc",
     "randomized_encoder_unittest.cc",
     "rationalization_util_unittest.cc",
+    "strike_database_integrator_test_strike_database_unittest.cc",
+    "strike_database_unittest.cc",
+    "test_utils/test_profiles.cc",
+    "test_utils/test_profiles.h",
     "ui/address_combobox_model_unittest.cc",
+    "ui/autofill_image_fetcher_unittest.cc",
     "ui/country_combobox_model_unittest.cc",
     "ui/payments/card_unmask_prompt_controller_impl_unittest.cc",
     "ui/region_combobox_model_unittest.cc",
@@ -714,6 +776,11 @@ source_set("unit_tests") {
 
   if (is_win) {
     sources += [ "autofill_ie_toolbar_import_win_unittest.cc" ]
+  }
+
+  if (is_ios) {
+    sources +=
+        [ "autofill_save_update_address_profile_delegate_ios_unittest.cc" ]
   }
 
   if (is_ios || is_android) {
@@ -755,6 +822,9 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//build:chromeos_buildflags",
     "//components/autofill/core/common",
+    "//components/feature_engagement",
+    "//components/image_fetcher/core:core",
+    "//components/image_fetcher/core:test_support",
     "//components/leveldb_proto",
     "//components/os_crypt",
     "//components/os_crypt:test_support",
@@ -792,6 +862,8 @@ source_set("unit_tests") {
     "//third_party/libphonenumber",
     "//third_party/re2:re2",
     "//ui/base",
+    "//ui/gfx:test_support",
+    "//ui/resources",
     "//url",
   ]
 

@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "content/browser/permissions/permission_util.h"
 #include "content/browser/renderer_host/render_frame_host_delegate.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/browser_context.h"
@@ -43,12 +44,12 @@ MediaDevicesManager::BoolDeviceTypes DoCheckPermissionsOnUIThread(
   url::Origin origin = frame_host->GetLastCommittedOrigin();
   bool audio_permission = delegate->CheckMediaAccessPermission(
       frame_host, origin, blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE);
-  bool mic_feature_policy = true;
-  bool camera_feature_policy = true;
-  mic_feature_policy = frame_host->IsFeatureEnabled(
-      blink::mojom::FeaturePolicyFeature::kMicrophone);
-  camera_feature_policy =
-      frame_host->IsFeatureEnabled(blink::mojom::FeaturePolicyFeature::kCamera);
+  bool mic_permissions_policy = true;
+  bool camera_permissions_policy = true;
+  mic_permissions_policy = frame_host->IsFeatureEnabled(
+      blink::mojom::PermissionsPolicyFeature::kMicrophone);
+  camera_permissions_policy = frame_host->IsFeatureEnabled(
+      blink::mojom::PermissionsPolicyFeature::kCamera);
 
   MediaDevicesManager::BoolDeviceTypes result;
   // Speakers.
@@ -63,7 +64,7 @@ MediaDevicesManager::BoolDeviceTypes DoCheckPermissionsOnUIThread(
   result[static_cast<size_t>(MediaDeviceType::MEDIA_AUDIO_INPUT)] =
       requested_device_types[static_cast<size_t>(
           MediaDeviceType::MEDIA_AUDIO_INPUT)] &&
-      audio_permission && mic_feature_policy;
+      audio_permission && mic_permissions_policy;
 
   // Camera.
   result[static_cast<size_t>(MediaDeviceType::MEDIA_VIDEO_INPUT)] =
@@ -72,7 +73,7 @@ MediaDevicesManager::BoolDeviceTypes DoCheckPermissionsOnUIThread(
       delegate->CheckMediaAccessPermission(
           frame_host, origin,
           blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE) &&
-      camera_feature_policy;
+      camera_permissions_policy;
 
   return result;
 }
@@ -170,11 +171,16 @@ bool MediaDevicesPermissionChecker::HasPanTiltZoomPermissionGrantedOnUIThread(
   if (!web_contents)
     return false;
 
-  auto* permission_controller = BrowserContext::GetPermissionController(
-      web_contents->GetBrowserContext());
+  auto* permission_controller =
+      web_contents->GetBrowserContext()->GetPermissionController();
   DCHECK(permission_controller);
 
-  const GURL& origin = web_contents->GetLastCommittedURL();
+  // TODO(crbug.com/698985): The semantics of the passed-in origin is incorrect:
+  // It should be the requesting origin, not the embedding origin. With the
+  // current implementation of the //chrome embedder, this parameter will be
+  // ignored, so it has no impact.
+  const GURL& origin =
+      PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
   blink::mojom::PermissionStatus status =
       permission_controller->GetPermissionStatusForFrame(
           PermissionType::CAMERA_PAN_TILT_ZOOM, frame_host, origin);

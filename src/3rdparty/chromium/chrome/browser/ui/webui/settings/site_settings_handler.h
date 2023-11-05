@@ -10,21 +10,20 @@
 #include <set>
 #include <string>
 
-#include "base/containers/flat_set.h"
 #include "base/scoped_multi_source_observation.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
-#include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/permissions/chooser_context_base.h"
+#include "components/permissions/object_permission_context_base.h"
 #include "components/prefs/pref_store.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "ppapi/buildflags/buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class PrefChangeRegistrar;
 
@@ -39,11 +38,11 @@ class SiteSettingsHandler
     : public SettingsPageUIHandler,
       public content_settings::Observer,
       public ProfileObserver,
-      public permissions::ChooserContextBase::PermissionObserver,
+      public permissions::ObjectPermissionContextBase::PermissionObserver,
       public CookiesTreeModel::Observer {
  public:
   explicit SiteSettingsHandler(Profile* profile,
-                               web_app::AppRegistrar& web_app_registrar);
+                               web_app::WebAppRegistrar& web_app_registrar);
   ~SiteSettingsHandler() override;
 
   // SettingsPageUIHandler:
@@ -69,11 +68,6 @@ class SiteSettingsHandler
   void TreeNodeChanged(ui::TreeModel* model, ui::TreeModelNode* node) override;
   void TreeModelEndBatch(CookiesTreeModel* model) override;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // Alert the Javascript that the |kEnableDRM| pref has changed.
-  void OnPrefEnableDrmChanged();
-#endif
-
   // content_settings::Observer:
   void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
                                const ContentSettingsPattern& secondary_pattern,
@@ -83,9 +77,9 @@ class SiteSettingsHandler
   void OnOffTheRecordProfileCreated(Profile* off_the_record) override;
   void OnProfileWillBeDestroyed(Profile* profile) override;
 
-  // ChooserContextBase::PermissionObserver implementation:
-  void OnChooserObjectPermissionChanged(
-      ContentSettingsType guard_content_settings_type,
+  // ObjectPermissionContextBase::PermissionObserver implementation:
+  void OnObjectPermissionChanged(
+      absl::optional<ContentSettingsType> guard_content_settings_type,
       ContentSettingsType data_content_settings_type) override;
 
   void OnZoomLevelChanged(const content::HostZoomMap::ZoomLevelChange& change);
@@ -120,6 +114,8 @@ class SiteSettingsHandler
   FRIEND_TEST_ALL_PREFIXES(SiteSettingsHandlerTest, IncognitoExceptions);
   FRIEND_TEST_ALL_PREFIXES(SiteSettingsHandlerTest,
                            ResetCategoryPermissionForEmbargoedOrigins);
+  FRIEND_TEST_ALL_PREFIXES(SiteSettingsHandlerTest,
+                           ResetCategoryPermissionForInvalidOrigins);
   FRIEND_TEST_ALL_PREFIXES(SiteSettingsHandlerTest, Origins);
   FRIEND_TEST_ALL_PREFIXES(SiteSettingsHandlerTest, Patterns);
   FRIEND_TEST_ALL_PREFIXES(SiteSettingsHandlerTest, PatternsAndContentType);
@@ -172,14 +168,20 @@ class SiteSettingsHandler
   // the front end when fetching finished.
   void HandleGetAllSites(const base::ListValue* args);
 
+  // Returns a list of content settings types that are controlled via a standard
+  // permissions UI and should be made visible to the user. There is a single
+  // nullable string argument, which represents an associated origin. See
+  // `SiteSettingsPrefsBrowserProxy#getCategoryList`.
+  void HandleGetCategoryList(const base::ListValue* args);
+
   // Returns a string for display describing the current cookie settings.
   void HandleGetCookieSettingDescription(const base::ListValue* args);
 
   // Returns a list containing the most recent permission changes for the
-  // provided content types grouped by origin/profile (incognito, regular)
-  // combinations, limited to N origin/profile pairings. This includes
-  // permission changes made by embargo, but does not include permissions
-  // enforced via policy.
+  // content types that are visiblein settings, grouped by origin/profile
+  // (incognito, regular) combinations, limited to N origin/profile pairings.
+  // This includes permission changes made by embargo, but does not include
+  // permissions enforced via policy.
   void HandleGetRecentSitePermissions(const base::ListValue* args);
 
   // Called when the list of origins using storage has been fetched, and sends
@@ -211,6 +213,9 @@ class SiteSettingsHandler
   void HandleResetCategoryPermissionForPattern(const base::ListValue* args);
   void HandleSetCategoryPermissionForPattern(const base::ListValue* args);
 
+  // TODO(andypaicu, crbug.com/880684): Update to only expect a list of three
+  // arguments, replacing the current (requesting,embedding) arguments with
+  // simply (origin) and update all call sites.
   // Handles resetting a chooser exception for the given site.
   void HandleResetChooserExceptionForSite(const base::ListValue* args);
 
@@ -260,7 +265,7 @@ class SiteSettingsHandler
   void SendCookieSettingDescription();
 
   Profile* profile_;
-  web_app::AppRegistrar& app_registrar_;
+  web_app::WebAppRegistrar& app_registrar_;
 
   base::ScopedMultiSourceObservation<Profile, ProfileObserver>
       observed_profiles_{this};
@@ -281,8 +286,8 @@ class SiteSettingsHandler
 
   // Change observer for chooser permissions.
   base::ScopedMultiSourceObservation<
-      permissions::ChooserContextBase,
-      permissions::ChooserContextBase::PermissionObserver>
+      permissions::ObjectPermissionContextBase,
+      permissions::ObjectPermissionContextBase::PermissionObserver>
       chooser_observations_{this};
 
   // Change observer for prefs.

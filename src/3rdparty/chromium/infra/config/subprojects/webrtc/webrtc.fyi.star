@@ -27,9 +27,10 @@ luci.bucket(
 )
 
 luci.gitiles_poller(
-    name = "webrtc-gitiles-trigger-master",
+    name = "webrtc-gitiles-trigger",
     bucket = "webrtc",
     repo = "https://webrtc.googlesource.com/src/",
+    refs = ["refs/heads/main"],
 )
 
 defaults.bucket.set("webrtc.fyi")
@@ -39,11 +40,11 @@ defaults.build_numbers.set(True)
 defaults.cpu.set(cpu.X86_64)
 defaults.executable.set("recipe:chromium")
 defaults.execution_timeout.set(2 * time.hour)
-defaults.os.set(os.LINUX_DEFAULT)
+defaults.os.set(os.LINUX_XENIAL_OR_BIONIC_REMOVE)
 defaults.pool.set("luci.chromium.webrtc.fyi")
 defaults.service_account.set("chromium-ci-builder@chops-service-accounts.iam.gserviceaccount.com")
 defaults.swarming_tags.set(["vpython:native-python-wrapper"])
-defaults.triggered_by.set(["webrtc-gitiles-trigger-master"])
+defaults.triggered_by.set(["webrtc-gitiles-trigger"])
 
 # Builders are defined in lexicographic order by name
 
@@ -110,12 +111,14 @@ builder(
 builder(
     name = "WebRTC Chromium FYI Win Builder",
     goma_backend = goma.backend.RBE_PROD,
+    goma_enable_ats = True,
     os = os.WINDOWS_DEFAULT,
 )
 
 builder(
     name = "WebRTC Chromium FYI Win Builder (dbg)",
     goma_backend = goma.backend.RBE_PROD,
+    goma_enable_ats = True,
     os = os.WINDOWS_DEFAULT,
 )
 
@@ -125,15 +128,19 @@ builder(
     triggered_by = ["WebRTC Chromium FYI Win Builder"],
 )
 
+# Builders run on the default Win OS version offered
+# in the Chrome infra however the tasks will be sharded
+# to swarming bots with appropriate OS using swarming
+# dimensions.
 builder(
     name = "WebRTC Chromium FYI Win7 Tester",
-    os = os.WINDOWS_7,
+    os = os.WINDOWS_DEFAULT,
     triggered_by = ["WebRTC Chromium FYI Win Builder"],
 )
 
 builder(
     name = "WebRTC Chromium FYI Win8 Tester",
-    os = os.WINDOWS_8_1,
+    os = os.WINDOWS_DEFAULT,
     triggered_by = ["WebRTC Chromium FYI Win Builder"],
 )
 
@@ -142,7 +149,7 @@ builder(
     executable = "recipe:webrtc/chromium_ios",
     goma_backend = goma.backend.RBE_PROD,
     os = os.MAC_ANY,
-    xcode = xcode.x12a7209,
+    xcode = xcode.x12d4e,
 )
 
 builder(
@@ -150,5 +157,5 @@ builder(
     executable = "recipe:webrtc/chromium_ios",
     goma_backend = goma.backend.RBE_PROD,
     os = os.MAC_ANY,
-    xcode = xcode.x12a7209,
+    xcode = xcode.x12d4e,
 )

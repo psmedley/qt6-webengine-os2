@@ -6,15 +6,15 @@
 #define BASE_TRACE_EVENT_BUILTIN_CATEGORIES_H_
 
 #include "base/base_export.h"
+#include "base/cxx17_backports.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/trace_event/common/trace_event_common.h"
 #include "base/tracing_buildflags.h"
 
 // List of builtin category names. If you want to use a new category name in
 // your code and you get a static assert, this is the right place to register
 // the name. If the name is going to be used only for testing, please add it to
-// |kIgnoredCategoriesForTesting| instead.
+// |kCategoriesForTesting| instead.
 //
 // Since spaces aren't allowed, use '_' to separate words in category names
 // (e.g., "content_capture").
@@ -31,19 +31,21 @@
   X("accessibility")                                                     \
   X("AccountFetcherService")                                             \
   X("android_webview")                                                   \
+  /* Actions on Google Hardware, used in Google-internal code. */        \
   X("aogh")                                                              \
   X("audio")                                                             \
   X("base")                                                              \
   X("benchmark")                                                         \
   X("blink")                                                             \
-  X("blink.bindings")                                                    \
   X("blink.animations")                                                  \
+  X("blink.bindings")                                                    \
   X("blink.console")                                                     \
-  X("blink_gc")                                                          \
   X("blink.net")                                                         \
-  X("blink_style")                                                       \
+  X("blink.resource")                                                    \
   X("blink.user_timing")                                                 \
   X("blink.worker")                                                      \
+  X("blink_gc")                                                          \
+  X("blink_style")                                                       \
   X("Blob")                                                              \
   X("browser")                                                           \
   X("browsing_data")                                                     \
@@ -78,6 +80,7 @@
   X("evdev")                                                             \
   X("event")                                                             \
   X("exo")                                                               \
+  X("extensions")                                                        \
   X("explore_sites")                                                     \
   X("FileSystem")                                                        \
   X("file_system_provider")                                              \
@@ -86,7 +89,6 @@
   X("gpu")                                                               \
   X("gpu.angle")                                                         \
   X("gpu.capture")                                                       \
-  X("gpu.memory")                                                        \
   X("headless")                                                          \
   X("hwoverlays")                                                        \
   X("identity")                                                          \
@@ -136,6 +138,7 @@
   X("RLZ")                                                               \
   X("safe_browsing")                                                     \
   X("screenlock_monitor")                                                \
+  X("segmentation_platform")                                             \
   X("sequence_manager")                                                  \
   X("service_manager")                                                   \
   X("ServiceWorker")                                                     \
@@ -150,7 +153,7 @@
   X("stadia_rtc")                                                        \
   X("startup")                                                           \
   X("sync")                                                              \
-  X("sync_lock_contention")                                              \
+  X("system_apps")                                                       \
   X("test_gpu")                                                          \
   X("thread_pool")                                                       \
   X("toplevel")                                                          \
@@ -173,6 +176,7 @@
   X(TRACE_DISABLED_BY_DEFAULT("animation-worklet"))                      \
   X(TRACE_DISABLED_BY_DEFAULT("audio"))                                  \
   X(TRACE_DISABLED_BY_DEFAULT("audio-worklet"))                          \
+  X(TRACE_DISABLED_BY_DEFAULT("base"))                                   \
   X(TRACE_DISABLED_BY_DEFAULT("blink.debug"))                            \
   X(TRACE_DISABLED_BY_DEFAULT("blink.debug.display_lock"))               \
   X(TRACE_DISABLED_BY_DEFAULT("blink.debug.layout"))                     \
@@ -231,6 +235,7 @@
   X(TRACE_DISABLED_BY_DEFAULT("skia"))                                   \
   X(TRACE_DISABLED_BY_DEFAULT("skia.gpu"))                               \
   X(TRACE_DISABLED_BY_DEFAULT("skia.gpu.cache"))                         \
+  X(TRACE_DISABLED_BY_DEFAULT("skia.shaders"))                           \
   X(TRACE_DISABLED_BY_DEFAULT("SyncFileSystem"))                         \
   X(TRACE_DISABLED_BY_DEFAULT("system_stats"))                           \
   X(TRACE_DISABLED_BY_DEFAULT("thread_pool_diagnostics"))                \
@@ -270,13 +275,14 @@
   X("benchmark,rail")                                                         \
   X("benchmark,uma")                                                          \
   X("benchmark,viz")                                                          \
-  X("blink.animations,devtools.timeline,benchmark,rail")                      \
   X("blink,benchmark")                                                        \
   X("blink,benchmark,rail," TRACE_DISABLED_BY_DEFAULT("blink.debug.layout"))  \
+  X("blink,blink.resource")                                                   \
   X("blink,blink_style")                                                      \
   X("blink,devtools.timeline")                                                \
   X("blink,loading")                                                          \
   X("blink,rail")                                                             \
+  X("blink.animations,devtools.timeline,benchmark,rail")                      \
   X("blink.user_timing,rail")                                                 \
   X("blink_gc,devtools.timeline")                                             \
   X("browser,content,navigation")                                             \
@@ -389,20 +395,12 @@ class BASE_EXPORT BuiltinCategories {
  public:
   // Returns a built-in category name at |index| in the registry.
   static constexpr const char* At(size_t index) {
-#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
-    return perfetto::internal::kCategories[index].name;
-#else
     return kBuiltinCategories[index];
-#endif
   }
 
   // Returns the amount of built-in categories in the registry.
   static constexpr size_t Size() {
-#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
-    return perfetto::internal::kCategoryCount;
-#else
     return base::size(kBuiltinCategories);
-#endif
   }
 
   // Where in the builtin category list to start when populating the

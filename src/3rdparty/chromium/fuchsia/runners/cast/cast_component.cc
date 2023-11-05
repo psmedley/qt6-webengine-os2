@@ -16,7 +16,8 @@
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/path_service.h"
 #include "base/task/current_thread.h"
-#include "components/cast/message_port/message_port_fuchsia.h"
+#include "components/cast/message_port/fuchsia/message_port_fuchsia.h"
+#include "components/cast/message_port/platform_message_port.h"
 #include "fuchsia/base/agent_manager.h"
 #include "fuchsia/base/mem_buffer_util.h"
 #include "fuchsia/fidl/chromium/cast/cpp/fidl.h"
@@ -96,6 +97,38 @@ void CastComponent::SetOnDestroyedCallback(base::OnceClosure on_destroyed) {
   on_destroyed_ = std::move(on_destroyed);
 }
 
+void CastComponent::ConnectMetricsRecorder(
+    fidl::InterfaceRequest<fuchsia::legacymetrics::MetricsRecorder> request) {
+  startup_context()->svc()->Connect(std::move(request));
+}
+
+void CastComponent::ConnectAudio(
+    fidl::InterfaceRequest<fuchsia::media::Audio> request) {
+  agent_manager_->ConnectToAgentService(application_config_.agent_url(),
+                                        std::move(request));
+}
+
+void CastComponent::ConnectDeviceWatcher(
+    fidl::InterfaceRequest<fuchsia::camera3::DeviceWatcher> request) {
+  agent_manager_->ConnectToAgentService(application_config_.agent_url(),
+                                        std::move(request));
+}
+
+bool CastComponent::HasWebPermission(
+    fuchsia::web::PermissionType permission_type) const {
+  if (!application_config_.has_permissions()) {
+    return false;
+  }
+
+  for (auto& permission : application_config_.permissions()) {
+    if (permission.has_type() && permission.type() == permission_type) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void CastComponent::StartComponent() {
   if (application_config_.has_enable_remote_debugging() &&
       application_config_.enable_remote_debugging()) {
@@ -129,10 +162,10 @@ void CastComponent::StartComponent() {
     // Register the MessagePort for the Cast Streaming Receiver.
     std::unique_ptr<cast_api_bindings::MessagePort> message_port_for_web_engine;
     std::unique_ptr<cast_api_bindings::MessagePort> message_port_for_agent;
-    cast_api_bindings::MessagePort::CreatePair(&message_port_for_agent,
-                                               &message_port_for_web_engine);
+    cast_api_bindings::CreatePlatformMessagePortPair(
+        &message_port_for_agent, &message_port_for_web_engine);
     frame()->PostMessage(
-        kCastStreamingMessagePortOrigin,
+        GetMessagePortOriginForAppId(application_config_.id()),
         CreateWebMessage("", std::move(message_port_for_web_engine)),
         [this](fuchsia::web::Frame_PostMessage_Result result) {
           if (result.is_err()) {
@@ -151,7 +184,7 @@ void CastComponent::StartComponent() {
                      fuchsia::sys::TerminationReason::INTERNAL_ERROR));
 
   // Get the theme from the system service.
-  frame()->SetPreferredTheme(fuchsia::settings::ThemeType::AUTO);
+  frame()->SetPreferredTheme(fuchsia::settings::ThemeType::DEFAULT);
 
   // Media loading has to be unblocked by the agent via the
   // ApplicationController.

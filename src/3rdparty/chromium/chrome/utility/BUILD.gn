@@ -35,7 +35,6 @@ static_library("utility") {
     "//chrome:strings",
     "//chrome/common",
     "//chrome/common:mojo_bindings",
-    "//chrome/services/machine_learning",
     "//chrome/services/qrcode_generator",
     "//components/mirroring/service:mirroring_service",
     "//components/paint_preview/buildflags",
@@ -101,7 +100,10 @@ static_library("utility") {
         "importer/safari_importer.h",
         "importer/safari_importer.mm",
       ]
-    } else {
+    }
+    if (!is_mac && !is_fuchsia) {
+      # NSS decryptor depends on system NSS that is not available on MacOS or
+      # Fuchsia.
       sources += [
         "importer/nss_decryptor.cc",
         "importer/nss_decryptor.h",
@@ -176,6 +178,8 @@ static_library("utility") {
       deps += [
         "//chromeos/services/assistant/audio_decoder:lib",
         "//chromeos/services/assistant/public/mojom",
+        "//chromeos/services/libassistant",
+        "//chromeos/services/libassistant/public/mojom",
       ]
     }
   }
@@ -197,6 +201,10 @@ static_library("utility") {
       "//components/services/print_compositor/public/mojom",
     ]
 
+    if (is_win || is_mac || is_linux || is_chromeos) {
+      deps += [ "//chrome/services/printing:lib" ]
+    }
+
     if (is_chromeos_ash) {
       deps += [
         "//chrome/services/ipp_parser",
@@ -206,13 +214,12 @@ static_library("utility") {
   }
 
   if (enable_print_preview) {
-    deps += [ "//chrome/services/printing:lib" ]
-
     if (is_win) {
       sources += [
         "printing_handler.cc",
         "printing_handler.h",
       ]
+      public_deps += [ "//chrome/common:cloud_print_utility_mojom" ]
     }
   }
 

@@ -25,7 +25,8 @@ static int ToPlatformAddressFamily(IpAddressFamily family) {
     case IpAddressFamily::IP_UNSPEC:
       return AF_UNSPEC;
   }
-  QUIC_BUG << "Invalid IpAddressFamily " << static_cast<int32_t>(family);
+  QUIC_BUG(quic_bug_10126_1)
+      << "Invalid IpAddressFamily " << static_cast<int32_t>(family);
   return AF_UNSPEC;
 }
 
@@ -95,7 +96,8 @@ bool operator==(QuicIpAddress lhs, QuicIpAddress rhs) {
     case IpAddressFamily::IP_UNSPEC:
       return true;
   }
-  QUIC_BUG << "Invalid IpAddressFamily " << static_cast<int32_t>(lhs.family_);
+  QUIC_BUG(quic_bug_10126_2)
+      << "Invalid IpAddressFamily " << static_cast<int32_t>(lhs.family_);
   return false;
 }
 
@@ -126,7 +128,8 @@ std::string QuicIpAddress::ToPackedString() const {
     case IpAddressFamily::IP_UNSPEC:
       return "";
   }
-  QUIC_BUG << "Invalid IpAddressFamily " << static_cast<int32_t>(family_);
+  QUIC_BUG(quic_bug_10126_3)
+      << "Invalid IpAddressFamily " << static_cast<int32_t>(family_);
   return "";
 }
 
@@ -142,7 +145,8 @@ std::string QuicIpAddress::ToString() const {
 #endif
   const char* result =
       inet_ntop(AddressFamilyToInt(), address_.bytes, buffer, sizeof(buffer));
-  QUIC_BUG_IF(result == nullptr) << "Failed to convert an IP address to string";
+  QUIC_BUG_IF(quic_bug_10126_4, result == nullptr)
+      << "Failed to convert an IP address to string";
   return buffer;
 }
 
@@ -233,7 +237,8 @@ bool QuicIpAddress::IsIPv6() const {
 bool QuicIpAddress::InSameSubnet(const QuicIpAddress& other,
                                  int subnet_length) {
   if (!IsInitialized()) {
-    QUIC_BUG << "Attempting to do subnet matching on undefined address";
+    QUIC_BUG(quic_bug_10126_5)
+        << "Attempting to do subnet matching on undefined address";
     return false;
   }
   if ((IsIPv4() && subnet_length > 32)
@@ -241,7 +246,7 @@ bool QuicIpAddress::InSameSubnet(const QuicIpAddress& other,
       || (IsIPv6() && subnet_length > 128)
 #endif
      ) {
-    QUIC_BUG << "Subnet mask is out of bounds";
+    QUIC_BUG(quic_bug_10126_6) << "Subnet mask is out of bounds";
     return false;
   }
 

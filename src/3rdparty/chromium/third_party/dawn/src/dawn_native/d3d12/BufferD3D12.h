@@ -27,9 +27,8 @@ namespace dawn_native { namespace d3d12 {
 
     class Buffer final : public BufferBase {
       public:
-        Buffer(Device* device, const BufferDescriptor* descriptor);
-
-        MaybeError Initialize(bool mappedAtCreation);
+        static ResultOrError<Ref<Buffer>> Create(Device* device,
+                                                 const BufferDescriptor* descriptor);
 
         ID3D12Resource* GetD3D12Resource() const;
         D3D12_GPU_VIRTUAL_ADDRESS GetVA() const;
@@ -51,7 +50,10 @@ namespace dawn_native { namespace d3d12 {
                                                       const CopyTextureToBufferCmd* copy);
 
       private:
+        Buffer(Device* device, const BufferDescriptor* descriptor);
         ~Buffer() override;
+
+        MaybeError Initialize(bool mappedAtCreation);
         MaybeError MapAsyncImpl(wgpu::MapMode mode, size_t offset, size_t size) override;
         void UnmapImpl() override;
         void DestroyImpl() override;
@@ -66,7 +68,10 @@ namespace dawn_native { namespace d3d12 {
                                                   wgpu::BufferUsage newUsage);
 
         MaybeError InitializeToZero(CommandRecordingContext* commandContext);
-        MaybeError ClearBuffer(CommandRecordingContext* commandContext, uint8_t clearValue);
+        MaybeError ClearBuffer(CommandRecordingContext* commandContext,
+                               uint8_t clearValue,
+                               uint64_t offset = 0,
+                               uint64_t size = 0);
 
         ResourceHeapAllocation mResourceAllocation;
         bool mFixedResourceState = false;

@@ -4,8 +4,10 @@
 
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_line_truncator.h"
 
+#include "base/containers/adapters.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_box_state.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_item_result.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_line_info.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_logical_line_item.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/platform/fonts/font_baseline.h"
@@ -49,7 +51,7 @@ void NGLineTruncator::SetupEllipsis() {
   ellipsis_text_ =
       ellipsis_font_data_ && ellipsis_font_data_->GlyphForCharacter(
                                  kHorizontalEllipsisCharacter)
-          ? String(&kHorizontalEllipsisCharacter, 1)
+          ? String(&kHorizontalEllipsisCharacter, 1u)
           : String(u"...");
   HarfBuzzShaper shaper(ellipsis_text_);
   ellipsis_shape_result_ =
@@ -134,11 +136,10 @@ LayoutUnit NGLineTruncator::TruncateLine(LayoutUnit line_width,
   // to place the ellipsis. Children maybe truncated or moved as part of the
   // process.
   NGLogicalLineItem* ellipsized_child = nullptr;
-  base::Optional<NGLogicalLineItem> truncated_child;
+  absl::optional<NGLogicalLineItem> truncated_child;
   if (IsLtr(line_direction_)) {
     NGLogicalLineItem* first_child = line_box->FirstInFlowChild();
-    for (auto it = line_box->rbegin(); it != line_box->rend(); it++) {
-      auto& child = *it;
+    for (auto& child : base::Reversed(*line_box)) {
       if (EllipsizeChild(line_width, ellipsis_width_, &child == first_child,
                          &child, &truncated_child)) {
         ellipsized_child = &child;
@@ -164,7 +165,8 @@ LayoutUnit NGLineTruncator::TruncateLine(LayoutUnit line_width,
   if (truncated_child) {
     // In order to preserve layout information before truncated, hide the
     // original fragment and insert a truncated one.
-    size_t child_index_to_truncate = ellipsized_child - line_box->begin();
+    unsigned child_index_to_truncate =
+        base::checked_cast<unsigned>(ellipsized_child - line_box->begin());
     line_box->InsertChild(child_index_to_truncate + 1,
                           std::move(*truncated_child));
     box_states->ChildInserted(child_index_to_truncate + 1);
@@ -409,7 +411,12 @@ void NGLineTruncator::HideChild(NGLogicalLineItem* child) {
     if (fragment.HasOutOfFlowPositionedDescendants())
       return;
 
-    child->layout_result = fragment.CloneAsHiddenForPaint();
+    // Truncate this object. Atomic inline is monolithic.
+    DCHECK(fragment.IsMonolithic());
+    LayoutObject* layout_object = fragment.GetMutableLayoutObject();
+    DCHECK(layout_object);
+    DCHECK(layout_object->IsAtomicInlineLevel());
+    layout_object->SetIsTruncated(true);
     return;
   }
 
@@ -429,7 +436,7 @@ bool NGLineTruncator::EllipsizeChild(
     LayoutUnit ellipsis_width,
     bool is_first_child,
     NGLogicalLineItem* child,
-    base::Optional<NGLogicalLineItem>* truncated_child) {
+    absl::optional<NGLogicalLineItem>* truncated_child) {
   DCHECK(truncated_child && !*truncated_child);
 
   // Leave out-of-flow children as is.
@@ -484,7 +491,7 @@ bool NGLineTruncator::TruncateChild(
     LayoutUnit space_for_child,
     bool is_first_child,
     const NGLogicalLineItem& child,
-    base::Optional<NGLogicalLineItem>* truncated_child) {
+    absl::optional<NGLogicalLineItem>* truncated_child) {
   DCHECK(truncated_child && !*truncated_child);
 
   // If the space is not enough, try the next child.

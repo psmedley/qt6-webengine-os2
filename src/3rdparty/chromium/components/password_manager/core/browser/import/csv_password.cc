@@ -21,7 +21,7 @@ namespace {
 // Convert() unescapes a CSV field |str| and converts the result to a 16-bit
 // string. |str| is assumed to exclude the outer pair of quotation marks, if
 // originally present.
-base::string16 Convert(base::StringPiece str) {
+std::u16string Convert(base::StringPiece str) {
   std::string str_copy(str);
   base::ReplaceSubstringsAfterOffset(&str_copy, 0, "\"\"", "\"");
   return base::UTF8ToUTF16(str_copy);
@@ -106,6 +106,7 @@ CSVPassword::Status CSVPassword::ParseImpl(PasswordForm* form) const {
   form->username_value = Convert(username);
   form->password_value = Convert(password);
   form->date_created = base::Time::Now();
+  form->date_password_modified = form->date_created;
   return Status::kOK;
 }
 

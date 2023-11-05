@@ -6,7 +6,6 @@
 #define NET_HTTP_HTTP_NETWORK_LAYER_H_
 
 #include <memory>
-#include <string>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -21,7 +20,7 @@ namespace net {
 class HttpNetworkSession;
 
 class NET_EXPORT HttpNetworkLayer : public HttpTransactionFactory,
-                                    public base::PowerObserver {
+                                    public base::PowerSuspendObserver {
  public:
   // Construct a HttpNetworkLayer with an existing HttpNetworkSession which
   // contains a valid ProxyResolutionService. The HttpNetworkLayer must be
@@ -35,7 +34,7 @@ class NET_EXPORT HttpNetworkLayer : public HttpTransactionFactory,
   HttpCache* GetCache() override;
   HttpNetworkSession* GetSession() override;
 
-  // base::PowerObserver methods:
+  // base::PowerSuspendObserver methods:
   void OnSuspend() override;
   void OnResume() override;
 

@@ -21,6 +21,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/resource_request_body_android.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/frame/blocked_navigation_types.mojom.h"
 #include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
 #include "ui/android/view_android.h"
@@ -55,11 +56,12 @@ ScopedJavaLocalRef<jobject> WebContentsDelegateAndroid::GetJavaDelegate(
 // WebContentsDelegate methods
 // ----------------------------------------------------------------------------
 
-ColorChooser* WebContentsDelegateAndroid::OpenColorChooser(
+std::unique_ptr<content::ColorChooser>
+WebContentsDelegateAndroid::OpenColorChooser(
     WebContents* source,
     SkColor color,
     const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
-  return new ColorChooserAndroid(source, color, suggestions);
+  return std::make_unique<ColorChooserAndroid>(source, color, suggestions);
 }
 
 // OpenURLFromTab() will be called when we're performing a browser-intiated
@@ -224,9 +226,9 @@ void WebContentsDelegateAndroid::SetContentsBounds(WebContents* source,
 bool WebContentsDelegateAndroid::DidAddMessageToConsole(
     WebContents* source,
     blink::mojom::ConsoleMessageLevel log_level,
-    const base::string16& message,
+    const std::u16string& message,
     int32_t line_no,
-    const base::string16& source_id) {
+    const std::u16string& source_id) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
   if (obj.is_null())
@@ -404,7 +406,11 @@ bool WebContentsDelegateAndroid::ShouldAnimateBrowserControlsHeightChanges() {
 
 bool WebContentsDelegateAndroid::DoBrowserControlsShrinkRendererSize(
     content::WebContents* contents) {
-  return contents->GetNativeView()->ControlsResizeView();
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
+  if (obj.is_null())
+    return false;
+  return Java_WebContentsDelegateAndroid_controlsResizeView(env, obj);
 }
 
 blink::mojom::DisplayMode WebContentsDelegateAndroid::GetDisplayMode(

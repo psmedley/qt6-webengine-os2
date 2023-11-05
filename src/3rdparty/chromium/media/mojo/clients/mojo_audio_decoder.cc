@@ -51,10 +51,6 @@ AudioDecoderType MojoAudioDecoder::GetDecoderType() const {
   return decoder_type_;
 }
 
-std::string MojoAudioDecoder::GetDisplayName() const {
-  return "MojoAudioDecoder";
-}
-
 void MojoAudioDecoder::FailInit(InitCB init_cb, Status err) {
   task_runner_->PostTask(FROM_HERE,
                          base::BindOnce(std::move(init_cb), std::move(err)));
@@ -79,7 +75,7 @@ void MojoAudioDecoder::Initialize(const AudioDecoderConfig& config,
   }
 
   // Fail immediately if the stream is encrypted but |cdm_context| is invalid.
-  base::Optional<base::UnguessableToken> cdm_id;
+  absl::optional<base::UnguessableToken> cdm_id;
   if (config.is_encrypted() && cdm_context)
     cdm_id = cdm_context->GetCdmId();
 

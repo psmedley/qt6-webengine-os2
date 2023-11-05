@@ -8,6 +8,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/media_gpu_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/linux/native_pixmap_dmabuf.h"
 
@@ -66,7 +67,7 @@ MEDIA_GPU_EXPORT scoped_refptr<VideoFrame> CreatePlatformVideoFrame(
 // encoding when the usage is VEA_READ_CAMERA_AND_CPU_READ_WRITE). It's
 // safe to call this function concurrently from multiple threads (as long as
 // either |gpu_memory_buffer_factory| is thread-safe or nullptr).
-MEDIA_GPU_EXPORT base::Optional<VideoFrameLayout> GetPlatformVideoFrameLayout(
+MEDIA_GPU_EXPORT absl::optional<VideoFrameLayout> GetPlatformVideoFrameLayout(
     gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory,
     VideoPixelFormat pixel_format,
     const gfx::Size& coded_size,

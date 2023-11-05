@@ -17,6 +17,7 @@
 #include "common/BitSetIterator.h"
 #include "dawn_native/Buffer.h"
 #include "dawn_native/CommandEncoder.h"
+#include "dawn_native/CommandValidation.h"
 #include "dawn_native/Commands.h"
 #include "dawn_native/Format.h"
 #include "dawn_native/Texture.h"
@@ -66,18 +67,26 @@ namespace dawn_native {
                                        const uint32_t mipLevel) {
         Extent3D extent = texture->GetMipLevelPhysicalSize(mipLevel);
 
-        ASSERT(texture->GetDimension() == wgpu::TextureDimension::e2D);
-        if (extent.width == copySize.width && extent.height == copySize.height) {
-            return true;
+        ASSERT(texture->GetDimension() != wgpu::TextureDimension::e1D);
+        switch (texture->GetDimension()) {
+            case wgpu::TextureDimension::e2D:
+                return extent.width == copySize.width && extent.height == copySize.height;
+            case wgpu::TextureDimension::e3D:
+                return extent.width == copySize.width && extent.height == copySize.height &&
+                       extent.depthOrArrayLayers == copySize.depthOrArrayLayers;
+            default:
+                UNREACHABLE();
         }
-        return false;
     }
 
     SubresourceRange GetSubresourcesAffectedByCopy(const TextureCopy& copy,
                                                    const Extent3D& copySize) {
         switch (copy.texture->GetDimension()) {
             case wgpu::TextureDimension::e2D:
-                return {copy.aspect, {copy.origin.z, copySize.depth}, {copy.mipLevel, 1}};
+                return {
+                    copy.aspect, {copy.origin.z, copySize.depthOrArrayLayers}, {copy.mipLevel, 1}};
+            case wgpu::TextureDimension::e3D:
+                return {copy.aspect, {0, 1}, {copy.mipLevel, 1}};
             default:
                 UNREACHABLE();
         }
@@ -117,6 +126,7 @@ namespace dawn_native {
                     view->GetTexture()->SetIsSubresourceContentInitialized(true, range);
                     break;
 
+                case wgpu::StoreOp::Discard:
                 case wgpu::StoreOp::Clear:
                     view->GetTexture()->SetIsSubresourceContentInitialized(false, range);
                     break;
@@ -162,27 +172,37 @@ namespace dawn_native {
         ASSERT(copy != nullptr);
 
         if (copy->destination.offset > 0) {
+            // The copy doesn't touch the start of the buffer.
             return false;
         }
 
         const TextureBase* texture = copy->source.texture.Get();
         const TexelBlockInfo& blockInfo =
             texture->GetFormat().GetAspectInfo(copy->source.aspect).block;
+        const uint64_t widthInBlocks = copy->copySize.width / blockInfo.width;
         const uint64_t heightInBlocks = copy->copySize.height / blockInfo.height;
+        const bool multiSlice = copy->copySize.depthOrArrayLayers > 1;
+        const bool multiRow = multiSlice || heightInBlocks > 1;
 
-        if (copy->destination.rowsPerImage > heightInBlocks) {
+        if (multiSlice && copy->destination.rowsPerImage > heightInBlocks) {
+            // There are gaps between slices that aren't overwritten
             return false;
         }
 
-        const uint64_t copyTextureDataSizePerRow =
-            copy->copySize.width / blockInfo.width * blockInfo.byteSize;
-        if (copy->destination.bytesPerRow > copyTextureDataSizePerRow) {
+        const uint64_t copyTextureDataSizePerRow = widthInBlocks * blockInfo.byteSize;
+        if (multiRow && copy->destination.bytesPerRow > copyTextureDataSizePerRow) {
+            // There are gaps between rows that aren't overwritten
             return false;
         }
 
-        const uint64_t overwrittenRangeSize =
-            copyTextureDataSizePerRow * heightInBlocks * copy->copySize.depth;
-        if (copy->destination.buffer->GetSize() > overwrittenRangeSize) {
+        // After the above checks, we're sure the copy has no gaps.
+        // Now, compute the total number of bytes written.
+        const uint64_t writtenBytes =
+            ComputeRequiredBytesInCopy(blockInfo, copy->copySize, copy->destination.bytesPerRow,
+                                       copy->destination.rowsPerImage)
+                .AcquireSuccess();
+        if (!copy->destination.buffer->IsFullBufferRange(copy->destination.offset, writtenBytes)) {
+            // The written bytes don't cover the whole buffer.
             return false;
         }
 

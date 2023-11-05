@@ -25,6 +25,7 @@ const char kRequestRestartMethod[] = "RequestRestart";
 const char kRequestShutdownMethod[] = "RequestShutdown";
 const char kRequestSuspendMethod[] = "RequestSuspend";
 const char kGetPowerSupplyPropertiesMethod[] = "GetPowerSupplyProperties";
+const char kGetBatteryStateMethod[] = "GetBatteryState";
 const char kGetSwitchStatesMethod[] = "GetSwitchStates";
 const char kHandleUserActivityMethod[] = "HandleUserActivity";
 const char kHandleVideoActivityMethod[] = "HandleVideoActivity";
@@ -52,13 +53,19 @@ const char kHasAmbientColorDeviceMethod[] = "HasAmbientColorDevice";
 const char kChangeWifiRegDomainMethod[] = "ChangeWifiRegDomain";
 // TODO(b/166543531): Remove after migrating to BlueZ Battery Provider API.
 const char kRefreshBluetoothBatteryMethod[] = "RefreshBluetoothBattery";
+const char kRefreshAllPeripheralBatteryMethod[] = "RefreshAllPeripheralBattery";
 const char kGetThermalStateMethod[] = "GetThermalState";
+const char kSetExternalDisplayALSBrightnessMethod[] =
+    "SetExternalDisplayALSBrightness";
+const char kGetExternalDisplayALSBrightnessMethod[] =
+    "GetExternalDisplayALSBrightness";
 
 // Signals emitted by powerd.
 const char kScreenBrightnessChangedSignal[] = "ScreenBrightnessChanged";
 const char kKeyboardBrightnessChangedSignal[] = "KeyboardBrightnessChanged";
 const char kPeripheralBatteryStatusSignal[] = "PeripheralBatteryStatus";
 const char kPowerSupplyPollSignal[] = "PowerSupplyPoll";
+const char kBatteryStatePollSignal[] = "BatteryStatePoll";
 const char kSuspendImminentSignal[] = "SuspendImminent";
 const char kDarkSuspendImminentSignal[] = "DarkSuspendImminent";
 const char kSuspendDoneSignal[] = "SuspendDone";

@@ -9,8 +9,9 @@
 namespace liburlpattern {
 
 void RunTokenizeTest(absl::string_view pattern,
-                     absl::StatusOr<std::vector<Token>> expected) {
-  auto result = Tokenize(pattern);
+                     absl::StatusOr<std::vector<Token>> expected,
+                     TokenizePolicy policy = TokenizePolicy::kStrict) {
+  auto result = Tokenize(pattern, policy);
   ASSERT_EQ(result.ok(), expected.ok()) << "lexer status for: " << pattern;
   if (!expected.ok()) {
     ASSERT_EQ(result.status().code(), expected.status().code())
@@ -117,12 +118,6 @@ TEST(TokenizeTest, EscapedCharAtEnd) {
                   absl::InvalidArgumentError("Trailing escape character"));
 }
 
-TEST(TokenizeTest, EscapedInvalidChar) {
-  // Use a single byte invalid character since the escape only applies to the
-  // next byte character.
-  RunTokenizeTest("\\\xff", absl::InvalidArgumentError("Invalid character"));
-}
-
 TEST(TokenizeTest, Name) {
   std::vector<Token> expected_tokens = {
       Token(TokenType::kName, 0, "Foo_1"),
@@ -136,8 +131,64 @@ TEST(TokenizeTest, NameWithZeroLength) {
                   absl::InvalidArgumentError("Missing parameter name"));
 }
 
-TEST(TokenizeTest, NameWithInvalidChar) {
-  RunTokenizeTest("/:fooßar", absl::InvalidArgumentError("Invalid character"));
+TEST(TokenizeTest, NameWithUnicodeChar) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "/"),
+      Token(TokenType::kName, 1, "fooßar"),
+      Token(TokenType::kEnd, 9, absl::string_view()),
+  };
+  RunTokenizeTest("/:fooßar", expected_tokens);
+}
+
+TEST(TokenizeTest, NameWithSpaceFirstChar) {
+  RunTokenizeTest("/: bad",
+                  absl::InvalidArgumentError("Missing parameter name"));
+}
+
+TEST(TokenizeTest, NameWithDollarFirst) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "/"),
+      Token(TokenType::kName, 1, "$foo"),
+      Token(TokenType::kEnd, 6, absl::string_view()),
+  };
+  RunTokenizeTest("/:$foo", expected_tokens);
+}
+
+TEST(TokenizeTest, NameWithDollarLater) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "/"),
+      Token(TokenType::kName, 1, "foo$"),
+      Token(TokenType::kEnd, 6, absl::string_view()),
+  };
+  RunTokenizeTest("/:foo$", expected_tokens);
+}
+
+TEST(TokenizeTest, NameWithUnderscoreFirst) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "/"),
+      Token(TokenType::kName, 1, "_foo"),
+      Token(TokenType::kEnd, 6, absl::string_view()),
+  };
+  RunTokenizeTest("/:_foo", expected_tokens);
+}
+
+TEST(TokenizeTest, NameWithUnderscoreLater) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "/"),
+      Token(TokenType::kName, 1, "foo_"),
+      Token(TokenType::kEnd, 6, absl::string_view()),
+  };
+  RunTokenizeTest("/:foo_", expected_tokens);
+}
+
+TEST(TokenizeTest, NameFollowedByEscapedChar) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "/"),
+      Token(TokenType::kName, 1, "foo"),
+      Token(TokenType::kEscapedChar, 5, ":"),
+      Token(TokenType::kEnd, 7, absl::string_view()),
+  };
+  RunTokenizeTest("/:foo\\:", expected_tokens);
 }
 
 TEST(TokenizeTest, NameAndFileExtension) {
@@ -178,7 +229,8 @@ TEST(TokenizeTest, RegexWithZeroLength) {
 }
 
 TEST(TokenizeTest, RegexWithInvalidChar) {
-  RunTokenizeTest("(ßar)", absl::InvalidArgumentError("Invalid character"));
+  RunTokenizeTest("(ßar)",
+                  absl::InvalidArgumentError("Invalid non-ASCII character"));
 }
 
 TEST(TokenizeTest, RegexWithoutClosingParen) {
@@ -238,7 +290,8 @@ TEST(TokenizeTest, RegexWithTrailingEscapedChar) {
 TEST(TokenizeTest, RegexWithEscapedInvalidChar) {
   // Use a single byte invalid character since the escape only applies to the
   // next byte character.
-  RunTokenizeTest("(\\\xff)", absl::InvalidArgumentError("Invalid character"));
+  RunTokenizeTest("(\\\xff)",
+                  absl::InvalidArgumentError("Invalid non-ASCII character"));
 }
 
 TEST(TokenizeTest, RegexWithLeadingQuestion) {
@@ -338,6 +391,90 @@ TEST(TokenizeTest, Everything) {
       Token(TokenType::kEnd, 22, absl::string_view()),
   };
   RunTokenizeTest("/\\foo/(a(?.*)){/:bar}*", expected_tokens);
+}
+
+TEST(TokenizeTest, LenientPolicy) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "h"),
+      Token(TokenType::kChar, 1, "t"),
+      Token(TokenType::kChar, 2, "t"),
+      Token(TokenType::kChar, 3, "p"),
+      Token(TokenType::kInvalidChar, 4, ":"),
+      Token(TokenType::kChar, 5, "/"),
+      Token(TokenType::kChar, 6, "/"),
+      Token(TokenType::kChar, 7, "a"),
+      Token(TokenType::kChar, 8, "."),
+      Token(TokenType::kChar, 9, "c"),
+      Token(TokenType::kChar, 10, "o"),
+      Token(TokenType::kChar, 11, "m"),
+      Token(TokenType::kInvalidChar, 12, ":"),
+      Token(TokenType::kChar, 13, "8"),
+      Token(TokenType::kChar, 14, "0"),
+      Token(TokenType::kChar, 15, "8"),
+      Token(TokenType::kChar, 16, "0"),
+      Token(TokenType::kChar, 17, "/"),
+      Token(TokenType::kChar, 18, "f"),
+      Token(TokenType::kChar, 19, "o"),
+      Token(TokenType::kChar, 20, "o"),
+      Token(TokenType::kOtherModifier, 21, "?"),
+      Token(TokenType::kChar, 22, "b"),
+      Token(TokenType::kChar, 23, "a"),
+      Token(TokenType::kChar, 24, "r"),
+      Token(TokenType::kChar, 25, "#"),
+      Token(TokenType::kChar, 26, "b"),
+      Token(TokenType::kChar, 27, "a"),
+      Token(TokenType::kChar, 28, "z"),
+      Token(TokenType::kEnd, 29, absl::string_view()),
+  };
+  RunTokenizeTest("http://a.com:8080/foo?bar#baz", expected_tokens,
+                  TokenizePolicy::kLenient);
+}
+
+TEST(TokenizeTest, LenientPolicyTrailingEscape) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kChar, 0, "f"),
+      Token(TokenType::kChar, 1, "o"),
+      Token(TokenType::kChar, 2, "o"),
+      Token(TokenType::kInvalidChar, 3, "\\"),
+      Token(TokenType::kEnd, 4, absl::string_view()),
+  };
+  RunTokenizeTest("foo\\", expected_tokens, TokenizePolicy::kLenient);
+}
+
+TEST(TokenizeTest, LenientPolicyRegexWithoutClose) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kInvalidChar, 0, "("),
+      Token(TokenType::kChar, 1, "f"),
+      Token(TokenType::kChar, 2, "o"),
+      Token(TokenType::kChar, 3, "o"),
+      Token(TokenType::kEnd, 4, absl::string_view()),
+  };
+  RunTokenizeTest("(foo", expected_tokens, TokenizePolicy::kLenient);
+}
+
+TEST(TokenizeTest, LenientPolicyRegexWithTrailingEscape) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kInvalidChar, 0, "("),
+      Token(TokenType::kChar, 1, "f"),
+      Token(TokenType::kChar, 2, "o"),
+      Token(TokenType::kChar, 3, "o"),
+      Token(TokenType::kInvalidChar, 4, "\\"),
+      Token(TokenType::kEnd, 5, absl::string_view()),
+  };
+  RunTokenizeTest("(foo\\", expected_tokens, TokenizePolicy::kLenient);
+}
+
+TEST(TokenizeTest, LenientPolicyRegexWithCaptureGroup) {
+  std::vector<Token> expected_tokens = {
+      Token(TokenType::kInvalidChar, 0, "("),
+      Token(TokenType::kChar, 1, "f"),
+      Token(TokenType::kChar, 2, "o"),
+      Token(TokenType::kChar, 3, "o"),
+      Token(TokenType::kRegex, 4, "bar"),
+      Token(TokenType::kChar, 9, ")"),
+      Token(TokenType::kEnd, 10, absl::string_view()),
+  };
+  RunTokenizeTest("(foo(bar))", expected_tokens, TokenizePolicy::kLenient);
 }
 
 }  // namespace liburlpattern

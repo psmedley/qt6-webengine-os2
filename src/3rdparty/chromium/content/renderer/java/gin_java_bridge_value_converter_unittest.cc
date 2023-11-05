@@ -9,7 +9,7 @@
 #include <cmath>
 #include <memory>
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/stringprintf.h"
 #include "content/common/android/gin_java_bridge_value.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -149,9 +149,8 @@ TEST_F(GinJavaBridgeValueConverterTest, TypedArrays) {
       EXPECT_EQ(42u, first_element) << typed_array_type;
 
     } else {
-      double first_element;
-      ASSERT_TRUE(value->GetAsDouble(&first_element)) << typed_array_type;
-      EXPECT_EQ(42.0, first_element) << typed_array_type;
+      ASSERT_TRUE(value->is_double() || value->is_int()) << typed_array_type;
+      EXPECT_EQ(42.0, value->GetDouble()) << typed_array_type;
     }
   }
 }

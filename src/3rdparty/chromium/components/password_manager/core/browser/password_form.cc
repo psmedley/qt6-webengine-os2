@@ -7,9 +7,10 @@
 #include <algorithm>
 #include <ostream>
 #include <sstream>
+#include <string>
 
 #include "base/json/json_writer.h"
-#include "base/strings/string16.h"
+#include "base/json/values_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -75,6 +76,19 @@ std::string ToString(PasswordForm::GenerationUploadStatus status) {
   return std::string();
 }
 
+std::string ToString(InsecureType insecure_type) {
+  switch (insecure_type) {
+    case InsecureType::kLeaked:
+      return "Leaked";
+    case InsecureType::kPhished:
+      return "Phished";
+    case InsecureType::kWeak:
+      return "Weak";
+    case InsecureType::kReused:
+      return "Reused";
+  }
+}
+
 // Utility function that creates a std::string from an object supporting the
 // ostream operator<<.
 template <typename T>
@@ -84,14 +98,13 @@ std::string ToString(const T& obj) {
   return ostream.str();
 }
 
-base::string16 ValueElementVectorToString(
+std::u16string ValueElementVectorToString(
     const ValueElementVector& value_element_pairs) {
-  std::vector<base::string16> pairs(value_element_pairs.size());
-  std::transform(value_element_pairs.begin(), value_element_pairs.end(),
-                 pairs.begin(), [](const ValueElementPair& p) {
-                   return p.first + base::ASCIIToUTF16("+") + p.second;
-                 });
-  return base::JoinString(pairs, base::ASCIIToUTF16(", "));
+  std::vector<std::u16string> pairs(value_element_pairs.size());
+  std::transform(
+      value_element_pairs.begin(), value_element_pairs.end(), pairs.begin(),
+      [](const ValueElementPair& p) { return p.first + u"+" + p.second; });
+  return base::JoinString(pairs, u", ");
 }
 
 // Serializes a PasswordForm to a JSON object. Used only for logging in tests.
@@ -127,8 +140,9 @@ void PasswordFormToJSON(const PasswordForm& form,
                     ValueElementVectorToString(form.all_possible_passwords));
   target->SetBoolean("blocked_by_user", form.blocked_by_user);
   target->SetDouble("date_last_used", form.date_last_used.ToDoubleT());
+  target->SetDouble("date_password_modified",
+                    form.date_password_modified.ToDoubleT());
   target->SetDouble("date_created", form.date_created.ToDoubleT());
-  target->SetDouble("date_synced", form.date_synced.ToDoubleT());
   target->SetString("type", ToString(form.type));
   target->SetInteger("times_used", form.times_used);
   target->SetString("form_data", ToString(form.form_data));
@@ -155,10 +169,35 @@ void PasswordFormToJSON(const PasswordForm& form,
   for (const auto& gaia_id_hash : form.moving_blocked_for_list) {
     hashes.push_back(gaia_id_hash.ToBase64());
   }
+
   target->SetString("moving_blocked_for_list", base::JoinString(hashes, ", "));
+
+  std::vector<base::Value> password_issues;
+  password_issues.reserve(form.password_issues.size());
+  for (const auto& issue : form.password_issues) {
+    base::Value issue_value(base::Value::Type::DICTIONARY);
+    issue_value.SetStringPath("insecurity_type", ToString(issue.first));
+    issue_value.SetPath("create_time",
+                        base::TimeToValue(issue.second.create_time));
+    issue_value.SetBoolPath("is_muted",
+                            static_cast<bool>(issue.second.is_muted));
+    password_issues.push_back(std::move(issue_value));
+  }
+
+  target->SetPath("password_issues ", base::Value(password_issues));
 }
 
 }  // namespace
+
+InsecurityMetadata::InsecurityMetadata() = default;
+InsecurityMetadata::InsecurityMetadata(base::Time create_time, IsMuted is_muted)
+    : create_time(create_time), is_muted(is_muted) {}
+InsecurityMetadata::InsecurityMetadata(const InsecurityMetadata& rhs) = default;
+InsecurityMetadata::~InsecurityMetadata() = default;
+
+bool operator==(const InsecurityMetadata& lhs, const InsecurityMetadata& rhs) {
+  return lhs.create_time == rhs.create_time && *lhs.is_muted == *rhs.is_muted;
+}
 
 PasswordForm::PasswordForm() = default;
 
@@ -172,13 +211,9 @@ PasswordForm& PasswordForm::operator=(const PasswordForm& form) = default;
 
 PasswordForm& PasswordForm::operator=(PasswordForm&& form) = default;
 
-bool PasswordForm::IsPossibleChangePasswordForm() const {
-  return !new_password_element_renderer_id.is_null();
-}
-
-bool PasswordForm::IsPossibleChangePasswordFormWithoutUsername() const {
-  return IsPossibleChangePasswordForm() &&
-         username_element_renderer_id.is_null();
+bool PasswordForm::IsLikelyChangePasswordForm() const {
+  return HasNewPasswordElement() && (username_element_renderer_id.is_null() ||
+                                     !password_element_renderer_id.is_null());
 }
 
 bool PasswordForm::HasUsernameElement() const {
@@ -203,11 +238,19 @@ bool PasswordForm::IsSingleUsername() const {
 }
 
 bool PasswordForm::IsUsingAccountStore() const {
-  return in_store == Store::kAccountStore;
+  return (in_store & Store::kAccountStore) != Store::kNotSet;
+}
+
+bool PasswordForm::IsUsingProfileStore() const {
+  return (in_store & Store::kProfileStore) != Store::kNotSet;
 }
 
 bool PasswordForm::HasNonEmptyPasswordValue() const {
   return !password_value.empty() || !new_password_value.empty();
+}
+
+bool PasswordForm::IsInsecureCredential(InsecureType type) const {
+  return password_issues.find(type) != password_issues.end();
 }
 
 bool ArePasswordFormUniqueKeysEqual(const PasswordForm& left,
@@ -240,8 +283,8 @@ bool operator==(const PasswordForm& lhs, const PasswordForm& rhs) {
              rhs.confirmation_password_element_renderer_id &&
          lhs.new_password_value == rhs.new_password_value &&
          lhs.date_created == rhs.date_created &&
-         lhs.date_synced == rhs.date_synced &&
          lhs.date_last_used == rhs.date_last_used &&
+         lhs.date_password_modified == rhs.date_password_modified &&
          lhs.blocked_by_user == rhs.blocked_by_user && lhs.type == rhs.type &&
          lhs.times_used == rhs.times_used &&
          lhs.form_data.SameFormAs(rhs.form_data) &&
@@ -263,7 +306,8 @@ bool operator==(const PasswordForm& lhs, const PasswordForm& rhs) {
          lhs.only_for_fallback == rhs.only_for_fallback &&
          lhs.is_new_password_reliable == rhs.is_new_password_reliable &&
          lhs.in_store == rhs.in_store &&
-         lhs.moving_blocked_for_list == rhs.moving_blocked_for_list;
+         lhs.moving_blocked_for_list == rhs.moving_blocked_for_list &&
+         lhs.password_issues == rhs.password_issues;
 }
 
 bool operator!=(const PasswordForm& lhs, const PasswordForm& rhs) {
@@ -286,8 +330,8 @@ std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
        !it_default_key_values.IsAtEnd(); it_default_key_values.Advance()) {
     const base::Value* actual_value;
     if (form_json.Get(it_default_key_values.key(), &actual_value) &&
-        it_default_key_values.value().Equals(actual_value)) {
-      form_json.Remove(it_default_key_values.key(), nullptr);
+        it_default_key_values.value() == *actual_value) {
+      form_json.RemoveKey(it_default_key_values.key());
     }
   }
 

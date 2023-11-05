@@ -14,10 +14,12 @@
 #include "include/cppgc/macros.h"
 #include "src/base/macros.h"
 #include "src/heap/cppgc/compactor.h"
+#include "src/heap/cppgc/garbage-collector.h"
 #include "src/heap/cppgc/marker.h"
 #include "src/heap/cppgc/metric-recorder.h"
 #include "src/heap/cppgc/object-allocator.h"
 #include "src/heap/cppgc/process-heap-statistics.h"
+#include "src/heap/cppgc/process-heap.h"
 #include "src/heap/cppgc/raw-heap.h"
 #include "src/heap/cppgc/sweeper.h"
 #include "v8config.h"  // NOLINT(build/include_directory)
@@ -25,6 +27,12 @@
 #if defined(CPPGC_CAGED_HEAP)
 #include "src/heap/cppgc/caged-heap.h"
 #endif
+
+namespace v8 {
+namespace base {
+class LsanPageAllocator;
+}  // namespace base
+}  // namespace v8
 
 namespace heap {
 namespace base {
@@ -39,6 +47,7 @@ class NoGarbageCollectionScope;
 }  // namespace subtle
 
 namespace testing {
+class Heap;
 class OverrideEmbedderStackStateScope;
 }  // namespace testing
 
@@ -74,8 +83,7 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
 
   HeapBase(std::shared_ptr<cppgc::Platform> platform,
            const std::vector<std::unique_ptr<CustomSpaceBase>>& custom_spaces,
-           StackSupport stack_support,
-           std::unique_ptr<MetricRecorder> histogram_recorder);
+           StackSupport stack_support);
   virtual ~HeapBase();
 
   HeapBase(const HeapBase&) = delete;
@@ -105,6 +113,9 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
   PreFinalizerHandler* prefinalizer_handler() {
     return prefinalizer_handler_.get();
   }
+  const PreFinalizerHandler* prefinalizer_handler() const {
+    return prefinalizer_handler_.get();
+  }
 
   MarkerBase* marker() const { return marker_.get(); }
 
@@ -128,16 +139,18 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
   const PersistentRegion& GetWeakPersistentRegion() const {
     return weak_persistent_region_;
   }
-  PersistentRegion& GetStrongCrossThreadPersistentRegion() {
+  CrossThreadPersistentRegion& GetStrongCrossThreadPersistentRegion() {
     return strong_cross_thread_persistent_region_;
   }
-  const PersistentRegion& GetStrongCrossThreadPersistentRegion() const {
+  const CrossThreadPersistentRegion& GetStrongCrossThreadPersistentRegion()
+      const {
     return strong_cross_thread_persistent_region_;
   }
-  PersistentRegion& GetWeakCrossThreadPersistentRegion() {
+  CrossThreadPersistentRegion& GetWeakCrossThreadPersistentRegion() {
     return weak_cross_thread_persistent_region_;
   }
-  const PersistentRegion& GetWeakCrossThreadPersistentRegion() const {
+  const CrossThreadPersistentRegion& GetWeakCrossThreadPersistentRegion()
+      const {
     return weak_cross_thread_persistent_region_;
   }
 
@@ -148,6 +161,9 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
   size_t ObjectPayloadSize() const;
 
   StackSupport stack_support() const { return stack_support_; }
+  const EmbedderStackState* override_stack_state() const {
+    return override_stack_state_.get();
+  }
 
   void AdvanceIncrementalGarbageCollectionOnAllocationIfNeeded();
 
@@ -161,7 +177,30 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
 
   HeapStatistics CollectStatistics(HeapStatistics::DetailLevel);
 
+  EmbedderStackState stack_state_of_prev_gc() const {
+    return stack_state_of_prev_gc_;
+  }
+  void SetStackStateOfPrevGC(EmbedderStackState stack_state) {
+    stack_state_of_prev_gc_ = stack_state;
+  }
+
+  uintptr_t stack_end_of_current_gc() const { return stack_end_of_current_gc_; }
+  void SetStackEndOfCurrentGC(uintptr_t stack_end) {
+    stack_end_of_current_gc_ = stack_end;
+  }
+
+  void SetInAtomicPauseForTesting(bool value) { in_atomic_pause_ = value; }
+
+  virtual void StartIncrementalGarbageCollectionForTesting() = 0;
+  virtual void FinalizeIncrementalGarbageCollectionForTesting(
+      EmbedderStackState) = 0;
+
+  void SetMetricRecorder(std::unique_ptr<MetricRecorder> histogram_recorder) {
+    stats_collector_->SetMetricRecorder(std::move(histogram_recorder));
+  }
+
  protected:
+  // Used by the incremental scheduler to finalize a GC if supported.
   virtual void FinalizeIncrementalGarbageCollectionIfNeeded(
       cppgc::Heap::StackState) = 0;
 
@@ -171,12 +210,22 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
 
   void ExecutePreFinalizers();
 
+  PageAllocator* page_allocator() const;
+
   RawHeap raw_heap_;
   std::shared_ptr<cppgc::Platform> platform_;
+
+#if defined(LEAK_SANITIZER)
+  std::unique_ptr<v8::base::LsanPageAllocator> lsan_page_allocator_;
+#endif  // LEAK_SANITIZER
+
 #if defined(CPPGC_CAGED_HEAP)
   CagedHeap caged_heap_;
-#endif
+#endif  // CPPGC_CAGED_HEAP
   std::unique_ptr<PageBackend> page_backend_;
+
+  // HeapRegistry requires access to page_backend_.
+  HeapRegistry::Subscription heap_registry_subscription_{*this};
 
   std::unique_ptr<StatsCollector> stats_collector_;
   std::unique_ptr<heap::base::Stack> stack_;
@@ -189,8 +238,8 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
 
   PersistentRegion strong_persistent_region_;
   PersistentRegion weak_persistent_region_;
-  PersistentRegion strong_cross_thread_persistent_region_;
-  PersistentRegion weak_cross_thread_persistent_region_;
+  CrossThreadPersistentRegion strong_cross_thread_persistent_region_;
+  CrossThreadPersistentRegion weak_cross_thread_persistent_region_;
 
   ProcessHeapStatisticsUpdater::AllocationObserverImpl
       allocation_observer_for_PROCESS_HEAP_STATISTICS_;
@@ -202,7 +251,13 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
   size_t disallow_gc_scope_ = 0;
 
   const StackSupport stack_support_;
+  EmbedderStackState stack_state_of_prev_gc_ =
+      EmbedderStackState::kNoHeapPointers;
   std::unique_ptr<EmbedderStackState> override_stack_state_;
+
+  // Marker that signals end of the interesting stack region in which on-heap
+  // pointers can be found.
+  uintptr_t stack_end_of_current_gc_ = 0;
 
   bool in_atomic_pause_ = false;
 
@@ -210,6 +265,7 @@ class V8_EXPORT_PRIVATE HeapBase : public cppgc::HeapHandle {
   friend class testing::TestWithHeap;
   friend class cppgc::subtle::DisallowGarbageCollectionScope;
   friend class cppgc::subtle::NoGarbageCollectionScope;
+  friend class cppgc::testing::Heap;
   friend class cppgc::testing::OverrideEmbedderStackStateScope;
 };
 

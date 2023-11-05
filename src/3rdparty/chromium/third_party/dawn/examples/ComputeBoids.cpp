@@ -15,6 +15,7 @@
 #include "SampleUtils.h"
 
 #include "utils/ComboRenderPipelineDescriptor.h"
+#include "utils/ScopedAutoreleasePool.h"
 #include "utils/SystemUtils.h"
 #include "utils/WGPUHelpers.h"
 
@@ -95,86 +96,83 @@ void initBuffers() {
 }
 
 void initRender() {
-    wgpu::ShaderModule vsModule = utils::CreateShaderModuleFromWGSL(device, R"(
-        [[location(0)]] var<in> a_particlePos : vec2<f32>;
-        [[location(1)]] var<in> a_particleVel : vec2<f32>;
-        [[location(2)]] var<in> a_pos : vec2<f32>;
-        [[builtin(position)]] var<out> Position : vec4<f32>;
+    wgpu::ShaderModule vsModule = utils::CreateShaderModule(device, R"(
+        struct VertexIn {
+            [[location(0)]] a_particlePos : vec2<f32>;
+            [[location(1)]] a_particleVel : vec2<f32>;
+            [[location(2)]] a_pos : vec2<f32>;
+        };
 
         [[stage(vertex)]]
-        fn main() -> void {
-            var angle : f32 = -atan2(a_particleVel.x, a_particleVel.y);
+        fn main(input : VertexIn) -> [[builtin(position)]] vec4<f32> {
+            var angle : f32 = -atan2(input.a_particleVel.x, input.a_particleVel.y);
             var pos : vec2<f32> = vec2<f32>(
-                (a_pos.x * cos(angle)) - (a_pos.y * sin(angle)),
-                (a_pos.x * sin(angle)) + (a_pos.y * cos(angle)));
-            Position = vec4<f32>(pos + a_particlePos, 0.0, 1.0);
-            return;
+                (input.a_pos.x * cos(angle)) - (input.a_pos.y * sin(angle)),
+                (input.a_pos.x * sin(angle)) + (input.a_pos.y * cos(angle)));
+            return vec4<f32>(pos + input.a_particlePos, 0.0, 1.0);
         }
     )");
 
-    wgpu::ShaderModule fsModule = utils::CreateShaderModuleFromWGSL(device, R"(
-        [[location(0)]] var<out> FragColor : vec4<f32>;
+    wgpu::ShaderModule fsModule = utils::CreateShaderModule(device, R"(
         [[stage(fragment)]]
-        fn main() -> void {
-            FragColor = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-            return;
+        fn main() -> [[location(0)]] vec4<f32> {
+            return vec4<f32>(1.0, 1.0, 1.0, 1.0);
         }
     )");
 
     depthStencilView = CreateDefaultDepthStencilView(device);
 
-    utils::ComboRenderPipelineDescriptor descriptor(device);
-    descriptor.vertexStage.module = vsModule;
-    descriptor.cFragmentStage.module = fsModule;
+    utils::ComboRenderPipelineDescriptor descriptor;
 
-    descriptor.cVertexState.vertexBufferCount = 2;
-    descriptor.cVertexState.cVertexBuffers[0].arrayStride = sizeof(Particle);
-    descriptor.cVertexState.cVertexBuffers[0].stepMode = wgpu::InputStepMode::Instance;
-    descriptor.cVertexState.cVertexBuffers[0].attributeCount = 2;
-    descriptor.cVertexState.cAttributes[0].offset = offsetof(Particle, pos);
-    descriptor.cVertexState.cAttributes[0].format = wgpu::VertexFormat::Float2;
-    descriptor.cVertexState.cAttributes[1].shaderLocation = 1;
-    descriptor.cVertexState.cAttributes[1].offset = offsetof(Particle, vel);
-    descriptor.cVertexState.cAttributes[1].format = wgpu::VertexFormat::Float2;
-    descriptor.cVertexState.cVertexBuffers[1].arrayStride = sizeof(glm::vec2);
-    descriptor.cVertexState.cVertexBuffers[1].attributeCount = 1;
-    descriptor.cVertexState.cVertexBuffers[1].attributes = &descriptor.cVertexState.cAttributes[2];
-    descriptor.cVertexState.cAttributes[2].shaderLocation = 2;
-    descriptor.cVertexState.cAttributes[2].format = wgpu::VertexFormat::Float2;
-    descriptor.depthStencilState = &descriptor.cDepthStencilState;
-    descriptor.cDepthStencilState.format = wgpu::TextureFormat::Depth24PlusStencil8;
-    descriptor.cColorStates[0].format = GetPreferredSwapChainTextureFormat();
+    descriptor.vertex.module = vsModule;
+    descriptor.vertex.bufferCount = 2;
+    descriptor.cBuffers[0].arrayStride = sizeof(Particle);
+    descriptor.cBuffers[0].stepMode = wgpu::VertexStepMode::Instance;
+    descriptor.cBuffers[0].attributeCount = 2;
+    descriptor.cAttributes[0].offset = offsetof(Particle, pos);
+    descriptor.cAttributes[0].format = wgpu::VertexFormat::Float32x2;
+    descriptor.cAttributes[1].shaderLocation = 1;
+    descriptor.cAttributes[1].offset = offsetof(Particle, vel);
+    descriptor.cAttributes[1].format = wgpu::VertexFormat::Float32x2;
+    descriptor.cBuffers[1].arrayStride = sizeof(glm::vec2);
+    descriptor.cBuffers[1].attributeCount = 1;
+    descriptor.cBuffers[1].attributes = &descriptor.cAttributes[2];
+    descriptor.cAttributes[2].shaderLocation = 2;
+    descriptor.cAttributes[2].format = wgpu::VertexFormat::Float32x2;
+
+    descriptor.cFragment.module = fsModule;
+    descriptor.EnableDepthStencil(wgpu::TextureFormat::Depth24PlusStencil8);
+    descriptor.cTargets[0].format = GetPreferredSwapChainTextureFormat();
 
     renderPipeline = device.CreateRenderPipeline(&descriptor);
 }
 
 void initSim() {
-    wgpu::ShaderModule module = utils::CreateShaderModuleFromWGSL(device, R"(
+    wgpu::ShaderModule module = utils::CreateShaderModule(device, R"(
         struct Particle {
-            [[offset(0)]] pos : vec2<f32>;
-            [[offset(8)]] vel : vec2<f32>;
+            pos : vec2<f32>;
+            vel : vec2<f32>;
         };
         [[block]] struct SimParams {
-            [[offset(0)]] deltaT : f32;
-            [[offset(4)]] rule1Distance : f32;
-            [[offset(8)]] rule2Distance : f32;
-            [[offset(12)]] rule3Distance : f32;
-            [[offset(16)]] rule1Scale : f32;
-            [[offset(20)]] rule2Scale : f32;
-            [[offset(24)]] rule3Scale : f32;
-            [[offset(28)]] particleCount : u32;
+            deltaT : f32;
+            rule1Distance : f32;
+            rule2Distance : f32;
+            rule3Distance : f32;
+            rule1Scale : f32;
+            rule2Scale : f32;
+            rule3Scale : f32;
+            particleCount : u32;
         };
         [[block]] struct Particles {
-            [[offset(0)]] particles : [[stride(16)]] array<Particle>;
+            particles : array<Particle>;
         };
         [[binding(0), group(0)]] var<uniform> params : SimParams;
-        [[binding(1), group(0)]] var<storage_buffer> particlesA : [[access(read)]] Particles;
-        [[binding(2), group(0)]] var<storage_buffer> particlesB : [[access(read_write)]] Particles;
-        [[builtin(global_invocation_id)]] var<in> GlobalInvocationID : vec3<u32>;
+        [[binding(1), group(0)]] var<storage, read> particlesA : Particles;
+        [[binding(2), group(0)]] var<storage, read_write> particlesB : Particles;
 
         // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
-        [[stage(compute)]]
-        fn main() -> void {
+        [[stage(compute), workgroup_size(1)]]
+        fn main([[builtin(global_invocation_id)]] GlobalInvocationID : vec3<u32>) {
             var index : u32 = GlobalInvocationID.x;
             if (index >= params.particleCount) {
                 return;
@@ -247,17 +245,17 @@ void initSim() {
 
     auto bgl = utils::MakeBindGroupLayout(
         device, {
-                    {0, wgpu::ShaderStage::Compute, wgpu::BindingType::UniformBuffer},
-                    {1, wgpu::ShaderStage::Compute, wgpu::BindingType::StorageBuffer},
-                    {2, wgpu::ShaderStage::Compute, wgpu::BindingType::StorageBuffer},
+                    {0, wgpu::ShaderStage::Compute, wgpu::BufferBindingType::Uniform},
+                    {1, wgpu::ShaderStage::Compute, wgpu::BufferBindingType::Storage},
+                    {2, wgpu::ShaderStage::Compute, wgpu::BufferBindingType::Storage},
                 });
 
     wgpu::PipelineLayout pl = utils::MakeBasicPipelineLayout(device, &bgl);
 
     wgpu::ComputePipelineDescriptor csDesc;
     csDesc.layout = pl;
-    csDesc.computeStage.module = module;
-    csDesc.computeStage.entryPoint = "main";
+    csDesc.compute.module = module;
+    csDesc.compute.entryPoint = "main";
     updatePipeline = device.CreateComputePipeline(&csDesc);
 
     for (uint32_t i = 0; i < 2; ++i) {
@@ -327,6 +325,7 @@ int main(int argc, const char* argv[]) {
     init();
 
     while (!ShouldQuit()) {
+        utils::ScopedAutoreleasePool pool;
         frame();
         utils::USleep(16000);
     }

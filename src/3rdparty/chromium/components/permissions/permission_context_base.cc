@@ -22,11 +22,11 @@
 #include "components/permissions/permission_decision_auto_blocker.h"
 #include "components/permissions/permission_request.h"
 #include "components/permissions/permission_request_id.h"
-#include "components/permissions/permission_request_impl.h"
 #include "components/permissions/permission_request_manager.h"
 #include "components/permissions/permission_uma_util.h"
 #include "components/permissions/permission_util.h"
 #include "components/permissions/permissions_client.h"
+#include "components/permissions/request_type.h"
 #include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_routing_id.h"
@@ -35,6 +35,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
 #include "url/gurl.h"
 
 namespace permissions {
@@ -71,7 +72,7 @@ const char kPermissionBlockedRepeatedIgnoresMessage[] =
     "information.";
 #endif
 
-const char kPermissionBlockedFeaturePolicyMessage[] =
+const char kPermissionBlockedPermissionsPolicyMessage[] =
     "%s permission has been blocked because of a permissions policy applied to"
     " the current document. See https://goo.gl/EuHzyv for more details.";
 
@@ -100,14 +101,15 @@ const char PermissionContextBase::kPermissionsKillSwitchBlockedValue[] =
 PermissionContextBase::PermissionContextBase(
     content::BrowserContext* browser_context,
     ContentSettingsType content_settings_type,
-    blink::mojom::FeaturePolicyFeature feature_policy_feature)
+    blink::mojom::PermissionsPolicyFeature permissions_policy_feature)
     : browser_context_(browser_context),
       content_settings_type_(content_settings_type),
-      feature_policy_feature_(feature_policy_feature) {
+      permissions_policy_feature_(permissions_policy_feature) {
   PermissionDecisionAutoBlocker::UpdateFromVariations();
 }
 
 PermissionContextBase::~PermissionContextBase() {
+  DCHECK(permission_observers_.empty());
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
@@ -120,7 +122,8 @@ void PermissionContextBase::RequestPermission(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   GURL requesting_origin = requesting_frame.GetOrigin();
-  GURL embedding_origin = web_contents->GetLastCommittedURL().GetOrigin();
+  GURL embedding_origin =
+      PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
 
   if (!requesting_origin.is_valid() || !embedding_origin.is_valid()) {
     std::string type_name =
@@ -165,7 +168,7 @@ void PermissionContextBase::RequestPermission(
         break;
       case PermissionStatusSource::FEATURE_POLICY:
         LogPermissionBlockedMessage(web_contents,
-                                    kPermissionBlockedFeaturePolicyMessage,
+                                    kPermissionBlockedPermissionsPolicyMessage,
                                     content_settings_type_);
         break;
       case PermissionStatusSource::PORTAL:
@@ -188,12 +191,15 @@ void PermissionContextBase::RequestPermission(
     return;
   }
 
-  // Don't show request permission UI for an inactive RenderFrameHost. If this
-  // is called when RenderFrameHost is in BackForwardCache, evict the document
-  // as the page might not distinguish properly between user denying the
-  // permission and automatic rejection, leading to an inconsistent UX after
-  // restoring the page from the cache.
-  if (rfh->IsInactiveAndDisallowReactivation()) {
+  // Don't show request permission UI for an inactive RenderFrameHost as the
+  // page might not distinguish properly between user denying the permission and
+  // automatic rejection, leading to an inconsistent UX once the page becomes
+  // active again.
+  // - If this is called when RenderFrameHost is in BackForwardCache, evict the
+  // document from the cache.
+  // - If this is called when RenderFrameHost is in prerendering, cancel
+  // prerendering.
+  if (rfh->IsInactiveAndDisallowActivation()) {
     std::move(callback).Run(result.content_setting);
     return;
   }
@@ -214,6 +220,20 @@ void PermissionContextBase::UserMadePermissionDecision(
     const GURL& embedding_origin,
     ContentSetting content_setting) {}
 
+std::unique_ptr<PermissionRequest>
+PermissionContextBase::CreatePermissionRequest(
+    const GURL& request_origin,
+    ContentSettingsType content_settings_type,
+    bool has_gesture,
+    content::WebContents* web_contents,
+    PermissionRequest::PermissionDecidedCallback permission_decided_callback,
+    base::OnceClosure delete_callback) const {
+  return std::make_unique<PermissionRequest>(
+      request_origin, ContentSettingsTypeToRequestType(content_settings_type),
+      has_gesture, std::move(permission_decided_callback),
+      std::move(delete_callback));
+}
+
 PermissionResult PermissionContextBase::GetPermissionStatus(
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
@@ -229,10 +249,10 @@ PermissionResult PermissionContextBase::GetPermissionStatus(
                             PermissionStatusSource::INSECURE_ORIGIN);
   }
 
-  // Check whether the feature is enabled for the frame by feature policy. We
-  // can only do this when a RenderFrameHost has been provided.
+  // Check whether the feature is enabled for the frame by permissions policy.
+  // We can only do this when a RenderFrameHost has been provided.
   if (render_frame_host &&
-      !PermissionAllowedByFeaturePolicy(render_frame_host)) {
+      !PermissionAllowedByPermissionsPolicy(render_frame_host)) {
     return PermissionResult(CONTENT_SETTING_BLOCK,
                             PermissionStatusSource::FEATURE_POLICY);
   }
@@ -368,14 +388,13 @@ void PermissionContextBase::DecidePermission(
   if (!permission_request_manager)
     return;
 
-  std::unique_ptr<PermissionRequest> request_ptr =
-      std::make_unique<PermissionRequestImpl>(
-          requesting_origin, content_settings_type_, user_gesture,
-          base::BindOnce(&PermissionContextBase::PermissionDecided,
-                         weak_factory_.GetWeakPtr(), id, requesting_origin,
-                         embedding_origin, std::move(callback)),
-          base::BindOnce(&PermissionContextBase::CleanUpRequest,
-                         weak_factory_.GetWeakPtr(), id));
+  std::unique_ptr<PermissionRequest> request_ptr = CreatePermissionRequest(
+      requesting_origin, content_settings_type_, user_gesture, web_contents,
+      base::BindOnce(&PermissionContextBase::PermissionDecided,
+                     weak_factory_.GetWeakPtr(), id, requesting_origin,
+                     embedding_origin, std::move(callback)),
+      base::BindOnce(&PermissionContextBase::CleanUpRequest,
+                     weak_factory_.GetWeakPtr(), id));
   PermissionRequest* request = request_ptr.get();
 
   bool inserted =
@@ -419,6 +438,39 @@ content::BrowserContext* PermissionContextBase::browser_context() const {
   return browser_context_;
 }
 
+void PermissionContextBase::OnContentSettingChanged(
+    const ContentSettingsPattern& primary_pattern,
+    const ContentSettingsPattern& secondary_pattern,
+    ContentSettingsType content_type) {
+  if (content_type != content_settings_type_)
+    return;
+
+  for (permissions::Observer& obs : permission_observers_)
+    obs.OnPermissionChanged(primary_pattern, secondary_pattern, content_type);
+}
+
+void PermissionContextBase::AddObserver(
+    permissions::Observer* permission_observer) {
+  if (permission_observers_.empty() &&
+      !content_setting_observer_registered_by_subclass_) {
+    PermissionsClient::Get()
+        ->GetSettingsMap(browser_context_)
+        ->AddObserver(this);
+  }
+  permission_observers_.AddObserver(permission_observer);
+}
+
+void PermissionContextBase::RemoveObserver(
+    permissions::Observer* permission_observer) {
+  permission_observers_.RemoveObserver(permission_observer);
+  if (permission_observers_.empty() &&
+      !content_setting_observer_registered_by_subclass_) {
+    PermissionsClient::Get()
+        ->GetSettingsMap(browser_context_)
+        ->RemoveObserver(this);
+  }
+}
+
 void PermissionContextBase::NotifyPermissionSet(
     const PermissionRequestID& id,
     const GURL& requesting_origin,
@@ -456,8 +508,6 @@ void PermissionContextBase::UpdateContentSetting(const GURL& requesting_origin,
   DCHECK_EQ(embedding_origin, embedding_origin.GetOrigin());
   DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
          content_setting == CONTENT_SETTING_BLOCK);
-  DCHECK(!requesting_origin.SchemeIsFile());
-  DCHECK(!embedding_origin.SchemeIsFile());
 
   using Constraints = content_settings::ContentSettingConstraints;
   PermissionsClient::Get()
@@ -470,13 +520,14 @@ void PermissionContextBase::UpdateContentSetting(const GURL& requesting_origin,
                       : Constraints());
 }
 
-bool PermissionContextBase::PermissionAllowedByFeaturePolicy(
+bool PermissionContextBase::PermissionAllowedByPermissionsPolicy(
     content::RenderFrameHost* rfh) const {
-  // Some features don't have an associated feature policy yet. Allow those.
-  if (feature_policy_feature_ == blink::mojom::FeaturePolicyFeature::kNotFound)
+  // Some features don't have an associated permissions policy yet. Allow those.
+  if (permissions_policy_feature_ ==
+      blink::mojom::PermissionsPolicyFeature::kNotFound)
     return true;
 
-  return rfh->IsFeatureEnabled(feature_policy_feature_);
+  return rfh->IsFeatureEnabled(permissions_policy_feature_);
 }
 
 }  // namespace permissions

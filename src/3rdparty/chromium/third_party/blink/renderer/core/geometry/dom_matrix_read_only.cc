@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_matrix_init.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_point_init.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_unrestricteddoublesequence.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
@@ -108,31 +109,36 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::Create(
 
 DOMMatrixReadOnly* DOMMatrixReadOnly::Create(
     ExecutionContext* execution_context,
-    const StringOrUnrestrictedDoubleSequence& init,
+    const V8UnionStringOrUnrestrictedDoubleSequence* init,
     ExceptionState& exception_state) {
-  if (init.IsString()) {
-    if (!execution_context->IsWindow()) {
-      exception_state.ThrowTypeError(
-          "DOMMatrix can't be constructed with strings on workers.");
-      return nullptr;
-    }
+  DCHECK(init);
 
-    DOMMatrixReadOnly* matrix =
-        MakeGarbageCollected<DOMMatrixReadOnly>(TransformationMatrix());
-    matrix->SetMatrixValueFromString(execution_context, init.GetAsString(),
-                                     exception_state);
-    return matrix;
-  }
+  switch (init->GetContentType()) {
+    case V8UnionStringOrUnrestrictedDoubleSequence::ContentType::kString: {
+      if (!execution_context->IsWindow()) {
+        exception_state.ThrowTypeError(
+            "DOMMatrix can't be constructed with strings on workers.");
+        return nullptr;
+      }
 
-  if (init.IsUnrestrictedDoubleSequence()) {
-    const Vector<double>& sequence = init.GetAsUnrestrictedDoubleSequence();
-    if (sequence.size() != 6 && sequence.size() != 16) {
-      exception_state.ThrowTypeError(
-          "The sequence must contain 6 elements for a 2D matrix or 16 elements "
-          "for a 3D matrix.");
-      return nullptr;
+      DOMMatrixReadOnly* matrix =
+          MakeGarbageCollected<DOMMatrixReadOnly>(TransformationMatrix());
+      matrix->SetMatrixValueFromString(execution_context, init->GetAsString(),
+                                       exception_state);
+      return matrix;
     }
-    return MakeGarbageCollected<DOMMatrixReadOnly>(sequence, sequence.size());
+    case V8UnionStringOrUnrestrictedDoubleSequence::ContentType::
+        kUnrestrictedDoubleSequence: {
+      const Vector<double>& sequence = init->GetAsUnrestrictedDoubleSequence();
+      if (sequence.size() != 6 && sequence.size() != 16) {
+        exception_state.ThrowTypeError(
+            "The sequence must contain 6 elements for a 2D matrix or 16 "
+            "elements "
+            "for a 3D matrix.");
+        return nullptr;
+      }
+      return MakeGarbageCollected<DOMMatrixReadOnly>(sequence, sequence.size());
+    }
   }
 
   NOTREACHED();
@@ -279,19 +285,19 @@ DOMMatrix* DOMMatrixReadOnly::skewY(double sy) {
 
 DOMMatrix* DOMMatrixReadOnly::flipX() {
   DOMMatrix* flip_x = DOMMatrix::Create(this);
-  flip_x->setM11(-this->m11());
-  flip_x->setM12(-this->m12());
-  flip_x->setM13(-this->m13());
-  flip_x->setM14(-this->m14());
+  flip_x->setM11(-m11());
+  flip_x->setM12(-m12());
+  flip_x->setM13(-m13());
+  flip_x->setM14(-m14());
   return flip_x;
 }
 
 DOMMatrix* DOMMatrixReadOnly::flipY() {
   DOMMatrix* flip_y = DOMMatrix::Create(this);
-  flip_y->setM21(-this->m21());
-  flip_y->setM22(-this->m22());
-  flip_y->setM23(-this->m23());
-  flip_y->setM24(-this->m24());
+  flip_y->setM21(-m21());
+  flip_y->setM22(-m22());
+  flip_y->setM23(-m23());
+  flip_y->setM24(-m24());
   return flip_y;
 }
 
@@ -490,10 +496,8 @@ void DOMMatrixReadOnly::SetMatrixValueFromString(
     return;
   }
 
-  const ComputedStyle& initial_style = ComputedStyle::InitialStyle();
   TransformOperations operations = TransformBuilder::CreateTransformOperations(
-      *value,
-      CSSToLengthConversionData(&initial_style, &initial_style, nullptr, 1.0f));
+      *value, CSSToLengthConversionData());
 
   if (operations.BoxSizeDependencies()) {
     exception_state.ThrowDOMException(

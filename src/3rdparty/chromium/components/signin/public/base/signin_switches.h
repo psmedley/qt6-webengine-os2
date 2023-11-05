@@ -23,15 +23,29 @@ extern const char kDisableSigninScopedDeviceId[];
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 extern const base::Feature kAccountIdMigration;
-#else
-extern const base::Feature kForceAccountIdMigration;
 #endif
 
 #if defined(OS_ANDROID)
 // This feature flag is for the deprecating of the Android profile data
 // Menagerie API.
 extern const base::Feature kDeprecateMenagerieAPI;
+// This feature flag is used to wipe device data on child account signin.
+extern const base::Feature kWipeDataOnChildAccountSignin;
 #endif  // defined(OS_ANDROID)
+
+#if defined(OS_ANDROID) || defined(OS_IOS)
+// Features to trigger the startup sign-in promo at boot.
+extern const base::Feature kForceStartupSigninPromo;
+#endif
+
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+// Support for the minor mode.
+extern const base::Feature kMinorModeSupport;
+#endif
+
+// This feature disables all extended sync promos.
+extern const base::Feature kForceDisableExtendedSyncPromos;
+
 }  // namespace switches
 
 #endif  // COMPONENTS_SIGNIN_PUBLIC_BASE_SIGNIN_SWITCHES_H_

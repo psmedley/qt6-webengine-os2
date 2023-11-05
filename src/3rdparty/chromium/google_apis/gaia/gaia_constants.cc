@@ -119,6 +119,8 @@ const char kCryptAuthOAuth2Scope[] =
 
 // OAuth2 scope for access to Drive.
 const char kDriveOAuth2Scope[] = "https://www.googleapis.com/auth/drive";
+
+// The scope required for an access token in order to query ItemSuggest.
 const char kDriveReadOnlyOAuth2Scope[] =
     "https://www.googleapis.com/auth/drive.readonly";
 
@@ -130,12 +132,22 @@ const char kAssistantOAuth2Scope[] =
 const char kNearbyShareOAuth2Scope[] =
     "https://www.googleapis.com/auth/nearbysharing-pa";
 
-// OAuth2 scope for access to GCM account tracker.
+// OAuth2 scopes for access to GCM account tracker.
 const char kGCMGroupServerOAuth2Scope[] = "https://www.googleapis.com/auth/gcm";
+const char kGCMCheckinServerOAuth2Scope[] =
+    "https://www.googleapis.com/auth/android_checkin";
 
 // OAuth2 scope for access to readonly Chrome web store.
 const char kChromeWebstoreOAuth2Scope[] =
     "https://www.googleapis.com/auth/chromewebstore.readonly";
+
+// OAuth2 scope for access to Account Capabilities API.
+const char kAccountCapabilitiesOAuth2Scope[] =
+    "https://www.googleapis.com/auth/account.capabilities";
+
+// OAuth2 scope for support content API.
+const char kSupportContentOAuth2Scope[] =
+    "https://www.googleapis.com/auth/supportcontent";
 
 // Used to mint uber auth tokens when needed.
 const char kGaiaSid[] = "sid";

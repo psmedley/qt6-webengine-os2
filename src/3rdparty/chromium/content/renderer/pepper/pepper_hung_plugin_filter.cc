@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "content/child/child_process.h"
-#include "content/common/frame_messages.h"
 #include "content/renderer/render_thread_impl.h"
 
 namespace content {
@@ -33,6 +32,10 @@ void PepperHungPluginFilter::BindHungDetectorHost(
       FROM_HERE,
       base::BindOnce(&PepperHungPluginFilter::BindHungDetectorHostOnIOThread,
                      this, std::move(hung_host)));
+}
+
+void PepperHungPluginFilter::UnbindHungDetectorHostOnIOThread() {
+  hung_host_.reset();
 }
 
 void PepperHungPluginFilter::BindHungDetectorHostOnIOThread(
@@ -78,6 +81,13 @@ bool PepperHungPluginFilter::OnMessageReceived(const IPC::Message& message) {
 }
 
 PepperHungPluginFilter::~PepperHungPluginFilter() {}
+
+void PepperHungPluginFilter::HostDispatcherDestroyed() {
+  io_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&PepperHungPluginFilter::UnbindHungDetectorHostOnIOThread,
+                     this));
+}
 
 void PepperHungPluginFilter::EnsureTimerScheduled() {
   lock_.AssertAcquired();

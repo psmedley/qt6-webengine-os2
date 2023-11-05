@@ -8,8 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "device/base/features.h"
 #include "device/fido/ctap2_device_operation.h"
+#include "device/fido/ctap_make_credential_request.h"
 #include "device/fido/pin.h"
 #include "device/fido/u2f_command_constructor.h"
 #include "device/fido/u2f_register_operation.h"
@@ -34,6 +36,12 @@ bool CtapDeviceShouldUseU2fBecauseClientPinIsSet(
   }
 
   DCHECK_EQ(device->supported_protocol(), ProtocolVersion::kCtap2);
+
+  // No need to fall back to U2F if CTAP2 registrations don't require UV.
+  if (device->device_info()->options.make_cred_uv_not_required) {
+    return false;
+  }
+
   // Don't use U2F for requests that require UV or PIN which U2F doesn't
   // support. Note that |pin_auth| may also be set by GetTouchRequest(), but we
   // don't want those requests to use U2F either if CTAP is supported.
@@ -55,17 +63,17 @@ bool CtapDeviceShouldUseU2fBecauseClientPinIsSet(
 // given CTAP response message in |cbor|. It wraps
 // ReadCTAPMakeCredentialResponse() and in addition fills in |is_resident_key|,
 // which requires looking at the request and device.
-base::Optional<AuthenticatorMakeCredentialResponse> ConvertCTAPResponse(
+absl::optional<AuthenticatorMakeCredentialResponse> ConvertCTAPResponse(
     FidoDevice* device,
     bool resident_key_required,
-    const base::Optional<cbor::Value>& cbor) {
+    const absl::optional<cbor::Value>& cbor) {
   DCHECK_EQ(device->supported_protocol(), ProtocolVersion::kCtap2);
   DCHECK(device->device_info());
 
-  base::Optional<AuthenticatorMakeCredentialResponse> response =
+  absl::optional<AuthenticatorMakeCredentialResponse> response =
       ReadCTAPMakeCredentialResponse(device->DeviceTransport(), cbor);
   if (!response) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Fill in whether the created credential is client-side discoverable
@@ -96,9 +104,11 @@ base::Optional<AuthenticatorMakeCredentialResponse> ConvertCTAPResponse(
 
 MakeCredentialTask::MakeCredentialTask(FidoDevice* device,
                                        CtapMakeCredentialRequest request,
+                                       MakeCredentialOptions options,
                                        MakeCredentialTaskCallback callback)
     : FidoTask(device),
       request_(std::move(request)),
+      options_(std::move(options)),
       callback_(std::move(callback)) {
   // The UV parameter should have been made binary by this point because CTAP2
   // only takes a binary value.
@@ -146,6 +156,15 @@ CtapMakeCredentialRequest MakeCredentialTask::GetTouchRequest(
   return req;
 }
 
+// static
+bool MakeCredentialTask::WillUseCTAP2(const FidoDevice* device,
+                                      const CtapMakeCredentialRequest& request,
+                                      const MakeCredentialOptions& options) {
+  return device->supported_protocol() == ProtocolVersion::kCtap2 &&
+         !options.make_u2f_api_credential &&
+         !CtapDeviceShouldUseU2fBecauseClientPinIsSet(device, request);
+}
+
 void MakeCredentialTask::Cancel() {
   canceled_ = true;
 
@@ -158,9 +177,7 @@ void MakeCredentialTask::Cancel() {
 }
 
 void MakeCredentialTask::StartTask() {
-  if (device()->supported_protocol() == ProtocolVersion::kCtap2 &&
-      !request_.is_u2f_only &&
-      !CtapDeviceShouldUseU2fBecauseClientPinIsSet(device(), request_)) {
+  if (WillUseCTAP2(device(), request_, options_)) {
     MakeCredential();
   } else {
     // |device_info| should be present iff the device is CTAP2. This will be
@@ -175,13 +192,24 @@ void MakeCredentialTask::StartTask() {
 
 CtapGetAssertionRequest MakeCredentialTask::NextSilentRequest() {
   DCHECK(current_exclude_list_batch_ < exclude_list_batches_.size());
-  CtapGetAssertionRequest request(
-      probing_alternative_rp_id_ ? *request_.app_id : request_.rp.id,
-      /*client_data_json=*/"");
+  CtapGetAssertionRequest request(request_.rp.id,
+                                  /*client_data_json=*/"");
 
   request.allow_list = exclude_list_batches_.at(current_exclude_list_batch_);
   request.user_presence_required = false;
   request.user_verification = UserVerificationRequirement::kDiscouraged;
+
+  // If a pinUvAuthToken was obtained for the original request, the silent
+  // requests should carry one as well. This is to ensure that excluded
+  // credentials with credProtect-level uvRequired can be matched.
+  DCHECK_EQ(request_.pin_auth.has_value(),
+            request_.pin_token_for_exclude_list_probing.has_value());
+  if (request_.pin_token_for_exclude_list_probing) {
+    std::tie(request.pin_protocol, request.pin_auth) =
+        request_.pin_token_for_exclude_list_probing->PinAuth(
+            request.client_data_hash);
+  }
+
   return request;
 }
 
@@ -198,13 +226,7 @@ void MakeCredentialTask::MakeCredential() {
   // If the filtered excludeList is small enough to be sent in a single request,
   // do so. (Note that the exclude list may be empty now, even if it wasn't
   // previously, due to filtering.)
-  //
-  // Handling appidExclude requires that the |HandleResponseToSilentSignRequest|
-  // path be used below, so this is only valid if either there's no
-  // appidExclude, or the single batch is empty and thus there are no excluded
-  // credentials.
-  if (exclude_list_batches_.size() == 1 &&
-      (!request_.app_id || exclude_list_batches_.front().empty())) {
+  if (exclude_list_batches_.size() == 1 || device()->NoSilentRequests()) {
     auto request = request_;
     request.exclude_list = exclude_list_batches_.front();
     register_operation_ = std::make_unique<Ctap2DeviceOperation<
@@ -217,9 +239,8 @@ void MakeCredentialTask::MakeCredential() {
     return;
   }
 
-  // If the filtered list is too large to be sent at once, or if an App ID might
-  // need to be tested because the site used the appidExclude extension, probe
-  // the credential IDs silently.
+  // If the filtered list is too large to be sent at once then probe the
+  // credential IDs silently.
   silent_sign_operation_ =
       std::make_unique<Ctap2DeviceOperation<CtapGetAssertionRequest,
                                             AuthenticatorGetAssertionResponse>>(
@@ -233,7 +254,7 @@ void MakeCredentialTask::MakeCredential() {
 
 void MakeCredentialTask::HandleResponseToSilentSignRequest(
     CtapDeviceResponseCode response_code,
-    base::Optional<AuthenticatorGetAssertionResponse> response_data) {
+    absl::optional<AuthenticatorGetAssertionResponse> response_data) {
   if (canceled_) {
     return;
   }
@@ -245,9 +266,6 @@ void MakeCredentialTask::HandleResponseToSilentSignRequest(
     CtapMakeCredentialRequest request = request_;
     request.exclude_list =
         exclude_list_batches_.at(current_exclude_list_batch_);
-    if (probing_alternative_rp_id_) {
-      request.rp.id = *request_.app_id;
-    }
     register_operation_ = std::make_unique<Ctap2DeviceOperation<
         CtapMakeCredentialRequest, AuthenticatorMakeCredentialResponse>>(
         device(), std::move(request), std::move(callback_),
@@ -260,10 +278,7 @@ void MakeCredentialTask::HandleResponseToSilentSignRequest(
 
   // The authenticator returned an unexpected error. Collect a touch to take the
   // authenticator out of the set of active devices.
-  if (response_code != CtapDeviceResponseCode::kCtap2ErrInvalidCredential &&
-      response_code != CtapDeviceResponseCode::kCtap2ErrNoCredentials &&
-      response_code != CtapDeviceResponseCode::kCtap2ErrLimitExceeded &&
-      response_code != CtapDeviceResponseCode::kCtap2ErrRequestTooLarge) {
+  if (!FidoDevice::IsStatusForUnrecognisedCredentialID(response_code)) {
     register_operation_ = std::make_unique<Ctap2DeviceOperation<
         CtapMakeCredentialRequest, AuthenticatorMakeCredentialResponse>>(
         device(), GetTouchRequest(device()),
@@ -279,14 +294,6 @@ void MakeCredentialTask::HandleResponseToSilentSignRequest(
   // The authenticator didn't recognize any credential from the previous exclude
   // list batch. Try the next batch, if there is one.
   current_exclude_list_batch_++;
-
-  if (current_exclude_list_batch_ == exclude_list_batches_.size() &&
-      !probing_alternative_rp_id_ && request_.app_id) {
-    // All elements of |request_.exclude_list| have been tested, but there's a
-    // second RP ID so they need to be tested again.
-    probing_alternative_rp_id_ = true;
-    current_exclude_list_batch_ = 0;
-  }
 
   if (current_exclude_list_batch_ < exclude_list_batches_.size()) {
     silent_sign_operation_ = std::make_unique<Ctap2DeviceOperation<
@@ -316,15 +323,15 @@ void MakeCredentialTask::HandleResponseToSilentSignRequest(
 
 void MakeCredentialTask::HandleResponseToDummyTouch(
     CtapDeviceResponseCode response_code,
-    base::Optional<AuthenticatorMakeCredentialResponse> response_data) {
+    absl::optional<AuthenticatorMakeCredentialResponse> response_data) {
   std::move(callback_).Run(CtapDeviceResponseCode::kCtap2ErrOther,
-                           base::nullopt);
+                           absl::nullopt);
 }
 
 void MakeCredentialTask::U2fRegister() {
   if (!IsConvertibleToU2fRegisterCommand(request_)) {
     std::move(callback_).Run(CtapDeviceResponseCode::kCtap2ErrOther,
-                             base::nullopt);
+                             absl::nullopt);
     return;
   }
 
@@ -338,7 +345,7 @@ void MakeCredentialTask::U2fRegister() {
 
 void MakeCredentialTask::MaybeRevertU2fFallback(
     CtapDeviceResponseCode status,
-    base::Optional<AuthenticatorMakeCredentialResponse> response) {
+    absl::optional<AuthenticatorMakeCredentialResponse> response) {
   DCHECK_EQ(ProtocolVersion::kU2f, device()->supported_protocol());
   if (device()->device_info()) {
     // This was actually a CTAP2 device, but the protocol version was set to U2F
@@ -359,9 +366,7 @@ FilterAndBatchCredentialDescriptors(
   DCHECK_EQ(device.supported_protocol(), ProtocolVersion::kCtap2);
   DCHECK(device.device_info().has_value());
 
-  const auto transport = device.DeviceTransport();
-  if (transport == FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy ||
-      transport == FidoTransportProtocol::kAndroidAccessory) {
+  if (device.NoSilentRequests()) {
     // caBLE devices might not support silent probing, so just put everything
     // into one batch that can will be sent in a non-probing request.
     return {in};

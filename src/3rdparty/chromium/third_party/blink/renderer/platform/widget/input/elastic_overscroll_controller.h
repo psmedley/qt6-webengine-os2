@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_INPUT_ELASTIC_OVERSCROLL_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_INPUT_ELASTIC_OVERSCROLL_CONTROLLER_H_
 
-#include "base/macros.h"
 #include "cc/input/overscroll_behavior.h"
 #include "cc/input/scroll_elasticity_helper.h"
 #include "third_party/blink/public/common/input/web_gesture_event.h"
@@ -114,6 +113,8 @@ class PLATFORM_EXPORT ElasticOverscrollController {
                            VerifyForwardAnimationIsNotPlayed);
   FRIEND_TEST_ALL_PREFIXES(ElasticOverscrollControllerBezierTest,
                            VerifyInitialStretchDelta);
+  FRIEND_TEST_ALL_PREFIXES(ElasticOverscrollControllerBezierTest,
+                           NoSyntheticEventsOverscroll);
 
   enum State {
     // The initial state, during which the overscroll amount is zero and

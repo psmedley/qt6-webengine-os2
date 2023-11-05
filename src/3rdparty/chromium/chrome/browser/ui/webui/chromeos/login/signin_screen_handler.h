@@ -16,8 +16,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ash/login/screens/error_screen.h"
-#include "chrome/browser/chromeos/login/signin_specifics.h"
-#include "chrome/browser/chromeos/login/ui/login_display.h"
+#include "chrome/browser/ash/login/signin_specifics.h"
+#include "chrome/browser/ash/login/ui/login_display.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_webui_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -34,14 +34,12 @@
 class AccountId;
 
 namespace ash {
+class LoginDisplayHostMojo;
+
 namespace mojom {
 enum class TrayActionState;
 }  // namespace mojom
 }  // namespace ash
-
-namespace base {
-class ListValue;
-}
 
 namespace chromeos {
 
@@ -55,10 +53,6 @@ class LoginDisplayWebUIHandler {
  public:
   virtual void ClearAndEnablePassword() = 0;
   virtual void OnPreferencesChanged() = 0;
-  virtual void ShowError(int login_attempts,
-                         const std::string& error_text,
-                         const std::string& help_link_text,
-                         HelpAppLauncher::HelpTopic help_topic_id) = 0;
   virtual void ShowAllowlistCheckFailedError() = 0;
 
  protected:
@@ -91,8 +85,6 @@ class SigninScreenHandlerDelegate {
   virtual void ShowWrongHWIDScreen() = 0;
 
   // --------------- Rest of the methods.
-  // Cancels user adding.
-  virtual void CancelUserAdding() = 0;
 
   // Let the delegate know about the handler it is supposed to be using.
   virtual void SetWebUIHandler(LoginDisplayWebUIHandler* webui_handler) = 0;
@@ -151,16 +143,16 @@ class SigninScreenHandler
   bool GetKeyboardRemappedPrefValue(const std::string& pref_name, int* value);
 
  private:
+  friend class GaiaScreenHandler;
+  friend class ash::LoginDisplayHostMojo;
+  friend class ReportDnsCacheClearedOnUIThread;
+
   // TODO (crbug.com/1168114): check if it makes sense anymore, as we're always
   // showing GAIA
   enum UIState {
     UI_STATE_UNKNOWN = 0,
     UI_STATE_GAIA_SIGNIN,
   };
-
-  friend class GaiaScreenHandler;
-  friend class ReportDnsCacheClearedOnUIThread;
-  friend class LoginDisplayHostMojo;
 
   void ShowImpl();
 
@@ -186,10 +178,6 @@ class SigninScreenHandler
   // LoginDisplayWebUIHandler implementation:
   void ClearAndEnablePassword() override;
   void OnPreferencesChanged() override;
-  void ShowError(int login_attempts,
-                 const std::string& error_text,
-                 const std::string& help_link_text,
-                 HelpAppLauncher::HelpTopic help_topic_id) override;
   void ShowAllowlistCheckFailedError() override;
 
   // content::NotificationObserver implementation:
@@ -203,7 +191,7 @@ class SigninScreenHandler
                               bool authenticated_by_pin);
   void HandleLaunchIncognito();
   void HandleLaunchSAMLPublicSession(const std::string& email);
-  void HandleOfflineLogin(const base::ListValue* args);
+  void HandleOfflineLogin();
   void HandleToggleEnrollmentScreen();
   void HandleToggleResetScreen();
   void HandleToggleKioskAutolaunchScreen();
@@ -230,15 +218,15 @@ class SigninScreenHandler
   bool AllAllowlistedUsersPresent();
 
   // Returns true if current visible screen is the Gaia sign-in page.
-  bool IsGaiaVisible() const;
+  bool IsGaiaVisible();
 
   // Returns true if current visible screen is the error screen over
   // Gaia sign-in page.
-  bool IsGaiaHiddenByError() const;
+  bool IsGaiaHiddenByError();
 
   // Returns true if current screen is the error screen over signin
   // screen.
-  bool IsSigninScreenHiddenByError() const;
+  bool IsSigninScreenHiddenByError();
 
   net::Error FrameError() const;
 
@@ -321,7 +309,9 @@ class SigninScreenHandler
 
 // TODO(https://crbug.com/1164001): remove when moved to ash.
 namespace ash {
+using ::chromeos::LoginDisplayWebUIHandler;
 using ::chromeos::SigninScreenHandler;
-}
+using ::chromeos::SigninScreenHandlerDelegate;
+}  // namespace ash
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_SIGNIN_SCREEN_HANDLER_H_

@@ -8,13 +8,13 @@
 #include "base/command_line.h"
 #include "base/hash/sha1.h"
 #include "base/i18n/timezone.h"
+#include "chrome/browser/ash/arc/arc_support_host.h"
+#include "chrome/browser/ash/arc/arc_util.h"
+#include "chrome/browser/ash/arc/optin/arc_optin_preference_handler.h"
 #include "chrome/browser/ash/login/screens/arc_terms_of_service_screen.h"
+#include "chrome/browser/ash/login/ui/login_display_host.h"
+#include "chrome/browser/ash/login/wizard_controller.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/arc/arc_support_host.h"
-#include "chrome/browser/chromeos/arc/arc_util.h"
-#include "chrome/browser/chromeos/arc/optin/arc_optin_preference_handler.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host.h"
-#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/consent_auditor/consent_auditor_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -114,8 +114,12 @@ void ArcTermsOfServiceScreenHandler::DefaultNetworkChanged(
 void ArcTermsOfServiceScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
   builder->Add("arcTermsOfServiceScreenHeading", IDS_ARC_OOBE_TERMS_HEADING);
+  builder->Add("arcTermsOfServiceScreenHeadingForChild",
+               IDS_ARC_OOBE_TERMS_HEADING_CHILD);
   builder->Add("arcTermsOfServiceScreenDescription",
       IDS_ARC_OOBE_TERMS_DESCRIPTION);
+  builder->Add("arcTermsOfServiceScreenDescriptionForChild",
+               IDS_ARC_OOBE_TERMS_DESCRIPTION_CHILD);
   builder->Add("arcTermsOfServiceLoading", IDS_ARC_OOBE_TERMS_LOADING);
   builder->Add("arcTermsOfServiceErrorTitle", IDS_OOBE_GENERIC_FATAL_ERROR_TITLE);
   builder->Add("arcTermsOfServiceErrorMessage", IDS_ARC_OOBE_TERMS_LOAD_ERROR);
@@ -338,8 +342,8 @@ void ArcTermsOfServiceScreenHandler::DoShow() {
   action_taken_ = false;
 
   ShowScreen(kScreenId);
-
   arc_managed_ = arc::IsArcPlayStoreEnabledPreferenceManagedForProfile(profile);
+  is_child_account_ = user_manager::UserManager::Get()->IsLoggedInAsChildUser();
   CallJS("login.ArcTermsOfServiceScreen.setArcManaged", arc_managed_,
          is_child_account_);
 
@@ -381,10 +385,9 @@ void ArcTermsOfServiceScreenHandler::RecordConsents(
       ConsentAuditorFactory::GetForProfile(profile);
   auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
   // The account may or may not have consented to browser sync.
-  DCHECK(
-      identity_manager->HasPrimaryAccount(signin::ConsentLevel::kNotRequired));
+  DCHECK(identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin));
   const CoreAccountId account_id =
-      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kNotRequired);
+      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kSignin);
 
   ArcPlayTermsOfServiceConsent play_consent;
   play_consent.set_status(tos_accepted ? UserConsentTypes::GIVEN

@@ -4,7 +4,7 @@
 
 #include "content/web_test/renderer/accessibility_controller.h"
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "content/web_test/renderer/web_frame_test_proxy.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
@@ -17,6 +17,7 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "ui/accessibility/ax_mode.h"
 
 namespace content {
 
@@ -43,6 +44,7 @@ class AccessibilityControllerBindings
   v8::Local<v8::Object> FocusedElement();
   v8::Local<v8::Object> RootElement();
   v8::Local<v8::Object> AccessibleElementById(const std::string& id);
+  bool CanCallAOMEventListeners() const;
   void Reset();
 
   base::WeakPtr<AccessibilityController> controller_;
@@ -98,6 +100,8 @@ AccessibilityControllerBindings::GetObjectTemplateBuilder(
       .SetProperty("rootElement", &AccessibilityControllerBindings::RootElement)
       .SetMethod("accessibleElementById",
                  &AccessibilityControllerBindings::AccessibleElementById)
+      .SetProperty("canCallAOMEventListeners",
+                   &AccessibilityControllerBindings::CanCallAOMEventListeners)
       // TODO(hajimehoshi): These are for backward compatibility. Remove them.
       .SetMethod("addNotificationListener",
                  &AccessibilityControllerBindings::SetNotificationListener)
@@ -136,6 +140,10 @@ v8::Local<v8::Object> AccessibilityControllerBindings::AccessibleElementById(
                      : v8::Local<v8::Object>();
 }
 
+bool AccessibilityControllerBindings::CanCallAOMEventListeners() const {
+  return controller_ ? controller_->CanCallAOMEventListeners() : false;
+}
+
 void AccessibilityControllerBindings::Reset() {
   if (controller_)
     controller_->Reset();
@@ -160,7 +168,8 @@ void AccessibilityController::Reset() {
 }
 
 void AccessibilityController::Install(blink::WebLocalFrame* frame) {
-  ax_context_ = std::make_unique<blink::WebAXContext>(frame->GetDocument());
+  ax_context_ = std::make_unique<blink::WebAXContext>(frame->GetDocument(),
+                                                      ui::kAXModeComplete);
   frame->View()->GetSettings()->SetInlineTextBoxAccessibilityEnabled(true);
 
   AccessibilityControllerBindings::Install(weak_factory_.GetWeakPtr(), frame);
@@ -274,6 +283,11 @@ v8::Local<v8::Object> AccessibilityController::AccessibleElementById(
       root_element, blink::WebString::FromUTF8(id.c_str()));
 }
 
+bool AccessibilityController::CanCallAOMEventListeners() const {
+  return GetAccessibilityObjectForMainFrame()
+      .CanCallAOMEventListenersForTesting();
+}
+
 v8::Local<v8::Object>
 AccessibilityController::FindAccessibleElementByIdRecursive(
     const blink::WebAXObject& obj,
@@ -299,12 +313,12 @@ AccessibilityController::FindAccessibleElementByIdRecursive(
   return v8::Local<v8::Object>();
 }
 
-blink::WebView* AccessibilityController::web_view() {
+blink::WebView* AccessibilityController::web_view() const {
   return web_frame_test_proxy_->GetWebFrame()->View();
 }
 
-blink::WebAXObject
-AccessibilityController::GetAccessibilityObjectForMainFrame() {
+blink::WebAXObject AccessibilityController::GetAccessibilityObjectForMainFrame()
+    const {
   blink::WebFrame* frame = web_view()->MainFrame();
 
   // TODO(lukasza): Finish adding OOPIF support to the web tests harness.

@@ -9,7 +9,6 @@
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/opentype/font_format_check.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/skia/include/core/SkStream.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 
@@ -128,8 +127,9 @@ sk_sp<SkFontMgr> WebFontTypefaceFactory::FontManagerForVariations() {
 sk_sp<SkFontMgr> WebFontTypefaceFactory::FontManagerForSbix() {
 #if defined(OS_MAC)
   return DefaultFontManager();
-#endif
+#else
   return FreeTypeFontManager();
+#endif
 }
 
 sk_sp<SkFontMgr> WebFontTypefaceFactory::DefaultFontManager() {

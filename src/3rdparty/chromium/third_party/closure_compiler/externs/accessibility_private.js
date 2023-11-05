@@ -7,7 +7,7 @@
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.accessibilityPrivate.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: accessibilityPrivate */
 
@@ -32,6 +32,15 @@ chrome.accessibilityPrivate.AlertInfo;
  * }}
  */
 chrome.accessibilityPrivate.ScreenRect;
+
+/**
+ * Point in global screen coordinates.
+ * @typedef {{
+ *   x: number,
+ *   y: number
+ * }}
+ */
+chrome.accessibilityPrivate.ScreenPoint;
 
 /**
  * @enum {string}
@@ -251,6 +260,7 @@ chrome.accessibilityPrivate.AcceleratorAction = {
  */
 chrome.accessibilityPrivate.AccessibilityFeature = {
   SELECT_TO_SPEAK_NAVIGATION_CONTROL: 'selectToSpeakNavigationControl',
+  ENHANCED_NETWORK_VOICES: 'enhancedNetworkVoices',
 };
 
 /**
@@ -415,6 +425,12 @@ chrome.accessibilityPrivate.handleScrollableBoundsForPointFound = function(rect)
 chrome.accessibilityPrivate.moveMagnifierToRect = function(rect) {};
 
 /**
+ * Called by the Accessibility Common extension to center magnifier at |point|.
+ * @param {!chrome.accessibilityPrivate.ScreenPoint} point
+ */
+chrome.accessibilityPrivate.magnifierCenterOnPoint = function(point) {};
+
+/**
  * Toggles dictation between active and inactive states.
  */
 chrome.accessibilityPrivate.toggleDictation = function() {};
@@ -456,6 +472,27 @@ chrome.accessibilityPrivate.isFeatureEnabled = function(feature, callback) {};
  * @param {number=} speed Current reading speed (TTS speech rate).
  */
 chrome.accessibilityPrivate.updateSelectToSpeakPanel = function(show, anchor, isPaused, speed) {};
+
+/**
+ * Shows a confirmation dialog.
+ * @param {string} title The title of the confirmation dialog.
+ * @param {string} description The description to show within the confirmation
+ *     dialog.
+ * @param {function(boolean): void} callback Called when the dialog is confirmed
+ *     or cancelled.
+ */
+chrome.accessibilityPrivate.showConfirmationDialog = function(title, description, callback) {};
+
+/**
+ * Gets the DOM key string for the given key code, taking into account the
+ * current input method locale, and assuming the key code is for U.S. input. For
+ * example, the key code for '/' would return the string '!' if the current
+ * input method is French.
+ * @param {number} keyCode
+ * @param {function(string): void} callback Called with the resulting Dom key
+ *     string.
+ */
+chrome.accessibilityPrivate.getLocalizedDomKeyStringForKeyCode = function(keyCode, callback) {};
 
 /**
  * Fired whenever ChromeVox should output introduction.
@@ -545,3 +582,17 @@ chrome.accessibilityPrivate.onMagnifierBoundsChanged;
  * @type {!ChromeEvent}
  */
 chrome.accessibilityPrivate.onCustomSpokenFeedbackToggled;
+
+/**
+ * Fired when ChromeVox should show its tutorial.
+ * @type {!ChromeEvent}
+ */
+chrome.accessibilityPrivate.onShowChromeVoxTutorial;
+
+/**
+ * Fired when Dictation is activated or deactivated using a keyboard shortcut,
+ * the button in the tray, or after a call from
+ * accessibilityPrivate.toggleDictation
+ * @type {!ChromeEvent}
+ */
+chrome.accessibilityPrivate.onToggleDictation;

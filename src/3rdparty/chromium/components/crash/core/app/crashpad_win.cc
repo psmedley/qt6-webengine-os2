@@ -7,11 +7,11 @@
 #include <memory>
 #include <string>
 
+#include "base/cxx17_backports.h"
 #include "base/debug/crash_logging.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -41,6 +41,11 @@ void GetPlatformCrashpadAnnotations(
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Empty means stable.
   const bool allow_empty_channel = true;
+  if (channel_name == L"extended") {
+    // Extended stable reports as stable (empty string) with an extra bool.
+    channel_name.clear();
+    (*annotations)["extended_stable_channel"] = "true";
+  }
 #else
   const bool allow_empty_channel = false;
 #endif

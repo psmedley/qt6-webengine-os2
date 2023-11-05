@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 #include "base/check.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/string_piece.h"
 #include "extensions/browser/api/web_request/form_data_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -21,7 +21,7 @@ std::unique_ptr<FormDataParser> InitParser(
   std::unique_ptr<FormDataParser> parser(
       FormDataParser::CreateFromContentTypeHeader(&content_type_header));
   if (parser.get() == NULL)
-    return std::unique_ptr<FormDataParser>();
+    return nullptr;
   return parser;
 }
 

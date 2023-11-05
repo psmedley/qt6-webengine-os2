@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_ndef_scan_options.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/modules/nfc/ndef_reader.h"
 #include "third_party/blink/renderer/modules/nfc/nfc_proxy.h"
@@ -116,7 +117,7 @@ class FakeNfcService : public device::mojom::blink::NFC {
     std::move(callback).Run(nullptr);
   }
   void CancelWatch(uint32_t id) override {
-    size_t index = watchIDs_.Find(id);
+    wtf_size_t index = watchIDs_.Find(id);
     if (index != kNotFound)
       watchIDs_.EraseAt(index);
   }

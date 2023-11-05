@@ -30,7 +30,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_SELECTOR_CHECKER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_SELECTOR_CHECKER_H_
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
+#include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 
@@ -73,25 +75,27 @@ class CORE_EXPORT SelectorChecker {
     kQueryingRules,
   };
 
-  struct Init {
-    STACK_ALLOCATED();
+  explicit inline SelectorChecker(const Mode& mode)
+      : element_style_(nullptr),
+        scrollbar_(nullptr),
+        part_names_(nullptr),
+        pseudo_argument_(g_null_atom),
+        scrollbar_part_(kNoPart),
+        mode_(mode),
+        is_ua_rule_(false) {}
+  inline SelectorChecker(ComputedStyle* element_style,
+                         PartNames* part_names,
+                         const StyleRequest& style_request,
+                         const Mode& mode,
+                         const bool& is_ua_rule)
+      : element_style_(element_style),
+        scrollbar_(style_request.scrollbar),
+        part_names_(part_names),
+        pseudo_argument_(style_request.pseudo_argument),
+        scrollbar_part_(style_request.scrollbar_part),
+        mode_(mode),
+        is_ua_rule_(is_ua_rule) {}
 
-   public:
-    Mode mode = kResolvingStyle;
-    bool is_ua_rule = false;
-    ComputedStyle* element_style = nullptr;
-    CustomScrollbar* scrollbar = nullptr;
-    ScrollbarPart scrollbar_part = kNoPart;
-    PartNames* part_names = nullptr;
-  };
-
-  explicit SelectorChecker(const Init& init)
-      : element_style_(init.element_style),
-        scrollbar_(init.scrollbar),
-        part_names_(init.part_names),
-        scrollbar_part_(init.scrollbar_part),
-        mode_(init.mode),
-        is_ua_rule_(init.is_ua_rule) {}
   SelectorChecker(const SelectorChecker&) = delete;
   SelectorChecker& operator=(const SelectorChecker&) = delete;
 
@@ -117,6 +121,7 @@ class CORE_EXPORT SelectorChecker {
     Element* vtt_originating_element = nullptr;
     bool in_nested_complex_selector = false;
     bool is_inside_visited_link = false;
+    const ContainerNode* relative_leftmost_element = nullptr;
   };
 
   struct MatchResult {
@@ -124,7 +129,60 @@ class CORE_EXPORT SelectorChecker {
 
    public:
     PseudoId dynamic_pseudo{kPseudoIdNone};
-    unsigned specificity{0};
+
+    // From the shortest argument selector match, we need to get the element
+    // that matches the leftmost compound selector to mark the correct scope
+    // elements of :has() pseudo class having the argument selectors starts
+    // with descendant combinator.
+    //
+    // <main id=main>
+    //   <div id=d1>
+    //     <div id=d2 class="a">
+    //       <div id=d3 class="a">
+    //         <div id=d4>
+    //           <div id=d5 class="b">
+    //           </div>
+    //         </div>
+    //       </div>
+    //     </div>
+    //   </div>
+    // </div>
+    // <script>
+    //  main.querySelectorAll('div:has(.a .b)'); // Should return #d1, #d2
+    // </script>
+    //
+    // In case of the above example, div#d5 element matches the argument
+    // selector '.a .b'. Among the ancestors of the div#d5, the div#d3 and
+    // div#d4 is not the correct candidate scope element of ':has(.a .b)'
+    // because those elements don't have .a element as it's descendant.
+    // So instead of marking ancestors of div#d5, we should mark ancestors
+    // of div#d3 to prevent incorrect marking.
+    // In case of the shortest match for the argument selector '.a .b' on
+    // div#d5 element, the div#d3 is the element that matches the leftmost
+    // compound selector '.a'. So the MatchResult will return the div#d3
+    // element for the matching operation.
+    //
+    // In case of matching none desendant relative argument selectors, we
+    // can get the candidate leftmost compound matches while matching the
+    // argument selector.
+    // To process the 'main.querySelectorAll("div:has(:scope > .a .b)")'
+    // on the above DOM tree, selector checker will try to match the
+    // argument selector ':scope > .a .b' on the descendants of #d1 div
+    // element with the :scope element as #d1. When it matches the argument
+    // selector on #d5 element, the matching result is true and it can get
+    // the element that matches the leftmost(except :scope) compound '.a'
+    // as #d2 element. But while matching the argument selector on the #d5
+    // element, selector checker can also aware that the #d3 element can
+    // be a leftmost compound matching element when the scope element is
+    // #d2 element. So the selector checker will return the #d2 and #d3
+    // element so that the #d1 and #d2 can be marked as matched with the
+    // ':has(:scope > .a .b)'
+    //
+    // Instead of having vector for the :has argument matching, MatchResult
+    // has a pointer field to hold a element vector instance to minimize the
+    // MatchResult instance allocation overhead for none-has matching operations
+    HeapVector<Member<Element>>* has_argument_leftmost_compound_matches{
+        nullptr};
   };
 
   bool Match(const SelectorCheckingContext& context, MatchResult& result) const;
@@ -185,10 +243,12 @@ class CORE_EXPORT SelectorChecker {
                                  MatchResult&) const;
   bool CheckPseudoHost(const SelectorCheckingContext&, MatchResult&) const;
   bool CheckPseudoNot(const SelectorCheckingContext&, MatchResult&) const;
+  bool CheckPseudoHas(const SelectorCheckingContext&, MatchResult&) const;
 
   ComputedStyle* element_style_;
   CustomScrollbar* scrollbar_;
   PartNames* part_names_;
+  const String pseudo_argument_;
   ScrollbarPart scrollbar_part_;
   Mode mode_;
   bool is_ua_rule_;
@@ -199,4 +259,4 @@ class CORE_EXPORT SelectorChecker {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_SELECTOR_CHECKER_H_

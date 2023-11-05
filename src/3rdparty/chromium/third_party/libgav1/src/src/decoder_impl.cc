@@ -36,7 +36,6 @@
 #include "src/utils/common.h"
 #include "src/utils/constants.h"
 #include "src/utils/logging.h"
-#include "src/utils/parameter_tree.h"
 #include "src/utils/raw_bit_reader.h"
 #include "src/utils/segmentation.h"
 #include "src/utils/threadpool.h"
@@ -631,10 +630,6 @@ DecoderImpl::~DecoderImpl() {
 }
 
 StatusCode DecoderImpl::Init() {
-  if (!GenerateWedgeMask(&wedge_masks_)) {
-    LIBGAV1_DLOG(ERROR, "GenerateWedgeMask() failed.");
-    return kStatusOutOfMemory;
-  }
   if (!output_frame_queue_.Init(kMaxLayers)) {
     LIBGAV1_DLOG(ERROR, "output_frame_queue_.Init() failed.");
     return kStatusOutOfMemory;
@@ -857,6 +852,10 @@ StatusCode DecoderImpl::ParseAndSchedule(const uint8_t* data, size_t size,
       LIBGAV1_DLOG(ERROR, "InitializeQuantizerMatrix() failed.");
       return kStatusOutOfMemory;
     }
+    if (!MaybeInitializeWedgeMasks(obu->frame_header().frame_type)) {
+      LIBGAV1_DLOG(ERROR, "InitializeWedgeMasks() failed.");
+      return kStatusOutOfMemory;
+    }
     if (IsNewSequenceHeader(*obu)) {
       const ObuSequenceHeader& sequence_header = obu->sequence_header();
       const Libgav1ImageFormat image_format =
@@ -1050,6 +1049,10 @@ StatusCode DecoderImpl::DecodeTemporalUnit(const TemporalUnit& temporal_unit,
       LIBGAV1_DLOG(ERROR, "InitializeQuantizerMatrix() failed.");
       return kStatusOutOfMemory;
     }
+    if (!MaybeInitializeWedgeMasks(obu->frame_header().frame_type)) {
+      LIBGAV1_DLOG(ERROR, "InitializeWedgeMasks() failed.");
+      return kStatusOutOfMemory;
+    }
     if (IsNewSequenceHeader(*obu)) {
       const ObuSequenceHeader& sequence_header = obu->sequence_header();
       const Libgav1ImageFormat image_format =
@@ -1229,12 +1232,21 @@ StatusCode DecoderImpl::DecodeTiles(
     LIBGAV1_DLOG(ERROR, "Failed to allocate memory for the decoder buffer.");
     return kStatusOutOfMemory;
   }
-  if (sequence_header.enable_cdef) {
+  if (frame_header.cdef.bits > 0) {
     if (!frame_scratch_buffer->cdef_index.Reset(
             DivideBy16(frame_header.rows4x4 + kMaxBlockHeight4x4),
             DivideBy16(frame_header.columns4x4 + kMaxBlockWidth4x4),
             /*zero_initialize=*/false)) {
       LIBGAV1_DLOG(ERROR, "Failed to allocate memory for cdef index.");
+      return kStatusOutOfMemory;
+    }
+  }
+  if (do_cdef) {
+    if (!frame_scratch_buffer->cdef_skip.Reset(
+            DivideBy2(frame_header.rows4x4 + kMaxBlockHeight4x4),
+            DivideBy16(frame_header.columns4x4 + kMaxBlockWidth4x4),
+            /*zero_initialize=*/true)) {
+      LIBGAV1_DLOG(ERROR, "Failed to allocate memory for cdef skip.");
       return kStatusOutOfMemory;
     }
   }
@@ -1278,8 +1290,7 @@ StatusCode DecoderImpl::DecodeTiles(
   // without having to check for boundary conditions.
   if (!frame_scratch_buffer->block_parameters_holder.Reset(
           frame_header.rows4x4 + kMaxBlockHeight4x4,
-          frame_header.columns4x4 + kMaxBlockWidth4x4,
-          sequence_header.use_128x128_superblock)) {
+          frame_header.columns4x4 + kMaxBlockWidth4x4)) {
     return kStatusOutOfMemory;
   }
   const dsp::Dsp* const dsp =
@@ -1403,10 +1414,6 @@ StatusCode DecoderImpl::DecodeTiles(
     }
   }
 
-  PostFilter post_filter(frame_header, sequence_header, frame_scratch_buffer,
-                         current_frame->buffer(), dsp,
-                         settings_.post_filter_mask);
-
   if (is_frame_parallel_ && !IsIntraFrame(frame_header.frame_type)) {
     // We can parse the current frame if all the reference frames have been
     // parsed.
@@ -1475,6 +1482,9 @@ StatusCode DecoderImpl::DecodeTiles(
     }
   }
 
+  PostFilter post_filter(frame_header, sequence_header, frame_scratch_buffer,
+                         current_frame->buffer(), dsp,
+                         settings_.post_filter_mask);
   SymbolDecoderContext saved_symbol_decoder_context;
   BlockingCounterWithStatus pending_tiles(tile_count);
   for (int tile_number = 0; tile_number < tile_count; ++tile_number) {
@@ -1644,6 +1654,17 @@ bool DecoderImpl::IsNewSequenceHeader(const ObuParser& obu) {
   sequence_header_ = sequence_header;
   has_sequence_header_ = true;
   return sequence_header_changed;
+}
+
+bool DecoderImpl::MaybeInitializeWedgeMasks(FrameType frame_type) {
+  if (IsIntraFrame(frame_type) || wedge_masks_initialized_) {
+    return true;
+  }
+  if (!GenerateWedgeMask(&wedge_masks_)) {
+    return false;
+  }
+  wedge_masks_initialized_ = true;
+  return true;
 }
 
 bool DecoderImpl::MaybeInitializeQuantizerMatrix(

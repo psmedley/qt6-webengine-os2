@@ -81,11 +81,11 @@ export class LogPanel extends Panel<{}> {
   }
 
   onRowOver(ts: number) {
-    globals.frontendLocalState.setHoveredLogsTimestamp(ts);
+    globals.dispatch(Actions.setHoveredLogsTimestamp({ts}));
   }
 
   onRowOut() {
-    globals.frontendLocalState.setHoveredLogsTimestamp(-1);
+    globals.dispatch(Actions.setHoveredLogsTimestamp({ts: -1}));
   }
 
   private totalRows():
@@ -132,7 +132,8 @@ export class LogPanel extends Panel<{}> {
                 formatTimestamp(ts / 1e9 - globals.state.traceTime.startSec)),
               m('.cell', priorityLetter || '?'),
               m('.cell', tags[i]),
-              m('.cell', messages[i])));
+              m('.cell', messages[i]),
+              m('br')));
       }
     }
 

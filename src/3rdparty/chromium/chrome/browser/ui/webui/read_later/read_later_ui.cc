@@ -7,10 +7,12 @@
 #include <string>
 #include <utility>
 
+#include "base/containers/cxx20_erase.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/read_later/read_later_page_handler.h"
+#include "chrome/browser/ui/webui/read_later/side_panel/bookmarks_page_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -29,7 +31,7 @@ namespace {
 void AddLocalizedString(content::WebUIDataSource* source,
                         const std::string& message,
                         int id) {
-  base::string16 str = l10n_util::GetStringUTF16(id);
+  std::u16string str = l10n_util::GetStringUTF16(id);
   base::Erase(str, '&');
   source->AddString(message, str);
 }
@@ -43,6 +45,10 @@ ReadLaterUI::ReadLaterUI(content::WebUI* web_ui)
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIReadLaterHost);
   static constexpr webui::LocalizedString kLocalizedStrings[] = {
+      {"addCurrentTab", IDS_READ_LATER_ADD_CURRENT_TAB},
+      {"bookmarksTabTitle", IDS_BOOKMARK_MANAGER_TITLE},
+      {"emptyStateAddFromDialogSubheader",
+       IDS_READ_LATER_MENU_EMPTY_STATE_ADD_FROM_DIALOG_SUBHEADER},
       {"emptyStateHeader", IDS_READ_LATER_MENU_EMPTY_STATE_HEADER},
       {"emptyStateSubheader", IDS_READ_LATER_MENU_EMPTY_STATE_SUBHEADER},
       {"readHeader", IDS_READ_LATER_MENU_READ_HEADER},
@@ -56,18 +62,23 @@ ReadLaterUI::ReadLaterUI(content::WebUI* web_ui)
   for (const auto& str : kLocalizedStrings)
     AddLocalizedString(source, str.name, str.id);
 
+  const bool show_side_panel =
+      base::FeatureList::IsEnabled(features::kSidePanel);
+
+  source->AddBoolean(
+      "currentPageActionButtonEnabled",
+      base::FeatureList::IsEnabled(features::kReadLaterAddFromDialog) ||
+          show_side_panel);
   source->AddBoolean("useRipples", views::PlatformStyle::kUseRipples);
 
   Profile* profile = Profile::FromWebUI(web_ui);
   content::URLDataSource::Add(
       profile, std::make_unique<FaviconSource>(
                    profile, chrome::FaviconUrlFormat::kFavicon2));
-
   webui::SetupWebUIDataSource(
       source, base::make_span(kReadLaterResources, kReadLaterResourcesSize),
-      base::FeatureList::IsEnabled(features::kSidePanel)
-          ? IDR_READ_LATER_SIDE_PANEL_SIDE_PANEL_HTML
-          : IDR_READ_LATER_READ_LATER_HTML);
+      show_side_panel ? IDR_READ_LATER_SIDE_PANEL_SIDE_PANEL_HTML
+                      : IDR_READ_LATER_READ_LATER_HTML);
   content::WebUIDataSource::Add(web_ui->GetWebContents()->GetBrowserContext(),
                                 source);
 }
@@ -88,4 +99,22 @@ void ReadLaterUI::CreatePageHandler(
   DCHECK(page);
   page_handler_ = std::make_unique<ReadLaterPageHandler>(
       std::move(receiver), std::move(page), this, web_ui());
+}
+
+void ReadLaterUI::BindInterface(
+    mojo::PendingReceiver<side_panel::mojom::BookmarksPageHandlerFactory>
+        receiver) {
+  bookmarks_page_factory_receiver_.reset();
+  bookmarks_page_factory_receiver_.Bind(std::move(receiver));
+}
+
+void ReadLaterUI::CreateBookmarksPageHandler(
+    mojo::PendingReceiver<side_panel::mojom::BookmarksPageHandler> receiver) {
+  bookmarks_page_handler_ =
+      std::make_unique<BookmarksPageHandler>(std::move(receiver), this);
+}
+
+void ReadLaterUI::SetActiveTabURL(const GURL& url) {
+  if (page_handler_)
+    page_handler_->SetActiveTabURL(url);
 }

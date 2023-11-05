@@ -7,8 +7,9 @@ syntax = "proto3";
 package feedstore;
 
 import "components/feed/core/proto/v2/wire/content_id.proto";
-import "components/feed/core/proto/v2/wire/stream_structure.proto";
 import "components/feed/core/proto/v2/wire/feed_action.proto";
+import "components/feed/core/proto/v2/wire/stream_structure.proto";
+import "components/feed/core/proto/v2/wire/web_feed_matcher.proto";
 
 option optimize_for = LITE_RUNTIME;
 
@@ -24,6 +25,9 @@ option optimize_for = LITE_RUNTIME;
 // s/<stream-id>/<content-id>       -> shared_state
 // a/<action-id>                    -> action
 // m                                -> metadata
+// subs                             -> subscribed_web_feeds
+// recommendedIndex                 -> recommended_web_feed_index
+// R/<web_feed_id>                  -> recommended_web_feed
 message Record {
   oneof data {
     StreamData stream_data = 1;
@@ -32,6 +36,9 @@ message Record {
     StoredAction local_action = 4;
     StreamSharedState shared_state = 5;
     Metadata metadata = 6;
+    SubscribedWebFeeds subscribed_web_feeds = 7;
+    WebFeedInfo recommended_web_feed = 8;
+    RecommendedWebFeedIndex recommended_web_feed_index = 9;
   }
 }
 
@@ -43,8 +50,8 @@ message StreamData {
   bytes next_page_token = 2;
   // The unix timestamp in milliseconds that the most recent content was added.
   int64 last_added_time_millis = 4;
-  // The content ID of the shared state for this stream.
-  feedwire.ContentId shared_state_id = 6;
+  // The content IDs of the shared state for this stream.
+  repeated feedwire.ContentId shared_state_ids = 6;
   // Was this feed signed in.
   bool signed_in = 7;
   // Is activity logging enabled?
@@ -53,6 +60,8 @@ message StreamData {
   bool privacy_notice_fulfilled = 9;
   // Stream ID. Should match the id value stored in the record's key.
   string stream_id = 10;
+  // List of unique IDs representing content contained in the stream.
+  repeated int64 content_ids = 11;
 
   reserved 3, 5;
 }
@@ -63,6 +72,29 @@ message Metadata {
   message SessionID {
     string token = 1;
     int64 expiry_time_ms = 2;
+  }
+
+  // Metadata about a specific stream.
+  message StreamMetadata {
+    string stream_id = 1;
+    // Whether the stream data is known to be stale. This can happen in the
+    // WebFeed stream if the subscription list changes.
+    bool is_known_stale = 3;
+    // If this stream has been viewed before, this is the list of content in the
+    // stream
+    // (`StreamData.content_ids`). This is used to determine whether the user
+    // has already seen a stored stream's data.
+    repeated int64 view_content_ids = 4;
+
+    message ContentLifetime {
+      int64 stale_age_ms = 1;
+      int64 invalid_age_ms = 2;
+    }
+    ContentLifetime content_lifetime = 5;
+    // The unix timestamp in milliseconds that the stream was fetched last time.
+    int64 last_fetch_time_millis = 6;
+
+    reserved 2;
   }
 
   // Token used to read or write to the same storage.
@@ -77,6 +109,9 @@ message Metadata {
   // "shared_state"
   //    records.
   int32 stream_schema_version = 4;
+  repeated StreamMetadata stream_metadata = 5;
+  // The GAIA ID associated with the store.
+  string gaia = 6;
 }
 
 // A set of StreamStructures that should be applied to a stream.
@@ -127,6 +162,8 @@ message StreamStructure {
   Type type = 4;
   // Set iff type=CONTENT
   ContentInfo content_info = 5;
+  // Is this the root of the stream?
+  bool is_root = 6;
 }
 
 message DataOperation {
@@ -170,4 +207,48 @@ message StoredAction {
   int32 upload_attempt_count = 2;
   // The action to upload.
   feedwire.FeedAction action = 3;
+}
+
+// List of web feeds for which the user is subscribed.
+message SubscribedWebFeeds {
+  repeated WebFeedInfo feeds = 1;
+  // The unix timestamp in milliseconds that this data was updated from the
+  // server.
+  int64 update_time_millis = 2;
+}
+
+message RecommendedWebFeedIndex {
+  message Entry {
+    string web_feed_id = 1;
+    repeated feedwire.webfeed.WebFeedMatcher matchers = 2;
+  }
+  repeated Entry entries = 1;
+  // The unix timestamp in milliseconds that this data was updated from the
+  // server.
+  int64 update_time_millis = 2;
+}
+
+// Reference to an image.
+message Image {
+  string url = 1;
+}
+
+// See http://go/chrome-web-feed-api.
+message WebFeedInfo {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    INACTIVE = 1;
+    ACTIVE = 2;
+    WAITING_FOR_CONTENT = 4;
+  }
+  string web_feed_id = 1;
+  string title = 2;
+  string subtitle = 3;
+  string detail_text = 4;
+  string visit_uri = 5;
+  string rss_uri = 6;
+  Image favicon = 7;
+  int64 follower_count = 8;
+  State state = 9;
+  repeated feedwire.webfeed.WebFeedMatcher matchers = 10;
 }

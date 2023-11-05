@@ -7,21 +7,20 @@
 #include <memory>
 
 #include "base/cancelable_callback.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
-#include "base/stl_util.h"
 #include "base/sys_byteorder.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
-#include "base/threading/platform_thread.h"
 #include "net/base/ip_address.h"
 #include "net/dns/dns_config.h"
 #include "net/dns/dns_config_service_posix.h"
 #include "net/dns/public/dns_protocol.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #include "base/bind.h"
 #include "base/task/thread_pool.h"
@@ -50,7 +49,7 @@ const char* const kNameserversIPv4[] = {
     "1.0.0.1",
 };
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
 const char* const kNameserversIPv6[] = {
     NULL,
     "2001:DB8:0::42",
@@ -86,7 +85,7 @@ void InitializeResState(res_state res) {
     ++res->nscount;
   }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
   // Install IPv6 addresses, replacing the corresponding IPv4 addresses.
   unsigned nscount6 = 0;
   for (unsigned i = 0; i < base::size(kNameserversIPv6) && i < MAXNS; ++i) {
@@ -107,7 +106,7 @@ void InitializeResState(res_state res) {
 }
 
 void CloseResState(res_state res) {
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
   for (int i = 0; i < res->nscount; ++i) {
     if (res->_u._ext.nsaddrs[i] != NULL)
       free(res->_u._ext.nsaddrs[i]);
@@ -132,7 +131,7 @@ void InitializeExpectedConfig(DnsConfig* config) {
     config->nameservers.push_back(IPEndPoint(ip, NS_DEFAULTPORT + i));
   }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
   for (unsigned i = 0; i < base::size(kNameserversIPv6) && i < MAXNS; ++i) {
     if (!kNameserversIPv6[i])
       continue;
@@ -143,10 +142,21 @@ void InitializeExpectedConfig(DnsConfig* config) {
 #endif
 }
 
+TEST(DnsConfigServicePosixTest, CreateAndDestroy) {
+  // Regression test to verify crash does not occur if DnsConfigServicePosix
+  // instance is destroyed without calling WatchConfig()
+  base::test::TaskEnvironment task_environment(
+      base::test::TaskEnvironment::MainThreadType::IO);
+
+  auto service = std::make_unique<internal::DnsConfigServicePosix>();
+  service.reset();
+  task_environment.RunUntilIdle();
+}
+
 TEST(DnsConfigServicePosixTest, ConvertResStateToDnsConfig) {
   struct __res_state res;
   InitializeResState(&res);
-  base::Optional<DnsConfig> config = internal::ConvertResStateToDnsConfig(res);
+  absl::optional<DnsConfig> config = internal::ConvertResStateToDnsConfig(res);
   CloseResState(&res);
   ASSERT_TRUE(config.has_value());
   EXPECT_TRUE(config->IsValid());
@@ -184,15 +194,15 @@ TEST(DnsConfigServicePosixTest, DestroyWhileJobsWorking) {
   // Regression test to verify crash does not occur if DnsConfigServicePosix
   // instance is destroyed while SerialWorker jobs have posted to worker pool.
   base::test::TaskEnvironment task_environment(
-      base::test::TaskEnvironment::MainThreadType::IO);
+      base::test::TaskEnvironment::MainThreadType::IO,
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME);
 
   std::unique_ptr<internal::DnsConfigServicePosix> service(
       new internal::DnsConfigServicePosix());
   // Call WatchConfig() which also tests ReadConfig().
   service->WatchConfig(base::BindRepeating(&DummyConfigCallback));
   service.reset();
-  task_environment.RunUntilIdle();
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1000));
+  task_environment.FastForwardUntilNoTasksRemain();
 }
 
 TEST(DnsConfigServicePosixTest, DestroyOnDifferentThread) {

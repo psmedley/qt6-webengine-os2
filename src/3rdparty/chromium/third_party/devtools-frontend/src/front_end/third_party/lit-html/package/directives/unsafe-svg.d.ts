@@ -1,17 +1,13 @@
 /**
  * @license
- * Copyright (c) 2017 The Polymer Project Authors. All rights reserved.
- * This code may only be used under the BSD style license found at
- * http://polymer.github.io/LICENSE.txt
- * The complete set of authors may be found at
- * http://polymer.github.io/AUTHORS.txt
- * The complete set of contributors may be found at
- * http://polymer.github.io/CONTRIBUTORS.txt
- * Code distributed by Google as part of the polymer project is also
- * subject to an additional IP rights grant found at
- * http://polymer.github.io/PATENTS.txt
+ * Copyright 2017 Google LLC
+ * SPDX-License-Identifier: BSD-3-Clause
  */
-import { Part } from '../lit-html.js';
+import { UnsafeHTMLDirective } from './unsafe-html.js';
+declare class UnsafeSVGDirective extends UnsafeHTMLDirective {
+    static directiveName: string;
+    static resultType: number;
+}
 /**
  * Renders the result as SVG, rather than text.
  *
@@ -19,5 +15,10 @@ import { Part } from '../lit-html.js';
  * sanitized or escaped, as it may lead to cross-site-scripting
  * vulnerabilities.
  */
-export declare const unsafeSVG: (value: unknown) => (part: Part) => void;
+export declare const unsafeSVG: (value: string | typeof import("../lit-html.js").noChange | typeof import("../lit-html.js").nothing) => import("../directive.js").DirectiveResult<typeof UnsafeSVGDirective>;
+/**
+ * The type of the class that powers this directive. Necessary for naming the
+ * directive's return type.
+ */
+export type { UnsafeSVGDirective };
 //# sourceMappingURL=unsafe-svg.d.ts.map

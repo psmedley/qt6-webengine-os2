@@ -12,7 +12,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/values.h"
 #include "content/common/content_export.h"
@@ -25,25 +24,6 @@ namespace content {
 class WebContents;
 class WebUIController;
 class WebUIMessageHandler;
-
-template <typename T>
-static T WebUIGetValue(const base::Value& value);
-
-template <>
-inline bool WebUIGetValue<bool>(const base::Value& value) {
-  return value.GetBool();
-}
-
-template <>
-inline int WebUIGetValue<int>(const base::Value& value) {
-  return value.GetInt();
-}
-
-template <>
-inline const std::string& WebUIGetValue<const std::string&>(
-    const base::Value& value) {
-  return value.GetString();
-}
 
 // A WebUI sets up the datasources and message handlers for a given HTML-based
 // UI.
@@ -59,7 +39,7 @@ class CONTENT_EXPORT WebUI {
 
   // Returns JavaScript code that, when executed, calls the function specified
   // by |function_name| with the arguments specified in |arg_list|.
-  static base::string16 GetJavascriptCall(
+  static std::u16string GetJavascriptCall(
       const std::string& function_name,
       const std::vector<const base::Value*>& arg_list);
 
@@ -78,8 +58,8 @@ class CONTENT_EXPORT WebUI {
   // Gets a custom tab title provided by the Web UI. If there is no title
   // override, the string will be empty which should trigger the default title
   // behavior for the tab.
-  virtual const base::string16& GetOverriddenTitle() = 0;
-  virtual void OverrideTitle(const base::string16& title) = 0;
+  virtual const std::u16string& GetOverriddenTitle() = 0;
+  virtual void OverrideTitle(const std::u16string& title) = 0;
 
   // Allows a controller to override the BindingsPolicy that should be enabled
   // for this page.
@@ -167,7 +147,7 @@ class CONTENT_EXPORT WebUI {
                      const base::ListValue* list) {
       base::span<const base::Value> args = list->GetList();
       CHECK_EQ(args.size(), sizeof...(Args)) << message;
-      callback.Run(WebUIGetValue<Args>(args[Is])...);
+      callback.Run(GetValue<Args>(args[Is])...);
     }
   };
 };

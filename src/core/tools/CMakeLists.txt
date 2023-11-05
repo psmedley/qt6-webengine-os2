@@ -3,14 +3,19 @@
 #  WEBENGINECORE DICT CONVERT TOOL
 ##
 
-if(QT_FEATURE_webengine_spellchecker)
+if(QT_FEATURE_webengine_spellchecker AND NOT CMAKE_CROSSCOMPILING)
     qt_get_tool_target_name(dict_target_name qwebengine_convert_dict)
     qt_internal_add_tool(${dict_target_name}
         TARGET_DESCRIPTION "QtWebEngine Dictionary Conversion Tool"
         INSTALL_DIR ${INSTALL_LIBEXECDIR}
         TOOLS_TARGET WebEngineCore
         SOURCES main.cpp
+        INCLUDE_DIRECTORIES
+            ../../3rdparty/chromium/third_party/abseil-cpp
     )
+    if(COMMAND qt_internal_return_unless_building_tools)
+        qt_internal_return_unless_building_tools()
+    endif()
     qt_skip_warnings_are_errors(${dict_target_name})
     add_dependencies(${dict_target_name} WebEngineCore)
     qt_internal_extend_target(${dict_target_name} CONDITION WIN32

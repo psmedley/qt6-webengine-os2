@@ -14,7 +14,6 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -37,9 +36,9 @@ UsbDeviceImpl::UsbDeviceImpl(ScopedLibusbDeviceRef platform_device,
                 descriptor.idVendor,
                 descriptor.idProduct,
                 descriptor.bcdDevice,
-                base::string16(),
-                base::string16(),
-                base::string16(),
+                std::u16string(),
+                std::u16string(),
+                std::u16string(),
                 libusb_get_bus_number(platform_device.get()),
                 libusb_get_port_number(platform_device.get())),
       platform_device_(std::move(platform_device)) {

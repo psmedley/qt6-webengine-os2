@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/paint/svg_shape_painter.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_marker.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_shape.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
@@ -22,13 +23,13 @@
 
 namespace blink {
 
-static base::Optional<AffineTransform> SetupNonScalingStrokeContext(
+static absl::optional<AffineTransform> SetupNonScalingStrokeContext(
     const LayoutSVGShape& layout_svg_shape,
     GraphicsContextStateSaver& state_saver) {
   const AffineTransform& non_scaling_stroke_transform =
       layout_svg_shape.NonScalingStrokeTransform();
   if (!non_scaling_stroke_transform.IsInvertible())
-    return base::nullopt;
+    return absl::nullopt;
   state_saver.Save();
   state_saver.Context().ConcatCTM(non_scaling_stroke_transform.Inverse());
   return non_scaling_stroke_transform;
@@ -74,9 +75,11 @@ void SVGShapePainter::Paint(const PaintInfo& paint_info) {
           case PT_FILL: {
             PaintFlags fill_flags;
             if (!SVGObjectPainter(layout_svg_shape_)
-                     .PreparePaint(paint_info, style, kApplyToFillMode,
-                                   fill_flags))
+                     .PreparePaint(paint_info.context,
+                                   paint_info.IsRenderingClipPathAsMaskImage(),
+                                   style, kApplyToFillMode, fill_flags)) {
               break;
+            }
             fill_flags.setAntiAlias(should_anti_alias);
             FillShape(paint_info.context, fill_flags,
                       FillRuleFromStyle(paint_info, style));
@@ -85,7 +88,7 @@ void SVGShapePainter::Paint(const PaintInfo& paint_info) {
           case PT_STROKE:
             if (style.HasVisibleStroke()) {
               GraphicsContextStateSaver state_saver(paint_info.context, false);
-              base::Optional<AffineTransform> non_scaling_transform;
+              absl::optional<AffineTransform> non_scaling_transform;
 
               if (layout_svg_shape_.HasNonScalingStroke()) {
                 // Non-scaling stroke needs to reset the transform back to the
@@ -99,9 +102,12 @@ void SVGShapePainter::Paint(const PaintInfo& paint_info) {
               PaintFlags stroke_flags;
               if (!SVGObjectPainter(layout_svg_shape_)
                        .PreparePaint(
-                           paint_info, style, kApplyToStrokeMode, stroke_flags,
-                           base::OptionalOrNullptr(non_scaling_transform)))
+                           paint_info.context,
+                           paint_info.IsRenderingClipPathAsMaskImage(), style,
+                           kApplyToStrokeMode, stroke_flags,
+                           base::OptionalOrNullptr(non_scaling_transform))) {
                 break;
+              }
               stroke_flags.setAntiAlias(should_anti_alias);
 
               StrokeData stroke_data;
@@ -162,8 +168,7 @@ void SVGShapePainter::FillShape(GraphicsContext& context,
                        DarkModeFilter::ElementRole::kSVG);
     }
   }
-  PaintTiming& timing = PaintTiming::From(
-      layout_svg_shape_.GetElement()->GetDocument().TopDocument());
+  PaintTiming& timing = PaintTiming::From(layout_svg_shape_.GetDocument());
   timing.MarkFirstContentfulPaint();
 }
 
@@ -188,8 +193,7 @@ void SVGShapePainter::StrokeShape(GraphicsContext& context,
       context.DrawPath(use_path->GetSkPath(), flags,
                        DarkModeFilter::ElementRole::kSVG);
   }
-  PaintTiming& timing = PaintTiming::From(
-      layout_svg_shape_.GetElement()->GetDocument().TopDocument());
+  PaintTiming& timing = PaintTiming::From(layout_svg_shape_.GetDocument());
   timing.MarkFirstContentfulPaint();
 }
 

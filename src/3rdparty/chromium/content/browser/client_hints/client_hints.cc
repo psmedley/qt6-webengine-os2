@@ -11,10 +11,8 @@
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/optional.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/devtools/devtools_instrumentation.h"
@@ -35,12 +33,14 @@
 #include "net/nqe/network_quality_estimator_params.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
+#include "third_party/blink/public/common/client_hints/enabled_client_hints.h"
 #include "third_party/blink/public/common/device_memory/approximated_device_memory.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
-#include "third_party/blink/public/platform/web_client_hints_type.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 
@@ -77,7 +77,7 @@ double GetRandomMultiplier(const std::string& host) {
 }
 
 unsigned long RoundRtt(const std::string& host,
-                       const base::Optional<base::TimeDelta>& rtt) {
+                       const absl::optional<base::TimeDelta>& rtt) {
   if (!rtt.has_value()) {
     // RTT is unavailable. So, return the fastest value.
     return 0;
@@ -96,7 +96,7 @@ unsigned long RoundRtt(const std::string& host,
 }
 
 double RoundKbpsToMbps(const std::string& host,
-                       const base::Optional<int32_t>& downlink_kbps) {
+                       const absl::optional<int32_t>& downlink_kbps) {
   // Limit the size of the buckets and the maximum reported value to reduce
   // fingerprinting.
   static const size_t kGranularityKbps = 50;
@@ -174,23 +174,23 @@ std::string DoubleToSpecCompliantString(double value) {
 
 // Return the effective connection type value overridden for web APIs.
 // If no override value has been set, a null value is returned.
-base::Optional<net::EffectiveConnectionType>
+absl::optional<net::EffectiveConnectionType>
 GetWebHoldbackEffectiveConnectionType() {
   if (!base::FeatureList::IsEnabled(
           features::kNetworkQualityEstimatorWebHoldback)) {
-    return base::nullopt;
+    return absl::nullopt;
   }
   std::string effective_connection_type_param =
       base::GetFieldTrialParamValueByFeature(
           features::kNetworkQualityEstimatorWebHoldback,
           "web_effective_connection_type_override");
 
-  base::Optional<net::EffectiveConnectionType> effective_connection_type =
+  absl::optional<net::EffectiveConnectionType> effective_connection_type =
       net::GetEffectiveConnectionTypeForName(effective_connection_type_param);
   DCHECK(effective_connection_type_param.empty() || effective_connection_type);
 
   if (!effective_connection_type)
-    return base::nullopt;
+    return absl::nullopt;
   DCHECK_NE(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN,
             effective_connection_type.value());
   return effective_connection_type;
@@ -277,7 +277,7 @@ void AddRttHeader(net::HttpRequestHeaders* headers,
                   const GURL& url) {
   DCHECK(headers);
 
-  base::Optional<net::EffectiveConnectionType> web_holdback_ect =
+  absl::optional<net::EffectiveConnectionType> web_holdback_ect =
       GetWebHoldbackEffectiveConnectionType();
 
   base::TimeDelta http_rtt;
@@ -298,7 +298,7 @@ void AddDownlinkHeader(net::HttpRequestHeaders* headers,
                        network::NetworkQualityTracker* network_quality_tracker,
                        const GURL& url) {
   DCHECK(headers);
-  base::Optional<net::EffectiveConnectionType> web_holdback_ect =
+  absl::optional<net::EffectiveConnectionType> web_holdback_ect =
       GetWebHoldbackEffectiveConnectionType();
 
   int32_t downlink_throughput_kbps;
@@ -329,7 +329,7 @@ void AddEctHeader(net::HttpRequestHeaders* headers,
   DCHECK_EQ(blink::kWebEffectiveConnectionTypeMappingCount,
             static_cast<size_t>(net::EFFECTIVE_CONNECTION_TYPE_LAST));
 
-  base::Optional<net::EffectiveConnectionType> web_holdback_ect =
+  absl::optional<net::EffectiveConnectionType> web_holdback_ect =
       GetWebHoldbackEffectiveConnectionType();
 
   int effective_connection_type;
@@ -355,6 +355,19 @@ void AddLangHeader(net::HttpRequestHeaders* headers, BrowserContext* context) {
           GetContentClient()->browser()->GetAcceptLangs(context)));
 }
 
+void AddPrefersColorSchemeHeader(net::HttpRequestHeaders* headers,
+                                 FrameTreeNode* frame_tree_node) {
+  if (!frame_tree_node)
+    return;
+  blink::mojom::PreferredColorScheme preferred_color_scheme =
+      frame_tree_node->current_frame_host()->GetPreferredColorScheme();
+  bool is_dark_mode =
+      preferred_color_scheme == blink::mojom::PreferredColorScheme::kDark;
+  SetHeaderToString(headers,
+                    network::mojom::WebClientHintsType::kPrefersColorScheme,
+                    is_dark_mode ? "dark" : "light");
+}
+
 bool IsValidURLForClientHints(const GURL& url) {
   if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() ||
       (url.SchemeIs(url::kHttpScheme) && !net::IsLocalhost(url)))
@@ -365,8 +378,8 @@ bool IsValidURLForClientHints(const GURL& url) {
   return true;
 }
 
-bool LangClientHintEnabled() {
-  return base::FeatureList::IsEnabled(features::kLangClientHintHeader);
+bool UserAgentClientHintEnabled() {
+  return base::FeatureList::IsEnabled(blink::features::kUserAgentClientHint);
 }
 
 void AddUAHeader(net::HttpRequestHeaders* headers,
@@ -382,7 +395,7 @@ std::string SerializeHeaderString(std::string str) {
       .value_or(std::string());
 }
 
-bool IsFeaturePolicyForClientHintsEnabled() {
+bool IsPermissionsPolicyForClientHintsEnabled() {
   return base::FeatureList::IsEnabled(features::kFeaturePolicyForClientHints);
 }
 
@@ -396,7 +409,7 @@ struct ClientHintsExtendedData {
     // in order to get the main frame URL, we should use the provided URL
     // instead. Otherwise, the current frame is an iframe and the main frame URL
     // was committed, so we can safely get it from it. Similarly, an
-    // in-navigation main frame doesn't yet have a feature policy.
+    // in-navigation main frame doesn't yet have a permissions policy.
     is_main_frame = !frame_tree_node || frame_tree_node->IsMainFrame();
     if (is_main_frame) {
       main_frame_url = url;
@@ -405,7 +418,8 @@ struct ClientHintsExtendedData {
       RenderFrameHostImpl* main_frame =
           frame_tree_node->frame_tree()->GetMainFrame();
       main_frame_url = main_frame->GetLastCommittedURL();
-      feature_policy = main_frame->feature_policy();
+      permissions_policy = blink::PermissionsPolicy::CopyStateFrom(
+          main_frame->permissions_policy());
       is_1p_origin = resource_origin.IsSameOriginWith(
           main_frame->GetLastCommittedOrigin());
     }
@@ -413,21 +427,22 @@ struct ClientHintsExtendedData {
     delegate->GetAllowedClientHintsFromSource(main_frame_url, &hints);
   }
 
-  blink::WebEnabledClientHints hints;
+  blink::EnabledClientHints hints;
   url::Origin resource_origin;
   bool is_main_frame = false;
   GURL main_frame_url;
-  const blink::FeaturePolicy* feature_policy = nullptr;
+  std::unique_ptr<blink::PermissionsPolicy> permissions_policy;
   bool is_1p_origin = false;
 };
 
 bool IsClientHintAllowed(const ClientHintsExtendedData& data,
                          network::mojom::WebClientHintsType type) {
-  if (!IsFeaturePolicyForClientHintsEnabled() || data.is_main_frame)
+  if (!IsPermissionsPolicyForClientHintsEnabled() || data.is_main_frame)
     return data.is_1p_origin;
-  return data.feature_policy &&
-         data.feature_policy->IsFeatureEnabledForOrigin(
-             blink::kClientHintsFeaturePolicyMapping[static_cast<int>(type)],
+  return data.permissions_policy &&
+         data.permissions_policy->IsFeatureEnabledForOrigin(
+             blink::kClientHintsPermissionsPolicyMapping[static_cast<int>(
+                 type)],
              data.resource_origin);
 }
 
@@ -461,14 +476,14 @@ void UpdateNavigationRequestClientUaHeadersImpl(
     FrameTreeNode* frame_tree_node,
     ClientUaHeaderCallType call_type,
     net::HttpRequestHeaders* headers) {
-  base::Optional<blink::UserAgentMetadata> ua_metadata;
+  absl::optional<blink::UserAgentMetadata> ua_metadata;
   bool disable_due_to_custom_ua = false;
   if (override_ua) {
     NavigatorDelegate* nav_delegate =
         frame_tree_node ? frame_tree_node->navigator().GetDelegate() : nullptr;
     ua_metadata =
         nav_delegate ? nav_delegate->GetUserAgentOverride().ua_metadata_override
-                     : base::nullopt;
+                     : absl::nullopt;
     // If a custom UA override is set, but no value is provided for UA client
     // hints, disable them.
     disable_due_to_custom_ua = !ua_metadata.has_value();
@@ -491,7 +506,7 @@ void UpdateNavigationRequestClientUaHeadersImpl(
     // The `Sec-CH-UA` client hint is attached to all outgoing requests. This is
     // (intentionally) different than other client hints.
     // It's barred behind ShouldAddClientHints to make sure it's controlled by
-    // FeaturePolicy.
+    // Permissions Policy.
     //
     // https://wicg.github.io/client-hints-infrastructure/#abstract-opdef-append-client-hints-to-request
     if (ShouldAddClientHint(data, network::mojom::WebClientHintsType::kUA)) {
@@ -500,7 +515,7 @@ void UpdateNavigationRequestClientUaHeadersImpl(
     }
     // The `Sec-CH-UA-Mobile client hint was also deemed "low entropy" and can
     // safely be sent with every request. Similarly to UA, ShouldAddClientHints
-    // makes sure it's controlled by FeaturePolicy.
+    // makes sure it's controlled by Permissions Policy.
     if (ShouldAddClientHint(data,
                             network::mojom::WebClientHintsType::kUAMobile)) {
       AddUAHeader(headers, network::mojom::WebClientHintsType::kUAMobile,
@@ -537,6 +552,11 @@ void UpdateNavigationRequestClientUaHeadersImpl(
       AddUAHeader(headers, network::mojom::WebClientHintsType::kUAModel,
                   SerializeHeaderString(ua_metadata->model));
     }
+    if (ShouldAddClientHint(data,
+                            network::mojom::WebClientHintsType::kUABitness)) {
+      AddUAHeader(headers, network::mojom::WebClientHintsType::kUABitness,
+                  SerializeHeaderString(ua_metadata->bitness));
+    }
   } else if (call_type == ClientUaHeaderCallType::kAfterCreated) {
     RemoveClientHintHeader(network::mojom::WebClientHintsType::kUA, headers);
     RemoveClientHintHeader(network::mojom::WebClientHintsType::kUAMobile,
@@ -550,6 +570,8 @@ void UpdateNavigationRequestClientUaHeadersImpl(
     RemoveClientHintHeader(
         network::mojom::WebClientHintsType::kUAPlatformVersion, headers);
     RemoveClientHintHeader(network::mojom::WebClientHintsType::kUAModel,
+                           headers);
+    RemoveClientHintHeader(network::mojom::WebClientHintsType::kUABitness,
                            headers);
   }
 }
@@ -569,12 +591,12 @@ bool ShouldAddClientHints(const GURL& url,
 }
 
 unsigned long RoundRttForTesting(const std::string& host,
-                                 const base::Optional<base::TimeDelta>& rtt) {
+                                 const absl::optional<base::TimeDelta>& rtt) {
   return RoundRtt(host, rtt);
 }
 
 double RoundKbpsToMbpsForTesting(const std::string& host,
-                                 const base::Optional<int32_t>& downlink_kbps) {
+                                 const absl::optional<int32_t>& downlink_kbps) {
   return RoundKbpsToMbps(host, downlink_kbps);
 }
 
@@ -585,7 +607,7 @@ void UpdateNavigationRequestClientUaHeaders(
     FrameTreeNode* frame_tree_node,
     net::HttpRequestHeaders* headers) {
   DCHECK(frame_tree_node);
-  if (!delegate->UserAgentClientHintEnabled() ||
+  if (!UserAgentClientHintEnabled() ||
       !ShouldAddClientHints(url, frame_tree_node, delegate)) {
     return;
   }
@@ -597,13 +619,23 @@ void UpdateNavigationRequestClientUaHeaders(
 
 namespace {
 
-void AddRequestClientHintsHeaders(const GURL& url,
-                                  net::HttpRequestHeaders* headers,
-                                  BrowserContext* context,
-                                  ClientHintsControllerDelegate* delegate,
-                                  bool is_ua_override_on,
-                                  FrameTreeNode* frame_tree_node) {
-  const ClientHintsExtendedData data(url, frame_tree_node, delegate);
+void AddRequestClientHintsHeaders(
+    const GURL& url,
+    net::HttpRequestHeaders* headers,
+    BrowserContext* context,
+    ClientHintsControllerDelegate* delegate,
+    bool is_ua_override_on,
+    FrameTreeNode* frame_tree_node,
+    const blink::ParsedPermissionsPolicy& container_policy) {
+  ClientHintsExtendedData data(url, frame_tree_node, delegate);
+
+  // If there is a container policy, use the same logic as when a new frame is
+  // committed to combine with the parent policy.
+  if (!container_policy.empty()) {
+    data.permissions_policy = blink::PermissionsPolicy::CreateFromParentPolicy(
+        data.permissions_policy.get(), container_policy,
+        url::Origin::Create(url));
+  }
 
   // Add Headers
   if (ShouldAddClientHint(data,
@@ -633,10 +665,15 @@ void AddRequestClientHintsHeaders(const GURL& url,
     AddLangHeader(headers, context);
   }
 
-  if (delegate->UserAgentClientHintEnabled()) {
+  if (UserAgentClientHintEnabled()) {
     UpdateNavigationRequestClientUaHeadersImpl(
         url, delegate, is_ua_override_on, frame_tree_node,
         ClientUaHeaderCallType::kDuringCreation, headers);
+  }
+
+  if (ShouldAddClientHint(
+          data, network::mojom::WebClientHintsType::kPrefersColorScheme)) {
+    AddPrefersColorSchemeHeader(headers, frame_tree_node);
   }
 
   // Static assert that triggers if a new client hint header is added. If a
@@ -644,7 +681,7 @@ void AddRequestClientHintsHeaders(const GURL& url,
   // If possible, logic should be added above so that the request headers for
   // the newly added client hint can be added to the request.
   static_assert(
-      network::mojom::WebClientHintsType::kUAPlatformVersion ==
+      network::mojom::WebClientHintsType::kUAReduced ==
           network::mojom::WebClientHintsType::kMaxValue,
       "Consider adding client hint request headers from the browser process");
 
@@ -678,7 +715,7 @@ void AddPrefetchNavigationRequestClientHintsHeaders(
   }
 
   AddRequestClientHintsHeaders(url, headers, context, delegate,
-                               is_ua_override_on, nullptr);
+                               is_ua_override_on, nullptr, {});
 }
 
 void AddNavigationRequestClientHintsHeaders(
@@ -687,7 +724,8 @@ void AddNavigationRequestClientHintsHeaders(
     BrowserContext* context,
     ClientHintsControllerDelegate* delegate,
     bool is_ua_override_on,
-    FrameTreeNode* frame_tree_node) {
+    FrameTreeNode* frame_tree_node,
+    const blink::ParsedPermissionsPolicy& container_policy) {
   DCHECK(frame_tree_node);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(blink::kWebEffectiveConnectionTypeMappingCount,
@@ -701,11 +739,12 @@ void AddNavigationRequestClientHintsHeaders(
   }
 
   AddRequestClientHintsHeaders(url, headers, context, delegate,
-                               is_ua_override_on, frame_tree_node);
+                               is_ua_override_on, frame_tree_node,
+                               container_policy);
 }
 
-base::Optional<std::vector<network::mojom::WebClientHintsType>>
-ParseAndPersistAcceptCHForNagivation(
+absl::optional<std::vector<network::mojom::WebClientHintsType>>
+ParseAndPersistAcceptCHForNavigation(
     const GURL& url,
     const ::network::mojom::ParsedHeadersPtr& headers,
     BrowserContext* context,
@@ -716,10 +755,10 @@ ParseAndPersistAcceptCHForNagivation(
   DCHECK(headers);
 
   if (!headers->accept_ch)
-    return base::nullopt;
+    return absl::nullopt;
 
   if (!IsValidURLForClientHints(url))
-    return base::nullopt;
+    return absl::nullopt;
 
   // Client hints should only be enabled when JavaScript is enabled. Platforms
   // which enable/disable JavaScript on a per-origin basis should implement
@@ -728,21 +767,15 @@ ParseAndPersistAcceptCHForNagivation(
   // WebPreferences setting.
   if (!delegate->IsJavaScriptAllowed(url) ||
       !IsJavascriptEnabled(frame_tree_node)) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Only the main frame should parse accept-CH.
   if (!frame_tree_node->IsMainFrame())
-    return base::nullopt;
-
-  base::Optional<std::vector<network::mojom::WebClientHintsType>> parsed =
-      blink::FilterAcceptCH(headers->accept_ch.value(), LangClientHintEnabled(),
-                            delegate->UserAgentClientHintEnabled());
-  if (!parsed.has_value())
-    return base::nullopt;
+    return absl::nullopt;
 
   base::TimeDelta persist_duration;
-  if (IsFeaturePolicyForClientHintsEnabled()) {
+  if (IsPermissionsPolicyForClientHintsEnabled()) {
     // JSON cannot store "non-finite" values (i.e. NaN or infinite) so
     // base::TimeDelta::Max cannot be used. As this will be removed once
     // the FeaturePolicyForClientHints feature is shipped, a reasonably
@@ -751,13 +784,13 @@ ParseAndPersistAcceptCHForNagivation(
   } else {
     persist_duration = headers->accept_ch_lifetime;
     if (persist_duration.is_zero())
-      return parsed;
+      return headers->accept_ch;
   }
 
-  delegate->PersistClientHints(url::Origin::Create(url), parsed.value(),
-                               persist_duration);
+  delegate->PersistClientHints(url::Origin::Create(url),
+                               headers->accept_ch.value(), persist_duration);
 
-  return parsed;
+  return headers->accept_ch;
 }
 
 CONTENT_EXPORT std::vector<::network::mojom::WebClientHintsType>
@@ -787,7 +820,7 @@ bool AreCriticalHintsMissing(
     const std::vector<network::mojom::WebClientHintsType>& critical_hints) {
   ClientHintsExtendedData data(url, frame_tree_node, delegate);
 
-  // Note: these only check for per-hint origin/feature policy settings, not
+  // Note: these only check for per-hint origin/permissions policy settings, not
   // origin-level or "browser-level" policies like disabiling JS or other
   // features.
   for (auto hint : critical_hints) {

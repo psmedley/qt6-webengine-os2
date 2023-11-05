@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
@@ -44,7 +45,7 @@ bool SoftwareRenderer::Initialize() {
     return false;
   }
 
-  software_surface_->ResizeCanvas(size_);
+  software_surface_->ResizeCanvas(size_, 1.f /*scale_factor*/);
   vsync_provider_ = software_surface_->CreateVSyncProvider();
   RenderFrame();
   return true;

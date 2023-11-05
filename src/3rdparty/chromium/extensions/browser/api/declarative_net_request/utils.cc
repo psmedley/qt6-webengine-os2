@@ -13,6 +13,7 @@
 #include "base/files/file_util.h"
 #include "base/hash/hash.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -25,6 +26,7 @@
 #include "extensions/browser/api/declarative_net_request/ruleset_matcher.h"
 #include "extensions/browser/api/web_request/web_request_info.h"
 #include "extensions/browser/api/web_request/web_request_resource_type.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/api/declarative_net_request/constants.h"
 #include "extensions/common/api/declarative_net_request/dnr_manifest_data.h"
 #include "extensions/common/permissions/api_permission.h"
@@ -42,12 +44,12 @@ namespace dnr_api = api::declarative_net_request;
 // url_pattern_index.fbs. Whenever an extension with an indexed ruleset format
 // version different from the one currently used by Chrome is loaded, the
 // extension ruleset will be reindexed.
-constexpr int kIndexedRulesetFormatVersion = 19;
+constexpr int kIndexedRulesetFormatVersion = 23;
 
 // This static assert is meant to catch cases where
 // url_pattern_index::kUrlPatternIndexFormatVersion is incremented without
 // updating kIndexedRulesetFormatVersion.
-static_assert(url_pattern_index::kUrlPatternIndexFormatVersion == 7,
+static_assert(url_pattern_index::kUrlPatternIndexFormatVersion == 10,
               "kUrlPatternIndexFormatVersion has changed, make sure you've "
               "also updated kIndexedRulesetFormatVersion above.");
 
@@ -122,12 +124,24 @@ void OverrideGetChecksumForTest(int checksum) {
   g_override_checksum_for_test = checksum;
 }
 
+std::string GetIndexedRulesetData(base::span<const uint8_t> data) {
+  return base::StrCat(
+      {GetVersionHeader(),
+       base::StringPiece(reinterpret_cast<const char*>(data.data()),
+                         data.size())});
+}
+
 bool PersistIndexedRuleset(const base::FilePath& path,
                            base::span<const uint8_t> data) {
   // Create the directory corresponding to |path| if it does not exist.
   if (!base::CreateDirectory(path.DirName()))
     return false;
 
+  // Unlike for dynamic rules, we don't use `ImportantFileWriter` here since it
+  // can be quite slow (and this will be called for the extension's indexed
+  // static rulesets). Also the file persisting logic here is simpler than for
+  // dynamic rules where we need to persist both the JSON and indexed rulesets
+  // and keep them in sync.
   base::File ruleset_file(
       path, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
   if (!ruleset_file.IsValid())
@@ -155,6 +169,7 @@ bool PersistIndexedRuleset(const base::FilePath& path,
 
 void ClearRendererCacheOnNavigation() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  extensions::ExtensionsBrowserClient::Get()->ClearBackForwardCache();
   web_cache::WebCacheManager::GetInstance()->ClearCacheOnNavigation();
 }
 
@@ -346,13 +361,14 @@ size_t GetEnabledStaticRuleCount(const CompositeMatcher* composite_matcher) {
 }
 
 bool HasDNRFeedbackPermission(const Extension* extension,
-                              const base::Optional<int>& tab_id) {
+                              const absl::optional<int>& tab_id) {
   const PermissionsData* permissions_data = extension->permissions_data();
   return tab_id.has_value()
              ? permissions_data->HasAPIPermissionForTab(
-                   *tab_id, APIPermission::kDeclarativeNetRequestFeedback)
+                   *tab_id,
+                   mojom::APIPermissionID::kDeclarativeNetRequestFeedback)
              : permissions_data->HasAPIPermission(
-                   APIPermission::kDeclarativeNetRequestFeedback);
+                   mojom::APIPermissionID::kDeclarativeNetRequestFeedback);
 }
 
 }  // namespace declarative_net_request

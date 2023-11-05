@@ -6,6 +6,7 @@
 
 #include "cc/animation/animation.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssnumericvalue_double.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
@@ -349,21 +350,20 @@ TEST_F(CSSAnimationsCompositorSyncTest, SetStartTime) {
   Animation* animation = GetAnimation();
   int compositor_group = animation->CompositorGroup();
 
-  CSSNumberish start_time, current_time;
-  animation->startTime(start_time);
-  animation->currentTime(current_time);
+  V8CSSNumberish* start_time = animation->startTime();
+  V8CSSNumberish* current_time = animation->currentTime();
 
   // Partially rewind the animation via setStartTime.
-  CSSNumberish new_start_time = CSSNumberish::FromDouble(
-      start_time.GetAsDouble() + (current_time.GetAsDouble() / 2));
+  V8CSSNumberish* new_start_time = MakeGarbageCollected<V8CSSNumberish>(
+      start_time->GetAsDouble() + (current_time->GetAsDouble() / 2));
 
   animation->setStartTime(new_start_time, ASSERT_NO_EXCEPTION);
   UpdateAllLifecyclePhasesForTest();
 
   // Verify blink updates.
-  animation->currentTime(current_time);
-  EXPECT_TRUE(current_time.IsDouble());
-  EXPECT_NEAR(250, current_time.GetAsDouble(), kTimeToleranceMilliseconds);
+  current_time = animation->currentTime();
+  EXPECT_TRUE(current_time->IsDouble());
+  EXPECT_NEAR(250, current_time->GetAsDouble(), kTimeToleranceMilliseconds);
   EXPECT_NEAR(0.75, element_->GetComputedStyle()->Opacity(), kTolerance);
 
   // Compositor animation needs to restart and will have a new compositor group.
@@ -394,14 +394,14 @@ TEST_F(CSSAnimationsCompositorSyncTest, SetCurrentTime) {
   int compositor_group = animation->CompositorGroup();
 
   // Advance current time.
-  animation->setCurrentTime(CSSNumberish::FromDouble(750), ASSERT_NO_EXCEPTION);
+  animation->setCurrentTime(MakeGarbageCollected<V8CSSNumberish>(750),
+                            ASSERT_NO_EXCEPTION);
   UpdateAllLifecyclePhasesForTest();
 
   // Verify blink updates.
-  CSSNumberish current_time;
-  animation->currentTime(current_time);
-  EXPECT_TRUE(current_time.IsDouble());
-  EXPECT_NEAR(750, current_time.GetAsDouble(), kTimeToleranceMilliseconds);
+  V8CSSNumberish* current_time = animation->currentTime();
+  EXPECT_TRUE(current_time->IsDouble());
+  EXPECT_NEAR(750, current_time->GetAsDouble(), kTimeToleranceMilliseconds);
   EXPECT_NEAR(0.25, element_->GetComputedStyle()->Opacity(), kTolerance);
 
   // Compositor animation needs to restart and will have a new compositor group.

@@ -12,13 +12,13 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/strings/stringprintf.h"
 #include "base/task/thread_pool.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_constants.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
@@ -141,7 +141,7 @@ bool IsRemovalPermitted(uint64_t removal_mask, PrefService* prefs) {
 
 // Returns true if Sync is currently running (i.e. enabled and not in error).
 bool IsSyncRunning(Profile* profile) {
-  return sync_ui_util::GetStatus(profile) == sync_ui_util::SYNCED;
+  return GetSyncStatusMessageType(profile) == SyncStatusMessageType::kSynced;
 }
 }  // namespace
 
@@ -190,7 +190,8 @@ ExtensionFunction::ResponseAction BrowsingDataSettingsFunction::Run() {
   std::unique_ptr<base::DictionaryValue> options(new base::DictionaryValue);
   options->Set(extension_browsing_data_api_constants::kOriginTypesKey,
                std::move(origin_types));
-  options->SetDouble(extension_browsing_data_api_constants::kSinceKey, since);
+  options->SetDoubleKey(extension_browsing_data_api_constants::kSinceKey,
+                        since);
 
   // Fill dataToRemove and dataRemovalPermitted.
   std::unique_ptr<base::DictionaryValue> selected(new base::DictionaryValue);
@@ -265,7 +266,7 @@ void BrowsingDataSettingsFunction::SetDetails(
   permitted_dict->SetBoolean(data_type, is_permitted);
 }
 
-BrowsingDataRemoverFunction::BrowsingDataRemoverFunction() : observer_(this) {}
+BrowsingDataRemoverFunction::BrowsingDataRemoverFunction() = default;
 
 void BrowsingDataRemoverFunction::OnBrowsingDataRemoverDone(
     uint64_t failed_data_types) {
@@ -278,7 +279,7 @@ void BrowsingDataRemoverFunction::OnTaskFinished() {
   if (--pending_tasks_ > 0)
     return;
   synced_data_deletion_.reset();
-  observer_.RemoveAll();
+  observation_.Reset();
   Respond(NoArguments());
   Release();  // Balanced in StartRemoving.
 }
@@ -360,8 +361,7 @@ bool BrowsingDataRemoverFunction::IsPauseSyncAllowed() {
 
 void BrowsingDataRemoverFunction::StartRemoving() {
   Profile* profile = Profile::FromBrowserContext(browser_context());
-  content::BrowsingDataRemover* remover =
-      content::BrowserContext::GetBrowsingDataRemover(profile);
+  content::BrowsingDataRemover* remover = profile->GetBrowsingDataRemover();
 
   // Add a ref (Balanced in OnTaskFinished)
   AddRef();
@@ -377,7 +377,7 @@ void BrowsingDataRemoverFunction::StartRemoving() {
   // that we're notified after removal) and call remove() with the arguments
   // we've generated above. We can use a raw pointer here, as the browsing data
   // remover is responsible for deleting itself once data removal is complete.
-  observer_.Add(remover);
+  observation_.Observe(remover);
 
   DCHECK_EQ(pending_tasks_, 0);
   pending_tasks_ = 1;
@@ -503,10 +503,9 @@ bool BrowsingDataRemoveFunction::GetRemovalMask(uint64_t* removal_mask) {
   for (base::DictionaryValue::Iterator i(*data_to_remove);
        !i.IsAtEnd();
        i.Advance()) {
-    bool selected = false;
-    if (!i.value().GetAsBoolean(&selected))
+    if (!i.value().is_bool())
       return false;
-    if (selected)
+    if (i.value().GetBool())
       *removal_mask |= MaskForKey(i.key().c_str());
   }
 

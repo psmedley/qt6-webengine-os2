@@ -13,13 +13,12 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/check.h"
+#include "base/location.h"
 #include "base/time/time.h"
 #include "pdf/paint_ready_rect.h"
 #include "pdf/ppapi_migration/callback.h"
 #include "pdf/ppapi_migration/geometry_conversions.h"
 #include "pdf/ppapi_migration/graphics.h"
-#include "ppapi/cpp/completion_callback.h"
-#include "ppapi/cpp/module.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -163,10 +162,10 @@ void PaintManager::EnsureCallbackPending() {
     return;
 
   client_->ScheduleTaskOnMainThread(
-      base::TimeDelta(),
+      FROM_HERE,
       base::BindOnce(&PaintManager::OnManualCallbackComplete,
                      weak_factory_.GetWeakPtr()),
-      0);
+      /*result=*/0, base::TimeDelta());
   manual_callback_pending_ = true;
 }
 
@@ -184,7 +183,7 @@ void PaintManager::DoPaint() {
   // have an unpainted device bound. The needs_binding flag tells us whether to
   // do this later.
   //
-  // Note that |has_pending_resize_| will always be set on the first DoPaint().
+  // Note that `has_pending_resize_` will always be set on the first DoPaint().
   DCHECK(graphics_ || has_pending_resize_);
   if (has_pending_resize_) {
     plugin_size_ = pending_size_;

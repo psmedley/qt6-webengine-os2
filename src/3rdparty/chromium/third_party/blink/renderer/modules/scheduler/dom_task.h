@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 
 namespace blink {
-class DOMScheduler;
 class DOMTaskSignal;
 class ScriptState;
 class V8SchedulerPostTaskCallback;
@@ -22,10 +21,10 @@ class V8SchedulerPostTaskCallback;
 // callback's v8 context is invalid, in which case, the task will not be run.
 class DOMTask final : public GarbageCollected<DOMTask> {
  public:
-  DOMTask(DOMScheduler*,
-          ScriptPromiseResolver*,
+  DOMTask(ScriptPromiseResolver*,
           V8SchedulerPostTaskCallback*,
           DOMTaskSignal*,
+          base::SingleThreadTaskRunner*,
           base::TimeDelta delay);
 
   virtual void Trace(Visitor*) const;
@@ -36,17 +35,20 @@ class DOMTask final : public GarbageCollected<DOMTask> {
   // Internal step of Invoke that handles invoking the callback, including
   // catching any errors and retrieving the result.
   void InvokeInternal(ScriptState*);
-  void Abort();
+  void OnAbort();
 
   void RecordTaskStartMetrics();
 
-  Member<DOMScheduler> scheduler_;
   TaskHandle task_handle_;
   Member<V8SchedulerPostTaskCallback> callback_;
   Member<ScriptPromiseResolver> resolver_;
   probe::AsyncTaskId async_task_id_;
+  // Do not remove. For dynamic priority task queues, |signal_| ensures that the
+  // associated WebSchedulingTaskQueue stays alive until after this task runs,
+  // which is necessary to ensure throttling works correctly.
   Member<DOMTaskSignal> signal_;
   const base::TimeTicks queue_time_;
+  const base::TimeDelta delay_;
 };
 
 }  // namespace blink

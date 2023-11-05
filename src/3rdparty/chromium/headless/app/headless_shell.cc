@@ -30,6 +30,7 @@
 #include "cc/base/switches.h"
 #include "components/viz/common/switches.h"
 #include "content/public/app/content_main.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "headless/app/headless_shell.h"
@@ -51,13 +52,17 @@
 #include "ui/gfx/geometry/size.h"
 
 #if defined(OS_WIN)
-#include "components/crash/core/app/crash_switches.h"
+#include "components/crash/core/app/crash_switches.h"  // nogncheck
 #include "components/crash/core/app/run_as_crashpad_handler_win.h"
 #include "sandbox/win/src/sandbox_types.h"
 #endif
 
 #if defined(OS_MAC)
-#include "components/os_crypt/os_crypt_switches.h"
+#include "components/os_crypt/os_crypt_switches.h"  // nogncheck
+#endif
+
+#if defined(HEADLESS_USE_POLICY)
+#include "headless/lib/browser/policy/headless_mode_policy.h"
 #endif
 
 namespace headless {
@@ -225,6 +230,18 @@ HeadlessShell::~HeadlessShell() = default;
 
 void HeadlessShell::OnStart(HeadlessBrowser* browser) {
   browser_ = browser;
+
+#if defined(HEADLESS_USE_POLICY)
+  if (policy::HeadlessModePolicy::IsHeadlessDisabled(
+          static_cast<HeadlessBrowserImpl*>(browser)->GetPrefs())) {
+    LOG(ERROR) << "Headless mode is disabled by policy.";
+    browser_->BrowserMainThread()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&HeadlessShell::Shutdown, weak_factory_.GetWeakPtr()));
+    return;
+  }
+#endif
+
   devtools_client_ = HeadlessDevToolsClient::Create();
   file_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
@@ -302,15 +319,26 @@ void HeadlessShell::Detach() {
 }
 
 void HeadlessShell::Shutdown() {
+  DCHECK(browser_);
   if (web_contents_)
     Detach();
-  browser_context_->Close();
+  if (browser_context_)
+    browser_context_->Close();
   browser_->Shutdown();
 }
 
 void HeadlessShell::DevToolsTargetReady() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  web_contents_->GetDevToolsTarget()->AttachClient(devtools_client_.get());
+  HeadlessDevToolsTarget* target = web_contents_->GetDevToolsTarget();
+  target->AttachClient(devtools_client_.get());
+  if (!target->IsAttached()) {
+    LOG(ERROR) << "Could not attach DevTools target.";
+    browser_->BrowserMainThread()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&HeadlessShell::Shutdown, weak_factory_.GetWeakPtr()));
+    return;
+  }
+
   devtools_client_->GetInspector()->GetExperimental()->AddObserver(this);
   devtools_client_->GetPage()->GetExperimental()->AddObserver(this);
   devtools_client_->GetPage()->Enable();
@@ -388,6 +416,11 @@ void HeadlessShell::FetchTimeout() {
   LOG(INFO) << "Timeout.";
   devtools_client_->GetPage()->GetExperimental()->StopLoading(
       page::StopLoadingParams::Builder().Build());
+  // After calling page.stopLoading() the page will not fire any
+  // life cycle events, so we have to proceed on our own.
+  browser_->BrowserMainThread()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&HeadlessShell::OnPageReady, weak_factory_.GetWeakPtr()));
 }
 
 void HeadlessShell::OnTargetCrashed(
@@ -755,6 +788,11 @@ int HeadlessShellMain(int argc, const char** argv) {
   if (command_line.HasSwitch(switches::kUseGL)) {
     builder.SetGLImplementation(
         command_line.GetSwitchValueASCII(switches::kUseGL));
+  }
+
+  if (command_line.HasSwitch(switches::kUseANGLE)) {
+    builder.SetANGLEImplementation(
+        command_line.GetSwitchValueASCII(switches::kUseANGLE));
   }
 
   if (command_line.HasSwitch(switches::kUserDataDir)) {

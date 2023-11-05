@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/containers/flat_set.h"
+#include "base/hash/hash.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/stringprintf.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
@@ -45,10 +46,6 @@ std::string GetStringNameForOptimizationType(
       return "LoadingPredictor";
     case proto::OptimizationType::FAST_HOST_HINTS:
       return "FastHostHints";
-    case proto::OptimizationType::DELAY_ASYNC_SCRIPT_EXECUTION:
-      return "DelayAsyncScriptExecution";
-    case proto::OptimizationType::DELAY_COMPETING_LOW_PRIORITY_REQUESTS:
-      return "DelayCompetingLowPriorityRequests";
     case proto::OptimizationType::LITE_VIDEO:
       return "LiteVideo";
     case proto::OptimizationType::LINK_PERFORMANCE:
@@ -57,6 +54,10 @@ std::string GetStringNameForOptimizationType(
       return "ShoppingPagePredictor";
     case proto::OptimizationType::LOGIN_DETECTION:
       return "LoginDetection";
+    case proto::OptimizationType::MERCHANT_TRUST_SIGNALS:
+      return "MerchantTrustSignals";
+    case proto::OptimizationType::PRICE_TRACKING:
+      return "PriceTracking";
   }
   NOTREACHED();
   return std::string();

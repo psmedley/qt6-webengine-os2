@@ -4,7 +4,7 @@
 
 #include "components/autofill_assistant/browser/actions/get_element_status_action.h"
 
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
@@ -13,6 +13,8 @@
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/user_data_util.h"
+#include "components/autofill_assistant/browser/web/element_store.h"
+#include "components/autofill_assistant/browser/web/web_controller.h"
 #include "third_party/re2/src/re2/re2.h"
 
 namespace autofill_assistant {
@@ -92,28 +94,65 @@ GetElementStatusAction::~GetElementStatusAction() = default;
 void GetElementStatusAction::InternalProcessAction(
     ProcessActionCallback callback) {
   callback_ = std::move(callback);
-  selector_ = Selector(proto_.get_element_status().element());
 
-  if (selector_.empty()) {
+  switch (proto_.get_element_status().element_case()) {
+    case GetElementStatusProto::kSelector:
+      GetElementBySelector(Selector(proto_.get_element_status().selector()));
+      return;
+    case GetElementStatusProto::kClientId:
+      GetElementByClientId(proto_.get_element_status().client_id());
+      return;
+    case GetElementStatusProto::ELEMENT_NOT_SET:
+      EndAction(ClientStatus(INVALID_ACTION));
+      return;
+  }
+}
+
+void GetElementStatusAction::GetElementBySelector(const Selector& selector) {
+  if (selector.empty()) {
     VLOG(1) << __func__ << ": empty selector";
     EndAction(ClientStatus(INVALID_SELECTOR));
     return;
   }
 
   delegate_->ShortWaitForElementWithSlowWarning(
-      selector_,
+      selector,
       base::BindOnce(&GetElementStatusAction::OnWaitForElementTimed,
                      weak_ptr_factory_.GetWeakPtr(),
                      base::BindOnce(&GetElementStatusAction::OnWaitForElement,
-                                    weak_ptr_factory_.GetWeakPtr())));
+                                    weak_ptr_factory_.GetWeakPtr(), selector)));
 }
 
 void GetElementStatusAction::OnWaitForElement(
+    const Selector& selector,
     const ClientStatus& element_status) {
   if (!element_status.ok()) {
     EndAction(element_status);
     return;
   }
+
+  delegate_->FindElement(selector,
+                         base::BindOnce(&GetElementStatusAction::OnGetElement,
+                                        weak_ptr_factory_.GetWeakPtr()));
+}
+
+void GetElementStatusAction::GetElementByClientId(
+    const ClientIdProto& client_id) {
+  auto element = std::make_unique<ElementFinder::Result>();
+  auto* element_ptr = element.get();
+  OnGetElement(delegate_->GetElementStore()->GetElement(client_id.identifier(),
+                                                        element_ptr),
+               std::move(element));
+}
+
+void GetElementStatusAction::OnGetElement(
+    const ClientStatus& status,
+    std::unique_ptr<ElementFinder::Result> element) {
+  if (!status.ok()) {
+    EndAction(status);
+    return;
+  }
+  element_ = std::move(element);
 
   std::vector<std::string> attribute_list;
   switch (proto_.get_element_status().value_source()) {
@@ -128,14 +167,10 @@ void GetElementStatusAction::OnWaitForElement(
       return;
   }
 
-  delegate_->FindElement(
-      selector_,
-      base::BindOnce(
-          &action_delegate_util::TakeElementAndGetProperty<std::string>,
-          base::BindOnce(&ActionDelegate::GetStringAttribute,
-                         delegate_->GetWeakPtr(), attribute_list),
-          base::BindOnce(&GetElementStatusAction::OnGetStringAttribute,
-                         weak_ptr_factory_.GetWeakPtr())));
+  delegate_->GetWebController()->GetStringAttribute(
+      attribute_list, *element_,
+      base::BindOnce(&GetElementStatusAction::OnGetStringAttribute,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void GetElementStatusAction::OnGetStringAttribute(const ClientStatus& status,
@@ -147,29 +182,42 @@ void GetElementStatusAction::OnGetStringAttribute(const ClientStatus& status,
 
   const auto& expected_match =
       proto_.get_element_status().expected_value_match().text_match();
-  MaybeRe2 expected_re2;
   switch (expected_match.value_source_case()) {
-    case GetElementStatusProto::TextMatch::kValue:
-      expected_re2.value = expected_match.value();
-      break;
-    case GetElementStatusProto::TextMatch::kAutofillValue: {
-      ClientStatus autofill_status = GetFormattedAutofillValue(
-          expected_match.autofill_value(), delegate_->GetUserData(),
-          &expected_re2.value);
-      if (!autofill_status.ok()) {
-        EndAction(autofill_status);
-        return;
-      }
-      break;
-    }
     case GetElementStatusProto::TextMatch::kRe2:
-      expected_re2.value = expected_match.re2();
-      expected_re2.is_re2 = true;
-      break;
+      CompareResult(text, expected_match.re2(), /* is_re2= */ true);
+      return;
+    case GetElementStatusProto::TextMatch::kTextValue:
+      user_data::ResolveTextValue(
+          expected_match.text_value(), *element_, delegate_,
+          base::BindOnce(&GetElementStatusAction::OnResolveTextValue,
+                         weak_ptr_factory_.GetWeakPtr(), text));
+      return;
     case GetElementStatusProto::TextMatch::VALUE_SOURCE_NOT_SET:
       EndAction(ClientStatus(INVALID_ACTION));
       return;
   }
+}
+
+void GetElementStatusAction::OnResolveTextValue(const std::string& text,
+                                                const ClientStatus& status,
+                                                const std::string& value) {
+  if (!status.ok()) {
+    EndAction(status);
+    return;
+  }
+
+  CompareResult(text, value, /* is_re2= */ false);
+}
+
+void GetElementStatusAction::CompareResult(const std::string& text,
+                                           const std::string& expected_value,
+                                           bool is_re2) {
+  MaybeRe2 expected_re2;
+  expected_re2.value = expected_value;
+  expected_re2.is_re2 = is_re2;
+
+  const auto& expected_match =
+      proto_.get_element_status().expected_value_match().text_match();
 
   auto* result = processed_action_proto_->mutable_get_element_status_result();
   result->set_not_empty(!text.empty());

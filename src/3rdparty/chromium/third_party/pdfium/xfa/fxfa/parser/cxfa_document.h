@@ -7,11 +7,13 @@
 #ifndef XFA_FXFA_PARSER_CXFA_DOCUMENT_H_
 #define XFA_FXFA_PARSER_CXFA_DOCUMENT_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <map>
 #include <memory>
 #include <vector>
 
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "fxjs/gc/heap.h"
 #include "third_party/base/optional.h"
@@ -21,6 +23,7 @@
 #include "v8/include/cppgc/persistent.h"
 #include "v8/include/cppgc/visitor.h"
 #include "xfa/fxfa/fxfa.h"
+#include "xfa/fxfa/fxfa_basic.h"
 #include "xfa/fxfa/parser/cxfa_localemgr.h"
 #include "xfa/fxfa/parser/cxfa_nodeowner.h"
 
@@ -67,7 +70,7 @@ class CXFA_Document final : public cppgc::GarbageCollected<CXFA_Document> {
     virtual ~LayoutProcessorIface();
 
     virtual void Trace(cppgc::Visitor* visitor) const;
-    virtual void SetForceRelayout(bool enable) = 0;
+    virtual void SetForceRelayout() = 0;
     virtual void AddChangedContainer(CXFA_Node* pContainer) = 0;
 
     void SetDocument(CXFA_Document* pDocument) { m_pDocument = pDocument; }
@@ -121,7 +124,7 @@ class CXFA_Document final : public cppgc::GarbageCollected<CXFA_Document> {
 
   void DoProtoMerge();
   void DoDataMerge();
-  void DoDataRemerge(bool bDoDataMerge);
+  void DoDataRemerge();
   CXFA_Node* DataMerge_CopyContainer(CXFA_Node* pTemplateNode,
                                      CXFA_Node* pFormNode,
                                      CXFA_Node* pDataScope,

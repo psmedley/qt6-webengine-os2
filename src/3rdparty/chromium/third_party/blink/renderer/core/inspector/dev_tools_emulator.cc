@@ -345,7 +345,6 @@ void DevToolsEmulator::EnableMobileEmulation() {
   is_mobile_layout_theme_enabled_ =
       RuntimeEnabledFeatures::MobileLayoutThemeEnabled();
   RuntimeEnabledFeatures::SetMobileLayoutThemeEnabled(true);
-  ComputedStyle::InvalidateInitialStyle();
   Page::PlatformColorsChanged();
   web_view_->GetPage()->GetSettings().SetForceAndroidOverlayScrollbar(true);
   web_view_->GetPage()->GetSettings().SetViewportStyle(
@@ -363,10 +362,10 @@ void DevToolsEmulator::EnableMobileEmulation() {
   web_view_->SetZoomFactorOverride(1);
   web_view_->GetPage()->SetDefaultPageScaleLimits(0.25f, 5);
 
-  // TODO(wjmaclean): Update all local frames in the WebView's frame tree, not
-  // just a local main frame.
-  if (web_view_->MainFrameImpl())
-    web_view_->MainFrameImpl()->GetFrameView()->UpdateLayout();
+  if (web_view_->MainFrameImpl()) {
+    web_view_->MainFrameImpl()->GetFrameView()->UpdateLifecycleToLayoutClean(
+        DocumentUpdateReason::kInspector);
+  }
 }
 
 void DevToolsEmulator::DisableMobileEmulation() {
@@ -378,7 +377,6 @@ void DevToolsEmulator::DisableMobileEmulation() {
       is_orientation_event_enabled_);
   RuntimeEnabledFeatures::SetMobileLayoutThemeEnabled(
       is_mobile_layout_theme_enabled_);
-  ComputedStyle::InvalidateInitialStyle();
   Page::PlatformColorsChanged();
   web_view_->GetPage()->GetSettings().SetForceAndroidOverlayScrollbar(false);
   web_view_->GetPage()->GetSettings().SetViewportEnabled(
@@ -403,8 +401,10 @@ void DevToolsEmulator::DisableMobileEmulation() {
                                                   embedder_max_page_scale_);
   emulate_mobile_enabled_ = false;
   // MainFrameImpl() could be null during cleanup or remote <-> local swap.
-  if (web_view_->MainFrameImpl())
-    web_view_->MainFrameImpl()->GetFrameView()->UpdateLayout();
+  if (web_view_->MainFrameImpl()) {
+    web_view_->MainFrameImpl()->GetFrameView()->UpdateLifecycleToLayoutClean(
+        DocumentUpdateReason::kInspector);
+  }
 }
 
 TransformationMatrix DevToolsEmulator::ForceViewport(
@@ -422,7 +422,7 @@ TransformationMatrix DevToolsEmulator::ForceViewport(
 }
 
 TransformationMatrix DevToolsEmulator::ResetViewport() {
-  viewport_override_ = base::nullopt;
+  viewport_override_ = absl::nullopt;
   return ComputeRootLayerTransform();
 }
 
@@ -443,13 +443,13 @@ void DevToolsEmulator::ApplyViewportOverride(TransformationMatrix* transform) {
 
   // Translate while taking into account current scroll offset.
   // TODO(lukasza): https://crbug.com/734201: Add OOPIF support.
-  WebSize scroll_offset =
+  gfx::ScrollOffset scroll_offset =
       web_view_->MainFrame()->IsWebLocalFrame()
           ? web_view_->MainFrame()->ToWebLocalFrame()->GetScrollOffset()
-          : WebSize();
+          : gfx::ScrollOffset();
   gfx::PointF visual_offset = web_view_->VisualViewportOffset();
-  float scroll_x = scroll_offset.width + visual_offset.x();
-  float scroll_y = scroll_offset.height + visual_offset.y();
+  float scroll_x = scroll_offset.x() + visual_offset.x();
+  float scroll_y = scroll_offset.y() + visual_offset.y();
   transform->Translate(-viewport_override_->position.X() + scroll_x,
                        -viewport_override_->position.Y() + scroll_y);
 

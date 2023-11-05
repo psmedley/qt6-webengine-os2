@@ -29,10 +29,17 @@ SnapshotHoursPolicyService::SnapshotHoursPolicyService(PrefService* local_state)
       prefs::kArcSnapshotHours,
       base::BindRepeating(&SnapshotHoursPolicyService::UpdatePolicy,
                           weak_ptr_factory_.GetWeakPtr()));
+
+  DCHECK(user_manager::UserManager::Get());
+  user_manager::UserManager::Get()->AddObserver(this);
+
   UpdatePolicy();
 }
 
-SnapshotHoursPolicyService::~SnapshotHoursPolicyService() = default;
+SnapshotHoursPolicyService::~SnapshotHoursPolicyService() {
+  DCHECK(user_manager::UserManager::Get());
+  user_manager::UserManager::Get()->RemoveObserver(this);
+}
 
 void SnapshotHoursPolicyService::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
@@ -44,8 +51,7 @@ void SnapshotHoursPolicyService::RemoveObserver(Observer* observer) {
 
 void SnapshotHoursPolicyService::StartObservingPrimaryProfilePrefs(
     PrefService* profile_prefs) {
-  if (!user_manager::UserManager::Get() ||
-      !user_manager::UserManager::Get()->IsLoggedInAsPublicAccount()) {
+  if (!user_manager::UserManager::Get()->IsLoggedInAsPublicAccount()) {
     // Do not care about ArcEnabled policy for other than MGS.
     return;
   }
@@ -55,6 +61,7 @@ void SnapshotHoursPolicyService::StartObservingPrimaryProfilePrefs(
       prefs::kArcEnabled,
       base::BindRepeating(&SnapshotHoursPolicyService::UpdatePolicy,
                           weak_ptr_factory_.GetWeakPtr()));
+
   UpdatePolicy();
 }
 
@@ -66,11 +73,19 @@ void SnapshotHoursPolicyService::StopObservingPrimaryProfilePrefs() {
   UpdatePolicy();
 }
 
+void SnapshotHoursPolicyService::LocalStateChanged(
+    user_manager::UserManager* user_manager) {
+  UpdatePolicy();
+}
+
 void SnapshotHoursPolicyService::UpdatePolicy() {
   intervals_.clear();
   base::ScopedClosureRunner snapshot_disabler(
       base::BindOnce(&SnapshotHoursPolicyService::DisableSnapshots,
                      weak_ptr_factory_.GetWeakPtr()));
+
+  if (!IsMgsConfigured())
+    return;
   if (!IsArcEnabled())
     return;
 
@@ -128,25 +143,21 @@ void SnapshotHoursPolicyService::EnableSnapshots() {
 }
 
 void SnapshotHoursPolicyService::UpdateTimer() {
-  auto current_time = policy::WeeklyTime::GetCurrentGmtWeeklyTime(
-      base::DefaultClock::GetInstance());
-  for (const auto& interval : intervals_) {
-    if (interval.Contains(current_time)) {
-      auto remaining_timer_duration =
-          current_time.GetDurationTo(interval.end());
-      SetEndTime(base::Time::Now() + remaining_timer_duration);
-      StartTimer(remaining_timer_duration);
-      return;
-    }
-  }
-  StartTimer(policy::weekly_time_utils::GetDeltaTillNextTimeInterval(
-      current_time, intervals_));
-  SetEndTime(base::Time());
+  namespace wtu = ::policy::weekly_time_utils;
+  const base::Time now = base::Time::Now();
+  const bool in_interval = wtu::Contains(now, intervals_);
+  const absl::optional<base::Time> update_time =
+      wtu::GetNextEventTime(now, intervals_);
+
+  SetEndTime(in_interval ? update_time.value() : base::Time{});
+  if (update_time)
+    StartTimer(update_time.value());
+  else
+    StopTimer();
 }
 
-void SnapshotHoursPolicyService::StartTimer(base::TimeDelta delay) {
-  DCHECK_GT(delay, base::TimeDelta());
-  timer_.Start(FROM_HERE, base::DefaultClock::GetInstance()->Now() + delay,
+void SnapshotHoursPolicyService::StartTimer(const base::Time& update_time) {
+  timer_.Start(FROM_HERE, update_time,
                base::BindOnce(&SnapshotHoursPolicyService::UpdateTimer,
                               weak_ptr_factory_.GetWeakPtr()));
 }
@@ -180,6 +191,14 @@ void SnapshotHoursPolicyService::NotifySnapshotUpdateEndTimeChanged() {
 bool SnapshotHoursPolicyService::IsArcEnabled() const {
   // Assume ARC is enabled if there is no profile prefs.
   return !profile_prefs_ || profile_prefs_->GetBoolean(prefs::kArcEnabled);
+}
+
+bool SnapshotHoursPolicyService::IsMgsConfigured() const {
+  for (auto* const user : user_manager::UserManager::Get()->GetUsers()) {
+    if (user->GetType() == user_manager::UserType::USER_TYPE_PUBLIC_ACCOUNT)
+      return true;
+  }
+  return false;
 }
 
 }  // namespace data_snapshotd

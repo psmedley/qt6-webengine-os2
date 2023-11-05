@@ -28,7 +28,7 @@
 
 #include "third_party/blink/renderer/modules/webdatabase/sql_transaction.h"
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/webdatabase/database.h"
 #include "third_party/blink/renderer/modules/webdatabase/database_authorizer.h"
@@ -347,7 +347,7 @@ void SQLTransaction::executeSql(ScriptState* script_state,
 void SQLTransaction::executeSql(
     ScriptState* script_state,
     const String& sql_statement,
-    const base::Optional<HeapVector<ScriptValue>>& arguments,
+    const absl::optional<HeapVector<ScriptValue>>& arguments,
     V8SQLStatementCallback* callback,
     V8SQLStatementErrorCallback* callback_error,
     ExceptionState& exception_state) {

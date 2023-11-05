@@ -25,8 +25,8 @@ def UnzipToTemp(zip_path, inner_path):
   """
   try:
     _, suffix = os.path.splitext(inner_path)
-    # Can't use NamedTemporaryFile() because it uses atexit, which does not play
-    # well with fork().
+    # Can't use NamedTemporaryFile() because it deletes via __del__, which will
+    # trigger in both this and the fork()'ed processes.
     fd, temp_file = tempfile.mkstemp(suffix=suffix)
     logging.debug('Extracting %s', inner_path)
     with zipfile.ZipFile(zip_path) as z:
@@ -64,7 +64,7 @@ def MeasureApkSignatureBlock(zip_file):
   start_of_central_directory = struct.unpack('<I', zip_file.fp.read(4))[0]
 
   # Compute the offset after the last zip entry.
-  last_info = zip_file.infolist()[-1]
+  last_info = max(zip_file.infolist(), key=lambda i: i.header_offset)
   last_header_size = (30 + len(last_info.filename) +
                       ReadZipInfoExtraFieldLength(zip_file, last_info))
   end_of_last_file = (last_info.header_offset + last_header_size +

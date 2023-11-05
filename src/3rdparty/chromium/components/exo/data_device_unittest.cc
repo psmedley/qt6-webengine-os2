@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "ash/shell.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
 #include "components/exo/data_device_delegate.h"
@@ -81,7 +80,7 @@ class TestDataDeviceDelegate : public DataDeviceDelegate {
   }
   DataOffer* OnDataOffer() override {
     events_.push_back(DataEvent::kOffer);
-    data_offer_.reset(new DataOffer(new TestDataOfferDelegate));
+    data_offer_ = std::make_unique<DataOffer>(new TestDataOfferDelegate);
     return data_offer_.get();
   }
   void OnEnter(Surface* surface,
@@ -132,7 +131,7 @@ class DataDeviceTest : public test::ExoTestBase {
     test::ExoTestBase::SetUp();
     seat_ = std::make_unique<TestSeat>();
     device_ = std::make_unique<DataDevice>(&delegate_, seat_.get());
-    data_.SetString(base::string16(base::ASCIIToUTF16("Test data")));
+    data_.SetString(std::u16string(u"Test data"));
     surface_ = std::make_unique<Surface>();
   }
 
@@ -284,14 +283,14 @@ TEST_F(DataDeviceTest, NotAcceptDataEventsForSurface) {
 
 TEST_F(DataDeviceTest, ClipboardCopy) {
   // Selection event sent when getting a focus.
-  device_->OnSurfaceFocusing(surface_.get());
+  device_->OnSurfaceFocused(surface_.get());
   std::vector<DataEvent> events;
   ASSERT_EQ(2u, delegate_.PopEvents(&events));
   EXPECT_EQ(DataEvent::kOffer, events[0]);
   EXPECT_EQ(DataEvent::kSelection, events[1]);
 
   // Next focus does not send selection.
-  device_->OnSurfaceFocusing(surface_.get());
+  device_->OnSurfaceFocused(surface_.get());
   EXPECT_EQ(0u, delegate_.PopEvents(&events));
 
   // Clipboard change
@@ -300,8 +299,8 @@ TEST_F(DataDeviceTest, ClipboardCopy) {
   EXPECT_EQ(DataEvent::kOffer, events[0]);
   EXPECT_EQ(DataEvent::kSelection, events[1]);
 
-  // Losing focuse does not create events.
-  device_->OnSurfaceFocusing(nullptr);
+  // Losing focus does not create events.
+  device_->OnSurfaceFocused(nullptr);
   EXPECT_EQ(0u, delegate_.PopEvents(&events));
 }
 
@@ -325,7 +324,7 @@ TEST_F(DataDeviceTest, ClipboardDeviceCreatedAfterFocus) {
 }
 
 TEST_F(DataDeviceTest, ClipboardFocusedSurfaceDestroyed) {
-  device_->OnSurfaceFocusing(surface_.get());
+  device_->OnSurfaceFocused(surface_.get());
   surface_.reset();
   std::vector<DataEvent> events;
   delegate_.PopEvents(&events);

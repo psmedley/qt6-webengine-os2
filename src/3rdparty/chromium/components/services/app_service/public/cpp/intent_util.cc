@@ -4,10 +4,17 @@
 
 #include "components/services/app_service/public/cpp/intent_util.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/compiler_specific.h"
-#include "base/optional.h"
+#include "base/containers/flat_map.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
+#include "components/services/app_service/public/mojom/types.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace {
 
@@ -23,9 +30,14 @@ const char kActivityNameKey[] = "activity_name";
 const char kDriveShareUrlKey[] = "drive_share_url";
 const char kShareTextKey[] = "share_text";
 const char kShareTitleKey[] = "share_title";
+const char kStartTypeKey[] = "start_type";
+const char kCategoriesKey[] = "categories";
+const char kDataKey[] = "data";
+const char kUiBypassedKey[] = "ui_bypassed";
+const char kExtrasKey[] = "extras";
 
 // Get the intent condition value based on the condition type.
-base::Optional<std::string> GetIntentConditionValueByType(
+absl::optional<std::string> GetIntentConditionValueByType(
     apps::mojom::ConditionType condition_type,
     const apps::mojom::IntentPtr& intent) {
   switch (condition_type) {
@@ -33,16 +45,16 @@ base::Optional<std::string> GetIntentConditionValueByType(
       return intent->action;
     case apps::mojom::ConditionType::kScheme:
       return intent->url.has_value()
-                 ? base::Optional<std::string>(intent->url->scheme())
-                 : base::nullopt;
+                 ? absl::optional<std::string>(intent->url->scheme())
+                 : absl::nullopt;
     case apps::mojom::ConditionType::kHost:
       return intent->url.has_value()
-                 ? base::Optional<std::string>(intent->url->host())
-                 : base::nullopt;
+                 ? absl::optional<std::string>(intent->url->host())
+                 : absl::nullopt;
     case apps::mojom::ConditionType::kPattern:
       return intent->url.has_value()
-                 ? base::Optional<std::string>(intent->url->path())
-                 : base::nullopt;
+                 ? absl::optional<std::string>(intent->url->path())
+                 : absl::nullopt;
     case apps::mojom::ConditionType::kMimeType:
       return intent->mime_type;
   }
@@ -99,43 +111,6 @@ bool MimeTypeMatched(const std::string& intent_mime_type,
   return true;
 }
 
-// Calculates the least general mime type that matches all of the given ones.
-// E.g., for ["image/jpeg", "image/png"] it will be "image/*". ["text/html",
-// "text/html"] will return "text/html", and ["text/html", "image/jpeg"]
-// becomes the fully wildcard pattern.
-std::string CalculateCommonMimeType(
-    const std::vector<std::string>& mime_types) {
-  const std::string any_mime_type = std::string(kWildCardAny) +
-                                    std::string(kMimeTypeSeparator) +
-                                    std::string(kWildCardAny);
-  if (mime_types.size() == 0) {
-    return any_mime_type;
-  }
-
-  std::vector<std::string> common_type =
-      base::SplitString(mime_types[0], kMimeTypeSeparator,
-                        base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-  if (common_type.size() != 2) {
-    return any_mime_type;
-  }
-
-  for (auto& mime_type : mime_types) {
-    std::vector<std::string> type =
-        base::SplitString(mime_type, kMimeTypeSeparator, base::TRIM_WHITESPACE,
-                          base::SPLIT_WANT_NONEMPTY);
-    if (type.size() != kMimeTypeComponentSize) {
-      return any_mime_type;
-    }
-    if (common_type[0] != type[0]) {
-      return any_mime_type;
-    }
-    if (common_type[1] != type[1]) {
-      common_type[1] = kWildCardAny;
-    }
-  }
-  return common_type[0] + kMimeTypeSeparator + common_type[1];
-}
-
 }  // namespace
 
 namespace apps_util {
@@ -159,7 +134,12 @@ apps::mojom::IntentPtr CreateShareIntentFromFiles(
   intent->action = filesystem_urls.size() == 1 ? kIntentActionSend
                                                : kIntentActionSendMultiple;
   intent->mime_type = CalculateCommonMimeType(mime_types);
-  intent->file_urls = filesystem_urls;
+  intent->files = std::vector<apps::mojom::IntentFilePtr>{};
+  for (const GURL& url : filesystem_urls) {
+    auto file = apps::mojom::IntentFile::New();
+    file->url = url;
+    intent->files->push_back(std::move(file));
+  }
   return intent;
 }
 
@@ -185,7 +165,10 @@ apps::mojom::IntentPtr CreateShareIntentFromDriveFile(
   intent->action = kIntentActionSend;
   if (!is_directory) {
     intent->mime_type = mime_type;
-    intent->file_urls = std::vector<GURL>{filesystem_url};
+    intent->files = std::vector<apps::mojom::IntentFilePtr>{};
+    auto file = apps::mojom::IntentFile::New();
+    file->url = filesystem_url;
+    intent->files->push_back(std::move(file));
   }
   if (!drive_share_url.is_empty()) {
     intent->drive_share_url = drive_share_url;
@@ -202,6 +185,17 @@ apps::mojom::IntentPtr CreateShareIntentFromText(
   intent->share_text = share_text;
   if (!share_title.empty())
     intent->share_title = share_title;
+  return intent;
+}
+
+apps::mojom::IntentPtr CreateIntentForActivity(const std::string& activity,
+                                               const std::string& start_type,
+                                               const std::string& category) {
+  auto intent = apps::mojom::Intent::New();
+  intent->action = kIntentActionMain;
+  intent->activity_name = activity;
+  intent->start_type = start_type;
+  intent->categories = std::vector<std::string>{category};
   return intent;
 }
 
@@ -225,7 +219,7 @@ bool ConditionValueMatches(
 
 bool IntentMatchesCondition(const apps::mojom::IntentPtr& intent,
                             const apps::mojom::ConditionPtr& condition) {
-  base::Optional<std::string> value_to_match =
+  absl::optional<std::string> value_to_match =
       GetIntentConditionValueByType(condition->condition_type, intent);
   if (!value_to_match.has_value()) {
     return false;
@@ -339,7 +333,7 @@ bool OnlyShareToDrive(const apps::mojom::IntentPtr& intent) {
   if (intent->action == kIntentActionSend ||
       intent->action == kIntentActionSendMultiple) {
     if (intent->drive_share_url.has_value() &&
-        !intent->share_text.has_value() && !intent->file_urls.has_value()) {
+        !intent->share_text.has_value() && !intent->files.has_value()) {
       return true;
     }
   }
@@ -351,7 +345,7 @@ bool IsIntentValid(const apps::mojom::IntentPtr& intent) {
   // validity check. Check if this is a share intent with no file or text.
   if (intent->action == kIntentActionSend ||
       intent->action == kIntentActionSendMultiple) {
-    if (!intent->share_text.has_value() && !intent->file_urls.has_value()) {
+    if (!intent->share_text.has_value() && !intent->files.has_value()) {
       return false;
     }
   }
@@ -371,11 +365,11 @@ base::Value ConvertIntentToValue(const apps::mojom::IntentPtr& intent) {
   if (intent->mime_type.has_value() && !intent->mime_type.value().empty())
     intent_value.SetStringKey(kMimeTypeKey, intent->mime_type.value());
 
-  if (intent->file_urls.has_value() && !intent->file_urls.value().empty()) {
+  if (intent->files.has_value() && !intent->files.value().empty()) {
     base::Value file_urls_list(base::Value::Type::LIST);
-    for (auto& url : intent->file_urls.value()) {
-      DCHECK(url.is_valid());
-      file_urls_list.Append(base::Value(url.spec()));
+    for (const auto& file : intent->files.value()) {
+      DCHECK(file->url.is_valid());
+      file_urls_list.Append(base::Value(file->url.spec()));
     }
     intent_value.SetKey(kFileUrlsKey, std::move(file_urls_list));
   }
@@ -397,74 +391,193 @@ base::Value ConvertIntentToValue(const apps::mojom::IntentPtr& intent) {
   if (intent->share_title.has_value() && !intent->share_title.value().empty())
     intent_value.SetStringKey(kShareTitleKey, intent->share_title.value());
 
+  if (intent->start_type.has_value() && !intent->start_type.value().empty())
+    intent_value.SetStringKey(kStartTypeKey, intent->start_type.value());
+
+  if (intent->categories.has_value() && !intent->categories.value().empty()) {
+    base::Value categories(base::Value::Type::LIST);
+    for (const auto& category : intent->categories.value()) {
+      categories.Append(base::Value(category));
+    }
+    intent_value.SetKey(kCategoriesKey, std::move(categories));
+  }
+
+  if (intent->data.has_value() && !intent->data.value().empty())
+    intent_value.SetStringKey(kDataKey, intent->data.value());
+
+  if (intent->ui_bypassed != apps::mojom::OptionalBool::kUnknown) {
+    intent_value.SetBoolKey(
+        kUiBypassedKey,
+        intent->ui_bypassed == apps::mojom::OptionalBool::kTrue ? true : false);
+  }
+
+  if (intent->extras.has_value() && !intent->extras.value().empty()) {
+    base::Value extras(base::Value::Type::DICTIONARY);
+    for (const auto& extra : intent->extras.value()) {
+      extras.SetStringKey(extra.first, extra.second);
+    }
+    intent_value.SetKey(kExtrasKey, std::move(extras));
+  }
+
   return intent_value;
 }
 
-base::Optional<std::string> GetStringValueFromDict(
+absl::optional<std::string> GetStringValueFromDict(
     const base::DictionaryValue& dict,
     const std::string& key_name) {
   if (!dict.HasKey(key_name))
-    return base::nullopt;
+    return absl::nullopt;
 
   const std::string* value = dict.FindStringKey(key_name);
   if (!value || value->empty())
-    return base::nullopt;
+    return absl::nullopt;
 
   return *value;
 }
 
-base::Optional<GURL> GetGurlValueFromDict(const base::DictionaryValue& dict,
+apps::mojom::OptionalBool GetBoolValueFromDict(
+    const base::DictionaryValue& dict,
+    const std::string& key_name) {
+  if (!dict.HasKey(key_name))
+    return apps::mojom::OptionalBool::kUnknown;
+
+  absl::optional<bool> value = dict.FindBoolKey(key_name);
+  if (!value.has_value())
+    return apps::mojom::OptionalBool::kUnknown;
+
+  return value.value() ? apps::mojom::OptionalBool::kTrue
+                       : apps::mojom::OptionalBool::kFalse;
+}
+
+absl::optional<GURL> GetGurlValueFromDict(const base::DictionaryValue& dict,
                                           const std::string& key_name) {
   if (!dict.HasKey(key_name))
-    return base::nullopt;
+    return absl::nullopt;
 
   const std::string* url_spec = dict.FindStringKey(key_name);
   if (!url_spec)
-    return base::nullopt;
+    return absl::nullopt;
 
   GURL url(*url_spec);
   if (!url.is_valid())
-    return base::nullopt;
+    return absl::nullopt;
 
   return url;
 }
 
-base::Optional<std::vector<::GURL>> GetFileUrlsFromDict(
+absl::optional<std::vector<apps::mojom::IntentFilePtr>> GetFilesFromDict(
     const base::DictionaryValue& dict,
     const std::string& key_name) {
   if (!dict.HasKey(key_name))
-    return base::nullopt;
+    return absl::nullopt;
 
   const base::Value* value = dict.FindListKey(key_name);
   if (!value || !value->is_list() || value->GetList().empty())
-    return base::nullopt;
+    return absl::nullopt;
 
-  std::vector<::GURL> file_urls;
+  std::vector<apps::mojom::IntentFilePtr> files;
   for (const auto& item : value->GetList()) {
     GURL url(item.GetString());
-    if (url.is_valid())
-      file_urls.push_back(std::move(url));
+    if (url.is_valid()) {
+      auto file = apps::mojom::IntentFile::New();
+      file->url = std::move(url);
+      files.push_back(std::move(file));
+    }
   }
-  return file_urls;
+  return files;
+}
+
+absl::optional<std::vector<std::string>> GetCategoriesFromDict(
+    const base::DictionaryValue& dict,
+    const std::string& key_name) {
+  if (!dict.HasKey(key_name))
+    return absl::nullopt;
+
+  const base::Value* value = dict.FindListKey(key_name);
+  if (!value || !value->is_list() || value->GetList().empty())
+    return absl::nullopt;
+
+  std::vector<std::string> categories;
+  for (const auto& item : value->GetList())
+    categories.push_back(item.GetString());
+
+  return categories;
+}
+
+absl::optional<base::flat_map<std::string, std::string>> GetExtrasFromDict(
+    const base::DictionaryValue& dict,
+    const std::string& key_name) {
+  if (!dict.HasKey(key_name))
+    return absl::nullopt;
+
+  const base::Value* value = dict.FindDictKey(key_name);
+  if (!value || !value->is_dict())
+    return absl::nullopt;
+
+  base::flat_map<std::string, std::string> extras;
+  for (auto pair : value->DictItems()) {
+    if (pair.second.is_string())
+      extras[pair.first] = pair.second.GetString();
+  }
+
+  return extras;
 }
 
 apps::mojom::IntentPtr ConvertValueToIntent(base::Value&& value) {
   auto intent = apps::mojom::Intent::New();
 
   base::DictionaryValue* dict = nullptr;
-  if (!value.is_dict() || !value.GetAsDictionary(&dict) || !dict)
+  if (!value.is_dict() || !value.GetAsDictionary(&dict))
     return intent;
 
   intent->action = GetStringValueFromDict(*dict, kActionKey);
   intent->url = GetGurlValueFromDict(*dict, kUrlKey);
   intent->mime_type = GetStringValueFromDict(*dict, kMimeTypeKey);
-  intent->file_urls = GetFileUrlsFromDict(*dict, kFileUrlsKey);
+  intent->files = GetFilesFromDict(*dict, kFileUrlsKey);
   intent->activity_name = GetStringValueFromDict(*dict, kActivityNameKey);
   intent->drive_share_url = GetGurlValueFromDict(*dict, kDriveShareUrlKey);
   intent->share_text = GetStringValueFromDict(*dict, kShareTextKey);
   intent->share_title = GetStringValueFromDict(*dict, kShareTitleKey);
+  intent->start_type = GetStringValueFromDict(*dict, kStartTypeKey);
+  intent->categories = GetCategoriesFromDict(*dict, kCategoriesKey);
+  intent->data = GetStringValueFromDict(*dict, kDataKey);
+  intent->ui_bypassed = GetBoolValueFromDict(*dict, kUiBypassedKey);
+  intent->extras = GetExtrasFromDict(*dict, kExtrasKey);
 
   return intent;
+}
+
+std::string CalculateCommonMimeType(
+    const std::vector<std::string>& mime_types) {
+  const std::string any_mime_type = std::string(kWildCardAny) +
+                                    std::string(kMimeTypeSeparator) +
+                                    std::string(kWildCardAny);
+  if (mime_types.size() == 0) {
+    return any_mime_type;
+  }
+
+  std::vector<std::string> common_type =
+      base::SplitString(mime_types[0], kMimeTypeSeparator,
+                        base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  if (common_type.size() != 2) {
+    return any_mime_type;
+  }
+
+  for (auto& mime_type : mime_types) {
+    std::vector<std::string> type =
+        base::SplitString(mime_type, kMimeTypeSeparator, base::TRIM_WHITESPACE,
+                          base::SPLIT_WANT_NONEMPTY);
+    if (type.size() != kMimeTypeComponentSize) {
+      return any_mime_type;
+    }
+    if (common_type[0] != type[0]) {
+      return any_mime_type;
+    }
+    if (common_type[1] != type[1]) {
+      common_type[1] = kWildCardAny;
+    }
+  }
+  return common_type[0] + kMimeTypeSeparator + common_type[1];
 }
 
 }  // namespace apps_util

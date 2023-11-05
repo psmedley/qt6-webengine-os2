@@ -33,12 +33,20 @@ namespace dawn_wire {
         return mImpl->ReserveTexture(device);
     }
 
+    ReservedSwapChain WireClient::ReserveSwapChain(WGPUDevice device) {
+        return mImpl->ReserveSwapChain(device);
+    }
+
     ReservedDevice WireClient::ReserveDevice() {
         return mImpl->ReserveDevice();
     }
 
     void WireClient::ReclaimTextureReservation(const ReservedTexture& reservation) {
         mImpl->ReclaimTextureReservation(reservation);
+    }
+
+    void WireClient::ReclaimSwapChainReservation(const ReservedSwapChain& reservation) {
+        mImpl->ReclaimSwapChainReservation(reservation);
     }
 
     void WireClient::ReclaimDeviceReservation(const ReservedDevice& reservation) {
@@ -53,16 +61,6 @@ namespace dawn_wire {
         MemoryTransferService::MemoryTransferService() = default;
 
         MemoryTransferService::~MemoryTransferService() = default;
-
-        MemoryTransferService::ReadHandle*
-        MemoryTransferService::CreateReadHandle(WGPUBuffer buffer, uint64_t offset, size_t size) {
-            return CreateReadHandle(size);
-        }
-
-        MemoryTransferService::WriteHandle*
-        MemoryTransferService::CreateWriteHandle(WGPUBuffer buffer, uint64_t offset, size_t size) {
-            return CreateWriteHandle(size);
-        }
 
         MemoryTransferService::ReadHandle::ReadHandle() = default;
 

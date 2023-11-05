@@ -8,6 +8,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/dcheck_is_on.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -123,6 +124,9 @@ class CORE_EXPORT ObjectPaintProperties {
   //         paint containment. It induces a PaintOffsetTranslation node and
   //         is the deepest child of any transform tree on the contain: paint
   //         element.
+  //
+  // This hierarchy is related to the order of transform operations in
+  // https://drafts.csswg.org/css-transforms-2/#accumulated-3d-transformation-matrix-computation
   ADD_TRANSFORM(PaintOffsetTranslation, paint_offset_translation_);
   ADD_TRANSFORM(StickyTranslation, sticky_translation_);
   ADD_TRANSFORM(Transform, transform_);
@@ -221,7 +225,8 @@ class CORE_EXPORT ObjectPaintProperties {
 
  public:
 #if DCHECK_IS_ON()
-  // Used by FindPropertiesNeedingUpdate.h for verifying state doesn't change.
+  // Used by find_properties_needing_update.h for verifying state doesn't
+  // change.
   void SetImmutable() const { is_immutable_ = true; }
   bool IsImmutable() const { return is_immutable_; }
   void SetMutable() const { is_immutable_ = false; }

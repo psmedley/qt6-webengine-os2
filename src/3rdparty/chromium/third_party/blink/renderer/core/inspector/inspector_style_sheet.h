@@ -40,6 +40,7 @@ namespace blink {
 
 class CSSKeyframeRule;
 class CSSMediaRule;
+class CSSContainerRule;
 class CSSStyleDeclaration;
 class CSSStyleRule;
 class CSSStyleSheet;
@@ -162,6 +163,11 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
                                  SourceRange* new_range,
                                  String* old_selector,
                                  ExceptionState&);
+  CSSContainerRule* SetContainerRuleText(const SourceRange&,
+                                         const String& selector,
+                                         SourceRange* new_range,
+                                         String* old_selector,
+                                         ExceptionState&);
   CSSStyleRule* AddRule(const String& rule_text,
                         const SourceRange& location,
                         SourceRange* added_range,
@@ -287,4 +293,4 @@ class InspectorStyleSheetForInlineStyle final : public InspectorStyleSheetBase {
 
 }  // namespace blink
 
-#endif  // !defined(InspectorStyleSheet_h)
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_STYLE_SHEET_H_

@@ -11,7 +11,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/util/type_safety/id_type.h"
+#include "base/types/id_type.h"
 #include "chrome/browser/ui/webui/discards/discards.mojom.h"
 #include "components/performance_manager/public/graph/frame_node.h"
 #include "components/performance_manager/public/graph/graph.h"
@@ -115,8 +115,11 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
       const performance_manager::PageNode* page_node) override;
   void OnOpenerFrameNodeChanged(
       const performance_manager::PageNode* page_node,
-      const performance_manager::FrameNode* previous_opener,
-      OpenedType previous_opened_type) override;
+      const performance_manager::FrameNode* previous_opener) override;
+  void OnEmbedderFrameNodeChanged(
+      const performance_manager::PageNode* page_node,
+      const performance_manager::FrameNode* previous_embedder,
+      EmbeddingType previous_embedding_type) override;
   // Ignored.
   void OnIsVisibleChanged(
       const performance_manager::PageNode* page_node) override {}
@@ -154,7 +157,11 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
   // Ignored.
   void OnFreezingVoteChanged(
       const performance_manager::PageNode* page_node,
-      base::Optional<performance_manager::freezing::FreezingVote>) override {}
+      absl::optional<performance_manager::freezing::FreezingVote>) override {}
+  // Ignored.
+  void OnPageStateChanged(
+      const performance_manager::PageNode* page_node,
+      performance_manager::PageNode::PageState old_state) override {}
 
   // ProcessNodeObserver implementation:
   void OnProcessNodeAdded(
@@ -200,7 +207,7 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
   // The favicon requests happen on the UI thread. This helper class
   // maintains the state required to do that.
   class FaviconRequestHelper;
-  using NodeId = util::IdType64<class NodeIdTag>;
+  using NodeId = base::IdType64<class NodeIdTag>;
 
   void AddNode(const performance_manager::Node* node);
   void RemoveNode(const performance_manager::Node* node);

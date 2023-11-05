@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 import {assert} from 'chrome://resources/js/assert.m.js';
-import {addSingletonGetter} from 'chrome://resources/js/cr.m.js';
 import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
@@ -21,7 +20,7 @@ export let MessageData;
  *   messageId: string,
  * }}
  */
-let SaveAttachmentDataMessageData;
+let SaveAttachmentMessageData;
 
 /**
  * @typedef {{
@@ -113,7 +112,7 @@ export class ContentController {
   /**
    * Requests that the attachment at a certain index be saved.
    * @param {number} index The index of the attachment to be saved.
-   * @return {Promise<{type: string, dataToSave: Array, messageId: string}>}
+   * @return {!Promise<!SaveAttachmentMessageData>}
    * @abstract
    */
   saveAttachment(index) {}
@@ -466,8 +465,7 @@ export class PluginController {
   /** @override */
   async load(fileName, data) {
     const url = URL.createObjectURL(new Blob([data]));
-    this.plugin_.removeAttribute('headers');
-    this.plugin_.setAttribute('stream-url', url);
+    this.plugin_.setAttribute('src', url);
     this.plugin_.setAttribute('has-edits', '');
     this.plugin_.style.display = 'block';
     try {
@@ -482,6 +480,17 @@ export class PluginController {
   unload() {
     this.plugin_.style.display = 'none';
     this.isActive = false;
+  }
+
+  /**
+   * An event handler for handling message events received from the Unseasoned
+   * PDF plugin.
+   * TODO(crbug.com/1228987): Remove this method when a permanent postMessage()
+   * bridge is implemented for the Unseasoned viewer.
+   * @param {!Event} messageEvent a message event.
+   */
+  handleMessageForUnseasoned(messageEvent) {
+    this.handlePluginMessage_(messageEvent);
   }
 
   /**
@@ -564,6 +573,12 @@ export class PluginController {
 
     resolver.resolve(messageData);
   }
+
+  /** @return {!PluginController} */
+  static getInstance() {
+    return instance || (instance = new PluginController());
+  }
 }
 
-addSingletonGetter(PluginController);
+/** @type {?PluginController} */
+let instance = null;

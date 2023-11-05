@@ -5,7 +5,6 @@
 #include "components/browsing_data/content/mock_appcache_helper.h"
 
 #include <utility>
-#include <vector>
 
 #include "base/callback.h"
 #include "content/public/browser/browser_context.h"
@@ -17,8 +16,8 @@ namespace browsing_data {
 
 MockAppCacheHelper::MockAppCacheHelper(content::BrowserContext* browser_context)
     : AppCacheHelper(
-          content::BrowserContext::GetDefaultStoragePartition(browser_context)
-              ->GetAppCacheService()) {}
+          browser_context->GetDefaultStoragePartition()->GetAppCacheService()) {
+}
 
 MockAppCacheHelper::~MockAppCacheHelper() {}
 

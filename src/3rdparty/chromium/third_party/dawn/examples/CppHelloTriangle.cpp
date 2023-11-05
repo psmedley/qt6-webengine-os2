@@ -15,6 +15,7 @@
 #include "SampleUtils.h"
 
 #include "utils/ComboRenderPipelineDescriptor.h"
+#include "utils/ScopedAutoreleasePool.h"
 #include "utils/SystemUtils.h"
 #include "utils/WGPUHelpers.h"
 
@@ -55,11 +56,11 @@ void initTextures() {
     descriptor.dimension = wgpu::TextureDimension::e2D;
     descriptor.size.width = 1024;
     descriptor.size.height = 1024;
-    descriptor.size.depth = 1;
+    descriptor.size.depthOrArrayLayers = 1;
     descriptor.sampleCount = 1;
     descriptor.format = wgpu::TextureFormat::RGBA8Unorm;
     descriptor.mipLevelCount = 1;
-    descriptor.usage = wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::Sampled;
+    descriptor.usage = wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::TextureBinding;
     texture = device.CreateTexture(&descriptor);
 
     sampler = device.CreateSampler();
@@ -72,12 +73,13 @@ void initTextures() {
 
     wgpu::Buffer stagingBuffer = utils::CreateBufferFromData(
         device, data.data(), static_cast<uint32_t>(data.size()), wgpu::BufferUsage::CopySrc);
-    wgpu::BufferCopyView bufferCopyView = utils::CreateBufferCopyView(stagingBuffer, 0, 4 * 1024);
-    wgpu::TextureCopyView textureCopyView = utils::CreateTextureCopyView(texture, 0, {0, 0, 0});
+    wgpu::ImageCopyBuffer imageCopyBuffer =
+        utils::CreateImageCopyBuffer(stagingBuffer, 0, 4 * 1024);
+    wgpu::ImageCopyTexture imageCopyTexture = utils::CreateImageCopyTexture(texture, 0, {0, 0, 0});
     wgpu::Extent3D copySize = {1024, 1024, 1};
 
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
-    encoder.CopyBufferToTexture(&bufferCopyView, &textureCopyView, &copySize);
+    encoder.CopyBufferToTexture(&imageCopyBuffer, &imageCopyTexture, &copySize);
 
     wgpu::CommandBuffer copy = encoder.Finish();
     queue.Submit(1, &copy);
@@ -94,46 +96,41 @@ void init() {
     initBuffers();
     initTextures();
 
-    wgpu::ShaderModule vsModule = utils::CreateShaderModuleFromWGSL(device, R"(
-        [[builtin(position)]] var<out> Position : vec4<f32>;
-        [[location(0)]] var<in> pos : vec4<f32>;
-        [[stage(vertex)]] fn main() -> void {
-            Position = pos;
-            return;
+    wgpu::ShaderModule vsModule = utils::CreateShaderModule(device, R"(
+        [[stage(vertex)]] fn main([[location(0)]] pos : vec4<f32>)
+                               -> [[builtin(position)]] vec4<f32> {
+            return pos;
         })");
 
-    wgpu::ShaderModule fsModule = utils::CreateShaderModuleFromWGSL(device, R"(
-        [[builtin(frag_coord)]] var<in> FragCoord : vec4<f32>;
+    wgpu::ShaderModule fsModule = utils::CreateShaderModule(device, R"(
         [[group(0), binding(0)]] var mySampler: sampler;
         [[group(0), binding(1)]] var myTexture : texture_2d<f32>;
 
-        [[location(0)]] var<out> FragColor : vec4<f32>;
-        [[stage(fragment)]] fn main() -> void {
-            FragColor = textureSample(myTexture, mySampler, FragCoord.xy / vec2<f32>(640.0, 480.0));
-            return;
+        [[stage(fragment)]] fn main([[builtin(position)]] FragCoord : vec4<f32>)
+                                 -> [[location(0)]] vec4<f32> {
+            return textureSample(myTexture, mySampler, FragCoord.xy / vec2<f32>(640.0, 480.0));
         })");
 
     auto bgl = utils::MakeBindGroupLayout(
         device, {
-                    {0, wgpu::ShaderStage::Fragment, wgpu::BindingType::Sampler},
-                    {1, wgpu::ShaderStage::Fragment, wgpu::BindingType::SampledTexture},
+                    {0, wgpu::ShaderStage::Fragment, wgpu::SamplerBindingType::Filtering},
+                    {1, wgpu::ShaderStage::Fragment, wgpu::TextureSampleType::Float},
                 });
 
     wgpu::PipelineLayout pl = utils::MakeBasicPipelineLayout(device, &bgl);
 
     depthStencilView = CreateDefaultDepthStencilView(device);
 
-    utils::ComboRenderPipelineDescriptor descriptor(device);
+    utils::ComboRenderPipelineDescriptor descriptor;
     descriptor.layout = utils::MakeBasicPipelineLayout(device, &bgl);
-    descriptor.vertexStage.module = vsModule;
-    descriptor.cFragmentStage.module = fsModule;
-    descriptor.cVertexState.vertexBufferCount = 1;
-    descriptor.cVertexState.cVertexBuffers[0].arrayStride = 4 * sizeof(float);
-    descriptor.cVertexState.cVertexBuffers[0].attributeCount = 1;
-    descriptor.cVertexState.cAttributes[0].format = wgpu::VertexFormat::Float4;
-    descriptor.depthStencilState = &descriptor.cDepthStencilState;
-    descriptor.cDepthStencilState.format = wgpu::TextureFormat::Depth24PlusStencil8;
-    descriptor.cColorStates[0].format = GetPreferredSwapChainTextureFormat();
+    descriptor.vertex.module = vsModule;
+    descriptor.vertex.bufferCount = 1;
+    descriptor.cBuffers[0].arrayStride = 4 * sizeof(float);
+    descriptor.cBuffers[0].attributeCount = 1;
+    descriptor.cAttributes[0].format = wgpu::VertexFormat::Float32x4;
+    descriptor.cFragment.module = fsModule;
+    descriptor.cTargets[0].format = GetPreferredSwapChainTextureFormat();
+    descriptor.EnableDepthStencil(wgpu::TextureFormat::Depth24PlusStencil8);
 
     pipeline = device.CreateRenderPipeline(&descriptor);
 
@@ -180,6 +177,7 @@ int main(int argc, const char* argv[]) {
     init();
 
     while (!ShouldQuit()) {
+        utils::ScopedAutoreleasePool pool;
         frame();
         utils::USleep(16000);
     }

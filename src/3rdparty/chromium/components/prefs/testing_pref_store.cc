@@ -111,6 +111,12 @@ void TestingPrefStore::CommitPendingWrite(
                                           std::move(synchronous_done_callback));
 }
 
+void TestingPrefStore::CommitPendingWriteSynchronously() {
+  // This function was added for one very specific use case and is intentionally
+  // not implemented for other pref stores.
+  NOTREACHED();
+}
+
 void TestingPrefStore::SchedulePendingLossyWrites() {}
 
 void TestingPrefStore::SetInitializationCompleted() {
@@ -160,7 +166,11 @@ bool TestingPrefStore::GetString(const std::string& key,
   if (!prefs_.GetValue(key, &stored_value) || !stored_value)
     return false;
 
-  return stored_value->GetAsString(value);
+  if (value && stored_value->is_string()) {
+    *value = stored_value->GetString();
+    return true;
+  }
+  return stored_value->is_string();
 }
 
 bool TestingPrefStore::GetInteger(const std::string& key, int* value) const {
@@ -168,7 +178,11 @@ bool TestingPrefStore::GetInteger(const std::string& key, int* value) const {
   if (!prefs_.GetValue(key, &stored_value) || !stored_value)
     return false;
 
-  return stored_value->GetAsInteger(value);
+  if (value && stored_value->is_int()) {
+    *value = stored_value->GetInt();
+    return true;
+  }
+  return stored_value->is_int();
 }
 
 bool TestingPrefStore::GetBoolean(const std::string& key, bool* value) const {
@@ -176,7 +190,11 @@ bool TestingPrefStore::GetBoolean(const std::string& key, bool* value) const {
   if (!prefs_.GetValue(key, &stored_value) || !stored_value)
     return false;
 
-  return stored_value->GetAsBoolean(value);
+  if (value && stored_value->is_bool()) {
+    *value = stored_value->GetBool();
+    return true;
+  }
+  return stored_value->is_bool();
 }
 
 void TestingPrefStore::SetBlockAsyncRead(bool block_async_read) {

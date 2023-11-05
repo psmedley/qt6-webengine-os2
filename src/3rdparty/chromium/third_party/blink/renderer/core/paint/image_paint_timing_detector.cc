@@ -3,10 +3,13 @@
 // found in the LICENSE file.
 #include "third_party/blink/renderer/core/paint/image_paint_timing_detector.h"
 
+#include "base/feature_list.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/layout/layout_image_resource.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_image.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -66,7 +69,9 @@ static bool LargeImageFirst(const base::WeakPtr<ImageRecord>& a,
 ImagePaintTimingDetector::ImagePaintTimingDetector(
     LocalFrameView* frame_view,
     PaintTimingCallbackManager* callback_manager)
-    : records_manager_(frame_view),
+    : uses_page_viewport_(
+          base::FeatureList::IsEnabled(features::kUsePageViewportInLCP)),
+      records_manager_(frame_view),
       frame_view_(frame_view),
       callback_manager_(callback_manager) {}
 
@@ -142,7 +147,7 @@ ImageRecord* ImagePaintTimingDetector::UpdateCandidate() {
 
 void ImagePaintTimingDetector::OnPaintFinished() {
   frame_index_++;
-  viewport_size_ = base::nullopt;
+  viewport_size_ = absl::nullopt;
   if (need_update_timing_at_frame_end_) {
     need_update_timing_at_frame_end_ = false;
     frame_view_->GetPaintTimingDetector()
@@ -260,7 +265,7 @@ void ImagePaintTimingDetector::RecordImage(
       cached_image.IsLoaded()) {
     records_manager_.OnImageLoaded(record_id, frame_index_, style_image);
     need_update_timing_at_frame_end_ = true;
-    if (base::Optional<PaintTimingVisualizer>& visualizer =
+    if (absl::optional<PaintTimingVisualizer>& visualizer =
             frame_view_->GetPaintTimingDetector().Visualizer()) {
       FloatRect mapped_visual_rect =
           frame_view_->GetPaintTimingDetector().CalculateVisualRect(
@@ -303,7 +308,7 @@ uint64_t ImagePaintTimingDetector::ComputeImageRectSize(
     const PropertyTreeStateOrAlias& current_paint_chunk_properties,
     const LayoutObject& object,
     const ImageResourceContent& cached_image) {
-  if (base::Optional<PaintTimingVisualizer>& visualizer =
+  if (absl::optional<PaintTimingVisualizer>& visualizer =
           frame_view_->GetPaintTimingDetector().Visualizer()) {
     visualizer->DumpImageDebuggingRect(object, mapped_visual_rect,
                                        cached_image);
@@ -314,8 +319,16 @@ uint64_t ImagePaintTimingDetector::ComputeImageRectSize(
       frame_view_->GetPaintTimingDetector().BlinkSpaceToDIPs(
           FloatRect(image_border));
   if (!viewport_size_.has_value()) {
+    // If the flag to use page viewport is enabled, we use the page viewport
+    // (aka the main frame viewport) for all frames, including iframes. This
+    // prevents us from discarding images with size equal to the size of its
+    // embedding iframe.
+    IntRect viewport_int_rect =
+        uses_page_viewport_
+            ? frame_view_->GetPage()->GetVisualViewport().VisibleContentRect()
+            : frame_view_->GetScrollableArea()->VisibleContentRect();
     FloatRect viewport = frame_view_->GetPaintTimingDetector().BlinkSpaceToDIPs(
-        FloatRect(frame_view_->GetScrollableArea()->VisibleContentRect()));
+        FloatRect(viewport_int_rect));
     viewport_size_ = viewport.Size().Area();
   }
   // An SVG image size is computed with respect to the virtual viewport of the

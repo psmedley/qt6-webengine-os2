@@ -289,10 +289,12 @@ PRIMITIVES = (
 ATTRIBUTE_MIN_VERSION = 'MinVersion'
 ATTRIBUTE_DEFAULT = 'Default'
 ATTRIBUTE_EXTENSIBLE = 'Extensible'
+ATTRIBUTE_NO_INTERRUPT = 'NoInterrupt'
 ATTRIBUTE_STABLE = 'Stable'
 ATTRIBUTE_SYNC = 'Sync'
 ATTRIBUTE_UNLIMITED_SIZE = 'UnlimitedSize'
 ATTRIBUTE_UUID = 'Uuid'
+ATTRIBUTE_SERVICE_SANDBOX = 'ServiceSandbox'
 
 
 class NamedValue(object):
@@ -573,11 +575,18 @@ class Struct(ReferenceKind):
       prefix = self.module.GetNamespacePrefix()
     return '%s%s' % (prefix, self.mojom_name)
 
+  def _tuple(self):
+    return (self.mojom_name, self.native_only, self.fields, self.constants,
+            self.attributes)
+
   def __eq__(self, rhs):
-    return (isinstance(rhs, Struct) and
-            (self.mojom_name, self.native_only, self.fields, self.constants,
-             self.attributes) == (rhs.mojom_name, rhs.native_only, rhs.fields,
-                                  rhs.constants, rhs.attributes))
+    return isinstance(rhs, Struct) and self._tuple() == rhs._tuple()
+
+  def __lt__(self, rhs):
+    if not isinstance(self, type(rhs)):
+      return str(type(self)) < str(type(rhs))
+
+    return self._tuple() < rhs._tuple()
 
   def __hash__(self):
     return id(self)
@@ -689,10 +698,17 @@ class Union(ReferenceKind):
       prefix = self.module.GetNamespacePrefix()
     return '%s%s' % (prefix, self.mojom_name)
 
+  def _tuple(self):
+    return (self.mojom_name, self.fields, self.attributes)
+
   def __eq__(self, rhs):
-    return (isinstance(rhs, Union) and
-            (self.mojom_name, self.fields,
-             self.attributes) == (rhs.mojom_name, rhs.fields, rhs.attributes))
+    return isinstance(rhs, Union) and self._tuple() == rhs._tuple()
+
+  def __lt__(self, rhs):
+    if not isinstance(self, type(rhs)):
+      return str(type(self)) < str(type(rhs))
+
+    return self._tuple() < rhs._tuple()
 
   def __hash__(self):
     return id(self)
@@ -1051,16 +1067,27 @@ class Method(object):
         if self.attributes else None
 
   @property
+  def allow_interrupt(self):
+    return not self.attributes.get(ATTRIBUTE_NO_INTERRUPT) \
+        if self.attributes else True
+
+  @property
   def unlimited_message_size(self):
     return self.attributes.get(ATTRIBUTE_UNLIMITED_SIZE) \
         if self.attributes else False
 
+  def _tuple(self):
+    return (self.mojom_name, self.ordinal, self.parameters,
+            self.response_parameters, self.attributes)
+
   def __eq__(self, rhs):
-    return (isinstance(rhs, Method) and
-            (self.mojom_name, self.ordinal, self.parameters,
-             self.response_parameters,
-             self.attributes) == (rhs.mojom_name, rhs.ordinal, rhs.parameters,
-                                  rhs.response_parameters, rhs.attributes))
+    return isinstance(rhs, Method) and self._tuple() == rhs._tuple()
+
+  def __lt__(self, rhs):
+    if not isinstance(self, type(rhs)):
+      return str(type(self)) < str(type(rhs))
+
+    return self._tuple() < rhs._tuple()
 
 
 class Interface(ReferenceKind):
@@ -1181,6 +1208,12 @@ class Interface(ReferenceKind):
     return True
 
   @property
+  def service_sandbox(self):
+    if not self.attributes:
+      return None
+    return self.attributes.get(ATTRIBUTE_SERVICE_SANDBOX, None)
+
+  @property
   def stable(self):
     return self.attributes.get(ATTRIBUTE_STABLE, False) \
         if self.attributes else False
@@ -1193,11 +1226,18 @@ class Interface(ReferenceKind):
       prefix = self.module.GetNamespacePrefix()
     return '%s%s' % (prefix, self.mojom_name)
 
+  def _tuple(self):
+    return (self.mojom_name, self.methods, self.enums, self.constants,
+            self.attributes)
+
   def __eq__(self, rhs):
-    return (isinstance(rhs, Interface)
-            and (self.mojom_name, self.methods, self.enums, self.constants,
-                 self.attributes) == (rhs.mojom_name, rhs.methods, rhs.enums,
-                                      rhs.constants, rhs.attributes))
+    return isinstance(rhs, Interface) and self._tuple() == rhs._tuple()
+
+  def __lt__(self, rhs):
+    if not isinstance(self, type(rhs)):
+      return str(type(self)) < str(type(rhs))
+
+    return self._tuple() < rhs._tuple()
 
   @property
   def uuid(self):
@@ -1352,13 +1392,18 @@ class Enum(Kind):
 
     return True
 
+  def _tuple(self):
+    return (self.mojom_name, self.native_only, self.fields, self.attributes,
+            self.min_value, self.max_value, self.default_field)
+
   def __eq__(self, rhs):
-    return (isinstance(rhs, Enum) and
-            (self.mojom_name, self.native_only, self.fields, self.attributes,
-             self.min_value, self.max_value,
-             self.default_field) == (rhs.mojom_name, rhs.native_only,
-                                     rhs.fields, rhs.attributes, rhs.min_value,
-                                     rhs.max_value, rhs.default_field))
+    return isinstance(rhs, Enum) and self._tuple() == rhs._tuple()
+
+  def __lt__(self, rhs):
+    if not isinstance(self, type(rhs)):
+      return str(type(self)) < str(type(rhs))
+
+    return self._tuple() < rhs._tuple()
 
   def __hash__(self):
     return id(self)
@@ -1391,6 +1436,9 @@ class Module(object):
              self.interfaces) == (rhs.path, rhs.attributes, rhs.mojom_namespace,
                                   rhs.imports, rhs.constants, rhs.enums,
                                   rhs.structs, rhs.unions, rhs.interfaces))
+
+  def __hash__(self):
+    return id(self)
 
   def Repr(self, as_ref=True):
     if as_ref:
@@ -1658,6 +1706,13 @@ def MethodPassesInterfaces(method):
 def HasSyncMethods(interface):
   for method in interface.methods:
     if method.sync:
+      return True
+  return False
+
+
+def HasUninterruptableMethods(interface):
+  for method in interface.methods:
+    if not method.allow_interrupt:
       return True
   return False
 

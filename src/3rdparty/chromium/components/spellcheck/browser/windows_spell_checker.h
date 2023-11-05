@@ -47,20 +47,20 @@ class WindowsSpellChecker : public PlatformSpellChecker {
 
   void RequestTextCheck(
       int document_tag,
-      const base::string16& text,
+      const std::u16string& text,
       spellcheck_platform::TextCheckCompleteCallback callback) override;
 
 #if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   void GetPerLanguageSuggestions(
-      const base::string16& word,
+      const std::u16string& word,
       spellcheck_platform::GetSuggestionsCallback callback);
 #endif
 
-  void AddWordForAllLanguages(const base::string16& word);
+  void AddWordForAllLanguages(const std::u16string& word);
 
-  void RemoveWordForAllLanguages(const base::string16& word);
+  void RemoveWordForAllLanguages(const std::u16string& word);
 
-  void IgnoreWordForAllLanguages(const base::string16& word);
+  void IgnoreWordForAllLanguages(const std::u16string& word);
 
   void RecordChromeLocalesStats(const std::vector<std::string> chrome_locales,
                                 SpellCheckHostMetrics* metrics);

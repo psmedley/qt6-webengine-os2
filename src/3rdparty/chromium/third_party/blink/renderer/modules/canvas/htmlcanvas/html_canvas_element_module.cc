@@ -13,11 +13,10 @@
 
 namespace blink {
 
-void HTMLCanvasElementModule::getContext(
+V8RenderingContext* HTMLCanvasElementModule::getContext(
     HTMLCanvasElement& canvas,
-    const String& type,
+    const String& context_id,
     const CanvasContextCreationAttributesModule* attributes,
-    RenderingContext& result,
     ExceptionState& exception_state) {
   if (canvas.SurfaceLayerBridge() && !canvas.LowLatencyEnabled()) {
     // The existence of canvas surfaceLayerBridge indicates that
@@ -26,13 +25,19 @@ void HTMLCanvasElementModule::getContext(
                                       "Cannot get context from a canvas that "
                                       "has transferred its control to "
                                       "offscreen.");
-    return;
+    return nullptr;
   }
 
+  CanvasContextCreationAttributesCore canvas_context_creation_attributes;
+  if (!ToCanvasContextCreationAttributes(
+          attributes, canvas_context_creation_attributes, exception_state)) {
+    return nullptr;
+  }
   CanvasRenderingContext* context = canvas.GetCanvasRenderingContext(
-      type, ToCanvasContextCreationAttributes(attributes));
-  if (context)
-    context->SetCanvasGetContextResult(result);
+      context_id, canvas_context_creation_attributes);
+  if (!context)
+    return nullptr;
+  return context->AsV8RenderingContext();
 }
 
 OffscreenCanvas* HTMLCanvasElementModule::transferControlToOffscreen(
@@ -80,4 +85,5 @@ OffscreenCanvas* HTMLCanvasElementModule::TransferControlToOffscreenInternal(
   }
   return offscreen_canvas;
 }
+
 }  // namespace blink

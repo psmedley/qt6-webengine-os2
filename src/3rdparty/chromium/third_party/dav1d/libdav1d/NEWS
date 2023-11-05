@@ -1,3 +1,28 @@
+Changes for 0.9.1 'Golden Eagle':
+---------------------------------
+
+0.9.1 is a middle-size revision of dav1d, adding notably 10b acceleration for SSSE3:
+ - 10/12b SSSE3 optimizations for mc (avg, w_avg, mask, w_mask, emu_edge),
+   prep/put_bilin, prep/put_8tap, ipred (dc/h/v, paeth, smooth, pal, filter), wiener,
+   sgr (10b), warp8x8, deblock, film_grain, cfl_ac/pred for 32bit and 64bit x86 processors
+ - Film grain NEON for fguv 10/12b, fgy/fguv 8b and fgy/fguv 10/12 arm32
+ - Fixes for filmgrain on ARM
+ - itx 10bit optimizations for 4x4/x8/x16, 8x4/x8/x16 for SSE4
+ - Misc improvements on SSE2, SSE4
+
+
+Changes for 0.9.0 'Golden Eagle':
+---------------------------------
+
+0.9.0 is a major version of dav1d, adding notably 10b acceleration on x64.
+
+Details:
+ - x86 (64bit) AVX2 implementation of most 10b/12b functions, which should provide
+   a large boost for high-bitdepth decoding on modern x86 computers and servers.
+ - ARM64 neon implementation of FilmGrain (4:2:0/4:2:2/4:4:4 8bit)
+ - New API to signal events happening during the decoding process
+
+
 Changes for 0.8.2 'Eurasian hobby':
 -----------------------------------
 

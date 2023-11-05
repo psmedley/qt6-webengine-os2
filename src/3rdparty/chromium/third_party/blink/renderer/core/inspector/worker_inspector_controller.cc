@@ -37,6 +37,7 @@
 #include "third_party/blink/renderer/core/inspector/inspector_emulation_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_issue_reporter.h"
 #include "third_party/blink/renderer/core/inspector/inspector_log_agent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_media_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_network_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/inspector/protocol/Protocol.h"
@@ -47,7 +48,6 @@
 #include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -126,6 +126,8 @@ void WorkerInspectorController::AttachSession(DevToolsSession* session,
     session->Append(MakeGarbageCollected<InspectorEmulationAgent>(nullptr));
     session->Append(MakeGarbageCollected<InspectorAuditsAgent>(
         network_agent, thread_->GetInspectorIssueStorage(), nullptr));
+    session->Append(MakeGarbageCollected<InspectorMediaAgent>(
+        inspected_frames_.Get(), scope));
   }
   ++session_count_;
 }
@@ -184,12 +186,11 @@ void WorkerInspectorController::OnTraceLogDisabled() {}
 void WorkerInspectorController::EmitTraceEvent() {
   if (worker_devtools_token_.is_empty())
     return;
-  TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
-                       "TracingSessionIdForWorker", TRACE_EVENT_SCOPE_THREAD,
-                       "data",
-                       inspector_tracing_session_id_for_worker_event::Data(
-                           worker_devtools_token_, parent_devtools_token_, url_,
-                           worker_thread_id_));
+  DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT_WITH_CATEGORIES(
+      TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
+      "TracingSessionIdForWorker",
+      inspector_tracing_session_id_for_worker_event::Data,
+      worker_devtools_token_, parent_devtools_token_, url_, worker_thread_id_);
 }
 
 void WorkerInspectorController::Trace(Visitor* visitor) const {

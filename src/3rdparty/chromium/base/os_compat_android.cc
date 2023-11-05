@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include "base/strings/string_util.h"
@@ -19,7 +20,6 @@
 #include "base/files/file.h"
 #include "base/rand_util.h"
 #include "base/strings/string_piece.h"
-#include "base/strings/stringprintf.h"
 
 extern "C" {
 // There is no futimes() avaiable in Bionic, so we provide our own

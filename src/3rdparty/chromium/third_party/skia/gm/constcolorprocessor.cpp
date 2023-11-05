@@ -28,15 +28,14 @@
 #include "include/gpu/GrConfig.h"
 #include "include/private/GrTypesPriv.h"
 #include "include/private/SkColorData.h"
+#include "src/core/SkCanvasPriv.h"
 #include "src/core/SkMatrixProvider.h"
 #include "src/gpu/GrColor.h"
 #include "src/gpu/GrFragmentProcessor.h"
 #include "src/gpu/GrPaint.h"
-#include "src/gpu/GrSurfaceDrawContext.h"
 #include "src/gpu/SkGr.h"
-#include "src/gpu/effects/generated/GrConstColorProcessor.h"
-#include "src/gpu/ops/GrDrawOp.h"
-#include "src/gpu/ops/GrFillRectOp.h"
+#include "src/gpu/ops/GrOp.h"
+#include "src/gpu/v1/SurfaceDrawContext_v1.h"
 #include "tools/ToolUtils.h"
 #include "tools/gpu/TestOps.h"
 
@@ -44,7 +43,7 @@
 
 namespace skiagm {
 /**
- * This GM directly exercises GrConstColorProcessor, ModulateRGBA and ModulateAlpha.
+ * This GM directly exercises Color, ModulateRGBA and ModulateAlpha.
  */
 class ColorProcessor : public GpuGM {
 public:
@@ -79,8 +78,13 @@ protected:
                                                SkTileMode::kClamp);
     }
 
-    void onDraw(GrRecordingContext* context, GrSurfaceDrawContext* surfaceDrawContext,
-                SkCanvas* canvas) override {
+    DrawResult onDraw(GrRecordingContext* rContext, SkCanvas* canvas, SkString* errorMsg) override {
+        auto sdc = SkCanvasPriv::TopDeviceSurfaceDrawContext(canvas);
+        if (!sdc) {
+            *errorMsg = kErrorMsg_DrawSkippedGpuOnly;
+            return DrawResult::kSkip;
+        }
+
         constexpr GrColor kColors[] = {
             0xFFFFFFFF,
             0xFFFF00FF,
@@ -110,12 +114,11 @@ protected:
                 // Create a base-layer FP for the const color processor to draw on top of.
                 std::unique_ptr<GrFragmentProcessor> baseFP;
                 if (paintType >= SK_ARRAY_COUNT(kPaintColors)) {
-                    SkSamplingOptions high(SkCubicResampler::Mitchell());
                     GrColorInfo colorInfo;
-                    GrFPArgs args(context, SkSimpleMatrixProvider(SkMatrix::I()), high, &colorInfo);
+                    GrFPArgs args(rContext, SkSimpleMatrixProvider(SkMatrix::I()), &colorInfo);
                     baseFP = as_SB(fShader)->asFragmentProcessor(args);
                 } else {
-                    baseFP = GrConstColorProcessor::Make(
+                    baseFP = GrFragmentProcessor::MakeColor(
                             SkPMColor4f::FromBytes_RGBA(kPaintColors[paintType]));
                 }
 
@@ -123,7 +126,7 @@ protected:
                 std::unique_ptr<GrFragmentProcessor> colorFP;
                 switch (fMode) {
                     case TestMode::kConstColor:
-                        colorFP = GrConstColorProcessor::Make(
+                        colorFP = GrFragmentProcessor::MakeColor(
                                 SkPMColor4f::FromBytes_RGBA(kColors[procColor]));
                         break;
 
@@ -139,12 +142,12 @@ protected:
                 }
 
                 // Render the FP tree.
-                if (auto op = sk_gpu_test::test_ops::MakeRect(context,
+                if (auto op = sk_gpu_test::test_ops::MakeRect(rContext,
                                                               std::move(colorFP),
                                                               renderRect.makeOffset(x, y),
                                                               renderRect,
                                                               SkMatrix::I())) {
-                    surfaceDrawContext->addDrawOp(std::move(op));
+                    sdc->addDrawOp(std::move(op));
                 }
 
                 // Draw labels for the input to the processor and the processor to the right of
@@ -200,6 +203,8 @@ protected:
                 }
             }
         }
+
+        return DrawResult::kOk;
     }
 
 private:

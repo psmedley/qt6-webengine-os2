@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "cc/layers/surface_layer_impl.h"
 #include "components/viz/common/quads/compositor_render_pass_draw_quad.h"
 #include "components/viz/common/quads/surface_draw_quad.h"
 #include "components/viz/common/surfaces/surface_range.h"
@@ -52,8 +53,9 @@ void ThrottleDecider::ProcessRenderPass(
           blur_bounds.Intersect(child_rp.backdrop_filter_bounds->rect());
         quad->shared_quad_state->quad_to_target_transform.TransformRect(
             &blur_bounds);
-        if (quad->shared_quad_state->is_clipped) {
-          blur_bounds.Intersect(gfx::RectF(quad->shared_quad_state->clip_rect));
+        if (quad->shared_quad_state->clip_rect) {
+          blur_bounds.Intersect(
+              gfx::RectF(*quad->shared_quad_state->clip_rect));
         }
         blur_backdrop_filter_bounds.push_back(blur_bounds);
       }
@@ -63,9 +65,9 @@ void ThrottleDecider::ProcessRenderPass(
         gfx::RectF rect_in_target_space(quad->visible_rect);
         quad->shared_quad_state->quad_to_target_transform.TransformRect(
             &rect_in_target_space);
-        if (quad->shared_quad_state->is_clipped) {
+        if (quad->shared_quad_state->clip_rect) {
           rect_in_target_space.Intersect(
-              gfx::RectF(quad->shared_quad_state->clip_rect));
+              gfx::RectF(*quad->shared_quad_state->clip_rect));
         }
 
         for (const gfx::RectF& blur_bounds : blur_backdrop_filter_bounds) {
@@ -83,6 +85,14 @@ void ThrottleDecider::ProcessRenderPass(
     }
   }
   id_to_pass_map_.emplace(render_pass.id, &render_pass);
+}
+
+void ThrottleDecider::ProcessLayerNotToDraw(const LayerImpl* layer) {
+  if (layer->is_surface_layer()) {
+    const auto* surface_layer = static_cast<const SurfaceLayerImpl*>(layer);
+    if (surface_layer->range().IsValid())
+      ids_.insert(surface_layer->range().end().frame_sink_id());
+  }
 }
 
 bool ThrottleDecider::HasThrottlingChanged() const {

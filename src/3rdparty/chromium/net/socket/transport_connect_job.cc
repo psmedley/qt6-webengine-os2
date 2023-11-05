@@ -5,6 +5,7 @@
 #include "net/socket/transport_connect_job.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -16,10 +17,11 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/trace_constants.h"
-#include "net/dns/public/secure_dns_mode.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source_type.h"
@@ -30,6 +32,8 @@
 #include "net/socket/socket_performance_watcher_factory.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/socket/websocket_transport_connect_job.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
+#include "url/scheme_host_port.h"
 
 namespace net {
 
@@ -45,19 +49,44 @@ bool AddressListOnlyContainsIPv6(const AddressList& list) {
   return true;
 }
 
+// TODO(crbug.com/1206799): Delete once endpoint usage is converted to using
+// url::SchemeHostPort when available.
+HostPortPair ToLegacyDestinationEndpoint(
+    const TransportSocketParams::Endpoint& endpoint) {
+  if (absl::holds_alternative<url::SchemeHostPort>(endpoint)) {
+    return HostPortPair::FromSchemeHostPort(
+        absl::get<url::SchemeHostPort>(endpoint));
+  }
+
+  DCHECK(absl::holds_alternative<HostPortPair>(endpoint));
+  return absl::get<HostPortPair>(endpoint);
+}
+
 }  // namespace
 
 TransportSocketParams::TransportSocketParams(
-    const HostPortPair& host_port_pair,
-    const NetworkIsolationKey& network_isolation_key,
-    bool disable_secure_dns,
-    const OnHostResolutionCallback& host_resolution_callback)
-    : destination_(host_port_pair),
-      network_isolation_key_(network_isolation_key),
-      disable_secure_dns_(disable_secure_dns),
-      host_resolution_callback_(host_resolution_callback) {}
+    Endpoint destination,
+    NetworkIsolationKey network_isolation_key,
+    SecureDnsPolicy secure_dns_policy,
+    OnHostResolutionCallback host_resolution_callback)
+    : destination_(std::move(destination)),
+      network_isolation_key_(std::move(network_isolation_key)),
+      secure_dns_policy_(secure_dns_policy),
+      host_resolution_callback_(std::move(host_resolution_callback)) {}
 
 TransportSocketParams::~TransportSocketParams() = default;
+
+std::unique_ptr<TransportConnectJob> TransportConnectJob::Factory::Create(
+    RequestPriority priority,
+    const SocketTag& socket_tag,
+    const CommonConnectJobParams* common_connect_job_params,
+    const scoped_refptr<TransportSocketParams>& params,
+    Delegate* delegate,
+    const NetLogWithSource* net_log) {
+  return std::make_unique<TransportConnectJob>(priority, socket_tag,
+                                               common_connect_job_params,
+                                               params, delegate, net_log);
+}
 
 // TODO(eroman): The use of this constant needs to be re-evaluated. The time
 // needed for TCPClientSocketXXX::Connect() can be arbitrarily long, since
@@ -269,11 +298,10 @@ int TransportConnectJob::DoResolveHost() {
 
   HostResolver::ResolveHostParameters parameters;
   parameters.initial_priority = priority();
-  if (params_->disable_secure_dns())
-    parameters.secure_dns_mode_override = SecureDnsMode::kOff;
-  request_ = host_resolver()->CreateRequest(params_->destination(),
-                                            params_->network_isolation_key(),
-                                            net_log(), parameters);
+  parameters.secure_dns_policy = params_->secure_dns_policy();
+  request_ = host_resolver()->CreateRequest(
+      ToLegacyDestinationEndpoint(params_->destination()),
+      params_->network_isolation_key(), net_log(), parameters);
 
   return request_->Start(base::BindOnce(&TransportConnectJob::OnIOComplete,
                                         base::Unretained(this)));
@@ -300,7 +328,8 @@ int TransportConnectJob::DoResolveHostComplete(int result) {
   if (!params_->host_resolution_callback().is_null()) {
     OnHostResolutionCallbackResult callback_result =
         params_->host_resolution_callback().Run(
-            params_->destination(), request_->GetAddressResults().value());
+            ToLegacyDestinationEndpoint(params_->destination()),
+            request_->GetAddressResults().value());
     if (callback_result == OnHostResolutionCallbackResult::kMayBeDeletedAsync) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE, base::BindOnce(&TransportConnectJob::OnIOComplete,
@@ -398,8 +427,8 @@ void TransportConnectJob::DoIPv6FallbackTransportConnect() {
   DCHECK(!fallback_transport_socket_.get());
   DCHECK(!fallback_addresses_.get());
 
-  fallback_addresses_.reset(
-      new AddressList(request_->GetAddressResults().value()));
+  fallback_addresses_ =
+      std::make_unique<AddressList>(request_->GetAddressResults().value());
   MakeAddressListStartWithIPv4(fallback_addresses_.get());
 
   // Create a |SocketPerformanceWatcher|, and pass the ownership.

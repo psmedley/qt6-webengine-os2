@@ -82,6 +82,7 @@ cc_library(
     deps = [
         ":fast_uniform_bits",
         "//absl/base:core_headers",
+        "//absl/base:dynamic_annotations",
         "//absl/base:raw_logging_internal",
         "//absl/strings",
         "//absl/types:optional",
@@ -296,6 +297,8 @@ cc_library(
         ":platform",
         "//absl/base:config",
         "//absl/base:core_headers",
+        "//absl/base:endian",
+        "//absl/numeric:int128",
     ],
 )
 
@@ -336,6 +339,7 @@ cc_library(
         ":platform",
         "//absl/base:config",
         "//absl/base:core_headers",
+        "//absl/numeric:int128",
     ],
 )
 
@@ -717,7 +721,6 @@ cc_test(
 
 cc_test(
     name = "iostream_state_saver_test",
-    size = "small",
     srcs = ["iostream_state_saver_test.cc"],
     linkopts = ABSL_DEFAULT_LINKOPTS,
     deps = [

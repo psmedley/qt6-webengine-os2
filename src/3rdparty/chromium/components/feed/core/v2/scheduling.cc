@@ -4,10 +4,11 @@
 
 #include "components/feed/core/v2/scheduling.h"
 
+#include "base/json/values_util.h"
 #include "base/time/time.h"
-#include "base/util/values/values_util.h"
 #include "base/values.h"
 #include "components/feed/core/v2/config.h"
+#include "components/feed/core/v2/feedstore_util.h"
 
 namespace feed {
 namespace {
@@ -15,7 +16,7 @@ namespace {
 base::Value VectorToValue(const std::vector<base::TimeDelta>& values) {
   base::Value result(base::Value::Type::LIST);
   for (base::TimeDelta delta : values) {
-    result.Append(util::TimeDeltaToValue(delta));
+    result.Append(base::TimeDeltaToValue(delta));
   }
   return result;
 }
@@ -25,23 +26,35 @@ bool ValueToVector(const base::Value& value,
   if (!value.is_list())
     return false;
   for (const base::Value& entry : value.GetList()) {
-    base::Optional<base::TimeDelta> delta = util::ValueToTimeDelta(entry);
+    absl::optional<base::TimeDelta> delta = base::ValueToTimeDelta(entry);
     if (!delta)
       return false;
     result->push_back(*delta);
   }
   return true;
 }
+
+base::TimeDelta GetThresholdTime(base::TimeDelta default_threshold,
+                                 base::TimeDelta server_threshold) {
+  if (server_threshold <= base::TimeDelta() ||
+      server_threshold > default_threshold) {
+    return default_threshold;
+  }
+  return server_threshold;
+}
+
 }  // namespace
 
 RequestSchedule::RequestSchedule() = default;
 RequestSchedule::~RequestSchedule() = default;
 RequestSchedule::RequestSchedule(const RequestSchedule&) = default;
 RequestSchedule& RequestSchedule::operator=(const RequestSchedule&) = default;
+RequestSchedule::RequestSchedule(RequestSchedule&&) = default;
+RequestSchedule& RequestSchedule::operator=(RequestSchedule&&) = default;
 
 base::Value RequestScheduleToValue(const RequestSchedule& schedule) {
   base::Value result(base::Value::Type::DICTIONARY);
-  result.SetKey("anchor", util::TimeToValue(schedule.anchor_time));
+  result.SetKey("anchor", base::TimeToValue(schedule.anchor_time));
   result.SetKey("offsets", VectorToValue(schedule.refresh_offsets));
   return result;
 }
@@ -50,8 +63,8 @@ RequestSchedule RequestScheduleFromValue(const base::Value& value) {
   if (!value.is_dict())
     return {};
   RequestSchedule result;
-  base::Optional<base::Time> anchor =
-      util::ValueToTime(value.FindKey("anchor"));
+  absl::optional<base::Time> anchor =
+      base::ValueToTime(value.FindKey("anchor"));
   const base::Value* offsets =
       value.FindKeyOfType("offsets", base::Value::Type::LIST);
   if (!anchor || !offsets || !ValueToVector(*offsets, &result.refresh_offsets))
@@ -84,8 +97,42 @@ base::Time NextScheduledRequestTime(base::Time now, RequestSchedule* schedule) {
   return now + GetFeedConfig().default_background_refresh_interval;
 }
 
-bool ShouldWaitForNewContent(bool has_content, base::TimeDelta content_age) {
-  return !has_content || content_age > GetFeedConfig().stale_content_threshold;
+bool ShouldWaitForNewContent(const feedstore::Metadata& metadata,
+                             const StreamType& stream_type,
+                             base::TimeDelta content_age) {
+  const feedstore::Metadata::StreamMetadata* stream_metadata =
+      feedstore::FindMetadataForStream(metadata, stream_type);
+  if (stream_metadata && stream_metadata->is_known_stale())
+    return true;
+
+  base::TimeDelta staleness_threshold =
+      GetFeedConfig().GetStalenessThreshold(stream_type);
+  if (stream_metadata && stream_metadata->has_content_lifetime()) {
+    staleness_threshold = GetThresholdTime(
+        staleness_threshold,
+        base::TimeDelta::FromMilliseconds(
+            stream_metadata->content_lifetime().stale_age_ms()));
+  }
+
+  return content_age > staleness_threshold;
+}
+
+bool ContentInvalidFromAge(const feedstore::Metadata& metadata,
+                           const StreamType& stream_type,
+                           base::TimeDelta content_age) {
+  const feedstore::Metadata::StreamMetadata* stream_metadata =
+      feedstore::FindMetadataForStream(metadata, stream_type);
+
+  base::TimeDelta content_expiration_threshold =
+      GetFeedConfig().content_expiration_threshold;
+  if (stream_metadata && stream_metadata->has_content_lifetime()) {
+    content_expiration_threshold = GetThresholdTime(
+        content_expiration_threshold,
+        base::TimeDelta::FromMilliseconds(
+            stream_metadata->content_lifetime().invalid_age_ms()));
+  }
+
+  return content_age > content_expiration_threshold;
 }
 
 }  // namespace feed

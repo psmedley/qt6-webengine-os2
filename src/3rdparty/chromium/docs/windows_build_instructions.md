@@ -105,10 +105,18 @@ the code, including msysgit and python.
 * If you see strange errors with the file system on the first run of gclient,
   you may want to [disable Windows Indexing](http://tortoisesvn.tigris.org/faq.html#cantmove2).
 
+## Check python install
+
 After running gclient open a command prompt and type `where python` and
 confirm that the depot_tools `python.bat` comes ahead of any copies of
 python.exe. Failing to ensure this can lead to overbuilding when
 using gn - see [crbug.com/611087](https://crbug.com/611087).
+
+[App Execution Aliases](https://docs.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions#alias)
+can conflict with other installations of python on the system so disable
+these for 'python.exe' and 'python3.exe' by opening 'App execution aliases'
+section of Control Panel and unticking the boxes next to both of these
+that point to 'App Installer'.
 
 ## Get the code
 
@@ -159,7 +167,7 @@ development and testing purposes.
 ## Setting up the build
 
 Chromium uses [Ninja](https://ninja-build.org) as its main build tool along with
-a tool called [GN](https://gn.googlesource.com/gn/+/master/docs/quick_start.md)
+a tool called [GN](https://gn.googlesource.com/gn/+/main/docs/quick_start.md)
 to generate `.ninja` files. You can create any number of *build directories*
 with different configurations. To create a build directory:
 
@@ -177,7 +185,8 @@ $ gn gen out/Default
   The default will be a debug component build matching the current host
   operating system and CPU.
 * For more info on GN, run `gn help` on the command line or read the [quick
-  start guide](https://gn.googlesource.com/gn/+/master/docs/quick_start.md).
+  start guide](https://gn.googlesource.com/gn/+/main/docs/quick_start.md).
+
 ### Faster builds
 
 * Reduce file system overhead by excluding build directories from
@@ -226,6 +235,14 @@ When invoking ninja specify 'chrome' as the target to avoid building all test
 binaries as well.
 
 Still, builds will take many hours on many machines.
+
+#### Use SCCACHE
+
+You might be able to use [sccache](https://github.com/mozilla/sccache) for the
+build process by enabling the following arguments:
+
+* `cc_wrapper = "sccache"` - assuming the `sccache` binary is in your `%PATH%`
+* `chrome_pgo_phase = 0`
 
 ### Why is my build slow?
 
@@ -371,9 +388,9 @@ $ gclient sync -D
 ```
 
 The first command updates the primary Chromium source repository and rebases
-any of your local branches on top of tip-of-tree (aka the Git branch `origin/master`).
-If you don't want to use this script, you can also just use `git pull` or
-other common Git commands to update the repo.
+any of your local branches on top of tip-of-tree (aka the Git branch
+`origin/main`). If you don't want to use this script, you can also just use
+`git pull` or other common Git commands to update the repo.
 
 The second command syncs the subrepositories to the appropriate versions,
 deleting those that are no longer needed, and re-runs the hooks as needed.

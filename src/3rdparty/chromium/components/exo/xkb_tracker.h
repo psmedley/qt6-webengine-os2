@@ -14,7 +14,6 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "base/memory/free_deleter.h"
-#include "base/optional.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/scoped_xkb.h"  // nogncheck
 #endif

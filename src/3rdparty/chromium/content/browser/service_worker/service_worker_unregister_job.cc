@@ -22,8 +22,9 @@ typedef ServiceWorkerRegisterJobBase::RegistrationJobType RegistrationJobType;
 ServiceWorkerUnregisterJob::ServiceWorkerUnregisterJob(
     ServiceWorkerContextCore* context,
     const GURL& scope,
+    const blink::StorageKey& key,
     bool is_immediate)
-    : context_(context), scope_(scope), is_immediate_(is_immediate) {
+    : context_(context), scope_(scope), key_(key), is_immediate_(is_immediate) {
   DCHECK(context_);
 }
 
@@ -35,8 +36,9 @@ void ServiceWorkerUnregisterJob::AddCallback(UnregistrationCallback callback) {
 
 void ServiceWorkerUnregisterJob::Start() {
   context_->registry()->FindRegistrationForScope(
-      scope_, base::BindOnce(&ServiceWorkerUnregisterJob::OnRegistrationFound,
-                             weak_factory_.GetWeakPtr()));
+      scope_, key_,
+      base::BindOnce(&ServiceWorkerUnregisterJob::OnRegistrationFound,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void ServiceWorkerUnregisterJob::Abort() {
@@ -86,7 +88,7 @@ void ServiceWorkerUnregisterJob::Complete(
     int64_t registration_id,
     blink::ServiceWorkerStatusCode status) {
   CompleteInternal(registration_id, status);
-  context_->job_coordinator()->FinishJob(scope_, this);
+  context_->job_coordinator()->FinishJob(scope_, key_, this);
 }
 
 void ServiceWorkerUnregisterJob::CompleteInternal(

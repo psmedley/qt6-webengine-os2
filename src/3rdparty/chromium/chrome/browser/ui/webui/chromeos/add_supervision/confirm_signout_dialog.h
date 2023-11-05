@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_ADD_SUPERVISION_CONFIRM_SIGNOUT_DIALOG_H_
 
 #include "base/macros.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/views/metadata/metadata_header_macros.h"
 #include "ui/views/window/dialog_delegate.h"
 
 namespace views {
@@ -28,7 +28,7 @@ class ConfirmSignoutDialog : public views::DialogDelegateView {
 
   // views::WidgetDelegate:
   ui::ModalType GetModalType() const override;
-  base::string16 GetWindowTitle() const override;
+  std::u16string GetWindowTitle() const override;
 
   // views::DialogDelegate:
   bool Accept() override;

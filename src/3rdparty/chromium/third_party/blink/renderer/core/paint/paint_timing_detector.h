@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/graphics/paint/ignore_paint_timing_scope.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
@@ -213,7 +214,7 @@ class CORE_EXPORT PaintTimingDetector
   // opacity layer.
   void ReportIgnoredContent();
 
-  base::Optional<PaintTimingVisualizer>& Visualizer() { return visualizer_; }
+  absl::optional<PaintTimingVisualizer>& Visualizer() { return visualizer_; }
   void Trace(Visitor* visitor) const;
 
  private:
@@ -240,7 +241,7 @@ class CORE_EXPORT PaintTimingDetector
 
   Member<PaintTimingCallbackManagerImpl> callback_manager_;
 
-  base::Optional<PaintTimingVisualizer> visualizer_;
+  absl::optional<PaintTimingVisualizer> visualizer_;
 
   base::TimeTicks largest_image_paint_time_;
   uint64_t largest_image_paint_size_ = 0;
@@ -298,7 +299,7 @@ class ScopedPaintTimingDetectorBlockPaintHook {
       top_->data_->aggregated_visual_rect_.Unite(visual_rect);
   }
 
-  base::Optional<base::AutoReset<ScopedPaintTimingDetectorBlockPaintHook*>>
+  absl::optional<base::AutoReset<ScopedPaintTimingDetectorBlockPaintHook*>>
       reset_top_;
   struct Data {
     STACK_ALLOCATED();
@@ -313,7 +314,7 @@ class ScopedPaintTimingDetectorBlockPaintHook {
     TextPaintTimingDetector* detector_;
     IntRect aggregated_visual_rect_;
   };
-  base::Optional<Data> data_;
+  absl::optional<Data> data_;
   static ScopedPaintTimingDetectorBlockPaintHook* top_;
 };
 

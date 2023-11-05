@@ -5,6 +5,7 @@
 #include "media/filters/decoder_stream_traits.h"
 
 #include <limits>
+#include <memory>
 
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -37,12 +38,17 @@ DecoderStreamTraits<DemuxerStream::AUDIO>::CreateEOSOutput() {
 
 void DecoderStreamTraits<DemuxerStream::AUDIO>::SetIsPlatformDecoder(
     bool is_platform_decoder) {
-  stats_.audio_decoder_info.is_platform_decoder = is_platform_decoder;
+  stats_.audio_pipeline_info.is_platform_decoder = is_platform_decoder;
 }
 
 void DecoderStreamTraits<DemuxerStream::AUDIO>::SetIsDecryptingDemuxerStream(
     bool is_dds) {
-  stats_.audio_decoder_info.has_decrypting_demuxer_stream = is_dds;
+  stats_.audio_pipeline_info.has_decrypting_demuxer_stream = is_dds;
+}
+
+void DecoderStreamTraits<DemuxerStream::AUDIO>::SetEncryptionType(
+    EncryptionType encryption_type) {
+  stats_.audio_pipeline_info.encryption_type = encryption_type;
 }
 
 DecoderStreamTraits<DemuxerStream::AUDIO>::DecoderStreamTraits(
@@ -82,7 +88,7 @@ void DecoderStreamTraits<DemuxerStream::AUDIO>::InitializeDecoder(
     OnConfigChanged(config);
   config_ = config;
 
-  stats_.audio_decoder_info.decoder_type = AudioDecoderType::kUnknown;
+  stats_.audio_pipeline_info.decoder_type = AudioDecoderType::kUnknown;
   // Both |this| and |decoder| are owned by a DecoderSelector and will stay
   // alive at least until |init_cb| is finished executing.
   decoder->Initialize(
@@ -98,7 +104,7 @@ void DecoderStreamTraits<DemuxerStream::AUDIO>::OnDecoderInitialized(
     InitCB cb,
     Status result) {
   if (result.is_ok())
-    stats_.audio_decoder_info.decoder_type = decoder->GetDecoderType();
+    stats_.audio_pipeline_info.decoder_type = decoder->GetDecoderType();
   std::move(cb).Run(result);
 }
 
@@ -107,8 +113,8 @@ void DecoderStreamTraits<DemuxerStream::AUDIO>::OnStreamReset(
   DCHECK(stream);
   // Stream is likely being seeked to a new timestamp, so make new validator to
   // build new timestamp expectations.
-  audio_ts_validator_.reset(
-      new AudioTimestampValidator(stream->audio_decoder_config(), media_log_));
+  audio_ts_validator_ = std::make_unique<AudioTimestampValidator>(
+      stream->audio_decoder_config(), media_log_);
 }
 
 void DecoderStreamTraits<DemuxerStream::AUDIO>::OnDecode(
@@ -126,7 +132,8 @@ void DecoderStreamTraits<DemuxerStream::AUDIO>::OnConfigChanged(
     const DecoderConfigType& config) {
   // Reset validator with the latest config. Also ensures that we do not attempt
   // to match timestamps across config boundaries.
-  audio_ts_validator_.reset(new AudioTimestampValidator(config, media_log_));
+  audio_ts_validator_ =
+      std::make_unique<AudioTimestampValidator>(config, media_log_);
 }
 
 void DecoderStreamTraits<DemuxerStream::AUDIO>::OnOutputReady(
@@ -153,12 +160,17 @@ DecoderStreamTraits<DemuxerStream::VIDEO>::CreateEOSOutput() {
 
 void DecoderStreamTraits<DemuxerStream::VIDEO>::SetIsPlatformDecoder(
     bool is_platform_decoder) {
-  stats_.video_decoder_info.is_platform_decoder = is_platform_decoder;
+  stats_.video_pipeline_info.is_platform_decoder = is_platform_decoder;
 }
 
 void DecoderStreamTraits<DemuxerStream::VIDEO>::SetIsDecryptingDemuxerStream(
     bool is_dds) {
-  stats_.video_decoder_info.has_decrypting_demuxer_stream = is_dds;
+  stats_.video_pipeline_info.has_decrypting_demuxer_stream = is_dds;
+}
+
+void DecoderStreamTraits<DemuxerStream::VIDEO>::SetEncryptionType(
+    EncryptionType encryption_type) {
+  stats_.video_pipeline_info.encryption_type = encryption_type;
 }
 
 DecoderStreamTraits<DemuxerStream::VIDEO>::DecoderStreamTraits(
@@ -200,8 +212,8 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::InitializeDecoder(
     const OutputCB& output_cb,
     const WaitingCB& waiting_cb) {
   DCHECK(config.IsValidConfig());
-  stats_.video_decoder_info.decoder_type = VideoDecoderType::kUnknown;
-  DVLOG(2) << decoder->GetDisplayName();
+  stats_.video_pipeline_info.decoder_type = VideoDecoderType::kUnknown;
+  transform_ = config.video_transformation();
   // |decoder| is owned by a DecoderSelector and will stay
   // alive at least until |init_cb| is finished executing.
   decoder->Initialize(
@@ -216,8 +228,12 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::OnDecoderInitialized(
     DecoderType* decoder,
     InitCB cb,
     Status result) {
-  if (result.is_ok())
-    stats_.video_decoder_info.decoder_type = decoder->GetDecoderType();
+  if (result.is_ok()) {
+    stats_.video_pipeline_info.decoder_type = decoder->GetDecoderType();
+    DVLOG(2) << stats_.video_pipeline_info.decoder_type;
+  } else {
+    DVLOG(2) << "Decoder initialization failed.";
+  }
   std::move(cb).Run(result);
 }
 
@@ -289,6 +305,8 @@ PostDecodeAction DecoderStreamTraits<DemuxerStream::VIDEO>::OnDecodeDone(
 
 void DecoderStreamTraits<DemuxerStream::VIDEO>::OnOutputReady(
     OutputType* buffer) {
+  buffer->metadata().transformation = transform_;
+
   if (!buffer->metadata().decode_begin_time.has_value())
     return;
 

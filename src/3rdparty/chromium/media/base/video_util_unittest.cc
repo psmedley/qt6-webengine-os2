@@ -9,7 +9,6 @@
 #include <cmath>
 #include <memory>
 
-#include "base/macros.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -151,7 +150,8 @@ class VideoUtilTest : public testing::Test {
         u_stride_(0),
         v_stride_(0) {
   }
-
+  VideoUtilTest(const VideoUtilTest&) = delete;
+  VideoUtilTest& operator=(const VideoUtilTest&) = delete;
   ~VideoUtilTest() override = default;
 
   void CreateSourceFrame(int width, int height,
@@ -187,87 +187,7 @@ class VideoUtilTest : public testing::Test {
   int v_stride_;
 
   scoped_refptr<VideoFrame> destination_frame_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoUtilTest);
 };
-
-TEST_F(VideoUtilTest, GetPixelAspectRatio) {
-  gfx::Rect visible_rect(320, 240);
-
-  // Test empty or invalid combinations.
-  EXPECT_TRUE(std::isnan(GetPixelAspectRatio(gfx::Rect(), gfx::Size())));
-  EXPECT_TRUE(std::isnan(GetPixelAspectRatio(gfx::Rect(1, 1), gfx::Size())));
-  EXPECT_TRUE(std::isnan(GetPixelAspectRatio(gfx::Rect(), gfx::Size(1, 1))));
-  EXPECT_TRUE(
-      std::isinf(GetPixelAspectRatio(gfx::Rect(1, 1), gfx::Size(1, 0))));
-  EXPECT_EQ(0.0, GetPixelAspectRatio(gfx::Rect(1, 1), gfx::Size(0, 1)));
-  EXPECT_EQ(0.0, GetPixelAspectRatio(gfx::Rect(1, 0), gfx::Size(1, 1)));
-  EXPECT_TRUE(
-      std::isinf(GetPixelAspectRatio(gfx::Rect(0, 1), gfx::Size(1, 1))));
-
-  // Some normal ratios.
-  EXPECT_DOUBLE_EQ(1.0, GetPixelAspectRatio(visible_rect, gfx::Size(320, 240)));
-  EXPECT_DOUBLE_EQ(2.0, GetPixelAspectRatio(visible_rect, gfx::Size(640, 240)));
-  EXPECT_DOUBLE_EQ(0.5, GetPixelAspectRatio(visible_rect, gfx::Size(320, 480)));
-}
-
-TEST_F(VideoUtilTest, GetNaturalSize_Double) {
-  gfx::Rect visible_rect(320, 240);
-
-  // Test 0 sizes.
-  EXPECT_EQ(gfx::Size(0, 0), GetNaturalSize(gfx::Rect(0, 0), 1.0));
-  EXPECT_EQ(gfx::Size(0, 1), GetNaturalSize(gfx::Rect(0, 1), 1.0));
-  EXPECT_EQ(gfx::Size(1, 0), GetNaturalSize(gfx::Rect(1, 0), 1.0));
-
-  // Test abnormal ratios.
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_rect, NAN));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_rect, 0.0));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_rect, INFINITY));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_rect, -INFINITY));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_rect, -1.0));
-
-  // Test normal sizes and ratios.
-  EXPECT_EQ(gfx::Size(320, 240), GetNaturalSize(visible_rect, 1.0 / 1.0));
-  EXPECT_EQ(gfx::Size(640, 240), GetNaturalSize(visible_rect, 2.0 / 1.0));
-  EXPECT_EQ(gfx::Size(320, 480), GetNaturalSize(visible_rect, 1.0 / 2.0));
-  EXPECT_EQ(gfx::Size(427, 240), GetNaturalSize(visible_rect, 4.0 / 3.0));
-  EXPECT_EQ(gfx::Size(320, 320), GetNaturalSize(visible_rect, 3.0 / 4.0));
-  EXPECT_EQ(gfx::Size(569, 240), GetNaturalSize(visible_rect, 16.0 / 9.0));
-  EXPECT_EQ(gfx::Size(320, 427), GetNaturalSize(visible_rect, 9.0 / 16.0));
-
-  // Test some random ratios.
-  EXPECT_EQ(gfx::Size(495, 240), GetNaturalSize(visible_rect, 17.0 / 11.0));
-  EXPECT_EQ(gfx::Size(320, 371), GetNaturalSize(visible_rect, 11.0 / 17.0));
-}
-
-TEST_F(VideoUtilTest, GetNaturalSize_Fraction) {
-  gfx::Size visible_size(320, 240);
-
-  // Test 0 sizes.
-  EXPECT_EQ(gfx::Size(0, 0), GetNaturalSize(gfx::Size(0, 0), 1, 1));
-  EXPECT_EQ(gfx::Size(0, 1), GetNaturalSize(gfx::Size(0, 1), 1, 1));
-  EXPECT_EQ(gfx::Size(1, 0), GetNaturalSize(gfx::Size(1, 0), 1, 1));
-
-  // Test abnormal ratios.
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_size, 0, 0));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_size, 0, 1));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_size, 1, 0));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_size, 1, -1));
-  EXPECT_EQ(gfx::Size(), GetNaturalSize(visible_size, -1, 1));
-
-  // Test normal sizes and ratios.
-  EXPECT_EQ(gfx::Size(320, 240), GetNaturalSize(visible_size, 1, 1));
-  EXPECT_EQ(gfx::Size(640, 240), GetNaturalSize(visible_size, 2, 1));
-  EXPECT_EQ(gfx::Size(320, 480), GetNaturalSize(visible_size, 1, 2));
-  EXPECT_EQ(gfx::Size(427, 240), GetNaturalSize(visible_size, 4, 3));
-  EXPECT_EQ(gfx::Size(320, 320), GetNaturalSize(visible_size, 3, 4));
-  EXPECT_EQ(gfx::Size(569, 240), GetNaturalSize(visible_size, 16, 9));
-  EXPECT_EQ(gfx::Size(320, 427), GetNaturalSize(visible_size, 9, 16));
-
-  // Test some random ratios.
-  EXPECT_EQ(gfx::Size(495, 240), GetNaturalSize(visible_size, 17, 11));
-  EXPECT_EQ(gfx::Size(320, 371), GetNaturalSize(visible_size, 11, 17));
-}
 
 namespace {
 
@@ -408,15 +328,14 @@ class VideoUtilRotationTest
   VideoUtilRotationTest() {
     dest_.reset(new uint8_t[GetParam().width * GetParam().height]);
   }
-
-  virtual ~VideoUtilRotationTest() = default;
+  VideoUtilRotationTest(const VideoUtilRotationTest&) = delete;
+  VideoUtilRotationTest& operator=(const VideoUtilRotationTest&) = delete;
+  ~VideoUtilRotationTest() override = default;
 
   uint8_t* dest_plane() { return dest_.get(); }
 
  private:
   std::unique_ptr<uint8_t[]> dest_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoUtilRotationTest);
 };
 
 TEST_P(VideoUtilRotationTest, Rotate) {

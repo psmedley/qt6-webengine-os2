@@ -7,6 +7,7 @@
 #include "xfa/fxfa/parser/cxfa_stipple.h"
 
 #include "fxjs/xfa/cjx_node.h"
+#include "xfa/fgas/graphics/cfgas_gegraphics.h"
 #include "xfa/fxfa/parser/cxfa_color.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 
@@ -51,7 +52,7 @@ int32_t CXFA_Stipple::GetRate() {
 }
 
 void CXFA_Stipple::Draw(CFGAS_GEGraphics* pGS,
-                        CFGAS_GEPath* fillPath,
+                        const CFGAS_GEPath& fillPath,
                         const CFX_RectF& rtFill,
                         const CFX_Matrix& matrix) {
   int32_t iRate = GetRate();
@@ -68,6 +69,6 @@ void CXFA_Stipple::Draw(CFGAS_GEGraphics* pGS,
 
   pGS->SaveGraphState();
   pGS->SetFillColor(CFGAS_GEColor(cr));
-  pGS->FillPath(fillPath, CFX_FillRenderOptions::FillType::kWinding, &matrix);
+  pGS->FillPath(fillPath, CFX_FillRenderOptions::FillType::kWinding, matrix);
   pGS->RestoreGraphState();
 }

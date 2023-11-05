@@ -37,10 +37,6 @@ WebController* FakeScriptExecutorDelegate::GetWebController() {
   return web_controller_;
 }
 
-ElementStore* FakeScriptExecutorDelegate::GetElementStore() const {
-  return element_store_;
-}
-
 TriggerContext* FakeScriptExecutorDelegate::GetTriggerContext() {
   return trigger_context_.get();
 }
@@ -257,7 +253,18 @@ void FakeScriptExecutorDelegate::SetGenericUi(
     base::OnceCallback<void(const ClientStatus&)>
         view_inflation_finished_callback) {}
 
+void FakeScriptExecutorDelegate::SetPersistentGenericUi(
+    std::unique_ptr<GenericUserInterfaceProto> generic_ui,
+    base::OnceCallback<void(const ClientStatus&)>
+        view_inflation_finished_callback) {
+  persistent_generic_ui_ = std::move(generic_ui);
+}
+
 void FakeScriptExecutorDelegate::ClearGenericUi() {}
+
+void FakeScriptExecutorDelegate::ClearPersistentGenericUi() {
+  persistent_generic_ui_.reset();
+}
 
 void FakeScriptExecutorDelegate::SetOverlayBehavior(
     ConfigureUiStateProto::OverlayBehavior overaly_behavior) {}

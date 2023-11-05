@@ -7,10 +7,10 @@
 
 #include "content/browser/renderer_host/input/input_router.h"
 
-#include "base/optional.h"
 #include "cc/input/touch_action.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/common/input/event_with_latency_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/input/touch_event.mojom.h"
 
 namespace content {
@@ -41,12 +41,11 @@ class MockInputRouter : public InputRouter {
   void NotifySiteIsMobileOptimized(bool is_mobile_optimized) override {}
   bool HasPendingEvents() const override;
   void SetDeviceScaleFactor(float device_scale_factor) override {}
-  void SetFrameTreeNodeId(int frameTreeNodeId) override {}
-  base::Optional<cc::TouchAction> AllowedTouchAction() override;
-  base::Optional<cc::TouchAction> ActiveTouchAction() override;
+  absl::optional<cc::TouchAction> AllowedTouchAction() override;
+  absl::optional<cc::TouchAction> ActiveTouchAction() override;
   void SetForceEnableZoom(bool enabled) override {}
-  mojo::PendingRemote<blink::mojom::WidgetInputHandlerHost> BindNewHost()
-      override;
+  mojo::PendingRemote<blink::mojom::WidgetInputHandlerHost> BindNewHost(
+      scoped_refptr<base::SequencedTaskRunner> task_runner) override;
   void StopFling() override {}
   void ForceSetTouchActionAuto() override {}
   void OnHasTouchEventConsumers(

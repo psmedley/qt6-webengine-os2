@@ -18,7 +18,6 @@
 #include "third_party/blink/renderer/core/css/cssom/css_unsupported_style_value.h"
 #include "third_party/blink/renderer/core/css/properties/css_property_ref.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
@@ -121,7 +120,7 @@ bool BuildCustomValues(
 }  // namespace
 
 // static
-base::Optional<PaintWorkletStylePropertyMap::CrossThreadData>
+absl::optional<PaintWorkletStylePropertyMap::CrossThreadData>
 PaintWorkletStylePropertyMap::BuildCrossThreadData(
     const Document& document,
     UniqueObjectId unique_object_id,
@@ -134,10 +133,10 @@ PaintWorkletStylePropertyMap::BuildCrossThreadData(
   data.ReserveCapacityForSize(native_properties.size() +
                               custom_properties.size());
   if (!BuildNativeValues(style, native_properties, data))
-    return base::nullopt;
+    return absl::nullopt;
   if (!BuildCustomValues(document, unique_object_id, style, custom_properties,
                          data, input_property_keys))
-    return base::nullopt;
+    return absl::nullopt;
   return data;
 }
 

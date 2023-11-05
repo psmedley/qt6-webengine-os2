@@ -48,6 +48,8 @@ private Q_SLOTS:
     void value();
     void roles_data();
     void roles();
+    void objectName();
+    void crossTreeParent();
 };
 
 // This will be called before the first test function is executed.
@@ -338,7 +340,7 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kAbbr") << QString("<abbr>a</abbr>") << 1 << QAccessible::StaticText;
     QTest::newRow("ax::mojom::Role::kAlert") << QString("<div role='alert'>alert</div>") << 0 << QAccessible::AlertMessage;
     QTest::newRow("ax::mojom::Role::kAlertDialog") << QString("<div role='alertdialog'>alert</div>") << 0 << QAccessible::AlertMessage;
-    QTest::newRow("ax::mojom::Role::kAnchor") << QString("<a id='a'>Chapter a</a>") << 1 << QAccessible::Link;
+    QTest::newRow("ax::mojom::Role::kAnchor") << QString("<a id='a'>Chapter a</a>") << 1 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kApplication") << QString("<div role='application'>landmark</div>") << 0 << QAccessible::Document;
     QTest::newRow("ax::mojom::Role::kArticle") << QString("<article>a</article>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kAudio") << QString("<audio controls><source src='test.mp3' type='audio/mpeg'></audio>") << 1 << QAccessible::Sound;
@@ -484,7 +486,7 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kRowGroup") << QString("<table role=table><tbody role=rowgroup><tr><td>a</td></tr></tbody></table>") << 1 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kRowHeader") << QString("<table role=table><tr><th>a</td><td>b</td></tr></table>") << 2 << QAccessible::RowHeader;
     QTest::newRow("ax::mojom::Role::kRuby") << QString("<ruby>a</ruby>") << 1 << QAccessible::Grouping;
-    QTest::newRow("ax::mojom::Role::kRubyAnnotation") << QString("<ruby><rt tabindex=0>a</rt></ruby>") << 2 << QAccessible::StaticText;
+    //QTest::newRow("ax::mojom::Role::kRubyAnnotation") // No mapping to ARIA role (presents as property on enclosing ruby element)
     QTest::newRow("ax::mojom::Role::kScrollBar") << QString("<div role='scrollbar'>a</a>") << 0 << QAccessible::ScrollBar;
     //QTest::newRow("ax::mojom::Role::kScrollView"); // No mapping to ARIA role
     QTest::newRow("ax::mojom::Role::kSearch") << QString("<div role='search'>landmark</div>") << 0 << QAccessible::Section;
@@ -550,6 +552,57 @@ void tst_Accessibility::roles()
     }
 
     QCOMPARE(element->role(), role);
+}
+
+void tst_Accessibility::objectName()
+{
+    QWebEngineView webView;
+    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
+    webView.setHtml("<html><body><p id='my_id'></p></body></html>");
+    webView.show();
+    QVERIFY(spyFinished.wait());
+    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
+    QAccessibleInterface *document = view->child(0);
+    QTRY_COMPARE(document->childCount(), 1);
+    QAccessibleInterface *p = document->child(0);
+    QVERIFY(p);
+    QVERIFY(p->object());
+    QCOMPARE(p->role(), QAccessible::Paragraph);
+    QCOMPARE(p->object()->objectName(), QStringLiteral("my_id"));
+}
+
+void tst_Accessibility::crossTreeParent()
+{
+    QWebEngineView webView;
+    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
+    webView.setHtml("<html><body><iframe src='data:text/html,<html><body><p id=my_id></p></body></html>'>Fallback text</iframe></body></html>");
+    webView.show();
+    QVERIFY(spyFinished.wait());
+    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
+    QAccessibleInterface *document = view->child(0);
+    QCOMPARE(document->role(), QAccessible::WebDocument);
+    QTRY_COMPARE(document->childCount(), 1);
+    QAccessibleInterface *p = document->child(0);
+    QVERIFY(p);
+    QCOMPARE(p->parent(), document);
+    p = p->child(0);
+    QVERIFY(p);
+    QCOMPARE(p->role(), QAccessible::WebDocument);
+    QCOMPARE(p->parent()->parent(), document);
+    QTRY_COMPARE(p->childCount(), 1);
+    p = p->child(0);
+    QVERIFY(p);
+    QAccessibleInterface *subdocument = p;
+    QCOMPARE(p->role(), QAccessible::WebDocument);
+    QCOMPARE(p->parent()->parent()->parent(), document);
+    p = p->child(0);
+    QVERIFY(p);
+    QVERIFY(p->object());
+    QCOMPARE(p->role(), QAccessible::Paragraph);
+    QCOMPARE(p->parent(), subdocument);
+    QCOMPARE(p->parent()->parent()->parent()->parent(), document);
+    QCOMPARE(p->parent()->parent()->parent()->parent()->parent(), view);
+    QCOMPARE(p->object()->objectName(), QStringLiteral("my_id"));
 }
 
 static QByteArrayList params = QByteArrayList()

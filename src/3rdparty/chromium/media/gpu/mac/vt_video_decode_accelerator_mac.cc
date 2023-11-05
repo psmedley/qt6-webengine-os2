@@ -23,11 +23,14 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/system/sys_info.h"
+#include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -194,7 +197,7 @@ base::ScopedCFTypeRef<CMFormatDescriptionRef> CreateVideoFormatH264(
 base::ScopedCFTypeRef<CMFormatDescriptionRef> CreateVideoFormatVP9(
     media::VideoColorSpace color_space,
     media::VideoCodecProfile profile,
-    base::Optional<gfx::HDRMetadata> hdr_metadata,
+    absl::optional<gfx::HDRMetadata> hdr_metadata,
     const gfx::Size& coded_size) {
   base::ScopedCFTypeRef<CFMutableDictionaryRef> format_config(
       CreateFormatExtensions(kCMVideoCodecType_VP9, profile, color_space,
@@ -247,8 +250,9 @@ bool CreateVideoToolboxSession(
   // output size for a 1:1 ratio. (Note though that VideoToolbox does not handle
   // top or left crops correctly.) We expect the visible rect to be integral.
   CGRect visible_rect = CMVideoFormatDescriptionGetCleanAperture(format, true);
-  CMVideoDimensions visible_dimensions = {visible_rect.size.width,
-                                          visible_rect.size.height};
+  CMVideoDimensions visible_dimensions = {
+      base::ClampFloor(visible_rect.size.width),
+      base::ClampFloor(visible_rect.size.height)};
   base::ScopedCFTypeRef<CFMutableDictionaryRef> image_config(
       BuildImageConfig(visible_dimensions, is_hbd));
   if (!image_config) {
@@ -323,7 +327,7 @@ bool InitializeVideoToolboxInternal() {
     // Create a VP9 decoding session.
     if (!CreateVideoToolboxSession(
             CreateVideoFormatVP9(VideoColorSpace::REC709(), VP9PROFILE_PROFILE0,
-                                 base::nullopt, gfx::Size(720, 480)),
+                                 absl::nullopt, gfx::Size(720, 480)),
             /*require_hardware=*/true, /*is_hbd=*/false, &callback, &session,
             &configured_size)) {
       DVLOG(1) << "Hardware VP9 decoding with VideoToolbox is not supported";
@@ -479,14 +483,18 @@ VTVideoDecodeAccelerator::VTVideoDecodeAccelerator(
     MediaLog* media_log)
     : gl_client_(gl_client),
       workarounds_(workarounds),
-      media_log_(media_log),
+      // Non media/ use cases like PPAPI may not provide a MediaLog.
+      media_log_(media_log ? media_log->Clone() : nullptr),
       gpu_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      decoder_thread_("VTDecoderThread"),
+      decoder_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
+          {base::TaskPriority::USER_VISIBLE})),
+      decoder_weak_this_factory_(this),
       weak_this_factory_(this) {
   DCHECK(gl_client_.bind_image);
 
   callback_.decompressionOutputCallback = OutputThunk;
   callback_.decompressionOutputRefCon = this;
+  decoder_weak_this_ = decoder_weak_this_factory_.GetWeakPtr();
   weak_this_ = weak_this_factory_.GetWeakPtr();
 
   memory_dump_id_ = g_memory_dump_ids.GetNext();
@@ -511,11 +519,11 @@ bool VTVideoDecodeAccelerator::OnMemoryDump(
   // called already).
   for (const auto& it : picture_info_map_) {
     PictureInfo* picture_info = it.second.get();
-    if (picture_info->gl_image) {
+    for (const auto& gl_image : picture_info->gl_images) {
       std::string dump_name =
           base::StringPrintf("media/vt_video_decode_accelerator_%d/picture_%d",
                              memory_dump_id_, picture_info->bitstream_id);
-      picture_info->gl_image->OnMemoryDump(pmd, 0, dump_name);
+      gl_image->OnMemoryDump(pmd, 0, dump_name);
     }
   }
 
@@ -622,13 +630,6 @@ bool VTVideoDecodeAccelerator::Initialize(const Config& config,
       NOTREACHED() << "Unsupported profile.";
   };
 
-  // Spawn a thread to handle parsing and calling VideoToolbox.
-  // TODO(sandersd): This should probably use a base::ThreadPool thread instead.
-  if (!decoder_thread_.Start()) {
-    DLOG(ERROR) << "Failed to start decoder thread";
-    return false;
-  }
-
   // Count the session as successfully initialized.
   UMA_HISTOGRAM_ENUMERATION("Media.VTVDA.SessionFailureReason",
                             SFT_SUCCESSFULLY_INITIALIZED, SFT_MAX + 1);
@@ -637,7 +638,7 @@ bool VTVideoDecodeAccelerator::Initialize(const Config& config,
 
 bool VTVideoDecodeAccelerator::FinishDelayedFrames() {
   DVLOG(3) << __func__;
-  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
+  DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
   if (session_) {
     OSStatus status = VTDecompressionSessionWaitForAsynchronousFrames(session_);
     if (status) {
@@ -651,7 +652,7 @@ bool VTVideoDecodeAccelerator::FinishDelayedFrames() {
 
 bool VTVideoDecodeAccelerator::ConfigureDecoder() {
   DVLOG(2) << __func__;
-  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
+  DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
 
   base::ScopedCFTypeRef<CMFormatDescriptionRef> format;
   switch (codec_) {
@@ -722,7 +723,7 @@ void VTVideoDecodeAccelerator::DecodeTaskVp9(
     Frame* frame) {
   DVLOG(2) << __func__ << ": bit_stream=" << frame->bitstream_id
            << ", buffer=" << buffer->AsHumanReadableString();
-  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
+  DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
 
   if (!cc_detector_)
     cc_detector_ = std::make_unique<VP9ConfigChangeDetector>();
@@ -792,7 +793,7 @@ void VTVideoDecodeAccelerator::DecodeTaskVp9(
 void VTVideoDecodeAccelerator::DecodeTask(scoped_refptr<DecoderBuffer> buffer,
                                           Frame* frame) {
   DVLOG(2) << __func__ << "(" << frame->bitstream_id << ")";
-  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
+  DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
 
   // NALUs are stored with Annex B format in the bitstream buffer (start codes),
   // but VideoToolbox expects AVC format (length headers), so we must rewrite
@@ -934,7 +935,7 @@ void VTVideoDecodeAccelerator::DecodeTask(scoped_refptr<DecoderBuffer> buffer,
 
           // Compute and store frame properties. |image_size| gets filled in
           // later, since it comes from the decoder configuration.
-          base::Optional<int32_t> pic_order_cnt =
+          absl::optional<int32_t> pic_order_cnt =
               poc_.ComputePicOrderCnt(sps, slice_hdr);
           if (!pic_order_cnt.has_value()) {
             WriteToMediaLog(MediaLogMessageLevel::kERROR,
@@ -1168,7 +1169,7 @@ void VTVideoDecodeAccelerator::DecodeDone(Frame* frame) {
 
 void VTVideoDecodeAccelerator::FlushTask(TaskType type) {
   DVLOG(3) << __func__;
-  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
+  DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
 
   FinishDelayedFrames();
 
@@ -1177,10 +1178,15 @@ void VTVideoDecodeAccelerator::FlushTask(TaskType type) {
   if (vp9_bsf_)
     vp9_bsf_->Flush();
 
-  if (type == TASK_DESTROY && session_) {
-    // Destroy the decoding session before returning from the decoder thread.
-    VTDecompressionSessionInvalidate(session_);
-    session_.reset();
+  if (type == TASK_DESTROY) {
+    if (session_) {
+      // Destroy the decoding session before returning from the decoder thread.
+      VTDecompressionSessionInvalidate(session_);
+      session_.reset();
+    }
+
+    // This must be done on |decoder_task_runner_|.
+    decoder_weak_this_factory_.InvalidateWeakPtrs();
   }
 
   // Queue a task even if flushing fails, so that destruction always completes.
@@ -1223,15 +1229,15 @@ void VTVideoDecodeAccelerator::Decode(scoped_refptr<DecoderBuffer> buffer,
   pending_frames_[bitstream_id] = base::WrapUnique(frame);
 
   if (codec_ == kCodecVP9) {
-    decoder_thread_.task_runner()->PostTask(
+    decoder_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&VTVideoDecodeAccelerator::DecodeTaskVp9,
-                       base::Unretained(this), std::move(buffer), frame));
+                       decoder_weak_this_, std::move(buffer), frame));
   } else {
-    decoder_thread_.task_runner()->PostTask(
+    decoder_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&VTVideoDecodeAccelerator::DecodeTask,
-                       base::Unretained(this), std::move(buffer), frame));
+                       decoder_weak_this_, std::move(buffer), frame));
   }
 }
 
@@ -1281,13 +1287,13 @@ void VTVideoDecodeAccelerator::ReusePictureBuffer(int32_t picture_id) {
   // Drop references to allow the underlying buffer to be released.
   PictureInfo* picture_info = it->second.get();
   if (picture_info->uses_shared_images) {
-    picture_info->scoped_shared_image = nullptr;
+    picture_info->scoped_shared_images.clear();
   } else {
     gl_client_.bind_image.Run(picture_info->client_texture_id,
                               gpu::GetPlatformSpecificTextureTarget(), nullptr,
                               false);
   }
-  picture_info->gl_image = nullptr;
+  picture_info->gl_images.clear();
   picture_info->bitstream_id = 0;
 
   // Mark the picture as available and try to complete pending output work.
@@ -1457,38 +1463,46 @@ bool VTVideoDecodeAccelerator::ProcessFrame(const Frame& frame) {
   // If the next pending flush is for a reset, then the frame will be dropped.
   bool resetting = !pending_flush_tasks_.empty() &&
                    pending_flush_tasks_.front() == TASK_RESET;
+  if (resetting)
+    return true;
 
-  if (!resetting) {
-    DCHECK(frame.image.get());
-    // If the |image_size| has changed, request new picture buffers and then
-    // wait for them.
-    //
-    // TODO(sandersd): When used by GpuVideoDecoder, we don't need to bother
-    // with this. We can tell that is the case when we also have a timestamp.
-    if (picture_size_ != frame.image_size) {
-      // Dismiss current pictures.
-      for (int32_t picture_id : assigned_picture_ids_) {
-        DVLOG(3) << "DismissPictureBuffer(" << picture_id << ")";
-        client_->DismissPictureBuffer(picture_id);
-      }
-      assigned_picture_ids_.clear();
-      picture_info_map_.clear();
-      available_picture_ids_.clear();
-
-      // Request new pictures.
-      picture_size_ = frame.image_size;
-      DVLOG(3) << "ProvidePictureBuffers(" << kNumPictureBuffers
-               << frame.image_size.ToString() << ")";
-      client_->ProvidePictureBuffers(kNumPictureBuffers, PIXEL_FORMAT_UNKNOWN,
-                                     1, frame.image_size,
-                                     gpu::GetPlatformSpecificTextureTarget());
-      return false;
+  DCHECK(frame.image.get());
+  // If the |image_size| has changed, request new picture buffers and then
+  // wait for them.
+  //
+  // TODO(sandersd): When used by GpuVideoDecoder, we don't need to bother
+  // with this. We can tell that is the case when we also have a timestamp.
+  if (picture_size_ != frame.image_size) {
+    // Dismiss current pictures.
+    for (int32_t picture_id : assigned_picture_ids_) {
+      DVLOG(3) << "DismissPictureBuffer(" << picture_id << ")";
+      client_->DismissPictureBuffer(picture_id);
     }
-    if (!SendFrame(frame))
-      return false;
-  }
+    assigned_picture_ids_.clear();
+    picture_info_map_.clear();
+    available_picture_ids_.clear();
 
-  return true;
+    // Request new pictures.
+    picture_size_ = frame.image_size;
+
+    // TODO(https://crbug.com/1210994): Remove XRGB support, and expose only
+    // PIXEL_FORMAT_NV12 and PIXEL_FORMAT_YUV420P10.
+    picture_format_ = PIXEL_FORMAT_XRGB;
+    if (base::FeatureList::IsEnabled(kMultiPlaneVideoToolboxSharedImages)) {
+      // TODO(https://crbug.com/1233228): The UV planes of P010 frames cannot
+      // be represented in the current gfx::BufferFormat.
+      if (config_.profile != VP9PROFILE_PROFILE2)
+        picture_format_ = PIXEL_FORMAT_NV12;
+    }
+
+    DVLOG(3) << "ProvidePictureBuffers(" << kNumPictureBuffers
+             << frame.image_size.ToString() << ")";
+    client_->ProvidePictureBuffers(kNumPictureBuffers, picture_format_, 1,
+                                   frame.image_size,
+                                   gpu::GetPlatformSpecificTextureTarget());
+    return false;
+  }
+  return SendFrame(frame);
 }
 
 bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
@@ -1504,100 +1518,124 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
   auto it = picture_info_map_.find(picture_id);
   DCHECK(it != picture_info_map_.end());
   PictureInfo* picture_info = it->second.get();
-  DCHECK(!picture_info->gl_image);
+  DCHECK(picture_info->gl_images.empty());
 
   const gfx::BufferFormat buffer_format =
       config_.profile == VP9PROFILE_PROFILE2
           ? gfx::BufferFormat::P010
           : gfx::BufferFormat::YUV_420_BIPLANAR;
-  // TODO(https://crbug.com/1108909): BGRA is not an appropriate value for
-  // these parameters.
-  const GLenum gl_format = GL_BGRA_EXT;
-  const viz::ResourceFormat viz_resource_format =
-      viz::ResourceFormat::BGRA_8888;
-
-  scoped_refptr<gl::GLImageIOSurface> gl_image(
-      gl::GLImageIOSurface::Create(frame.image_size, gl_format));
-  if (!gl_image->InitializeWithCVPixelBuffer(
-          frame.image.get(),
-          gfx::GenericSharedMemoryId(g_cv_pixel_buffer_ids.GetNext()),
-          buffer_format)) {
-    NOTIFY_STATUS("Failed to initialize GLImageIOSurface", PLATFORM_FAILURE,
-                  SFT_PLATFORM_ERROR);
-  }
-  gl_image->DisableInUseByWindowServer();
-
   gfx::ColorSpace color_space = GetImageBufferColorSpace(frame.image);
-  gl_image->SetColorSpaceForYUVToRGBConversion(color_space);
-  gl_image->SetColorSpaceShallow(color_space);
 
-  scoped_refptr<Picture::ScopedSharedImage> scoped_shared_image;
-  if (picture_info->uses_shared_images) {
-    gpu::SharedImageStub* shared_image_stub = client_->GetSharedImageStub();
-    DCHECK(shared_image_stub);
-    const uint32_t shared_image_usage =
-        gpu::SHARED_IMAGE_USAGE_DISPLAY | gpu::SHARED_IMAGE_USAGE_SCANOUT;
-    gpu::Mailbox mailbox = gpu::Mailbox::GenerateForSharedImage();
-
-    gpu::SharedImageBackingGLCommon::InitializeGLTextureParams gl_params;
-    // ANGLE-on-Metal exposes IOSurfaces via GL_TEXTURE_2D. Be robust to that.
-    gl_params.target = gl_client_.supports_arb_texture_rectangle
-                           ? GL_TEXTURE_RECTANGLE_ARB
-                           : GL_TEXTURE_2D;
-    gl_params.internal_format = gl_format;
-    gl_params.format = gl_format;
-    gl_params.type = GL_UNSIGNED_BYTE;
-    gl_params.is_cleared = true;
-    gpu::SharedImageBackingGLCommon::UnpackStateAttribs gl_attribs;
-
-    // A GL texture id is needed to create the legacy mailbox, which requires
-    // that the GL context be made current.
-    const bool kCreateLegacyMailbox = true;
-    if (!gl_client_.make_context_current.Run()) {
-      DLOG(ERROR) << "Failed to make context current";
-      NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
-      return false;
-    }
-
-    auto shared_image = std::make_unique<gpu::SharedImageBackingGLImage>(
-        gl_image, mailbox, viz_resource_format, frame.image_size, color_space,
-        kTopLeft_GrSurfaceOrigin, kOpaque_SkAlphaType, shared_image_usage,
-        gl_params, gl_attribs, gl_client_.is_passthrough);
-
-    const bool success = shared_image_stub->factory()->RegisterBacking(
-        std::move(shared_image), kCreateLegacyMailbox);
-    if (!success) {
-      DLOG(ERROR) << "Failed to register shared image";
-      NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
-      return false;
-    }
-
-    // Wrap the destroy callback in a lambda that ensures that it be called on
-    // the appropriate thread.
-    auto destroy_shared_image_lambda =
-        [](gpu::SharedImageStub::SharedImageDestructionCallback callback,
-           scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-          task_runner->PostTask(
-              FROM_HERE, base::BindOnce(std::move(callback), gpu::SyncToken()));
-        };
-    auto destroy_shared_image_callback = base::BindOnce(
-        destroy_shared_image_lambda,
-        shared_image_stub->GetSharedImageDestructionCallback(mailbox),
-        gpu_task_runner_);
-    scoped_shared_image = scoped_refptr<Picture::ScopedSharedImage>(
-        new Picture::ScopedSharedImage(
-            mailbox, gl_params.target,
-            std::move(destroy_shared_image_callback)));
-  } else {
-    if (!gl_client_.bind_image.Run(picture_info->client_texture_id,
-                                   gpu::GetPlatformSpecificTextureTarget(),
-                                   gl_image, false)) {
-      DLOG(ERROR) << "Failed to bind image";
-      NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
-      return false;
-    }
+  std::vector<gfx::BufferPlane> planes;
+  switch (picture_format_) {
+    case PIXEL_FORMAT_NV12:
+    case PIXEL_FORMAT_YUV420P10:
+      planes.push_back(gfx::BufferPlane::Y);
+      planes.push_back(gfx::BufferPlane::UV);
+      break;
+    case PIXEL_FORMAT_XRGB:
+      planes.push_back(gfx::BufferPlane::DEFAULT);
+      break;
+    default:
+      NOTREACHED();
+      break;
   }
-  picture_info->gl_image = gl_image;
+
+  for (size_t plane = 0; plane < planes.size(); ++plane) {
+    const gfx::Size plane_size(
+        CVPixelBufferGetWidthOfPlane(frame.image.get(), plane),
+        CVPixelBufferGetHeightOfPlane(frame.image.get(), plane));
+    gfx::BufferFormat plane_buffer_format =
+        gpu::GetPlaneBufferFormat(planes[plane], buffer_format);
+    // TODO(https://crbug.com/1108909): BGRA is not an appropriate value for
+    // these parameters.
+    const viz::ResourceFormat viz_resource_format =
+        (picture_format_ == PIXEL_FORMAT_XRGB)
+            ? viz::ResourceFormat::BGRA_8888
+            : viz::GetResourceFormat(plane_buffer_format);
+    const GLenum gl_format = viz::GLDataFormat(viz_resource_format);
+
+    scoped_refptr<gl::GLImageIOSurface> gl_image(
+        gl::GLImageIOSurface::Create(plane_size, gl_format));
+    if (!gl_image->InitializeWithCVPixelBuffer(
+            frame.image.get(), plane,
+            gfx::GenericSharedMemoryId(g_cv_pixel_buffer_ids.GetNext()),
+            plane_buffer_format)) {
+      NOTIFY_STATUS("Failed to initialize GLImageIOSurface", PLATFORM_FAILURE,
+                    SFT_PLATFORM_ERROR);
+    }
+    gl_image->DisableInUseByWindowServer();
+    gl_image->SetColorSpaceForYUVToRGBConversion(color_space);
+    gl_image->SetColorSpaceShallow(color_space);
+
+    if (picture_info->uses_shared_images) {
+      gpu::SharedImageStub* shared_image_stub = client_->GetSharedImageStub();
+      DCHECK(shared_image_stub);
+      const uint32_t shared_image_usage =
+          gpu::SHARED_IMAGE_USAGE_DISPLAY | gpu::SHARED_IMAGE_USAGE_SCANOUT;
+      gpu::Mailbox mailbox = gpu::Mailbox::GenerateForSharedImage();
+
+      gpu::SharedImageBackingGLCommon::InitializeGLTextureParams gl_params;
+      // ANGLE-on-Metal exposes IOSurfaces via GL_TEXTURE_2D. Be robust to that.
+      gl_params.target = gl_client_.supports_arb_texture_rectangle
+                             ? GL_TEXTURE_RECTANGLE_ARB
+                             : GL_TEXTURE_2D;
+      gl_params.internal_format = gl_format;
+      gl_params.format = gl_format;
+      gl_params.type = GL_UNSIGNED_BYTE;
+      gl_params.is_cleared = true;
+      gpu::SharedImageBackingGLCommon::UnpackStateAttribs gl_attribs;
+
+      // A GL texture id is needed to create the legacy mailbox, which requires
+      // that the GL context be made current.
+      const bool kCreateLegacyMailbox = true;
+      if (!gl_client_.make_context_current.Run()) {
+        DLOG(ERROR) << "Failed to make context current";
+        NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
+        return false;
+      }
+
+      auto shared_image = std::make_unique<gpu::SharedImageBackingGLImage>(
+          gl_image, mailbox, viz_resource_format, plane_size, color_space,
+          kTopLeft_GrSurfaceOrigin, kOpaque_SkAlphaType, shared_image_usage,
+          gl_params, gl_attribs, gl_client_.is_passthrough);
+
+      const bool success = shared_image_stub->factory()->RegisterBacking(
+          std::move(shared_image), kCreateLegacyMailbox);
+      if (!success) {
+        DLOG(ERROR) << "Failed to register shared image";
+        NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
+        return false;
+      }
+
+      // Wrap the destroy callback in a lambda that ensures that it be called on
+      // the appropriate thread.
+      auto destroy_shared_image_lambda =
+          [](gpu::SharedImageStub::SharedImageDestructionCallback callback,
+             scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+            task_runner->PostTask(FROM_HERE, base::BindOnce(std::move(callback),
+                                                            gpu::SyncToken()));
+          };
+      auto destroy_shared_image_callback = base::BindOnce(
+          destroy_shared_image_lambda,
+          shared_image_stub->GetSharedImageDestructionCallback(mailbox),
+          gpu_task_runner_);
+      picture_info->scoped_shared_images.push_back(
+          scoped_refptr<Picture::ScopedSharedImage>(
+              new Picture::ScopedSharedImage(
+                  mailbox, gl_params.target,
+                  std::move(destroy_shared_image_callback))));
+    } else {
+      if (!gl_client_.bind_image.Run(picture_info->client_texture_id,
+                                     gpu::GetPlatformSpecificTextureTarget(),
+                                     gl_image, false)) {
+        DLOG(ERROR) << "Failed to bind image";
+        NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
+        return false;
+      }
+    }
+    picture_info->gl_images.push_back(gl_image);
+  }
   picture_info->bitstream_id = frame.bitstream_id;
   available_picture_ids_.pop_back();
 
@@ -1617,7 +1655,10 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
   // we don't need to use them when the image is never bound? Bindings are
   // typically only created when WebGL is in use.
   picture.set_read_lock_fences_enabled(true);
-  picture.set_scoped_shared_image(scoped_shared_image);
+  for (size_t plane = 0; plane < planes.size(); ++plane) {
+    picture.set_scoped_shared_image(picture_info->scoped_shared_images[plane],
+                                    plane);
+  }
   client_->PictureReady(std::move(picture));
   return true;
 }
@@ -1657,9 +1698,9 @@ void VTVideoDecodeAccelerator::WriteToMediaLog(MediaLogMessageLevel level,
 void VTVideoDecodeAccelerator::QueueFlush(TaskType type) {
   DCHECK(gpu_task_runner_->BelongsToCurrentThread());
   pending_flush_tasks_.push(type);
-  decoder_thread_.task_runner()->PostTask(
+  decoder_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&VTVideoDecodeAccelerator::FlushTask,
-                                base::Unretained(this), type));
+                                decoder_weak_this_, type));
 
   // If this is a new flush request, see if we can make progress.
   if (pending_flush_tasks_.size() == 1)
@@ -1682,12 +1723,6 @@ void VTVideoDecodeAccelerator::Destroy() {
   DVLOG(1) << __func__;
   DCHECK(gpu_task_runner_->BelongsToCurrentThread());
 
-  // In a forceful shutdown, the decoder thread may be dead already.
-  if (!decoder_thread_.IsRunning()) {
-    delete this;
-    return;
-  }
-
   // For a graceful shutdown, return assigned buffers and flush before
   // destructing |this|.
   for (int32_t bitstream_id : assigned_bitstream_ids_)
@@ -1695,9 +1730,6 @@ void VTVideoDecodeAccelerator::Destroy() {
   assigned_bitstream_ids_.clear();
   state_ = STATE_DESTROYING;
   QueueFlush(TASK_DESTROY);
-
-  // Prevent calling into a deleted MediaLog.
-  media_log_ = nullptr;
 }
 
 bool VTVideoDecodeAccelerator::TryToSetupDecodeOnSeparateThread(

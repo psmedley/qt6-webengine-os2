@@ -18,12 +18,12 @@
 #include <memory>
 #include <string>
 
+#include "securegcm/d2d_connection_context_v1.h"
+#include "absl/container/flat_hash_map.h"
 #include "core/internal/client_proxy.h"
 #include "core/internal/endpoint_channel.h"
 #include "platform/public/logging.h"
 #include "platform/public/mutex.h"
-#include "securegcm/d2d_connection_context_v1.h"
-#include "absl/container/flat_hash_map.h"
 
 namespace location {
 namespace nearby {
@@ -31,8 +31,8 @@ namespace connections {
 
 // NOTE(std::string):
 // All the strings in internal class public interfaces should be exchanged as
-// const std::string& if they are immutable, and as std::string
-// it they are mutable.
+// const std::string& if they are immutable, and as std::string if they are
+// mutable.
 // This is to keep all the internal classes compatible with each other,
 // and minimize resources spent on the type conversion.
 // Project-wide, strings are either passed around as reference (which has

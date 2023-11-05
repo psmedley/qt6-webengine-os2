@@ -40,8 +40,8 @@ QuicStreamSequencer::QuicStreamSequencer(StreamInterface* quic_stream)
 
 QuicStreamSequencer::~QuicStreamSequencer() {
   if (stream_ == nullptr) {
-    QUIC_BUG << "Double free'ing QuicStreamSequencer at " << this << ". "
-             << QuicStackTrace();
+    QUIC_BUG(quic_bug_10858_1) << "Double free'ing QuicStreamSequencer at "
+                               << this << ". " << QuicStackTrace();
   }
   stream_ = nullptr;
 }
@@ -56,13 +56,10 @@ void QuicStreamSequencer::OnStreamFrame(const QuicStreamFrame& frame) {
       (!CloseStreamAtOffset(frame.offset + data_len) || data_len == 0)) {
     return;
   }
-  if (GetQuicReloadableFlag(quic_accept_empty_stream_frame_with_no_fin)) {
-    QUIC_RELOADABLE_FLAG_COUNT(quic_accept_empty_stream_frame_with_no_fin);
-    if (stream_->version().HasIetfQuicFrames() && data_len == 0) {
-      QUICHE_DCHECK(!frame.fin);
-      // Ignore empty frame with no fin.
-      return;
-    }
+  if (stream_->version().HasIetfQuicFrames() && data_len == 0) {
+    QUICHE_DCHECK(!frame.fin);
+    // Ignore empty frame with no fin.
+    return;
   }
   OnFrameData(byte_offset, data_len, frame.data_buffer);
 }
@@ -235,9 +232,10 @@ void QuicStreamSequencer::MarkConsumed(size_t num_bytes_consumed) {
   QUICHE_DCHECK(!blocked_);
   bool result = buffered_frames_.MarkConsumed(num_bytes_consumed);
   if (!result) {
-    QUIC_BUG << "Invalid argument to MarkConsumed."
-             << " expect to consume: " << num_bytes_consumed
-             << ", but not enough bytes available. " << DebugString();
+    QUIC_BUG(quic_bug_10858_2)
+        << "Invalid argument to MarkConsumed."
+        << " expect to consume: " << num_bytes_consumed
+        << ", but not enough bytes available. " << DebugString();
     stream_->Reset(QUIC_ERROR_PROCESSING_STREAM);
     return;
   }

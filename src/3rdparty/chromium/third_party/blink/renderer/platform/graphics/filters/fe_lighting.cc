@@ -27,6 +27,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_lighting.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/graphics/filters/distant_light_source.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/graphics/filters/point_light_source.h"
@@ -55,7 +56,7 @@ FELighting::FELighting(Filter* filter,
 sk_sp<PaintFilter> FELighting::CreateImageFilter() {
   if (!light_source_)
     return CreateTransparentBlack();
-  base::Optional<PaintFilter::CropRect> crop_rect = GetCropRect();
+  absl::optional<PaintFilter::CropRect> crop_rect = GetCropRect();
   const PaintFilter::CropRect* rect = base::OptionalOrNullptr(crop_rect);
   Color light_color = AdaptColorToOperatingInterpolationSpace(lighting_color_);
   sk_sp<PaintFilter> input(paint_filter_builder::Build(

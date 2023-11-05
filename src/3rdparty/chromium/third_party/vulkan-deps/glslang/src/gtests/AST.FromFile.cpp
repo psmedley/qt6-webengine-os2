@@ -281,6 +281,9 @@ INSTANTIATE_TEST_SUITE_P(
         "terminate.frag",
         "terminate.vert",
         "negativeWorkGroupSize.comp",
+        "textureoffset_sampler2darrayshadow.vert",
+        "atomicAdd.comp",
+        "GL_ARB_gpu_shader5.u2i.vert",
     })),
     FileNameAsCustomTestSuffix
 );

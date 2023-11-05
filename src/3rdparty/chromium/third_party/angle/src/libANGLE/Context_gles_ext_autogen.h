@@ -183,9 +183,12 @@
                                            GLsizei width, GLsizei height);                         \
     /* GL_EXT_multisampled_render_to_texture2 */                                                   \
     /* GL_EXT_occlusion_query_boolean */                                                           \
+    /* GL_EXT_primitive_bounding_box */                                                            \
+    /* GL_EXT_protected_textures */                                                                \
     /* GL_EXT_read_format_bgra */                                                                  \
     /* GL_EXT_robustness */                                                                        \
     /* GL_EXT_sRGB */                                                                              \
+    /* GL_EXT_sRGB_write_control */                                                                \
     /* GL_EXT_semaphore */                                                                         \
     void deleteSemaphores(GLsizei n, const SemaphoreID *semaphoresPacked);                         \
     void genSemaphores(GLsizei n, SemaphoreID *semaphoresPacked);                                  \
@@ -206,6 +209,7 @@
     void framebufferFetchBarrier();                                                                \
     /* GL_EXT_shader_io_blocks */                                                                  \
     /* GL_EXT_tessellation_shader */                                                               \
+    /* GL_EXT_texture_border_clamp */                                                              \
     /* GL_EXT_texture_buffer */                                                                    \
     /* GL_EXT_texture_compression_bptc */                                                          \
     /* GL_EXT_texture_compression_dxt1 */                                                          \
@@ -216,8 +220,10 @@
     /* GL_EXT_texture_filter_anisotropic */                                                        \
     /* GL_EXT_texture_format_BGRA8888 */                                                           \
     /* GL_EXT_texture_sRGB_R8 */                                                                   \
+    /* GL_EXT_texture_sRGB_RG8 */                                                                  \
     /* GL_EXT_texture_storage */                                                                   \
     void texStorage1D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width);        \
+    /* GL_KHR_blend_equation_advanced */                                                           \
     /* GL_KHR_debug */                                                                             \
     /* GL_KHR_parallel_shader_compile */                                                           \
     void maxShaderCompilerThreads(GLuint count);                                                   \
@@ -240,6 +246,7 @@
     /* GL_OES_depth32 */                                                                           \
     /* GL_OES_draw_buffers_indexed */                                                              \
     /* GL_OES_draw_elements_base_vertex */                                                         \
+    /* GL_OES_geometry_shader */                                                                   \
     /* GL_OES_get_program_binary */                                                                \
     /* GL_OES_mapbuffer */                                                                         \
     void *mapBuffer(BufferBinding targetPacked, GLenum access);                                    \
@@ -276,6 +283,7 @@
     void getTexImage(TextureTarget targetPacked, GLint level, GLenum format, GLenum type,          \
                      void *pixels);                                                                \
     void getRenderbufferImage(GLenum target, GLenum format, GLenum type, void *pixels);            \
+    /* GL_ANGLE_get_serialized_context_string */                                                   \
     /* GL_ANGLE_get_tex_level_parameter */                                                         \
     /* GL_ANGLE_program_binary */                                                                  \
     /* GL_ANGLE_request_extension */                                                               \

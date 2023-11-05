@@ -9,15 +9,24 @@
 
 #include "base/time/time.h"
 #include "ui/gfx/gfx_export.h"
+#include "ui/gfx/gpu_fence_handle.h"
 
 namespace gfx {
 
 struct CALayerParams;
-class GpuFence;
 
 enum class SwapResult {
   SWAP_ACK,
   SWAP_FAILED,
+  // Typically, the Viz thread should decide whether to skip a swap based off
+  // the damage. In rare cases, however, the GPU main thread might skip the
+  // swap after the Viz thread requests it (e.g. the Viz thread might not know
+  // that the buffers are not fully initialized yet). For the purposes of
+  // metrics bookkeeping, we label this scenario as SWAP_SKIPPED and treat it
+  // much like we do a SWAP_FAILED (e.g. failed PresentationFeedback).
+  // TODO(https://crbug.com/1226090): Consider more explicit handling of
+  // SWAP_SKIPPED.
+  SWAP_SKIPPED,
   SWAP_NAK_RECREATE_BUFFERS,
   SWAP_RESULT_LAST = SWAP_NAK_RECREATE_BUFFERS,
 };
@@ -43,6 +52,9 @@ struct SwapTimings {
   // it's FinishPaintRenderPass/SwapBuffers.
   base::TimeTicks gpu_started_draw;
 
+  // When GPU scheduler removed the last required dependency.
+  base::TimeTicks gpu_task_ready;
+
   bool is_null() const { return swap_start.is_null() && swap_end.is_null(); }
 };
 
@@ -67,7 +79,7 @@ struct SwapResponse {
 struct GFX_EXPORT SwapCompletionResult {
   explicit SwapCompletionResult(gfx::SwapResult swap_result);
   SwapCompletionResult(gfx::SwapResult swap_result,
-                       std::unique_ptr<gfx::GpuFence> gpu_fence);
+                       gfx::GpuFenceHandle release_fence);
   SwapCompletionResult(gfx::SwapResult swap_result,
                        std::unique_ptr<gfx::CALayerParams> ca_layer_params);
   SwapCompletionResult(SwapCompletionResult&& other);
@@ -77,7 +89,7 @@ struct GFX_EXPORT SwapCompletionResult {
   SwapCompletionResult& operator=(const SwapCompletionResult other) = delete;
 
   gfx::SwapResult swap_result = SwapResult::SWAP_FAILED;
-  std::unique_ptr<GpuFence> gpu_fence;
+  gfx::GpuFenceHandle release_fence;
   std::unique_ptr<CALayerParams> ca_layer_params;
 };
 

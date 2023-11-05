@@ -18,8 +18,8 @@
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/chrome_extension_browser_constants.h"
-#include "chrome/browser/extensions/extension_checkup.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/managed_ui_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
@@ -48,7 +48,7 @@
 #include "ui/base/webui/web_ui_util.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
+#include "chrome/browser/ash/ownership/owner_settings_service_ash_factory.h"
 #include "chrome/browser/ui/webui/extensions/chromeos/kiosk_apps_handler.h"
 #endif
 
@@ -64,8 +64,8 @@ std::string GetLoadTimeClasses(bool in_dev_mode) {
   return in_dev_mode ? "in-dev-mode" : std::string();
 }
 
-content::WebUIDataSource* CreateMdExtensionsSource(Profile* profile,
-                                                   bool in_dev_mode) {
+content::WebUIDataSource* CreateExtensionsSource(Profile* profile,
+                                                 bool in_dev_mode) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIExtensionsHost);
   webui::SetupWebUIDataSource(
@@ -201,6 +201,8 @@ content::WebUIDataSource* CreateMdExtensionsSource(Profile* profile,
     {"itemAllowOnFollowingSites", IDS_EXTENSIONS_ALLOW_ON_FOLLOWING_SITES},
     {"itemCollectErrors", IDS_EXTENSIONS_ENABLE_ERROR_COLLECTION},
     {"itemCorruptInstall", IDS_EXTENSIONS_CORRUPTED_EXTENSION},
+    {"itemAllowlistWarning",
+     IDS_EXTENSIONS_SAFE_BROWSING_CRX_ALLOWLIST_WARNING},
     {"itemRepair", IDS_EXTENSIONS_REPAIR_CORRUPTED},
     {"itemReload", IDS_EXTENSIONS_RELOAD_TERMINATED},
     {"loadErrorCouldNotLoadManifest",
@@ -241,6 +243,7 @@ content::WebUIDataSource* CreateMdExtensionsSource(Profile* profile,
     {"subpageArrowRoleDescription", IDS_EXTENSIONS_SUBPAGE_BUTTON},
     {"toolbarDevMode", IDS_EXTENSIONS_DEVELOPER_MODE},
     {"toolbarLoadUnpacked", IDS_EXTENSIONS_TOOLBAR_LOAD_UNPACKED},
+    {"toolbarLoadUnpackedDone", IDS_EXTENSIONS_TOOLBAR_LOAD_UNPACKED_DONE},
     {"toolbarPack", IDS_EXTENSIONS_TOOLBAR_PACK},
     {"toolbarUpdateNow", IDS_EXTENSIONS_TOOLBAR_UPDATE_NOW},
     {"toolbarUpdateNowTooltip", IDS_EXTENSIONS_TOOLBAR_UPDATE_NOW_TOOLTIP},
@@ -288,6 +291,9 @@ content::WebUIDataSource* CreateMdExtensionsSource(Profile* profile,
                              GURL(chrome::kRemoveNonCWSExtensionURL),
                              g_browser_process->GetApplicationLocale())
                              .spec()));
+  source->AddString(
+      "enhancedSafeBrowsingWarningHelpUrl",
+      base::ASCIIToUTF16(chrome::kCwsEnhancedSafeBrowsingLearnMoreURL));
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   source->AddString(
       "kioskDisableBailoutWarningBody",
@@ -309,38 +315,11 @@ content::WebUIDataSource* CreateMdExtensionsSource(Profile* profile,
                      base::CommandLine::ForCurrentProcess()->HasSwitch(
                          ::switches::kEnableExtensionActivityLogging));
 
-  bool checkup_enabled =
-      base::FeatureList::IsEnabled(extensions_features::kExtensionsCheckup);
-  source->AddBoolean("showCheckup", checkup_enabled);
-  if (checkup_enabled) {
-    int title_id = 0;
-    int body1_id = 0;
-    int body2_id = 0;
-    switch (GetCheckupMessageFocus()) {
-      case CheckupMessage::PERFORMANCE:
-        title_id = IDS_EXTENSIONS_CHECKUP_BANNER_PERFORMANCE_TITLE;
-        body1_id = IDS_EXTENSIONS_CHECKUP_BANNER_PERFORMANCE_BODY1;
-        body2_id = IDS_EXTENSIONS_CHECKUP_BANNER_PERFORMANCE_BODY2;
-        break;
-      case CheckupMessage::PRIVACY:
-        title_id = IDS_EXTENSIONS_CHECKUP_BANNER_PRIVACY_TITLE;
-        body1_id = IDS_EXTENSIONS_CHECKUP_BANNER_PRIVACY_BODY1;
-        body2_id = IDS_EXTENSIONS_CHECKUP_BANNER_PRIVACY_BODY2;
-        break;
-      case CheckupMessage::NEUTRAL:
-        title_id = IDS_EXTENSIONS_CHECKUP_BANNER_NEUTRAL_TITLE;
-        body1_id = IDS_EXTENSIONS_CHECKUP_BANNER_NEUTRAL_BODY1;
-        body2_id = IDS_EXTENSIONS_CHECKUP_BANNER_NEUTRAL_BODY2;
-        break;
-    }
-    source->AddLocalizedString("checkupTitle", title_id);
-    source->AddLocalizedString("checkupBody1", body1_id);
-    source->AddLocalizedString("checkupBody2", body2_id);
-  } else {
-    source->AddString("checkupTitle", "");
-    source->AddString("checkupBody1", "");
-    source->AddString("checkupBody2", "");
-  }
+  source->AddString("enableBrandingUpdateAttribute",
+                    base::FeatureList::IsEnabled(features::kWebUIBrandingUpdate)
+                        ? "enable-branding-update"
+                        : "");
+
   source->AddString(kLoadTimeClassesKey, GetLoadTimeClasses(in_dev_mode));
 
   return source;
@@ -349,8 +328,7 @@ content::WebUIDataSource* CreateMdExtensionsSource(Profile* profile,
 }  // namespace
 
 ExtensionsUI::ExtensionsUI(content::WebUI* web_ui)
-    : WebContentsObserver(web_ui->GetWebContents()),
-      WebUIController(web_ui),
+    : WebUIController(web_ui),
       webui_load_timer_(web_ui->GetWebContents(),
                         "Extensions.WebUi.DocumentLoadedInMainFrameTime",
                         "Extensions.WebUi.LoadCompletedInMainFrame") {
@@ -361,13 +339,12 @@ ExtensionsUI::ExtensionsUI(content::WebUI* web_ui)
                     base::BindRepeating(&ExtensionsUI::OnDevModeChanged,
                                         base::Unretained(this)));
 
-  source = CreateMdExtensionsSource(profile, *in_dev_mode_);
+  source = CreateExtensionsSource(profile, *in_dev_mode_);
   ManagedUIHandler::Initialize(web_ui, source);
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   auto kiosk_app_handler = std::make_unique<chromeos::KioskAppsHandler>(
-      chromeos::OwnerSettingsServiceChromeOSFactory::GetForBrowserContext(
-          profile));
+      ash::OwnerSettingsServiceAshFactory::GetForBrowserContext(profile));
   web_ui->AddMessageHandler(std::move(kiosk_app_handler));
 #endif
 
@@ -377,31 +354,13 @@ ExtensionsUI::ExtensionsUI(content::WebUI* web_ui)
       network::mojom::CSPDirectiveName::ObjectSrc, "object-src 'self';");
 
   content::WebUIDataSource::Add(profile, source);
-
-  // Stores a boolean in ExtensionPrefs so we can make sure that the user is
-  // redirected to the extensions page upon startup once. We're using
-  // GetVisibleURL() because the load hasn't committed and this check isn't used
-  // for a security decision, however a stronger check will be implemented if we
-  // decide to invest more in this experiment.
-  if (base::StartsWith(web_ui->GetWebContents()->GetVisibleURL().query_piece(),
-                       "checkup")) {
-    ExtensionPrefs::Get(profile)->SetUserHasSeenExtensionsCheckupOnStartup(
-        true);
-  }
 }
 
-ExtensionsUI::~ExtensionsUI() {
-  if (timer_.has_value())
-    UMA_HISTOGRAM_LONG_TIMES("Extensions.Checkup.TimeSpent", timer_->Elapsed());
-}
-
-void ExtensionsUI::DidStopLoading() {
-  timer_ = base::ElapsedTimer();
-}
+ExtensionsUI::~ExtensionsUI() = default;
 
 // static
 base::RefCountedMemory* ExtensionsUI::GetFaviconResourceBytes(
-    ui::ScaleFactor scale_factor) {
+    ui::ResourceScaleFactor scale_factor) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return rb.LoadDataResourceBytesForScale(IDR_EXTENSIONS_FAVICON, scale_factor);
 }

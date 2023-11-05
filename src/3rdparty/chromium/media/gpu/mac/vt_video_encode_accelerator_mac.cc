@@ -11,6 +11,7 @@
 #include "base/memory/shared_memory_mapping.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "media/base/bitrate.h"
 #include "media/base/mac/video_frame_mac.h"
 
 namespace media {
@@ -119,13 +120,13 @@ VTVideoEncodeAccelerator::GetSupportedProfiles() {
   SupportedProfiles profiles;
   const bool rv = CreateCompressionSession(
       gfx::Size(kDefaultResolutionWidth, kDefaultResolutionHeight));
-  DestroyCompressionSession();
   if (!rv) {
     VLOG(1)
         << "Hardware encode acceleration is not available on this platform.";
     return profiles;
   }
 
+  DestroyCompressionSession();
   SupportedProfile profile;
   profile.max_framerate_numerator = kMaxFrameRateNumerator;
   profile.max_framerate_denominator = kMaxFrameRateDenominator;
@@ -160,12 +161,16 @@ bool VTVideoEncodeAccelerator::Initialize(const Config& config,
   }
   h264_profile_ = config.output_profile;
 
-  client_ptr_factory_.reset(new base::WeakPtrFactory<Client>(client));
+  client_ptr_factory_ = std::make_unique<base::WeakPtrFactory<Client>>(client);
   client_ = client_ptr_factory_->GetWeakPtr();
   input_visible_size_ = config.input_visible_size;
-  frame_rate_ = kMaxFrameRateNumerator / kMaxFrameRateDenominator;
-  initial_bitrate_ = config.initial_bitrate;
+  if (config.initial_framerate.has_value())
+    frame_rate_ = config.initial_framerate.value();
+  else
+    frame_rate_ = kMaxFrameRateNumerator / kMaxFrameRateDenominator;
+  bitrate_ = config.bitrate;
   bitstream_buffer_size_ = config.input_visible_size.GetArea();
+  require_low_delay_ = config.require_low_delay;
 
   if (!encoder_thread_.Start()) {
     DLOG(ERROR) << "Failed spawning encoder thread.";
@@ -226,9 +231,9 @@ void VTVideoEncodeAccelerator::UseOutputBitstreamBuffer(
 }
 
 void VTVideoEncodeAccelerator::RequestEncodingParametersChange(
-    uint32_t bitrate,
+    const Bitrate& bitrate,
     uint32_t framerate) {
-  DVLOG(3) << __func__ << ": bitrate=" << bitrate
+  DVLOG(3) << __func__ << ": bitrate=" << bitrate.ToString()
            << ": framerate=" << framerate;
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -329,24 +334,29 @@ void VTVideoEncodeAccelerator::UseOutputBitstreamBufferTask(
 }
 
 void VTVideoEncodeAccelerator::RequestEncodingParametersChangeTask(
-    uint32_t bitrate,
+    const Bitrate& bitrate,
     uint32_t framerate) {
   DCHECK(encoder_thread_task_runner_->BelongsToCurrentThread());
+
+  if (bitrate.mode() != media::Bitrate::Mode::kConstant) {
+    // Even if users ask for VBR, CBR will do for now, because
+    // CBR is kinda a subset of VBR.
+    DLOG(ERROR) << "Unexpected bitrate mode. Using CBR anyway.";
+  }
 
   if (!compression_session_) {
     NotifyError(kPlatformFailureError);
     return;
   }
 
-  if (framerate != static_cast<uint32_t>(frame_rate_)) {
-    video_toolbox::SessionPropertySetter session_property_setter(
-        compression_session_);
-    session_property_setter.Set(kVTCompressionPropertyKey_ExpectedFrameRate,
-                                frame_rate_);
-  }
-
-  if (bitrate != static_cast<uint32_t>(target_bitrate_) && bitrate > 0) {
-    target_bitrate_ = bitrate;
+  frame_rate_ = framerate;
+  video_toolbox::SessionPropertySetter session_property_setter(
+      compression_session_);
+  session_property_setter.Set(kVTCompressionPropertyKey_ExpectedFrameRate,
+                              frame_rate_);
+  if (bitrate.target() != static_cast<uint32_t>(target_bitrate_) &&
+      bitrate.target() > 0) {
+    target_bitrate_ = bitrate.target();
     bitrate_adjuster_.SetTargetBitrateBps(target_bitrate_);
     SetAdjustedBitrate(bitrate_adjuster_.GetAdjustedBitrateBps());
   }
@@ -495,14 +505,12 @@ bool VTVideoEncodeAccelerator::ResetCompressionSession() {
   DestroyCompressionSession();
 
   bool session_rv = CreateCompressionSession(input_visible_size_);
-  if (!session_rv) {
-    DestroyCompressionSession();
+  if (!session_rv)
     return false;
-  }
 
   const bool configure_rv = ConfigureCompressionSession();
   if (configure_rv)
-    RequestEncodingParametersChange(initial_bitrate_, frame_rate_);
+    RequestEncodingParametersChange(bitrate_, frame_rate_);
   return configure_rv;
 }
 
@@ -534,6 +542,12 @@ bool VTVideoEncodeAccelerator::CreateCompressionSession(
       &VTVideoEncodeAccelerator::CompressionCallback,
       reinterpret_cast<void*>(this), compression_session_.InitializeInto());
   if (status != noErr) {
+    // IMPORTANT: ScopedCFTypeRef::release() doesn't call CFRelease().
+    // In case of an error VTCompressionSessionCreate() is not supposed to
+    // write a non-null value into compression_session_, but just in case,
+    // we'll clear it without calling CFRelease() because it can be unsafe
+    // to call on a not fully created session.
+    (void)compression_session_.release();
     DLOG(ERROR) << " VTCompressionSessionCreate failed: " << status;
     return false;
   }
@@ -552,7 +566,9 @@ bool VTVideoEncodeAccelerator::ConfigureCompressionSession() {
   rv &=
       session_property_setter.Set(kVTCompressionPropertyKey_ProfileLevel,
                                   VideoCodecProfileToVTProfile(h264_profile_));
-  rv &= session_property_setter.Set(kVTCompressionPropertyKey_RealTime, true);
+  rv &= session_property_setter.Set(kVTCompressionPropertyKey_RealTime,
+                                    require_low_delay_);
+
   rv &= session_property_setter.Set(
       kVTCompressionPropertyKey_AllowFrameReordering, false);
   // Limit keyframe output to 4 minutes, see https://crbug.com/658429.
@@ -560,10 +576,20 @@ bool VTVideoEncodeAccelerator::ConfigureCompressionSession() {
       kVTCompressionPropertyKey_MaxKeyFrameInterval, 7200);
   rv &= session_property_setter.Set(
       kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, 240);
-  rv &=
+  DLOG_IF(ERROR, !rv) << " Setting session property failed.";
+
+  bool delay_count_rv =
       session_property_setter.Set(kVTCompressionPropertyKey_MaxFrameDelayCount,
                                   static_cast<int>(kNumInputBuffers));
-  DLOG_IF(ERROR, !rv) << " Setting session property failed.";
+  if (!delay_count_rv) {
+    DLOG(ERROR) << " Setting frame delay count failed.";
+    if (require_low_delay_) {
+      // Setting MaxFrameDelayCount fails on low resolutions and arm64 macs,
+      // but we can use accelerated encoder anyway. See: crbug.com/1195177
+      return false;
+    }
+  }
+
   return rv;
 }
 

@@ -26,6 +26,11 @@ namespace dawn_native { namespace metal {
 
     // OldSwapChain
 
+    // static
+    Ref<OldSwapChain> OldSwapChain::Create(Device* device, const SwapChainDescriptor* descriptor) {
+        return AcquireRef(new OldSwapChain(device, descriptor));
+    }
+
     OldSwapChain::OldSwapChain(Device* device, const SwapChainDescriptor* descriptor)
         : OldSwapChainBase(device, descriptor) {
         const auto& im = GetImplementation();
@@ -48,7 +53,8 @@ namespace dawn_native { namespace metal {
         }
 
         id<MTLTexture> nativeTexture = reinterpret_cast<id<MTLTexture>>(next.texture.ptr);
-        return new Texture(ToBackend(GetDevice()), descriptor, nativeTexture);
+
+        return Texture::CreateWrapping(ToBackend(GetDevice()), descriptor, nativeTexture).Detach();
     }
 
     MaybeError OldSwapChain::OnBeforePresent(TextureViewBase*) {
@@ -58,14 +64,13 @@ namespace dawn_native { namespace metal {
     // SwapChain
 
     // static
-    ResultOrError<SwapChain*> SwapChain::Create(Device* device,
-                                                Surface* surface,
-                                                NewSwapChainBase* previousSwapChain,
-                                                const SwapChainDescriptor* descriptor) {
-        std::unique_ptr<SwapChain> swapchain =
-            std::make_unique<SwapChain>(device, surface, descriptor);
+    ResultOrError<Ref<SwapChain>> SwapChain::Create(Device* device,
+                                                    Surface* surface,
+                                                    NewSwapChainBase* previousSwapChain,
+                                                    const SwapChainDescriptor* descriptor) {
+        Ref<SwapChain> swapchain = AcquireRef(new SwapChain(device, surface, descriptor));
         DAWN_TRY(swapchain->Initialize(previousSwapChain));
-        return swapchain.release();
+        return swapchain;
     }
 
     SwapChain::~SwapChain() {
@@ -76,7 +81,7 @@ namespace dawn_native { namespace metal {
         ASSERT(GetSurface()->GetType() == Surface::Type::MetalLayer);
 
         if (previousSwapChain != nullptr) {
-            // TODO(cwallez@chromium.org): figure out what should happen when surfaces are used by
+            // TODO(crbug.com/dawn/269): figure out what should happen when surfaces are used by
             // multiple backends one after the other. It probably needs to block until the backend
             // and GPU are completely finished with the previous swapchain.
             if (previousSwapChain->GetBackendType() != wgpu::BackendType::Metal) {
@@ -113,7 +118,7 @@ namespace dawn_native { namespace metal {
         ASSERT(mCurrentDrawable != nullptr);
         [*mCurrentDrawable present];
 
-        mTexture->Destroy();
+        mTexture->APIDestroy();
         mTexture = nullptr;
 
         mCurrentDrawable = nullptr;
@@ -127,16 +132,17 @@ namespace dawn_native { namespace metal {
 
         TextureDescriptor textureDesc = GetSwapChainBaseTextureDescriptor(this);
 
-        mTexture = AcquireRef(
-            new Texture(ToBackend(GetDevice()), &textureDesc, [*mCurrentDrawable texture]));
-        return mTexture->CreateView();
+        mTexture = Texture::CreateWrapping(ToBackend(GetDevice()), &textureDesc,
+                                           [*mCurrentDrawable texture]);
+        // TODO(dawn:723): change to not use AcquireRef for reentrant object creation.
+        return mTexture->APICreateView();
     }
 
     void SwapChain::DetachFromSurfaceImpl() {
         ASSERT((mTexture == nullptr) == (mCurrentDrawable == nullptr));
 
         if (mTexture != nullptr) {
-            mTexture->Destroy();
+            mTexture->APIDestroy();
             mTexture = nullptr;
 
             mCurrentDrawable = nullptr;

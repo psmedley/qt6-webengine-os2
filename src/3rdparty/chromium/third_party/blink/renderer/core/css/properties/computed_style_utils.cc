@@ -7,7 +7,7 @@
 #include "third_party/blink/renderer/core/css/basic_shape_functions.h"
 #include "third_party/blink/renderer/core/css/css_border_image.h"
 #include "third_party/blink/renderer/core/css/css_border_image_slice_value.h"
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_counter_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_font_family_value.h"
@@ -35,11 +35,12 @@
 #include "third_party/blink/renderer/core/css/cssom/css_keyword_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_unit_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_unparsed_value.h"
-#include "third_party/blink/renderer/core/css/cssom/css_unsupported_color_value.h"
+#include "third_party/blink/renderer/core/css/cssom/css_unsupported_color.h"
 #include "third_party/blink/renderer/core/css/style_color.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_grid.h"
+#include "third_party/blink/renderer/core/layout/ng/grid/layout_ng_grid_interface.h"
 #include "third_party/blink/renderer/core/layout/svg/transform_helper.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/style_svg_resource.h"
@@ -121,7 +122,7 @@ CSSValue* ComputedStyleUtils::CurrentColorOrValidColor(
       RuntimeEnabledFeatures::CSSSystemColorComputeToSelfEnabled()) {
     return CSSIdentifierValue::Create(color.GetColorKeyword());
   }
-  return cssvalue::CSSColorValue::Create(
+  return cssvalue::CSSColor::Create(
       color.Resolve(style.GetCurrentColor(), style.UsedColorScheme()).Rgb());
 }
 
@@ -1289,7 +1290,7 @@ void AddValuesForNamedGridLinesAtIndex(OrderedNamedLinesCollector& collector,
 CSSValue* ComputedStyleUtils::ValueForGridTrackSizeList(
     GridTrackSizingDirection direction,
     const ComputedStyle& style) {
-  const Vector<GridTrackSize>& auto_track_sizes =
+  const Vector<GridTrackSize, 1>& auto_track_sizes =
       direction == kForColumns ? style.GridAutoColumns().LegacyTrackList()
                                : style.GridAutoRows().LegacyTrackList();
 
@@ -1303,27 +1304,26 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackSizeList(
 template <typename T, typename F>
 void PopulateGridTrackList(CSSValueList* list,
                            OrderedNamedLinesCollector& collector,
-                           const Vector<T>& tracks,
+                           const Vector<T, 1>& tracks,
                            F getTrackSize,
-                           int start,
-                           int end,
+                           wtf_size_t start,
+                           wtf_size_t end,
                            int offset = 0) {
-  DCHECK_LE(0, start);
   DCHECK_LE(start, end);
-  DCHECK_LE((unsigned)end, tracks.size());
-  for (int i = start; i < end; ++i) {
-    if (i + offset >= 0)
+  DCHECK_LE(end, tracks.size());
+  for (wtf_size_t i = start; i < end; ++i) {
+    if (offset >= 0 || i >= static_cast<wtf_size_t>(-offset))
       AddValuesForNamedGridLinesAtIndex(collector, i + offset, *list);
     list->Append(*getTrackSize(tracks[i]));
   }
-  if (end + offset >= 0)
+  if (offset >= 0 || end >= static_cast<wtf_size_t>(-offset))
     AddValuesForNamedGridLinesAtIndex(collector, end + offset, *list);
 }
 
 template <typename T, typename F>
 void PopulateGridTrackList(CSSValueList* list,
                            OrderedNamedLinesCollector& collector,
-                           const Vector<T>& tracks,
+                           const Vector<T, 1>& tracks,
                            F getTrackSize,
                            int offset = 0) {
   PopulateGridTrackList<T>(list, collector, tracks, getTrackSize, 0,
@@ -1335,14 +1335,14 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackList(
     const LayoutObject* layout_object,
     const ComputedStyle& style) {
   bool is_row_axis = direction == kForColumns;
-  const Vector<GridTrackSize>& track_sizes =
+  const Vector<GridTrackSize, 1>& track_sizes =
       is_row_axis ? style.GridTemplateColumns().LegacyTrackList()
                   : style.GridTemplateRows().LegacyTrackList();
-  const Vector<GridTrackSize>& auto_repeat_track_sizes =
+  const Vector<GridTrackSize, 1>& auto_repeat_track_sizes =
       is_row_axis ? style.GridAutoRepeatColumns() : style.GridAutoRepeatRows();
 
-  // TODO(crbug.com/1045599): Implement similar logic for GridNG.
-  bool is_layout_grid = layout_object && layout_object->IsLayoutGrid();
+  bool is_layout_grid =
+      layout_object && layout_object->IsLayoutGridIncludingNG();
 
   // Handle the 'none' case.
   bool track_list_is_empty =
@@ -1350,9 +1350,11 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackList(
   if (is_layout_grid && track_list_is_empty) {
     // For grids we should consider every listed track, whether implicitly or
     // explicitly created. Empty grids have a sole grid line per axis.
-    auto& positions = is_row_axis
-                          ? To<LayoutGrid>(layout_object)->ColumnPositions()
-                          : To<LayoutGrid>(layout_object)->RowPositions();
+    const Vector<LayoutUnit> positions =
+        is_row_axis
+            ? ToInterface<LayoutNGGridInterface>(layout_object)
+                  ->ColumnPositions()
+            : ToInterface<LayoutNGGridInterface>(layout_object)->RowPositions();
     track_list_is_empty = positions.size() == 1;
   }
 
@@ -1364,14 +1366,15 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackList(
   // If the element is a grid container, the resolved value is the used value,
   // specifying track sizes in pixels and expanding the repeat() notation.
   if (is_layout_grid) {
-    const auto* grid = To<LayoutGrid>(layout_object);
+    const auto* grid = ToInterface<LayoutNGGridInterface>(layout_object);
     OrderedNamedLinesCollectorInGridLayout collector(
         style, is_row_axis, grid->AutoRepeatCountForDirection(direction),
         auto_repeat_track_sizes.size());
     // Named grid line indices are relative to the explicit grid, but we are
     // including all tracks. So we need to subtract the number of leading
     // implicit tracks in order to get the proper line index.
-    int offset = -grid->ExplicitGridStartForDirection(direction);
+    int offset = -base::checked_cast<int>(
+        grid->ExplicitGridStartForDirection(direction));
     PopulateGridTrackList(
         list, collector, grid->TrackSizesForComputedStyle(direction),
         [&](const LayoutUnit& v) { return ZoomAdjustedPixelValue(v, style); },
@@ -1392,7 +1395,7 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackList(
   }
 
   // Add the line names and track sizes that precede the auto repeat().
-  size_t auto_repeat_insertion_point =
+  wtf_size_t auto_repeat_insertion_point =
       is_row_axis ? style.GridAutoRepeatColumnsInsertionPoint()
                   : style.GridAutoRepeatRowsInsertionPoint();
   PopulateGridTrackList(list, collector, track_sizes, getTrackSize, 0,
@@ -2680,6 +2683,38 @@ CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
   }
 }
 
+CSSValueList* ComputedStyleUtils::ValuesForContainerShorthand(
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style) {
+  CHECK_EQ(containerShorthand().length(), 2u);
+  CHECK_EQ(containerShorthand().properties()[0],
+           &GetCSSPropertyContainerType());
+  CHECK_EQ(containerShorthand().properties()[1],
+           &GetCSSPropertyContainerName());
+
+  CSSValueList* list = CSSValueList::CreateSlashSeparated();
+
+  const CSSValue* type =
+      GetCSSPropertyContainerType().CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style);
+  const CSSValue* name =
+      GetCSSPropertyContainerName().CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style);
+
+  DCHECK(type);
+  DCHECK(name);
+
+  list->Append(*type);
+
+  if (!(IsA<CSSIdentifierValue>(name) &&
+        To<CSSIdentifierValue>(*name).GetValueID() == CSSValueID::kNone)) {
+    list->Append(*name);
+  }
+
+  return list;
+}
+
 // Returns up to two values for 'scroll-customization' property. The values
 // correspond to the customization values for 'x' and 'y' axes.
 CSSValue* ComputedStyleUtils::ScrollCustomizationFlagsToCSSValue(
@@ -2715,7 +2750,7 @@ CSSValue* ComputedStyleUtils::ScrollCustomizationFlagsToCSSValue(
 }
 
 CSSValue* ComputedStyleUtils::ValueForGapLength(
-    const base::Optional<Length>& gap_length,
+    const absl::optional<Length>& gap_length,
     const ComputedStyle& style) {
   if (!gap_length)
     return CSSIdentifierValue::Create(CSSValueID::kNormal);
@@ -2740,7 +2775,7 @@ const CSSValue* ComputedStyleUtils::ValueForStyleAutoColor(
     const StyleAutoColor& color,
     CSSValuePhase value_phase) {
   if (color.IsAutoColor()) {
-    return cssvalue::CSSColorValue::Create(
+    return cssvalue::CSSColor::Create(
         StyleColor::CurrentColor()
             .Resolve(style.GetCurrentColor(), style.UsedColorScheme())
             .Rgb());
@@ -2762,7 +2797,7 @@ ComputedStyleUtils::CrossThreadStyleValueFromCSSStyleValue(
           To<CSSUnitValue>(style_value)->GetInternalUnit());
     case CSSStyleValue::StyleValueType::kUnsupportedColorType:
       return std::make_unique<CrossThreadColorValue>(
-          To<CSSUnsupportedColorValue>(style_value)->Value());
+          To<CSSUnsupportedColor>(style_value)->Value());
     case CSSStyleValue::StyleValueType::kUnparsedType:
       return std::make_unique<CrossThreadUnparsedValue>(
           To<CSSUnparsedValue>(style_value)->ToString().IsolatedCopy());
@@ -2821,6 +2856,18 @@ const CSSValue* ComputedStyleUtils::ComputedPropertyValue(
     case CSSPropertyID::kColor:
       return ComputedStyleUtils::CurrentColorOrValidColor(
           style, style.GetColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kMinHeight: {
+      if (style.MinHeight().IsAuto())
+        return CSSIdentifierValue::Create(CSSValueID::kAuto);
+      return property.CSSValueFromComputedStyle(
+          style, /*layout_object=*/nullptr, false);
+    }
+    case CSSPropertyID::kMinWidth: {
+      if (style.MinWidth().IsAuto())
+        return CSSIdentifierValue::Create(CSSValueID::kAuto);
+      return property.CSSValueFromComputedStyle(
+          style, /*layout_object=*/nullptr, false);
+    }
     case CSSPropertyID::kOutlineColor:
       return ComputedStyleUtils::CurrentColorOrValidColor(
           style, style.OutlineColor(), CSSValuePhase::kComputedValue);

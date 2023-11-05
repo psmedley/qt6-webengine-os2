@@ -6,13 +6,13 @@
 
 #include <stddef.h>
 
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/onc/onc_constants.h"
@@ -143,10 +143,10 @@ void GetCachedNetworkPropertiesResultCallback(
     NetworkingPrivateDelegate::PropertiesCallback callback) {
   if (!error->empty()) {
     LOG(ERROR) << "GetCachedNetworkProperties failed: " << *error;
-    std::move(callback).Run(base::nullopt, *error);
+    std::move(callback).Run(absl::nullopt, *error);
     return;
   }
-  std::move(callback).Run(std::move(*properties), base::nullopt);
+  std::move(callback).Run(std::move(*properties), absl::nullopt);
 }
 
 }  // namespace
@@ -155,7 +155,7 @@ NetworkingPrivateLinux::NetworkingPrivateLinux()
     : dbus_thread_("Networking Private DBus"), network_manager_proxy_(nullptr) {
   base::Thread::Options thread_options(base::MessagePumpType::IO, 0);
 
-  dbus_thread_.StartWithOptions(thread_options);
+  dbus_thread_.StartWithOptions(std::move(thread_options));
   dbus_thread_.task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&NetworkingPrivateLinux::Initialize,
                                 base::Unretained(this)));
@@ -204,7 +204,7 @@ void NetworkingPrivateLinux::GetProperties(const std::string& guid,
                                            PropertiesCallback callback) {
   if (!network_manager_proxy_) {
     LOG(WARNING) << "NetworkManager over DBus is not supported";
-    std::move(callback).Run(base::nullopt,
+    std::move(callback).Run(absl::nullopt,
                             extensions::networking_private::kErrorNotSupported);
     return;
   }
@@ -230,7 +230,7 @@ void NetworkingPrivateLinux::GetProperties(const std::string& guid,
 void NetworkingPrivateLinux::GetManagedProperties(const std::string& guid,
                                                   PropertiesCallback callback) {
   LOG(WARNING) << "GetManagedProperties is not supported";
-  std::move(callback).Run(base::nullopt,
+  std::move(callback).Run(absl::nullopt,
                           extensions::networking_private::kErrorNotSupported);
 }
 
@@ -610,10 +610,9 @@ void NetworkingPrivateLinux::SelectCellularMobileNetwork(
                      std::move(failure_callback));
 }
 
-std::unique_ptr<base::ListValue>
-NetworkingPrivateLinux::GetEnabledNetworkTypes() {
-  std::unique_ptr<base::ListValue> network_list(new base::ListValue);
-  network_list->AppendString(::onc::network_type::kWiFi);
+base::Value NetworkingPrivateLinux::GetEnabledNetworkTypes() {
+  base::Value network_list(base::Value::Type::LIST);
+  network_list.Append(::onc::network_type::kWiFi);
   return network_list;
 }
 
@@ -685,7 +684,7 @@ void NetworkingPrivateLinux::SendNetworkListChangedEvent(
     const base::ListValue& network_list) {
   GuidList guidsForEventCallback;
 
-  for (const auto& network : network_list) {
+  for (const auto& network : network_list.GetList()) {
     std::string guid;
     const base::DictionaryValue* dict = nullptr;
     if (network.GetAsDictionary(&dict)) {
@@ -834,7 +833,7 @@ bool NetworkingPrivateLinux::GetAccessPointInfo(
     }
 
     std::string ssidUTF8(ssid_bytes, ssid_bytes + ssid_length);
-    base::string16 ssid = base::UTF8ToUTF16(ssidUTF8);
+    std::u16string ssid = base::UTF8ToUTF16(ssidUTF8);
 
     access_point_info->SetString(kAccessPointInfoName, ssid);
   }
@@ -972,7 +971,7 @@ void NetworkingPrivateLinux::AddOrUpdateAccessPoint(
     NetworkMap* network_map,
     const std::string& network_guid,
     std::unique_ptr<base::DictionaryValue>& access_point) {
-  base::string16 ssid;
+  std::u16string ssid;
   std::string connection_state;
   int signal_strength;
 

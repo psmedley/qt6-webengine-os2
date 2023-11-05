@@ -118,10 +118,27 @@ const PixelProcessor::State PixelProcessor::update(const vk::GraphicsState &pipe
 
 		state.depthBias = (pipelineState.getConstantDepthBias() != 0.0f) || (pipelineState.getSlopeDepthBias() != 0.0f);
 
+		bool pipelineDepthClamp = pipelineState.getDepthClampEnable();
 		// "For fixed-point depth buffers, fragment depth values are always limited to the range [0,1] by clamping after depth bias addition is performed.
 		//  Unless the VK_EXT_depth_range_unrestricted extension is enabled, fragment depth values are clamped even when the depth buffer uses a floating-point representation."
-		state.depthClamp = !state.depthFormat.isFloatFormat() || !pipelineState.hasDepthRangeUnrestricted();
+		state.depthClamp = pipelineDepthClamp || !state.depthFormat.isFloatFormat() || !pipelineState.hasDepthRangeUnrestricted();
+
+		if(pipelineDepthClamp)
+		{
+			const VkViewport viewport = pipelineState.getViewport();
+			state.minDepthClamp = min(viewport.minDepth, viewport.maxDepth);
+			state.maxDepthClamp = max(viewport.minDepth, viewport.maxDepth);
+		}
+		else if(state.depthClamp)
+		{
+			state.minDepthClamp = 0.0f;
+			state.maxDepthClamp = 1.0f;
+		}
 	}
+
+	state.depthBoundsTestActive = pipelineState.depthBoundsTestActive();
+	state.minDepthBounds = pipelineState.getMinDepthBounds();
+	state.maxDepthBounds = pipelineState.getMaxDepthBounds();
 
 	state.occlusionEnabled = occlusionEnabled;
 
@@ -137,8 +154,26 @@ const PixelProcessor::State PixelProcessor::update(const vk::GraphicsState &pipe
 	state.multiSampleMask = pipelineState.getMultiSampleMask();
 	state.enableMultiSampling = (state.multiSampleCount > 1) &&
 	                            !(pipelineState.isDrawLine(true) && (pipelineState.getLineRasterizationMode() == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT));
-	state.sampleShadingEnabled = pipelineState.hasSampleShadingEnabled();
-	state.minSampleShading = pipelineState.getMinSampleShading();
+
+	// SampleId and SamplePosition require per-sample fragment shader invocations, so the Vulkan spec
+	// requires turning on sample shading if either of them is present in the shader:
+	// "If a fragment shader entry point's interface includes an input variable decorated with SampleId,
+	//  Sample Shading is considered enabled with a minSampleShading value of 1.0."
+	// "If a fragment shader entry point's interface includes an input variable decorated with SamplePosition,
+	//  Sample Shading is considered enabled with a minSampleShading value of 1.0."
+	bool shaderContainsSampleDecoration = fragmentShader && (fragmentShader->hasBuiltinInput(spv::BuiltInSampleId) ||
+	                                                         fragmentShader->hasBuiltinInput(spv::BuiltInSamplePosition));
+
+	if(shaderContainsSampleDecoration)
+	{
+		state.sampleShadingEnabled = true;
+		state.minSampleShading = 1.0f;
+	}
+	else
+	{
+		state.sampleShadingEnabled = pipelineState.hasSampleShadingEnabled();
+		state.minSampleShading = pipelineState.getMinSampleShading();
+	}
 
 	if(state.enableMultiSampling && fragmentShader)
 	{

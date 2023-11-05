@@ -56,7 +56,8 @@ class VCMTimingFake : public VCMTiming {
   }
 
   int64_t MaxWaitingTime(int64_t render_time_ms,
-                         int64_t now_ms) const override {
+                         int64_t now_ms,
+                         bool too_many_frames_queued) const override {
     return render_time_ms - now_ms - kDecodeTime;
   }
 
@@ -199,7 +200,7 @@ class TestFrameBuffer2 : public ::testing::Test {
     time_task_queue_.PostTask([this, max_wait_time, keyframe_required]() {
       buffer_->NextFrame(
           max_wait_time, keyframe_required, &time_task_queue_,
-          [this](std::unique_ptr<video_coding::EncodedFrame> frame,
+          [this](std::unique_ptr<EncodedFrame> frame,
                  video_coding::FrameBuffer::ReturnReason reason) {
             if (reason != FrameBuffer::ReturnReason::kStopped) {
               frames_.emplace_back(std::move(frame));

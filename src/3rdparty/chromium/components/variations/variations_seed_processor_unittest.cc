@@ -10,15 +10,14 @@
 #include <map>
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -89,7 +88,7 @@ Study CreateStudyWithFlagGroups(int default_group_probability,
 
 class TestOverrideStringCallback {
  public:
-  typedef std::map<uint32_t, base::string16> OverrideMap;
+  typedef std::map<uint32_t, std::u16string> OverrideMap;
 
   TestOverrideStringCallback()
       : callback_(base::BindRepeating(&TestOverrideStringCallback::Override,
@@ -104,7 +103,7 @@ class TestOverrideStringCallback {
   const OverrideMap& overrides() const { return overrides_; }
 
  private:
-  void Override(uint32_t hash, const base::string16& string) {
+  void Override(uint32_t hash, const std::u16string& string) {
     overrides_[hash] = string;
   }
 
@@ -363,7 +362,7 @@ TEST_F(VariationsSeedProcessorTest, OverrideUIStrings) {
 
   EXPECT_EQ(1u, overrides.size());
   auto it = overrides.find(1234);
-  EXPECT_EQ(base::ASCIIToUTF16("test"), it->second);
+  EXPECT_EQ(u"test", it->second);
 }
 
 TEST_F(VariationsSeedProcessorTest, OverrideUIStringsWithForcingFlag) {
@@ -384,7 +383,7 @@ TEST_F(VariationsSeedProcessorTest, OverrideUIStringsWithForcingFlag) {
       override_callback_.overrides();
   EXPECT_EQ(1u, overrides.size());
   auto it = overrides.find(1234);
-  EXPECT_EQ(base::ASCIIToUTF16("test"), it->second);
+  EXPECT_EQ(u"test", it->second);
 }
 
 TEST_F(VariationsSeedProcessorTest, ValidateStudy) {

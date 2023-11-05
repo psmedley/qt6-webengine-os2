@@ -4,6 +4,12 @@ accept_configuration:
   property: features
   not_contains_value: Disable
 
+machine_type:
+    Build:
+        cores: 8
+    Test:
+        cores: 4
+
 instructions:
   Build:
     - type: EnvironmentVariable
@@ -12,6 +18,13 @@ instructions:
     - type: EnvironmentVariable
       variableName: CMAKE_BUILD_OUTPUT_TIMEOUT
       variableValue: "3600"
+    - type: EnvironmentVariable
+      variableName: QTWEBENGINE_GN_THREADS
+      variableValue: "1"
+      enable_if:
+        condition: property
+        property: host.os
+        equals_value: MacOS
     - !include "{{qt/qtbase}}/coin_module_build_template_v2.yaml"
   Test:
     - type: EnvironmentVariable
@@ -22,3 +35,4 @@ instructions:
         property: target.osVersion
         equals_value: QEMU
     - !include "{{qt/qtbase}}/coin_module_test_template_v3.yaml"
+    - !include "{{qt/qtbase}}/coin_module_test_docs.yaml"

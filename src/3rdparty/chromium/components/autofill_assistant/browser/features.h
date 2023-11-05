@@ -19,10 +19,12 @@ extern const base::Feature kAutofillAssistantDialogOnboarding;
 extern const base::Feature kAutofillAssistantDirectActions;
 extern const base::Feature kAutofillAssistantDisableOnboardingFlow;
 extern const base::Feature kAutofillAssistantDisableProactiveHelpTiedToMSBB;
+extern const base::Feature kAutofillAssistantInCCTTriggering;
+extern const base::Feature kAutofillAssistantInTabTriggering;
 extern const base::Feature kAutofillAssistantFeedbackChip;
 extern const base::Feature kAutofillAssistantLoadDFMForTriggerScripts;
 extern const base::Feature kAutofillAssistantProactiveHelp;
-extern const base::Feature kAutofillAssistantWithTabHelper;
+extern const base::Feature kAutofillAssistantUrlHeuristics;
 
 }  // namespace features
 }  // namespace autofill_assistant

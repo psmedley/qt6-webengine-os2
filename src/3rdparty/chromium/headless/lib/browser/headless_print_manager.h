@@ -68,6 +68,11 @@ class HeadlessPrintManager
 
   ~HeadlessPrintManager() override;
 
+  static void BindPrintManagerHost(
+      mojo::PendingAssociatedReceiver<printing::mojom::PrintManagerHost>
+          receiver,
+      content::RenderFrameHost* rfh);
+
   static std::string PrintResultToString(PrintResult result);
   // Exported for tests.
   HEADLESS_EXPORT static PageRangeStatus PageRangeTextToPages(
@@ -101,9 +106,22 @@ class HeadlessPrintManager
   void ShowInvalidPrinterSettingsError() override;
   void PrintingFailed(int32_t cookie) override;
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+  void UpdatePrintSettings(int32_t cookie,
+                           base::Value job_settings,
+                           UpdatePrintSettingsCallback callback) override;
+  void SetupScriptedPrintPreview(
+      SetupScriptedPrintPreviewCallback callback) override;
+  void ShowScriptedPrintPreview(bool source_is_modifiable) override;
+  void RequestPrintPreview(
+      printing::mojom::RequestPrintPreviewParamsPtr params) override;
   void CheckForCancel(int32_t preview_ui_id,
                       int32_t request_id,
                       CheckForCancelCallback callback) override;
+#endif
+#if BUILDFLAG(ENABLE_TAGGED_PDF)
+  void SetAccessibilityTree(
+      int32_t cookie,
+      const ui::AXTreeUpdate& accessibility_tree) override;
 #endif
 
   void Reset();

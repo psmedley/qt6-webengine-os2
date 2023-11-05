@@ -9,8 +9,8 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/values.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/origin.h"
 
 class GURL;
@@ -56,7 +56,8 @@ class MessagePort {
   virtual bool IsValidPort() = 0;
 
   // Triggers the check of whether the port is still valid. If the port is
-  // determined to be invalid, the channel will be closed.
+  // determined to be invalid, the channel will be closed. This should only be
+  // called for opener ports.
   virtual void RevalidatePort();
 
   // Notifies the port that the channel has been opened.
@@ -69,7 +70,7 @@ class MessagePort {
       const MessagingEndpoint& source_endpoint,
       const std::string& target_extension_id,
       const GURL& source_url,
-      base::Optional<url::Origin> source_origin);
+      absl::optional<url::Origin> source_origin);
 
   // Notifies the port that the channel has been closed. If |error_message| is
   // non-empty, it indicates an error occurred while opening the connection.

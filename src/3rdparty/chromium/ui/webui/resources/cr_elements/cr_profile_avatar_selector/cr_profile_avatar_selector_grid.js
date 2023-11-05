@@ -7,19 +7,36 @@
  * profile avatar icons that allows keyboard navigation with all arrow keys.
  */
 
-Polymer({
-  is: 'cr-profile-avatar-selector-grid',
+import {html, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-  properties: {
-    ignoreModifiedKeyEvents: {
-      type: Boolean,
-      value: false,
-    },
-  },
+import {assert} from '../../js/assert.m.js';
+import {hasKeyModifiers} from '../../js/util.m.js';
 
-  listeners: {
-    keydown: 'onKeyDown_',
-  },
+/** @polymer */
+class CrProfileAvatarSelectorGridElement extends PolymerElement {
+  static get is() {
+    return 'cr-profile-avatar-selector-grid';
+  }
+
+  static get template() {
+    return html`{__html_template__}`;
+  }
+
+  static get properties() {
+    return {
+      ignoreModifiedKeyEvents: {
+        type: Boolean,
+        value: false,
+      },
+    };
+  }
+
+  /** @override */
+  ready() {
+    super.ready();
+    this.addEventListener(
+        'keydown', e => this.onKeyDown_(/** @type {!KeyboardEvent} */ (e)));
+  }
 
   /**
    * @param {!KeyboardEvent} e
@@ -44,7 +61,7 @@ Polymer({
         e.preventDefault();
         return;
     }
-  },
+  }
 
   /**
    * Moves focus up/down/left/right according to the given direction. Wraps
@@ -94,5 +111,7 @@ Polymer({
     nextItem.focus();
     assert(this.parentNode.activeElement === nextItem);
   }
-});
-/* #ignore */ console.warn('crbug/1173575, non-JS module files deprecated.');
+}
+
+customElements.define(
+    CrProfileAvatarSelectorGridElement.is, CrProfileAvatarSelectorGridElement);

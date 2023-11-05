@@ -8,10 +8,10 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
+#include "chrome/browser/ash/login/login_manager_test.h"
+#include "chrome/browser/ash/login/test/login_manager_mixin.h"
+#include "chrome/browser/ash/login/ui/user_adding_screen.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/login/login_manager_test.h"
-#include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
-#include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -39,10 +39,10 @@ class DBTester {
   bool DoGetDBTests() {
     base::RunLoop run_loop;
     content::GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(&DBTester::GetDBAndDoTestsOnIOThread,
-                       base::Unretained(this), profile_->GetResourceContext(),
-                       run_loop.QuitClosure()));
+        FROM_HERE, base::BindOnce(&DBTester::GetDBAndDoTestsOnIOThread,
+                                  base::Unretained(this),
+                                  CreateNSSCertDatabaseGetter(profile_),
+                                  run_loop.QuitClosure()));
     run_loop.Run();
     return !!db_;
   }
@@ -51,10 +51,10 @@ class DBTester {
   void DoGetDBAgainTests() {
     base::RunLoop run_loop;
     content::GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(&DBTester::DoGetDBAgainTestsOnIOThread,
-                       base::Unretained(this), profile_->GetResourceContext(),
-                       run_loop.QuitClosure()));
+        FROM_HERE, base::BindOnce(&DBTester::DoGetDBAgainTestsOnIOThread,
+                                  base::Unretained(this),
+                                  CreateNSSCertDatabaseGetter(profile_),
+                                  run_loop.QuitClosure()));
     run_loop.Run();
   }
 
@@ -66,10 +66,11 @@ class DBTester {
   }
 
  private:
-  void GetDBAndDoTestsOnIOThread(content::ResourceContext* context,
+  void GetDBAndDoTestsOnIOThread(NssCertDatabaseGetter database_getter,
                                  const base::RepeatingClosure& done_callback) {
-    net::NSSCertDatabase* db = GetNSSCertDatabaseForResourceContext(
-        context, base::BindOnce(&DBTester::DoTestsOnIOThread,
+    net::NSSCertDatabase* db =
+        std::move(database_getter)
+            .Run(base::BindOnce(&DBTester::DoTestsOnIOThread,
                                 base::Unretained(this), done_callback));
     if (db) {
       DVLOG(1) << "got db synchronously";
@@ -93,10 +94,10 @@ class DBTester {
                                                  std::move(done_callback));
   }
 
-  void DoGetDBAgainTestsOnIOThread(content::ResourceContext* context,
+  void DoGetDBAgainTestsOnIOThread(NssCertDatabaseGetter database_getter,
                                    base::OnceClosure done_callback) {
-    net::NSSCertDatabase* db = GetNSSCertDatabaseForResourceContext(
-        context, base::BindOnce(&NotCalledDbCallback));
+    net::NSSCertDatabase* db =
+        std::move(database_getter).Run(base::BindOnce(&NotCalledDbCallback));
     // Should always be synchronous now.
     EXPECT_TRUE(db);
     // Should return the same db as before.
@@ -110,25 +111,25 @@ class DBTester {
   net::NSSCertDatabase* db_;
 };
 
-class UserAddingFinishObserver : public chromeos::UserAddingScreen::Observer {
+class UserAddingFinishObserver : public ash::UserAddingScreen::Observer {
  public:
   UserAddingFinishObserver() {
-    chromeos::UserAddingScreen::Get()->AddObserver(this);
+    ash::UserAddingScreen::Get()->AddObserver(this);
   }
 
   ~UserAddingFinishObserver() override {
-    chromeos::UserAddingScreen::Get()->RemoveObserver(this);
+    ash::UserAddingScreen::Get()->RemoveObserver(this);
   }
 
   void WaitUntilUserAddingFinishedOrCancelled() {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     if (finished_)
       return;
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 
-  // chromeos::UserAddingScreen::Observer:
+  // ash::UserAddingScreen::Observer:
   void OnUserAddingFinished() override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     finished_ = true;
@@ -175,7 +176,7 @@ IN_PROC_BROWSER_TEST_F(NSSContextChromeOSBrowserTest, TwoUsers) {
 
   // Log in second user and get their DB.
   UserAddingFinishObserver observer;
-  chromeos::UserAddingScreen::Get()->Start();
+  ash::UserAddingScreen::Get()->Start();
   base::RunLoop().RunUntilIdle();
 
   const AccountId account_id2(login_mixin_.users()[1].account_id);

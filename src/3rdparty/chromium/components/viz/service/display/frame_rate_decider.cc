@@ -170,7 +170,7 @@ void FrameRateDecider::UpdatePreferredFrameIntervalIfNeeded() {
   // animating. This ensures that, for instance, if we're currently displaying
   // a video while the rest of the page is static, we choose the frame interval
   // optimal for the video.
-  base::Optional<base::TimeDelta> min_frame_sink_interval;
+  absl::optional<base::TimeDelta> min_frame_sink_interval;
   bool all_frame_sinks_have_same_interval = true;
   for (const auto& frame_sink_id : frame_sinks_updated_in_previous_frame_) {
     auto interval =
@@ -279,14 +279,7 @@ void FrameRateDecider::SetPreferredInterval(
 }
 
 bool FrameRateDecider::multiple_refresh_rates_supported() const {
-  // TODO(crbug/1156136): This should work on all platforms, but currently
-  // causes pages to freeze on android when removing a camera track from a video
-  // element. Reenable once the root cause is fixed.
-#if defined(OS_WIN)
   return supports_set_frame_rate_ || supported_intervals_.size() > 1u;
-#else
-  return supported_intervals_.size() > 1u;
-#endif
 }
 
 }  // namespace viz

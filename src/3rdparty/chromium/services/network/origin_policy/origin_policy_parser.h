@@ -10,7 +10,7 @@
 
 #include "base/component_export.h"
 #include "base/macros.h"
-#include "services/network/public/mojom/origin_policy_manager.mojom.h"
+#include "services/network/public/cpp/origin_policy.h"
 
 namespace base {
 class Value;

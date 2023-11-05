@@ -24,10 +24,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_checker.h"
@@ -39,6 +37,7 @@
 #include "net/base/backoff_entry.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/elements_upload_data_stream.h"
+#include "net/base/idempotency.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -58,6 +57,7 @@
 #include "net/dns/public/dns_over_https_server_config.h"
 #include "net/dns/public/dns_protocol.h"
 #include "net/dns/public/dns_query_type.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/dns/resolve_context.h"
 #include "net/http/http_request_headers.h"
 #include "net/log/net_log.h"
@@ -74,6 +74,7 @@
 #include "net/url_request/url_fetcher_response_writer.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -398,6 +399,7 @@ class DnsHTTPAttempt : public DnsAttempt, public URLRequest::Delegate {
 
     if (use_post) {
       request_->set_method("POST");
+      request_->SetIdempotency(IDEMPOTENT);
       std::unique_ptr<UploadElementReader> reader =
           std::make_unique<UploadBytesElementReader>(
               query_->io_buffer()->data(), query_->io_buffer()->size());
@@ -409,7 +411,7 @@ class DnsHTTPAttempt : public DnsAttempt, public URLRequest::Delegate {
 
     request_->SetExtraRequestHeaders(extra_request_headers);
     // Disable secure DNS for any DoH server hostname lookups to avoid deadlock.
-    request_->SetDisableSecureDns(true);
+    request_->SetSecureDnsPolicy(SecureDnsPolicy::kDisable);
     request_->SetLoadFlags(request_->load_flags() | LOAD_DISABLE_CACHE |
                            LOAD_BYPASS_PROXY);
     request_->set_allow_credentials(false);
@@ -763,7 +765,7 @@ class DnsTCPAttempt : public DnsAttempt {
     if (response_length_ < query_->io_buffer()->size())
       return ERR_DNS_MALFORMED_RESPONSE;
     // Allocate more space so that DnsResponse::InitParse sanity check passes.
-    response_.reset(new DnsResponse(response_length_ + 1));
+    response_ = std::make_unique<DnsResponse>(response_length_ + 1);
     buffer_ = base::MakeRefCounted<DrainableIOBuffer>(response_->io_buffer(),
                                                       response_length_);
     next_state_ = STATE_READ_RESPONSE;
@@ -1038,7 +1040,7 @@ class DnsTransactionImpl : public DnsTransaction,
                            public base::SupportsWeakPtr<DnsTransactionImpl> {
  public:
   DnsTransactionImpl(DnsSession* session,
-                     const std::string& hostname,
+                     std::string hostname,
                      uint16_t qtype,
                      DnsTransactionFactory::CallbackType callback,
                      const NetLogWithSource& net_log,
@@ -1048,7 +1050,7 @@ class DnsTransactionImpl : public DnsTransaction,
                      ResolveContext* resolve_context,
                      bool fast_timeout)
       : session_(session),
-        hostname_(hostname),
+        hostname_(std::move(hostname)),
         qtype_(qtype),
         opt_rdata_(opt_rdata),
         secure_(secure),
@@ -1197,7 +1199,7 @@ class DnsTransactionImpl : public DnsTransaction,
     net_log_.EndEventWithNetErrorCode(NetLogEventType::DNS_TRANSACTION,
                                       result.rv);
 
-    base::Optional<std::string> doh_provider_id;
+    absl::optional<std::string> doh_provider_id;
     if (secure_ && result.attempt) {
       size_t server_index = result.attempt->server_index();
       doh_provider_id = GetDohProviderIdForHistogramFromDohConfig(
@@ -1230,7 +1232,8 @@ class DnsTransactionImpl : public DnsTransaction,
     uint16_t id = session_->NextQueryId();
     std::unique_ptr<DnsQuery> query;
     if (attempts_.empty()) {
-      query.reset(new DnsQuery(id, qnames_.front(), qtype_, opt_rdata_));
+      query =
+          std::make_unique<DnsQuery>(id, qnames_.front(), qtype_, opt_rdata_);
     } else {
       query = attempts_[0]->GetQuery()->CloneWithNewId(id);
     }
@@ -1377,7 +1380,7 @@ class DnsTransactionImpl : public DnsTransaction,
 
   // Begins query for the current name. Makes the first attempt.
   AttemptResult StartQuery() {
-    base::Optional<std::string> dotted_qname =
+    absl::optional<std::string> dotted_qname =
         DnsDomainToString(qnames_.front());
     net_log_.BeginEventWithStringParams(
         NetLogEventType::DNS_TRANSACTION_QUERY, "qname",
@@ -1645,7 +1648,7 @@ class DnsTransactionFactoryImpl : public DnsTransactionFactory {
   }
 
   std::unique_ptr<DnsTransaction> CreateTransaction(
-      const std::string& hostname,
+      std::string hostname,
       uint16_t qtype,
       CallbackType callback,
       const NetLogWithSource& net_log,
@@ -1654,8 +1657,8 @@ class DnsTransactionFactoryImpl : public DnsTransactionFactory {
       ResolveContext* resolve_context,
       bool fast_timeout) override {
     return std::make_unique<DnsTransactionImpl>(
-        session_.get(), hostname, qtype, std::move(callback), net_log,
-        opt_rdata_.get(), secure, secure_dns_mode, resolve_context,
+        session_.get(), std::move(hostname), qtype, std::move(callback),
+        net_log, opt_rdata_.get(), secure, secure_dns_mode, resolve_context,
         fast_timeout);
   }
 

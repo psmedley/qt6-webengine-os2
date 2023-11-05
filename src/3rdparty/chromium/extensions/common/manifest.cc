@@ -20,6 +20,8 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handler_helpers.h"
 
+using extensions::mojom::ManifestLocation;
+
 namespace extensions {
 
 namespace keys = manifest_keys;
@@ -31,62 +33,63 @@ namespace {
 // An extension installed from two locations will have the location
 // with the higher rank, as returned by this function. The actual
 // integer values may change, and should never be persisted.
-int GetLocationRank(Manifest::Location location) {
+int GetLocationRank(ManifestLocation location) {
   const int kInvalidRank = -1;
   int rank = kInvalidRank;  // Will CHECK that rank is not kInvalidRank.
 
   switch (location) {
-    // Component extensions can not be overriden by any other type.
-    case Manifest::COMPONENT:
+    // Component extensions can not be overridden by any other type.
+    case ManifestLocation::kComponent:
       rank = 9;
       break;
 
-    case Manifest::EXTERNAL_COMPONENT:
+    case ManifestLocation::kExternalComponent:
       rank = 8;
       break;
 
     // Policy controlled extensions may not be overridden by any type
     // that is not part of chrome.
-    case Manifest::EXTERNAL_POLICY:
+    case ManifestLocation::kExternalPolicy:
       rank = 7;
       break;
 
-    case Manifest::EXTERNAL_POLICY_DOWNLOAD:
+    case ManifestLocation::kExternalPolicyDownload:
       rank = 6;
       break;
 
     // A developer-loaded extension should override any installed type
     // that a user can disable. Anything specified on the command-line should
     // override one loaded via the extensions UI.
-    case Manifest::COMMAND_LINE:
+    case ManifestLocation::kCommandLine:
       rank = 5;
       break;
 
-    case Manifest::UNPACKED:
+    case ManifestLocation::kUnpacked:
       rank = 4;
       break;
 
     // The relative priority of various external sources is not important,
     // but having some order ensures deterministic behavior.
-    case Manifest::EXTERNAL_REGISTRY:
+    case ManifestLocation::kExternalRegistry:
       rank = 3;
       break;
 
-    case Manifest::EXTERNAL_PREF:
+    case ManifestLocation::kExternalPref:
       rank = 2;
       break;
 
-    case Manifest::EXTERNAL_PREF_DOWNLOAD:
+    case ManifestLocation::kExternalPrefDownload:
       rank = 1;
       break;
 
     // User installed extensions are overridden by any external type.
-    case Manifest::INTERNAL:
+    case ManifestLocation::kInternal:
       rank = 0;
       break;
 
-    default:
-      NOTREACHED() << "Need to add new extension location " << location;
+    // kInvalidLocation should never be passed to this function.
+    case ManifestLocation::kInvalidLocation:
+      break;
   }
 
   CHECK(rank != kInvalidRank);
@@ -120,7 +123,7 @@ class AvailableValuesFilter {
     DCHECK(input_dict.is_dict());
     DCHECK(CanAccessFeature(manifest, current_path));
 
-    for (const auto& it : input_dict.DictItems()) {
+    for (auto it : input_dict.DictItems()) {
       std::string child_path = CombineKeys(current_path, it.first);
 
       // Unavailable key, skip it.
@@ -181,8 +184,8 @@ class AvailableValuesFilter {
 }  // namespace
 
 // static
-Manifest::Location Manifest::GetHigherPriorityLocation(
-    Location loc1, Location loc2) {
+ManifestLocation Manifest::GetHigherPriorityLocation(ManifestLocation loc1,
+                                                     ManifestLocation loc2) {
   if (loc1 == loc2)
     return loc1;
 
@@ -215,6 +218,8 @@ Manifest::Type Manifest::GetTypeFromManifestValue(
     } else {
       type = TYPE_LEGACY_PACKAGED_APP;
     }
+  } else if (value.HasKey(keys::kChromeOSSystemExtension)) {
+    type = TYPE_CHROMEOS_SYSTEM_EXTENSION;
   } else if (for_login_screen) {
     type = TYPE_LOGIN_SCREEN_EXTENSION;
   } else {
@@ -226,9 +231,9 @@ Manifest::Type Manifest::GetTypeFromManifestValue(
 }
 
 // static
-bool Manifest::ShouldAlwaysLoadExtension(Manifest::Location location,
+bool Manifest::ShouldAlwaysLoadExtension(ManifestLocation location,
                                          bool is_theme) {
-  if (location == Manifest::COMPONENT)
+  if (location == ManifestLocation::kComponent)
     return true;  // Component extensions are always allowed.
 
   if (is_theme)
@@ -243,7 +248,7 @@ bool Manifest::ShouldAlwaysLoadExtension(Manifest::Location location,
 
 // static
 std::unique_ptr<Manifest> Manifest::CreateManifestForLoginScreen(
-    Location location,
+    ManifestLocation location,
     std::unique_ptr<base::DictionaryValue> value,
     ExtensionId extension_id) {
   CHECK(IsPolicyLocation(location));
@@ -252,12 +257,12 @@ std::unique_ptr<Manifest> Manifest::CreateManifestForLoginScreen(
       new Manifest(location, std::move(value), std::move(extension_id), true));
 }
 
-Manifest::Manifest(Location location,
+Manifest::Manifest(ManifestLocation location,
                    std::unique_ptr<base::DictionaryValue> value,
                    ExtensionId extension_id)
     : Manifest(location, std::move(value), std::move(extension_id), false) {}
 
-Manifest::Manifest(Location location,
+Manifest::Manifest(ManifestLocation location,
                    std::unique_ptr<base::DictionaryValue> value,
                    ExtensionId extension_id,
                    bool for_login_screen)
@@ -346,8 +351,8 @@ bool Manifest::GetString(
   return available_values_->GetString(path, out_value);
 }
 
-bool Manifest::GetString(
-    const std::string& path, base::string16* out_value) const {
+bool Manifest::GetString(const std::string& path,
+                         std::u16string* out_value) const {
   return available_values_->GetString(path, out_value);
 }
 
@@ -358,30 +363,24 @@ bool Manifest::GetDictionary(
 
 bool Manifest::GetDictionary(const std::string& path,
                              const base::Value** out_value) const {
-  return GetPathOfType(path, base::Value::Type::DICTIONARY, out_value);
-}
-
-bool Manifest::GetList(
-    const std::string& path, const base::ListValue** out_value) const {
-  return available_values_->GetList(path, out_value);
+  const std::vector<base::StringPiece> components =
+      manifest_handler_helpers::TokenizeDictionaryPath(path);
+  *out_value = available_values_->FindPathOfType(components,
+                                                 base::Value::Type::DICTIONARY);
+  return *out_value != nullptr;
 }
 
 bool Manifest::GetList(const std::string& path,
                        const base::Value** out_value) const {
-  return GetPathOfType(path, base::Value::Type::LIST, out_value);
-}
-
-bool Manifest::GetPathOfType(const std::string& path,
-                             base::Value::Type type,
-                             const base::Value** out_value) const {
   const std::vector<base::StringPiece> components =
       manifest_handler_helpers::TokenizeDictionaryPath(path);
-  *out_value = available_values_->FindPathOfType(components, type);
+  *out_value =
+      available_values_->FindPathOfType(components, base::Value::Type::LIST);
   return *out_value != nullptr;
 }
 
 bool Manifest::EqualsForTesting(const Manifest& other) const {
-  return value_->Equals(other.value()) && location_ == other.location_ &&
+  return *value_ == *other.value() && location_ == other.location_ &&
          extension_id_ == other.extension_id_;
 }
 

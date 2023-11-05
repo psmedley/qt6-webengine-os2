@@ -38,9 +38,10 @@
 #define FWL_STYLEEXT_EDT_ShowScrollbarFocus (1L << 25)
 #define FWL_STYLEEXT_EDT_OuterScrollbar (1L << 26)
 
-class CFWL_Edit;
+class CFWL_MessageKey;
 class CFWL_MessageMouse;
 class CFWL_Caret;
+class CFX_RenderDevice;
 
 class CFWL_Edit : public CFWL_Widget, public CFDE_TextEditEngine::Delegate {
  public:
@@ -108,7 +109,7 @@ class CFWL_Edit : public CFWL_Widget, public CFDE_TextEditEngine::Delegate {
   void RenderText(CFX_RenderDevice* pRenderDev,
                   const CFX_RectF& clipRect,
                   const CFX_Matrix& mt);
-  void DrawContent(CFGAS_GEGraphics* pGraphics, const CFX_Matrix* pMatrix);
+  void DrawContent(CFGAS_GEGraphics* pGraphics, const CFX_Matrix& mtMatrix);
 
   void UpdateEditEngine();
   void UpdateEditParams();
@@ -122,16 +123,16 @@ class CFWL_Edit : public CFWL_Widget, public CFDE_TextEditEngine::Delegate {
   void LayoutScrollBar();
   CFX_PointF DeviceToEngine(const CFX_PointF& pt);
   void InitVerticalScrollBar();
-  void InitHorizontalScrollBar();
   void InitEngine();
   void InitCaret();
-  bool IsShowScrollBar(bool bVert);
-  bool IsContentHeightOverflow();
+  bool IsShowVertScrollBar() const;
+  bool IsContentHeightOverflow() const;
   void SetCursorPosition(size_t position);
   void UpdateCursorRect();
 
   void DoRButtonDown(CFWL_MessageMouse* pMsg);
-  void OnFocusChanged(CFWL_Message* pMsg, bool bSet);
+  void OnFocusGained();
+  void OnFocusLost();
   void OnLButtonDown(CFWL_MessageMouse* pMsg);
   void OnLButtonUp(CFWL_MessageMouse* pMsg);
   void OnButtonDoubleClick(CFWL_MessageMouse* pMsg);
@@ -155,7 +156,6 @@ class CFWL_Edit : public CFWL_Widget, public CFDE_TextEditEngine::Delegate {
   size_t m_CursorPosition = 0;
   std::unique_ptr<CFDE_TextEditEngine> const m_pEditEngine;
   cppgc::Member<CFWL_ScrollBar> m_pVertScrollBar;
-  cppgc::Member<CFWL_ScrollBar> m_pHorzScrollBar;
   cppgc::Member<CFWL_Caret> m_pCaret;
   WideString m_wsCache;
   WideString m_wsFont;

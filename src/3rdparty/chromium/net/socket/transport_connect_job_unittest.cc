@@ -13,12 +13,13 @@
 #include "base/test/task_environment.h"
 #include "net/base/address_family.h"
 #include "net/base/address_list.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/dns/public/secure_dns_mode.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/log/test_net_log.h"
 #include "net/socket/connect_job_test_util.h"
 #include "net/socket/connection_attempts.h"
@@ -27,6 +28,8 @@
 #include "net/test/gtest_util.h"
 #include "net/test/test_with_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/scheme_host_port.h"
+#include "url/url_constants.h"
 
 namespace net {
 namespace {
@@ -59,8 +62,9 @@ class TransportConnectJobTest : public WithTaskEnvironment,
 
   static scoped_refptr<TransportSocketParams> DefaultParams() {
     return base::MakeRefCounted<TransportSocketParams>(
-        HostPortPair(kHostName, 80), NetworkIsolationKey(),
-        false /* disable_secure_dns */, OnHostResolutionCallback());
+        url::SchemeHostPort(url::kHttpScheme, kHostName, 80),
+        NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+        OnHostResolutionCallback());
   }
 
  protected:
@@ -262,23 +266,49 @@ TEST_F(TransportConnectJobTest, ConnectionSuccess) {
   }
 }
 
-TEST_F(TransportConnectJobTest, DisableSecureDns) {
-  for (bool disable_secure_dns : {false, true}) {
+// TODO(crbug.com/1206799): Set up `host_resolver_` to require the expected
+// scheme.
+TEST_F(TransportConnectJobTest, HandlesHttpsEndpoint) {
+  TestConnectJobDelegate test_delegate;
+  TransportConnectJob transport_connect_job(
+      DEFAULT_PRIORITY, SocketTag(), &common_connect_job_params_,
+      base::MakeRefCounted<TransportSocketParams>(
+          url::SchemeHostPort(url::kHttpsScheme, kHostName, 80),
+          NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+          OnHostResolutionCallback()),
+      &test_delegate, nullptr /* net_log */);
+  test_delegate.StartJobExpectingResult(&transport_connect_job, OK,
+                                        false /* expect_sync_result */);
+}
+
+// TODO(crbug.com/1206799): Set up `host_resolver_` to require the expected
+// lack of scheme.
+TEST_F(TransportConnectJobTest, HandlesNonStandardEndpoint) {
+  TestConnectJobDelegate test_delegate;
+  TransportConnectJob transport_connect_job(
+      DEFAULT_PRIORITY, SocketTag(), &common_connect_job_params_,
+      base::MakeRefCounted<TransportSocketParams>(
+          HostPortPair(kHostName, 80), NetworkIsolationKey(),
+          SecureDnsPolicy::kAllow, OnHostResolutionCallback()),
+      &test_delegate, nullptr /* net_log */);
+  test_delegate.StartJobExpectingResult(&transport_connect_job, OK,
+                                        false /* expect_sync_result */);
+}
+
+TEST_F(TransportConnectJobTest, SecureDnsPolicy) {
+  for (auto secure_dns_policy :
+       {SecureDnsPolicy::kAllow, SecureDnsPolicy::kDisable}) {
     TestConnectJobDelegate test_delegate;
     TransportConnectJob transport_connect_job(
         DEFAULT_PRIORITY, SocketTag(), &common_connect_job_params_,
         base::MakeRefCounted<TransportSocketParams>(
-            HostPortPair(kHostName, 80), NetworkIsolationKey(),
-            disable_secure_dns, OnHostResolutionCallback()),
+            url::SchemeHostPort(url::kHttpScheme, kHostName, 80),
+            NetworkIsolationKey(), secure_dns_policy,
+            OnHostResolutionCallback()),
         &test_delegate, nullptr /* net_log */);
     test_delegate.StartJobExpectingResult(&transport_connect_job, OK,
                                           false /* expect_sync_result */);
-    EXPECT_EQ(disable_secure_dns,
-              host_resolver_.last_secure_dns_mode_override().has_value());
-    if (disable_secure_dns) {
-      EXPECT_EQ(net::SecureDnsMode::kOff,
-                host_resolver_.last_secure_dns_mode_override().value());
-    }
+    EXPECT_EQ(secure_dns_policy, host_resolver_.last_secure_dns_policy());
   }
 }
 

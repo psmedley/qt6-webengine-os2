@@ -13,7 +13,6 @@
 #include "src/compiler/globals.h"
 #include "src/compiler/linkage.h"
 #include "src/compiler/pipeline.h"
-#include "src/compiler/wasm-compiler.h"
 #include "src/diagnostics/eh-frame.h"
 #include "src/execution/frames.h"
 #include "src/logging/counters.h"
@@ -48,9 +47,8 @@ CodeGenerator::CodeGenerator(
     Isolate* isolate, base::Optional<OsrHelper> osr_helper,
     int start_source_position, JumpOptimizationInfo* jump_opt,
     PoisoningMitigationLevel poisoning_level, const AssemblerOptions& options,
-    int32_t builtin_index, size_t max_unoptimized_frame_height,
-    size_t max_pushed_argument_count, std::unique_ptr<AssemblerBuffer> buffer,
-    const char* debug_name)
+    Builtin builtin, size_t max_unoptimized_frame_height,
+    size_t max_pushed_argument_count, const char* debug_name)
     : zone_(codegen_zone),
       isolate_(isolate),
       frame_access_state_(nullptr),
@@ -63,7 +61,7 @@ CodeGenerator::CodeGenerator(
       current_block_(RpoNumber::Invalid()),
       start_source_position_(start_source_position),
       current_source_position_(SourcePosition::Unknown()),
-      tasm_(isolate, options, CodeObjectRequired::kNo, std::move(buffer)),
+      tasm_(isolate, options, CodeObjectRequired::kNo),
       resolver_(this),
       safepoints_(codegen_zone),
       handlers_(codegen_zone),
@@ -99,7 +97,7 @@ CodeGenerator::CodeGenerator(
       code_kind == CodeKind::JS_TO_WASM_FUNCTION) {
     tasm_.set_abort_hard(true);
   }
-  tasm_.set_builtin_index(builtin_index);
+  tasm_.set_builtin(builtin);
 }
 
 bool CodeGenerator::wasm_runtime_exception_support() const {
@@ -173,7 +171,7 @@ void CodeGenerator::AssembleDeoptImmediateArgs(
 
     switch (constant.type()) {
       case Constant::kInt32:
-        tasm()->dp(constant.ToInt32());
+        tasm()->dp(constant.ToInt32(), RelocInfo::LITERAL_CONSTANT);
         break;
 #ifdef V8_TARGET_ARCH_64_BIT
       case Constant::kInt64:
@@ -183,7 +181,7 @@ void CodeGenerator::AssembleDeoptImmediateArgs(
       case Constant::kFloat64: {
         int smi;
         CHECK(DoubleToSmiInteger(constant.ToFloat64().value(), &smi));
-        tasm()->dp(Smi::FromInt(smi).ptr());
+        tasm()->dp(Smi::FromInt(smi).ptr(), RelocInfo::LITERAL_CONSTANT);
         break;
       }
       case Constant::kCompressedHeapObject:
@@ -213,11 +211,18 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleDeoptimizerCall(
 
   DeoptimizeKind deopt_kind = exit->kind();
   DeoptimizeReason deoptimization_reason = exit->reason();
-  Label* jump_deoptimization_entry_label =
-      &jump_deoptimization_entry_labels_[static_cast<int>(deopt_kind)];
+  Label* jump_deoptimization_entry_label;
+  if (deopt_kind == DeoptimizeKind::kEagerWithResume) {
+    jump_deoptimization_entry_label =
+        &jump_deoptimization_or_resume_entry_labels_[static_cast<int>(
+            deoptimization_reason)];
+  } else {
+    jump_deoptimization_entry_label =
+        &jump_deoptimization_entry_labels_[static_cast<int>(deopt_kind)];
+  }
   if (info()->source_positions()) {
-    tasm()->RecordDeoptReason(deoptimization_reason, exit->pos(),
-                              deoptimization_id);
+    tasm()->RecordDeoptReason(deoptimization_reason, exit->node_id(),
+                              exit->pos(), deoptimization_id);
   }
 
   if (deopt_kind == DeoptimizeKind::kLazy) {
@@ -229,7 +234,7 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleDeoptimizerCall(
     }
     tasm()->bind(exit->label());
   }
-  Builtins::Name target =
+  Builtin target =
       deopt_kind == DeoptimizeKind::kEagerWithResume
           ? Deoptimizer::GetDeoptWithResumeBuiltin(deoptimization_reason)
           : Deoptimizer::GetDeoptimizationEntry(deopt_kind);
@@ -315,8 +320,12 @@ void CodeGenerator::AssembleCode() {
   offsets_info_.blocks_start = tasm()->pc_offset();
   for (const InstructionBlock* block : instructions()->ao_blocks()) {
     // Align loop headers on vendor recommended boundaries.
-    if (block->ShouldAlign() && !tasm()->jump_optimization_info()) {
-      tasm()->CodeTargetAlign();
+    if (!tasm()->jump_optimization_info()) {
+      if (block->ShouldAlignLoopHeader()) {
+        tasm()->LoopHeaderAlign();
+      } else if (block->ShouldAlignCodeTarget()) {
+        tasm()->CodeTargetAlign();
+      }
     }
     if (info->trace_turbo_json()) {
       block_starts_[block->rpo_number().ToInt()] = tasm()->pc_offset();
@@ -417,23 +426,29 @@ void CodeGenerator::AssembleCode() {
     std::sort(deoptimization_exits_.begin(), deoptimization_exits_.end(), cmp);
   }
 
-  for (DeoptimizationExit* exit : deoptimization_exits_) {
-    if (exit->emitted()) continue;
-    if (Deoptimizer::kSupportsFixedDeoptExitSizes) {
-      exit->set_deoptimization_id(next_deoptimization_id_++);
-    }
-    result_ = AssembleDeoptimizerCall(exit);
-    if (result_ != kSuccess) return;
+  {
+#ifdef V8_TARGET_ARCH_PPC64
+    v8::internal::Assembler::BlockTrampolinePoolScope block_trampoline_pool(
+        tasm());
+#endif
+    for (DeoptimizationExit* exit : deoptimization_exits_) {
+      if (exit->emitted()) continue;
+      if (Deoptimizer::kSupportsFixedDeoptExitSizes) {
+        exit->set_deoptimization_id(next_deoptimization_id_++);
+      }
+      result_ = AssembleDeoptimizerCall(exit);
+      if (result_ != kSuccess) return;
 
-    // UpdateDeoptimizationInfo expects lazy deopts to be visited in pc_offset
-    // order, which is always the case since they are added to
-    // deoptimization_exits_ in that order, and the optional sort operation
-    // above preserves that order.
-    if (exit->kind() == DeoptimizeKind::kLazy) {
-      int trampoline_pc = exit->label()->pos();
-      last_updated = safepoints()->UpdateDeoptimizationInfo(
-          exit->pc_offset(), trampoline_pc, last_updated,
-          exit->deoptimization_id());
+      // UpdateDeoptimizationInfo expects lazy deopts to be visited in pc_offset
+      // order, which is always the case since they are added to
+      // deoptimization_exits_ in that order, and the optional sort operation
+      // above preserves that order.
+      if (exit->kind() == DeoptimizeKind::kLazy) {
+        int trampoline_pc = exit->label()->pos();
+        last_updated = safepoints()->UpdateDeoptimizationInfo(
+            exit->pc_offset(), trampoline_pc, last_updated,
+            exit->deoptimization_id());
+      }
     }
   }
 
@@ -529,13 +544,13 @@ void CodeGenerator::AssembleArchBinarySearchSwitchRange(
   AssembleArchBinarySearchSwitchRange(input, def_block, begin, middle);
 }
 
-OwnedVector<byte> CodeGenerator::GetSourcePositionTable() {
+base::OwnedVector<byte> CodeGenerator::GetSourcePositionTable() {
   return source_position_table_builder_.ToSourcePositionTableVector();
 }
 
-OwnedVector<byte> CodeGenerator::GetProtectedInstructionsData() {
-  return OwnedVector<byte>::Of(
-      Vector<byte>::cast(VectorOf(protected_instructions_)));
+base::OwnedVector<byte> CodeGenerator::GetProtectedInstructionsData() {
+  return base::OwnedVector<byte>::Of(
+      base::Vector<byte>::cast(base::VectorOf(protected_instructions_)));
 }
 
 MaybeHandle<Code> CodeGenerator::FinalizeCode() {
@@ -556,9 +571,8 @@ MaybeHandle<Code> CodeGenerator::FinalizeCode() {
   tasm()->GetCode(isolate(), &desc, safepoints(), handler_table_offset_);
 
 #if defined(V8_OS_WIN64)
-  if (Builtins::IsBuiltinId(info_->builtin_index())) {
-    isolate_->SetBuiltinUnwindData(info_->builtin_index(),
-                                   tasm()->GetUnwindInfo());
+  if (Builtins::IsBuiltinId(info_->builtin())) {
+    isolate_->SetBuiltinUnwindData(info_->builtin(), tasm()->GetUnwindInfo());
   }
 #endif  // V8_OS_WIN64
 
@@ -568,7 +582,7 @@ MaybeHandle<Code> CodeGenerator::FinalizeCode() {
 
   MaybeHandle<Code> maybe_code =
       Factory::CodeBuilder(isolate(), desc, info()->code_kind())
-          .set_builtin_index(info()->builtin_index())
+          .set_builtin(info()->builtin())
           .set_inlined_bytecode_size(info()->inlined_bytecode_size())
           .set_source_position_table(source_positions)
           .set_deoptimization_data(deopt_data)
@@ -583,18 +597,13 @@ MaybeHandle<Code> CodeGenerator::FinalizeCode() {
     return MaybeHandle<Code>();
   }
 
-  // TODO(jgruber,v8:8888): Turn this into a DCHECK once confidence is
-  // high that the implementation is complete.
-  CHECK_IMPLIES(info()->IsNativeContextIndependent(),
-                code->IsNativeContextIndependent(isolate()));
-
   // Counts both compiled code and metadata.
   isolate()->counters()->total_compiled_code_size()->Increment(
       code->raw_body_size());
 
-  LOG_CODE_EVENT(isolate(),
-                 CodeLinePosInfoRecordEvent(code->raw_instruction_start(),
-                                            *source_positions));
+  LOG_CODE_EVENT(isolate(), CodeLinePosInfoRecordEvent(
+                                code->raw_instruction_start(),
+                                *source_positions, JitCodeEvent::JIT_CODE));
 
   return code;
 }
@@ -874,8 +883,16 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleInstruction(
       AssembleArchBoolean(instr, condition);
       break;
     }
+    case kFlags_select: {
+      AssembleArchSelect(instr, condition);
+      break;
+    }
     case kFlags_trap: {
+#if V8_ENABLE_WEBASSEMBLY
       AssembleArchTrap(instr, condition);
+#else
+      UNREACHABLE();
+#endif  // V8_ENABLE_WEBASSEMBLY
       break;
     }
     case kFlags_none: {
@@ -906,7 +923,13 @@ void CodeGenerator::AssembleSourcePosition(SourcePosition source_position) {
                                              source_position, false);
   if (FLAG_code_comments) {
     OptimizedCompilationInfo* info = this->info();
-    if (!info->IsOptimizing() && !info->IsWasm()) return;
+    if (!info->IsOptimizing()) {
+#if V8_ENABLE_WEBASSEMBLY
+      if (!info->IsWasm()) return;
+#else
+      return;
+#endif  // V8_ENABLE_WEBASSEMBLY
+    }
     std::ostringstream buffer;
     buffer << "-- ";
     // Turbolizer only needs the source position, as it can reconstruct
@@ -937,12 +960,15 @@ bool CodeGenerator::GetSlotAboveSPBeforeTailCall(Instruction* instr,
 }
 
 StubCallMode CodeGenerator::DetermineStubCallMode() const {
+#if V8_ENABLE_WEBASSEMBLY
   CodeKind code_kind = info()->code_kind();
-  return (code_kind == CodeKind::WASM_FUNCTION ||
-          code_kind == CodeKind::WASM_TO_CAPI_FUNCTION ||
-          code_kind == CodeKind::WASM_TO_JS_FUNCTION)
-             ? StubCallMode::kCallWasmRuntimeStub
-             : StubCallMode::kCallCodeObject;
+  if (code_kind == CodeKind::WASM_FUNCTION ||
+      code_kind == CodeKind::WASM_TO_CAPI_FUNCTION ||
+      code_kind == CodeKind::WASM_TO_JS_FUNCTION) {
+    return StubCallMode::kCallWasmRuntimeStub;
+  }
+#endif  // V8_ENABLE_WEBASSEMBLY
+  return StubCallMode::kCallCodeObject;
 }
 
 void CodeGenerator::AssembleGaps(Instruction* instr) {
@@ -961,10 +987,6 @@ Handle<PodArray<InliningPosition>> CreateInliningPositions(
     OptimizedCompilationInfo* info, Isolate* isolate) {
   const OptimizedCompilationInfo::InlinedFunctionList& inlined_functions =
       info->inlined_functions();
-  if (inlined_functions.size() == 0) {
-    return Handle<PodArray<InliningPosition>>::cast(
-        isolate->factory()->empty_byte_array());
-  }
   Handle<PodArray<InliningPosition>> inl_positions =
       PodArray<InliningPosition>::New(
           isolate, static_cast<int>(inlined_functions.size()),
@@ -1037,6 +1059,9 @@ Handle<DeoptimizationData> CodeGenerator::GenerateDeoptimizationData() {
     data->SetTranslationIndex(
         i, Smi::FromInt(deoptimization_exit->translation_id()));
     data->SetPc(i, Smi::FromInt(deoptimization_exit->pc_offset()));
+#ifdef DEBUG
+    data->SetNodeId(i, Smi::FromInt(deoptimization_exit->node_id()));
+#endif  // DEBUG
   }
 
   return data;
@@ -1176,14 +1201,16 @@ void CodeGenerator::BuildTranslationForFrameStateDescriptor(
                                                   height);
       break;
     }
+#if V8_ENABLE_WEBASSEMBLY
     case FrameStateType::kJSToWasmBuiltinContinuation: {
       const JSToWasmFrameStateDescriptor* js_to_wasm_descriptor =
           static_cast<const JSToWasmFrameStateDescriptor*>(descriptor);
       translations_.BeginJSToWasmBuiltinContinuationFrame(
           bailout_id, shared_info_id, height,
-          js_to_wasm_descriptor->return_type());
+          js_to_wasm_descriptor->return_kind());
       break;
     }
+#endif  // V8_ENABLE_WEBASSEMBLY
     case FrameStateType::kJavaScriptBuiltinContinuation: {
       translations_.BeginJavaScriptBuiltinContinuationFrame(
           bailout_id, shared_info_id, height);
@@ -1222,8 +1249,12 @@ DeoptimizationExit* CodeGenerator::BuildTranslation(
 
   DeoptimizationExit* const exit = zone()->New<DeoptimizationExit>(
       current_source_position_, descriptor->bailout_id(), translation_index,
-      pc_offset, entry.kind(), entry.reason());
-
+      pc_offset, entry.kind(), entry.reason(),
+#ifdef DEBUG
+      entry.node_id());
+#else   // DEBUG
+      0);
+#endif  // DEBUG
   if (!Deoptimizer::kSupportsFixedDeoptExitSizes) {
     exit->set_deoptimization_id(next_deoptimization_id_++);
   }

@@ -13,7 +13,9 @@
 #include "base/feature_list.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
 #include "components/password_manager/core/browser/hash_password_manager.h"
+#include "components/password_manager/core/browser/password_form.h"
 
 namespace password_manager {
 
@@ -30,15 +32,15 @@ std::unique_ptr<PasswordForm> PasswordFormFromData(
   if (form_data.action)
     form->action = GURL(form_data.action);
   if (form_data.submit_element)
-    form->submit_element = base::WideToUTF16(form_data.submit_element);
+    form->submit_element = form_data.submit_element;
   if (form_data.username_element)
-    form->username_element = base::WideToUTF16(form_data.username_element);
+    form->username_element = form_data.username_element;
   if (form_data.password_element)
-    form->password_element = base::WideToUTF16(form_data.password_element);
+    form->password_element = form_data.password_element;
   if (form_data.username_value)
-    form->username_value = base::WideToUTF16(form_data.username_value);
+    form->username_value = form_data.username_value;
   if (form_data.password_value)
-    form->password_value = base::WideToUTF16(form_data.password_value);
+    form->password_value = form_data.password_value;
   return form;
 }
 
@@ -46,7 +48,6 @@ std::unique_ptr<PasswordForm> FillPasswordFormWithData(
     const PasswordFormData& form_data,
     bool use_federated_login) {
   auto form = PasswordFormFromData(form_data);
-  form->date_synced = form->date_created + base::TimeDelta::FromDays(1);
   if (form_data.username_value)
     form->display_name = form->username_value;
   else
@@ -56,8 +57,14 @@ std::unique_ptr<PasswordForm> FillPasswordFormWithData(
     form->password_value.clear();
     form->federation_origin =
         url::Origin::Create(GURL("https://accounts.google.com/login"));
+    if (!IsValidAndroidFacetURI(form->signon_realm)) {
+      form->signon_realm =
+          "federation://" + form->url.host() + "/accounts.google.com";
+      form->type = PasswordForm::Type::kApi;
+    }
   }
   form->in_store = PasswordForm::Store::kProfileStore;
+  form->password_issues = base::flat_map<InsecureType, InsecurityMetadata>();
   return form;
 }
 
@@ -127,16 +134,16 @@ MockPasswordReuseDetectorConsumer::~MockPasswordReuseDetectorConsumer() =
     default;
 
 PasswordHashDataMatcher::PasswordHashDataMatcher(
-    base::Optional<PasswordHashData> expected)
+    absl::optional<PasswordHashData> expected)
     : expected_(expected) {}
 
 bool PasswordHashDataMatcher::MatchAndExplain(
-    base::Optional<PasswordHashData> hash_data,
+    absl::optional<PasswordHashData> hash_data,
     ::testing::MatchResultListener* listener) const {
-  if (expected_ == base::nullopt)
-    return hash_data == base::nullopt;
+  if (expected_ == absl::nullopt)
+    return hash_data == absl::nullopt;
 
-  if (hash_data == base::nullopt)
+  if (hash_data == absl::nullopt)
     return false;
 
   return expected_->username == hash_data->username &&
@@ -152,8 +159,8 @@ void PasswordHashDataMatcher::DescribeNegationTo(::std::ostream* os) const {
   *os << "doesn't match password hash data for " << expected_->username;
 }
 
-::testing::Matcher<base::Optional<PasswordHashData>> Matches(
-    base::Optional<PasswordHashData> expected) {
+::testing::Matcher<absl::optional<PasswordHashData>> Matches(
+    absl::optional<PasswordHashData> expected) {
   return ::testing::MakeMatcher(new PasswordHashDataMatcher(expected));
 }
 

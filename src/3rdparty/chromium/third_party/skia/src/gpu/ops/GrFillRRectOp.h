@@ -20,10 +20,12 @@ class SkRRect;
 
 namespace GrFillRRectOp {
     GrOp::Owner Make(GrRecordingContext*,
+                     SkArenaAlloc*,
                      GrPaint&&,
                      const SkMatrix& viewMatrix,
                      const SkRRect&,
-                     GrAAType);
+                     const SkRect& localRect,
+                     GrAA);
 }  // namespace GrFillRRectOp
 
 #endif

@@ -9,6 +9,7 @@
 #include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/task_environment.h"
@@ -54,7 +55,7 @@ TEST_F(OffloadingAudioEncoderTest, Initialize) {
   bool called_output = false;
   AudioEncoder::Options options;
   AudioEncoder::OutputCB output_cb = base::BindLambdaForTesting(
-      [&](EncodedAudioBuffer, base::Optional<AudioEncoder::CodecDescription>) {
+      [&](EncodedAudioBuffer, absl::optional<AudioEncoder::CodecDescription>) {
         EXPECT_TRUE(callback_runner_->RunsTasksInCurrentSequence());
         called_output = true;
       });

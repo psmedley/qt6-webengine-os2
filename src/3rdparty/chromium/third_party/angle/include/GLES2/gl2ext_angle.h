@@ -411,16 +411,6 @@ GL_APICALL void GL_APIENTRY glGetTexLevelParameterivANGLE(GLenum target, GLint l
 #endif
 #endif /* GL_ANGLE_get_tex_level_parameter */
 
-#ifndef GL_ANGLE_explicit_context
-#define GL_ANGLE_explicit_context
-typedef void *GLeglContext;
-#include "gl2ext_explicit_context_autogen.inc"
-#include "../GLES3/gl3ext_explicit_context_autogen.inc"
-#include "../GLES3/gl31ext_explicit_context_autogen.inc"
-#include "../GLES3/gl32.h"
-#include "../GLES3/gl32ext_explicit_context_autogen.inc"
-#endif /* GL_ANGLE_explicit_context */
-
 #ifndef GL_ANGLE_multi_draw
 #define GL_ANGLE_multi_draw 1
 typedef void (GL_APIENTRYP PFNGLMULTIDRAWARRAYSANGLEPROC) (GLenum mode, const GLint *firsts, const GLsizei *counts, GLsizei drawcount);
@@ -569,6 +559,11 @@ GL_APICALL void GL_APIENTRY glImportSemaphoreZirconHandleANGLE(GLuint memory,
 #define GL_NV_robustness_video_memory
 #define GL_PURGED_CONTEXT_RESET_NV 0x92BB
 #endif /* GL_NV_robustness_video_memory */
+
+#ifndef GL_ANGLE_get_serialized_context_string
+#define GL_ANGLE_get_serialized_context_string
+#define GL_SERIALIZED_CONTEXT_STRING_ANGLE 0x96B0
+#endif /* GL_ANGLE_get_serialized_context_string */
 
 // clang-format on
 

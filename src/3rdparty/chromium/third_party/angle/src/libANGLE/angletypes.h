@@ -579,6 +579,7 @@ class BlendStateExt final
 
     BlendStateExt(const size_t drawBuffers = 1);
 
+    BlendStateExt(const BlendStateExt &other);
     BlendStateExt &operator=(const BlendStateExt &other);
 
     ///////// Blending Toggle /////////
@@ -671,23 +672,23 @@ class BlendStateExt final
 
     ///////// Data Members /////////
 
-    const FactorStorage::Type mMaxFactorMask;
+    FactorStorage::Type mMaxFactorMask;
     FactorStorage::Type mSrcColor;
     FactorStorage::Type mDstColor;
     FactorStorage::Type mSrcAlpha;
     FactorStorage::Type mDstAlpha;
 
-    const EquationStorage::Type mMaxEquationMask;
+    EquationStorage::Type mMaxEquationMask;
     EquationStorage::Type mEquationColor;
     EquationStorage::Type mEquationAlpha;
 
-    const ColorMaskStorage::Type mMaxColorMask;
+    ColorMaskStorage::Type mMaxColorMask;
     ColorMaskStorage::Type mColorMask;
 
-    const DrawBufferMask mMaxEnabledMask;
+    DrawBufferMask mMaxEnabledMask;
     DrawBufferMask mEnabledMask;
 
-    const size_t mMaxDrawBuffers;
+    size_t mMaxDrawBuffers;
 };
 
 // Used in StateCache
@@ -843,8 +844,8 @@ using UniformBuffersArray = std::array<T, IMPLEMENTATION_MAX_UNIFORM_BUFFER_BIND
 template <typename T>
 using StorageBuffersArray = std::array<T, IMPLEMENTATION_MAX_SHADER_STORAGE_BUFFER_BINDINGS>;
 template <typename T>
-using AtomicCounterBuffersArray = std::array<T, IMPLEMENTATION_MAX_ATOMIC_COUNTER_BUFFERS>;
-using AtomicCounterBufferMask   = angle::BitSet<IMPLEMENTATION_MAX_ATOMIC_COUNTER_BUFFERS>;
+using AtomicCounterBuffersArray = std::array<T, IMPLEMENTATION_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS>;
+using AtomicCounterBufferMask   = angle::BitSet<IMPLEMENTATION_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS>;
 template <typename T>
 using ImagesArray = std::array<T, IMPLEMENTATION_MAX_IMAGE_UNITS>;
 

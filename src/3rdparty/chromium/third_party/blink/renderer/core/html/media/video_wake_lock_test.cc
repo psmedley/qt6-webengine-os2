@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/html/media/video_wake_lock.h"
 
+#include <memory>
+
 #include "cc/layers/layer.h"
 #include "media/mojo/mojom/media_player.mojom-blink.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
@@ -16,6 +18,7 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/picture_in_picture_controller.h"
 #include "third_party/blink/renderer/core/html/media/html_media_test_helper.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
@@ -30,7 +33,7 @@ namespace blink {
 // The VideoWakeLockPictureInPictureSession implements a PictureInPicture
 // session in the same process as the test and guarantees that the callbacks are
 // called in order for the events to be fired.
-class VideoWakeLockPictureInPictureSession
+class VideoWakeLockPictureInPictureSession final
     : public mojom::blink::PictureInPictureSession {
  public:
   explicit VideoWakeLockPictureInPictureSession(
@@ -38,12 +41,13 @@ class VideoWakeLockPictureInPictureSession
       : receiver_(this, std::move(receiver)) {}
   ~VideoWakeLockPictureInPictureSession() override = default;
 
-  void Stop(StopCallback callback) final { std::move(callback).Run(); }
-
+  void Stop(StopCallback callback) override { std::move(callback).Run(); }
   void Update(uint32_t player_id,
-              const base::Optional<viz::SurfaceId>&,
+              mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayer>
+                  player_remote,
+              const viz::SurfaceId&,
               const gfx::Size&,
-              bool show_play_pause_button) final {}
+              bool show_play_pause_button) override {}
 
  private:
   mojo::Receiver<mojom::blink::PictureInPictureSession> receiver_;
@@ -52,7 +56,7 @@ class VideoWakeLockPictureInPictureSession
 // The VideoWakeLockPictureInPictureService implements the PictureInPicture
 // service in the same process as the test and guarantees that the callbacks are
 // called in order for the events to be fired.
-class VideoWakeLockPictureInPictureService
+class VideoWakeLockPictureInPictureService final
     : public mojom::blink::PictureInPictureService {
  public:
   VideoWakeLockPictureInPictureService() : receiver_(this) {}
@@ -66,14 +70,14 @@ class VideoWakeLockPictureInPictureService
   void StartSession(
       uint32_t,
       mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayer>,
-      const base::Optional<viz::SurfaceId>&,
+      const viz::SurfaceId&,
       const gfx::Size&,
       bool,
       mojo::PendingRemote<mojom::blink::PictureInPictureSessionObserver>,
-      StartSessionCallback callback) final {
+      StartSessionCallback callback) override {
     mojo::PendingRemote<mojom::blink::PictureInPictureSession> session_remote;
-    session_.reset(new VideoWakeLockPictureInPictureSession(
-        session_remote.InitWithNewPipeAndPassReceiver()));
+    session_ = std::make_unique<VideoWakeLockPictureInPictureSession>(
+        session_remote.InitWithNewPipeAndPassReceiver());
 
     std::move(callback).Run(std::move(session_remote), gfx::Size());
   }
@@ -85,17 +89,27 @@ class VideoWakeLockPictureInPictureService
 
 class VideoWakeLockMediaPlayer final : public EmptyWebMediaPlayer {
  public:
-  ReadyState GetReadyState() const final { return kReadyStateHaveMetadata; }
-  bool HasVideo() const final { return true; }
+  ReadyState GetReadyState() const override { return kReadyStateHaveMetadata; }
+  bool HasVideo() const override { return true; }
+  void OnRequestPictureInPicture() override {
+    // Use a fake but valid viz::SurfaceId.
+    surface_id_ = viz::SurfaceId(
+        viz::FrameSinkId(1, 1),
+        viz::LocalSurfaceId(11,
+                            base::UnguessableToken::Deserialize(0x111111, 0)));
+  }
+  absl::optional<viz::SurfaceId> GetSurfaceId() override { return surface_id_; }
+
+ private:
+  absl::optional<viz::SurfaceId> surface_id_;
 };
 
 class VideoWakeLockFrameClient : public test::MediaStubLocalFrameClient {
  public:
   explicit VideoWakeLockFrameClient(std::unique_ptr<WebMediaPlayer> player)
       : test::MediaStubLocalFrameClient(std::move(player)) {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(VideoWakeLockFrameClient);
+  VideoWakeLockFrameClient(const VideoWakeLockFrameClient&) = delete;
+  VideoWakeLockFrameClient& operator=(const VideoWakeLockFrameClient&) = delete;
 };
 
 class VideoWakeLockTest : public PageTestBase {

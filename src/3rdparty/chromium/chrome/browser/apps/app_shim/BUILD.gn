@@ -46,7 +46,6 @@ source_set("app_shim") {
       "//chrome/browser:browser_process",
       "//chrome/browser/profiles:profile",
       "//chrome/browser/web_applications:web_applications",
-      "//chrome/browser/web_applications/components",
       "//services/preferences/public/cpp:cpp",
     ]
   }

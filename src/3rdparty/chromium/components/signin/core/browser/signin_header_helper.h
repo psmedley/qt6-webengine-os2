@@ -26,6 +26,8 @@ class HttpRequestHeaders;
 
 namespace signin {
 
+enum class Tribool;
+
 // Profile mode flags.
 enum ProfileMode {
   PROFILE_MODE_DEFAULT = 0,
@@ -39,6 +41,13 @@ extern const char kChromeConnectedHeader[];
 extern const char kChromeManageAccountsHeader[];
 extern const char kDiceRequestHeader[];
 extern const char kDiceResponseHeader[];
+
+// The X-Auto-Login header detects when a user is prompted to enter their
+// credentials on the Gaia sign-in page. It is sent with an empty email if the
+// user is on the Gaia sign-in email page or a pre-filled email if the user has
+// selected an account on the AccountChooser. X-Auto-Login is not sent following
+// a reauth request.
+extern const char kAutoLoginHeader[];
 
 // The ServiceType specified by Gaia in the response header accompanying the 204
 // response. This indicates the action Chrome is supposed to lead the user to
@@ -84,6 +93,7 @@ struct ManageAccountsParams {
 
   ManageAccountsParams();
   ManageAccountsParams(const ManageAccountsParams& other);
+  ManageAccountsParams& operator=(const ManageAccountsParams& other);
 };
 
 // Struct describing the parameters received in the Dice response header.
@@ -197,10 +207,6 @@ class SigninHeaderHelper {
       const GURL& url,
       const content_settings::CookieSettings* cookie_settings) = 0;
 
- protected:
-  SigninHeaderHelper();
-  virtual ~SigninHeaderHelper();
-
   // Dictionary of fields in a account consistency response header.
   using ResponseHeaderDictionary = std::multimap<std::string, std::string>;
 
@@ -208,6 +214,10 @@ class SigninHeaderHelper {
   // "key1=value1,key2=value2,...".
   static ResponseHeaderDictionary ParseAccountConsistencyResponseHeader(
       const std::string& header_value);
+
+ protected:
+  SigninHeaderHelper();
+  virtual ~SigninHeaderHelper();
 
   // Returns whether the url is eligible for the request header.
   virtual bool IsUrlEligibleForRequestHeader(const GURL& url) = 0;
@@ -238,7 +248,7 @@ void AppendOrRemoveMirrorRequestHeader(
     RequestAdapter* request,
     const GURL& redirect_url,
     const std::string& gaia_id,
-    const base::Optional<bool>& is_child_account,
+    Tribool is_child_account,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask,

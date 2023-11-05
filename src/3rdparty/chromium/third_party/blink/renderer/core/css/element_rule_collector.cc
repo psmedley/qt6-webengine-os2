@@ -44,6 +44,8 @@
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_stats.h"
 #include "third_party/blink/renderer/core/css/resolver/style_rule_usage_tracker.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
@@ -56,6 +58,17 @@ unsigned AdjustLinkMatchType(EInsideLink inside_link,
   if (inside_link == EInsideLink::kNotInsideLink)
     return CSSSelector::kMatchLink;
   return link_match_type;
+}
+
+ContainerQueryEvaluator* FindContainerQueryEvaluator(
+    const AtomicString& name,
+    const StyleRecalcContext& style_recalc_context) {
+  if (auto* element =
+          ContainerQueryEvaluator::FindContainer(style_recalc_context, name)) {
+    return element->GetContainerQueryEvaluator();
+  }
+
+  return nullptr;
 }
 
 }  // namespace
@@ -71,7 +84,6 @@ ElementRuleCollector::ElementRuleCollector(
       style_recalc_context_(style_recalc_context),
       selector_filter_(filter),
       style_(style),
-      pseudo_style_request_(kPseudoIdNone),
       mode_(SelectorChecker::kResolvingStyle),
       can_use_fast_reject_(
           selector_filter_.ParentStackIsConsistent(context.ParentNode())),
@@ -137,18 +149,11 @@ template <typename RuleDataListType>
 void ElementRuleCollector::CollectMatchingRulesForList(
     const RuleDataListType* rules,
     const MatchRequest& match_request,
+    const SelectorChecker& checker,
     PartRequest* part_request) {
   if (!rules)
     return;
 
-  SelectorChecker::Init init;
-  init.mode = mode_;
-  init.is_ua_rule = matching_ua_rules_;
-  init.element_style = style_.get();
-  init.scrollbar = pseudo_style_request_.scrollbar;
-  init.scrollbar_part = pseudo_style_request_.scrollbar_part;
-  init.part_names = part_request ? &part_request->part_names : nullptr;
-  SelectorChecker checker(init);
   SelectorChecker::SelectorCheckingContext context(&context_.GetElement());
   context.scope = match_request.scope;
   context.pseudo_id = pseudo_style_request_.pseudo_id;
@@ -206,7 +211,8 @@ void ElementRuleCollector::CollectMatchingRulesForList(
     if (auto* container_query = rule_data->GetContainerQuery()) {
       result_.SetDependsOnContainerQueries();
 
-      auto* evaluator = style_recalc_context_.cq_evaluator;
+      auto* evaluator = FindContainerQueryEvaluator(container_query->Name(),
+                                                    style_recalc_context_);
 
       if (!evaluator || !evaluator->EvalAndAdd(*container_query)) {
         rejected++;
@@ -235,18 +241,21 @@ void ElementRuleCollector::CollectMatchingRules(
     bool matching_tree_boundary_rules) {
   DCHECK(match_request.rule_set);
 
+  SelectorChecker checker(style_.get(), nullptr, pseudo_style_request_, mode_,
+                          matching_ua_rules_);
+
   Element& element = context_.GetElement();
   const AtomicString& pseudo_id = element.ShadowPseudoId();
   if (!pseudo_id.IsEmpty()) {
     DCHECK(element.IsStyledElement());
     CollectMatchingRulesForList(
         match_request.rule_set->UAShadowPseudoElementRules(pseudo_id),
-        match_request);
+        match_request, checker);
   }
 
   if (element.IsVTTElement()) {
     CollectMatchingRulesForList(match_request.rule_set->CuePseudoRules(),
-                                match_request);
+                                match_request, checker);
   }
   // Check whether other types of rules are applicable in the current tree
   // scope. Criteria for this:
@@ -264,19 +273,19 @@ void ElementRuleCollector::CollectMatchingRules(
   if (element.HasID()) {
     CollectMatchingRulesForList(
         match_request.rule_set->IdRules(element.IdForStyleResolution()),
-        match_request);
+        match_request, checker);
   }
   if (element.IsStyledElement() && element.HasClass()) {
     for (wtf_size_t i = 0; i < element.ClassNames().size(); ++i) {
       CollectMatchingRulesForList(
           match_request.rule_set->ClassRules(element.ClassNames()[i]),
-          match_request);
+          match_request, checker);
     }
   }
 
   if (element.IsLink()) {
     CollectMatchingRulesForList(match_request.rule_set->LinkPseudoClassRules(),
-                                match_request);
+                                match_request, checker);
   }
   if (inside_link_ != EInsideLink::kNotInsideLink) {
     // Collect rules for visited links regardless of whether they affect
@@ -284,34 +293,38 @@ void ElementRuleCollector::CollectMatchingRules(
     // If the visited or unvisited style changes and an affected property has a
     // transition rule, we create a transition even if it has no visible effect.
     CollectMatchingRulesForList(match_request.rule_set->VisitedDependentRules(),
-                                match_request);
+                                match_request, checker);
   }
   if (SelectorChecker::MatchesFocusPseudoClass(element)) {
     CollectMatchingRulesForList(match_request.rule_set->FocusPseudoClassRules(),
-                                match_request);
+                                match_request, checker);
   }
   if (SelectorChecker::MatchesFocusVisiblePseudoClass(element)) {
     CollectMatchingRulesForList(
-        match_request.rule_set->FocusVisiblePseudoClassRules(), match_request);
+        match_request.rule_set->FocusVisiblePseudoClassRules(), match_request,
+        checker);
   }
   if (SelectorChecker::MatchesSpatialNavigationInterestPseudoClass(element)) {
     CollectMatchingRulesForList(
         match_request.rule_set->SpatialNavigationInterestPseudoClassRules(),
-        match_request);
+        match_request, checker);
   }
   AtomicString element_name = matching_ua_rules_
                                   ? element.localName()
                                   : element.LocalNameForSelectorMatching();
   CollectMatchingRulesForList(match_request.rule_set->TagRules(element_name),
-                              match_request);
+                              match_request, checker);
   CollectMatchingRulesForList(match_request.rule_set->UniversalRules(),
-                              match_request);
+                              match_request, checker);
 }
 
 void ElementRuleCollector::CollectMatchingShadowHostRules(
     const MatchRequest& match_request) {
+  SelectorChecker checker(style_.get(), nullptr, pseudo_style_request_, mode_,
+                          matching_ua_rules_);
+
   CollectMatchingRulesForList(match_request.rule_set->ShadowHostRules(),
-                              match_request);
+                              match_request, checker);
 }
 
 void ElementRuleCollector::CollectMatchingPartPseudoRules(
@@ -319,8 +332,11 @@ void ElementRuleCollector::CollectMatchingPartPseudoRules(
     PartNames& part_names,
     bool for_shadow_pseudo) {
   PartRequest request{part_names, for_shadow_pseudo};
+  SelectorChecker checker(style_.get(), &part_names, pseudo_style_request_,
+                          mode_, matching_ua_rules_);
+
   CollectMatchingRulesForList(match_request.rule_set->PartPseudoRules(),
-                              match_request, &request);
+                              match_request, checker, &request);
 }
 
 template <class CSSRuleCollection>
@@ -414,9 +430,8 @@ void ElementRuleCollector::DidMatchRule(
     if (!rule_data->Rule()->Properties().IsEmpty())
       style_->SetHasPseudoElementStyle(dynamic_pseudo);
   } else {
-    matched_rules_.push_back(MatchedRule(rule_data, result.specificity,
-                                         match_request.style_sheet_index,
-                                         match_request.style_sheet));
+    matched_rules_.push_back(MatchedRule(
+        rule_data, match_request.style_sheet_index, match_request.style_sheet));
   }
 }
 

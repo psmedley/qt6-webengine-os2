@@ -6,10 +6,10 @@
 #define CHROME_RENDERER_SUBRESOURCE_REDIRECT_LOGIN_ROBOTS_COMPRESSION_METRICS_H_
 
 #include <cstdint>
-#include "base/optional.h"
 #include "base/time/time.h"
-#include "chrome/renderer/subresource_redirect/redirect_result.h"
+#include "components/subresource_redirect/common/subresource_redirect_result.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace subresource_redirect {
 
@@ -31,9 +31,9 @@ class LoginRobotsCompressionMetrics {
   // network response bytes, and |ofcl| is populated for compressed response as
   // the original full content length of the response sent by compression
   // server.
-  void RecordMetricsOnLoadFinished(RedirectResult redirect_result,
+  void RecordMetricsOnLoadFinished(SubresourceRedirectResult redirect_result,
                                    size_t content_length,
-                                   base::Optional<size_t> ofcl);
+                                   absl::optional<size_t> ofcl);
 
  private:
   ukm::SourceId ukm_source_id_;

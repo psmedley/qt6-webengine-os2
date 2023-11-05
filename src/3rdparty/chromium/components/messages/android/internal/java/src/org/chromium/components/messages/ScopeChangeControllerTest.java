@@ -49,8 +49,83 @@ public class ScopeChangeControllerTest {
         when(navigationController.getEntryAtIndex(anyInt())).thenReturn(entry);
         when(entry.getTransition()).thenReturn(PageTransition.HOME_PAGE);
 
-        ScopeKey key = new ScopeKey(
-                org.chromium.components.messages.MessageScopeType.NAVIGATION, webContents);
+        int expectedOnScopeChangeCalls = 0;
+        ScopeKey key = new ScopeKey(MessageScopeType.NAVIGATION, webContents);
+        controller.firstMessageEnqueued(key);
+
+        final ArgumentCaptor<WebContentsObserver> runnableCaptor =
+                ArgumentCaptor.forClass(WebContentsObserver.class);
+        verify(webContents).addObserver(runnableCaptor.capture());
+
+        WebContentsObserver observer = runnableCaptor.getValue();
+
+        // Default visibility of web contents is invisible.
+        expectedOnScopeChangeCalls++;
+        ArgumentCaptor<MessageScopeChange> captor =
+                ArgumentCaptor.forClass(MessageScopeChange.class);
+        verify(delegate,
+                times(expectedOnScopeChangeCalls)
+                        .description("Delegate should be called when page is hidden"))
+                .onScopeChange(captor.capture());
+        Assert.assertEquals("Scope type should be inactive when page is hidden",
+                ChangeType.INACTIVE, captor.getValue().changeType);
+
+        observer.wasShown();
+        expectedOnScopeChangeCalls++;
+        verify(delegate,
+                times(expectedOnScopeChangeCalls)
+                        .description("Delegate should be called when page is shown"))
+                .onScopeChange(captor.capture());
+        Assert.assertEquals("Scope type should be active when page is shown", ChangeType.ACTIVE,
+                captor.getValue().changeType);
+
+        observer.wasHidden();
+        expectedOnScopeChangeCalls++;
+        verify(delegate,
+                times(expectedOnScopeChangeCalls)
+                        .description("Delegate should be called when page is hidden"))
+                .onScopeChange(captor.capture());
+        Assert.assertEquals("Scope type should be inactive when page is hidden",
+                ChangeType.INACTIVE, captor.getValue().changeType);
+
+        observer.navigationEntryCommitted(createLoadCommittedDetails(true));
+        verify(delegate,
+                times(expectedOnScopeChangeCalls)
+                        .description("Delegate should not be called when entry is replaced"))
+                .onScopeChange(any());
+
+        observer.navigationEntryCommitted(createLoadCommittedDetails(false));
+
+        expectedOnScopeChangeCalls++;
+        verify(delegate,
+                times(expectedOnScopeChangeCalls)
+                        .description(
+                                "Delegate should be called when page is navigated to another page"))
+                .onScopeChange(captor.capture());
+        Assert.assertEquals("Scope type should be destroy when navigated to another page",
+                ChangeType.DESTROY, captor.getValue().changeType);
+
+        observer.onTopLevelNativeWindowChanged(null);
+
+        expectedOnScopeChangeCalls++;
+        verify(delegate,
+                times(expectedOnScopeChangeCalls)
+                        .description(
+                                "Delegate should be called when top level native window changes"))
+                .onScopeChange(captor.capture());
+        Assert.assertEquals("Scope type should be destroy when top level native window changes",
+                ChangeType.DESTROY, captor.getValue().changeType);
+    }
+
+    @Test
+    @SmallTest
+    public void testIgnoreNavigation() {
+        ScopeChangeController.Delegate delegate =
+                Mockito.mock(ScopeChangeController.Delegate.class);
+        ScopeChangeController controller = new ScopeChangeController(delegate);
+
+        MockWebContents webContents = mock(MockWebContents.class);
+        ScopeKey key = new ScopeKey(MessageScopeType.WEB_CONTENTS, webContents);
         controller.firstMessageEnqueued(key);
 
         final ArgumentCaptor<WebContentsObserver> runnableCaptor =
@@ -67,32 +142,13 @@ public class ScopeChangeControllerTest {
         Assert.assertEquals("Scope type should be inactive when page is hidden",
                 ChangeType.INACTIVE, captor.getValue().changeType);
 
-        observer.wasShown();
-        verify(delegate, times(2).description("Delegate should be called when page is shown"))
-                .onScopeChange(captor.capture());
-        Assert.assertEquals("Scope type should be active when page is shown", ChangeType.ACTIVE,
-                captor.getValue().changeType);
-
-        observer.wasHidden();
-        verify(delegate, times(3).description("Delegate should be called when page is hidden"))
-                .onScopeChange(captor.capture());
-        Assert.assertEquals("Scope type should be inactive when page is hidden",
-                ChangeType.INACTIVE, captor.getValue().changeType);
-
-        observer.navigationEntryCommitted(
-                new LoadCommittedDetails(-1, null, true, false, true, -1));
+        observer.navigationEntryCommitted(createLoadCommittedDetails(false));
         verify(delegate,
-                times(3).description("Delegate should not be called when entry is replaced"))
+                times(1).description("Delegate should not be called when navigation is ignored"))
                 .onScopeChange(any());
+    }
 
-        observer.navigationEntryCommitted(
-                new LoadCommittedDetails(-1, null, false, false, true, -1));
-
-        verify(delegate,
-                times(4).description(
-                        "Delegate should be called when page is navigated to another page"))
-                .onScopeChange(captor.capture());
-        Assert.assertEquals("Scope type should be destroy when navigated to another page",
-                ChangeType.DESTROY, captor.getValue().changeType);
+    private LoadCommittedDetails createLoadCommittedDetails(boolean didReplaceEntry) {
+        return new LoadCommittedDetails(-1, null, didReplaceEntry, false, true, -1);
     }
 }

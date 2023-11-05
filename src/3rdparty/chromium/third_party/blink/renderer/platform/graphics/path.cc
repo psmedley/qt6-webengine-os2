@@ -208,7 +208,7 @@ FloatPoint Path::PointAtLength(float length) const {
   return PointAndNormalAtLength(length).point;
 }
 
-static base::Optional<PointAndTangent> CalculatePointAndNormalOnPath(
+static absl::optional<PointAndTangent> CalculatePointAndNormalOnPath(
     SkPathMeasure& measure,
     SkScalar& contour_start,
     SkScalar length) {
@@ -229,13 +229,13 @@ static base::Optional<PointAndTangent> CalculatePointAndNormalOnPath(
     }
     contour_start = contour_end;
   } while (measure.nextContour());
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 PointAndTangent Path::PointAndNormalAtLength(float length) const {
   SkPathMeasure measure(path_, false);
   SkScalar start = 0;
-  if (base::Optional<PointAndTangent> result = CalculatePointAndNormalOnPath(
+  if (absl::optional<PointAndTangent> result = CalculatePointAndNormalOnPath(
           measure, start, WebCoreFloatToSkScalar(length)))
     return *result;
   return {FloatPoint(path_.getPoint(0)), 0};
@@ -255,7 +255,7 @@ PointAndTangent Path::PositionCalculator::PointAndNormalAtLength(float length) {
       accumulated_length_ = 0;
     }
 
-    base::Optional<PointAndTangent> result = CalculatePointAndNormalOnPath(
+    absl::optional<PointAndTangent> result = CalculatePointAndNormalOnPath(
         path_measure_, accumulated_length_, sk_length);
     if (result)
       return *result;
@@ -462,7 +462,8 @@ void Path::AddRoundedRect(const FloatRect& rect,
   if (radius.Height() > half_size.Height())
     radius.SetHeight(half_size.Height());
 
-  AddPathForRoundedRect(rect, radius, radius, radius, radius);
+  const bool clockwise = true;
+  AddPathForRoundedRect(rect, radius, radius, radius, radius, clockwise);
 }
 
 void Path::AddRoundedRect(const FloatRect& rect,
@@ -488,19 +489,21 @@ void Path::AddRoundedRect(const FloatRect& rect,
     return;
   }
 
+  const bool clockwise = true;
   AddPathForRoundedRect(rect, top_left_radius, top_right_radius,
-                        bottom_left_radius, bottom_right_radius);
+                        bottom_left_radius, bottom_right_radius, clockwise);
 }
 
 void Path::AddPathForRoundedRect(const FloatRect& rect,
                                  const FloatSize& top_left_radius,
                                  const FloatSize& top_right_radius,
                                  const FloatSize& bottom_left_radius,
-                                 const FloatSize& bottom_right_radius) {
-  // Start at upper-left (after corner radii), add clock-wise.
+                                 const FloatSize& bottom_right_radius,
+                                 bool clockwise) {
+  // Start at upper-left (after corner radius).
   path_.addRRect(FloatRoundedRect(rect, top_left_radius, top_right_radius,
                                   bottom_left_radius, bottom_right_radius),
-                 SkPathDirection::kCW, 0);
+                 clockwise ? SkPathDirection::kCW : SkPathDirection::kCCW, 0);
 }
 
 void Path::AddPath(const Path& src, const AffineTransform& transform) {
@@ -518,10 +521,6 @@ bool Path::SubtractPath(const Path& other) {
 
 bool Path::UnionPath(const Path& other) {
   return Op(path_, other.path_, kUnion_SkPathOp, &path_);
-}
-
-bool Path::IntersectPath(const Path& other) {
-  return Op(path_, other.path_, kIntersect_SkPathOp, &path_);
 }
 
 bool EllipseIsRenderable(float start_angle, float end_angle) {

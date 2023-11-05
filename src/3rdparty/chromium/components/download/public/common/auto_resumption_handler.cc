@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/files/file_path.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -128,6 +129,13 @@ void AutoResumptionHandler::SetResumableDownloads(
 bool AutoResumptionHandler::IsActiveNetworkMetered() const {
   return network::NetworkConnectionTracker::IsConnectionCellular(
       network_listener_->GetConnectionType());
+}
+
+void AutoResumptionHandler::OnNetworkStatusReady(
+    network::mojom::ConnectionType type) {
+  // TODO(xingliu): The API to check network type on all platforms is async now,
+  // that early call to IsActiveNetworkMetered() which queries network type
+  // might just return a unknown network type.
 }
 
 void AutoResumptionHandler::OnNetworkChanged(

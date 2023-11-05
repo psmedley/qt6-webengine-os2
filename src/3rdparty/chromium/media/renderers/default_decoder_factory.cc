@@ -23,9 +23,6 @@
 #endif
 
 #if defined(OS_FUCHSIA)
-// TODO(crbug.com/1117629): Remove this dependency and update include_rules
-// that allow it.
-#include "fuchsia/engine/switches.h"
 #include "media/filters/fuchsia/fuchsia_video_decoder.h"
 #endif
 
@@ -100,28 +97,12 @@ DefaultDecoderFactory::GetSupportedVideoDecoderConfigsForWebRTC() {
     }
   }
 
-#if defined(OS_FUCHSIA)
-  // TODO(crbug.com/1173503): Implement capabilities for fuchsia.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSoftwareVideoDecoders)) {
-    // Bypass software codec registration.
-    return supported_configs;
-  }
-#endif
-
   if (!base::FeatureList::IsEnabled(media::kExposeSwDecodersToWebRTC))
     return supported_configs;
 
 #if BUILDFLAG(ENABLE_LIBVPX)
-  SupportedVideoDecoderConfigs vpx_configs =
-      VpxVideoDecoder::SupportedConfigs();
-
-  for (auto& config : vpx_configs) {
-    if (config.profile_min >= VP9PROFILE_MIN &&
-        config.profile_max <= VP9PROFILE_MAX) {
-      supported_configs.emplace_back(config);
-    }
-  }
+  // When the VpxVideoDecoder has been updated for RTC add
+  // `VpxVideoDecoder::SupportedConfigs()` to `supported_configs`.
 #endif
 
 #if BUILDFLAG(ENABLE_LIBGAV1_DECODER)
@@ -142,10 +123,8 @@ DefaultDecoderFactory::GetSupportedVideoDecoderConfigsForWebRTC() {
   }
 
 #if BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
-  SupportedVideoDecoderConfigs ffmpeg_configs =
-      FFmpegVideoDecoder::SupportedConfigsForWebRTC();
-  supported_configs.insert(supported_configs.end(), ffmpeg_configs.begin(),
-                           ffmpeg_configs.end());
+  // When the FFmpegVideoDecoder has been updated for RTC add
+  // `FFmpegVideoDecoder::SupportedConfigsForWebRTC()` to `supported_configs`.
 #endif
 
   return supported_configs;
@@ -194,17 +173,11 @@ void DefaultDecoderFactory::CreateVideoDecoders(
     //
     // TODO(crbug.com/580386): Handle context loss properly.
     if (context_provider) {
-      video_decoders->push_back(CreateFuchsiaVideoDecoder(context_provider));
+      video_decoders->push_back(FuchsiaVideoDecoder::Create(context_provider));
     } else {
       DLOG(ERROR)
           << "Can't create FuchsiaVideoDecoder due to GPU context loss.";
     }
-  }
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSoftwareVideoDecoders)) {
-    // Bypass software codec registration.
-    return;
   }
 #endif
 

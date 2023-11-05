@@ -17,8 +17,13 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
 #include "components/policy/core/common/policy_service.h"
+#include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/account_info.h"
+
+#if !BUILDFLAG(ENABLE_DICE_SUPPORT)
+#error "This file should only be included if DICE support is enabled"
+#endif
 
 class Browser;
 class DiceSignedInProfileCreator;
@@ -89,7 +94,7 @@ class DiceTurnSyncOnHelper
     // sync being disabled even before fetching enterprise policies (e.g. sync
     // engine gets a 'disabled-by-enterprise' error from the server).
     virtual void ShowEnterpriseAccountConfirmation(
-        const std::string& email,
+        const AccountInfo& account_info,
         SigninChoiceCallback callback) = 0;
 
     // Shows a sync confirmation screen offering to open the Sync settings.
@@ -117,13 +122,10 @@ class DiceTurnSyncOnHelper
     // Informs the delegate that the flow is switching to a new profile.
     virtual void SwitchToProfile(Profile* new_profile) = 0;
 
-    // Shows the login error with `error_message` and `email` for `browser`.
+    // Shows the `error` for `browser`.
     // This helper is static because in some cases it needs to be called
     // after this object gets destroyed.
-    // TODO(crbug.com/1133189): Replace `email` and `error_message` with a
-    // `SigninUIError`.
-    static void ShowLoginErrorForBrowser(const base::string16& email,
-                                         const base::string16& error_message,
+    static void ShowLoginErrorForBrowser(const SigninUIError& error,
                                          Browser* browser);
 
     // Shows the enterprise account confirmation dialog with `email` for
@@ -163,6 +165,10 @@ class DiceTurnSyncOnHelper
   // SyncStartupTracker::Observer:
   void SyncStartupCompleted() override;
   void SyncStartupFailed() override;
+
+  // Fakes that sync enabled for testing, but does not create a sync service.
+  static void SetShowSyncEnabledUiForTesting(
+      bool show_sync_enabled_ui_for_testing);
 
  private:
   friend class base::DeleteHelper<DiceTurnSyncOnHelper>;
@@ -272,6 +278,7 @@ class DiceTurnSyncOnHelper
   std::unique_ptr<SyncStartupTracker> sync_startup_tracker_;
   std::unique_ptr<DiceSignedInProfileCreator> dice_signed_in_profile_creator_;
   base::CallbackListSubscription shutdown_subscription_;
+  bool enterprise_account_confirmed_ = false;
 
   base::WeakPtrFactory<DiceTurnSyncOnHelper> weak_pointer_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(DiceTurnSyncOnHelper);

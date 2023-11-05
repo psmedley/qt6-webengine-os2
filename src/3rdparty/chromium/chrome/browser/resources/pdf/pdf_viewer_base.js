@@ -11,7 +11,6 @@ import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/poly
 import {BrowserApi, ZoomBehavior} from './browser_api.js';
 import {FittingType, Point} from './constants.js';
 import {ContentController, MessageData, PluginController, PluginControllerEventType} from './controller.js';
-import {ViewerErrorScreenElement} from './elements/viewer-error-screen.js';
 import {record, recordFitTo, UserAction} from './metrics.js';
 import {OpenPdfParams, OpenPdfParamsParser} from './open_pdf_params_parser.js';
 import {LoadState} from './pdf_scripting_api.js';
@@ -45,6 +44,12 @@ export class PDFViewerBaseElement extends PolymerElement {
 
   static get properties() {
     return {
+      /** @protected */
+      showErrorDialog: {
+        type: Boolean,
+        value: false,
+      },
+
       /** @protected {Object|undefined} */
       strings: Object,
     };
@@ -124,12 +129,6 @@ export class PDFViewerBaseElement extends PolymerElement {
   getSizer() {}
 
   /**
-   * @return {!ViewerErrorScreenElement}
-   * @protected
-   */
-  getErrorScreen() {}
-
-  /**
    * @param {!FittingType} view
    * @protected
    */
@@ -161,10 +160,10 @@ export class PDFViewerBaseElement extends PolymerElement {
    * @private
    */
   createPlugin_(isPrintPreview) {
-    // Create the plugin object dynamically so we can set its src. The plugin
-    // element is sized to fill the entire window and is set to be fixed
-    // positioning, acting as a viewport. The plugin renders into this viewport
-    // according to the scroll position of the window.
+    // Create the plugin object dynamically. The plugin element is sized to
+    // fill the entire window and is set to be fixed positioning, acting as a
+    // viewport. The plugin renders into this viewport according to the scroll
+    // position of the window.
     const plugin =
         /** @type {!HTMLEmbedElement} */ (document.createElement('embed'));
 
@@ -175,15 +174,8 @@ export class PDFViewerBaseElement extends PolymerElement {
     plugin.id = 'plugin';
     plugin.type = 'application/x-google-chrome-pdf';
 
-    plugin.setAttribute('src', this.originalUrl);
-    plugin.setAttribute(
-        'stream-url', this.browserApi.getStreamInfo().streamUrl);
-    let headers = '';
-    for (const header in this.browserApi.getStreamInfo().responseHeaders) {
-      headers += header + ': ' +
-          this.browserApi.getStreamInfo().responseHeaders[header] + '\n';
-    }
-    plugin.setAttribute('headers', headers);
+    plugin.setAttribute('original-url', this.originalUrl);
+    plugin.setAttribute('src', this.browserApi.getStreamInfo().streamUrl);
 
     plugin.setAttribute('background-color', this.getBackgroundColor());
 
@@ -215,13 +207,6 @@ export class PDFViewerBaseElement extends PolymerElement {
     this.paramsParser = new OpenPdfParamsParser(destination => {
       return PluginController.getInstance().getNamedDestination(destination);
     });
-
-    // Can only reload if we are in a normal tab.
-    if (chrome.tabs && this.browserApi.getStreamInfo().tabId !== -1) {
-      this.getErrorScreen().reloadFn = () => {
-        chrome.tabs.reload(this.browserApi.getStreamInfo().tabId);
-      };
-    }
 
     // Determine the scrolling container.
     const isPrintPreview =
@@ -304,7 +289,7 @@ export class PDFViewerBaseElement extends PolymerElement {
   updateProgress(progress) {
     if (progress === -1) {
       // Document load failed.
-      this.getErrorScreen().show();
+      this.showErrorDialog = true;
       this.getSizer().style.display = 'none';
       this.setLoadState(LoadState.FAILED);
       this.sendDocumentLoadedMessage();
@@ -383,6 +368,21 @@ export class PDFViewerBaseElement extends PolymerElement {
    * @param {!MessageObject} message The message to handle.
    */
   handleScriptingMessage(message) {
+    // TODO(crbug.com/1228987): Remove this message handler when a permanent
+    // postMessage() bridge is implemented for the Unseasoned viewer.
+    if (message.data.type === 'connect') {
+      const token = /** @type {!{token: string}} */ (message.data).token;
+      if (token === this.browserApi.getStreamInfo().streamUrl) {
+        const port = message.ports[0];
+        this.plugin_.postMessage = m => port.postMessage(m);
+        port.onmessage = e =>
+            PluginController.getInstance().handleMessageForUnseasoned(e);
+      } else {
+        this.dispatchEvent(new CustomEvent('connection-denied-for-testing'));
+      }
+      return;
+    }
+
     if (this.parentWindow_ !== message.source) {
       this.parentWindow_ = message.source;
       this.parentOrigin_ = message.origin;

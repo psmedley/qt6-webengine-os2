@@ -8,6 +8,7 @@
 #include <fuchsia/logger/cpp/fidl.h>
 #include <fuchsia/web/cpp/fidl.h>
 #include <lib/fidl/cpp/binding_set.h>
+#include <lib/inspect/cpp/vmo/types.h>
 #include <lib/syslog/logger.h>
 #include <lib/ui/scenic/cpp/view_ref_pair.h>
 #include <lib/zx/channel.h>
@@ -22,7 +23,6 @@
 #include "base/fuchsia/scoped_fx_logger.h"
 #include "base/macros.h"
 #include "base/memory/read_only_shared_memory_region.h"
-#include "base/optional.h"
 #include "components/media_control/browser/media_blocker.h"
 #include "components/on_load_script_injector/browser/on_load_script_injector_host.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -33,6 +33,7 @@
 #include "fuchsia/engine/browser/navigation_controller_impl.h"
 #include "fuchsia/engine/browser/theme_manager.h"
 #include "fuchsia/engine/browser/url_request_rewrite_rules_manager.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/wm/core/focus_controller.h"
 #include "url/gurl.h"
@@ -41,7 +42,7 @@ namespace content {
 class FromRenderFrameHost;
 }  // namespace content
 
-class CastStreamingSessionClient;
+class ReceiverSessionClient;
 class ContextImpl;
 class FrameWindowTreeHost;
 class FrameLayoutManager;
@@ -64,11 +65,13 @@ class FrameImpl : public fuchsia::web::Frame,
 
   // |context| must out-live |this|.
   // |params| apply both to this Frame, and also to any popup Frames it creates.
+  // |inspect_node| will be populated with diagnostic data for this Frame.
   // DestroyFrame() is automatically called on |context| if the |frame_request|
   // channel disconnects.
   FrameImpl(std::unique_ptr<content::WebContents> web_contents,
             ContextImpl* context,
             fuchsia::web::CreateFrameParams params,
+            inspect::Node inspect_node,
             fidl::InterfaceRequest<fuchsia::web::Frame> frame_request);
   ~FrameImpl() override;
 
@@ -89,6 +92,15 @@ class FrameImpl : public fuchsia::web::Frame,
     return navigation_policy_handler_.get();
   }
 
+  // Enables explicit sites filtering and set the error page. If |error_page| is
+  // empty, the default error page will be used.
+  void EnableExplicitSitesFilter(std::string error_page);
+
+  const absl::optional<std::string>& explicit_sites_filter_error_page() const {
+    return explicit_sites_filter_error_page_;
+  }
+
+  // Accessors required by tests.
   zx::unowned_channel GetBindingChannelForTest() const;
   content::WebContents* web_contents_for_test() const {
     return web_contents_.get();
@@ -101,16 +113,8 @@ class FrameImpl : public fuchsia::web::Frame,
       fuchsia::accessibility::semantics::SemanticsManager* semantics_manager) {
     semantics_manager_for_test_ = semantics_manager;
   }
-  CastStreamingSessionClient* cast_streaming_session_client_for_test() {
-    return cast_streaming_session_client_.get();
-  }
-
-  // Enables explicit sites filtering and set the error page. If |error_page| is
-  // empty, the default error page will be used.
-  void EnableExplicitSitesFilter(std::string error_page);
-
-  const base::Optional<std::string>& explicit_sites_filter_error_page() const {
-    return explicit_sites_filter_error_page_;
+  FrameWindowTreeHost* window_tree_host_for_test() {
+    return window_tree_host_.get();
   }
 
  private:
@@ -162,6 +166,9 @@ class FrameImpl : public fuchsia::web::Frame,
 
   void MaybeStartCastStreaming(content::NavigationHandle* navigation_handle);
 
+  // Updates zoom level for the specified |render_view_host|.
+  void UpdateRenderViewZoomLevel(content::RenderViewHost* render_view_host);
+
   // fuchsia::web::Frame implementation.
   void CreateView(fuchsia::ui::views::ViewToken view_token) override;
   void CreateViewWithViewRef(fuchsia::ui::views::ViewToken view_token,
@@ -191,6 +198,9 @@ class FrameImpl : public fuchsia::web::Frame,
   void SetNavigationEventListener(
       fidl::InterfaceHandle<fuchsia::web::NavigationEventListener> listener)
       override;
+  void SetNavigationEventListener2(
+      fidl::InterfaceHandle<fuchsia::web::NavigationEventListener> listener,
+      fuchsia::web::NavigationEventListenerFlags flags) override;
   void SetJavaScriptLogLevel(fuchsia::web::ConsoleLogLevel level) override;
   void SetConsoleLogSink(fuchsia::logger::LogSinkHandle sink) override;
   void ConfigureInputTypes(fuchsia::web::InputTypes types,
@@ -222,14 +232,15 @@ class FrameImpl : public fuchsia::web::Frame,
       fidl::InterfaceHandle<fuchsia::web::NavigationPolicyProvider> provider)
       override;
   void SetPreferredTheme(fuchsia::settings::ThemeType theme) override;
+  void SetPageScale(float scale) override;
 
   // content::WebContentsDelegate implementation.
   void CloseContents(content::WebContents* source) override;
   bool DidAddMessageToConsole(content::WebContents* source,
                               blink::mojom::ConsoleMessageLevel log_level,
-                              const base::string16& message,
+                              const std::u16string& message,
                               int32_t line_no,
-                              const base::string16& source_id) override;
+                              const std::u16string& source_id) override;
   bool IsWebContentsCreationOverridden(
       content::SiteInstance* source_site_instance,
       content::mojom::WindowContainerType window_container_type,
@@ -264,6 +275,8 @@ class FrameImpl : public fuchsia::web::Frame,
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
   void RenderFrameCreated(content::RenderFrameHost* frame_host) override;
+  void RenderViewHostChanged(content::RenderViewHost* old_host,
+                             content::RenderViewHost* new_host) override;
   void DidFirstVisuallyNonEmptyPaint() override;
   void ResourceLoadComplete(
       content::RenderFrameHost* render_frame_host,
@@ -300,6 +313,9 @@ class FrameImpl : public fuchsia::web::Frame,
   FramePermissionController permission_controller_;
   std::unique_ptr<NavigationPolicyHandler> navigation_policy_handler_;
 
+  // Current page scale. Updated by calling SetPageScale().
+  float page_scale_ = 1.0;
+
   // Session ID to use for fuchsia.media.AudioConsumer. Set with
   // SetMediaSessionId().
   uint64_t media_session_id_ = 0;
@@ -311,7 +327,7 @@ class FrameImpl : public fuchsia::web::Frame,
   gfx::Size render_size_override_;
 
   std::unique_ptr<MediaPlayerImpl> media_player_;
-  std::unique_ptr<CastStreamingSessionClient> cast_streaming_session_client_;
+  std::unique_ptr<ReceiverSessionClient> receiver_session_client_;
   on_load_script_injector::OnLoadScriptInjectorHost<uint64_t> script_injector_;
 
   fidl::Binding<fuchsia::web::Frame> binding_;
@@ -322,7 +338,11 @@ class FrameImpl : public fuchsia::web::Frame,
   // The error page to be displayed when a navigation to an explicit site is
   // filtered. Explicit sites are filtered if it has a value. If set to the
   // empty string, the default error page will be displayed.
-  base::Optional<std::string> explicit_sites_filter_error_page_;
+  absl::optional<std::string> explicit_sites_filter_error_page_;
+
+  // Used to publish Frame details to Inspect.
+  inspect::Node inspect_node_;
+  const inspect::StringProperty inspect_name_property_;
 
   base::WeakPtrFactory<FrameImpl> weak_factory_{this};
 };

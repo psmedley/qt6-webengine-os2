@@ -64,7 +64,7 @@ FakeGpuMemoryBuffer::FakeGpuMemoryBuffer(const gfx::Size& size,
                                          gfx::BufferFormat format,
                                          uint64_t modifier)
     : size_(size), format_(format) {
-  base::Optional<VideoPixelFormat> video_pixel_format =
+  absl::optional<VideoPixelFormat> video_pixel_format =
       GfxBufferFormatToVideoPixelFormat(format);
   CHECK(video_pixel_format);
   video_pixel_format_ = *video_pixel_format;
@@ -75,8 +75,8 @@ FakeGpuMemoryBuffer::FakeGpuMemoryBuffer(const gfx::Size& size,
 
   handle_.type = gfx::NATIVE_PIXMAP;
 
-  static base::NoDestructor<base::AtomicSequenceNumber> buffer_id_generator;
-  handle_.id = gfx::GpuMemoryBufferId(buffer_id_generator->GetNext());
+  static base::AtomicSequenceNumber buffer_id_generator;
+  handle_.id = gfx::GpuMemoryBufferId(buffer_id_generator.GetNext());
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
   for (size_t i = 0; i < VideoFrame::NumPlanes(video_pixel_format_); i++) {
@@ -159,7 +159,9 @@ FakeGpuMemoryBufferSupport::CreateGpuMemoryBufferImplFromHandle(
     const gfx::Size& size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
-    gpu::GpuMemoryBufferImpl::DestructionCallback callback) {
+    gpu::GpuMemoryBufferImpl::DestructionCallback callback,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    scoped_refptr<base::UnsafeSharedMemoryPool> pool) {
   return std::make_unique<FakeGpuMemoryBufferImpl>(size, format);
 }
 

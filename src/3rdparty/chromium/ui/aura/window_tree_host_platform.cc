@@ -4,6 +4,7 @@
 
 #include "ui/aura/window_tree_host_platform.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -56,7 +57,7 @@ WindowTreeHostPlatform::WindowTreeHostPlatform(
     std::unique_ptr<Window> window)
     : WindowTreeHost(std::move(window)) {
   bounds_in_pixels_ = properties.bounds;
-  CreateCompositor(viz::FrameSinkId(), false, false,
+  CreateCompositor(false, false,
                    properties.enable_compositing_based_throttling);
   CreateAndSetPlatformWindow(std::move(properties));
 }
@@ -91,8 +92,8 @@ void WindowTreeHostPlatform::CreateAndSetPlatformWindow(
   return;
 #endif
   NOTREACHED();
-#elif defined(OS_WIN)
-  platform_window_.reset(new ui::WinWindow(this, properties.bounds));
+#elif defined(OS_WIN) && !defined(TOOLKIT_QT)
+  platform_window_ = std::make_unique<ui::WinWindow>(this, properties.bounds);
 #else
   NOTIMPLEMENTED();
 #endif
@@ -150,7 +151,7 @@ void WindowTreeHostPlatform::ReleaseCapture() {
 }
 
 bool WindowTreeHostPlatform::CaptureSystemKeyEventsImpl(
-    base::Optional<base::flat_set<ui::DomCode>> dom_codes) {
+    absl::optional<base::flat_set<ui::DomCode>> dom_codes) {
   // Only one KeyboardHook should be active at a time, otherwise there will be
   // problems with event routing (i.e. which Hook takes precedence) and
   // destruction ordering.
@@ -202,7 +203,12 @@ void WindowTreeHostPlatform::OnCursorVisibilityChangedNative(bool show) {
   NOTIMPLEMENTED();
 }
 
-void WindowTreeHostPlatform::OnBoundsChanged(const gfx::Rect& new_bounds) {
+void WindowTreeHostPlatform::LockMouse(Window* window) {
+  window->SetCapture();
+  WindowTreeHost::LockMouse(window);
+}
+
+void WindowTreeHostPlatform::OnBoundsChanged(const BoundsChange& change) {
   // It's possible this function may be called recursively. Only notify
   // observers on initial entry. This way observers can safely assume that
   // OnHostDidProcessBoundsChange() is called when all bounds changes have
@@ -215,7 +221,7 @@ void WindowTreeHostPlatform::OnBoundsChanged(const gfx::Rect& new_bounds) {
   float new_scale = ui::GetScaleFactorForNativeView(window());
   gfx::Rect old_bounds = bounds_in_pixels_;
   auto weak_ref = GetWeakPtr();
-  bounds_in_pixels_ = new_bounds;
+  bounds_in_pixels_ = change.bounds;
   if (bounds_in_pixels_.origin() != old_bounds.origin()) {
     OnHostMovedInPixels(bounds_in_pixels_.origin());
     // Changing the bounds may destroy this.
@@ -255,6 +261,7 @@ void WindowTreeHostPlatform::OnCloseRequest() {
 void WindowTreeHostPlatform::OnClosed() {}
 
 void WindowTreeHostPlatform::OnWindowStateChanged(
+    ui::PlatformWindowState old_state,
     ui::PlatformWindowState new_state) {}
 
 void WindowTreeHostPlatform::OnLostCapture() {
@@ -287,6 +294,26 @@ void WindowTreeHostPlatform::OnMouseEnter() {
     DCHECK(display.is_valid());
     cursor_client->SetDisplay(display);
   }
+}
+
+void WindowTreeHostPlatform::OnOcclusionStateChanged(
+    ui::PlatformWindowOcclusionState occlusion_state) {
+  auto aura_occlusion_state = Window::OcclusionState::UNKNOWN;
+  switch (occlusion_state) {
+    case ui::PlatformWindowOcclusionState::kUnknown:
+      aura_occlusion_state = Window::OcclusionState::UNKNOWN;
+      break;
+    case ui::PlatformWindowOcclusionState::kVisible:
+      aura_occlusion_state = Window::OcclusionState::VISIBLE;
+      break;
+    case ui::PlatformWindowOcclusionState::kOccluded:
+      aura_occlusion_state = Window::OcclusionState::OCCLUDED;
+      break;
+    case ui::PlatformWindowOcclusionState::kHidden:
+      aura_occlusion_state = Window::OcclusionState::HIDDEN;
+      break;
+  }
+  SetNativeWindowOcclusionState(aura_occlusion_state);
 }
 
 }  // namespace aura

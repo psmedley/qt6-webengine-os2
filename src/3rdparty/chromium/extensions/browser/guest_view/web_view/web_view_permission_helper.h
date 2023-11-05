@@ -18,6 +18,10 @@
 #include "ppapi/buildflags/buildflags.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 
+namespace base {
+class DictionaryValue;
+}
+
 namespace extensions {
 
 class WebViewGuest;
@@ -74,11 +78,9 @@ class WebViewPermissionHelper
                                     base::OnceCallback<void(bool)> callback);
 
   // Requests Geolocation Permission from the embedder.
-  void RequestGeolocationPermission(int bridge_id,
-                                    const GURL& requesting_frame,
+  void RequestGeolocationPermission(const GURL& requesting_frame,
                                     bool user_gesture,
                                     base::OnceCallback<void(bool)> callback);
-  void CancelGeolocationPermissionRequest(int bridge_id);
 
   void RequestFileSystemPermission(const GURL& url,
                                    bool allowed_by_default,
@@ -102,6 +104,10 @@ class WebViewPermissionHelper
   void CancelPendingPermissionRequest(int request_id);
 
   WebViewGuest* web_view_guest() { return web_view_guest_; }
+
+  WebViewPermissionHelperDelegate* delegate() {
+    return web_view_permission_helper_delegate_.get();
+  }
 
   void set_default_media_access_permission(bool allow_media_access) {
     default_media_access_permission_ = allow_media_access;

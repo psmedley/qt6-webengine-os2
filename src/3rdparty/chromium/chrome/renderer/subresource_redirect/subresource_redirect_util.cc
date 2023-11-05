@@ -8,6 +8,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "chrome/renderer/subresource_redirect/subresource_redirect_params.h"
 #include "components/base32/base32.h"
+#include "components/subresource_redirect/common/subresource_redirect_features.h"
 #include "crypto/sha2.h"
 #include "net/base/escape.h"
 #include "url/gurl.h"
@@ -32,6 +33,13 @@ GURL GetSubresourceURLForURL(const GURL& original_url) {
   compressed_url = compressed_url.ReplaceComponents(replacements);
   DCHECK(compressed_url.is_valid());
   return compressed_url;
+}
+
+bool IsCompressionServerOrigin(const GURL& url) {
+  auto compression_server = GetSubresourceRedirectOrigin();
+  return url.DomainIs(compression_server.host()) &&
+         (url.EffectiveIntPort() == compression_server.port()) &&
+         (url.scheme() == compression_server.scheme());
 }
 
 }  // namespace subresource_redirect

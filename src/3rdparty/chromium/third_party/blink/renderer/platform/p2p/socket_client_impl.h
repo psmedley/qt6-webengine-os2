@@ -7,7 +7,6 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -18,6 +17,7 @@
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/p2p_socket_type.h"
 #include "services/network/public/mojom/p2p.mojom-blink.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/p2p/socket_client.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -31,13 +31,15 @@ class P2PSocketDispatcher;
 
 // P2P socket that routes all calls over Mojo.
 //
-// The object runs on the WebRTC worker thread.
+// The object is created and runs on the WebRTC worker thread.
 class P2PSocketClientImpl : public blink::P2PSocketClient,
                             public network::mojom::blink::P2PSocketClient {
  public:
   P2PSocketClientImpl(
       P2PSocketDispatcher* dispatcher,
       const net::NetworkTrafficAnnotationTag& traffic_annotation);
+  P2PSocketClientImpl(const P2PSocketClientImpl&) = delete;
+  P2PSocketClientImpl& operator=(const P2PSocketClientImpl&) = delete;
   ~P2PSocketClientImpl() override;
 
   // Initialize socket of the specified |type| and connected to the
@@ -100,7 +102,9 @@ class P2PSocketClientImpl : public blink::P2PSocketClient,
 
   void OnConnectionError();
 
-  P2PSocketDispatcher* dispatcher_;
+  // `P2PSocketDispatcher` is owned by the main thread, and must be accessed in
+  // a thread-safe way.
+  CrossThreadWeakPersistent<P2PSocketDispatcher> dispatcher_;
   THREAD_CHECKER(thread_checker_);
   int socket_id_;
   blink::P2PSocketClientDelegate* delegate_;
@@ -113,8 +117,6 @@ class P2PSocketClientImpl : public blink::P2PSocketClient,
 
   mojo::Remote<network::mojom::blink::P2PSocket> socket_;
   mojo::Receiver<network::mojom::blink::P2PSocketClient> receiver_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(P2PSocketClientImpl);
 };
 
 }  // namespace blink

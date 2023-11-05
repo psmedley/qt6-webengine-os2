@@ -18,11 +18,6 @@
 - (BOOL)hasKeyAppearance;
 @end
 
-@interface CommandDispatcher ()
-// The parent to bubble events to, or nil.
-- (NSWindow<CommandDispatchingWindow>*)bubbleParent;
-@end
-
 namespace {
 
 // Duplicate the given key event, but changing the associated window.
@@ -175,7 +170,7 @@ NSEvent* KeyEventForWindow(NSWindow* window, NSEvent* event) {
 
     id appController = [NSApp delegate];
     DCHECK([appController
-        conformsToProtocol:@protocol(NSUserInterfaceValidations)]);
+        respondsToSelector:@selector(validateUserInterfaceItem:)]);
     if ([appController validateUserInterfaceItem:item])
       return YES;
   }

@@ -8,16 +8,17 @@
 
 namespace federated_learning {
 
+// If enabled, the check for whether the IP address is publicly routable will be
+// bypassed when determining the eligibility for a page to be included in floc
+// computation. This is useful for developers to test FLoC in local environment.
+const base::Feature kFlocBypassIPIsPubliclyRoutableCheck{
+    "FlocBypassIPIsPubliclyRoutableCheck", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables or disables the FlocIdComputed event logging, which happens when a
 // floc id is first computed for a browsing session or is refreshed due to a
 // long period of time has passed since the last computation.
 const base::Feature kFlocIdComputedEventLogging{
     "FlocIdComputedEventLogging", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// If enabled, the sim-hash floc computed from history will be further encoded
-// based on the sorting-lsh.
-const base::Feature kFlocIdSortingLshBasedComputation{
-    "FlocIdSortingLshBasedComputation", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // If enabled, pages that had ad resources will be included in floc computation;
 // otherwise, only pages that used the document.interestCohort API will be
@@ -33,7 +34,7 @@ const base::Feature kFlocPagesWithAdResourcesDefaultIncludedInFlocComputation{
 // required.
 // TODO(yaoxia): merge other floc features into this one.
 const base::Feature kFederatedLearningOfCohorts{
-    "FederatedLearningOfCohorts", base::FEATURE_ENABLED_BY_DEFAULT};
+    "FederatedLearningOfCohorts", base::FEATURE_DISABLED_BY_DEFAULT};
 constexpr base::FeatureParam<base::TimeDelta> kFlocIdScheduledUpdateInterval{
     &kFederatedLearningOfCohorts, "update_interval",
     base::TimeDelta::FromDays(7)};

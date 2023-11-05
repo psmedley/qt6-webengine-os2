@@ -147,8 +147,6 @@ GpuPreferences ParseGpuPreferences(const base::CommandLine* command_line) {
       command_line->HasSwitch(switches::kEnableThreadedTextureMailboxes);
   gpu_preferences.gl_shader_interm_output =
       command_line->HasSwitch(switches::kGLShaderIntermOutput);
-  gpu_preferences.emulate_shader_precision =
-      command_line->HasSwitch(switches::kEmulateShaderPrecision);
   gpu_preferences.enable_gpu_service_logging =
       command_line->HasSwitch(switches::kEnableGPUServiceLogging);
   gpu_preferences.enable_gpu_service_tracing =
@@ -158,9 +156,23 @@ GpuPreferences ParseGpuPreferences(const base::CommandLine* command_line) {
   gpu_preferences.ignore_gpu_blocklist =
       command_line->HasSwitch(switches::kIgnoreGpuBlocklist);
   gpu_preferences.enable_webgpu =
+      command_line->HasSwitch(switches::kEnableUnsafeWebGPU) ||
+      base::FeatureList::IsEnabled(features::kWebGPUService);
+  gpu_preferences.enable_webgpu_spirv =
       command_line->HasSwitch(switches::kEnableUnsafeWebGPU);
-  gpu_preferences.enable_dawn_backend_validation =
-      command_line->HasSwitch(switches::kEnableDawnBackendValidation);
+  gpu_preferences.force_webgpu_compat =
+      command_line->HasSwitch(switches::kForceWebGPUCompat);
+  if (command_line->HasSwitch(switches::kEnableDawnBackendValidation)) {
+    auto value = command_line->GetSwitchValueASCII(
+        switches::kEnableDawnBackendValidation);
+    if (value.empty() || value == "full") {
+      gpu_preferences.enable_dawn_backend_validation =
+          DawnBackendValidationLevel::kFull;
+    } else if (value == "partial") {
+      gpu_preferences.enable_dawn_backend_validation =
+          DawnBackendValidationLevel::kPartial;
+    }
+  }
   if (command_line->HasSwitch(switches::kEnableDawnFeatures)) {
     gpu_preferences.enabled_dawn_features_list = base::SplitString(
         command_line->GetSwitchValueASCII(switches::kEnableDawnFeatures), ",",

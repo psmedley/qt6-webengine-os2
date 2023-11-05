@@ -48,13 +48,6 @@ class CPDF_DIB final : public CFX_DIBBase {
   bool SkipToScanline(int line, PauseIndicatorIface* pPause) const override;
   uint8_t* GetBuffer() const override;
   const uint8_t* GetScanline(int line) const override;
-  void DownSampleScanline(int line,
-                          uint8_t* dest_scan,
-                          int dest_bpp,
-                          int dest_width,
-                          bool bFlipX,
-                          int clip_left,
-                          int clip_width) const override;
 
   RetainPtr<CPDF_ColorSpace> GetColorSpace() const { return m_pColorSpace; }
   uint32_t GetMatteColor() const { return m_MatteColor; }
@@ -65,7 +58,7 @@ class CPDF_DIB final : public CFX_DIBBase {
                              const CPDF_Dictionary* pFormResources,
                              const CPDF_Dictionary* pPageResources,
                              bool bStdCS,
-                             uint32_t GroupFamily,
+                             CPDF_ColorSpace::Family GroupFamily,
                              bool bLoadMask);
   LoadState ContinueLoadDIBBase(PauseIndicatorIface* pPause);
   RetainPtr<CPDF_DIB> DetachMask();
@@ -102,33 +95,6 @@ class CPDF_DIB final : public CFX_DIBBase {
   bool TranslateScanline24bppDefaultDecode(uint8_t* dest_scan,
                                            const uint8_t* src_scan) const;
   void ValidateDictParam(const ByteString& filter);
-  void DownSampleScanline1Bit(int orig_Bpp,
-                              int dest_Bpp,
-                              uint32_t src_width,
-                              const uint8_t* pSrcLine,
-                              uint8_t* dest_scan,
-                              int dest_width,
-                              bool bFlipX,
-                              int clip_left,
-                              int clip_width) const;
-  void DownSampleScanline8Bit(int orig_Bpp,
-                              int dest_Bpp,
-                              uint32_t src_width,
-                              const uint8_t* pSrcLine,
-                              uint8_t* dest_scan,
-                              int dest_width,
-                              bool bFlipX,
-                              int clip_left,
-                              int clip_width) const;
-  void DownSampleScanline32Bit(int orig_Bpp,
-                               int dest_Bpp,
-                               uint32_t src_width,
-                               const uint8_t* pSrcLine,
-                               uint8_t* dest_scan,
-                               int dest_width,
-                               bool bFlipX,
-                               int clip_left,
-                               int clip_width) const;
   bool TransMask() const;
   void SetMaskProperties();
 
@@ -140,11 +106,11 @@ class CPDF_DIB final : public CFX_DIBBase {
   RetainPtr<const CPDF_Dictionary> m_pDict;
   RetainPtr<CPDF_StreamAcc> m_pStreamAcc;
   RetainPtr<CPDF_ColorSpace> m_pColorSpace;
-  uint32_t m_Family = 0;
   uint32_t m_bpc = 0;
   uint32_t m_bpc_orig = 0;
   uint32_t m_nComponents = 0;
-  uint32_t m_GroupFamily = 0;
+  CPDF_ColorSpace::Family m_Family = CPDF_ColorSpace::Family::kUnknown;
+  CPDF_ColorSpace::Family m_GroupFamily = CPDF_ColorSpace::Family::kUnknown;
   uint32_t m_MatteColor = 0;
   LoadState m_Status = LoadState::kFail;
   bool m_bLoadMask = false;

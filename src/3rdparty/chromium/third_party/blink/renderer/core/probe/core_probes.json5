@@ -27,6 +27,7 @@
     InspectorIssueReporter: {
       probes: [
         "DidFailLoading",
+        "DomContentLoadedEventFired",
       ]
     },
     InspectorAnimationAgent: {
@@ -65,6 +66,7 @@
       probes: [
         "CharacterDataModified",
         "DidCommitLoad",
+        'DidRestoreFromBackForwardCache',
         "DidInsertDOMNode",
         "DidInvalidateStyleAttr",
         "DidModifyDOMAttr",
@@ -86,6 +88,7 @@
     InspectorDOMDebuggerAgent: {
       probes: [
         "BreakableLocation",
+        "CharacterDataModified",
         "DidCreateCanvasContext",
         "DidFireWebGLError",
         "DidFireWebGLErrorOrWarning",
@@ -97,7 +100,6 @@
         "UserCallback",
         "WillInsertDOMNode",
         "WillModifyDOMAttr",
-        "WillRemoveDOMNode",
         "WillSendXMLHttpOrFetchNetworkRequest",
         "DidCreateAudioContext",
         "DidCloseAudioContext",
@@ -149,7 +151,6 @@
         "DidChangeResourcePriority",
         "DidCloseWebSocket",
         "DidCommitLoad",
-        "DidCreateWebSocket",
         "DidFailLoading",
         "DidFinishLoading",
         "DidFinishXHR",
@@ -174,6 +175,7 @@
         "WebTransportCreated",
         "WebTransportConnectionEstablished",
         "WebTransportClosed",
+        "WillCreateWebSocket",
         "WillDispatchEventSourceEvent",
         "WillLoadXHR",
         "WillSendEventSourceRequest",
@@ -186,11 +188,12 @@
     },
     InspectorPageAgent: {
       probes: [
-        "ConsumeCompilationCache",
+        "ApplyCompilationModeOverride",
         "DidChangeViewport",
         "DidClearDocumentOfWindowObject",
         "DidNavigateWithinDocument",
         "WillCommitLoad",
+        "DidRestoreFromBackForwardCache",
         "DidResizeMainFrame",
         "DidRunJavaScriptDialog",
         "DomContentLoadedEventFired",
@@ -206,7 +209,7 @@
         "LifecycleEvent",
         "LoadEventFired",
         "PaintTiming",
-        "ProduceCompilationCache",
+        "DidProduceCompilationCache",
         "RecalculateStyle",
         "UpdateLayout",
         "WillRunJavaScriptDialog",

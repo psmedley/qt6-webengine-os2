@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/auto_reset.h"
-#include "base/strings/string16.h"
 #include "components/js_injection/common/interfaces.mojom.h"
 #include "gin/arguments.h"
 #include "gin/wrappable.h"
@@ -32,31 +31,31 @@ class JsCommunication;
 // JsCommunication will own at most one instance of this class. When the
 // RenderFrame gone or another DidClearWindowObject comes, the instance will be
 // destroyed.
-class JsBinding : public gin::Wrappable<JsBinding>,
-                  public mojom::BrowserToJsMessaging {
+class JsBinding final : public gin::Wrappable<JsBinding>,
+                        public mojom::BrowserToJsMessaging {
  public:
   static gin::WrapperInfo kWrapperInfo;
 
   static std::unique_ptr<JsBinding> Install(
       content::RenderFrame* render_frame,
-      const base::string16& js_object_name,
+      const std::u16string& js_object_name,
       JsCommunication* js_java_configurator);
 
   // mojom::BrowserToJsMessaging implementation.
-  void OnPostMessage(const base::string16& message) override;
+  void OnPostMessage(const std::u16string& message) override;
 
   void ReleaseV8GlobalObjects();
 
-  ~JsBinding() final;
+  ~JsBinding() override;
 
  private:
   explicit JsBinding(content::RenderFrame* render_frame,
-                     const base::string16& js_object_name,
+                     const std::u16string& js_object_name,
                      JsCommunication* js_java_configurator);
 
   // gin::Wrappable implementation
   gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) final;
+      v8::Isolate* isolate) override;
 
   // For jsObject.postMessage(message[, ports]) JavaScript API.
   void PostMessage(gin::Arguments* args);
@@ -70,7 +69,7 @@ class JsBinding : public gin::Wrappable<JsBinding>,
   void SetOnMessage(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
   content::RenderFrame* render_frame_;
-  base::string16 js_object_name_;
+  std::u16string js_object_name_;
   v8::Global<v8::Function> on_message_;
   std::vector<v8::Global<v8::Function>> listeners_;
   // |js_java_configurator| owns JsBinding objects, so it will out live

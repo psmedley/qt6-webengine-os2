@@ -49,7 +49,6 @@
 #include "qtwebenginecoreglobal_p.h"
 
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
 #include "components/prefs/pref_member.h"
 #include "components/printing/common/print.mojom.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -70,20 +69,24 @@ class PrintViewManagerQt
 {
 public:
     ~PrintViewManagerQt() override;
-    typedef base::Callback<void(QSharedPointer<QByteArray> result)> PrintToPDFCallback;
-    typedef base::Callback<void(bool success)> PrintToPDFFileCallback;
+
+    static void BindPrintManagerHost(mojo::PendingAssociatedReceiver<printing::mojom::PrintManagerHost> receiver,
+                                     content::RenderFrameHost *rfh);
+
+    typedef base::OnceCallback<void(QSharedPointer<QByteArray> result)> PrintToPDFCallback;
+    typedef base::OnceCallback<void(bool success)> PrintToPDFFileCallback;
 
     // Method to print a page to a Pdf document with page size \a pageSize in location \a filePath.
     void PrintToPDFFileWithCallback(const QPageLayout &pageLayout,
                                     const QPageRanges &pageRanges,
                                     bool printInColor,
                                     const QString &filePath,
-                                    const PrintToPDFFileCallback& callback);
+                                    PrintToPDFFileCallback callback);
     void PrintToPDFWithCallback(const QPageLayout &pageLayout,
                                 const QPageRanges &pageRanges,
                                 bool printInColor,
                                 bool useCustomMargins,
-                                const PrintToPDFCallback &callback);
+                                PrintToPDFCallback callback);
 
 protected:
     explicit PrintViewManagerQt(content::WebContents*);
@@ -108,7 +111,7 @@ protected:
                         CheckForCancelCallback callback) override;
     void MetafileReadyForPrinting(printing::mojom::DidPreviewDocumentParamsPtr params,
                                   int32_t preview_ui_id) override;
-
+    void SetAccessibilityTree(int32_t, const ui::AXTreeUpdate &) override;
 private:
     void resetPdfState();
 

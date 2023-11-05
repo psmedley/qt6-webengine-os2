@@ -23,6 +23,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/disk_cache/disk_cache.h"
 #include "storage/browser/blob/blob_data_builder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
 
 namespace storage {
@@ -94,7 +95,7 @@ class CONTENT_EXPORT CacheStorageCacheEntryHandler {
     ~DiskCacheBlobEntry();
 
     base::WeakPtr<CacheStorageCacheEntryHandler> entry_handler_;
-    base::Optional<CacheStorageCacheHandle> cache_handle_;
+    absl::optional<CacheStorageCacheHandle> cache_handle_;
     disk_cache::ScopedEntryPtr disk_cache_entry_;
 
     SEQUENCE_CHECKER(sequence_checker_);

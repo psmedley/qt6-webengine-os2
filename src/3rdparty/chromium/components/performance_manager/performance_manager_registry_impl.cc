@@ -7,7 +7,6 @@
 #include <iterator>
 #include <utility>
 
-#include "base/stl_util.h"
 #include "components/performance_manager/embedder/binders.h"
 #include "components/performance_manager/performance_manager_tab_helper.h"
 #include "components/performance_manager/public/mojom/coordination_unit.mojom.h"
@@ -154,7 +153,7 @@ void PerformanceManagerRegistryImpl::NotifyBrowserContextAdded(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   content::StoragePartition* storage_partition =
-      content::BrowserContext::GetDefaultStoragePartition(browser_context);
+      browser_context->GetDefaultStoragePartition();
 
   // Create an adapter for the service worker context.
   auto insertion_result = service_worker_context_adapters_.emplace(

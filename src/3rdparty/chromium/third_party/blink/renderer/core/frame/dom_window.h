@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -22,12 +23,14 @@ namespace blink {
 class InputDeviceCapabilitiesConstants;
 class LocalDOMWindow;
 class Location;
-class MessageEvent;
 class ScriptValue;
 class SecurityOrigin;
 class SerializedScriptValue;
+class UserActivation;
 class WindowPostMessageOptions;
 class WindowProxyManager;
+
+struct BlinkTransferableMessage;
 
 // DOMWindow is an abstract class of Window interface implementations.
 // We have two derived implementation classes;  LocalDOMWindow and
@@ -67,9 +70,7 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
   virtual bool IsRemoteDOMWindow() const = 0;
 
   // ScriptWrappable overrides:
-  v8::Local<v8::Value> Wrap(v8::Isolate*,
-                            v8::Local<v8::Object> creation_context) final;
-  v8::MaybeLocal<v8::Value> WrapV2(ScriptState*) final;
+  v8::MaybeLocal<v8::Value> Wrap(ScriptState*) final;
   v8::Local<v8::Object> AssociateWithWrapper(
       v8::Isolate*,
       const WrapperTypeInfo*,
@@ -156,9 +157,19 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
  protected:
   explicit DOMWindow(Frame&);
 
-  virtual void SchedulePostMessage(MessageEvent*,
-                                   scoped_refptr<const SecurityOrigin> target,
-                                   LocalDOMWindow* source) = 0;
+  struct PostedMessage final : GarbageCollected<PostedMessage> {
+    void Trace(Visitor* visitor) const;
+    BlinkTransferableMessage ToBlinkTransferableMessage() &&;
+
+    scoped_refptr<const SecurityOrigin> source_origin;
+    scoped_refptr<const SecurityOrigin> target_origin;
+    scoped_refptr<SerializedScriptValue> data;
+    Vector<MessagePortChannel> channels;
+    Member<LocalDOMWindow> source;
+    Member<UserActivation> user_activation;
+    bool delegate_payment_request = false;
+  };
+  virtual void SchedulePostMessage(PostedMessage* message) = 0;
 
   void DisconnectFromFrame() { frame_ = nullptr; }
 

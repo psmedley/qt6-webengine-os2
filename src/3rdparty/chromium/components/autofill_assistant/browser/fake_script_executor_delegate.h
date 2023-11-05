@@ -30,7 +30,6 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   const GURL& GetScriptURL() override;
   Service* GetService() override;
   WebController* GetWebController() override;
-  ElementStore* GetElementStore() const override;
   TriggerContext* GetTriggerContext() override;
   autofill::PersonalDataManager* GetPersonalDataManager() override;
   WebsiteLoginManager* GetWebsiteLoginManager() override;
@@ -96,7 +95,12 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
       base::OnceCallback<void(const ClientStatus&)> end_action_callback,
       base::OnceCallback<void(const ClientStatus&)>
           view_inflation_finished_callback) override;
+  void SetPersistentGenericUi(
+      std::unique_ptr<GenericUserInterfaceProto> generic_ui,
+      base::OnceCallback<void(const ClientStatus&)>
+          view_inflation_finished_callback) override;
   void ClearGenericUi() override;
+  void ClearPersistentGenericUi() override;
   void SetOverlayBehavior(
       ConfigureUiStateProto::OverlayBehavior overlay_behavior) override;
   void SetBrowseModeInvisible(bool invisible) override;
@@ -114,10 +118,6 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
     web_controller_ = web_controller;
   }
 
-  void SetElementStore(ElementStore* element_store) {
-    element_store_ = element_store;
-  }
-
   void SetTriggerContext(std::unique_ptr<TriggerContext> trigger_context) {
     trigger_context_ = std::move(trigger_context);
   }
@@ -133,6 +133,10 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   }
 
   const std::vector<Details>& GetDetails() { return details_; }
+
+  const GenericUserInterfaceProto* GetPersistentGenericUi() {
+    return persistent_generic_ui_.get();
+  }
 
   InfoBox* GetInfoBox() { return info_box_.get(); }
 
@@ -160,7 +164,6 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   GURL current_url_;
   Service* service_ = nullptr;
   WebController* web_controller_ = nullptr;
-  ElementStore* element_store_ = nullptr;
   std::unique_ptr<TriggerContext> trigger_context_;
   std::vector<AutofillAssistantState> state_history_;
   std::string status_message_;
@@ -183,6 +186,7 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   bool expand_sheet_for_prompt_ = true;
   std::vector<std::string> browse_domains_;
   UserModel* user_model_ = nullptr;
+  std::unique_ptr<GenericUserInterfaceProto> persistent_generic_ui_;
 
   bool require_ui_ = false;
 

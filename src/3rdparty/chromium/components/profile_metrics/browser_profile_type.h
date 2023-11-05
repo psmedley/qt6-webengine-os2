@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_PROFILE_METRICS_BROWSER_PROFILE_TYPE_H_
 #define COMPONENTS_PROFILE_METRICS_BROWSER_PROFILE_TYPE_H_
 
+#include "base/supports_user_data.h"
+
 namespace profile_metrics {
 
 // These values are persisted to logs. Entries should not be renumbered and
@@ -17,10 +19,21 @@ enum class BrowserProfileType {
   kGuest = 2,
   kSystem = 3,
   kOtherOffTheRecordProfile = 4,
-  kEphemeralGuest = 5,
-  kMaxValue = kEphemeralGuest,
+  kDeprecatedEphemeralGuest = 5,
+  kMaxValue = kDeprecatedEphemeralGuest,
 };
 
+// Returns the BrowserProfileType value associated with |browser_context|.
+// Note that the browser profile type should be set for all BrowserContext (or
+// equivalent) objects during creation or initialization of the object. This
+// function will result in a crash if |SetBrowserProfileType| is not called
+// before to associate the browser profile type.
+BrowserProfileType GetBrowserProfileType(
+    const base::SupportsUserData* browser_context);
+
+// Associates |type| as the BrowserProfileType value for |browser_context|.
+void SetBrowserProfileType(base::SupportsUserData* browser_context,
+                           BrowserProfileType type);
 }  // namespace profile_metrics
 
 #endif  // COMPONENTS_PROFILE_METRICS_BROWSER_PROFILE_TYPE_H_

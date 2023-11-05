@@ -5,6 +5,7 @@
 #include "content/web_test/browser/web_test_storage_access_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "services/network/public/mojom/cookie_manager.mojom.h"
 
 #include <list>
 #include <memory>
@@ -63,8 +64,7 @@ void WebTestStorageAccessManager::SetStorageAccess(
   // Content Shell, then we should update this class to handle those other
   // types are well.
 
-  auto* storage_partition =
-      BrowserContext::GetDefaultStoragePartition(browser_context_);
+  auto* storage_partition = browser_context_->GetDefaultStoragePartition();
   auto* cookie_manager = storage_partition->GetCookieManagerForBrowserProcess();
 
   // Enable third-party cookies blocking if we have not done so yet. This will

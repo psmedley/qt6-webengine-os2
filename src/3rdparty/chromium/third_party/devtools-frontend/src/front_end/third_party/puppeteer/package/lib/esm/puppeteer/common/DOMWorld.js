@@ -55,6 +55,7 @@ export class DOMWorld {
     }
     async _setContext(context) {
         if (context) {
+            this._ctxBindings.clear();
             this._contextResolveCallback.call(null, context);
             this._contextResolveCallback = null;
             for (const waitTask of this._waitTasks)
@@ -450,7 +451,7 @@ export class DOMWorld {
         return elementHandle;
     }
     waitForFunction(pageFunction, options = {}, ...args) {
-        const { polling = 'raf', timeout = this._timeoutSettings.timeout(), } = options;
+        const { polling = 'raf', timeout = this._timeoutSettings.timeout() } = options;
         const waitTaskOptions = {
             domWorld: this,
             predicateBody: pageFunction,

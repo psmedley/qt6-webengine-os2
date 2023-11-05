@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/callback_helpers.h"
 #include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -48,7 +49,6 @@ class ScopedAllowScheduleGpuTask;
 
 namespace viz {
 class AggregatedFrame;
-class DelegatedInkPointRendererBase;
 class DirectRenderer;
 class DisplayClient;
 class DisplayResourceProvider;
@@ -136,7 +136,7 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
 
   // Sets the color matrix that will be used to transform the output of this
   // display. This is only supported for GPU compositing.
-  void SetColorMatrix(const SkMatrix44& matrix);
+  void SetColorMatrix(const skia::Matrix44& matrix);
 
   void SetDisplayColorSpaces(
       const gfx::DisplayColorSpaces& display_color_spaces);
@@ -150,7 +150,8 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
 
   // OutputSurfaceClient implementation.
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect) override;
-  void DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings) override;
+  void DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
+                                gfx::GpuFenceHandle release_fence) override;
   void DidReceiveTextureInUseResponses(
       const gpu::TextureInUseResponses& responses) override;
   void DidReceiveCALayerParams(
@@ -194,12 +195,18 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   bool IsRootFrameMissing() const;
   bool HasPendingSurfaces(const BeginFrameArgs& args) const;
 
-  // Return the delegated ink point renderer from |renderer_|, creating it if
-  // one doesn't exist. Should only be used when the delegated ink trails web
-  // API has been used.
-  DelegatedInkPointRendererBase* GetDelegatedInkPointRenderer();
+  bool DoesPlatformSupportDelegatedInk() const {
+    return output_surface_->capabilities().supports_delegated_ink;
+  }
 
- private:
+  // If the platform supports delegated ink trails, then forward the pending
+  // receiver to the gpu main thread where it will be bound so that points can
+  // be sent directly there from the browser process and bypass viz.
+  void InitDelegatedInkPointRendererReceiver(
+      mojo::PendingReceiver<gfx::mojom::DelegatedInkPointRenderer>
+          pending_receiver);
+
+ protected:
   friend class DisplayTest;
   // PresentationGroupTiming stores rendering pipeline stage timings associated
   // with a call to Display::DrawAndSwap along with a list of
@@ -216,7 +223,8 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
     void OnDraw(base::TimeTicks draw_start_timestamp);
     void OnSwap(gfx::SwapTimings timings);
     bool HasSwapped() const { return !swap_timings_.is_null(); }
-    void OnPresent(const gfx::PresentationFeedback& feedback);
+    void OnPresent(const gfx::PresentationFeedback& feedback,
+                   DisplaySchedulerBase* scheduler);
 
     base::TimeTicks draw_start_timestamp() const {
       return draw_start_timestamp_;

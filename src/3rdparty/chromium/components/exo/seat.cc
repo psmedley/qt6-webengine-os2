@@ -5,19 +5,14 @@
 #include "components/exo/seat.h"
 
 #include <memory>
-#include "ui/gfx/geometry/point_f.h"
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "ash/shell.h"
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #include "ash/wm/window_util.h"
 #include "base/auto_reset.h"
 #include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/feature_list.h"
 #include "base/memory/weak_ptr.h"
+#include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "build/chromeos_buildflags.h"
@@ -36,33 +31,16 @@
 #include "ui/base/clipboard/clipboard_monitor.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_source.h"
+#include "ui/gfx/geometry/point_f.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/shell.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace exo {
 namespace {
-
-Surface* GetEffectiveFocus(aura::Window* window) {
-  if (!window)
-    return nullptr;
-  Surface* const surface = Surface::AsSurface(window);
-  if (surface)
-    return surface;
-  ShellSurfaceBase* shell_surface_base = nullptr;
-  for (auto* current = window; current && !shell_surface_base;
-       current = current->parent()) {
-    shell_surface_base = GetShellSurfaceBaseForWindow(current);
-  }
-  // Make sure the |window| is the toplevel or a host window, but not
-  // another window added to the toplevel.
-  if (shell_surface_base &&
-      (shell_surface_base->GetWidget()->GetNativeWindow() == window ||
-       shell_surface_base->host_window()->Contains(window))) {
-    return shell_surface_base->root_surface();
-  }
-  return nullptr;
-}
 
 }  // namespace
 
@@ -96,10 +74,15 @@ Seat::~Seat() {
   Shutdown();
 }
 
+void Seat::SetFocusChangedCallback(FocusChangedCallback callback) {
+  focus_changed_callback_ = std::move(callback);
+  OnWindowFocused(WMHelper::GetInstance()->GetActiveWindow(), nullptr);
+}
+
 void Seat::Shutdown() {
-  if (shutdown_)
+  if (was_shutdown_)
     return;
-  shutdown_ = true;
+  was_shutdown_ = true;
   DCHECK(!selection_source_) << "DataSource must be released before Seat";
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   ash::Shell::Get()->ime_controller()->RemoveObserver(this);
@@ -111,16 +94,24 @@ void Seat::Shutdown() {
     ui::PlatformEventSource::GetInstance()->RemovePlatformEventObserver(this);
 }
 
-void Seat::AddObserver(SeatObserver* observer) {
-  observers_.AddObserver(observer);
+void Seat::AddObserver(SeatObserver* observer, int priority) {
+#if DCHECK_IS_ON()
+  for (const auto& observer_list : priority_observer_list_)
+    DCHECK(!observer_list.HasObserver(observer));
+#endif
+  DCHECK(IsValidObserverPriority(priority));
+  priority_observer_list_[priority].AddObserver(observer);
 }
 
 void Seat::RemoveObserver(SeatObserver* observer) {
-  observers_.RemoveObserver(observer);
+  // We assume that the number of priority variations is small enough.
+  for (auto& observer_list : priority_observer_list_)
+    observer_list.RemoveObserver(observer);
 }
 
 Surface* Seat::GetFocusedSurface() {
-  return GetEffectiveFocus(WMHelper::GetInstance()->GetFocusedWindow());
+  return GetTargetSurfaceForKeyboardFocus(
+      WMHelper::GetInstance()->GetFocusedWindow());
 }
 
 void Seat::StartDrag(DataSource* source,
@@ -144,9 +135,12 @@ void Seat::AbortPendingDragOperation() {
 
 void Seat::SetSelection(DataSource* source) {
   Surface* focused_surface = GetFocusedSurface();
-  DCHECK(focused_surface);
-  if (!source || !source->CanBeDataSourceForCopy(focused_surface))
+  if (!source || !focused_surface ||
+      !source->CanBeDataSourceForCopy(focused_surface)) {
+    if (source)
+      source->Cancelled();
     return;
+  }
 
   if (selection_source_) {
     if (selection_source_->get() == source)
@@ -161,7 +155,7 @@ void Seat::SetSelection(DataSource* source) {
       base::MakeRefCounted<RefCountedScopedClipboardWriter>(endpoint_type);
 
   base::RepeatingClosure data_read_callback = base::BarrierClosure(
-      kMaxClipboardDataTypes,
+      DataSource::kMaxDataTypes,
       base::BindOnce(&Seat::OnAllReadsFinished, weak_ptr_factory_.GetWeakPtr(),
                      writer));
 
@@ -176,7 +170,7 @@ void Seat::SetSelection(DataSource* source) {
                      data_read_callback),
       base::BindOnce(&Seat::OnFilenamesRead, weak_ptr_factory_.GetWeakPtr(),
                      endpoint_type, writer, data_read_callback),
-      data_read_callback);
+      DataSource::ReadFileContentsDataCallback(), data_read_callback);
 }
 
 class Seat::RefCountedScopedClipboardWriter
@@ -196,7 +190,7 @@ class Seat::RefCountedScopedClipboardWriter
 void Seat::OnTextRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
                       base::OnceClosure callback,
                       const std::string& mime_type,
-                      base::string16 data) {
+                      std::u16string data) {
   writer->WriteText(std::move(data));
   std::move(callback).Run();
 }
@@ -213,7 +207,7 @@ void Seat::OnRTFRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
 void Seat::OnHTMLRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
                       base::OnceClosure callback,
                       const std::string& mime_type,
-                      base::string16 data) {
+                      std::u16string data) {
   writer->WriteHTML(std::move(data), std::string());
   std::move(callback).Run();
 }
@@ -224,7 +218,7 @@ void Seat::OnImageRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
                        const std::vector<uint8_t>& data) {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   data_decoder::DecodeImageIsolated(
-      data, data_decoder::mojom::ImageCodec::DEFAULT, false,
+      data, data_decoder::mojom::ImageCodec::kDefault, false,
       std::numeric_limits<int64_t>::max(), gfx::Size(),
       base::BindOnce(&Seat::OnImageDecoded, weak_ptr_factory_.GetWeakPtr(),
                      std::move(callback), writer));
@@ -249,18 +243,9 @@ void Seat::OnFilenamesRead(
     base::OnceClosure callback,
     const std::string& mime_type,
     const std::vector<uint8_t>& data) {
-  if (base::FeatureList::IsEnabled(features::kClipboardFilenames)) {
-    std::vector<ui::FileInfo> filenames =
-        data_exchange_delegate_->GetFilenames(source, data);
-    writer->WriteFilenames(ui::FileInfosToURIList(filenames));
-  } else {
-    // There is no need for CreateClipboardFilenamesPickle() once
-    // chrome://flags#clipboard-filenames is permanently enabled.
-    base::Pickle pickle =
-        data_exchange_delegate_->CreateClipboardFilenamesPickle(source, data);
-    writer->WritePickledData(pickle,
-                             ui::ClipboardFormatType::GetWebCustomDataType());
-  }
+  std::vector<ui::FileInfo> filenames =
+      data_exchange_delegate_->GetFilenames(source, data);
+  writer->WriteFilenames(ui::FileInfosToURIList(filenames));
   std::move(callback).Run();
 }
 
@@ -286,12 +271,18 @@ void Seat::OnAllReadsFinished(
 
 void Seat::OnWindowFocused(aura::Window* gained_focus,
                            aura::Window* lost_focus) {
-  Surface* const surface = GetEffectiveFocus(gained_focus);
-  for (auto& observer : observers_) {
-    observer.OnSurfaceFocusing(surface);
+  Surface* const gaining_focus_surface =
+      GetTargetSurfaceForKeyboardFocus(gained_focus);
+  Surface* const lost_focus_surface =
+      GetTargetSurfaceForKeyboardFocus(lost_focus);
+
+  if (!focus_changed_callback_.is_null()) {
+    focus_changed_callback_.Run(gaining_focus_surface, lost_focus_surface,
+                                !!gained_focus);
   }
-  for (auto& observer : observers_) {
-    observer.OnSurfaceFocused(surface);
+  for (auto& observer_list : priority_observer_list_) {
+    for (auto& observer : observer_list)
+      observer.OnSurfaceFocused(gaining_focus_surface);
   }
 }
 
@@ -338,8 +329,9 @@ void Seat::OnKeyEvent(ui::KeyEvent* event) {
   if (physical_code_for_currently_processing_event_ != ui::DomCode::NONE) {
     switch (event->type()) {
       case ui::ET_KEY_PRESSED:
-        pressed_keys_.insert(
-            {physical_code_for_currently_processing_event_, event->code()});
+        pressed_keys_.emplace(
+            physical_code_for_currently_processing_event_,
+            KeyState{event->code(), /*consumed_by_ime=*/false});
         break;
       case ui::ET_KEY_RELEASED:
         pressed_keys_.erase(physical_code_for_currently_processing_event_);

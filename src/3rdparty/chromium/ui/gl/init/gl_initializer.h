@@ -25,7 +25,7 @@ bool usingSoftwareDynamicGL();
 #endif
 
 // Initializes a particular GL implementation.
-bool InitializeStaticGLBindings(GLImplementation implementation);
+bool InitializeStaticGLBindings(GLImplementationParts implementation);
 
 #if BUILDFLAG(USE_STATIC_ANGLE)
 bool InitializeStaticANGLEEGL();

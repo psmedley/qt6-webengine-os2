@@ -80,10 +80,11 @@ void FrameView::UpdateViewportIntersection(unsigned flags,
 
   LayoutEmbeddedContent* owner_layout_object =
       owner_element->GetLayoutEmbeddedContent();
-  if (!owner_layout_object || owner_layout_object->ContentSize().IsEmpty()) {
-    // The frame is detached from layout, not visible, or zero size; leave
-    // viewport_intersection empty, and signal the frame as occluded if
-    // necessary.
+  if (!owner_layout_object || owner_layout_object->ContentSize().IsEmpty() ||
+      (flags & IntersectionObservation::kAncestorFrameIsDetachedFromLayout)) {
+    // The frame, or an ancestor frame, is detached from layout, not visible, or
+    // zero size; leave viewport_intersection empty, and signal the frame as
+    // occluded if necessary.
     occlusion_state = mojom::blink::FrameOcclusionState::kPossiblyOccluded;
   } else if (parent_lifecycle_state >= DocumentLifecycle::kLayoutClean &&
              !owner_document.View()->NeedsLayout()) {
@@ -207,10 +208,16 @@ void FrameView::UpdateViewportIntersection(unsigned flags,
     GetFrame().Client()->OnMainFrameIntersectionChanged(projected_rect);
   }
 
-  // We don't throttle 0x0 or display:none iframes, because in practice they are
-  // sometimes used to drive UI logic.
-  bool hidden_for_throttling = viewport_intersection.IsEmpty() &&
-                               !FrameRect().IsEmpty() && owner_layout_object;
+  // We don't throttle zero-area or display:none iframes unless they are
+  // cross-origin and ThrottleCrossOriginIframes is enabled, because in practice
+  // they are sometimes used to drive UI logic.
+  bool hidden_for_throttling = viewport_intersection.IsEmpty();
+  bool is_display_none = !owner_layout_object;
+  bool has_zero_area = FrameRect().IsEmpty();
+  bool has_flag = RuntimeEnabledFeatures::
+      ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframesEnabled();
+  if (!has_flag && (is_display_none || has_zero_area))
+    hidden_for_throttling = false;
   bool subtree_throttled = false;
   Frame* parent_frame = GetFrame().Tree().Parent();
   if (parent_frame && parent_frame->View()) {

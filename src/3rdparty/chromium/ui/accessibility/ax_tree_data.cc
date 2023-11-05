@@ -8,7 +8,6 @@
 
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_enum_util.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -65,6 +64,12 @@ std::string AXTreeData::ToString() const {
     result += " sel_focus_offset=" + base::NumberToString(sel_focus_offset);
     result += " sel_focus_affinity=";
     result += ui::ToString(sel_focus_affinity);
+  }
+  if (!metadata.empty()) {
+    result += "\n<head>\n";
+    for (const auto& str : metadata)
+      result += "  " + str + "\n";
+    result += "</head>\n";
   }
 
   return result;

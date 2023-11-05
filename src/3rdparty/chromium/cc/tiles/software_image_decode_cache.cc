@@ -129,10 +129,10 @@ SkSize GetScaleAdjustment(const SoftwareImageDecodeCache::CacheKey& key) {
 // to do a bilinear interpolation. The exception to this is if the developer
 // specified a pixelated effect, which results in a None filter quality (nearest
 // neighbor).
-SkFilterQuality GetDecodedFilterQuality(
+PaintFlags::FilterQuality GetDecodedFilterQuality(
     const SoftwareImageDecodeCache::CacheKey& key) {
-  return key.is_nearest_neighbor() ? kNone_SkFilterQuality
-                                   : kLow_SkFilterQuality;
+  return key.is_nearest_neighbor() ? PaintFlags::FilterQuality::kNone
+                                   : PaintFlags::FilterQuality::kLow;
 }
 
 }  // namespace
@@ -361,7 +361,7 @@ SoftwareImageDecodeCache::DecodeImageIfNecessary(const CacheKey& key,
   } else {
     // Attempt to find a cached decode to generate a scaled/subrected decode
     // from.
-    base::Optional<CacheKey> candidate_key = FindCachedCandidate(key);
+    absl::optional<CacheKey> candidate_key = FindCachedCandidate(key);
 
     SkISize desired_size = gfx::SizeToSkISize(key.target_size());
     const bool should_decode_to_scale =
@@ -415,8 +415,8 @@ SoftwareImageDecodeCache::DecodeImageIfNecessary(const CacheKey& key,
               ? SkIRect::MakeWH(paint_image.width(), paint_image.height())
               : gfx::RectToSkIRect(key.src_rect());
       DrawImage candidate_draw_image(
-          paint_image, false, src_rect, kNone_SkFilterQuality, SkMatrix::I(),
-          key.frame_key().frame_index(), key.target_color_space());
+          paint_image, false, src_rect, PaintFlags::FilterQuality::kNone,
+          SkM44(), key.frame_key().frame_index(), key.target_color_space());
       candidate_key.emplace(CacheKey::FromDrawImage(
           candidate_draw_image,
           GetColorTypeForPaintImage(key.target_color_space(), paint_image)));
@@ -469,7 +469,7 @@ SoftwareImageDecodeCache::DecodeImageIfNecessary(const CacheKey& key,
   return TaskProcessingResult::kFullDecode;
 }
 
-base::Optional<SoftwareImageDecodeCache::CacheKey>
+absl::optional<SoftwareImageDecodeCache::CacheKey>
 SoftwareImageDecodeCache::FindCachedCandidate(const CacheKey& key) {
   auto image_keys_it = frame_key_to_image_keys_.find(key.frame_key());
   // We know that we must have at least our own |entry| in this list, so it
@@ -503,7 +503,7 @@ SoftwareImageDecodeCache::FindCachedCandidate(const CacheKey& key) {
     }
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 bool SoftwareImageDecodeCache::UseCacheForDrawImage(

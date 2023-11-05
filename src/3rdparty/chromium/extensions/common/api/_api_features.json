@@ -182,7 +182,9 @@
       "channel": "stable",
       "contexts": ["webui"],
       "matches": [
-        "chrome://feedback/*"
+        "chrome://feedback/*",
+        "chrome://cast-feedback/*",
+        "chrome://os-feedback/*"
       ]
     }
   ],
@@ -220,7 +222,6 @@
         "chrome://extensions/*",
         "chrome://home/*",
         "chrome://chrome-signin/*",
-        "chrome://hats/*",
         "chrome://mobilesetup/*",
         "chrome://oobe/*",
         "chrome://os-settings/*",
@@ -243,7 +244,7 @@
     "contexts": ["blessed_extension"]
   },
   "idle.getAutoLockDelay": {
-    "platforms": ["chromeos"]
+    "platforms": ["chromeos", "lacros"]
   },
   "lockScreen.data": {
     "dependencies": ["permission:lockScreen"],
@@ -308,6 +309,7 @@
     "contexts": ["webui"],
     "matches": [
       "chrome://bookmarks/*",
+      "chrome://download-shelf.top-chrome/*",
       "chrome://extensions/*",
       "chrome://new-tab-page/*",
       "chrome://os-settings/*",
@@ -315,11 +317,12 @@
       "chrome://sync-confirmation/*",
       "chrome://read-later.top-chrome/*",
       "chrome://tab-search.top-chrome/*",
-      "chrome://tab-strip/*",
+      "chrome://tab-strip.top-chrome/*",
       "chrome://welcome/*",
       "chrome://profile-picker/*",
       "chrome://file-manager/*",
-      "chrome://help-app/*"
+      "chrome://help-app/*",
+      "chrome://eche-app/*"
     ]
   }, {
     "channel": "stable",
@@ -360,7 +363,9 @@
       "82F30B65397BC3E4ADE627BBD857AB8A58210648",  // http://crbug.com/819404
       "A3E3DE9E9F16B41D4A2FAD106BD6CA76B94A0C94",  // http://crbug.com/932466
       "B41E7F08E1179CC03CBD1F49E57CF353A40ADE07",  // http://crbug.com/932466
-      "C74B2AF138F9EDECD04D0965AB36CA66C8290466"   // http://crbug.com/957772
+      "C74B2AF138F9EDECD04D0965AB36CA66C8290466",  // http://crbug.com/957772
+      "754A9CB3C8623093180E10CF4C3AB64837179E68",  // https://crbug.com/1201800
+      "CF6B19571334F49878327D557597D23B1458AA39"   // https://crbug.com/1201800
     ]
   },
   "mimeHandlerPrivate": {
@@ -415,14 +420,12 @@
   },
   "printerProvider": {
     "dependencies": ["permission:printerProvider"],
-    "contexts": ["blessed_extension"],
-    "disallow_for_service_workers": true
+    "contexts": ["blessed_extension"]
   },
   "printerProviderInternal": {
     "internal": true,
     "dependencies": ["permission:printerProvider"],
-    "contexts": ["blessed_extension"],
-    "disallow_for_service_workers": true
+    "contexts": ["blessed_extension"]
   },
   "runtime": {
     "channel": "stable",
@@ -522,7 +525,8 @@
   },{
     "contexts": ["webui"],
     "matches": [
-      "chrome://password-change/*"
+      "chrome://password-change/*",
+      "chrome://file-manager/*"
     ]
   }],
   "runtime.sendNativeMessage": {
@@ -553,14 +557,17 @@
     "dependencies": ["permission:storage"],
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
+  "storage.session": {
+    "channel": "canary",
+    "min_manifest_version": 3
+  },
   "system.cpu": {
     "dependencies": ["permission:system.cpu"],
     "contexts": ["blessed_extension"]
   },
   "system.display": [{
     "dependencies": ["permission:system.display"],
-    "contexts": ["blessed_extension"],
-    "disallow_for_service_workers": true
+    "contexts": ["blessed_extension"]
   }, {
     "channel": "stable",
     "contexts": ["webui"],
@@ -640,7 +647,6 @@
       "chrome://assistant-optin/*",
       "chrome://chrome-signin/*",
       "chrome://discards/*",
-      "chrome://hats/*",
       "chrome://home/*",
       "chrome://mobilesetup/*",
       "chrome://oobe/*",
@@ -662,7 +668,6 @@
       "chrome://assistant-optin/*",
       "chrome://chrome-signin/*",
       "chrome://discards/*",
-      "chrome://hats/*",
       "chrome://home/*",
       "chrome://mobilesetup/*",
       "chrome://oobe/*",
@@ -682,7 +687,6 @@
       "chrome://assistant-optin/*",
       "chrome://chrome-signin/*",
       "chrome://discards/*",
-      "chrome://hats/*",
       "chrome://home/*",
       "chrome://mobilesetup/*",
       "chrome://oobe/*",

@@ -13,6 +13,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/peerconnection/webrtc_video_track_source.h"
 #include "third_party/blink/renderer/platform/testing/video_frame_utils.h"
+#include "third_party/blink/renderer/platform/webrtc/convert_to_webrtc_video_frame_buffer.h"
 #include "third_party/webrtc/api/video/video_frame.h"
 #include "third_party/webrtc/rtc_base/ref_counted_object.h"
 
@@ -49,7 +50,7 @@ class WebRtcVideoTrackSourceTest
     track_source_->AddOrUpdateSink(&mock_sink_, rtc::VideoSinkWants());
   }
 
-  void ProcessFeedback(const media::VideoFrameFeedback& feedback) {
+  void ProcessFeedback(const media::VideoCaptureFeedback& feedback) {
     feedback_ = feedback;
   }
 
@@ -64,7 +65,7 @@ class WebRtcVideoTrackSourceTest
                      media::VideoPixelFormat pixel_format) {
     scoped_refptr<media::VideoFrame> frame = CreateTestFrame(
         coded_size, visible_rect, natural_size, storage_type, pixel_format);
-    track_source_->OnFrameCaptured(frame);
+    track_source_->OnFrameCaptured(frame, {});
   }
 
   void SendTestFrameAndVerifyFeedback(
@@ -77,7 +78,7 @@ class WebRtcVideoTrackSourceTest
       float max_framerate) {
     scoped_refptr<media::VideoFrame> frame = CreateTestFrame(
         coded_size, visible_rect, natural_size, storage_type, pixel_format);
-    track_source_->OnFrameCaptured(frame);
+    track_source_->OnFrameCaptured(frame, {});
     EXPECT_EQ(feedback_.max_pixels, max_pixels);
     EXPECT_EQ(feedback_.max_framerate_fps, max_framerate);
   }
@@ -93,7 +94,7 @@ class WebRtcVideoTrackSourceTest
         coded_size, visible_rect, natural_size, storage_type, pixel_format);
     frame->metadata().capture_counter = capture_counter;
     frame->metadata().capture_update_rect = update_rect;
-    track_source_->OnFrameCaptured(frame);
+    track_source_->OnFrameCaptured(frame, {});
   }
 
   WebRtcVideoTrackSource::FrameAdaptationParams FrameAdaptation_KeepAsIs(
@@ -138,7 +139,7 @@ class WebRtcVideoTrackSourceTest
  protected:
   MockVideoSink mock_sink_;
   scoped_refptr<WebRtcVideoTrackSource> track_source_;
-  media::VideoFrameFeedback feedback_;
+  media::VideoCaptureFeedback feedback_;
 };
 
 namespace {
@@ -146,7 +147,7 @@ std::vector<WebRtcVideoTrackSourceTest::ParamType> TestParams() {
   std::vector<WebRtcVideoTrackSourceTest::ParamType> test_params;
   // All formats for owned memory.
   for (media::VideoPixelFormat format :
-       WebRtcVideoFrameAdapter::AdaptableMappablePixelFormats()) {
+       GetPixelFormatsMappableToWebRtcVideoFrameBuffer()) {
     test_params.emplace_back(
         media::VideoFrame::StorageType::STORAGE_OWNED_MEMORY, format);
   }

@@ -11,11 +11,13 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/linux_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/posix/global_descriptors.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/system/sys_info.h"
 #include "build/branding_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "components/crash/core/app/crash_reporter_client.h"
@@ -113,7 +115,7 @@ base::FilePath PlatformCrashpadInitialization(
     if (!base::PathService::Get(base::DIR_EXE, &handler_path)) {
       return database_path;
     }
-    handler_path = handler_path.Append("crashpad_handler");
+    handler_path = handler_path.Append("chrome_crashpad_handler");
 
     // When --use-cros-crash-reporter is set (below), the handler passes dumps
     // to ChromeOS's /sbin/crash_reporter which in turn passes the dump to
@@ -136,6 +138,11 @@ base::FilePath PlatformCrashpadInitialization(
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     // Empty means stable.
     const bool allow_empty_channel = true;
+    if (channel == "extended") {
+      // Extended stable reports as stable (empty string) with an extra bool.
+      channel.clear();
+      annotations["extended_stable_channel"] = "true";
+    }
 #else
     const bool allow_empty_channel = false;
 #endif
@@ -144,6 +151,20 @@ base::FilePath PlatformCrashpadInitialization(
     }
 
     annotations["plat"] = std::string("Linux");
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+    // Chromium OS: save board and builder path for 'tast symbolize'.
+    annotations["chromeos-board"] = base::SysInfo::GetLsbReleaseBoard();
+    std::string builder_path;
+    if (base::SysInfo::GetLsbReleaseValue("CHROMEOS_RELEASE_BUILDER_PATH",
+                                          &builder_path)) {
+      annotations["chromeos-builder-path"] = builder_path;
+    }
+#else
+    // Other Linux: save lsb-release. This isn't needed on Chromium OS,
+    // where crash_reporter provides it's own values for lsb-release.
+    annotations["lsb-release"] = base::GetLinuxDistro();
+#endif
 
     std::vector<std::string> arguments;
     if (crash_reporter_client->ShouldMonitorCrashHandlerExpensively()) {

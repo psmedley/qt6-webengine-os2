@@ -12,12 +12,12 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/stl_util.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/browsing_data/browsing_data_filter_builder_impl.h"
@@ -35,6 +35,7 @@
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "storage/browser/quota/special_storage_policy.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -144,6 +145,13 @@ BrowsingDataRemoverImpl::~BrowsingDataRemoverImpl() {
 void BrowsingDataRemoverImpl::SetRemoving(bool is_removing) {
   DCHECK_NE(is_removing_, is_removing);
   is_removing_ = is_removing;
+  if (embedder_delegate_) {
+    if (is_removing_) {
+      embedder_delegate_->OnStartRemoving();
+    } else {
+      embedder_delegate_->OnDoneRemoving();
+    }
+  }
 }
 
 void BrowsingDataRemoverImpl::SetEmbedderDelegate(
@@ -241,7 +249,7 @@ void BrowsingDataRemoverImpl::RemoveInternal(
 void BrowsingDataRemoverImpl::RunNextTask() {
   DCHECK(!task_queue_.empty());
   RemovalTask& removal_task = task_queue_.front();
-  removal_task.task_started = base::Time::Now();
+  removal_task.task_started = base::TimeTicks::Now();
 
   // To detect tasks that are causing slow deletions, record running sub tasks
   // after a delay.
@@ -321,8 +329,7 @@ void BrowsingDataRemoverImpl::RemoveImpl(
   if ((remove_mask & DATA_TYPE_DOWNLOADS) &&
       (!embedder_delegate_ || embedder_delegate_->MayRemoveDownloadHistory())) {
     base::RecordAction(UserMetricsAction("ClearBrowsingData_Downloads"));
-    DownloadManager* download_manager =
-        BrowserContext::GetDownloadManager(browser_context_);
+    DownloadManager* download_manager = browser_context_->GetDownloadManager();
     download_manager->RemoveDownloadsByURLAndTime(url_filter, delete_begin_,
                                                   delete_end_);
   }
@@ -339,6 +346,10 @@ void BrowsingDataRemoverImpl::RemoveImpl(
   if (remove_mask & DATA_TYPE_COOKIES &&
       origin_type_mask_ & ORIGIN_TYPE_UNPROTECTED_WEB) {
     storage_partition_remove_mask |= StoragePartition::REMOVE_DATA_MASK_COOKIES;
+    // Interest groups should be cleared with cookies for its origin trial as
+    // the current FLEDGE implementation has the same privacy characteristics.
+    storage_partition_remove_mask |=
+        StoragePartition::REMOVE_DATA_MASK_INTEREST_GROUPS;
     if (embedder_delegate_) {
       domains_for_deferred_cookie_deletion_ =
           embedder_delegate_->GetDomainsForDeferredCookieDeletion(remove_mask);
@@ -513,13 +524,12 @@ void BrowsingDataRemoverImpl::RemoveImpl(
         CreateTaskCompletionClosureForMojo(TracingDataType::kTrustTokens));
   }
 
-#if BUILDFLAG(ENABLE_REPORTING)
   //////////////////////////////////////////////////////////////////////////////
   // Reporting cache.
+  // TODO(https://crbug.com/1291489): Add unit test to cover this.
   if (remove_mask & DATA_TYPE_COOKIES) {
     network::mojom::NetworkContext* network_context =
-        BrowserContext::GetDefaultStoragePartition(browser_context_)
-            ->GetNetworkContext();
+        browser_context_->GetDefaultStoragePartition()->GetNetworkContext();
     network_context->ClearReportingCacheClients(
         filter_builder->BuildNetworkServiceFilter(),
         CreateTaskCompletionClosureForMojo(TracingDataType::kReportingCache));
@@ -528,13 +538,12 @@ void BrowsingDataRemoverImpl::RemoveImpl(
         CreateTaskCompletionClosureForMojo(
             TracingDataType::kNetworkErrorLogging));
   }
-#endif  // BUILDFLAG(ENABLE_REPORTING)
 
   //////////////////////////////////////////////////////////////////////////////
   // Auth cache.
   if ((remove_mask & DATA_TYPE_COOKIES) &&
       !(remove_mask & DATA_TYPE_AVOID_CLOSING_CONNECTIONS)) {
-    BrowserContext::GetDefaultStoragePartition(browser_context_)
+    browser_context_->GetDefaultStoragePartition()
         ->GetNetworkContext()
         ->ClearHttpAuthCache(
             delete_begin_.is_null() ? base::Time::Min() : delete_begin_,
@@ -617,7 +626,7 @@ bool BrowsingDataRemoverImpl::RemovalTask::IsSameDeletion(
 StoragePartition* BrowsingDataRemoverImpl::GetStoragePartition() {
   return storage_partition_for_testing_
              ? storage_partition_for_testing_
-             : BrowserContext::GetDefaultStoragePartition(browser_context_);
+             : browser_context_->GetDefaultStoragePartition();
 }
 
 void BrowsingDataRemoverImpl::OnDelegateDone(
@@ -649,7 +658,7 @@ void BrowsingDataRemoverImpl::Notify() {
     }
   }
 
-  base::TimeDelta delta = base::Time::Now() - task.task_started;
+  base::TimeDelta delta = base::TimeTicks::Now() - task.task_started;
   if (task.filter_builder->GetMode() ==
       BrowsingDataFilterBuilder::Mode::kPreserve) {
     // Full, and time based and filtered deletions are often implemented
@@ -693,9 +702,11 @@ void BrowsingDataRemoverImpl::OnTaskComplete(TracingDataType data_type) {
   size_t num_erased = pending_sub_tasks_.erase(data_type);
   DCHECK_EQ(num_erased, 1U);
 
-  TRACE_EVENT_ASYNC_END1("browsing_data", "BrowsingDataRemoverImpl",
-                         static_cast<int>(data_type), "data_type",
-                         static_cast<int>(data_type));
+  TRACE_EVENT_NESTABLE_ASYNC_END1(
+      "browsing_data", "BrowsingDataRemoverImpl",
+      TRACE_ID_WITH_SCOPE("BrowsingDataRemoverImpl",
+                          static_cast<int>(data_type)),
+      "data_type", static_cast<int>(data_type));
   if (!pending_sub_tasks_.empty())
     return;
 
@@ -734,9 +745,11 @@ base::OnceClosure BrowsingDataRemoverImpl::CreateTaskCompletionClosure(
   auto result = pending_sub_tasks_.insert(data_type);
   DCHECK(result.second) << "Task already started: "
                         << static_cast<int>(data_type);
-  TRACE_EVENT_ASYNC_BEGIN1("browsing_data", "BrowsingDataRemoverImpl",
-                           static_cast<int>(data_type), "data_type",
-                           static_cast<int>(data_type));
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN1(
+      "browsing_data", "BrowsingDataRemoverImpl",
+      TRACE_ID_WITH_SCOPE("BrowsingDataRemoverImpl",
+                          static_cast<int>(data_type)),
+      "data_type", static_cast<int>(data_type));
   return base::BindOnce(&BrowsingDataRemoverImpl::OnTaskComplete, GetWeakPtr(),
                         data_type);
 }

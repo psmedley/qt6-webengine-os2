@@ -280,7 +280,13 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockAndUserActivation) {
                        grand_child, EXECUTE_SCRIPT_NO_USER_GESTURE));
 }
 
-IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockEventRouting) {
+// crbug.com/1210940: flaky on Linux
+#if defined(OS_LINUX)
+#define MAYBE_PointerLockEventRouting DISABLED_PointerLockEventRouting
+#else
+#define MAYBE_PointerLockEventRouting PointerLockEventRouting
+#endif
+IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, MAYBE_PointerLockEventRouting) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
@@ -296,20 +302,27 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockEventRouting) {
 
   WaitForHitTestData(child->current_frame_host());
 
-  std::string set_mouse_move_event_listener =
-      R"code(mouseMoveExecuted = new Promise(function (resolve, reject){
-              mousemoveHandler = function(e){
-                x = e.x; y = e.y; mX = e.movementX; mY = e.movementY;
-                document.removeEventListener('mousemove', mousemoveHandler);
-                resolve();
-              };
-              document.addEventListener('mousemove', mousemoveHandler);
-             });)code";
-  std::string define_variables = R"code(var x; var y;
-       var mX; var mY;
-       var mouseMoveExecuted;
-       var mousemoveHandler;
-       )code";
+  std::string set_mouse_move_event_listener = R"(
+    mouseMoveExecuted = new Promise(function (resolve, reject) {
+      mousemoveHandler = function(e) {
+        x = e.x;
+        y = e.y;
+        mX = e.movementX;
+        mY = e.movementY;
+        resolve();
+      };
+      document.addEventListener('mousemove', mousemoveHandler, {once: true});
+    });
+    true; // A promise is defined above, but do not wait.
+  )";
+  std::string define_variables = R"(
+    var x;
+    var y;
+    var mX;
+    var mY;
+    var mouseMoveExecuted;
+    var mousemoveHandler;
+  )";
   // Add a mouse move event listener to the root frame.
   EXPECT_TRUE(ExecJs(root, define_variables));
   EXPECT_TRUE(ExecJs(root, set_mouse_move_event_listener));
@@ -523,7 +536,13 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockOopifCrashes) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockWheelEventRouting) {
+#if defined(OS_LINUX)
+#define MAYBE_PointerLockWheelEventRouting DISABLED_PointerLockWheelEventRouting
+#else
+#define MAYBE_PointerLockWheelEventRouting PointerLockWheelEventRouting
+#endif
+IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest,
+                       MAYBE_PointerLockWheelEventRouting) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
@@ -688,6 +707,18 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockOutOfFocus) {
 }
 #endif
 
+IN_PROC_BROWSER_TEST_F(PointerLockBrowserTest, PointerLockOnDroppedElem) {
+  GURL url = embedded_test_server()->GetURL(
+      "a.com", "/pointerlock_on_dropped_elem.html");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  EXPECT_TRUE(ExecJs(shell(), "document.body.click();"));
+
+  // The second ExecJS() call here delays test termination so that the first
+  // call's async tasks get a chance to run.
+  EXPECT_TRUE(ExecJs(shell(), "", EXECUTE_SCRIPT_NO_USER_GESTURE));
+}
+
 IN_PROC_BROWSER_TEST_F(PointerLockBrowserTestWithOptions,
                        PointerLockRequestUnadjustedMovement) {
   GURL main_url(embedded_test_server()->GetURL(
@@ -749,7 +780,9 @@ IN_PROC_BROWSER_TEST_F(PointerLockBrowserTestWithOptions,
 }
 
 #if defined(USE_AURA)
-IN_PROC_BROWSER_TEST_F(PointerLockBrowserTestWithOptions, UnadjustedMovement) {
+// Flaky on all platforms http://crbug.com/1198612.
+IN_PROC_BROWSER_TEST_F(PointerLockBrowserTestWithOptions,
+                       DISABLED_UnadjustedMovement) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));

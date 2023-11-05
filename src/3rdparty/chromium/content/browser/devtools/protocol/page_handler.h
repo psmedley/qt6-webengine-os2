@@ -16,7 +16,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
-#include "base/time/time.h"
 #include "build/build_config.h"
 #include "cc/trees/render_frame_metadata.h"
 #include "content/browser/devtools/devtools_video_consumer.h"
@@ -28,7 +27,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_observer.h"
 #include "content/public/common/javascript_dialog_type.h"
-#include "third_party/blink/public/mojom/manifest/manifest_manager.mojom.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom-forward.h"
 #include "url/gurl.h"
 
 class SkBitmap;
@@ -47,6 +46,7 @@ struct DeviceEmulationParams;
 
 namespace content {
 
+class BackForwardCacheCanStoreDocumentResult;
 class DevToolsAgentHostImpl;
 class FrameTreeNode;
 class NavigationRequest;
@@ -65,7 +65,8 @@ class PageHandler : public DevToolsDomainHandler,
  public:
   PageHandler(EmulationHandler* emulation_handler,
               BrowserHandler* browser_handler,
-              bool allow_unsafe_operations);
+              bool allow_unsafe_operations,
+              bool may_capture_screenshots_not_from_surface);
   ~PageHandler() override;
 
   static std::vector<PageHandler*> EnabledForWebContents(
@@ -84,19 +85,24 @@ class PageHandler : public DevToolsDomainHandler,
   using JavaScriptDialogCallback =
       content::JavaScriptDialogManager::DialogClosedCallback;
   void DidRunJavaScriptDialog(const GURL& url,
-                              const base::string16& message,
-                              const base::string16& default_prompt,
+                              const std::u16string& message,
+                              const std::u16string& default_prompt,
                               JavaScriptDialogType dialog_type,
                               bool has_non_devtools_handlers,
                               JavaScriptDialogCallback callback);
   void DidRunBeforeUnloadConfirm(const GURL& url,
                                  bool has_non_devtools_handlers,
                                  JavaScriptDialogCallback callback);
-  void DidCloseJavaScriptDialog(bool success, const base::string16& user_input);
+  void DidCloseJavaScriptDialog(bool success, const std::u16string& user_input);
   void NavigationReset(NavigationRequest* navigation_request);
   void DownloadWillBegin(FrameTreeNode* ftn, download::DownloadItem* item);
 
   WebContentsImpl* GetWebContents();
+
+  bool ShouldBypassCSP();
+  void BackForwardCacheNotUsed(
+      const NavigationRequest* nav_request,
+      const BackForwardCacheCanStoreDocumentResult* result);
 
   Response Enable() override;
   Response Disable() override;
@@ -174,8 +180,10 @@ class PageHandler : public DevToolsDomainHandler,
   void GetManifestIcons(
       std::unique_ptr<GetManifestIconsCallback> callback) override;
 
+  Response SetBypassCSP(bool enabled) override;
   Response AddCompilationCache(const std::string& url,
                                const Binary& data) override;
+
  private:
   enum EncodingFormat { PNG, JPEG };
 
@@ -197,12 +205,12 @@ class PageHandler : public DevToolsDomainHandler,
       const gfx::Size& original_view_size,
       const gfx::Size& requested_image_size,
       const blink::DeviceEmulationParams& original_params,
-      const base::Optional<blink::web_pref::WebPreferences>& original_web_prefs,
+      const absl::optional<blink::web_pref::WebPreferences>& original_web_prefs,
       const gfx::Image& image);
 
   void GotManifest(std::unique_ptr<GetAppManifestCallback> callback,
                    const GURL& manifest_url,
-                   const ::blink::Manifest& parsed_manifest,
+                   ::blink::mojom::ManifestPtr parsed_manifest,
                    blink::mojom::ManifestDebugInfoPtr debug_info);
 
   // RenderWidgetHostObserver overrides.
@@ -215,8 +223,10 @@ class PageHandler : public DevToolsDomainHandler,
   void OnDownloadDestroyed(download::DownloadItem* item) override;
 
   const bool allow_unsafe_operations_;
+  const bool may_capture_screenshots_not_from_surface_;
 
   bool enabled_;
+  bool bypass_csp_ = false;
 
   bool screencast_enabled_;
   std::string screencast_format_;
@@ -225,7 +235,7 @@ class PageHandler : public DevToolsDomainHandler,
   int screencast_max_height_;
   int capture_every_nth_frame_;
   int capture_retry_count_;
-  base::Optional<cc::RenderFrameMetadata> frame_metadata_;
+  absl::optional<cc::RenderFrameMetadata> frame_metadata_;
   int session_id_;
   int frame_counter_;
   int frames_in_flight_;
@@ -248,6 +258,7 @@ class PageHandler : public DevToolsDomainHandler,
   base::ScopedObservation<RenderWidgetHost, RenderWidgetHostObserver>
       observation_{this};
   JavaScriptDialogCallback pending_dialog_;
+  // Maps DevTools navigation tokens to pending NavigateCallbacks.
   base::flat_map<base::UnguessableToken, std::unique_ptr<NavigateCallback>>
       navigate_callbacks_;
   base::flat_set<download::DownloadItem*> pending_downloads_;

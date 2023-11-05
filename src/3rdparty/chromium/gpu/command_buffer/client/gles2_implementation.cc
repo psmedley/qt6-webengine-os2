@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -25,10 +26,9 @@
 #include "base/bits.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
+#include "base/cxx17_backports.h"
 #include "base/numerics/safe_math.h"
-#include "base/stl_util.h"
 #include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_allocator_dump.h"
@@ -290,7 +290,7 @@ gpu::ContextResult GLES2Implementation::Initialize(
                                                     helper_);
 
   for (int i = 0; i < static_cast<int>(IdNamespaces::kNumIdNamespaces); ++i)
-    id_allocators_[i].reset(new IdAllocator());
+    id_allocators_[i] = std::make_unique<IdAllocator>();
 
   if (support_client_side_arrays_) {
     GetIdHandler(SharedIdNamespaces::kBuffers)
@@ -298,9 +298,9 @@ gpu::ContextResult GLES2Implementation::Initialize(
                   &reserved_ids_[0]);
   }
 
-  vertex_array_object_manager_.reset(new VertexArrayObjectManager(
+  vertex_array_object_manager_ = std::make_unique<VertexArrayObjectManager>(
       capabilities_.max_vertex_attribs, reserved_ids_[0], reserved_ids_[1],
-      support_client_side_arrays_));
+      support_client_side_arrays_);
 
   // GL_BIND_GENERATES_RESOURCE_CHROMIUM state must be the same
   // on Client & Service.
@@ -387,7 +387,8 @@ void GLES2Implementation::OnGpuControlErrorMessage(const char* message,
 }
 
 void GLES2Implementation::OnGpuControlSwapBuffersCompleted(
-    const SwapBuffersCompleteParams& params) {
+    const SwapBuffersCompleteParams& params,
+    gfx::GpuFenceHandle release_fence) {
   auto found = pending_swap_callbacks_.find(params.swap_response.swap_id);
   if (found == pending_swap_callbacks_.end())
     return;
@@ -397,7 +398,7 @@ void GLES2Implementation::OnGpuControlSwapBuffersCompleted(
   auto callback = std::move(found->second);
   pending_swap_callbacks_.erase(found);
 
-  std::move(callback).Run(params);
+  std::move(callback).Run(params, std::move(release_fence));
 }
 
 void GLES2Implementation::OnGpuSwitched(
@@ -1530,6 +1531,9 @@ void GLES2Implementation::VerifySyncTokensCHROMIUM(GLbyte** sync_tokens,
 void GLES2Implementation::WaitSyncTokenCHROMIUM(const GLbyte* sync_token) {
   ImplementationBase::WaitSyncToken(sync_token);
 }
+void GLES2Implementation::ShallowFlushCHROMIUM() {
+  IssueShallowFlush();
+}
 
 // ImplementationBase implementation.
 void GLES2Implementation::IssueShallowFlush() {
@@ -1539,9 +1543,6 @@ void GLES2Implementation::IssueShallowFlush() {
   FlushHelper();
 }
 
-void GLES2Implementation::ShallowFlushCHROMIUM() {
-  IssueShallowFlush();
-}
 
 void GLES2Implementation::FlushHelper() {
   // Flush our command buffer
@@ -5133,16 +5134,20 @@ void GLES2Implementation::BindFramebufferHelper(GLenum target,
       }
       break;
     case GL_READ_FRAMEBUFFER:
+#if EXPENSIVE_DCHECKS_ARE_ON()
       DCHECK(capabilities_.major_version >= 3 ||
              IsChromiumFramebufferMultisampleAvailable());
+#endif
       if (bound_read_framebuffer_ != framebuffer) {
         bound_read_framebuffer_ = framebuffer;
         changed = true;
       }
       break;
     case GL_DRAW_FRAMEBUFFER:
+#if EXPENSIVE_DCHECKS_ARE_ON()
       DCHECK(capabilities_.major_version >= 3 ||
              IsChromiumFramebufferMultisampleAvailable());
+#endif
       if (bound_framebuffer_ != framebuffer) {
         bound_framebuffer_ = framebuffer;
         changed = true;

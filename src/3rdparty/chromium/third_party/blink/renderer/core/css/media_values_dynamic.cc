@@ -16,7 +16,7 @@
 namespace blink {
 
 MediaValues* MediaValuesDynamic::Create(Document& document) {
-  return MediaValuesDynamic::Create(document.GetFrameOfTreeRootDocument());
+  return MediaValuesDynamic::Create(document.GetFrame());
 }
 
 MediaValues* MediaValuesDynamic::Create(LocalFrame* frame) {
@@ -91,6 +91,10 @@ float MediaValuesDynamic::DevicePixelRatio() const {
   return CalculateDevicePixelRatio(frame_);
 }
 
+bool MediaValuesDynamic::DeviceSupportsHDR() const {
+  return CalculateDeviceSupportsHDR(frame_);
+}
+
 int MediaValuesDynamic::ColorBitsPerComponent() const {
   return CalculateColorBitsPerComponent(frame_);
 }
@@ -158,7 +162,7 @@ bool MediaValuesDynamic::PrefersReducedData() const {
 }
 
 ForcedColors MediaValuesDynamic::GetForcedColors() const {
-  return CalculateForcedColors();
+  return CalculateForcedColors(frame_);
 }
 
 NavigationControls MediaValuesDynamic::GetNavigationControls() const {
@@ -169,8 +173,9 @@ ScreenSpanning MediaValuesDynamic::GetScreenSpanning() const {
   return CalculateScreenSpanning(frame_);
 }
 
-ScreenFoldPosture MediaValuesDynamic::GetScreenFoldPosture() const {
-  return CalculateScreenFoldPosture(frame_);
+device::mojom::blink::DevicePostureType MediaValuesDynamic::GetDevicePosture()
+    const {
+  return CalculateDevicePosture(frame_);
 }
 
 Document* MediaValuesDynamic::GetDocument() const {

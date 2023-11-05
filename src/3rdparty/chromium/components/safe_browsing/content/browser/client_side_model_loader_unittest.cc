@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -21,14 +22,15 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
 #include "components/safe_browsing/buildflags.h"
-#include "components/safe_browsing/core/features.h"
-#include "components/safe_browsing/core/proto/client_model.pb.h"
-#include "components/safe_browsing/core/proto/csd.pb.h"
+#include "components/safe_browsing/core/common/features.h"
+#include "components/safe_browsing/core/common/proto/client_model.pb.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/test/browser_task_environment.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -303,7 +305,7 @@ TEST_F(ModelLoaderTest, FetchModelTest) {
 
   // Model version number is decreasing.  Set the model version number of the
   // model that is currently loaded in the loader object to 11.
-  loader.model_.reset(new ClientSideModel(model));
+  loader.model_ = std::make_unique<ClientSideModel>(model);
   loader.model_->set_version(11);
   {
     base::RunLoop loop;
@@ -375,23 +377,25 @@ TEST_F(ModelLoaderTest, ModelNamesTest) {
   EXPECT_EQ(ModelLoader::FillInModelName(false, 5),
             "client_model_v5_variation_5.pb");
 
-  // No Finch setup. Should default to 4.
+  // No Finch setup. Should default to 9.
   std::unique_ptr<ModelLoader> loader;
-  loader.reset(new ModelLoader(base::RepeatingClosure(), nullptr,
-                               false /* is_extended_reporting */));
-  EXPECT_EQ(loader->name(), "client_model_v5_variation_6.pb");
+  loader = std::make_unique<ModelLoader>(base::RepeatingClosure(), nullptr,
+                                         false /* is_extended_reporting */);
+  EXPECT_EQ(loader->name(), "client_model_v5_variation_9.pb");
   EXPECT_EQ(loader->url_.spec(),
             "https://ssl.gstatic.com/safebrowsing/csd/"
-            "client_model_v5_variation_6.pb");
+            "client_model_v5_variation_9.pb");
 
   // Model 1, no extended reporting.
   SetFinchModelNumber(1);
-  loader.reset(new ModelLoader(base::RepeatingClosure(), nullptr, false));
+  loader =
+      std::make_unique<ModelLoader>(base::RepeatingClosure(), nullptr, false);
   EXPECT_EQ(loader->name(), "client_model_v5_variation_1.pb");
 
   // Model 2, with extended reporting.
   SetFinchModelNumber(2);
-  loader.reset(new ModelLoader(base::RepeatingClosure(), nullptr, true));
+  loader =
+      std::make_unique<ModelLoader>(base::RepeatingClosure(), nullptr, true);
   EXPECT_EQ(loader->name(), "client_model_v5_ext_variation_2.pb");
 }
 
@@ -430,17 +434,6 @@ TEST_F(ModelLoaderTest, ModelHasValidHashIds) {
 
   rule->set_feature(2, 1);
   EXPECT_TRUE(ModelLoader::ModelHasValidHashIds(model));
-}
-
-TEST_F(ModelLoaderTest, FetchesFromCacheAtStartup) {
-  ModelLoader model_loader(base::DoNothing(), shared_loader_factory(),
-                           /*is_extended_reporting=*/false);
-  ASSERT_NE(test_url_loader_factory()->GetPendingRequest(0), nullptr);
-
-  // Check the request does not use the network
-  int load_flags =
-      test_url_loader_factory()->GetPendingRequest(0)->request.load_flags;
-  EXPECT_NE((load_flags & net::LOAD_ONLY_FROM_CACHE), 0);
 }
 
 }  // namespace safe_browsing

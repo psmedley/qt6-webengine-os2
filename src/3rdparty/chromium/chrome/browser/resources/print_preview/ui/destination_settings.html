@@ -1,5 +1,5 @@
 <style include="print-preview-shared">
-<if expr="chromeos">
+<if expr="chromeos or lacros">
   :host([has-pin-setting_]) {
     margin-bottom: 0 !important;
   }
@@ -8,17 +8,15 @@
 <template is="dom-if" if="[[!cloudPrintDisabled_]]">
   <print-preview-user-manager id="userManager" active-user="{{activeUser_}}"
       cloud-print-disabled="[[cloudPrintDisabled_]]"
-      users="{{users_}}" destination-store="[[destinationStore_]]"
-      invitation-store="[[invitationStore_]]">
+      users="{{users_}}" destination-store="[[destinationStore_]]">
   </print-preview-user-manager>
 </template>
-<if expr="not chromeos">
+<if expr="not chromeos and not lacros">
   <print-preview-destination-select id="destinationSelect"
       active-user="[[activeUser_]]" dark="[[dark]]"
       destination="[[destination]]"
       disabled="[[shouldDisableDropdown_(
                       destinationState, state, disabled)]]"
-      drive-destination-key="[[driveDestinationKey_]]"
       loaded="[[loaded_]]"
       no-destinations="[[noDestinations_]]"
       pdf-printer-disabled="[[pdfPrinterDisabled_]]"
@@ -29,7 +27,6 @@
     <template>
       <print-preview-destination-dialog
           destination-store="[[destinationStore_]]"
-          invitation-store="[[invitationStore_]]"
           recent-destination-list="[[recentDestinationList_]]"
           active-user="[[activeUser_]]" users="[[users_]]"
           current-destination-account="[[destination.account]]"
@@ -38,7 +35,7 @@
     </template>
   </cr-lazy-render>
 </if>
-<if expr="chromeos">
+<if expr="chromeos or lacros">
   <print-preview-destination-select-cros id="destinationSelect"
       active-user="[[activeUser_]]" dark="[[dark]]"
       destination="[[destination]]"
@@ -55,7 +52,6 @@
     <template>
       <print-preview-destination-dialog-cros
           destination-store="[[destinationStore_]]"
-          invitation-store="[[invitationStore_]]"
           recent-destination-list="[[recentDestinationList_]]"
           active-user="[[activeUser_]]" users="[[users_]]"
           current-destination-account="[[destination.account]]"

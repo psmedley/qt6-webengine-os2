@@ -8,6 +8,7 @@ This PRESUBMIT guards against rolling a broken version of WPT tooling. It does
 some smoke checks of WPT functionality.
 """
 
+USE_PYTHON3 = True
 
 def _TestWPTLint(input_api, output_api):
   # We test 'wpt lint' by deferring to the web_tests/external presubmit test,
@@ -20,7 +21,8 @@ def _TestWPTLint(input_api, output_api):
     name='web_tests/external/PRESUBMIT_test.py',
     cmd=[abspath_to_test],
     kwargs={},
-    message=output_api.PresubmitError
+    message=output_api.PresubmitError,
+    python3=True
   )
   if input_api.verbose:
     print('Running ' + abspath_to_test)
@@ -35,7 +37,7 @@ def _TestWPTManifest(input_api, output_api):
 
   base_manifest = input_api.os_path.join(
       blink_path, 'web_tests', 'external', 'WPT_BASE_MANIFEST_8.json')
-  with input_api.CreateTemporaryFile() as f:
+  with input_api.CreateTemporaryFile(mode = 'wt') as f:
     f.write(input_api.ReadFile(base_manifest))
     f.close()
 
@@ -45,7 +47,7 @@ def _TestWPTManifest(input_api, output_api):
         blink_path, 'web_tests', 'external', 'wpt')
     try:
       input_api.subprocess.check_output(
-          ['python', wpt_exec_path, 'manifest', '--no-download',
+          ['python3', wpt_exec_path, 'manifest', '--no-download',
            '--path', f.name, '--tests-root', external_wpt])
     except input_api.subprocess.CalledProcessError as exc:
       return [output_api.PresubmitError('wpt manifest failed:', long_text=exc.output)]

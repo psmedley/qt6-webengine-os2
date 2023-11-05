@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.safeBrowsingPrivate.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: safeBrowsingPrivate */
 
@@ -83,7 +83,10 @@ chrome.safeBrowsingPrivate.ServerRedirect;
  *   navigationTimeMs: (number|undefined),
  *   serverRedirectChain: (!Array<!chrome.safeBrowsingPrivate.ServerRedirect>|undefined),
  *   navigationInitiation: (!chrome.safeBrowsingPrivate.NavigationInitiation|undefined),
- *   maybeLaunchedByExternalApp: (boolean|undefined)
+ *   maybeLaunchedByExternalApp: (boolean|undefined),
+ *   isSubframeUrlRemoved: (boolean|undefined),
+ *   isSubframeReferrerUrlRemoved: (boolean|undefined),
+ *   isUrlRemovedByPolicy: boolean
  * }}
  */
 chrome.safeBrowsingPrivate.ReferrerChainEntry;

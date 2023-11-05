@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/json/json_reader.h"
-#include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/values.h"
@@ -24,6 +23,7 @@
 #include "services/network/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 using testing::_;
 using testing::ByRef;
@@ -108,13 +108,14 @@ static RemoteConsentResolutionData CreateRemoteConsentResolutionData() {
       *net::CanonicalCookie::CreateSanitizedCookie(
           resolution_data.url, "test_name", "test_value", "test.com", "/",
           base::Time(), base::Time(), base::Time(), false, true,
-          net::CookieSameSite::LAX_MODE, net::COOKIE_PRIORITY_DEFAULT, false));
+          net::CookieSameSite::LAX_MODE, net::COOKIE_PRIORITY_DEFAULT, false,
+          absl::nullopt));
   resolution_data.cookies.push_back(
       *net::CanonicalCookie::CreateSanitizedCookie(
           resolution_data.url, "test_name2", "test_value2", "test.com", "/",
           base::Time(), base::Time(), base::Time(), false, false,
-          net::CookieSameSite::UNSPECIFIED, net::COOKIE_PRIORITY_DEFAULT,
-          false));
+          net::CookieSameSite::UNSPECIFIED, net::COOKIE_PRIORITY_DEFAULT, false,
+          absl::nullopt));
   return resolution_data;
 }
 
@@ -211,7 +212,7 @@ class OAuth2MintTokenFlowTest : public testing::Test {
 
   // Helper to parse the given string to base::Value.
   static std::unique_ptr<base::Value> ParseJson(const std::string& str) {
-    base::Optional<base::Value> value = base::JSONReader::Read(str);
+    absl::optional<base::Value> value = base::JSONReader::Read(str);
     EXPECT_TRUE(value.has_value());
     EXPECT_TRUE(value->is_dict());
     return std::make_unique<base::Value>(std::move(*value));

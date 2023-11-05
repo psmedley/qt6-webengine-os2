@@ -68,6 +68,20 @@ CONTENT_EXPORT void SetAttributeValueOf(const id node,
                                         NSString* attribute,
                                         id value);
 
+// Returns a list of actions supported on a given accessible node (either
+// AXUIElement or BrowserAccessibilityCocoa).
+CONTENT_EXPORT NSArray* ActionNamesOf(const id node);
+
+// Performs action on a given accessible node (either AXUIElement or
+// BrowserAccessibilityCocoa).
+CONTENT_EXPORT void PerformAction(const id node, NSString* action);
+
+//
+// Returns DOM id of a given node (either AXUIElement or
+// BrowserAccessibilityCocoa).
+//
+CONTENT_EXPORT std::string GetDOMId(const id node);
+
 //
 // Return AXElement in a tree by a given criteria.
 //
@@ -80,6 +94,9 @@ CONTENT_EXPORT AXUIElementRef FindAXUIElement(const AXUIElementRef node,
 //
 CONTENT_EXPORT std::pair<AXUIElementRef, int> FindAXUIElement(
     const AXTreeSelector&);
+
+AXUIElementRef FindAXWindowChild(AXUIElementRef parent,
+                                 const std::string& pattern);
 
 }  // namespace a11y
 }  // namespace content

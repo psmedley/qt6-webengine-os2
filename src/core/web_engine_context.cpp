@@ -42,11 +42,13 @@
 #include <math.h>
 
 #include "base/base_switches.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/run_loop.h"
+#include "base/strings/string_split.h"
 #include "base/task/post_task.h"
 #include "base/task/sequence_manager/thread_controller_with_message_pump_impl.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
@@ -77,7 +79,9 @@
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#if QT_CONFIG(webengine_pepper_plugins)
 #include "content/public/browser/plugin_service.h"
+#endif
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_features.h"
@@ -141,6 +145,7 @@
 #include <QNetworkProxy>
 #include <QtGui/qpa/qplatformintegration.h>
 #include <QtGui/private/qguiapplication_p.h>
+#include <QtQuick/private/qsgrhisupport_p.h>
 #include <QLoggingCategory>
 
 #if QT_CONFIG(opengl)
@@ -152,18 +157,8 @@ QT_END_NAMESPACE
 namespace QtWebEngineCore {
 
 #if QT_CONFIG(opengl)
-static bool usingANGLE()
-{
-#if defined(Q_OS_WIN)
-    if (qt_gl_global_share_context())
-        return qt_gl_global_share_context()->isOpenGLES();
-    return QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
-#else
-    return false;
-#endif
-}
 
-static bool usingDefaultSGBackend()
+static bool usingSupportedSGBackend()
 {
     if (QQuickWindow::graphicsApi() != QSGRendererInterface::OpenGL)
         return false;
@@ -185,7 +180,7 @@ static bool usingDefaultSGBackend()
     if (device.isEmpty())
         device = qEnvironmentVariable("QMLSCENE_DEVICE");
 
-    return device.isEmpty();
+    return device.isEmpty() || device == QLatin1String("rhi");
 }
 
 bool usingSoftwareDynamicGL()
@@ -203,52 +198,61 @@ bool usingSoftwareDynamicGL()
 #endif
 }
 
-static const char *getGLType(bool enableGLSoftwareRendering)
+static bool openGLPlatformSupport()
 {
-    const char *glType = nullptr;
-    const bool tryGL = (usingDefaultSGBackend() && !usingSoftwareDynamicGL()
-                        && QGuiApplicationPrivate::platformIntegration()->hasCapability(
-                                QPlatformIntegration::OpenGL))
-            || enableGLSoftwareRendering;
-    if (tryGL) {
-        if (!qt_gl_global_share_context() || !qt_gl_global_share_context()->isValid()) {
-            qWarning("WebEngineContext used before QtWebEngineCore::initialize() or OpenGL context "
-                     "creation failed.");
-        } else {
-            const QSurfaceFormat sharedFormat = qt_gl_global_share_context()->format();
-            switch (sharedFormat.renderableType()) {
-            case QSurfaceFormat::OpenGL:
-                glType = gl::kGLImplementationDesktopName;
-                // Check if Core profile was requested and is supported.
-                if (sharedFormat.profile() == QSurfaceFormat::CoreProfile) {
-#ifdef Q_OS_MACOS
-                    glType = gl::kGLImplementationCoreProfileName;
+    return QGuiApplicationPrivate::platformIntegration()->hasCapability(
+            QPlatformIntegration::OpenGL);
+}
+
+static const char *getGLType(bool enableGLSoftwareRendering, bool disableGpu)
+{
+    const char *glType = gl::kGLImplementationDisabledName;
+    const bool tryGL =
+            usingSupportedSGBackend() && !usingSoftwareDynamicGL() && openGLPlatformSupport();
+
+    if (disableGpu || (!tryGL && !enableGLSoftwareRendering))
+        return glType;
+
+    if (!qt_gl_global_share_context() || !qt_gl_global_share_context()->isValid()) {
+        qWarning("WebEngineContext used before QtWebEngineCore::initialize() or OpenGL context "
+                 "creation failed.");
+        return glType;
+    }
+
+    const QSurfaceFormat sharedFormat = qt_gl_global_share_context()->format();
+
+    switch (sharedFormat.renderableType()) {
+    case QSurfaceFormat::OpenGL:
+        if (sharedFormat.profile() == QSurfaceFormat::CoreProfile) {
+#if defined(Q_OS_MACOS)
+            // Chromium supports core profile only on mac
+            glType = gl::kGLImplementationCoreProfileName;
 #else
-                    qWarning("An OpenGL Core Profile was requested, but it is not supported "
-                             "on the current platform. Falling back to a non-Core profile. "
-                             "Note that this might cause rendering issues.");
+            glType = gl::kGLImplementationDesktopName;
+            qWarning("An OpenGL Core Profile was requested, but it is not supported "
+                     "on the current platform. Falling back to a non-Core profile. "
+                     "Note that this might cause rendering issues.");
 #endif
-                }
-                break;
-            case QSurfaceFormat::OpenGLES:
-                glType = usingANGLE() ? gl::kGLImplementationANGLEName
-                                      : gl::kGLImplementationEGLName;
-                break;
-            case QSurfaceFormat::OpenVG:
-            case QSurfaceFormat::DefaultRenderableType:
-            default:
-                // Shared contex created but no rederable type set.
-                qWarning("Unsupported rendering surface format. Please open bug report at "
-                         "https://bugreports.qt.io");
-            }
+        } else {
+            glType = gl::kGLImplementationDesktopName;
         }
+        break;
+    case QSurfaceFormat::OpenGLES:
+        glType = gl::kGLImplementationEGLName;
+        break;
+    case QSurfaceFormat::OpenVG:
+    case QSurfaceFormat::DefaultRenderableType:
+    default:
+        // Shared contex created but no rederable type set.
+        qWarning("Unsupported rendering surface format. Please open bug report at "
+                 "https://bugreports.qt.io");
     }
     return glType;
 }
 #else
-static const char *getGLType(bool enableGLSoftwareRendering)
+static const char *getGLType(bool enableGLSoftwareRendering, bool disableGpu)
 {
-    return nullptr;
+    return gl::kGLImplementationDisabledName;
 }
 #endif // QT_CONFIG(opengl)
 
@@ -274,17 +278,20 @@ static void logContext(const char *glType, base::CommandLine *cmd)
             params << " * " << toQt(pair.first)
                    << toQt(pair.second) << "\n";
         qCInfo(webEngineContextLog,
-               "\n\nGLImplementation: %s\n"
+               "\n\nGL Type: %s\n"
                "Surface Type: %s\n"
                "Surface Profile: %s\n"
                "Surface Version: %d.%d\n"
-               "Using Default SG Backend: %s\n"
+               "QSG RHI Backend: %s\n"
+               "Using Supported QSG Backend: %s\n"
                "Using Software Dynamic GL: %s\n"
-               "Using Angle: %s\n\n"
+               "Using Multithreaded OpenGL: %s\n\n"
                "Init Parameters:\n %s",
                glType, type, profile, sharedFormat.majorVersion(), sharedFormat.minorVersion(),
-               usingDefaultSGBackend() ? "yes" : "no", usingSoftwareDynamicGL() ? "yes" : "no",
-               usingANGLE() ? "yes" : "no", qPrintable(params.join(" ")));
+               qUtf8Printable(QSGRhiSupport::instance()->rhiBackendName()),
+               usingSupportedSGBackend() ? "yes" : "no", usingSoftwareDynamicGL() ? "yes" : "no",
+               !WebEngineContext::isGpuServiceOnUIThread() ? "yes" : "no",
+               qPrintable(params.join(" ")));
 #else
 #ifndef Q_OS_OS2 // We dont' have opengl on OS/2, so suppress the warning
         qCInfo(webEngineContextLog) << "WebEngine compiled with no opengl enabled.";
@@ -316,26 +323,14 @@ static void setupProxyPac(base::CommandLine *commandLine)
     }
 }
 
-static bool waitForViz = false;
-static void completeVizCleanup()
-{
-    waitForViz = false;
-}
-
 static void cleanupVizProcess()
 {
     auto gpuChildThread = content::GpuChildThread::instance();
     if (!gpuChildThread)
         return;
-    auto vizMain = gpuChildThread->viz_main();
-    auto vizCompositorThreadRunner = vizMain->viz_compositor_thread_runner();
-    if (!vizCompositorThreadRunner)
-        return;
-    waitForViz = true;
     content::GetHostFrameSinkManager()->SetConnectionLostCallback(base::DoNothing());
     auto factory = static_cast<content::VizProcessTransportFactory*>(content::ImageTransportFactory::GetInstance());
     factory->PrepareForShutDown();
-    vizCompositorThreadRunner->CleanupForShutdown(base::BindOnce(&completeVizCleanup));
 }
 
 static QStringList parseEnvCommandLine(const QString &cmdLine)
@@ -448,10 +443,6 @@ void WebEngineContext::destroy()
     // on IO thread (triggered by ~BrowserMainRunner). But by that time the UI
     // task runner is not working anymore so we need to do this earlier.
     cleanupVizProcess();
-    while (waitForViz) {
-        flushMessages();
-        QThread::msleep(50);
-    }
     destroyGpuProcess();
     // Flush the UI message loop before quitting.
     flushMessages();
@@ -700,6 +691,8 @@ WebEngineContext::WebEngineContext()
         parsedCommandLine->AppendSwitch(sandbox::policy::switches::kNoSandbox);
         qInfo() << "Sandboxing disabled by user.";
     }
+    // Do not try to be clever with device-scale-factor, it messes up scaling in accessibility for us
+    parsedCommandLine->AppendSwitchASCII(switches::kEnableUseZoomForDSF, "false");
 
     parsedCommandLine->AppendSwitch(switches::kEnableThreadedCompositing);
 
@@ -711,8 +704,6 @@ WebEngineContext::WebEngineContext()
 
     enableFeatures.push_back(features::kNetworkServiceInProcess.name);
     enableFeatures.push_back(features::kTracingServiceInProcess.name);
-
-    disableFeatures.push_back(network::features::kDnsOverHttpsUpgrade.name);
 
     // When enabled, event.movement is calculated in blink instead of in browser.
     disableFeatures.push_back(features::kConsolidatedMovementXY.name);
@@ -744,16 +735,18 @@ WebEngineContext::WebEngineContext()
     // performant, but at least provides WebGL support.
     // TODO(miklocek), check if this still works with latest chromium
     const bool enableGLSoftwareRendering = appArgs.contains(QStringLiteral("--enable-webgl-software-rendering"));
-    const char *glType = getGLType(enableGLSoftwareRendering);
+    const bool disableGpu = parsedCommandLine->HasSwitch(switches::kDisableGpu);
+    const char *glType = getGLType(enableGLSoftwareRendering, disableGpu);
 
-    if (glType) {
-#if QT_CONFIG(opengl)
-        parsedCommandLine->AppendSwitchASCII(switches::kUseGL, glType);
-        parsedCommandLine->AppendSwitch(switches::kInProcessGPU);
+    parsedCommandLine->AppendSwitchASCII(switches::kUseGL, glType);
+    parsedCommandLine->AppendSwitch(switches::kInProcessGPU);
+
+    if (glType != gl::kGLImplementationDisabledName) {
         if (enableGLSoftwareRendering) {
             parsedCommandLine->AppendSwitch(switches::kDisableGpuRasterization);
             parsedCommandLine->AppendSwitch(switches::kIgnoreGpuBlocklist);
         }
+#if QT_CONFIG(opengl)
         const QSurfaceFormat sharedFormat = QOpenGLContext::globalShareContext()->format();
         if (sharedFormat.profile() == QSurfaceFormat::CompatibilityProfile)
             parsedCommandLine->AppendSwitch(switches::kCreateDefaultGLContext);
@@ -763,22 +756,12 @@ WebEngineContext::WebEngineContext()
         // Core Profile context, even if Qt uses a legacy profile, which causes
         // "Could not share GL contexts" warnings, because it's not possible to share between Core and
         // legacy profiles. See GLContextWGL::Initialize().
-        // Given that Desktop GL Core profile is not currently supported on Windows anyway, pass this
-        // switch to get rid of the warnings.
-        //
-        // The switch is also used to determine which version of OpenGL ES to use (2 or 3) when using
-        // ANGLE.
-        // If the switch is not set, Chromium will always try to create an ES3 context, even if Qt uses
-        // an ES2 context, which causes resource sharing issues (black screen),
-        // see gpu::gles2::GenerateGLContextAttribs().
-        // Make sure to disable ES3 context creation when using ES2.
-        const bool isGLES2Context = QOpenGLContext::globalShareContext()->isOpenGLES()
-            && QOpenGLContext::globalShareContext()->format().majorVersion() == 2;
-        if (!usingANGLE() || isGLES2Context)
+        if (sharedFormat.renderableType() == QSurfaceFormat::OpenGL
+            && sharedFormat.profile() != QSurfaceFormat::CoreProfile)
             parsedCommandLine->AppendSwitch(switches::kDisableES3GLContext);
 #endif
 #endif //QT_CONFIG(opengl)
-    } else {
+    } else if (!disableGpu) {
         parsedCommandLine->AppendSwitch(switches::kDisableGpu);
     }
 
@@ -802,8 +785,8 @@ WebEngineContext::WebEngineContext()
     mojoConfiguration.is_broker_process = true;
     mojo::core::Init(mojoConfiguration);
 
-    // This block mirrors ContentMainRunnerImpl::RunServiceManager():
-    m_mainDelegate->PreCreateMainMessageLoop();
+    // This block mirrors ContentMainRunnerImpl::RunBrowser():
+    m_mainDelegate->PreBrowserMain();
     base::MessagePump::OverrideMessagePumpForUIFactory(messagePumpFactory);
     content::BrowserTaskExecutor::Create();
     m_mainDelegate->PostEarlyInitialization(false);
@@ -837,11 +820,6 @@ WebEngineContext::WebEngineContext()
 
     base::ThreadRestrictions::SetIOAllowed(true);
 
-    if (parsedCommandLine->HasSwitch(network::switches::kExplicitlyAllowedPorts)) {
-        std::string allowedPorts = parsedCommandLine->GetSwitchValueASCII(network::switches::kExplicitlyAllowedPorts);
-        net::SetExplicitlyAllowedPorts(allowedPorts);
-    }
-
 #if defined(OS_LINUX)
     media::AudioManager::SetGlobalAppName(QCoreApplication::applicationName().toStdString());
 #endif
@@ -853,7 +831,7 @@ WebEngineContext::WebEngineContext()
     // be created from the FILE thread, and that GetPluginInfoArray is synchronous, it
     // can't loads plugins synchronously from the IO thread to serve the render process' request
     // and we need to make sure that it happened beforehand.
-    content::PluginService::GetInstance()->GetPlugins(base::Bind(&dummyGetPluginCallback));
+    content::PluginService::GetInstance()->GetPlugins(base::BindOnce(&dummyGetPluginCallback));
 #endif
 
 #if QT_CONFIG(webengine_printing_and_pdf)
@@ -915,7 +893,7 @@ base::CommandLine* WebEngineContext::commandLine() {
         argv.resize(appArgs.size());
 #if defined(Q_OS_WIN)
         for (int i = 0; i < appArgs.size(); ++i)
-            argv[i] = toString16(appArgs[i]);
+            argv[i] = appArgs[i].toStdWString();
 #else
         for (int i = 0; i < appArgs.size(); ++i)
             argv[i] = appArgs[i].toStdString();
@@ -935,29 +913,18 @@ bool WebEngineContext::closingDown()
 } // namespace
 
 QT_BEGIN_NAMESPACE
-/*!
-    \relates <qtwebenginecoreglobal.h>
-    \since 6.2
-
-    Returns the version number of Qt WebEngine at run-time as a string
-    (for example, "6.2.0"). This may be a different version than the
-    version the application was compiled against, and a different version
-    than Qt.
-*/
 const char *qWebEngineVersion() noexcept
 {
     return QTWEBENGINECORE_VERSION_STR;
 }
 
-/*!
-    \relates <qtwebenginecoreglobal.h>
-    \since 6.2
-
-    Returns the version number of Chromium used by Qt WebEngine at run-time
-    as a string (for example, "83.0.4103.122").
-*/
 const char *qWebEngineChromiumVersion() noexcept
 {
     return CHROMIUM_VERSION;
 }
+const char *qWebEngineChromiumSecurityPatchVersion() noexcept
+{
+    return "104.0.5112.81"; // FIXME: Remember to update
+}
+
 QT_END_NAMESPACE

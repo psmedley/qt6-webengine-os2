@@ -28,58 +28,59 @@ namespace dawn_native {
     namespace {
 
         // Assert the offsets in dawn_native::TimestampParams are same with the ones in the shader
-        static_assert(offsetof(dawn_native::TimestampParams, count) == 0, "");
-        static_assert(offsetof(dawn_native::TimestampParams, offset) == 4, "");
-        static_assert(offsetof(dawn_native::TimestampParams, period) == 8, "");
+        static_assert(offsetof(dawn_native::TimestampParams, first) == 0, "");
+        static_assert(offsetof(dawn_native::TimestampParams, count) == 4, "");
+        static_assert(offsetof(dawn_native::TimestampParams, offset) == 8, "");
+        static_assert(offsetof(dawn_native::TimestampParams, period) == 12, "");
 
         static const char sConvertTimestampsToNanoseconds[] = R"(
             struct Timestamp {
-                [[offset(0)]] low  : u32;
-                [[offset(4)]] high : u32;
+                low  : u32;
+                high : u32;
             };
 
             [[block]] struct TimestampArr {
-                [[offset(0)]] t : [[stride(8)]] array<Timestamp>;
+                t : array<Timestamp>;
             };
 
             [[block]] struct AvailabilityArr {
-                [[offset(0)]] v : [[stride(4)]] array<u32>;
+                v : array<u32>;
             };
 
             [[block]] struct TimestampParams {
-                [[offset(0)]]  count  : u32;
-                [[offset(4)]]  offset : u32;
-                [[offset(8)]]  period : f32;
+                first  : u32;
+                count  : u32;
+                offset : u32;
+                period : f32;
             };
 
             [[group(0), binding(0)]]
-                var<storage_buffer> timestamps : [[access(read_write)]] TimestampArr;
+                var<storage, read_write> timestamps : TimestampArr;
             [[group(0), binding(1)]]
-                var<storage_buffer> availability : [[access(read)]] AvailabilityArr;
+                var<storage, read> availability : AvailabilityArr;
             [[group(0), binding(2)]] var<uniform> params : TimestampParams;
 
-            [[builtin(global_invocation_id)]] var<in> GlobalInvocationID : vec3<u32>;
 
-            const sizeofTimestamp : u32 = 8u;
+            let sizeofTimestamp : u32 = 8u;
 
             [[stage(compute), workgroup_size(8, 1, 1)]]
-            fn main() -> void {
+            fn main([[builtin(global_invocation_id)]] GlobalInvocationID : vec3<u32>) {
                 if (GlobalInvocationID.x >= params.count) { return; }
 
-                var index : u32 = GlobalInvocationID.x + params.offset / sizeofTimestamp;
+                var index = GlobalInvocationID.x + params.offset / sizeofTimestamp;
 
-                var timestamp : Timestamp = timestamps.t[index];
+                var timestamp = timestamps.t[index];
 
                 // Return 0 for the unavailable value.
-                if (availability.v[index] == 0u) {
+                if (availability.v[GlobalInvocationID.x + params.first] == 0u) {
                     timestamps.t[index].low = 0u;
                     timestamps.t[index].high = 0u;
                     return;
                 }
 
                 // Multiply the values in timestamps buffer by the period.
-                var period : f32 = params.period;
-                var w : u32 = 0u;
+                var period = params.period;
+                var w = 0u;
 
                 // If the product of low 32-bits and the period does not exceed the maximum of u32,
                 // directly do the multiplication, otherwise, use two u32 to represent the high
@@ -87,15 +88,15 @@ namespace dawn_native {
                 if (timestamp.low <= u32(f32(0xFFFFFFFFu) / period)) {
                     timestamps.t[index].low = u32(round(f32(timestamp.low) * period));
                 } else {
-                    var lo : u32 = timestamp.low & 0xFFFF;
-                    var hi : u32 = timestamp.low >> 16;
+                    var lo = timestamp.low & 0xFFFFu;
+                    var hi = timestamp.low >> 16u;
 
-                    var t0 : u32 = u32(round(f32(lo) * period));
-                    var t1 : u32 = u32(round(f32(hi) * period)) + (t0 >> 16);
-                    w = t1 >> 16;
+                    var t0 = u32(round(f32(lo) * period));
+                    var t1 = u32(round(f32(hi) * period)) + (t0 >> 16u);
+                    w = t1 >> 16u;
 
-                    var result : u32 = t1 << 16;
-                    result = result | (t0 & 0xFFFF);
+                    var result = t1 << 16u;
+                    result = result | (t0 & 0xFFFFu);
                     timestamps.t[index].low = result;
                 }
 
@@ -105,7 +106,8 @@ namespace dawn_native {
             }
         )";
 
-        ComputePipelineBase* GetOrCreateTimestampComputePipeline(DeviceBase* device) {
+        ResultOrError<ComputePipelineBase*> GetOrCreateTimestampComputePipeline(
+            DeviceBase* device) {
             InternalPipelineStore* store = device->GetInternalPipelineStore();
 
             if (store->timestampComputePipeline == nullptr) {
@@ -116,18 +118,41 @@ namespace dawn_native {
                     wgslDesc.source = sConvertTimestampsToNanoseconds;
                     descriptor.nextInChain = reinterpret_cast<ChainedStruct*>(&wgslDesc);
 
-                    store->timestampCS = AcquireRef(device->CreateShaderModule(&descriptor));
+                    DAWN_TRY_ASSIGN(store->timestampCS, device->CreateShaderModule(&descriptor));
                 }
+
+                // Create binding group layout
+                std::array<BindGroupLayoutEntry, 3> entries = {};
+                for (uint32_t i = 0; i < entries.size(); i++) {
+                    entries[i].binding = i;
+                    entries[i].visibility = wgpu::ShaderStage::Compute;
+                }
+                entries[0].buffer.type = kInternalStorageBufferBinding;
+                entries[1].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+                entries[2].buffer.type = wgpu::BufferBindingType::Uniform;
+
+                BindGroupLayoutDescriptor bglDesc;
+                bglDesc.entryCount = static_cast<uint32_t>(entries.size());
+                bglDesc.entries = entries.data();
+                Ref<BindGroupLayoutBase> bgl;
+                DAWN_TRY_ASSIGN(bgl, device->CreateBindGroupLayout(&bglDesc, true));
+
+                // Create pipeline layout
+                PipelineLayoutDescriptor plDesc;
+                plDesc.bindGroupLayoutCount = 1;
+                plDesc.bindGroupLayouts = &bgl.Get();
+                Ref<PipelineLayoutBase> layout;
+                DAWN_TRY_ASSIGN(layout, device->CreatePipelineLayout(&plDesc));
 
                 // Create ComputePipeline.
                 ComputePipelineDescriptor computePipelineDesc = {};
                 // Generate the layout based on shader module.
-                computePipelineDesc.layout = nullptr;
-                computePipelineDesc.computeStage.module = store->timestampCS.Get();
-                computePipelineDesc.computeStage.entryPoint = "main";
+                computePipelineDesc.layout = layout.Get();
+                computePipelineDesc.compute.module = store->timestampCS.Get();
+                computePipelineDesc.compute.entryPoint = "main";
 
-                store->timestampComputePipeline =
-                    AcquireRef(device->CreateComputePipeline(&computePipelineDesc));
+                DAWN_TRY_ASSIGN(store->timestampComputePipeline,
+                                device->CreateComputePipeline(&computePipelineDesc));
             }
 
             return store->timestampComputePipeline.Get();
@@ -135,16 +160,18 @@ namespace dawn_native {
 
     }  // anonymous namespace
 
-    void EncodeConvertTimestampsToNanoseconds(CommandEncoder* encoder,
-                                              BufferBase* timestamps,
-                                              BufferBase* availability,
-                                              BufferBase* params) {
+    MaybeError EncodeConvertTimestampsToNanoseconds(CommandEncoder* encoder,
+                                                    BufferBase* timestamps,
+                                                    BufferBase* availability,
+                                                    BufferBase* params) {
         DeviceBase* device = encoder->GetDevice();
 
-        ComputePipelineBase* pipeline = GetOrCreateTimestampComputePipeline(device);
+        ComputePipelineBase* pipeline;
+        DAWN_TRY_ASSIGN(pipeline, GetOrCreateTimestampComputePipeline(device));
 
         // Prepare bind group layout.
-        Ref<BindGroupLayoutBase> layout = AcquireRef(pipeline->GetBindGroupLayout(0));
+        Ref<BindGroupLayoutBase> layout;
+        DAWN_TRY_ASSIGN(layout, pipeline->GetBindGroupLayout(0));
 
         // Prepare bind group descriptor
         std::array<BindGroupEntry, 3> bindGroupEntries = {};
@@ -165,15 +192,20 @@ namespace dawn_native {
         bindGroupEntries[2].size = params->GetSize();
 
         // Create bind group after all binding entries are set.
-        Ref<BindGroupBase> bindGroup = AcquireRef(device->CreateBindGroup(&bgDesc));
+        Ref<BindGroupBase> bindGroup;
+        DAWN_TRY_ASSIGN(bindGroup, device->CreateBindGroup(&bgDesc));
 
         // Create compute encoder and issue dispatch.
         ComputePassDescriptor passDesc = {};
-        Ref<ComputePassEncoder> pass = AcquireRef(encoder->BeginComputePass(&passDesc));
-        pass->SetPipeline(pipeline);
-        pass->SetBindGroup(0, bindGroup.Get());
-        pass->Dispatch(static_cast<uint32_t>((timestamps->GetSize() / sizeof(uint64_t) + 7) / 8));
-        pass->EndPass();
+        // TODO(dawn:723): change to not use AcquireRef for reentrant object creation.
+        Ref<ComputePassEncoder> pass = AcquireRef(encoder->APIBeginComputePass(&passDesc));
+        pass->APISetPipeline(pipeline);
+        pass->APISetBindGroup(0, bindGroup.Get());
+        pass->APIDispatch(
+            static_cast<uint32_t>((timestamps->GetSize() / sizeof(uint64_t) + 7) / 8));
+        pass->APIEndPass();
+
+        return {};
     }
 
 }  // namespace dawn_native

@@ -7,9 +7,9 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/numerics/ranges.h"
+#include "base/cxx17_backports.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
+#include "ui/base/clipboard/clipboard.h"
 #include "ui/events/event.h"
 #include "ui/gfx/render_text.h"
 #include "ui/views/metrics.h"
@@ -23,12 +23,11 @@ SelectionController::SelectionController(SelectionControllerDelegate* delegate)
     : aggregated_clicks_(0),
       delegate_(delegate),
       handles_selection_clipboard_(false) {
-// On Linux, update the selection clipboard on a text selection.
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
-  set_handles_selection_clipboard(true);
-#endif
+  // If selection clipboard is used, update it on a text selection.
+  if (ui::Clipboard::IsSupportedClipboardBuffer(
+          ui::ClipboardBuffer::kSelection)) {
+    set_handles_selection_clipboard(true);
+  }
 
   DCHECK(delegate);
 }
@@ -120,7 +119,7 @@ bool SelectionController::OnMouseDragged(const ui::MouseEvent& event) {
     SelectThroughLastDragLocation();
   } else if (!drag_selection_timer_.IsRunning()) {
     // Select through the edge of the visible text, then start the scroll timer.
-    last_drag_location_.set_x(base::ClampToRange(x, 0, width));
+    last_drag_location_.set_x(base::clamp(x, 0, width));
     SelectThroughLastDragLocation();
 
     drag_selection_timer_.Start(

@@ -4,6 +4,7 @@
 
 #import "ui/views/controls/menu/menu_runner_impl_cocoa.h"
 
+#include "base/i18n/rtl.h"
 #include "base/mac/mac_util.h"
 #import "base/message_loop/message_pump_mac.h"
 #import "skia/ext/skia_utils_mac.h"
@@ -197,9 +198,7 @@ NSMutableAttributedString* MutableAttributedStringForMenuItemTitleString(
 - (void)controllerWillAddItem:(NSMenuItem*)menuItem
                     fromModel:(ui::MenuModel*)model
                       atIndex:(NSInteger)index {
-  static const bool newBadgeFeatureEnabled =
-      base::FeatureList::IsEnabled(views::features::kEnableNewBadgeOnMenuItems);
-  if (newBadgeFeatureEnabled && model->IsNewFeatureAt(index)) {
+  if (model->IsNewFeatureAt(index)) {
     // /!\ WARNING /!\ Do not update this to use NSTextAttachment.image until
     // macOS 10.15 is the minimum required OS. See the details on the class
     // comment above.
@@ -397,7 +396,8 @@ void MenuRunnerImplCocoa::RunMenuAt(Widget* parent,
                                     MenuButtonController* button_controller,
                                     const gfx::Rect& bounds,
                                     MenuAnchorPosition anchor,
-                                    int32_t run_types) {
+                                    int32_t run_types,
+                                    gfx::NativeView native_view_for_gestures) {
   DCHECK(!IsRunning());
   DCHECK(parent);
   closing_event_time_ = base::TimeTicks();

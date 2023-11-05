@@ -16,6 +16,7 @@
 #include "net/base/request_priority.h"
 #include "net/dns/public/secure_dns_mode.h"
 #include "net/dns/record_rdata.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -87,7 +88,7 @@ class NET_EXPORT_PRIVATE DnsTransactionFactory {
   typedef base::OnceCallback<void(DnsTransaction* transaction,
                                   int neterror,
                                   const DnsResponse* response,
-                                  base::Optional<std::string> doh_provider_id)>
+                                  absl::optional<std::string> doh_provider_id)>
       CallbackType;
 
   DnsTransactionFactory();
@@ -111,7 +112,7 @@ class NET_EXPORT_PRIVATE DnsTransactionFactory {
   // and it would be beneficial to move on to those options sooner on signals
   // that the transaction is potentially slow or problematic.
   virtual std::unique_ptr<DnsTransaction> CreateTransaction(
-      const std::string& hostname,
+      std::string hostname,
       uint16_t qtype,
       CallbackType callback,
       const NetLogWithSource& net_log,

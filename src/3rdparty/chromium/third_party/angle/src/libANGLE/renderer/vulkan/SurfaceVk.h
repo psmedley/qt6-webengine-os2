@@ -88,7 +88,8 @@ class OffscreenSurfaceVk : public SurfaceVk
                                  EGLint height,
                                  const vk::Format &vkFormat,
                                  GLint samples,
-                                 bool isRobustResourceInitEnabled);
+                                 bool isRobustResourceInitEnabled,
+                                 bool hasProtectedContent);
 
         angle::Result initializeWithExternalMemory(DisplayVk *displayVk,
                                                    EGLint width,
@@ -96,7 +97,8 @@ class OffscreenSurfaceVk : public SurfaceVk
                                                    const vk::Format &vkFormat,
                                                    GLint samples,
                                                    void *buffer,
-                                                   bool isRobustResourceInitEnabled);
+                                                   bool isRobustResourceInitEnabled,
+                                                   bool hasProtectedContent);
 
         void destroy(const egl::Display *display);
 
@@ -168,6 +170,7 @@ struct SwapchainImage : angle::NonCopyable
     static constexpr size_t kPresentHistorySize = kSwapHistorySize + 1;
     std::array<ImagePresentHistory, kPresentHistorySize> presentHistory;
     size_t currentPresentHistoryIndex = 0;
+    uint64_t mFrameNumber             = 0;
 };
 }  // namespace impl
 
@@ -234,7 +237,7 @@ class WindowSurfaceVk : public SurfaceVk
 
     vk::Semaphore getAcquireImageSemaphore();
 
-    VkSurfaceTransformFlagBitsKHR getPreTransform()
+    VkSurfaceTransformFlagBitsKHR getPreTransform() const
     {
         if (mEmulatedPreTransform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
         {
@@ -242,6 +245,8 @@ class WindowSurfaceVk : public SurfaceVk
         }
         return mPreTransform;
     }
+
+    egl::Error getBufferAge(const gl::Context *context, EGLint *age) override;
 
   protected:
     angle::Result swapImpl(const gl::Context *context,
@@ -252,6 +257,7 @@ class WindowSurfaceVk : public SurfaceVk
     EGLNativeWindowType mNativeWindowType;
     VkSurfaceKHR mSurface;
     VkSurfaceCapabilitiesKHR mSurfaceCaps;
+    VkBool32 mSupportsProtectedSwapchain;
 
   private:
     virtual angle::Result createSurfaceVk(vk::Context *context, gl::Extents *extentsOut)      = 0;
@@ -340,6 +346,9 @@ class WindowSurfaceVk : public SurfaceVk
 
     // True when acquiring the next image is deferred.
     bool mNeedToAcquireNextSwapchainImage;
+
+    // EGL_EXT_buffer_age: Track frame count.
+    uint64_t mFrameCount;
 };
 
 }  // namespace rx

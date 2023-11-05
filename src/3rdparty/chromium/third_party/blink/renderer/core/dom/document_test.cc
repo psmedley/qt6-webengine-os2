@@ -32,15 +32,14 @@
 
 #include <memory>
 
-#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/common/feature_policy/document_policy_features.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
+#include "third_party/blink/public/common/permissions_policy/document_policy_features.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/web/web_print_page_description.h"
 #include "third_party/blink/renderer/bindings/core/v8/isolated_world_csp.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
@@ -107,6 +106,16 @@ class DocumentTest : public PageTestBase {
   }
 
   void SetHtmlInnerHTML(const char*);
+
+  void NavigateWithSandbox(const KURL& url) {
+    auto params = WebNavigationParams::CreateWithHTMLStringForTesting(
+        /*html=*/"", url);
+    params->sandbox_flags = network::mojom::blink::WebSandboxFlags::kAll;
+    GetFrame().Loader().CommitNavigation(std::move(params),
+                                         /*extra_data=*/nullptr);
+    test::RunPendingTasks();
+    ASSERT_EQ(url.GetString(), GetDocument().Url().GetString());
+  }
 };
 
 void DocumentTest::SetHtmlInnerHTML(const char* html_content) {
@@ -774,8 +783,7 @@ TEST_F(DocumentTest, ValidationMessageCleanup) {
 }
 
 TEST_F(DocumentTest, SandboxDisablesAppCache) {
-  NavigateTo(KURL("https://test.com/foobar/document"),
-             {{http_names::kContentSecurityPolicy, "sandbox"}});
+  NavigateWithSandbox(KURL("https://test.com/foobar/document"));
 
   GetDocument().Loader()->SetApplicationCacheHostForTesting(
       MakeGarbageCollected<MockApplicationCacheHost>(GetDocument().Loader()));
@@ -856,8 +864,7 @@ TEST_F(DocumentTest, ViewportPropagationNoRecalc) {
 }
 
 TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
-  NavigateTo(KURL("https://www.example.com/"),
-             {{http_names::kContentSecurityPolicy, "sandbox"}});
+  NavigateWithSandbox(KURL("https://www.example.com/"));
 
   LocalFrame* frame = GetDocument().GetFrame();
   frame->GetSettings()->SetScriptEnabled(true);
@@ -1372,10 +1379,7 @@ class DocumentBatterySavingsTest : public PageTestBase,
 
   void SetUp() override {
     chrome_client_ = MakeGarbageCollected<BatterySavingsChromeClient>();
-    Page::PageClients page_clients;
-    FillWithEmptyClients(page_clients);
-    page_clients.chrome_client = chrome_client_;
-    SetupPageWithClients(&page_clients);
+    SetupPageWithClients(chrome_client_);
   }
 
   Persistent<BatterySavingsChromeClient> chrome_client_;
@@ -1390,18 +1394,16 @@ TEST_F(DocumentBatterySavingsTest, ChromeClientCalls) {
               BatterySavingsChanged(testing::_, kAllowReducedFrameRate))
       .Times(2);
 
-  EXPECT_FALSE(
-      GetDocument().Loader()->GetUseCounterHelper().HasRecordedMeasurement(
-          WebFeature::kBatterySavingsMeta));
+  EXPECT_FALSE(GetDocument().Loader()->GetUseCounter().IsCounted(
+      WebFeature::kBatterySavingsMeta));
 
   SetHtmlInnerHTML(R"HTML(
     <meta id="first" name="battery-savings" content="allow-reduced-framerate">
     <meta id="second" name="battery-savings" content="allow-reduced-script-speed">
   )HTML");
 
-  EXPECT_TRUE(
-      GetDocument().Loader()->GetUseCounterHelper().HasRecordedMeasurement(
-          WebFeature::kBatterySavingsMeta));
+  EXPECT_TRUE(GetDocument().Loader()->GetUseCounter().IsCounted(
+      WebFeature::kBatterySavingsMeta));
 
   // Remove the first meta causing the second to apply.
   EXPECT_CALL(*chrome_client_,

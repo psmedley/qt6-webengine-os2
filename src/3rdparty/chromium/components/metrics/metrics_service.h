@@ -13,7 +13,6 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -25,7 +24,6 @@
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "components/metrics/clean_exit_beacon.h"
 #include "components/metrics/delegating_provider.h"
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_log_manager.h"
@@ -44,7 +42,7 @@ FORWARD_DECLARE_TEST(IOSChromeMetricsServiceClientTest,
 namespace base {
 class HistogramSamples;
 class PrefService;
-}
+}  // namespace base
 
 namespace metrics {
 
@@ -136,17 +134,14 @@ class MetricsService : public base::HistogramFlattener {
   // Called when the application is coming out of background mode.
   void OnAppEnterForeground(bool force_open_new_log = false);
 #else
-  // Set the dirty flag, which will require a later call to LogCleanShutdown().
+  // Signals that the session has not yet exited cleanly. Calling this later
+  // requires a call to LogCleanShutdown().
   void LogNeedForCleanShutdown();
 #endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
   bool recording_active() const;
   bool reporting_active() const;
   bool has_unsent_logs() const;
-
-  // Redundant test to ensure that we are notified of a clean exit.
-  // This value should be true when process has completed shutdown.
-  static bool UmaMetricsProperlyShutdown();
 
   // Register the specified |provider| to provide additional metrics into the
   // UMA log. Should be called during MetricsService initialization only.
@@ -162,6 +157,17 @@ class MetricsService : public base::HistogramFlattener {
 
   // Clears the stability metrics that are saved in local state.
   void ClearSavedStabilityMetrics();
+
+#if defined(OS_CHROMEOS)
+  // Binds a user log store to store unsent logs. This log store will be
+  // fully managed by MetricsLogStore. This will no-op if another log store has
+  // already been set.
+  void SetUserLogStore(std::unique_ptr<UnsentLogStore> user_log_store);
+
+  // Unbinds the user log store. If there was no user log store, then this does
+  // nothing.
+  void UnsetUserLogStore();
+#endif
 
   variations::SyntheticTrialRegistry* synthetic_trial_registry() {
     return &synthetic_trial_registry_;
@@ -208,18 +214,13 @@ class MetricsService : public base::HistogramFlattener {
   State state() const { return state_; }
 
  private:
-  enum ShutdownCleanliness {
-    CLEANLY_SHUTDOWN = 0xdeadbeef,
-    NEED_TO_SHUTDOWN = ~CLEANLY_SHUTDOWN
-  };
-
   // The current state of recording for the MetricsService. The state is UNSET
   // until set to something else, at which point it remains INACTIVE or ACTIVE
   // for the lifetime of the object.
   enum RecordingState {
     INACTIVE,
     ACTIVE,
-    UNSET
+    UNSET,
   };
 
   // Gets the LogStore for UMA logs.
@@ -402,10 +403,6 @@ class MetricsService : public base::HistogramFlattener {
   // (false) was called.
   bool is_in_foreground_ = false;
 #endif
-
-  // Redundant marker to check that we completed our shutdown, and set the
-  // exited-cleanly bit in the prefs.
-  static ShutdownCleanliness clean_shutdown_status_;
 
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ActiveFieldTrialsReported);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, IsPluginProcess);

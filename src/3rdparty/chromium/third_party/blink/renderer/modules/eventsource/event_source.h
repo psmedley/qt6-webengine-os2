@@ -32,7 +32,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_EVENTSOURCE_EVENT_SOURCE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_EVENTSOURCE_EVENT_SOURCE_H_
 
-#include <memory>
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
@@ -105,8 +104,8 @@ class MODULES_EXPORT EventSource final
   void DidReceiveResponse(uint64_t, const ResourceResponse&) override;
   void DidReceiveData(const char*, unsigned) override;
   void DidFinishLoading(uint64_t) override;
-  void DidFail(const ResourceError&) override;
-  void DidFailRedirectCheck() override;
+  void DidFail(uint64_t, const ResourceError&) override;
+  void DidFailRedirectCheck(uint64_t) override;
 
   void OnMessageEvent(const AtomicString& event,
                       const String& data,

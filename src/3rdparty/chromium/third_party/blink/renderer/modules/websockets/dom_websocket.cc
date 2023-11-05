@@ -42,7 +42,7 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
-#include "third_party/blink/renderer/bindings/core/v8/string_or_string_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_stringsequence.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/message_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -63,7 +63,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/weborigin/known_ports.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
@@ -83,7 +82,6 @@ void DOMWebSocket::EventQueue::Dispatch(Event* event) {
   switch (state_) {
     case kActive:
       DCHECK(events_.IsEmpty());
-      DCHECK(target_->GetExecutionContext());
       target_->DispatchEvent(*event);
       break;
     case kPaused:
@@ -141,7 +139,6 @@ void DOMWebSocket::EventQueue::DispatchQueuedEvents() {
     if (state_ == kStopped || state_ == kPaused || state_ == kUnpausePosted)
       break;
     DCHECK_EQ(state_, kActive);
-    DCHECK(target_->GetExecutionContext());
     target_->DispatchEvent(*events.TakeFirst());
     // |this| can be stopped here.
   }
@@ -204,14 +201,17 @@ void DOMWebSocket::LogError(const String& message) {
 DOMWebSocket* DOMWebSocket::Create(ExecutionContext* context,
                                    const String& url,
                                    ExceptionState& exception_state) {
-  StringOrStringSequence protocols;
-  return Create(context, url, protocols, exception_state);
+  return Create(
+      context, url,
+      MakeGarbageCollected<V8UnionStringOrStringSequence>(Vector<String>()),
+      exception_state);
 }
 
-DOMWebSocket* DOMWebSocket::Create(ExecutionContext* context,
-                                   const String& url,
-                                   const StringOrStringSequence& protocols,
-                                   ExceptionState& exception_state) {
+DOMWebSocket* DOMWebSocket::Create(
+    ExecutionContext* context,
+    const String& url,
+    const V8UnionStringOrStringSequence* protocols,
+    ExceptionState& exception_state) {
   if (url.IsNull()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
@@ -222,16 +222,18 @@ DOMWebSocket* DOMWebSocket::Create(ExecutionContext* context,
   DOMWebSocket* websocket = MakeGarbageCollected<DOMWebSocket>(context);
   websocket->UpdateStateIfNeeded();
 
-  if (protocols.IsNull()) {
-    Vector<String> protocols_vector;
-    websocket->Connect(url, protocols_vector, exception_state);
-  } else if (protocols.IsString()) {
-    Vector<String> protocols_vector;
-    protocols_vector.push_back(protocols.GetAsString());
-    websocket->Connect(url, protocols_vector, exception_state);
-  } else {
-    DCHECK(protocols.IsStringSequence());
-    websocket->Connect(url, protocols.GetAsStringSequence(), exception_state);
+  DCHECK(protocols);
+  switch (protocols->GetContentType()) {
+    case V8UnionStringOrStringSequence::ContentType::kString: {
+      Vector<String> protocols_vector;
+      protocols_vector.push_back(protocols->GetAsString());
+      websocket->Connect(url, protocols_vector, exception_state);
+      break;
+    }
+    case V8UnionStringOrStringSequence::ContentType::kStringSequence:
+      websocket->Connect(url, protocols->GetAsStringSequence(),
+                         exception_state);
+      break;
   }
 
   if (exception_state.HadException())

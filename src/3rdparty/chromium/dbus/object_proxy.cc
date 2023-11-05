@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/debug/alias.h"
 #include "base/debug/leak_annotations.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -112,6 +113,10 @@ ObjectProxy::ReplyCallbackHolder::ReleaseCallback() {
   return std::move(callback_);
 }
 
+bool ObjectProxy::ReplyCallbackHolder::IsNullCallback() const {
+  return callback_.is_null();
+}
+
 ObjectProxy::ObjectProxy(Bus* bus,
                          const std::string& service_name,
                          const ObjectPath& object_path,
@@ -137,8 +142,9 @@ std::unique_ptr<Response> ObjectProxy::CallMethodAndBlockWithErrorDetails(
   bus_->AssertOnDBusThread();
 
   if (!bus_->Connect() || !method_call->SetDestination(service_name_) ||
-      !method_call->SetPath(object_path_))
-    return std::unique_ptr<Response>();
+      !method_call->SetPath(object_path_)) {
+    return nullptr;
+  }
 
   DBusMessage* request_message = method_call->raw_message();
 
@@ -157,7 +163,7 @@ std::unique_ptr<Response> ObjectProxy::CallMethodAndBlockWithErrorDetails(
     LogMethodCallFailure(method_call->GetInterface(), method_call->GetMember(),
                          error->is_set() ? error->name() : "unknown error type",
                          error->is_set() ? error->message() : "");
-    return std::unique_ptr<Response>();
+    return nullptr;
   }
   // Record time spent for the method call. Don't include failures.
   UMA_HISTOGRAM_TIMES("DBus.SyncMethodCallTime",
@@ -176,6 +182,10 @@ std::unique_ptr<Response> ObjectProxy::CallMethodAndBlock(
 void ObjectProxy::CallMethod(MethodCall* method_call,
                              int timeout_ms,
                              ResponseCallback callback) {
+  // `callback` should not be null. Otherwise, it crashes later in OnCallMethod.
+  // TODO(http://crbug/1211451): Remove after fix.
+  CHECK(!callback.is_null());
+
   auto internal_callback = base::BindOnce(
       &ObjectProxy::OnCallMethod, this, method_call->GetInterface(),
       method_call->GetMember(), std::move(callback));
@@ -194,6 +204,8 @@ void ObjectProxy::CallMethodWithErrorResponse(
 
   ReplyCallbackHolder callback_holder(bus_->GetOriginTaskRunner(),
                                       std::move(callback));
+  // TODO(http://crbug/1211451): Remove after fix.
+  CHECK(!callback_holder.IsNullCallback());
 
   if (!method_call->SetDestination(service_name_) ||
       !method_call->SetPath(object_path_)) {
@@ -250,18 +262,38 @@ void ObjectProxy::ConnectToSignal(const std::string& interface_name,
   if (bus_->HasDBusThread()) {
     base::PostTaskAndReplyWithResult(
         bus_->GetDBusTaskRunner(), FROM_HERE,
-        base::BindOnce(&ObjectProxy::ConnectToSignalInternal, this,
+        base::BindOnce(&ObjectProxy::ConnectToSignalAndBlock, this,
                        interface_name, signal_name, signal_callback),
         base::BindOnce(std::move(on_connected_callback), interface_name,
                        signal_name));
   } else {
     // If the bus doesn't have a dedicated dbus thread we need to call
-    // ConnectToSignalInternal directly otherwise we might miss a signal
+    // ConnectToSignalAndBlock directly otherwise we might miss a signal
     // that is currently queued if we do a PostTask.
     const bool success =
-        ConnectToSignalInternal(interface_name, signal_name, signal_callback);
+        ConnectToSignalAndBlock(interface_name, signal_name, signal_callback);
     std::move(on_connected_callback).Run(interface_name, signal_name, success);
   }
+}
+
+bool ObjectProxy::ConnectToSignalAndBlock(const std::string& interface_name,
+                                          const std::string& signal_name,
+                                          SignalCallback signal_callback) {
+  bus_->AssertOnDBusThread();
+
+  if (!ConnectToNameOwnerChangedSignal())
+    return false;
+
+  const std::string absolute_signal_name =
+      GetAbsoluteMemberName(interface_name, signal_name);
+
+  // Add a match rule so the signal goes through HandleMessage().
+  const std::string match_rule = base::StringPrintf(
+      "type='signal', sender='%s', interface='%s', path='%s'",
+      service_name_.c_str(), interface_name.c_str(),
+      object_path_.value().c_str());
+  return AddMatchRuleWithCallback(match_rule, absolute_signal_name,
+                                  signal_callback);
 }
 
 void ObjectProxy::SetNameOwnerChangedCallback(
@@ -319,6 +351,9 @@ void ObjectProxy::StartAsyncMethodCall(int timeout_ms,
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
 
+  // TODO(http://crbug/1211451): Remove after fix.
+  CHECK(!callback_holder.IsNullCallback());
+
   if (!bus_->Connect() || !bus_->SetUpAsyncOperations()) {
     // In case of a failure, run the error callback with nullptr.
     base::OnceClosure task =
@@ -360,6 +395,9 @@ void ObjectProxy::OnPendingCallIsComplete(ReplyCallbackHolder callback_holder,
   bus_->AssertOnDBusThread();
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
+
+  // TODO(http://crbug/1211451): Remove after fix.
+  CHECK(!callback_holder.IsNullCallback());
 
   DBusMessage* response_message = dbus_pending_call_steal_reply(pending_call);
 
@@ -414,6 +452,9 @@ void ObjectProxy::RunResponseOrErrorCallback(
     base::TimeTicks start_time,
     Response* response,
     ErrorResponse* error_response) {
+  // TODO(http://crbug/1211451): Remove after fix.
+  CHECK(!callback_holder.IsNullCallback());
+
   bus_->AssertOnOriginThread();
   callback_holder.ReleaseCallback().Run(response, error_response);
 
@@ -462,26 +503,6 @@ void ObjectProxy::TryConnectToNameOwnerChangedSignal() {
   LOG_IF(WARNING, !success)
       << "Failed to connect to NameOwnerChanged signal for object: "
       << object_path_.value();
-}
-
-bool ObjectProxy::ConnectToSignalInternal(const std::string& interface_name,
-                                          const std::string& signal_name,
-                                          SignalCallback signal_callback) {
-  bus_->AssertOnDBusThread();
-
-  if (!ConnectToNameOwnerChangedSignal())
-    return false;
-
-  const std::string absolute_signal_name =
-      GetAbsoluteMemberName(interface_name, signal_name);
-
-  // Add a match rule so the signal goes through HandleMessage().
-  const std::string match_rule = base::StringPrintf(
-      "type='signal', sender='%s', interface='%s', path='%s'",
-      service_name_.c_str(), interface_name.c_str(),
-      object_path_.value().c_str());
-  return AddMatchRuleWithCallback(match_rule, absolute_signal_name,
-                                  signal_callback);
 }
 
 void ObjectProxy::WaitForServiceToBeAvailableInternal() {
@@ -626,6 +647,16 @@ void ObjectProxy::OnCallMethod(const std::string& interface_name,
                                ResponseCallback response_callback,
                                Response* response,
                                ErrorResponse* error_response) {
+  // Crash on null `response_callback` with details of the call.
+  // TODO(http://crbug/1211451): Remove after fix.
+  DEBUG_ALIAS_FOR_CSTR(interface_name_copy, interface_name.c_str(), 64);
+  DEBUG_ALIAS_FOR_CSTR(method_name_copy, method_name.c_str(), 64);
+  DEBUG_ALIAS_FOR_CSTR(object_path_copy, object_path_.value().c_str(), 64);
+  LOG_IF(FATAL, response_callback.is_null())
+      << "Null response_callback"
+      << ", method:" << interface_name << "." << method_name
+      << ", obj=" << object_path_.value();
+
   if (response) {
     // Method call was successful.
     std::move(response_callback).Run(response);
@@ -703,7 +734,7 @@ void ObjectProxy::UpdateNameOwnerAndBlock() {
   // Errors should be suppressed here, as the service may not be yet running
   // when connecting to signals of the service, which is just fine.
   // The ObjectProxy will be notified when the service is launched via
-  // NameOwnerChanged signal. See also comments in ConnectToSignalInternal().
+  // NameOwnerChanged signal. See also comments in ConnectToSignalAndBlock().
   service_name_owner_ =
       bus_->GetServiceOwnerAndBlock(service_name_, Bus::SUPPRESS_ERRORS);
 }

@@ -14,11 +14,10 @@
 #include "base/component_export.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "device/fido/authenticator_get_info_response.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_transport_protocol.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
@@ -38,7 +37,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   static constexpr CancelToken kInvalidCancelToken = 0;
 
   using DeviceCallback =
-      base::OnceCallback<void(base::Optional<std::vector<uint8_t>>)>;
+      base::OnceCallback<void(absl::optional<std::vector<uint8_t>>)>;
 
   // Internal state machine states.
   enum class State {
@@ -97,6 +96,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   // for a FIDO Bluetooth device.
   virtual bool RequiresBlePairingPin() const;
 
+  // NoSilentRequests returns true if this device does not support up=false
+  // requests.
+  bool NoSilentRequests() const;
+
   virtual base::WeakPtr<FidoDevice> GetWeakPtr() = 0;
 
   // Sends a speculative AuthenticatorGetInfo request to determine whether the
@@ -113,24 +116,30 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   }
 
   ProtocolVersion supported_protocol() const { return supported_protocol_; }
-  const base::Optional<AuthenticatorGetInfoResponse>& device_info() const {
+  const absl::optional<AuthenticatorGetInfoResponse>& device_info() const {
     return device_info_;
   }
   bool is_in_error_state() const {
     return state_ == State::kMsgError || state_ == State::kDeviceError;
   }
 
+  // IsStatusForUnrecognisedCredentialID returns true iff the given |status|, in
+  // response to a CTAP2 GetAssertion command, indicates that none of the
+  // credential IDs was recognised by the authenticator.
+  static bool IsStatusForUnrecognisedCredentialID(
+      CtapDeviceResponseCode status);
+
   State state_for_testing() const { return state_; }
   void SetStateForTesting(State state) { state_ = state; }
 
  protected:
   void OnDeviceInfoReceived(base::OnceClosure done,
-                            base::Optional<std::vector<uint8_t>> response);
+                            absl::optional<std::vector<uint8_t>> response);
   void SetDeviceInfo(AuthenticatorGetInfoResponse device_info);
 
   State state_ = State::kInit;
   ProtocolVersion supported_protocol_ = ProtocolVersion::kUnknown;
-  base::Optional<AuthenticatorGetInfoResponse> device_info_;
+  absl::optional<AuthenticatorGetInfoResponse> device_info_;
   // If `true`, the device needs to be sent a specific wink command to flash
   // when user presence is required.
   bool needs_explicit_wink_ = false;

@@ -133,18 +133,19 @@ namespace dawn_native {
           mUsage(descriptor->usage),
           mState(BufferState::Unmapped) {
         // Add readonly storage usage if the buffer has a storage usage. The validation rules in
-        // ValidatePassResourceUsage will make sure we don't use both at the same
-        // time.
+        // ValidateSyncScopeResourceUsage will make sure we don't use both at the same time.
         if (mUsage & wgpu::BufferUsage::Storage) {
             mUsage |= kReadOnlyStorageBuffer;
         }
 
-        // TODO(hao.x.li@intel.com): This is just a workaround to make QueryResolve buffer pass the
-        // binding group validation when used as an internal resource. Instead the buffer made with
-        // QueryResolve usage would implicitly get StorageInternal usage which is only compatible
-        // with StorageBufferInternal binding type in BGL, not StorageBuffer binding type.
+        // The query resolve buffer need to be used as a storage buffer in the internal compute
+        // pipeline which does timestamp uint conversion for timestamp query, it requires the buffer
+        // has Storage usage in the binding group. Implicitly add an InternalStorage usage which is
+        // only compatible with InternalStorageBuffer binding type in BGL. It shouldn't be
+        // compatible with StorageBuffer binding type and the query resolve buffer cannot be bound
+        // as storage buffer if it's created without Storage usage.
         if (mUsage & wgpu::BufferUsage::QueryResolve) {
-            mUsage |= wgpu::BufferUsage::Storage;
+            mUsage |= kInternalStorageBuffer;
         }
     }
 
@@ -176,6 +177,13 @@ namespace dawn_native {
         return mSize;
     }
 
+    uint64_t BufferBase::GetAllocatedSize() const {
+        ASSERT(!IsError());
+        // The backend must initialize this value.
+        ASSERT(mAllocatedSize != 0);
+        return mAllocatedSize;
+    }
+
     wgpu::BufferUsage BufferBase::GetUsage() const {
         ASSERT(!IsError());
         return mUsage;
@@ -184,13 +192,29 @@ namespace dawn_native {
     MaybeError BufferBase::MapAtCreation() {
         DAWN_TRY(MapAtCreationInternal());
 
+        void* ptr;
+        size_t size;
+        if (mSize == 0) {
+            return {};
+        } else if (mStagingBuffer) {
+            // If there is a staging buffer for initialization, clear its contents directly.
+            // It should be exactly as large as the buffer allocation.
+            ptr = mStagingBuffer->GetMappedPointer();
+            size = mStagingBuffer->GetSize();
+            ASSERT(size == GetAllocatedSize());
+        } else {
+            // Otherwise, the buffer is directly mappable on the CPU.
+            ptr = GetMappedPointerImpl();
+            size = GetAllocatedSize();
+        }
+
         DeviceBase* device = GetDevice();
         if (device->IsToggleEnabled(Toggle::LazyClearResourceOnFirstUse)) {
-            memset(GetMappedRange(0, mSize), uint8_t(0u), mSize);
+            memset(ptr, uint8_t(0u), size);
             SetIsDataInitialized();
             device->IncrementLazyClearCountForTesting();
         } else if (device->IsToggleEnabled(Toggle::NonzeroClearResourcesOnCreationForTesting)) {
-            memset(GetMappedRange(0, mSize), uint8_t(1u), mSize);
+            memset(ptr, uint8_t(1u), size);
         }
 
         return {};
@@ -214,9 +238,12 @@ namespace dawn_native {
         } else {
             // If any of these fail, the buffer will be deleted and replaced with an
             // error buffer.
-            // TODO(enga): Suballocate and reuse memory from a larger staging buffer so we don't
-            // create many small buffers.
-            DAWN_TRY_ASSIGN(mStagingBuffer, GetDevice()->CreateStagingBuffer(GetSize()));
+            // The staging buffer is used to return mappable data to inititalize the buffer
+            // contents. Allocate one as large as the real buffer size so that every byte is
+            // initialized.
+            // TODO(crbug.com/dawn/828): Suballocate and reuse memory from a larger staging buffer
+            // so we don't create many small buffers.
+            DAWN_TRY_ASSIGN(mStagingBuffer, GetDevice()->CreateStagingBuffer(GetAllocatedSize()));
         }
 
         return {};
@@ -252,11 +279,11 @@ namespace dawn_native {
         }
     }
 
-    void BufferBase::MapAsync(wgpu::MapMode mode,
-                              size_t offset,
-                              size_t size,
-                              WGPUBufferMapCallback callback,
-                              void* userdata) {
+    void BufferBase::APIMapAsync(wgpu::MapMode mode,
+                                 size_t offset,
+                                 size_t size,
+                                 WGPUBufferMapCallback callback,
+                                 void* userdata) {
         // Handle the defaulting of size required by WebGPU, even if in webgpu_cpp.h it is not
         // possible to default the function argument (because there is the callback later in the
         // argument list)
@@ -291,15 +318,15 @@ namespace dawn_native {
                                            GetDevice()->GetPendingCommandSerial());
     }
 
-    void* BufferBase::GetMappedRange(size_t offset, size_t size) {
-        return GetMappedRangeInternal(true, offset, size);
+    void* BufferBase::APIGetMappedRange(size_t offset, size_t size) {
+        return GetMappedRange(offset, size, true);
     }
 
-    const void* BufferBase::GetConstMappedRange(size_t offset, size_t size) {
-        return GetMappedRangeInternal(false, offset, size);
+    const void* BufferBase::APIGetConstMappedRange(size_t offset, size_t size) {
+        return GetMappedRange(offset, size, false);
     }
 
-    void* BufferBase::GetMappedRangeInternal(bool writable, size_t offset, size_t size) {
+    void* BufferBase::GetMappedRange(size_t offset, size_t size, bool writable) {
         if (!CanGetMappedRange(writable, offset, size)) {
             return nullptr;
         }
@@ -314,7 +341,7 @@ namespace dawn_native {
         return start == nullptr ? nullptr : start + offset;
     }
 
-    void BufferBase::Destroy() {
+    void BufferBase::APIDestroy() {
         if (IsError()) {
             // It is an error to call Destroy() on an ErrorBuffer, but we still need to reclaim the
             // fake mapped staging data.
@@ -342,16 +369,23 @@ namespace dawn_native {
 
     MaybeError BufferBase::CopyFromStagingBuffer() {
         ASSERT(mStagingBuffer);
-        if (GetSize() == 0) {
+        if (mSize == 0) {
+            // Staging buffer is not created if zero size.
+            ASSERT(mStagingBuffer == nullptr);
             return {};
         }
 
-        DAWN_TRY(GetDevice()->CopyFromStagingToBuffer(mStagingBuffer.get(), 0, this, 0, GetSize()));
+        DAWN_TRY(GetDevice()->CopyFromStagingToBuffer(mStagingBuffer.get(), 0, this, 0,
+                                                      GetAllocatedSize()));
 
         DynamicUploader* uploader = GetDevice()->GetDynamicUploader();
         uploader->ReleaseStagingBuffer(std::move(mStagingBuffer));
 
         return {};
+    }
+
+    void BufferBase::APIUnmap() {
+        Unmap();
     }
 
     void BufferBase::Unmap() {

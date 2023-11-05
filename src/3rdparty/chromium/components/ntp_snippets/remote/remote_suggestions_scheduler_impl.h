@@ -7,9 +7,7 @@
 
 #include <memory>
 #include <set>
-#include <string>
 #include <utility>
-#include <vector>
 
 #include "base/macros.h"
 #include "base/time/clock.h"

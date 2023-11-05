@@ -16,6 +16,8 @@ static_library("browser_util") {
   sources = [
     "content_settings_utils.cc",
     "content_settings_utils.h",
+    "permission_context_utils.cc",
+    "permission_context_utils.h",
     "user_agent_utils.cc",
     "user_agent_utils.h",
   ]
@@ -23,7 +25,10 @@ static_library("browser_util") {
   deps = [
     ":embedder_support",
     "//build:branding_buildflags",
-    "//components/content_settings/core/browser:browser",
+    "//components/background_sync",
+    "//components/content_settings/browser",
+    "//components/content_settings/core/browser",
+    "//components/permissions",
     "//components/version_info",
     "//content/public/browser",
   ]
@@ -32,6 +37,7 @@ static_library("browser_util") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "origin_trials/component_updater_utils_unittest.cc",
     "origin_trials/origin_trial_policy_impl_unittest.cc",
     "user_agent_utils_unittest.cc",
   ]
@@ -40,8 +46,11 @@ source_set("unit_tests") {
     ":browser_util",
     "//base",
     "//base/test:test_support",
+    "//components/component_updater/installer_policies",
     "//components/embedder_support",
     "//components/embedder_support/origin_trials",
+    "//components/prefs",
+    "//components/prefs:test_support",
     "//components/version_info:version_info",
     "//content/public/common",
     "//mojo/core/embedder:embedder",

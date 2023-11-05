@@ -24,6 +24,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_composite.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
@@ -184,7 +185,7 @@ sk_sp<PaintFilter> FEComposite::CreateImageFilterInternal(
   sk_sp<PaintFilter> background(
       paint_filter_builder::Build(InputEffect(1), OperatingInterpolationSpace(),
                                   !MayProduceInvalidPreMultipliedPixels()));
-  base::Optional<PaintFilter::CropRect> crop_rect = GetCropRect();
+  absl::optional<PaintFilter::CropRect> crop_rect = GetCropRect();
 
   if (type_ == FECOMPOSITE_OPERATOR_ARITHMETIC) {
     return sk_make_sp<ArithmeticPaintFilter>(

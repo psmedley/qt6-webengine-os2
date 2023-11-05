@@ -28,7 +28,7 @@ IN_PROC_BROWSER_TEST_F(MessagePortProviderBrowserTest, PostMessage) {
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL("/title1.html"));
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  EXPECT_TRUE(ExecuteScript(shell(), R"(
+  EXPECT_TRUE(ExecJs(shell(), R"(
       onmessage = function(e) {
           domAutomationController.send(e.origin + ':' + e.data);
       } )"));
@@ -39,8 +39,9 @@ IN_PROC_BROWSER_TEST_F(MessagePortProviderBrowserTest, PostMessage) {
   const std::string message("success");
   DOMMessageQueue msg_queue;
   MessagePortProvider::PostMessageToFrame(
-      shell()->web_contents(), base::UTF8ToUTF16(source_origin),
-      base::UTF8ToUTF16(target_origin), base::UTF8ToUTF16(message));
+      shell()->web_contents()->GetPrimaryPage(),
+      base::UTF8ToUTF16(source_origin), base::UTF8ToUTF16(target_origin),
+      base::UTF8ToUTF16(message));
 
   // Verify that the message was received (and had the expected payload).
   std::string expected_test_reply;

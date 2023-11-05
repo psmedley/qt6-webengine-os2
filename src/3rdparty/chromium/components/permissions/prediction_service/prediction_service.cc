@@ -24,6 +24,7 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace {
 
@@ -210,11 +211,14 @@ PredictionService::GetPredictionRequestProto(
 
   switch (entity.type) {
     case RequestType::kNotifications:
-      permission_features->mutable_notification_permission()
-          ->Clear();
+      permission_features->mutable_notification_permission()->Clear();
+      break;
+    case RequestType::kGeolocation:
+      permission_features->mutable_geolocation_permission()->Clear();
       break;
     default:
-      NOTREACHED() << "CPSS only supports notifications at the moment.";
+      NOTREACHED()
+          << "CPSS only supports notifications and geolocation at the moment.";
   }
 
   return proto_request;
@@ -254,9 +258,9 @@ void PredictionService::OnURLLoaderComplete(
           CreatePredictionsResponse(loader, response_body.get());
 
       if (request.second) {
+        bool lookup_success = prediction_response != nullptr;
         std::move(request.second)
-            .Run(prediction_response != nullptr /* Lookup successful */,
-                 false /* Response from cache */,
+            .Run(lookup_success, false /* Response from cache */,
                  std::move(prediction_response));
       }
 
@@ -282,8 +286,7 @@ PredictionService::CreatePredictionsResponse(network::SimpleURLLoader* loader,
     return GeneratePredictionsResponseJsonToMessage(*response_body);
   }
 
-  std::unique_ptr<GeneratePredictionsResponse> predictions_response;
-  predictions_response = std::make_unique<GeneratePredictionsResponse>();
+  auto predictions_response = std::make_unique<GeneratePredictionsResponse>();
   if (!predictions_response->ParseFromString(*response_body)) {
     return nullptr;
   }

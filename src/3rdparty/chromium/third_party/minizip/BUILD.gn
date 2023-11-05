@@ -2,7 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/features.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
+
+assert(!use_qt)
 
 config("minizip_compiler_flags") {
   if (is_clang) {
@@ -10,6 +13,7 @@ config("minizip_compiler_flags") {
       # mz_zip.c does |UINT_MAX == UINT16_MAX && ...|.
       "-Wno-unreachable-code",
       "-Wno-unused-function",
+      "-Wno-implicit-fallthrough",
     ]
 
     if (!is_nacl && (target_cpu == "x86" || target_cpu == "x64")) {

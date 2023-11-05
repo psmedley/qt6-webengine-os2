@@ -7,7 +7,6 @@
 
 #include <list>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
@@ -75,6 +74,7 @@ class AudioFocusManager : public mojom::AudioFocusManager,
       mojo::PendingRemote<mojom::AudioFocusObserver> observer) override;
   void GetSourceFocusRequests(const base::UnguessableToken& source_id,
                               GetFocusRequestsCallback callback) override;
+  void RequestIdReleased(const base::UnguessableToken& request_id) override;
 
   // mojom::AudioFocusManagerDebug.
   void GetDebugInfoForRequest(const RequestId& request_id,

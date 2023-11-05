@@ -6,6 +6,8 @@
 
 #include "xfa/fxfa/parser/cxfa_stroke.h"
 
+#include <math.h>
+
 #include <utility>
 
 #include "fxjs/xfa/cjx_object.h"
@@ -113,7 +115,7 @@ FX_ARGB CXFA_Stroke::GetColor() {
   if (!pNode)
     return 0xFF000000;
 
-  return StringToFXARGB(
+  return CXFA_Color::StringToFXARGB(
       pNode->JSObject()->GetCData(XFA_Attribute::Value).AsStringView());
 }
 
@@ -167,8 +169,8 @@ bool CXFA_Stroke::SameStyles(CXFA_Stroke* stroke, uint32_t dwFlags) {
   return true;
 }
 
-void CXFA_Stroke::Stroke(CFGAS_GEPath* pPath,
-                         CFGAS_GEGraphics* pGS,
+void CXFA_Stroke::Stroke(CFGAS_GEGraphics* pGS,
+                         const CFGAS_GEPath& pPath,
                          const CFX_Matrix& matrix) {
   if (!IsVisible())
     return;
@@ -186,6 +188,6 @@ void CXFA_Stroke::Stroke(CFGAS_GEPath* pPath,
   pGS->SetLineCap(CFX_GraphStateData::LineCapButt);
   XFA_StrokeTypeSetLineDash(pGS, GetStrokeType(), XFA_AttributeValue::Butt);
   pGS->SetStrokeColor(CFGAS_GEColor(GetColor()));
-  pGS->StrokePath(pPath, &matrix);
+  pGS->StrokePath(pPath, matrix);
   pGS->RestoreGraphState();
 }

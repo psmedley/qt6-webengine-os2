@@ -5,6 +5,7 @@
 #include "chrome/browser/devtools/devtools_window.h"
 
 #include <algorithm>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -23,7 +24,6 @@
 #include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 #include "chrome/browser/devtools/devtools_eye_dropper.h"
 #include "chrome/browser/file_select_helper.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -33,7 +33,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/color_chooser.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -41,6 +40,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/infobars/content/content_infobar_manager.h"
 #include "components/javascript_dialogs/app_modal_dialog_manager.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
@@ -54,6 +54,7 @@
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/color_chooser.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
@@ -125,11 +126,11 @@ bool FindInspectedBrowserAndTabIndex(
 }
 
 void SetPreferencesFromJson(Profile* profile, const std::string& json) {
-  base::Optional<base::Value> parsed = base::JSONReader::Read(json);
+  absl::optional<base::Value> parsed = base::JSONReader::Read(json);
   if (!parsed || !parsed->is_dict())
     return;
   DictionaryPrefUpdate update(profile->GetPrefs(), prefs::kDevToolsPreferences);
-  for (const auto& dict_value : parsed->DictItems()) {
+  for (auto dict_value : parsed->DictItems()) {
     if (!dict_value.second.is_string())
       continue;
     update.Get()->SetKey(dict_value.first, std::move(dict_value.second));
@@ -272,7 +273,7 @@ class DevToolsEventForwarder {
 
 void DevToolsEventForwarder::SetWhitelistedShortcuts(
     const std::string& message) {
-  base::Optional<base::Value> parsed_message = base::JSONReader::Read(message);
+  absl::optional<base::Value> parsed_message = base::JSONReader::Read(message);
   if (!parsed_message || !parsed_message->is_list())
     return;
   for (const auto& list_item : parsed_message->GetList()) {
@@ -455,6 +456,7 @@ DevToolsWindow::~DevToolsWindow() {
   UpdateBrowserWindow();
   UpdateBrowserToolbar();
 
+  capture_handle_.RunAndReset();
   owned_toolbox_web_contents_.reset();
 
   DevToolsWindows* instances = g_devtools_window_instances.Pointer();
@@ -1036,8 +1038,8 @@ DevToolsWindow::DevToolsWindow(FrontendType frontend_type,
 
   // There is no inspected_web_contents in case of various workers.
   if (inspected_web_contents)
-    inspected_contents_observer_.reset(
-        new ObserverWithAccessor(inspected_web_contents));
+    inspected_contents_observer_ =
+        std::make_unique<ObserverWithAccessor>(inspected_web_contents);
 
   // Initialize docked page to be of the right size.
   if (can_dock_ && inspected_web_contents) {
@@ -1049,7 +1051,7 @@ DevToolsWindow::DevToolsWindow(FrontendType frontend_type,
     }
   }
 
-  event_forwarder_.reset(new DevToolsEventForwarder(this));
+  event_forwarder_ = std::make_unique<DevToolsEventForwarder>(this);
 
   // Tag the DevTools main WebContents with its TaskManager specific UserData
   // so that it shows up in the task manager.
@@ -1278,10 +1280,12 @@ void DevToolsWindow::WebContentsCreated(WebContents* source_contents,
                                         const GURL& target_url,
                                         WebContents* new_contents) {
   if (target_url.SchemeIs(content::kChromeDevToolsScheme) &&
-      target_url.path().rfind("toolbox.html") != std::string::npos) {
+      target_url.path().rfind("device_mode_emulation_frame.html") !=
+          std::string::npos) {
     CHECK(can_dock_);
 
     // Ownership will be passed in DevToolsWindow::AddNewContents.
+    capture_handle_.RunAndReset();
     if (owned_toolbox_web_contents_)
       owned_toolbox_web_contents_.reset();
     toolbox_web_contents_ = new_contents;
@@ -1296,8 +1300,10 @@ void DevToolsWindow::WebContentsCreated(WebContents* source_contents,
     // is resized when the frame is rendered. Force rendering of the toolbox at
     // all times, to make sure that a frame can be rendered even when the
     // inspected WebContents fully covers the toolbox. https://crbug.com/828307
-    toolbox_web_contents_->IncrementCapturerCount(gfx::Size(),
-                                                  /* stay_hidden */ false);
+    capture_handle_ =
+        toolbox_web_contents_->IncrementCapturerCount(gfx::Size(),
+                                                      /*stay_hidden=*/false,
+                                                      /*stay_awake=*/false);
   }
 }
 
@@ -1367,13 +1373,6 @@ content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager(
   return javascript_dialogs::AppModalDialogManager::GetInstance();
 }
 
-content::ColorChooser* DevToolsWindow::OpenColorChooser(
-    WebContents* web_contents,
-    SkColor initial_color,
-    const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
-  return chrome::ShowColorChooser(web_contents, initial_color);
-}
-
 void DevToolsWindow::RunFileChooser(
     content::RenderFrameHost* render_frame_host,
     scoped_refptr<content::FileSelectListener> listener,
@@ -1394,7 +1393,7 @@ void DevToolsWindow::ActivateWindow() {
     return;
   if (is_docked_ && GetInspectedBrowserWindow())
     main_web_contents_->Focus();
-  else if (!is_docked_ && !browser_->window()->IsActive())
+  else if (!is_docked_ && browser_ && !browser_->window()->IsActive())
     browser_->window()->Activate();
 }
 
@@ -1447,7 +1446,7 @@ void DevToolsWindow::SetIsDocked(bool dock_requested) {
   if (dock_requested == was_docked)
     return;
 
-  if (dock_requested && !was_docked) {
+  if (dock_requested && !was_docked && browser_) {
     // Detach window from the external devtools browser. It will lead to
     // the browser object's close and delete. Remove observer first.
     TabStripModel* tab_strip_model = browser_->tab_strip_model();
@@ -1458,8 +1457,11 @@ void DevToolsWindow::SetIsDocked(bool dock_requested) {
     // okay to just null the raw pointer here.
     browser_ = nullptr;
 
+    // TODO(crbug.com/1221967): WebContents should be removed with a reason
+    // other than kInsertedIntoOtherTabStrip, it's not getting reinserted into
+    // another tab strip.
     owned_main_web_contents_ = std::make_unique<OwnedMainWebContents>(
-        tab_strip_model->DetachWebContentsAt(
+        tab_strip_model->DetachWebContentsAtForInsertion(
             tab_strip_model->GetIndexOfWebContents(main_web_contents_)));
   } else if (!dock_requested && was_docked) {
     UpdateBrowserWindow();
@@ -1531,10 +1533,11 @@ void DevToolsWindow::InspectedContentsClosing() {
   main_web_contents_->ClosePage();
 }
 
-InfoBarService* DevToolsWindow::GetInfoBarService() {
-  return is_docked_ ?
-      InfoBarService::FromWebContents(GetInspectedWebContents()) :
-      InfoBarService::FromWebContents(main_web_contents_);
+infobars::ContentInfoBarManager* DevToolsWindow::GetInfoBarManager() {
+  return is_docked_ ? infobars::ContentInfoBarManager::FromWebContents(
+                          GetInspectedWebContents())
+                    : infobars::ContentInfoBarManager::FromWebContents(
+                          main_web_contents_);
 }
 
 void DevToolsWindow::RenderProcessGone(bool crashed) {
@@ -1549,7 +1552,7 @@ void DevToolsWindow::RenderProcessGone(bool crashed) {
 }
 
 void DevToolsWindow::ShowCertificateViewer(const std::string& cert_chain) {
-  base::Optional<base::Value> value = base::JSONReader::Read(cert_chain);
+  absl::optional<base::Value> value = base::JSONReader::Read(cert_chain);
   CHECK(value && value->is_list());
   std::vector<std::string> decoded;
   for (const auto& item : value->GetList()) {

@@ -11,10 +11,10 @@
 
 #include "base/containers/flat_map.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "cc/paint/element_id.h"
 #include "cc/paint/paint_export.h"
 #include "cc/paint/paint_image.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/geometry/size_f.h"
@@ -29,6 +29,7 @@ class CC_PAINT_EXPORT PaintWorkletInput
  public:
   enum class NativePropertyType {
     kBackgroundColor,
+    kClipPath,
     kInvalid,
   };
   // Uniquely identifies a property from the animation system, so that a
@@ -55,8 +56,8 @@ class CC_PAINT_EXPORT PaintWorkletInput
     bool operator!=(const PropertyKey& other) const;
     bool operator<(const PropertyKey&) const;
 
-    base::Optional<std::string> custom_property_name;
-    base::Optional<NativePropertyType> native_property_type;
+    absl::optional<std::string> custom_property_name;
+    absl::optional<NativePropertyType> native_property_type;
     ElementId element_id;
   };
 
@@ -74,8 +75,8 @@ class CC_PAINT_EXPORT PaintWorkletInput
     ~PropertyValue();
     bool has_value() const;
     void reset();
-    base::Optional<float> float_value;
-    base::Optional<SkColor> color_value;
+    absl::optional<float> float_value;
+    absl::optional<SkColor> color_value;
   };
 
   virtual gfx::SizeF GetSize() const = 0;
@@ -87,6 +88,8 @@ class CC_PAINT_EXPORT PaintWorkletInput
   // job for this input.
   using PropertyKeys = std::vector<PropertyKey>;
   virtual const PropertyKeys& GetPropertyKeys() const = 0;
+
+  virtual bool IsCSSPaintWorkletInput() const = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<PaintWorkletInput>;

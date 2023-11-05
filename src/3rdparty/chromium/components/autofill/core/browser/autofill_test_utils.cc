@@ -28,7 +28,7 @@
 #include "components/autofill/core/common/form_data_predictions.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/form_field_data_predictions.h"
-#include "components/autofill/core/common/renderer_id.h"
+#include "components/autofill/core/common/unique_ids.h"
 #include "components/os_crypt/os_crypt_mocker.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -45,8 +45,8 @@ namespace autofill {
 bool operator==(const FormFieldDataPredictions& a,
                 const FormFieldDataPredictions& b) {
   auto members = [](const FormFieldDataPredictions& p) {
-    return std::tie(p.signature, p.heuristic_type, p.server_type,
-                    p.overall_type, p.parseable_name, p.section);
+    return std::tie(p.host_form_signature, p.signature, p.heuristic_type,
+                    p.server_type, p.overall_type, p.parseable_name, p.section);
   };
   return members(a) == members(b);
 }
@@ -71,6 +71,12 @@ std::string GetRandomCardNumber() {
   return value;
 }
 
+}  // namespace
+
+LocalFrameToken GetLocalFrameToken() {
+  return LocalFrameToken(base::UnguessableToken::Deserialize(98765, 43210));
+}
+
 FormRendererId MakeFormRendererId() {
   static uint32_t counter = 10;
   return FormRendererId(counter++);
@@ -81,7 +87,15 @@ FieldRendererId MakeFieldRendererId() {
   return FieldRendererId(counter++);
 }
 
-}  // namespace
+// Creates new, pairwise distinct FormGlobalIds.
+FormGlobalId MakeFormGlobalId() {
+  return {GetLocalFrameToken(), MakeFormRendererId()};
+}
+
+// Creates new, pairwise distinct FieldGlobalIds.
+FieldGlobalId MakeFieldGlobalId() {
+  return {GetLocalFrameToken(), MakeFieldRendererId()};
+}
 
 void SetFormGroupValues(FormGroup& form_group,
                         const std::vector<FormGroupValue>& values) {
@@ -137,6 +151,7 @@ void CreateTestFormField(const char* label,
                          const char* value,
                          const char* type,
                          FormFieldData* field) {
+  field->host_frame = GetLocalFrameToken();
   field->unique_renderer_id = MakeFieldRendererId();
   field->label = ASCIIToUTF16(label);
   field->name = ASCIIToUTF16(name);
@@ -155,16 +170,14 @@ void CreateTestSelectField(const char* label,
   // Fill the base attributes.
   CreateTestFormField(label, name, value, "select-one", field);
 
-  std::vector<base::string16> values16(select_size);
-  for (size_t i = 0; i < select_size; ++i)
-    values16[i] = base::UTF8ToUTF16(values[i]);
-
-  std::vector<base::string16> contents16(select_size);
-  for (size_t i = 0; i < select_size; ++i)
-    contents16[i] = base::UTF8ToUTF16(contents[i]);
-
-  field->option_values = values16;
-  field->option_contents = contents16;
+  field->options.clear();
+  CHECK_EQ(values.size(), contents.size());
+  for (size_t i = 0; i < std::min(values.size(), contents.size()); ++i) {
+    field->options.push_back({
+        .value = base::UTF8ToUTF16(values[i]),
+        .content = base::UTF8ToUTF16(contents[i]),
+    });
+  }
 }
 
 void CreateTestSelectField(const std::vector<const char*>& values,
@@ -181,11 +194,11 @@ void CreateTestDatalistField(const char* label,
   // Fill the base attributes.
   CreateTestFormField(label, name, value, "text", field);
 
-  std::vector<base::string16> values16(values.size());
+  std::vector<std::u16string> values16(values.size());
   for (size_t i = 0; i < values.size(); ++i)
     values16[i] = base::UTF8ToUTF16(values[i]);
 
-  std::vector<base::string16> label16(labels.size());
+  std::vector<std::u16string> label16(labels.size());
   for (size_t i = 0; i < labels.size(); ++i)
     label16[i] = base::UTF8ToUTF16(labels[i]);
 
@@ -201,12 +214,11 @@ void CreateTestAddressFormData(FormData* form, const char* unique_id) {
 void CreateTestAddressFormData(FormData* form,
                                std::vector<ServerFieldTypeSet>* types,
                                const char* unique_id) {
+  form->host_frame = GetLocalFrameToken();
   form->unique_renderer_id = MakeFormRendererId();
-  form->name =
-      ASCIIToUTF16("MyForm") + ASCIIToUTF16(unique_id ? unique_id : "");
-  form->button_titles = {
-      std::make_pair(ASCIIToUTF16("Submit"),
-                     mojom::ButtonTitleType::BUTTON_ELEMENT_SUBMIT_TYPE)};
+  form->name = u"MyForm" + ASCIIToUTF16(unique_id ? unique_id : "");
+  form->button_titles = {std::make_pair(
+      u"Submit", mojom::ButtonTitleType::BUTTON_ELEMENT_SUBMIT_TYPE)};
   form->url = GURL("https://myform.com/form.html");
   form->full_url = GURL("https://myform.com/form.html?foo=bar");
   form->action = GURL("https://myform.com/submit.html");
@@ -218,77 +230,55 @@ void CreateTestAddressFormData(FormData* form,
       mojom::SubmissionIndicatorEvent::SAME_DOCUMENT_NAVIGATION;
 
   FormFieldData field;
-  ServerFieldTypeSet type_set;
   test::CreateTestFormField("First Name", "firstname", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(NAME_FIRST);
-  types->push_back(type_set);
+  types->push_back({NAME_FIRST});
   test::CreateTestFormField("Middle Name", "middlename", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(NAME_MIDDLE);
-  types->push_back(type_set);
+  types->push_back({NAME_MIDDLE});
   test::CreateTestFormField("Last Name", "lastname", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(NAME_LAST);
   if (base::FeatureList::IsEnabled(
           features::kAutofillEnableSupportForMoreStructureInNames)) {
-    type_set.insert(NAME_LAST_SECOND);
+    types->push_back({NAME_LAST, NAME_LAST_SECOND});
+  } else {
+    types->push_back({NAME_LAST});
   }
-  types->push_back(type_set);
   test::CreateTestFormField("Address Line 1", "addr1", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(ADDRESS_HOME_LINE1);
-  types->push_back(type_set);
+  types->push_back({ADDRESS_HOME_LINE1});
   test::CreateTestFormField("Address Line 2", "addr2", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(ADDRESS_HOME_LINE2);
   if (base::FeatureList::IsEnabled(
           features::kAutofillEnableSupportForMoreStructureInAddresses)) {
-    type_set.insert(ADDRESS_HOME_SUBPREMISE);
+    types->push_back({ADDRESS_HOME_SUBPREMISE, ADDRESS_HOME_LINE2});
+  } else {
+    types->push_back({ADDRESS_HOME_LINE2});
   }
-  types->push_back(type_set);
   test::CreateTestFormField("City", "city", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(ADDRESS_HOME_CITY);
-  types->push_back(type_set);
+  types->push_back({ADDRESS_HOME_CITY});
   test::CreateTestFormField("State", "state", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(ADDRESS_HOME_STATE);
-  types->push_back(type_set);
+  types->push_back({ADDRESS_HOME_STATE});
   test::CreateTestFormField("Postal Code", "zipcode", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(ADDRESS_HOME_ZIP);
-  types->push_back(type_set);
+  types->push_back({ADDRESS_HOME_ZIP});
   test::CreateTestFormField("Country", "country", "", "text", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(ADDRESS_HOME_COUNTRY);
-  types->push_back(type_set);
+  types->push_back({ADDRESS_HOME_COUNTRY});
   test::CreateTestFormField("Phone Number", "phonenumber", "", "tel", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(PHONE_HOME_WHOLE_NUMBER);
-  types->push_back(type_set);
+  types->push_back({PHONE_HOME_WHOLE_NUMBER});
   test::CreateTestFormField("Email", "email", "", "email", &field);
   form->fields.push_back(field);
-  type_set.clear();
-  type_set.insert(EMAIL_ADDRESS);
-  types->push_back(type_set);
+  types->push_back({EMAIL_ADDRESS});
 }
 
 void CreateTestPersonalInformationFormData(FormData* form,
                                            const char* unique_id) {
   form->unique_renderer_id = MakeFormRendererId();
-  form->name =
-      ASCIIToUTF16("MyForm") + ASCIIToUTF16(unique_id ? unique_id : "");
+  form->name = u"MyForm" + ASCIIToUTF16(unique_id ? unique_id : "");
   form->url = GURL("https://myform.com/form.html");
   form->full_url = GURL("https://myform.com/form.html?foo=bar");
   form->action = GURL("https://myform.com/submit.html");
@@ -312,8 +302,7 @@ void CreateTestCreditCardFormData(FormData* form,
                                   bool split_names,
                                   const char* unique_id) {
   form->unique_renderer_id = MakeFormRendererId();
-  form->name =
-      ASCIIToUTF16("MyForm") + ASCIIToUTF16(unique_id ? unique_id : "");
+  form->name = u"MyForm" + ASCIIToUTF16(unique_id ? unique_id : "");
   if (is_https) {
     form->url = GURL("https://myform.com/form.html");
     form->full_url = GURL("https://myform.com/form.html?foo=bar");
@@ -357,6 +346,18 @@ void CreateTestCreditCardFormData(FormData* form,
   }
   test::CreateTestFormField("CVC", "cvc", "", "text", &field);
   form->fields.push_back(field);
+}
+
+FormData WithoutUnserializedData(FormData form) {
+  form.host_frame = {};
+  for (FormFieldData& field : form.fields)
+    field = WithoutUnserializedData(std::move(field));
+  return form;
+}
+
+FormFieldData WithoutUnserializedData(FormFieldData field) {
+  field.host_frame = {};
+  return field;
 }
 
 inline void check_and_set(
@@ -439,10 +440,9 @@ AutofillProfile GetServerProfile() {
                  "Apt. 42", "Mountain View", "California", "94043", "US",
                  "1.800.555.1234");
 
-  profile.SetInfo(NAME_FULL, ASCIIToUTF16("John K. Doe"), "en");
-  profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, ASCIIToUTF16("CEDEX"));
-  profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY,
-                     ASCIIToUTF16("Santa Clara"));
+  profile.SetInfo(NAME_FULL, u"John K. Doe", "en");
+  profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"CEDEX");
+  profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"Santa Clara");
 
   profile.set_language_code("en");
   profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield);
@@ -462,10 +462,9 @@ AutofillProfile GetServerProfile2() {
                  "Apt. 1032", "Sunnyvale", "California", "10011", "US",
                  "+1 514-123-1234");
 
-  profile.SetInfo(NAME_FULL, ASCIIToUTF16("Jim S. Bristow"), "en");
-  profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, ASCIIToUTF16("XEDEC"));
-  profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY,
-                     ASCIIToUTF16("Santa Monica"));
+  profile.SetInfo(NAME_FULL, u"Jim S. Bristow", "en");
+  profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"XEDEC");
+  profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"Santa Monica");
 
   profile.set_language_code("en");
   profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield);
@@ -541,7 +540,7 @@ CreditCard GetMaskedServerCardWithNickname() {
   test::SetCreditCardInfo(&credit_card, "Test user", "1111" /* Visa */,
                           NextMonth().c_str(), NextYear().c_str(), "1");
   credit_card.SetNetworkForMaskedCard(kVisaCard);
-  credit_card.SetNickname(ASCIIToUTF16("Test nickname"));
+  credit_card.SetNickname(u"Test nickname");
   return credit_card;
 }
 
@@ -550,7 +549,7 @@ CreditCard GetMaskedServerCardWithInvalidNickname() {
   test::SetCreditCardInfo(&credit_card, "Test user", "1111" /* Visa */,
                           NextMonth().c_str(), NextYear().c_str(), "1");
   credit_card.SetNetworkForMaskedCard(kVisaCard);
-  credit_card.SetNickname(ASCIIToUTF16("Invalid nickname which is too long"));
+  credit_card.SetNickname(u"Invalid nickname which is too long");
   return credit_card;
 }
 
@@ -598,7 +597,7 @@ CreditCard GetRandomCreditCard(CreditCard::RecordType record_type) {
 CreditCardCloudTokenData GetCreditCardCloudTokenData1() {
   CreditCardCloudTokenData data;
   data.masked_card_id = "data1_id";
-  data.suffix = ASCIIToUTF16("1111");
+  data.suffix = u"1111";
   data.exp_month = 1;
   base::StringToInt(NextYear(), &data.exp_year);
   data.card_art_url = "fake url 1";
@@ -609,7 +608,7 @@ CreditCardCloudTokenData GetCreditCardCloudTokenData1() {
 CreditCardCloudTokenData GetCreditCardCloudTokenData2() {
   CreditCardCloudTokenData data;
   data.masked_card_id = "data2_id";
-  data.suffix = ASCIIToUTF16("2222");
+  data.suffix = u"2222";
   data.exp_month = 2;
   base::StringToInt(NextYear(), &data.exp_year);
   data.exp_year += 1;
@@ -621,11 +620,15 @@ CreditCardCloudTokenData GetCreditCardCloudTokenData2() {
 AutofillOfferData GetCardLinkedOfferData1() {
   AutofillOfferData data;
   data.offer_id = 111;
-  data.offer_reward_amount = "5%";
   // Sets the expiry to be 45 days later.
   data.expiry = AutofillClock::Now() + base::TimeDelta::FromDays(45);
   data.offer_details_url = GURL("http://www.example1.com");
-  data.merchant_domain.emplace_back("http://www.example1.com");
+  data.merchant_origins.emplace_back("http://www.example1.com");
+  data.display_strings.value_prop_text = "Get 5% off your purchase";
+  data.display_strings.see_details_text = "See details";
+  data.display_strings.usage_instructions_text =
+      "Check out with this card to activate";
+  data.offer_reward_amount = "5%";
   data.eligible_instrument_id.emplace_back(111111);
   return data;
 }
@@ -633,12 +636,31 @@ AutofillOfferData GetCardLinkedOfferData1() {
 AutofillOfferData GetCardLinkedOfferData2() {
   AutofillOfferData data;
   data.offer_id = 222;
-  data.offer_reward_amount = "$10";
   // Sets the expiry to be 40 days later.
   data.expiry = AutofillClock::Now() + base::TimeDelta::FromDays(40);
   data.offer_details_url = GURL("http://www.example2.com");
-  data.merchant_domain.emplace_back("http://www.example2.com");
+  data.merchant_origins.emplace_back("http://www.example2.com");
+  data.display_strings.value_prop_text = "Get $10 off your purchase";
+  data.display_strings.see_details_text = "See details";
+  data.display_strings.usage_instructions_text =
+      "Check out with this card to activate";
+  data.offer_reward_amount = "$10";
   data.eligible_instrument_id.emplace_back(222222);
+  return data;
+}
+
+AutofillOfferData GetPromoCodeOfferData() {
+  AutofillOfferData data;
+  data.offer_id = 333;
+  // Sets the expiry to be 35 days later.
+  data.expiry = AutofillClock::Now() + base::TimeDelta::FromDays(35);
+  data.offer_details_url = GURL("http://www.example.com");
+  data.merchant_origins.emplace_back("http://www.example.com");
+  data.display_strings.value_prop_text = "5% off on shoes. Up to $50.";
+  data.display_strings.see_details_text = "See details";
+  data.display_strings.usage_instructions_text =
+      "Click the promo code field at checkout to autofill it.";
+  data.promo_code = "5PCTOFFSHOES";
   return data;
 }
 
@@ -882,14 +904,15 @@ void GenerateTestAutofillPopup(
   autofill_external_delegate->OnQuery(query_id, form, field, bounds);
 
   std::vector<Suggestion> suggestions;
-  suggestions.push_back(Suggestion(base::ASCIIToUTF16("Test suggestion")));
+  suggestions.push_back(Suggestion(u"Test suggestion"));
   autofill_external_delegate->OnSuggestionsReturned(
       query_id, suggestions, /*autoselect_first_suggestion=*/false);
 }
 
-std::string ObfuscatedCardDigitsAsUTF8(const std::string& str) {
-  return base::UTF16ToUTF8(
-      internal::GetObfuscatedStringForCardDigits(base::ASCIIToUTF16(str)));
+std::string ObfuscatedCardDigitsAsUTF8(const std::string& str,
+                                       int obfuscation_length) {
+  return base::UTF16ToUTF8(internal::GetObfuscatedStringForCardDigits(
+      base::ASCIIToUTF16(str), obfuscation_length));
 }
 
 std::string NextMonth() {
@@ -934,7 +957,7 @@ void AddFieldSuggestionToForm(
   auto* field_suggestion = form_suggestion->add_field_suggestions();
   field_suggestion->set_field_signature(
       CalculateFieldSignatureForField(field_data).value());
-  field_suggestion->set_primary_type_prediction(field_type);
+  field_suggestion->add_predictions()->set_type(field_type);
 }
 
 void AddFieldPredictionsToForm(
@@ -943,7 +966,7 @@ void AddFieldPredictionsToForm(
     ::autofill::AutofillQueryResponse_FormSuggestion* form_suggestion) {
   std::vector<ServerFieldType> types;
   for (auto type : field_types) {
-    types.emplace_back(static_cast<ServerFieldType>(type));
+    types.emplace_back(ToSafeServerFieldType(type, UNKNOWN_TYPE));
   }
   AddFieldPredictionsToForm(field_data, types, form_suggestion);
 }
@@ -952,11 +975,9 @@ void AddFieldPredictionsToForm(
     const autofill::FormFieldData& field_data,
     const std::vector<ServerFieldType>& field_types,
     ::autofill::AutofillQueryResponse_FormSuggestion* form_suggestion) {
-  // According to api_v1.proto, the first element is always set to primary type.
   auto* field_suggestion = form_suggestion->add_field_suggestions();
   field_suggestion->set_field_signature(
       CalculateFieldSignatureForField(field_data).value());
-  field_suggestion->set_primary_type_prediction(*field_types.begin());
   for (auto field_type : field_types) {
     AutofillQueryResponse_FormSuggestion_FieldSuggestion_FieldPrediction*
         prediction = field_suggestion->add_predictions();

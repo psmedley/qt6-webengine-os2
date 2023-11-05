@@ -4,6 +4,8 @@
 
 #include "ui/events/blink/web_input_event_builders_win.h"
 
+#include "base/metrics/histogram_functions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/windowsx_shim.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/display/win/screen_win.h"
@@ -133,10 +135,9 @@ WebMouseEvent WebMouseEventBuilder::Build(
   result.button = button;
 
   // set position fields:
-  result.SetPositionInWidget(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+  POINT global_point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+  result.SetPositionInWidget(global_point.x, global_point.y);
 
-  POINT global_point = {result.PositionInWidget().x(),
-                        result.PositionInWidget().y()};
   ClientToScreen(hwnd, &global_point);
 
   // We need to convert the global point back to DIP before using it.
@@ -207,6 +208,7 @@ WebMouseWheelEvent WebMouseWheelEventBuilder::Build(
   UINT key_state;
   float wheel_delta;
   bool horizontal_scroll = false;
+  POINT client_point = {0};
   if ((message == WM_VSCROLL) || (message == WM_HSCROLL)) {
     // Synthesize mousewheel event from a scroll event.  This is needed to
     // simulate middle mouse scrolling in some laptops.  Use GetAsyncKeyState
@@ -219,9 +221,8 @@ WebMouseWheelEvent WebMouseWheelEventBuilder::Build(
     // NOTE: There doesn't seem to be a way to query the mouse button state
     // in this case.
 
-    POINT cursor_position = {0};
-    GetCursorPos(&cursor_position);
-    result.SetPositionInScreen(cursor_position.x, cursor_position.y);
+    GetCursorPos(&client_point);
+    result.SetPositionInScreen(client_point.x, client_point.y);
 
     switch (LOWORD(wparam)) {
       case SB_LINEUP:  // == SB_LINELEFT
@@ -249,7 +250,8 @@ WebMouseWheelEvent WebMouseWheelEventBuilder::Build(
     // Non-synthesized event; we can just read data off the event.
     key_state = GET_KEYSTATE_WPARAM(wparam);
 
-    result.SetPositionInScreen(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+    client_point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    result.SetPositionInScreen(client_point.x, client_point.y);
 
     // Currently we leave hasPreciseScrollingDeltas false, even for trackpad
     // scrolls that generate WM_MOUSEWHEEL, since we don't have a good way to
@@ -277,8 +279,6 @@ WebMouseWheelEvent WebMouseWheelEventBuilder::Build(
   result.SetModifiers(modifiers);
 
   // Set coordinates by translating event coordinates from screen to client.
-  POINT client_point = {result.PositionInScreen().x(),
-                        result.PositionInScreen().y()};
   MapWindowPoints(0, hwnd, &client_point, 1);
   result.SetPositionInWidget(client_point.x, client_point.y);
 
@@ -289,10 +289,18 @@ WebMouseWheelEvent WebMouseWheelEventBuilder::Build(
   if (horizontal_scroll) {
     unsigned long scroll_chars = kDefaultScrollCharsPerWheelDelta;
     SystemParametersInfo(SPI_GETWHEELSCROLLCHARS, 0, &scroll_chars, 0);
+    TRACE_EVENT1("input", "WebMouseWheelEventBuilder::Build", "scroll_chars",
+                 scroll_chars);
+    base::UmaHistogramCounts10M("InputMethod.MouseWheel.ScrollCharacters",
+                                base::saturated_cast<int>(scroll_chars));
     scroll_delta *= static_cast<float>(scroll_chars);
   } else {
     unsigned long scroll_lines = kDefaultScrollLinesPerWheelDelta;
     SystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0, &scroll_lines, 0);
+    TRACE_EVENT1("input", "WebMouseWheelEventBuilder::Build", "scroll_lines",
+                 scroll_lines);
+    base::UmaHistogramCounts10M("InputMethod.MouseWheel.ScrollLines",
+                                base::saturated_cast<int>(scroll_lines));
     if (scroll_lines == WHEEL_PAGESCROLL)
       result.delta_units = ui::ScrollGranularity::kScrollByPage;
     else

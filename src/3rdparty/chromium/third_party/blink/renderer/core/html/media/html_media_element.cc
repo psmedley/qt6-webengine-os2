@@ -34,15 +34,16 @@
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "media/base/logging_override_if_enabled.h"
 #include "media/base/media_content_type.h"
 #include "media/base/media_switches.h"
+#include "services/media_session/public/mojom/media_session.mojom-blink.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
-#include "third_party/blink/public/common/widget/screen_info.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-shared.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream.h"
 #include "third_party/blink/public/platform/modules/remoteplayback/web_remote_playback_client.h"
@@ -58,6 +59,8 @@
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/core_probes_inl.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
+#include "third_party/blink/renderer/core/css/style_change_reason.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
@@ -125,6 +128,7 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#include "ui/display/screen_info.h"
 
 #ifndef LOG_MEDIA_EVENTS
 // Default to not logging events because so many are generated they can
@@ -153,7 +157,9 @@ enum class MediaControlsShow {
   kNoScript,
   kNotShown,
   kDisabledSettings,
-  kMaxValue = kDisabledSettings,
+  kUserExplicitlyEnabled,
+  kUserExplicitlyDisabled,
+  kMaxValue = kUserExplicitlyDisabled,
 };
 
 // These values are used for the Media.MediaElement.ContentTypeResult histogram.
@@ -176,6 +182,35 @@ enum class PlayPromiseRejectReason {
   kInterruptedByLoad,
   kMaxValue = kInterruptedByLoad,
 };
+
+// The state of the HTMLMediaElement when ProgressEventTimerFired is invoked.
+// These values are histogrammed, so please only add values to the end.
+enum class ProgressEventTimerState {
+  // networkState is not NETWORK_LOADING.
+  kNotLoading,
+  // MediaShouldBeOpaque() is true.
+  kMediaShouldBeOpaque,
+  // "progress" event was scheduled.
+  kProgress,
+  // No progress. The "stalled" event was scheduled.
+  kStalled,
+  // No progress. No "stalled" event scheduled because a Media Source Attachment
+  // is used.
+  kHasMediaSourceAttachment,
+  // No progress. No "stalled" event scheduled because there was recent
+  // progress.
+  kRecentProgress,
+  // No progress. No "stalled" event scheduled because it was already scheduled.
+  kStalledEventAlreadyScheduled,
+  kMaxValue = kStalledEventAlreadyScheduled
+};
+
+// Records the state of the HTMLMediaElement when its "progress event" timer
+// fires.
+// TODO(crbug.com/1143317): Remove once the bug is fixed.
+void RecordProgressEventTimerState(ProgressEventTimerState state) {
+  UMA_HISTOGRAM_ENUMERATION("Media.ProgressEventTimerState", state);
+}
 
 static const base::TimeDelta kStalledNotificationInterval =
     base::TimeDelta::FromSeconds(3);
@@ -446,7 +481,7 @@ bool HTMLMediaElement::IsHLSURL(const KURL& url) {
   if (!url.IsLocalFile() && !url.ProtocolIs("http") && !url.ProtocolIs("https"))
     return false;
 
-  return url.GetString().Contains("m3u8");
+  return url.GetPath().EndsWith(".m3u8");
 }
 
 bool HTMLMediaElement::MediaTracksEnabledInternally() {
@@ -538,9 +573,20 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tag_name,
       media_controls_(nullptr),
       controls_list_(MakeGarbageCollected<HTMLMediaElementControlsList>(this)),
       lazy_load_intersection_observer_(nullptr),
-      media_player_host_remote_(GetExecutionContext()),
-      media_player_observer_remote_set_(GetExecutionContext()),
-      media_player_receiver_set_(this, GetExecutionContext()) {
+      media_player_host_remote_(
+          MakeGarbageCollected<DisallowNewWrapper<
+              HeapMojoAssociatedRemote<media::mojom::blink::MediaPlayerHost>>>(
+              GetExecutionContext())),
+      media_player_observer_remote_set_(
+          MakeGarbageCollected<DisallowNewWrapper<HeapMojoAssociatedRemoteSet<
+              media::mojom::blink::MediaPlayerObserver>>>(
+              GetExecutionContext())),
+      media_player_receiver_set_(
+          MakeGarbageCollected<DisallowNewWrapper<
+              HeapMojoAssociatedReceiverSet<media::mojom::blink::MediaPlayer,
+                                            HTMLMediaElement>>>(
+              this,
+              GetExecutionContext())) {
   DVLOG(1) << "HTMLMediaElement(" << *this << ")";
 
   LocalFrame* frame = document.GetFrame();
@@ -605,6 +651,22 @@ void HTMLMediaElement::DidMoveToNewDocument(Document& old_document) {
 
   RemoveElementFromDocumentMap(this, &old_document);
   AddElementToDocumentMap(this, &GetDocument());
+  SetExecutionContext(GetExecutionContext());
+
+  // Reset mojo state that is coupled to |old_document|'s execution context.
+  // NOTE: |media_player_host_remote_| is also coupled to |old_document|'s frame
+  media_player_host_remote_ = MakeGarbageCollected<DisallowNewWrapper<
+      HeapMojoAssociatedRemote<media::mojom::blink::MediaPlayerHost>>>(
+      GetExecutionContext());
+  media_player_observer_remote_set_->Value().Clear();
+  media_player_observer_remote_set_ = MakeGarbageCollected<DisallowNewWrapper<
+      HeapMojoAssociatedRemoteSet<media::mojom::blink::MediaPlayerObserver>>>(
+      GetExecutionContext());
+  media_player_receiver_set_->Value().Clear();
+  media_player_receiver_set_ =
+      MakeGarbageCollected<DisallowNewWrapper<HeapMojoAssociatedReceiverSet<
+          media::mojom::blink::MediaPlayer, HTMLMediaElement>>>(
+          this, GetExecutionContext());
 
   // FIXME: This is a temporary fix to prevent this object from causing the
   // MediaPlayer to dereference LocalFrame and FrameLoader pointers from the
@@ -620,7 +682,6 @@ void HTMLMediaElement::DidMoveToNewDocument(Document& old_document) {
   // load event from within the destructor.
   old_document.DecrementLoadEventDelayCount();
 
-  SetExecutionContext(GetExecutionContext());
   HTMLElement::DidMoveToNewDocument(old_document);
 }
 
@@ -645,6 +706,10 @@ void HTMLMediaElement::ParseAttribute(
     DVLOG(2) << "parseAttribute(" << *this
              << ", kSrcAttr, old=" << params.old_value
              << ", new=" << params.new_value << ")";
+    // A change to the src attribute can affect intrinsic size, which in turn
+    // requires a style recalc.
+    SetNeedsStyleRecalc(kLocalStyleChange,
+                        StyleChangeReasonForTracing::FromAttribute(name));
     // Trigger a reload, as long as the 'src' attribute is present.
     if (!params.new_value.IsNull()) {
       ignore_preload_none_ = false;
@@ -1330,14 +1395,15 @@ void HTMLMediaElement::StartPlayerLoad() {
 
   // Setup the communication channels between the renderer and browser processes
   // via the MediaPlayer and MediaPlayerObserver mojo interfaces.
-  DCHECK(media_player_receiver_set_.empty());
+  DCHECK(media_player_receiver_set_->Value().empty());
   mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayer>
       media_player_remote;
   BindMediaPlayerReceiver(
       media_player_remote.InitWithNewEndpointAndPassReceiver());
 
   GetMediaPlayerHostRemote().OnMediaPlayerAdded(
-      std::move(media_player_remote), web_media_player_->GetDelegateId());
+      std::move(media_player_remote), AddMediaPlayerObserverAndPassReceiver(),
+      web_media_player_->GetDelegateId());
 
   if (GetLayoutObject())
     GetLayoutObject()->SetShouldDoFullPaintInvalidation();
@@ -1469,14 +1535,14 @@ bool HTMLMediaElement::PausedWhenVisible() const {
 
 void HTMLMediaElement::DidAudioOutputSinkChanged(
     const String& hashed_device_id) {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnAudioOutputSinkChanged(hashed_device_id);
 }
 
-void HTMLMediaElement::AddMediaPlayerObserverForTesting(
-    mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayerObserver>
-        observer) {
-  AddMediaPlayerObserver(std::move(observer));
+void HTMLMediaElement::SetMediaPlayerHostForTesting(
+    mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayerHost> host) {
+  media_player_host_remote_->Value().Bind(
+      std::move(host), GetDocument().GetTaskRunner(TaskType::kInternalMedia));
 }
 
 bool HTMLMediaElement::TextTracksAreReady() const {
@@ -1885,7 +1951,7 @@ void HTMLMediaElement::SetReadyState(ReadyState state) {
           current_src_after_redirects_ == current_src_
               ? ResourceRequest::RedirectStatus::kNoRedirect
               : ResourceRequest::RedirectStatus::kFollowedRedirect,
-          current_src_after_redirects_, /* devtools_id= */ base::nullopt,
+          current_src_after_redirects_, /* devtools_id= */ absl::nullopt,
           ReportingDisposition::kReport,
           GetDocument().Loader()->GetContentSecurityNotifier());
     }
@@ -2031,15 +2097,20 @@ void HTMLMediaElement::UpdateLayoutObject() {
 }
 
 void HTMLMediaElement::ProgressEventTimerFired(TimerBase*) {
-  if (network_state_ != kNetworkLoading)
+  if (network_state_ != kNetworkLoading) {
+    RecordProgressEventTimerState(ProgressEventTimerState::kNotLoading);
     return;
+  }
 
   // If this is an cross-origin request, and we haven't discovered whether
   // the media is actually playable yet, don't fire any progress events as
   // those may let the page know information about the resource that it's
   // not supposed to know.
-  if (MediaShouldBeOpaque())
+  if (MediaShouldBeOpaque()) {
+    RecordProgressEventTimerState(
+        ProgressEventTimerState::kMediaShouldBeOpaque);
     return;
+  }
 
   DCHECK(previous_progress_time_);
 
@@ -2048,10 +2119,17 @@ void HTMLMediaElement::ProgressEventTimerFired(TimerBase*) {
     previous_progress_time_ = base::ElapsedTimer();
     sent_stalled_event_ = false;
     UpdateLayoutObject();
-  } else if (!media_source_attachment_ &&
-             previous_progress_time_->Elapsed() >
-                 kStalledNotificationInterval &&
-             !sent_stalled_event_) {
+    RecordProgressEventTimerState(ProgressEventTimerState::kProgress);
+  } else if (media_source_attachment_) {
+    RecordProgressEventTimerState(
+        ProgressEventTimerState::kHasMediaSourceAttachment);
+  } else if (previous_progress_time_->Elapsed() <=
+             kStalledNotificationInterval) {
+    RecordProgressEventTimerState(ProgressEventTimerState::kRecentProgress);
+  } else if (sent_stalled_event_) {
+    RecordProgressEventTimerState(
+        ProgressEventTimerState::kStalledEventAlreadyScheduled);
+  } else {
     // Note the !media_source_attachment_ condition above. The 'stalled' event
     // is not fired when using MSE. MSE's resource is considered 'local' (we
     // don't manage the download - the app does), so the HTML5 spec text around
@@ -2061,6 +2139,7 @@ void HTMLMediaElement::ProgressEventTimerFired(TimerBase*) {
     ScheduleEvent(event_type_names::kStalled);
     sent_stalled_event_ = true;
     SetShouldDelayLoadEvent(false);
+    RecordProgressEventTimerState(ProgressEventTimerState::kStalled);
   }
 }
 
@@ -2525,7 +2604,7 @@ ScriptPromise HTMLMediaElement::playForBindings(ScriptState* script_state) {
   ScriptPromise promise = resolver->Promise();
   play_promise_resolvers_.push_back(resolver);
 
-  base::Optional<DOMExceptionCode> code = Play();
+  absl::optional<DOMExceptionCode> code = Play();
   if (code) {
     DCHECK(!play_promise_resolvers_.IsEmpty());
     play_promise_resolvers_.pop_back();
@@ -2551,10 +2630,10 @@ ScriptPromise HTMLMediaElement::playForBindings(ScriptState* script_state) {
   return promise;
 }
 
-base::Optional<DOMExceptionCode> HTMLMediaElement::Play() {
+absl::optional<DOMExceptionCode> HTMLMediaElement::Play() {
   DVLOG(2) << "play(" << *this << ")";
 
-  base::Optional<DOMExceptionCode> exception_code =
+  absl::optional<DOMExceptionCode> exception_code =
       autoplay_policy_->RequestPlay();
 
   if (exception_code == DOMExceptionCode::kNotAllowedError) {
@@ -2562,7 +2641,7 @@ base::Optional<DOMExceptionCode> HTMLMediaElement::Play() {
     // Call playInternal to handle scheduling the promise resolution.
     if (!paused_) {
       PlayInternal();
-      return base::nullopt;
+      return absl::nullopt;
     }
     return exception_code;
   }
@@ -2576,7 +2655,7 @@ base::Optional<DOMExceptionCode> HTMLMediaElement::Play() {
 
   PlayInternal();
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 void HTMLMediaElement::PlayInternal() {
@@ -2715,6 +2794,18 @@ bool HTMLMediaElement::ShouldShowControls(
     return false;
   }
 
+  // If the user has explicitly shown or hidden the controls, then force that
+  // choice.
+  if (user_wants_controls_visible_.has_value()) {
+    if (record_metrics == RecordMetricsBehavior::kDoRecord) {
+      RecordShowControlsUsage(this,
+                              *user_wants_controls_visible_
+                                  ? MediaControlsShow::kUserExplicitlyEnabled
+                                  : MediaControlsShow::kUserExplicitlyDisabled);
+    }
+    return *user_wants_controls_visible_;
+  }
+
   if (FastHasAttribute(html_names::kControlsAttr)) {
     if (record_metrics == RecordMetricsBehavior::kDoRecord)
       RecordShowControlsUsage(this, MediaControlsShow::kAttribute);
@@ -2737,6 +2828,14 @@ bool HTMLMediaElement::ShouldShowControls(
   if (record_metrics == RecordMetricsBehavior::kDoRecord)
     RecordShowControlsUsage(this, MediaControlsShow::kNotShown);
   return false;
+}
+
+bool HTMLMediaElement::ShouldShowAllControls() const {
+  // If the user has explicitly shown or hidden the controls, then force that
+  // choice. Otherwise returns whether controls should be shown and no controls
+  // are meant to be hidden.
+  return user_wants_controls_visible_.value_or(
+      ShouldShowControls() && !ControlsListInternal()->CanShowAllControls());
 }
 
 DOMTokenList* HTMLMediaElement::controlsList() const {
@@ -2823,6 +2922,15 @@ void HTMLMediaElement::setMuted(bool muted) {
     GetWebMediaPlayer()->SetVolume(EffectiveMediaVolume());
 
   autoplay_policy_->StopAutoplayMutedWhenVisible();
+}
+
+void HTMLMediaElement::SetUserWantsControlsVisible(bool visible) {
+  user_wants_controls_visible_ = visible;
+  UpdateControlsVisibility();
+}
+
+bool HTMLMediaElement::UserWantsControlsVisible() const {
+  return user_wants_controls_visible_.value_or(false);
 }
 
 double HTMLMediaElement::EffectiveMediaVolume() const {
@@ -3660,6 +3768,8 @@ void HTMLMediaElement::UpdatePlayState() {
     web_media_player_->OnTimeUpdate();
 
   ReportCurrentTimeToMediaSource();
+  PseudoStateChanged(CSSSelector::kPseudoPaused);
+  PseudoStateChanged(CSSSelector::kPseudoPlaying);
 }
 
 void HTMLMediaElement::StopPeriodicTimers() {
@@ -3680,8 +3790,8 @@ void HTMLMediaElement::
 
     // The lifetime of the mojo endpoints are tied to the WebMediaPlayer's, so
     // we need to reset those as well.
-    media_player_receiver_set_.Clear();
-    media_player_observer_remote_set_.Clear();
+    media_player_receiver_set_->Value().Clear();
+    media_player_observer_remote_set_->Value().Clear();
   }
   OnWebMediaPlayerCleared();
 }
@@ -4124,15 +4234,9 @@ bool HTMLMediaElement::IsInteractiveContent() const {
 void HTMLMediaElement::BindMediaPlayerReceiver(
     mojo::PendingAssociatedReceiver<media::mojom::blink::MediaPlayer>
         receiver) {
-  mojo::ReceiverId receiver_id = media_player_receiver_set_.Add(
+  media_player_receiver_set_->Value().Add(
       std::move(receiver),
       GetDocument().GetTaskRunner(TaskType::kInternalMedia));
-
-  media_player_receiver_set_.set_disconnect_handler(WTF::BindRepeating(
-      [](HTMLMediaElement* html_media_element, mojo::ReceiverId receiver_id) {
-        html_media_element->media_player_receiver_set_.Remove(receiver_id);
-      },
-      WrapWeakPersistent(this), receiver_id));
 }
 
 void HTMLMediaElement::Trace(Visitor* visitor) const {
@@ -4342,7 +4446,7 @@ void HTMLMediaElement::AudioSourceProviderImpl::SetClient(
 
 void HTMLMediaElement::AudioSourceProviderImpl::ProvideInput(
     AudioBus* bus,
-    uint32_t frames_to_process) {
+    int frames_to_process) {
   DCHECK(bus);
 
   MutexTryLocker try_locker(provide_input_lock);
@@ -4410,17 +4514,17 @@ void HTMLMediaElement::PausePlayback() {
 }
 
 void HTMLMediaElement::DidPlayerStartPlaying() {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnMediaPlaying();
 }
 
 void HTMLMediaElement::DidPlayerPaused(bool stream_ended) {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnMediaPaused(stream_ended);
 }
 
 void HTMLMediaElement::DidPlayerMutedStatusChange(bool muted) {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnMutedStatusChanged(muted);
 }
 
@@ -4428,33 +4532,41 @@ void HTMLMediaElement::DidMediaMetadataChange(
     bool has_audio,
     bool has_video,
     media::MediaContentType media_content_type) {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnMediaMetadataChanged(has_audio, has_video, media_content_type);
 }
 
 void HTMLMediaElement::DidPlayerMediaPositionStateChange(
     double playback_rate,
     base::TimeDelta duration,
-    base::TimeDelta position) {
-  for (auto& observer : media_player_observer_remote_set_) {
+    base::TimeDelta position,
+    bool end_of_media) {
+  for (auto& observer : media_player_observer_remote_set_->Value()) {
     observer->OnMediaPositionStateChanged(
         media_session::mojom::blink::MediaPosition::New(
-            playback_rate, duration, position, base::TimeTicks::Now()));
+            playback_rate, duration, position, base::TimeTicks::Now(),
+            end_of_media));
   }
 }
 
 void HTMLMediaElement::DidDisableAudioOutputSinkChanges() {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnAudioOutputSinkChangingDisabled();
 }
 
+void HTMLMediaElement::DidUseAudioServiceChange(bool uses_audio_service) {
+  for (auto& observer : media_player_observer_remote_set_->Value()) {
+    observer->OnUseAudioServiceChanged(uses_audio_service);
+  }
+}
+
 void HTMLMediaElement::DidPlayerSizeChange(const gfx::Size& size) {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnMediaSizeChanged(size);
 }
 
 void HTMLMediaElement::DidBufferUnderflow() {
-  for (auto& observer : media_player_observer_remote_set_)
+  for (auto& observer : media_player_observer_remote_set_->Value())
     observer->OnBufferUnderflow();
 }
 
@@ -4464,7 +4576,7 @@ void HTMLMediaElement::DidSeek() {
       (base::TimeTicks::Now() - last_seek_update_time_ >=
        base::TimeDelta::FromSeconds(1))) {
     last_seek_update_time_ = base::TimeTicks::Now();
-    for (auto& observer : media_player_observer_remote_set_)
+    for (auto& observer : media_player_observer_remote_set_->Value())
       observer->OnSeek();
   }
 }
@@ -4473,29 +4585,26 @@ media::mojom::blink::MediaPlayerHost&
 HTMLMediaElement::GetMediaPlayerHostRemote() {
   // It is an error to call this before having access to the document's frame.
   DCHECK(GetDocument().GetFrame());
-  if (!media_player_host_remote_.is_bound()) {
+  if (!media_player_host_remote_->Value().is_bound()) {
     GetDocument()
         .GetFrame()
         ->GetRemoteNavigationAssociatedInterfaces()
-        ->GetInterface(media_player_host_remote_.BindNewEndpointAndPassReceiver(
-            GetDocument().GetTaskRunner(TaskType::kInternalMedia)));
+        ->GetInterface(
+            media_player_host_remote_->Value().BindNewEndpointAndPassReceiver(
+                GetDocument().GetTaskRunner(TaskType::kInternalMedia)));
   }
-  return *media_player_host_remote_.get();
+  return *media_player_host_remote_->Value().get();
 }
 
-void HTMLMediaElement::AddMediaPlayerObserver(
-    mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayerObserver>
-        observer) {
-  media_player_observer_remote_set_.Add(
+mojo::PendingAssociatedReceiver<media::mojom::blink::MediaPlayerObserver>
+HTMLMediaElement::AddMediaPlayerObserverAndPassReceiver() {
+  mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayerObserver>
+      observer;
+  auto observer_receiver = observer.InitWithNewEndpointAndPassReceiver();
+  media_player_observer_remote_set_->Value().Add(
       std::move(observer),
       GetDocument().GetTaskRunner(TaskType::kInternalMedia));
-
-  media_player_observer_remote_set_.set_disconnect_handler(WTF::BindRepeating(
-      [](HTMLMediaElement* html_media_element,
-         mojo::RemoteSetElementId remote_id) {
-        html_media_element->media_player_observer_remote_set_.Remove(remote_id);
-      },
-      WrapWeakPersistent(this)));
+  return observer_receiver;
 }
 
 void HTMLMediaElement::RequestPlay() {
@@ -4531,11 +4640,30 @@ void HTMLMediaElement::RequestSeekBackward(base::TimeDelta seek_time) {
   setCurrentTime(currentTime() - seconds);
 }
 
+void HTMLMediaElement::RequestSeekTo(base::TimeDelta seek_time) {
+  setCurrentTime(seek_time.InSecondsF());
+}
+
+void HTMLMediaElement::SetVolumeMultiplier(double multiplier) {
+  if (web_media_player_)
+    web_media_player_->SetVolumeMultiplier(multiplier);
+}
+
+void HTMLMediaElement::SetPowerExperimentState(bool enabled) {
+  if (web_media_player_)
+    web_media_player_->SetPowerExperimentState(enabled);
+}
+
 void HTMLMediaElement::SetAudioSinkId(const String& sink_id) {
   auto* audio_output_controller = AudioOutputDeviceController::From(*this);
   DCHECK(audio_output_controller);
 
   audio_output_controller->SetSinkId(sink_id);
+}
+
+void HTMLMediaElement::SuspendForFrameClosed() {
+  if (web_media_player_)
+    web_media_player_->SuspendForFrameClosed();
 }
 
 bool HTMLMediaElement::MediaShouldBeOpaque() const {

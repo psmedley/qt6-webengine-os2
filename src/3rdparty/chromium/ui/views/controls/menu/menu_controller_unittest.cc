@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -34,6 +35,7 @@
 #include "ui/views/controls/menu/menu_host_root_view.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
+#include "ui/views/controls/menu/menu_types.h"
 #include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/test/ax_event_counter.h"
 #include "ui/views/test/menu_test_utils.h"
@@ -42,11 +44,15 @@
 #include "ui/views/widget/widget_utils.h"
 
 #if defined(USE_AURA)
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/drag_drop_client_observer.h"
 #include "ui/aura/null_window_targeter.h"
 #include "ui/aura/scoped_window_targeter.h"
+#include "ui/aura/test/test_window_delegate.h"
+#include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
 #include "ui/views/controls/menu/menu_pre_target_handler.h"
 #endif
@@ -66,8 +72,9 @@
 
 namespace views {
 namespace test {
-
 namespace {
+
+using ::ui::mojom::DragOperation;
 
 bool ShouldIgnoreScreenBoundsForMenus() {
 #if defined(USE_OZONE)
@@ -202,12 +209,12 @@ class TestDragDropClient : public aura::client::DragDropClient {
   ~TestDragDropClient() override = default;
 
   // aura::client::DragDropClient:
-  int StartDragAndDrop(std::unique_ptr<ui::OSExchangeData> data,
-                       aura::Window* root_window,
-                       aura::Window* source_window,
-                       const gfx::Point& screen_location,
-                       int operation,
-                       ui::mojom::DragEventSource source) override;
+  DragOperation StartDragAndDrop(std::unique_ptr<ui::OSExchangeData> data,
+                                 aura::Window* root_window,
+                                 aura::Window* source_window,
+                                 const gfx::Point& screen_location,
+                                 int allowed_operations,
+                                 ui::mojom::DragEventSource source) override;
   void DragCancel() override;
   bool IsDragDropInProgress() override;
 
@@ -222,16 +229,16 @@ class TestDragDropClient : public aura::client::DragDropClient {
   DISALLOW_COPY_AND_ASSIGN(TestDragDropClient);
 };
 
-int TestDragDropClient::StartDragAndDrop(
+DragOperation TestDragDropClient::StartDragAndDrop(
     std::unique_ptr<ui::OSExchangeData> data,
     aura::Window* root_window,
     aura::Window* source_window,
     const gfx::Point& screen_location,
-    int operation,
+    int allowed_operations,
     ui::mojom::DragEventSource source) {
   drag_in_progress_ = true;
   start_drag_and_drop_callback_.Run();
-  return 0;
+  return DragOperation::kNone;
 }
 
 void TestDragDropClient::DragCancel() {
@@ -372,6 +379,11 @@ class MenuControllerTest : public ViewsTestBase,
 
   gfx::Rect CalculateBubbleMenuBounds(const MenuBoundsOptions& options) {
     return CalculateBubbleMenuBounds(options, menu_item_.get());
+  }
+
+  static MenuAnchorPosition AdjustAnchorPositionForRtl(
+      MenuAnchorPosition position) {
+    return MenuController::AdjustAnchorPositionForRtl(position);
   }
 
 #if defined(USE_AURA)
@@ -594,9 +606,10 @@ class MenuControllerTest : public ViewsTestBase,
 
   void TestSubmenuFitsOnScreen(MenuItemView* item,
                                const gfx::Rect& monitor_bounds,
-                               const gfx::Rect& parent_bounds) {
+                               const gfx::Rect& parent_bounds,
+                               MenuAnchorPosition menu_anchor) {
     MenuBoundsOptions options;
-    options.menu_anchor = MenuAnchorPosition::kBubbleAbove;
+    options.menu_anchor = menu_anchor;
     options.monitor_bounds = monitor_bounds;
 
     // Adjust the final bounds to not include the shadow and border.
@@ -608,7 +621,11 @@ class MenuControllerTest : public ViewsTestBase,
     SubmenuView* sub_menu = parent_item->GetSubmenu();
 
     parent_item->SetBoundsRect(parent_bounds);
-    sub_menu->ShowAt(owner(), parent_item->bounds(), false);
+    MenuHost::InitParams params;
+    params.parent = owner();
+    params.bounds = parent_item->bounds();
+    params.do_capture = false;
+    sub_menu->ShowAt(params);
     gfx::Rect final_bounds = CalculateBubbleMenuBounds(options, item);
     final_bounds.Inset(border_and_shadow_insets);
     sub_menu->Close();
@@ -689,7 +706,7 @@ class MenuControllerTest : public ViewsTestBase,
 
   void MenuHostOnDragComplete(MenuHost* host) { host->OnDragComplete(); }
 
-  void SelectByChar(base::char16 character) {
+  void SelectByChar(char16_t character) {
     menu_controller_->SelectByChar(character);
   }
 
@@ -767,17 +784,20 @@ class MenuControllerTest : public ViewsTestBase,
   // `single_child` is true, the hosting menu item has only one child button.
   MenuItemView* AddButtonMenuItems(bool single_child) {
     menu_item()->SetBounds(0, 0, 200, 300);
-    MenuItemView* item_view =
-        menu_item()->AppendMenuItem(5, base::ASCIIToUTF16("Five"));
+    MenuItemView* item_view = menu_item()->AppendMenuItem(5, u"Five");
     const size_t children_count = single_child ? 1 : 3;
     for (size_t i = 0; i < children_count; ++i) {
-      LabelButton* button = new LabelButton(Button::PressedCallback(),
-                                            base::ASCIIToUTF16("Label"));
+      LabelButton* button =
+          new LabelButton(Button::PressedCallback(), u"Label");
       // This is an in-menu button. Hence it must be always focusable.
       button->SetFocusBehavior(View::FocusBehavior::ALWAYS);
       item_view->AddChildView(button);
     }
-    menu_item()->GetSubmenu()->ShowAt(owner(), menu_item()->bounds(), false);
+    MenuHost::InitParams params;
+    params.parent = owner();
+    params.bounds = menu_item()->bounds();
+    params.do_capture = false;
+    menu_item()->GetSubmenu()->ShowAt(params);
     return item_view;
   }
 
@@ -834,10 +854,10 @@ class MenuControllerTest : public ViewsTestBase,
   void SetupMenuItem() {
     menu_delegate_ = std::make_unique<TestMenuDelegate>();
     menu_item_ = std::make_unique<TestMenuItemViewShown>(menu_delegate_.get());
-    menu_item_->AppendMenuItem(1, base::ASCIIToUTF16("One"));
-    menu_item_->AppendMenuItem(2, base::ASCIIToUTF16("Two"));
-    menu_item_->AppendMenuItem(3, base::ASCIIToUTF16("Three"));
-    menu_item_->AppendMenuItem(4, base::ASCIIToUTF16("Four"));
+    menu_item_->AppendMenuItem(1, u"One");
+    menu_item_->AppendMenuItem(2, u"Two");
+    menu_item_->AppendMenuItem(3, u"Three");
+    menu_item_->AppendMenuItem(4, u"Four");
   }
 
   void SetupMenuController() {
@@ -1063,10 +1083,11 @@ TEST_F(MenuControllerTest, VerifyMenuBubblePositionAfterSizeChanges) {
   }
 }
 
-// Verifies that the context menu bubble position, MenuPosition::kBubbleBelow,
-// does not shift as items are removed. The menu position will shift it items
-// are added and the menu no longer fits in its previous position.
-TEST_F(MenuControllerTest, VerifyMenuBubbleBelowPositionAfterSizeChanges) {
+// Verifies that the context menu bubble position,
+// MenuAnchorPosition::kBubbleBottomRight, does not shift as items are removed.
+// The menu position will shift if items are added and the menu no longer fits
+// in its previous position.
+TEST_F(MenuControllerTest, VerifyContextMenuBubblePositionAfterSizeChanges) {
   constexpr gfx::Rect kMonitorBounds(0, 0, 500, 500);
   constexpr gfx::Size kMenuSize(100, 200);
   const gfx::Insets border_and_shadow_insets =
@@ -1083,7 +1104,7 @@ TEST_F(MenuControllerTest, VerifyMenuBubbleBelowPositionAfterSizeChanges) {
                                     border_and_shadow_insets.top());
 
   MenuBoundsOptions options;
-  options.menu_anchor = MenuAnchorPosition::kBubbleBelow;
+  options.menu_anchor = MenuAnchorPosition::kBubbleBottomRight;
   options.monitor_bounds = kMonitorBounds;
   options.anchor_bounds = gfx::Rect(anchor_point, gfx::Size());
 
@@ -1123,6 +1144,15 @@ TEST_F(MenuControllerTest, VerifyMenuBubbleBelowPositionAfterSizeChanges) {
     options.menu_position = MenuItemView::MenuPosition::kAboveBounds;
     CalculateBubbleMenuBounds(options);
     EXPECT_EQ(MenuItemView::MenuPosition::kAboveBounds,
+              menu_item()->ActualMenuPosition());
+  }
+
+  // Case 4: There is enough space for the menu below `anchor_point`. The cached
+  // menu position is below the anchor. The menu should show below the anchor.
+  {
+    options.menu_position = MenuItemView::MenuPosition::kBelowBounds;
+    CalculateBubbleMenuBounds(options);
+    EXPECT_EQ(MenuItemView::MenuPosition::kBelowBounds,
               menu_item()->ActualMenuPosition());
   }
 }
@@ -1664,7 +1694,11 @@ TEST_F(MenuControllerTest, AsynchronousCancelDuringDrag) {
 // the MenuHost does not crash as the drag completes.
 TEST_F(MenuControllerTest, AsynchronousDragHostDeleted) {
   SubmenuView* submenu = menu_item()->GetSubmenu();
-  submenu->ShowAt(owner(), menu_item()->bounds(), false);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = menu_item()->bounds();
+  params.do_capture = false;
+  submenu->ShowAt(params);
   MenuHost* host = GetMenuHost(submenu);
   MenuHostOnDragWillStart(host);
   submenu->Close();
@@ -1677,7 +1711,11 @@ TEST_F(MenuControllerTest, AsynchronousDragHostDeleted) {
 // access a destroyed MenuController. This test should not cause a crash.
 TEST_F(MenuControllerTest, HostReceivesInputBeforeDestruction) {
   SubmenuView* submenu = menu_item()->GetSubmenu();
-  submenu->ShowAt(owner(), menu_item()->bounds(), false);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = menu_item()->bounds();
+  params.do_capture = false;
+  submenu->ShowAt(params);
   gfx::Point location(submenu->bounds().bottom_right());
   location.Offset(1, 1);
 
@@ -1721,7 +1759,11 @@ TEST_F(MenuControllerTest, PreserveGestureForOwner) {
   controller->Run(owner(), nullptr, item, gfx::Rect(),
                   MenuAnchorPosition::kBottomCenter, false, false);
   SubmenuView* sub_menu = item->GetSubmenu();
-  sub_menu->ShowAt(owner(), gfx::Rect(0, 0, 100, 100), true);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = gfx::Rect(0, 0, 100, 100);
+  params.do_capture = true;
+  sub_menu->ShowAt(params);
 
   gfx::Point location(sub_menu->bounds().bottom_left().x(),
                       sub_menu->bounds().bottom_left().y() + 10);
@@ -1751,6 +1793,69 @@ TEST_F(MenuControllerTest, PreserveGestureForOwner) {
   EXPECT_EQ(CountOwnerOnGestureEvent(), 2);
 }
 
+#if defined(USE_AURA)
+// Tests that setting `send_gesture_events_to_owner` flag forwards gesture
+// events to the NativeView specified for gestures and not the owner's
+// NativeView.
+TEST_F(MenuControllerTest, ForwardsEventsToNativeViewForGestures) {
+  aura::test::EventCountDelegate child_delegate;
+  auto child_window = std::make_unique<aura::Window>(&child_delegate);
+  child_window->Init(ui::LAYER_TEXTURED);
+  owner()->GetNativeView()->AddChild(child_window.get());
+
+  MenuController* controller = menu_controller();
+  MenuItemView* item = menu_item();
+
+  // Ensure menu is closed before running with the menu with `child_window` as
+  // the NativeView for gestures.
+  controller->Cancel(MenuController::ExitType::kAll);
+
+  controller->Run(owner(), nullptr, item, gfx::Rect(),
+                  MenuAnchorPosition::kBottomCenter, false, false,
+                  child_window.get());
+  SubmenuView* sub_menu = item->GetSubmenu();
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = item->bounds();
+  params.do_capture = false;
+  params.native_view_for_gestures = child_window.get();
+  sub_menu->ShowAt(params);
+
+  gfx::Point location(sub_menu->bounds().bottom_left().x(),
+                      sub_menu->bounds().bottom_left().y() + 10);
+  ui::GestureEvent event(location.x(), location.y(), 0, ui::EventTimeForNow(),
+                         ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_BEGIN));
+
+  // Gesture events should not be forwarded to either the `child_window` or the
+  // hosts native window if the flag is not set.
+  EXPECT_EQ(0, CountOwnerOnGestureEvent());
+  EXPECT_EQ(0, child_delegate.GetGestureCountAndReset());
+  EXPECT_FALSE(controller->send_gesture_events_to_owner());
+  controller->OnGestureEvent(sub_menu, &event);
+  EXPECT_EQ(0, CountOwnerOnGestureEvent());
+  EXPECT_EQ(0, child_delegate.GetGestureCountAndReset());
+
+  // The `child_window` should receive gestures triggered outside the menu.
+  controller->set_send_gesture_events_to_owner(true);
+  controller->OnGestureEvent(sub_menu, &event);
+  EXPECT_EQ(0, CountOwnerOnGestureEvent());
+  EXPECT_EQ(1, child_delegate.GetGestureCountAndReset());
+
+  ui::GestureEvent event2(location.x(), location.y(), 0, ui::EventTimeForNow(),
+                          ui::GestureEventDetails(ui::ET_GESTURE_END));
+
+  controller->OnGestureEvent(sub_menu, &event2);
+  EXPECT_EQ(0, CountOwnerOnGestureEvent());
+  EXPECT_EQ(1, child_delegate.GetGestureCountAndReset());
+
+  // ET_GESTURE_END resets the `send_gesture_events_to_owner_` flag, so further
+  // gesture events should not be sent to the `child_window`.
+  controller->OnGestureEvent(sub_menu, &event2);
+  EXPECT_EQ(0, CountOwnerOnGestureEvent());
+  EXPECT_EQ(0, child_delegate.GetGestureCountAndReset());
+}
+#endif
+
 // Tests that touch outside menu does not closes the menu when forwarding
 // gesture events to owner.
 TEST_F(MenuControllerTest, NoTouchCloseWhenSendingGesturesToOwner) {
@@ -1763,7 +1868,11 @@ TEST_F(MenuControllerTest, NoTouchCloseWhenSendingGesturesToOwner) {
   // Show a sub menu and touch outside of it.
   MenuItemView* item = menu_item();
   SubmenuView* sub_menu = item->GetSubmenu();
-  sub_menu->ShowAt(owner(), item->bounds(), false);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = item->bounds();
+  params.do_capture = false;
+  sub_menu->ShowAt(params);
   gfx::Point location(sub_menu->bounds().bottom_right());
   location.Offset(1, 1);
   ui::TouchEvent touch_event(
@@ -1807,7 +1916,11 @@ TEST_F(MenuControllerTest, AsynchronousRepostEvent) {
   // Show a sub menu to target with a pointer selection. However have the event
   // occur outside of the bounds of the entire menu.
   SubmenuView* sub_menu = item->GetSubmenu();
-  sub_menu->ShowAt(owner(), item->bounds(), false);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = item->bounds();
+  params.do_capture = false;
+  sub_menu->ShowAt(params);
   gfx::Point location(sub_menu->bounds().bottom_right());
   location.Offset(1, 1);
   ui::MouseEvent event(ui::ET_MOUSE_PRESSED, location, location,
@@ -1839,7 +1952,11 @@ TEST_F(MenuControllerTest, AsynchronousTouchEventRepostEvent) {
   // outside of the bounds of the entire menu.
   MenuItemView* item = menu_item();
   SubmenuView* sub_menu = item->GetSubmenu();
-  sub_menu->ShowAt(owner(), item->bounds(), false);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = item->bounds();
+  params.do_capture = false;
+  sub_menu->ShowAt(params);
   gfx::Point location(sub_menu->bounds().bottom_right());
   location.Offset(1, 1);
   ui::TouchEvent event(ui::ET_TOUCH_PRESSED, location, ui::EventTimeForNow(),
@@ -1874,7 +1991,11 @@ TEST_F(MenuControllerTest, AsynchronousRepostEventDeletesController) {
   // Show a sub menu to target with a pointer selection. However have the event
   // occur outside of the bounds of the entire menu.
   SubmenuView* sub_menu = item->GetSubmenu();
-  sub_menu->ShowAt(owner(), item->bounds(), true);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = item->bounds();
+  params.do_capture = true;
+  sub_menu->ShowAt(params);
   gfx::Point location(sub_menu->bounds().bottom_right());
   location.Offset(1, 1);
   ui::MouseEvent event(ui::ET_MOUSE_PRESSED, location, location,
@@ -1910,7 +2031,11 @@ TEST_F(MenuControllerTest, AsynchronousGestureDeletesController) {
 
   // Show a sub menu to target with a tap event.
   SubmenuView* sub_menu = item->GetSubmenu();
-  sub_menu->ShowAt(owner(), gfx::Rect(0, 0, 100, 100), true);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = gfx::Rect(0, 0, 100, 100);
+  params.do_capture = true;
+  sub_menu->ShowAt(params);
 
   gfx::Point location(sub_menu->bounds().CenterPoint());
   ui::GestureEvent event(location.x(), location.y(), 0, ui::EventTimeForNow(),
@@ -2081,6 +2206,53 @@ TEST_F(MenuControllerTest, CalculateMenuBoundsAnchorTest) {
   EXPECT_EQ(expected, CalculateMenuBounds(options));
 }
 
+// Regression test for https://crbug.com/1217711
+TEST_F(MenuControllerTest, MenuAnchorPositionFlippedInRtl) {
+  ASSERT_FALSE(base::i18n::IsRTL());
+
+  // Test the AdjustAnchorPositionForRtl() method directly, rather than running
+  // the menu, because it's awkward to access the menu's window. Also, the menu
+  // bounds are already tested separately.
+  EXPECT_EQ(MenuAnchorPosition::kTopLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kTopLeft));
+  EXPECT_EQ(MenuAnchorPosition::kTopRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kTopRight));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleTopLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleTopLeft));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleTopRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleTopRight));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleLeft));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleRight));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleBottomLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleBottomLeft));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleBottomRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleBottomRight));
+
+  base::i18n::SetRTLForTesting(true);
+
+  // Anchor positions are left/right flipped in RTL.
+  EXPECT_EQ(MenuAnchorPosition::kTopLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kTopRight));
+  EXPECT_EQ(MenuAnchorPosition::kTopRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kTopLeft));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleTopLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleTopRight));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleTopRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleTopLeft));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleRight));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleLeft));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleBottomLeft,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleBottomRight));
+  EXPECT_EQ(MenuAnchorPosition::kBubbleBottomRight,
+            AdjustAnchorPositionForRtl(MenuAnchorPosition::kBubbleBottomLeft));
+
+  base::i18n::SetRTLForTesting(false);
+}
+
 TEST_F(MenuControllerTest, CalculateMenuBoundsMonitorFitTest) {
   MenuBoundsOptions options;
   gfx::Rect expected;
@@ -2113,31 +2285,44 @@ TEST_F(MenuControllerTest, CalculateMenuBoundsMonitorFitTest) {
 TEST_P(MenuControllerTest, TestMenuFitsOnScreen) {
   const int display_size = 500;
   // Simulate multiple display layouts.
-  for (int x = -1; x <= 1; x++)
+  for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
       const gfx::Rect monitor_bounds(x * display_size, y * display_size,
                                      display_size, display_size);
-      TestMenuFitsOnScreen(MenuAnchorPosition::kBubbleAbove, monitor_bounds);
+      TestMenuFitsOnScreen(MenuAnchorPosition::kBubbleTopLeft, monitor_bounds);
+      TestMenuFitsOnScreen(MenuAnchorPosition::kBubbleTopRight, monitor_bounds);
       TestMenuFitsOnScreen(MenuAnchorPosition::kBubbleLeft, monitor_bounds);
       TestMenuFitsOnScreen(MenuAnchorPosition::kBubbleRight, monitor_bounds);
+      TestMenuFitsOnScreen(MenuAnchorPosition::kBubbleBottomLeft,
+                           monitor_bounds);
+      TestMenuFitsOnScreen(MenuAnchorPosition::kBubbleBottomRight,
+                           monitor_bounds);
     }
+  }
 }
 
 // Test that menus show up on screen with zero sized anchors.
 TEST_P(MenuControllerTest, TestMenuFitsOnScreenSmallAnchor) {
   const int display_size = 500;
   // Simulate multiple display layouts.
-  for (int x = -1; x <= 1; x++)
+  for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
       const gfx::Rect monitor_bounds(x * display_size, y * display_size,
                                      display_size, display_size);
-      TestMenuFitsOnScreenSmallAnchor(MenuAnchorPosition::kBubbleAbove,
+      TestMenuFitsOnScreenSmallAnchor(MenuAnchorPosition::kBubbleTopLeft,
+                                      monitor_bounds);
+      TestMenuFitsOnScreenSmallAnchor(MenuAnchorPosition::kBubbleTopRight,
                                       monitor_bounds);
       TestMenuFitsOnScreenSmallAnchor(MenuAnchorPosition::kBubbleLeft,
                                       monitor_bounds);
       TestMenuFitsOnScreenSmallAnchor(MenuAnchorPosition::kBubbleRight,
                                       monitor_bounds);
+      TestMenuFitsOnScreenSmallAnchor(MenuAnchorPosition::kBubbleBottomLeft,
+                                      monitor_bounds);
+      TestMenuFitsOnScreenSmallAnchor(MenuAnchorPosition::kBubbleBottomRight,
+                                      monitor_bounds);
     }
+  }
 }
 
 // Test that menus fit a small screen.
@@ -2145,24 +2330,31 @@ TEST_P(MenuControllerTest, TestMenuFitsOnSmallScreen) {
   const int display_size = 500;
 
   // Simulate multiple display layouts.
-  for (int x = -1; x <= 1; x++)
+  for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
       const gfx::Rect monitor_bounds(x * display_size, y * display_size,
                                      display_size, display_size);
-      TestMenuFitsOnSmallScreen(MenuAnchorPosition::kBubbleAbove,
+      TestMenuFitsOnSmallScreen(MenuAnchorPosition::kBubbleTopLeft,
+                                monitor_bounds);
+      TestMenuFitsOnSmallScreen(MenuAnchorPosition::kBubbleTopRight,
                                 monitor_bounds);
       TestMenuFitsOnSmallScreen(MenuAnchorPosition::kBubbleLeft,
                                 monitor_bounds);
       TestMenuFitsOnSmallScreen(MenuAnchorPosition::kBubbleRight,
                                 monitor_bounds);
+      TestMenuFitsOnSmallScreen(MenuAnchorPosition::kBubbleBottomLeft,
+                                monitor_bounds);
+      TestMenuFitsOnSmallScreen(MenuAnchorPosition::kBubbleBottomRight,
+                                monitor_bounds);
     }
+  }
 }
 
 // Test that submenus are displayed within the screen bounds on smaller screens.
 TEST_P(MenuControllerTest, TestSubmenuFitsOnScreen) {
   menu_controller()->set_use_touchable_layout(true);
   MenuItemView* sub_item = menu_item()->GetSubmenu()->GetMenuItemAt(0);
-  sub_item->AppendMenuItem(11, base::ASCIIToUTF16("Subitem.One"));
+  sub_item->AppendMenuItem(11, u"Subitem.One");
 
   const int menu_width = MenuConfig::instance().touchable_menu_min_width;
   const gfx::Size parent_size(menu_width, menu_width);
@@ -2171,37 +2363,48 @@ TEST_P(MenuControllerTest, TestSubmenuFitsOnScreen) {
   const int kDisplayWidth = parent_size.width() * 3;
   const int kDisplayHeight = parent_size.height() * 3;
 
-  // Simulate multiple display layouts.
-  for (int x = -1; x <= 1; x++)
-    for (int y = -1; y <= 1; y++) {
-      const gfx::Rect monitor_bounds(x * kDisplayWidth, y * kDisplayHeight,
-                                     kDisplayWidth, kDisplayHeight);
+  // For both kBubbleTopLeft and kBubbleTopRight.
+  for (auto menu_position : {MenuAnchorPosition::kBubbleTopLeft,
+                             MenuAnchorPosition::kBubbleTopRight}) {
+    // Simulate multiple display layouts.
+    for (int x = -1; x <= 1; x++) {
+      for (int y = -1; y <= 1; y++) {
+        const gfx::Rect monitor_bounds(x * kDisplayWidth, y * kDisplayHeight,
+                                       kDisplayWidth, kDisplayHeight);
 
-      const int x_min = monitor_bounds.x();
-      const int x_max = monitor_bounds.right() - parent_size.width();
-      const int x_mid = (x_min + x_max) / 2;
-      const int x_qtr = x_min + (x_max - x_min) / 4;
+        const int x_min = monitor_bounds.x();
+        const int x_max = monitor_bounds.right() - parent_size.width();
+        const int x_mid = (x_min + x_max) / 2;
+        const int x_qtr = x_min + (x_max - x_min) / 4;
 
-      const int y_min = monitor_bounds.y();
-      const int y_max = monitor_bounds.bottom() - parent_size.height();
-      const int y_mid = (y_min + y_max) / 2;
+        const int y_min = monitor_bounds.y();
+        const int y_max = monitor_bounds.bottom() - parent_size.height();
+        const int y_mid = (y_min + y_max) / 2;
 
-      TestSubmenuFitsOnScreen(sub_item, monitor_bounds,
-                              gfx::Rect(gfx::Point(x_min, y_min), parent_size));
-      TestSubmenuFitsOnScreen(sub_item, monitor_bounds,
-                              gfx::Rect(gfx::Point(x_max, y_min), parent_size));
-      TestSubmenuFitsOnScreen(sub_item, monitor_bounds,
-                              gfx::Rect(gfx::Point(x_mid, y_min), parent_size));
-      TestSubmenuFitsOnScreen(sub_item, monitor_bounds,
-                              gfx::Rect(gfx::Point(x_min, y_mid), parent_size));
-      TestSubmenuFitsOnScreen(sub_item, monitor_bounds,
-                              gfx::Rect(gfx::Point(x_min, y_max), parent_size));
+        TestSubmenuFitsOnScreen(
+            sub_item, monitor_bounds,
+            gfx::Rect(gfx::Point(x_min, y_min), parent_size), menu_position);
+        TestSubmenuFitsOnScreen(
+            sub_item, monitor_bounds,
+            gfx::Rect(gfx::Point(x_max, y_min), parent_size), menu_position);
+        TestSubmenuFitsOnScreen(
+            sub_item, monitor_bounds,
+            gfx::Rect(gfx::Point(x_mid, y_min), parent_size), menu_position);
+        TestSubmenuFitsOnScreen(
+            sub_item, monitor_bounds,
+            gfx::Rect(gfx::Point(x_min, y_mid), parent_size), menu_position);
+        TestSubmenuFitsOnScreen(
+            sub_item, monitor_bounds,
+            gfx::Rect(gfx::Point(x_min, y_max), parent_size), menu_position);
 
-      // Extra wide menu: test with insufficient room on both sides.
-      TestSubmenuFitsOnScreen(
-          sub_item, monitor_bounds,
-          gfx::Rect(gfx::Point(x_qtr, y_min), parent_size_wide));
+        // Extra wide menu: test with insufficient room on both sides.
+        TestSubmenuFitsOnScreen(
+            sub_item, monitor_bounds,
+            gfx::Rect(gfx::Point(x_qtr, y_min), parent_size_wide),
+            menu_position);
+      }
     }
+  }
 }
 
 // Test that a menu that was originally drawn below the anchor does not get
@@ -2249,9 +2452,8 @@ TEST_F(MenuControllerTest, MouseAtMenuItemOnShow) {
   // the menu is shown.
   std::unique_ptr<TestMenuItemViewNotShown> menu_item(
       new TestMenuItemViewNotShown(menu_delegate()));
-  MenuItemView* first_item =
-      menu_item->AppendMenuItem(1, base::ASCIIToUTF16("One"));
-  menu_item->AppendMenuItem(2, base::ASCIIToUTF16("Two"));
+  MenuItemView* first_item = menu_item->AppendMenuItem(1, u"One");
+  menu_item->AppendMenuItem(2, u"Two");
   menu_item->SetController(menu_controller());
 
   // Move the mouse to where the first menu item will be shown,
@@ -2352,7 +2554,11 @@ TEST_F(MenuControllerTest, RepostEventToEmptyMenuItem) {
   base_menu->SetBounds(0, 0, 200, 200);
   SubmenuView* base_submenu = base_menu->GetSubmenu();
   base_submenu->SetBounds(0, 0, 200, 200);
-  base_submenu->ShowAt(owner(), gfx::Rect(0, 0, 200, 200), false);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.do_capture = false;
+  base_submenu->ShowAt(params);
   GetMenuHost(base_submenu)
       ->SetContentsView(base_submenu->GetScrollViewContainer());
 
@@ -2369,7 +2575,10 @@ TEST_F(MenuControllerTest, RepostEventToEmptyMenuItem) {
   base_submenu->AddChildView(sub_menu_item.get());
   SubmenuView* sub_menu_view = sub_menu_item->GetSubmenu();
   sub_menu_view->SetBounds(0, 50, 50, 50);
-  sub_menu_view->ShowAt(owner(), gfx::Rect(0, 50, 50, 50), false);
+  params.parent = owner();
+  params.bounds = gfx::Rect(0, 50, 50, 50);
+  params.do_capture = false;
+  sub_menu_view->ShowAt(params);
   GetMenuHost(sub_menu_view)
       ->SetContentsView(sub_menu_view->GetScrollViewContainer());
 
@@ -2393,7 +2602,10 @@ TEST_F(MenuControllerTest, RepostEventToEmptyMenuItem) {
 
   SubmenuView* nested_menu_submenu = nested_menu_item_1->GetSubmenu();
   nested_menu_submenu->SetBounds(0, 0, 100, 100);
-  nested_menu_submenu->ShowAt(owner(), gfx::Rect(0, 0, 100, 100), false);
+  params.parent = owner();
+  params.bounds = gfx::Rect(0, 0, 100, 100);
+  params.do_capture = false;
+  nested_menu_submenu->ShowAt(params);
   GetMenuHost(nested_menu_submenu)
       ->SetContentsView(nested_menu_submenu->GetScrollViewContainer());
 
@@ -2458,7 +2670,11 @@ TEST_F(MenuControllerTest, DragFromViewIntoMenuAndExit) {
 
   std::unique_ptr<View> drag_view = std::make_unique<View>();
   drag_view->SetBoundsRect(gfx::Rect(0, 500, 100, 100));
-  sub_menu->ShowAt(owner(), gfx::Rect(0, 0, 100, 100), false);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = gfx::Rect(0, 0, 100, 100);
+  params.do_capture = false;
+  sub_menu->ShowAt(params);
   gfx::Point press_location(drag_view->bounds().CenterPoint());
   gfx::Point drag_location(first_item->bounds().CenterPoint());
   gfx::Point release_location(200, 50);
@@ -2490,6 +2706,81 @@ TEST_F(MenuControllerTest, DragFromViewIntoMenuAndExit) {
   ProcessMouseReleased(sub_menu, release_event);
 }
 
+// Tests that |MenuHost::InitParams| are correctly forwarded to the created
+// |aura::Window|.
+TEST_F(MenuControllerTest, AuraWindowIsInitializedWithMenuHostInitParams) {
+  SubmenuView* sub_menu = menu_item()->GetSubmenu();
+
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = gfx::Rect(0, 0, 100, 100);
+  params.do_capture = false;
+  params.menu_type = ui::MenuType::kRootMenu;
+  sub_menu->ShowAt(params);
+
+  aura::Window* window = sub_menu->GetWidget()->GetNativeWindow();
+  EXPECT_EQ(ui::MenuType::kRootMenu,
+            window->GetProperty(aura::client::kMenuType));
+}
+
+// Tests that |aura::Window| has the correct properties when a context menu is
+// shown.
+TEST_F(MenuControllerTest, ContextMenuInitializesAuraWindowWhenShown) {
+  SubmenuView* sub_menu = menu_item()->GetSubmenu();
+
+  // Checking that context menu properties are calculated correctly.
+  menu_controller()->Run(owner(), nullptr, menu_item(), menu_item()->bounds(),
+                         MenuAnchorPosition::kTopLeft, true, false);
+  OpenMenu(menu_item());
+
+  aura::Window* window = sub_menu->GetWidget()->GetNativeWindow();
+  EXPECT_EQ(ui::MenuType::kRootContextMenu,
+            window->GetProperty(aura::client::kMenuType));
+
+  // Checking that child menu properties are calculated correctly.
+  MenuItemView* const child_menu = menu_item()->GetSubmenu()->GetMenuItemAt(0);
+  child_menu->CreateSubmenu();
+  ASSERT_NE(nullptr, child_menu->GetParentMenuItem());
+  menu_controller()->Run(owner(), nullptr, child_menu, child_menu->bounds(),
+                         MenuAnchorPosition::kTopRight, false, false);
+  OpenMenu(child_menu);
+
+  ASSERT_NE(nullptr, child_menu->GetWidget());
+  window = child_menu->GetSubmenu()->GetWidget()->GetNativeWindow();
+
+  EXPECT_EQ(ui::MenuType::kChildMenu,
+            window->GetProperty(aura::client::kMenuType));
+}
+
+// Tests that |aura::Window| has the correct properties when a root or a child
+// menu is shown.
+TEST_F(MenuControllerTest, RootAndChildMenusInitializeAuraWindowWhenShown) {
+  SubmenuView* sub_menu = menu_item()->GetSubmenu();
+
+  // Checking that root menu properties are calculated correctly.
+  menu_controller()->Run(owner(), nullptr, menu_item(), menu_item()->bounds(),
+                         MenuAnchorPosition::kTopLeft, false, false);
+  OpenMenu(menu_item());
+
+  aura::Window* window = sub_menu->GetWidget()->GetNativeWindow();
+  EXPECT_EQ(ui::MenuType::kRootMenu,
+            window->GetProperty(aura::client::kMenuType));
+
+  // Checking that child menu properties are calculated correctly.
+  MenuItemView* const child_menu = menu_item()->GetSubmenu()->GetMenuItemAt(0);
+  child_menu->CreateSubmenu();
+  ASSERT_NE(nullptr, child_menu->GetParentMenuItem());
+  menu_controller()->Run(owner(), nullptr, child_menu, child_menu->bounds(),
+                         MenuAnchorPosition::kTopRight, false, false);
+  OpenMenu(child_menu);
+
+  ASSERT_NE(nullptr, child_menu->GetWidget());
+  window = child_menu->GetSubmenu()->GetWidget()->GetNativeWindow();
+
+  EXPECT_EQ(ui::MenuType::kChildMenu,
+            window->GetProperty(aura::client::kMenuType));
+}
+
 #endif  // defined(USE_AURA)
 
 // Tests that having the MenuController deleted during OnMousePressed does not
@@ -2510,7 +2801,11 @@ TEST_F(MenuControllerTest, NoUseAfterFreeWhenMenuCanceledOnMousePress) {
 
   controller->Run(owner(), nullptr, item.get(), item->bounds(),
                   MenuAnchorPosition::kTopLeft, false, false);
-  sub_menu->ShowAt(owner(), item->bounds(), true);
+  MenuHost::InitParams params;
+  params.parent = owner();
+  params.bounds = item->bounds();
+  params.do_capture = true;
+  sub_menu->ShowAt(params);
 
   // Simulate a mouse press in the middle of the |closing_widget|.
   gfx::Point location(canceling_view->bounds().CenterPoint());
@@ -2734,7 +3029,7 @@ TEST_F(MenuControllerTest, AccessibilityEmitsSelectChildrenChanged) {
   EXPECT_EQ(ax_counter.GetCount(ax::mojom::Event::kSelectedChildrenChanged), 2);
 }
 
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
 // This test exercises a Mac-specific behavior, by which hotkeys using modifiers
 // cause menus to close and the hotkeys to be handled by the browser window.
 // This specific test case tries using cmd-ctrl-f, which normally means

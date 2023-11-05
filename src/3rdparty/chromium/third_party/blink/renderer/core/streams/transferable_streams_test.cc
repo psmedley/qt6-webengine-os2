@@ -6,7 +6,6 @@
 
 #include "base/types/strong_alias.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/readable_stream_default_reader_or_readable_stream_byob_reader.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -162,8 +161,8 @@ TEST(TransferableStreamsTest, SmokeTest) {
       MakeGarbageCollected<MessageChannel>(scope.GetExecutionContext());
   auto* script_state = scope.GetScriptState();
   auto* writable = CreateCrossRealmTransformWritable(
-      script_state, channel->port1(), /*optimizer=*/nullptr,
-      ASSERT_NO_EXCEPTION);
+      script_state, channel->port1(), AllowPerChunkTransferring(false),
+      /*optimizer=*/nullptr, ASSERT_NO_EXCEPTION);
   ASSERT_TRUE(writable);
   auto* readable = CreateCrossRealmTransformReadable(
       script_state, channel->port2(), /*optimizer=*/nullptr,

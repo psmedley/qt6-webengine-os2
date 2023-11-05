@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_command_line.h"
@@ -22,6 +21,7 @@
 #include "content/public/common/content_features.h"
 #include "content/public/test/test_renderer_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/test/test_windows.h"
@@ -30,6 +30,7 @@
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/drop_target_event.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/display/display_switches.h"
 #include "ui/events/base_event_utils.h"
@@ -40,8 +41,10 @@
 #endif
 
 namespace content {
-
 namespace {
+
+using ::ui::mojom::DragOperation;
+
 constexpr gfx::Rect kBounds = gfx::Rect(0, 0, 20, 20);
 constexpr gfx::PointF kClientPt = {5, 10};
 
@@ -73,15 +76,15 @@ class RunCallbackOnActivation : public WebContentsDelegate {
 class TestDragDropClient : public aura::client::DragDropClient {
  public:
   // aura::client::DragDropClient:
-  int StartDragAndDrop(std::unique_ptr<ui::OSExchangeData> data,
-                       aura::Window* root_window,
-                       aura::Window* source_window,
-                       const gfx::Point& screen_location,
-                       int operation,
-                       ui::mojom::DragEventSource source) override {
+  DragOperation StartDragAndDrop(std::unique_ptr<ui::OSExchangeData> data,
+                                 aura::Window* root_window,
+                                 aura::Window* source_window,
+                                 const gfx::Point& screen_location,
+                                 int allowed_operations,
+                                 ui::mojom::DragEventSource source) override {
     drag_in_progress_ = true;
     drag_drop_data_ = std::move(data);
-    return 1;
+    return DragOperation::kCopy;
   }
   void DragCancel() override { drag_in_progress_ = false; }
   bool IsDragDropInProgress() override { return drag_in_progress_; }
@@ -93,7 +96,7 @@ class TestDragDropClient : public aura::client::DragDropClient {
 
  private:
   bool drag_in_progress_ = false;
-  std::unique_ptr<ui::OSExchangeData> drag_drop_data_ = nullptr;
+  std::unique_ptr<ui::OSExchangeData> drag_drop_data_;
 };
 
 }  // namespace
@@ -236,7 +239,7 @@ TEST_F(WebContentsViewAuraTest, DragDropFiles) {
   WebContentsViewAura* view = GetView();
   auto data = std::make_unique<ui::OSExchangeData>();
 
-  const base::string16 string_data = base::ASCIIToUTF16("Some string data");
+  const std::u16string string_data = u"Some string data";
   data->SetString(string_data);
 
 #if defined(OS_WIN)
@@ -324,7 +327,7 @@ TEST_F(WebContentsViewAuraTest, DragDropFilesOriginateFromRenderer) {
   WebContentsViewAura* view = GetView();
   auto data = std::make_unique<ui::OSExchangeData>();
 
-  const base::string16 string_data = base::ASCIIToUTF16("Some string data");
+  const std::u16string string_data = u"Some string data";
   data->SetString(string_data);
 
 #if defined(OS_WIN)
@@ -406,7 +409,7 @@ TEST_F(WebContentsViewAuraTest, DragDropVirtualFiles) {
   WebContentsViewAura* view = GetView();
   auto data = std::make_unique<ui::OSExchangeData>();
 
-  const base::string16 string_data = base::ASCIIToUTF16("Some string data");
+  const std::u16string string_data = u"Some string data";
   data->SetString(string_data);
 
   const std::vector<std::pair<base::FilePath, std::string>>
@@ -485,7 +488,7 @@ TEST_F(WebContentsViewAuraTest, DragDropVirtualFilesOriginateFromRenderer) {
   WebContentsViewAura* view = GetView();
   auto data = std::make_unique<ui::OSExchangeData>();
 
-  const base::string16 string_data = base::ASCIIToUTF16("Some string data");
+  const std::u16string string_data = u"Some string data";
   data->SetString(string_data);
 
   const std::vector<std::pair<base::FilePath, std::string>>
@@ -542,7 +545,7 @@ TEST_F(WebContentsViewAuraTest, DragDropUrlData) {
 
   const std::string url_spec = "https://www.wikipedia.org/";
   const GURL url(url_spec);
-  const base::string16 url_title = base::ASCIIToUTF16("Wikipedia");
+  const std::u16string url_title = u"Wikipedia";
   data->SetURL(url, url_title);
 
   // SetUrl should also add a virtual .url (internet shortcut) file.
@@ -605,7 +608,7 @@ TEST_F(WebContentsViewAuraTest, StartDragging) {
   view->drag_in_progress_ = true;
 
   DropData drop_data;
-  drop_data.text.emplace(base::UTF8ToUTF16("Hello World!"));
+  drop_data.text.emplace(u"Hello World!");
   view->StartDragging(drop_data, blink::DragOperationsMask::kDragOperationNone,
                       gfx::ImageSkia(), gfx::Vector2d(),
                       blink::mojom::DragEventSourceInfo(),

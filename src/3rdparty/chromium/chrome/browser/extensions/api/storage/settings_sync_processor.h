@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "components/sync/base/model_type.h"
 #include "extensions/browser/value_store/value_store_change.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace syncer {
 class ModelError;
@@ -36,7 +37,7 @@ class SettingsSyncProcessor {
   void Init(const base::DictionaryValue& initial_state);
 
   // Sends |changes| to sync.
-  base::Optional<syncer::ModelError> SendChanges(
+  absl::optional<syncer::ModelError> SendChanges(
       const ValueStoreChangeList& changes);
 
   // Informs this that |changes| have been receieved from sync. No action will

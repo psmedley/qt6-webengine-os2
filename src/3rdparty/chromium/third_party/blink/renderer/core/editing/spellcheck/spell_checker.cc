@@ -30,6 +30,7 @@
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_text_check_client.h"
 #include "third_party/blink/public/web/web_text_decoration_type.h"
+#include "third_party/blink/renderer/core/clipboard/data_transfer.h"
 #include "third_party/blink/renderer/core/clipboard/data_transfer_access_policy.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -521,6 +522,10 @@ void SpellChecker::ReplaceMisspelledRange(const String& text) {
   if (current_document != GetFrame().GetDocument())
     return;
 
+  // No DOM mutation if EditContext is active.
+  if (GetFrame().GetInputMethodController().GetActiveEditContext())
+    return;
+
   // TODO(editing-dev): The use of UpdateStyleAndLayout
   // needs to be audited.  See http://crbug.com/590369 for more details.
   GetFrame().GetDocument()->UpdateStyleAndLayout(
@@ -657,8 +662,9 @@ Vector<TextCheckingResult> SpellChecker::FindMisspellings(const String& text) {
       DCHECK_LE(misspelling_location + misspelling_length, word_length);
       TextCheckingResult misspelling;
       misspelling.decoration = kTextDecorationTypeSpelling;
-      misspelling.location = word_start + misspelling_location;
-      misspelling.length = misspelling_length;
+      misspelling.location =
+          base::checked_cast<int>(word_start + misspelling_location);
+      misspelling.length = base::checked_cast<int>(misspelling_length);
       results.push_back(misspelling);
     }
     word_start = word_end;

@@ -11,7 +11,6 @@
 #include <stdint.h>
 #include <vector>
 
-#include "base/bit_cast.h"
 #include "base/numerics/safe_conversions.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_tree_id.h"
@@ -141,9 +140,9 @@ fuchsia::accessibility::semantics::States ConvertStates(
   }
 
   // The scroll offsets, if the element is a scrollable container.
-  const auto x_scroll_offset =
+  const float x_scroll_offset =
       node.GetIntAttribute(ax::mojom::IntAttribute::kScrollX);
-  const auto y_scroll_offset =
+  const float y_scroll_offset =
       node.GetIntAttribute(ax::mojom::IntAttribute::kScrollY);
   if (x_scroll_offset || y_scroll_offset)
     states.set_viewport_offset({x_scroll_offset, y_scroll_offset});
@@ -213,8 +212,10 @@ fuchsia::ui::gfx::mat4 ConvertTransform(gfx::Transform* transform) {
 
 fuchsia::accessibility::semantics::Node AXNodeDataToSemanticNode(
     const ui::AXNodeData& node,
+    const ui::AXNodeData& container_node,
     const ui::AXTreeID& tree_id,
     bool is_root,
+    float device_scale_factor,
     NodeIDMapper* id_mapper) {
   fuchsia::accessibility::semantics::Node fuchsia_node;
   fuchsia_node.set_node_id(
@@ -226,9 +227,22 @@ fuchsia::accessibility::semantics::Node AXNodeDataToSemanticNode(
   fuchsia_node.set_child_ids(
       ConvertChildIds(node.child_ids, tree_id, id_mapper));
   fuchsia_node.set_location(ConvertBoundingBox(node.relative_bounds.bounds));
+  fuchsia_node.set_container_id(
+      id_mapper->ToFuchsiaNodeID(tree_id, container_node.id, false));
+
+  // The transform field must be handled carefully to account for
+  // the offsetting implied by the offset container's relative bounds.
+  gfx::Transform transform;
   if (node.relative_bounds.transform) {
-    fuchsia_node.set_transform(
-        ConvertTransform(node.relative_bounds.transform.get()));
+    transform = *node.relative_bounds.transform;
+  }
+  transform.PostTranslate(container_node.relative_bounds.bounds.x(),
+                          container_node.relative_bounds.bounds.y());
+  if (device_scale_factor > 0) {
+    transform.PostScale(1 / device_scale_factor, 1 / device_scale_factor);
+  }
+  if (!transform.IsIdentity()) {
+    fuchsia_node.set_transform(ConvertTransform(&transform));
   }
 
   return fuchsia_node;
@@ -297,7 +311,7 @@ uint32_t NodeIDMapper::ToFuchsiaNodeID(const ui::AXTreeID& ax_tree_id,
   return fuchsia_node_id;
 }
 
-base::Optional<std::pair<ui::AXTreeID, int32_t>> NodeIDMapper::ToAXNodeID(
+absl::optional<std::pair<ui::AXTreeID, int32_t>> NodeIDMapper::ToAXNodeID(
     uint32_t fuchsia_node_id) {
   for (const auto& tree_id_to_node_ids : id_map_) {
     for (const auto& ax_id_to_fuchsia_id : tree_id_to_node_ids.second) {
@@ -307,7 +321,7 @@ base::Optional<std::pair<ui::AXTreeID, int32_t>> NodeIDMapper::ToAXNodeID(
     }
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 bool NodeIDMapper::UpdateAXTreeIDForCachedNodeIDs(

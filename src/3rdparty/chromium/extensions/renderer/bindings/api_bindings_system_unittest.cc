@@ -6,7 +6,8 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "extensions/common/event_filtering_info.h"
@@ -189,10 +190,10 @@ void APIBindingsSystemTest::ValidateLastRequest(
   ASSERT_TRUE(last_request());
   // Note that even if no arguments are provided by the API call, we should
   // have an empty list.
-  ASSERT_TRUE(last_request()->arguments);
+  ASSERT_TRUE(last_request()->arguments_list);
   EXPECT_EQ(expected_name, last_request()->method_name);
   EXPECT_EQ(ReplaceSingleQuotes(expected_arguments),
-            ValueToString(*last_request()->arguments));
+            ValueToString(*last_request()->arguments_list));
 }
 
 v8::Local<v8::Value> APIBindingsSystemTest::CallFunctionOnObject(

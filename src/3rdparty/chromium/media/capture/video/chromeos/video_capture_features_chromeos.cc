@@ -5,6 +5,10 @@
 #include "media/capture/video/chromeos/video_capture_features_chromeos.h"
 
 namespace media {
+namespace switches {
+const char kForceControlFaceAe[] = "force-control-face-ae";
+}  // namespace switches
+
 namespace features {
 
 // Controls if the camera frame is rotated to the upright display orientation in

@@ -7,17 +7,28 @@ import 'chrome://resources/cr_elements/cr_icons_css.m.js';
 import 'chrome://resources/cr_elements/mwb_shared_icons.js';
 import 'chrome://resources/cr_elements/mwb_shared_vars.js';
 import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import './strings.m.js';
 
-import {getFaviconForPageURL} from 'chrome://resources/js/icon.m.js';
+import {MouseHoverableMixin, MouseHoverableMixinInterface} from 'chrome://resources/cr_elements/mouse_hoverable_mixin.js';
+import {getFaviconForPageURL} from 'chrome://resources/js/icon.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {highlight} from 'chrome://resources/js/search_highlight_utils.m.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {get as deepGet, html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {TabData} from './tab_data.js';
-import {Tab} from './tab_search.mojom-webui.js';
-import './strings.js';
+import {ariaLabel, TabData, TabItemType} from './tab_data.js';
+import {colorName} from './tab_group_color_helper.js';
+import {Tab, TabGroup} from './tab_search.mojom-webui.js';
+import {highlightText} from './tab_search_utils.js';
 
-export class TabSearchItem extends PolymerElement {
+/**
+ * @constructor
+ * @extends PolymerElement
+ * @implements {MouseHoverableMixinInterface}
+ * @appliesMixin MouseHoverableMixin
+ */
+const TabSearchItemBase = MouseHoverableMixin(PolymerElement);
+
+/** @polymer */
+export class TabSearchItem extends TabSearchItemBase {
   static get is() {
     return 'tab-search-item';
   }
@@ -39,7 +50,18 @@ export class TabSearchItem extends PolymerElement {
         type: Boolean,
         value: () => loadTimeData.getBoolean('useRipples'),
       },
+
+      /** @type {number} */
+      index: Number,
     };
+  }
+
+  /**
+   * @param {!TabItemType} type
+   * @return {boolean} Whether a close action can be performed on the item.
+   */
+  isCloseable_(type) {
+    return type === TabItemType.OPEN_TAB;
   }
 
   /**
@@ -58,49 +80,78 @@ export class TabSearchItem extends PolymerElement {
    */
   faviconUrl_(tab) {
     return tab.faviconUrl ?
-        `url("${tab.faviconUrl}")` :
+        `url("${tab.faviconUrl.url}")` :
         getFaviconForPageURL(
-            tab.isDefaultFavicon ? 'chrome://newtab' : tab.url, false);
+            tab.isDefaultFavicon ? 'chrome://newtab' : tab.url.url, false);
   }
 
   /**
+   * Determines the display attribute value for the group SVG element.
+   * @param {!TabData} tabData
+   * @return {string}
    * @private
    */
-  dataChanged_() {
-    this.highlightText_(
-        /** @type {!HTMLElement} */ (this.$.primaryText), this.data.tab.title,
-        this.data.titleHighlightRanges);
-    this.highlightText_(
-        /** @type {!HTMLElement} */ (this.$.secondaryText), this.data.hostname,
-        this.data.hostnameHighlightRanges);
+  groupSvgDisplay_(tabData) {
+    return tabData.tabGroup ? 'block' : 'none';
+  }
+
+  /**
+   * @param {!TabData} tabData
+   * @returns {boolean}
+   * @private
+   */
+  hasTabGroupWithTitle_(tabData) {
+    return !!(tabData.tabGroup && tabData.tabGroup.title);
+  }
+
+  /**
+   * @param {!TabData} data
+   * @private
+   */
+  dataChanged_(data) {
+    [['tab.title', this.$.primaryText], ['hostname', this.$.secondaryText],
+     ['tabGroup.title', this.$.groupTitle]]
+        .forEach(([path, element]) => {
+          if (element) {
+            const highlightRanges =
+                data.highlightRanges ? data.highlightRanges[path] : undefined;
+            highlightText(
+                /** @type {!HTMLElement} */ (element), deepGet(data, path),
+                highlightRanges);
+          }
+        });
 
     // Show chrome:// if it's a chrome internal url
-    if (new URL(this.data.tab.url).protocol === 'chrome:') {
+    let secondaryLabel = data.hostname;
+    const protocol = new URL(data.tab.url.url).protocol;
+    if (protocol === 'chrome:') {
       /** @type {!HTMLElement} */ (this.$.secondaryText)
           .prepend(document.createTextNode('chrome://'));
+      secondaryLabel = `chrome://${secondaryLabel}`;
+    }
+
+    if (data.tabGroup) {
+      this.style.setProperty(
+          '--group-dot-color',
+          `var(--tab-group-color-${colorName(data.tabGroup.color)})`);
     }
   }
 
   /**
-   *
-   * @param {!HTMLElement} container
-   * @param {string} text
-   * @param {!Array<!{start:number, length:number}>|undefined} ranges
+   * @param {!TabData} tabData
+   * @return {string}
+   * @private
    */
-  highlightText_(container, text, ranges) {
-    container.textContent = '';
-    const node = document.createTextNode(text);
-    container.appendChild(node);
-    if (ranges) {
-      const result = highlight(node, ranges, true);
-      // Delete default highlight style.
-      result.querySelectorAll('.search-highlight-hit').forEach(e => {
-        e.style = '';
-      });
-    }
+  ariaLabelForText_(tabData) {
+    return ariaLabel(tabData);
   }
 
-  ariaLabel_(title) {
+  /**
+   * @param {string} title
+   * @return {string}
+   * @private
+   */
+  ariaLabelForButton_(title) {
     return `${loadTimeData.getString('closeTab')} ${title}`;
   }
 }

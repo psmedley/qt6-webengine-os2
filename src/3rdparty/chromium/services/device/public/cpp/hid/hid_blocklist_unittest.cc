@@ -6,8 +6,12 @@
 
 #include "base/command_line.h"
 #include "base/guid.h"
-#include "components/variations/variations_params_manager.h"
+#include "base/strings/string_piece.h"
+#include "base/test/scoped_feature_list.h"
+#include "services/device/hid/test_report_descriptors.h"
+#include "services/device/hid/test_util.h"
 #include "services/device/public/cpp/hid/hid_switches.h"
+#include "services/device/public/mojom/hid.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -27,15 +31,18 @@ constexpr uint8_t kTestReportId = 0x01;
 class HidBlocklistTest : public testing::Test {
  public:
   HidBlocklistTest() : blocklist_(HidBlocklist::Get()) {}
+  HidBlocklistTest(HidBlocklistTest&) = delete;
+  HidBlocklistTest& operator=(HidBlocklistTest&) = delete;
 
   const HidBlocklist& list() { return blocklist_; }
 
   void SetDynamicBlocklist(base::StringPiece list) {
-    params_manager_.ClearAllVariationParams();
+    feature_list_.Reset();
 
     std::map<std::string, std::string> params;
-    params["blocklist_additions"] = list.as_string();
-    params_manager_.SetVariationParams("WebHIDBlocklist", params);
+    params[kWebHidBlocklistAdditions.name] = std::string(list);
+    feature_list_.InitWithFeaturesAndParameters({{kWebHidBlocklist, params}},
+                                                /*disabled_features=*/{});
 
     blocklist_.ResetToDefaultValuesForTest();
   }
@@ -136,11 +143,11 @@ class HidBlocklistTest : public testing::Test {
   void TearDown() override {
     // Because HidBlocklist is a singleton it must be cleared after tests run
     // to prevent leakage between tests.
-    params_manager_.ClearAllVariationParams();
+    feature_list_.Reset();
     blocklist_.ResetToDefaultValuesForTest();
   }
 
-  variations::testing::VariationParamsManager params_manager_;
+  base::test::ScopedFeatureList feature_list_;
   HidBlocklist& blocklist_;
 };
 
@@ -412,6 +419,23 @@ TEST_F(HidBlocklistTest, DeviceWithAllProtectedReportsIsExcluded) {
   EXPECT_THAT(*device->protected_input_report_ids, ElementsAre(0x01, 0x04));
   EXPECT_THAT(*device->protected_output_report_ids, ElementsAre(0x02, 0x05));
   EXPECT_THAT(*device->protected_feature_report_ids, ElementsAre(0x03, 0x06));
+}
+
+TEST_F(HidBlocklistTest, SpecificOutputReportExcluded) {
+  // Block report 0x05 from usage page 0xff00 on devices from vendor 0x0b0e.
+  SetDynamicBlocklist("0b0e::ff00::05:O");
+
+  // Create a device with several reports, one of which matches the blocklist
+  // rule.
+  auto device = CreateDeviceFromReportDescriptor(
+      /*vendor_id=*/0x0b0e, /*product_id=*/0x24c9,
+      TestReportDescriptors::JabraLink380c());
+
+  // Check that only the blocked report is excluded.
+  EXPECT_FALSE(HidBlocklist::IsDeviceExcluded(*device));
+  EXPECT_TRUE(device->protected_input_report_ids->empty());
+  EXPECT_THAT(*device->protected_output_report_ids, ElementsAre(0x05));
+  EXPECT_TRUE(device->protected_feature_report_ids->empty());
 }
 
 }  // namespace device

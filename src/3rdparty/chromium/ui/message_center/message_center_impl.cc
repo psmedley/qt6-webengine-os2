@@ -17,6 +17,7 @@
 #include "base/observer_list.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/message_center/lock_screen/lock_screen_controller.h"
 #include "ui/message_center/message_center_types.h"
 #include "ui/message_center/notification_blocker.h"
@@ -25,6 +26,10 @@
 #include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/public/cpp/notification.h"
 #include "ui/message_center/public/cpp/notification_types.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_features.h"
+#endif
 
 namespace message_center {
 
@@ -37,6 +42,10 @@ MessageCenterImpl::MessageCenterImpl(
       popup_timers_controller_(std::make_unique<PopupTimersController>(this)),
       stats_collector_(this) {
   notification_list_ = std::make_unique<NotificationList>(this);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  notifications_grouping_enabled_ =
+      ash::features::IsNotificationsRefreshEnabled();
+#endif
 }
 
 MessageCenterImpl::~MessageCenterImpl() = default;
@@ -143,6 +152,34 @@ bool MessageCenterImpl::IsSpokenFeedbackEnabled() const {
   return spoken_feedback_enabled_;
 }
 
+Notification* MessageCenterImpl::FindNotificationById(const std::string& id) {
+  return notification_list_->GetNotificationById(id);
+}
+
+Notification* MessageCenterImpl::FindOldestNotificationByNotiferId(
+    const NotifierId& notifier_id) {
+  auto notifier_id_match = [&notifier_id](Notification* notification) {
+    return notifier_id == notification->notifier_id();
+  };
+  auto notifications = GetVisibleNotifications();
+  auto notification = std::find_if(notifications.rbegin(), notifications.rend(),
+                                   notifier_id_match);
+
+  return notification == notifications.rend() ? nullptr : *notification;
+}
+
+Notification* MessageCenterImpl::FindPopupNotificationById(
+    const std::string& id) {
+  auto id_match = [&id](Notification* notification) {
+    return id == notification->id();
+  };
+  auto notifications = GetPopupNotifications();
+  auto notification =
+      std::find_if(notifications.begin(), notifications.end(), id_match);
+
+  return notification == notifications.end() ? nullptr : *notification;
+}
+
 Notification* MessageCenterImpl::FindVisibleNotificationById(
     const std::string& id) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -185,6 +222,9 @@ void MessageCenterImpl::AddNotification(
     std::unique_ptr<Notification> notification) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(notification);
+
+  notification->set_allow_group(notifications_grouping_enabled_);
+
   const std::string id = notification->id();
   for (NotificationBlocker* blocker : blockers_)
     blocker->CheckState();
@@ -196,6 +236,12 @@ void MessageCenterImpl::AddNotification(
   if (already_exists) {
     UpdateNotification(id, std::move(notification));
     return;
+  }
+
+  auto* parent = FindOldestNotificationByNotiferId(notification->notifier_id());
+  if (notification->allow_group() && parent) {
+    parent->SetGroupParent();
+    notification->SetGroupChild();
   }
 
   notification_list_->AddNotification(std::move(notification));
@@ -338,7 +384,7 @@ void MessageCenterImpl::ClickOnNotification(const std::string& id) {
 
   lock_screen_controller_->DismissLockScreenThenExecute(
       base::BindOnce(&MessageCenterImpl::ClickOnNotificationUnlocked,
-                     base::Unretained(this), id, base::nullopt, base::nullopt),
+                     base::Unretained(this), id, absl::nullopt, absl::nullopt),
       base::OnceClosure());
 }
 
@@ -350,14 +396,14 @@ void MessageCenterImpl::ClickOnNotificationButton(const std::string& id,
 
   lock_screen_controller_->DismissLockScreenThenExecute(
       base::BindOnce(&MessageCenterImpl::ClickOnNotificationUnlocked,
-                     base::Unretained(this), id, button_index, base::nullopt),
+                     base::Unretained(this), id, button_index, absl::nullopt),
       base::OnceClosure());
 }
 
 void MessageCenterImpl::ClickOnNotificationButtonWithReply(
     const std::string& id,
     int button_index,
-    const base::string16& reply) {
+    const std::u16string& reply) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (!FindVisibleNotificationById(id))
     return;
@@ -370,8 +416,8 @@ void MessageCenterImpl::ClickOnNotificationButtonWithReply(
 
 void MessageCenterImpl::ClickOnNotificationUnlocked(
     const std::string& id,
-    const base::Optional<int>& button_index,
-    const base::Optional<base::string16>& reply) {
+    const absl::optional<int>& button_index,
+    const absl::optional<std::u16string>& reply) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // This method must be called under unlocked screen.
@@ -434,6 +480,10 @@ void MessageCenterImpl::MarkSinglePopupAsShown(const std::string& id,
   }
 }
 
+void MessageCenterImpl::ResetSinglePopup(const std::string& id) {
+  notification_list_->ResetSinglePopup(id);
+}
+
 void MessageCenterImpl::DisplayedNotification(
     const std::string& id,
     const DisplaySource source) {
@@ -460,7 +510,7 @@ void MessageCenterImpl::SetQuietMode(bool in_quiet_mode) {
     for (MessageCenterObserver& observer : observer_list_)
       observer.OnQuietModeChanged(in_quiet_mode);
   }
-  quiet_mode_timer_.reset();
+  quiet_mode_timer_.Stop();
 }
 
 void MessageCenterImpl::SetSpokenFeedbackEnabled(bool enabled) {
@@ -470,20 +520,17 @@ void MessageCenterImpl::SetSpokenFeedbackEnabled(bool enabled) {
 void MessageCenterImpl::EnterQuietModeWithExpire(
     const base::TimeDelta& expires_in) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (quiet_mode_timer_) {
-    // Note that the capital Reset() is the method to restart the timer, not
-    // scoped_ptr::reset().
-    quiet_mode_timer_->Reset();
-  } else {
+
+  if (!quiet_mode_timer_.IsRunning()) {
     notification_list_->SetQuietMode(true);
     for (MessageCenterObserver& observer : observer_list_)
       observer.OnQuietModeChanged(true);
-
-    quiet_mode_timer_ = std::make_unique<base::OneShotTimer>();
-    quiet_mode_timer_->Start(FROM_HERE, expires_in,
-                             base::BindOnce(&MessageCenterImpl::SetQuietMode,
-                                            base::Unretained(this), false));
   }
+
+  // This will restart the timer if it is already running.
+  quiet_mode_timer_.Start(FROM_HERE, expires_in,
+                          base::BindOnce(&MessageCenterImpl::SetQuietMode,
+                                         base::Unretained(this), false));
 }
 
 void MessageCenterImpl::RestartPopupTimers() {
@@ -498,12 +545,12 @@ void MessageCenterImpl::PausePopupTimers() {
     popup_timers_controller_->PauseAll();
 }
 
-const base::string16& MessageCenterImpl::GetSystemNotificationAppName() const {
+const std::u16string& MessageCenterImpl::GetSystemNotificationAppName() const {
   return system_notification_app_name_;
 }
 
 void MessageCenterImpl::SetSystemNotificationAppName(
-    const base::string16& name) {
+    const std::u16string& name) {
   system_notification_app_name_ = name;
 }
 

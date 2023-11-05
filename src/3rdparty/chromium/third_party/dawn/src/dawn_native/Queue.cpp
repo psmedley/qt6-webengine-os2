@@ -23,7 +23,7 @@
 #include "dawn_native/CopyTextureForBrowserHelper.h"
 #include "dawn_native/Device.h"
 #include "dawn_native/DynamicUploader.h"
-#include "dawn_native/Fence.h"
+#include "dawn_native/ExternalTexture.h"
 #include "dawn_native/QuerySet.h"
 #include "dawn_native/RenderPassEncoder.h"
 #include "dawn_native/RenderPipeline.h"
@@ -115,9 +115,9 @@ namespace dawn_native {
             uint64_t imageAdditionalStride =
                 dataLayout.bytesPerRow * (dataRowsPerImage - alignedRowsPerImage);
 
-            CopyTextureData(dstPointer, srcPointer, writeSizePixel.depth, alignedRowsPerImage,
-                            imageAdditionalStride, alignedBytesPerRow, optimallyAlignedBytesPerRow,
-                            dataLayout.bytesPerRow);
+            CopyTextureData(dstPointer, srcPointer, writeSizePixel.depthOrArrayLayers,
+                            alignedRowsPerImage, imageAdditionalStride, alignedBytesPerRow,
+                            optimallyAlignedBytesPerRow, dataLayout.bytesPerRow);
 
             return uploadHandle;
         }
@@ -176,7 +176,7 @@ namespace dawn_native {
         return new ErrorQueue(device);
     }
 
-    void QueueBase::Submit(uint32_t commandCount, CommandBufferBase* const* commands) {
+    void QueueBase::APISubmit(uint32_t commandCount, CommandBufferBase* const* commands) {
         SubmitInternal(commandCount, commands);
 
         for (uint32_t i = 0; i < commandCount; ++i) {
@@ -184,22 +184,9 @@ namespace dawn_native {
         }
     }
 
-    void QueueBase::Signal(Fence* fence, uint64_t apiSignalValue) {
-        FenceAPISerial signalValue(apiSignalValue);
-
-        DeviceBase* device = GetDevice();
-        if (device->ConsumedError(ValidateSignal(fence, signalValue))) {
-            return;
-        }
-        ASSERT(!IsError());
-
-        fence->SetSignaledValue(signalValue);
-        fence->UpdateFenceOnComplete(fence, signalValue);
-    }
-
-    void QueueBase::OnSubmittedWorkDone(uint64_t signalValue,
-                                        WGPUQueueWorkDoneCallback callback,
-                                        void* userdata) {
+    void QueueBase::APIOnSubmittedWorkDone(uint64_t signalValue,
+                                           WGPUQueueWorkDoneCallback callback,
+                                           void* userdata) {
         // The error status depends on the type of error so we let the validation function choose it
         WGPUQueueWorkDoneStatus status;
         if (GetDevice()->ConsumedError(ValidateOnSubmittedWorkDone(signalValue, &status))) {
@@ -223,10 +210,20 @@ namespace dawn_native {
     }
 
     void QueueBase::Tick(ExecutionSerial finishedSerial) {
+        // If a user calls Queue::Submit inside a task, for example in a Buffer::MapAsync callback,
+        // then the device will be ticked, which in turns ticks the queue, causing reentrance here.
+        // To prevent the reentrant call from invalidating mTasksInFlight while in use by the first
+        // call, we remove the tasks to finish from the queue, update mTasksInFlight, then run the
+        // callbacks.
+        std::vector<std::unique_ptr<TaskInFlight>> tasks;
         for (auto& task : mTasksInFlight.IterateUpTo(finishedSerial)) {
-            task->Finish();
+            tasks.push_back(std::move(task));
         }
         mTasksInFlight.ClearUpTo(finishedSerial);
+
+        for (auto& task : tasks) {
+            task->Finish();
+        }
     }
 
     void QueueBase::HandleDeviceLoss() {
@@ -236,29 +233,17 @@ namespace dawn_native {
         mTasksInFlight.Clear();
     }
 
-    Fence* QueueBase::CreateFence(const FenceDescriptor* descriptor) {
-        if (GetDevice()->ConsumedError(ValidateCreateFence(descriptor))) {
-            return Fence::MakeError(GetDevice());
-        }
-
-        if (descriptor == nullptr) {
-            FenceDescriptor defaultDescriptor = {};
-            return new Fence(this, &defaultDescriptor);
-        }
-        return new Fence(this, descriptor);
+    void QueueBase::APIWriteBuffer(BufferBase* buffer,
+                                   uint64_t bufferOffset,
+                                   const void* data,
+                                   size_t size) {
+        GetDevice()->ConsumedError(WriteBuffer(buffer, bufferOffset, data, size));
     }
 
-    void QueueBase::WriteBuffer(BufferBase* buffer,
-                                uint64_t bufferOffset,
-                                const void* data,
-                                size_t size) {
-        GetDevice()->ConsumedError(WriteBufferInternal(buffer, bufferOffset, data, size));
-    }
-
-    MaybeError QueueBase::WriteBufferInternal(BufferBase* buffer,
-                                              uint64_t bufferOffset,
-                                              const void* data,
-                                              size_t size) {
+    MaybeError QueueBase::WriteBuffer(BufferBase* buffer,
+                                      uint64_t bufferOffset,
+                                      const void* data,
+                                      size_t size) {
         DAWN_TRY(ValidateWriteBuffer(buffer, bufferOffset, size));
         return WriteBufferImpl(buffer, bufferOffset, data, size);
     }
@@ -287,34 +272,34 @@ namespace dawn_native {
                                                buffer, bufferOffset, size);
     }
 
-    void QueueBase::WriteTexture(const TextureCopyView* destination,
-                                 const void* data,
-                                 size_t dataSize,
-                                 const TextureDataLayout* dataLayout,
-                                 const Extent3D* writeSize) {
+    void QueueBase::APIWriteTexture(const ImageCopyTexture* destination,
+                                    const void* data,
+                                    size_t dataSize,
+                                    const TextureDataLayout* dataLayout,
+                                    const Extent3D* writeSize) {
         GetDevice()->ConsumedError(
-            WriteTextureInternal(destination, data, dataSize, dataLayout, writeSize));
+            WriteTextureInternal(destination, data, dataSize, *dataLayout, writeSize));
     }
 
-    MaybeError QueueBase::WriteTextureInternal(const TextureCopyView* destination,
+    MaybeError QueueBase::WriteTextureInternal(const ImageCopyTexture* destination,
                                                const void* data,
                                                size_t dataSize,
-                                               const TextureDataLayout* dataLayout,
+                                               const TextureDataLayout& dataLayout,
                                                const Extent3D* writeSize) {
         DAWN_TRY(ValidateWriteTexture(destination, dataSize, dataLayout, writeSize));
 
-        if (writeSize->width == 0 || writeSize->height == 0 || writeSize->depth == 0) {
+        if (writeSize->width == 0 || writeSize->height == 0 || writeSize->depthOrArrayLayers == 0) {
             return {};
         }
 
         const TexelBlockInfo& blockInfo =
             destination->texture->GetFormat().GetAspectInfo(destination->aspect).block;
-        TextureDataLayout layout = *dataLayout;
+        TextureDataLayout layout = dataLayout;
         ApplyDefaultTextureDataLayoutOptions(&layout, blockInfo, *writeSize);
         return WriteTextureImpl(*destination, data, layout, *writeSize);
     }
 
-    MaybeError QueueBase::WriteTextureImpl(const TextureCopyView& destination,
+    MaybeError QueueBase::WriteTextureImpl(const ImageCopyTexture& destination,
                                            const void* data,
                                            const TextureDataLayout& dataLayout,
                                            const Extent3D& writeSizePixel) {
@@ -358,17 +343,17 @@ namespace dawn_native {
                                                 &textureCopy, writeSizePixel);
     }
 
-    void QueueBase::CopyTextureForBrowser(const TextureCopyView* source,
-                                          const TextureCopyView* destination,
-                                          const Extent3D* copySize,
-                                          const CopyTextureForBrowserOptions* options) {
+    void QueueBase::APICopyTextureForBrowser(const ImageCopyTexture* source,
+                                             const ImageCopyTexture* destination,
+                                             const Extent3D* copySize,
+                                             const CopyTextureForBrowserOptions* options) {
         GetDevice()->ConsumedError(
             CopyTextureForBrowserInternal(source, destination, copySize, options));
     }
 
     MaybeError QueueBase::CopyTextureForBrowserInternal(
-        const TextureCopyView* source,
-        const TextureCopyView* destination,
+        const ImageCopyTexture* source,
+        const ImageCopyTexture* destination,
         const Extent3D* copySize,
         const CopyTextureForBrowserOptions* options) {
         if (GetDevice()->IsValidationEnabled()) {
@@ -390,12 +375,29 @@ namespace dawn_native {
 
             const CommandBufferResourceUsage& usages = commands[i]->GetResourceUsages();
 
-            for (const PassResourceUsage& passUsages : usages.perPass) {
-                for (const BufferBase* buffer : passUsages.buffers) {
+            for (const SyncScopeResourceUsage& scope : usages.renderPasses) {
+                for (const BufferBase* buffer : scope.buffers) {
                     DAWN_TRY(buffer->ValidateCanUseOnQueueNow());
                 }
-                for (const TextureBase* texture : passUsages.textures) {
+
+                for (const TextureBase* texture : scope.textures) {
                     DAWN_TRY(texture->ValidateCanUseInSubmitNow());
+                }
+
+                for (const ExternalTextureBase* externalTexture : scope.externalTextures) {
+                    DAWN_TRY(externalTexture->ValidateCanUseInSubmitNow());
+                }
+            }
+
+            for (const ComputePassResourceUsage& pass : usages.computePasses) {
+                for (const BufferBase* buffer : pass.referencedBuffers) {
+                    DAWN_TRY(buffer->ValidateCanUseOnQueueNow());
+                }
+                for (const TextureBase* texture : pass.referencedTextures) {
+                    DAWN_TRY(texture->ValidateCanUseInSubmitNow());
+                }
+                for (const ExternalTextureBase* externalTexture : pass.referencedExternalTextures) {
+                    DAWN_TRY(externalTexture->ValidateCanUseInSubmitNow());
                 }
             }
 
@@ -413,21 +415,6 @@ namespace dawn_native {
         return {};
     }
 
-    MaybeError QueueBase::ValidateSignal(const Fence* fence, FenceAPISerial signalValue) const {
-        DAWN_TRY(GetDevice()->ValidateIsAlive());
-        DAWN_TRY(GetDevice()->ValidateObject(this));
-        DAWN_TRY(GetDevice()->ValidateObject(fence));
-
-        if (fence->GetQueue() != this) {
-            return DAWN_VALIDATION_ERROR(
-                "Fence must be signaled on the queue on which it was created.");
-        }
-        if (signalValue <= fence->GetSignaledValue()) {
-            return DAWN_VALIDATION_ERROR("Signal value less than or equal to fence signaled value");
-        }
-        return {};
-    }
-
     MaybeError QueueBase::ValidateOnSubmittedWorkDone(uint64_t signalValue,
                                                       WGPUQueueWorkDoneStatus* status) const {
         *status = WGPUQueueWorkDoneStatus_DeviceLost;
@@ -438,16 +425,6 @@ namespace dawn_native {
 
         if (signalValue != 0) {
             return DAWN_VALIDATION_ERROR("SignalValue must currently be 0.");
-        }
-
-        return {};
-    }
-
-    MaybeError QueueBase::ValidateCreateFence(const FenceDescriptor* descriptor) const {
-        DAWN_TRY(GetDevice()->ValidateIsAlive());
-        DAWN_TRY(GetDevice()->ValidateObject(this));
-        if (descriptor != nullptr) {
-            DAWN_TRY(ValidateFenceDescriptor(descriptor));
         }
 
         return {};
@@ -481,17 +458,17 @@ namespace dawn_native {
         return {};
     }
 
-    MaybeError QueueBase::ValidateWriteTexture(const TextureCopyView* destination,
+    MaybeError QueueBase::ValidateWriteTexture(const ImageCopyTexture* destination,
                                                size_t dataSize,
-                                               const TextureDataLayout* dataLayout,
+                                               const TextureDataLayout& dataLayout,
                                                const Extent3D* writeSize) const {
         DAWN_TRY(GetDevice()->ValidateIsAlive());
         DAWN_TRY(GetDevice()->ValidateObject(this));
         DAWN_TRY(GetDevice()->ValidateObject(destination->texture));
 
-        DAWN_TRY(ValidateTextureCopyView(GetDevice(), *destination, *writeSize));
+        DAWN_TRY(ValidateImageCopyTexture(GetDevice(), *destination, *writeSize));
 
-        if (dataLayout->offset > dataSize) {
+        if (dataLayout.offset > dataSize) {
             return DAWN_VALIDATION_ERROR("Queue::WriteTexture out of range");
         }
 
@@ -508,14 +485,12 @@ namespace dawn_native {
         // because in the latter we divide copyExtent.width by blockWidth and
         // copyExtent.height by blockHeight while the divisibility conditions are
         // checked in validating texture copy range.
-        DAWN_TRY(ValidateTextureCopyRange(*destination, *writeSize));
+        DAWN_TRY(ValidateTextureCopyRange(GetDevice(), *destination, *writeSize));
 
         const TexelBlockInfo& blockInfo =
             destination->texture->GetFormat().GetAspectInfo(destination->aspect).block;
 
-        TextureDataLayout layout = FixUpDeprecatedTextureDataLayoutOptions(GetDevice(), *dataLayout,
-                                                                           blockInfo, *writeSize);
-        DAWN_TRY(ValidateLinearTextureData(layout, dataSize, blockInfo, *writeSize));
+        DAWN_TRY(ValidateLinearTextureData(dataLayout, dataSize, blockInfo, *writeSize));
 
         DAWN_TRY(destination->texture->ValidateCanUseInSubmitNow());
 

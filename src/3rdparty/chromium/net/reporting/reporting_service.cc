@@ -16,12 +16,14 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "net/base/features.h"
+#include "net/http/structured_headers.h"
 #include "net/reporting/reporting_browsing_data_remover.h"
 #include "net/reporting/reporting_cache.h"
 #include "net/reporting/reporting_context.h"
 #include "net/reporting/reporting_delegate.h"
 #include "net/reporting/reporting_header_parser.h"
 #include "net/reporting/reporting_uploader.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -53,6 +55,16 @@ class ReportingServiceImpl : public ReportingService {
       context_->cache()->Flush();
   }
 
+  void SetDocumentReportingEndpoints(
+      const url::Origin& origin,
+      const net::NetworkIsolationKey& network_isolation_key,
+      const base::flat_map<std::string, std::string>& endpoints) override {
+    DoOrBacklogTask(base::BindOnce(
+        &ReportingServiceImpl::DoSetDocumentReportingEndpoints,
+        base::Unretained(this), FixupNetworkIsolationKey(network_isolation_key),
+        origin, endpoints));
+  }
+
   void QueueReport(const GURL& url,
                    const NetworkIsolationKey& network_isolation_key,
                    const std::string& user_agent,
@@ -82,9 +94,9 @@ class ReportingServiceImpl : public ReportingService {
         depth, queued_ticks));
   }
 
-  void ProcessHeader(const GURL& url,
-                     const NetworkIsolationKey& network_isolation_key,
-                     const std::string& header_string) override {
+  void ProcessReportToHeader(const GURL& url,
+                             const NetworkIsolationKey& network_isolation_key,
+                             const std::string& header_string) override {
     if (header_string.size() > kMaxJsonSize)
       return;
 
@@ -96,7 +108,7 @@ class ReportingServiceImpl : public ReportingService {
 
     DVLOG(1) << "Received Reporting policy for " << url.GetOrigin();
     DoOrBacklogTask(base::BindOnce(
-        &ReportingServiceImpl::DoProcessHeader, base::Unretained(this),
+        &ReportingServiceImpl::DoProcessReportToHeader, base::Unretained(this),
         FixupNetworkIsolationKey(network_isolation_key), url,
         std::move(header_value)));
   }
@@ -165,12 +177,21 @@ class ReportingServiceImpl : public ReportingService {
                                  depth, queued_ticks, 0 /* attempts */);
   }
 
-  void DoProcessHeader(const NetworkIsolationKey& network_isolation_key,
-                       const GURL& url,
-                       std::unique_ptr<base::Value> header_value) {
+  void DoProcessReportToHeader(const NetworkIsolationKey& network_isolation_key,
+                               const GURL& url,
+                               std::unique_ptr<base::Value> header_value) {
     DCHECK(initialized_);
-    ReportingHeaderParser::ParseHeader(context_.get(), network_isolation_key,
-                                       url, std::move(header_value));
+    ReportingHeaderParser::ParseReportToHeader(
+        context_.get(), network_isolation_key, url, std::move(header_value));
+  }
+
+  void DoSetDocumentReportingEndpoints(
+      const NetworkIsolationKey& network_isolation_key,
+      const url::Origin& origin,
+      base::flat_map<std::string, std::string> header_value) {
+    DCHECK(initialized_);
+    ReportingHeaderParser::ProcessParsedReportingEndpointsHeader(
+        context_.get(), network_isolation_key, origin, std::move(header_value));
   }
 
   void DoRemoveBrowsingData(

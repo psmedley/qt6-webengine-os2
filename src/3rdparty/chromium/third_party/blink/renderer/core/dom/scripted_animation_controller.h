@@ -43,6 +43,7 @@ class Event;
 class EventTarget;
 class LocalDOMWindow;
 class MediaQueryListListener;
+class PageAnimator;
 
 class CORE_EXPORT ScriptedAnimationController
     : public GarbageCollected<ScriptedAnimationController>,
@@ -87,22 +88,21 @@ class CORE_EXPORT ScriptedAnimationController
 
   // Invokes callbacks, dispatches events, etc. The order is defined by HTML:
   // https://html.spec.whatwg.org/C/#event-loop-processing-model
-  void ServiceScriptedAnimations(base::TimeTicks monotonic_time_now);
+  void ServiceScriptedAnimations(base::TimeTicks monotonic_time_now,
+                                 bool can_throttle = false);
 
   void ContextLifecycleStateChanged(mojom::FrameLifecycleState) final;
   void ContextDestroyed() final {}
 
   void DispatchEventsAndCallbacksForPrinting();
 
-  bool CurrentFrameHadRAF() const { return current_frame_had_raf_; }
-  bool NextFrameHasPendingRAF() const { return next_frame_has_pending_raf_; }
-
  private:
   void ScheduleAnimationIfNeeded();
 
   void RunTasks();
+  typedef absl::optional<bool (*)(const Event*)> DispatchFilter;
   void DispatchEvents(
-      const AtomicString& event_interface_filter = AtomicString());
+      const DispatchFilter& filter = DispatchFilter(absl::nullopt));
   void ExecuteFrameCallbacks();
   void ExecuteVideoFrameCallbacks();
   void CallMediaQueryListListeners();
@@ -110,6 +110,9 @@ class CORE_EXPORT ScriptedAnimationController
   bool HasScheduledFrameTasks() const;
 
   LocalDOMWindow* GetWindow() const;
+
+  // A helper function that is called by more than one callsite.
+  PageAnimator* GetPageAnimator();
 
   ALWAYS_INLINE bool InsertToPerFrameEventsMap(const Event* event);
   ALWAYS_INLINE void EraseFromPerFrameEventsMap(const Event* event);
@@ -128,10 +131,6 @@ class CORE_EXPORT ScriptedAnimationController
   HeapHashSet<Member<MediaQueryListListener>> media_query_list_listeners_set_;
   double current_frame_time_ms_ = 0.0;
   double current_frame_legacy_time_ms_ = 0.0;
-
-  // Used for animation metrics; see cc::CompositorTimingHistory::DidDraw.
-  bool current_frame_had_raf_;
-  bool next_frame_has_pending_raf_;
 };
 
 }  // namespace blink

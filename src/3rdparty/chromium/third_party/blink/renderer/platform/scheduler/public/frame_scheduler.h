@@ -17,7 +17,6 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_priority.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -32,7 +31,6 @@ class WebAgentGroupScheduler;
 }  // namespace scheduler
 
 class PageScheduler;
-class WebSchedulingTaskQueue;
 
 class FrameScheduler : public FrameOrWorkerScheduler {
  public:
@@ -96,7 +94,7 @@ class FrameScheduler : public FrameOrWorkerScheduler {
   virtual void SetCrossOriginToMainFrame(bool) = 0;
   virtual bool IsCrossOriginToMainFrame() const = 0;
 
-  virtual void SetIsAdFrame() = 0;
+  virtual void SetIsAdFrame(bool is_ad_frame) = 0;
   virtual bool IsAdFrame() const = 0;
 
   virtual void TraceUrlChange(const String&) = 0;
@@ -130,9 +128,6 @@ class FrameScheduler : public FrameOrWorkerScheduler {
   virtual std::unique_ptr<scheduler::WebResourceLoadingTaskRunnerHandle>
   CreateResourceLoadingMaybeUnfreezableTaskRunnerHandle() = 0;
 
-  virtual std::unique_ptr<WebSchedulingTaskQueue> CreateWebSchedulingTaskQueue(
-      WebSchedulingPriority) = 0;
-
   // Returns the parent PageScheduler.
   virtual PageScheduler* GetPageScheduler() const = 0;
 
@@ -160,9 +155,13 @@ class FrameScheduler : public FrameOrWorkerScheduler {
   virtual void DidCommitProvisionalLoad(bool is_web_history_inert_commit,
                                         NavigationType navigation_type) = 0;
 
-  // Tells the scheduler that the first contentful paint has occurred for this
+  // Tells the scheduler that the "DOMContentLoaded" event has occurred for this
   // frame.
-  virtual void OnFirstContentfulPaint() = 0;
+  virtual void OnDomContentLoaded() = 0;
+
+  // Tells the scheduler that the first contentful paint has occurred for this
+  // frame. Only for main frames.
+  virtual void OnFirstContentfulPaintInMainFrame() = 0;
 
   // Tells the scheduler that the first meaningful paint has occurred for this
   // frame.

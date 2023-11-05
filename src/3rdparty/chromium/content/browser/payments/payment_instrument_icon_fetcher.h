@@ -14,7 +14,6 @@
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/global_routing_id.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
-#include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
 
 namespace content {
 
@@ -26,7 +25,7 @@ class PaymentInstrumentIconFetcher {
   // Should be called on the service worker core thread.
   static void Start(
       const GURL& scope,
-      std::unique_ptr<std::vector<GlobalFrameRoutingId>> frame_routing_ids,
+      std::unique_ptr<std::vector<GlobalRenderFrameHostId>> frame_routing_ids,
       const std::vector<blink::Manifest::ImageResource>& icons,
       PaymentInstrumentIconFetcherCallback callback);
 

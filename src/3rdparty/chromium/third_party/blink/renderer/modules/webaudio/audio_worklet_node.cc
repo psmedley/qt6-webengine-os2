@@ -6,12 +6,14 @@
 
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_param_descriptor.h"
 #include "third_party/blink/renderer/core/events/error_event.h"
 #include "third_party/blink/renderer/core/messaging/message_channel.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet.h"
@@ -42,7 +44,7 @@ AudioWorkletHandler::AudioWorkletHandler(
   for (const auto& param_name : param_handler_map_.Keys()) {
     param_value_map_.Set(param_name,
                          std::make_unique<AudioFloatArray>(
-                             audio_utilities::kRenderQuantumFrames));
+                             GetDeferredTaskHandler().RenderQuantumFrames()));
   }
 
   for (unsigned i = 0; i < options->numberOfInputs(); ++i)
@@ -147,7 +149,7 @@ void AudioWorkletHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
   // not be dynamically changed.
   if (NumberOfInputs() == 1 && NumberOfOutputs() == 1 &&
       !is_output_channel_count_given_) {
-    DCHECK_EQ(input, &this->Input(0));
+    DCHECK_EQ(input, &Input(0));
     unsigned number_of_input_channels = Input(0).NumberOfChannels();
     if (number_of_input_channels != Output(0).NumberOfChannels()) {
       // This will propagate the channel count to any nodes connected further
@@ -246,8 +248,8 @@ AudioWorkletNode::AudioWorkletNode(
   HashMap<String, scoped_refptr<AudioParamHandler>> param_handler_map;
   for (const auto& param_info : param_info_list) {
     String param_name = param_info.Name().IsolatedCopy();
-    AudioParamHandler::AutomationRate
-        param_automation_rate(AudioParamHandler::AutomationRate::kAudio);
+    AudioParamHandler::AutomationRate param_automation_rate(
+        AudioParamHandler::AutomationRate::kAudio);
     if (param_info.AutomationRate() == "k-rate")
       param_automation_rate = AudioParamHandler::AutomationRate::kControl;
     AudioParam* audio_param = AudioParam::Create(
@@ -269,11 +271,8 @@ AudioWorkletNode::AudioWorkletNode(
   }
   parameter_map_ = MakeGarbageCollected<AudioParamMap>(audio_param_map);
 
-  SetHandler(AudioWorkletHandler::Create(*this,
-                                         context.sampleRate(),
-                                         name,
-                                         param_handler_map,
-                                         options));
+  SetHandler(AudioWorkletHandler::Create(*this, context.sampleRate(), name,
+                                         param_handler_map, options));
 }
 
 AudioWorkletNode* AudioWorkletNode::Create(
@@ -376,9 +375,9 @@ AudioWorkletNode* AudioWorkletNode::Create(
   scoped_refptr<SerializedScriptValue> serialized_node_options =
       SerializedScriptValue::Serialize(
           isolate,
-          ToV8(options, script_state->GetContext()->Global(), isolate),
-          serialize_options,
-          exception_state);
+          ToV8Traits<AudioWorkletNodeOptions>::ToV8(script_state, options)
+              .ToLocalChecked(),
+          serialize_options, exception_state);
 
   // |serialized_node_options| can be nullptr if the option dictionary is not
   // valid.

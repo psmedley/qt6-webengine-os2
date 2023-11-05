@@ -17,7 +17,7 @@ import "extension_install.proto";
 // Almost all the fields should be populated on every upload. (The only
 // exception is some fields in the stability section that are only uploaded
 // once per browsing session, usually shortly after startup.)
-// Next tag: 36
+// Next tag: 40
 message SystemProfileProto {
   // The time when the client was compiled/linked, in seconds since the epoch.
   optional int64 build_timestamp = 1;
@@ -61,6 +61,10 @@ message SystemProfileProto {
   }
   optional Channel channel = 10;
 
+  // True for a client following updates on the extended stable channel;
+  // see go/chrome-extended-dd.
+  optional bool is_extended_stable_channel = 36 [default = false];
+
   // True if Chrome build is instrumented (e.g. built with ASAN instrumentation
   // or with DCHECKs enabled).
   // This field was renamed from |is_asan_build| to reflect its actual meaning.
@@ -76,6 +80,34 @@ message SystemProfileProto {
   // For privacy, this is rounded to the nearest hour.
   optional int64 install_date = 16;
 
+  // A message about the cloned install detection that helps improve data
+  // quality by identifying potential VMs and bots. This message will be
+  // set in every record after the client has ever been reset due to cloned
+  // install detection. However, the `cloned_from_client_id`
+  // field will only be set in the resetting session because this is not
+  // persisted in the local prefs.
+  // Next tag: 5
+  message ClonedInstallInfo {
+    // The latest timestamp we reset a cloned client’s client id, in seconds
+    // since the epoch. For privacy, this is rounded to the nearest hour.
+    optional int64 last_timestamp = 1;
+
+    // The client_id that this client is cloned from. This field is tied to the
+    // cloned install detector only; any other way of resetting client_id
+    // doesn't touch this field. This field is only reported in the
+    // resetting session.
+    optional fixed64 cloned_from_client_id = 2;
+
+    // The first timestamp when we reset a cloned client’s client id, in seconds
+    // since the epoch. For privacy, this is rounded to the nearest hour.
+    optional int64 first_timestamp = 3;
+
+    // The number of times this client has been reset due to cloned install.
+    // Increment by one per reset happens.
+    optional int32 count = 4;
+  }
+  optional ClonedInstallInfo cloned_install_info = 39;
+
   // The non-identifying low entropy source value. This value seeds the
   // pseudorandom generator which picks experimental groups.
   optional int32 low_entropy_source = 31;
@@ -87,10 +119,27 @@ message SystemProfileProto {
   // the new source.
   optional int32 old_low_entropy_source = 32;
 
+  // A pseudo low entropy value. The actual low_entropy_source value is used for
+  // assignment to experiment arms, and this use may cause drift over time (for
+  // example, if a bad experiment arm drives away some users permanently.) This
+  // pseudo low entropy value is generated identically to low_entropy_source,
+  // but it is generated with a different randomization seed and is not used for
+  // experiment randomization. Consequently, it can be used in statistical
+  // validation to answer the question of how our data would be distributed if
+  // we didn't have to worry about low entropy source drift.
+  optional int32 pseudo_low_entropy_source = 37;
+
   // The user's selected application locale, i.e. the user interface language.
   // The locale includes a language code and, possibly, also a country code,
   // e.g. "en-US".
   optional string application_locale = 4;
+
+  // Hashes of command line keys used in the browser session when the MetricsLog
+  // is created. This takes into account the command line switches that were
+  // used when launching the session, as well as any modifications made to them,
+  // for example via CommandLine::AppendSwitch and CommandLine::RemoveSwitch.
+  // Values are the lower 32-bit of SHA1 hash in little-endian.
+  repeated fixed32 command_line_key_hash = 38 [packed = true];
 
   // Information on the user's operating system.
   // Next tag: 8
@@ -206,18 +255,6 @@ message SystemProfileProto {
     // Max DPI for any attached screen. (Windows only)
     optional float max_dpi_x = 9;
     optional float max_dpi_y = 10;
-
-    // Device form factors.
-    enum FormFactor {
-      FORM_FACTOR_UNKNOWN = 0;
-      FORM_FACTOR_DESKTOP = 1;
-      FORM_FACTOR_PHONE = 2;
-      FORM_FACTOR_TABLET = 3;
-      FORM_FACTOR_KIOSK = 4;
-    }
-
-    // The device form factor.
-    optional FormFactor form_factor = 19;
 
     // Information on the CPU obtained by CPUID.
     message CPU {
@@ -367,6 +404,9 @@ message SystemProfileProto {
       WIFI_PHY_LAYER_PROTOCOL_G = 4;
       WIFI_PHY_LAYER_PROTOCOL_N = 5;
       WIFI_PHY_LAYER_PROTOCOL_UNKNOWN = 6;
+      WIFI_PHY_LAYER_PROTOCOL_AC = 7;
+      WIFI_PHY_LAYER_PROTOCOL_AD = 8;
+      WIFI_PHY_LAYER_PROTOCOL_AX = 9;
     }
     // The physical layer mode of the associated wifi access point, if any.
     optional WifiPHYLayerProtocol wifi_phy_layer_protocol = 4;
@@ -956,6 +996,7 @@ message SystemProfileProto {
     CROS_SMART_DIM = 26;
     ZXCVBN_DATA = 27;
     AUTOFILL_REGEX_CONSTANTS = 28;
+    WEBVIEW_APPS_PACKAGE_NAMES_ALLOWLIST = 29;
   }
 
   // Information about what Chrome components are registered and at which

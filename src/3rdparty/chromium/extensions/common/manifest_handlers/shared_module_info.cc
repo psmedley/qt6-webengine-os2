@@ -36,7 +36,7 @@ namespace {
 
 const char kSharedModule[] = "shared_module";
 
-using ManifestKeys = api::shared_module::ManifestKeys;
+using ManifestKeys2 = api::shared_module::ManifestKeys;
 
 static base::LazyInstance<SharedModuleInfo>::DestructorAtExit
     g_empty_shared_module_info = LAZY_INSTANCE_INITIALIZER;
@@ -130,9 +130,9 @@ const std::vector<SharedModuleInfo::ImportInfo>& SharedModuleInfo::GetImports(
 SharedModuleHandler::SharedModuleHandler() = default;
 SharedModuleHandler::~SharedModuleHandler() = default;
 
-bool SharedModuleHandler::Parse(Extension* extension, base::string16* error) {
-  ManifestKeys manifest_keys;
-  if (!ManifestKeys::ParseFromDictionary(
+bool SharedModuleHandler::Parse(Extension* extension, std::u16string* error) {
+  ManifestKeys2 manifest_keys;
+  if (!ManifestKeys2::ParseFromDictionary(
           extension->manifest()->available_values(), &manifest_keys, error)) {
     return false;
   }
@@ -144,7 +144,7 @@ bool SharedModuleHandler::Parse(Extension* extension, base::string16* error) {
   auto info = std::make_unique<SharedModuleInfo>();
 
   if (has_import && has_export) {
-    *error = base::ASCIIToUTF16(errors::kInvalidImportAndExport);
+    *error = errors::kInvalidImportAndExport;
     return false;
   }
 
@@ -212,8 +212,8 @@ bool SharedModuleHandler::Validate(
 }
 
 base::span<const char* const> SharedModuleHandler::Keys() const {
-  static constexpr const char* kKeys[] = {ManifestKeys::kImport,
-                                          ManifestKeys::kExport};
+  static constexpr const char* kKeys[] = {ManifestKeys2::kImport,
+                                          ManifestKeys2::kExport};
   return kKeys;
 }
 

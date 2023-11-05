@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
@@ -35,7 +34,7 @@ AutofillPaymentApp::AutofillPaymentApp(
     const autofill::CreditCard& card,
     const std::vector<autofill::AutofillProfile*>& billing_profiles,
     const std::string& app_locale,
-    PaymentRequestBaseDelegate* payment_request_delegate)
+    base::WeakPtr<PaymentRequestBaseDelegate> payment_request_delegate)
     : PaymentApp(autofill::data_util::GetPaymentRequestData(card.network())
                      .icon_resource_id,
                  PaymentApp::Type::AUTOFILL),
@@ -70,14 +69,16 @@ void AutofillPaymentApp::InvokePaymentApp(base::WeakPtr<Delegate> delegate) {
   is_waiting_for_billing_address_normalization_ = true;
   is_waiting_for_card_unmask_ = true;
 
-  // Start the normalization of the billing address.
-  payment_request_delegate_->GetAddressNormalizer()->NormalizeAddressAsync(
-      billing_address_, /*timeout_seconds=*/5,
-      base::BindOnce(&AutofillPaymentApp::OnAddressNormalized,
-                     weak_ptr_factory_.GetWeakPtr()));
+  if (payment_request_delegate_) {
+    // Start the normalization of the billing address.
+    payment_request_delegate_->GetAddressNormalizer()->NormalizeAddressAsync(
+        billing_address_, /*timeout_seconds=*/5,
+        base::BindOnce(&AutofillPaymentApp::OnAddressNormalized,
+                       weak_ptr_factory_.GetWeakPtr()));
 
-  payment_request_delegate_->DoFullCardRequest(credit_card_,
-                                               weak_ptr_factory_.GetWeakPtr());
+    payment_request_delegate_->DoFullCardRequest(
+        credit_card_, weak_ptr_factory_.GetWeakPtr());
+  }
 }
 
 bool AutofillPaymentApp::IsCompleteForPayment() const {
@@ -96,7 +97,7 @@ bool AutofillPaymentApp::CanPreselect() const {
   return IsCompleteForPayment();
 }
 
-base::string16 AutofillPaymentApp::GetMissingInfoLabel() const {
+std::u16string AutofillPaymentApp::GetMissingInfoLabel() const {
   return GetCompletionMessageForCard(
       GetCompletionStatusForCard(credit_card_, app_locale_, billing_profiles_));
 }
@@ -117,9 +118,11 @@ bool AutofillPaymentApp::HasEnrolledInstrument() const {
 }
 
 void AutofillPaymentApp::RecordUse() {
-  // Record the use of the credit card.
-  payment_request_delegate_->GetPersonalDataManager()->RecordUseOf(
-      &credit_card_);
+  if (payment_request_delegate_) {
+    // Record the use of the credit card.
+    payment_request_delegate_->GetPersonalDataManager()->RecordUseOf(
+        &credit_card_);
+  }
 }
 
 bool AutofillPaymentApp::NeedsInstallation() const {
@@ -131,11 +134,11 @@ std::string AutofillPaymentApp::GetId() const {
   return credit_card_.guid();
 }
 
-base::string16 AutofillPaymentApp::GetLabel() const {
+std::u16string AutofillPaymentApp::GetLabel() const {
   return credit_card_.NetworkAndLastFourDigits();
 }
 
-base::string16 AutofillPaymentApp::GetSublabel() const {
+std::u16string AutofillPaymentApp::GetSublabel() const {
   return credit_card_.GetInfo(
       autofill::AutofillType(autofill::CREDIT_CARD_NAME_FULL), app_locale_);
 }
@@ -183,7 +186,7 @@ bool AutofillPaymentApp::HandlesPayerPhone() const {
 void AutofillPaymentApp::OnFullCardRequestSucceeded(
     const autofill::payments::FullCardRequest& /* full_card_request */,
     const autofill::CreditCard& card,
-    const base::string16& cvc) {
+    const std::u16string& cvc) {
   credit_card_ = card;
   cvc_ = cvc;
   is_waiting_for_card_unmask_ = false;
@@ -227,7 +230,7 @@ void AutofillPaymentApp::GenerateBasicCardResponse() {
     delegate_ = nullptr;
   }
 
-  cvc_ = base::UTF8ToUTF16("");
+  cvc_ = u"";
 }
 
 void AutofillPaymentApp::OnAddressNormalized(

@@ -98,11 +98,9 @@ scoped_refptr<FontData> CSSSegmentedFontFace::GetFontData(
   if (!IsValid())
     return nullptr;
 
-  const FontSelectionRequest& font_selection_request =
-      font_description.GetFontSelectionRequest();
   bool is_unique_match = false;
-  FontCacheKey key = font_description.CacheKey(
-      FontFaceCreationParams(), is_unique_match, font_selection_request);
+  FontCacheKey key =
+      font_description.CacheKey(FontFaceCreationParams(), is_unique_match);
 
   // font_data_table_ caches FontData and SegmentedFontData instances, which
   // provide SimpleFontData objects containing FontPlatformData objects. In the
@@ -122,11 +120,13 @@ scoped_refptr<FontData> CSSSegmentedFontFace::GetFontData(
       (*cached_font_data)->NumFaces())
     return *cached_font_data;
 
-  scoped_refptr<SegmentedFontData> created_font_data;
-  created_font_data = SegmentedFontData::Create();
+  scoped_refptr<SegmentedFontData> created_font_data =
+      SegmentedFontData::Create();
 
   FontDescription requested_font_description(font_description);
   if (!font_selection_capabilities_.HasRange()) {
+    const FontSelectionRequest& font_selection_request =
+        font_description.GetFontSelectionRequest();
     requested_font_description.SetSyntheticBold(
         font_selection_capabilities_.weight.maximum < BoldThreshold() &&
         font_selection_request.weight >= BoldThreshold());

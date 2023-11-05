@@ -29,8 +29,8 @@ PageInfoDelegateImpl::PageInfoDelegateImpl(content::WebContents* web_contents)
   DCHECK(web_contents_);
 }
 
-permissions::ChooserContextBase* PageInfoDelegateImpl::GetChooserContext(
-    ContentSettingsType type) {
+permissions::ObjectPermissionContextBase*
+PageInfoDelegateImpl::GetChooserContext(ContentSettingsType type) {
   // TODO(crbug.com/1052375): Once WebLayer has USB and Bluetooth support,
   // add more logic here.
   return nullptr;
@@ -44,15 +44,14 @@ PageInfoDelegateImpl::GetPasswordProtectionService() const {
 }
 
 void PageInfoDelegateImpl::OnUserActionOnPasswordUi(
-    content::WebContents* web_contents,
     safe_browsing::WarningAction action) {
   NOTREACHED();
 }
 
-base::string16 PageInfoDelegateImpl::GetWarningDetailText() {
+std::u16string PageInfoDelegateImpl::GetWarningDetailText() {
   // TODO(crbug.com/1052375): Implement.
   NOTREACHED();
-  return base::string16();
+  return std::u16string();
 }
 #endif
 
@@ -72,6 +71,45 @@ bool PageInfoDelegateImpl::CreateInfoBarDelegate() {
 void PageInfoDelegateImpl::ShowSiteSettings(const GURL& site_url) {
   // TODO(crbug.com/1052375): Implement once site settings code has been
   // componentized.
+  NOTREACHED();
+}
+
+void PageInfoDelegateImpl::OpenCookiesDialog() {
+  // Used for desktop only. Doesn't need implementation for WebLayer.
+  NOTREACHED();
+}
+
+void PageInfoDelegateImpl::OpenCertificateDialog(
+    net::X509Certificate* certificate) {
+  // Used for desktop only. Doesn't need implementation for WebLayer.
+  NOTREACHED();
+}
+
+void PageInfoDelegateImpl::OpenConnectionHelpCenterPage(
+    const ui::Event& event) {
+  // Used for desktop only. Doesn't need implementation for WebLayer.
+  NOTREACHED();
+}
+
+void PageInfoDelegateImpl::OpenSafetyTipHelpCenterPage() {
+  // Used for desktop only. Doesn't need implementation for WebLayer.
+  NOTREACHED();
+}
+
+void PageInfoDelegateImpl::OpenContentSettingsExceptions(
+    ContentSettingsType content_settings_type) {
+  // Used for desktop only. Doesn't need implementation for WebLayer.
+  NOTREACHED();
+}
+
+void PageInfoDelegateImpl::OnPageInfoActionOccurred(
+    PageInfo::PageInfoAction action) {
+  // Used for desktop only. Doesn't need implementation for WebLayer.
+  NOTREACHED();
+}
+
+void PageInfoDelegateImpl::OnUIClosing() {
+  // Used for desktop only. Doesn't need implementation for WebLayer.
   NOTREACHED();
 }
 #endif
@@ -124,7 +162,7 @@ PageInfoDelegateImpl::GetPageSpecificContentSettingsDelegate() {
 }
 
 #if defined(OS_ANDROID)
-const base::string16 PageInfoDelegateImpl::GetClientApplicationName() {
+const std::u16string PageInfoDelegateImpl::GetClientApplicationName() {
   return weblayer::GetClientApplicationName();
 }
 #endif

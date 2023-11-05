@@ -13,7 +13,6 @@
 #include "base/metrics/sample_vector.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "net/base/isolation_info.h"
 #include "net/base/net_export.h"

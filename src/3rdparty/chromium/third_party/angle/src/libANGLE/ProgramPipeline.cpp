@@ -241,17 +241,21 @@ void ProgramPipeline::updateExecutableAttributes()
 
 void ProgramPipeline::updateTransformFeedbackMembers()
 {
-    Program *vertexProgram = getShaderProgram(gl::ShaderType::Vertex);
-
-    if (!vertexProgram)
+    ShaderType lastVertexProcessingStage =
+        gl::GetLastPreFragmentStage(getExecutable().getLinkedShaderStages());
+    if (lastVertexProcessingStage == ShaderType::InvalidEnum)
     {
         return;
     }
 
-    const ProgramExecutable &vertexExecutable     = vertexProgram->getExecutable();
-    mState.mExecutable->mTransformFeedbackStrides = vertexExecutable.mTransformFeedbackStrides;
+    Program *shaderProgram = getShaderProgram(lastVertexProcessingStage);
+    ASSERT(shaderProgram);
+
+    const ProgramExecutable &lastPreFragmentExecutable = shaderProgram->getExecutable();
+    mState.mExecutable->mTransformFeedbackStrides =
+        lastPreFragmentExecutable.mTransformFeedbackStrides;
     mState.mExecutable->mLinkedTransformFeedbackVaryings =
-        vertexExecutable.mLinkedTransformFeedbackVaryings;
+        lastPreFragmentExecutable.mLinkedTransformFeedbackVaryings;
 }
 
 void ProgramPipeline::updateShaderStorageBlocks()
@@ -383,6 +387,33 @@ void ProgramPipeline::updateFragmentInoutRange()
     mState.mExecutable->mFragmentInoutRange     = fragmentExecutable.mFragmentInoutRange;
 }
 
+void ProgramPipeline::updateLinkedVaryings()
+{
+    // Need to check all of the shader stages, not just linked, so we handle Compute correctly.
+    for (const gl::ShaderType shaderType : kAllGraphicsShaderTypes)
+    {
+        const Program *shaderProgram = getShaderProgram(shaderType);
+        if (shaderProgram && shaderProgram->isLinked())
+        {
+            const ProgramExecutable &executable = shaderProgram->getExecutable();
+            mState.mExecutable->mLinkedOutputVaryings[shaderType] =
+                executable.getLinkedOutputVaryings(shaderType);
+            mState.mExecutable->mLinkedInputVaryings[shaderType] =
+                executable.getLinkedInputVaryings(shaderType);
+        }
+    }
+
+    const Program *computeProgram = getShaderProgram(ShaderType::Compute);
+    if (computeProgram && computeProgram->isLinked())
+    {
+        const ProgramExecutable &executable = computeProgram->getExecutable();
+        mState.mExecutable->mLinkedOutputVaryings[ShaderType::Compute] =
+            executable.getLinkedOutputVaryings(ShaderType::Compute);
+        mState.mExecutable->mLinkedInputVaryings[ShaderType::Compute] =
+            executable.getLinkedInputVaryings(ShaderType::Compute);
+    }
+}
+
 void ProgramPipeline::updateHasBooleans()
 {
     // Need to check all of the shader stages, not just linked, so we handle Compute correctly.
@@ -473,6 +504,7 @@ void ProgramPipeline::updateExecutable()
 
     // All Shader ProgramExecutable properties
     mState.updateExecutableTextures();
+    updateLinkedVaryings();
 
     // Must be last, since it queries things updated by earlier functions
     updateHasBooleans();
@@ -506,10 +538,22 @@ angle::Result ProgramPipeline::link(const Context *context)
             return angle::Result::Stop;
         }
 
-        mergedVaryings = GetMergedVaryingsFromShaders(*this);
+        mergedVaryings = GetMergedVaryingsFromShaders(*this, getExecutable());
         // If separable program objects are in use, the set of attributes captured is taken
         // from the program object active on the last vertex processing stage.
-        Program *tfProgram = mState.mPrograms[ShaderType::Geometry];
+        ShaderType lastVertexProcessingStage =
+            gl::GetLastPreFragmentStage(getExecutable().getLinkedShaderStages());
+        if (lastVertexProcessingStage == ShaderType::InvalidEnum)
+        {
+            //  If there is no active program for the vertex or fragment shader stages, the results
+            //  of vertex and fragment shader execution will respectively be undefined. However,
+            //  this is not an error.
+            return angle::Result::Continue;
+        }
+
+        Program *tfProgram = getShaderProgram(lastVertexProcessingStage);
+        ASSERT(tfProgram);
+
         if (!tfProgram)
         {
             tfProgram = mState.mPrograms[ShaderType::Vertex];
@@ -546,7 +590,7 @@ bool ProgramPipeline::linkVaryings(InfoLog &infoLog) const
         {
             Program *previousProgram = getShaderProgram(previousShaderType);
             ASSERT(previousProgram);
-            ProgramExecutable &previousExecutable = previousProgram->getExecutable();
+            const ProgramExecutable &previousExecutable = previousProgram->getExecutable();
 
             if (!LinkValidateShaderInterfaceMatching(
                     previousExecutable.getLinkedOutputVaryings(previousShaderType),
@@ -568,7 +612,7 @@ bool ProgramPipeline::linkVaryings(InfoLog &infoLog) const
     Program *fragmentProgram = mState.mPrograms[ShaderType::Fragment];
     if (!vertexProgram || !fragmentProgram)
     {
-        return false;
+        return true;
     }
     ProgramExecutable &vertexExecutable   = vertexProgram->getExecutable();
     ProgramExecutable &fragmentExecutable = fragmentProgram->getExecutable();
@@ -610,6 +654,15 @@ void ProgramPipeline::validate(const gl::Context *context)
         }
     }
 
+    intptr_t drawStatesError = context->getStateCache().getBasicDrawStatesError(context);
+    if (drawStatesError)
+    {
+        mState.mValid            = false;
+        const char *errorMessage = reinterpret_cast<const char *>(drawStatesError);
+        infoLog << errorMessage << "\n";
+        return;
+    }
+
     if (!linkVaryings(infoLog))
     {
         mState.mValid = false;
@@ -628,27 +681,21 @@ void ProgramPipeline::validate(const gl::Context *context)
     }
 }
 
-bool ProgramPipeline::validateSamplers(InfoLog *infoLog, const Caps &caps)
-{
-    for (const ShaderType shaderType : gl::AllShaderTypes())
-    {
-        Program *shaderProgram = mState.mPrograms[shaderType];
-        if (shaderProgram && !shaderProgram->validateSamplers(infoLog, caps))
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 void ProgramPipeline::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessage message)
 {
     switch (message)
     {
-        case angle::SubjectMessage::SubjectChanged:
+        case angle::SubjectMessage::ProgramTextureOrImageBindingChanged:
             mState.mIsLinked = false;
+            mState.mExecutable->mActiveSamplerRefCounts.fill(0);
             mState.updateExecutableTextures();
+            break;
+        case angle::SubjectMessage::ProgramRelinked:
+            mState.mIsLinked = false;
+            updateExecutable();
+            break;
+        case angle::SubjectMessage::SamplerUniformsUpdated:
+            getExecutable().resetCachedValidateSamplersResult();
             break;
         default:
             UNREACHABLE();

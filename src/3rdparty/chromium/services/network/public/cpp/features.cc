@@ -4,6 +4,8 @@
 
 #include "services/network/public/cpp/features.h"
 
+#include "base/metrics/field_trial_params.h"
+#include "base/numerics/safe_conversions.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 
@@ -76,6 +78,21 @@ const base::Feature kProactivelyThrottleLowPriorityRequests{
     "ProactivelyThrottleLowPriorityRequests",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Enables Cross-Origin-Embedder-Policy: credentialless.
+// https://github.com/mikewest/credentiallessness
+COMPONENT_EXPORT(NETWORK_CPP)
+extern const base::Feature kCrossOriginEmbedderPolicyCredentialless{
+    "CrossOriginEmbedderPolicyCredentialless",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables Cross-Origin-Embedder-Policy credentialless origin trial. It will be
+// used as a kill switch during the experiment.
+// Intent-to-experiment:
+// https://groups.google.com/a/chromium.org/g/blink-dev/c/Sdc0G1bvKr0/m/YHR8RuWyAAAJ
+const base::Feature kCrossOriginEmbedderPolicyCredentiallessOriginTrial{
+    "CrossOriginEmbedderPolicyCredentiallessOriginTrial",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
 // Enables Cross-Origin Opener Policy (COOP).
 // https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
 // https://html.spec.whatwg.org/#cross-origin-opener-policy
@@ -103,11 +120,6 @@ const base::Feature kCrossOriginOpenerPolicyAccessReporting{
 // https://github.com/mikewest/coop-by-default/
 const base::Feature kCrossOriginOpenerPolicyByDefault{
     "CrossOriginOpenerPolicyByDefault", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables the most recent developments on the crossOriginIsolated property.
-// https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/crossOriginIsolated
-const base::Feature kCrossOriginIsolated{"CrossOriginIsolated",
-                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables or defaults splittup up server (not proxy) entries in the
 // HttpAuthCache.
@@ -192,6 +204,52 @@ const base::FeatureParam<bool> kPlatformProvidedTrustTokenIssuance{
 
 const base::Feature kWebSocketReassembleShortMessages{
     "WebSocketReassembleShortMessages", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Enable support for ACCEPT_CH H2/3 frame as part of Client Hint Reliability.
+// See:
+// https://tools.ietf.org/html/draft-davidben-http-client-hint-reliability-02#section-4.3
+const base::Feature kAcceptCHFrame{"AcceptCHFrame",
+                                   base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSCTAuditingRetryAndPersistReports{
+    "SCTAuditingRetryAndPersistReports", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// This feature is used for tuning several loading-related data pipe
+// parameters. See crbug.com/1041006.
+const base::Feature kLoaderDataPipeTuningFeature{
+    "LoaderDataPipeTuning", base::FEATURE_DISABLED_BY_DEFAULT};
+
+namespace {
+// The default buffer size of DataPipe which is used to send the content body.
+static constexpr uint32_t kDataPipeDefaultAllocationSize = 512 * 1024;
+constexpr base::FeatureParam<int> kDataPipeAllocationSize{
+    &kLoaderDataPipeTuningFeature, "allocation_size_bytes",
+    base::saturated_cast<int>(kDataPipeDefaultAllocationSize)};
+
+// The maximal number of bytes consumed in a loading task. When there are more
+// bytes in the data pipe, they will be consumed in following tasks. Setting too
+// small of a number will generate many tasks but setting a too large of a
+// number will lead to thread janks.
+static constexpr uint32_t kMaxNumConsumedBytesInTask = 64 * 1024;
+constexpr base::FeatureParam<int> kLoaderChunkSize{
+    &kLoaderDataPipeTuningFeature, "loader_chunk_size",
+    base::saturated_cast<int>(kMaxNumConsumedBytesInTask)};
+}  // namespace
+
+// static
+uint32_t GetDataPipeDefaultAllocationSize() {
+  return base::saturated_cast<uint32_t>(kDataPipeAllocationSize.Get());
+}
+
+// static
+uint32_t GetLoaderChunkSize() {
+  return base::saturated_cast<uint32_t>(kLoaderChunkSize.Get());
+}
+
+// Enable recording UMAs for network activities which can wake-up radio on
+// Android.
+const base::Feature kRecordRadioWakeupTrigger{
+    "RecordRadioWakeupTrigger", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace features
 }  // namespace network

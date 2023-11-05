@@ -9,15 +9,14 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "base/optional.h"
 #include "base/process/kill.h"
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/scoped_surface_id_allocator.h"
@@ -31,16 +30,18 @@
 #include "content/public/browser/visibility.h"
 #include "content/public/common/widget_type.h"
 #include "services/viz/public/mojom/hit_test/hit_test_region_list.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/page/content_to_visible_time_reporter.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom-forward.h"
 #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
 #include "third_party/blink/public/mojom/page/record_content_to_visible_time_request.mojom-forward.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
-#include "ui/accessibility/ax_tree_id_registry.h"
+#include "ui/accessibility/ax_action_handler_registry.h"
 #include "ui/base/ime/mojom/text_input_state.mojom-forward.h"
 #include "ui/base/ime/text_input_mode.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/display/display.h"
+#include "ui/display/display_list.h"
 #include "ui/events/event_constants.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
@@ -53,6 +54,7 @@ class WebMouseWheelEvent;
 }
 
 namespace ui {
+class Compositor;
 enum class DomCode;
 class LatencyInfo;
 class TouchEvent;
@@ -75,12 +77,23 @@ class DelegatedFrameHost;
 // Basic implementation shared by concrete RenderWidgetHostView subclasses.
 class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
  public:
+  // The TooltipObserver is used in browser tests only.
+  class CONTENT_EXPORT TooltipObserver {
+   public:
+    virtual ~TooltipObserver() = default;
+
+    virtual void OnTooltipTextUpdated(const std::u16string& tooltip_text) = 0;
+  };
+
+  // This function takes a (possibly invalid) pointer to
+  // RenderWidgetHostViewBase, and returns -1 if was never valid, 0 if there was
+  // once a valid object with that pointer that is now deallocated, and +1 if
+  // the pointer is valid.
+  // Diagnostic for https://crbug.com/1197154.
+  static int IsValidRWHVBPointer(const RenderWidgetHostViewBase* view);
+
   RenderWidgetHostViewBase(const RenderWidgetHostViewBase&) = delete;
   RenderWidgetHostViewBase& operator=(const RenderWidgetHostViewBase&) = delete;
-
-  float current_device_scale_factor() const {
-    return current_display_.device_scale_factor();
-  }
 
   // Returns the focused RenderWidgetHost inside this |view|'s RWH.
   RenderWidgetHostImpl* GetFocusedWidget() const;
@@ -91,12 +104,14 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
   void WasUnOccluded() override {}
   void WasOccluded() override {}
   void SetIsInVR(bool is_in_vr) override;
-  base::string16 GetSelectedText() override;
+  std::u16string GetSelectedText() override;
   bool IsMouseLocked() override;
   bool GetIsMouseLockedUnadjustedMovementForTesting() override;
-  bool LockKeyboard(base::Optional<base::flat_set<ui::DomCode>> codes) override;
+  bool LockKeyboard(absl::optional<base::flat_set<ui::DomCode>> codes) override;
   void SetBackgroundColor(SkColor color) override;
-  base::Optional<SkColor> GetBackgroundColor() override;
+  absl::optional<SkColor> GetBackgroundColor() override;
+  void CopyBackgroundColorIfPresentFrom(
+      const RenderWidgetHostView& other) override;
   void UnlockKeyboard() override;
   bool IsKeyboardLocked() override;
   base::flat_map<std::string, std::string> GetKeyboardLayoutMap() override;
@@ -109,7 +124,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
       base::OnceCallback<void(const SkBitmap&)> callback) override;
   std::unique_ptr<viz::ClientFrameSinkVideoCapturer> CreateVideoCapturer()
       override;
-  void GetScreenInfo(blink::ScreenInfo* screen_info) override;
+  void GetScreenInfo(display::ScreenInfo* screen_info) override;
   void EnableAutoResize(const gfx::Size& min_size,
                         const gfx::Size& max_size) override;
   void DisableAutoResize(const gfx::Size& new_size) override;
@@ -122,6 +137,9 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
       bool show_reason_tab_switching,
       bool show_reason_unoccluded,
       bool show_reason_bfcache_restore) final;
+  bool ShouldVirtualKeyboardOverlayContent() override;
+  void NotifyVirtualKeyboardOverlayRect(
+      const gfx::Rect& keyboard_rect) override {}
 
   // This only needs to be overridden by RenderWidgetHostViewBase subclasses
   // that handle content embedded within other RenderWidgetHostViews.
@@ -149,12 +167,14 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
 
   virtual void SendInitialPropertiesIfNeeded() {}
 
-  // Notification that a resize or move session ended on the native widget.
-  void UpdateScreenInfo(gfx::NativeView view);
+  // Get display info known to this view; must be consistent with GetScreenInfo.
+  virtual const std::vector<display::Display>& GetDisplays() const;
 
-  // Tells if the display property (work area/scale factor) has
-  // changed since the last time.
-  bool HasDisplayPropertyChanged(gfx::NativeView view);
+  // Called when screen information or native widget bounds change.
+  virtual void UpdateScreenInfo();
+
+  // Get the device scale factor of the associated display.
+  float GetCurrentDeviceScaleFactor() const;
 
   // Called by the TextInputManager to notify the view about being removed from
   // the list of registered views, i.e., TextInputManager is no longer tracking
@@ -185,7 +205,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
   virtual RenderWidgetHostViewBase* GetRootView();
 
   // Notifies the View that the renderer text selection has changed.
-  virtual void SelectionChanged(const base::string16& text,
+  virtual void SelectionChanged(const std::u16string& text,
                                 size_t offset,
                                 const gfx::Range& range,
                                 bool user_initiated);
@@ -383,13 +403,15 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
   // Notifies the view that the renderer selection bounds has changed.
   // Selection bounds are described as a focus bound which is the current
   // position of caret on the screen, as well as the anchor bound which is the
-  // starting position of the selection. The coordinates are with respect to
-  // RenderWidget's window's origin. Focus and anchor bound are represented as
-  // gfx::Rect.
+  // starting position of the selection. `bounding_box` is the bounds of the
+  // rectangle enclosing the selection region. The coordinates are with respect
+  // to RenderWidget's window's origin. Focus and anchor bound are represented
+  // as gfx::Rect.
   virtual void SelectionBoundsChanged(const gfx::Rect& anchor_rect,
                                       base::i18n::TextDirection anchor_dir,
                                       const gfx::Rect& focus_rect,
                                       base::i18n::TextDirection focus_dir,
+                                      const gfx::Rect& bounding_box,
                                       bool is_anchor_first);
 
   // Updates the range of the marked text in an IME composition.
@@ -431,12 +453,19 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
   // Tells the View to destroy itself.
   virtual void Destroy();
 
-  // Tells the View that the tooltip text for the current mouse position over
-  // the page has changed.
-  virtual void SetTooltipText(const base::string16& tooltip_text) = 0;
+  // Calls UpdateTooltip if the view is under the cursor.
+  virtual void UpdateTooltipUnderCursor(const std::u16string& tooltip_text) {}
 
-  // Displays the requested tooltip on the screen.
-  virtual void DisplayTooltipText(const base::string16& tooltip_text) {}
+  // Updates the tooltip text and displays the requested tooltip on the screen.
+  // An empty string will clear a visible tooltip.
+  virtual void UpdateTooltip(const std::u16string& tooltip_text) {}
+
+  // Updates the tooltip text and its position and displays the requested
+  // tooltip on the screen. The |bounds| parameter corresponds to the bounds of
+  // the renderer-side element (in widget-relative DIPS) on which the tooltip
+  // should appear to be anchored.
+  virtual void UpdateTooltipFromKeyboard(const std::u16string& tooltip_text,
+                                         const gfx::Rect& bounds) {}
 
   // Transforms |point| to be in the coordinate space of browser compositor's
   // surface. This is in DIP.
@@ -458,7 +487,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
 
   // Gets the DisplayFeature whose offset and mask_length are expressed in DIPs
   // relative to the view. See display_feature.h for more details.
-  virtual base::Optional<DisplayFeature> GetDisplayFeature() = 0;
+  virtual absl::optional<DisplayFeature> GetDisplayFeature() = 0;
 
   virtual void SetDisplayFeatureForTesting(
       const DisplayFeature* display_feature) = 0;
@@ -514,9 +543,13 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
   // SetContentBackgroundColor is called when the renderer wants to update the
   // view's background color.
   void SetContentBackgroundColor(SkColor color);
-  base::Optional<SkColor> content_background_color() const {
+  absl::optional<SkColor> content_background_color() const {
     return content_background_color_;
   }
+
+  void SetTooltipObserverForTesting(TooltipObserver* observer);
+
+  virtual ui::Compositor* GetCompositor();
 
  protected:
   explicit RenderWidgetHostViewBase(RenderWidgetHost* host);
@@ -547,16 +580,15 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
 
   virtual bool HasFallbackSurface() const;
 
-  void set_current_device_scale_factor(float scale) {
-    current_display_.set_device_scale_factor(scale);
-  }
-
   // The model object. Access is protected to allow access to
   // RenderWidgetHostViewChildFrame.
   RenderWidgetHostImpl* host_;
 
   // Whether this view is a frame or a popup.
   WidgetType widget_type_ = WidgetType::kFrame;
+
+  // Cached information about the renderer's display environment.
+  display::DisplayList display_list_;
 
   // Indicates whether keyboard lock is active for this view.
   bool keyboard_locked_ = false;
@@ -572,13 +604,15 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
   TextInputManager* text_input_manager_ = nullptr;
 
   // The background color used in the current renderer.
-  base::Optional<SkColor> content_background_color_;
+  absl::optional<SkColor> content_background_color_;
 
   // The default background color used before getting the
   // |content_background_color|.
-  base::Optional<SkColor> default_background_color_;
+  absl::optional<SkColor> default_background_color_;
 
   bool is_currently_scrolling_viewport_ = false;
+
+  TooltipObserver* tooltip_observer_for_testing_ = nullptr;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(
@@ -613,17 +647,17 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView {
                                         const gfx::PointF& point,
                                         gfx::PointF* transformed_point) const;
 
+  // Helper function to return whether the current background color is fully
+  // opaque.
+  bool IsBackgroundColorOpaque();
+
   bool view_stopped_flinging_for_test() const {
     return view_stopped_flinging_for_test_;
   }
 
-  // Cached information about the renderer's display environment.
-  display::Display current_display_;
-  bool current_display_is_extended_ = false;
-
   base::ObserverList<RenderWidgetHostViewBaseObserver>::Unchecked observers_;
 
-  base::Optional<blink::WebGestureEvent> pending_touchpad_pinch_begin_;
+  absl::optional<blink::WebGestureEvent> pending_touchpad_pinch_begin_;
 
   // The last tab switch processing start request. This should only be set and
   // retrieved using SetRecordContentToVisibleTimeRequest and

@@ -6,6 +6,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2021-08-06
+
+### Added
+ - `Path.makeAsWinding` has been added to convert paths with an EvenOdd FillType to the
+   equivalent area using the Winding FillType.
+
+### Breaking
+ - `Paint.getBlendMode()` has been removed.
+ - `Canvas.drawImageAtCurrentFrame()` has been removed.
+ - FilterQuality enum removed -- pass `FilterOptions` | `CubicResampler` instead.
+
+### Type Changes (index.d.ts)
+ - Replaced all `object` with actual types, including `AnimationMarker`.
+
+## [0.28.1] - 2021-06-28
+
+### Added
+ - `Typeface.MakeFreeTypeFaceFromData` as a more convenient way to create a Typeface from the bytes
+   of a .ttf, .woff, or .woff2 file.
+ - `Typeface.getGlyphIDs` - provides the same functionality as `Font.getGlyphIDs`.
+
+### Changed
+ - ICU has been updated from v65 to v69.
+ - Freetype has been updated from f9350be to ff40776.
+
+### Fixed
+ - We should no longer have to decode the same font multiple times (skbug.com/12112)
+ - `Font.getGlyphIDs` had the wrong type for the third argument. It is now correctly a Uint16Array.
+
+### Deprecated
+ - `FontMgr.MakeTypefaceFromData` will be removed in favor of `Typeface.MakeFreeTypeFaceFromData`
+ - `FontMgr.RefDefault` will be removed in an upcoming version. It's only real use was
+   for `FontMgr.MakeTypefaceFromData`.
+
+## [0.28.0] - 2021-06-17
+
+### Added
+ - `Surface.makeImageFromTexture` and `Surface.makeImageFromTextureSource` as easy ways to provide
+   CanvasKit with a WebGL texture and interact with WebGL texture sources (e.g. &lt;video&gt;)
+
+### Changed
+ - We now build/ship with emscripten 2.0.20.
+
+### Breaking
+ - `Path.toCmds()` returns a flattened Float32Array instead of a 2D Array.
+ - `Canvaskit.Path.MakeFromCmds` no longer accepts a 2D Array. Inputs must be flattened,
+   but can be an array, a TypedArray, or a MallocObj.
+ - `CanvasKit.*Builder` have all been removed. Clients should use Malloc instead.
+
+### Removed
+ - `CanvasKit.Shader.MakeLerp`, the same effect can be easily generated with `RuntimeEffect`
+
+### Known Bugs
+ - On legacy (non-ANGLE) SwiftShader, certain paths that require tessellation may not be drawn
+   correctly when using a WebGL-backed surface. (skbug.com/11965)
+
+## [0.27.0] - 2021-05-20
+
+### Added
+ - `Font.getGlyphIntercepts()`
+ 
+### Fixed
+ - Bug with images using certain exif metadata. (skbug.com/11968)
+
+### Removed
+ - `Canvas.flush`, which had been previously deprecated. `Surface.flush` is the preferred method.
+ - `AnimatedImage.getCurrentFrame`, which had been previously deprecated.
+   `AnimatedImage.makeImageAtCurrentFrame` is the replacement, which behaves exactly the same.
+
+## [0.26.0] - 2021-04-23
+
+### Added
+ - Add 'isEmbolden, setEmbolden' to 'Font'
+ - Add 'drawGlyphs' to 'Canvas'
+ - Add `drawPatch` to `Canvas`.
+ - Add `Strut` as a `RectHeightStyle` enum.
+ - `CanvasKit.RuntimeEffect` now supports integer uniforms in the SkSL. These are still passed
+   to `RuntimeEffect.makeShader` as floats (like all other uniforms), and will be converted to
+   integers internally, to match the expectations of the shader.
+ - Add 'halfLeading' to `TextStyle` and `StrutStyle`.
+ - `ParagraphStyle` now accepts textHeightBehavior.
+
+### Removed
+ - `Picture.saveAsFile()`, in favor of `Picture.serialize()` where clients can control how to
+    store/encode the bytes.
+
+## [0.25.1] - 2021-03-30
+
+### Added
+ - Skottie accessors for dynamic text properties (text string, font size).
+ - Optional sampling parameter to drawAtlas (paint filter-quality is ignored/deprecated)
+
+### Fixed
+ - Fonts should not be leaked https://bugs.chromium.org/p/skia/issues/detail?id=11778
+
+## [0.25.0] - 2021-03-02
+
 ### Added
  - A full build of CanvasKit is now in /bin/full.
  - `CanvasKit.rt_effect` to test if the RuntimeEffect code was compiled in.

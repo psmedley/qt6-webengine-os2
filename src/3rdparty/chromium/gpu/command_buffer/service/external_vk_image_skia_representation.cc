@@ -62,7 +62,7 @@ sk_sp<SkSurface> ExternalVkImageSkiaRepresentation::BeginWriteAccess(
     SkColorType sk_color_type = viz::ResourceFormatToClosestSkColorType(
         true /* gpu_compositing */, format());
     surface = SkSurface::MakeFromBackendTexture(
-        gr_context, promise_texture->backendTexture(), kTopLeft_GrSurfaceOrigin,
+        gr_context, promise_texture->backendTexture(), surface_origin(),
         final_msaa_count, sk_color_type,
         backing_impl()->color_space().ToSkColorSpace(), &surface_props);
     if (!surface) {
@@ -201,7 +201,8 @@ sk_sp<SkPromiseImageTexture> ExternalVkImageSkiaRepresentation::BeginAccess(
     // Create an |end_access_semaphore_| which will be signalled by the caller.
     end_access_semaphore_ =
         backing_impl()->external_semaphore_pool()->GetOrCreateSemaphore();
-    DCHECK(end_access_semaphore_);
+    if (!end_access_semaphore_)
+      return nullptr;
     end_semaphores->emplace_back();
     end_semaphores->back().initVulkan(end_access_semaphore_.GetVkSemaphore());
   }

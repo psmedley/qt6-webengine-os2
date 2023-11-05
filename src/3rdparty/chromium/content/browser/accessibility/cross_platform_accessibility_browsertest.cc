@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
@@ -149,6 +150,26 @@ class CrossPlatformAccessibilityBrowserTest : public ContentBrowserTest {
     for (unsigned int i = 0; i < node.PlatformChildCount(); ++i) {
       BrowserAccessibility* result =
           FindNodeInSubtree(*node.PlatformGetChild(i), name_or_value);
+      if (result)
+        return result;
+    }
+
+    return nullptr;
+  }
+
+  BrowserAccessibility* FindFirstNodeWithRole(ax::mojom::Role role_value) {
+    return FindFirstNodeWithRoleInSubtree(*GetManager()->GetRoot(), role_value);
+  }
+
+  BrowserAccessibility* FindFirstNodeWithRoleInSubtree(
+      BrowserAccessibility& node,
+      ax::mojom::Role role_value) {
+    if (node.GetRole() == role_value)
+      return &node;
+
+    for (unsigned int i = 0; i < node.PlatformChildCount(); ++i) {
+      BrowserAccessibility* result =
+          FindFirstNodeWithRoleInSubtree(*node.PlatformGetChild(i), role_value);
       if (result)
         return result;
     }
@@ -667,6 +688,61 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
 }
 #endif  // !defined(OS_ANDROID)
 
+// Select controls behave differently on Mac/Android, this test doesn't apply.
+#if !defined(OS_ANDROID) && !defined(OS_MAC)
+IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
+                       SelectSizeChangeWithOpenedPopupDoesNotCrash) {
+  LoadInitialAccessibilityTreeFromHtml(R"HTML(
+      <!DOCTYPE html>
+      <html>
+      <body>
+        <select aria-label="Select" id="select_node">
+          <option>Option 1</option>
+          <option>Option 2</option>
+          <option>Option 3</option>
+        </select>
+      </body>
+      </html>)HTML");
+
+  WaitForAccessibilityTreeToContainNodeWithName(shell()->web_contents(),
+                                                "Select");
+
+  const BrowserAccessibility* root = GetManager()->GetRoot();
+  ASSERT_NE(root, nullptr);
+  const BrowserAccessibility* body = root->PlatformGetChild(0);
+  ASSERT_NE(body, nullptr);
+
+  for (size_t attempts = 0; attempts < 10; ++attempts) {
+    BrowserAccessibility* select = FindNode("Select");
+    ASSERT_NE(select, nullptr);
+    // If there is a popup, expand it and wait for it to appear.
+    // If it's a list, it will simply click on the list.
+    {
+      AccessibilityNotificationWaiter waiter(
+          shell()->web_contents(), ui::kAXModeComplete,
+          ax::mojom::Event::kChildrenChanged);
+
+      ui::AXActionData action_data;
+      action_data.action = ax::mojom::Action::kDoDefault;
+      select->AccessibilityPerformAction(action_data);
+      waiter.WaitForNotification();
+    }
+
+    // Toggle whether 'size' is '2' or not present (effectively size=1),
+    // There can't be a popup when the size to 2, because it becomes a list box.
+    // This means the accessible object for the listbox needs to be cleanly
+    // removed, and the widget's accessible hierarchy is rebuilt.
+    ExecuteScript(
+        "var select = document.getElementById('select_node');"
+        "if (select.hasAttribute('size')) {"
+        "  select.removeAttribute('size');"
+        "} else {"
+        "  select.setAttribute('size', '2');"
+        "}");
+  }
+}
+#endif  // !defined(OS_ANDROID) && !defined(OS_MAC)
+
 IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
                        PlatformIterator) {
   LoadInitialAccessibilityTreeFromHtml(R"HTML(
@@ -748,7 +824,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest, WritableElement) {
       <!DOCTYPE html>
       <html>
       <body>
-        <div role="textbox" tabindex="0">
+        <div role="textbox" contenteditable tabindex="0">
           Some text
         </div>
       </body>
@@ -819,27 +895,29 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
         <main aria-label="main"></main>
         <nav aria-label="nav"></nav>
         <section></section>
-        <section aria-label="section"></section>
+        <section aria-label="a label"></section>
         <div role="banner" aria-label="banner"></div>
         <div role="complementary" aria-label="complementary"></div>
         <div role="contentinfo" aria-label="contentinfo"></div>
         <div role="form" aria-label="role_form"></div>
         <div role="main" aria-label="role_main"></div>
         <div role="navigation" aria-label="role_nav"></div>
-        <div role="region"></div>
+        <div role="region"></div> <!-- No name: will be ignored -->
         <div role="region" aria-label="region"></div>
+        <section></section>
+        <section aria-label="a label"></section>
         <div role="search" aria-label="search"></div>
       </body>
       </html>)HTML");
 
   BrowserAccessibility* root = GetManager()->GetRoot();
   ASSERT_NE(nullptr, root);
-  ASSERT_EQ(17u, root->PlatformChildCount());
+  ASSERT_EQ(18u, root->PlatformChildCount());
 
   auto TestLocalizedLandmarkType =
       [root](int child_index, ax::mojom::Role expected_role,
              const std::string& expected_name,
-             const base::string16& expected_localized_landmark_type = {}) {
+             const std::u16string& expected_localized_landmark_type = {}) {
         BrowserAccessibility* node = root->PlatformGetChild(child_index);
         ASSERT_NE(nullptr, node);
 
@@ -851,32 +929,29 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       };
 
   // For testing purposes, assume we get en-US localized strings.
-  TestLocalizedLandmarkType(0, ax::mojom::Role::kHeader, "header",
-                            base::ASCIIToUTF16("banner"));
+  TestLocalizedLandmarkType(0, ax::mojom::Role::kHeader, "header", u"banner");
   TestLocalizedLandmarkType(1, ax::mojom::Role::kComplementary, "aside",
-                            base::ASCIIToUTF16("complementary"));
+                            u"complementary");
   TestLocalizedLandmarkType(2, ax::mojom::Role::kFooter, "footer",
-                            base::ASCIIToUTF16("content information"));
+                            u"content information");
   TestLocalizedLandmarkType(3, ax::mojom::Role::kForm, "form");
   TestLocalizedLandmarkType(4, ax::mojom::Role::kMain, "main");
   TestLocalizedLandmarkType(5, ax::mojom::Role::kNavigation, "nav");
   TestLocalizedLandmarkType(6, ax::mojom::Role::kSection, "");
-  TestLocalizedLandmarkType(7, ax::mojom::Role::kSection, "section",
-                            base::ASCIIToUTF16("region"));
+  TestLocalizedLandmarkType(7, ax::mojom::Role::kRegion, "a label", u"region");
 
-  TestLocalizedLandmarkType(8, ax::mojom::Role::kBanner, "banner",
-                            base::ASCIIToUTF16("banner"));
+  TestLocalizedLandmarkType(8, ax::mojom::Role::kBanner, "banner", u"banner");
   TestLocalizedLandmarkType(9, ax::mojom::Role::kComplementary, "complementary",
-                            base::ASCIIToUTF16("complementary"));
+                            u"complementary");
   TestLocalizedLandmarkType(10, ax::mojom::Role::kContentInfo, "contentinfo",
-                            base::ASCIIToUTF16("content information"));
+                            u"content information");
   TestLocalizedLandmarkType(11, ax::mojom::Role::kForm, "role_form");
   TestLocalizedLandmarkType(12, ax::mojom::Role::kMain, "role_main");
   TestLocalizedLandmarkType(13, ax::mojom::Role::kNavigation, "role_nav");
-  TestLocalizedLandmarkType(14, ax::mojom::Role::kRegion, "");
-  TestLocalizedLandmarkType(15, ax::mojom::Role::kRegion, "region",
-                            base::ASCIIToUTF16("region"));
-  TestLocalizedLandmarkType(16, ax::mojom::Role::kSearch, "search");
+  TestLocalizedLandmarkType(14, ax::mojom::Role::kRegion, "region", u"region");
+  TestLocalizedLandmarkType(15, ax::mojom::Role::kSection, "", u"");
+  TestLocalizedLandmarkType(16, ax::mojom::Role::kRegion, "a label", u"region");
+  TestLocalizedLandmarkType(17, ax::mojom::Role::kSearch, "search");
 }
 
 // TODO(https://crbug.com/1020456) re-enable when crashing on linux is resolved.
@@ -909,8 +984,6 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
         <mark></mark>
         <meter></meter>
         <output></output>
-        <section></section>
-        <section aria-label="section"></section>
         <time></time>
         <div role="contentinfo" aria-label="contentinfo"></div>
       </body>
@@ -918,11 +991,11 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
 
   BrowserAccessibility* root = GetManager()->GetRoot();
   ASSERT_NE(nullptr, root);
-  ASSERT_EQ(22u, root->PlatformChildCount());
+  ASSERT_EQ(20u, root->PlatformChildCount());
 
   auto TestLocalizedRoleDescription =
       [root](int child_index,
-             const base::string16& expected_localized_role_description = {}) {
+             const std::u16string& expected_localized_role_description = {}) {
         BrowserAccessibility* node = root->PlatformGetChild(child_index);
         ASSERT_NE(nullptr, node);
 
@@ -931,29 +1004,26 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       };
 
   // For testing purposes, assume we get en-US localized strings.
-  TestLocalizedRoleDescription(0, base::ASCIIToUTF16("article"));
-  TestLocalizedRoleDescription(1, base::ASCIIToUTF16("audio"));
-  TestLocalizedRoleDescription(2, base::ASCIIToUTF16("details"));
-  TestLocalizedRoleDescription(3, base::ASCIIToUTF16("figure"));
-  TestLocalizedRoleDescription(4, base::ASCIIToUTF16("footer"));
-  TestLocalizedRoleDescription(5, base::ASCIIToUTF16("header"));
-  TestLocalizedRoleDescription(6, base::ASCIIToUTF16(""));
-  TestLocalizedRoleDescription(7, base::ASCIIToUTF16("color picker"));
-  TestLocalizedRoleDescription(8, base::ASCIIToUTF16("date picker"));
-  TestLocalizedRoleDescription(
-      9, base::ASCIIToUTF16("local date and time picker"));
-  TestLocalizedRoleDescription(10, base::ASCIIToUTF16("email"));
-  TestLocalizedRoleDescription(11, base::ASCIIToUTF16("month picker"));
-  TestLocalizedRoleDescription(12, base::ASCIIToUTF16("telephone"));
-  TestLocalizedRoleDescription(13, base::ASCIIToUTF16("url"));
-  TestLocalizedRoleDescription(14, base::ASCIIToUTF16("week picker"));
-  TestLocalizedRoleDescription(15, base::ASCIIToUTF16("highlight"));
-  TestLocalizedRoleDescription(16, base::ASCIIToUTF16("meter"));
-  TestLocalizedRoleDescription(17, base::ASCIIToUTF16("output"));
-  TestLocalizedRoleDescription(18, base::ASCIIToUTF16(""));
-  TestLocalizedRoleDescription(19, base::ASCIIToUTF16("section"));
-  TestLocalizedRoleDescription(20, base::ASCIIToUTF16("time"));
-  TestLocalizedRoleDescription(21, base::ASCIIToUTF16("content information"));
+  TestLocalizedRoleDescription(0, u"article");
+  TestLocalizedRoleDescription(1, u"audio");
+  TestLocalizedRoleDescription(2, u"details");
+  TestLocalizedRoleDescription(3, u"figure");
+  TestLocalizedRoleDescription(4, u"footer");
+  TestLocalizedRoleDescription(5, u"header");
+  TestLocalizedRoleDescription(6, u"");
+  TestLocalizedRoleDescription(7, u"color picker");
+  TestLocalizedRoleDescription(8, u"date picker");
+  TestLocalizedRoleDescription(9, u"local date and time picker");
+  TestLocalizedRoleDescription(10, u"email");
+  TestLocalizedRoleDescription(11, u"month picker");
+  TestLocalizedRoleDescription(12, u"telephone");
+  TestLocalizedRoleDescription(13, u"url");
+  TestLocalizedRoleDescription(14, u"week picker");
+  TestLocalizedRoleDescription(15, u"highlight");
+  TestLocalizedRoleDescription(16, u"meter");
+  TestLocalizedRoleDescription(17, u"output");
+  TestLocalizedRoleDescription(18, u"time");
+  TestLocalizedRoleDescription(19, u"content information");
 }
 
 IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
@@ -972,7 +1042,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
 
   auto TestGetStyleNameAttributeAsLocalizedString =
       [](BrowserAccessibility* node, ax::mojom::Role expected_role,
-         const base::string16& expected_localized_style_name_attribute = {}) {
+         const std::u16string& expected_localized_style_name_attribute = {}) {
         ASSERT_NE(nullptr, node);
 
         EXPECT_EQ(expected_role, node->GetRole());
@@ -993,15 +1063,14 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
 
   BrowserAccessibility* mark_node = para_node->PlatformGetChild(1);
   TestGetStyleNameAttributeAsLocalizedString(mark_node, ax::mojom::Role::kMark,
-                                             base::ASCIIToUTF16("highlight"));
+                                             u"highlight");
 
   // Android doesn't always have a child in this case.
   if (mark_node->PlatformChildCount() > 0u) {
     BrowserAccessibility* mark_text_node = mark_node->PlatformGetChild(0);
     ASSERT_EQ(0u, mark_text_node->PlatformChildCount());
-    TestGetStyleNameAttributeAsLocalizedString(mark_text_node,
-                                               ax::mojom::Role::kStaticText,
-                                               base::ASCIIToUTF16("highlight"));
+    TestGetStyleNameAttributeAsLocalizedString(
+        mark_text_node, ax::mojom::Role::kStaticText, u"highlight");
   }
 }
 
@@ -1744,5 +1813,284 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
     PressTabAndWaitForFocusChange();
   }
 }
+
+IN_PROC_BROWSER_TEST_F(
+    CrossPlatformAccessibilityBrowserTest,
+    SingleSelectionContainerSelectionFollowsFocusWithoutActiveDescendant) {
+  LoadInitialAccessibilityTreeFromHtml(R"HTML(
+      <!DOCTYPE html>
+      <body>
+        <input role="combobox" type="search" aria-expanded="true"
+               aria-haspopup="true" aria-autocomplete="list" aria-owns="list">
+        <ul id="list" role="listbox">
+        <li id="option1" role="option" tabindex="-1">Apple</li>
+        <li id="option2" role="option" tabindex="-1">Orange</li>
+        </ul>
+      </body></html>)HTML");
+
+  BrowserAccessibilityManager* browser_accessibility_manager = GetManager();
+  BrowserAccessibility* root_browser_accessibility =
+      browser_accessibility_manager->GetRoot();
+  ASSERT_NE(root_browser_accessibility, nullptr);
+
+  BrowserAccessibility* input_browser_accessibility =
+      FindFirstNodeWithRole(ax::mojom::Role::kTextFieldWithComboBox);
+  ASSERT_NE(input_browser_accessibility, nullptr);
+  BrowserAccessibility* list_box_browser_accessibility =
+      FindFirstNodeWithRole(ax::mojom::Role::kListBox);
+  ASSERT_NE(list_box_browser_accessibility, nullptr);
+  BrowserAccessibility* list_option_1_browser_accessibility =
+      list_box_browser_accessibility->PlatformGetChild(0);
+  ASSERT_NE(list_option_1_browser_accessibility, nullptr);
+  BrowserAccessibility* list_option_2_browser_accessibility =
+      list_box_browser_accessibility->PlatformGetChild(1);
+  ASSERT_NE(list_option_2_browser_accessibility, nullptr);
+
+  {
+    AccessibilityNotificationWaiter waiter(
+        shell()->web_contents(), ui::kAXModeComplete,
+        ui::AXEventGenerator::Event::SELECTED_CHANGED);
+    ui::AXActionData action_data;
+    action_data.action = ax::mojom::Action::kFocus;
+    action_data.target_node_id = list_option_1_browser_accessibility->GetId();
+    list_option_1_browser_accessibility->AccessibilityPerformAction(
+        action_data);
+    waiter.WaitForNotification();
+  }
+
+  EXPECT_TRUE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_TRUE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+
+  {
+    AccessibilityNotificationWaiter waiter(
+        shell()->web_contents(), ui::kAXModeComplete,
+        ui::AXEventGenerator::Event::SELECTED_CHANGED);
+    ui::AXActionData action_data;
+    action_data.action = ax::mojom::Action::kFocus;
+    action_data.target_node_id = list_option_2_browser_accessibility->GetId();
+    list_option_2_browser_accessibility->AccessibilityPerformAction(
+        action_data);
+    waiter.WaitForNotification();
+  }
+
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+  EXPECT_TRUE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_TRUE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+}
+
+IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
+                       SingleSelectionContainerFocusSelectsActiveDescendant) {
+  LoadInitialAccessibilityTreeFromHtml(R"HTML(
+      <!DOCTYPE html>
+      <body>
+        <input role="combobox" type="search" aria-expanded="true"
+               aria-haspopup="true" aria-autocomplete="list"
+               aria-activedescendant="option1" aria-owns="list">
+        <ul id="list" role="listbox">
+        <li id="option1" role="option">Apple</li>
+        <li id="option2" role="option">Orange</li>
+        </ul>
+        <button></button>
+      </body></html>)HTML");
+
+  BrowserAccessibilityManager* browser_accessibility_manager = GetManager();
+  BrowserAccessibility* root_browser_accessibility =
+      browser_accessibility_manager->GetRoot();
+  ASSERT_NE(root_browser_accessibility, nullptr);
+
+  BrowserAccessibility* input_browser_accessibility =
+      FindFirstNodeWithRole(ax::mojom::Role::kTextFieldWithComboBox);
+  ASSERT_NE(input_browser_accessibility, nullptr);
+  BrowserAccessibility* list_box_browser_accessibility =
+      FindFirstNodeWithRole(ax::mojom::Role::kListBox);
+  ASSERT_NE(list_box_browser_accessibility, nullptr);
+  BrowserAccessibility* list_option_1_browser_accessibility =
+      list_box_browser_accessibility->PlatformGetChild(0);
+  ASSERT_NE(list_option_1_browser_accessibility, nullptr);
+  BrowserAccessibility* list_option_2_browser_accessibility =
+      list_box_browser_accessibility->PlatformGetChild(1);
+  ASSERT_NE(list_option_2_browser_accessibility, nullptr);
+  BrowserAccessibility* button_browser_accessibility =
+      FindFirstNodeWithRole(ax::mojom::Role::kButton);
+  ASSERT_NE(button_browser_accessibility, nullptr);
+
+  {
+    AccessibilityNotificationWaiter waiter(
+        shell()->web_contents(), ui::kAXModeComplete,
+        ui::AXEventGenerator::Event::SELECTED_CHANGED);
+    ui::AXActionData action_data;
+    action_data.action = ax::mojom::Action::kFocus;
+    action_data.target_node_id = input_browser_accessibility->GetId();
+    input_browser_accessibility->AccessibilityPerformAction(action_data);
+    waiter.WaitForNotification();
+  }
+
+  ui::AXNodeID active_descendant_id = ui::kInvalidAXNodeID;
+  EXPECT_TRUE(input_browser_accessibility->GetIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId, &active_descendant_id));
+  EXPECT_EQ(active_descendant_id, list_option_1_browser_accessibility->GetId());
+  EXPECT_TRUE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_TRUE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+
+  {
+    AccessibilityNotificationWaiter waiter(
+        shell()->web_contents(), ui::kAXModeComplete,
+        ui::AXEventGenerator::Event::SELECTED_CHANGED);
+    ui::AXActionData action_data;
+    action_data.action = ax::mojom::Action::kFocus;
+    action_data.target_node_id = button_browser_accessibility->GetId();
+    button_browser_accessibility->AccessibilityPerformAction(action_data);
+    waiter.WaitForNotification();
+  }
+
+  active_descendant_id = ui::kInvalidAXNodeID;
+  EXPECT_TRUE(input_browser_accessibility->GetIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId, &active_descendant_id));
+  EXPECT_EQ(active_descendant_id, list_option_1_browser_accessibility->GetId());
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    CrossPlatformAccessibilityBrowserTest,
+    SingleSelectionContainerSelectionFollowsFocusNotSupported) {
+  LoadInitialAccessibilityTreeFromHtml(R"HTML(
+      <!DOCTYPE html>
+      <body>
+        <input role="combobox" type="search" aria-expanded="true"
+               aria-haspopup="true" aria-autocomplete="list"
+               aria-activedescendant="option1" aria-owns="list">
+        <ul id="list" role="listbox">
+        <li id="option1" role="row" tabindex="-1">Apple</li>
+        <li id="option2" role="row" tabindex="-1">Orange</li>
+        </ul>
+      </body></html>)HTML");
+
+  BrowserAccessibilityManager* browser_accessibility_manager = GetManager();
+  BrowserAccessibility* root_browser_accessibility =
+      browser_accessibility_manager->GetRoot();
+  ASSERT_NE(root_browser_accessibility, nullptr);
+
+  BrowserAccessibility* input_browser_accessibility =
+      FindFirstNodeWithRole(ax::mojom::Role::kTextFieldWithComboBox);
+  ASSERT_NE(input_browser_accessibility, nullptr);
+  BrowserAccessibility* list_box_browser_accessibility =
+      FindFirstNodeWithRole(ax::mojom::Role::kListBox);
+  ASSERT_NE(list_box_browser_accessibility, nullptr);
+  BrowserAccessibility* list_option_1_browser_accessibility =
+      list_box_browser_accessibility->PlatformGetChild(0);
+  ASSERT_NE(list_option_1_browser_accessibility, nullptr);
+  BrowserAccessibility* list_option_2_browser_accessibility =
+      list_box_browser_accessibility->PlatformGetChild(1);
+  ASSERT_NE(list_option_2_browser_accessibility, nullptr);
+
+  {
+    AccessibilityNotificationWaiter waiter(
+        shell()->web_contents(), ui::kAXModeComplete, ax::mojom::Event::kFocus);
+    ui::AXActionData action_data;
+    action_data.action = ax::mojom::Action::kFocus;
+    action_data.target_node_id = list_option_1_browser_accessibility->GetId();
+    list_option_1_browser_accessibility->AccessibilityPerformAction(
+        action_data);
+    waiter.WaitForNotification();
+  }
+
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+
+  {
+    AccessibilityNotificationWaiter waiter(
+        shell()->web_contents(), ui::kAXModeComplete, ax::mojom::Event::kFocus);
+    ui::AXActionData action_data;
+    action_data.action = ax::mojom::Action::kFocus;
+    action_data.target_node_id = list_option_2_browser_accessibility->GetId();
+    list_option_2_browser_accessibility->AccessibilityPerformAction(
+        action_data);
+    waiter.WaitForNotification();
+  }
+
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_1_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelected));
+  EXPECT_FALSE(list_option_2_browser_accessibility->GetBoolAttribute(
+      ax::mojom::BoolAttribute::kSelectedFromFocus));
+}
+
+// We do not run this test on Android because only the Java code can change the
+// size of the web contents, instead see the associated test in
+// WebContentsAccessibilityTest#testBoundingBoxUpdatesOnWindowResize().
+#if !defined(OS_ANDROID)
+IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
+                       FlexBoxBoundingBoxUpdatesOnWindowResize) {
+  // This is an edge case that was discovered on a mobile sign-in page.
+  // The size of the outer flexbox is tied to the vertical height of the
+  // window, so ensure that the bounding box of the button is correctly
+  // recomputed if the window is resized, causing the button to move up.
+  LoadInitialAccessibilityTreeFromHtml(R"HTML(
+      <div style="display: flex; min-height: 90vh;">
+        <div style="display: flex; flex-grow: 1; align-items: flex-end;">
+          <div>
+            <button style="display: inline-flex; will-change: transform;">
+              Next
+            </button>
+          </div>
+        </div>
+      </div>)HTML");
+
+  BrowserAccessibility* button =
+      FindFirstNodeWithRole(ax::mojom::Role::kButton);
+  gfx::Rect bounds0 = button->GetUnclippedRootFrameBoundsRect();
+
+  // Resize the viewport, making it half the height.
+  gfx::Rect view_bounds = shell()->web_contents()->GetViewBounds();
+  view_bounds.set_height(view_bounds.height() / 2);
+  shell()->web_contents()->Resize(view_bounds);
+
+  gfx::Rect bounds1;
+  do {
+    // Wait for any event
+    AccessibilityNotificationWaiter waiter(
+        shell()->web_contents(), ui::AXMode(), ax::mojom::Event::kNone);
+    waiter.WaitForNotification();
+    bounds1 = button->GetUnclippedRootFrameBoundsRect();
+  } while (bounds1.y() == bounds0.y());
+
+  // The top coordinate of the button should be less than half of its
+  // original top coordinate.
+  EXPECT_LT(bounds1.y(), bounds0.y() / 2);
+}
+#endif
 
 }  // namespace content

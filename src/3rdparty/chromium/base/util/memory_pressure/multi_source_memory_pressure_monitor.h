@@ -8,6 +8,7 @@
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "base/util/memory_pressure/memory_pressure_level_reporter.h"
 #include "base/util/memory_pressure/memory_pressure_voter.h"
 
 namespace util {
@@ -51,16 +52,10 @@ class MultiSourceMemoryPressureMonitor
   void SetSystemEvaluator(
       std::unique_ptr<SystemMemoryPressureEvaluator> evaluator);
 
- protected:
-  void StartMetricsTimer();
-  void StopMetricsTimer();
-
  private:
   // Delegate implementation.
   void OnMemoryPressureLevelChanged(MemoryPressureLevel level) override;
   void OnNotifyListenersRequested() override;
-
-  void RecordCurrentPressureLevel();
 
   MemoryPressureLevel current_pressure_level_;
 
@@ -70,11 +65,10 @@ class MultiSourceMemoryPressureMonitor
 
   std::unique_ptr<SystemMemoryPressureEvaluator> system_evaluator_;
 
-  // A periodic timer to record UMA metrics.
-  base::RepeatingTimer metric_timer_;
-
   // The timestamp of the last pressure change event.
   base::TimeTicks last_pressure_change_timestamp_;
+
+  MemoryPressureLevelReporter level_reporter_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

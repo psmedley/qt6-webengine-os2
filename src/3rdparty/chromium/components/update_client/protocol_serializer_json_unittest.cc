@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/optional.h"
 #include "base/test/task_environment.h"
 #include "base/values.h"
 #include "base/version.h"
@@ -21,6 +20,7 @@
 #include "components/update_client/test_activity_data_service.h"
 #include "components/update_client/updater_state.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/re2/src/re2/re2.h"
 
 using base::Value;
@@ -50,7 +50,7 @@ TEST(SerializeRequestJSON, Serialize) {
   apps.push_back(MakeProtocolApp(
       "id1", base::Version("1.0"), "brand1", "source1", "location1", "fp1",
       {{"attr1", "1"}, {"attr2", "2"}}, "c1", "ch1", "cn1", "test", {0, 1},
-      MakeProtocolUpdateCheck(true),
+      MakeProtocolUpdateCheck(true, "33.12", true),
       MakeProtocolPing("id1", metadata.get(), {})));
   apps.push_back(
       MakeProtocolApp("id2", base::Version("2.0"), std::move(events)));
@@ -69,7 +69,8 @@ TEST(SerializeRequestJSON, Serialize) {
       R"("packages":{"package":\[{"fp":"fp1"}]},)"
       R"("ping":{"ping_freshness":"{[-\w]{36}}","rd":1234},)"
       R"("release_channel":"test",)"
-      R"("updatecheck":{"updatedisabled":true},"version":"1.0"},)"
+      R"("updatecheck":{"rollback_allowed":true,"targetversionprefix":"33.12",)"
+      R"("updatedisabled":true},"version":"1.0"},)"
       R"({"appid":"id2","event":\[{"a":1,"b":"2"},{"error":0}],)"
       R"("version":"2.0"}],"arch":"\w+","dedup":"cr","dlpref":"cacheable",)"
       R"("extra":"params","hw":{"physmemory":\d+},"lang":"lang",)"

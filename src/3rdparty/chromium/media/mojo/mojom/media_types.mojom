@@ -130,6 +130,14 @@ struct EncryptionPattern {
 [Native]
 enum EncryptionScheme;
 
+// See media::EncryptionType for descriptions.
+enum EncryptionType {
+  kNone,
+  kClear,
+  kEncrypted,
+  kEncryptedWithClearLead,
+};
+
 // This defines a mojo transport format for media::VideoColorSpace.
 // See media/base/video_color_space.h for description.
 struct VideoColorSpace {
@@ -151,19 +159,21 @@ struct VideoColorSpace {
   RangeID range;
 };
 
-
 // This defines a mojo transport format for media::AudioDecoderConfig.
 // See media/base/audio_decoder_config.h for descriptions.
+// TODO(crbug.com/1232205): Support `channels_` set by SetChannelsForDiscrete().
 struct AudioDecoderConfig {
   AudioCodec codec;
-  AudioCodecProfile profile;
   SampleFormat sample_format;
   ChannelLayout channel_layout;
   int32 samples_per_second;
   array<uint8> extra_data;
+  EncryptionScheme encryption_scheme;
   mojo_base.mojom.TimeDelta seek_preroll;
   int32 codec_delay;
-  EncryptionScheme encryption_scheme;
+  AudioCodecProfile profile;
+  ChannelLayout target_output_channel_layout;
+  bool should_discard_decoder_delay;
 };
 
 // This defines a mojo transport format for media::VideoDecoderConfig.
@@ -186,6 +196,15 @@ struct VideoDecoderConfig {
 // Native struct media::SubsampleEntry;
 [Native]
 struct SubsampleEntry;
+
+// See media::CdmSessionClosedReason for descriptions.
+enum CdmSessionClosedReason {
+  kInternalError,
+  kClose,
+  kReleaseAcknowledged,
+  kHardwareContextReset,
+  kResourceEvicted,
+};
 
 // This defines a mojo transport format for media::DecryptConfig.
 // See media/base/decrypt_config.h for descriptions.
@@ -311,6 +330,8 @@ struct VideoFrameMetadata {
 
   bool power_efficient;
 
+  bool texture_origin_is_top_left;
+
   bool has_device_scale_factor;
   double device_scale_factor;
 
@@ -372,7 +393,6 @@ struct VideoFrame {
 union VideoFrameData {
   EosVideoFrameData eos_data;
   SharedBufferVideoFrameData shared_buffer_data;
-  DmabufVideoFrameData dmabuf_data;
   GpuMemoryBufferVideoFrameData gpu_memory_buffer_data;
   MailboxVideoFrameData mailbox_data;
 };
@@ -391,12 +411,6 @@ struct SharedBufferVideoFrameData {
   // of |frame_data|.
   array<int32> strides;
   array<uint32> offsets;
-};
-
-// This defines video frame data stored in dmabuf.
-struct DmabufVideoFrameData {
-  // Size depends on media::VideoFrame::NumPlanes with frame format.
-  array<handle<platform>> dmabuf_fds;
 };
 
 struct GpuMemoryBufferVideoFrameData {
@@ -445,17 +459,19 @@ struct PredictionTargets {
 };
 
 // See media/base/pipeline_status.h for descriptions.
-struct AudioDecoderInfo {
+struct AudioPipelineInfo {
   AudioDecoderType decoder_type;
   bool is_platform_decoder = false;
   bool has_decrypting_demuxer_stream = false;
+  EncryptionType encryption_type;
 };
 
 // See media/base/pipeline_status.h for descriptions.
-struct VideoDecoderInfo {
+struct VideoPipelineInfo {
   VideoDecoderType decoder_type;
   bool is_platform_decoder = false;
   bool has_decrypting_demuxer_stream = false;
+  EncryptionType encryption_type;
 };
 
 // See media/base/status.h for descriptions.
@@ -477,4 +493,26 @@ enum MediaStreamType {
   kLocalDisplayCapture = 4, // The source is a local display capture.
   kRemote = 5, // The source is a remote peer connection.
   kNone = 6, // Not a media stream.
+};
+
+// Error codes propagated by Input media streams OnError methods to indicate the
+// reason for an error.
+enum InputStreamErrorCode {
+  kUnknown = 0,
+  kSystemPermissions = 1,
+  kDeviceInUse = 2,
+};
+
+// See media/base/renderer_factory_selector.h for description.
+enum RendererType {
+  kDefault = 0,          // DefaultRendererFactory
+  kMojo = 1,             // MojoRendererFactory
+  kMediaPlayer = 2,      // MediaPlayerRendererClientFactory
+  kCourier = 3,          // CourierRendererFactory
+  kFlinging = 4,         // FlingingRendererClientFactory
+  kCast = 5,             // CastRendererClientFactory
+  kMediaFoundation = 6,  // MediaFoundationRendererClientFactory
+  kFuchsia = 7,          // FuchsiaRendererFactory
+  kRemoting = 8,         // RemotingRendererFactory for remoting::Receiver
+  kCastStreaming = 9,    // CastStreamingRendererFactory
 };

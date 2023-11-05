@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <utility>
 
 #include "base/base_switches.h"
@@ -17,7 +18,6 @@
 #include "base/location.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ptr_util.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -94,6 +94,7 @@
 #include "media/base/media.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
 #include "ui/events/types/scroll_input_type.h"
 #include "ui/gfx/geometry/angle_conversions.h"
@@ -108,12 +109,12 @@
     statements;                   \
   }
 
-using ::testing::Mock;
-using ::testing::Return;
+using media::VideoFrame;
+using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::AtLeast;
-using ::testing::_;
-using media::VideoFrame;
+using ::testing::Mock;
+using ::testing::Return;
 
 using ScrollThread = cc::InputHandler::ScrollThread;
 
@@ -263,9 +264,11 @@ class LayerTreeHostImplTest : public testing::Test,
       uint32_t frame_token,
       PresentationTimeCallbackBuffer::PendingCallbacks activated,
       const viz::FrameTimingDetails& details) override {
-    std::move(activated.main_thread_callbacks);
+    // We don't call main thread callbacks in this test.
+    activated.main_thread_callbacks.clear();
+
     host_impl_->NotifyDidPresentCompositorFrameOnImplThread(
-        frame_token, std::move(activated), details);
+        frame_token, std::move(activated.compositor_thread_callbacks), details);
   }
   void NotifyAnimationWorkletStateChange(AnimationWorkletMutationState state,
                                          ElementListType tree_type) override {}
@@ -766,9 +769,9 @@ class LayerTreeHostImplTest : public testing::Test,
     return overflow;
   }
 
-  base::Optional<SnapContainerData> GetSnapContainerData(LayerImpl* layer) {
+  absl::optional<SnapContainerData> GetSnapContainerData(LayerImpl* layer) {
     return GetScrollNode(layer) ? GetScrollNode(layer)->snap_container_data
-                                : base::nullopt;
+                                : absl::nullopt;
   }
 
   void ClearLayersAndPropertyTrees(LayerTreeImpl* layer_tree_impl) {
@@ -890,6 +893,16 @@ class CommitToPendingTreeLayerTreeHostImplTest : public LayerTreeHostImplTest {
   }
 };
 
+class OccludedSurfaceThrottlingLayerTreeHostImplTest
+    : public LayerTreeHostImplTest {
+ public:
+  void SetUp() override {
+    LayerTreeSettings settings = DefaultSettings();
+    settings.enable_compositing_based_throttling = true;
+    CreateHostImpl(settings, CreateLayerTreeFrameSink());
+  }
+};
+
 // A test fixture for new animation timelines tests.
 class LayerTreeHostImplTimelinesTest : public LayerTreeHostImplTest {
  public:
@@ -915,6 +928,7 @@ class TestInputHandlerClient : public InputHandlerClient {
   void WillShutdown() override {}
   void Animate(base::TimeTicks time) override {}
   void ReconcileElasticOverscrollAndRootScroll() override {}
+  void SetPrefersReducedMotion(bool prefers_reduced_motion) override {}
   void UpdateRootLayerStateForSynchronousInputHandler(
       const gfx::ScrollOffset& total_scroll_offset,
       const gfx::ScrollOffset& max_scroll_offset,
@@ -1677,11 +1691,9 @@ class LayerTreeHostImplTestInvokeMainThreadCallbacks
       const viz::FrameTimingDetails& details) override {
     auto main_thread_callbacks = std::move(activated.main_thread_callbacks);
     host_impl_->NotifyDidPresentCompositorFrameOnImplThread(
-        frame_token, std::move(activated), details);
-    for (LayerTreeHost::PresentationTimeCallback& callback :
-         main_thread_callbacks) {
+        frame_token, std::move(activated.compositor_thread_callbacks), details);
+    for (auto& callback : main_thread_callbacks)
       std::move(callback).Run(details.presentation_feedback);
-    }
   }
 };
 
@@ -1691,25 +1703,27 @@ TEST_F(LayerTreeHostImplTestInvokeMainThreadCallbacks,
        PresentationFeedbackCallbacksFire) {
   bool compositor_thread_callback_fired = false;
   bool main_thread_callback_fired = false;
-  gfx::PresentationFeedback feedback_seen_by_compositor_thread_callback;
+  base::TimeTicks presentation_time_seen_by_compositor_thread_callback;
   gfx::PresentationFeedback feedback_seen_by_main_thread_callback;
 
   // Register a compositor-thread callback to run when the frame for
   // |frame_token_1| gets presented.
   constexpr uint32_t frame_token_1 = 1;
   host_impl_->RegisterCompositorPresentationTimeCallback(
-      frame_token_1, base::BindLambdaForTesting(
-                         [&](const gfx::PresentationFeedback& feedback) {
-                           compositor_thread_callback_fired = true;
-                           feedback_seen_by_compositor_thread_callback =
-                               feedback;
-                         }));
+      frame_token_1,
+      base::BindLambdaForTesting([&](base::TimeTicks presentation_timestamp) {
+        DCHECK(presentation_time_seen_by_compositor_thread_callback.is_null());
+        DCHECK(!presentation_timestamp.is_null());
+        compositor_thread_callback_fired = true;
+        presentation_time_seen_by_compositor_thread_callback =
+            presentation_timestamp;
+      }));
 
   // Register a main-thread callback to run when the frame for |frame_token_2|
   // gets presented.
   constexpr uint32_t frame_token_2 = 2;
   ASSERT_GT(frame_token_2, frame_token_1);
-  host_impl_->RegisterMainThreadPresentationTimeCallback(
+  host_impl_->RegisterMainThreadPresentationTimeCallbackForTesting(
       frame_token_2, base::BindLambdaForTesting(
                          [&](const gfx::PresentationFeedback& feedback) {
                            main_thread_callback_fired = true;
@@ -1722,8 +1736,8 @@ TEST_F(LayerTreeHostImplTestInvokeMainThreadCallbacks,
   host_impl_->DidPresentCompositorFrame(frame_token_1, mock_details);
 
   EXPECT_TRUE(compositor_thread_callback_fired);
-  EXPECT_EQ(feedback_seen_by_compositor_thread_callback,
-            mock_details.presentation_feedback);
+  EXPECT_EQ(presentation_time_seen_by_compositor_thread_callback,
+            mock_details.presentation_feedback.timestamp);
 
   // Since |frame_token_2| is strictly greater than |frame_token_1|, the
   // main-thread callback must remain queued for now.
@@ -1807,6 +1821,44 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest, NonFastScrollableRegionBasic) {
                                              ui::ScrollInputType::kTouchscreen)
                                      .get());
   GetInputHandler().ScrollEnd();
+}
+
+TEST_P(ScrollUnifiedLayerTreeHostImplTest,
+       NonFastScrollRegionInNonScrollingRoot) {
+  LayerImpl* root_layer = SetupDefaultRootLayer(gfx::Size(50, 50));
+  auto AddNewLayer = [&]() {
+    LayerImpl* layer = AddLayer();
+    layer->SetBounds(gfx::Size(50, 50));
+    layer->SetHitTestable(true);
+    CopyProperties(root_layer, layer);
+    return layer;
+  };
+  LayerImpl* layers[3] = {AddNewLayer(), AddNewLayer(), AddNewLayer()};
+  DrawFrame();
+
+  auto& input_handler = GetInputHandler();
+  std::unique_ptr<ScrollState> begin_state = BeginState(
+      gfx::Point(20, 20), gfx::Vector2dF(0, 10), ui::ScrollInputType::kWheel);
+  InputHandler::ScrollStatus status;
+
+  for (LayerImpl* layer : layers) {
+    layer->SetNonFastScrollableRegion(gfx::Rect(10, 10, 20, 20));
+    status = input_handler.ScrollBegin(begin_state.get(),
+                                       ui::ScrollInputType::kWheel);
+    input_handler.ScrollEnd();
+    layer->SetNonFastScrollableRegion(Region());
+
+    if (base::FeatureList::IsEnabled(features::kScrollUnification)) {
+      EXPECT_EQ(ScrollThread::SCROLL_ON_IMPL_THREAD, status.thread);
+      EXPECT_EQ(MainThreadScrollingReason::kNotScrollingOnMain,
+                status.main_thread_scrolling_reasons);
+      EXPECT_TRUE(status.needs_main_thread_hit_test);
+    } else {
+      EXPECT_EQ(ScrollThread::SCROLL_ON_MAIN_THREAD, status.thread);
+      EXPECT_EQ(MainThreadScrollingReason::kNonFastScrollableRegion,
+                status.main_thread_scrolling_reasons);
+    }
+  }
 }
 
 TEST_P(ScrollUnifiedLayerTreeHostImplTest, NonFastScrollableRegionWithOffset) {
@@ -3203,7 +3255,7 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest, ScrollNodeWithoutScrollLayer) {
     EXPECT_FALSE(status.needs_main_thread_hit_test);
   } else {
     EXPECT_EQ(ScrollThread::SCROLL_ON_MAIN_THREAD, status.thread);
-    EXPECT_EQ(MainThreadScrollingReason::kNonFastScrollableRegion,
+    EXPECT_EQ(MainThreadScrollingReason::kNoScrollingLayer,
               status.main_thread_scrolling_reasons);
   }
 }
@@ -3422,21 +3474,87 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest,
 
 class MissingTilesLayer : public LayerImpl {
  public:
-  MissingTilesLayer(LayerTreeImpl* layer_tree_impl, int id)
-      : LayerImpl(layer_tree_impl, id), has_missing_tiles_(true) {}
-
-  void set_has_missing_tiles(bool has_missing_tiles) {
-    has_missing_tiles_ = has_missing_tiles;
+  static std::unique_ptr<MissingTilesLayer> Create(LayerTreeImpl* tree_impl,
+                                                   int id) {
+    return base::WrapUnique(new MissingTilesLayer(tree_impl, id));
   }
+  MissingTilesLayer(LayerTreeImpl* layer_tree_impl, int id)
+      : LayerImpl(layer_tree_impl, id) {}
 
   void AppendQuads(viz::CompositorRenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override {
-    append_quads_data->num_missing_tiles += has_missing_tiles_;
+    append_quads_data->num_missing_tiles += 10;
+    append_quads_data->checkerboarded_no_recording_content_area += 200;
+    append_quads_data->checkerboarded_needs_raster_content_area += 200;
+    append_quads_data->visible_layer_area += 200;
   }
-
- private:
-  bool has_missing_tiles_;
 };
+
+TEST_P(ScrollUnifiedLayerTreeHostImplTest,
+       CurrentScrollDidCheckerboardLargeArea) {
+  LayerTreeSettings settings = DefaultSettings();
+  CreateHostImpl(settings, CreateLayerTreeFrameSink());
+  host_impl_->active_tree()->PushPageScaleFromMainThread(1, 0.25f, 4);
+
+  const gfx::Size content_size(1000, 1000);
+  const gfx::Size viewport_size(500, 500);
+  SetupViewportLayersOuterScrolls(viewport_size, content_size);
+
+  LayerImpl* outer_scroll_layer = OuterViewportScrollLayer();
+  outer_scroll_layer->SetDrawsContent(true);
+  LayerImpl* inner_scroll_layer = InnerViewportScrollLayer();
+  inner_scroll_layer->SetDrawsContent(true);
+
+  // Add layer that draws content and has checkerboarded areas.
+  auto* scroll_layer = AddLayer<MissingTilesLayer>(host_impl_->active_tree());
+  CopyProperties(inner_scroll_layer, scroll_layer);
+  scroll_layer->SetBounds(gfx::Size(500, 500));
+  scroll_layer->SetDrawsContent(true);
+  scroll_layer->SetHitTestable(false);
+  host_impl_->active_tree()->SetElementIdsForTesting();
+
+  UpdateDrawProperties(host_impl_->active_tree());
+
+  DrawFrame();
+
+  // No scroll has taken place so this should be false.
+  EXPECT_FALSE(host_impl_->CurrentScrollDidCheckerboardLargeArea());
+
+  // Send scroll begin.
+  GetInputHandler().ScrollBegin(
+      BeginState(gfx::Point(250, 250), gfx::Vector2dF(),
+                 ui::ScrollInputType::kTouchscreen)
+          .get(),
+      ui::ScrollInputType::kTouchscreen);
+
+  DrawFrame();
+
+  // Even though a ScrollBegin has been processed, we still don't consider the
+  // interaction to be "actively scrolling". Expect this to be false.
+  EXPECT_FALSE(host_impl_->CurrentScrollDidCheckerboardLargeArea());
+
+  gfx::ScrollOffset scroll_delta(0, 10);
+
+  // Send scroll update.
+  GetInputHandler().ScrollUpdate(
+      UpdateState(gfx::Point(10, 10),
+                  gfx::ScrollOffsetToVector2dF(scroll_delta),
+                  ui::ScrollInputType::kWheel)
+          .get());
+
+  host_impl_->SetFullViewportDamage();
+  DrawFrame();
+
+  // Now that a scroll update has been processed and the latest
+  // CalculateRenderPasses run has computed significant visible checkerboarding,
+  // expect this flag to be true.
+  EXPECT_TRUE(host_impl_->CurrentScrollDidCheckerboardLargeArea());
+
+  GetInputHandler().ScrollEnd();
+
+  // Expect state to be reset after a scroll end.
+  EXPECT_FALSE(host_impl_->CurrentScrollDidCheckerboardLargeArea());
+}
 
 TEST_P(ScrollUnifiedLayerTreeHostImplTest, ImplPinchZoom) {
   SetupViewportLayersInnerScrolls(gfx::Size(50, 50), gfx::Size(100, 100));
@@ -4479,9 +4597,8 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest, PageScaleAnimation) {
     did_request_redraw_ = false;
     did_request_next_frame_ = false;
     host_impl_->active_tree()->SetPendingPageScaleAnimation(
-        std::unique_ptr<PendingPageScaleAnimation>(
-            new PendingPageScaleAnimation(gfx::Vector2d(), false, 2,
-                                          duration)));
+        std::make_unique<PendingPageScaleAnimation>(gfx::Vector2d(), false, 2,
+                                                    duration));
     host_impl_->ActivateSyncTree();
     EXPECT_FALSE(did_request_redraw_);
     EXPECT_TRUE(did_request_next_frame_);
@@ -4540,9 +4657,8 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest, PageScaleAnimation) {
     did_request_redraw_ = false;
     did_request_next_frame_ = false;
     host_impl_->active_tree()->SetPendingPageScaleAnimation(
-        std::unique_ptr<PendingPageScaleAnimation>(
-            new PendingPageScaleAnimation(gfx::Vector2d(25, 25), true,
-                                          min_page_scale, duration)));
+        std::make_unique<PendingPageScaleAnimation>(gfx::Vector2d(25, 25), true,
+                                                    min_page_scale, duration));
     host_impl_->ActivateSyncTree();
     EXPECT_FALSE(did_request_redraw_);
     EXPECT_TRUE(did_request_next_frame_);
@@ -4606,8 +4722,8 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest, PageScaleAnimationNoOp) {
             scroll_layer->element_id(), gfx::ScrollOffset(50, 50));
 
     host_impl_->active_tree()->SetPendingPageScaleAnimation(
-        std::unique_ptr<PendingPageScaleAnimation>(
-            new PendingPageScaleAnimation(gfx::Vector2d(), true, 1, duration)));
+        std::make_unique<PendingPageScaleAnimation>(gfx::Vector2d(), true, 1,
+                                                    duration));
     host_impl_->ActivateSyncTree();
     begin_frame_args.frame_time = start_time;
     begin_frame_args.frame_id.sequence_number++;
@@ -4673,8 +4789,8 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest,
   // Make sure TakePageScaleAnimation works properly.
 
   host_impl_->sync_tree()->SetPendingPageScaleAnimation(
-      std::unique_ptr<PendingPageScaleAnimation>(new PendingPageScaleAnimation(
-          gfx::Vector2d(), false, target_scale, duration)));
+      std::make_unique<PendingPageScaleAnimation>(gfx::Vector2d(), false,
+                                                  target_scale, duration));
   std::unique_ptr<PendingPageScaleAnimation> psa =
       host_impl_->sync_tree()->TakePendingPageScaleAnimation();
   EXPECT_EQ(target_scale, psa->scale);
@@ -4686,8 +4802,8 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest,
   did_request_redraw_ = false;
   did_request_next_frame_ = false;
   host_impl_->sync_tree()->SetPendingPageScaleAnimation(
-      std::unique_ptr<PendingPageScaleAnimation>(new PendingPageScaleAnimation(
-          gfx::Vector2d(), false, target_scale, duration)));
+      std::make_unique<PendingPageScaleAnimation>(gfx::Vector2d(), false,
+                                                  target_scale, duration));
   begin_frame_args.frame_time = halfway_through_animation;
   begin_frame_args.frame_id.sequence_number++;
   host_impl_->WillBeginImplFrame(begin_frame_args);
@@ -4786,8 +4902,8 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest,
 
   did_complete_page_scale_animation_ = false;
   host_impl_->active_tree()->SetPendingPageScaleAnimation(
-      std::unique_ptr<PendingPageScaleAnimation>(
-          new PendingPageScaleAnimation(gfx::Vector2d(), false, 2, duration)));
+      std::make_unique<PendingPageScaleAnimation>(gfx::Vector2d(), false, 2,
+                                                  duration));
   host_impl_->ActivateSyncTree();
   begin_frame_args.frame_time = start_time;
   begin_frame_args.frame_id.sequence_number++;
@@ -4847,14 +4963,8 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest,
   gfx::Point position(295, 195);
   gfx::Vector2dF offset(0, 50);
 
-// TODO(bokan): Unfortunately, Mac currently doesn't support smooth scrolling
-// wheel events. https://crbug.com/574283.
-#if defined(OS_MAC)
-  std::vector<ui::ScrollInputType> types = {ui::ScrollInputType::kScrollbar};
-#else
   std::vector<ui::ScrollInputType> types = {ui::ScrollInputType::kScrollbar,
                                             ui::ScrollInputType::kWheel};
-#endif
   for (auto type : types) {
     auto begin_state = BeginState(position, offset, type);
     begin_state->data()->set_current_native_scrolling_element(
@@ -5012,7 +5122,7 @@ class LayerTreeHostImplTestScrollbarAnimation : public LayerTreeHostImplTest {
     SetupScrollbarLayer(OuterViewportScrollLayer(), scrollbar);
 
     host_impl_->active_tree()->DidBecomeActive();
-    host_impl_->active_tree()->HandleScrollbarShowRequestsFromMain();
+    host_impl_->active_tree()->HandleScrollbarShowRequests();
     host_impl_->active_tree()->SetLocalSurfaceIdFromParent(
         viz::LocalSurfaceId(1, base::UnguessableToken::Deserialize(2u, 3u)));
 
@@ -5689,7 +5799,7 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest, ScrollbarRegistration) {
   animation_task_.Reset();
   child->set_needs_show_scrollbars(true);
   UpdateDrawProperties(host_impl_->active_tree());
-  host_impl_->active_tree()->HandleScrollbarShowRequestsFromMain();
+  host_impl_->active_tree()->HandleScrollbarShowRequests();
   EXPECT_FALSE(animation_task_.is_null());
   animation_task_.Reset();
 
@@ -10254,7 +10364,7 @@ class BlendStateCheckLayer : public LayerImpl {
     resource_id_ = resource_provider_->ImportResource(
         viz::TransferableResource::MakeSoftware(
             viz::SharedBitmap::GenerateId(), gfx::Size(1, 1), viz::RGBA_8888),
-        viz::SingleReleaseCallback::Create(base::DoNothing()));
+        base::DoNothing());
     SetBounds(gfx::Size(10, 10));
     SetDrawsContent(true);
   }
@@ -11637,7 +11747,8 @@ TEST_P(LayerTreeHostImplTestWithRenderer, ShutdownReleasesContext) {
   GetPropertyTrees(root)->effect_tree.AddCopyRequest(
       root->effect_tree_index(),
       std::make_unique<viz::CopyOutputRequest>(
-          viz::CopyOutputRequest::ResultFormat::RGBA_TEXTURE,
+          viz::CopyOutputRequest::ResultFormat::RGBA,
+          viz::CopyOutputRequest::ResultDestination::kNativeTextures,
           base::BindOnce(&Helper::OnResult, base::Unretained(&helper),
                          copy_request_run_loop.QuitClosure())));
   DrawFrame();
@@ -11986,7 +12097,7 @@ class LayerTreeHostImplWithBrowserControlsTest : public LayerTreeHostImplTest {
     settings.commit_to_active_tree = false;
     CreateHostImpl(settings, CreateLayerTreeFrameSink());
     host_impl_->active_tree()->SetBrowserControlsParams(
-        {top_controls_height_, 0, 0, 0, false, false});
+        {static_cast<float>(top_controls_height_), 0, 0, 0, false, false});
     host_impl_->active_tree()->SetCurrentBrowserControlsShownRatio(1.f, 1.f);
   }
 
@@ -13141,32 +13252,6 @@ TEST_P(ScrollUnifiedLayerTreeHostImplTest,
   node = GetEffectNode(test_layer);
   EXPECT_EQ(node->surface_contents_scale, gfx::Vector2dF(1, 1));
 }
-
-#if defined(OS_MAC)
-// Ensure Mac wheel scrolling causes instant scrolling. This test can be removed
-// once https://crbug.com/574283 is fixed.
-TEST_P(ScrollUnifiedLayerTreeHostImplTest, MacWheelIsNonAnimated) {
-  const gfx::Size content_size(1000, 1000);
-  const gfx::Size viewport_size(50, 100);
-  SetupViewportLayersOuterScrolls(viewport_size, content_size);
-  LayerImpl* scrolling_layer = OuterViewportScrollLayer();
-
-  host_impl_->set_force_smooth_wheel_scrolling_for_testing(false);
-  ASSERT_EQ(ScrollThread::SCROLL_ON_IMPL_THREAD,
-            GetInputHandler()
-                .ScrollBegin(BeginState(gfx::Point(), gfx::Vector2d(0, 50),
-                                        ui::ScrollInputType::kWheel)
-                                 .get(),
-                             ui::ScrollInputType::kWheel)
-                .thread);
-  GetInputHandler().ScrollUpdate(
-      AnimatedUpdateState(gfx::Point(), gfx::Vector2d(0, 50)).get());
-
-  // Ensure the scroll update happens immediately.
-  EXPECT_EQ(CurrentScrollOffset(scrolling_layer).y(), 50);
-  GetInputHandler().ScrollEnd();
-}
-#endif
 
 TEST_P(ScrollUnifiedLayerTreeHostImplTest, OneScrollForFirstScrollDelay) {
   LayerTreeSettings settings = DefaultSettings();
@@ -16565,13 +16650,13 @@ class TestRenderFrameMetadataObserver : public RenderFrameMetadataObserver {
     last_metadata_ = render_frame_metadata;
   }
 
-  const base::Optional<RenderFrameMetadata>& last_metadata() const {
+  const absl::optional<RenderFrameMetadata>& last_metadata() const {
     return last_metadata_;
   }
 
  private:
   bool increment_counter_;
-  base::Optional<RenderFrameMetadata> last_metadata_;
+  absl::optional<RenderFrameMetadata> last_metadata_;
 };
 
 TEST_P(ScrollUnifiedLayerTreeHostImplTest, RenderFrameMetadata) {
@@ -16941,10 +17026,10 @@ TEST_F(HitTestRegionListGeneratingLayerTreeHostImplTest, BuildHitTestData) {
                                              base::UnguessableToken::Create());
   viz::FrameSinkId frame_sink_id(2, 0);
   viz::SurfaceId child_surface_id(frame_sink_id, child_local_surface_id);
-  surface_child1->SetRange(viz::SurfaceRange(base::nullopt, child_surface_id),
-                           base::nullopt);
-  surface_child2->SetRange(viz::SurfaceRange(base::nullopt, child_surface_id),
-                           base::nullopt);
+  surface_child1->SetRange(viz::SurfaceRange(absl::nullopt, child_surface_id),
+                           absl::nullopt);
+  surface_child2->SetRange(viz::SurfaceRange(absl::nullopt, child_surface_id),
+                           absl::nullopt);
 
   CopyProperties(root, intermediate_layer);
   intermediate_layer->SetOffsetToTransformParent(gfx::Vector2dF(200, 300));
@@ -16965,7 +17050,7 @@ TEST_F(HitTestRegionListGeneratingLayerTreeHostImplTest, BuildHitTestData) {
 
   constexpr gfx::Rect kFrameRect(0, 0, 1024, 768);
 
-  base::Optional<viz::HitTestRegionList> hit_test_region_list =
+  absl::optional<viz::HitTestRegionList> hit_test_region_list =
       host_impl_->BuildHitTestData();
   // Generating HitTestRegionList should have been enabled for this test.
   ASSERT_TRUE(hit_test_region_list);
@@ -17041,13 +17126,13 @@ TEST_F(HitTestRegionListGeneratingLayerTreeHostImplTest, PointerEvents) {
                                              base::UnguessableToken::Create());
   viz::FrameSinkId frame_sink_id(2, 0);
   viz::SurfaceId child_surface_id(frame_sink_id, child_local_surface_id);
-  surface_child1->SetRange(viz::SurfaceRange(base::nullopt, child_surface_id),
-                           base::nullopt);
+  surface_child1->SetRange(viz::SurfaceRange(absl::nullopt, child_surface_id),
+                           absl::nullopt);
 
   constexpr gfx::Rect kFrameRect(0, 0, 1024, 768);
 
   UpdateDrawProperties(host_impl_->active_tree());
-  base::Optional<viz::HitTestRegionList> hit_test_region_list =
+  absl::optional<viz::HitTestRegionList> hit_test_region_list =
       host_impl_->BuildHitTestData();
   // Generating HitTestRegionList should have been enabled for this test.
   ASSERT_TRUE(hit_test_region_list);
@@ -17098,8 +17183,8 @@ TEST_F(HitTestRegionListGeneratingLayerTreeHostImplTest, ComplexPage) {
                                              base::UnguessableToken::Create());
   viz::FrameSinkId frame_sink_id(2, 0);
   viz::SurfaceId child_surface_id(frame_sink_id, child_local_surface_id);
-  surface_child->SetRange(viz::SurfaceRange(base::nullopt, child_surface_id),
-                          base::nullopt);
+  surface_child->SetRange(viz::SurfaceRange(absl::nullopt, child_surface_id),
+                          absl::nullopt);
 
   CopyProperties(root, surface_child);
 
@@ -17115,7 +17200,7 @@ TEST_F(HitTestRegionListGeneratingLayerTreeHostImplTest, ComplexPage) {
   constexpr gfx::Rect kFrameRect(0, 0, 1024, 768);
 
   UpdateDrawProperties(host_impl_->active_tree());
-  base::Optional<viz::HitTestRegionList> hit_test_region_list =
+  absl::optional<viz::HitTestRegionList> hit_test_region_list =
       host_impl_->BuildHitTestData();
   // Generating HitTestRegionList should have been enabled for this test.
   ASSERT_TRUE(hit_test_region_list);
@@ -17169,8 +17254,8 @@ TEST_F(HitTestRegionListGeneratingLayerTreeHostImplTest, InvalidFrameSinkId) {
                                              base::UnguessableToken::Create());
   viz::FrameSinkId frame_sink_id(2, 0);
   viz::SurfaceId child_surface_id(frame_sink_id, child_local_surface_id);
-  surface_child1->SetRange(viz::SurfaceRange(base::nullopt, child_surface_id),
-                           base::nullopt);
+  surface_child1->SetRange(viz::SurfaceRange(absl::nullopt, child_surface_id),
+                           absl::nullopt);
 
   auto* surface_child2 = AddLayer<SurfaceLayerImpl>(host_impl_->active_tree());
 
@@ -17181,13 +17266,13 @@ TEST_F(HitTestRegionListGeneratingLayerTreeHostImplTest, InvalidFrameSinkId) {
   surface_child2->SetHasPointerEventsNone(false);
   CopyProperties(root, surface_child2);
 
-  surface_child2->SetRange(viz::SurfaceRange(base::nullopt, viz::SurfaceId()),
-                           base::nullopt);
+  surface_child2->SetRange(viz::SurfaceRange(absl::nullopt, viz::SurfaceId()),
+                           absl::nullopt);
 
   constexpr gfx::Rect kFrameRect(0, 0, 1024, 768);
 
   UpdateDrawProperties(host_impl_->active_tree());
-  base::Optional<viz::HitTestRegionList> hit_test_region_list =
+  absl::optional<viz::HitTestRegionList> hit_test_region_list =
       host_impl_->BuildHitTestData();
   // Generating HitTestRegionList should have been enabled for this test.
   ASSERT_TRUE(hit_test_region_list);
@@ -18078,6 +18163,33 @@ TEST_F(UnifiedScrollingTest, CompositedWithSquashedLayerMutatesTransform) {
   ScrollEnd();
 }
 
+// Verifies that when a surface layer is occluded, its frame sink id will be
+// marked as qualified for throttling.
+TEST_F(OccludedSurfaceThrottlingLayerTreeHostImplTest,
+       ThrottleOccludedSurface) {
+  LayerTreeImpl* tree = host_impl_->active_tree();
+  gfx::Rect viewport_rect(0, 0, 800, 600);
+  auto* root = SetupRootLayer<LayerImpl>(tree, viewport_rect.size());
+
+  auto* occluded = AddLayer<SurfaceLayerImpl>(tree);
+  occluded->SetBounds(gfx::Size(400, 300));
+  occluded->SetDrawsContent(true);
+  viz::SurfaceId start = MakeSurfaceId(viz::FrameSinkId(1, 2), 1);
+  viz::SurfaceId end = MakeSurfaceId(viz::FrameSinkId(3, 4), 1);
+  occluded->SetRange(viz::SurfaceRange(start, end), 2u);
+  CopyProperties(root, occluded);
+
+  auto* occluder = AddLayer<SolidColorLayerImpl>(tree);
+  occluder->SetBounds(gfx::Size(400, 400));
+  occluder->SetDrawsContent(true);
+  occluder->SetContentsOpaque(true);
+  CopyProperties(root, occluder);
+
+  DrawFrame();
+  EXPECT_EQ(host_impl_->GetFrameSinksToThrottleForTesting(),
+            base::flat_set<viz::FrameSinkId>{end.frame_sink_id()});
+}
+
 TEST_F(LayerTreeHostImplTest, FrameElementIdHitTestSimple) {
   SetupDefaultRootLayer(gfx::Size(100, 100));
 
@@ -18270,7 +18382,8 @@ TEST_F(LayerTreeHostImplTest, DocumentTransitionRequestCausesDamage) {
 
   // Adding a transition effect should cause us to redraw.
   host_impl_->active_tree()->AddDocumentTransitionRequest(
-      DocumentTransitionRequest::CreateStart(base::OnceClosure()));
+      DocumentTransitionRequest::CreateStart(
+          /*document_tag=*/0, /*shared_element_count=*/0, base::OnceClosure()));
 
   // Ensure there is damage and we requested a redraw.
   host_impl_->OnDraw(draw_transform, draw_viewport, resourceless_software_draw,

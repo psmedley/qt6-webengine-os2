@@ -13,7 +13,6 @@
 
 #include "base/base_export.h"
 #include "base/callback_forward.h"
-#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -25,6 +24,7 @@ namespace debug {
 FORWARD_DECLARE_TEST(SystemMetricsTest, ParseMeminfo);
 }
 
+class FilePath;
 struct SystemMemoryInfoKB;
 
 class BASE_EXPORT SysInfo {
@@ -78,8 +78,8 @@ class BASE_EXPORT SysInfo {
   // Returns a descriptive string for the current machine model or an empty
   // string if the machine model is unknown or an error occurred.
   // e.g. "MacPro1,1" on Mac, "iPhone9,3" on iOS or "Nexus 5" on Android. Only
-  // implemented on OS X, iOS, Android and Chrome OS. This returns an empty
-  // string on other platforms.
+  // implemented on OS X, iOS, Android, Chrome OS and Windows. This returns an
+  // empty string on other platforms.
   static std::string HardwareModelName();
 
   struct HardwareInfo {
@@ -160,6 +160,7 @@ class BASE_EXPORT SysInfo {
 
   // Overrides |lsb_release| and |lsb_release_time|. Overrides cannot be nested.
   // Call ResetChromeOSVersionInfoForTest() to restore the previous values.
+  // Prefer base::test::ScopedChromeOSVersionInfo to calling this function.
   static void SetChromeOSVersionInfoForTest(const std::string& lsb_release,
                                             const Time& lsb_release_time);
 

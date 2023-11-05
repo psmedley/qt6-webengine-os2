@@ -8,9 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "third_party/blink/public/mojom/loader/resource_load_info.mojom.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/web_dialogs/web_dialogs_export.h"
@@ -46,10 +44,10 @@ class WEB_DIALOGS_EXPORT WebDialogDelegate {
   virtual ModalType GetDialogModalType() const = 0;
 
   // Returns the title of the dialog.
-  virtual base::string16 GetDialogTitle() const = 0;
+  virtual std::u16string GetDialogTitle() const = 0;
 
   // Returns the title to be read with screen readers.
-  virtual base::string16 GetAccessibleDialogTitle() const;
+  virtual std::u16string GetAccessibleDialogTitle() const;
 
   // Returns the dialog's name identifier. Used to identify this dialog for
   // state restoration.
@@ -103,13 +101,13 @@ class WEB_DIALOGS_EXPORT WebDialogDelegate {
   // closed.  If this returns true, the dialog is closed, otherwise the
   // dialog remains open. Default implementation returns true.
   virtual bool OnDialogCloseRequested();
-  // Use `OnDialogCloseRequested()` instead. This one is called too late in the
-  // closing process, so returning false here will leave you a half-broken
-  // dialog. Currently, `AddSupervisionDialog` relies on this to record
-  // histogram correctly.
-  //
-  // TODO(crbug.com/1110759): remove this function.
-  virtual bool DeprecatedOnDialogCloseRequested();
+
+  // Called when the dialog's window is certainly about to close, but teardown
+  // has not started yet. This differs from OnDialogCloseRequested in that
+  // OnDialogCloseRequested is part of the process of deciding whether to close
+  // a window, while OnDialogWillClose is called as soon as it is known for
+  // certain that the window is about to be closed.
+  virtual void OnDialogWillClose() {}
 
   // A callback to notify the delegate that the dialog is about to close due to
   // the user pressing the ESC key.
@@ -177,8 +175,6 @@ class WEB_DIALOGS_EXPORT WebDialogDelegate {
   virtual bool AcceleratorPressed(const Accelerator& accelerator);
 
   virtual void OnWebContentsFinishedLoad() {}
-  virtual void OnMainFrameResourceLoadComplete(
-      const blink::mojom::ResourceLoadInfo& resource_load_info) {}
 
   virtual void RequestMediaAccessPermission(
       content::WebContents* web_contents,

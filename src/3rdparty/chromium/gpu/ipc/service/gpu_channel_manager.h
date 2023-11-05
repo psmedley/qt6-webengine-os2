@@ -16,9 +16,10 @@
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
+#include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/activity_flags.h"
 #include "gpu/command_buffer/common/constants.h"
@@ -34,6 +35,7 @@
 #include "gpu/config/gpu_preferences.h"
 #include "gpu/ipc/common/gpu_peak_memory.h"
 #include "gpu/ipc/service/gpu_ipc_service_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_surface.h"
@@ -76,6 +78,12 @@ class ProgramCache;
 class GPU_IPC_SERVICE_EXPORT GpuChannelManager
     : public raster::GrShaderCache::Client {
  public:
+  using OnMemoryAllocatedChangeCallback =
+      base::OnceCallback<void(gpu::CommandBufferId id,
+                              uint64_t old_size,
+                              uint64_t new_size,
+                              gpu::GpuPeakMemoryAllocationSource source)>;
+
   GpuChannelManager(
       const GpuPreferences& gpu_preferences,
       GpuChannelManagerDelegate* delegate,
@@ -98,10 +106,13 @@ class GPU_IPC_SERVICE_EXPORT GpuChannelManager
   GpuChannelManagerDelegate* delegate() const { return delegate_; }
   GpuWatchdogThread* watchdog() const { return watchdog_; }
 
-  GpuChannel* EstablishChannel(int client_id,
+  GpuChannel* EstablishChannel(const base::UnguessableToken& channel_token,
+                               int client_id,
                                uint64_t client_tracing_id,
                                bool is_gpu_host,
                                bool cache_shaders_on_disk);
+
+  void SetChannelClientPid(int client_id, base::ProcessId client_pid);
 
   void PopulateShaderCache(int32_t client_id,
                            const std::string& key,
@@ -153,6 +164,8 @@ class GPU_IPC_SERVICE_EXPORT GpuChannelManager
     return &peak_memory_monitor_;
   }
 
+  GpuProcessActivityFlags* activity_flags() { return &activity_flags_; }
+
 #if defined(OS_ANDROID)
   void DidAccessGpu();
   void OnBackgroundCleanup();
@@ -160,14 +173,16 @@ class GPU_IPC_SERVICE_EXPORT GpuChannelManager
 
   void OnApplicationBackgrounded();
 
-  MailboxManager* mailbox_manager() { return mailbox_manager_.get(); }
+  MailboxManager* mailbox_manager() const { return mailbox_manager_.get(); }
 
   gl::GLShareGroup* share_group() const { return share_group_.get(); }
   void set_share_group(gl::GLShareGroup* share_group);
 
   SyncPointManager* sync_point_manager() const { return sync_point_manager_; }
 
-  SharedImageManager* shared_image_manager() { return shared_image_manager_; }
+  SharedImageManager* shared_image_manager() const {
+    return shared_image_manager_;
+  }
 
   // Retrieve GPU Resource consumption statistics for the task manager
   void GetVideoMemoryUsageStats(
@@ -198,11 +213,9 @@ class GPU_IPC_SERVICE_EXPORT GpuChannelManager
 
   void LoseAllContexts();
 
-#ifdef TOOLKIT_QT
-  const scoped_refptr<base::SingleThreadTaskRunner>& task_runner() const {
-    return task_runner_;
-  }
-#endif // TOOLKIT_QT
+  SharedContextState::ContextLostCallback GetContextLostCallback();
+  GpuChannelManager::OnMemoryAllocatedChangeCallback
+  GetOnMemoryAllocatedChangeCallback();
 
  private:
   friend class GpuChannelManagerTest;
@@ -334,8 +347,7 @@ class GPU_IPC_SERVICE_EXPORT GpuChannelManager
   // order to avoid having the GpuChannelManager keep the lost context state
   // alive until all clients have recovered, we use a ref-counted object and
   // allow the decoders to manage its lifetime.
-  base::Optional<raster::GrShaderCache> gr_shader_cache_;
-  base::Optional<raster::GrCacheController> gr_cache_controller_;
+  absl::optional<raster::GrShaderCache> gr_shader_cache_;
   scoped_refptr<SharedContextState> shared_context_state_;
 
   // With --enable-vulkan, |vulkan_context_provider_| will be set from

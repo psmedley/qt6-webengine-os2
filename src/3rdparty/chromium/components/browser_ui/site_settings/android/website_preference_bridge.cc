@@ -30,19 +30,20 @@
 #include "components/content_settings/core/browser/uma_util.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "components/embedder_support/android/browser_context/browser_context_handle.h"
-#include "components/permissions/chooser_context_base.h"
+#include "components/permissions/object_permission_context_base.h"
 #include "components/permissions/permission_decision_auto_blocker.h"
 #include "components/permissions/permission_manager.h"
 #include "components/permissions/permission_uma_util.h"
 #include "components/permissions/permission_util.h"
 #include "components/permissions/permissions_client.h"
 #include "components/user_prefs/user_prefs.h"
+#include "content/public/browser/android/browser_context_handle.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "storage/browser/quota/quota_manager.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
 #include "url/origin.h"
 #include "url/url_constants.h"
@@ -65,7 +66,7 @@ const char kHttpPortSuffix[] = ":80";
 const char kHttpsPortSuffix[] = ":443";
 
 BrowserContext* unwrap(const JavaParamRef<jobject>& jbrowser_context_handle) {
-  return browser_context::BrowserContextFromJavaHandle(jbrowser_context_handle);
+  return content::BrowserContextFromJavaHandle(jbrowser_context_handle);
 }
 
 HostContentSettingsMap* GetHostContentSettingsMap(
@@ -255,7 +256,7 @@ void SetSettingForOrigin(JNIEnv* env,
   content_settings::LogWebSiteSettingsPermissionChange(content_type, setting);
 }
 
-permissions::ChooserContextBase* GetChooserContext(
+permissions::ObjectPermissionContextBase* GetChooserContext(
     const JavaParamRef<jobject>& jbrowser_context_handle,
     ContentSettingsType type) {
   BrowserContext* browser_context = unwrap(jbrowser_context_handle);
@@ -471,26 +472,19 @@ static void JNI_WebsitePreferenceBridge_GetChosenObjects(
     const JavaParamRef<jobject>& list) {
   ContentSettingsType type =
       static_cast<ContentSettingsType>(content_settings_type);
-  permissions::ChooserContextBase* context =
+  permissions::ObjectPermissionContextBase* context =
       GetChooserContext(jbrowser_context_handle, type);
-  // The ChooserContextBase can be null if the embedder doesn't support the
-  // given ContentSettingsType.
+  // The ObjectPermissionContextBase can be null if the embedder doesn't support
+  // the given ContentSettingsType.
   if (!context)
     return;
   for (const auto& object : context->GetAllGrantedObjects()) {
     // Remove the trailing slash so that origins are matched correctly in
     // SingleWebsitePreferences.mergePermissionInfoForTopLevelOrigin.
-    std::string origin = object->requesting_origin.spec();
+    std::string origin = object->origin.spec();
     DCHECK_EQ('/', origin.back());
     origin.pop_back();
     ScopedJavaLocalRef<jstring> jorigin = ConvertUTF8ToJavaString(env, origin);
-
-    std::string embedder = object->embedding_origin.spec();
-    DCHECK_EQ('/', embedder.back());
-    embedder.pop_back();
-    ScopedJavaLocalRef<jstring> jembedder;
-    if (embedder != origin)
-      jembedder = ConvertUTF8ToJavaString(env, embedder);
 
     ScopedJavaLocalRef<jstring> jname = ConvertUTF16ToJavaString(
         env, context->GetObjectDisplayName(object->value));
@@ -505,8 +499,8 @@ static void JNI_WebsitePreferenceBridge_GetChosenObjects(
         object->source == content_settings::SETTING_SOURCE_POLICY;
 
     Java_WebsitePreferenceBridge_insertChosenObjectInfoIntoList(
-        env, list, content_settings_type, jorigin, jembedder, jname,
-        jserialized, jis_managed);
+        env, list, content_settings_type, jorigin, jname, jserialized,
+        jis_managed);
   }
 }
 
@@ -515,23 +509,16 @@ static void JNI_WebsitePreferenceBridge_RevokeObjectPermission(
     const JavaParamRef<jobject>& jbrowser_context_handle,
     jint content_settings_type,
     const JavaParamRef<jstring>& jorigin,
-    const JavaParamRef<jstring>& jembedder,
     const JavaParamRef<jstring>& jobject) {
   GURL origin(ConvertJavaStringToUTF8(env, jorigin));
   DCHECK(origin.is_valid());
-  // If embedder == origin above then a null embedder was sent to Java instead
-  // of a duplicated string.
-  GURL embedder(
-      ConvertJavaStringToUTF8(env, jembedder.is_null() ? jorigin : jembedder));
-  DCHECK(embedder.is_valid());
   std::unique_ptr<base::DictionaryValue> object = base::DictionaryValue::From(
       base::JSONReader::ReadDeprecated(ConvertJavaStringToUTF8(env, jobject)));
   DCHECK(object);
-  permissions::ChooserContextBase* context = GetChooserContext(
+  permissions::ObjectPermissionContextBase* context = GetChooserContext(
       jbrowser_context_handle,
       static_cast<ContentSettingsType>(content_settings_type));
-  context->RevokeObjectPermission(url::Origin::Create(origin),
-                                  url::Origin::Create(embedder), *object);
+  context->RevokeObjectPermission(url::Origin::Create(origin), *object);
 }
 
 namespace {
@@ -658,11 +645,11 @@ static void JNI_WebsitePreferenceBridge_ClearLocalStorageData(
   BrowserContext* browser_context = unwrap(jbrowser_context_handle);
   auto local_storage_helper =
       base::MakeRefCounted<browsing_data::LocalStorageHelper>(browser_context);
-  auto origin =
-      url::Origin::Create(GURL(ConvertJavaStringToUTF8(env, jorigin)));
-  local_storage_helper->DeleteOrigin(
-      origin, base::BindOnce(&OnLocalStorageCleared,
-                             ScopedJavaGlobalRef<jobject>(java_callback)));
+  auto storage_key = blink::StorageKey(
+      url::Origin::Create(GURL(ConvertJavaStringToUTF8(env, jorigin))));
+  local_storage_helper->DeleteStorageKey(
+      storage_key, base::BindOnce(&OnLocalStorageCleared,
+                                  ScopedJavaGlobalRef<jobject>(java_callback)));
 }
 
 static void JNI_WebsitePreferenceBridge_ClearStorageData(
@@ -689,8 +676,7 @@ static void JNI_WebsitePreferenceBridge_ClearCookieData(
   BrowserContext* browser_context = unwrap(jbrowser_context_handle);
   GURL url(ConvertJavaStringToUTF8(env, jorigin));
 
-  auto* storage_partition =
-      content::BrowserContext::GetDefaultStoragePartition(browser_context);
+  auto* storage_partition = browser_context->GetDefaultStoragePartition();
   auto* cookie_manager = storage_partition->GetCookieManagerForBrowserProcess();
   cookie_manager->GetAllCookies(
       base::BindOnce(&OnCookiesReceived, cookie_manager, url));
@@ -727,6 +713,15 @@ static jboolean JNI_WebsitePreferenceBridge_IsPermissionControlledByDSE(
   return permissions::PermissionsClient::Get()->IsPermissionControlledByDse(
       unwrap(jbrowser_context_handle),
       static_cast<ContentSettingsType>(content_settings_type),
+      url::Origin::Create(GURL(ConvertJavaStringToUTF8(env, jorigin))));
+}
+
+static jboolean JNI_WebsitePreferenceBridge_IsDSEOrigin(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jbrowser_context_handle,
+    const JavaParamRef<jstring>& jorigin) {
+  return permissions::PermissionsClient::Get()->IsDseOrigin(
+      unwrap(jbrowser_context_handle),
       url::Origin::Create(GURL(ConvertJavaStringToUTF8(env, jorigin))));
 }
 

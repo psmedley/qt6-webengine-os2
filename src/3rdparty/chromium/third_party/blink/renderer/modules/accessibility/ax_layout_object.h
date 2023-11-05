@@ -37,7 +37,6 @@
 namespace blink {
 
 class AXObjectCacheImpl;
-class Element;
 class HTMLAreaElement;
 class IntPoint;
 class Node;
@@ -47,10 +46,9 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   AXLayoutObject(LayoutObject*, AXObjectCacheImpl&);
   ~AXLayoutObject() override;
 
-  // Public, overridden from AXObject.
-  LayoutObject* GetLayoutObject() const final { return layout_object_; }
+  // AXObject overrides:
+  LayoutObject* GetLayoutObject() const final;
   ScrollableArea* GetScrollableAreaIfScrollable() const final;
-  ax::mojom::blink::Role DetermineAccessibilityRole() override;
 
   // If this is an anonymous node, returns the node of its containing layout
   // block, otherwise returns the node of this layout object.
@@ -58,7 +56,6 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
 
   // DOM and layout tree access.
   Document* GetDocument() const override;
-  Element* AnchorElement() const override;
 
  protected:
   LayoutObject* layout_object_;
@@ -71,9 +68,6 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   bool IsAXLayoutObject() const final;
 
   // Check object role or purpose.
-  bool IsEditable() const override;
-  bool IsRichlyEditable() const override;
-  bool IsLineBreakingObject() const override;
   bool IsLinked() const override;
   bool IsOffScreen() const override;
   bool IsVisited() const override;
@@ -88,17 +82,13 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
 
   // Properties of static elements.
   ax::mojom::blink::ListStyle GetListStyle() const final;
-  String GetText() const override;
   // Inline text boxes.
   AXObject* NextOnLine() const override;
   AXObject* PreviousOnLine() const override;
 
-  // Properties of interactive elements.
-  String StringValue() const override;
-
   // AX name calc.
   String TextAlternative(bool recursive,
-                         bool in_aria_labelled_by_traversal,
+                         const AXObject* aria_label_or_description_root,
                          AXObjectSet& visited,
                          ax::mojom::blink::NameFrom&,
                          AXRelatedObjectVector*,
@@ -107,11 +97,6 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   // Hit testing.
   AXObject* AccessibilityHitTest(const IntPoint&) const override;
 
-  bool CanHaveChildren() const override;
-
-  // Notifications that this object may have changed.
-  void HandleActiveDescendantChanged() override;
-  void HandleAriaExpandedChanged() override;
   // Called when autofill/autocomplete state changes on a form control.
   void HandleAutofillStateChanged(WebAXAutofillState state) override;
 
@@ -141,8 +126,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
 
   // If we can't determine a useful role from the DOM node, attempt to determine
   // a role from the layout object.
-  ax::mojom::blink::Role RoleFromLayoutObject(
-      ax::mojom::blink::Role dom_role) const override;
+  ax::mojom::blink::Role RoleFromLayoutObjectOrNode() const override;
 
  private:
   AXObject* AccessibilityImageMapHitTest(HTMLAreaElement*,

@@ -10,18 +10,17 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "gpu/vulkan/vulkan_device_queue.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace gpu {
 
 namespace {
 
-base::Optional<uint32_t> FindMemoryTypeIndex(
+absl::optional<uint32_t> FindMemoryTypeIndex(
     VkPhysicalDevice physical_device,
     const VkMemoryRequirements* requirements,
     VkMemoryPropertyFlags flags) {
@@ -36,7 +35,7 @@ base::Optional<uint32_t> FindMemoryTypeIndex(
     return i;
   }
   NOTREACHED();
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 }  // namespace
@@ -88,11 +87,12 @@ std::unique_ptr<VulkanImage> VulkanImage::CreateFromGpuMemoryBufferHandle(
     VkFormat format,
     VkImageUsageFlags usage,
     VkImageCreateFlags flags,
-    VkImageTiling image_tiling) {
+    VkImageTiling image_tiling,
+    uint32_t queue_family_index) {
   auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
   if (!image->InitializeFromGpuMemoryBufferHandle(
           device_queue, std::move(gmb_handle), size, format, usage, flags,
-          image_tiling)) {
+          image_tiling, queue_family_index)) {
     return nullptr;
   }
   return image;
@@ -108,7 +108,7 @@ std::unique_ptr<VulkanImage> VulkanImage::Create(
     VkImageTiling image_tiling,
     VkDeviceSize device_size,
     uint32_t memory_type_index,
-    base::Optional<VulkanYCbCrInfo>& ycbcr_info,
+    absl::optional<VulkanYCbCrInfo>& ycbcr_info,
     VkImageUsageFlags usage,
     VkImageCreateFlags flags) {
   auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
@@ -192,23 +192,22 @@ bool VulkanImage::Initialize(VulkanDeviceQueue* device_queue,
   flags_ = flags;
   image_tiling_ = image_tiling;
 
-  VkImageCreateInfo create_info = {
-      VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-      vk_image_create_info_next,
-      flags_,
-      VK_IMAGE_TYPE_2D,
-      format_,
-      {size.width(), size.height(), 1},
-      1,
-      1,
-      VK_SAMPLE_COUNT_1_BIT,
-      image_tiling_,
-      usage,
-      VK_SHARING_MODE_EXCLUSIVE,
-      0,
-      nullptr,
-      image_layout_,
-  };
+  VkImageCreateInfo create_info = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+      create_info.pNext = vk_image_create_info_next;
+      create_info.flags = flags_;
+      create_info.imageType = VK_IMAGE_TYPE_2D;
+      create_info.format = format_;
+      create_info.extent = {static_cast<uint32_t>(size.width()),
+                            static_cast<uint32_t>(size.height()), 1};
+      create_info.mipLevels = 1;
+      create_info.arrayLayers = 1;
+      create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+      create_info.tiling = image_tiling_;
+      create_info.usage = usage;
+      create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+      create_info.queueFamilyIndexCount = 0;
+      create_info.pQueueFamilyIndices = nullptr;
+      create_info.initialLayout = image_layout_;
   VkDevice vk_device = device_queue->GetVulkanDevice();
   VkResult result =
       vkCreateImage(vk_device, &create_info, nullptr /* pAllocator */, &image_);
@@ -302,7 +301,7 @@ bool VulkanImage::InitializeWithExternalMemory(
     void* memory_allocation_info_next) {
 #if defined(OS_FUCHSIA)
   constexpr auto kHandleType =
-      VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA;
+      VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA;
 #elif defined(OS_WIN)
   constexpr auto kHandleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 #else

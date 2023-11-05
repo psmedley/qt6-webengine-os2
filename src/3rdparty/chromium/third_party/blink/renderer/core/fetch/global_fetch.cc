@@ -52,10 +52,11 @@ class GlobalFetchImpl final : public GarbageCollected<GlobalFetchImpl<T>>,
   }
 
   explicit GlobalFetchImpl(ExecutionContext* execution_context)
-      : fetch_manager_(MakeGarbageCollected<FetchManager>(execution_context)) {}
+      : Supplement<T>(nullptr),
+        fetch_manager_(MakeGarbageCollected<FetchManager>(execution_context)) {}
 
   ScriptPromise Fetch(ScriptState* script_state,
-                      const RequestInfo& input,
+                      const V8RequestInfo* input,
                       const RequestInit* init,
                       ExceptionState& exception_state) override {
     fetch_count_ += 1;
@@ -122,7 +123,7 @@ void GlobalFetch::ScopedFetcher::Trace(Visitor* visitor) const {}
 
 ScriptPromise GlobalFetch::fetch(ScriptState* script_state,
                                  LocalDOMWindow& window,
-                                 const RequestInfo& input,
+                                 const V8RequestInfo* input,
                                  const RequestInit* init,
                                  ExceptionState& exception_state) {
   UseCounter::Count(window.GetExecutionContext(), WebFeature::kFetch);
@@ -136,7 +137,7 @@ ScriptPromise GlobalFetch::fetch(ScriptState* script_state,
 
 ScriptPromise GlobalFetch::fetch(ScriptState* script_state,
                                  WorkerGlobalScope& worker,
-                                 const RequestInfo& input,
+                                 const V8RequestInfo* input,
                                  const RequestInit* init,
                                  ExceptionState& exception_state) {
   UseCounter::Count(worker.GetExecutionContext(), WebFeature::kFetch);

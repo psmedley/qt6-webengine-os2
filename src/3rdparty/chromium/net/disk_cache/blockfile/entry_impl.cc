@@ -5,6 +5,7 @@
 #include "net/disk_cache/blockfile/entry_impl.h"
 
 #include <limits>
+#include <memory>
 
 #include "base/hash/hash.h"
 #include "base/macros.h"
@@ -404,12 +405,12 @@ int EntryImpl::WriteSparseDataImpl(int64_t offset,
   return result;
 }
 
-int EntryImpl::GetAvailableRangeImpl(int64_t offset, int len, int64_t* start) {
+RangeResult EntryImpl::GetAvailableRangeImpl(int64_t offset, int len) {
   int result = InitSparseData();
   if (net::OK != result)
-    return result;
+    return RangeResult(static_cast<net::Error>(result));
 
-  return sparse_->GetAvailableRange(offset, len, start);
+  return sparse_->GetAvailableRange(offset, len);
 }
 
 void EntryImpl::CancelSparseIOImpl() {
@@ -921,24 +922,21 @@ int EntryImpl::WriteSparseData(int64_t offset,
   return net::ERR_IO_PENDING;
 }
 
-int EntryImpl::GetAvailableRange(int64_t offset,
-                                 int len,
-                                 int64_t* start,
-                                 CompletionOnceCallback callback) {
+RangeResult EntryImpl::GetAvailableRange(int64_t offset,
+                                         int len,
+                                         RangeResultCallback callback) {
   if (!background_queue_.get())
-    return net::ERR_UNEXPECTED;
+    return RangeResult(net::ERR_UNEXPECTED);
 
-  background_queue_->GetAvailableRange(this, offset, len, start,
-                                       std::move(callback));
-  return net::ERR_IO_PENDING;
+  background_queue_->GetAvailableRange(this, offset, len, std::move(callback));
+  return RangeResult(net::ERR_IO_PENDING);
 }
 
 bool EntryImpl::CouldBeSparse() const {
   if (sparse_.get())
     return true;
 
-  std::unique_ptr<SparseControl> sparse;
-  sparse.reset(new SparseControl(const_cast<EntryImpl*>(this)));
+  auto sparse = std::make_unique<SparseControl>(const_cast<EntryImpl*>(this));
   return sparse->CouldBeSparse();
 }
 
@@ -1349,7 +1347,7 @@ bool EntryImpl::PrepareTarget(int index, int offset, int buf_len,
   }
 
   if (!user_buffers_[index].get())
-    user_buffers_[index].reset(new UserBuffer(backend_.get()));
+    user_buffers_[index] = std::make_unique<UserBuffer>(backend_.get());
 
   return PrepareBuffer(index, offset, buf_len);
 }
@@ -1435,7 +1433,7 @@ bool EntryImpl::CopyToLocalBuffer(int index) {
   DCHECK(address.is_initialized());
 
   int len = std::min(entry_.Data()->data_size[index], kMaxBlockSize);
-  user_buffers_[index].reset(new UserBuffer(backend_.get()));
+  user_buffers_[index] = std::make_unique<UserBuffer>(backend_.get());
   user_buffers_[index]->Write(len, nullptr, 0);
 
   File* file = GetBackingFile(address, index);

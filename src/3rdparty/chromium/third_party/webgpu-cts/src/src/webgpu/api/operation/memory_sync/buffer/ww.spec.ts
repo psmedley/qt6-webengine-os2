@@ -9,11 +9,8 @@ Wait on another fence, then call expectContents to verify the written buffer.
   - x= 2nd write type: {storage buffer in {compute, render, render-via-bundle}, t2b-copy, b2b-copy, writeBuffer}
   - if pass type is the same, x= {single pass, separate passes} (note: render has loose guarantees)
   - if not single pass, x= writes in {same cmdbuf, separate cmdbufs, separate submits, separate queues}
-
-TODO: Tests with more than one buffer to try to stress implementations a little bit more.
 `;
 
-import { pbool, poptions, params } from '../../../../../common/framework/params_builder.js';
 import { makeTestGroup } from '../../../../../common/framework/test_group.js';
 
 import { kAllWriteOps, BufferSyncTest } from './buffer_sync_test.js';
@@ -22,10 +19,10 @@ export const g = makeTestGroup(BufferSyncTest);
 
 g.test('same_cmdbuf')
   .desc('Test write-after-write operations in the same command buffer.')
-  .params(
-    params()
-      .combine(poptions('firstWriteOp', kAllWriteOps))
-      .combine(poptions('secondWriteOp', kAllWriteOps))
+  .paramsSubcasesOnly(u =>
+    u //
+      .combine('firstWriteOp', kAllWriteOps)
+      .combine('secondWriteOp', kAllWriteOps)
   )
   .fn(async t => {
     const { firstWriteOp, secondWriteOp } = t.params;
@@ -34,17 +31,17 @@ g.test('same_cmdbuf')
     const encoder = t.device.createCommandEncoder();
     await t.encodeWriteOp(encoder, firstWriteOp, buffer, 1);
     await t.encodeWriteOp(encoder, secondWriteOp, buffer, 2);
-    t.device.defaultQueue.submit([encoder.finish()]);
+    t.device.queue.submit([encoder.finish()]);
 
     t.verifyData(buffer, 2);
   });
 
 g.test('separate_cmdbufs')
   .desc('Test write-after-write operations in separate command buffers via the same submit.')
-  .params(
-    params()
-      .combine(poptions('firstWriteOp', kAllWriteOps))
-      .combine(poptions('secondWriteOp', kAllWriteOps))
+  .paramsSubcasesOnly(u =>
+    u //
+      .combine('firstWriteOp', kAllWriteOps)
+      .combine('secondWriteOp', kAllWriteOps)
   )
   .fn(async t => {
     const { firstWriteOp, secondWriteOp } = t.params;
@@ -53,17 +50,17 @@ g.test('separate_cmdbufs')
     const command_buffers: GPUCommandBuffer[] = [];
     command_buffers.push(await t.createCommandBufferWithWriteOp(firstWriteOp, buffer, 1));
     command_buffers.push(await t.createCommandBufferWithWriteOp(secondWriteOp, buffer, 2));
-    t.device.defaultQueue.submit(command_buffers);
+    t.device.queue.submit(command_buffers);
 
     t.verifyData(buffer, 2);
   });
 
 g.test('separate_submits')
   .desc('Test write-after-write operations via separate submits in the same queue.')
-  .params(
-    params()
-      .combine(poptions('firstWriteOp', ['write-buffer', ...kAllWriteOps] as const))
-      .combine(poptions('secondWriteOp', ['write-buffer', ...kAllWriteOps] as const))
+  .paramsSubcasesOnly(u =>
+    u //
+      .combine('firstWriteOp', ['write-buffer', ...kAllWriteOps] as const)
+      .combine('secondWriteOp', ['write-buffer', ...kAllWriteOps] as const)
   )
   .fn(async t => {
     const { firstWriteOp, secondWriteOp } = t.params;
@@ -85,7 +82,11 @@ g.test('two_draws_in_the_same_render_pass')
     a storage buffer. The second write will write 2 into the same buffer in the same pass. Expected
     data in buffer is either 1 or 2. It may use bundle in each draw.`
   )
-  .params(params().combine(pbool('firstDrawUseBundle')).combine(pbool('secondDrawUseBundle')))
+  .paramsSubcasesOnly(u =>
+    u //
+      .combine('firstDrawUseBundle', [false, true])
+      .combine('secondDrawUseBundle', [false, true])
+  )
   .fn(async t => {
     const { firstDrawUseBundle, secondDrawUseBundle } = t.params;
     const buffer = await t.createBufferWithValue(0);
@@ -109,7 +110,7 @@ g.test('two_draws_in_the_same_render_pass')
     }
 
     passEncoder.endPass();
-    t.device.defaultQueue.submit([encoder.finish()]);
+    t.device.queue.submit([encoder.finish()]);
     t.verifyDataTwoValidValues(buffer, 1, 2);
   });
 
@@ -137,7 +138,7 @@ g.test('two_draws_in_the_same_render_bundle')
 
     passEncoder.executeBundles([renderEncoder.finish()]);
     passEncoder.endPass();
-    t.device.defaultQueue.submit([encoder.finish()]);
+    t.device.queue.submit([encoder.finish()]);
     t.verifyDataTwoValidValues(buffer, 1, 2);
   });
 
@@ -161,6 +162,10 @@ g.test('two_dispatches_in_the_same_compute_pass')
     }
 
     pass.endPass();
-    t.device.defaultQueue.submit([encoder.finish()]);
+    t.device.queue.submit([encoder.finish()]);
     t.verifyData(buffer, 2);
   });
+
+g.test('multiple_buffers')
+  .desc(`Tests with more than one buffer to try to stress implementations a little bit more.`)
+  .unimplemented();

@@ -20,8 +20,6 @@ jumbo_source_set("generator") {
 }
 
 blink_platform_sources("blob") {
-  configs += [ "//build/config/compiler:noshadowing" ]
-
   sources = [
     "blob_bytes_provider.cc",
     "blob_bytes_provider.h",

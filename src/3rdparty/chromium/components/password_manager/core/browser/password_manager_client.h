@@ -17,6 +17,7 @@
 #include "components/autofill/core/common/language_code.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom.h"
 #include "components/autofill/core/common/password_generation_util.h"
+#include "components/autofill/core/common/unique_ids.h"
 #include "components/password_manager/core/browser/credentials_filter.h"
 #include "components/password_manager/core/browser/hsts_query.h"
 #include "components/password_manager/core/browser/http_auth_manager.h"
@@ -65,26 +66,31 @@ namespace safe_browsing {
 class PasswordProtectionService;
 }
 
+namespace device_reauth {
+class BiometricAuthenticator;
+}
+
 namespace password_manager {
 
 class FieldInfoManager;
 class PasswordFeatureManager;
-class BiometricAuthenticator;
 class PasswordFormManagerForUI;
 class PasswordManagerDriver;
 class PasswordManagerMetricsRecorder;
 class HttpAuthManager;
 class PasswordRequirementsService;
+class PasswordReuseManager;
 class PasswordStore;
+class PasswordStoreInterface;
 struct PasswordForm;
 
-enum SyncState {
-  NOT_SYNCING,
-  SYNCING_NORMAL_ENCRYPTION,
-  SYNCING_WITH_CUSTOM_PASSPHRASE,
+enum class SyncState {
+  kNotSyncing,
+  kSyncingNormalEncryption,
+  kSyncingWithCustomPassphrase,
   // Sync is disabled but the user is signed in and opted in to passwords
   // account storage.
-  ACCOUNT_PASSWORDS_ACTIVE_NORMAL_ENCRYPTION
+  kAccountPasswordsActiveNormalEncryption
 };
 
 // An abstraction of operations that depend on the embedders (e.g. Chrome)
@@ -156,6 +162,7 @@ class PasswordManagerClient {
   // same frame (e.g. tabbed from email to password field).
   virtual void FocusedInputChanged(
       PasswordManagerDriver* driver,
+      autofill::FieldRendererId focused_field_id,
       autofill::mojom::FocusedFieldType focused_field_type) = 0;
 
   // Informs the embedder of a password forms that the user should choose from.
@@ -167,20 +174,17 @@ class PasswordManagerClient {
       const url::Origin& origin,
       CredentialsCallback callback) = 0;
 
-  // Indicates if re-auth with the device is needed before filling passwords.
-  // Currently only used by iOS.
-  virtual bool RequiresReauthToFill();
-
   // Instructs the client to show the Touch To Fill UI.
   virtual void ShowTouchToFill(PasswordManagerDriver* driver);
 
   // Informs `PasswordReuseDetectionManager` about reused passwords selected
   // from the AllPasswordsBottomSheet.
-  virtual void OnPasswordSelected(const base::string16& text);
+  virtual void OnPasswordSelected(const std::u16string& text);
 
   // Returns a pointer to a BiometricAuthenticator. Might be null if
   // BiometricAuthentication is not available for a given platform.
-  virtual BiometricAuthenticator* GetBiometricAuthenticator();
+  virtual scoped_refptr<device_reauth::BiometricAuthenticator>
+  GetBiometricAuthenticator();
 
   // Informs the embedder that the user has requested to generate a
   // password in the focused password field.
@@ -240,11 +244,9 @@ class PasswordManagerClient {
                                 const PasswordFormManagerForUI* form_manager);
 
   // Informs the embedder that user credentials were leaked.
-  virtual void NotifyUserCredentialsWereLeaked(
-      CredentialLeakType leak_type,
-      CompromisedSitesCount saved_sites,
-      const GURL& origin,
-      const base::string16& username);
+  virtual void NotifyUserCredentialsWereLeaked(CredentialLeakType leak_type,
+                                               const GURL& origin,
+                                               const std::u16string& username);
 
   // Requests a reauth for the primary account with |access_point| representing
   // where the reauth was triggered.
@@ -267,8 +269,16 @@ class PasswordManagerClient {
   // Returns the account PasswordStore associated with this instance.
   virtual PasswordStore* GetAccountPasswordStore() const = 0;
 
+  // TODO(crbug.com/1218413): remove the follow two method once the two above
+  // methods are returning PasswordStoreInterface.
+  virtual PasswordStoreInterface* GetProfilePasswordStoreInterface() const;
+  virtual PasswordStoreInterface* GetAccountPasswordStoreInterface() const;
+
+  // Returns the PasswordReuseManager associated with this instance.
+  virtual PasswordReuseManager* GetPasswordReuseManager() const = 0;
+
   // Reports whether and how passwords are synced in the embedder. The default
-  // implementation always returns NOT_SYNCING.
+  // implementation always returns kNotSyncing.
   virtual SyncState GetPasswordSyncState() const;
 
   // Returns true if last navigation page had HTTP error i.e 5XX or 4XX

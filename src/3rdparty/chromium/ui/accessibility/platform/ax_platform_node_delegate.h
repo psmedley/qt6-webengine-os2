@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_clipping_behavior.h"
 #include "ui/accessibility/ax_coordinate_system.h"
@@ -70,14 +70,83 @@ class AX_EXPORT AXPlatformNodeDelegate {
  public:
   virtual ~AXPlatformNodeDelegate() = default;
 
-  // Get the accessibility data that should be exposed for this node.
-  // Virtually all of the information is obtained from this structure
-  // (role, state, name, cursor position, etc.) - the rest of this interface
-  // is mostly to implement support for walking the accessibility tree.
+  // Get the accessibility data that should be exposed for this node. This data
+  // is readonly and comes directly from the accessibility tree's source, e.g.
+  // Blink.
+  //
+  // Virtually all of the information could be obtained from this structure
+  // (role, state, name, cursor position, etc.) However, please prefer using
+  // specific accessor methods, such as `GetStringAttribute` or
+  // `GetTableCellRowIndex`, instead of directly accessing this structure,
+  // because any attributes that could automatically be computed in the browser
+  // process would also be returned. The browser process would try to correct
+  // missing or erroneous information too.
   virtual const AXNodeData& GetData() const = 0;
 
   // Get the accessibility tree data for this node.
   virtual const AXTreeData& GetTreeData() const = 0;
+
+  // Accessing accessibility attributes:
+  //
+  // There are dozens of possible attributes for an accessibility node,
+  // but only a few tend to apply to any one object, so we store them
+  // in sparse arrays of <attribute id, attribute value> pairs, organized
+  // by type (bool, int, float, string, int list).
+  //
+  // There are three accessors for each type of attribute: one that returns
+  // true if the attribute is present and false if not, one that takes a
+  // pointer argument and returns true if the attribute is present (if you
+  // need to distinguish between the default value and a missing attribute),
+  // and another that returns the default value for that type if the
+  // attribute is not present. In addition, strings can be returned as
+  // either std::string or std::u16string, for convenience.
+
+  virtual ax::mojom::Role GetRole() const = 0;
+  virtual bool HasBoolAttribute(ax::mojom::BoolAttribute attribute) const = 0;
+  virtual bool GetBoolAttribute(ax::mojom::BoolAttribute attribute) const = 0;
+  virtual bool GetBoolAttribute(ax::mojom::BoolAttribute attribute,
+                                bool* value) const = 0;
+  virtual bool HasFloatAttribute(ax::mojom::FloatAttribute attribute) const = 0;
+  virtual float GetFloatAttribute(
+      ax::mojom::FloatAttribute attribute) const = 0;
+  virtual bool GetFloatAttribute(ax::mojom::FloatAttribute attribute,
+                                 float* value) const = 0;
+  virtual bool HasIntAttribute(ax::mojom::IntAttribute attribute) const = 0;
+  virtual int GetIntAttribute(ax::mojom::IntAttribute attribute) const = 0;
+  virtual bool GetIntAttribute(ax::mojom::IntAttribute attribute,
+                               int* value) const = 0;
+  virtual bool HasStringAttribute(
+      ax::mojom::StringAttribute attribute) const = 0;
+  virtual const std::string& GetStringAttribute(
+      ax::mojom::StringAttribute attribute) const = 0;
+  virtual bool GetStringAttribute(ax::mojom::StringAttribute attribute,
+                                  std::string* value) const = 0;
+  virtual std::u16string GetString16Attribute(
+      ax::mojom::StringAttribute attribute) const = 0;
+  virtual bool GetString16Attribute(ax::mojom::StringAttribute attribute,
+                                    std::u16string* value) const = 0;
+  virtual const std::string& GetInheritedStringAttribute(
+      ax::mojom::StringAttribute attribute) const = 0;
+  virtual std::u16string GetInheritedString16Attribute(
+      ax::mojom::StringAttribute attribute) const = 0;
+  virtual bool HasIntListAttribute(
+      ax::mojom::IntListAttribute attribute) const = 0;
+  virtual const std::vector<int32_t>& GetIntListAttribute(
+      ax::mojom::IntListAttribute attribute) const = 0;
+  virtual bool GetIntListAttribute(ax::mojom::IntListAttribute attribute,
+                                   std::vector<int32_t>* value) const = 0;
+  virtual bool HasStringListAttribute(
+      ax::mojom::StringListAttribute attribute) const = 0;
+  virtual const std::vector<std::string>& GetStringListAttribute(
+      ax::mojom::StringListAttribute attribute) const = 0;
+  virtual bool GetStringListAttribute(
+      ax::mojom::StringListAttribute attribute,
+      std::vector<std::string>* value) const = 0;
+  virtual bool GetHtmlAttribute(const char* attribute,
+                                std::string* value) const = 0;
+  virtual bool GetHtmlAttribute(const char* attribute,
+                                std::u16string* value) const = 0;
+  virtual bool HasState(ax::mojom::State state) const = 0;
 
   // Returns the text of this node and all descendant nodes; including text
   // found in embedded objects.
@@ -85,23 +154,32 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Only text displayed on screen is included. Text from ARIA and HTML
   // attributes that is either not displayed on screen, or outside this node,
   // e.g. aria-label and HTML title, is not returned.
-  virtual base::string16 GetInnerText() const = 0;
+  virtual std::u16string GetInnerText() const = 0;
 
   // Returns the value of a control such as a text field, a slider, a <select>
   // element, a date picker or an ARIA combo box. In order to minimize
   // cross-process communication between the renderer and the browser, may
   // compute the value from the control's inner text in the case of a text
   // field.
-  virtual base::string16 GetValueForControl() const = 0;
+  virtual std::u16string GetValueForControl() const = 0;
 
   // Get the unignored selection from the tree, meaning the selection whose
   // endpoints are on unignored nodes. (An ignored node means that the node
-  // should not be exposed to platform APIs: See `IsInvisibleOrIgnored`.)
+  // should not be exposed to platform APIs: See `IsIgnored`.)
   virtual const AXTree::Selection GetUnignoredSelection() const = 0;
+
+  // Creates a text position rooted at this object if it's a leaf node, or a
+  // tree position otherwise.
+  virtual AXNodePosition::AXPositionInstance CreatePositionAt(
+      int offset,
+      ax::mojom::TextAffinity affinity =
+          ax::mojom::TextAffinity::kDownstream) const = 0;
 
   // Creates a text position rooted at this object.
   virtual AXNodePosition::AXPositionInstance CreateTextPositionAt(
-      int offset) const = 0;
+      int offset,
+      ax::mojom::TextAffinity affinity =
+          ax::mojom::TextAffinity::kDownstream) const = 0;
 
   // Get the accessibility node for the NSWindow the node is contained in. This
   // method is only meaningful on macOS.
@@ -125,7 +203,7 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // should return the number of unignored children. All ignored nodes are
   // recursively removed from the children count. (An ignored node means that
   // the node should not be exposed to platform APIs: See
-  // `IsInvisibleOrIgnored`.)
+  // `IsIgnored`.)
   virtual int GetChildCount() const = 0;
 
   // Get a child of a node given a 0-based index.
@@ -133,7 +211,7 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Note that for accessibility trees that have ignored nodes, this method
   // returns only unignored children. All ignored nodes are recursively removed.
   // (An ignored node means that the node should not be exposed to platform
-  // APIs: See `IsInvisibleOrIgnored`.)
+  // APIs: See `IsIgnored`.)
   virtual gfx::NativeViewAccessible ChildAtIndex(int index) = 0;
 
   // Returns true if it has a modal dialog.
@@ -157,9 +235,21 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // platform's accessibility layer.
   virtual bool IsChildOfLeaf() const = 0;
 
-  // Returns true if this node is either a plain text field , or one of its
-  // ancestors is.
-  virtual bool IsDescendantOfPlainTextField() const = 0;
+  // Returns true if this node is either an atomic text field , or one of its
+  // ancestors is. An atomic text field does not expose its internal
+  // implementation to assistive software, appearing as a single leaf node in
+  // the accessibility tree. It includes <input>, <textarea> and Views-based
+  // text fields.
+  virtual bool IsDescendantOfAtomicTextField() const = 0;
+
+  // Returns true if this node is ignored and should be hidden from the
+  // accessibility tree. Methods that are used to navigate the accessibility
+  // tree, such as "ChildAtIndex", "GetParent", and "GetChildCount", among
+  // others, also skip ignored nodes. This does not impact the node's
+  // descendants.
+  //
+  // Only relevant for accessibility trees that support ignored nodes.)
+  virtual bool IsIgnored() const = 0;
 
   // Returns true if this is a leaf node, meaning all its
   // children should not be exposed to any platform's native accessibility
@@ -183,8 +273,14 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // ancestor under which this object is found.
   //
   // (An ignored node means that the node should not be exposed to platform
-  // APIs: See `IsInvisibleOrIgnored`.)
+  // APIs: See `IsIgnored`.)
   virtual gfx::NativeViewAccessible GetLowestPlatformAncestor() const = 0;
+
+  // If this node is within an editable region, returns the node that is at the
+  // root of that editable region, otherwise returns nullptr. In accessibility,
+  // an editable region is synonymous to a node with the kTextField role, or a
+  // contenteditable without the role, (see `AXNodeData::IsTextField()`).
+  virtual gfx::NativeViewAccessible GetTextFieldAncestor() const = 0;
 
   class ChildIterator {
    public:
@@ -211,7 +307,7 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Returns the text of this node and represent the text of descendant nodes
   // with a special character in place of every embedded object. This represents
   // the concept of text in ATK and IA2 APIs.
-  virtual base::string16 GetHypertext() const = 0;
+  virtual std::u16string GetHypertext() const = 0;
 
   // Set the selection in the hypertext of this node. Depending on the
   // implementation, this may mean the new selection will span multiple nodes.
@@ -338,7 +434,7 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // any instance of the application, regardless of locale. The author ID should
   // be unique among sibling accessibility nodes and is best if unique across
   // the application, however, not meeting this requirement is non-fatal.
-  virtual base::string16 GetAuthorUniqueId() const = 0;
+  virtual std::u16string GetAuthorUniqueId() const = 0;
 
   virtual const AXUniqueId& GetUniqueId() const = 0;
 
@@ -351,7 +447,7 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // that the delegate does not have all the information required to calculate
   // this value and it is the responsibility of the AXPlatformNode itself to
   // to calculate it.
-  virtual base::Optional<int> FindTextBoundary(
+  virtual absl::optional<int> FindTextBoundary(
       ax::mojom::TextBoundary boundary,
       int offset,
       ax::mojom::MoveDirection direction,
@@ -378,12 +474,12 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // role, otherwise they return nullopt.
   //
   virtual bool IsTable() const = 0;
-  virtual base::Optional<int> GetTableColCount() const = 0;
-  virtual base::Optional<int> GetTableRowCount() const = 0;
-  virtual base::Optional<int> GetTableAriaColCount() const = 0;
-  virtual base::Optional<int> GetTableAriaRowCount() const = 0;
-  virtual base::Optional<int> GetTableCellCount() const = 0;
-  virtual base::Optional<bool> GetTableHasColumnOrRowHeaderNode() const = 0;
+  virtual absl::optional<int> GetTableColCount() const = 0;
+  virtual absl::optional<int> GetTableRowCount() const = 0;
+  virtual absl::optional<int> GetTableAriaColCount() const = 0;
+  virtual absl::optional<int> GetTableAriaRowCount() const = 0;
+  virtual absl::optional<int> GetTableCellCount() const = 0;
+  virtual absl::optional<bool> GetTableHasColumnOrRowHeaderNode() const = 0;
   virtual std::vector<int32_t> GetColHeaderNodeIds() const = 0;
   virtual std::vector<int32_t> GetColHeaderNodeIds(int col_index) const = 0;
   virtual std::vector<int32_t> GetRowHeaderNodeIds() const = 0;
@@ -392,20 +488,20 @@ class AX_EXPORT AXPlatformNodeDelegate {
 
   // Table row-like nodes.
   virtual bool IsTableRow() const = 0;
-  virtual base::Optional<int> GetTableRowRowIndex() const = 0;
+  virtual absl::optional<int> GetTableRowRowIndex() const = 0;
 
   // Table cell-like nodes.
   virtual bool IsTableCellOrHeader() const = 0;
-  virtual base::Optional<int> GetTableCellIndex() const = 0;
-  virtual base::Optional<int> GetTableCellColIndex() const = 0;
-  virtual base::Optional<int> GetTableCellRowIndex() const = 0;
-  virtual base::Optional<int> GetTableCellColSpan() const = 0;
-  virtual base::Optional<int> GetTableCellRowSpan() const = 0;
-  virtual base::Optional<int> GetTableCellAriaColIndex() const = 0;
-  virtual base::Optional<int> GetTableCellAriaRowIndex() const = 0;
-  virtual base::Optional<int32_t> GetCellId(int row_index,
+  virtual absl::optional<int> GetTableCellIndex() const = 0;
+  virtual absl::optional<int> GetTableCellColIndex() const = 0;
+  virtual absl::optional<int> GetTableCellRowIndex() const = 0;
+  virtual absl::optional<int> GetTableCellColSpan() const = 0;
+  virtual absl::optional<int> GetTableCellRowSpan() const = 0;
+  virtual absl::optional<int> GetTableCellAriaColIndex() const = 0;
+  virtual absl::optional<int> GetTableCellAriaRowIndex() const = 0;
+  virtual absl::optional<int32_t> GetCellId(int row_index,
                                             int col_index) const = 0;
-  virtual base::Optional<int32_t> CellIndexToId(int cell_index) const = 0;
+  virtual absl::optional<int32_t> CellIndexToId(int cell_index) const = 0;
 
   // Helper methods to check if a cell is an ARIA-1.1+ 'cell' or 'gridcell'
   virtual bool IsCellOrHeaderOfARIATable() const = 0;
@@ -414,8 +510,8 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Ordered-set-like and item-like nodes.
   virtual bool IsOrderedSetItem() const = 0;
   virtual bool IsOrderedSet() const = 0;
-  virtual base::Optional<int> GetPosInSet() const = 0;
-  virtual base::Optional<int> GetSetSize() const = 0;
+  virtual absl::optional<int> GetPosInSet() const = 0;
+  virtual absl::optional<int> GetSetSize() const = 0;
 
   // Computed colors, taking blending into account.
   virtual SkColor GetColor() const = 0;
@@ -441,13 +537,13 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Localized strings.
   //
 
-  virtual base::string16 GetLocalizedRoleDescriptionForUnlabeledImage()
+  virtual std::u16string GetLocalizedRoleDescriptionForUnlabeledImage()
       const = 0;
-  virtual base::string16 GetLocalizedStringForImageAnnotationStatus(
+  virtual std::u16string GetLocalizedStringForImageAnnotationStatus(
       ax::mojom::ImageAnnotationStatus status) const = 0;
-  virtual base::string16 GetLocalizedStringForLandmarkType() const = 0;
-  virtual base::string16 GetLocalizedStringForRoleDescription() const = 0;
-  virtual base::string16 GetStyleNameAttributeAsLocalizedString() const = 0;
+  virtual std::u16string GetLocalizedStringForLandmarkType() const = 0;
+  virtual std::u16string GetLocalizedStringForRoleDescription() const = 0;
+  virtual std::u16string GetStyleNameAttributeAsLocalizedString() const = 0;
 
   //
   // Testing.

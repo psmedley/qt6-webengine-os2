@@ -22,8 +22,10 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "ui/base/x/visual_picker_glx.h"
 #include "ui/base/x/x11_display_util.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/base/x/x11_xrandr_interval_only_vsync_provider.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/x/xproto_util.h"
@@ -31,7 +33,6 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_presentation_helper.h"
-#include "ui/gl/gl_visual_picker_glx.h"
 #include "ui/gl/glx_util.h"
 #include "ui/gl/sync_control_vsync_provider.h"
 
@@ -436,7 +437,7 @@ bool GLSurfaceGLX::InitializeOneOff() {
     return false;
   }
 
-  auto* visual_picker = gl::GLVisualPickerGLX::GetInstance();
+  auto* visual_picker = ui::VisualPickerGlx::GetInstance();
   auto visual_id = visual_picker->rgba_visual();
   if (visual_id == x11::VisualId{})
     visual_id = visual_picker->system_visual();
@@ -617,11 +618,11 @@ bool NativeViewGLSurfaceGLX::Initialize(GLSurfaceFormat format) {
 
   window_ = conn->GenerateId<x11::Window>();
   x11::CreateWindowRequest req{
-      .depth = g_depth,
+      .depth = static_cast<uint8_t>(g_depth),
       .wid = window_,
       .parent = static_cast<x11::Window>(parent_window_),
-      .width = size_.width(),
-      .height = size_.height(),
+      .width = static_cast<uint16_t>(size_.width()),
+      .height = static_cast<uint16_t>(size_.height()),
       .c_class = x11::WindowClass::InputOutput,
       .visual = g_visual,
       .background_pixmap = x11::Pixmap::None,
@@ -669,18 +670,9 @@ bool NativeViewGLSurfaceGLX::Initialize(GLSurfaceFormat format) {
     presentation_helper_ =
         std::make_unique<GLSurfacePresentationHelper>(vsync_provider_.get());
   } else {
-    // Assume a refresh rate of 59.9 Hz, which will cause us to skip
-    // 1 frame every 10 seconds on a 60Hz monitor, but will prevent us
-    // from blocking the GPU service due to back pressure. This would still
-    // encounter backpressure on a <60Hz monitor, but hopefully that is
-    // not common.
-    const base::TimeTicks kDefaultTimebase;
-    const base::TimeDelta kDefaultInterval =
-        base::TimeDelta::FromSeconds(1) / 59.9;
-    vsync_provider_ = std::make_unique<gfx::FixedVSyncProvider>(
-        kDefaultTimebase, kDefaultInterval);
+    vsync_provider_ = std::make_unique<ui::XrandrIntervalOnlyVSyncProvider>();
     presentation_helper_ = std::make_unique<GLSurfacePresentationHelper>(
-        kDefaultTimebase, kDefaultInterval);
+        base::TimeTicks(), ui::GetPrimaryDisplayRefreshIntervalFromXrandr());
   }
 
   return true;
@@ -844,11 +836,11 @@ bool UnmappedNativeViewGLSurfaceGLX::Initialize(GLSurfaceFormat format) {
   auto* conn = x11::Connection::Get();
   window_ = conn->GenerateId<x11::Window>();
   conn->CreateWindow(x11::CreateWindowRequest{
-                         .depth = g_depth,
+                         .depth = static_cast<uint8_t>(g_depth),
                          .wid = window_,
                          .parent = parent_window,
-                         .width = size_.width(),
-                         .height = size_.height(),
+                         .width = static_cast<uint16_t>(size_.width()),
+                         .height = static_cast<uint16_t>(size_.height()),
                          .c_class = x11::WindowClass::InputOutput,
                          .visual = g_visual,
                          .border_pixel = 0,

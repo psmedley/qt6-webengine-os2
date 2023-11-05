@@ -17,6 +17,7 @@ aggregate_vector_icons("chrome_vector_icons") {
     "account_box.icon",
     "account_child.icon",
     "account_child_circle.icon",
+    "account_circle.icon",
     "add.icon",
     "apps.icon",
     "autofill/gpay_offer.icon",
@@ -29,15 +30,11 @@ aggregate_vector_icons("chrome_vector_icons") {
     "browser_tools_error.icon",
     "browser_tools_touch.icon",
     "browser_tools_update.icon",
-    "caret_down.icon",
-    "caret_up.icon",
-    "cast_for_education.icon",
     "chevron_right.icon",
     "chrome_labs.icon",
     "chrome_labs_touch.icon",
     "click_to_call_illustration.icon",
     "click_to_call_illustration_dark.icon",
-    "close_all.icon",
     "computer_with_circle_background.icon",
     "copy.icon",
     "crashed_tab.icon",
@@ -68,6 +65,8 @@ aggregate_vector_icons("chrome_vector_icons") {
     "keyboard_arrow_right.icon",
     "keyboard_arrow_up.icon",
     "laptop.icon",
+    "media_controls_arrow_drop_down.icon",
+    "media_controls_arrow_drop_up.icon",
     "media_toolbar_button.icon",
     "media_toolbar_button_touch.icon",
     "mixed_content.icon",
@@ -94,10 +93,14 @@ aggregate_vector_icons("chrome_vector_icons") {
     "remove_box.icon",
     "resize_handle.icon",
     "sad_tab.icon",
+    "save_page.icon",
     "scrolling_tabstrip_leading.icon",
     "scrolling_tabstrip_trailing.icon",
     "security.icon",
     "send_tab_to_self.icon",
+    "sharing_hub_screenshot.icon",
+    "side_panel.icon",
+    "side_panel_touch.icon",
     "sign_out.icon",
     "signin_button_drop_down_arrow.icon",
     "smartphone.icon",
@@ -129,6 +132,7 @@ aggregate_vector_icons("chrome_vector_icons") {
     "translate.icon",
     "trash_can.icon",
     "tv.icon",
+    "usb_cable.icon",
     "user_account_avatar.icon",
     "user_menu_guest.icon",
     "user_menu_right_arrow.icon",
@@ -169,8 +173,15 @@ aggregate_vector_icons("chrome_vector_icons") {
       "navigate_stop_windows.icon",
       "navigate_stop_windows_touch.icon",
       "open_in_phone.icon",
+      "payments/secure_payment_confirmation_face.icon",
+      "payments/secure_payment_confirmation_face_dark.icon",
       "reload_windows.icon",
       "reload_windows_touch.icon",
+    ]
+  } else {
+    sources += [
+      "payments/secure_payment_confirmation_fingerprint.icon",
+      "payments/secure_payment_confirmation_fingerprint_dark.icon",
     ]
   }
 
@@ -200,8 +211,9 @@ aggregate_vector_icons("chrome_vector_icons") {
       "notification_wifi.icon",
       "notification_wifi_off.icon",
       "person_add.icon",
+      "sharesheet_link.icon",
+      "sharesheet_text.icon",
       "shutdown_guest_os.icon",
-      "warning_badge_circle.icon",
     ]
   }
 

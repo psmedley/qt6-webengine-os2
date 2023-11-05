@@ -10,6 +10,7 @@
     box-sizing: border-box;
     display: block;
     flex-grow: 1;
+    padding-bottom: 15px;
     padding-inline-end: 15px;
     padding-inline-start: 15px;
     width: 100%;
@@ -89,7 +90,6 @@
     margin: 8px;
     padding:  8px;
     position: absolute;
-    text-transform: uppercase;
   }
 
   :host-context([dir=rtl]) .tag {
@@ -167,8 +167,8 @@
     margin-inline-start: 8px;
   }
 
-  .loupe {
-    -webkit-mask-image: url(search.svg);
+  .clock {
+    -webkit-mask-image: url(chrome://resources/images/icon_clock.svg);
     -webkit-mask-repeat: no-repeat;
     -webkit-mask-size: 100%;
     background-color: var(--cr-secondary-text-color);
@@ -184,18 +184,16 @@
     margin-inline-start: 8px;
   }
 
-  cr-dialog::part(dialog) {
-    position: fixed;
-    width: 459px;
-  }
-
-  cr-dialog [slot='body'] div:not(:last-of-type) {
-    margin-bottom: 24px;
-  }
-
-  cr-dialog [slot='body'] a[href] {
+  ntp-info-dialog a {
     color: var(--cr-link-color);
+    cursor: pointer;
     text-decoration: none;
+  }
+
+  ntp-info-dialog a:focus {
+    border-radius: 2px;
+    box-shadow: var(--ntp-focus-shadow);
+    outline: none;
   }
 </style>
 <ntp-module-header
@@ -215,7 +213,7 @@
         <template is="dom-if" if="[[isShopping_(taskModuleType)]]">
           <div class="image-background">
             <div class="image-container">
-              <img is="ntp-img" auto-src="[[item.imageUrl.url]]"
+              <img is="cr-auto-img" auto-src="[[item.imageUrl.url]]"
                   draggable="false"></img>
             </div>
           </div>
@@ -224,7 +222,8 @@
           <div class="secondary">[[item.info]]</div>
         </template>
         <template is="dom-if" if="[[isRecipe_(taskModuleType)]]">
-          <img is="ntp-img" auto-src="[[item.imageUrl.url]]" draggable="false">
+          <img is="cr-auto-img" auto-src="[[item.imageUrl.url]]"
+              draggable="false">
           </img>
           <div class="tag">[[item.info]]</div>
           <div class="name" title="[[item.name]]">[[item.name]]</div>
@@ -238,23 +237,15 @@
         items="[[task.relatedSearches]]" on-dom-change="onDomChange_">
       <a class="pill" href="[[item.targetUrl.url]]" on-click="onPillClick_"
           on-auxclick="onPillClick_">
-        <div class="loupe"></div>
+        <div class="clock"></div>
         <div class="search-text">[[item.text]]</div>
       </a>
     </template>
   </div>
 </div>
-<template is="dom-if" if="[[showInfoDialog]]" restamp>
-  <cr-dialog show-on-attach>
-    <div slot="title">$i18n{modulesTasksInfoTitle}</div>
-    <div slot="body">
-      <div>$i18nRaw{modulesTasksInfo1}</div>
-      <div>$i18nRaw{modulesTasksInfo2}</div>
-    </div>
-    <div slot="button-container">
-      <cr-button class="action-button" on-click="onCloseClick_">
-        $i18n{modulesTasksInfoClose}
-      </cr-button>
-    </div>
-  </cr-dialog>
-</template>
+<cr-lazy-render id="infoDialogRender">
+  <template>
+    <ntp-info-dialog inner-h-t-m-l="[[i18nAdvanced('modulesTasksInfo')]]">
+    </ntp-info-dialog>
+  </template>
+</cr-lazy-render>

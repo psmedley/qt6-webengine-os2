@@ -22,9 +22,11 @@
 #include "core/fpdfapi/page/cpdf_pageobject.h"
 #include "core/fpdfapi/page/cpdf_pathobject.h"
 #include "core/fpdfapi/page/cpdf_shadingobject.h"
+#include "core/fpdfapi/page/cpdf_textobject.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
+#include "core/fpdfapi/parser/cpdf_name.h"
 #include "core/fpdfapi/parser/cpdf_number.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "core/fpdfapi/render/cpdf_docrenderdata.h"
@@ -34,8 +36,8 @@
 #include "core/fxcrt/fx_extension.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "public/fpdf_formfill.h"
+#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/notreached.h"
-#include "third_party/base/stl_util.h"
 
 #ifdef PDF_ENABLE_XFA
 #include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
@@ -60,11 +62,12 @@ bool IsPageObject(CPDF_Page* pPage) {
     return false;
 
   const CPDF_Dictionary* pFormDict = pPage->GetDict();
-  if (!pFormDict->KeyExist("Type"))
+  if (!pFormDict->KeyExist(pdfium::page_object::kType))
     return false;
 
-  const CPDF_Object* pObject = pFormDict->GetObjectFor("Type")->GetDirect();
-  return pObject && !pObject->GetString().Compare("Page");
+  const CPDF_Name* pName =
+      ToName(pFormDict->GetObjectFor(pdfium::page_object::kType)->GetDirect());
+  return pName && pName->GetString() == "Page";
 }
 
 void CalcBoundingBox(CPDF_PageObject* pPageObj) {
@@ -132,7 +135,7 @@ bool PageObjectContainsMark(CPDF_PageObject* pPageObj,
                             FPDF_PAGEOBJECTMARK mark) {
   const CPDF_ContentMarkItem* pMarkItem =
       CPDFContentMarkItemFromFPDFPageObjectMark(mark);
-  return pMarkItem && pPageObj->m_ContentMarks.ContainsItem(pMarkItem);
+  return pMarkItem && pPageObj->GetContentMarks()->ContainsItem(pMarkItem);
 }
 
 CPDF_FormObject* CPDFFormObjectFromFPDFPageObject(FPDF_PAGEOBJECT page_object) {
@@ -292,7 +295,7 @@ FPDFPageObj_CountMarks(FPDF_PAGEOBJECT page_object) {
   if (!pPageObj)
     return -1;
 
-  return pPageObj->m_ContentMarks.CountItems();
+  return pPageObj->GetContentMarks()->CountItems();
 }
 
 FPDF_EXPORT FPDF_PAGEOBJECTMARK FPDF_CALLCONV
@@ -301,11 +304,11 @@ FPDFPageObj_GetMark(FPDF_PAGEOBJECT page_object, unsigned long index) {
   if (!pPageObj)
     return nullptr;
 
-  auto& mark = pPageObj->m_ContentMarks;
-  if (index >= mark.CountItems())
+  CPDF_ContentMarks* pMarks = pPageObj->GetContentMarks();
+  if (index >= pMarks->CountItems())
     return nullptr;
 
-  return FPDFPageObjectMarkFromCPDFContentMarkItem(mark.GetItem(index));
+  return FPDFPageObjectMarkFromCPDFContentMarkItem(pMarks->GetItem(index));
 }
 
 FPDF_EXPORT FPDF_PAGEOBJECTMARK FPDF_CALLCONV
@@ -314,11 +317,12 @@ FPDFPageObj_AddMark(FPDF_PAGEOBJECT page_object, FPDF_BYTESTRING name) {
   if (!pPageObj)
     return nullptr;
 
-  auto& mark = pPageObj->m_ContentMarks;
-  mark.AddMark(name);
-  unsigned long index = mark.CountItems() - 1;
+  CPDF_ContentMarks* pMarks = pPageObj->GetContentMarks();
+  pMarks->AddMark(name);
   pPageObj->SetDirty(true);
-  return FPDFPageObjectMarkFromCPDFContentMarkItem(mark.GetItem(index));
+
+  const unsigned long index = pMarks->CountItems() - 1;
+  return FPDFPageObjectMarkFromCPDFContentMarkItem(pMarks->GetItem(index));
 }
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
@@ -329,11 +333,11 @@ FPDFPageObj_RemoveMark(FPDF_PAGEOBJECT page_object, FPDF_PAGEOBJECTMARK mark) {
   if (!pPageObj || !pMarkItem)
     return false;
 
-  bool result = pPageObj->m_ContentMarks.RemoveMark(pMarkItem);
-  if (result)
-    pPageObj->SetDirty(true);
+  if (!pPageObj->GetContentMarks()->RemoveMark(pMarkItem))
+    return false;
 
-  return result;
+  pPageObj->SetDirty(true);
+  return true;
 }
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
@@ -612,6 +616,63 @@ FPDFPageObj_Transform(FPDF_PAGEOBJECT page_object,
   pPageObj->Transform(matrix);
 }
 
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFPageObj_GetMatrix(FPDF_PAGEOBJECT page_object, FS_MATRIX* matrix) {
+  CPDF_PageObject* pPageObj = CPDFPageObjectFromFPDFPageObject(page_object);
+  if (!pPageObj || !matrix)
+    return false;
+
+  switch (pPageObj->GetType()) {
+    case CPDF_PageObject::TEXT:
+      *matrix = FSMatrixFromCFXMatrix(pPageObj->AsText()->GetTextMatrix());
+      return true;
+    case CPDF_PageObject::PATH:
+      *matrix = FSMatrixFromCFXMatrix(pPageObj->AsPath()->matrix());
+      return true;
+    case CPDF_PageObject::IMAGE:
+      *matrix = FSMatrixFromCFXMatrix(pPageObj->AsImage()->matrix());
+      return true;
+    case CPDF_PageObject::SHADING:
+      return false;
+    case CPDF_PageObject::FORM:
+      *matrix = FSMatrixFromCFXMatrix(pPageObj->AsForm()->form_matrix());
+      return true;
+    default:
+      NOTREACHED();
+      return false;
+  }
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFPageObj_SetMatrix(FPDF_PAGEOBJECT page_object, const FS_MATRIX* matrix) {
+  CPDF_PageObject* pPageObj = CPDFPageObjectFromFPDFPageObject(page_object);
+  if (!pPageObj || !matrix)
+    return false;
+
+  CFX_Matrix cmatrix = CFXMatrixFromFSMatrix(*matrix);
+  switch (pPageObj->GetType()) {
+    case CPDF_PageObject::TEXT:
+      pPageObj->AsText()->SetTextMatrix(cmatrix);
+      break;
+    case CPDF_PageObject::PATH:
+      pPageObj->AsPath()->SetPathMatrix(cmatrix);
+      break;
+    case CPDF_PageObject::IMAGE:
+      pPageObj->AsImage()->SetImageMatrix(cmatrix);
+      break;
+    case CPDF_PageObject::SHADING:
+      return false;
+    case CPDF_PageObject::FORM:
+      pPageObj->AsForm()->SetFormMatrix(cmatrix);
+      break;
+    default:
+      NOTREACHED();
+      return false;
+  }
+  pPageObj->SetDirty(true);
+  return true;
+}
+
 FPDF_EXPORT void FPDF_CALLCONV
 FPDFPageObj_SetBlendMode(FPDF_PAGEOBJECT page_object,
                          FPDF_BYTESTRING blend_mode) {
@@ -681,7 +742,7 @@ FPDF_BOOL FPDFPageObj_SetFillColor(FPDF_PAGEOBJECT page_object,
   std::vector<float> rgb = {R / 255.f, G / 255.f, B / 255.f};
   pPageObj->m_GeneralState.SetFillAlpha(A / 255.f);
   pPageObj->m_ColorState.SetFillColor(
-      CPDF_ColorSpace::GetStockCS(PDFCS_DEVICERGB), rgb);
+      CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB), rgb);
   pPageObj->SetDirty(true);
   return true;
 }
@@ -738,7 +799,7 @@ FPDFPageObj_SetStrokeColor(FPDF_PAGEOBJECT page_object,
   std::vector<float> rgb = {R / 255.f, G / 255.f, B / 255.f};
   pPageObj->m_GeneralState.SetStrokeAlpha(A / 255.f);
   pPageObj->m_ColorState.SetStrokeColor(
-      CPDF_ColorSpace::GetStockCS(PDFCS_DEVICERGB), rgb);
+      CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB), rgb);
   pPageObj->SetDirty(true);
   return true;
 }
@@ -835,6 +896,73 @@ FPDFPageObj_SetLineCap(FPDF_PAGEOBJECT page_object, int line_cap) {
   return true;
 }
 
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFPageObj_GetDashPhase(FPDF_PAGEOBJECT page_object, float* phase) {
+  auto* pPageObj = CPDFPageObjectFromFPDFPageObject(page_object);
+  if (!pPageObj || !phase)
+    return false;
+
+  *phase = pPageObj->m_GraphState.GetLineDashPhase();
+  return true;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFPageObj_SetDashPhase(FPDF_PAGEOBJECT page_object, float phase) {
+  auto* pPageObj = CPDFPageObjectFromFPDFPageObject(page_object);
+  if (!pPageObj)
+    return false;
+
+  pPageObj->m_GraphState.SetLineDashPhase(phase);
+  pPageObj->SetDirty(true);
+  return true;
+}
+
+FPDF_EXPORT int FPDF_CALLCONV
+FPDFPageObj_GetDashCount(FPDF_PAGEOBJECT page_object) {
+  auto* pPageObj = CPDFPageObjectFromFPDFPageObject(page_object);
+  return pPageObj ? pPageObj->m_GraphState.GetLineDashSize() : -1;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFPageObj_GetDashArray(FPDF_PAGEOBJECT page_object,
+                         float* dash_array,
+                         size_t dash_count) {
+  auto* pPageObj = CPDFPageObjectFromFPDFPageObject(page_object);
+  if (!pPageObj || !dash_array)
+    return false;
+
+  auto dash_vector = pPageObj->m_GraphState.GetLineDashArray();
+  if (dash_vector.size() > dash_count)
+    return false;
+
+  memcpy(dash_array, dash_vector.data(), dash_vector.size() * sizeof(float));
+  return true;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFPageObj_SetDashArray(FPDF_PAGEOBJECT page_object,
+                         const float* dash_array,
+                         size_t dash_count,
+                         float phase) {
+  if (dash_count > 0 && !dash_array)
+    return false;
+
+  auto* pPageObj = CPDFPageObjectFromFPDFPageObject(page_object);
+  if (!pPageObj)
+    return false;
+
+  std::vector<float> dashes;
+  if (dash_count > 0) {
+    dashes.reserve(dash_count);
+    dashes.assign(dash_array, dash_array + dash_count);
+  }
+
+  pPageObj->m_GraphState.SetLineDash(dashes, phase, 1.0f);
+
+  pPageObj->SetDirty(true);
+  return true;
+}
+
 FPDF_EXPORT int FPDF_CALLCONV
 FPDFFormObj_CountObjects(FPDF_PAGEOBJECT form_object) {
   const auto* pObjectList = CPDFPageObjHolderFromFPDFFormObject(form_object);
@@ -849,14 +977,4 @@ FPDFFormObj_GetObject(FPDF_PAGEOBJECT form_object, unsigned long index) {
 
   return FPDFPageObjectFromCPDFPageObject(
       pObjectList->GetPageObjectByIndex(index));
-}
-
-FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
-FPDFFormObj_GetMatrix(FPDF_PAGEOBJECT form_object, FS_MATRIX* matrix) {
-  CPDF_FormObject* pFormObj = CPDFFormObjectFromFPDFPageObject(form_object);
-  if (!pFormObj || !matrix)
-    return false;
-
-  *matrix = FSMatrixFromCFXMatrix(pFormObj->form_matrix());
-  return true;
 }

@@ -106,6 +106,12 @@ BlobData::BlobData(FileCompositionStatus composition)
 BlobData::~BlobData() = default;
 
 Vector<mojom::blink::DataElementPtr> BlobData::ReleaseElements() {
+  if (last_bytes_provider_) {
+    DCHECK(last_bytes_provider_receiver_);
+    BlobBytesProvider::Bind(std::move(last_bytes_provider_),
+                            std::move(last_bytes_provider_receiver_));
+  }
+
   return std::move(elements_);
 }
 
@@ -120,7 +126,7 @@ std::unique_ptr<BlobData> BlobData::CreateForFileWithUnknownSize(
 
 std::unique_ptr<BlobData> BlobData::CreateForFileWithUnknownSize(
     const String& path,
-    const base::Optional<base::Time>& expected_modification_time) {
+    const absl::optional<base::Time>& expected_modification_time) {
   std::unique_ptr<BlobData> data = base::WrapUnique(
       new BlobData(FileCompositionStatus::SINGLE_UNKNOWN_SIZE_FILE));
   data->elements_.push_back(DataElement::NewFile(
@@ -131,23 +137,13 @@ std::unique_ptr<BlobData> BlobData::CreateForFileWithUnknownSize(
 
 std::unique_ptr<BlobData> BlobData::CreateForFileSystemURLWithUnknownSize(
     const KURL& file_system_url,
-    const base::Optional<base::Time>& expected_modification_time) {
+    const absl::optional<base::Time>& expected_modification_time) {
   std::unique_ptr<BlobData> data = base::WrapUnique(
       new BlobData(FileCompositionStatus::SINGLE_UNKNOWN_SIZE_FILE));
   data->elements_.push_back(DataElement::NewFileFilesystem(
       DataElementFilesystemURL::New(file_system_url, 0, BlobData::kToEndOfFile,
                                     expected_modification_time)));
   return data;
-}
-
-void BlobData::DetachFromCurrentThread() {
-  content_type_ = content_type_.IsolatedCopy();
-  for (auto& element : elements_) {
-    if (element->is_file_filesystem()) {
-      auto& file_element = element->get_file_filesystem();
-      file_element->url = file_element->url.Copy();
-    }
-  }
 }
 
 void BlobData::SetContentType(const String& content_type) {
@@ -165,7 +161,7 @@ void BlobData::AppendFile(
     const String& path,
     int64_t offset,
     int64_t length,
-    const base::Optional<base::Time>& expected_modification_time) {
+    const absl::optional<base::Time>& expected_modification_time) {
   DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
       << "Blobs with a unknown-size file cannot have other items.";
   DCHECK_NE(length, BlobData::kToEndOfFile)
@@ -199,7 +195,7 @@ void BlobData::AppendFileSystemURL(
     const KURL& url,
     int64_t offset,
     int64_t length,
-    const base::Optional<base::Time>& expected_modification_time) {
+    const absl::optional<base::Time>& expected_modification_time) {
   DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
       << "Blobs with a unknown-size file cannot have other items.";
   DCHECK_GE(length, 0);
@@ -273,25 +269,37 @@ void BlobData::AppendDataInternal(base::span<const char> data,
   if (!elements_.IsEmpty() && elements_.back()->is_bytes()) {
     // Append bytes to previous element.
     DCHECK(last_bytes_provider_);
+    DCHECK(last_bytes_provider_receiver_);
     const auto& bytes_element = elements_.back()->get_bytes();
     bytes_element->length += data.size();
     if (should_embed_bytes && bytes_element->embedded_data) {
-      bytes_element->embedded_data->Append(data.data(), data.size());
+      bytes_element->embedded_data->Append(
+          data.data(), base::checked_cast<wtf_size_t>(data.size()));
       current_memory_population_ += data.size();
     } else if (bytes_element->embedded_data) {
       current_memory_population_ -= bytes_element->embedded_data->size();
-      bytes_element->embedded_data = base::nullopt;
+      bytes_element->embedded_data = absl::nullopt;
     }
   } else {
+    if (last_bytes_provider_) {
+      // If `last_bytes_provider_` is set, but the previous element is not a
+      // bytes element, a new BytesProvider will be created and we need to
+      // make sure to bind the previous one first.
+      DCHECK(last_bytes_provider_receiver_);
+      BlobBytesProvider::Bind(std::move(last_bytes_provider_),
+                              std::move(last_bytes_provider_receiver_));
+    }
     mojo::PendingRemote<BytesProvider> bytes_provider_remote;
-    last_bytes_provider_ = BlobBytesProvider::CreateAndBind(
-        bytes_provider_remote.InitWithNewPipeAndPassReceiver());
+    last_bytes_provider_ = std::make_unique<BlobBytesProvider>();
+    last_bytes_provider_receiver_ =
+        bytes_provider_remote.InitWithNewPipeAndPassReceiver();
 
     auto bytes_element = DataElementBytes::New(
-        data.size(), base::nullopt, std::move(bytes_provider_remote));
+        data.size(), absl::nullopt, std::move(bytes_provider_remote));
     if (should_embed_bytes) {
       bytes_element->embedded_data = Vector<uint8_t>();
-      bytes_element->embedded_data->Append(data.data(), data.size());
+      bytes_element->embedded_data->Append(
+          data.data(), base::checked_cast<wtf_size_t>(data.size()));
       current_memory_population_ += data.size();
     }
     elements_.push_back(DataElement::NewBytes(std::move(bytes_element)));
@@ -418,7 +426,7 @@ void BlobDataHandle::ReadRange(
 
 bool BlobDataHandle::CaptureSnapshot(
     uint64_t* snapshot_size,
-    base::Optional<base::Time>* snapshot_modification_time) {
+    absl::optional<base::Time>* snapshot_modification_time) {
   // This method operates on a cloned blob remote; this lets us avoid holding
   // the |blob_remote_mutex_| locked during the duration of the (synchronous)
   // CaptureSnapshot call.

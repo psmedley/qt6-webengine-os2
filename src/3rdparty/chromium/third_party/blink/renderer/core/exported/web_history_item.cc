@@ -189,7 +189,7 @@ WebVector<WebString> WebHistoryItem::GetReferencedFilePaths() const {
   HashSet<String> file_paths;
   const EncodedFormData* form_data = private_->FormData();
   if (form_data) {
-    for (size_t i = 0; i < form_data->Elements().size(); ++i) {
+    for (wtf_size_t i = 0; i < form_data->Elements().size(); ++i) {
       const FormDataElement& element = form_data->Elements()[i];
       if (element.type_ == FormDataElement::kEncodedFile)
         file_paths.insert(element.filename_);
@@ -198,7 +198,7 @@ WebVector<WebString> WebHistoryItem::GetReferencedFilePaths() const {
 
   const Vector<String>& referenced_file_paths =
       private_->GetReferencedFilePaths();
-  for (size_t i = 0; i < referenced_file_paths.size(); ++i)
+  for (wtf_size_t i = 0; i < referenced_file_paths.size(); ++i)
     file_paths.insert(referenced_file_paths[i]);
 
   Vector<String> results;
@@ -221,6 +221,30 @@ ScrollAnchorData WebHistoryItem::GetScrollAnchorData() const {
 void WebHistoryItem::SetScrollAnchorData(
     const struct ScrollAnchorData& scroll_anchor_data) {
   private_->SetScrollAnchorData(scroll_anchor_data);
+}
+
+WebString WebHistoryItem::GetAppHistoryKey() const {
+  return private_->GetAppHistoryKey();
+}
+
+void WebHistoryItem::SetAppHistoryKey(const WebString& key) {
+  private_->SetAppHistoryKey(key);
+}
+
+WebString WebHistoryItem::GetAppHistoryId() const {
+  return private_->GetAppHistoryId();
+}
+
+void WebHistoryItem::SetAppHistoryId(const WebString& id) {
+  private_->SetAppHistoryId(id);
+}
+
+WebSerializedScriptValue WebHistoryItem::GetAppHistoryState() const {
+  return WebSerializedScriptValue(private_->GetAppHistoryState());
+}
+
+void WebHistoryItem::SetAppHistoryState(const WebSerializedScriptValue& state) {
+  private_->SetAppHistoryState(state);
 }
 
 WebHistoryItem::WebHistoryItem(HistoryItem* item) : private_(item) {}

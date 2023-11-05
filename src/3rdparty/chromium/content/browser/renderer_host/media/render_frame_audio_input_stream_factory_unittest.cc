@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/media/forwarding_audio_stream_factory.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
@@ -31,14 +32,18 @@
 #include "media/audio/test_audio_thread.h"
 #include "media/base/audio_parameters.h"
 #include "media/mojo/mojom/audio_data_pipe.mojom.h"
+#include "media/mojo/mojom/audio_stream_factory.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/audio/public/cpp/fake_stream_factory.h"
-#include "services/audio/public/mojom/stream_factory.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/lacros/lacros_test_helper.h"
+#endif
 
 namespace content {
 
@@ -70,7 +75,7 @@ class MAYBE_RenderFrameAudioInputStreamFactoryTest
     RenderFrameHostTester::For(main_rfh())->InitializeRenderFrameIfNeeded();
 
     // Set up the ForwardingAudioStreamFactory.
-    ForwardingAudioStreamFactory::OverrideStreamFactoryBinderForTesting(
+    ForwardingAudioStreamFactory::OverrideAudioStreamFactoryBinderForTesting(
         base::BindRepeating(
             &MAYBE_RenderFrameAudioInputStreamFactoryTest::BindFactory,
             base::Unretained(this)));
@@ -79,14 +84,14 @@ class MAYBE_RenderFrameAudioInputStreamFactoryTest
   }
 
   void TearDown() override {
-    ForwardingAudioStreamFactory::OverrideStreamFactoryBinderForTesting(
+    ForwardingAudioStreamFactory::OverrideAudioStreamFactoryBinderForTesting(
         base::NullCallback());
     audio_manager_.Shutdown();
     RenderViewHostTestHarness::TearDown();
   }
 
   void BindFactory(
-      mojo::PendingReceiver<audio::mojom::StreamFactory> receiver) {
+      mojo::PendingReceiver<media::mojom::AudioStreamFactory> receiver) {
     audio_service_stream_factory_.receiver_.Bind(std::move(receiver));
   }
 
@@ -123,7 +128,7 @@ class MAYBE_RenderFrameAudioInputStreamFactoryTest
     CreateInputStreamCallback last_created_callback;
     CreateLoopbackStreamCallback last_created_loopback_callback;
 
-    mojo::Receiver<audio::mojom::StreamFactory> receiver_{this};
+    mojo::Receiver<media::mojom::AudioStreamFactory> receiver_{this};
   };
 
   class FakeRendererAudioInputStreamFactoryClient
@@ -135,7 +140,7 @@ class MAYBE_RenderFrameAudioInputStreamFactoryTest
             client_receiver,
         media::mojom::ReadOnlyAudioDataPipePtr data_pipe,
         bool initially_muted,
-        const base::Optional<base::UnguessableToken>& stream_id) override {}
+        const absl::optional<base::UnguessableToken>& stream_id) override {}
   };
 
   AudioInputDeviceManager* audio_input_device_manager() {
@@ -179,6 +184,10 @@ class MAYBE_RenderFrameAudioInputStreamFactoryTest
   const std::string kDeviceName = "test name";
   const bool kAGC = false;
   const uint32_t kSharedMemoryCount = 123;
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Instantiate LacrosService for WakeLock support.
+  chromeos::ScopedLacrosServiceTestHelper scoped_lacros_service_test_helper_;
+#endif
   MockStreamFactory audio_service_stream_factory_;
   media::FakeAudioLogFactory log_factory_;
   media::FakeAudioManager audio_manager_;

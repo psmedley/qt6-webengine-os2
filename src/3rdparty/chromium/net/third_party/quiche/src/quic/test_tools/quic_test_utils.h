@@ -33,6 +33,7 @@
 #include "quic/core/quic_types.h"
 #include "quic/core/quic_utils.h"
 #include "quic/platform/api/quic_mem_slice_storage.h"
+#include "quic/platform/api/quic_socket_address.h"
 #include "quic/platform/api/quic_test.h"
 #include "quic/test_tools/mock_clock.h"
 #include "quic/test_tools/mock_quic_session_visitor.h"
@@ -281,7 +282,7 @@ class SimpleRandom : public QuicRandom {
 
  private:
   uint8_t buffer_[4096];
-  size_t buffer_offset_;
+  size_t buffer_offset_ = 0;
   uint8_t key_[32];
 
   void FillBuffer();
@@ -430,7 +431,7 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
   MOCK_METHOD(void, OnPacketComplete, (), (override));
   MOCK_METHOD(bool,
               IsValidStatelessResetToken,
-              (QuicUint128),
+              (const StatelessResetToken&),
               (const, override));
   MOCK_METHOD(void,
               OnAuthenticatedIetfStatelessResetPacket,
@@ -503,7 +504,8 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
   bool OnHandshakeDoneFrame(const QuicHandshakeDoneFrame& frame) override;
   bool OnAckFrequencyFrame(const QuicAckFrequencyFrame& frame) override;
   void OnPacketComplete() override {}
-  bool IsValidStatelessResetToken(QuicUint128 token) const override;
+  bool IsValidStatelessResetToken(
+      const StatelessResetToken& token) const override;
   void OnAuthenticatedIetfStatelessResetPacket(
       const QuicIetfStatelessResetPacket& /*packet*/) override {}
   void OnKeyUpdate(KeyUpdateReason /*reason*/) override {}
@@ -577,6 +579,22 @@ class MockQuicConnectionVisitor : public QuicConnectionVisitorInterface {
               SendAckFrequency,
               (const QuicAckFrequencyFrame& frame),
               (override));
+  MOCK_METHOD(void,
+              SendNewConnectionId,
+              (const QuicNewConnectionIdFrame& frame),
+              (override));
+  MOCK_METHOD(void,
+              SendRetireConnectionId,
+              (uint64_t sequence_number),
+              (override));
+  MOCK_METHOD(void,
+              OnServerConnectionIdIssued,
+              (const QuicConnectionId& server_connection_id),
+              (override));
+  MOCK_METHOD(void,
+              OnServerConnectionIdRetired,
+              (const QuicConnectionId& server_connection_id),
+              (override));
   MOCK_METHOD(bool, AllowSelfAddressChange, (), (const, override));
   MOCK_METHOD(HandshakeState, GetHandshakeState, (), (const, override));
   MOCK_METHOD(bool,
@@ -606,6 +624,11 @@ class MockQuicConnectionVisitor : public QuicConnectionVisitorInterface {
   MOCK_METHOD(void, BeforeConnectionCloseSent, (), (override));
   MOCK_METHOD(bool, ValidateToken, (absl::string_view), (const, override));
   MOCK_METHOD(void, MaybeSendAddressToken, (), (override));
+
+  bool IsKnownServerAddress(
+      const QuicSocketAddress& /*address*/) const override {
+    return false;
+  }
 };
 
 class MockQuicConnectionHelper : public QuicConnectionHelperInterface {
@@ -740,10 +763,8 @@ class MockQuicConnection : public QuicConnection {
               (QuicStreamId, QuicRstStreamErrorCode),
               (override));
   MOCK_METHOD(bool, SendControlFrame, (const QuicFrame& frame), (override));
-  MOCK_METHOD(MessageStatus,
-              SendMessage,
-              (QuicMessageId, QuicMemSliceSpan, bool),
-              (override));
+  MOCK_METHOD(MessageStatus, SendMessage,
+              (QuicMessageId, absl::Span<QuicMemSlice>, bool), (override));
   MOCK_METHOD(bool,
               SendPathChallenge,
               (const QuicPathFrameBuffer&,
@@ -768,6 +789,15 @@ class MockQuicConnection : public QuicConnection {
     // it doesn't invoke the virtual 4-param method causing the mock 4-param
     // method to trigger.
     QuicConnection::CloseConnection(error, NO_IETF_QUIC_ERROR, details,
+                                    connection_close_behavior);
+  }
+
+  void ReallyCloseConnection4(
+      QuicErrorCode error,
+      QuicIetfTransportErrorCodes ietf_error,
+      const std::string& details,
+      ConnectionCloseBehavior connection_close_behavior) {
+    QuicConnection::CloseConnection(error, ietf_error, details,
                                     connection_close_behavior);
   }
 
@@ -872,14 +902,10 @@ class MockQuicSession : public QuicSession {
               CreateIncomingStream,
               (PendingStream*),
               (override));
-  MOCK_METHOD(QuicConsumedData,
-              WritevData,
-              (QuicStreamId id,
-               size_t write_length,
-               QuicStreamOffset offset,
-               StreamSendingState state,
-               TransmissionType type,
-               absl::optional<EncryptionLevel> level),
+  MOCK_METHOD(QuicConsumedData, WritevData,
+              (QuicStreamId id, size_t write_length, QuicStreamOffset offset,
+               StreamSendingState state, TransmissionType type,
+               EncryptionLevel level),
               (override));
   MOCK_METHOD(bool,
               WriteControlFrame,
@@ -897,10 +923,6 @@ class MockQuicSession : public QuicSession {
               (override));
 
   MOCK_METHOD(bool, ShouldKeepConnectionAlive, (), (const, override));
-  MOCK_METHOD(void,
-              SendStopSending,
-              (QuicRstStreamErrorCode code, QuicStreamId stream_id),
-              (override));
   MOCK_METHOD(std::vector<std::string>, GetAlpnsToOffer, (), (const, override));
   MOCK_METHOD(std::vector<absl::string_view>::const_iterator,
               SelectAlpn,
@@ -1014,14 +1036,10 @@ class MockQuicSpdySession : public QuicSpdySession {
   MOCK_METHOD(bool, ShouldCreateIncomingStream, (QuicStreamId id), (override));
   MOCK_METHOD(bool, ShouldCreateOutgoingBidirectionalStream, (), (override));
   MOCK_METHOD(bool, ShouldCreateOutgoingUnidirectionalStream, (), (override));
-  MOCK_METHOD(QuicConsumedData,
-              WritevData,
-              (QuicStreamId id,
-               size_t write_length,
-               QuicStreamOffset offset,
-               StreamSendingState state,
-               TransmissionType type,
-               absl::optional<EncryptionLevel> level),
+  MOCK_METHOD(QuicConsumedData, WritevData,
+              (QuicStreamId id, size_t write_length, QuicStreamOffset offset,
+               StreamSendingState state, TransmissionType type,
+               EncryptionLevel level),
               (override));
   MOCK_METHOD(void,
               MaybeSendRstStreamFrame,
@@ -1094,14 +1112,15 @@ class MockHttp3DebugVisitor : public Http3DebugVisitor {
               (override));
 
   MOCK_METHOD(void,
+              OnSettingsFrameReceivedViaAlps,
+              (const SettingsFrame&),
+              (override));
+
+  MOCK_METHOD(void,
               OnAcceptChFrameReceivedViaAlps,
               (const AcceptChFrame&),
               (override));
 
-  MOCK_METHOD(void,
-              OnCancelPushFrameReceived,
-              (const CancelPushFrame&),
-              (override));
   MOCK_METHOD(void,
               OnSettingsFrameReceived,
               (const SettingsFrame&),
@@ -1133,14 +1152,6 @@ class MockHttp3DebugVisitor : public Http3DebugVisitor {
               (QuicStreamId, QuicHeaderList),
               (override));
   MOCK_METHOD(void,
-              OnPushPromiseFrameReceived,
-              (QuicStreamId, QuicStreamId, QuicByteCount),
-              (override));
-  MOCK_METHOD(void,
-              OnPushPromiseDecoded,
-              (QuicStreamId, QuicStreamId, QuicHeaderList),
-              (override));
-  MOCK_METHOD(void,
               OnUnknownFrameReceived,
               (QuicStreamId, uint64_t, QuicByteCount),
               (override));
@@ -1157,10 +1168,6 @@ class MockHttp3DebugVisitor : public Http3DebugVisitor {
   MOCK_METHOD(void,
               OnHeadersFrameSent,
               (QuicStreamId, const spdy::SpdyHeaderBlock&),
-              (override));
-  MOCK_METHOD(void,
-              OnPushPromiseFrameSent,
-              (QuicStreamId, QuicStreamId, const spdy::SpdyHeaderBlock&),
               (override));
 };
 
@@ -1208,9 +1215,14 @@ class TestQuicSpdyServerSession : public QuicServerSessionBase {
 
   MockQuicCryptoServerStreamHelper* helper() { return &helper_; }
 
+  QuicSSLConfig GetSSLConfig() const override { return ssl_config_; }
+
+  QuicSSLConfig* ssl_config() { return &ssl_config_; }
+
  private:
   MockQuicSessionVisitor visitor_;
   MockQuicCryptoServerStreamHelper helper_;
+  QuicSSLConfig ssl_config_;
 };
 
 // A test implementation of QuicClientPushPromiseIndex::Delegate.
@@ -1958,7 +1970,7 @@ class TaggingDecrypter : public QuicDecrypter {
   }
 
   bool SetPreliminaryKey(absl::string_view /*key*/) override {
-    QUIC_BUG << "should not be called";
+    QUIC_BUG(quic_bug_10230_1) << "should not be called";
     return false;
   }
 
@@ -2283,6 +2295,50 @@ bool WriteServerVersionNegotiationProbeResponse(
     size_t* packet_length_out,
     const char* source_connection_id_bytes,
     uint8_t source_connection_id_length);
+
+// Implementation of Http3DatagramVisitor which saves all received datagrams.
+class SavingHttp3DatagramVisitor : public QuicSpdyStream::Http3DatagramVisitor {
+ public:
+  struct SavedHttp3Datagram {
+    QuicStreamId stream_id;
+    absl::optional<QuicDatagramContextId> context_id;
+    std::string payload;
+    bool operator==(const SavedHttp3Datagram& o) const {
+      return stream_id == o.stream_id && context_id == o.context_id &&
+             payload == o.payload;
+    }
+  };
+  const std::vector<SavedHttp3Datagram>& received_h3_datagrams() const {
+    return received_h3_datagrams_;
+  }
+
+  // Override from QuicSpdyStream::Http3DatagramVisitor.
+  void OnHttp3Datagram(QuicStreamId stream_id,
+                       absl::optional<QuicDatagramContextId> context_id,
+                       absl::string_view payload) override {
+    received_h3_datagrams_.push_back(
+        SavedHttp3Datagram{stream_id, context_id, std::string(payload)});
+  }
+
+ private:
+  std::vector<SavedHttp3Datagram> received_h3_datagrams_;
+};
+
+class MockHttp3DatagramRegistrationVisitor
+    : public QuicSpdyStream::Http3DatagramRegistrationVisitor {
+ public:
+  MOCK_METHOD(void, OnContextReceived,
+              (QuicStreamId stream_id,
+               absl::optional<QuicDatagramContextId> context_id,
+               const Http3DatagramContextExtensions& extensions),
+              (override));
+
+  MOCK_METHOD(void, OnContextClosed,
+              (QuicStreamId stream_id,
+               absl::optional<QuicDatagramContextId> context_id,
+               const Http3DatagramContextExtensions& extensions),
+              (override));
+};
 
 }  // namespace test
 }  // namespace quic

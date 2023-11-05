@@ -10,7 +10,7 @@
 
 #include "src/gpu/GrSurfaceProxy.h"
 
-#include "src/gpu/GrResourceProvider.h"
+class GrResourceProvider;
 
 /** Class that adds methods to GrSurfaceProxy that are only intended for use internal to Skia.
     This class is purely a privileged window into GrSurfaceProxy. It should never have additional
@@ -41,6 +41,8 @@ public:
     bool doLazyInstantiation(GrResourceProvider*);
 
     void setIsDDLTarget() { fProxy->fIsDDLTarget = true; }
+
+    void setIsPromiseProxy() { fProxy->fIsPromiseProxy = true; }
 
 private:
     explicit GrSurfaceProxyPriv(GrSurfaceProxy* proxy) : fProxy(proxy) {}

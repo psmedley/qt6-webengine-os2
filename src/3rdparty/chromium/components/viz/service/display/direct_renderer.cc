@@ -15,7 +15,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
+#include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "cc/base/math_util.h"
@@ -33,6 +33,7 @@
 #include "components/viz/service/display/skia_output_surface.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/transform_util.h"
 
@@ -256,8 +257,8 @@ void DirectRenderer::DrawFrame(
     current_frame()->root_damage_rect.Union(
         overlay_processor_->GetAndResetOverlayDamage());
   }
-  if (DelegatedInkPointRendererBase* ink_renderer =
-          GetDelegatedInkPointRenderer()) {
+  if (auto* ink_renderer =
+          GetDelegatedInkPointRenderer(/*create_if_necessary=*/false)) {
     // The path must be finalized before GetDamageRect() can return an accurate
     // rect that will allow the old trail to be removed and the new trail to
     // be drawn at the same time.
@@ -302,6 +303,8 @@ void DirectRenderer::DrawFrame(
       current_frame()->display_color_spaces.GetOutputBufferFormat(
           current_frame()->root_render_pass->content_color_usage,
           frame_has_alpha);
+  gfx::Size surface_resource_size =
+      CalculateSizeForOutputSurface(device_viewport_size);
   if (overlay_processor_) {
     // Display transform and viewport size are needed for overlay validator on
     // Android SurfaceControl, and viewport size is need on Windows. These need
@@ -322,13 +325,15 @@ void DirectRenderer::DrawFrame(
       // enough because they're all created with identical properties.
       current_frame()->output_surface_plane =
           overlay_processor_->ProcessOutputSurfaceAsOverlay(
-              device_viewport_size, frame_buffer_format, frame_color_space,
-              frame_has_alpha, output_surface_->GetOverlayMailbox());
+              device_viewport_size, surface_resource_size, frame_buffer_format,
+              frame_color_space, frame_has_alpha,
+              output_surface_->GetOverlayMailbox());
       primary_plane = &(current_frame()->output_surface_plane.value());
     }
 
     // Attempt to replace some or all of the quads of the root render pass with
     // overlays.
+    base::ElapsedTimer overlay_processing_timer;
     overlay_processor_->ProcessForOverlays(
         resource_provider_, render_passes_in_draw_order,
         output_surface_->color_matrix(), render_pass_filters_,
@@ -336,6 +341,14 @@ void DirectRenderer::DrawFrame(
         primary_plane, &current_frame()->overlay_list,
         &current_frame()->root_damage_rect,
         &current_frame()->root_content_bounds);
+    auto overlay_processing_time = overlay_processing_timer.Elapsed();
+
+    constexpr auto kMinTime = base::TimeDelta::FromMicroseconds(5);
+    constexpr auto kMaxTime = base::TimeDelta::FromMilliseconds(10);
+    constexpr int kTimeBuckets = 50;
+    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+        "Compositing.DirectRenderer.OverlayProcessingUs",
+        overlay_processing_time, kMinTime, kMaxTime, kTimeBuckets);
 
     // If we promote any quad to an underlay then the main plane must support
     // alpha.
@@ -355,12 +368,12 @@ void DirectRenderer::DrawFrame(
   // viewport size is never set.
   bool use_stencil = overdraw_feedback_;
   bool needs_full_frame_redraw = false;
-  if (device_viewport_size != reshape_surface_size_ ||
+  if (surface_resource_size != reshape_surface_size_ ||
       device_scale_factor != reshape_device_scale_factor_ ||
       frame_color_space != reshape_color_space_ ||
       frame_buffer_format != reshape_buffer_format_ ||
       use_stencil != reshape_use_stencil_) {
-    reshape_surface_size_ = device_viewport_size;
+    reshape_surface_size_ = surface_resource_size;
     reshape_device_scale_factor_ = device_scale_factor;
     reshape_color_space_ = frame_color_space;
     reshape_buffer_format_ = frame_buffer_format;
@@ -467,8 +480,8 @@ bool DirectRenderer::ShouldSkipQuad(const DrawQuad& quad,
 
   gfx::Rect target_rect = cc::MathUtil::MapEnclosingClippedRect(
       quad.shared_quad_state->quad_to_target_transform, quad.visible_rect);
-  if (quad.shared_quad_state->is_clipped)
-    target_rect.Intersect(quad.shared_quad_state->clip_rect);
+  if (quad.shared_quad_state->clip_rect)
+    target_rect.Intersect(*quad.shared_quad_state->clip_rect);
 
   target_rect.Intersect(render_pass_scissor);
   return target_rect.IsEmpty();
@@ -480,12 +493,12 @@ void DirectRenderer::SetScissorStateForQuad(
     bool use_render_pass_scissor) {
   if (use_render_pass_scissor) {
     gfx::Rect quad_scissor_rect = render_pass_scissor;
-    if (quad.shared_quad_state->is_clipped)
-      quad_scissor_rect.Intersect(quad.shared_quad_state->clip_rect);
+    if (quad.shared_quad_state->clip_rect)
+      quad_scissor_rect.Intersect(*quad.shared_quad_state->clip_rect);
     SetScissorTestRectInDrawSpace(quad_scissor_rect);
     return;
-  } else if (quad.shared_quad_state->is_clipped) {
-    SetScissorTestRectInDrawSpace(quad.shared_quad_state->clip_rect);
+  } else if (quad.shared_quad_state->clip_rect) {
+    SetScissorTestRectInDrawSpace(*quad.shared_quad_state->clip_rect);
     return;
   }
 
@@ -530,11 +543,11 @@ const cc::FilterOperations* DirectRenderer::BackdropFiltersForPass(
   return it == render_pass_backdrop_filters_.end() ? nullptr : it->second;
 }
 
-const base::Optional<gfx::RRectF> DirectRenderer::BackdropFilterBoundsForPass(
+const absl::optional<gfx::RRectF> DirectRenderer::BackdropFilterBoundsForPass(
     AggregatedRenderPassId render_pass_id) const {
   auto it = render_pass_backdrop_filter_bounds_.find(render_pass_id);
   return it == render_pass_backdrop_filter_bounds_.end()
-             ? base::Optional<gfx::RRectF>()
+             ? absl::optional<gfx::RRectF>()
              : it->second;
 }
 
@@ -693,7 +706,7 @@ void DirectRenderer::DrawRenderPass(const AggregatedRenderPass* render_pass) {
       auto new_polygon = std::make_unique<DrawPolygon>(
           *it, gfx::RectF(quad.visible_rect),
           quad.shared_quad_state->quad_to_target_transform, next_polygon_id++);
-      if (new_polygon->points().size() > 2u) {
+      if (new_polygon->normal().LengthSquared() > 0.0) {
         poly_list.push_back(std::move(new_polygon));
       }
       continue;
@@ -793,30 +806,33 @@ gfx::Rect DirectRenderer::ComputeScissorRectForRenderPass(
   const AggregatedRenderPass* root_render_pass =
       current_frame()->root_render_pass;
   gfx::Rect root_damage_rect = current_frame()->root_damage_rect;
+  // If |frame_buffer_damage|, which is carried over from the previous frame
+  // when we want to preserve buffer content, is not empty, we should add it
+  // to both root and non-root render passes.
+  gfx::Rect frame_buffer_damage =
+      output_surface_->GetCurrentFramebufferDamage();
 
   if (render_pass == root_render_pass) {
-    base::CheckedNumeric<int> display_area =
+    base::CheckedNumeric<int64_t> display_area =
         current_frame()->device_viewport_size.GetCheckedArea();
-    gfx::Rect frame_buffer_damage =
-        output_surface_->GetCurrentFramebufferDamage();
-    base::CheckedNumeric<int> root_damage_area =
+    base::CheckedNumeric<int64_t> root_damage_area =
         root_damage_rect.size().GetCheckedArea();
     if (display_area.IsValid() && root_damage_area.IsValid()) {
-      DCHECK_GT(static_cast<int>(display_area.ValueOrDie()), 0);
+      DCHECK_GT(static_cast<int64_t>(display_area.ValueOrDie()), 0);
       {
-        base::CheckedNumeric<int> frame_buffer_damage_area =
+        base::CheckedNumeric<int64_t> frame_buffer_damage_area =
             frame_buffer_damage.size().GetCheckedArea();
-        int ratio =
-            (frame_buffer_damage_area / display_area).ValueOrDefault(INT_MAX);
+        int64_t percentage = ((frame_buffer_damage_area * 100ll) / display_area)
+                                 .ValueOrDefault(INT_MAX);
         UMA_HISTOGRAM_PERCENTAGE(
             "Compositing.DirectRenderer.PartialSwap.FrameBufferDamage",
-            100ull * ratio);
+            percentage);
       }
       {
-        int ratio = (root_damage_area / display_area).ValueOrDie();
+        int64_t percentage =
+            ((root_damage_area * 100ll) / display_area).ValueOrDie();
         UMA_HISTOGRAM_PERCENTAGE(
-            "Compositing.DirectRenderer.PartialSwap.RootDamage",
-            100ull * ratio);
+            "Compositing.DirectRenderer.PartialSwap.RootDamage", percentage);
       }
 
       root_damage_rect.Union(frame_buffer_damage);
@@ -844,20 +860,20 @@ gfx::Rect DirectRenderer::ComputeScissorRectForRenderPass(
       }
 
       // Total damage after all adjustments.
-      base::CheckedNumeric<int> total_damage_area =
+      base::CheckedNumeric<int64_t> total_damage_area =
           root_damage_rect.size().GetCheckedArea();
       {
-        int ratio = (total_damage_area / display_area).ValueOrDefault(INT_MAX);
+        int64_t percentage = ((total_damage_area * 100ll) / display_area)
+                                 .ValueOrDefault(INT_MAX);
         UMA_HISTOGRAM_PERCENTAGE(
-            "Compositing.DirectRenderer.PartialSwap.TotalDamage",
-            100ull * ratio);
+            "Compositing.DirectRenderer.PartialSwap.TotalDamage", percentage);
       }
       {
-        int ratio = ((total_damage_area - root_damage_area) / display_area)
-                        .ValueOrDefault(INT_MAX);
+        int64_t percentage =
+            (((total_damage_area - root_damage_area) * 100ll) / display_area)
+                .ValueOrDefault(INT_MAX);
         UMA_HISTOGRAM_PERCENTAGE(
-            "Compositing.DirectRenderer.PartialSwap.ExtraDamage",
-            100ull * ratio);
+            "Compositing.DirectRenderer.PartialSwap.ExtraDamage", percentage);
       }
     }
 
@@ -871,7 +887,22 @@ gfx::Rect DirectRenderer::ComputeScissorRectForRenderPass(
 
   DCHECK(render_pass->copy_requests.empty() ||
          (render_pass->damage_rect == render_pass->output_rect));
-  return render_pass->damage_rect;
+
+  // For the non-root render pass.
+  gfx::Rect damage_rect = render_pass->damage_rect;
+  if (!frame_buffer_damage.IsEmpty()) {
+    gfx::Transform inverse_transform(gfx::Transform::kSkipInitialization);
+    if (render_pass->transform_to_root_target.GetInverse(&inverse_transform)) {
+      // |frame_buffer_damage| is in the root target space. Transform the damage
+      // from the root to the non-root space before it's added.
+      gfx::Rect frame_buffer_damage_in_render_pass_space =
+          cc::MathUtil::MapEnclosingClippedRect(inverse_transform,
+                                                frame_buffer_damage);
+      damage_rect.Union(frame_buffer_damage_in_render_pass_space);
+    }
+  }
+
+  return damage_rect;
 }
 
 gfx::Size DirectRenderer::CalculateTextureSizeForRenderPass(
@@ -882,11 +913,57 @@ gfx::Size DirectRenderer::CalculateTextureSizeForRenderPass(
   int width = render_pass->output_rect.width();
   int height = render_pass->output_rect.height();
   if (!settings_->dont_round_texture_sizes_for_pixel_tests) {
-    int multiple = 64;
+    constexpr int multiple = 64;
     width = cc::MathUtil::CheckedRoundUp(width, multiple);
     height = cc::MathUtil::CheckedRoundUp(height, multiple);
   }
   return gfx::Size(width, height);
+}
+
+// TODO(fangzhoug): There should be metrics recording the amount of unused
+// buffer area and number of reallocations to quantify the trade-off.
+gfx::Size DirectRenderer::CalculateSizeForOutputSurface(
+    const gfx::Size& requested_viewport_size) {
+  // We're not able to clip back buffers if output surface does not support
+  // clipping.
+  if (requested_viewport_size == surface_size_for_swap_buffers() ||
+      !output_surface_->capabilities().supports_viewporter ||
+      settings_->dont_round_texture_sizes_for_pixel_tests) {
+    device_viewport_size_ = requested_viewport_size;
+    return requested_viewport_size;
+  }
+
+  // If 1 second has passed since last |device_viewport_size_| change, shrink
+  // OutputSurface size to |device_viewport_size_|.
+  if (device_viewport_size_ == requested_viewport_size &&
+      (base::TimeTicks::Now() - last_viewport_resize_time_) >=
+          base::TimeDelta::FromSeconds(1)) {
+    return requested_viewport_size;
+  }
+
+  // Round the size of the output surface to a multiple of 256 pixels. This
+  // allows backings to be more easily reused during a resize operation.
+  const int request_width = requested_viewport_size.width();
+  const int request_height = requested_viewport_size.height();
+  int surface_width = surface_size_for_swap_buffers().width();
+  int surface_height = surface_size_for_swap_buffers().height();
+  constexpr int multiple = 256;
+
+  // If |request_width| or |request_height| is already a multiple of |multiple|,
+  // round up extra |multiple| pixels s.t. we always have some amount of
+  // padding.
+  if (request_width > surface_width)
+    surface_width =
+        cc::MathUtil::CheckedRoundUp(request_width + multiple - 1, multiple);
+  if (request_height > surface_height)
+    surface_height =
+        cc::MathUtil::CheckedRoundUp(request_height + multiple - 1, multiple);
+
+  if (requested_viewport_size != device_viewport_size_)
+    last_viewport_resize_time_ = base::TimeTicks::Now();
+
+  device_viewport_size_ = requested_viewport_size;
+  return gfx::Size(surface_width, surface_height);
 }
 
 void DirectRenderer::SetCurrentFrameForTesting(const DrawingFrame& frame) {
@@ -941,20 +1018,9 @@ gfx::ColorSpace DirectRenderer::CurrentRenderPassColorSpace() const {
       current_frame()->current_render_pass->content_color_usage);
 }
 
-bool DirectRenderer::CreateDelegatedInkPointRenderer() {
-  return false;
-}
-
-DelegatedInkPointRendererBase* DirectRenderer::GetDelegatedInkPointRenderer() {
+DelegatedInkPointRendererBase* DirectRenderer::GetDelegatedInkPointRenderer(
+    bool create_if_necessary) {
   return nullptr;
-}
-
-void DirectRenderer::SetDelegatedInkMetadata(
-    std::unique_ptr<DelegatedInkMetadata> metadata) {
-  if (!GetDelegatedInkPointRenderer() && !CreateDelegatedInkPointRenderer())
-    return;
-
-  GetDelegatedInkPointRenderer()->SetDelegatedInkMetadata(std::move(metadata));
 }
 
 void DirectRenderer::DrawDelegatedInkTrail() {
@@ -968,10 +1034,12 @@ bool DirectRenderer::CompositeTimeTracingEnabled() {
 void DirectRenderer::AddCompositeTimeTraces(base::TimeTicks ready_timestamp) {}
 
 gfx::Rect DirectRenderer::GetDelegatedInkTrailDamageRect() {
-  if (!GetDelegatedInkPointRenderer())
-    return gfx::Rect();
+  if (auto* ink_renderer =
+          GetDelegatedInkPointRenderer(/*create_if_necessary=*/false)) {
+    return ink_renderer->GetDamageRect();
+  }
 
-  return GetDelegatedInkPointRenderer()->GetDamageRect();
+  return gfx::Rect();
 }
 
 }  // namespace viz

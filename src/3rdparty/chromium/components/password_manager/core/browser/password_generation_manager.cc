@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/time/default_clock.h"
 #include "components/password_manager/core/browser/form_saver.h"
 #include "components/password_manager/core/browser/password_form_manager_for_ui.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
@@ -54,8 +53,8 @@ class PasswordDataForUI : public PasswordFormManagerForUI {
   bool IsMovableToAccountStore() const override;
   void Save() override;
   void Update(const PasswordForm& credentials_to_update) override;
-  void OnUpdateUsernameFromPrompt(const base::string16& new_username) override;
-  void OnUpdatePasswordFromPrompt(const base::string16& new_password) override;
+  void OnUpdateUsernameFromPrompt(const std::u16string& new_username) override;
+  void OnUpdatePasswordFromPrompt(const std::u16string& new_password) override;
   void OnNopeUpdateClicked() override;
   void OnNeverClicked() override;
   void OnNoInteraction(bool is_update) override;
@@ -156,12 +155,12 @@ void PasswordDataForUI::Update(const PasswordForm&) {
 }
 
 void PasswordDataForUI::OnUpdateUsernameFromPrompt(
-    const base::string16& new_username) {
+    const std::u16string& new_username) {
   pending_form_.username_value = new_username;
 }
 
 void PasswordDataForUI::OnUpdatePasswordFromPrompt(
-    const base::string16& new_password) {
+    const std::u16string& new_password) {
   // Ignore. The generated password can be edited in-place.
 }
 
@@ -199,7 +198,7 @@ const PasswordForm* FindUsernameConflict(
 
 PasswordGenerationManager::PasswordGenerationManager(
     PasswordManagerClient* client)
-    : client_(client), clock_(new base::DefaultClock) {}
+    : client_(client) {}
 
 PasswordGenerationManager::~PasswordGenerationManager() = default;
 
@@ -243,14 +242,14 @@ void PasswordGenerationManager::PresaveGeneratedPassword(
   // the same username in order to prevent overwriting.
   if (FindUsernameConflict(generated, matches))
     generated.username_value.clear();
-  generated.date_created = clock_->Now();
+  generated.date_created = base::Time::Now();
   if (presaved_) {
     form_saver->UpdateReplace(generated, {} /* matches */,
-                              base::string16() /* old_password */,
+                              std::u16string() /* old_password */,
                               presaved_.value() /* old_primary_key */);
   } else {
     form_saver->Save(generated, {} /* matches */,
-                     base::string16() /* old_password */);
+                     std::u16string() /* old_password */);
   }
   presaved_ = std::move(generated);
 }
@@ -265,11 +264,11 @@ void PasswordGenerationManager::PasswordNoLongerGenerated(
 void PasswordGenerationManager::CommitGeneratedPassword(
     PasswordForm generated,
     const std::vector<const PasswordForm*>& matches,
-    const base::string16& old_password,
+    const std::u16string& old_password,
     FormSaver* form_saver) {
   DCHECK(presaved_);
-  generated.date_last_used = clock_->Now();
-  generated.date_created = clock_->Now();
+  generated.date_last_used = base::Time::Now();
+  generated.date_created = base::Time::Now();
   form_saver->UpdateReplace(generated, matches, old_password,
                             presaved_.value() /* old_primary_key */);
 }
@@ -279,7 +278,9 @@ void PasswordGenerationManager::OnPresaveBubbleResult(
     bool accepted,
     const PasswordForm& pending) {
   weak_factory_.InvalidateWeakPtrs();
-  if (accepted) {
+  if (driver && accepted) {
+    // See https://crbug.com/1210341 for when `driver` might be null due to a
+    // compromised renderer.
     driver->GeneratedPasswordAccepted(pending.password_value);
   }
 }

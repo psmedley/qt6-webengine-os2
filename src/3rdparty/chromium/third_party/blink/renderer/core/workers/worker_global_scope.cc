@@ -50,6 +50,7 @@
 #include "third_party/blink/renderer/core/frame/user_activation.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/console_message_storage.h"
+#include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
 #include "third_party/blink/renderer/core/inspector/inspector_issue_storage.h"
 #include "third_party/blink/renderer/core/inspector/worker_inspector_controller.h"
 #include "third_party/blink/renderer/core/inspector/worker_thread_debugger.h"
@@ -67,6 +68,7 @@
 #include "third_party/blink/renderer/core/workers/worker_navigator.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/fonts/font_matching_metrics.h"
@@ -82,7 +84,6 @@
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
@@ -370,7 +371,6 @@ bool WorkerGlobalScope::FetchClassicImportedScript(
   ExecutionContext* execution_context = GetExecutionContext();
   WorkerClassicScriptLoader* classic_script_loader =
       MakeGarbageCollected<WorkerClassicScriptLoader>();
-  EnsureFetcher();
   classic_script_loader->LoadSynchronously(
       *execution_context, Fetcher(), script_url,
       mojom::blink::RequestContextType::SCRIPT,
@@ -403,6 +403,11 @@ void WorkerGlobalScope::AddInspectorIssue(
     mojom::blink::InspectorIssueInfoPtr info) {
   GetThread()->GetInspectorIssueStorage()->AddInspectorIssue(this,
                                                              std::move(info));
+}
+
+void WorkerGlobalScope::AddInspectorIssue(AuditsIssue issue) {
+  GetThread()->GetInspectorIssueStorage()->AddInspectorIssue(this,
+                                                             std::move(issue));
 }
 
 CoreProbeSink* WorkerGlobalScope::GetProbeSink() {
@@ -443,7 +448,7 @@ void WorkerGlobalScope::EvaluateClassicScript(
 
 void WorkerGlobalScope::WorkerScriptFetchFinished(
     Script& worker_script,
-    base::Optional<v8_inspector::V8StackTraceId> stack_id) {
+    absl::optional<v8_inspector::V8StackTraceId> stack_id) {
   DCHECK(IsContextThread());
 
   DCHECK_NE(ScriptEvalState::kEvaluated, script_eval_state_);
@@ -554,8 +559,6 @@ WorkerGlobalScope::WorkerGlobalScope(
       user_agent_(creation_params->user_agent),
       ua_metadata_(creation_params->ua_metadata),
       thread_(thread),
-      agent_group_scheduler_compositor_task_runner_(std::move(
-          creation_params->agent_group_scheduler_compositor_task_runner)),
       time_origin_(time_origin),
       font_selector_(MakeGarbageCollected<OffscreenFontSelector>(this)),
       script_eval_state_(ScriptEvalState::kPauseAfterFetch),
@@ -583,11 +586,12 @@ WorkerGlobalScope::WorkerGlobalScope(
         GetTaskRunner(TaskType::kInternalDefault));
   }
 
-  // A FeaturePolicy is created by FeaturePolicy::CreateFromParentPolicy, even
-  // if the parent policy is null.
-  DCHECK(creation_params->worker_feature_policy);
-  GetSecurityContext().SetFeaturePolicy(
-      std::move(creation_params->worker_feature_policy));
+  // A PermissionsPolicy is created by
+  // PermissionsPolicy::CreateFromParentPolicy, even if the parent policy is
+  // null.
+  DCHECK(creation_params->worker_permissions_policy);
+  GetSecurityContext().SetPermissionsPolicy(
+      std::move(creation_params->worker_permissions_policy));
 }
 
 void WorkerGlobalScope::ExceptionThrown(ErrorEvent* event) {
@@ -687,6 +691,19 @@ FontMatchingMetrics* WorkerGlobalScope::GetFontMatchingMetrics() {
         GetTaskRunner(TaskType::kInternalDefault));
   }
   return font_matching_metrics_.get();
+}
+
+blink::mojom::CodeCacheHost* WorkerGlobalScope::GetCodeCacheHost() {
+  if (!code_cache_host_) {
+    // We may not have a valid browser interface in tests. For ex:
+    // FakeWorkerGlobalScope doesn't provide a valid interface. These tests
+    // don't rely on code caching so it's safe to return nullptr here.
+    if (!GetBrowserInterfaceBroker().is_bound())
+      return nullptr;
+    GetBrowserInterfaceBroker().GetInterface(
+        code_cache_host_.BindNewPipeAndPassReceiver());
+  }
+  return code_cache_host_.get();
 }
 
 }  // namespace blink

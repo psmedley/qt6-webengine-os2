@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_SIGNIN_PROFILE_CREATION_CUSTOMIZE_THEMES_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_SIGNIN_PROFILE_CREATION_CUSTOMIZE_THEMES_HANDLER_H_
 
-#include "base/optional.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"

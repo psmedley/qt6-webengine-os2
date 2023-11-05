@@ -33,7 +33,8 @@
 namespace dawn_native {
 
     MaybeError ValidateBindGroupLayoutDescriptor(DeviceBase* device,
-                                                 const BindGroupLayoutDescriptor* descriptor);
+                                                 const BindGroupLayoutDescriptor* descriptor,
+                                                 bool allowInternalBinding = false);
 
     // Bindings are specified as a |BindingNumber| in the BindGroupLayoutDescriptor.
     // These numbers may be arbitrary and sparse. Internally, Dawn packs these numbers
@@ -54,6 +55,7 @@ namespace dawn_native {
             return mBindingInfo[bindingIndex];
         }
         const BindingMap& GetBindingMap() const;
+        bool HasBinding(BindingNumber bindingNumber) const;
         BindingIndex GetBindingIndex(BindingNumber bindingNumber) const;
 
         // Functions necessary for the unordered_set<BGLBase*>-based cache.

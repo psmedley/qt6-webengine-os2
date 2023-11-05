@@ -10,6 +10,8 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
+#include "base/files/file_error_or.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
@@ -17,7 +19,6 @@
 #include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/process/process_metrics.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -33,11 +34,9 @@
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "components/services/storage/public/cpp/filesystem/file_error_or.h"
 #include "components/services/storage/public/cpp/filesystem/filesystem_proxy.h"
 #include "third_party/leveldatabase/chromium_logger.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
-#include "third_party/leveldatabase/leveldb_features.h"
 #include "third_party/leveldatabase/src/include/leveldb/options.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -53,7 +52,7 @@ namespace leveldb_env {
 namespace {
 
 template <typename ValueType>
-using FileErrorOr = storage::FileErrorOr<ValueType>;
+using FileErrorOr = base::FileErrorOr<ValueType>;
 
 // After this limit we don't bother doing file eviction for leveldb for speed,
 // memory usage, and simplicity.
@@ -840,7 +839,7 @@ Status ChromiumEnv::RemoveDir(const std::string& name) {
 
 Status ChromiumEnv::GetFileSize(const std::string& fname, uint64_t* size) {
   Status s;
-  base::Optional<base::File::Info> info =
+  absl::optional<base::File::Info> info =
       filesystem_->GetFileInfo(base::FilePath::FromUTF8Unsafe(fname));
   if (!info) {
     *size = 0;
@@ -880,7 +879,8 @@ Status ChromiumEnv::LockFile(const std::string& fname, FileLock** lock) {
   Status result;
   const base::FilePath path = base::FilePath::FromUTF8Unsafe(fname);
   Retrier retrier;
-  FileErrorOr<std::unique_ptr<storage::FilesystemProxy::FileLock>> lock_result;
+  FileErrorOr<std::unique_ptr<storage::FilesystemProxy::FileLock>> lock_result =
+      base::File::Error::FILE_ERROR_FAILED;
   do {
     lock_result = filesystem_->LockFile(path);
   } while (lock_result.is_error() && retrier.ShouldKeepTrying());
@@ -1416,8 +1416,6 @@ leveldb::Status RewriteDB(const leveldb_env::Options& options,
                           const std::string& name,
                           std::unique_ptr<leveldb::DB>* dbptr) {
   DCHECK(options.create_if_missing);
-  if (!base::FeatureList::IsEnabled(leveldb::kLevelDBRewriteFeature))
-    return Status::OK();
   if (leveldb_chrome::IsMemEnv(options.env))
     return Status::OK();
   TRACE_EVENT1("leveldb", "ChromiumEnv::RewriteDB", "name", name);

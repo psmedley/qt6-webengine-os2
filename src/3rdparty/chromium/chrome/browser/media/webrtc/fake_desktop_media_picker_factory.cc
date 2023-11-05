@@ -93,7 +93,7 @@ std::unique_ptr<DesktopMediaPicker> FakeDesktopMediaPickerFactory::CreatePicker(
     const content::MediaStreamRequest* request) {
   EXPECT_LE(current_test_, tests_count_);
   if (current_test_ >= tests_count_)
-    return std::unique_ptr<DesktopMediaPicker>();
+    return nullptr;
   ++current_test_;
   picker_ = new FakeDesktopMediaPicker(test_flags_ + current_test_ - 1);
   return std::unique_ptr<DesktopMediaPicker>(picker_);
@@ -102,7 +102,8 @@ std::unique_ptr<DesktopMediaPicker> FakeDesktopMediaPickerFactory::CreatePicker(
 std::vector<std::unique_ptr<DesktopMediaList>>
 FakeDesktopMediaPickerFactory::CreateMediaList(
     const std::vector<DesktopMediaList::Type>& types,
-    content::WebContents* web_contents) {
+    content::WebContents* web_contents,
+    DesktopMediaList::WebContentsFilter includable_web_contents_filter) {
   EXPECT_LE(current_test_, tests_count_);
   std::vector<std::unique_ptr<DesktopMediaList>> media_lists;
   for (auto source_type : types)

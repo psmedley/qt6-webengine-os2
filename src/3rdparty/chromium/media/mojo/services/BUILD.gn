@@ -71,9 +71,6 @@ jumbo_component("services") {
 
   defines = [ "MEDIA_MOJO_IMPLEMENTATION" ]
 
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-
   public_deps = [
     "//base",
     "//media",
@@ -105,6 +102,24 @@ jumbo_component("services") {
   ]
 
   if (is_android) {
+    sources += [ "gpu_mojo_media_client_android.cc" ]
+  } else if (is_mac) {
+    sources += [ "gpu_mojo_media_client_mac.cc" ]
+  } else if (is_win) {
+    sources += [ "gpu_mojo_media_client_win.cc" ]
+  } else if (use_vaapi || use_v4l2_codec) {
+    sources += [ "gpu_mojo_media_client_cros.cc" ]
+
+    if (is_chromeos_ash) {
+      sources += [ "gpu_mojo_media_client_cros_ash.cc" ]
+      deps +=
+          [ "//chromeos/components/cdm_factory_daemon:cdm_factory_daemon_gpu" ]
+    }
+  } else {
+    sources += [ "gpu_mojo_media_client_stubs.cc" ]
+  }
+
+  if (is_android) {
     sources += [
       "android_mojo_media_client.cc",
       "android_mojo_media_client.h",
@@ -124,16 +139,8 @@ jumbo_component("services") {
     sources += [
       "cdm_service.cc",
       "cdm_service.h",
-      "mojo_cdm_allocator.cc",
-      "mojo_cdm_allocator.h",
-      "mojo_cdm_file_io.cc",
-      "mojo_cdm_file_io.h",
-      "mojo_cdm_helper.cc",
-      "mojo_cdm_helper.h",
-    ]
-    deps += [
-      "//media/cdm:cdm_api",
-      "//media/cdm:cdm_paths",
+      "cdm_service_broker.cc",
+      "cdm_service_broker.h",
     ]
 
     # TODO(xhwang): Ideally media should not worry about sandbox. Find a way to
@@ -142,9 +149,17 @@ jumbo_component("services") {
       deps += [ "//sandbox" ]
     }
   }
-  if (is_chromeos_ash) {
-    deps +=
-        [ "//chromeos/components/cdm_factory_daemon:cdm_factory_daemon_gpu" ]
+
+  if (is_win || enable_library_cdms) {
+    sources += [
+      "mojo_cdm_allocator.cc",
+      "mojo_cdm_allocator.h",
+      "mojo_cdm_file_io.cc",
+      "mojo_cdm_file_io.h",
+      "mojo_cdm_helper.cc",
+      "mojo_cdm_helper.h",
+    ]
+    deps += [ "//media/cdm:cdm_api" ]
   }
 
   if (is_win) {
@@ -153,6 +168,10 @@ jumbo_component("services") {
       "media_foundation_mojo_media_client.h",
       "media_foundation_renderer_wrapper.cc",
       "media_foundation_renderer_wrapper.h",
+      "media_foundation_service.cc",
+      "media_foundation_service.h",
+      "media_foundation_service_broker.cc",
+      "media_foundation_service_broker.h",
     ]
     deps += [ "//media/base/win:media_foundation_util" ]
   }
@@ -190,7 +209,6 @@ source_set("unit_tests") {
     "//media/mojo/common",
     "//media/mojo/mojom",
     "//mojo/core/embedder",
-    "//mojo/public/interfaces/bindings/tests:test_interfaces",
     "//services/metrics/public/cpp:ukm_builders",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/cpp/test:test_support",
@@ -198,8 +216,13 @@ source_set("unit_tests") {
     "//testing/gtest",
   ]
 
+  if (!is_ios) {
+    deps += ["//mojo/public/interfaces/bindings/tests:test_interfaces"]
+  }
+
   if (enable_library_cdms) {
     sources += [
+      "cdm_service_broker_unittest.cc",
       "cdm_service_unittest.cc",
       "mojo_cdm_allocator_unittest.cc",
       "mojo_cdm_file_io_unittest.cc",

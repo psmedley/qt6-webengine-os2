@@ -7,9 +7,11 @@
 
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/features.gni")
+
 if (current_cpu == "arm" || current_cpu == "arm64") {
   import("//build/config/arm.gni")
 }
+
 if (!use_qt) {
 assert(!is_ios, "This is not used on iOS, don't drag it in unintentionally")
 }

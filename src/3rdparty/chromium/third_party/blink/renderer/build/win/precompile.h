@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #ifdef THIRD_PARTY_BLINK_RENDERER_BUILD_WIN_PRECOMPILE_H_
-#error You shouldn't include the precompiled header file more than once.
+#error "You shouldn't include the precompiled header file more than once."
 #endif
 
 #define THIRD_PARTY_BLINK_RENDERER_BUILD_WIN_PRECOMPILE_H_
@@ -17,8 +17,6 @@
 // build time was measured.
 
 #define _USE_MATH_DEFINES  // Make math.h behave like other platforms.
-
-#include <Windows.h>
 
 #include <errno.h>
 #include <fcntl.h>

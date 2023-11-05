@@ -21,9 +21,9 @@ HTTP Client Hints are request headers that can be optionally sent to origins tha
 
 Every document created with that origin contains those preferences as a “client hint set” and uses that set alongside other settings to decide what client hints to delegate to sub-resource requests associated with that document.
 
-When requests are initiated from a document, the client hints are filtered through [Permission Policies](https://w3c.github.io/webappsec-permissions-policy/), which allows origins to control what features are used by what 3rd parties in a document. By default, the feature policies for client hints (except Sec-CH-UA and Sec-CH-UA-Mobile) are set to “self,” which means that hints are only delegated to the same origin as the (top-level) document. The permission can also be a list of origins or an asterisk `*` for all origins (Sec-CH-UA and Sec-CH-UA-Mobile are considered “[low-entropy](https://wicg.github.io/client-hints-infrastructure/#low-entropy-hint-table)” and safe to send to all origins, thus their defaults are `*`). Permissions can also be set in HTML for iframes in the same format through the `allow` attribute.
+When requests are initiated from a document, the client hints are filtered through [Permission Policies](https://w3c.github.io/webappsec-permissions-policy/), which allows origins to control what features are used by what 3rd parties in a document. By default, the feature policies for client hints (except `Sec-CH-UA` and `Sec-CH-UA-Mobile`) are set to “self,” which means that hints are only delegated to the same origin as the (top-level) document. The permission can also be a list of origins or an asterisk `*` for all origins (`Sec-CH-UA` and `Sec-CH-UA-Mobile` are considered “[low-entropy](https://wicg.github.io/client-hints-infrastructure/#low-entropy-hint-table)” and safe to send to all origins, thus their defaults are `*`). Permissions can also be set in HTML for iframes in the same format through the `allow` attribute.
 
-Note: All client hints (top-level and subresource) are gated on JavaScript being enabled in Chrome. While not explicitly stated, it fits into the requirement to only reveal information visible through JavaScript interfaces
+Note: All client hints (top-level and subresource) are gated on JavaScript being enabled in Chrome. While not explicitly stated, it fits into the requirement to only reveal information visible through JavaScript interfaces.
 
 ### Client Hint Reliability
 
@@ -52,7 +52,7 @@ The `Critical-CH` response header is a signal from the origin that the hints lis
 
 ### Accept-CH cache
 
-Client Hint preferences are stored in the preferences service as a content setting  (ContentSettingsType::CLIENT_HINTS), keyed to the origin. This storage is accessed through the [content::ClientHintsControllerDelegate] interface, with the principle implementation being [client_hints::ClientHints] in //components (to share across multiple platforms). The delegate is accessible in the browser process as a property of the [content::BrowserContext] (in //chrome land, this is implemented as the Profile and “Off The Record” Profile. An important note is that there is an “incognito profile” that gets its own client hints storage).
+Client Hint preferences are stored in the preferences service as a content setting (`ContentSettingsType::CLIENT_HINTS`), keyed to the origin. This storage is accessed through the [content::ClientHintsControllerDelegate] interface, with the principle implementation being [client_hints::ClientHints] in //components (to share across multiple platforms). The delegate is accessible in the browser process as a property of the [content::BrowserContext] (in //chrome land, this is implemented as the Profile and “Off The Record” Profile. An important note is that there is an “incognito profile” that gets its own client hints storage).
 
 This storage is marked as `content_settings::SessionModel::UserSession`. This means that when settings are read in from disk (on browser start up) there’s also a check for a flag that’s set on graceful shutdown. (This is to exclude crashes and browser updates). If that flag is set, the settings are cleared. Practically, this means that the settings are cleared after closing the browser.
 
@@ -60,15 +60,15 @@ The code for reading from and writing to the client hint preferences in content 
 
 The preferences are read on the construction of a `ClientHintsExtendedData` object, which then will use the `FrameTreeNode` (which is where the object gets first party origin and permission policy information) and client hints preferences to calculate what hints should be sent for a given request.
 
-The preferences are written in |ParseAndPersistAcceptCHForNavigation|, which is also where various settings (secure context, JS permissions, feature flags set) are checked before sending the information to the controller delegate.
+The preferences are written in `ParseAndPersistAcceptCHForNavigation`, which is also where various settings (secure context, JS permissions, feature flags set) are checked before sending the information to the controller delegate.
 
 ### Client Hints Infrastructure
 
-The client hints set is passed into the document on commit from [NavigationRequest::CommitNavigation](/content/browser/renderer_host/navigation_request.cc) to the document and is used in [FrameFetchContext::AddClientHintsIfNecessary](third_party/blink/renderer/core/loader/frame_fetch_context.cc), where all of the relevant client hint information filled into the headers to be sent.
+The client hints set is passed into the document on commit from [NavigationRequest::CommitNavigation](/content/browser/renderer_host/navigation_request.cc) to the document and is used in [FrameFetchContext::AddClientHintsIfNecessary](/third_party/blink/renderer/core/loader/frame_fetch_context.cc), where all of the relevant client hint information gets filled into the headers to be sent.
 
 ### Critical-CH response header
 
-The Critical-CH retry mechanism is implemented as [content::CriticalClientHintsThrottle] and all of the important logic is in |WillProcessResponse|. When a retry situation is found (and the |redirected_| flag isn’t set) the header is stored, the new hints are added to the request, and the request is “restarted” (i.e. the request is aborted and a new one is started).
+The Critical-CH retry mechanism is implemented as [content::CriticalClientHintsThrottle] and all of the important logic is in `WillProcessResponse`. When a retry situation is found (and the `redirected_` flag isn’t set) the header is stored, the new hints are added to the request, and the request is “restarted” (i.e. the request is aborted and a new one is started).
 
 ## Adding a new hint
 
@@ -76,20 +76,32 @@ There’s two main steps to adding a hint to Chromium: adding the token, and pop
 
 ### Adding a new client hint token
 
-The canonical enum for client hint tokens is [network::mojom::WebClientHintsType]. Any new token should be added to the end of that list. Along with that, a string of the token/header name should be added to:
+The canonical enum for client hint tokens is [network::mojom::WebClientHintsType]. Any new token should be added to the end of that list. Along with that:
 
-*   |kClientHintsNameMapping| in [/services/network/public/cpp/client_hints.cc]
-*   |kClientHintsHeaderMapping| in [/third_party/blink/common/client_hints/client_hints.cc]
+*   Add the header name to `kClientHintsNameMapping` in [/services/network/public/cpp/client_hints.cc].
+*   Add the header name to `kClientHintsHeaderMapping` in [/third_party/blink/common/client_hints/client_hints.cc] and update its test.
+*   Add an enum value to `WebFeature` in [/third_party/blink/public/mojom/web_feature/web_feature.mojom].
+*   Add the feature enum to `kWebFeatureMapping` in [/third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.cc].
+*   Add the client hint header to the `Accept-CH` header in the appropriate test files in [/chrome/test/data/client_hints/] and [/third_party/blink/web_tests/external/wpt/client-hints].
+*   Update `expected_client_hints_number` to the current value + 1 in [/chrome/browser/client_hints/client_hints_browsertest.cc].
 
 **NOTE:** It’s very important that the order of these arrays remain in sync.
 
-There should also be a new feature policy created, which should go in [/third_party/blink/renderer/core/feature_policy/feature_policy_features.json5](/third_party/blink/renderer/core/feature_policy/feature_policy_features.json5), and the header should be added to the cors |safe_names| list in [/services/network/public/cpp/cors/cors.cc](/services/network/public/cpp/cors/cors.cc)
+There should also be a new feature policy created:
+
+*   Define the permission policy in [/third_party/blink/renderer/core/permissions_policy/permissions_policy_features.json5].
+*   Add an enum to [/third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom].
+*   Add the same enum to `kClientHintsPermissionsPolicyMapping` in [/third_party/blink/common/client_hints/client_hints.cc].
+*   Add the permission policy token to the `PermissionsPolicyFeature` enum in [/third_party/blink/public/devtools_protocol/browser_protocol.pdl], [/third_party/devtools-frontend/src/third_party/blink/public/devtools_protocol/browser_protocol.pdl], and [/third_party/devtools-frontend/src/third_party/blink/public/devtools_protocol/browser_protocol.json].
+*   Add the permission policy token to [/third_party/blink/web_tests/webexposed/feature-policy-features-expected.txt] and [/third_party/blink/web_tests/virtual/stable/webexposed/feature-policy-features-expected.txt].
+
+The header should also be added to the cors `safe_names` list in [/services/network/public/cpp/cors/cors.cc](/services/network/public/cpp/cors/cors.cc) and update its test.
 
 TODO(crbug.com/1176808): There should be UseCounters measuring usage, but there are not currently.
 
 ### Populating the client hint
 
-Client Hints are populated in [BaseFetchContext::AddClientHintsIfNecessary](/third_party/blink/renderer/core/loader/base_fetch_context.cc). If you need frame-based information, this should be added to `[ClientHintsImageInfo](/third_party/blink/renderer/core/loader/base_fetch_context.cc)`, which is populated in [FrameFetchContext::AddClientHintsIfNecessary](/third_party/blink/renderer/core/loader/frame_fetch_context.cc)
+Client Hints are populated in [BaseFetchContext::AddClientHintsIfNecessary](/third_party/blink/renderer/core/loader/base_fetch_context.cc). If you need frame-based information, this should be added to [ClientHintsImageInfo](/third_party/blink/renderer/core/loader/base_fetch_context.cc), which is populated in [FrameFetchContext::AddClientHintsIfNecessary](/third_party/blink/renderer/core/loader/frame_fetch_context.cc)
 
 <!-- links -->
 [/components/client_hints/]: /components/client_hints/
@@ -106,3 +118,15 @@ Client Hints are populated in [BaseFetchContext::AddClientHintsIfNecessary](/thi
 [network::mojom::WebClientHintsType]: /services/network/public/mojom/web_client_hints_types.mojom
 [/services/network/public/cpp/client_hints.cc]: /services/network/public/cpp/client_hints.cc
 [/third_party/blink/common/client_hints/client_hints.cc]: /third_party/blink/common/client_hints/client_hints.cc
+[/third_party/blink/public/mojom/web_feature/web_feature.mojom]: /third_party/blink/public/mojom/web_feature/web_feature.mojom
+[/third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.cc]: /third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.cc
+[/chrome/test/data/client_hints/]: /chrome/test/data/client_hints/
+[/third_party/blink/web_tests/external/wpt/client-hints]: /third_party/blink/web_tests/external/wpt/client-hints
+[/chrome/browser/client_hints/client_hints_browsertest.cc]: /chrome/browser/client_hints/client_hints_browsertest.cc
+[/third_party/blink/renderer/core/permissions_policy/permissions_policy_features.json5]: /third_party/blink/renderer/core/permissions_policy/permissions_policy_features.json5
+[/third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom]: /third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom
+[/third_party/blink/public/devtools_protocol/browser_protocol.pdl]: /third_party/blink/public/devtools_protocol/browser_protocol.pdl
+[/third_party/devtools-frontend/src/third_party/blink/public/devtools_protocol/browser_protocol.pdl]: /third_party/devtools-frontend/src/third_party/blink/public/devtools_protocol/browser_protocol.pdl
+[/third_party/devtools-frontend/src/third_party/blink/public/devtools_protocol/browser_protocol.json]: /third_party/devtools-frontend/src/third_party/blink/public/devtools_protocol/browser_protocol.json
+[/third_party/blink/web_tests/webexposed/feature-policy-features-expected.txt]: /third_party/blink/web_tests/webexposed/feature-policy-features-expected.txt
+[/third_party/blink/web_tests/virtual/stable/webexposed/feature-policy-features-expected.txt]: /third_party/blink/web_tests/virtual/stable/webexposed/feature-policy-features-expected.txt

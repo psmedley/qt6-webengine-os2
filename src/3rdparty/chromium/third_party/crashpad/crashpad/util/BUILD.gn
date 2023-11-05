@@ -71,8 +71,16 @@ if (crashpad_is_mac || crashpad_is_ios) {
         import("//build/config/mac/mac_sdk.gni")
         clang_path =
             rebase_path("$clang_base_path/bin/", root_build_dir) + "clang"
-        mig_path = "$mac_bin_path" + "mig"
-        migcom_path = "$mac_bin_path" + "../libexec/migcom"
+        if (host_os == "mac") {
+          mig_path = "$mac_bin_path" + "mig"
+          migcom_path = "$mac_bin_path" + "../libexec/migcom"
+        } else if (host_os == "linux") {
+          mig_path = rebase_path("//third_party/mig/bin/mig", root_build_dir)
+          migcom_path =
+              rebase_path("//third_party/mig/bin/migcom", root_build_dir)
+        } else {
+          assert(false, "don't know how to mig on $host_os")
+        }
 
         args += [
           "--clang-path",
@@ -382,14 +390,31 @@ crashpad_static_library("util") {
     sources += [
       "ios/exception_processor.h",
       "ios/exception_processor.mm",
+      "ios/ios_intermediate_dump_data.cc",
+      "ios/ios_intermediate_dump_data.h",
+      "ios/ios_intermediate_dump_format.h",
+      "ios/ios_intermediate_dump_list.cc",
+      "ios/ios_intermediate_dump_list.h",
+      "ios/ios_intermediate_dump_map.cc",
+      "ios/ios_intermediate_dump_map.h",
+      "ios/ios_intermediate_dump_object.cc",
+      "ios/ios_intermediate_dump_object.h",
+      "ios/ios_intermediate_dump_reader.cc",
+      "ios/ios_intermediate_dump_reader.h",
+      "ios/ios_intermediate_dump_writer.cc",
+      "ios/ios_intermediate_dump_writer.h",
       "ios/ios_system_data_collector.h",
       "ios/ios_system_data_collector.mm",
+      "ios/raw_logging.cc",
+      "ios/raw_logging.h",
+      "ios/scoped_vm_read.cc",
+      "ios/scoped_vm_read.h",
     ]
   }
 
   deps = [ "//build:chromeos_buildflags" ]
 
-  if (crashpad_is_linux || crashpad_is_fuchsia || crashpad_is_android) {
+  if (crashpad_http_transport_impl == "socket") {
     sources += [ "net/http_transport_socket.cc" ]
     if (crashpad_use_boringssl_for_http_transport_socket) {
       defines += [ "CRASHPAD_USE_BORINGSSL" ]
@@ -402,6 +427,12 @@ crashpad_static_library("util") {
           "ssl",
         ]
       }
+    }
+  } else if (crashpad_http_transport_impl == "libcurl") {
+    sources += [ "net/http_transport_libcurl.cc" ]
+    if (crashpad_is_in_fuchsia) {
+      # Host Linux builds in Fuchsia don't have libcurl in a sysroot.
+      deps += [ "//third_party/curl:libcurl" ]
     }
   }
 
@@ -586,7 +617,10 @@ crashpad_static_library("util") {
     "../third_party/zlib",
   ]
 
-  deps += [ "../third_party/mini_chromium:base" ]
+  deps += [
+    "../third_party/mini_chromium:base",
+    "../third_party/mini_chromium:chromeos_buildflags",
+  ]
 
   if (crashpad_is_mac || crashpad_is_ios) {
     include_dirs += [ "$root_build_dir/gen" ]
@@ -781,7 +815,12 @@ source_set("util_test") {
   }
 
   if (crashpad_is_ios) {
-    sources += [ "ios/exception_processor_test.mm" ]
+    sources += [
+      "ios/exception_processor_test.mm",
+      "ios/ios_intermediate_dump_reader_test.cc",
+      "ios/ios_intermediate_dump_writer_test.cc",
+      "ios/scoped_vm_read_test.cc",
+    ]
 
     sources -= [
       "process/process_memory_range_test.cc",

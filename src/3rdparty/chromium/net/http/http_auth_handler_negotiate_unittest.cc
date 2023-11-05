@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
@@ -68,9 +68,9 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest,
     resolver_->rules_map()[HostResolverSource::ANY]->AddIPLiteralRule(
         "alias", "10.0.0.2", "canonical.example.com");
 
-    http_auth_preferences_.reset(new MockAllowHttpAuthPreferences());
-    factory_.reset(
-        new HttpAuthHandlerNegotiate::Factory(HttpAuthMechanismFactory()));
+    http_auth_preferences_ = std::make_unique<MockAllowHttpAuthPreferences>();
+    factory_ = std::make_unique<HttpAuthHandlerNegotiate::Factory>(
+        HttpAuthMechanismFactory());
     factory_->set_http_auth_preferences(http_auth_preferences_.get());
 #if defined(OS_ANDROID)
     http_auth_preferences_->set_auth_android_negotiate_account_type(
@@ -87,7 +87,7 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest,
 
   void SetupMocks(MockAuthLibrary* mock_library) {
 #if defined(OS_WIN)
-    security_package_.reset(new SecPkgInfoW);
+    security_package_ = std::make_unique<SecPkgInfoW>();
     memset(security_package_.get(), 0x0, sizeof(SecPkgInfoW));
     security_package_->cbMaxToken = 1337;
     mock_library->ExpectQuerySecurityPackageInfo(SEC_E_OK,

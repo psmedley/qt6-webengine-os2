@@ -7,14 +7,17 @@
 
 #include <map>
 #include <memory>
+#include <vector>
 
+#include "components/viz/common/resources/release_callback.h"
 #include "components/viz/common/resources/resource_id.h"
-#include "components/viz/common/resources/single_release_callback.h"
 #include "components/viz/common/resources/transferable_resource.h"
+#include "components/viz/service/display/shared_bitmap_manager.h"
 #include "components/viz/service/surfaces/surface_saved_frame.h"
 #include "components/viz/service/viz_service_export.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/sync_token.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace viz {
@@ -23,18 +26,54 @@ namespace viz {
 // Note that TransferableResourceTracker uses reserved range ResourceIds.
 class VIZ_SERVICE_EXPORT TransferableResourceTracker {
  public:
-  TransferableResourceTracker();
+  // This represents a resource that is positioned somewhere on screen.
+  struct VIZ_SERVICE_EXPORT PositionedResource {
+    TransferableResource resource;
+    SurfaceSavedFrame::RenderPassDrawData draw_data;
+  };
+
+  // A resource frame consists of a root PositionedResource and a set of
+  // optional shared PositionedResources. A SurfaceSavedFrame can be converted
+  // to a ResourceFrame via ImportResources.
+  struct VIZ_SERVICE_EXPORT ResourceFrame {
+    ResourceFrame();
+    ResourceFrame(ResourceFrame&& other);
+    ~ResourceFrame();
+
+    ResourceFrame& operator=(ResourceFrame&& other);
+
+    PositionedResource root;
+    std::vector<absl::optional<PositionedResource>> shared;
+  };
+
+  explicit TransferableResourceTracker(
+      SharedBitmapManager* shared_bitmap_manager);
   TransferableResourceTracker(const TransferableResourceTracker&) = delete;
   ~TransferableResourceTracker();
 
   TransferableResourceTracker& operator=(const TransferableResourceTracker&) =
       delete;
 
-  TransferableResource ImportResource(
-      std::unique_ptr<SurfaceSavedFrame> saved_frame);
+  // This call converts a SurfaceSavedFrame into a ResourceFrame by converting
+  // each of the resources into a TransferableResource. Note that `this` keeps
+  // a ref on each of the TransferableResources returned in the ResourceFrame.
+  // The ref count can be managed by calls to RefResource and UnrefResource
+  // below. Note that a convenience function, `ReturnFrame`, is also provided
+  // below which will unref every resource in a given ResourceFrame. Using the
+  // convenience function is not a guarantee that the resources will be
+  // released: it only removes one ref from each resource. The resources will
+  // be released when the ref count reaches 0.
+  // TODO(vmpstr): Instead of providing a convenience function, we should
+  // convert ResourceFrame to be RAII so that it can be automatically
+  // "returned".
+  ResourceFrame ImportResources(std::unique_ptr<SurfaceSavedFrame> saved_frame);
 
+  // Return a frame back to the tracker. This unrefs all of the resources.
+  void ReturnFrame(const ResourceFrame& frame);
+
+  // Ref count management for the resources returned by `ImportResources`.
   void RefResource(ResourceId id);
-  void UnrefResource(ResourceId id);
+  void UnrefResource(ResourceId id, int count);
 
   bool is_empty() const { return managed_resources_.empty(); }
 
@@ -43,8 +82,8 @@ class VIZ_SERVICE_EXPORT TransferableResourceTracker {
 
   ResourceId GetNextAvailableResourceId();
 
-  TransferableResource ImportTextureResult(
-      SurfaceSavedFrame::TextureResult result);
+  PositionedResource ImportResource(
+      SurfaceSavedFrame::OutputCopyResult output_copy);
 
   static_assert(std::is_same<decltype(kInvalidResourceId.GetUnsafeValue()),
                              uint32_t>::value,
@@ -53,19 +92,22 @@ class VIZ_SERVICE_EXPORT TransferableResourceTracker {
   const uint32_t starting_id_;
   uint32_t next_id_;
 
+  SharedBitmapManager* const shared_bitmap_manager_;
+
   struct TransferableResourceHolder {
+    using ResourceReleaseCallback =
+        base::OnceCallback<void(const TransferableResource&)>;
+
     TransferableResourceHolder();
+    TransferableResourceHolder(const TransferableResource& resource,
+                               ResourceReleaseCallback release_callback);
     TransferableResourceHolder(TransferableResourceHolder&& other);
-    TransferableResourceHolder(
-        const TransferableResource& resource,
-        std::unique_ptr<SingleReleaseCallback> release_callback);
+    TransferableResourceHolder& operator=(TransferableResourceHolder&& other);
     ~TransferableResourceHolder();
 
-    TransferableResourceHolder& operator=(TransferableResourceHolder&& other);
-
     TransferableResource resource;
-    std::unique_ptr<SingleReleaseCallback> release_callback;
-    uint8_t ref_count;
+    ResourceReleaseCallback release_callback;
+    uint8_t ref_count = 0u;
   };
 
   std::map<ResourceId, TransferableResourceHolder> managed_resources_;

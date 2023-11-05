@@ -4,20 +4,32 @@
 
 #include "ui/events/event_utils.h"
 
+#include <limits>
 #include <map>
 #include <vector>
 
 #include "base/check.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
-#include "base/numerics/safe_conversions.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/events/base_event_utils.h"
+
+#if defined(OS_WIN)
+#include "ui/events/win/events_win_utils.h"
+#endif
 
 namespace ui {
 
 namespace {
+
 int g_custom_event_types = ET_LAST;
+
+#define UMA_HISTOGRAM_EVENT_LATENCY_TIMES(name, sample)            \
+  UMA_HISTOGRAM_CUSTOM_TIMES(name, sample,                         \
+                             base::TimeDelta::FromMilliseconds(1), \
+                             base::TimeDelta::FromMinutes(1), 50)
+
 }  // namespace
 
 std::unique_ptr<Event> EventFromNative(const PlatformEvent& native_event) {
@@ -85,10 +97,20 @@ display::Display::TouchSupport GetInternalDisplayTouchSupport() {
 
 void ComputeEventLatencyOS(const PlatformEvent& native_event) {
   base::TimeTicks current_time = EventTimeForNow();
-  base::TimeTicks time_stamp = EventTimeFromNative(native_event);
+  base::TimeTicks time_stamp =
+      EventLatencyTimeFromNative(native_event, current_time);
+  EventType type = EventTypeFromNative(native_event);
+  ComputeEventLatencyOS(type, time_stamp, current_time);
+}
+
+void ComputeEventLatencyOS(EventType type,
+                           base::TimeTicks time_stamp,
+                           base::TimeTicks current_time) {
   base::TimeDelta delta = current_time - time_stamp;
 
-  EventType type = EventTypeFromNative(native_event);
+  // TODO(crbug.com/1189656): Remove the legacy Event.Latency.OS.* histograms
+  // after M92 (which introduced Event.Latency.OS2.*) has been replaced in the
+  // stable channel.
   switch (type) {
 #if defined(OS_APPLE)
     // On Mac, ET_SCROLL and ET_MOUSEWHEEL represent the same class of events.
@@ -98,41 +120,85 @@ void ComputeEventLatencyOS(const PlatformEvent& native_event) {
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Event.Latency.OS.MOUSE_WHEEL",
           base::saturated_cast<int>(delta.InMicroseconds()), 1, 1000000, 50);
+      UMA_HISTOGRAM_EVENT_LATENCY_TIMES("Event.Latency.OS2.MOUSE_WHEEL", delta);
       return;
     case ET_TOUCH_MOVED:
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Event.Latency.OS.TOUCH_MOVED",
           base::saturated_cast<int>(delta.InMicroseconds()), 1, 1000000, 50);
+      UMA_HISTOGRAM_EVENT_LATENCY_TIMES("Event.Latency.OS2.TOUCH_MOVED", delta);
       return;
     case ET_TOUCH_PRESSED:
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Event.Latency.OS.TOUCH_PRESSED",
           base::saturated_cast<int>(delta.InMicroseconds()), 1, 1000000, 50);
+      UMA_HISTOGRAM_EVENT_LATENCY_TIMES("Event.Latency.OS2.TOUCH_PRESSED",
+                                        delta);
       return;
     case ET_TOUCH_RELEASED:
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Event.Latency.OS.TOUCH_RELEASED",
           base::saturated_cast<int>(delta.InMicroseconds()), 1, 1000000, 50);
+      UMA_HISTOGRAM_EVENT_LATENCY_TIMES("Event.Latency.OS2.TOUCH_RELEASED",
+                                        delta);
       return;
     case ET_TOUCH_CANCELLED:
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Event.Latency.OS.TOUCH_CANCELLED",
           base::saturated_cast<int>(delta.InMicroseconds()), 1, 1000000, 50);
+      UMA_HISTOGRAM_EVENT_LATENCY_TIMES("Event.Latency.OS2.TOUCH_CANCELLED",
+                                        delta);
       return;
     case ET_KEY_PRESSED:
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Event.Latency.OS.KEY_PRESSED",
           base::saturated_cast<int>(delta.InMicroseconds()), 1, 1000000, 50);
+      UMA_HISTOGRAM_EVENT_LATENCY_TIMES("Event.Latency.OS2.KEY_PRESSED", delta);
       return;
     case ET_MOUSE_PRESSED:
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Event.Latency.OS.MOUSE_PRESSED",
           base::saturated_cast<int>(delta.InMicroseconds()), 1, 1000000, 50);
+      UMA_HISTOGRAM_EVENT_LATENCY_TIMES("Event.Latency.OS2.MOUSE_PRESSED",
+                                        delta);
       return;
     default:
       return;
   }
 }
+
+#if defined(OS_WIN)
+
+void ComputeEventLatencyOSFromTOUCHINPUT(EventType event_type,
+                                         TOUCHINPUT touch_input,
+                                         base::TimeTicks current_time) {
+  base::TimeTicks time_stamp =
+      EventLatencyTimeFromTickClock(touch_input.dwTime, current_time);
+  ComputeEventLatencyOS(event_type, time_stamp, current_time);
+}
+
+void ComputeEventLatencyOSFromPOINTER_INFO(EventType event_type,
+                                           POINTER_INFO pointer_info,
+                                           base::TimeTicks current_time) {
+  base::TimeTicks time_stamp;
+  if (pointer_info.PerformanceCount) {
+    if (!base::TimeTicks::IsHighResolution()) {
+      // The tick clock will be incompatible with |event_time|.
+      return;
+    }
+    time_stamp =
+        EventLatencyTimeFromPerformanceCounter(pointer_info.PerformanceCount);
+  } else if (pointer_info.dwTime) {
+    time_stamp =
+        EventLatencyTimeFromTickClock(pointer_info.dwTime, current_time);
+  } else {
+    // Bad POINTER_INFO with no timestamp.
+    return;
+  }
+  ComputeEventLatencyOS(event_type, time_stamp, current_time);
+}
+
+#endif  // defined(OS_WIN)
 
 void ConvertEventLocationToTargetWindowLocation(
     const gfx::Point& target_window_origin,

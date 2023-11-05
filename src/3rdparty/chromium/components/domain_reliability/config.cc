@@ -7,16 +7,15 @@
 #include <utility>
 
 #include "base/json/json_reader.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/url_constants.h"
 
 namespace {
 
 bool ConvertURL(const base::Value* value, GURL* url) {
-  std::string url_string;
-  if (!value->GetAsString(&url_string))
+  if (!value->is_string())
     return false;
-  *url = GURL(url_string);
+  *url = GURL(value->GetString());
   return url->is_valid();
 }
 
@@ -44,7 +43,7 @@ DomainReliabilityConfig::~DomainReliabilityConfig() {}
 // static
 std::unique_ptr<const DomainReliabilityConfig>
 DomainReliabilityConfig::FromJSON(const base::StringPiece& json) {
-  base::Optional<base::Value> value = base::JSONReader::Read(json);
+  absl::optional<base::Value> value = base::JSONReader::Read(json);
   if (!value)
     return nullptr;
 

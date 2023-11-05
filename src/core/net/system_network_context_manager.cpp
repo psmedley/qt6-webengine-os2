@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2019 The Qt Company Ltd.
+** Copyright (C) 2021 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtWebEngine module of the Qt Toolkit.
@@ -46,20 +46,24 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/net/chrome_mojo_proxy_resolver_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/certificate_transparency/ct_known_logs.h"
 #include "components/network_session_configurator/common/network_switches.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/common/content_switches.h"
+#include "crypto/sha2.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "net/base/port_util.h"
 #include "net/net_buildflags.h"
 #include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom.h"
 #include "services/network/network_service.h"
 #include "services/network/public/cpp/cross_thread_pending_shared_url_loader_factory.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
-#include "services/network/public/mojom/host_resolver.mojom.h"
-#include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/cert_verifier_service.mojom.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
 
 namespace {
@@ -103,7 +107,6 @@ public:
     // mojom::URLLoaderFactory implementation:
 
     void CreateLoaderAndStart(mojo::PendingReceiver<network::mojom::URLLoader> receiver,
-                              int32_t routing_id,
                               int32_t request_id,
                               uint32_t options,
                               const network::ResourceRequest &url_request,
@@ -114,7 +117,7 @@ public:
         if (!manager_)
             return;
         manager_->GetURLLoaderFactory()->CreateLoaderAndStart(
-                    std::move(receiver), routing_id, request_id, options, url_request,
+                    std::move(receiver), request_id, options, url_request,
                     std::move(client), traffic_annotation);
     }
 
@@ -220,16 +223,56 @@ void SystemNetworkContextManager::OnNetworkServiceCreated(network::mojom::Networ
     network_service->SetUpHttpAuth(CreateHttpAuthStaticParams());
     network_service->ConfigureHttpAuthPrefs(CreateHttpAuthDynamicParams());
 
+    // Configure the Certificate Transparency logs.
+    std::vector<std::pair<std::string, base::TimeDelta>> disqualified_logs =
+        certificate_transparency::GetDisqualifiedLogs();
+    std::vector<network::mojom::CTLogInfoPtr> log_list_mojo;
+    for (const auto &ct_log : certificate_transparency::GetKnownLogs()) {
+        network::mojom::CTLogInfoPtr log_info = network::mojom::CTLogInfo::New();
+        log_info->public_key = std::string(ct_log.log_key, ct_log.log_key_length);
+        log_info->name = ct_log.log_name;
+
+        std::string log_id = crypto::SHA256HashString(log_info->public_key);
+        auto it = std::lower_bound(
+            std::begin(disqualified_logs), std::end(disqualified_logs), log_id,
+            [](const auto& disqualified_log, const std::string& log_id) {
+                return disqualified_log.first < log_id;
+            });
+        if (it != std::end(disqualified_logs) && it->first == log_id)
+            log_info->disqualified_at = it->second;
+        log_list_mojo.push_back(std::move(log_info));
+    }
+    network_service->UpdateCtLogList(
+        std::move(log_list_mojo),
+        certificate_transparency::GetLogListTimestamp());
+
     // The system NetworkContext is created first
     network_service_network_context_.reset();
     network_service->CreateNetworkContext(
         network_service_network_context_.BindNewPipeAndPassReceiver(),
         CreateNetworkContextParams());
 
+    // Handle --explicitly-allowed-ports
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kExplicitlyAllowedPorts)) {
+        std::vector<uint16_t> explicitly_allowed_network_ports;
+        std::string switch_value =
+            base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(switches::kExplicitlyAllowedPorts);
+        const auto split = base::SplitStringPiece(switch_value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+        for (const auto &piece : split) {
+            int port;
+            if (!base::StringToInt(piece, &port))
+                continue;
+            if (!net::IsPortValid(port))
+                continue;
+            explicitly_allowed_network_ports.push_back(static_cast<uint16_t>(port));
+        }
+
+        network_service->SetExplicitlyAllowedPorts(explicitly_allowed_network_ports);
+    }
     // Configure the stub resolver. This must be done after the system
     // NetworkContext is created, but before anything has the chance to use it.
     //    bool stub_resolver_enabled;
-    //    base::Optional<std::vector<network::mojom::DnsOverHttpsServerPtr>> dns_over_https_servers;
+    //    absl::optional<std::vector<network::mojom::DnsOverHttpsServerPtr>> dns_over_https_servers;
     //    GetStubResolverConfig(local_state_, &stub_resolver_enabled, &dns_over_https_servers);
     //    content::GetNetworkService()->ConfigureStubHostResolver(stub_resolver_enabled, std::move(dns_over_https_servers));
 }
@@ -249,23 +292,21 @@ void SystemNetworkContextManager::ConfigureDefaultNetworkContextParams(network::
     // respect prefs::kEnableReferrers from the appropriate pref store.
     network_context_params->enable_referrers = false;
 
-    network_context_params->proxy_resolver_factory = ChromeMojoProxyResolverFactory::CreateWithSelfOwnedReceiver();
+    const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+
+    if (command_line.HasSwitch(switches::kSingleProcess)) {
+      LOG(ERROR) << "Cannot use V8 Proxy resolver in single process mode.";
+    } else {
+      network_context_params->proxy_resolver_factory =
+          ChromeMojoProxyResolverFactory::CreateWithSelfOwnedReceiver();
+    }
 
     // Use the SystemNetworkContextManager to populate and update SSL
     // configuration. The SystemNetworkContextManager is owned by the
     // BrowserProcess itself, so will only be destroyed on shutdown, at which
     // point, all NetworkContexts will be destroyed as well.
     AddSSLConfigToNetworkContextParams(network_context_params);
-
-    // CT is only enabled on Desktop platforms for now.
-    network_context_params->enforce_chrome_ct_policy = true;
-    for (const auto &ct_log : certificate_transparency::GetKnownLogs()) {
-        // TODO(rsleevi): https://crbug.com/702062 - Remove this duplication.
-        network::mojom::CTLogInfoPtr log_info = network::mojom::CTLogInfo::New();
-        log_info->public_key = std::string(ct_log.log_key, ct_log.log_key_length);
-        log_info->name = ct_log.log_name;
-        network_context_params->ct_logs.push_back(std::move(log_info));
-    }
 }
 
 network::mojom::NetworkContextParamsPtr SystemNetworkContextManager::CreateNetworkContextParams()

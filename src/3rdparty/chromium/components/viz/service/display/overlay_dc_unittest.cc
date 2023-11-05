@@ -122,11 +122,9 @@ static ResourceId CreateResourceInLayerTree(
   auto resource = TransferableResource::MakeGL(
       gpu::Mailbox::Generate(), GL_LINEAR, GL_TEXTURE_2D, gpu::SyncToken(),
       size, is_overlay_candidate);
-  auto release_callback = SingleReleaseCallback::Create(
-      base::BindRepeating([](const gpu::SyncToken&, bool) {}));
 
-  ResourceId resource_id = child_resource_provider->ImportResource(
-      resource, std::move(release_callback));
+  ResourceId resource_id =
+      child_resource_provider->ImportResource(resource, base::DoNothing());
 
   return resource_id;
 }
@@ -139,7 +137,8 @@ ResourceId CreateResource(DisplayResourceProvider* parent_resource_provider,
   ResourceId resource_id = CreateResourceInLayerTree(
       child_resource_provider, size, is_overlay_candidate);
 
-  int child_id = parent_resource_provider->CreateChild(base::DoNothing());
+  int child_id =
+      parent_resource_provider->CreateChild(base::DoNothing(), SurfaceId());
 
   // Transfer resource to the parent.
   std::vector<ResourceId> resource_ids_to_transfer;
@@ -218,8 +217,8 @@ AggregatedRenderPassDrawQuad* CreateRenderPassDrawQuadAt(
   return quad;
 }
 
-SkMatrix44 GetIdentityColorMatrix() {
-  return SkMatrix44(SkMatrix44::kIdentity_Constructor);
+skia::Matrix44 GetIdentityColorMatrix() {
+  return skia::Matrix44(skia::Matrix44::kIdentity_Constructor);
 }
 
 class DCLayerOverlayTest : public testing::Test {
@@ -366,21 +365,11 @@ TEST_F(DCLayerOverlayTest, Occluded) {
     EXPECT_EQ(0U, output_surface_->bind_framebuffer_count());
     EXPECT_EQ(-1, dc_layer_list.front().z_order);
     EXPECT_EQ(-2, dc_layer_list.back().z_order);
+
     // The underlay rectangle is the same, so the damage for first video quad is
     // contained within the combined occluding rects for this and the last
     // frame. Second video quad also adds its damage.
-
-    // This is calculated by carving out the underlay rect size from the
-    // damage_rect, adding back the quads on top and then the overlay/underlay
-    // rects from the previous frame. The damage rect carried over from the
-    // previous frame with multiple overlays cannot be skipped if
-    // kDirectCompositionUseOverlayDamageList is disabled.
-    if (base::FeatureList::IsEnabled(
-            features::kDirectCompositionUseOverlayDamageList)) {
-      EXPECT_EQ(gfx::Rect(1, 1, 10, 10), damage_rect_);
-    } else {
-      EXPECT_EQ(gfx::Rect(0, 0, 256, 256), damage_rect_);
-    }
+    EXPECT_EQ(gfx::Rect(1, 1, 10, 10), damage_rect_);
   }
 }
 
@@ -520,7 +509,6 @@ TEST_F(DCLayerOverlayTest, ClipRect) {
     CreateOpaqueQuadAt(resource_provider_.get(),
                        pass->shared_quad_state_list.back(), pass.get(),
                        gfx::Rect(0, 2, 100, 100), SK_ColorWHITE);
-    pass->shared_quad_state_list.back()->is_clipped = true;
     pass->shared_quad_state_list.back()->clip_rect = gfx::Rect(0, 3, 100, 100);
 
     SharedQuadState* shared_state = pass->CreateAndAppendSharedQuadState();
@@ -529,7 +517,6 @@ TEST_F(DCLayerOverlayTest, ClipRect) {
     CreateFullscreenCandidateYUVVideoQuad(
         resource_provider_.get(), child_resource_provider_.get(),
         child_provider_.get(), shared_state, pass.get());
-    shared_state->is_clipped = true;
     // Clipped rect shouldn't be overlapped by clipped opaque quad rect.
     shared_state->clip_rect = gfx::Rect(0, 0, 100, 3);
 
@@ -551,7 +538,6 @@ TEST_F(DCLayerOverlayTest, ClipRect) {
     // Because of clip rects the overlay isn't occluded and shouldn't be an
     // underlay.
     EXPECT_EQ(1, dc_layer_list.back().z_order);
-    EXPECT_TRUE(dc_layer_list.back().is_clipped);
     EXPECT_EQ(gfx::Rect(0, 0, 100, 3), dc_layer_list.back().clip_rect);
     if (i == 1) {
       // The damage rect should only contain contents that aren't in the
@@ -922,6 +908,90 @@ TEST_F(DCLayerOverlayTest, BackdropFilter) {
   // with the backdrop filter rpdq->rect.
   EXPECT_EQ(0U, dc_layer_list.size());
   EXPECT_EQ(gfx::Rect(0, 0, 300, 300), damage_rect_);
+}
+
+// Test if overlay is not used when video capture is on.
+TEST_F(DCLayerOverlayTest, VideoCapture) {
+  // Frame #0
+  auto pass = CreateRenderPass();
+  pass->shared_quad_state_list.back();
+  // Create a solid quad.
+  CreateOpaqueQuadAt(resource_provider_.get(),
+                     pass->shared_quad_state_list.back(), pass.get(),
+                     gfx::Rect(0, 0, 32, 32), SK_ColorRED);
+
+  // Create a video YUV quad below the red solid quad.
+  auto* video_quad = CreateFullscreenCandidateYUVVideoQuad(
+      resource_provider_.get(), child_resource_provider_.get(),
+      child_provider_.get(), pass->shared_quad_state_list.back(), pass.get());
+  gfx::Rect rect(0, 0, 256, 256);
+  video_quad->rect = rect;
+  video_quad->visible_rect = rect;
+  pass->shared_quad_state_list.back()->overlay_damage_index = 1;
+
+  DCLayerOverlayList dc_layer_list;
+  OverlayProcessorInterface::FilterOperationsMap render_pass_filters;
+  OverlayProcessorInterface::FilterOperationsMap render_pass_backdrop_filters;
+  damage_rect_ = gfx::Rect(0, 0, 256, 256);
+  AggregatedRenderPassList pass_list;
+  pass_list.push_back(std::move(pass));
+  SurfaceDamageRectList surface_damage_rect_list = {gfx::Rect(0, 0, 32, 32),
+                                                    gfx::Rect(0, 0, 256, 256)};
+  // No video capture in this frame.
+  overlay_processor_->SetIsVideoCaptureEnabled(false);
+  overlay_processor_->ProcessForOverlays(
+      resource_provider_.get(), &pass_list, GetIdentityColorMatrix(),
+      render_pass_filters, render_pass_backdrop_filters,
+      std::move(surface_damage_rect_list), nullptr, &dc_layer_list,
+      &damage_rect_, &content_bounds_);
+
+  // Use overlay for the video quad.
+  EXPECT_EQ(1U, dc_layer_list.size());
+
+  // Frame #1
+  {
+    auto pass = CreateRenderPass();
+    pass->shared_quad_state_list.back();
+    // Create a solid quad.
+    CreateOpaqueQuadAt(resource_provider_.get(),
+                       pass->shared_quad_state_list.back(), pass.get(),
+                       gfx::Rect(0, 0, 32, 32), SK_ColorRED);
+
+    // Create a video YUV quad below the red solid quad.
+    auto* video_quad = CreateFullscreenCandidateYUVVideoQuad(
+        resource_provider_.get(), child_resource_provider_.get(),
+        child_provider_.get(), pass->shared_quad_state_list.back(), pass.get());
+    gfx::Rect rect(0, 0, 256, 256);
+    video_quad->rect = rect;
+    video_quad->visible_rect = rect;
+    pass->shared_quad_state_list.back()->overlay_damage_index = 0;
+
+    DCLayerOverlayList dc_layer_list;
+    OverlayProcessorInterface::FilterOperationsMap render_pass_filters;
+    OverlayProcessorInterface::FilterOperationsMap render_pass_backdrop_filters;
+    damage_rect_ = gfx::Rect(0, 0, 256, 256);
+    AggregatedRenderPassList pass_list;
+    pass_list.push_back(std::move(pass));
+    SurfaceDamageRectList surface_damage_rect_list = {
+        gfx::Rect(0, 0, 256, 256)};
+
+    // Now video capture is enabled.
+    overlay_processor_->SetIsVideoCaptureEnabled(true);
+    overlay_processor_->ProcessForOverlays(
+        resource_provider_.get(), &pass_list, GetIdentityColorMatrix(),
+        render_pass_filters, render_pass_backdrop_filters,
+        std::move(surface_damage_rect_list), nullptr, &dc_layer_list,
+        &damage_rect_, &content_bounds_);
+
+    // Should not use overlay for the video when video capture is on.
+    EXPECT_EQ(0U, dc_layer_list.size());
+
+    // Check whether both quads including the YUV quads are still in the render
+    // pass.
+    auto* root_pass = pass_list.back().get();
+    int quad_count = root_pass->quad_list.size();
+    EXPECT_EQ(2, quad_count);
+  }
 }
 
 }  // namespace

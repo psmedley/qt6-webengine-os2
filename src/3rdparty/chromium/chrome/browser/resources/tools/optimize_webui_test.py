@@ -53,23 +53,11 @@ class OptimizeWebUiTest(unittest.TestCase):
     # TODO(dbeam): make it possible to _run_optimize twice? Is that useful?
     args = input_args + [
       '--depfile', os.path.join(self._out_folder, 'depfile.d'),
+      '--target_name', 'dummy_target_name',
       '--input', self._tmp_src_dir,
       '--out_folder', self._out_folder,
     ]
     optimize_webui.main(args)
-
-  def _write_files_to_src_dir(self):
-    self._write_file_to_src_dir('element.html', '<div>got here!</div>')
-    self._write_file_to_src_dir('element.js', "alert('yay');")
-    self._write_file_to_src_dir('element_in_dir/element_in_dir.html',
-                                '<script src="element_in_dir.js">')
-    self._write_file_to_src_dir('element_in_dir/element_in_dir.js',
-                                "alert('hello from element_in_dir');")
-    self._write_file_to_src_dir('ui.html', '''
-<link rel="import" href="element.html">
-<link rel="import" href="element_in_dir/element_in_dir.html">
-<script src="element.js"></script>
-''')
 
   def _write_v3_files_to_src_dir(self):
     self._write_file_to_src_dir('element.js', "alert('yay');")
@@ -153,22 +141,6 @@ import './element_in_dir/element_in_dir.js';
       self.assertIn('element.html', depfile_d)
       self.assertIn(os.path.normpath('element_in_dir/element_in_dir.html'),
                     depfile_d)
-
-  def testSimpleOptimize(self):
-    self._write_files_to_src_dir()
-    args = [
-      '--host', 'fake-host',
-      '--html_in_files', 'ui.html',
-      '--html_out_files', 'fast.html',
-      '--js_out_files', 'fast.js',
-    ]
-    self._run_optimize(args)
-
-    fast_html = self._read_out_file('fast.html')
-    self._check_output_html(fast_html)
-    self.assertIn('<script src="fast.js"></script>', fast_html)
-    self._check_output_js('fast.js')
-    self._check_output_depfile(True)
 
   def testV3SimpleOptimize(self):
     self._write_v3_files_to_src_dir()

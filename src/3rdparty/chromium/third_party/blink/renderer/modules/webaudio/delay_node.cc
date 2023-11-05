@@ -29,6 +29,7 @@
 
 #include "third_party/blink/renderer/bindings/modules/v8/v8_delay_options.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_basic_processor_handler.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/delay_processor.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -46,10 +47,12 @@ DelayHandler::DelayHandler(AudioNode& node,
           kNodeTypeDelay,
           node,
           sample_rate,
-          std::make_unique<DelayProcessor>(sample_rate,
-                                           1,
-                                           delay_time,
-                                           max_delay_time)) {
+          std::make_unique<DelayProcessor>(
+              sample_rate,
+              1,
+              node.context()->GetDeferredTaskHandler().RenderQuantumFrames(),
+              delay_time,
+              max_delay_time)) {
   // Initialize the handler so that AudioParams can be processed.
   Initialize();
 }

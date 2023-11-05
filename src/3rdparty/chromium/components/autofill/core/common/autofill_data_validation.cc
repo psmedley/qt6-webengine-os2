@@ -22,7 +22,7 @@ bool IsValidString(const std::string& str) {
   return str.size() <= kMaxDataLength;
 }
 
-bool IsValidString16(const base::string16& str) {
+bool IsValidString16(const std::u16string& str) {
   return str.size() <= kMaxDataLength;
 }
 
@@ -35,7 +35,7 @@ bool IsValidFormFieldData(const FormFieldData& field) {
          IsValidString16(field.value) &&
          IsValidString(field.form_control_type) &&
          IsValidString(field.autocomplete_attribute) &&
-         IsValidString16Vector(field.option_contents);
+         IsValidOptionVector(field.options);
 }
 
 bool IsValidFormData(const FormData& form) {
@@ -56,12 +56,39 @@ bool IsValidPasswordFormFillData(const PasswordFormFillData& form) {
          });
 }
 
-bool IsValidString16Vector(const std::vector<base::string16>& v) {
-  return v.size() <= kMaxListSize && base::ranges::all_of(v, &IsValidString16);
+bool IsValidOptionVector(const std::vector<SelectOption>& options) {
+  if (options.size() > kMaxListSize)
+    return false;
+  for (const auto& option : options) {
+    if (!IsValidString16(option.content))
+      return false;
+  }
+  return true;
+//   return options.size() <= kMaxListSize &&
+//          base::ranges::all_of(options, &IsValidString16,
+//                               &SelectOption::content);
+}
+
+bool IsValidString16Vector(const std::vector<std::u16string>& v) {
+  if (v.size() > kMaxListSize)
+    return false;
+  for (const auto& i : v) {
+    if (!IsValidString16(i))
+      return false;
+  }
+  return true;
+//   return v.size() <= kMaxListSize && base::ranges::all_of(v, &IsValidString16);
 }
 
 bool IsValidFormDataVector(const std::vector<FormData>& v) {
-  return v.size() <= kMaxListSize && base::ranges::all_of(v, &IsValidFormData);
+  if (v.size() > kMaxListSize)
+    return false;
+  for (const auto& i : v) {
+    if (!IsValidFormData(i))
+      return false;
+  }
+  return true;
+//   return v.size() <= kMaxListSize && base::ranges::all_of(v, &IsValidFormData);
 }
 
 }  // namespace autofill

@@ -6,10 +6,10 @@
 
 #include <inttypes.h>
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "cc/animation/animation_delegate.h"
 #include "cc/animation/animation_events.h"
@@ -32,7 +32,7 @@ Animation::Animation(int id, std::unique_ptr<KeyframeEffect> keyframe_effect)
     : animation_host_(), animation_timeline_(), animation_delegate_(), id_(id) {
   DCHECK(id_);
   if (!keyframe_effect)
-    keyframe_effect.reset(new KeyframeEffect(this));
+    keyframe_effect = std::make_unique<KeyframeEffect>(this);
 
   keyframe_effect_ = std::move(keyframe_effect);
 }
@@ -238,7 +238,8 @@ void Animation::ActivateKeyframeModels() {
 
 KeyframeModel* Animation::GetKeyframeModel(
     TargetProperty::Type target_property) const {
-  return keyframe_effect_->GetKeyframeModel(target_property);
+  return KeyframeModel::ToCcKeyframeModel(
+      keyframe_effect_->GetKeyframeModel(target_property));
 }
 
 std::string Animation::ToString() const {

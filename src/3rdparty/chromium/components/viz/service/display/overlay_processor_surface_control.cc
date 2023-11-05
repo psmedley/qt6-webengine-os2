@@ -66,8 +66,8 @@ void OverlayProcessorSurfaceControl::CheckOverlaySupport(
 
     gfx::RectF orig_display_rect = candidate.display_rect;
     gfx::RectF display_rect = orig_display_rect;
-    if (candidate.is_clipped)
-      display_rect.Intersect(gfx::RectF(candidate.clip_rect));
+    if (candidate.clip_rect)
+      display_rect.Intersect(gfx::RectF(*candidate.clip_rect));
     // The framework doesn't support display rects positioned at a negative
     // offset.
     display_rect = ClipFromOrigin(display_rect);
@@ -84,6 +84,9 @@ void OverlayProcessorSurfaceControl::CheckOverlaySupport(
     display_inverse.TransformRect(&orig_display_rect);
     display_inverse.TransformRect(&display_rect);
 
+    candidate.unclipped_display_rect = orig_display_rect;
+    candidate.unclipped_uv_rect = candidate.uv_rect;
+
     candidate.display_rect = gfx::RectF(gfx::ToEnclosingRect(display_rect));
     candidate.uv_rect = cc::MathUtil::ScaleRectProportional(
         candidate.uv_rect, orig_display_rect, candidate.display_rect);
@@ -92,7 +95,7 @@ void OverlayProcessorSurfaceControl::CheckOverlaySupport(
 }
 
 void OverlayProcessorSurfaceControl::AdjustOutputSurfaceOverlay(
-    base::Optional<OutputSurfaceOverlayPlane>* output_surface_plane) {
+    absl::optional<OutputSurfaceOverlayPlane>* output_surface_plane) {
   // For surface control, we should always have a valid |output_surface_plane|
   // here.
   DCHECK(output_surface_plane && output_surface_plane->has_value());

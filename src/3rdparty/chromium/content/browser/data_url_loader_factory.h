@@ -9,6 +9,7 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/cpp/self_deleting_url_loader_factory.h"
+#include "url/gurl.h"
 
 namespace content {
 
@@ -41,7 +42,6 @@ class DataURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
   ~DataURLLoaderFactory() override;
   void CreateLoaderAndStart(
       mojo::PendingReceiver<network::mojom::URLLoader> loader,
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& request,

@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
+
 assert(!is_android)
 
 static_library("discovery") {
@@ -13,6 +15,7 @@ static_library("discovery") {
     "//chrome/app:generated_resources",
     "//chrome/browser:browser_process",
     "//chrome/browser/media/router:data_decoder_util",
+    "//chrome/browser/media/router:media_router_feature",
     "//chrome/common:constants",
     "//components/cast_channel",
     "//components/media_router/browser",
@@ -79,8 +82,16 @@ static_library("discovery") {
     sources += [ "discovery_network_list_wifi_linux.cc" ]
   }
 
+  if (is_chromeos_ash) {
+    deps += [ "//chromeos/network" ]
+  }
+
   if (is_posix) {
     sources += [ "discovery_network_list_posix.cc" ]
+  }
+
+  if (is_fuchsia) {
+    sources += [ "discovery_network_list_fuchsia.cc" ]
   }
 
   if (is_mac) {

@@ -6,9 +6,12 @@ set noparent
 # Troopers
 bpastene@chromium.org
 estaab@chromium.org
+gatong@chromium.org
 gbeaty@chromium.org
 hypan@google.com
+kimstephanie@google.com
 martiniss@chromium.org
+mmoss@chromium.org
 
 # Other folks who understand the infrastructure well.
 dpranke@google.com
@@ -20,3 +23,8 @@ ynovikov@chromium.org
 
 # For code coverage and PGO related.
 liaoyuke@chromium.org
+
+# Specific OWNERS to review changes to the non-inclusive terms PRESUBMIT checks
+per-file inclusive_language_presubmit_exempt_dirs.txt=efoo@chromium.org
+per-file update_inclusive_language_presubmit_exempt_dirs.sh=efoo@chromium.org
+per-file update_inclusive_language_presubmit_exempt_dirs.sh=seanmccullough@chromium.org

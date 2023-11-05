@@ -45,9 +45,6 @@ declare_args() {
   # Set to true for builds targeting ARC.
   is_android_arc = false
 
-  # Set true for builds targeting Android Things.
-  is_android_things = false
-
   # Set true for builds targeting Android appliances.
   is_android_appliance = false
 
@@ -86,10 +83,10 @@ declare_args() {
   use_android_user_agent = false
 
   # Contain default command line switches we want to set.
-  # The syntax: "test-flag-one=public,test-flag-two=true,test-flag-three=1,".
-  # This arg can be overridden but not supports += operator.
+  # This will get joined into a comma-separated list that looks like:
+  #   "test-flag-one=public,test-flag-two=true,test-flag-three=1,"
   # TODO(ziyangch): make the parsing logic have ability to quote/escape characters.
-  default_command_line_flags = ""
+  default_command_line_flags = []
 
   # Set to true to disable secure flac/opus support in EME, when using
   # cast CMA media backend and supporting Widevine or Playready.
@@ -132,13 +129,12 @@ declare_args() {
 
   # True to use the Chromium runtime for cast rendering.
   enable_chromium_runtime_cast_renderer = false
-}
 
-declare_args() {
-  enable_volume_tables_access =
-      is_android_things && chromecast_branding != "public"
-  is_android_things_non_public =
-      is_android_things && chromecast_branding != "public"
+  # True to link in alternate build targets for the Cast Media Runtime.
+  enable_cast_media_runtime = false
+
+  # device specific string to append to User string.
+  device_user_agent_suffix = ""
 }
 
 declare_args() {
@@ -157,9 +153,11 @@ if (chromecast_branding == "public") {
 }
 
 # All locales supported by Cast builds. This provides a single point of
-# reference for all GN files referencing a locales list. |locales| is declared
-# in //build/config/locales.gni.
-cast_locales = locales
+# reference for all GN files referencing a locales list.
+# |locales_without_pseudolocales| is declared in //build/config/locales.gni.
+# See https://chromium-review.googlesource.com/488166/ for why we can't use
+# pseudolocales in chromecast.
+cast_locales = locales_without_pseudolocales
 
 # Android currently supports more locales than Desktop and ChromeOS.
 # If Cast will also the android files update this and the Cast grd files.

@@ -7,7 +7,6 @@
 #include <stdint.h>
 
 #include <string>
-#include <vector>
 
 #include "base/check.h"
 #include "base/metrics/histogram_functions.h"
@@ -316,11 +315,6 @@ void StabilityMetricsHelper::LogRendererLaunchFailed(
 void StabilityMetricsHelper::IncrementPrefValue(const char* path) {
   int value = local_state_->GetInteger(path);
   local_state_->SetInteger(path, value + 1);
-}
-
-void StabilityMetricsHelper::IncrementLongPrefsValue(const char* path) {
-  int64_t value = local_state_->GetInt64(path);
-  local_state_->SetInt64(path, value + 1);
 }
 
 void StabilityMetricsHelper::LogRendererHang() {

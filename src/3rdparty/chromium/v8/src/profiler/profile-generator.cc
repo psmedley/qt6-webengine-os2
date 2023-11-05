@@ -157,12 +157,10 @@ bool CodeEntry::IsSameFunctionAs(const CodeEntry* entry) const {
          line_number_ == entry->line_number_;
 }
 
-
-void CodeEntry::SetBuiltinId(Builtins::Name id) {
+void CodeEntry::SetBuiltinId(Builtin id) {
   bit_field_ = TagField::update(bit_field_, CodeEventListener::BUILTIN_TAG);
-  bit_field_ = BuiltinIdField::update(bit_field_, id);
+  bit_field_ = BuiltinField::update(bit_field_, id);
 }
-
 
 int CodeEntry::GetSourceLine(int pc_offset) const {
   if (line_info_) return line_info_->GetSourceLineNumber(pc_offset);
@@ -170,8 +168,7 @@ int CodeEntry::GetSourceLine(int pc_offset) const {
 }
 
 void CodeEntry::SetInlineStacks(
-    std::unordered_set<std::unique_ptr<CodeEntry>, Hasher, Equals>
-        inline_entries,
+    std::unordered_set<CodeEntry*, Hasher, Equals> inline_entries,
     std::unordered_map<int, std::vector<CodeEntryAndLineNumber>>
         inline_stacks) {
   EnsureRareData()->inline_entries_ = std::move(inline_entries);
@@ -233,6 +230,8 @@ CodeEntry::RareData* CodeEntry::EnsureRareData() {
 }
 
 void CodeEntry::ReleaseStrings(StringsStorage& strings) {
+  DCHECK_EQ(ref_count_, 0UL);
+
   if (name_) {
     strings.Release(name_);
     name_ = nullptr;
@@ -240,14 +239,6 @@ void CodeEntry::ReleaseStrings(StringsStorage& strings) {
   if (resource_name_) {
     strings.Release(resource_name_);
     resource_name_ = nullptr;
-  }
-
-  if (rare_data_) {
-    // All inline entries are exclusively owned by the CodeEntry. They'll be
-    // deallocated when the CodeEntry is deallocated.
-    for (auto& entry : rare_data_->inline_entries_) {
-      entry->ReleaseStrings(strings);
-    }
   }
 }
 
@@ -298,6 +289,10 @@ void CodeEntry::print() const {
   base::OS::Print("\n");
 }
 
+ProfileNode::~ProfileNode() {
+  if (tree_->code_entries()) tree_->code_entries()->DecRef(entry_);
+}
+
 CpuProfileNode::SourceType ProfileNode::source_type() const {
   // Handle metadata and VM state code entry types.
   if (entry_ == CodeEntry::program_entry() ||
@@ -314,7 +309,6 @@ CpuProfileNode::SourceType ProfileNode::source_type() const {
     case CodeEventListener::SCRIPT_TAG:
     case CodeEventListener::LAZY_COMPILE_TAG:
     case CodeEventListener::FUNCTION_TAG:
-    case CodeEventListener::INTERPRETED_FUNCTION_TAG:
       return CpuProfileNode::kScript;
     case CodeEventListener::BUILTIN_TAG:
     case CodeEventListener::HANDLER_TAG:
@@ -335,7 +329,6 @@ CpuProfileNode::SourceType ProfileNode::source_type() const {
     case CodeEventListener::SHARED_FUNC_MOVE_EVENT:
     case CodeEventListener::SNAPSHOT_CODE_NAME_EVENT:
     case CodeEventListener::TICK_EVENT:
-    case CodeEventListener::BYTECODE_FLUSH_EVENT:
     case CodeEventListener::NUMBER_OF_LOG_EVENTS:
       return CpuProfileNode::kInternal;
   }
@@ -437,10 +430,11 @@ class DeleteNodesCallback {
   void AfterChildTraversed(ProfileNode*, ProfileNode*) { }
 };
 
-ProfileTree::ProfileTree(Isolate* isolate)
+ProfileTree::ProfileTree(Isolate* isolate, CodeEntryStorage* storage)
     : next_node_id_(1),
-      root_(new ProfileNode(this, CodeEntry::root_entry(), nullptr)),
-      isolate_(isolate) {}
+      isolate_(isolate),
+      code_entries_(storage),
+      root_(new ProfileNode(this, CodeEntry::root_entry(), nullptr)) {}
 
 ProfileTree::~ProfileTree() {
   DeleteNodesCallback cb;
@@ -535,6 +529,12 @@ void ProfileTree::TraverseDepthFirst(Callback* callback) {
   }
 }
 
+void ContextFilter::OnMoveEvent(Address from_address, Address to_address) {
+  if (native_context_address() != from_address) return;
+
+  set_native_context_address(to_address);
+}
+
 using v8::tracing::TracedValue;
 
 std::atomic<uint32_t> CpuProfile::last_id_;
@@ -546,7 +546,7 @@ CpuProfile::CpuProfile(CpuProfiler* profiler, const char* title,
       options_(options),
       delegate_(std::move(delegate)),
       start_time_(base::TimeTicks::HighResolutionNow()),
-      top_down_(profiler->isolate()),
+      top_down_(profiler->isolate(), profiler->code_entries()),
       profiler_(profiler),
       streaming_next_sample_(0),
       id_(++last_id_) {
@@ -559,6 +559,13 @@ CpuProfile::CpuProfile(CpuProfiler* profiler, const char* title,
   value->SetDouble("startTime", start_time_.since_origin().InMicroseconds());
   TRACE_EVENT_SAMPLE_WITH_ID1(TRACE_DISABLED_BY_DEFAULT("v8.cpu_profiler"),
                               "Profile", id_, "data", std::move(value));
+
+  DisallowHeapAllocation no_gc;
+  if (options_.has_filter_context()) {
+    i::Address raw_filter_context =
+        reinterpret_cast<i::Address>(options_.raw_filter_context());
+    context_filter_.set_native_context_address(raw_filter_context);
+  }
 }
 
 bool CpuProfile::CheckSubsample(base::TimeDelta source_sampling_interval) {
@@ -708,6 +715,8 @@ void CpuProfile::StreamPendingTraceEvents() {
 
 void CpuProfile::FinishProfile() {
   end_time_ = base::TimeTicks::HighResolutionNow();
+  // Stop tracking context movements after profiling stops.
+  context_filter_.set_native_context_address(kNullAddress);
   StreamPendingTraceEvents();
   auto value = TracedValue::Create();
   // The endTime timestamp is not converted to Perfetto's clock domain and will
@@ -728,36 +737,54 @@ void CpuProfile::Print() const {
   ProfilerStats::Instance()->Clear();
 }
 
-CodeMap::CodeMap(StringsStorage& function_and_resource_names)
-    : function_and_resource_names_(function_and_resource_names) {}
+void CodeEntryStorage::AddRef(CodeEntry* entry) {
+  if (entry->is_ref_counted()) entry->AddRef();
+}
+
+void CodeEntryStorage::DecRef(CodeEntry* entry) {
+  if (entry->is_ref_counted() && entry->DecRef() == 0) {
+    if (entry->rare_data_) {
+      for (auto* inline_entry : entry->rare_data_->inline_entries_) {
+        DecRef(inline_entry);
+      }
+    }
+    entry->ReleaseStrings(function_and_resource_names_);
+    delete entry;
+  }
+}
+
+CodeMap::CodeMap(CodeEntryStorage& storage) : code_entries_(storage) {}
 
 CodeMap::~CodeMap() { Clear(); }
 
 void CodeMap::Clear() {
   for (auto& slot : code_map_) {
     if (CodeEntry* entry = slot.second.entry) {
-      entry->ReleaseStrings(function_and_resource_names_);
-      delete entry;
+      code_entries_.DecRef(entry);
     } else {
       // We expect all entries in the code mapping to contain a CodeEntry.
       UNREACHABLE();
     }
   }
 
-  // Free all CodeEntry objects that are no longer in the map, but in a profile.
-  // TODO(acomminos): Remove this deque after we refcount CodeEntry objects.
-  for (CodeEntry* entry : used_entries_) {
-    DCHECK(entry->used());
-    DeleteCodeEntry(entry);
-  }
-
   code_map_.clear();
-  used_entries_.clear();
 }
 
 void CodeMap::AddCode(Address addr, CodeEntry* entry, unsigned size) {
-  ClearCodesInRange(addr, addr + size);
   code_map_.emplace(addr, CodeEntryMapInfo{entry, size});
+  entry->set_instruction_start(addr);
+}
+
+bool CodeMap::RemoveCode(CodeEntry* entry) {
+  auto range = code_map_.equal_range(entry->instruction_start());
+  for (auto i = range.first; i != range.second; ++i) {
+    if (i->second.entry == entry) {
+      code_entries_.DecRef(entry);
+      code_map_.erase(i);
+      return true;
+    }
+  }
+  return false;
 }
 
 void CodeMap::ClearCodesInRange(Address start, Address end) {
@@ -768,16 +795,15 @@ void CodeMap::ClearCodesInRange(Address start, Address end) {
   }
   auto right = left;
   for (; right != code_map_.end() && right->first < end; ++right) {
-    if (!right->second.entry->used()) {
-      DeleteCodeEntry(right->second.entry);
-    } else {
-      used_entries_.push_back(right->second.entry);
-    }
+    code_entries_.DecRef(right->second.entry);
   }
   code_map_.erase(left, right);
 }
 
 CodeEntry* CodeMap::FindEntry(Address addr, Address* out_instruction_start) {
+  // Note that an address may correspond to multiple CodeEntry objects. An
+  // arbitrary selection is made (as per multimap spec) in the event of a
+  // collision.
   auto it = code_map_.upper_bound(addr);
   if (it == code_map_.begin()) return nullptr;
   --it;
@@ -791,18 +817,25 @@ CodeEntry* CodeMap::FindEntry(Address addr, Address* out_instruction_start) {
 
 void CodeMap::MoveCode(Address from, Address to) {
   if (from == to) return;
-  auto it = code_map_.find(from);
-  if (it == code_map_.end()) return;
-  CodeEntryMapInfo info = it->second;
-  code_map_.erase(it);
-  DCHECK(from + info.size <= to || to + info.size <= from);
-  ClearCodesInRange(to, to + info.size);
-  code_map_.emplace(to, info);
-}
 
-void CodeMap::DeleteCodeEntry(CodeEntry* entry) {
-  entry->ReleaseStrings(function_and_resource_names_);
-  delete entry;
+  auto range = code_map_.equal_range(from);
+  // Instead of iterating until |range.second|, iterate the number of elements.
+  // This is because the |range.second| may no longer be the element past the
+  // end of the equal elements range after insertions.
+  size_t distance = std::distance(range.first, range.second);
+  auto it = range.first;
+  while (distance--) {
+    CodeEntryMapInfo& info = it->second;
+    DCHECK(info.entry);
+    DCHECK_EQ(info.entry->instruction_start(), from);
+    info.entry->set_instruction_start(to);
+
+    DCHECK(from + info.size <= to || to + info.size <= from);
+    code_map_.emplace(to, info);
+    it++;
+  }
+
+  code_map_.erase(range.first, it);
 }
 
 void CodeMap::Print() {
@@ -913,14 +946,28 @@ base::TimeDelta CpuProfilesCollection::GetCommonSamplingInterval() const {
 
 void CpuProfilesCollection::AddPathToCurrentProfiles(
     base::TimeTicks timestamp, const ProfileStackTrace& path, int src_line,
-    bool update_stats, base::TimeDelta sampling_interval) {
+    bool update_stats, base::TimeDelta sampling_interval,
+    Address native_context_address) {
   // As starting / stopping profiles is rare relatively to this
   // method, we don't bother minimizing the duration of lock holding,
   // e.g. copying contents of the list to a local vector.
   current_profiles_semaphore_.Wait();
+  const ProfileStackTrace empty_path;
   for (const std::unique_ptr<CpuProfile>& profile : current_profiles_) {
-    profile->AddPath(timestamp, path, src_line, update_stats,
-                     sampling_interval);
+    // If the context filter check failed, omit the contents of the stack.
+    bool accepts_context =
+        profile->context_filter().Accept(native_context_address);
+    profile->AddPath(timestamp, accepts_context ? path : empty_path, src_line,
+                     update_stats, sampling_interval);
+  }
+  current_profiles_semaphore_.Signal();
+}
+
+void CpuProfilesCollection::UpdateNativeContextAddressForCurrentProfiles(
+    Address from, Address to) {
+  current_profiles_semaphore_.Wait();
+  for (const std::unique_ptr<CpuProfile>& profile : current_profiles_) {
+    profile->context_filter().OnMoveEvent(from, to);
   }
   current_profiles_semaphore_.Signal();
 }

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <string>
 
 #include "base/bind.h"
@@ -126,7 +127,7 @@ class TestNetworkQualityObserver
     run_loop_wait_effective_connection_type_ =
         run_loop_wait_effective_connection_type;
     run_loop_->Run();
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
   }
 
  private:
@@ -153,8 +154,7 @@ class NetworkQualityEstimatorPrefsBrowserTest : public InProcessBrowserTest {
 
     mojo::ScopedAllowSyncCallForTesting allow_sync_call;
     content::StoragePartition* partition =
-        content::BrowserContext::GetDefaultStoragePartition(
-            browser()->profile());
+        browser()->profile()->GetDefaultStoragePartition();
     DCHECK(partition->GetNetworkContext());
     DCHECK(content::GetNetworkService());
 
@@ -206,8 +206,7 @@ IN_PROC_BROWSER_TEST_F(NetworkQualityEstimatorPrefsBrowserTest,
 
   base::DictionaryValue pref_value;
   base::Value value("2G");
-  pref_value.Set("network_id_foo",
-                 base::Value::ToUniquePtrValue(value.Clone()));
+  pref_value.SetKey("network_id_foo", value.Clone());
   state->SetValue("net.network_qualities",
                   base::Value::ToUniquePtrValue(pref_value.Clone()), 0);
 
@@ -217,7 +216,7 @@ IN_PROC_BROWSER_TEST_F(NetworkQualityEstimatorPrefsBrowserTest,
       base::BindOnce([](base::RunLoop* loop) { loop->Quit(); }, &loop));
   loop.Run();
 
-  content::GetNetworkService()->CreateNetworkContext(
+  content::CreateNetworkContextInNetworkService(
       network_context.InitWithNewPipeAndPassReceiver(),
       std::move(context_params));
 

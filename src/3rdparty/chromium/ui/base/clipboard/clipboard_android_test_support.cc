@@ -25,7 +25,7 @@ jboolean JNI_ClipboardAndroidTestSupport_NativeWriteHtml(
   {
     // Simulate something writing HTML to the clipboard in native.
     // Android requires both a plaintext and HTML version.
-    base::string16 html_text;
+    std::u16string html_text;
     base::android::ConvertJavaStringToUTF16(env, j_html_text, &html_text);
     std::string url;
     ScopedClipboardWriter clipboard_writer(ClipboardBuffer::kCopyPaste);
@@ -33,10 +33,10 @@ jboolean JNI_ClipboardAndroidTestSupport_NativeWriteHtml(
     clipboard_writer.WriteText(html_text);
   }
   auto* clipboard = Clipboard::GetForCurrentThread();
-  return clipboard->IsFormatAvailable(ClipboardFormatType::GetHtmlType(),
+  return clipboard->IsFormatAvailable(ClipboardFormatType::HtmlType(),
                                       ClipboardBuffer::kCopyPaste,
                                       /* data_dst = */ nullptr) &&
-         clipboard->IsFormatAvailable(ClipboardFormatType::GetPlainTextType(),
+         clipboard->IsFormatAvailable(ClipboardFormatType::PlainTextType(),
                                       ClipboardBuffer::kCopyPaste,
                                       /* data_dst = */ nullptr);
 }
@@ -48,14 +48,14 @@ jboolean JNI_ClipboardAndroidTestSupport_NativeClipboardContains(
   // ClipboardManager. This should update the native side of the clipboard as
   // well as the Android side.
   auto* clipboard = Clipboard::GetForCurrentThread();
-  if (clipboard->IsFormatAvailable(ClipboardFormatType::GetHtmlType(),
+  if (clipboard->IsFormatAvailable(ClipboardFormatType::HtmlType(),
                                    ClipboardBuffer::kCopyPaste,
                                    /* data_dst = */ nullptr)) {
     LOG(ERROR) << "HTML still in clipboard.";
     return false;
   }
 
-  if (!clipboard->IsFormatAvailable(ClipboardFormatType::GetPlainTextType(),
+  if (!clipboard->IsFormatAvailable(ClipboardFormatType::PlainTextType(),
                                     ClipboardBuffer::kCopyPaste,
                                     /* data_dst = */ nullptr)) {
     LOG(ERROR) << "Plain text not in clipboard.";

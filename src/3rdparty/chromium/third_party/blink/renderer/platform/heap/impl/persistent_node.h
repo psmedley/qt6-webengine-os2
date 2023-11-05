@@ -7,11 +7,12 @@
 
 #include <atomic>
 #include <memory>
+
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/platform/heap/process_heap.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
@@ -213,7 +214,7 @@ class PLATFORM_EXPORT PersistentRegionBase {
   PersistentNode* free_list_head_ = nullptr;
   PersistentNodeSlots* slots_ = nullptr;
 #if DCHECK_IS_ON()
-  size_t used_node_count_ = 0;
+  int used_node_count_ = 0;
 #endif
 };
 
@@ -234,7 +235,7 @@ inline PersistentNode* PersistentRegionBase::AllocateNode(void* self,
 
 void PersistentRegionBase::FreeNode(PersistentNode* persistent_node) {
 #if DCHECK_IS_ON()
-  DCHECK_GT(used_node_count_, 0u);
+  DCHECK_GT(used_node_count_, 0);
 #endif
   persistent_node->SetFreeListNext(free_list_head_);
   free_list_head_ = persistent_node;

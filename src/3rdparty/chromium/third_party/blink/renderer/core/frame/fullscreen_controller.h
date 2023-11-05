@@ -31,8 +31,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FULLSCREEN_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FULLSCREEN_CONTROLLER_H_
 
-#include <memory>
-
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
@@ -98,12 +96,10 @@ class CORE_EXPORT FullscreenController {
     kInitial,
     kEnteringFullscreen,
     kFullscreen,
+    kChangingFullscreenDisplays,
     kExitingFullscreen,
   };
   State state_ = State::kInitial;
-
-  bool initial_background_color_override_enabled_ = false;
-  RGBA32 initial_background_color_override_ = Color::kTransparent;
 
   using PendingFullscreenSet = HeapLinkedHashSet<WeakMember<LocalFrame>>;
   Persistent<PendingFullscreenSet> pending_frames_;
@@ -111,4 +107,4 @@ class CORE_EXPORT FullscreenController {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FULLSCREEN_CONTROLLER_H_

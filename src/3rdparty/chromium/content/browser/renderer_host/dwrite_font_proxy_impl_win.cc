@@ -11,21 +11,22 @@
 #include <algorithm>
 #include <memory>
 #include <set>
+#include <string>
 #include <utility>
 
 #include "base/callback_helpers.h"
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/renderer_host/dwrite_font_file_util_win.h"
 #include "content/browser/renderer_host/dwrite_font_uma_logging_win.h"
 #include "content/public/common/content_features.h"
@@ -52,7 +53,7 @@ const wchar_t* kLastResortFontNames[] = {
     L"Segoe UI", L"Calibri", L"Times New Roman", L"Courier New"};
 
 struct RequiredFontStyle {
-  const base::char16* family_name;
+  const char16_t* family_name;
   DWRITE_FONT_WEIGHT required_weight;
   DWRITE_FONT_STRETCH required_stretch;
   DWRITE_FONT_STYLE required_style;
@@ -61,12 +62,12 @@ struct RequiredFontStyle {
 const RequiredFontStyle kRequiredStyles[] = {
     // The regular version of Gill Sans is actually in the Gill Sans MT family,
     // and the Gill Sans family typically contains just the ultra-bold styles.
-    {STRING16_LITERAL("gill sans"), DWRITE_FONT_WEIGHT_NORMAL,
-     DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL},
-    {STRING16_LITERAL("helvetica"), DWRITE_FONT_WEIGHT_NORMAL,
-     DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL},
-    {STRING16_LITERAL("open sans"), DWRITE_FONT_WEIGHT_NORMAL,
-     DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL},
+    {u"gill sans", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+     DWRITE_FONT_STYLE_NORMAL},
+    {u"helvetica", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+     DWRITE_FONT_STYLE_NORMAL},
+    {u"open sans", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+     DWRITE_FONT_STYLE_NORMAL},
 };
 
 // As a workaround for crbug.com/635932, refuse to load some common fonts that
@@ -76,7 +77,7 @@ const RequiredFontStyle kRequiredStyles[] = {
 // That results in a poor user experience because websites that use those fonts
 // usually expect them to be rendered in the regular variant.
 bool CheckRequiredStylesPresent(IDWriteFontCollection* collection,
-                                const base::string16& family_name,
+                                const std::u16string& family_name,
                                 uint32_t family_index) {
   for (const auto& font_style : kRequiredStyles) {
     if (base::EqualsCaseInsensitiveASCII(family_name, font_style.family_name)) {
@@ -125,11 +126,11 @@ void DWriteFontProxyImpl::Create(
                               std::move(receiver));
 }
 
-void DWriteFontProxyImpl::SetWindowsFontsPathForTesting(base::string16 path) {
+void DWriteFontProxyImpl::SetWindowsFontsPathForTesting(std::u16string path) {
   windows_fonts_path_.swap(path);
 }
 
-void DWriteFontProxyImpl::FindFamily(const base::string16& family_name,
+void DWriteFontProxyImpl::FindFamily(const std::u16string& family_name,
                                      FindFamilyCallback callback) {
   InitializeDirectWrite();
   TRACE_EVENT0("dwrite,fonts", "FontProxyHost::OnFindFamily");
@@ -251,8 +252,8 @@ void DWriteFontProxyImpl::GetFontFiles(uint32_t family_index,
     }
 
     uint32_t dummy_ttc_index = 0;
-    if (!AddFilesForFont(font.Get(), windows_fonts_path_, &path_set,
-                         &custom_font_path_set, &dummy_ttc_index)) {
+    if (FAILED(AddFilesForFont(font.Get(), windows_fonts_path_, &path_set,
+                               &custom_font_path_set, &dummy_ttc_index))) {
       if (IsLastResortFallbackFont(family_index))
         LogMessageFilterError(
             MessageFilterError::LAST_RESORT_FONT_ADD_FILES_FAILED);
@@ -285,17 +286,17 @@ void DWriteFontProxyImpl::GetFontFiles(uint32_t family_index,
 }
 
 void DWriteFontProxyImpl::MapCharacters(
-    const base::string16& text,
+    const std::u16string& text,
     blink::mojom::DWriteFontStylePtr font_style,
-    const base::string16& locale_name,
+    const std::u16string& locale_name,
     uint32_t reading_direction,
-    const base::string16& base_family_name,
+    const std::u16string& base_family_name,
     MapCharactersCallback callback) {
   InitializeDirectWrite();
   callback = mojo::WrapCallbackWithDefaultInvokeIfNotRun(
       std::move(callback),
       blink::mojom::MapCharactersResult::New(
-          UINT32_MAX, STRING16_LITERAL(""), text.length(), 0.0,
+          UINT32_MAX, u"", text.length(), 0.0,
           blink::mojom::DWriteFontStyle::New(DWRITE_FONT_STYLE_NORMAL,
                                              DWRITE_FONT_STRETCH_NORMAL,
                                              DWRITE_FONT_WEIGHT_NORMAL)));
@@ -326,7 +327,7 @@ void DWriteFontProxyImpl::MapCharacters(
   }
 
   auto result = blink::mojom::MapCharactersResult::New(
-      UINT32_MAX, STRING16_LITERAL(""), text.length(), 0.0,
+      UINT32_MAX, u"", text.length(), 0.0,
       blink::mojom::DWriteFontStyle::New(DWRITE_FONT_STYLE_NORMAL,
                                          DWRITE_FONT_STRETCH_NORMAL,
                                          DWRITE_FONT_WEIGHT_NORMAL));
@@ -407,7 +408,7 @@ void DWriteFontProxyImpl::GetUniqueNameLookupTableIfAvailable(
 }
 
 void DWriteFontProxyImpl::MatchUniqueFont(
-    const base::string16& unique_font_name,
+    const std::u16string& unique_font_name,
     MatchUniqueFontCallback callback) {
   TRACE_EVENT0("dwrite,fonts", "DWriteFontProxyImpl::MatchUniqueFont");
 

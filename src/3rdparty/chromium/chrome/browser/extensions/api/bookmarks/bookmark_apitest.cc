@@ -28,6 +28,11 @@ using ContextType = ExtensionApiTest::ContextType;
 
 class BookmarksApiTest : public ExtensionApiTest,
                          public testing::WithParamInterface<ContextType> {
+ public:
+  BookmarksApiTest() = default;
+  ~BookmarksApiTest() override = default;
+  BookmarksApiTest(const BookmarksApiTest&) = delete;
+  BookmarksApiTest& operator=(const BookmarksApiTest&) = delete;
 };
 
 INSTANTIATE_TEST_SUITE_P(EventPage,
@@ -52,7 +57,7 @@ IN_PROC_BROWSER_TEST_P(BookmarksApiTest, Bookmarks) {
   node->SetString("name", "Managed Bookmark");
   node->SetString("url", "http://www.chromium.org");
   list.Append(std::move(node));
-  node.reset(new base::DictionaryValue());
+  node = std::make_unique<base::DictionaryValue>();
   node->SetString("name", "Managed Folder");
   node->Set("children", std::make_unique<base::ListValue>());
   list.Append(std::move(node));
@@ -60,7 +65,7 @@ IN_PROC_BROWSER_TEST_P(BookmarksApiTest, Bookmarks) {
   ASSERT_EQ(2u, managed->managed_node()->children().size());
 
   ASSERT_TRUE(RunExtensionTest(
-      {.name = "bookmarks"},
+      "bookmarks", {},
       {.load_as_service_worker = GetParam() == ContextType::kServiceWorker}))
       << message_;
 }

@@ -16,14 +16,6 @@
 
 namespace {
 
-const std::string callback_title("test title");
-
-// TODO(https://crbug.com/1042727): Fix test GURL scoping and remove this getter
-// function.
-GURL CallbackUrl() {
-  return GURL("http://example.com");
-}
-
 base::Time AdvanceAndGetTime(base::SimpleTestClock* clock) {
   clock->Advance(base::TimeDelta::FromMilliseconds(10));
   return clock->Now();
@@ -107,24 +99,24 @@ class TestReadingListStorage : public ReadingListModelStorage {
   }
 
   std::unique_ptr<ScopedBatchUpdate> EnsureBatchCreated() override {
-    return std::unique_ptr<ScopedBatchUpdate>();
+    return nullptr;
   }
 
   // Syncing is not used in this test class.
   std::unique_ptr<syncer::MetadataChangeList> CreateMetadataChangeList()
       override {
     NOTREACHED();
-    return std::unique_ptr<syncer::MetadataChangeList>();
+    return nullptr;
   }
 
-  base::Optional<syncer::ModelError> MergeSyncData(
+  absl::optional<syncer::ModelError> MergeSyncData(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityChangeList entity_data) override {
     NOTREACHED();
     return {};
   }
 
-  base::Optional<syncer::ModelError> ApplySyncChanges(
+  absl::optional<syncer::ModelError> ApplySyncChanges(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityChangeList entity_changes) override {
     NOTREACHED();
@@ -161,7 +153,7 @@ class ReadingListModelTest : public ReadingListModelObserver,
                              public TestReadingListStorageObserver,
                              public testing::Test {
  public:
-  ReadingListModelTest() : callback_called_(false) {
+  ReadingListModelTest() {
     model_ = std::make_unique<ReadingListModelImpl>(nullptr, nullptr, &clock_);
     ClearCounts();
     model_->AddObserver(this);
@@ -277,14 +269,6 @@ class ReadingListModelTest : public ReadingListModelObserver,
     return size;
   }
 
-  void Callback(const ReadingListEntry& entry) {
-    EXPECT_EQ(CallbackUrl(), entry.URL());
-    EXPECT_EQ(callback_title, entry.Title());
-    callback_called_ = true;
-  }
-
-  bool CallbackCalled() { return callback_called_; }
-
  protected:
   int observer_loaded_;
   int observer_started_batch_update_;
@@ -298,7 +282,6 @@ class ReadingListModelTest : public ReadingListModelObserver,
   int observer_did_apply_;
   int storage_saved_;
   int storage_removed_;
-  bool callback_called_;
 
   std::unique_ptr<ReadingListModelImpl> model_;
   base::SimpleTestClock clock_;

@@ -20,24 +20,45 @@
 #include "common/vulkan_platform.h"
 #include "dawn_native/Error.h"
 
+#include <mutex>
+
 namespace dawn_native { namespace vulkan {
 
     class Device;
+    class PipelineLayout;
 
     class ShaderModule final : public ShaderModuleBase {
       public:
-        static ResultOrError<ShaderModule*> Create(Device* device,
-                                                   const ShaderModuleDescriptor* descriptor,
-                                                   ShaderModuleParseResult* parseResult);
+        static ResultOrError<Ref<ShaderModule>> Create(Device* device,
+                                                       const ShaderModuleDescriptor* descriptor,
+                                                       ShaderModuleParseResult* parseResult);
 
-        VkShaderModule GetHandle() const;
+        ResultOrError<VkShaderModule> GetTransformedModuleHandle(const char* entryPointName,
+                                                                 PipelineLayout* layout);
 
       private:
         ShaderModule(Device* device, const ShaderModuleDescriptor* descriptor);
         ~ShaderModule() override;
         MaybeError Initialize(ShaderModuleParseResult* parseResult);
 
-        VkShaderModule mHandle = VK_NULL_HANDLE;
+        // New handles created by GetTransformedModuleHandle at pipeline creation time
+        class ConcurrentTransformedShaderModuleCache {
+          public:
+            explicit ConcurrentTransformedShaderModuleCache(Device* device);
+            ~ConcurrentTransformedShaderModuleCache();
+            VkShaderModule FindShaderModule(const PipelineLayoutEntryPointPair& key);
+            VkShaderModule AddOrGetCachedShaderModule(const PipelineLayoutEntryPointPair& key,
+                                                      VkShaderModule value);
+
+          private:
+            Device* mDevice;
+            std::mutex mMutex;
+            std::unordered_map<PipelineLayoutEntryPointPair,
+                               VkShaderModule,
+                               PipelineLayoutEntryPointPairHashFunc>
+                mTransformedShaderModuleCache;
+        };
+        ConcurrentTransformedShaderModuleCache mTransformedShaderModuleCache;
     };
 
 }}  // namespace dawn_native::vulkan

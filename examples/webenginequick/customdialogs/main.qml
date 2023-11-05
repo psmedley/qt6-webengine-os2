@@ -56,7 +56,7 @@ import QtQuick.Window
 Window {
     id: mainWindow
     width: 800
-    height: 600
+    height: 610
     visible: true
 
     StackView {

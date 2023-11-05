@@ -10,7 +10,6 @@
 
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkColor.h"
-#include "include/core/SkFilterQuality.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkImageFilter.h"
 #include "include/core/SkPicture.h"
@@ -19,6 +18,7 @@
 
 #include <cstddef>
 
+class SkBlender;
 class SkColorFilter;
 class SkPaint;
 class SkRegion;
@@ -94,6 +94,17 @@ public:
      *  @cropRect         Optional rectangle to crop input and output.
      */
     static sk_sp<SkImageFilter> Blend(SkBlendMode mode, sk_sp<SkImageFilter> background,
+                                      sk_sp<SkImageFilter> foreground = nullptr,
+                                      const CropRect& cropRect = {});
+
+    /**
+     *  This filter takes an SkBlendMode and uses it to composite the two filters together.
+     *  @param blender       The blender that defines the compositing operation
+     *  @param background The Dst pixels used in blending, if null the source bitmap is used.
+     *  @param foreground The Src pixels used in blending, if null the source bitmap is used.
+     *  @cropRect         Optional rectangle to crop input and output.
+     */
+    static sk_sp<SkImageFilter> Blend(sk_sp<SkBlender> blender, sk_sp<SkImageFilter> background,
                                       sk_sp<SkImageFilter> foreground = nullptr,
                                       const CropRect& cropRect = {});
 
@@ -263,12 +274,6 @@ public:
     static sk_sp<SkImageFilter> MatrixTransform(const SkMatrix& matrix,
                                                 const SkSamplingOptions& sampling,
                                                 sk_sp<SkImageFilter> input);
-#ifdef SK_SUPPORT_LEGACY_MATRIX_IMAGEFILTER
-    // DEPRECATED
-    static sk_sp<SkImageFilter> MatrixTransform(const SkMatrix& matrix,
-                                                SkFilterQuality filterQuality,
-                                                sk_sp<SkImageFilter> input);
-#endif
 
     /**
      *  Create a filter that merges the 'count' filters together by drawing their results in order
@@ -347,14 +352,6 @@ public:
     }
     static sk_sp<SkImageFilter> Shader(sk_sp<SkShader> shader, Dither dither,
                                        const CropRect& cropRect = {});
-#ifdef SK_SUPPORT_LEGACY_IMPLICIT_FILTERQUALITY
-    // As above, but the filter quality defines what is used in image shaders that defer to the
-    // quality stored on an SkPaint. NOTE: this default behavior is deprecated, so prefer creating
-    // image shaders with explicit sampling parameters and call the other Shader() factory instead.
-    static sk_sp<SkImageFilter> Shader(sk_sp<SkShader> shader, Dither dither,
-                                       SkFilterQuality filterQuality,
-                                       const CropRect& cropRect = {});
-#endif
 
     /**
      *  Create a tile image filter.
@@ -504,8 +501,6 @@ public:
                                                 SkScalar ks, SkScalar shininess,
                                                 sk_sp<SkImageFilter> input,
                                                 const CropRect& cropRect = {});
-
-    static void RegisterFlattenables();
 
 private:
     SkImageFilters() = delete;

@@ -5,10 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_GESTURE_MANAGER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_GESTURE_MANAGER_H_
 
+#include "third_party/blink/public/common/input/pointer_id.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/hit_test_request.h"
 #include "third_party/blink/renderer/core/page/event_with_hit_test_results.h"
+#include "third_party/blink/renderer/platform/wtf/deque.h"
 
 namespace blink {
 
@@ -18,6 +20,7 @@ class ScrollManager;
 class SelectionController;
 class PointerEventManager;
 class MouseEventManager;
+class WebPointerEvent;
 
 // This class takes care of gestures and delegating the action based on the
 // gesture to the responsible class.
@@ -53,6 +56,12 @@ class CORE_EXPORT GestureManager final
   // gesture recognizer does not know if the drag has ended at the originating
   // position.
   void SendContextMenuEventTouchDragEnd(const WebMouseEvent&);
+
+  // Gesture Manager receives notification when Pointer Events are dispatched.
+  // GestureManager is interested in knowing the pointerId of pointerdown
+  // event because it uses this pointer id to populate the pointerId for
+  // click and auxclick pointer events it generates.
+  void NotifyPointerEventHandled(const WebPointerEvent& web_pointer_event);
 
  private:
   WebInputEventResult HandleGestureShowPress();
@@ -92,6 +101,16 @@ class CORE_EXPORT GestureManager final
   bool gesture_context_menu_deferred_;
 
   gfx::PointF long_press_position_in_root_frame_;
+
+  // Pair of the unique_touch_id for the first gesture in the sequence and
+  // the pointerId associated.
+  using TouchIdPointerId = std::pair<uint32_t, PointerId>;
+  // The mapping between unique_touch_event_id for tap down and pointer Id
+  // for pointerdown. We will keep the pointerId for a pointerevents sequence
+  // until we know that the pointerevents will not turn into gestures anymore.
+  // We will not keep track of the mapping for unique_touch_event_id = 0
+  // (unknown id) which will be the case for mouse pointer events for example.
+  Deque<TouchIdPointerId> recent_pointerdown_pointer_ids_;
 
   const Member<SelectionController> selection_controller_;
 };

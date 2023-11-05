@@ -12,8 +12,9 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/media/display_type.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_picture_in_picture_options.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -27,6 +28,7 @@
 #include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_window.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/widget/frame_widget.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -75,13 +77,13 @@ PictureInPictureControllerImpl::IsDocumentAllowed(bool report_failure) const {
     return Status::kDisabledBySystem;
 
   // If document is not allowed to use the policy-controlled feature named
-  // "picture-in-picture", return kDisabledByFeaturePolicy status.
+  // "picture-in-picture", return kDisabledByPermissionsPolicy status.
   if (RuntimeEnabledFeatures::PictureInPictureAPIEnabled() &&
       !GetSupplementable()->GetExecutionContext()->IsFeatureEnabled(
-          blink::mojom::blink::FeaturePolicyFeature::kPictureInPicture,
+          blink::mojom::blink::PermissionsPolicyFeature::kPictureInPicture,
           report_failure ? ReportOptions::kReportOnFailure
                          : ReportOptions::kDoNotReport)) {
-    return Status::kDisabledByFeaturePolicy;
+    return Status::kDisabledByPermissionsPolicy;
   }
 
   return Status::kEnabled;
@@ -168,6 +170,7 @@ void PictureInPictureControllerImpl::EnterPictureInPicture(
     Fullscreen::ExitFullscreen(*GetSupplementable());
 
   video_element->GetWebMediaPlayer()->OnRequestPictureInPicture();
+  DCHECK(video_element->GetWebMediaPlayer()->GetSurfaceId().has_value());
 
   session_observer_receiver_.reset();
 
@@ -186,7 +189,7 @@ void PictureInPictureControllerImpl::EnterPictureInPicture(
   picture_in_picture_service_->StartSession(
       video_element->GetWebMediaPlayer()->GetDelegateId(),
       std::move(media_player_remote),
-      video_element->GetWebMediaPlayer()->GetSurfaceId(),
+      video_element->GetWebMediaPlayer()->GetSurfaceId().value(),
       video_element->GetWebMediaPlayer()->NaturalSize(),
       ShouldShowPlayPauseButton(*video_element), std::move(session_observer),
       WTF::Bind(&PictureInPictureControllerImpl::OnEnteredPictureInPicture,
@@ -339,7 +342,8 @@ bool PictureInPictureControllerImpl::IsEnterAutoPictureInPictureAllowed()
         GetSupplementable()->GetFrame()->GetWidgetForLocalRoot()->DisplayMode();
     is_in_pwa_window = display_mode != mojom::blink::DisplayMode::kBrowser;
   }
-  if (!(GetSupplementable()->Url().ProtocolIs("chrome-extension") ||
+  if (!(CommonSchemeRegistry::IsExtensionScheme(
+            GetSupplementable()->Url().Protocol().Ascii()) ||
         Fullscreen::FullscreenElementFrom(*GetSupplementable()) ||
         (is_in_pwa_window && GetSupplementable()->IsInWebAppScope()))) {
     return false;
@@ -396,10 +400,23 @@ void PictureInPictureControllerImpl::PageVisibilityChanged() {
 void PictureInPictureControllerImpl::OnPictureInPictureStateChange() {
   DCHECK(picture_in_picture_element_);
   DCHECK(picture_in_picture_element_->GetWebMediaPlayer());
+  DCHECK(picture_in_picture_element_->GetWebMediaPlayer()
+             ->GetSurfaceId()
+             .has_value());
+
+  // The lifetime of the MediaPlayer mojo endpoint in the renderer is tied to
+  // WebMediaPlayer, which is recreated by |picture_in_picture_element_| on
+  // src= change. Since src= change is one of the reasons we get here, we need
+  // to give the browser a newly bound remote.
+  mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayer>
+      media_player_remote;
+  picture_in_picture_element_->BindMediaPlayerReceiver(
+      media_player_remote.InitWithNewEndpointAndPassReceiver());
 
   picture_in_picture_session_->Update(
       picture_in_picture_element_->GetWebMediaPlayer()->GetDelegateId(),
-      picture_in_picture_element_->GetWebMediaPlayer()->GetSurfaceId(),
+      std::move(media_player_remote),
+      picture_in_picture_element_->GetWebMediaPlayer()->GetSurfaceId().value(),
       picture_in_picture_element_->GetWebMediaPlayer()->NaturalSize(),
       ShouldShowPlayPauseButton(*picture_in_picture_element_));
 }

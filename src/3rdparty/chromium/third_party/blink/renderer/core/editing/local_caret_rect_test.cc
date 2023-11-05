@@ -174,6 +174,26 @@ TEST_P(ParameterizedLocalCaretRectTest, RtlText) {
                 Position(foo, 3), TextAffinity::kDownstream)));
 }
 
+TEST_P(ParameterizedLocalCaretRectTest, ClampingAndRounding) {
+  // crbug.com/1228620
+  LoadAhem();
+  SetBodyContent(R"HTML(
+      <style>
+      #root {
+        margin-left: 0.6px;
+        width: 150.6px;
+        text-align: right;
+        font: 30px/30px Ahem;
+      }
+      </style>
+      <div id=root>def</div>)HTML");
+  const Node* text = GetElementById("root")->firstChild();
+  EXPECT_EQ(
+      LocalCaretRect(text->GetLayoutObject(), PhysicalRect(149, 0, 1, 30)),
+      LocalCaretRectOfPosition(
+          PositionWithAffinity(Position(text, 3), TextAffinity::kDownstream)));
+}
+
 TEST_P(ParameterizedLocalCaretRectTest, OverflowTextLtr) {
   // This test only records the current behavior. Future changes are allowed.
 
@@ -947,6 +967,103 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterTrimedLineBreak) {
   EXPECT_EQ(PhysicalRect(30, 0, 1, 10), visible_position_rect);
 }
 
+// See also NGCaretPositionTest.MultiColumnSingleText
+TEST_P(ParameterizedLocalCaretRectTest, MultiColumnSingleText) {
+  RuntimeEnabledFeaturesTestHelpers::ScopedLayoutNGBlockFragmentation
+      block_fragmentation(LayoutNGEnabled());
+  LoadAhem();
+  InsertStyleElement(
+      "div { font: 10px/15px Ahem; column-count: 3; width: 20ch; }");
+  SetBodyInnerHTML("<div id=target>abc def ghi jkl mno pqr</div>");
+  // This HTML is rendered as:
+  //    abc ghi mno
+  //    def jkl
+  const auto& target = *GetElementById("target");
+  const Text& text = *To<Text>(target.firstChild());
+  const bool block_fragmentation_enabled =
+      RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled();
+
+  // Note: Legacy layout caret rect is in stitch coordinate space == as if
+  // columns are laid out vertically.
+  // NG caret rect is in relative to containing box fragment.
+
+  // "abc " in column 1
+  EXPECT_EQ(PhysicalRect(0, 2, 1, 10),
+            LocalCaretRectOf(Position(text, 0)).rect);
+  EXPECT_EQ(PhysicalRect(10, 2, 1, 10),
+            LocalCaretRectOf(Position(text, 1)).rect);
+  EXPECT_EQ(PhysicalRect(20, 2, 1, 10),
+            LocalCaretRectOf(Position(text, 2)).rect);
+  EXPECT_EQ(PhysicalRect(30, 2, 1, 10),
+            LocalCaretRectOf(Position(text, 3)).rect);
+
+  // "def " in column 1
+  EXPECT_EQ(PhysicalRect(0, 17, 1, 10),
+            LocalCaretRectOf(Position(text, 4)).rect);
+  EXPECT_EQ(PhysicalRect(10, 17, 1, 10),
+            LocalCaretRectOf(Position(text, 5)).rect);
+  EXPECT_EQ(PhysicalRect(20, 17, 1, 10),
+            LocalCaretRectOf(Position(text, 6)).rect);
+  EXPECT_EQ(PhysicalRect(30, 17, 1, 10),
+            LocalCaretRectOf(Position(text, 7)).rect);
+
+  // "ghi " in column 2
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(0, 2, 1, 10)
+                                        : PhysicalRect(0, 32, 1, 10),
+            LocalCaretRectOf(Position(text, 8)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(10, 2, 1, 10)
+                                        : PhysicalRect(10, 32, 1, 10),
+            LocalCaretRectOf(Position(text, 9)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(20, 2, 1, 10)
+                                        : PhysicalRect(20, 32, 1, 10),
+            LocalCaretRectOf(Position(text, 10)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(30, 2, 1, 10)
+                                        : PhysicalRect(30, 32, 1, 10),
+            LocalCaretRectOf(Position(text, 11)).rect);
+
+  // "jkl " in column 2
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(0, 17, 1, 10)
+                                        : PhysicalRect(0, 47, 1, 10),
+            LocalCaretRectOf(Position(text, 12)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(10, 17, 1, 10)
+                                        : PhysicalRect(10, 47, 1, 10),
+            LocalCaretRectOf(Position(text, 13)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(20, 17, 1, 10)
+                                        : PhysicalRect(20, 47, 1, 10),
+            LocalCaretRectOf(Position(text, 14)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(30, 17, 1, 10)
+                                        : PhysicalRect(30, 47, 1, 10),
+            LocalCaretRectOf(Position(text, 15)).rect);
+
+  // "mno " in column 3
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(0, 2, 1, 10)
+                                        : PhysicalRect(0, 62, 1, 10),
+            LocalCaretRectOf(Position(text, 16)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(10, 2, 1, 10)
+                                        : PhysicalRect(10, 62, 1, 10),
+            LocalCaretRectOf(Position(text, 17)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(20, 2, 1, 10)
+                                        : PhysicalRect(20, 62, 1, 10),
+            LocalCaretRectOf(Position(text, 18)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(30, 2, 1, 10)
+                                        : PhysicalRect(30, 62, 1, 10),
+            LocalCaretRectOf(Position(text, 19)).rect);
+
+  // "pqr" in column 3
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(0, 17, 1, 10)
+                                        : PhysicalRect(0, 77, 1, 10),
+            LocalCaretRectOf(Position(text, 20)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(10, 17, 1, 10)
+                                        : PhysicalRect(10, 77, 1, 10),
+            LocalCaretRectOf(Position(text, 21)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(20, 17, 1, 10)
+                                        : PhysicalRect(20, 77, 1, 10),
+            LocalCaretRectOf(Position(text, 22)).rect);
+  EXPECT_EQ(block_fragmentation_enabled ? PhysicalRect(30, 17, 1, 10)
+                                        : PhysicalRect(30, 77, 1, 10),
+            LocalCaretRectOf(Position(text, 23)).rect);
+}
+
 TEST_P(ParameterizedLocalCaretRectTest,
        UnicodeBidiPlaintextWithDifferentBlockDirection) {
   LoadAhem();
@@ -1063,6 +1180,144 @@ TEST_P(ParameterizedLocalCaretRectTest, OptionWithDisplayContents) {
        {Position(body, 1), Position::LastPositionInNode(*body),
         Position::AfterNode(*body)})
     EXPECT_EQ(end, LocalCaretRectOfPosition(PositionWithAffinity(p)));
+}
+
+TEST_P(ParameterizedLocalCaretRectTest, TextCombineOneTextNode) {
+  if (!LayoutNGEnabled())
+    return;
+  ScopedLayoutNGTextCombineForTest enable_layout_ng_text_combine(true);
+  LoadAhem();
+  InsertStyleElement(
+      "div {"
+      "  font: 100px/110px Ahem;"
+      "  writing-mode: vertical-rl;"
+      "}"
+      "tcy { text-combine-upright: all; }");
+  SetBodyInnerHTML("<div>a<tcy id=target>01234</tcy>b</div>");
+  //   LayoutNGBlockFlow {HTML} at (0,0) size 800x600
+  //     LayoutNGBlockFlow {BODY} at (8,8) size 784x584
+  //       LayoutNGBlockFlow {DIV} at (0,0) size 110x300
+  //         LayoutText {#text} at (5,0) size 100x100
+  //           text run at (5,0) width 100: "a"
+  //         LayoutInline {TCY} at (5,100) size 100x100
+  //           LayoutNGTextCombine (anonymous) at (5,100) size 100x100
+  //             LayoutText {#text} at (-5,0) size 110x100
+  //               text run at (0,0) width 500: "01234"
+  //         LayoutText {#text} at (5,200) size 100x100
+  //           text run at (5,200) width 100: "b"
+  const auto& target = *GetElementById("target");
+  const auto& text_a = *To<Text>(target.previousSibling());
+  const auto& text_01234 = *To<Text>(target.firstChild());
+  const auto& text_b = *To<Text>(target.nextSibling());
+
+  // text_a
+  EXPECT_EQ(
+      LocalCaretRect(text_a.GetLayoutObject(), PhysicalRect(5, 0, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_a, 0))));
+  EXPECT_EQ(
+      LocalCaretRect(text_a.GetLayoutObject(), PhysicalRect(5, 100, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_a, 1))));
+
+  // text_01234
+  EXPECT_EQ(
+      LocalCaretRect(text_01234.GetLayoutObject(), PhysicalRect(0, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_01234, 0))));
+  EXPECT_EQ(
+      LocalCaretRect(text_01234.GetLayoutObject(), PhysicalRect(17, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_01234, 1))));
+  EXPECT_EQ(
+      LocalCaretRect(text_01234.GetLayoutObject(), PhysicalRect(39, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_01234, 2))));
+  EXPECT_EQ(
+      LocalCaretRect(text_01234.GetLayoutObject(), PhysicalRect(61, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_01234, 3))));
+  EXPECT_EQ(
+      LocalCaretRect(text_01234.GetLayoutObject(), PhysicalRect(83, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_01234, 4))));
+  EXPECT_EQ(
+      LocalCaretRect(text_01234.GetLayoutObject(), PhysicalRect(99, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_01234, 5))));
+
+  // text_b
+  EXPECT_EQ(
+      LocalCaretRect(text_b.GetLayoutObject(), PhysicalRect(5, 200, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_b, 0))));
+  EXPECT_EQ(
+      LocalCaretRect(text_b.GetLayoutObject(), PhysicalRect(5, 299, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_b, 1))));
+}
+
+TEST_P(ParameterizedLocalCaretRectTest, TextCombineTwoTextNodes) {
+  if (!LayoutNGEnabled())
+    return;
+  ScopedLayoutNGTextCombineForTest enable_layout_ng_text_combine(true);
+  LoadAhem();
+  InsertStyleElement(
+      "div {"
+      "  font: 100px/110px Ahem;"
+      "  writing-mode: vertical-rl;"
+      "}"
+      "tcy { text-combine-upright: all; }");
+  SetBodyInnerHTML("<div>a<tcy id=target>012<!-- -->34</tcy>b</div>");
+  //   LayoutNGBlockFlow {HTML} at (0,0) size 800x600
+  //     LayoutNGBlockFlow {BODY} at (8,8) size 784x584
+  //       LayoutNGBlockFlow {DIV} at (0,0) size 110x300
+  //         LayoutText {#text} at (5,0) size 100x100
+  //           text run at (5,0) width 100: "a"
+  //         LayoutInline {TCY} at (5,100) size 100x100
+  //           LayoutNGTextCombine (anonymous) at (5,100) size 100x100
+  //             LayoutText {#text} at (-5,0) size 66x100
+  //               text run at (0,0) width 300: "012"
+  //             LayoutText {#text} at (61,0) size 44x100
+  //               text run at (300,0) width 200: "34"
+  //         LayoutText {#text} at (5,200) size 100x100
+  //           text run at (5,200) width 100: "b"
+  const auto& target = *GetElementById("target");
+  const auto& text_a = *To<Text>(target.previousSibling());
+  const auto& text_012 = *To<Text>(target.firstChild());
+  const auto& text_34 = *To<Text>(target.lastChild());
+  const auto& text_b = *To<Text>(target.nextSibling());
+
+  // text_a
+  EXPECT_EQ(
+      LocalCaretRect(text_a.GetLayoutObject(), PhysicalRect(5, 0, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_a, 0))));
+  EXPECT_EQ(
+      LocalCaretRect(text_a.GetLayoutObject(), PhysicalRect(5, 100, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_a, 1))));
+
+  // text_012
+  EXPECT_EQ(
+      LocalCaretRect(text_012.GetLayoutObject(), PhysicalRect(0, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_012, 0))));
+  EXPECT_EQ(
+      LocalCaretRect(text_012.GetLayoutObject(), PhysicalRect(17, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_012, 1))));
+  EXPECT_EQ(
+      LocalCaretRect(text_012.GetLayoutObject(), PhysicalRect(39, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_012, 2))));
+  EXPECT_EQ(
+      LocalCaretRect(text_012.GetLayoutObject(), PhysicalRect(61, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_012, 3))));
+
+  // text_34
+  EXPECT_EQ(
+      LocalCaretRect(text_34.GetLayoutObject(), PhysicalRect(61, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_34, 0))));
+  EXPECT_EQ(
+      LocalCaretRect(text_34.GetLayoutObject(), PhysicalRect(83, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_34, 1))));
+  EXPECT_EQ(
+      LocalCaretRect(text_34.GetLayoutObject(), PhysicalRect(99, 0, 1, 100)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_34, 2))));
+
+  // text_b
+  EXPECT_EQ(
+      LocalCaretRect(text_b.GetLayoutObject(), PhysicalRect(5, 200, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_b, 0))));
+  EXPECT_EQ(
+      LocalCaretRect(text_b.GetLayoutObject(), PhysicalRect(5, 299, 100, 1)),
+      LocalCaretRectOfPosition(PositionWithAffinity(Position(text_b, 1))));
 }
 
 }  // namespace blink

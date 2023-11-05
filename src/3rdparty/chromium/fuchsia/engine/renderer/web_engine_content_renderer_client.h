@@ -6,6 +6,7 @@
 #define FUCHSIA_ENGINE_RENDERER_WEB_ENGINE_CONTENT_RENDERER_CLIENT_H_
 
 #include "base/macros.h"
+#include "components/cast_streaming/renderer/public/demuxer_provider.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "fuchsia/engine/renderer/web_engine_render_frame_observer.h"
 
@@ -35,9 +36,9 @@ class WebEngineContentRendererClient : public content::ContentRendererClient {
       std::vector<std::unique_ptr<media::KeySystemProperties>>* key_systems)
       override;
   bool IsSupportedVideoType(const media::VideoType& type) override;
-  std::unique_ptr<content::URLLoaderThrottleProvider>
+  std::unique_ptr<blink::URLLoaderThrottleProvider>
   CreateURLLoaderThrottleProvider(
-      content::URLLoaderThrottleProviderType type) override;
+      blink::URLLoaderThrottleProviderType type) override;
   bool DeferMediaLoad(content::RenderFrame* render_frame,
                       bool has_played_media_before,
                       base::OnceClosure closure) override;
@@ -48,6 +49,9 @@ class WebEngineContentRendererClient : public content::ContentRendererClient {
 
   bool RunClosureWhenInForeground(content::RenderFrame* render_frame,
                                   base::OnceClosure closure);
+
+  // Handles interaction with cast_streaming component.
+  cast_streaming::DemuxerProvider cast_streaming_demuxer_provider_;
 
   // Map of RenderFrame ID to WebEngineRenderFrameObserver.
   std::map<int, std::unique_ptr<WebEngineRenderFrameObserver>>

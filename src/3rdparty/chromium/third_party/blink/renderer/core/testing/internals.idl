@@ -63,6 +63,7 @@
     [RaisesException] unsigned short compareTreeScopePosition(Node treeScope1, Node treeScope2);
     [RaisesException] unsigned long updateStyleAndReturnAffectedElementCount();
     [RaisesException] unsigned long needsLayoutCount();
+    [RaisesException] unsigned long layoutCountForTesting();
     [RaisesException] unsigned long hitTestCount(Document document);
     [RaisesException] unsigned long hitTestCacheHits(Document document);
     [RaisesException] Element? elementFromPoint(Document document, double x, double y, boolean ignoreClipping, boolean allowChildFrameContent);
@@ -178,9 +179,6 @@
     boolean canHyphenate(DOMString locale);
     void setMockHyphenation(DOMString locale);
 
-    boolean isOverwriteModeEnabled(Document document);
-    void toggleOverwriteModeEnabled(Document document);
-
     unsigned long numberOfScrollableAreas(Document document);
 
     boolean isPageBoxVisible(Document document, long pageNumber);
@@ -188,7 +186,6 @@
     readonly attribute InternalSettings settings;
     readonly attribute InternalRuntimeFlags runtimeFlags;
     readonly attribute unsigned long workerThreadCount;
-    readonly attribute boolean isFormControlsRefreshEnabled;
 
     // Flag for layerTreeAsText. The value must be kept in sync with the value
     // of LayerTreeFlags in layers_as_json.h.
@@ -291,8 +288,6 @@
     [RaisesException] DOMRect selectionBounds();
     readonly attribute DOMString textAffinity;
 
-    boolean loseSharedGraphicsContext3D();
-
     [RaisesException] void forceCompositingUpdate(Document document);
 
     void setForcedColorsAndDarkPreferredColorScheme(Document document);
@@ -325,6 +320,8 @@
 
     boolean isInCanvasFontCache(Document document, DOMString fontString);
     unsigned long canvasFontCacheMaxFonts();
+    void forceLoseCanvasContext(HTMLCanvasElement canvas, DOMString contextType);
+    void forceLoseCanvasContext(OffscreenCanvas offscreencanvas, DOMString context_type);
 
     DictionaryTest dictionaryTest();
     RecordTest recordTest();
@@ -450,4 +447,6 @@
     // The return value consists of a WritableStream (.stream) and a promise of
     // a sink object (.sink).
     [RaisesException, CallWith=ScriptState] any createWritableStreamAndSink(long queueSize, DOMString optimizer);
+
+    void setAllowPerChunkTransferring(ReadableStream stream);
 };

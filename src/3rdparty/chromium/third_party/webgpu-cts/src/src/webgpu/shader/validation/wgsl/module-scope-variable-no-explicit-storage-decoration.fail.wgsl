@@ -3,6 +3,6 @@
 
 var f : vec2<f32>;
 
-[[stage(vertex)]]
-fn main() -> void {
+[[stage(fragment)]]
+fn main() {
 }

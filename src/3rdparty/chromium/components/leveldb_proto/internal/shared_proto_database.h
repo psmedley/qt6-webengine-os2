@@ -15,6 +15,7 @@
 #include "base/containers/queue.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
+#include "base/synchronization/lock.h"
 #include "components/leveldb_proto/internal/proto/shared_db_metadata.pb.h"
 #include "components/leveldb_proto/internal/shared_proto_database_client.h"
 #include "components/leveldb_proto/public/proto_database.h"
@@ -132,7 +133,8 @@ class COMPONENT_EXPORT(LEVELDB_PROTO) SharedProtoDatabase
   void OnGetGlobalMetadata(bool corruption,
                            bool success,
                            std::unique_ptr<SharedDBMetadataProto> proto);
-  void OnFinishCorruptionCountWrite(bool success);
+  void OnWriteMetadataAtInit(bool success);
+  void OnDestroySharedDatabase(bool success);
   void InitDatabase();
   void OnDatabaseInit(bool create_if_missing, Enums::InitStatus status);
   void CheckCorruptionAndRunInitCallback(
@@ -158,9 +160,7 @@ class COMPONENT_EXPORT(LEVELDB_PROTO) SharedProtoDatabase
 
   LevelDB* GetLevelDBForTesting() const;
 
-  void set_delete_obsolete_delay_for_testing(base::TimeDelta delay) {
-    delete_obsolete_delay_ = delay;
-  }
+  void SetDeleteObsoleteDelayForTesting(base::TimeDelta delay);
 
   scoped_refptr<base::SequencedTaskRunner> database_task_runner_for_testing()
       const {
@@ -191,6 +191,7 @@ class COMPONENT_EXPORT(LEVELDB_PROTO) SharedProtoDatabase
   bool create_if_missing_ = false;
 
   base::TimeDelta delete_obsolete_delay_ = base::TimeDelta::FromSeconds(120);
+  base::Lock delete_obsolete_delay_lock_;
   base::CancelableOnceClosure delete_obsolete_task_;
 
   DISALLOW_COPY_AND_ASSIGN(SharedProtoDatabase);

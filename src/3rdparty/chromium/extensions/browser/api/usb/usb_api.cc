@@ -52,6 +52,7 @@ namespace ResetDevice = usb::ResetDevice;
 namespace SetInterfaceAlternateSetting = usb::SetInterfaceAlternateSetting;
 
 using content::BrowserThread;
+using device::mojom::UsbClaimInterfaceResult;
 using device::mojom::UsbControlTransferParams;
 using device::mojom::UsbControlTransferRecipient;
 using device::mojom::UsbControlTransferType;
@@ -303,7 +304,7 @@ EndpointDescriptor ConvertEndpointDescriptor(
   output.synchronization =
       ConvertSynchronizationTypeToApi(input.synchronization_type);
   output.usage = ConvertUsageTypeToApi(input.usage_type);
-  output.polling_interval.reset(new int(input.polling_interval));
+  output.polling_interval = std::make_unique<int>(input.polling_interval);
   output.extra_data.assign(input.extra_data.begin(), input.extra_data.end());
   return output;
 }
@@ -409,7 +410,7 @@ bool UsbPermissionCheckingFunction::HasDevicePermission(
   std::unique_ptr<UsbDevicePermission::CheckParam> param =
       UsbDevicePermission::CheckParam::ForUsbDevice(extension(), device);
   if (extension()->permissions_data()->CheckAPIPermissionWithParam(
-          APIPermission::kUsbDevice, param.get())) {
+          mojom::APIPermissionID::kUsbDevice, param.get())) {
     return true;
   }
 
@@ -489,7 +490,7 @@ void UsbTransferFunction::OnCompleted(
 
 void UsbTransferFunction::OnTransferInCompleted(
     UsbTransferStatus status,
-    const std::vector<uint8_t>& data) {
+    base::span<const uint8_t> data) {
   base::Value transfer_info(base::Value::Type::DICTIONARY);
   transfer_info.SetIntKey(kResultCodeKey, static_cast<int>(status));
   transfer_info.SetKey(kDataKey, base::Value(data));
@@ -501,8 +502,7 @@ void UsbTransferFunction::OnTransferInCompleted(
 void UsbTransferFunction::OnTransferOutCompleted(UsbTransferStatus status) {
   auto transfer_info = std::make_unique<base::DictionaryValue>();
   transfer_info->SetInteger(kResultCodeKey, static_cast<int>(status));
-  transfer_info->Set(kDataKey,
-                     std::make_unique<base::Value>(base::Value::Type::BINARY));
+  transfer_info->SetKey(kDataKey, base::Value(base::Value::Type::BINARY));
 
   OnCompleted(status, std::move(transfer_info));
 }
@@ -591,7 +591,7 @@ ExtensionFunction::ResponseAction UsbFindDevicesFunction::Run() {
       UsbDevicePermission::CheckParam::ForDeviceWithAnyInterfaceClass(
           extension(), vendor_id_, product_id_, interface_id);
   if (!extension()->permissions_data()->CheckAPIPermissionWithParam(
-          APIPermission::kUsbDevice, param.get())) {
+          mojom::APIPermissionID::kUsbDevice, param.get())) {
     return RespondNow(Error(kErrorPermissionDenied));
   }
 
@@ -607,7 +607,7 @@ ExtensionFunction::ResponseAction UsbFindDevicesFunction::Run() {
 
 void UsbFindDevicesFunction::OnGetDevicesComplete(
     std::vector<device::mojom::UsbDeviceInfoPtr> devices) {
-  result_.reset(new base::ListValue());
+  result_ = std::make_unique<base::ListValue>();
   barrier_ = base::BarrierClosure(
       devices.size(),
       base::BindOnce(&UsbFindDevicesFunction::OpenComplete, this));
@@ -630,7 +630,7 @@ void UsbFindDevicesFunction::OnGetDevicesComplete(
         UsbDevicePermission::CheckParam::ForUsbDevice(extension(),
                                                       *device_info);
     if (!extension()->permissions_data()->CheckAPIPermissionWithParam(
-            APIPermission::kUsbDevice, param.get())) {
+            mojom::APIPermissionID::kUsbDevice, param.get())) {
       barrier_.Run();
     } else {
       mojo::Remote<device::mojom::UsbDevice> device;
@@ -1038,12 +1038,13 @@ ExtensionFunction::ResponseAction UsbClaimInterfaceFunction::Run() {
   device->ClaimInterface(
       parameters->interface_number,
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-          base::BindOnce(&UsbClaimInterfaceFunction::OnComplete, this), false));
+          base::BindOnce(&UsbClaimInterfaceFunction::OnComplete, this),
+          UsbClaimInterfaceResult::kFailure));
   return RespondLater();
 }
 
-void UsbClaimInterfaceFunction::OnComplete(bool success) {
-  if (success) {
+void UsbClaimInterfaceFunction::OnComplete(UsbClaimInterfaceResult result) {
+  if (result == UsbClaimInterfaceResult::kSuccess) {
     Respond(NoArguments());
   } else {
     Respond(Error(kErrorCannotClaimInterface));
@@ -1273,7 +1274,7 @@ ExtensionFunction::ResponseAction UsbIsochronousTransferFunction::Run() {
 }
 
 void UsbIsochronousTransferFunction::OnTransferInCompleted(
-    const std::vector<uint8_t>& data,
+    base::span<const uint8_t> data,
     std::vector<UsbIsochronousPacketPtr> packets) {
   size_t length = std::accumulate(packets.begin(), packets.end(), 0,
                                   [](const size_t& a, const auto& packet) {
@@ -1341,7 +1342,7 @@ void UsbResetDeviceFunction::OnComplete(bool success) {
     ReleaseDeviceResource(parameters_->handle);
 
     std::unique_ptr<base::ListValue> error_args(new base::ListValue());
-    error_args->AppendBoolean(false);
+    error_args->Append(false);
     // Using ErrorWithArguments is discouraged but required to maintain
     // compatibility with existing applications.
     Respond(ErrorWithArguments(std::move(error_args), kErrorResetDevice));

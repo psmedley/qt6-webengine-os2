@@ -86,14 +86,14 @@
   <message name="IDS_OS_SETTINGS_TAG_CELLULAR_TURN_OFF_ALT1" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with a toggle to turn off cellular. Alternate phrase for: 'Turn off cellular network'">
     Disable Cellular
   </message>
-  <message name="IDS_OS_SETTINGS_TAG_ADD_CELLULAR" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with an add cellular icon button. Alternate phrase for: 'Activate physical SIM', 'Set up eSIM'">
-    Add Cellular
+  <message name="IDS_OS_SETTINGS_TAG_ADD_ESIM" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with an add eSIM icon button. Alternate phrase for: 'Install eSIM profile', 'Download eSIM profile'">
+    Add eSIM profile
   </message>
-  <message name="IDS_OS_SETTINGS_TAG_ADD_CELLULAR_ALT1" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with an add cellular icon button. Alternate phrase for: 'Add Cellular', 'Set up eSIM'">
-    Activate physical SIM
+  <message name="IDS_OS_SETTINGS_TAG_ADD_ESIM_ALT1" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with an add eSIM icon button. Alternate phrase for: 'Add eSIM profile', 'Download eSIM profile'">
+    Install eSIM profile
   </message>
-  <message name="IDS_OS_SETTINGS_TAG_ADD_CELLULAR_ALT2" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with an add cellular icon button. Alternate phrase for: 'Add Cellular', 'Activate physical SIM'">
-    Set up eSIM
+  <message name="IDS_OS_SETTINGS_TAG_ADD_ESIM_ALT2" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with an add eSIM icon button. Alternate phrase for: 'Add eSIM profile', 'Install eSIM profile'">
+    Download eSIM profile
   </message>
   <message name="IDS_OS_SETTINGS_TAG_CELLULAR_TURN_ON" desc="Text for search result item which, when clicked, navigates the user to cellular network settings, with a toggle to turn on cellular. Alternate phrase for: 'Enable cellular'">
     Turn on Cellular network
@@ -145,6 +145,12 @@
   </message>
   <message name="IDS_OS_SETTINGS_TAG_AUTO_CONNECT_NETWORK_ALT1" desc="Text for search result item which, when clicked, navigates the user to settings to toggle whether the device auto-connects to a network. Alternate phrase for: 'Automatically connect to network'">
     Auto connect to network
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_HIDDEN_NETWORK" desc="Text for search result item which, when clicked, navigates the user to settings to toggle whether the device auto-connects to a network. Alternate phrase for: 'Auto connect to network'">
+    Hidden network
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_HIDDEN_NETWORK_ALT1" desc="Text for search result item which, when clicked, navigates the user to settings to toggle whether the device auto-connects to a network. Alternate phrase for: 'Automatically connect to network'">
+    Hidden SSID
   </message>
   <message name="IDS_OS_SETTINGS_TAG_CONFIGURE_IP_AUTOMATICALLY" desc="Text for search result item which, when clicked, navigates the user to network settings which allow the user to set whether the device's IP address is configured automatically. Alternate phrase for: 'Auto configure IP address', 'Configure network address'">
     Configure IP address automatically
@@ -705,10 +711,103 @@
   <message name="IDS_OS_SETTINGS_TAG_AMBIENT_MODE_ART_GALLERY_ALBUM" desc="Text for search result item which, when clicked, navigates the user to ambient mode Art gallery album settings, which allow the user to set Art gallery albums to be displayed when the device is idle.">
     Art gallery album
   </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings. Alternate phrase for: 'Dark mode', 'Light mode', 'Light theme'">
+    Dark theme
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE_ALT1" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings. Alternate phrase for: 'Dark theme', 'Light mode', 'Light theme'">
+    Dark mode
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE_ALT2" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings. Alternate phrase for: 'Dark theme', 'Dark mode', 'Light mode'">
+    Light theme
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE_ALT3" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings. Alternate phrase for: 'Dark theme', 'Dark mode', 'Light theme'">
+    Light mode
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn on dark mode. Alternate phrase for: 'Enable dark theme', 'Turn dark mode on', 'Enable dark mode', 'Turn light theme off',  'Disable light theme'">
+    Turn dark theme on
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT1" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn on dark mode. Alternate phrase for: 'Turn dark theme on', 'Turn dark mode on', 'Enable dark mode', 'Turn light theme off',  'Disable light theme'">
+    Enable dark theme
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT2" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn on dark mode. Alternate phrase for: 'Turn dark theme on', 'Enable dark theme', 'Enable dark mode', 'Turn light theme off',  'Disable light theme'">
+    Turn dark mode on
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT3" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn on dark mode. Alternate phrase for: 'Turn dark theme on', 'Enable dark theme', 'Turn dark mode on', 'Turn light theme off',  'Disable light theme'">
+    Enable dark mode
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT4" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn on dark mode. Alternate phrase for: 'Turn dark theme on', 'Enable dark theme', 'Turn dark mode on', 'Enable dark mode',  'Disable light theme'">
+    Turn light theme off
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT5" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn on dark mode. Alternate phrase for: 'Turn dark theme on', 'Enable dark theme', 'Turn dark mode on', 'Enable dark mode', 'Turn light theme off'">
+    Disable light theme
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn off dark mode. Alternate phrase for: 'Disable dark theme', 'Turn dark mode off', 'Disable dark mode', 'Turn light theme on',  'Enable light theme'">
+    Turn dark theme off
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT1" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn off dark mode. Alternate phrase for: 'Turn dark theme off', 'Turn dark mode off', 'Disable dark mode', 'Turn light theme on',  'Enable light theme'">
+    Disable dark theme
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT2" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn off dark mode. Alternate phrase for: 'Turn dark theme off', 'Disable dark theme', 'Disable dark mode', 'Turn light theme on',  'Enable light theme'">
+    Turn dark mode off
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT3" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn off dark mode. Alternate phrase for: 'Turn dark theme off', 'Disable dark theme', 'Turn dark mode off', 'Turn light theme on',  'Enable light theme'">
+    Disable dark mode
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT4" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn off dark mode. Alternate phrase for: 'Turn dark theme off', 'Disable dark theme', 'Turn dark mode off', 'Disable dark mode',  'Enable light theme'">
+    Turn light theme on
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT5" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a toggle to turn off dark mode. Alternate phrase for: 'Turn dark theme off', 'Disable dark theme', 'Turn dark mode off', 'Disable dark mode', 'Turn light theme on'">
+    Enable light theme
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_THEMED" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a radio button group to select theming. Alternate phrase for: 'Color mode', 'Color theme'">
+    Accent color
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_THEMED_ALT1" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a radio button group to select theming. Alternate phrase for: 'Accent color', 'Color theme'">
+    Color mode
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_THEMED_ALT2" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a radio button group to select theming. Alternate phrase for: 'Accent color', 'Color mode'">
+    Color theme
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SCHEDULE" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a dropdown to select scheduling mode. Alternate phrase for: 'Dark mode schedule', 'Automatic dark mode', 'Automatic light mode', 'Automatic dark theme'">
+    Dark theme schedule
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SCHEDULE_ALT1" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a dropdown to select scheduling mode. Alternate phrase for: 'Dark theme schedule','Automatic dark mode', 'Automatic light mode', 'Automatic dark theme'">
+    Dark mode schedule
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SCHEDULE_ALT2" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a dropdown to select scheduling mode. Alternate phrase for: 'Dark theme schedule', 'Dark mode schedule', 'Automatic light mode', 'Automatic dark theme'">
+    Automatic dark mode
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SCHEDULE_ALT3" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a dropdown to select scheduling mode. Alternate phrase for: 'Dark theme schedule', 'Dark mode schedule', 'Automatic dark mode', 'Automatic dark theme'">
+    Automatic light mode
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DARK_MODE_SCHEDULE_ALT4" desc="Text for search result item which, when clicked, navigates the user to dark mode subpage settings, with a dropdown to select scheduling mode. Alternate phrase for: 'Dark theme schedule', 'Dark mode schedule', 'Automatic dark mode', 'Automatic light mode'">
+    Automatic dark theme
+  </message>
 
   <!-- Search and Assistant section. -->
   <message name="IDS_OS_SETTINGS_TAG_PREFERRED_SEARCH_ENGINE" desc="Text for search result item which, when clicked, navigates the user to search settings, with an option to set the user's preferred search engine.">
     Preferred search engine
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_QUICK_ANSWERS" desc="Text for search result item which, when clicked, navigates the user to Quick Answers settings, with a toggle to enable/disable the functionality. Alternate phrase for: 'Look up', 'Quick search', 'Right click card'">
+    Quick Answers
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_QUICK_ANSWERS_ALT1" desc="Text for search result item which, when clicked, navigates the user to Quick Answers settings, with a toggle to enable/disable the functionality. Alternate phrase for: 'Quick Answers', 'Quick search', 'Right click card'">
+    Look up
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_QUICK_ANSWERS_ALT2" desc="Text for search result item which, when clicked, navigates the user to Quick Answers settings, with a toggle to enable/disable the functionality. Alternate phrase for: 'Quick Answers', 'Look up', 'Right click card'">
+    Quick search
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_QUICK_ANSWERS_ALT3" desc="Text for search result item which, when clicked, navigates the user to Quick Answers settings, with a toggle to enable/disable the functionality. Alternate phrase for: 'Quick Answers', 'Look up', 'Quick search'">
+    Right click card
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_QUICK_ANSWERS_DEFINITION" desc="Text for search result item which, when clicked, navigates the user to Quick Answers settings, with a toggle to enable/disable the Quick Answers definition functionality.">
+    Quick Answers definition
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_QUICK_ANSWERS_TRANSLATION" desc="Text for search result item which, when clicked, navigates the user to Quick Answers settings, with a toggle to enable/disable the Quick Answers translation functionality.">
+    Quick Answers translation
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_QUICK_ANSWERS_UNIT_CONVERSION" desc="Text for search result item which, when clicked, navigates the user to Quick Answers settings, with a toggle to enable/disable the Quick Answers unit conversion functionality.">
+    Quick Answers unit conversion
   </message>
   <message name="IDS_OS_SETTINGS_TAG_ASSISTANT" desc="Text for search result item which, when clicked, navigates the user to Google Assistant settings.">
     Google Assistant
@@ -759,6 +858,21 @@
   </message>
   <message name="IDS_OS_SETTINGS_TAG_APPS_MANAGEMENT_ALT1" desc="Text for search result item which, when clicked, navigates the user to app mangement settings. Alternate phrase for: 'Manage apps'">
     View installed apps
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_APP_NOTIFICATIONS" desc="Text for search result item which, when clicked, navigates the user to app notification settings.">
+    Notifications
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DO_NOT_DISTURB_TURN_ON" desc="Text for search result item which, when clicked, navigates the user to app notification settings, with toggle to silence notifications. Alternate phrase for: 'Mute Notificatons'">
+    Turn on Do Not Disturb
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DO_NOT_DISTURB_TURN_ON_ALT1" desc="Text for search result item which, when clicked, navigates the user to app notification settings with toggle to silence notifications. Alternate phrase for: 'Turn on Do Not Disturb'">
+    Mute Notifications
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DO_NOT_DISTURB_TURN_OFF" desc="Text for search result item which, when clicked, navigates the user to app notification settings, with toggle to silence notifications. Alternate phrase for: 'Unmute Notificatons'">
+    Turn off Do Not Disturb
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_DO_NOT_DISTURB_TURN_OFF_ALT1" desc="Text for search result item which, when clicked, navigates the user to app notification settings with toggle to silence notifications. Alternate phrase for: 'Turn off Do Not Disturb'">
+    Unmute Notifications
   </message>
   <message name="IDS_OS_SETTINGS_TAG_REMOVE_PLAY_STORE" desc="Text for search result item which, when clicked, navigates the user to Android app settings, with a button to remove the Play Store (Android app store). Alternate phrase for: 'Uninstall Google Play Store'">
     Remove Google Play Store
@@ -933,9 +1047,6 @@
   </message>
 
   <!-- Languages and Input section. -->
-  <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_INPUT" desc="Text for search result item which, when clicked, navigates the user to languages and input settings.">
-    Languages and inputs
-  </message>
   <message name="IDS_OS_SETTINGS_TAG_LANGUAGES" desc="Text for search result item which, when clicked, navigates the user to languages settings.">
     Languages
   </message>
@@ -960,9 +1071,6 @@
   <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_EDIT_DICTIONARY" desc="Text for search result item which, when clicked, navigates the user to edit dictionary page.">
     Customize spell check
   </message>
-  <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_INPUT_METHODS" desc="Text for search result item which, when clicked, navigates the user to input settings, with the option to enable/disable input in supported languages.">
-    Manage input methods
-  </message>
   <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_INPUT_INPUT_OPTIONS_SHELF" desc="Text for search result item which, when clicked, navigates the user to languages and input settings, with a toggle to enable/disable showing input options in the shelf. Alternate phrase for: 'Input options in toolbar'">
     Show input options in the shelf
   </message>
@@ -977,6 +1085,15 @@
   </message>
   <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_EMOJI_SUGGESTIONS" desc="Text for search result item which, when clicked, navigates the user to suggestions settings, with a section having a toggle to enable/disable showing emoji suggestions after an user types a word.">
     Emoji suggestions
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_PREDICTIVE_WRITING" desc="Text for search result item which, when clicked, navigates the user to suggestions settings, with a section having a toggle to enable/disable showing predictive writing suggestions after a user types a word.">
+    Predictive writing
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_PREDICTIVE_WRITING_ALT1" desc="Text for search result item which, when clicked, navigates the user to suggestions settings, with a section having a toggle to enable/disable showing predictive writing suggestions after a user types a word.">
+    Text suggestions
+  </message>
+  <message name="IDS_OS_SETTINGS_TAG_LANGUAGES_PREDICTIVE_WRITING_ALT2" desc="Text for search result item which, when clicked, navigates the user to suggestions settings, with a section having a toggle to enable/disable showing predictive writing suggestions after a user types a word.">
+    Next word prediction
   </message>
 
   <!-- Files section. -->

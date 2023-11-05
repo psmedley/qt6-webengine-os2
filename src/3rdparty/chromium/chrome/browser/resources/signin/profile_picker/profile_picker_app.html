@@ -26,7 +26,24 @@
     <template>
       <local-profile-customization slot="view"
           profile-theme-info="{{newProfileThemeInfo}}">
-      </local-profile-customizatione>
+      </local-profile-customization>
     </template>
   </cr-lazy-render>
+
+  <cr-lazy-render id="profileSwitch">
+    <template>
+      <profile-switch slot="view">
+      </profile-switch>
+    </template>
+  </cr-lazy-render>
+
+  <if expr="lacros">
+    <cr-lazy-render id="accountSelectionLacros">
+      <template>
+        <account-selection-lacros slot="view"
+            profile-theme-info="[[newProfileThemeInfo]]">
+        </account-selection-lacros>
+      </template>
+    </cr-lazy-render>
+  </if>
 </cr-view-manager>

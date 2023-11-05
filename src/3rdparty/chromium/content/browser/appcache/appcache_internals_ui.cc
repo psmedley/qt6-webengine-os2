@@ -162,7 +162,7 @@ void AppCacheInternalsHandler::Proxy::Initialize(
 }
 
 AppCacheInternalsHandler::Proxy::~Proxy() {
-//   DCHECK(shutdown_called_);
+//  DCHECK(shutdown_called_);
 }
 
 void AppCacheInternalsHandler::Proxy::Shutdown() {
@@ -375,10 +375,8 @@ void AppCacheInternalsHandler::RegisterMessages() {
 }
 
 void AppCacheInternalsHandler::OnJavascriptAllowed() {
-  BrowserContext::ForEachStoragePartition(
-      GetBrowserContext(),
-      base::BindRepeating(&AppCacheInternalsHandler::CreateProxyForPartition,
-                          AsWeakPtr()));
+  GetBrowserContext()->ForEachStoragePartition(base::BindRepeating(
+      &AppCacheInternalsHandler::CreateProxyForPartition, AsWeakPtr()));
 }
 
 void AppCacheInternalsHandler::OnJavascriptDisallowed() {

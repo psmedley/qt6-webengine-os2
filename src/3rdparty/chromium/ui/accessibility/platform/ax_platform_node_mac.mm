@@ -42,7 +42,6 @@ RoleMap BuildRoleMap() {
       {ax::mojom::Role::kAbbr, NSAccessibilityGroupRole},
       {ax::mojom::Role::kAlert, NSAccessibilityGroupRole},
       {ax::mojom::Role::kAlertDialog, NSAccessibilityGroupRole},
-      {ax::mojom::Role::kAnchor, NSAccessibilityGroupRole},
       {ax::mojom::Role::kApplication, NSAccessibilityGroupRole},
       {ax::mojom::Role::kArticle, NSAccessibilityGroupRole},
       {ax::mojom::Role::kAudio, NSAccessibilityGroupRole},
@@ -140,9 +139,7 @@ RoleMap BuildRoleMap() {
       {ax::mojom::Role::kHeading, @"AXHeading"},
       {ax::mojom::Role::kIframe, NSAccessibilityGroupRole},
       {ax::mojom::Role::kIframePresentational, NSAccessibilityGroupRole},
-      {ax::mojom::Role::kIgnored, NSAccessibilityUnknownRole},
       {ax::mojom::Role::kImage, NSAccessibilityImageRole},
-      {ax::mojom::Role::kImageMap, NSAccessibilityGroupRole},
       {ax::mojom::Role::kInputTime, @"AXTimeField"},
       {ax::mojom::Role::kLabelText, NSAccessibilityGroupRole},
       {ax::mojom::Role::kLayoutTable, NSAccessibilityGroupRole},
@@ -179,7 +176,6 @@ RoleMap BuildRoleMap() {
       {ax::mojom::Role::kPopUpButton, NSAccessibilityPopUpButtonRole},
       {ax::mojom::Role::kPortal, NSAccessibilityButtonRole},
       {ax::mojom::Role::kPre, NSAccessibilityGroupRole},
-      {ax::mojom::Role::kPresentational, NSAccessibilityGroupRole},
       {ax::mojom::Role::kProgressIndicator,
        NSAccessibilityProgressIndicatorRole},
       {ax::mojom::Role::kRadioButton, NSAccessibilityRadioButtonRole},
@@ -263,7 +259,6 @@ RoleMap BuildSubroleMap() {
       {ax::mojom::Role::kRegion, @"AXLandmarkRegion"},
       {ax::mojom::Role::kSearch, @"AXLandmarkSearch"},
       {ax::mojom::Role::kSearchBox, @"AXSearchField"},
-      {ax::mojom::Role::kSection, @"AXLandmarkRegion"},
       {ax::mojom::Role::kStatus, @"AXApplicationStatus"},
       {ax::mojom::Role::kStrong, @"AXStrongStyleGroup"},
       {ax::mojom::Role::kSwitch, @"AXSwitch"},
@@ -287,10 +282,15 @@ EventMap BuildEventMap() {
        NSAccessibilityFocusedUIElementChangedNotification},
       {ax::mojom::Event::kFocusContext,
        NSAccessibilityFocusedUIElementChangedNotification},
-      {ax::mojom::Event::kMenuStart, (id)kAXMenuOpenedNotification},
-      {ax::mojom::Event::kMenuEnd, (id)kAXMenuClosedNotification},
-      {ax::mojom::Event::kMenuPopupStart, (id)kAXMenuOpenedNotification},
-      {ax::mojom::Event::kMenuPopupEnd, (id)kAXMenuClosedNotification},
+
+      // Do not map kMenuStart/End to the Mac's opened/closed notifications.
+      // kMenuStart/End are fired at the start/end of menu interaction on the
+      // container of the menu; not the menu itself. All newly-opened/closed
+      // menus should fire kMenuPopupStart/End. See SubmenuView::ShowAt and
+      // SubmenuView::Hide.
+      {ax::mojom::Event::kMenuPopupStart, (NSString*)kAXMenuOpenedNotification},
+      {ax::mojom::Event::kMenuPopupEnd, (NSString*)kAXMenuClosedNotification},
+
       {ax::mojom::Event::kTextChanged, NSAccessibilityTitleChangedNotification},
       {ax::mojom::Event::kValueChanged,
        NSAccessibilityValueChangedNotification},
@@ -334,6 +334,16 @@ void PostAnnouncementNotification(NSString* announcement,
       notification_info);
 }
 void NotifyMacEvent(AXPlatformNodeCocoa* target, ax::mojom::Event event_type) {
+  // When this is fired and VoiceOver is running, a blocking AppKit call will
+  // attempt to ascend the hierarchy. Don't fire AXMenuOpened if we don't yet
+  // have a window.
+  if (event_type == ax::mojom::Event::kMenuPopupStart) {
+    if (auto* node = ui::AXPlatformNode::FromNativeViewAccessible(target)) {
+      if (!node->GetDelegate()->GetNSWindow())
+        return;
+    }
+  }
+
   NSString* notification =
       [AXPlatformNodeCocoa nativeNotificationFromAXEvent:event_type];
   if (notification)
@@ -617,12 +627,12 @@ bool IsAXSetter(SEL selector) {
   base::scoped_nsobject<NSMutableArray> axAttributes(
       [[NSMutableArray alloc] init]);
   [axAttributes addObjectsFromArray:kAllRoleAttributes];
-  switch (_node->GetData().role) {
+  switch (_node->GetRole()) {
     case ax::mojom::Role::kTextField:
     case ax::mojom::Role::kTextFieldWithComboBox:
     case ax::mojom::Role::kStaticText:
       [axAttributes addObject:kTextAttributes];
-      if (!_node->GetData().HasState(ax::mojom::State::kProtected))
+      if (!_node->HasState(ax::mojom::State::kProtected))
         [axAttributes addObjectsFromArray:kUnprotectedTextAttributes];
       FALLTHROUGH;
     case ax::mojom::Role::kCheckBox:
@@ -639,13 +649,13 @@ bool IsAXSetter(SEL selector) {
     default:
       break;
   }
-  if (_node->GetData().HasBoolAttribute(ax::mojom::BoolAttribute::kSelected))
+  if (_node->HasBoolAttribute(ax::mojom::BoolAttribute::kSelected))
     [axAttributes addObject:NSAccessibilitySelectedAttribute];
-  if (ui::IsMenuItem(_node->GetData().role))
+  if (ui::IsMenuItem(_node->GetRole()))
     [axAttributes addObject:@"AXMenuItemMarkChar"];
-  if (ui::IsItemLike(_node->GetData().role))
+  if (ui::IsItemLike(_node->GetRole()))
     [axAttributes addObjectsFromArray:@[ @"AXARIAPosInSet", @"AXARIASetSize" ]];
-  if (ui::IsSetLike(_node->GetData().role))
+  if (ui::IsSetLike(_node->GetRole()))
     [axAttributes addObject:@"AXARIASetSize"];
   return axAttributes.autorelease();
 }
@@ -702,7 +712,7 @@ bool IsAXSetter(SEL selector) {
   if (!_node)
     return nil;
 
-  return [[self class] nativeRoleFromAXRole:_node->GetData().role];
+  return [[self class] nativeRoleFromAXRole:_node->GetRole()];
 }
 
 - (NSString*)AXRoleDescription {
@@ -710,7 +720,7 @@ bool IsAXSetter(SEL selector) {
     return [base::SysUTF8ToNSString(_node->GetStringAttribute(
         ax::mojom::StringAttribute::kRoleDescription)) lowercaseString];
   }
-  switch (_node->GetData().role) {
+  switch (_node->GetRole()) {
     case ax::mojom::Role::kTab:
       // There is no NSAccessibilityTabRole or similar (AXRadioButton is used
       // instead). Do the same as NSTabView and put "tab" in the description.
@@ -726,10 +736,10 @@ bool IsAXSetter(SEL selector) {
 }
 
 - (NSString*)AXSubrole {
-  ax::mojom::Role role = _node->GetData().role;
+  ax::mojom::Role role = _node->GetRole();
   switch (role) {
     case ax::mojom::Role::kTextField:
-      if (_node->GetData().HasState(ax::mojom::State::kProtected))
+      if (_node->HasState(ax::mojom::State::kProtected))
         return NSAccessibilitySecureTextFieldSubrole;
       break;
     default:
@@ -754,7 +764,7 @@ bool IsAXSetter(SEL selector) {
 }
 
 - (id)AXValue {
-  ax::mojom::Role role = _node->GetData().role;
+  ax::mojom::Role role = _node->GetRole();
   if (role == ax::mojom::Role::kTab)
     return [self AXSelected];
 
@@ -777,7 +787,7 @@ bool IsAXSetter(SEL selector) {
 }
 
 - (NSNumber*)AXFocused {
-  if (_node->GetData().HasState(ax::mojom::State::kFocusable))
+  if (_node->HasState(ax::mojom::State::kFocusable))
     return
         @(_node->GetDelegate()->GetFocus() == _node->GetNativeViewAccessible());
   return @NO;
@@ -820,7 +830,7 @@ bool IsAXSetter(SEL selector) {
 }
 
 - (NSString*)AXTitle {
-  if (ui::IsNameExposedInAXValueForRole(_node->GetData().role))
+  if (ui::IsNameExposedInAXValueForRole(_node->GetRole()))
     return @"";
 
   return [self getName];
@@ -829,8 +839,7 @@ bool IsAXSetter(SEL selector) {
 // Misc attributes.
 
 - (NSNumber*)AXSelected {
-  return
-      @(_node->GetData().GetBoolAttribute(ax::mojom::BoolAttribute::kSelected));
+  return @(_node->GetBoolAttribute(ax::mojom::BoolAttribute::kSelected));
 }
 
 - (NSString*)AXPlaceholderValue {
@@ -838,7 +847,7 @@ bool IsAXSetter(SEL selector) {
 }
 
 - (NSString*)AXMenuItemMarkChar {
-  if (!ui::IsMenuItem(_node->GetData().role))
+  if (!ui::IsMenuItem(_node->GetRole()))
     return nil;
 
   const auto checkedState = static_cast<ax::mojom::CheckedState>(
@@ -851,14 +860,14 @@ bool IsAXSetter(SEL selector) {
 }
 
 - (NSNumber*)AXARIAPosInSet {
-  base::Optional<int> posInSet = _node->GetPosInSet();
+  absl::optional<int> posInSet = _node->GetPosInSet();
   if (!posInSet)
     return nil;
   return @(*posInSet);
 }
 
 - (NSNumber*)AXARIASetSize {
-  base::Optional<int> setSize = _node->GetSetSize();
+  absl::optional<int> setSize = _node->GetSetSize();
   if (!setSize)
     return nil;
   return @(*setSize);
@@ -873,15 +882,17 @@ bool IsAXSetter(SEL selector) {
 }
 
 - (NSValue*)AXSelectedTextRange {
-  // Selection might not be supported. Return (NSRange){0,0} in that case.
   int start = 0, end = 0;
-  if (_node->IsPlainTextField()) {
-    start = _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelStart);
-    end = _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelEnd);
+  if (_node->IsAtomicTextField() &&
+      _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelStart, &start) &&
+      _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelEnd, &end)) {
+    // NSRange cannot represent the direction the text was selected in.
+    return
+        [NSValue valueWithRange:{static_cast<NSUInteger>(std::min(start, end)),
+                                 static_cast<NSUInteger>(abs(end - start))}];
   }
 
-  // NSRange cannot represent the direction the text was selected in.
-  return [NSValue valueWithRange:{std::min(start, end), abs(end - start)}];
+  return [NSValue valueWithRange:NSMakeRange(0, 0)];
 }
 
 - (NSNumber*)AXNumberOfCharacters {
@@ -1028,15 +1039,14 @@ bool IsAXSetter(SEL selector) {
     return NO;
 
   if (selector == @selector(setAccessibilityFocused:))
-    return _node->GetData().HasState(ax::mojom::State::kFocusable);
+    return _node->HasState(ax::mojom::State::kFocusable);
 
   if (selector == @selector(setAccessibilityValue:) &&
-      _node->GetData().role == ax::mojom::Role::kTab) {
+      _node->GetRole() == ax::mojom::Role::kTab) {
     // Tabs use the radio button role on Mac, so they are selected by calling
     // setSelected on an individual tab, rather than by setting the selected
     // element on the tabstrip as a whole.
-    return !_node->GetData().GetBoolAttribute(
-        ax::mojom::BoolAttribute::kSelected);
+    return !_node->GetBoolAttribute(ax::mojom::BoolAttribute::kSelected);
   }
 
   // Don't allow calling AX setters on disabled elements.
@@ -1057,7 +1067,7 @@ bool IsAXSetter(SEL selector) {
     return;
 
   ui::AXActionData data;
-  data.action = _node->GetData().role == ax::mojom::Role::kTab
+  data.action = _node->GetRole() == ax::mojom::Role::kTab
                     ? ax::mojom::Action::kSetSelection
                     : ax::mojom::Action::kSetValue;
   if ([value isKindOfClass:[NSString class]]) {
@@ -1241,7 +1251,7 @@ void AXPlatformNodeMac::Destroy() {
 
 // On Mac, the checked state is mapped to AXValue.
 bool AXPlatformNodeMac::IsPlatformCheckable() const {
-  if (GetData().role == ax::mojom::Role::kTab) {
+  if (GetRole() == ax::mojom::Role::kTab) {
     // On Mac, tabs are exposed as radio buttons, and are treated as checkable.
     // Also, the internal State::kSelected is be mapped to checked via AXValue.
     return true;
@@ -1271,16 +1281,15 @@ void AXPlatformNodeMac::NotifyAccessibilityEvent(ax::mojom::Event event_type) {
     return;
   }
   if (event_type == ax::mojom::Event::kSelection) {
-    ax::mojom::Role role = GetData().role;
+    ax::mojom::Role role = GetRole();
     if (ui::IsMenuItem(role)) {
       // On Mac, map menu item selection to a focus event.
       NotifyMacEvent(native_node_, ax::mojom::Event::kFocus);
       return;
     } else if (ui::IsListItem(role)) {
       if (AXPlatformNodeBase* container = GetSelectionContainer()) {
-        const ui::AXNodeData& data = container->GetData();
-        if (data.role == ax::mojom::Role::kListBox &&
-            !data.HasState(ax::mojom::State::kMultiselectable) &&
+        if (container->GetRole() == ax::mojom::Role::kListBox &&
+            !container->HasState(ax::mojom::State::kMultiselectable) &&
             GetDelegate()->GetFocus() == GetNativeViewAccessible()) {
           NotifyMacEvent(native_node_, ax::mojom::Event::kFocus);
           return;
@@ -1288,12 +1297,13 @@ void AXPlatformNodeMac::NotifyAccessibilityEvent(ax::mojom::Event event_type) {
       }
     }
   }
+
   // Otherwise, use mappings between ax::mojom::Event and NSAccessibility
   // notifications from the EventMap above.
   NotifyMacEvent(native_node_, event_type);
 }
 
-void AXPlatformNodeMac::AnnounceText(const base::string16& text) {
+void AXPlatformNodeMac::AnnounceText(const std::u16string& text) {
   PostAnnouncementNotification(base::SysUTF16ToNSString(text),
                                [native_node_ AXWindow], false);
 }

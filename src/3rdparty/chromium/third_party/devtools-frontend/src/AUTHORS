@@ -11,6 +11,7 @@
 # Please keep the list sorted.
 
 # BEGIN individuals section.
+Ajay Panthagani <ajaypanthagani321@gmail.com>
 Alexander Stammbach <alexander@stammbach.io>
 Ankit Mishra <ankit.mishra131990@gmail.com>
 Anna Agoha <annaagoha@gmail.com>
@@ -32,11 +33,16 @@ Julian Geppert <spctstr@gmail.com>
 Karntino Areros <karntino.c.areros@gmail.com>
 Krishnal Ciccolella <ciccolella.krishnal@gmail.com>
 Luke Swiderski <luke.swiderski@gmail.com>
+Michael Brüning <michael.bruning@qt.io>
 Per-Olov Jernberg <possan@possan.se>
 PhistucK <phistuck@gmail.com>
+Pradhuman Singh Baid <pradhumansinghbaid@gmail.com>
+Rahat Muneeb <irahatmuneeb@gmail.com>
+Rahul B S <bsrahul2020@gmail.com>
 Rajasekar Murugan <rajasekar89be@gmail.com>
 Stephen Tsoi-A-Sue <stsoiasue@gmail.com>
 Tony Kostowny <tonykostowny@gmail.com>
+Toshiaki Tanaka <zokutyou2@gmail.com>
 Varun Varada <varuncvarada@gmail.com>
 Will Hernandez <w.hernandez.code@gmail.com>
 Yeol Park <peary2@gmail.com>
@@ -46,11 +52,13 @@ Yisi <yiorsi@gmail.com>
 
 # BEGIN organizations section.
 Cloudflare, Inc. <*@cloudflare.com>
+Facebook, Inc. <*@fb.com>
 Google Inc. <*@google.com>
 Igalia, S.L. <*@igalia.com>
 Intel Corporation <*@intel.com>
 Microsoft <*@microsoft.com>
 Samsung <*@samsung.com>
 The Chromium Authors <*@chromium.org>
+The Qt Company <*@qt.io>
 # Please DO NOT APPEND here. See comments at the top of the file.
 # END organizations section.

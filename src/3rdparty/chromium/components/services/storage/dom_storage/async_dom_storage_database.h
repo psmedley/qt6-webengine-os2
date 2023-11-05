@@ -15,6 +15,7 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/unguessable_token.h"
 #include "components/services/storage/dom_storage/dom_storage_database.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/leveldatabase/src/include/leveldb/cache.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 
@@ -37,13 +38,13 @@ class AsyncDomStorageDatabase {
       const leveldb_env::Options& options,
       const base::FilePath& directory,
       const std::string& dbname,
-      const base::Optional<base::trace_event::MemoryAllocatorDumpGuid>&
+      const absl::optional<base::trace_event::MemoryAllocatorDumpGuid>&
           memory_dump_id,
       scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
       StatusCallback callback);
 
   static std::unique_ptr<AsyncDomStorageDatabase> OpenInMemory(
-      const base::Optional<base::trace_event::MemoryAllocatorDumpGuid>&
+      const absl::optional<base::trace_event::MemoryAllocatorDumpGuid>&
           memory_dump_id,
       const std::string& tracking_name,
       scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,

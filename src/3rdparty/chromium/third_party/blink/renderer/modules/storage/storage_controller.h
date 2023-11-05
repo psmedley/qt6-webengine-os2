@@ -5,8 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_STORAGE_STORAGE_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_STORAGE_STORAGE_CONTROLLER_H_
 
-#include <memory>
-
 #include "base/callback.h"
 #include "base/sequence_checker.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -35,17 +33,17 @@ class StorageNamespace;
 // Singleton that manages the creation & accounting for DOMStorage objects. It
 // does this by holding weak references to all session storage namespaces, and
 // owning the local storage namespace internally. The total cache size is
-// exposed with |TotalCacheSize()|, and |ClearAreasIfNeeded()| will - if our
-// total cache size is larger than |total_cache_limit| - clear away any cache
+// exposed with `TotalCacheSize()`, and `ClearAreasIfNeeded()` will - if our
+// total cache size is larger than `total_cache_limit` - clear away any cache
 // areas in live namespaces that no longer have references from Blink objects.
 //
 // SessionStorage StorageNamespace objects are created with
-// |CreateSessionStorageNamespace| and live as a supplement on the Page.
+// `CreateSessionStorageNamespace` and live as a supplement on the Page.
 //
 // The LocalStorage StorageNamespace object is owned internally, and
 // StorageController delegates the following methods to that namespace:
 // GetLocalStorageArea, AddLocalStorageInspectorStorageAgent,
-// RemoveLocalStorageInspectorStorageAgent, DidDispatchLocalStorageEvent
+// RemoveLocalStorageInspectorStorageAgent
 class MODULES_EXPORT StorageController : public mojom::blink::DomStorageClient {
   USING_FAST_MALLOC(StorageController);
 
@@ -77,16 +75,14 @@ class MODULES_EXPORT StorageController : public mojom::blink::DomStorageClient {
   // Cleans up unused areas if the total cache size is over the cache limit.
   void ClearAreasIfNeeded();
 
-  // Methods that delegate to the internal SessionNamespace used for
+  // Methods that delegate to the internal StorageNamespace used for
   // LocalStorage:
 
-  scoped_refptr<CachedStorageArea> GetLocalStorageArea(const SecurityOrigin*);
+  scoped_refptr<CachedStorageArea> GetLocalStorageArea(
+      const SecurityOrigin*,
+      mojo::PendingRemote<mojom::blink::StorageArea> local_storage_area = {});
   void AddLocalStorageInspectorStorageAgent(InspectorDOMStorageAgent* agent);
   void RemoveLocalStorageInspectorStorageAgent(InspectorDOMStorageAgent* agent);
-  void DidDispatchLocalStorageEvent(const SecurityOrigin* origin,
-                                    const String& key,
-                                    const String& old_value,
-                                    const String& new_value);
 
   mojom::blink::DomStorage* dom_storage() const {
     return dom_storage_remote_.get();

@@ -6,6 +6,7 @@
 
 #include "base/task/post_task.h"
 #include "content/browser/file_system_access/file_system_access_error.h"
+#include "content/browser/renderer_host/back_forward_cache_disable.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -23,9 +24,6 @@ FileSystemAccessHandleBase::FileSystemAccessHandleBase(
       url_(url),
       handle_state_(handle_state) {
   DCHECK(manager_);
-  DCHECK_EQ(url_.mount_type() == storage::kFileSystemTypeIsolated,
-            handle_state_.file_system.is_valid())
-      << url_.mount_type();
 
   // We support sandboxed file system and local file systems on all platforms.
   DCHECK(url_.type() == storage::kFileSystemTypeLocal ||
@@ -35,18 +33,18 @@ FileSystemAccessHandleBase::FileSystemAccessHandleBase(
       << url_.type();
 
   if (ShouldTrackUsage()) {
-    DCHECK(url_.mount_type() == storage::kFileSystemTypeIsolated ||
+    DCHECK(url_.mount_type() == storage::kFileSystemTypeLocal ||
            url_.mount_type() == storage::kFileSystemTypeExternal)
         << url_.mount_type();
-    if (url_.mount_type() == storage::kFileSystemTypeIsolated)
-      DCHECK_EQ(url_.type(), storage::kFileSystemTypeLocal);
 
     Observe(WebContentsImpl::FromRenderFrameHostID(context_.frame_id));
 
     // Disable back-forward cache as File System Access's usage of
-    // RenderFrameHost::IsCurrent at the moment is not compatible with bfcache.
-    BackForwardCache::DisableForRenderFrameHost(context_.frame_id,
-                                                "FileSystemAccess");
+    // RenderFrameHost::IsActive at the moment is not compatible with bfcache.
+    BackForwardCache::DisableForRenderFrameHost(
+        context_.frame_id,
+        BackForwardCacheDisable::DisabledReason(
+            BackForwardCacheDisable::DisabledReasonId::kFileSystemAccess));
     if (web_contents())
       web_contents()->IncrementFileSystemAccessHandleCount();
   }
@@ -164,12 +162,39 @@ void FileSystemAccessHandleBase::DidRequestPermission(
     case Outcome::kUserDismissed:
     case Outcome::kRequestAborted:
     case Outcome::kGrantedByContentSetting:
+    case Outcome::kGrantedByPersistentPermission:
+    case Outcome::kGrantedByAncestorPersistentPermission:
       std::move(callback).Run(
           file_system_access_error::Ok(),
           writable ? GetWritePermissionStatus() : GetReadPermissionStatus());
       return;
   }
   NOTREACHED();
+}
+
+void FileSystemAccessHandleBase::DoRemove(
+    const storage::FileSystemURL& url,
+    bool recurse,
+    base::OnceCallback<void(blink::mojom::FileSystemAccessErrorPtr)> callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_EQ(GetWritePermissionStatus(),
+            blink::mojom::PermissionStatus::GRANTED);
+
+  DoFileSystemOperation(
+      FROM_HERE, &storage::FileSystemOperationRunner::Remove,
+      base::BindOnce(
+          [](base::OnceCallback<void(blink::mojom::FileSystemAccessErrorPtr)>
+                 callback,
+             base::File::Error result) {
+            std::move(callback).Run(
+                file_system_access_error::FromFileError(result));
+          },
+          std::move(callback)),
+      url, recurse);
+}
+
+WebContentsImpl* FileSystemAccessHandleBase::web_contents() const {
+  return static_cast<WebContentsImpl*>(WebContentsObserver::web_contents());
 }
 
 }  // namespace content

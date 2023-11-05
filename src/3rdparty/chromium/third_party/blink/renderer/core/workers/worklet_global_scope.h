@@ -60,11 +60,13 @@ class CORE_EXPORT WorkletGlobalScope
   bool IsContextThread() const final;
   void AddConsoleMessageImpl(ConsoleMessage*, bool discard_duplicates) final;
   void AddInspectorIssue(mojom::blink::InspectorIssueInfoPtr) final;
+  void AddInspectorIssue(AuditsIssue) final;
   void ExceptionThrown(ErrorEvent*) final;
   CoreProbeSink* GetProbeSink() final;
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType) final;
   FrameOrWorkerScheduler* GetScheduler() final;
-  bool CrossOriginIsolatedCapability() const final { return false; }
+  bool CrossOriginIsolatedCapability() const final;
+  bool DirectSocketCapability() const final;
   ukm::UkmRecorder* UkmRecorder() final;
 
   // WorkerOrWorkletGlobalScope
@@ -132,7 +134,7 @@ class CORE_EXPORT WorkletGlobalScope
   // Returns the ExecutionContextToken that uniquely identifies the parent
   // context that created this worklet. Note that this will always be a
   // LocalFrameToken.
-  base::Optional<ExecutionContextToken> GetParentExecutionContextToken()
+  absl::optional<ExecutionContextToken> GetParentExecutionContextToken()
       const final {
     return frame_token_;
   }
@@ -184,6 +186,17 @@ class CORE_EXPORT WorkletGlobalScope
   const LocalFrameToken frame_token_;
 
   std::unique_ptr<ukm::UkmRecorder> ukm_recorder_;
+
+  // This is inherited at construction to make sure it is possible to used
+  // restricted API between the document and the worklet (e.g.
+  // SharedArrayBuffer passing via postMessage).
+  const bool parent_cross_origin_isolated_capability_;
+
+  // This is inherited at construction to ensure it's possible to use APIs
+  // like Direct Sockets if they're made available in Worklets.
+  //
+  // TODO(mkwst): We need a spec for this capability.
+  const bool parent_direct_socket_capability_;
 };
 
 template <>

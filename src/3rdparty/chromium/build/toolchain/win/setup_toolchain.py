@@ -220,7 +220,6 @@ def main():
     print('or setup_toolchain.py <target_os> <target_cpu>'
           '<environment block name|none>')
     sys.exit(2)
-  win_sdk_path = ''
   if len(sys.argv) == 7:
     # toolchain_root and win_sdk_path are only read if the hermetic Windows
     # toolchain is set, that is if DEPOT_TOOLS_WIN_TOOLCHAIN is not set to 0.
@@ -261,7 +260,7 @@ def main():
 
   def relflag(s):  # Make s relative to builddir when cwd and sdk on same drive.
     try:
-      return os.path.relpath(s)
+      return os.path.relpath(s).replace('\\', '/')
     except ValueError:
       return s
 

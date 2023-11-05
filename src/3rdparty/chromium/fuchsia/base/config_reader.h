@@ -5,15 +5,15 @@
 #ifndef FUCHSIA_BASE_CONFIG_READER_H_
 #define FUCHSIA_BASE_CONFIG_READER_H_
 
-#include "base/files/file_path.h"
 #include "base/values.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace cr_fuchsia {
 
 // Loads and parses configuration data from the environment.
 // Returns a null value if the file(s) do not exist.
 // CHECK-fails if the file(s) are present but not parseable.
-const base::Optional<base::Value>& LoadPackageConfig();
+const absl::optional<base::Value>& LoadPackageConfig();
 
 }  // namespace cr_fuchsia
 

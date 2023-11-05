@@ -52,6 +52,7 @@ target(link_target_type, "gpu_sources") {
     "//base/third_party/dynamic_annotations",
     "//build:branding_buildflags",
     "//build:chromeos_buildflags",
+    "//components/services/storage/public/mojom",
     "//components/viz/service",
     "//content:export",
     "//content/child",
@@ -137,8 +138,7 @@ target(link_target_type, "gpu_sources") {
   }
 
   # Use DRI on desktop Linux builds.
-  if (current_cpu != "s390x" && current_cpu != "ppc64" &&
-      (is_linux || is_chromeos_lacros) &&
+  if (current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
       ((!is_chromecast || is_cast_desktop_build) && !use_qt)) {
     configs += [ "//build/config/linux/dri" ]
   }

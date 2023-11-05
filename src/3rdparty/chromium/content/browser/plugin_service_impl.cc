@@ -16,6 +16,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -29,7 +30,6 @@
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/pepper_plugin_list.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -41,6 +41,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/webplugininfo.h"
@@ -119,7 +120,7 @@ void PluginServiceImpl::Init() {
 PpapiPluginProcessHost* PluginServiceImpl::FindPpapiPluginProcess(
     const base::FilePath& plugin_path,
     const base::FilePath& profile_data_directory,
-    const base::Optional<url::Origin>& origin_lock) {
+    const absl::optional<url::Origin>& origin_lock) {
   for (PpapiPluginProcessHostIterator iter; !iter.Done(); ++iter) {
     if (iter->plugin_path() == plugin_path &&
         iter->profile_data_directory() == profile_data_directory &&
@@ -148,8 +149,10 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
     const url::Origin& embedder_origin,
     const base::FilePath& plugin_path,
     const base::FilePath& profile_data_directory,
-    const base::Optional<url::Origin>& origin_lock) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+    const absl::optional<url::Origin>& origin_lock) {
+  DCHECK_CURRENTLY_ON(base::FeatureList::IsEnabled(features::kProcessHostOnUI)
+                          ? BrowserThread::UI
+                          : BrowserThread::IO);
 
   if (filter_ && !filter_->CanLoadPlugin(render_process_id, plugin_path)) {
     VLOG(1) << "Unable to load ppapi plugin: " << plugin_path.MaybeAsASCII();
@@ -240,7 +243,7 @@ void PluginServiceImpl::OpenChannelToPpapiPlugin(
     const url::Origin& embedder_origin,
     const base::FilePath& plugin_path,
     const base::FilePath& profile_data_directory,
-    const base::Optional<url::Origin>& origin_lock,
+    const absl::optional<url::Origin>& origin_lock,
     PpapiPluginProcessHost::PluginClient* client) {
   PpapiPluginProcessHost* plugin_host = FindOrStartPpapiPluginProcess(
       render_process_id, embedder_origin, plugin_path, profile_data_directory,
@@ -308,9 +311,9 @@ bool PluginServiceImpl::GetPluginInfoByPath(const base::FilePath& plugin_path,
   return false;
 }
 
-base::string16 PluginServiceImpl::GetPluginDisplayNameByPath(
+std::u16string PluginServiceImpl::GetPluginDisplayNameByPath(
     const base::FilePath& path) {
-  base::string16 plugin_name = path.LossyDisplayName();
+  std::u16string plugin_name = path.LossyDisplayName();
   WebPluginInfo info;
   if (PluginService::GetInstance()->GetPluginInfoByPath(path, &info) &&
       !info.name.empty()) {
@@ -318,10 +321,9 @@ base::string16 PluginServiceImpl::GetPluginDisplayNameByPath(
 #if defined(OS_MAC)
     // Many plugins on the Mac have .plugin in the actual name, which looks
     // terrible, so look for that and strip it off if present.
-    static const char kPluginExtension[] = ".plugin";
-    if (base::EndsWith(plugin_name, base::ASCIIToUTF16(kPluginExtension),
-                       base::CompareCase::SENSITIVE))
-      plugin_name.erase(plugin_name.length() - strlen(kPluginExtension));
+    static constexpr base::StringPiece16 kPluginExtension = u".plugin";
+    if (base::EndsWith(plugin_name, kPluginExtension))
+      plugin_name.erase(plugin_name.size() - kPluginExtension.size());
 #endif  // defined(OS_MAC)
   }
   return plugin_name;

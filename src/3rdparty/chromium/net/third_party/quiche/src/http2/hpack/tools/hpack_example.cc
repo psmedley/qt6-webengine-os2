@@ -6,10 +6,10 @@
 
 #include <ctype.h>
 
+#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "http2/platform/api/http2_bug_tracker.h"
 #include "http2/platform/api/http2_logging.h"
-#include "http2/platform/api/http2_string_utils.h"
 
 namespace http2 {
 namespace test {
@@ -22,7 +22,7 @@ void HpackExampleToStringOrDie(absl::string_view example, std::string* output) {
       QUICHE_CHECK_GT(example.size(), 1u) << "Truncated hex byte?";
       const char c1 = example[1];
       QUICHE_CHECK(isxdigit(c1)) << "Found half a byte?";
-      *output += Http2HexDecode(example.substr(0, 2));
+      *output += absl::HexStringToBytes(example.substr(0, 2));
       example.remove_prefix(2);
       continue;
     }
@@ -40,9 +40,9 @@ void HpackExampleToStringOrDie(absl::string_view example, std::string* output) {
       example.remove_prefix(pos + 1);
       continue;
     }
-    HTTP2_BUG << "Can't parse byte " << static_cast<int>(c0)
-              << absl::StrCat(" (0x", Http2Hex(c0), ")")
-              << "\nExample: " << example;
+    HTTP2_BUG(http2_bug_107_1)
+        << "Can't parse byte " << static_cast<int>(c0)
+        << absl::StrCat(" (0x", absl::Hex(c0), ")") << "\nExample: " << example;
   }
   QUICHE_CHECK_LT(0u, output->size()) << "Example is empty.";
 }

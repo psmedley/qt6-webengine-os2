@@ -10,25 +10,23 @@
 #include <map>
 #include <memory>
 
-#include "core/fxcrt/fx_system.h"
+#include "core/fxcrt/fx_coordinates.h"
 #include "fxjs/gc/gced_tree_node.h"
 #include "fxjs/gc/heap.h"
 #include "v8/include/cppgc/garbage-collected.h"
 #include "v8/include/cppgc/member.h"
 #include "v8/include/cppgc/visitor.h"
-#include "xfa/fgas/graphics/cfgas_gegraphics.h"
 
 class CFGAS_GEGraphics;
 class CFWL_App;
 class CFWL_Message;
 class CFWL_Widget;
-class CFX_Matrix;
 
 class CFWL_WidgetMgr final : public cppgc::GarbageCollected<CFWL_WidgetMgr> {
  public:
   class AdapterIface : public cppgc::GarbageCollectedMixin {
    public:
-    virtual ~AdapterIface() {}
+    virtual ~AdapterIface() = default;
     virtual void RepaintWidget(CFWL_Widget* pWidget) = 0;
     virtual bool GetPopupPos(CFWL_Widget* pWidget,
                              float fMinHeight,
@@ -93,7 +91,7 @@ class CFWL_WidgetMgr final : public cppgc::GarbageCollected<CFWL_WidgetMgr> {
   void DrawChildren(CFWL_Widget* pParent,
                     const CFX_RectF& rtClip,
                     CFGAS_GEGraphics* pGraphics,
-                    const CFX_Matrix* pMatrix);
+                    const CFX_Matrix& mtMatrix);
 
   cppgc::Member<AdapterIface> const m_pAdapter;
   cppgc::Member<CFWL_App> const m_pApp;

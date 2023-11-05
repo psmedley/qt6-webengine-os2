@@ -19,6 +19,7 @@ namespace message_center {
 // Square image sizes in DIPs.
 const int kNotificationButtonIconSize = 16;
 const int kNotificationIconSize = 80;
+const int kQuickSettingIconSizeInDp = 48;
 // A border is applied to images that have a non-preferred aspect ratio.
 const int kNotificationImageBorderSize = 10;
 const int kNotificationPreferredImageWidth = 360;
@@ -58,17 +59,6 @@ const int kTitleLineHeight = 20;      // In DIPs.
 const int kMessageFontSize = 12;      // For everything but title.
 const int kMessageLineHeight = 18;    // In DIPs.
 
-// Colors.
-// Background of the card.
-constexpr SkColor kNotificationBackgroundColor = SK_ColorWHITE;
-// The focus border.
-constexpr SkColor kFocusBorderColor = SkColorSetRGB(64, 128, 250);
-// Foreground of small icon image.
-constexpr SkColor kSmallImageMaskForegroundColor = SK_ColorWHITE;
-// Background of small icon image.
-constexpr SkColor kSmallImageMaskBackgroundColor =
-    SkColorSetRGB(0xa3, 0xa3, 0xa3);
-
 // For list notifications.
 // Not used when --enabled-new-style-notification is set.
 const size_t kNotificationMaximumItems = 5;
@@ -88,8 +78,6 @@ const int kButtonHeight = 38;              // In DIPs.
 const int kButtonHorizontalPadding = 16;   // In DIPs.
 const int kButtonIconTopPadding = 11;      // In DIPs.
 const int kButtonIconToTitlePadding = 16;  // In DIPs.
-
-constexpr SkColor kHoveredButtonBackgroundColor = SkColorSetRGB(243, 243, 243);
 
 // Progress bar.
 const int kProgressBarTopPadding = 16;

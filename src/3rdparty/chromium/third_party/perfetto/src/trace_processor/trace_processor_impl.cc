@@ -16,8 +16,8 @@
 
 #include "src/trace_processor/trace_processor_impl.h"
 
-#include <inttypes.h>
 #include <algorithm>
+#include <cinttypes>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/base/time.h"
@@ -27,8 +27,10 @@
 #include "src/trace_processor/dynamic/connected_flow_generator.h"
 #include "src/trace_processor/dynamic/descendant_slice_generator.h"
 #include "src/trace_processor/dynamic/describe_slice_generator.h"
+#include "src/trace_processor/dynamic/experimental_annotated_stack_generator.h"
 #include "src/trace_processor/dynamic/experimental_counter_dur_generator.h"
 #include "src/trace_processor/dynamic/experimental_flamegraph_generator.h"
+#include "src/trace_processor/dynamic/experimental_flat_slice_generator.h"
 #include "src/trace_processor/dynamic/experimental_sched_upid_generator.h"
 #include "src/trace_processor/dynamic/experimental_slice_layout_generator.h"
 #include "src/trace_processor/dynamic/thread_state_generator.h"
@@ -541,6 +543,12 @@ void ExtractArg(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
     sqlite3_result_error(ctx, "EXTRACT_ARG: 2 args required", -1);
     return;
   }
+
+  // If the arg set id is null, just return null as the result.
+  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
+    sqlite3_result_null(ctx);
+    return;
+  }
   if (sqlite3_value_type(argv[0]) != SQLITE_INTEGER) {
     sqlite3_result_error(ctx, "EXTRACT_ARG: 1st argument should be arg set id",
                          -1);
@@ -616,6 +624,16 @@ void CreateSourceGeqFunction(sqlite3* db) {
   }
 }
 
+void CreateUnwrapMetricProtoFunction(sqlite3* db) {
+  auto ret = sqlite3_create_function_v2(
+      db, "UNWRAP_METRIC_PROTO", 2, SQLITE_UTF8 | SQLITE_DETERMINISTIC, nullptr,
+      &metrics::UnwrapMetricProto, nullptr, nullptr, nullptr);
+  if (ret != SQLITE_OK) {
+    PERFETTO_FATAL("Error initializing UNWRAP_METRIC_PROTO: %s",
+                   sqlite3_errmsg(db));
+  }
+}
+
 void SetupMetrics(TraceProcessor* tp,
                   sqlite3* db,
                   std::vector<metrics::SqlMetricFile>* sql_metrics) {
@@ -686,7 +704,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
 
   context_.systrace_trace_parser.reset(new SystraceTraceParser(&context_));
 
-  if (gzip::IsGzipSupported())
+  if (util::IsGzipSupported())
     context_.gzip_trace_parser.reset(new GzipTraceParser(&context_));
 
   if (json::IsJsonSupported()) {
@@ -711,6 +729,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
   CreateExtractArgFunction(context_.storage.get(), db);
   CreateSourceGeqFunction(db);
   CreateValueAtMaxTsFunction(db);
+  CreateUnwrapMetricProtoFunction(db);
 
   SetupMetrics(this, *db_, &sql_metrics_);
 
@@ -760,6 +779,10 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
                                          storage->thread_table())));
   RegisterDynamicTable(std::unique_ptr<ThreadStateGenerator>(
       new ThreadStateGenerator(&context_)));
+  RegisterDynamicTable(std::unique_ptr<ExperimentalAnnotatedStackGenerator>(
+      new ExperimentalAnnotatedStackGenerator(&context_)));
+  RegisterDynamicTable(std::unique_ptr<ExperimentalFlatSliceGenerator>(
+      new ExperimentalFlatSliceGenerator(&context_)));
 
   // New style db-backed tables.
   RegisterDbTable(storage->arg_table());
@@ -768,6 +791,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
 
   RegisterDbTable(storage->slice_table());
   RegisterDbTable(storage->flow_table());
+  RegisterDbTable(storage->thread_slice_table());
   RegisterDbTable(storage->sched_slice_table());
   RegisterDbTable(storage->instant_table());
   RegisterDbTable(storage->gpu_slice_table());
@@ -787,6 +811,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
   RegisterDbTable(storage->softirq_counter_track_table());
   RegisterDbTable(storage->gpu_counter_track_table());
   RegisterDbTable(storage->gpu_counter_group_table());
+  RegisterDbTable(storage->perf_counter_track_table());
 
   RegisterDbTable(storage->heap_graph_object_table());
   RegisterDbTable(storage->heap_graph_reference_table());
@@ -814,6 +839,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
   RegisterDbTable(storage->metadata_table());
   RegisterDbTable(storage->cpu_table());
   RegisterDbTable(storage->cpu_freq_table());
+  RegisterDbTable(storage->clock_snapshot_table());
 
   RegisterDbTable(storage->memory_snapshot_table());
   RegisterDbTable(storage->process_memory_snapshot_table());
@@ -865,6 +891,7 @@ void TraceProcessorImpl::NotifyEndOfFile() {
 }
 
 size_t TraceProcessorImpl::RestoreInitialTables() {
+  // Step 1: figure out what tables/views/indices we need to delete.
   std::vector<std::pair<std::string, std::string>> deletion_list;
   std::string msg = "Resetting DB to initial state, deleting table/views:";
   for (auto it = ExecuteQuery(kAllTablesQuery); it.Next();) {
@@ -878,6 +905,8 @@ size_t TraceProcessorImpl::RestoreInitialTables() {
   }
 
   PERFETTO_LOG("%s", msg.c_str());
+
+  // Step 2: actually delete those tables/views/indices.
   for (const auto& tn : deletion_list) {
     std::string query = "DROP " + tn.first + " " + tn.second;
     auto it = ExecuteQuery(query);
@@ -1018,7 +1047,7 @@ util::Status TraceProcessorImpl::ComputeMetric(
     return util::Status("Root metrics proto descriptor not found");
 
   const auto& root_descriptor = pool_.descriptors()[opt_idx.value()];
-  return metrics::ComputeMetrics(this, metric_names, sql_metrics_,
+  return metrics::ComputeMetrics(this, metric_names, sql_metrics_, pool_,
                                  root_descriptor, metrics_proto);
 }
 

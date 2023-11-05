@@ -26,7 +26,7 @@
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxge/cfx_fillrenderoptions.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/cxx17_backports.h"
 
 class CPDF_PageContentGeneratorTest : public testing::Test {
  protected:
@@ -39,10 +39,11 @@ class CPDF_PageContentGeneratorTest : public testing::Test {
     pGen->ProcessPath(buf, pPathObj);
   }
 
-  CPDF_Dictionary* TestGetResource(CPDF_PageContentGenerator* pGen,
-                                   const ByteString& type,
-                                   const ByteString& name) {
-    return pGen->m_pObjHolder->m_pResources->GetDictFor(type)->GetDictFor(name);
+  const CPDF_Dictionary* TestGetResource(CPDF_PageContentGenerator* pGen,
+                                         const ByteString& type,
+                                         const ByteString& name) {
+    const CPDF_Dictionary* pResources = pGen->m_pObjHolder->GetResources();
+    return pResources->GetDictFor(type)->GetDictFor(name);
   }
 
   void TestProcessText(CPDF_PageContentGenerator* pGen,
@@ -67,10 +68,13 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessRect) {
   EXPECT_EQ("q 1 0 0 1 0 0 cm 10 5 3 25 re B* Q\n", ByteString(buf));
 
   pPathObj = std::make_unique<CPDF_PathObject>();
-  pPathObj->path().AppendPoint(CFX_PointF(0, 0), FXPT_TYPE::MoveTo);
-  pPathObj->path().AppendPoint(CFX_PointF(5.2f, 0), FXPT_TYPE::LineTo);
-  pPathObj->path().AppendPoint(CFX_PointF(5.2f, 3.78f), FXPT_TYPE::LineTo);
-  pPathObj->path().AppendPointAndClose(CFX_PointF(0, 3.78f), FXPT_TYPE::LineTo);
+  pPathObj->path().AppendPoint(CFX_PointF(0, 0), CFX_Path::Point::Type::kMove);
+  pPathObj->path().AppendPoint(CFX_PointF(5.2f, 0),
+                               CFX_Path::Point::Type::kLine);
+  pPathObj->path().AppendPoint(CFX_PointF(5.2f, 3.78f),
+                               CFX_Path::Point::Type::kLine);
+  pPathObj->path().AppendPointAndClose(CFX_PointF(0, 3.78f),
+                                       CFX_Path::Point::Type::kLine);
   buf.str("");
   TestProcessPath(&generator, &buf, pPathObj.get());
   EXPECT_EQ("q 1 0 0 1 0 0 cm 0 0 5.1999998 3.78 re n Q\n", ByteString(buf));
@@ -78,7 +82,8 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessRect) {
 
 TEST_F(CPDF_PageContentGeneratorTest, BUG_937) {
   static const std::vector<float> rgb = {0.000000000000000000001f, 0.7f, 0.35f};
-  RetainPtr<CPDF_ColorSpace> pCS = CPDF_ColorSpace::GetStockCS(PDFCS_DEVICERGB);
+  RetainPtr<CPDF_ColorSpace> pCS =
+      CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB);
   {
     auto pPathObj = std::make_unique<CPDF_PathObject>();
     pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
@@ -116,16 +121,17 @@ TEST_F(CPDF_PageContentGeneratorTest, BUG_937) {
 
     pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
     pPathObj->path().AppendPoint(CFX_PointF(0.000000000000000000001f, 4.67f),
-                                 FXPT_TYPE::MoveTo);
+                                 CFX_Path::Point::Type::kMove);
     pPathObj->path().AppendPoint(
         CFX_PointF(0.000000000000000000001, 100000000000000.000002),
-        FXPT_TYPE::LineTo);
+        CFX_Path::Point::Type::kLine);
     pPathObj->path().AppendPoint(CFX_PointF(0.0000000000001f, 3.15f),
-                                 FXPT_TYPE::BezierTo);
-    pPathObj->path().AppendPoint(CFX_PointF(3.57f, 2.98f), FXPT_TYPE::BezierTo);
+                                 CFX_Path::Point::Type::kBezier);
+    pPathObj->path().AppendPoint(CFX_PointF(3.57f, 2.98f),
+                                 CFX_Path::Point::Type::kBezier);
     pPathObj->path().AppendPointAndClose(
         CFX_PointF(53.4f, 5000000000000000000.00000000000000004),
-        FXPT_TYPE::BezierTo);
+        CFX_Path::Point::Type::kBezier);
     auto dummy_page_dict = pdfium::MakeRetain<CPDF_Dictionary>();
     auto pTestPage =
         pdfium::MakeRetain<CPDF_Page>(nullptr, dummy_page_dict.Get());
@@ -145,17 +151,26 @@ TEST_F(CPDF_PageContentGeneratorTest, BUG_937) {
 TEST_F(CPDF_PageContentGeneratorTest, ProcessPath) {
   auto pPathObj = std::make_unique<CPDF_PathObject>();
   pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
-  pPathObj->path().AppendPoint(CFX_PointF(3.102f, 4.67f), FXPT_TYPE::MoveTo);
-  pPathObj->path().AppendPoint(CFX_PointF(5.45f, 0.29f), FXPT_TYPE::LineTo);
-  pPathObj->path().AppendPoint(CFX_PointF(4.24f, 3.15f), FXPT_TYPE::BezierTo);
-  pPathObj->path().AppendPoint(CFX_PointF(4.65f, 2.98f), FXPT_TYPE::BezierTo);
-  pPathObj->path().AppendPoint(CFX_PointF(3.456f, 0.24f), FXPT_TYPE::BezierTo);
-  pPathObj->path().AppendPoint(CFX_PointF(10.6f, 11.15f), FXPT_TYPE::LineTo);
-  pPathObj->path().AppendPoint(CFX_PointF(11, 12.5f), FXPT_TYPE::LineTo);
-  pPathObj->path().AppendPoint(CFX_PointF(11.46f, 12.67f), FXPT_TYPE::BezierTo);
-  pPathObj->path().AppendPoint(CFX_PointF(11.84f, 12.96f), FXPT_TYPE::BezierTo);
+  pPathObj->path().AppendPoint(CFX_PointF(3.102f, 4.67f),
+                               CFX_Path::Point::Type::kMove);
+  pPathObj->path().AppendPoint(CFX_PointF(5.45f, 0.29f),
+                               CFX_Path::Point::Type::kLine);
+  pPathObj->path().AppendPoint(CFX_PointF(4.24f, 3.15f),
+                               CFX_Path::Point::Type::kBezier);
+  pPathObj->path().AppendPoint(CFX_PointF(4.65f, 2.98f),
+                               CFX_Path::Point::Type::kBezier);
+  pPathObj->path().AppendPoint(CFX_PointF(3.456f, 0.24f),
+                               CFX_Path::Point::Type::kBezier);
+  pPathObj->path().AppendPoint(CFX_PointF(10.6f, 11.15f),
+                               CFX_Path::Point::Type::kLine);
+  pPathObj->path().AppendPoint(CFX_PointF(11, 12.5f),
+                               CFX_Path::Point::Type::kLine);
+  pPathObj->path().AppendPoint(CFX_PointF(11.46f, 12.67f),
+                               CFX_Path::Point::Type::kBezier);
+  pPathObj->path().AppendPoint(CFX_PointF(11.84f, 12.96f),
+                               CFX_Path::Point::Type::kBezier);
   pPathObj->path().AppendPointAndClose(CFX_PointF(12, 13.64f),
-                                       FXPT_TYPE::BezierTo);
+                                       CFX_Path::Point::Type::kBezier);
 
   auto dummy_page_dict = pdfium::MakeRetain<CPDF_Dictionary>();
   auto pTestPage =
@@ -175,12 +190,14 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessGraphics) {
   auto pPathObj = std::make_unique<CPDF_PathObject>();
   pPathObj->set_stroke(true);
   pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
-  pPathObj->path().AppendPoint(CFX_PointF(1, 2), FXPT_TYPE::MoveTo);
-  pPathObj->path().AppendPoint(CFX_PointF(3, 4), FXPT_TYPE::LineTo);
-  pPathObj->path().AppendPointAndClose(CFX_PointF(5, 6), FXPT_TYPE::LineTo);
+  pPathObj->path().AppendPoint(CFX_PointF(1, 2), CFX_Path::Point::Type::kMove);
+  pPathObj->path().AppendPoint(CFX_PointF(3, 4), CFX_Path::Point::Type::kLine);
+  pPathObj->path().AppendPointAndClose(CFX_PointF(5, 6),
+                                       CFX_Path::Point::Type::kLine);
 
   static const std::vector<float> rgb = {0.5f, 0.7f, 0.35f};
-  RetainPtr<CPDF_ColorSpace> pCS = CPDF_ColorSpace::GetStockCS(PDFCS_DEVICERGB);
+  RetainPtr<CPDF_ColorSpace> pCS =
+      CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB);
   pPathObj->m_ColorState.SetFillColor(pCS, rgb);
 
   static const std::vector<float> rgb2 = {1, 0.9f, 0};
@@ -206,7 +223,7 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessGraphics) {
   EXPECT_EQ(" gs 1 0 0 1 0 0 cm 1 2 m 3 4 l 5 6 l h B Q\n",
             pathString.Last(43));
   ASSERT_GT(pathString.GetLength(), 91U);
-  CPDF_Dictionary* externalGS =
+  const CPDF_Dictionary* externalGS =
       TestGetResource(&generator, "ExtGState",
                       pathString.Substr(48, pathString.GetLength() - 91));
   ASSERT_TRUE(externalGS);
@@ -246,7 +263,8 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessStandardText) {
   pTextObj->m_TextState.SetFontSize(10.0f);
 
   static const std::vector<float> rgb = {0.5f, 0.7f, 0.35f};
-  RetainPtr<CPDF_ColorSpace> pCS = CPDF_ColorSpace::GetStockCS(PDFCS_DEVICERGB);
+  RetainPtr<CPDF_ColorSpace> pCS =
+      CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB);
   pTextObj->m_ColorState.SetFillColor(pCS, rgb);
 
   static const std::vector<float> rgb2 = {1, 0.9f, 0};
@@ -282,13 +300,13 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessStandardText) {
   EXPECT_EQ(compareString1, firstString.First(compareString1.GetLength()));
   EXPECT_EQ(compareString2, midString.Last(compareString2.GetLength()));
   EXPECT_EQ(compareString3, lastString.Last(compareString3.GetLength()));
-  CPDF_Dictionary* externalGS = TestGetResource(
+  const CPDF_Dictionary* externalGS = TestGetResource(
       &generator, "ExtGState",
       midString.First(midString.GetLength() - compareString2.GetLength()));
   ASSERT_TRUE(externalGS);
   EXPECT_EQ(0.5f, externalGS->GetNumberFor("ca"));
   EXPECT_EQ(0.8f, externalGS->GetNumberFor("CA"));
-  CPDF_Dictionary* fontDict = TestGetResource(
+  const CPDF_Dictionary* fontDict = TestGetResource(
       &generator, "Font",
       lastString.First(lastString.GetLength() - compareString3.GetLength()));
   ASSERT_TRUE(fontDict);
@@ -334,14 +352,13 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessText) {
 
     // Add a clipping path.
     auto pPath = std::make_unique<CPDF_Path>();
-    pPath->AppendPoint(CFX_PointF(0, 0), FXPT_TYPE::MoveTo);
-    pPath->AppendPoint(CFX_PointF(5, 0), FXPT_TYPE::LineTo);
-    pPath->AppendPoint(CFX_PointF(5, 4), FXPT_TYPE::LineTo);
-    pPath->AppendPointAndClose(CFX_PointF(0, 4), FXPT_TYPE::LineTo);
+    pPath->AppendPoint(CFX_PointF(0, 0), CFX_Path::Point::Type::kMove);
+    pPath->AppendPoint(CFX_PointF(5, 0), CFX_Path::Point::Type::kLine);
+    pPath->AppendPoint(CFX_PointF(5, 4), CFX_Path::Point::Type::kLine);
+    pPath->AppendPointAndClose(CFX_PointF(0, 4), CFX_Path::Point::Type::kLine);
     pTextObj->m_ClipPath.Emplace();
     pTextObj->m_ClipPath.AppendPath(*pPath,
-                                    CFX_FillRenderOptions::FillType::kEvenOdd,
-                                    /*bAutoMerge=*/false);
+                                    CFX_FillRenderOptions::FillType::kEvenOdd);
 
     TestProcessText(&generator, &buf, pTextObj.get());
   }
@@ -361,7 +378,7 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessText) {
             textString.GetLength());
   EXPECT_EQ(compareString1, textString.First(compareString1.GetLength()));
   EXPECT_EQ(compareString2, textString.Last(compareString2.GetLength()));
-  CPDF_Dictionary* fontDict = TestGetResource(
+  const CPDF_Dictionary* fontDict = TestGetResource(
       &generator, "Font",
       textString.Substr(compareString1.GetLength(),
                         textString.GetLength() - compareString1.GetLength() -
@@ -371,7 +388,7 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessText) {
   EXPECT_EQ("Font", fontDict->GetNameFor("Type"));
   EXPECT_EQ("TrueType", fontDict->GetNameFor("Subtype"));
   EXPECT_EQ("Helvetica", fontDict->GetNameFor("BaseFont"));
-  CPDF_Dictionary* fontDesc = fontDict->GetDictFor("FontDescriptor");
+  const CPDF_Dictionary* fontDesc = fontDict->GetDictFor("FontDescriptor");
   ASSERT_TRUE(fontDesc);
   EXPECT_TRUE(fontDesc->GetObjNum());
   EXPECT_EQ("FontDescriptor", fontDesc->GetNameFor("Type"));

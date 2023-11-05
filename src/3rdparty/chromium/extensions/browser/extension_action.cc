@@ -5,6 +5,7 @@
 #include "extensions/browser/extension_action.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/base64.h"
@@ -60,7 +61,7 @@ struct IconRepresentationInfo {
   // SetIcon function arguments.
   const char* size_string;
   // Scale factor for which the represantion should be used.
-  ui::ScaleFactor scale;
+  ui::ResourceScaleFactor scale;
 };
 
 template <class T>
@@ -122,14 +123,13 @@ ExtensionAction::IconParseResult ExtensionAction::ParseIconFromCanvasDictionary(
   for (base::DictionaryValue::Iterator iter(dict); !iter.IsAtEnd();
        iter.Advance()) {
     std::string byte_string;
-    std::string base64_string;
     const void* bytes = nullptr;
     size_t num_bytes = 0;
     if (iter.value().is_blob()) {
       bytes = iter.value().GetBlob().data();
       num_bytes = iter.value().GetBlob().size();
-    } else if (iter.value().GetAsString(&base64_string)) {
-      if (!base::Base64Decode(base64_string, &byte_string))
+    } else if (iter.value().is_string()) {
+      if (!base::Base64Decode(iter.value().GetString(), &byte_string))
         return IconParseResult::kDecodeFailure;
       bytes = byte_string.c_str();
       num_bytes = byte_string.length();
@@ -308,12 +308,13 @@ void ExtensionAction::Populate(const Extension& extension,
 
   // Initialize the specified icon set.
   if (!manifest_data.default_icon.empty()) {
-    default_icon_.reset(new ExtensionIconSet(manifest_data.default_icon));
+    default_icon_ =
+        std::make_unique<ExtensionIconSet>(manifest_data.default_icon);
   } else {
     // Fall back to the product icons if no action icon exists.
     const ExtensionIconSet& product_icons = IconsInfo::GetIcons(&extension);
     if (!product_icons.empty())
-      default_icon_.reset(new ExtensionIconSet(product_icons));
+      default_icon_ = std::make_unique<ExtensionIconSet>(product_icons);
   }
 }
 

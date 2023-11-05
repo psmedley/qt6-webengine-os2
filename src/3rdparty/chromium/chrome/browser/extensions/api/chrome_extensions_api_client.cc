@@ -24,7 +24,6 @@
 #include "chrome/browser/extensions/api/management/chrome_management_api_delegate.h"
 #include "chrome/browser/extensions/api/messaging/chrome_messaging_delegate.h"
 #include "chrome/browser/extensions/api/metrics_private/chrome_metrics_private_delegate.h"
-#include "chrome/browser/extensions/api/networking_cast_private/chrome_networking_cast_private_delegate.h"
 #include "chrome/browser/extensions/api/storage/managed_value_store_cache.h"
 #include "chrome/browser/extensions/api/storage/sync_value_store_cache.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
@@ -72,6 +71,9 @@
 #include "chrome/browser/extensions/api/file_handlers/non_native_file_system_delegate_chromeos.h"
 #include "chrome/browser/extensions/api/media_perception_private/media_perception_api_delegate_chromeos.h"
 #include "chrome/browser/extensions/api/virtual_keyboard_private/chrome_virtual_keyboard_delegate.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chrome/browser/extensions/clipboard_extension_helper_chromeos.h"
 #endif
 
@@ -153,11 +155,11 @@ bool ChromeExtensionsAPIClient::ShouldHideBrowserNetworkRequest(
        request.initiator ==
            url::Origin::Create(GURL(chrome::kChromeUINewTabURL)));
 
-  // Hide requests made by the browser on behalf of the local NTP.
+  // Hide requests made by the browser on behalf of the 1P WebUI NTP.
   is_sensitive_request |=
       (is_browser_request &&
        request.initiator ==
-           url::Origin::Create(GURL(chrome::kChromeSearchLocalNtpUrl)));
+           url::Origin::Create(GURL(chrome::kChromeUINewTabPageURL)));
 
   // Hide requests made by the NTP Instant renderer.
   auto* instant_service =
@@ -322,23 +324,26 @@ ChromeExtensionsAPIClient::CreateDevicePermissionsPrompt(
   return std::make_unique<ChromeDevicePermissionsPrompt>(web_contents);
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 bool ChromeExtensionsAPIClient::ShouldAllowDetachingUsb(int vid,
                                                         int pid) const {
+  // TOOD(huangs): Figure out how to do the following in Lacros, which does not
+  // have access to ash::CrosSettings (https://crbug.com/1219329).
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   const base::ListValue* policy_list;
-  if (chromeos::CrosSettings::Get()->GetList(chromeos::kUsbDetachableAllowlist,
-                                             &policy_list)) {
-    for (const auto& entry : *policy_list) {
+  if (ash::CrosSettings::Get()->GetList(chromeos::kUsbDetachableAllowlist,
+                                        &policy_list)) {
+    for (const auto& entry : policy_list->GetList()) {
       if (entry.FindIntKey(chromeos::kUsbDetachableAllowlistKeyVid) == vid &&
           entry.FindIntKey(chromeos::kUsbDetachableAllowlistKeyPid) == pid) {
         return true;
       }
     }
   }
-
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   return false;
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
 std::unique_ptr<VirtualKeyboardDelegate>
 ChromeExtensionsAPIClient::CreateVirtualKeyboardDelegate(
@@ -371,18 +376,9 @@ ChromeExtensionsAPIClient::CreateDisplayInfoProvider() const {
 
 MetricsPrivateDelegate* ChromeExtensionsAPIClient::GetMetricsPrivateDelegate() {
   if (!metrics_private_delegate_)
-    metrics_private_delegate_.reset(new ChromeMetricsPrivateDelegate());
+    metrics_private_delegate_ =
+        std::make_unique<ChromeMetricsPrivateDelegate>();
   return metrics_private_delegate_.get();
-}
-
-NetworkingCastPrivateDelegate*
-ChromeExtensionsAPIClient::GetNetworkingCastPrivateDelegate() {
-#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_WIN) || defined(OS_MAC)
-  if (!networking_cast_private_delegate_)
-    networking_cast_private_delegate_ =
-        ChromeNetworkingCastPrivateDelegate::Create();
-#endif
-  return networking_cast_private_delegate_.get();
 }
 
 FileSystemDelegate* ChromeExtensionsAPIClient::GetFileSystemDelegate() {
@@ -424,7 +420,9 @@ ChromeExtensionsAPIClient::GetNonNativeFileSystemDelegate() {
   }
   return non_native_file_system_delegate_.get();
 }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 void ChromeExtensionsAPIClient::SaveImageDataToClipboard(
     const std::vector<char>& image_data,
     api::clipboard::ImageType type,
@@ -437,7 +435,7 @@ void ChromeExtensionsAPIClient::SaveImageDataToClipboard(
       image_data, type, std::move(additional_items),
       std::move(success_callback), std::move(error_callback));
 }
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
 AutomationInternalApiDelegate*
 ChromeExtensionsAPIClient::GetAutomationInternalApiDelegate() {

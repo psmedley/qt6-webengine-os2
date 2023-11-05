@@ -5,7 +5,9 @@
 #include "third_party/blink/renderer/core/animation/effect_stack.h"
 
 #include <memory>
+
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssnumericvalue_double.h"
 #include "third_party/blink/renderer/core/animation/animation_clock.h"
 #include "third_party/blink/renderer/core/animation/animation_test_helpers.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
@@ -34,7 +36,9 @@ class AnimationEffectStackTest : public PageTestBase {
 
   Animation* Play(KeyframeEffect* effect, double start_time) {
     Animation* animation = timeline->Play(effect);
-    animation->setStartTime(CSSNumberish::FromDouble(start_time * 1000));
+    animation->setStartTime(
+        MakeGarbageCollected<V8CSSNumberish>(start_time * 1000),
+        ASSERT_NO_EXCEPTION);
     animation->Update(kTimingUpdateOnDemand);
     return animation;
   }
@@ -69,7 +73,7 @@ class AnimationEffectStackTest : public PageTestBase {
     Timing timing;
     timing.fill_mode = Timing::FillMode::BOTH;
     return MakeGarbageCollected<InertEffect>(
-        effect, timing, false, AnimationTimeDelta(), base::nullopt);
+        effect, timing, false, AnimationTimeDelta(), absl::nullopt);
   }
 
   KeyframeEffect* MakeKeyframeEffect(KeyframeEffectModelBase* effect,
@@ -281,6 +285,48 @@ TEST_F(AnimationEffectStackTest, AffectsPropertiesCSSBitsetTransitionPriority) {
   EXPECT_FALSE(effect_stack.AffectsProperties(
       CSSBitset({CSSPropertyID::kBackgroundColor}),
       KeyframeEffect::kTransitionPriority));
+}
+
+TEST_F(AnimationEffectStackTest, AffectedPropertiesDefaultPriority) {
+  Play(MakeKeyframeEffect(MakeEffectModel(CSSPropertyID::kColor, "red")), 10);
+  Play(MakeKeyframeEffect(MakeEffectModel(CSSPropertyID::kTop, "1px")), 10);
+  Play(MakeKeyframeEffect(MakeEffectModel(CSSPropertyID::kLeft, "1px")), 10);
+
+  ASSERT_TRUE(element->GetElementAnimations());
+  const EffectStack& effect_stack =
+      element->GetElementAnimations()->GetEffectStack();
+
+  EXPECT_TRUE(
+      effect_stack.AffectedProperties(KeyframeEffect::kTransitionPriority)
+          .IsEmpty());
+
+  auto set = effect_stack.AffectedProperties(KeyframeEffect::kDefaultPriority);
+  ASSERT_EQ(3u, set.size());
+  EXPECT_TRUE(set.Contains(PropertyHandle(GetCSSPropertyColor())));
+  EXPECT_TRUE(set.Contains(PropertyHandle(GetCSSPropertyTop())));
+  EXPECT_TRUE(set.Contains(PropertyHandle(GetCSSPropertyLeft())));
+}
+
+TEST_F(AnimationEffectStackTest, AffectedPropertiesTransitionPriority) {
+  Element* body = GetDocument().body();
+  body->SetInlineStyleProperty(CSSPropertyID::kTransition, "color 10s");
+  body->SetInlineStyleProperty(CSSPropertyID::kColor, "red");
+  UpdateAllLifecyclePhasesForTest();
+
+  body->SetInlineStyleProperty(CSSPropertyID::kColor, "blue");
+  UpdateAllLifecyclePhasesForTest();
+
+  ASSERT_TRUE(body->GetElementAnimations());
+  const EffectStack& effect_stack =
+      body->GetElementAnimations()->GetEffectStack();
+
+  EXPECT_TRUE(effect_stack.AffectedProperties(KeyframeEffect::kDefaultPriority)
+                  .IsEmpty());
+
+  auto set =
+      effect_stack.AffectedProperties(KeyframeEffect::kTransitionPriority);
+  ASSERT_EQ(1u, set.size());
+  EXPECT_TRUE(set.Contains(PropertyHandle(GetCSSPropertyColor())));
 }
 
 }  // namespace blink

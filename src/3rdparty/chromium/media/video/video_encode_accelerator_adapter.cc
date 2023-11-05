@@ -11,8 +11,8 @@
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/sequenced_task_runner.h"
-#include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -37,15 +37,32 @@ VideoEncodeAccelerator::Config SetUpVeaConfig(
     const VideoEncoder::Options& opts,
     VideoPixelFormat format,
     VideoFrame::StorageType storage_type) {
-  base::Optional<uint32_t> initial_framerate;
+  absl::optional<uint32_t> initial_framerate;
   if (opts.framerate.has_value())
     initial_framerate = static_cast<uint32_t>(opts.framerate.value());
 
-  auto config = VideoEncodeAccelerator::Config(
-      format, opts.frame_size, profile,
-      opts.bitrate.value_or(opts.frame_size.width() * opts.frame_size.height() *
-                            kVEADefaultBitratePerPixel),
-      initial_framerate);
+  uint64_t default_bitrate = opts.frame_size.width() *
+                             opts.frame_size.height() *
+                             kVEADefaultBitratePerPixel;
+  Bitrate bitrate =
+      opts.bitrate.value_or(Bitrate::ConstantBitrate(default_bitrate));
+  auto config =
+      VideoEncodeAccelerator::Config(format, opts.frame_size, profile, bitrate,
+                                     initial_framerate, opts.keyframe_interval);
+
+  if (opts.temporal_layers > 1) {
+    VideoEncodeAccelerator::Config::SpatialLayer layer;
+    layer.width = opts.frame_size.width();
+    layer.height = opts.frame_size.height();
+    layer.bitrate_bps = config.bitrate.target();
+    if (initial_framerate.has_value())
+      layer.framerate = initial_framerate.value();
+    layer.num_of_temporal_layers = opts.temporal_layers;
+    config.spatial_layers.push_back(layer);
+  }
+
+  config.require_low_delay =
+      opts.latency_mode == VideoEncoder::LatencyMode::Realtime;
 
   const bool is_rgb =
       format == PIXEL_FORMAT_XBGR || format == PIXEL_FORMAT_XRGB ||
@@ -73,14 +90,12 @@ VideoEncodeAccelerator::Config SetUpVeaConfig(
 
 VideoEncodeAcceleratorAdapter::PendingOp::PendingOp() = default;
 VideoEncodeAcceleratorAdapter::PendingOp::~PendingOp() = default;
-VideoEncodeAcceleratorAdapter::PendingEncode::PendingEncode() = default;
-VideoEncodeAcceleratorAdapter::PendingEncode::~PendingEncode() = default;
 
 VideoEncodeAcceleratorAdapter::VideoEncodeAcceleratorAdapter(
     GpuVideoAcceleratorFactories* gpu_factories,
     scoped_refptr<base::SequencedTaskRunner> callback_task_runner)
-    : output_pool_(base::MakeRefCounted<SharedMemoryPool>()),
-      input_pool_(base::MakeRefCounted<SharedMemoryPool>()),
+    : output_pool_(base::MakeRefCounted<base::UnsafeSharedMemoryPool>()),
+      input_pool_(base::MakeRefCounted<base::UnsafeSharedMemoryPool>()),
       gpu_factories_(gpu_factories),
       accelerator_task_runner_(gpu_factories_->GetTaskRunner()),
       callback_task_runner_(std::move(callback_task_runner)) {
@@ -278,9 +293,9 @@ void VideoEncodeAcceleratorAdapter::EncodeOnAcceleratorThread(
 
   StatusOr<scoped_refptr<VideoFrame>> result(nullptr);
   if (use_gpu_buffer)
-    result = PrepareGpuFrame(options_.frame_size, frame);
+    result = PrepareGpuFrame(input_coded_size_, frame);
   else
-    result = PrepareCpuFrame(options_.frame_size, frame);
+    result = PrepareCpuFrame(input_coded_size_, frame);
 
   if (result.has_error()) {
     auto status = std::move(result).error();
@@ -326,14 +341,14 @@ void VideoEncodeAcceleratorAdapter::ChangeOptionsOnAcceleratorThread(
     return;
   }
 
-  uint32_t bitrate =
-      std::min(options.bitrate.value_or(options.frame_size.width() *
-                                        options.frame_size.height() *
-                                        kVEADefaultBitratePerPixel),
-               uint64_t(std::numeric_limits<uint32_t>::max()));
+  uint32_t default_bitrate = options.frame_size.width() *
+                             options.frame_size.height() *
+                             kVEADefaultBitratePerPixel;
+  auto bitrate =
+      options.bitrate.value_or(Bitrate::ConstantBitrate(default_bitrate));
 
-  uint32_t framerate = uint32_t(std::round(
-      options.framerate.value_or(VideoEncodeAccelerator::kDefaultFramerate)));
+  uint32_t framerate = base::ClampRound<uint32_t>(
+      options.framerate.value_or(VideoEncodeAccelerator::kDefaultFramerate));
 
   accelerator_->RequestEncodingParametersChange(bitrate, framerate);
 
@@ -406,6 +421,7 @@ void VideoEncodeAcceleratorAdapter::RequireBitstreamBuffers(
     size_t output_buffer_size) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(accelerator_sequence_checker_);
 
+  input_coded_size_ = input_coded_size;
   input_buffer_size_ =
       VideoFrame::AllocationSize(PIXEL_FORMAT_I420, input_coded_size);
 
@@ -416,31 +432,38 @@ void VideoEncodeAcceleratorAdapter::RequireBitstreamBuffers(
     return;
   }
 
-  base::UnsafeSharedMemoryRegion* region = output_handle_holder_->GetRegion();
+  const base::UnsafeSharedMemoryRegion& region =
+      output_handle_holder_->GetRegion();
   // There is always one output buffer.
   accelerator_->UseOutputBitstreamBuffer(
-      BitstreamBuffer(0, region->Duplicate(), region->GetSize()));
+      BitstreamBuffer(0, region.Duplicate(), region.GetSize()));
   InitCompleted(Status());
 }
 
 void VideoEncodeAcceleratorAdapter::BitstreamBufferReady(
     int32_t buffer_id,
     const BitstreamBufferMetadata& metadata) {
-  base::Optional<CodecDescription> desc;
+  absl::optional<CodecDescription> desc;
   VideoEncoderOutput result;
   result.key_frame = metadata.key_frame;
   result.timestamp = metadata.timestamp;
   result.size = metadata.payload_size_bytes;
+  if (metadata.h264.has_value())
+    result.temporal_id = metadata.h264.value().temporal_idx;
+  else if (metadata.vp9.has_value())
+    result.temporal_id = metadata.vp9.value().temporal_idx;
+  else if (metadata.vp8.has_value())
+    result.temporal_id = metadata.vp8.value().temporal_idx;
 
   DCHECK_EQ(buffer_id, 0);
   // There is always one output buffer.
-  base::WritableSharedMemoryMapping* mapping =
+  const base::WritableSharedMemoryMapping& mapping =
       output_handle_holder_->GetMapping();
-  DCHECK_LE(result.size, mapping->size());
+  DCHECK_LE(result.size, mapping.size());
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
   if (h264_converter_) {
-    uint8_t* src = static_cast<uint8_t*>(mapping->memory());
+    uint8_t* src = static_cast<uint8_t*>(mapping.memory());
     size_t dst_size = result.size;
     size_t actual_output_size = 0;
     bool config_changed = false;
@@ -482,15 +505,16 @@ void VideoEncodeAcceleratorAdapter::BitstreamBufferReady(
   } else {
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
     result.data.reset(new uint8_t[result.size]);
-    memcpy(result.data.get(), mapping->memory(), result.size);
+    memcpy(result.data.get(), mapping.memory(), result.size);
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
   }
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
   // Give the buffer back to |accelerator_|
-  base::UnsafeSharedMemoryRegion* region = output_handle_holder_->GetRegion();
+  const base::UnsafeSharedMemoryRegion& region =
+      output_handle_holder_->GetRegion();
   accelerator_->UseOutputBitstreamBuffer(
-      BitstreamBuffer(buffer_id, region->Duplicate(), region->GetSize()));
+      BitstreamBuffer(buffer_id, region.Duplicate(), region.GetSize()));
 
   for (auto it = active_encodes_.begin(); it != active_encodes_.end(); ++it) {
     if ((*it)->timestamp == result.timestamp) {
@@ -603,26 +627,26 @@ VideoEncodeAcceleratorAdapter::PrepareCpuFrame(
   if (!handle)
     return Status(StatusCode::kEncoderFailedEncode);
 
-  base::UnsafeSharedMemoryRegion* region = handle->GetRegion();
-  base::WritableSharedMemoryMapping* mapping = handle->GetMapping();
+  const base::UnsafeSharedMemoryRegion& region = handle->GetRegion();
+  const base::WritableSharedMemoryMapping& mapping = handle->GetMapping();
 
   auto mapped_src_frame = src_frame->HasGpuMemoryBuffer()
                               ? ConvertToMemoryMappedFrame(src_frame)
                               : src_frame;
   auto shared_frame = VideoFrame::WrapExternalData(
-      PIXEL_FORMAT_I420, options_.frame_size, gfx::Rect(size), size,
-      mapping->GetMemoryAsSpan<uint8_t>().data(), mapping->size(),
+      PIXEL_FORMAT_I420, size, gfx::Rect(size), size,
+      mapping.GetMemoryAsSpan<uint8_t>().data(), mapping.size(),
       src_frame->timestamp());
 
   if (!shared_frame || !mapped_src_frame)
     return Status(StatusCode::kEncoderFailedEncode);
 
-  shared_frame->BackWithSharedMemory(region);
+  shared_frame->BackWithSharedMemory(&region);
   // Keep the SharedMemoryHolder until the frame is destroyed so that the
   // memory is not freed prematurely.
   shared_frame->AddDestructionObserver(BindToCurrentLoop(base::BindOnce(
       base::DoNothing::Once<
-          std::unique_ptr<SharedMemoryPool::SharedMemoryHandle>>(),
+          std::unique_ptr<base::UnsafeSharedMemoryPool::Handle>>(),
       std::move(handle))));
   auto status =
       ConvertAndScaleFrame(*mapped_src_frame, *shared_frame, resize_buf_);
@@ -667,6 +691,8 @@ VideoEncodeAcceleratorAdapter::PrepareGpuFrame(
   // view in CPU memory. It allows us to use ConvertAndScaleFrame() without
   // having to tinker with libyuv and GpuMemoryBuffer memory views.
   // |mapped_gpu_frame| doesn't own anything, but unmaps the buffer when freed.
+  // This is true because |gpu_frame| is created with
+  // |VEA_READ_CAMERA_AND_CPU_READ_WRITE| usage flag.
   auto mapped_gpu_frame = ConvertToMemoryMappedFrame(gpu_frame);
   auto mapped_src_frame = src_frame->HasGpuMemoryBuffer()
                               ? ConvertToMemoryMappedFrame(src_frame)

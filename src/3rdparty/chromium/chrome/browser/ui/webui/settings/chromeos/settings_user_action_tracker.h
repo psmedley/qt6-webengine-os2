@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/optional.h"
 #include "chrome/browser/ui/webui/settings/chromeos/constants/setting.mojom.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/per_session_settings_user_action_tracker.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/user_action_recorder.mojom.h"
@@ -42,6 +41,8 @@ class SettingsUserActionTracker : public mojom::UserActionRecorder {
                            TestRecordSettingChangedBool);
   FRIEND_TEST_ALL_PREFIXES(SettingsUserActionTrackerTest,
                            TestRecordSettingChangedInt);
+  FRIEND_TEST_ALL_PREFIXES(SettingsUserActionTrackerTest,
+                           TestRecordSettingChangedString);
   FRIEND_TEST_ALL_PREFIXES(SettingsUserActionTrackerTest,
                            TestRecordSettingChangedBoolPref);
   FRIEND_TEST_ALL_PREFIXES(SettingsUserActionTrackerTest,

@@ -6,6 +6,7 @@
 #define CC_METRICS_DROPPED_FRAME_COUNTER_H_
 
 #include <stddef.h>
+#include <map>
 #include <queue>
 #include <utility>
 
@@ -13,6 +14,7 @@
 #include "cc/cc_export.h"
 #include "cc/metrics/frame_sorter.h"
 #include "cc/metrics/ukm_smoothness_data.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace cc {
 class TotalFrameCounter;
@@ -49,8 +51,8 @@ class CC_EXPORT DroppedFrameCounter {
 
   size_t frame_history_size() const { return ring_buffer_.BufferSize(); }
   size_t total_frames() const { return total_frames_; }
-  size_t total_compositor_dropped() const { return total_dropped_; }
-  size_t total_main_dropped() const { return total_partial_; }
+  size_t total_dropped() const { return total_dropped_; }
+  size_t total_partial() const { return total_partial_; }
   size_t total_smoothness_dropped() const { return total_smoothness_dropped_; }
 
   uint32_t GetAverageThroughput() const;
@@ -102,6 +104,8 @@ class CC_EXPORT DroppedFrameCounter {
   void NotifyFrameResult(const viz::BeginFrameArgs& args, bool is_dropped);
   base::TimeDelta ComputeCurrentWindowSize() const;
 
+  void UpdateMaxPercentDroppedFrame(double percent_dropped_frame);
+
   const base::TimeDelta kSlidingWindowInterval =
       base::TimeDelta::FromSeconds(1);
   std::queue<std::pair<const viz::BeginFrameArgs, bool>> sliding_window_;
@@ -119,11 +123,19 @@ class CC_EXPORT DroppedFrameCounter {
   size_t total_smoothness_dropped_ = 0;
   bool fcp_received_ = false;
   double sliding_window_max_percent_dropped_ = 0;
+  absl::optional<double> sliding_window_max_percent_dropped_After_1_sec_;
+  absl::optional<double> sliding_window_max_percent_dropped_After_2_sec_;
+  absl::optional<double> sliding_window_max_percent_dropped_After_5_sec_;
   base::TimeTicks time_fcp_received_;
   base::TimeDelta time_max_delta_;
   UkmSmoothnessDataShared* ukm_smoothness_data_ = nullptr;
   FrameSorter frame_sorter_;
   TotalFrameCounter* total_counter_ = nullptr;
+
+  struct {
+    double max_window = 0;
+    double p95_window = 0;
+  } last_reported_metrics_;
 
   struct ScrollStartInfo {
     // The timestamp of when the scroll started.
@@ -132,7 +144,7 @@ class CC_EXPORT DroppedFrameCounter {
     // The vsync corresponding to the scroll-start.
     viz::BeginFrameId frame_id;
   };
-  base::Optional<ScrollStartInfo> scroll_start_;
+  absl::optional<ScrollStartInfo> scroll_start_;
   std::map<viz::BeginFrameId, ScrollStartInfo> scroll_start_per_frame_;
 };
 

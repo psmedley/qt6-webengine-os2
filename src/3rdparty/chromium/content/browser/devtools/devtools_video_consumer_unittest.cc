@@ -11,6 +11,7 @@
 #include "content/browser/devtools/devtools_video_consumer.h"
 #include "content/public/test/test_utils.h"
 #include "media/base/limits.h"
+#include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -26,6 +27,9 @@ namespace {
 // Capture parameters.
 constexpr gfx::Size kResolution = gfx::Size(320, 180);  // Arbitrarily chosen.
 constexpr media::VideoPixelFormat kFormat = media::PIXEL_FORMAT_I420;
+
+// Video buffer parameters.
+constexpr bool kNotPremapped = false;
 
 // A non-zero FrameSinkId to prevent validation errors when
 // DevToolsVideoConsumer::ChangeTarget(viz::FrameSinkId) is called
@@ -80,7 +84,7 @@ class MockFrameSinkVideoCapturer : public viz::mojom::FrameSinkVideoCapturer {
                     bool use_fixed_aspect_ratio));
   // This is never called.
   MOCK_METHOD1(SetAutoThrottlingEnabled, void(bool));
-  void ChangeTarget(const base::Optional<viz::FrameSinkId>& frame_sink_id,
+  void ChangeTarget(const absl::optional<viz::FrameSinkId>& frame_sink_id,
                     const viz::SubtreeCaptureId& subtree_capture_id) final {
     frame_sink_id_ = frame_sink_id ? *frame_sink_id : viz::FrameSinkId();
     MockChangeTarget(frame_sink_id_);
@@ -140,7 +144,7 @@ class MockFrameSinkVideoConsumerFrameCallbacks
   }
 
   MOCK_METHOD0(Done, void());
-  MOCK_METHOD1(ProvideFeedback, void(const media::VideoFrameFeedback&));
+  MOCK_METHOD1(ProvideFeedback, void(const media::VideoCaptureFeedback&));
 
  private:
   mojo::Receiver<viz::mojom::FrameSinkVideoConsumerFrameCallbacks> receiver_{
@@ -193,7 +197,8 @@ class DevToolsVideoConsumerTest : public testing::Test {
 
     media::mojom::VideoFrameInfoPtr info = media::mojom::VideoFrameInfo::New(
         base::TimeDelta(), media::VideoFrameMetadata(), kFormat, kResolution,
-        gfx::Rect(kResolution), gfx::ColorSpace::CreateREC709(), nullptr);
+        gfx::Rect(kResolution), kNotPremapped, gfx::ColorSpace::CreateREC709(),
+        nullptr);
 
     consumer_->OnFrameCaptured(std::move(data), std::move(info),
                                gfx::Rect(kResolution),

@@ -13,10 +13,8 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/observer_list.h"
-#include "base/optional.h"
+#include "base/observer_list_types.h"
 #include "base/process/process_handle.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/service_process_info.h"
@@ -24,17 +22,25 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "sandbox/policy/mojom/sandbox.mojom.h"
 #include "sandbox/policy/sandbox_type.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
 // Sandbox type for ServiceProcessHost::Launch<remote>() is found by
-// template matching on |remote|. This provides a safe default. For
-// services that use other sandbox types, consult
-// security-dev@chromium.org and add to an appropriate |service_sandbox_type.h|.
+// template matching on |remote|. Consult security-dev@chromium.org and
+// add a [ServiceSandbox=type] mojom attribute, or an appropriate
+// |service_sandbox_type.h|.
 template <typename Interface>
 inline sandbox::policy::SandboxType GetServiceSandboxType() {
-  return sandbox::policy::SandboxType::kUtility;
+  using ProvidedSandboxType = decltype(Interface::kServiceSandbox);
+  static_assert(
+      std::is_same<ProvidedSandboxType, const sandbox::mojom::Sandbox>::value,
+      "This interface does not declare a proper ServiceSandbox attribute. See "
+      "//docs/mojo_and_services.md (Specifying a sandbox).");
+
+  return sandbox::policy::MapToSandboxType(Interface::kServiceSandbox);
 }
 
 // ServiceProcessHost is used to launch new service processes given basic
@@ -66,7 +72,7 @@ class CONTENT_EXPORT ServiceProcessHost {
     // be a human readable and meaningful application or service name and will
     // appear in places like the system task viewer.
     Options& WithDisplayName(const std::string& name);
-    Options& WithDisplayName(const base::string16& name);
+    Options& WithDisplayName(const std::u16string& name);
     Options& WithDisplayName(int resource_id);
 
     // Specifies additional flags to configure the launched process. See
@@ -83,8 +89,8 @@ class CONTENT_EXPORT ServiceProcessHost {
 
     sandbox::policy::SandboxType sandbox_type =
         sandbox::policy::SandboxType::kUtility;
-    base::string16 display_name;
-    base::Optional<int> child_flags;
+    std::u16string display_name;
+    absl::optional<int> child_flags;
     std::vector<std::string> extra_switches;
   };
 
@@ -165,7 +171,7 @@ class CONTENT_EXPORT ServiceProcessHost {
 // process. All new code must use ServiceProcessHost instead of this API.
 void CONTENT_EXPORT LaunchUtilityProcessServiceDeprecated(
     const std::string& service_name,
-    const base::string16& display_name,
+    const std::u16string& display_name,
     sandbox::policy::SandboxType sandbox_type,
     mojo::ScopedMessagePipeHandle service_pipe,
     base::OnceCallback<void(base::ProcessId)> callback);

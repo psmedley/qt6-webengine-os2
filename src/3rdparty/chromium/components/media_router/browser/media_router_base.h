@@ -53,7 +53,7 @@ class MediaRouterBase : public MediaRouter {
 #endif  // !defined(OS_ANDROID)
   base::Value GetState() const override;
   void GetProviderState(
-      MediaRouteProviderId provider_id,
+      mojom::MediaRouteProviderId provider_id,
       mojom::MediaRouteProvider::GetStateCallback callback) const override;
 
  protected:
@@ -63,6 +63,9 @@ class MediaRouterBase : public MediaRouter {
                            PresentationConnectionStateChangedCallbackRemoved);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterBaseTest, CreatePresentationIds);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterBaseTest, NotifyCallbacks);
+  FRIEND_TEST_ALL_PREFIXES(PresentationServiceDelegateImplTest,
+                           ListenForConnnectionStateChange);
+  FRIEND_TEST_ALL_PREFIXES(PresentationServiceDelegateImplTest, GetMediaRoutes);
 
   MediaRouterBase();
 
@@ -85,8 +88,9 @@ class MediaRouterBase : public MediaRouter {
   // if not found.
   const MediaRoute* GetRoute(const MediaRoute::Id& route_id) const;
 
-  using PresentationConnectionStateChangedCallbacks = base::CallbackList<void(
-      const content::PresentationConnectionStateChangeInfo&)>;
+  using PresentationConnectionStateChangedCallbacks =
+      base::RepeatingCallbackList<void(
+          const content::PresentationConnectionStateChangeInfo&)>;
 
   std::unordered_map<
       MediaRoute::Id,

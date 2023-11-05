@@ -103,6 +103,10 @@ namespace dawn_native {
         return mImpl->GetAdapterProperties();
     }
 
+    bool Adapter::SupportsExternalImages() const {
+        return mImpl->SupportsExternalImages();
+    }
+
     Adapter::operator bool() const {
         return mImpl != nullptr;
     }
@@ -208,7 +212,7 @@ namespace dawn_native {
 
     DAWN_NATIVE_EXPORT bool DeviceTick(WGPUDevice device) {
         dawn_native::DeviceBase* deviceBase = reinterpret_cast<dawn_native::DeviceBase*>(device);
-        return deviceBase->Tick();
+        return deviceBase->APITick();
     }
 
     // ExternalImageDescriptor

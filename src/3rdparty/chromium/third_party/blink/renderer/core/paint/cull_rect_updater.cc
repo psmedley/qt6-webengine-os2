@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/paint/cull_rect_updater.h"
 
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
@@ -46,54 +47,73 @@ bool SetFragmentContentsCullRect(PaintLayer& layer,
   return true;
 }
 
-bool ShouldProactivelyUpdateCullRect(const PaintLayer& layer) {
-  // If we will repaint anyway, proactively refresh cull rect. A sliding
-  // window (aka hysteresis, see: CullRect::ChangedEnough()) is used to
-  // avoid frequent cull rect updates because they force a repaint (see:
-  // |CullRectUpdater::SetFragmentCullRects|). Proactively updating the cull
-  // rect resets the sliding window which will minimize the need to update
-  // the cull rect again.
-  return layer.SelfOrDescendantNeedsRepaint();
-}
-
 }  // anonymous namespace
 
-CullRectUpdater::CullRectUpdater(PaintLayer& root_layer)
-    : root_layer_(root_layer),
-      root_state_(root_layer.GetLayoutObject()
-                      .FirstFragment()
-                      .LocalBorderBoxProperties()
-                      .Unalias()) {
-  DCHECK(root_layer.IsRootLayer());
+void CullRectUpdater::Update() {
+  DCHECK(starting_layer_.IsRootLayer());
+  UpdateInternal(CullRect::Infinite());
+#if DCHECK_IS_ON()
+  if (VLOG_IS_ON(2)) {
+    VLOG(2) << "PaintLayer tree after cull rect update:";
+    showLayerTree(&starting_layer_);
+  }
+#endif
 }
 
 void CullRectUpdater::UpdateInternal(const CullRect& input_cull_rect) {
   DCHECK(RuntimeEnabledFeatures::CullRectUpdateEnabled());
-  DCHECK(root_layer_.IsRootLayer());
-  if (root_layer_.GetLayoutObject().GetFrameView()->ShouldThrottleRendering())
+  const auto& object = starting_layer_.GetLayoutObject();
+  if (object.GetFrameView()->ShouldThrottleRendering())
     return;
 
-  auto& fragment =
-      root_layer_.GetLayoutObject().GetMutableForPainting().FirstFragment();
-  SetFragmentCullRect(root_layer_, fragment, input_cull_rect);
+  root_state_ =
+      object.View()->FirstFragment().LocalBorderBoxProperties().Unalias();
+  bool should_use_infinite =
+      PaintLayerPainter(starting_layer_).ShouldUseInfiniteCullRect();
+  auto& fragment = object.GetMutableForPainting().FirstFragment();
+  SetFragmentCullRect(
+      starting_layer_, fragment,
+      should_use_infinite ? CullRect::Infinite() : input_cull_rect);
   bool force_update_children = SetFragmentContentsCullRect(
-      root_layer_, fragment,
-      ComputeFragmentContentsCullRect(root_layer_, fragment, input_cull_rect));
-  UpdateForDescendants(root_layer_, force_update_children);
+      starting_layer_, fragment,
+      should_use_infinite ? CullRect::Infinite()
+                          : ComputeFragmentContentsCullRect(
+                                starting_layer_, fragment, input_cull_rect));
+  UpdateForDescendants(starting_layer_, force_update_children);
 }
 
 void CullRectUpdater::UpdateRecursively(PaintLayer& layer,
                                         const PaintLayer& parent_painting_layer,
                                         bool force_update_self) {
-  bool should_proactively_update = ShouldProactivelyUpdateCullRect(layer);
-  bool force_update_children = should_proactively_update;
+  bool should_proactively_update = ShouldProactivelyUpdate(layer);
+  bool force_update_children =
+      should_proactively_update || layer.ForcesChildrenCullRectUpdate();
+
+  // This defines the scope of force_proactive_update_ (which may be set by
+  // ComputeFragmentCullRect() and ComputeFragmentContentsCullRect()) to the
+  // subtree.
+  base::AutoReset<bool> reset_force_update(&force_proactive_update_,
+                                           force_proactive_update_);
 
   if (force_update_self || should_proactively_update ||
       layer.NeedsCullRectUpdate())
     force_update_children |= UpdateForSelf(layer, parent_painting_layer);
 
-  if (force_update_children || should_proactively_update ||
-      layer.DescendantNeedsCullRectUpdate())
+  absl::optional<base::AutoReset<bool>> reset_subtree_is_out_of_cull_rect;
+  if (!subtree_is_out_of_cull_rect_ && layer.KnownToClipSubtree() &&
+      !layer.GetLayoutObject().FirstFragment().NextFragment()) {
+    const auto* box = layer.GetLayoutBox();
+    DCHECK(box);
+    PhysicalRect overflow_rect = box->PhysicalSelfVisualOverflowRect();
+    overflow_rect.Move(box->FirstFragment().PaintOffset());
+    if (!box->FirstFragment().GetCullRect().Intersects(
+            EnclosingIntRect(overflow_rect))) {
+      reset_subtree_is_out_of_cull_rect.emplace(&subtree_is_out_of_cull_rect_,
+                                                true);
+    }
+  }
+
+  if (force_update_children || layer.DescendantNeedsCullRectUpdate())
     UpdateForDescendants(layer, force_update_children);
 
   layer.ClearNeedsCullRectUpdate();
@@ -131,9 +151,9 @@ void CullRectUpdater::UpdateForDescendants(PaintLayer& layer,
   //     <div id="stacked-child" style="position: relative"></div>
   //   </div>
   // </div>
-  // If |child|'s contents cull rect changes, we need to update |stack-child|'s
-  // cull rect because it's clipped by |child|. The is done in the following
-  // order:
+  // If |child|'s contents cull rect changes, we need to update
+  // |stacked-child|'s cull rect because it's clipped by |child|. The is done in
+  // the following order:
   //   UpdateForDescendants(|layer|)
   //     UpdateRecursively(|child|) (in the following loop)
   //       |stacked-child|->SetNeedsCullRectUpdate()
@@ -168,46 +188,55 @@ bool CullRectUpdater::UpdateForSelf(PaintLayer& layer,
       parent_painting_layer.GetLayoutObject().FirstFragment();
   auto& first_fragment =
       layer.GetLayoutObject().GetMutableForPainting().FirstFragment();
-  // If both |this| and |root_layer| are fragmented and are inside the same
-  // pagination container, then try to match fragments from |root_layer| to
-  // |this|, so that any fragment clip for |root_layer|'s fragment matches
-  // |this|'s. Note we check both ShouldFragmentCompositedBounds() and next
-  // fragment here because the former may return false even if |this| is
-  // fragmented, e.g. for fixed-position objects in paged media, and the next
-  // fragment can be null even if the first fragment is actually in a fragmented
-  // context when the current layer appears in only one of the multiple
-  // fragments of the pagination container.
+  // If both |layer| and |parent_painting_layer| are fragmented and are inside
+  // the same pagination container, then try to match fragments from
+  // |parent_painting_layer| to |layer|, so that any fragment clip for
+  // |parent_painting_layer|'s fragment matches |layer|'s. Note we check both
+  // ShouldFragmentCompositedBounds() and next fragment here because the former
+  // may return false even if |layer| is fragmented, e.g. for fixed-position
+  // objects in paged media, and the next fragment can be null even if the first
+  // fragment is actually in a fragmented context when the current layer appears
+  // in only one of the multiple fragments of the pagination container.
   bool is_fragmented =
       layer.ShouldFragmentCompositedBounds() || first_fragment.NextFragment();
   bool should_match_fragments =
       is_fragmented && parent_painting_layer.EnclosingPaginationLayer() ==
                            layer.EnclosingPaginationLayer();
   bool force_update_children = false;
+  bool should_use_infinite_cull_rect =
+      !subtree_is_out_of_cull_rect_ &&
+      PaintLayerPainter(layer).ShouldUseInfiniteCullRect();
 
   for (auto* fragment = &first_fragment; fragment;
        fragment = fragment->NextFragment()) {
-    const FragmentData* parent_fragment = nullptr;
-    if (should_match_fragments) {
-      for (parent_fragment = &first_parent_fragment; parent_fragment;
-           parent_fragment = parent_fragment->NextFragment()) {
-        if (parent_fragment->LogicalTopInFlowThread() ==
-            fragment->LogicalTopInFlowThread())
-          break;
-      }
-    } else {
-      parent_fragment = &first_parent_fragment;
-    }
-
     CullRect cull_rect;
     CullRect contents_cull_rect;
-    if (!parent_fragment || PaintLayerPainter(layer).ShouldUseInfiniteCullRect(
-                                kGlobalPaintNormalPhase)) {
-      cull_rect = CullRect::Infinite();
-      contents_cull_rect = CullRect::Infinite();
+    if (subtree_is_out_of_cull_rect_) {
+      // PaintLayerPainter may skip the subtree including this layer, so we
+      // need to SetPreviousPaintResult() here.
+      layer.SetPreviousPaintResult(kMayBeClippedByCullRect);
     } else {
-      cull_rect = ComputeFragmentCullRect(layer, *fragment, *parent_fragment);
-      contents_cull_rect =
-          ComputeFragmentContentsCullRect(layer, *fragment, cull_rect);
+      const FragmentData* parent_fragment = nullptr;
+      if (!should_use_infinite_cull_rect) {
+        if (should_match_fragments) {
+          for (parent_fragment = &first_parent_fragment; parent_fragment;
+               parent_fragment = parent_fragment->NextFragment()) {
+            if (parent_fragment->FragmentID() == fragment->FragmentID())
+              break;
+          }
+        } else {
+          parent_fragment = &first_parent_fragment;
+        }
+      }
+
+      if (should_use_infinite_cull_rect || !parent_fragment) {
+        cull_rect = CullRect::Infinite();
+        contents_cull_rect = CullRect::Infinite();
+      } else {
+        cull_rect = ComputeFragmentCullRect(layer, *fragment, *parent_fragment);
+        contents_cull_rect =
+            ComputeFragmentContentsCullRect(layer, *fragment, cull_rect);
+      }
     }
 
     SetFragmentCullRect(layer, *fragment, cull_rect);
@@ -226,13 +255,15 @@ CullRect CullRectUpdater::ComputeFragmentCullRect(
   auto parent_state = parent_fragment.ContentsProperties().Unalias();
   auto local_state = fragment.LocalBorderBoxProperties().Unalias();
   if (parent_state != local_state) {
-    base::Optional<CullRect> old_cull_rect;
+    absl::optional<CullRect> old_cull_rect;
     // Not using |old_cull_rect| will force the cull rect to be updated
     // (skipping |ChangedEnough|) in |ApplyPaintProperties|.
-    if (!ShouldProactivelyUpdateCullRect(layer))
+    if (!ShouldProactivelyUpdate(layer))
       old_cull_rect = fragment.GetCullRect();
-    cull_rect.ApplyPaintProperties(root_state_, parent_state, local_state,
-                                   old_cull_rect);
+    bool expanded = cull_rect.ApplyPaintProperties(root_state_, parent_state,
+                                                   local_state, old_cull_rect);
+    if (expanded && fragment.GetCullRect() != cull_rect)
+      force_proactive_update_ = true;
   }
   return cull_rect;
 }
@@ -245,43 +276,55 @@ CullRect CullRectUpdater::ComputeFragmentContentsCullRect(
   CullRect contents_cull_rect = cull_rect;
   auto contents_state = fragment.ContentsProperties().Unalias();
   if (contents_state != local_state) {
-    base::Optional<CullRect> old_contents_cull_rect;
+    absl::optional<CullRect> old_contents_cull_rect;
     // Not using |old_cull_rect| will force the cull rect to be updated
     // (skipping |CullRect::ChangedEnough|) in |ApplyPaintProperties|.
-    if (!ShouldProactivelyUpdateCullRect(layer))
+    if (!ShouldProactivelyUpdate(layer))
       old_contents_cull_rect = fragment.GetContentsCullRect();
-    contents_cull_rect.ApplyPaintProperties(
+    bool expanded = contents_cull_rect.ApplyPaintProperties(
         root_state_, local_state, contents_state, old_contents_cull_rect);
+    if (expanded && fragment.GetContentsCullRect() != contents_cull_rect)
+      force_proactive_update_ = true;
   }
   return contents_cull_rect;
 }
 
-OverriddenCullRectScope::OverriddenCullRectScope(LocalFrameView& frame_view,
+bool CullRectUpdater::ShouldProactivelyUpdate(const PaintLayer& layer) const {
+  if (force_proactive_update_)
+    return true;
+
+  // If we will repaint anyway, proactively refresh cull rect. A sliding
+  // window (aka hysteresis, see: CullRect::ChangedEnough()) is used to
+  // avoid frequent cull rect updates because they force a repaint (see:
+  // |CullRectUpdater::SetFragmentCullRects|). Proactively updating the cull
+  // rect resets the sliding window which will minimize the need to update
+  // the cull rect again.
+  return layer.SelfOrDescendantNeedsRepaint();
+}
+
+OverriddenCullRectScope::OverriddenCullRectScope(PaintLayer& starting_layer,
                                                  const CullRect& cull_rect)
-    : frame_view_(frame_view) {
+    : starting_layer_(starting_layer) {
   if (!RuntimeEnabledFeatures::CullRectUpdateEnabled())
     return;
 
-  PaintLayer* root_layer = frame_view_.GetLayoutView()->Layer();
-  DCHECK(root_layer);
-
-  // The cull rects calculated during PrePaint are good.
-  if (frame_view.GetFrame().IsLocalRoot() &&
-      !root_layer->NeedsCullRectUpdate() &&
+  if (starting_layer.GetLayoutObject().GetFrame()->IsLocalRoot() &&
+      !starting_layer.NeedsCullRectUpdate() &&
+      !starting_layer.DescendantNeedsCullRectUpdate() &&
       cull_rect ==
-          root_layer->GetLayoutObject().FirstFragment().GetCullRect()) {
-    DCHECK(!root_layer->DescendantNeedsCullRectUpdate());
+          starting_layer.GetLayoutObject().FirstFragment().GetCullRect()) {
+    // The current cull rects are good.
     return;
   }
 
   updated_ = true;
-  root_layer->SetNeedsCullRectUpdate();
-  CullRectUpdater(*root_layer).UpdateInternal(cull_rect);
+  starting_layer.SetNeedsCullRectUpdate();
+  CullRectUpdater(starting_layer).UpdateInternal(cull_rect);
 }
 
 OverriddenCullRectScope::~OverriddenCullRectScope() {
   if (RuntimeEnabledFeatures::CullRectUpdateEnabled() && updated_)
-    frame_view_.GetLayoutView()->Layer()->SetNeedsCullRectUpdate();
+    starting_layer_.SetNeedsCullRectUpdate();
 }
 
 }  // namespace blink

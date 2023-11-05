@@ -41,11 +41,15 @@ const char kMetricsInitialLogsMetadata[] =
 // avoid reshuffling experiments using high entropy, but use the new source for
 // experiments requiring low entropy. Newer clients only have the new source,
 // and use it both for low entropy experiments to to incorporate into the high
-// entropy source for high entropy experiments.
+// entropy source for high entropy experiments. The pseudo low entropy source
+// is not used for trial assignment, but only for statistical validation. It
+// should be assigned in the same way as the new source (with suffix "3").
 const char kMetricsLowEntropySource[] =
     "user_experience_metrics.low_entropy_source3";
 const char kMetricsOldLowEntropySource[] =
     "user_experience_metrics.low_entropy_source2";
+const char kMetricsPseudoLowEntropySource[] =
+    "user_experience_metrics.pseudo_low_entropy_source";
 
 // A machine ID used to detect when underlying hardware changes. It is only
 // stored locally and never transmitted in metrics reports.
@@ -88,6 +92,16 @@ const char kMetricsLastSeenPrefix[] =
 const char kMetricsFileMetricsMetadata[] =
     "user_experience_metrics.file_metrics_metadata";
 
+// The number of times the client has been reset due to cloned install.
+const char kClonedResetCount[] = "cloned_install.count";
+
+// The first timestamp when we reset a cloned client’s client id. This is only
+// set once. Attached to metrics reports forever thereafter.
+const char kFirstClonedResetTimestamp[] = "cloned_install.first_timestamp";
+
+// The last timestamp the client is reset due to cloned install. This will be
+// updated every time we reset the client due to cloned install.
+const char kLastClonedResetTimestamp[] = "cloned_install.last_timestamp";
 
 // A time stamp at which time the browser was known to be alive. Used to
 // evaluate whether the browser crash was due to a whole system crash.

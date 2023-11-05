@@ -16,6 +16,7 @@
 #include "base/test/task_environment.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/sync/base/hash_util.h"
+#include "components/sync/engine/entity_data.h"
 #include "components/sync/protocol/session_specifics.pb.h"
 #include "components/sync/test/model/model_type_store_test_util.h"
 #include "components/sync/test/model/test_matchers.h"
@@ -59,7 +60,7 @@ class MockOpenCallback {
  public:
   MOCK_METHOD(void,
               Run,
-              (const base::Optional<syncer::ModelError>& error,
+              (const absl::optional<syncer::ModelError>& error,
                SessionStore* store,
                MetadataBatch* metadata_batch),
               ());
@@ -67,7 +68,7 @@ class MockOpenCallback {
   SessionStore::OpenCallback Get() {
     return base::BindOnce(
         [](MockOpenCallback* callback,
-           const base::Optional<syncer::ModelError>& error,
+           const absl::optional<syncer::ModelError>& error,
            std::unique_ptr<SessionStore> store,
            std::unique_ptr<MetadataBatch> metadata_batch) {
           // Store a copy of the pointer for GetResult().
@@ -117,7 +118,7 @@ std::unique_ptr<MetadataBatch> ReadAllPersistedMetadataFrom(
   base::RunLoop loop;
   store->ReadAllMetadata(base::BindOnce(
       [](std::unique_ptr<MetadataBatch>* output_batch, base::RunLoop* loop,
-         const base::Optional<syncer::ModelError>& error,
+         const absl::optional<syncer::ModelError>& error,
          std::unique_ptr<MetadataBatch> input_batch) {
         EXPECT_FALSE(error) << error->ToString();
         EXPECT_THAT(input_batch, NotNull());
@@ -135,7 +136,7 @@ std::map<std::string, SessionSpecifics> ReadAllPersistedDataFrom(
   base::RunLoop loop;
   store->ReadAllData(base::BindOnce(
       [](std::unique_ptr<ModelTypeStore::RecordList>* output_records,
-         base::RunLoop* loop, const base::Optional<syncer::ModelError>& error,
+         base::RunLoop* loop, const absl::optional<syncer::ModelError>& error,
          std::unique_ptr<ModelTypeStore::RecordList> input_records) {
         EXPECT_FALSE(error) << error->ToString();
         EXPECT_THAT(input_records, NotNull());
@@ -228,7 +229,7 @@ TEST_F(SessionStoreOpenTest, ShouldNotUseClientIfCancelled) {
     }
 
    private:
-    void Completed(const base::Optional<syncer::ModelError>& error,
+    void Completed(const absl::optional<syncer::ModelError>& error,
                    std::unique_ptr<SessionStore> store,
                    std::unique_ptr<syncer::MetadataBatch> metadata_batch) {
       std::move(cb_).Run(error, std::move(store), std::move(metadata_batch));

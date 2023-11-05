@@ -2,16 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "media/base/video_frame.h"
+#include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
+
 #include "components/viz/test/test_context_provider.h"
+#include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_imagedata_offscreencanvas_svgimageelement_videoframe.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_cssimagevalue_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_offscreencanvas_svgimageelement_videoframe.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_frame_init.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
-#include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
+#include "third_party/blink/renderer/modules/canvas/imagebitmap/image_bitmap_factories.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame_handle.h"
+#include "third_party/blink/renderer/modules/webcodecs/video_frame_monitor.h"
+#include "third_party/blink/renderer/modules/webcodecs/webcodecs_logger.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/test/gpu_test_utils.h"
@@ -87,8 +94,6 @@ TEST_F(VideoFrameTest, ConstructorAndAttributes) {
   EXPECT_EQ(1000u, blink_frame->timestamp().value());
   EXPECT_EQ(112u, blink_frame->codedWidth());
   EXPECT_EQ(208u, blink_frame->codedHeight());
-  EXPECT_EQ(100u, blink_frame->cropWidth());
-  EXPECT_EQ(200u, blink_frame->cropHeight());
   EXPECT_EQ(media_frame, blink_frame->frame());
 
   blink_frame->close();
@@ -96,8 +101,6 @@ TEST_F(VideoFrameTest, ConstructorAndAttributes) {
   EXPECT_FALSE(blink_frame->timestamp().has_value());
   EXPECT_EQ(0u, blink_frame->codedWidth());
   EXPECT_EQ(0u, blink_frame->codedHeight());
-  EXPECT_EQ(0u, blink_frame->cropWidth());
-  EXPECT_EQ(0u, blink_frame->cropHeight());
   EXPECT_EQ(nullptr, blink_frame->frame());
 }
 
@@ -151,8 +154,7 @@ TEST_F(VideoFrameTest, ClonedFrame) {
   VideoFrame* blink_frame =
       CreateBlinkVideoFrame(media_frame, scope.GetExecutionContext());
 
-  VideoFrame* cloned_frame =
-      blink_frame->clone(scope.GetScriptState(), scope.GetExceptionState());
+  VideoFrame* cloned_frame = blink_frame->clone(scope.GetExceptionState());
 
   // The cloned frame should be referencing the same media::VideoFrame.
   EXPECT_EQ(blink_frame->frame(), cloned_frame->frame());
@@ -175,8 +177,7 @@ TEST_F(VideoFrameTest, CloningClosedFrame) {
 
   blink_frame->close();
 
-  VideoFrame* cloned_frame =
-      blink_frame->clone(scope.GetScriptState(), scope.GetExceptionState());
+  VideoFrame* cloned_frame = blink_frame->clone(scope.GetExceptionState());
 
   // No frame should have been created, and there should be an exception.
   EXPECT_EQ(nullptr, cloned_frame);
@@ -196,7 +197,7 @@ TEST_F(VideoFrameTest, LeakedHandlesReportLeaks) {
   // Remove the last reference to the handle without calling Invalidate().
   handle.reset();
 
-  auto& logger = VideoFrameLogger::From(*scope.GetExecutionContext());
+  auto& logger = WebCodecsLogger::From(*scope.GetExecutionContext());
 
   EXPECT_TRUE(logger.GetCloseAuditor()->were_frames_not_closed());
 }
@@ -214,7 +215,7 @@ TEST_F(VideoFrameTest, InvalidatedHandlesDontReportLeaks) {
   handle->Invalidate();
   handle.reset();
 
-  auto& logger = VideoFrameLogger::From(*scope.GetExecutionContext());
+  auto& logger = WebCodecsLogger::From(*scope.GetExecutionContext());
 
   EXPECT_FALSE(logger.GetCloseAuditor()->were_frames_not_closed());
 }
@@ -231,18 +232,19 @@ TEST_F(VideoFrameTest, ImageBitmapCreationAndZeroCopyRoundTrip) {
 
   const auto* default_options = ImageBitmapOptions::Create();
   auto* image_bitmap = MakeGarbageCollected<ImageBitmap>(
-      UnacceleratedStaticBitmapImage::Create(original_image), base::nullopt,
+      UnacceleratedStaticBitmapImage::Create(original_image), absl::nullopt,
       default_options);
-  CanvasImageSourceUnion source;
-  source.SetImageBitmap(image_bitmap);
+  auto* source = MakeGarbageCollected<V8CanvasImageSource>(image_bitmap);
   auto* video_frame = VideoFrame::Create(scope.GetScriptState(), source, init,
                                          scope.GetExceptionState());
 
   EXPECT_EQ(video_frame->handle()->sk_image(), original_image);
 
   {
-    auto promise = video_frame->createImageBitmap(
-        scope.GetScriptState(), default_options, scope.GetExceptionState());
+    auto* ibs_source = MakeGarbageCollected<V8ImageBitmapSource>(video_frame);
+    auto promise = ImageBitmapFactories::CreateImageBitmap(
+        scope.GetScriptState(), ibs_source, default_options,
+        scope.GetExceptionState());
     ScriptPromiseTester tester(scope.GetScriptState(), promise);
     tester.WaitUntilSettled();
     ASSERT_TRUE(tester.IsFulfilled());
@@ -254,8 +256,7 @@ TEST_F(VideoFrameTest, ImageBitmapCreationAndZeroCopyRoundTrip) {
     EXPECT_EQ(bitmap_image, original_image);
   }
 
-  auto* clone =
-      video_frame->clone(scope.GetScriptState(), scope.GetExceptionState());
+  auto* clone = video_frame->clone(scope.GetExceptionState());
   EXPECT_EQ(clone->handle()->sk_image(), original_image);
 }
 
@@ -265,7 +266,7 @@ TEST_F(VideoFrameTest, VideoFrameFromGPUImageBitmap) {
   auto context_provider_wrapper = SharedGpuContext::ContextProviderWrapper();
   CanvasResourceParams resource_params;
   auto resource_provider = CanvasResourceProvider::CreateSharedImageProvider(
-      IntSize(100, 100), kLow_SkFilterQuality, resource_params,
+      IntSize(100, 100), cc::PaintFlags::FilterQuality::kLow, resource_params,
       CanvasResourceProvider::ShouldInitialize::kNo, context_provider_wrapper,
       RasterMode::kGPU, true /*is_origin_top_left*/,
       0u /*shared_image_usage_flags*/);
@@ -280,11 +281,169 @@ TEST_F(VideoFrameTest, VideoFrameFromGPUImageBitmap) {
   auto* init = VideoFrameInit::Create();
   init->setTimestamp(0);
 
-  CanvasImageSourceUnion source;
-  source.SetImageBitmap(image_bitmap);
+  auto* source = MakeGarbageCollected<V8CanvasImageSource>(image_bitmap);
   auto* video_frame = VideoFrame::Create(scope.GetScriptState(), source, init,
                                          scope.GetExceptionState());
   ASSERT_TRUE(video_frame);
+}
+
+TEST_F(VideoFrameTest, HandleMonitoring) {
+  V8TestingScope scope;
+  VideoFrameMonitor& monitor = VideoFrameMonitor::Instance();
+  const std::string source1 = "source1";
+  const std::string source2 = "source2";
+  EXPECT_TRUE(monitor.IsEmpty());
+
+  // Test all constructors.
+  scoped_refptr<media::VideoFrame> media_frame1 =
+      CreateDefaultBlackMediaVideoFrame();
+  scoped_refptr<media::VideoFrame> media_frame2 =
+      CreateDefaultBlackMediaVideoFrame();
+
+  auto verify_expectations =
+      [&](wtf_size_t num_frames_source1, int num_refs_frame1_source1,
+          int num_refs_frame2_source1, wtf_size_t num_frames_source2,
+          int num_refs_frame1_source2, int num_refs_frame2_source2) {
+        EXPECT_EQ(monitor.NumFrames(source1), num_frames_source1);
+        EXPECT_EQ(monitor.NumRefs(source1, media_frame1->unique_id()),
+                  num_refs_frame1_source1);
+        EXPECT_EQ(monitor.NumRefs(source1, media_frame2->unique_id()),
+                  num_refs_frame2_source1);
+        EXPECT_EQ(monitor.NumFrames(source2), num_frames_source2);
+        EXPECT_EQ(monitor.NumRefs(source2, media_frame1->unique_id()),
+                  num_refs_frame1_source2);
+        EXPECT_EQ(monitor.NumRefs(source2, media_frame2->unique_id()),
+                  num_refs_frame2_source2);
+      };
+
+  auto handle_1_1 = base::MakeRefCounted<VideoFrameHandle>(
+      media_frame1, scope.GetExecutionContext(), source1);
+  verify_expectations(/* source1 */ 1, 1, 0, /* source2 */ 0, 0, 0);
+
+  sk_sp<SkSurface> surface(SkSurface::MakeRaster(
+      SkImageInfo::MakeN32Premul(5, 5, SkColorSpace::MakeSRGB())));
+  sk_sp<SkImage> sk_image = surface->makeImageSnapshot();
+  auto handle_2_1 = base::MakeRefCounted<VideoFrameHandle>(
+      media_frame2, sk_image, scope.GetExecutionContext(), source1);
+  verify_expectations(/* source1 */ 2, 1, 1, /* source2 */ 0, 0, 0);
+
+  auto& logger = WebCodecsLogger::From(*scope.GetExecutionContext());
+  auto handle_1_1b = base::MakeRefCounted<VideoFrameHandle>(
+      media_frame1, sk_image, logger.GetCloseAuditor(), source1);
+  verify_expectations(/* source1 */ 2, 2, 1, /* source2 */ 0, 0, 0);
+
+  auto handle_1_2 =
+      base::MakeRefCounted<VideoFrameHandle>(media_frame1, sk_image, source2);
+  verify_expectations(/* source1 */ 2, 2, 1, /* source2 */ 1, 1, 0);
+
+  auto non_monitored1 = base::MakeRefCounted<VideoFrameHandle>(
+      media_frame2, sk_image, scope.GetExecutionContext());
+  verify_expectations(/* source1 */ 2, 2, 1, /* source2 */ 1, 1, 0);
+
+  auto non_monitored2 =
+      base::MakeRefCounted<VideoFrameHandle>(media_frame1, sk_image);
+  verify_expectations(/* source1 */ 2, 2, 1, /* source2 */ 1, 1, 0);
+
+  // Move constructor
+  auto handle_1_1c = std::move(handle_1_1b);
+  verify_expectations(/* source1 */ 2, 2, 1, /* source2 */ 1, 1, 0);
+
+  // Test all clone methods.
+  auto clone_1_1a = handle_1_1->Clone();
+  verify_expectations(/* source1 */ 2, 3, 1, /* source2 */ 1, 1, 0);
+
+  auto clone_1_1b = handle_1_1->CloneForInternalUse();
+  verify_expectations(/* source1 */ 2, 4, 1, /* source2 */ 1, 1, 0);
+
+  // Clone non-monitored frame
+  auto non_monitored_clone = non_monitored2->CloneForInternalUse();
+  verify_expectations(/* source1 */ 2, 4, 1, /* source2 */ 1, 1, 0);
+
+  // Test invalidate
+  handle_1_1->Invalidate();
+  verify_expectations(/* source1 */ 2, 3, 1, /* source2 */ 1, 1, 0);
+
+  // handle_1_1b was moved to handle_1_1c
+  handle_1_1c->Invalidate();
+  verify_expectations(/* source1 */ 2, 2, 1, /* source2 */ 1, 1, 0);
+
+  handle_2_1->Invalidate();
+  verify_expectations(/* source1 */ 1, 2, 0, /* source2 */ 1, 1, 0);
+
+  non_monitored1->Invalidate();
+  verify_expectations(/* source1 */ 1, 2, 0, /* source2 */ 1, 1, 0);
+
+  non_monitored2->Invalidate();
+  verify_expectations(/* source1 */ 1, 2, 0, /* source2 */ 1, 1, 0);
+
+  clone_1_1a->Invalidate();
+  verify_expectations(/* source1 */ 1, 1, 0, /* source2 */ 1, 1, 0);
+
+  // Resetting handles instead of invalidating.
+  handle_1_2.reset();
+  verify_expectations(/* source1 */ 1, 1, 0, /* source2 */ 0, 0, 0);
+
+  clone_1_1b.reset();
+  EXPECT_TRUE(monitor.IsEmpty());
+
+  // handle10 is not monitored
+  non_monitored_clone.reset();
+  EXPECT_TRUE(monitor.IsEmpty());
+}
+
+TEST_F(VideoFrameTest, VideoFrameMonitoring) {
+  V8TestingScope scope;
+  VideoFrameMonitor& monitor = VideoFrameMonitor::Instance();
+  const std::string source = "source";
+  scoped_refptr<media::VideoFrame> media_frame =
+      CreateDefaultBlackMediaVideoFrame();
+  auto verify_expectations = [&](wtf_size_t num_frames, int num_refs) {
+    EXPECT_EQ(monitor.NumFrames(source), num_frames);
+    EXPECT_EQ(monitor.NumRefs(source, media_frame->unique_id()), num_refs);
+  };
+  EXPECT_TRUE(monitor.IsEmpty());
+
+  // Test all constructors
+  auto* frame1 = MakeGarbageCollected<VideoFrame>(
+      media_frame, scope.GetExecutionContext(), source);
+  verify_expectations(1u, 1);
+
+  auto* non_monitored1 = MakeGarbageCollected<VideoFrame>(
+      media_frame, scope.GetExecutionContext());
+  verify_expectations(1u, 1);
+
+  auto monitored_handle = base::MakeRefCounted<VideoFrameHandle>(
+      media_frame, scope.GetExecutionContext(), source);
+  auto* frame2 = MakeGarbageCollected<VideoFrame>(std::move(monitored_handle));
+  verify_expectations(1u, 2);
+
+  auto non_monitored_handle = base::MakeRefCounted<VideoFrameHandle>(
+      media_frame, scope.GetExecutionContext());
+  auto* non_monitored2 =
+      MakeGarbageCollected<VideoFrame>(std::move(non_monitored_handle));
+  verify_expectations(1u, 2);
+
+  frame1->clone(scope.GetExceptionState());
+  verify_expectations(1u, 3);
+
+  auto* non_monitored_clone = non_monitored1->clone(scope.GetExceptionState());
+  verify_expectations(1u, 3);
+
+  frame1->close();
+  verify_expectations(1u, 2);
+
+  frame2->close();
+  verify_expectations(1u, 1);
+
+  non_monitored1->close();
+  non_monitored2->close();
+  non_monitored_clone->close();
+  verify_expectations(1u, 1);
+
+  // Garbage-collecting a non-closed monitored frame should reclaim it and
+  // update the monitor.
+  blink::WebHeap::CollectAllGarbageForTesting();
+  EXPECT_TRUE(monitor.IsEmpty());
 }
 
 }  // namespace

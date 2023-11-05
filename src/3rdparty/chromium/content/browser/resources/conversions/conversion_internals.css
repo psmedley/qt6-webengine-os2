@@ -14,7 +14,7 @@ body {
   color: rgb(48, 57, 66);
   display: flex;
   flex-direction: column;
-  font-family: Roboto, sans-seriif;
+  font-family: Roboto, sans-serif;
   font-size: 13px;
   height: 100%;
   margin: 15px;
@@ -29,6 +29,15 @@ body {
 
 #feature-status-content {
   font-weight: bold;
+}
+
+#feature-status-content.disabled {
+  color: red;
+}
+
+hr {
+  border-top: 1px solid rgb(48, 57, 66);
+  width: 100%;
 }
 
 .content {
@@ -73,4 +82,5 @@ table th {
 
 button {
   font: inherit;
+  margin-inline-end: 30px;
 }

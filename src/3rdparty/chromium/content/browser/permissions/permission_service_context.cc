@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "content/browser/permissions/permission_controller_impl.h"
 #include "content/browser/permissions/permission_service_impl.h"
+#include "content/browser/permissions/permission_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -45,7 +46,8 @@ class PermissionServiceContext::PermissionSubscription {
   }
 
   void OnPermissionStatusChanged(blink::mojom::PermissionStatus status) {
-    observer_->OnPermissionStatusChange(status);
+    if (observer_.is_connected())
+      observer_->OnPermissionStatusChange(status);
   }
 
   void set_id(PermissionController::SubscriptionId id) { id_ = id; }
@@ -56,21 +58,21 @@ class PermissionServiceContext::PermissionSubscription {
   PermissionController::SubscriptionId id_;
 };
 
+RENDER_DOCUMENT_HOST_USER_DATA_KEY_IMPL(PermissionServiceContext)
+
 PermissionServiceContext::PermissionServiceContext(
     RenderFrameHost* render_frame_host)
-    : WebContentsObserver(WebContents::FromRenderFrameHost(render_frame_host)),
-      render_frame_host_(render_frame_host),
-      render_process_host_(nullptr) {
+    : render_frame_host_(render_frame_host), render_process_host_(nullptr) {
+  render_frame_host->GetProcess()->AddObserver(this);
 }
 
 PermissionServiceContext::PermissionServiceContext(
     RenderProcessHost* render_process_host)
-    : WebContentsObserver(nullptr),
-      render_frame_host_(nullptr),
-      render_process_host_(render_process_host) {
-}
+    : render_frame_host_(nullptr), render_process_host_(render_process_host) {}
 
 PermissionServiceContext::~PermissionServiceContext() {
+  if (render_frame_host_)
+    render_frame_host_->GetProcess()->RemoveObserver(this);
 }
 
 void PermissionServiceContext::CreateService(
@@ -124,40 +126,9 @@ void PermissionServiceContext::ObserverHadConnectionError(
   DCHECK_EQ(1u, erased);
 }
 
-void PermissionServiceContext::RenderFrameHostChanged(
-    RenderFrameHost* old_host,
-    RenderFrameHost* new_host) {
-  CloseBindings(old_host);
-}
-
-void PermissionServiceContext::FrameDeleted(
-    RenderFrameHost* render_frame_host) {
-  CloseBindings(render_frame_host);
-}
-
-void PermissionServiceContext::DidFinishNavigation(
-    NavigationHandle* navigation_handle) {
-  if (!navigation_handle->HasCommitted() || navigation_handle->IsSameDocument())
-    return;
-
-  CloseBindings(navigation_handle->GetRenderFrameHost());
-}
-
-void PermissionServiceContext::CloseBindings(
-    RenderFrameHost* render_frame_host) {
-  DCHECK(render_frame_host_);
-  if (render_frame_host != render_frame_host_)
-    return;
-
-  services_.Clear();
-  subscriptions_.clear();
-}
-
 BrowserContext* PermissionServiceContext::GetBrowserContext() const {
-  // web_contents() may return nullptr during teardown, or when showing
-  // an interstitial.
-  if (web_contents())
-    return web_contents()->GetBrowserContext();
+  if (render_frame_host_)
+    return render_frame_host_->GetBrowserContext();
 
   if (render_process_host_)
     return render_process_host_->GetBrowserContext();
@@ -166,8 +137,23 @@ BrowserContext* PermissionServiceContext::GetBrowserContext() const {
 }
 
 GURL PermissionServiceContext::GetEmbeddingOrigin() const {
-  return web_contents() ? web_contents()->GetLastCommittedURL().GetOrigin()
-                        : GURL();
+  // TODO(https://crbug.com/1199710): This will return the wrong origin for a
+  // non primary FrameTree.
+  WebContents* web_contents =
+      WebContents::FromRenderFrameHost(render_frame_host_);
+  return web_contents
+             ? PermissionUtil::GetLastCommittedOriginAsURL(web_contents)
+             : GURL();
+}
+
+void PermissionServiceContext::RenderProcessHostDestroyed(
+    RenderProcessHost* host) {
+  DCHECK(host == render_frame_host_->GetProcess());
+  subscriptions_.clear();
+  // RenderProcessHostImpl will always outlive 'this', but it gets cleaned up
+  // earlier so we need to listen to this event so we can do our clean up as
+  // well.
+  host->RemoveObserver(this);
 }
 
 }  // namespace content

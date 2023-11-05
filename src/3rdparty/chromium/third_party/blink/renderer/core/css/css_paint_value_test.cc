@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 #include "third_party/blink/renderer/core/css/mock_css_paint_image_generator.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -133,7 +134,7 @@ TEST_P(CSSPaintValueTest, ReportingNonCompositedUMA) {
 
   SetBodyInnerHTML(R"HTML(<div id="target"></div>)HTML");
   LayoutObject* target = GetLayoutObjectByElementId("target");
-  auto style = ComputedStyle::Create();
+  auto style = GetDocument().GetStyleResolver().CreateComputedStyle();
   auto* ident = MakeGarbageCollected<CSSCustomIdentValue>("testpainter");
   CSSPaintValue* paint_value = MakeGarbageCollected<CSSPaintValue>(ident, true);
   StyleGeneratedImage* style_image =

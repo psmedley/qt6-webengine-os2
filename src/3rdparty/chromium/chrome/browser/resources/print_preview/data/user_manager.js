@@ -4,15 +4,14 @@
 
 import {assert} from 'chrome://resources/js/assert.m.js';
 import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
-import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
-import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {WebUIListenerBehavior, WebUIListenerBehaviorInterface} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
+import {mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {CloudPrintInterface, CloudPrintInterfaceErrorEventDetail, CloudPrintInterfaceEventType} from '../cloud_print_interface.js';
 import {CloudPrintInterfaceImpl} from '../cloud_print_interface_impl.js';
 
 import {Destination, DestinationOrigin} from './destination.js';
 import {DestinationStore} from './destination_store.js';
-import {InvitationStore} from './invitation_store.js';
 
 /**
  * @typedef {{ activeUser: string,
@@ -20,87 +19,81 @@ import {InvitationStore} from './invitation_store.js';
  */
 let UpdateUsersPayload;
 
-Polymer({
-  is: 'print-preview-user-manager',
+/**
+ * @constructor
+ * @extends {PolymerElement}
+ * @implements {WebUIListenerBehaviorInterface}
+ */
+const PrintPreviewUserManagerElementBase =
+    mixinBehaviors([WebUIListenerBehavior], PolymerElement);
 
-  _template: null,
+/** @polymer */
+class PrintPreviewUserManagerElement extends
+    PrintPreviewUserManagerElementBase {
+  static get is() {
+    return 'print-preview-user-manager';
+  }
 
-  behaviors: [WebUIListenerBehavior],
-
-  properties: {
-    activeUser: {
-      type: String,
-      notify: true,
-    },
-
-    cloudPrintDisabled: {
-      type: Boolean,
-      observer: 'onCloudPrintDisabledChanged_',
-    },
-
-    /** @type {?DestinationStore} */
-    destinationStore: Object,
-
-    /** @type {?InvitationStore} */
-    invitationStore: Object,
-
-    /** @type {!Array<string>} */
-    users: {
-      type: Array,
-      notify: true,
-      value() {
-        return [];
+  static get properties() {
+    return {
+      activeUser: {
+        type: String,
+        notify: true,
       },
-    },
-  },
 
-  /** @private {?CloudPrintInterface} */
-  cloudPrintInterface_: null,
+      cloudPrintDisabled: {
+        type: Boolean,
+        observer: 'onCloudPrintDisabledChanged_',
+      },
 
-  /** @private {boolean} */
-  initialized_: false,
+      /** @type {?DestinationStore} */
+      destinationStore: Object,
 
-  /** @private {!EventTracker} */
-  tracker_: new EventTracker(),
+      /** @type {!Array<string>} */
+      users: {
+        type: Array,
+        notify: true,
+        value() {
+          return [];
+        },
+      },
+    };
+  }
+
+  constructor() {
+    super();
+
+    /** @private {?CloudPrintInterface} */
+    this.cloudPrintInterface_ = null;
+
+    /** @private {boolean} */
+    this.initialized_ = false;
+
+    /** @private {!EventTracker} */
+    this.tracker_ = new EventTracker();
+  }
 
   /** @override */
-  detached() {
+  disconnectedCallback() {
+    super.disconnectedCallback();
+
     this.tracker_.removeAll();
     this.initialized_ = false;
-  },
+  }
 
-  /**
-   * @param {?Array<string>} userAccounts
-   * @param {boolean} syncAvailable
-   */
-  initUserAccounts(userAccounts, syncAvailable) {
+  initUserAccounts() {
     assert(!this.initialized_);
     this.initialized_ = true;
 
-    if (!userAccounts) {
-      assert(this.cloudPrintDisabled);
-      this.activeUser = '';
+    if (this.cloudPrintDisabled) {
       return;
     }
 
-    // If cloud print is enabled, listen for account changes.
-    assert(!this.cloudPrintDisabled);
-    if (syncAvailable) {
-      this.addWebUIListener(
-          'user-accounts-updated', this.updateUsers_.bind(this));
-      this.updateUsers_(userAccounts);
-    } else {
-      // Request the cookies destinations from the Google Cloud Print server
-      // directly. We have to do this in incognito mode in order to get the
-      // user's login state.
+    this.addWebUIListener('check-for-account-update', () => {
       this.destinationStore.startLoadCloudDestinations(
           DestinationOrigin.COOKIES);
-      this.addWebUIListener('check-for-account-update', () => {
-        this.destinationStore.startLoadCloudDestinations(
-            DestinationOrigin.COOKIES);
-      });
-    }
-  },
+    });
+  }
 
   /** @private */
   onCloudPrintDisabledChanged_() {
@@ -123,7 +116,7 @@ Polymer({
     if (this.users.length > 0) {
       this.cloudPrintInterface_.setUsers(this.users);
     }
-  },
+  }
 
   /**
    * Updates the cloud print status to NOT_SIGNED_IN if there is an
@@ -143,7 +136,7 @@ Polymer({
     assert(!this.cloudPrintDisabled);
     this.updateActiveUser('');
     console.warn('Google Cloud Print Error: HTTP status 403');
-  },
+  }
 
   /**
    * @param {!CustomEvent<!UpdateUsersPayload>} e Event containing the new
@@ -155,7 +148,7 @@ Polymer({
     if (e.detail.users) {
       this.updateUsers_(e.detail.users);
     }
-  },
+  }
 
   /**
    * @param {!Array<string>} users The full list of signed in users.
@@ -171,7 +164,7 @@ Polymer({
     if (updateActiveUser) {
       this.updateActiveUser(this.users[0] || '');
     }
-  },
+  }
 
   /** @param {string} user The new active user. */
   updateActiveUser(user) {
@@ -187,6 +180,8 @@ Polymer({
     }
 
     this.destinationStore.reloadUserCookieBasedDestinations(user);
-    this.invitationStore.startLoadingInvitations(user);
-  },
-});
+  }
+}
+
+customElements.define(
+    PrintPreviewUserManagerElement.is, PrintPreviewUserManagerElement);

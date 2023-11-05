@@ -11,6 +11,7 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/animation/ink_drop.h"
 #include "ui/views/animation/test/ink_drop_host_view_test_api.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/image_button.h"
@@ -33,7 +34,7 @@ TEST_F(ImageButtonFactoryTest, SetImageFromVectorIcon) {
   EXPECT_FALSE(button->GetImage(Button::STATE_NORMAL).isNull());
   EXPECT_FALSE(button->GetImage(Button::STATE_DISABLED).isNull());
   EXPECT_EQ(color_utils::DeriveDefaultIconColor(SK_ColorRED),
-            button->GetInkDropBaseColor());
+            InkDrop::Get(button.get())->GetBaseColor());
 }
 
 class ImageButtonFactoryWidgetTest : public ViewsTestBase {
@@ -81,6 +82,15 @@ TEST_F(ImageButtonFactoryWidgetTest, CreateVectorImageButtonWithNativeTheme) {
       Button::PressedCallback(), vector_icons::kCloseRoundedIcon));
   EXPECT_EQ(button()->GetNativeTheme()->GetSystemColor(
                 ui::NativeTheme::kColorId_DefaultIconColor),
-            button()->GetInkDropBaseColor());
+            InkDrop::Get(button())->GetBaseColor());
 }
+
+TEST_F(ImageButtonFactoryWidgetTest,
+       CreateVectorImageButtonWithNativeThemeWithSize) {
+  constexpr int kSize = 15;
+  AddImageButton(CreateVectorImageButtonWithNativeTheme(
+      Button::PressedCallback(), vector_icons::kEditIcon, kSize));
+  EXPECT_EQ(kSize, button()->GetImage(Button::STATE_NORMAL).width());
+}
+
 }  // namespace views

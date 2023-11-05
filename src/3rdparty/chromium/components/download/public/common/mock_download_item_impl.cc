@@ -37,7 +37,8 @@ MockDownloadItemImpl::MockDownloadItemImpl(DownloadItemImplDelegate* delegate)
                        base::Time(),
                        true,
                        DownloadItem::ReceivedSlices(),
-                       base::nullopt /*download_schedule*/,
+                       DownloadItemRerouteInfo(),
+                       absl::nullopt /*download_schedule*/,
                        nullptr /* download_entry */) {}
 
 MockDownloadItemImpl::~MockDownloadItemImpl() = default;

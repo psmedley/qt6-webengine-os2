@@ -4,10 +4,11 @@
 
 import os
 import math
-from base_generator import Color, Modes, BaseGenerator, VariableType
+from style_variable_generator.base_generator import Color, Modes, VariableType
+from style_variable_generator.css_generator import CSSStyleGenerator
 
 
-class ViewsStyleGenerator(BaseGenerator):
+class ViewsStyleGenerator(CSSStyleGenerator):
     '''Generator for Views Variables'''
 
     @staticmethod
@@ -30,6 +31,9 @@ class ViewsStyleGenerator(BaseGenerator):
             'to_const_name': self._ToConstName,
             'cpp_color': self._CppColor,
             'alpha_to_hex': self._AlphaToHex,
+            'cpp_opacity': self._CppOpacity,
+            'to_css_var_name': self.ToCSSVarName,
+            'css_color_rgb': self.CSSColorRGB,
         }
 
     def GetGlobals(self):
@@ -37,7 +41,8 @@ class ViewsStyleGenerator(BaseGenerator):
             'Modes': Modes,
             'out_file_path': None,
             'namespace_name': None,
-            'in_files': self.in_file_to_context.keys(),
+            'in_files': sorted(self.in_file_to_context.keys()),
+            'css_color_var': self.CSSColorVar,
         }
         if self.out_file_path:
             globals['out_file_path'] = self.out_file_path
@@ -55,32 +60,34 @@ class ViewsStyleGenerator(BaseGenerator):
     def _ToConstName(self, var_name):
         return 'k%s' % var_name.title().replace('_', '')
 
-    def _AlphaToHex(self, a):
-        return '0x%X' % math.floor(a * 255)
+    def _AlphaToHex(self, opacity):
+        return '0x%X' % math.floor(opacity.a * 255)
+
+    def _CppOpacity(self, opacity):
+        if opacity.a != -1:
+            return self._AlphaToHex(opacity)
+        elif opacity.var:
+            return ('GetOpacity(OpacityName::%s, is_dark_mode)' %
+                    self._ToConstName(opacity.var))
+        raise ValueError('Invalid opacity: ' + repr(opacity))
 
     def _CppColor(self, c):
         '''Returns the C++ color representation of |c|'''
         assert (isinstance(c, Color))
 
-        def CppOpacity(color):
-            if c.a != -1:
-                return self._AlphaToHex(c.a)
-            elif c.opacity_var:
-                return 'GetOpacity(OpacityName::%s)' % self._ToConstName(
-                    c.opacity_var)
-            raise ValueError('Color with invalid opacity: ' + repr(color))
-
         if c.var:
-            return ('ResolveColor(ColorName::%s, is_dark_mode)' %
-                    self._ToConstName(c.var))
+            return (
+                'ResolveColor(ColorName::%s, is_dark_mode, use_debug_colors)' %
+                self._ToConstName(c.var))
 
         if c.rgb_var:
-            return (
-                'SkColorSetA(ResolveColor(ColorName::%s, is_dark_mode), %s)' %
-                (self._ToConstName(c.RGBVarToVar()), CppOpacity(c)))
+            return ('SkColorSetA(ResolveColor(' +
+                    'ColorName::%s, is_dark_mode, use_debug_colors), %s)' %
+                    (self._ToConstName(
+                        c.RGBVarToVar()), self._CppOpacity(c.opacity)))
 
-        if c.a != 1:
-            return 'SkColorSetARGB(%s, 0x%X, 0x%X, 0x%X)' % (CppOpacity(c),
-                                                             c.r, c.g, c.b)
+        if c.opacity.a != 1:
+            return 'SkColorSetARGB(%s, 0x%X, 0x%X, 0x%X)' % (self._CppOpacity(
+                c.opacity), c.r, c.g, c.b)
         else:
             return 'SkColorSetRGB(0x%X, 0x%X, 0x%X)' % (c.r, c.g, c.b)

@@ -6,7 +6,6 @@
 
 #include "services/device/public/mojom/nfc.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/bindings/modules/v8/string_or_array_buffer_or_array_buffer_view_or_ndef_message_init.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_ndef_scan_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_ndef_write_options.h"
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
@@ -189,10 +188,13 @@ void NDEFReader::OnReading(const String& serial_number,
 }
 
 void NDEFReader::OnReadingError(const String& message) {
-  DispatchEvent(*Event::Create(event_type_names::kReadingerror));
   GetExecutionContext()->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
       mojom::blink::ConsoleMessageSource::kJavaScript,
       mojom::blink::ConsoleMessageLevel::kInfo, message));
+
+  // Dispatch the event as the final step in this method as it may cause script
+  // to run that destroys the execution context.
+  DispatchEvent(*Event::Create(event_type_names::kReadingerror));
 }
 
 void NDEFReader::ContextDestroyed() {
@@ -212,7 +214,7 @@ void NDEFReader::ReadAbort() {
 // https://w3c.github.io/web-nfc/#writing-content
 // https://w3c.github.io/web-nfc/#the-write-method
 ScriptPromise NDEFReader::write(ScriptState* script_state,
-                                const NDEFMessageSource& write_message,
+                                const V8NDEFMessageSource* write_message,
                                 const NDEFWriteOptions* options,
                                 ExceptionState& exception_state) {
   // https://w3c.github.io/web-nfc/#security-policies

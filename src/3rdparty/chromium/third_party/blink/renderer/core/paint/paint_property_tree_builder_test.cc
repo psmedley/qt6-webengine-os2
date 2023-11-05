@@ -125,7 +125,13 @@ void PaintPropertyTreeBuilderTest::SetUp() {
 #define CHECK_EXACT_VISUAL_RECT(expected, source_object, ancestor) \
   CHECK_VISUAL_RECT(expected, source_object, ancestor, 0)
 
-INSTANTIATE_PAINT_TEST_SUITE_P(PaintPropertyTreeBuilderTest);
+INSTANTIATE_TEST_SUITE_P(All,
+                         PaintPropertyTreeBuilderTest,
+                         ::testing::Values(0,
+                                           kCompositeAfterPaint,
+                                           kUnderInvalidationChecking,
+                                           kCompositeAfterPaint |
+                                               kUnderInvalidationChecking));
 
 TEST_P(PaintPropertyTreeBuilderTest, FixedPosition) {
   LoadTestData("fixed-position.html");
@@ -833,8 +839,9 @@ TEST_P(PaintPropertyTreeBuilderTest, WillChangeContents) {
 
 TEST_P(PaintPropertyTreeBuilderTest,
        BackfaceVisibilityWithPseudoStacking3DChildren) {
-  ScopedTransformInteropForTest enabled(true);
-  // TODO(chrishtr): implement for CAP. This entails computing
+  ScopedTransformInteropForTest ti_enabled(true);
+  ScopedBackfaceVisibilityInteropForTest bfi_enabled(true);
+  // TODO(chrishtr, dbaron): implement for CAP. This entails computing
   // has_backface_invisible_ancestor_in_same_3d_context in the pre-paint tree
   // walk.
   if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
@@ -4318,6 +4325,12 @@ TEST_P(PaintPropertyTreeBuilderTest, SpanFragmentsLimitedToSize) {
 
 TEST_P(PaintPropertyTreeBuilderTest,
        PaintOffsetUnderMulticolumnScrollFixedPos) {
+  // Raster under-invalidation will fail to allocate bitmap when checking a huge
+  // layer created without LayoutNGBlockFragmentation.
+  if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() &&
+      !RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled())
+    return;
+
   SetBodyInnerHTML(R"HTML(
     <div id=fixed style='position: fixed; columns: 2'>
       <div style='width: 50px; height: 20px; background: lightblue'></div>
@@ -5849,7 +5862,19 @@ TEST_P(PaintPropertyTreeBuilderTest, RepeatingFixedPositionInPagedMedia) {
   EXPECT_EQ(3u, NumFragments(fixed));
   for (int i = 0; i < 3; i++) {
     const auto& fragment = FragmentAt(fixed, i);
-    EXPECT_EQ(PhysicalOffset(0, 0), fragment.PaintOffset());
+    if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+      // In CompositeAfterPaint, we don't composite and create
+      // PaintOffsetTranslation for the fixed-position element during printing.
+      EXPECT_EQ(PhysicalOffset(20, 400 * i - 180), fragment.PaintOffset());
+      EXPECT_FALSE(fragment.PaintProperties());
+    } else {
+      // In pre-CompositeAfterPaint, we create PaintOffsetTranslation because
+      // the fixed-position element is currently composited.
+      EXPECT_EQ(PhysicalOffset(0, 0), fragment.PaintOffset());
+      EXPECT_EQ(FloatSize(20, 400 * i - 180), fragment.PaintProperties()
+                                                  ->PaintOffsetTranslation()
+                                                  ->Translation2D());
+    }
     EXPECT_EQ(LayoutUnit(400 * i), fragment.LogicalTopInFlowThread());
   }
 
@@ -5857,7 +5882,8 @@ TEST_P(PaintPropertyTreeBuilderTest, RepeatingFixedPositionInPagedMedia) {
   EXPECT_EQ(3u, NumFragments(fixed_child));
   for (int i = 0; i < 3; i++) {
     const auto& fragment = FragmentAt(fixed_child, i);
-    EXPECT_EQ(PhysicalOffset(0, 10), fragment.PaintOffset());
+    EXPECT_EQ(FragmentAt(fixed, i).PaintOffset() + PhysicalOffset(0, 10),
+              fragment.PaintOffset());
     EXPECT_EQ(LayoutUnit(i * 400), fragment.LogicalTopInFlowThread());
   }
 
@@ -6926,7 +6952,7 @@ TEST_P(PaintPropertyTreeBuilderTest, SVGChildBackdropFilter) {
   ASSERT_TRUE(svg_text_properties->Effect());
   EXPECT_TRUE(svg_text_properties->Effect()->HasDirectCompositingReasons());
   // TODO(crbug.com/1131987): Backdrop-filter doesn't work in SVG yet.
-  EXPECT_TRUE(svg_text_properties->Effect()->BackdropFilter().IsEmpty());
+  EXPECT_FALSE(svg_text_properties->Effect()->BackdropFilter());
   EXPECT_FALSE(svg_text_properties->Transform());
   EXPECT_FALSE(GetLayoutObjectByElementId("text")
                    ->SlowFirstChild()

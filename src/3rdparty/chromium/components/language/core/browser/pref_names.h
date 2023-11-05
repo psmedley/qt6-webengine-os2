@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_LANGUAGE_CORE_BROWSER_PREF_NAMES_H_
 #define COMPONENTS_LANGUAGE_CORE_BROWSER_PREF_NAMES_H_
 
+#include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 
 namespace language {
@@ -12,12 +13,14 @@ namespace prefs {
 
 extern const char kAcceptLanguages[];
 
+extern const char kSelectedLanguages[];
+
+extern const char kForcedLanguages[];
+
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 extern const char kPreferredLanguages[];
 extern const char kPreferredLanguagesSyncable[];
 #endif
-
-extern const char kUserLanguageProfile[];
 
 // The application locale.
 // DO NOT USE this locale directly: use language::ConvertToActualUILocale()
@@ -25,7 +28,9 @@ extern const char kUserLanguageProfile[];
 // the user selected, if applicable.
 extern const char kApplicationLocale[];
 
-extern const char kFluentLanguages[];
+#if defined(OS_ANDROID)
+extern const char kAppLanguagePromptShown[];
+#endif
 
 }  // namespace prefs
 }  // namespace language

@@ -58,9 +58,6 @@
       name: "initial-value"
     },
     {
-      name: "advance-override"
-    },
-    {
       name: "fallback",
     },
     {
@@ -98,6 +95,9 @@
     },
     {
       name: "range",
+    },
+    {
+      name: "size-adjust",
     },
     {
       name: "source",

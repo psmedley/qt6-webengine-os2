@@ -90,13 +90,15 @@ class CORE_EXPORT ListMarker {
                             StringBuilder*,
                             MarkerTextFormat) const;
   void UpdateMarkerText(LayoutObject&);
-  void UpdateMarkerText(LayoutObject&, LayoutText*);
 
   void ListStyleTypeChanged(LayoutObject&);
   void OrdinalValueChanged(LayoutObject&);
   void CounterStyleChanged(LayoutObject&);
 
   int ListItemValue(const LayoutObject&) const;
+
+  LayoutText& GetTextChild(const LayoutObject& marker) const;
+  LayoutObject* GetContentChild(const LayoutObject& marker) const;
 
   unsigned marker_text_type_ : 3;  // MarkerTextType
 };

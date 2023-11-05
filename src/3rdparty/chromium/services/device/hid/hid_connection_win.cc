@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/win/object_watcher.h"
@@ -50,6 +50,8 @@ class PendingHidTransfer : public base::win::ObjectWatcher::Delegate {
 
   PendingHidTransfer(scoped_refptr<base::RefCountedBytes> buffer,
                      Callback callback);
+  PendingHidTransfer(PendingHidTransfer&) = delete;
+  PendingHidTransfer& operator=(PendingHidTransfer&) = delete;
   ~PendingHidTransfer() override;
 
   void TakeResultFromWindowsAPI(BOOL result);
@@ -67,8 +69,6 @@ class PendingHidTransfer : public base::win::ObjectWatcher::Delegate {
   OVERLAPPED overlapped_;
   base::win::ScopedHandle event_;
   base::win::ObjectWatcher watcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(PendingHidTransfer);
 };
 
 PendingHidTransfer::PendingHidTransfer(
@@ -105,10 +105,11 @@ void PendingHidTransfer::OnObjectSignaled(HANDLE event_handle) {
 scoped_refptr<HidConnection> HidConnectionWin::Create(
     scoped_refptr<HidDeviceInfo> device_info,
     std::vector<std::unique_ptr<HidDeviceEntry>> file_handles,
-    bool allow_protected_reports) {
+    bool allow_protected_reports,
+    bool allow_fido_reports) {
   scoped_refptr<HidConnectionWin> connection(
       new HidConnectionWin(std::move(device_info), std::move(file_handles),
-                           allow_protected_reports));
+                           allow_protected_reports, allow_fido_reports));
   connection->SetUpInitialReads();
   return std::move(connection);
 }
@@ -116,8 +117,11 @@ scoped_refptr<HidConnection> HidConnectionWin::Create(
 HidConnectionWin::HidConnectionWin(
     scoped_refptr<HidDeviceInfo> device_info,
     std::vector<std::unique_ptr<HidDeviceEntry>> file_handles,
-    bool allow_protected_reports)
-    : HidConnection(std::move(device_info), allow_protected_reports),
+    bool allow_protected_reports,
+    bool allow_fido_reports)
+    : HidConnection(std::move(device_info),
+                    allow_protected_reports,
+                    allow_fido_reports),
       file_handles_(std::move(file_handles)) {}
 
 HidConnectionWin::~HidConnectionWin() {

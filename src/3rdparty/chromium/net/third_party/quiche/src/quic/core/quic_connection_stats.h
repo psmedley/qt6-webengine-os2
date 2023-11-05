@@ -103,8 +103,14 @@ struct QUIC_EXPORT_PRIVATE QuicConnectionStats {
   int64_t min_rtt_us = 0;  // Minimum RTT in microseconds.
   int64_t srtt_us = 0;     // Smoothed RTT in microseconds.
   int64_t cwnd_bootstrapping_rtt_us = 0;  // RTT used in cwnd_bootstrapping.
-  QuicByteCount max_packet_size = 0;
-  QuicByteCount max_received_packet_size = 0;
+  // The connection's |long_term_mtu_| used for sending packets, populated by
+  // QuicConnection::GetStats().
+  QuicByteCount egress_mtu = 0;
+  // The maximum |long_term_mtu_| the connection ever used.
+  QuicByteCount max_egress_mtu = 0;
+  // Size of the largest packet received from the peer, populated by
+  // QuicConnection::GetStats().
+  QuicByteCount ingress_mtu = 0;
   QuicBandwidth estimated_bandwidth = QuicBandwidth::Zero();
 
   // Reordering stats for received packets.
@@ -209,6 +215,25 @@ struct QUIC_EXPORT_PRIVATE QuicConnectionStats {
   // which was canceled because the peer migrated again. Such migration is also
   // counted as invalid peer migration.
   size_t num_peer_migration_while_validating_default_path = 0;
+  // Number of NEW_CONNECTION_ID frames sent.
+  size_t num_new_connection_id_sent = 0;
+  // Number of RETIRE_CONNECTION_ID frames sent.
+  size_t num_retire_connection_id_sent = 0;
+
+  struct QUIC_NO_EXPORT TlsServerOperationStats {
+    bool success = false;
+    // If the operation is performed asynchronously, how long did it take.
+    // Zero() for synchronous operations.
+    QuicTime::Delta async_latency = QuicTime::Delta::Zero();
+  };
+
+  // The TLS server op stats only have values when the corresponding operation
+  // is performed by TlsServerHandshaker. If an operation is done within
+  // BoringSSL, e.g. ticket decrypted without using
+  // TlsServerHandshaker::SessionTicketOpen, it will not be recorded here.
+  absl::optional<TlsServerOperationStats> tls_server_select_cert_stats;
+  absl::optional<TlsServerOperationStats> tls_server_compute_signature_stats;
+  absl::optional<TlsServerOperationStats> tls_server_decrypt_ticket_stats;
 };
 
 }  // namespace quic

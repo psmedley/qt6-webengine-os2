@@ -10,6 +10,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -18,7 +19,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/numerics/checked_math.h"
-#include "base/optional.h"
 #include "base/rand_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -36,6 +36,7 @@
 #include "net/dns/public/dns_query_type.h"
 #include "net/dns/record_parsed.h"
 #include "net/dns/record_rdata.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -180,18 +181,19 @@ ExtractionError ExtractResponseRecords(
     const DnsResponse& response,
     uint16_t result_qtype,
     std::vector<std::unique_ptr<const RecordParsed>>* out_records,
-    base::Optional<base::TimeDelta>* out_response_ttl,
+    absl::optional<base::TimeDelta>* out_response_ttl,
     std::vector<std::string>* out_aliases) {
+  DCHECK_EQ(response.question_count(), 1u);
   DCHECK(out_records);
   DCHECK(out_response_ttl);
 
   std::vector<std::unique_ptr<const RecordParsed>> records;
-  base::Optional<base::TimeDelta> response_ttl;
+  absl::optional<base::TimeDelta> response_ttl;
 
   DnsRecordParser parser = response.Parser();
 
   // Expected to be validated by DnsTransaction.
-  DCHECK_EQ(result_qtype, response.qtype());
+  DCHECK_EQ(result_qtype, response.GetSingleQType());
 
   AliasMap aliases;
   for (unsigned i = 0; i < response.answer_count(); ++i) {
@@ -230,7 +232,7 @@ ExtractionError ExtractResponseRecords(
 
   std::vector<std::string> out_ordered_aliases;
   ExtractionError name_and_alias_validation_error = ValidateNamesAndAliases(
-      response.GetDottedName(), aliases, records, &out_ordered_aliases);
+      response.GetSingleDottedName(), aliases, records, &out_ordered_aliases);
   if (name_and_alias_validation_error != ExtractionError::kOk)
     return name_and_alias_validation_error;
 
@@ -277,12 +279,13 @@ ExtractionError ExtractResponseRecords(
 ExtractionError ExtractAddressResults(const DnsResponse& response,
                                       uint16_t address_qtype,
                                       HostCache::Entry* out_results) {
+  DCHECK_EQ(response.question_count(), 1u);
   DCHECK(address_qtype == dns_protocol::kTypeA ||
          address_qtype == dns_protocol::kTypeAAAA);
   DCHECK(out_results);
 
   std::vector<std::unique_ptr<const RecordParsed>> records;
-  base::Optional<base::TimeDelta> response_ttl;
+  absl::optional<base::TimeDelta> response_ttl;
   std::vector<std::string> aliases;
   ExtractionError extraction_error = ExtractResponseRecords(
       response, address_qtype, &records, &response_ttl, &aliases);
@@ -301,7 +304,9 @@ ExtractionError ExtractAddressResults(const DnsResponse& response,
 
     // Expect that ExtractResponseRecords validates that all results correctly
     // have the same name.
-    DCHECK_EQ(canonical_name, record->name());
+    DCHECK(base::EqualsCaseInsensitiveASCII(canonical_name, record->name()))
+        << "canonical_name: " << canonical_name
+        << "\nrecord->name(): " << record->name();
 
     IPAddress address;
     if (address_qtype == dns_protocol::kTypeA) {
@@ -323,8 +328,13 @@ ExtractionError ExtractAddressResults(const DnsResponse& response,
   // from canonical name (i.e. record name) through to query name.
   if (!addresses.empty()) {
     DCHECK(!aliases.empty());
-    DCHECK(aliases.front() == canonical_name);
-    DCHECK(aliases.back() == response.GetDottedName());
+    DCHECK(base::EqualsCaseInsensitiveASCII(aliases.front(), canonical_name))
+        << "aliases.front(): " << aliases.front()
+        << "\ncanonical_name: " << canonical_name;
+    DCHECK(base::EqualsCaseInsensitiveASCII(aliases.back(),
+                                            response.GetSingleDottedName()))
+        << "aliases.back(): " << aliases.back()
+        << "\nresponse.GetDottedName(): " << response.GetSingleDottedName();
     addresses.SetDnsAliases(std::move(aliases));
   }
 
@@ -339,7 +349,7 @@ ExtractionError ExtractTxtResults(const DnsResponse& response,
   DCHECK(out_results);
 
   std::vector<std::unique_ptr<const RecordParsed>> records;
-  base::Optional<base::TimeDelta> response_ttl;
+  absl::optional<base::TimeDelta> response_ttl;
   ExtractionError extraction_error =
       ExtractResponseRecords(response, dns_protocol::kTypeTXT, &records,
                              &response_ttl, nullptr /* out_aliases */);
@@ -368,7 +378,7 @@ ExtractionError ExtractPointerResults(const DnsResponse& response,
   DCHECK(out_results);
 
   std::vector<std::unique_ptr<const RecordParsed>> records;
-  base::Optional<base::TimeDelta> response_ttl;
+  absl::optional<base::TimeDelta> response_ttl;
   ExtractionError extraction_error =
       ExtractResponseRecords(response, dns_protocol::kTypePTR, &records,
                              &response_ttl, nullptr /* out_aliases */);
@@ -400,7 +410,7 @@ ExtractionError ExtractServiceResults(const DnsResponse& response,
   DCHECK(out_results);
 
   std::vector<std::unique_ptr<const RecordParsed>> records;
-  base::Optional<base::TimeDelta> response_ttl;
+  absl::optional<base::TimeDelta> response_ttl;
   ExtractionError extraction_error =
       ExtractResponseRecords(response, dns_protocol::kTypeSRV, &records,
                              &response_ttl, nullptr /* out_aliases */);
@@ -434,26 +444,16 @@ ExtractionError ExtractIntegrityResults(const DnsResponse& response,
                                         HostCache::Entry* out_results) {
   DCHECK(out_results);
 
-  base::Optional<base::TimeDelta> response_ttl;
+  absl::optional<base::TimeDelta> response_ttl;
   std::vector<std::unique_ptr<const RecordParsed>> records;
   ExtractionError extraction_error = ExtractResponseRecords(
       response, dns_protocol::kExperimentalTypeIntegrity, &records,
       &response_ttl, nullptr /* out_aliases */);
 
-  // If the response couldn't be parsed, assume no INTEGRITY records, and
-  // pretend success. This is a temporary hack to keep errors with INTEGRITY
-  // (which is only used for experiments) from affecting non-experimental
-  // results, e.g. due to a parse error being treated as fatal for the whole
-  // HostResolver request.
-  //
-  // TODO(crbug.com/1138620): Cleanup handling of fatal vs non-fatal errors and
-  // the organization responsibility for handling them so that this extractor
-  // can more sensibly return honest results rather than lying to try to be
-  // helpful to HostResolverManager.
   if (extraction_error != ExtractionError::kOk) {
-    *out_results =
-        DnsResponseResultExtractor::CreateEmptyResult(DnsQueryType::INTEGRITY);
-    return ExtractionError::kOk;
+    *out_results = HostCache::Entry(ERR_DNS_MALFORMED_RESPONSE,
+                                    HostCache::Entry::SOURCE_DNS);
+    return extraction_error;
   }
 
   // Condense results into a list of booleans. We do not cache the results,
@@ -464,64 +464,48 @@ ExtractionError ExtractIntegrityResults(const DnsResponse& response,
     condensed_results.push_back(rdata.IsIntact());
   }
 
-  // As another temporary hack for the experimental nature of INTEGRITY, always
-  // claim no results, even on success.  This will let it merge with address
-  // results since an address request should be considered successful overall
-  // only with A/AAAA results, not INTEGRITY results.
-  //
-  // TODO(crbug.com/1138620): Remove and handle the merging more intelligently
-  // in HostResolverManager.
-  *out_results =
-      HostCache::Entry(ERR_NAME_NOT_RESOLVED, std::move(condensed_results),
-                       HostCache::Entry::SOURCE_DNS, response_ttl);
+  *out_results = HostCache::Entry(
+      condensed_results.empty() ? ERR_NAME_NOT_RESOLVED : OK,
+      std::move(condensed_results), HostCache::Entry::SOURCE_DNS, response_ttl);
   DCHECK_EQ(extraction_error, ExtractionError::kOk);
   return extraction_error;
 }
 
+// TODO(crbug.com/1203426): Remove `malformed_record_is_fatal` and make it
+// always fatal once HTTPS queries are no longer done for pure experimental use.
 ExtractionError ExtractHttpsResults(const DnsResponse& response,
+                                    bool malformed_record_is_fatal,
                                     HostCache::Entry* out_results) {
   DCHECK(out_results);
 
-  base::Optional<base::TimeDelta> response_ttl;
+  absl::optional<base::TimeDelta> response_ttl;
   std::vector<std::unique_ptr<const RecordParsed>> records;
   ExtractionError extraction_error =
       ExtractResponseRecords(response, dns_protocol::kTypeHttps, &records,
                              &response_ttl, nullptr /* out_aliases */);
 
-  // If the response couldn't be parsed, assume no HTTPS records, and pretend
-  // success. This is a temporary hack to keep errors with HTTPS (which is
-  // currently only used for experiments) from affecting non-experimental
-  // results, e.g. due to a parse error being treated as fatal for the whole
-  // HostResolver request.
-  //
-  // TODO(crbug.com/1138620): Cleanup handling of fatal vs non-fatal errors and
-  // the organization responsibility for handling them so that this extractor
-  // can more sensibly return honest results rather than lying to try to be
-  // helpful to HostResolverManager.
   if (extraction_error != ExtractionError::kOk) {
-    *out_results =
-        DnsResponseResultExtractor::CreateEmptyResult(DnsQueryType::HTTPS);
-    return ExtractionError::kOk;
+    *out_results = HostCache::Entry(ERR_DNS_MALFORMED_RESPONSE,
+                                    HostCache::Entry::SOURCE_DNS);
+    return extraction_error;
   }
 
-  // Condense results into a list of booleans. We do not cache the results,
-  // but this enables us to write some unit tests.
+  // Record experimental result bools for each record.
   std::vector<bool> condensed_results;
   for (const auto& record : records) {
     const HttpsRecordRdata& rdata = *record->rdata<HttpsRecordRdata>();
+    if (rdata.IsMalformed() && malformed_record_is_fatal) {
+      *out_results = HostCache::Entry(ERR_DNS_MALFORMED_RESPONSE,
+                                      HostCache::Entry::SOURCE_DNS);
+      return ExtractionError::kMalformedRecord;
+    }
     condensed_results.push_back(!rdata.IsMalformed());
   }
 
-  // As another temporary hack for experimental usage of HTTPS, always claim no
-  // results, even on success.  This will let it merge with address results
-  // since an address request should be considered successful overall only with
-  // A/AAAA results, not HTTPS results.
-  //
-  // TODO(crbug.com/1138620): Remove and handle the merging more intelligently
-  // in HostResolverManager.
-  *out_results =
-      HostCache::Entry(ERR_NAME_NOT_RESOLVED, std::move(condensed_results),
-                       HostCache::Entry::SOURCE_DNS, response_ttl);
+  // TODO(crbug.com/1225776): Output a non-experimental result representation.
+  *out_results = HostCache::Entry(records.empty() ? ERR_NAME_NOT_RESOLVED : OK,
+                                  std::move(condensed_results),
+                                  HostCache::Entry::SOURCE_DNS, response_ttl);
   DCHECK_EQ(extraction_error, ExtractionError::kOk);
   return extraction_error;
 }
@@ -560,7 +544,11 @@ DnsResponseResultExtractor::ExtractDnsResults(
     case DnsQueryType::INTEGRITY:
       return ExtractIntegrityResults(*response_, out_results);
     case DnsQueryType::HTTPS:
-      return ExtractHttpsResults(*response_, out_results);
+      return ExtractHttpsResults(*response_, /*malformed_record_is_fatal=*/true,
+                                 out_results);
+    case DnsQueryType::HTTPS_EXPERIMENTAL:
+      return ExtractHttpsResults(
+          *response_, /*malformed_record_is_fatal=*/false, out_results);
   }
 }
 
@@ -568,7 +556,8 @@ DnsResponseResultExtractor::ExtractDnsResults(
 HostCache::Entry DnsResponseResultExtractor::CreateEmptyResult(
     DnsQueryType query_type) {
   if (query_type != DnsQueryType::INTEGRITY &&
-      query_type != DnsQueryType::HTTPS) {
+      query_type != DnsQueryType::HTTPS &&
+      query_type != DnsQueryType::HTTPS_EXPERIMENTAL) {
     // Currently only used for INTEGRITY/HTTPS.
     NOTIMPLEMENTED();
     return HostCache::Entry(ERR_FAILED, HostCache::Entry::SOURCE_UNKNOWN);

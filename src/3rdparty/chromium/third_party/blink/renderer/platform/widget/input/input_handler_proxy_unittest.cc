@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -84,10 +83,10 @@ std::unique_ptr<WebInputEvent> CreateGestureScrollPinch(
 class MockInputHandler : public cc::InputHandler {
  public:
   MockInputHandler() = default;
-  ~MockInputHandler() override = default;
-
   MockInputHandler(const MockInputHandler&) = delete;
   MockInputHandler& operator=(const MockInputHandler&) = delete;
+
+  ~MockInputHandler() override = default;
 
   base::WeakPtr<InputHandler> AsWeakPtr() const override {
     return weak_ptr_factory_.GetWeakPtr();
@@ -136,6 +135,8 @@ class MockInputHandler : public cc::InputHandler {
   cc::ScrollElasticityHelper* CreateScrollElasticityHelper() override {
     return nullptr;
   }
+  void DestroyScrollElasticityHelper() override {}
+
   bool GetScrollOffsetForLayer(cc::ElementId element_id,
                                gfx::ScrollOffset* offset) override {
     return false;
@@ -180,6 +181,8 @@ class MockInputHandler : public cc::InputHandler {
                     gfx::Vector2dF* target_offset));
   MOCK_METHOD1(ScrollEndForSnapFling, void(bool));
 
+  bool ScrollbarScrollIsActive() override { return false; }
+
  private:
   bool is_scrolling_root_ = true;
 
@@ -200,6 +203,10 @@ class MockSynchronousInputHandler : public SynchronousInputHandler {
 class MockInputHandlerProxyClient : public InputHandlerProxyClient {
  public:
   MockInputHandlerProxyClient() {}
+  MockInputHandlerProxyClient(const MockInputHandlerProxyClient&) = delete;
+  MockInputHandlerProxyClient& operator=(const MockInputHandlerProxyClient&) =
+      delete;
+
   ~MockInputHandlerProxyClient() override {}
 
   void WillShutdown() override {}
@@ -226,21 +233,20 @@ class MockInputHandlerProxyClient : public InputHandlerProxyClient {
                void(cc::TouchAction touch_action,
                     uint32_t unique_touch_event_id,
                     InputHandlerProxy::EventDisposition event_disposition));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockInputHandlerProxyClient);
 };
 
 class MockInputHandlerProxyClientWithDidAnimateForInput
     : public MockInputHandlerProxyClient {
  public:
   MockInputHandlerProxyClientWithDidAnimateForInput() {}
+  MockInputHandlerProxyClientWithDidAnimateForInput(
+      const MockInputHandlerProxyClientWithDidAnimateForInput&) = delete;
+  MockInputHandlerProxyClientWithDidAnimateForInput& operator=(
+      const MockInputHandlerProxyClientWithDidAnimateForInput&) = delete;
+
   ~MockInputHandlerProxyClientWithDidAnimateForInput() override {}
 
   MOCK_METHOD0(DidAnimateForInput, void());
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockInputHandlerProxyClientWithDidAnimateForInput);
 };
 
 WebTouchPoint CreateWebTouchPoint(WebTouchPoint::State state,
@@ -1957,7 +1963,7 @@ class UnifiedScrollingInputHandlerProxyTest : public testing::Test {
   using LatencyInfo = ui::LatencyInfo;
   using ScrollGranularity = ui::ScrollGranularity;
   using ScrollState = cc::ScrollState;
-  using ReturnedDisposition = base::Optional<EventDisposition>;
+  using ReturnedDisposition = absl::optional<EventDisposition>;
 
   UnifiedScrollingInputHandlerProxyTest()
       : input_handler_proxy_(mock_input_handler_, &mock_client_) {}
@@ -2416,7 +2422,7 @@ TEST_F(UnifiedScrollingInputHandlerProxyTest, MainThreadHitTestFailed) {
     DispatchEvent(ScrollUpdate());
 
     EXPECT_EQ(InputHandlerProxy::DID_HANDLE, *disposition);
-    disposition = base::nullopt;
+    disposition = absl::nullopt;
 
     DispatchEvent(ScrollUpdate(), &disposition);
     EXPECT_FALSE(disposition);
@@ -2515,6 +2521,8 @@ TEST_F(InputHandlerProxyEventQueueTest,
   EXPECT_EQ(2ul, event_queue().size());
   EXPECT_EQ(event_queue()[0]->event().GetType(),
             WebInputEvent::Type::kGestureScrollBegin);
+  EXPECT_TRUE(static_cast<const WebGestureEvent&>(event_queue()[0]->event())
+                  .data.scroll_begin.synthetic);
   EXPECT_EQ(event_queue()[1]->event().GetType(),
             WebInputEvent::Type::kGestureScrollUpdate);
   cc::InputHandlerPointerResult pointer_up_result;

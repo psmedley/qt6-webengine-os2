@@ -12,11 +12,16 @@
 #include "base/memory/ref_counted.h"
 #include "media/base/media_export.h"
 #include "media/base/status.h"
+#include "media/base/video_types.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
 class GrDirectContext;
+
+namespace base {
+class TimeDelta;
+}
 
 namespace gpu {
 namespace raster {
@@ -28,37 +33,6 @@ namespace media {
 
 class VideoFramePool;
 class VideoFrame;
-
-// Computes the pixel aspect ratio of a given |visible_rect| from its
-// |natural_size|.
-//
-// See https://en.wikipedia.org/wiki/Pixel_aspect_ratio for a detailed
-// definition.
-//
-// Returns NaN or Infinity if |visible_rect| or |natural_size| are empty.
-//
-// Note: Something has probably gone wrong if you need to call this function;
-// pixel aspect ratios should be the source of truth.
-//
-// TODO(crbug.com/837337): Decide how to encode 'not provided' for pixel aspect
-// ratios, and return that if one of the inputs is empty.
-MEDIA_EXPORT double GetPixelAspectRatio(const gfx::Rect& visible_rect,
-                                        const gfx::Size& natural_size);
-
-// Increases (at most) one of the dimensions of |visible_rect| to produce
-// a |natural_size| with the given pixel aspect ratio.
-//
-// Returns gfx::Size() if |pixel_aspect_ratio| is not finite and positive.
-MEDIA_EXPORT gfx::Size GetNaturalSize(const gfx::Rect& visible_rect,
-                                      double pixel_aspect_ratio);
-
-// Overload that takes the pixel aspect ratio as an integer fraction (and
-// |visible_size| instead of |visible_rect|).
-//
-// Returns gfx::Size() if numerator or denominator are not positive.
-MEDIA_EXPORT gfx::Size GetNaturalSize(const gfx::Size& visible_size,
-                                      int aspect_ratio_numerator,
-                                      int aspect_ratio_denominator);
 
 // Fills |frame| containing YUV data to the given color values.
 MEDIA_EXPORT void FillYUV(VideoFrame* frame, uint8_t y, uint8_t u, uint8_t v);
@@ -149,7 +123,10 @@ MEDIA_EXPORT gfx::Size PadToMatchAspectRatio(const gfx::Size& size,
 
 // A helper function to map GpuMemoryBuffer-based VideoFrame. This function
 // maps the given GpuMemoryBuffer of |frame| as-is without converting pixel
-// format. The returned VideoFrame owns the |frame|.
+// format, unless the video frame is backed by DXGI GMB.
+// The returned VideoFrame owns the |frame|.
+// If the underlying buffer is DXGI, then it will be copied to shared memory
+// in GPU process.
 MEDIA_EXPORT scoped_refptr<VideoFrame> ConvertToMemoryMappedFrame(
     scoped_refptr<VideoFrame> frame);
 
@@ -197,6 +174,11 @@ MEDIA_EXPORT Status ConvertAndScaleFrame(const VideoFrame& src_frame,
                                          std::vector<uint8_t>& tmp_buf)
     WARN_UNUSED_RESULT;
 
+// Converts kRGBA_8888_SkColorType and kBGRA_8888_SkColorType to the appropriate
+// ARGB, XRGB, ABGR, or XBGR format.
+MEDIA_EXPORT VideoPixelFormat
+VideoPixelFormatFromSkColorType(SkColorType sk_color_type, bool is_opaque);
+
 // Backs a VideoFrame with a SkImage. The created frame takes a ref on the
 // provided SkImage to make this operation zero copy. Only works with CPU
 // backed images.
@@ -204,7 +186,8 @@ MEDIA_EXPORT scoped_refptr<VideoFrame> CreateFromSkImage(
     sk_sp<SkImage> sk_image,
     const gfx::Rect& visible_rect,
     const gfx::Size& natural_size,
-    base::TimeDelta timestamp);
+    base::TimeDelta timestamp,
+    bool force_opaque = false);
 
 }  // namespace media
 

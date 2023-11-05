@@ -22,6 +22,8 @@
 
 #include "fxbarcode/oned/BC_OneDimWriter.h"
 
+#include <math.h>
+
 #include <algorithm>
 #include <memory>
 #include <vector>
@@ -31,7 +33,7 @@
 #include "core/fxge/cfx_fillrenderoptions.h"
 #include "core/fxge/cfx_font.h"
 #include "core/fxge/cfx_graphstatedata.h"
-#include "core/fxge/cfx_pathdata.h"
+#include "core/fxge/cfx_path.h"
 #include "core/fxge/cfx_renderdevice.h"
 #include "core/fxge/cfx_unicodeencodingex.h"
 #include "core/fxge/text_char_pos.h"
@@ -162,7 +164,7 @@ void CBC_OneDimWriter::CalcTextInfo(const ByteString& text,
 }
 
 void CBC_OneDimWriter::ShowDeviceChars(CFX_RenderDevice* device,
-                                       const CFX_Matrix* matrix,
+                                       const CFX_Matrix& matrix,
                                        const ByteString str,
                                        float geWidth,
                                        TextCharPos* pCharPos,
@@ -176,13 +178,11 @@ void CBC_OneDimWriter::ShowDeviceChars(CFX_RenderDevice* device,
   if (geWidth != m_Width) {
     rect.right -= 1;
   }
-  FX_RECT re = matrix->TransformRect(rect).GetOuterRect();
+  FX_RECT re = matrix.TransformRect(rect).GetOuterRect();
   device->FillRect(re, kBackgroundColor);
   CFX_Matrix affine_matrix(1.0, 0.0, 0.0, -1.0, (float)locX,
                            (float)(locY + iFontSize));
-  if (matrix) {
-    affine_matrix.Concat(*matrix);
-  }
+  affine_matrix.Concat(matrix);
   device->DrawNormalText(str.GetLength(), pCharPos, m_pFont.Get(),
                          static_cast<float>(iFontSize), affine_matrix,
                          m_fontColor, GetTextRenderOptions());
@@ -190,7 +190,7 @@ void CBC_OneDimWriter::ShowDeviceChars(CFX_RenderDevice* device,
 
 bool CBC_OneDimWriter::ShowChars(WideStringView contents,
                                  CFX_RenderDevice* device,
-                                 const CFX_Matrix* matrix,
+                                 const CFX_Matrix& matrix,
                                  int32_t barWidth,
                                  int32_t multiple) {
   if (!device || !m_pFont)
@@ -245,20 +245,20 @@ bool CBC_OneDimWriter::ShowChars(WideStringView contents,
 }
 
 bool CBC_OneDimWriter::RenderDeviceResult(CFX_RenderDevice* device,
-                                          const CFX_Matrix* matrix,
+                                          const CFX_Matrix& matrix,
                                           WideStringView contents) {
   if (m_output.empty())
     return false;
 
   CFX_GraphStateData stateData;
-  CFX_PathData path;
+  CFX_Path path;
   path.AppendRect(0, 0, static_cast<float>(m_Width),
                   static_cast<float>(m_Height));
-  device->DrawPath(&path, matrix, &stateData, kBackgroundColor,
+  device->DrawPath(&path, &matrix, &stateData, kBackgroundColor,
                    kBackgroundColor, CFX_FillRenderOptions::EvenOddOptions());
   CFX_Matrix scaledMatrix(m_outputHScale, 0.0, 0.0,
                           static_cast<float>(m_Height), 0.0, 0.0);
-  scaledMatrix.Concat(*matrix);
+  scaledMatrix.Concat(matrix);
   for (const auto& rect : m_output) {
     CFX_GraphStateData data;
     device->DrawPath(&rect, &scaledMatrix, &data, kBarColor, 0,

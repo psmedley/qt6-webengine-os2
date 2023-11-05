@@ -13,6 +13,7 @@
 
 #include <utility>
 
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
@@ -27,6 +28,7 @@
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/browser/devtools_manager_delegate.h"
 #include "content/public/browser/identity_request_dialog_controller.h"
 #include "content/public/browser/login_delegate.h"
 #include "content/public/browser/navigation_throttle.h"
@@ -35,6 +37,8 @@
 #include "content/public/browser/overlay_window.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/quota_permission_context.h"
+#include "content/public/browser/sms_fetcher.h"
+#include "content/public/browser/speculation_host_delegate.h"
 #include "content/public/browser/url_loader_request_interceptor.h"
 #include "content/public/browser/vpn_service_proxy.h"
 #include "content/public/browser/web_contents.h"
@@ -46,12 +50,14 @@
 #include "net/ssl/client_cert_store.h"
 #include "sandbox/policy/sandbox_type.h"
 #include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom.h"
-#include "services/device/public/cpp/geolocation/geolocation_system_permission_mac.h"
+#include "services/device/public/cpp/geolocation/geolocation_manager.h"
 #include "services/device/public/cpp/geolocation/location_provider.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
+#include "services/network/public/mojom/web_transport.mojom.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
@@ -193,6 +199,11 @@ void ContentBrowserClient::GetAdditionalViewSourceSchemes(
   GetAdditionalWebUISchemes(additional_schemes);
 }
 
+network::mojom::IPAddressSpace
+ContentBrowserClient::DetermineAddressSpaceFromURL(const GURL& url) {
+  return network::mojom::IPAddressSpace::kUnknown;
+}
+
 bool ContentBrowserClient::LogWebUIUrl(const GURL& web_ui_url) {
   return false;
 }
@@ -232,6 +243,10 @@ bool ContentBrowserClient::MayReuseHost(RenderProcessHost* process_host) {
   return true;
 }
 
+size_t ContentBrowserClient::GetProcessCountToIgnoreForLimit() {
+  return 0;
+}
+
 bool ContentBrowserClient::ShouldTryToUseExistingProcessHost(
     BrowserContext* browser_context,
     const GURL& url) {
@@ -263,11 +278,6 @@ std::unique_ptr<media::AudioManager> ContentBrowserClient::CreateAudioManager(
 bool ContentBrowserClient::OverridesAudioManager() {
   return false;
 }
-
-void ContentBrowserClient::GetHardwareSecureDecryptionCaps(
-    const std::string& key_system,
-    base::flat_set<media::VideoCodec>* video_codecs,
-    base::flat_set<media::EncryptionScheme>* encryption_schemes) {}
 
 bool ContentBrowserClient::ShouldAssignSiteForURL(const GURL& url) {
   return true;
@@ -336,7 +346,7 @@ base::FilePath ContentBrowserClient::GetLoggingFileName(
 bool ContentBrowserClient::AllowAppCache(
     const GURL& manifest_url,
     const GURL& site_for_cookies,
-    const base::Optional<url::Origin>& top_frame_origin,
+    const absl::optional<url::Origin>& top_frame_origin,
     BrowserContext* context) {
   return true;
 }
@@ -344,7 +354,7 @@ bool ContentBrowserClient::AllowAppCache(
 AllowServiceWorkerResult ContentBrowserClient::AllowServiceWorker(
     const GURL& scope,
     const GURL& site_for_cookies,
-    const base::Optional<url::Origin>& top_frame_origin,
+    const absl::optional<url::Origin>& top_frame_origin,
     const GURL& script_url,
     BrowserContext* context) {
   return AllowServiceWorkerResult::Yes();
@@ -353,9 +363,9 @@ AllowServiceWorkerResult ContentBrowserClient::AllowServiceWorker(
 bool ContentBrowserClient::AllowSharedWorker(
     const GURL& worker_url,
     const GURL& site_for_cookies,
-    const base::Optional<url::Origin>& top_frame_origin,
+    const absl::optional<url::Origin>& top_frame_origin,
     const std::string& name,
-    const url::Origin& constructor_origin,
+    const blink::StorageKey& storage_key,
     BrowserContext* context,
     int render_process_id,
     int render_frame_id) {
@@ -392,7 +402,7 @@ void ContentBrowserClient::UpdateRendererPreferencesForWorker(
 void ContentBrowserClient::AllowWorkerFileSystem(
     const GURL& url,
     BrowserContext* browser_context,
-    const std::vector<GlobalFrameRoutingId>& render_frames,
+    const std::vector<GlobalRenderFrameHostId>& render_frames,
     base::OnceCallback<void(bool)> callback) {
   std::move(callback).Run(true);
 }
@@ -400,21 +410,21 @@ void ContentBrowserClient::AllowWorkerFileSystem(
 bool ContentBrowserClient::AllowWorkerIndexedDB(
     const GURL& url,
     BrowserContext* browser_context,
-    const std::vector<GlobalFrameRoutingId>& render_frames) {
+    const std::vector<GlobalRenderFrameHostId>& render_frames) {
   return true;
 }
 
 bool ContentBrowserClient::AllowWorkerCacheStorage(
     const GURL& url,
     BrowserContext* browser_context,
-    const std::vector<GlobalFrameRoutingId>& render_frames) {
+    const std::vector<GlobalRenderFrameHostId>& render_frames) {
   return true;
 }
 
 bool ContentBrowserClient::AllowWorkerWebLocks(
     const GURL& url,
     BrowserContext* browser_context,
-    const std::vector<GlobalFrameRoutingId>& render_frames) {
+    const std::vector<GlobalRenderFrameHostId>& render_frames) {
   return true;
 }
 
@@ -431,9 +441,11 @@ std::string ContentBrowserClient::GetWebBluetoothBlocklist() {
   return std::string();
 }
 
-bool ContentBrowserClient::IsConversionMeasurementAllowed(
-    content::BrowserContext* browser_context) {
-  return true;
+bool ContentBrowserClient::IsInterestGroupAPIAllowed(
+    content::BrowserContext* browser_context,
+    const url::Origin& top_frame_origin,
+    const GURL& api_url) {
+  return false;
 }
 
 bool ContentBrowserClient::IsConversionMeasurementOperationAllowed(
@@ -501,8 +513,7 @@ std::string ContentBrowserClient::GetGeolocationApiKey() {
   return std::string();
 }
 
-device::GeolocationSystemPermissionManager*
-ContentBrowserClient::GetLocationPermissionManager() {
+device::GeolocationManager* ContentBrowserClient::GetGeolocationManager() {
   return nullptr;
 }
 
@@ -512,21 +523,11 @@ bool ContentBrowserClient::ShouldUseGmsCoreGeolocationProvider() {
 }
 #endif
 
-std::string ContentBrowserClient::GetStoragePartitionIdForSite(
+StoragePartitionId ContentBrowserClient::GetStoragePartitionIdForSite(
     BrowserContext* browser_context,
     const GURL& site) {
   DCHECK(browser_context);
-  return std::string();
-}
-
-bool ContentBrowserClient::IsValidStoragePartitionId(
-    BrowserContext* browser_context,
-    const std::string& partition_id) {
-  DCHECK(browser_context);
-
-  // Since the GetStoragePartitionIdForChildProcess() only generates empty
-  // strings, we should only ever see empty strings coming back.
-  return partition_id.empty();
+  return StoragePartitionId(browser_context);
 }
 
 StoragePartitionConfig ContentBrowserClient::GetStoragePartitionConfigForSite(
@@ -534,7 +535,7 @@ StoragePartitionConfig ContentBrowserClient::GetStoragePartitionConfigForSite(
     const GURL& site) {
   DCHECK(browser_context);
 
-  return StoragePartitionConfig::CreateDefault();
+  return StoragePartitionConfig::CreateDefault(browser_context);
 }
 
 MediaObserver* ContentBrowserClient::GetMediaObserver() {
@@ -633,10 +634,11 @@ std::unique_ptr<VpnServiceProxy> ContentBrowserClient::GetVpnServiceProxy(
 
 std::unique_ptr<ui::SelectFilePolicy>
 ContentBrowserClient::CreateSelectFilePolicy(WebContents* web_contents) {
-  return std::unique_ptr<ui::SelectFilePolicy>();
+  return nullptr;
 }
 
-DevToolsManagerDelegate* ContentBrowserClient::GetDevToolsManagerDelegate() {
+std::unique_ptr<content::DevToolsManagerDelegate>
+ContentBrowserClient::CreateDevToolsManagerDelegate() {
   return nullptr;
 }
 
@@ -722,6 +724,11 @@ bool ContentBrowserClient::PreSpawnChild(
   return true;
 }
 
+bool ContentBrowserClient::IsUtilityCetCompatible(
+    const std::string& utility_sub_type) {
+  return true;
+}
+
 std::wstring ContentBrowserClient::GetAppContainerSidForSandboxType(
     sandbox::policy::SandboxType sandbox_type) {
   // Embedders should override this method and return different SIDs for each
@@ -730,6 +737,13 @@ std::wstring ContentBrowserClient::GetAppContainerSidForSandboxType(
   return std::wstring(
       L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
       L"924012148-129201922");
+}
+
+std::wstring ContentBrowserClient::GetLPACCapabilityNameForNetworkService() {
+  // Embedders should override this method and return different LPAC capability
+  // name. This will be used to secure the user data files required for the
+  // network service.
+  return std::wstring(L"lpacContentNetworkService");
 }
 
 bool ContentBrowserClient::IsRendererCodeIntegrityEnabled() {
@@ -778,7 +792,7 @@ bool ContentBrowserClient::WillCreateURLLoaderFactory(
     int render_process_id,
     URLLoaderFactoryType type,
     const url::Origin& request_initiator,
-    base::Optional<int64_t> navigation_id,
+    absl::optional<int64_t> navigation_id,
     ukm::SourceIdObj ukm_source_id,
     mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver,
     mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>*
@@ -803,11 +817,18 @@ void ContentBrowserClient::CreateWebSocket(
     WebSocketFactory factory,
     const GURL& url,
     const net::SiteForCookies& site_for_cookies,
-    const base::Optional<std::string>& user_agent,
+    const absl::optional<std::string>& user_agent,
     mojo::PendingRemote<network::mojom::WebSocketHandshakeClient>
         handshake_client) {
   // NOTREACHED because WillInterceptWebSocket returns false.
   NOTREACHED();
+}
+
+void ContentBrowserClient::WillCreateWebTransport(
+    RenderFrameHost* frame,
+    const GURL& url,
+    WillCreateWebTransportCallback callback) {
+  std::move(callback).Run(absl::nullopt);
 }
 
 bool ContentBrowserClient::WillCreateRestrictedCookieManager(
@@ -895,6 +916,11 @@ void ContentBrowserClient::CreateDeviceInfoService(
     RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<blink::mojom::DeviceAPIService> receiver) {}
 
+void ContentBrowserClient::CreateManagedConfigurationService(
+    RenderFrameHost* render_frame_host,
+    mojo::PendingReceiver<blink::mojom::ManagedConfigurationService> receiver) {
+}
+
 #if !defined(OS_ANDROID)
 SerialDelegate* ContentBrowserClient::GetSerialDelegate() {
   return nullptr;
@@ -927,6 +953,12 @@ bool ContentBrowserClient::CreateThreadPool(base::StringPiece name) {
 }
 
 #if !defined(OS_ANDROID)
+WebAuthenticationDelegate*
+ContentBrowserClient::GetWebAuthenticationDelegate() {
+  static base::NoDestructor<WebAuthenticationDelegate> delegate;
+  return delegate.get();
+}
+
 std::unique_ptr<AuthenticatorRequestClientDelegate>
 ContentBrowserClient::GetWebAuthenticationRequestDelegate(
     RenderFrameHost* render_frame_host) {
@@ -953,13 +985,14 @@ std::unique_ptr<LoginDelegate> ContentBrowserClient::CreateLoginDelegate(
 
 bool ContentBrowserClient::HandleExternalProtocol(
     const GURL& url,
-    WebContents::OnceGetter web_contents_getter,
+    WebContents::Getter web_contents_getter,
     int child_id,
+    int frame_tree_node_id,
     NavigationUIData* navigation_data,
     bool is_main_frame,
     ui::PageTransition page_transition,
     bool has_user_gesture,
-    const base::Optional<url::Origin>& initiating_origin,
+    const absl::optional<url::Origin>& initiating_origin,
     mojo::PendingRemote<network::mojom::URLLoaderFactory>* out_factory) {
   return true;
 }
@@ -976,10 +1009,10 @@ void ContentBrowserClient::RegisterRendererPreferenceWatcher(
   // |browser_context| may be null (e.g. during shutdown of a service worker).
 }
 
-base::Optional<std::string> ContentBrowserClient::GetOriginPolicyErrorPage(
+absl::optional<std::string> ContentBrowserClient::GetOriginPolicyErrorPage(
     network::OriginPolicyState error_reason,
     content::NavigationHandle* handle) {
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 bool ContentBrowserClient::CanAcceptUntrustedExchangesIfNeeded() {
@@ -987,6 +1020,8 @@ bool ContentBrowserClient::CanAcceptUntrustedExchangesIfNeeded() {
 }
 
 void ContentBrowserClient::OnNetworkServiceDataUseUpdate(
+    int process_id,
+    int route_id,
     int32_t network_traffic_annotation_id_hash,
     int64_t recv_bytes,
     int64_t sent_bytes) {}
@@ -1021,12 +1056,16 @@ std::string ContentBrowserClient::GetUserAgent() {
   return std::string();
 }
 
+std::string ContentBrowserClient::GetReducedUserAgent() {
+  return GetUserAgent();
+}
+
 blink::UserAgentMetadata ContentBrowserClient::GetUserAgentMetadata() {
   return blink::UserAgentMetadata();
 }
 
-base::Optional<gfx::ImageSkia> ContentBrowserClient::GetProductLogo() {
-  return base::nullopt;
+absl::optional<gfx::ImageSkia> ContentBrowserClient::GetProductLogo() {
+  return absl::nullopt;
 }
 
 bool ContentBrowserClient::IsBuiltinComponent(BrowserContext* browser_context,
@@ -1055,6 +1094,11 @@ std::unique_ptr<TtsEnvironmentAndroid>
 ContentBrowserClient::CreateTtsEnvironmentAndroid() {
   return nullptr;
 }
+
+bool ContentBrowserClient::
+    ShouldObserveContainerViewLocationForDialogOverlays() {
+  return false;
+}
 #endif
 
 base::flat_set<std::string>
@@ -1072,7 +1116,7 @@ void ContentBrowserClient::AugmentNavigationDownloadPolicy(
 blink::mojom::InterestCohortPtr ContentBrowserClient::GetInterestCohortForJsApi(
     WebContents* web_contents,
     const GURL& url,
-    const base::Optional<url::Origin>& top_frame_origin) {
+    const absl::optional<url::Origin>& top_frame_origin) {
   return blink::mojom::InterestCohort::New();
 }
 
@@ -1096,14 +1140,19 @@ bool ContentBrowserClient::ArePersistentMediaDeviceIDsAllowed(
     content::BrowserContext* browser_context,
     const GURL& scope,
     const GURL& site_for_cookies,
-    const base::Optional<url::Origin>& top_frame_origin) {
+    const absl::optional<url::Origin>& top_frame_origin) {
   return false;
 }
 
-void ContentBrowserClient::FetchRemoteSms(
-    content::BrowserContext* browser_context,
-    const url::Origin& origin,
-    base::OnceCallback<void(base::Optional<std::string>)> callback) {}
+base::OnceClosure ContentBrowserClient::FetchRemoteSms(
+    content::WebContents* web_contents,
+    const std::vector<url::Origin>& origin_list,
+    base::OnceCallback<void(absl::optional<std::vector<url::Origin>>,
+                            absl::optional<std::string>,
+                            absl::optional<content::SmsFetchFailureType>)>
+        callback) {
+  return base::NullCallback();
+}
 
 bool ContentBrowserClient::IsClipboardPasteAllowed(
     content::RenderFrameHost* render_frame_host) {
@@ -1160,6 +1209,11 @@ bool ContentBrowserClient::ShouldAllowInsecurePrivateNetworkRequests(
   return false;
 }
 
+bool ContentBrowserClient::IsJitDisabledForSite(BrowserContext* browser_context,
+                                                const GURL& site_url) {
+  return false;
+}
+
 ukm::UkmService* ContentBrowserClient::GetUkmService() {
   return nullptr;
 }
@@ -1185,13 +1239,27 @@ bool ContentBrowserClient::HasErrorPage(int http_status_code, WebContents* conte
 
 std::unique_ptr<IdentityRequestDialogController>
 ContentBrowserClient::CreateIdentityRequestDialogController() {
-  return nullptr;
+  return std::make_unique<IdentityRequestDialogController>();
 }
 
 bool ContentBrowserClient::SuppressDifferentOriginSubframeJSDialogs(
     BrowserContext* browser_context) {
   return base::FeatureList::IsEnabled(
       features::kSuppressDifferentOriginSubframeJSDialogs);
+}
+
+std::unique_ptr<SpeculationHostDelegate>
+ContentBrowserClient::CreateSpeculationHostDelegate(
+    RenderFrameHost& render_frame_host) {
+  return nullptr;
+}
+
+void ContentBrowserClient::ShowDirectSocketsConnectionDialog(
+    content::RenderFrameHost* owner,
+    const std::string& address,
+    base::OnceCallback<void(bool, const std::string&, const std::string&)>
+        callback) {
+  std::move(callback).Run(false, std::string(), std::string());
 }
 
 }  // namespace content

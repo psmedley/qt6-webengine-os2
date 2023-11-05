@@ -4,15 +4,17 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -67,6 +69,8 @@ using testing::Field;
 
 #if defined(OS_WIN)
 #include "base/win/scoped_handle.h"
+
+#include <windows.h>
 #endif
 
 // Provide a BackendImpl object to macros from histogram_macros.h.
@@ -103,14 +107,14 @@ std::unique_ptr<disk_cache::BackendImpl> CreateExistingEntryCache(
                                                 /* net_log = */ nullptr));
   int rv = cache->Init(cb.callback());
   if (cb.GetResult(rv) != net::OK)
-    return std::unique_ptr<disk_cache::BackendImpl>();
+    return nullptr;
 
   TestEntryResultCompletionCallback cb2;
   EntryResult result =
       cache->CreateEntry(kExistingEntryKey, net::HIGHEST, cb2.callback());
   result = cb2.GetResult(std::move(result));
   if (result.net_error() != net::OK)
-    return std::unique_ptr<disk_cache::BackendImpl>();
+    return nullptr;
 
   return cache;
 }
@@ -2598,8 +2602,8 @@ TEST_F(DiskCacheTest, SimpleCacheControlRestart) {
 
   const int kRestartCount = 5;
   for (int i = 0; i < kRestartCount; ++i) {
-    cache.reset(new disk_cache::BackendImpl(cache_path_, nullptr, nullptr,
-                                            net::DISK_CACHE, nullptr));
+    cache = std::make_unique<disk_cache::BackendImpl>(
+        cache_path_, nullptr, nullptr, net::DISK_CACHE, nullptr);
     int rv = cache->Init(cb.callback());
     ASSERT_THAT(cb.GetResult(rv), IsOk());
     EXPECT_EQ(1, cache->GetEntryCount());

@@ -1,4 +1,5 @@
 include($QT_INSTALL_DOCS/global/qt-module-defaults.qdocconf)
+include($QT_INSTALL_DOCS/config/exampleurl-qtwebengine.qdocconf)
 
 project                 = QtPdf
 description             = Qt Pdf Reference Documentation
@@ -11,10 +12,6 @@ qhp.QtPdf.namespace           = org.qt-project.qtpdf.$QT_VERSION_TAG
 qhp.QtPdf.virtualFolder       = qtpdf
 qhp.QtPdf.indexTitle          = Qt PDF
 qhp.QtPdf.indexRoot           =
-
-qhp.QtPdf.filterAttributes    = qtpdf $QT_VERSION qtrefdoc
-qhp.QtPdf.customFilters.Qt.name = QtPdf $QT_VERSION
-qhp.QtPdf.customFilters.Qt.filterAttributes = qtpdf $QT_VERSION
 
 qhp.QtPdf.subprojects         = classes qmltypes examples
 
@@ -42,17 +39,23 @@ depends += qtcore \
            qtquick \
            qtcmake
 
-headerdirs  += ../api \
-               ../quick
+headerdirs  += ../
 
-sourcedirs  += .. \
-               ../quick
+sourcedirs  += ../ \
+               ../../pdfquick
 
 exampledirs += ../../../examples/pdfwidgets \
+               ../../../examples/pdf \
                snippets/
+
+# add a generic thumbnail for an example that has no \image in its doc
+manifestmeta.thumbnail.names = "QtPdf/PDF Viewer Example"
 
 imagedirs   += images
 
 navigation.landingpage = "Qt PDF"
 navigation.cppclassespage = "Qt PDF C++ Classes"
-navigation.qmltypespage = "Qt WebEngine QML Types"
+navigation.qmltypespage = "Qt Quick PDF QML Types"
+
+# Fail the documentation build if there are more warnings than the limit
+warninglimit = 0

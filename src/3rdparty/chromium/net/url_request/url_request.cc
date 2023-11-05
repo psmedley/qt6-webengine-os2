@@ -12,7 +12,6 @@
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -24,6 +23,11 @@
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_delegate.h"
 #include "net/base/upload_data_stream.h"
+#include "net/cookies/cookie_store.h"
+#include "net/cookies/cookie_util.h"
+#include "net/cookies/same_party_context.h"
+#include "net/dns/public/secure_dns_policy.h"
+#include "net/http/http_log_util.h"
 #include "net/http/http_util.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
@@ -131,7 +135,8 @@ void ConvertRealLoadTimesToBlockingTimes(LoadTimingInfo* load_timing_info) {
 // URLRequest::Delegate
 
 int URLRequest::Delegate::OnConnected(URLRequest* request,
-                                      const TransportInfo& info) {
+                                      const TransportInfo& info,
+                                      CompletionOnceCallback callback) {
   return OK;
 }
 
@@ -261,10 +266,10 @@ LoadStateWithParam URLRequest::GetLoadState() const {
     return LoadStateWithParam(LOAD_STATE_WAITING_FOR_DELEGATE,
                               use_blocked_by_as_load_param_
                                   ? base::UTF8ToUTF16(blocked_by_)
-                                  : base::string16());
+                                  : std::u16string());
   }
   return LoadStateWithParam(job_.get() ? job_->GetLoadState() : LOAD_STATE_IDLE,
-                            base::string16());
+                            std::u16string());
 }
 
 base::Value URLRequest::GetStateAsValue() const {
@@ -369,7 +374,7 @@ HttpResponseHeaders* URLRequest::response_headers() const {
   return response_info_.headers.get();
 }
 
-const base::Optional<AuthChallengeInfo>& URLRequest::auth_challenge_info()
+const absl::optional<AuthChallengeInfo>& URLRequest::auth_challenge_info()
     const {
   return response_info_.auth_challenge;
 }
@@ -429,8 +434,8 @@ void URLRequest::SetLoadFlags(int flags) {
     SetPriority(MAXIMUM_PRIORITY);
 }
 
-void URLRequest::SetDisableSecureDns(bool disable_secure_dns) {
-  disable_secure_dns_ = disable_secure_dns;
+void URLRequest::SetSecureDnsPolicy(SecureDnsPolicy secure_dns_policy) {
+  secure_dns_policy_ = secure_dns_policy;
 }
 
 // static
@@ -467,7 +472,7 @@ void URLRequest::set_first_party_url_policy(
   first_party_url_policy_ = first_party_url_policy;
 }
 
-void URLRequest::set_initiator(const base::Optional<url::Origin>& initiator) {
+void URLRequest::set_initiator(const absl::optional<url::Origin>& initiator) {
   DCHECK(!is_pending_);
   DCHECK(!initiator.has_value() || initiator.value().opaque() ||
          initiator.value().GetURL().is_valid());
@@ -562,6 +567,7 @@ URLRequest::URLRequest(const GURL& url,
                                       NetLogSourceType::URL_REQUEST)),
       url_chain_(1, url),
       force_ignore_site_for_cookies_(false),
+      force_ignore_top_frame_party_for_cookies_(false),
       force_main_frame_for_same_site_cookies_(false),
       method_("GET"),
       referrer_policy_(
@@ -571,7 +577,7 @@ URLRequest::URLRequest(const GURL& url,
       load_flags_(LOAD_NORMAL),
       allow_credentials_(true),
       privacy_mode_(PRIVACY_MODE_DISABLED),
-      disable_secure_dns_(false),
+      secure_dns_policy_(SecureDnsPolicy::kAllow),
 #if BUILDFLAG(ENABLE_REPORTING)
       reporting_upload_depth_(0),
 #endif
@@ -587,7 +593,6 @@ URLRequest::URLRequest(const GURL& url,
       has_notified_completion_(false),
       received_response_content_length_(0),
       creation_time_(base::TimeTicks::Now()),
-      raw_header_size_(0),
       traffic_annotation_(traffic_annotation),
       upgrade_if_insecure_(false) {
   // Sanity check out environment.
@@ -630,6 +635,13 @@ void URLRequest::StartJob(std::unique_ptr<URLRequestJob> job) {
   DCHECK(!is_pending_);
   DCHECK(!job_);
 
+  set_same_party_context(
+      context()->cookie_store()
+          ? cookie_util::ComputeSamePartyContext(
+                SchemefulSite(url()), isolation_info(),
+                context()->cookie_store()->cookie_access_delegate(),
+                force_ignore_top_frame_party_for_cookies())
+          : SamePartyContext());
   privacy_mode_ = DeterminePrivacyMode();
 
   net_log_.BeginEvent(NetLogEventType::URL_REQUEST_START_JOB, [&] {
@@ -643,6 +655,7 @@ void URLRequest::StartJob(std::unique_ptr<URLRequestJob> job) {
   job_->SetExtraRequestHeaders(extra_request_headers_);
   job_->SetPriority(priority_);
   job_->SetRequestHeadersCallback(request_headers_callback_);
+  job_->SetEarlyResponseHeadersCallback(early_response_headers_callback_);
   job_->SetResponseHeadersCallback(response_headers_callback_);
 
   if (upload_data_stream_.get())
@@ -795,8 +808,9 @@ bool URLRequest::failed() const {
   return (status_ != OK && status_ != ERR_IO_PENDING);
 }
 
-int URLRequest::NotifyConnected(const TransportInfo& info) {
-  return delegate_->OnConnected(this, info);
+int URLRequest::NotifyConnected(const TransportInfo& info,
+                                CompletionOnceCallback callback) {
+  return delegate_->OnConnected(this, info, std::move(callback));
 }
 
 void URLRequest::NotifyReceivedRedirect(const RedirectInfo& redirect_info,
@@ -839,8 +853,8 @@ void URLRequest::NotifyResponseStarted(int net_error) {
 }
 
 void URLRequest::FollowDeferredRedirect(
-    const base::Optional<std::vector<std::string>>& removed_headers,
-    const base::Optional<net::HttpRequestHeaders>& modified_headers) {
+    const absl::optional<std::vector<std::string>>& removed_headers,
+    const absl::optional<net::HttpRequestHeaders>& modified_headers) {
   DCHECK(job_.get());
   DCHECK_EQ(OK, status_);
 
@@ -924,8 +938,8 @@ void URLRequest::PrepareToRestart() {
 
 void URLRequest::Redirect(
     const RedirectInfo& redirect_info,
-    const base::Optional<std::vector<std::string>>& removed_headers,
-    const base::Optional<net::HttpRequestHeaders>& modified_headers) {
+    const absl::optional<std::vector<std::string>>& removed_headers,
+    const absl::optional<net::HttpRequestHeaders>& modified_headers) {
   // This method always succeeds. Whether |job_| is allowed to redirect to
   // |redirect_info| is checked in URLRequestJob::CanFollowRedirect, before
   // NotifyReceivedRedirect. This means the delegate can assume that, if it
@@ -1028,17 +1042,19 @@ void URLRequest::NotifySSLCertificateError(int net_error,
   delegate_->OnSSLCertificateError(this, net_error, ssl_info, fatal);
 }
 
-bool URLRequest::CanGetCookies() const {
-  DCHECK_EQ(PrivacyMode::PRIVACY_MODE_DISABLED, privacy_mode_);
+void URLRequest::AnnotateAndMoveUserBlockedCookies(
+    CookieAccessResultList& maybe_included_cookies,
+    CookieAccessResultList& excluded_cookies) const {
+  DCHECK_EQ(privacy_mode_, PrivacyMode::PRIVACY_MODE_DISABLED);
   bool can_get_cookies = g_default_can_use_cookies;
   if (network_delegate()) {
-    can_get_cookies =
-        network_delegate()->CanGetCookies(*this, /*allowed_from_caller=*/true);
+    can_get_cookies = network_delegate()->AnnotateAndMoveUserBlockedCookies(
+        *this, maybe_included_cookies, excluded_cookies,
+        /*allowed_from_caller=*/true);
   }
 
   if (!can_get_cookies)
     net_log_.AddEvent(NetLogEventType::COOKIE_GET_BLOCKED_BY_NETWORK_DELEGATE);
-  return can_get_cookies;
 }
 
 bool URLRequest::CanSetCookie(const net::CanonicalCookie& cookie,
@@ -1073,7 +1089,8 @@ PrivacyMode URLRequest::DeterminePrivacyMode() const {
   bool enable_privacy_mode = !g_default_can_use_cookies;
   if (network_delegate()) {
     enable_privacy_mode = network_delegate()->ForcePrivacyMode(
-        url(), site_for_cookies_, isolation_info_.top_frame_origin());
+        url(), site_for_cookies_, isolation_info_.top_frame_origin(),
+        same_party_context().context_type());
   }
   return enable_privacy_mode ? PRIVACY_MODE_ENABLED : PRIVACY_MODE_DISABLED;
 }
@@ -1118,7 +1135,6 @@ void URLRequest::OnHeadersComplete() {
 
     load_timing_info_.request_start = request_start;
     load_timing_info_.request_start_time = request_start_time;
-    raw_header_size_ = GetTotalReceivedBytes();
 
     ConvertRealLoadTimesToBlockingTimes(&load_timing_info_);
   }
@@ -1197,6 +1213,13 @@ void URLRequest::SetResponseHeadersCallback(ResponseHeadersCallback callback) {
   DCHECK(!job_.get());
   DCHECK(response_headers_callback_.is_null());
   response_headers_callback_ = std::move(callback);
+}
+
+void URLRequest::SetEarlyResponseHeadersCallback(
+    ResponseHeadersCallback callback) {
+  DCHECK(!job_.get());
+  DCHECK(early_response_headers_callback_.is_null());
+  early_response_headers_callback_ = std::move(callback);
 }
 
 void URLRequest::set_socket_tag(const SocketTag& socket_tag) {

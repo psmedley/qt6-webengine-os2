@@ -13,6 +13,7 @@
 #include "components/autofill_assistant/browser/actions/action_delegate_util.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/user_data_util.h"
+#include "components/autofill_assistant/browser/web/web_controller.h"
 
 namespace autofill_assistant {
 
@@ -52,15 +53,17 @@ void SelectOptionAction::InternalProcessAction(ProcessActionCallback callback) {
       value_ = select_option.text_filter_value().re2();
       case_sensitive_ = select_option.text_filter_value().case_sensitive();
       break;
-    case SelectOptionProto::kAutofillValue: {
-      ClientStatus autofill_status = GetFormattedAutofillValue(
-          select_option.autofill_value(), delegate_->GetUserData(), &value_);
+    case SelectOptionProto::kAutofillRegexpValue: {
+      ClientStatus autofill_status = user_data::GetFormattedClientValue(
+          select_option.autofill_regexp_value(), delegate_->GetUserData(),
+          &value_);
       if (!autofill_status.ok()) {
         EndAction(autofill_status);
         return;
       }
-      case_sensitive_ =
-          select_option.autofill_value().value_expression().case_sensitive();
+      case_sensitive_ = select_option.autofill_regexp_value()
+                            .value_expression_re2()
+                            .case_sensitive();
       break;
     }
     default:
@@ -88,9 +91,11 @@ void SelectOptionAction::OnWaitForElement(const Selector& selector,
          SelectOptionProto::NOT_SET);
   action_delegate_util::FindElementAndPerform(
       delegate_, selector,
-      base::BindOnce(&ActionDelegate::SelectOption, delegate_->GetWeakPtr(),
-                     value_, case_sensitive_,
-                     proto_.select_option().option_comparison_attribute()),
+      base::BindOnce(&WebController::SelectOption,
+                     delegate_->GetWebController()->GetWeakPtr(), value_,
+                     case_sensitive_,
+                     proto_.select_option().option_comparison_attribute(),
+                     proto_.select_option().strict()),
       base::BindOnce(&SelectOptionAction::EndAction,
                      weak_ptr_factory_.GetWeakPtr()));
 }

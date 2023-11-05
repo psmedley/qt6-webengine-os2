@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_forward.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -86,6 +85,7 @@ class SafeBrowsingPrivateEventRouter
   static const char kKeyMalwareFamily[];
   static const char kKeyMalwareCategory[];
   static const char kKeyEvidenceLockerFilePath[];
+  static const char kKeyScanId[];
 
   static const char kKeyPasswordReuseEvent[];
   static const char kKeyPasswordChangedEvent[];
@@ -121,6 +121,7 @@ class SafeBrowsingPrivateEventRouter
                                  const std::string& file_name,
                                  const std::string& download_digest_sha256,
                                  const std::string& mime_type,
+                                 const std::string& scan_id,
                                  const download::DownloadDangerType danger_type,
                                  const int64_t content_size);
 
@@ -141,6 +142,7 @@ class SafeBrowsingPrivateEventRouter
       const std::string& download_digest_sha256,
       const std::string& mime_type,
       const std::string& trigger,
+      const std::string& scan_id,
       safe_browsing::DeepScanAccessPoint access_point,
       const enterprise_connectors::ContentAnalysisResponse::Result& result,
       const int64_t content_size,
@@ -153,6 +155,7 @@ class SafeBrowsingPrivateEventRouter
       const std::string& download_digest_sha256,
       const std::string& mime_type,
       const std::string& trigger,
+      const std::string& scan_id,
       safe_browsing::DeepScanAccessPoint access_point,
       const enterprise_connectors::ContentAnalysisResponse::Result& result,
       const int64_t content_size);
@@ -178,6 +181,7 @@ class SafeBrowsingPrivateEventRouter
                                 const std::string& download_digest_sha256,
                                 const std::string& threat_type,
                                 const std::string& mime_type,
+                                const std::string& scan_id,
                                 const int64_t content_size,
                                 safe_browsing::EventResult event_result);
   void OnDangerousDownloadEvent(const GURL& url,
@@ -185,6 +189,7 @@ class SafeBrowsingPrivateEventRouter
                                 const std::string& download_digest_sha256,
                                 const download::DownloadDangerType danger_type,
                                 const std::string& mime_type,
+                                const std::string& scan_id,
                                 const int64_t content_size,
                                 safe_browsing::EventResult event_result);
 
@@ -199,6 +204,7 @@ class SafeBrowsingPrivateEventRouter
       const std::string& download_digest_sha256,
       const std::string& threat_type,
       const std::string& mime_type,
+      const std::string& scan_id,
       const int64_t content_size);
   void OnDangerousDownloadWarningBypassed(
       const GURL& url,
@@ -206,6 +212,7 @@ class SafeBrowsingPrivateEventRouter
       const std::string& download_digest_sha256,
       const download::DownloadDangerType danger_type,
       const std::string& mime_type,
+      const std::string& scan_id,
       const int64_t content_size);
 
   // Returns true if enterprise real-time reporting should be initialized,
@@ -226,13 +233,11 @@ class SafeBrowsingPrivateEventRouter
  protected:
   // Report safe browsing event through real-time reporting channel, if enabled.
   // Declared as virtual for tests. Declared as protected to be called directly
-  // by tests. Events are created lazily to avoid doing useless work if they are
-  // discarded.
-  using EventBuilder = base::OnceCallback<base::Value()>;
+  // by tests.
   virtual void ReportRealtimeEvent(
       const std::string&,
-      enterprise_connectors::ReportingSettings settings,
-      EventBuilder event_builder);
+      const enterprise_connectors::ReportingSettings& settings,
+      base::Value event);
 
  private:
   // Initialize a real-time report client if needed.  This client is used only
@@ -255,8 +260,8 @@ class SafeBrowsingPrivateEventRouter
 
   // Determines if the real-time reporting feature is enabled.
   // Obtain settings to apply to a reporting event from ConnectorsService.
-  // base::nullopt represents that reporting should not be done.
-  base::Optional<enterprise_connectors::ReportingSettings>
+  // absl::nullopt represents that reporting should not be done.
+  absl::optional<enterprise_connectors::ReportingSettings>
   GetReportingSettings();
 
   // Called whenever the real-time reporting policy changes.
@@ -300,7 +305,8 @@ class SafeBrowsingPrivateEventRouter
       safe_browsing::EventResult event_result,
       const std::string& malware_family,
       const std::string& malware_category,
-      const std::string& evidence_locker_filepath);
+      const std::string& evidence_locker_filepath,
+      const std::string& scan_id);
 
   // Notifies listeners that the analysis connector detected a violation.
   void OnSensitiveDataEvent(
@@ -309,6 +315,7 @@ class SafeBrowsingPrivateEventRouter
       const std::string& download_digest_sha256,
       const std::string& mime_type,
       const std::string& trigger,
+      const std::string& scan_id,
       const enterprise_connectors::ContentAnalysisResponse::Result& result,
       const int64_t content_size,
       safe_browsing::EventResult event_result);

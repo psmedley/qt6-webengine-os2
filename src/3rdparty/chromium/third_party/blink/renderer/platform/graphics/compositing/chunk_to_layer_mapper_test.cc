@@ -5,8 +5,8 @@
 #include "third_party/blink/renderer/platform/graphics/compositing/chunk_to_layer_mapper.h"
 
 #include <utility>
-#include "base/optional.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_chunk.h"
 #include "third_party/blink/renderer/platform/testing/fake_display_item_client.h"
@@ -19,7 +19,7 @@ class ChunkToLayerMapperTest : public testing::Test {
   static PaintChunk Chunk(const PropertyTreeState& state) {
     DEFINE_STATIC_LOCAL(FakeDisplayItemClient, fake_client, ());
     DEFINE_STATIC_LOCAL(
-        base::Optional<PaintChunk::Id>, id,
+        absl::optional<PaintChunk::Id>, id,
         (PaintChunk::Id(fake_client, DisplayItem::kDrawingFirst)));
     PaintChunk chunk(0, 1, *id, state);
     return chunk;
@@ -36,10 +36,8 @@ class ChunkToLayerMapperTest : public testing::Test {
           CreateClip(c0(), *layer_transform_, FloatRoundedRect(12, 34, 56, 78));
       layer_effect_ = EffectPaintPropertyNode::Create(
           e0(), EffectPaintPropertyNode::State{
-                    layer_transform_, layer_clip_, kColorFilterLuminanceToAlpha,
-                    CompositorFilterOperations(), 0.789f,
-                    CompositorFilterOperations(), base::Optional<gfx::RRectF>(),
-                    SkBlendMode::kSrcIn});
+                    layer_transform_, layer_clip_, CompositorFilterOperations(),
+                    nullptr, 0.789f, SkBlendMode::kSrcIn});
     }
     return PropertyTreeState(*layer_transform_, *layer_clip_, *layer_effect_);
   }
@@ -54,7 +52,7 @@ class ChunkToLayerMapperTest : public testing::Test {
 };
 
 TEST_F(ChunkToLayerMapperTest, OneChunkUsingLayerState) {
-  ChunkToLayerMapper mapper(LayerState(), gfx::Vector2dF(10, 20));
+  ChunkToLayerMapper mapper(LayerState(), FloatPoint(10, 20));
   auto chunk = Chunk(LayerState());
   mapper.SwitchToChunk(chunk);
   EXPECT_FALSE(HasFilterThatMovesPixels(mapper));
@@ -66,7 +64,7 @@ TEST_F(ChunkToLayerMapperTest, OneChunkUsingLayerState) {
 }
 
 TEST_F(ChunkToLayerMapperTest, TwoChunkUsingLayerState) {
-  ChunkToLayerMapper mapper(LayerState(), gfx::Vector2dF(10, 20));
+  ChunkToLayerMapper mapper(LayerState(), FloatPoint(10, 20));
   auto chunk1 = Chunk(LayerState());
   auto chunk2 = Chunk(LayerState());
 
@@ -88,7 +86,7 @@ TEST_F(ChunkToLayerMapperTest, TwoChunkUsingLayerState) {
 }
 
 TEST_F(ChunkToLayerMapperTest, TwoChunkSameState) {
-  ChunkToLayerMapper mapper(LayerState(), gfx::Vector2dF(10, 20));
+  ChunkToLayerMapper mapper(LayerState(), FloatPoint(10, 20));
   auto transform = CreateTransform(LayerState().Transform(),
                                    TransformationMatrix().Scale(2));
   auto clip = CreateClip(LayerState().Clip(), LayerState().Transform(),
@@ -119,7 +117,7 @@ TEST_F(ChunkToLayerMapperTest, TwoChunkSameState) {
 }
 
 TEST_F(ChunkToLayerMapperTest, TwoChunkDifferentState) {
-  ChunkToLayerMapper mapper(LayerState(), gfx::Vector2dF(10, 20));
+  ChunkToLayerMapper mapper(LayerState(), FloatPoint(10, 20));
   auto transform1 = CreateTransform(LayerState().Transform(),
                                     TransformationMatrix().Scale(2));
   auto clip1 = CreateClip(LayerState().Clip(), LayerState().Transform(),
@@ -155,7 +153,7 @@ TEST_F(ChunkToLayerMapperTest, TwoChunkDifferentState) {
 }
 
 TEST_F(ChunkToLayerMapperTest, SlowPath) {
-  ChunkToLayerMapper mapper(LayerState(), gfx::Vector2dF(10, 20));
+  ChunkToLayerMapper mapper(LayerState(), FloatPoint(10, 20));
   auto chunk1 = Chunk(LayerState());
 
   // Chunk2 has a blur filter. Should use the slow path.
@@ -223,7 +221,7 @@ TEST_F(ChunkToLayerMapperTest, SwitchToSiblingEffect) {
                                         LayerState().Clip(), *effect2));
 
   ChunkToLayerMapper mapper(chunk1.properties.GetPropertyTreeState().Unalias(),
-                            gfx::Vector2dF(10, 20));
+                            FloatPoint(10, 20));
   mapper.SwitchToChunk(chunk2);
   EXPECT_FALSE(HasFilterThatMovesPixels(mapper));
 }

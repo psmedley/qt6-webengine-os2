@@ -6,14 +6,15 @@
 
 #include <memory>
 
-#include "base/optional.h"
 #include "base/test/bind.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/dom/range.h"
@@ -974,6 +975,25 @@ TEST_F(EventHandlerTest, MisspellingContextMenuEvent) {
   ASSERT_TRUE(Selection().IsHandleVisible());
 }
 
+// Tests that touch adjustment algorithm can handle editable elements without
+// layout objects.
+//
+// TODO(mustaq): A fix for https://crbug.com/1230045 can make this test
+// obsolete.
+TEST_F(EventHandlerTest, TouchAdjustmentOnEditableDisplayContents) {
+  SetHtmlInnerHTML(
+      "<div style='display:contents' contenteditable='true'>TEXT</div>");
+  TapEventBuilder single_tap_event(FloatPoint(1, 1), 1);
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(
+      single_tap_event);
+
+  LongPressEventBuilder long_press_event(FloatPoint(1, 1));
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(
+      long_press_event);
+
+  // This test passes if it doesn't crash.
+}
+
 TEST_F(EventHandlerTest, dragEndInNewDrag) {
   SetHtmlInnerHTML(
       "<style>.box { width: 100px; height: 100px; display: block; }</style>"
@@ -1055,14 +1075,33 @@ class TooltipCapturingChromeClient : public EmptyChromeClient {
  public:
   TooltipCapturingChromeClient() = default;
 
-  void SetToolTip(LocalFrame&, const String& str, TextDirection) override {
-    last_tool_tip_ = str;
+  void UpdateTooltipUnderCursor(LocalFrame&,
+                                const String& str,
+                                TextDirection) override {
+    last_tooltip_text_ = str;
+    // Always reset the bounds to zero as this function doesn't set bounds.
+    last_tooltip_bounds_ = gfx::Rect();
   }
 
-  String& LastToolTip() { return last_tool_tip_; }
+  void UpdateTooltipFromKeyboard(LocalFrame&,
+                                 const String& str,
+                                 TextDirection,
+                                 const gfx::Rect& bounds) override {
+    last_tooltip_text_ = str;
+    last_tooltip_bounds_ = bounds;
+  }
+
+  void ResetTooltip() {
+    last_tooltip_text_ = "";
+    last_tooltip_bounds_ = gfx::Rect();
+  }
+
+  const String& LastToolTipText() { return last_tooltip_text_; }
+  const gfx::Rect& LastToolTipBounds() { return last_tooltip_bounds_; }
 
  private:
-  String last_tool_tip_;
+  String last_tooltip_text_;
+  gfx::Rect last_tooltip_bounds_;
 };
 
 class EventHandlerTooltipTest : public EventHandlerTest {
@@ -1071,13 +1110,14 @@ class EventHandlerTooltipTest : public EventHandlerTest {
 
   void SetUp() override {
     chrome_client_ = MakeGarbageCollected<TooltipCapturingChromeClient>();
-    Page::PageClients clients;
-    FillWithEmptyClients(clients);
-    clients.chrome_client = chrome_client_.Get();
-    SetupPageWithClients(&clients);
+    SetupPageWithClients(chrome_client_);
   }
 
-  String& LastToolTip() { return chrome_client_->LastToolTip(); }
+  const String& LastToolTipText() { return chrome_client_->LastToolTipText(); }
+  const gfx::Rect& LastToolTipBounds() {
+    return chrome_client_->LastToolTipBounds();
+  }
+  void ResetTooltip() { chrome_client_->ResetTooltip(); }
 
  private:
   Persistent<TooltipCapturingChromeClient> chrome_client_;
@@ -1089,7 +1129,7 @@ TEST_F(EventHandlerTooltipTest, mouseLeaveClearsTooltip) {
       "<style>.box { width: 100%; height: 100%; }</style>"
       "<img src='image.png' class='box' title='tooltip'>link</img>");
 
-  EXPECT_EQ(WTF::String(), LastToolTip());
+  EXPECT_EQ(WTF::String(), LastToolTipText());
 
   WebMouseEvent mouse_move_event(
       WebInputEvent::Type::kMouseMove, gfx::PointF(51, 50), gfx::PointF(51, 50),
@@ -1099,7 +1139,7 @@ TEST_F(EventHandlerTooltipTest, mouseLeaveClearsTooltip) {
   GetDocument().GetFrame()->GetEventHandler().HandleMouseMoveEvent(
       mouse_move_event, Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
 
-  EXPECT_EQ("tooltip", LastToolTip());
+  EXPECT_EQ("tooltip", LastToolTipText());
 
   WebMouseEvent mouse_leave_event(
       WebInputEvent::Type::kMouseLeave, gfx::PointF(0, 0), gfx::PointF(0, 0),
@@ -1109,7 +1149,105 @@ TEST_F(EventHandlerTooltipTest, mouseLeaveClearsTooltip) {
   GetDocument().GetFrame()->GetEventHandler().HandleMouseLeaveEvent(
       mouse_leave_event);
 
-  EXPECT_EQ(WTF::String(), LastToolTip());
+  EXPECT_EQ(WTF::String(), LastToolTipText());
+}
+
+// macOS doesn't have keyboard-triggered tooltips.
+#if defined(OS_MAC)
+#define MAYBE_FocusSetFromKeyboardUpdatesTooltip \
+  DISABLED_FocusSetFromKeyboardUpdatesTooltip
+#else
+#define MAYBE_FocusSetFromKeyboardUpdatesTooltip \
+  FocusSetFromKeyboardUpdatesTooltip
+#endif
+TEST_F(EventHandlerTooltipTest, MAYBE_FocusSetFromKeyboardUpdatesTooltip) {
+  SetHtmlInnerHTML(
+      R"HTML(
+        <button id='b1' title='my tooltip 1'>button 1</button>
+        <button id='b2'>button 2</button>
+        <button id='b3' title='my tooltip 3' accessKey='a'>button 3</button>
+      )HTML");
+
+  EXPECT_EQ(WTF::String(), LastToolTipText());
+  EXPECT_EQ(gfx::Rect(), LastToolTipBounds());
+
+  // 1. Moving the focus with the tab key should trigger a tooltip update.
+  {
+    WebKeyboardEvent e{WebInputEvent::Type::kRawKeyDown,
+                       WebInputEvent::kNoModifiers,
+                       WebInputEvent::GetStaticTimeStampForTests()};
+    e.dom_code = static_cast<int>(ui::DomCode::TAB);
+    e.dom_key = ui::DomKey::TAB;
+    GetDocument().GetFrame()->GetEventHandler().KeyEvent(e);
+
+    Element* element = GetDocument().getElementById("b1");
+    EXPECT_EQ("my tooltip 1", LastToolTipText());
+    EXPECT_EQ(element->BoundsInViewport(), LastToolTipBounds());
+
+    // Doing the same but for a button that doesn't have a tooltip text should
+    // still trigger a tooltip update. The browser-side TooltipController will
+    // handle this case.
+    GetDocument().GetFrame()->GetEventHandler().KeyEvent(e);
+    element = GetDocument().getElementById("b2");
+    EXPECT_TRUE(LastToolTipText().IsNull());
+    EXPECT_EQ(element->BoundsInViewport(), LastToolTipBounds());
+  }
+
+  ResetTooltip();
+
+  // 2. Moving the focus by pressing the access key on button should trigger a
+  // tooltip update.
+  {
+    WebKeyboardEvent e{WebInputEvent::Type::kRawKeyDown, WebInputEvent::kAltKey,
+                       WebInputEvent::GetStaticTimeStampForTests()};
+    e.unmodified_text[0] = 'a';
+    GetDocument().GetFrame()->GetEventHandler().HandleAccessKey(e);
+
+    Element* element = GetDocument().getElementById("b3");
+    EXPECT_EQ("my tooltip 3", LastToolTipText());
+    EXPECT_EQ(element->BoundsInViewport(), LastToolTipBounds());
+  }
+
+  ResetTooltip();
+
+  // 3. Moving the focus by pressing a directional arrow while spatial
+  // navigation is enabled should trigger a tooltip update.
+  {
+    // TODO(bebeaudr): Implement this once we support updating a tooltip with
+    // spatial navigation.
+  }
+
+  ResetTooltip();
+
+  // 4. Moving the focus to an element with a mouse action shouldn't update the
+  // tooltip.
+  {
+    Element* element = GetDocument().getElementById("b1");
+    gfx::PointF mouse_press_point =
+        gfx::PointF(element->BoundsInViewport().Center());
+    WebMouseEvent mouse_press_event(
+        WebInputEvent::Type::kMouseDown, mouse_press_point, mouse_press_point,
+        WebPointerProperties::Button::kLeft, 1,
+        WebInputEvent::Modifiers::kLeftButtonDown, base::TimeTicks::Now());
+    mouse_press_event.SetFrameScale(1);
+    GetDocument().GetFrame()->GetEventHandler().HandleMousePressEvent(
+        mouse_press_event);
+
+    EXPECT_EQ("", LastToolTipText());
+    EXPECT_EQ(gfx::Rect(), LastToolTipBounds());
+  }
+
+  ResetTooltip();
+
+  // 5. Moving the focus to an element with a script action (FocusType::kNone
+  // means that the focus was set from a script) shouldn't update the tooltip.
+  {
+    Element* element = GetDocument().getElementById("b3");
+    element->focus();
+
+    EXPECT_EQ("", LastToolTipText());
+    EXPECT_EQ(gfx::Rect(), LastToolTipBounds());
+  }
 }
 
 class UnbufferedInputEventsTrackingChromeClient : public EmptyChromeClient {
@@ -1135,10 +1273,7 @@ class EventHandlerLatencyTest : public PageTestBase {
   void SetUp() override {
     chrome_client_ =
         MakeGarbageCollected<UnbufferedInputEventsTrackingChromeClient>();
-    Page::PageClients page_clients;
-    FillWithEmptyClients(page_clients);
-    page_clients.chrome_client = chrome_client_.Get();
-    SetupPageWithClients(&page_clients);
+    SetupPageWithClients(chrome_client_);
   }
 
   void SetHtmlInnerHTML(const char* html_content) {
@@ -1707,7 +1842,7 @@ TEST_F(EventHandlerSimTest, TestUpdateHoverAfterCompositorScrollAtBeginFrame) {
   // Do a compositor scroll and set |hover_needs_update_at_scroll_end| to be
   // true in WebViewImpl.
   LocalFrameView* frame_view = GetDocument().View();
-  frame_view->LayoutViewport()->DidScroll(FloatPoint(0, 500));
+  frame_view->LayoutViewport()->DidCompositorScroll(FloatPoint(0, 500));
   WebView().MainFrameWidget()->ApplyViewportChangesForTesting(
       {gfx::ScrollOffset(), gfx::Vector2dF(), 1.0f, false, 0, 0,
        cc::BrowserControlsState::kBoth, true});

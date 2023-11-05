@@ -4,8 +4,6 @@
 
 #include "components/browsing_data/content/mock_service_worker_helper.h"
 
-#include <vector>
-
 #include "base/callback.h"
 #include "base/containers/contains.h"
 #include "content/public/browser/browser_context.h"
@@ -17,9 +15,8 @@ namespace browsing_data {
 
 MockServiceWorkerHelper::MockServiceWorkerHelper(
     content::BrowserContext* browser_context)
-    : ServiceWorkerHelper(
-          content::BrowserContext::GetDefaultStoragePartition(browser_context)
-              ->GetServiceWorkerContext()) {}
+    : ServiceWorkerHelper(browser_context->GetDefaultStoragePartition()
+                              ->GetServiceWorkerContext()) {}
 
 MockServiceWorkerHelper::~MockServiceWorkerHelper() {}
 

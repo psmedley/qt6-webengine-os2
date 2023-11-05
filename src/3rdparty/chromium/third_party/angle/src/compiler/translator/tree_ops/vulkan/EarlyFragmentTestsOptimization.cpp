@@ -15,7 +15,6 @@
 #include "compiler/translator/tree_util/IntermNode_util.h"
 #include "compiler/translator/tree_util/IntermTraverse.h"
 
-
 namespace sh
 {
 
@@ -49,7 +48,7 @@ void CheckEFTOptimizationTraverser::visitSymbol(TIntermSymbol *node)
     // different qualifier if it's the result of a folded ternary node.
     TQualifier qualifier = node->variable().getType().getQualifier();
 
-    if (qualifier == EvqFragDepth || qualifier == EvqFragDepthEXT)
+    if (qualifier == EvqFragDepth)
     {
         mFragDepthUsed = true;
     }
@@ -79,4 +78,4 @@ bool CheckEarlyFragmentTestsFeasible(TCompiler *compiler, TIntermNode *root)
 }
 
 }  // namespace sh
-#endif
+#endif // ANGLE_ENABLE_VULKAN

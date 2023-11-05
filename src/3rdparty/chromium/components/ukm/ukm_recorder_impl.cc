@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/component_export.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/metrics/crc32.h"
 #include "base/metrics/field_trial.h"
@@ -48,11 +49,11 @@ std::string GetWhitelistEntries() {
 }
 
 bool IsWhitelistedSourceId(SourceId source_id) {
-  return GetSourceIdType(source_id) == SourceIdType::NAVIGATION_ID ||
-         GetSourceIdType(source_id) == SourceIdType::APP_ID ||
-         GetSourceIdType(source_id) == SourceIdType::HISTORY_ID ||
-         GetSourceIdType(source_id) == SourceIdType::WEBAPK_ID ||
-         GetSourceIdType(source_id) == SourceIdType::PAYMENT_APP_ID;
+  SourceIdType type = GetSourceIdType(source_id);
+  return type == SourceIdType::NAVIGATION_ID || type == SourceIdType::APP_ID ||
+         type == SourceIdType::HISTORY_ID || type == SourceIdType::WEBAPK_ID ||
+         type == SourceIdType::PAYMENT_APP_ID ||
+         type == SourceIdType::NO_URL_ID;
 }
 
 // Returns whether |url| has one of the schemes supported for logging to UKM.
@@ -265,30 +266,51 @@ void UkmRecorderImpl::Purge() {
   recording_is_continuous_ = false;
 }
 
-void UkmRecorderImpl::PurgeExtensionRecordings() {
+void UkmRecorderImpl::PurgeRecordingsWithUrlScheme(
+    const std::string& url_scheme) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // Discard all sources that have an extension URL as well as all the entries
-  // related to any of these sources.
-  std::unordered_set<SourceId> extension_source_ids;
+
+  // Discard all sources that have a URL with the given URL scheme as well as
+  // all the entries associated with these sources.
+  std::unordered_set<SourceId> relevant_source_ids;
   for (const auto& kv : recordings_.sources) {
-    if (kv.second->url().SchemeIs(kExtensionScheme)) {
-      extension_source_ids.insert(kv.first);
+    if (kv.second->url().SchemeIs(url_scheme)) {
+      relevant_source_ids.insert(kv.first);
     }
   }
-  for (const auto source_id : extension_source_ids) {
+
+  PurgeSourcesAndEventsBySourceIds(relevant_source_ids);
+  recording_is_continuous_ = false;
+}
+
+void UkmRecorderImpl::PurgeRecordingsWithSourceIdType(
+    ukm::SourceIdType source_id_type) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  std::unordered_set<SourceId> relevant_source_ids;
+
+  for (const auto& kv : recordings_.sources) {
+    if (GetSourceIdType(kv.first) == source_id_type) {
+      relevant_source_ids.insert(kv.first);
+    }
+  }
+
+  PurgeSourcesAndEventsBySourceIds(relevant_source_ids);
+  recording_is_continuous_ = false;
+}
+
+void UkmRecorderImpl::PurgeSourcesAndEventsBySourceIds(
+    const std::unordered_set<SourceId>& source_ids) {
+  for (const auto source_id : source_ids) {
     recordings_.sources.erase(source_id);
   }
 
   std::vector<mojom::UkmEntryPtr>& events = recordings_.entries;
 
-  events.erase(
-      std::remove_if(events.begin(), events.end(),
-                     [&](const auto& event) {
-                       return extension_source_ids.count(event->source_id);
-                     }),
-      events.end());
-
-  recording_is_continuous_ = false;
+  events.erase(std::remove_if(events.begin(), events.end(),
+                              [&](const auto& event) {
+                                return source_ids.count(event->source_id);
+                              }),
+               events.end());
 }
 
 void UkmRecorderImpl::MarkSourceForDeletion(SourceId source_id) {
@@ -337,10 +359,11 @@ void UkmRecorderImpl::StoreRecordingsInReport(Report* report) {
   for (const auto& kv : recordings_.sources) {
     // Don't keep sources of these types after current report because their
     // entries are logged only at source creation time.
-    if (GetSourceIdType(kv.first) == ukm::SourceIdObj::Type::APP_ID ||
-        GetSourceIdType(kv.first) == ukm::SourceIdObj::Type::HISTORY_ID ||
-        GetSourceIdType(kv.first) == ukm::SourceIdObj::Type::WEBAPK_ID ||
-        GetSourceIdType(kv.first) == SourceIdType::PAYMENT_APP_ID) {
+    SourceIdType type = GetSourceIdType(kv.first);
+    if (type == ukm::SourceIdObj::Type::HISTORY_ID ||
+        type == ukm::SourceIdObj::Type::WEBAPK_ID ||
+        type == SourceIdType::PAYMENT_APP_ID ||
+        type == SourceIdType::NO_URL_ID) {
       MarkSourceForDeletion(kv.first);
     }
     // If the source id is not whitelisted, don't send it unless it has
@@ -579,6 +602,7 @@ int UkmRecorderImpl::PruneOldSources(size_t max_kept_sources) {
 void UkmRecorderImpl::UpdateSourceURL(SourceId source_id,
                                       const GURL& unsanitized_url) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(GetSourceIdType(source_id) != SourceIdType::NO_URL_ID);
 
   if (base::Contains(recordings_.sources, source_id))
     return;

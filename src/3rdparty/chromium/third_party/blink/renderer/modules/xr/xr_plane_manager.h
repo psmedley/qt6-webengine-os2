@@ -12,6 +12,7 @@
 
 namespace blink {
 
+class XRPlane;
 class XRPlaneSet;
 
 // Helper class, used to separate the code related to plane processing out of
@@ -32,7 +33,6 @@ class XRPlaneManager : public GarbageCollected<XRPlaneManager> {
  private:
   Member<XRSession> session_;
 
-  bool is_detected_planes_null_ = true;
   HeapHashMap<uint64_t, Member<XRPlane>> plane_ids_to_planes_;
 };
 

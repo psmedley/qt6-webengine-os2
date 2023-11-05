@@ -9,7 +9,6 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -22,12 +21,14 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/variations/scoped_variations_ids_provider.h"
 #include "net/base/url_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_network_connection_tracker.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace optimization_guide {
 
@@ -62,7 +63,7 @@ class HintsFetcherTest : public testing::Test,
 
   ~HintsFetcherTest() override = default;
 
-  void OnHintsFetched(base::Optional<std::unique_ptr<proto::GetHintsResponse>>
+  void OnHintsFetched(absl::optional<std::unique_ptr<proto::GetHintsResponse>>
                           get_hints_response) {
     if (get_hints_response)
       hints_fetched_ = true;
@@ -113,7 +114,7 @@ class HintsFetcherTest : public testing::Test,
                   const std::vector<GURL>& urls) {
     bool status = hints_fetcher_->FetchOptimizationGuideServiceHints(
         hosts, urls, {optimization_guide::proto::NOSCRIPT},
-        optimization_guide::proto::CONTEXT_BATCH_UPDATE,
+        optimization_guide::proto::CONTEXT_BATCH_UPDATE, "en-US",
         base::BindOnce(&HintsFetcherTest::OnHintsFetched,
                        base::Unretained(this)));
     RunUntilIdle();
@@ -163,6 +164,8 @@ class HintsFetcherTest : public testing::Test,
     base::RunLoop().RunUntilIdle();
   }
 
+  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
+      variations::VariationsIdsProvider::Mode::kUseSignedInState};
   bool hints_fetched_ = false;
   base::test::TaskEnvironment task_environment_;
 
@@ -275,7 +278,7 @@ TEST_P(HintsFetcherTest, FetchInProgress_HostsHintsRefreshed) {
   // Advancing the clock so that it's still one hour before the hints need to be
   // refreshed.
   test_clock.Advance(features::StoredFetchedHintsFreshnessDuration() -
-                     features::GetHintsFetchRefreshDuration() -
+                     features::GetHostHintsFetchRefreshDuration() -
                      base::TimeDelta().FromHours(1));
 
   EXPECT_FALSE(FetchHints({"foo.com"}, {} /* urls */));
@@ -390,9 +393,9 @@ TEST_P(HintsFetcherTest, HintsFetchSuccessfulHostsRecorded) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  const base::DictionaryValue* hosts_fetched = pref_service()->GetDictionary(
+  const base::Value* hosts_fetched = pref_service()->GetDictionary(
       prefs::kHintsFetcherHostsSuccessfullyFetched);
-  base::Optional<double> value;
+  absl::optional<double> value;
   for (const std::string& host : hosts) {
     value = hosts_fetched->FindDoubleKey(HashHostForDictionary(host));
     // This reduces the necessary precision for the check on the expiry time for
@@ -418,7 +421,7 @@ TEST_P(HintsFetcherTest, HintsFetchFailsHostNotRecorded) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  const base::DictionaryValue* hosts_fetched = pref_service()->GetDictionary(
+  const base::Value* hosts_fetched = pref_service()->GetDictionary(
       prefs::kHintsFetcherHostsSuccessfullyFetched);
   for (const std::string& host : hosts) {
     EXPECT_FALSE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
@@ -437,7 +440,7 @@ TEST_P(HintsFetcherTest, HintsFetchClearHostsSuccessfullyFetched) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  const base::DictionaryValue* hosts_fetched = pref_service()->GetDictionary(
+  const base::Value* hosts_fetched = pref_service()->GetDictionary(
       prefs::kHintsFetcherHostsSuccessfullyFetched);
   for (const std::string& host : hosts) {
     EXPECT_TRUE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
@@ -449,6 +452,33 @@ TEST_P(HintsFetcherTest, HintsFetchClearHostsSuccessfullyFetched) {
   for (const std::string& host : hosts) {
     EXPECT_FALSE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
   }
+}
+
+TEST_P(HintsFetcherTest, HintsFetchClearSingleFetchedHost) {
+  std::vector<std::string> hosts{"host1.com", "host2.com"};
+  std::string response_content;
+
+  EXPECT_TRUE(FetchHints(hosts, {} /* urls */));
+  VerifyHasPendingFetchRequests();
+  EXPECT_TRUE(SimulateResponse(response_content, net::HTTP_OK));
+  EXPECT_TRUE(hints_fetched());
+
+  if (!ShouldPersistHintsToDisk())
+    return;
+
+  const base::Value* hosts_fetched = pref_service()->GetDictionary(
+      prefs::kHintsFetcherHostsSuccessfullyFetched);
+  for (const std::string& host : hosts) {
+    EXPECT_TRUE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
+  }
+
+  HintsFetcher::ClearSingleFetchedHost(pref_service(), "host1.com");
+  hosts_fetched = pref_service()->GetDictionary(
+      prefs::kHintsFetcherHostsSuccessfullyFetched);
+
+  EXPECT_FALSE(
+      hosts_fetched->FindDoubleKey(HashHostForDictionary("host1.com")));
+  EXPECT_TRUE(hosts_fetched->FindDoubleKey(HashHostForDictionary("host2.com")));
 }
 
 TEST_P(HintsFetcherTest, HintsFetcherHostsCovered) {
@@ -492,7 +522,7 @@ TEST_P(HintsFetcherTest, HintsFetcherCoveredHostExpired) {
   // pref as they have expired.
   DictionaryPrefUpdate hosts_fetched(
       pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(2u, hosts_fetched->size());
+  EXPECT_EQ(2u, hosts_fetched->DictSize());
 
   // Navigations to the valid hosts should be recorded as successfully
   // covered.
@@ -508,7 +538,7 @@ TEST_P(HintsFetcherTest, HintsFetcherHostNotCovered) {
   SeedCoveredHosts(hosts, host_invalid_time);
   DictionaryPrefUpdate hosts_fetched(
       pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(2u, hosts_fetched->size());
+  EXPECT_EQ(2u, hosts_fetched->DictSize());
 
   EXPECT_TRUE(WasHostCoveredByFetch(hosts[0]));
   EXPECT_TRUE(WasHostCoveredByFetch(hosts[1]));
@@ -537,7 +567,7 @@ TEST_P(HintsFetcherTest, HintsFetcherRemoveExpiredOnSuccessfullyFetched) {
   // have expired.
   DictionaryPrefUpdate hosts_fetched(
       pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(2u, hosts_fetched->size());
+  EXPECT_EQ(2u, hosts_fetched->DictSize());
 
   EXPECT_FALSE(WasHostCoveredByFetch(hosts_expired[0]));
   EXPECT_FALSE(WasHostCoveredByFetch(hosts_expired[1]));
@@ -572,7 +602,7 @@ TEST_P(HintsFetcherTest, HintsFetcherSuccessfullyFetchedHostsFull) {
   // Navigations to both the extra hosts should be recorded.
   DictionaryPrefUpdate hosts_fetched(
       pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(200u, hosts_fetched->size());
+  EXPECT_EQ(200u, hosts_fetched->DictSize());
 
   EXPECT_TRUE(WasHostCoveredByFetch(extra_hosts[0]));
   EXPECT_TRUE(WasHostCoveredByFetch(extra_hosts[1]));
@@ -606,7 +636,7 @@ TEST_P(HintsFetcherTest, MaxHostsForOptimizationGuideServiceHintsFetch) {
 
   DictionaryPrefUpdate hosts_fetched(
       pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(max_hosts_in_fetch_request, hosts_fetched->size());
+  EXPECT_EQ(max_hosts_in_fetch_request, hosts_fetched->DictSize());
   EXPECT_EQ(all_hosts.size(), max_hosts_in_fetch_request + 5);
 
   for (size_t i = 0; i < max_hosts_in_fetch_request; ++i) {

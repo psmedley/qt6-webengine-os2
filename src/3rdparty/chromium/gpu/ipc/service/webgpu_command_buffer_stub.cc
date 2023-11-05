@@ -25,7 +25,6 @@
 #include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "gpu/command_buffer/service/webgpu_decoder.h"
 #include "gpu/config/gpu_crash_keys.h"
-#include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
@@ -51,7 +50,7 @@ namespace gpu {
 
 WebGPUCommandBufferStub::WebGPUCommandBufferStub(
     GpuChannel* channel,
-    const GPUCreateCommandBufferConfig& init_params,
+    const mojom::CreateCommandBufferParams& init_params,
     CommandBufferId command_buffer_id,
     SequenceId sequence_id,
     int32_t stream_id,
@@ -72,7 +71,7 @@ WebGPUCommandBufferStub::~WebGPUCommandBufferStub() {
 
 gpu::ContextResult WebGPUCommandBufferStub::Initialize(
     CommandBufferStub* share_command_buffer_stub,
-    const GPUCreateCommandBufferConfig& init_params,
+    const mojom::CreateCommandBufferParams& init_params,
     base::UnsafeSharedMemoryRegion shared_state_shm) {
 #if defined(OS_FUCHSIA)
   // TODO(crbug.com/707031): Implement this.
@@ -151,10 +150,6 @@ gpu::ContextResult WebGPUCommandBufferStub::Initialize(
 
 MemoryTracker* WebGPUCommandBufferStub::GetContextGroupMemoryTracker() const {
   return nullptr;
-}
-
-bool WebGPUCommandBufferStub::HandleMessage(const IPC::Message& message) {
-  return false;
 }
 
 void WebGPUCommandBufferStub::OnSwapBuffers(uint64_t swap_id, uint32_t flags) {}

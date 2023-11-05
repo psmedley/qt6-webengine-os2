@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssnumericvalue_double.h"
 #include "third_party/blink/renderer/core/animation/animation_test_helpers.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
@@ -30,10 +31,10 @@ namespace blink {
 using animation_test_helpers::CreateSimpleKeyframeEffectForTest;
 
 class StyleResolverTest : public PageTestBase {
- public:
+ protected:
   scoped_refptr<ComputedStyle> StyleForId(AtomicString id) {
     Element* element = GetDocument().getElementById(id);
-    auto style = GetStyleEngine().GetStyleResolver().StyleForElement(
+    auto style = GetStyleEngine().GetStyleResolver().ResolveStyle(
         element, StyleRecalcContext());
     DCHECK(style);
     return style;
@@ -46,8 +47,12 @@ class StyleResolverTest : public PageTestBase {
         .CSSValueFromComputedStyle(style, nullptr, false)
         ->CssText();
   }
+};
 
+class StyleResolverTestCQ : public StyleResolverTest,
+                            public ScopedCSSContainerQueriesForTest {
  protected:
+  StyleResolverTestCQ() : ScopedCSSContainerQueriesForTest(true) {}
 };
 
 TEST_F(StyleResolverTest, StyleForTextInDisplayNone) {
@@ -83,24 +88,24 @@ TEST_F(StyleResolverTest, AnimationBaseComputedStyle) {
   animations.SetAnimationStyleChange(true);
 
   StyleResolver& resolver = GetStyleEngine().GetStyleResolver();
-  ASSERT_TRUE(resolver.StyleForElement(div, StyleRecalcContext()));
-  EXPECT_EQ(20,
-            resolver.StyleForElement(div, StyleRecalcContext())->FontSize());
-  ASSERT_TRUE(animations.BaseComputedStyle());
-  EXPECT_EQ(20, animations.BaseComputedStyle()->FontSize());
+  auto style1 = resolver.ResolveStyle(div, StyleRecalcContext());
+  ASSERT_TRUE(style1);
+  EXPECT_EQ(20, style1->FontSize());
+  ASSERT_TRUE(style1->GetBaseComputedStyle());
+  EXPECT_EQ(20, style1->GetBaseComputedStyle()->FontSize());
 
-  // Getting style with customized parent style should not affect cached
-  // animation base computed style.
+  // Getting style with customized parent style should not affect previously
+  // produced animation base computed style.
   const ComputedStyle* parent_style =
       GetDocument().documentElement()->GetComputedStyle();
-  EXPECT_EQ(10, resolver
-                    .StyleForElement(div, StyleRecalcContext(), parent_style,
-                                     parent_style)
+  StyleRequest style_request;
+  style_request.parent_override = parent_style;
+  style_request.layout_parent_override = parent_style;
+  EXPECT_EQ(10, resolver.ResolveStyle(div, StyleRecalcContext(), style_request)
                     ->FontSize());
-  ASSERT_TRUE(animations.BaseComputedStyle());
-  EXPECT_EQ(20, animations.BaseComputedStyle()->FontSize());
-  EXPECT_EQ(20,
-            resolver.StyleForElement(div, StyleRecalcContext())->FontSize());
+  ASSERT_TRUE(style1->GetBaseComputedStyle());
+  EXPECT_EQ(20, style1->GetBaseComputedStyle()->FontSize());
+  EXPECT_EQ(20, resolver.ResolveStyle(div, StyleRecalcContext())->FontSize());
 }
 
 TEST_F(StyleResolverTest, HasEmUnits) {
@@ -130,9 +135,6 @@ TEST_F(StyleResolverTest, BaseReusableIfFontRelativeUnitsAbsent) {
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
   StyleForId("div");
 
-  ASSERT_TRUE(div->GetElementAnimations());
-  EXPECT_TRUE(div->GetElementAnimations()->BaseComputedStyle());
-
   StyleResolverState state(GetDocument(), *div);
   EXPECT_TRUE(StyleResolver::CanReuseBaseComputedStyle(state));
 }
@@ -160,13 +162,12 @@ TEST_F(StyleResolverTest, AnimationNotMaskedByImportant) {
 
   div->SetNeedsAnimationStyleRecalc();
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
-  StyleForId("div");
+  auto style = StyleForId("div");
 
-  ASSERT_TRUE(div->GetElementAnimations());
-  const CSSBitset* bitset = div->GetElementAnimations()->BaseImportantSet();
+  const CSSBitset* bitset = style->GetBaseImportantSet();
   EXPECT_FALSE(CSSAnimations::IsAnimatingStandardProperties(
       div->GetElementAnimations(), bitset, KeyframeEffect::kDefaultPriority));
-  EXPECT_TRUE(div->GetElementAnimations()->BaseComputedStyle());
+  EXPECT_TRUE(style->GetBaseComputedStyle());
   EXPECT_FALSE(bitset && bitset->Has(CSSPropertyID::kWidth));
   EXPECT_TRUE(bitset && bitset->Has(CSSPropertyID::kHeight));
 }
@@ -231,11 +232,10 @@ TEST_F(StyleResolverTest, AnimationMaskedByImportant) {
 
   div->SetNeedsAnimationStyleRecalc();
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
-  StyleForId("div");
+  auto style = StyleForId("div");
 
-  ASSERT_TRUE(div->GetElementAnimations());
-  EXPECT_TRUE(div->GetElementAnimations()->BaseComputedStyle());
-  EXPECT_TRUE(div->GetElementAnimations()->BaseImportantSet());
+  EXPECT_TRUE(style->GetBaseComputedStyle());
+  EXPECT_TRUE(style->GetBaseImportantSet());
 
   StyleResolverState state(GetDocument(), *div);
   EXPECT_FALSE(StyleResolver::CanReuseBaseComputedStyle(state));
@@ -271,7 +271,8 @@ TEST_F(StyleResolverTest,
   EXPECT_EQ("20px", ComputedValue("font-size", *StyleForId("target")));
 
   // Bump the animation time to ensure a transition reversal.
-  transition->setCurrentTime(CSSNumberish::FromDouble(50));
+  transition->setCurrentTime(MakeGarbageCollected<V8CSSNumberish>(50),
+                             ASSERT_NO_EXCEPTION);
   transition->pause();
   UpdateAllLifecyclePhasesForTest();
   const String before_reversal_font_size =
@@ -287,51 +288,6 @@ TEST_F(StyleResolverTest,
   EXPECT_TRUE(reverse_transition);
   EXPECT_EQ(before_reversal_font_size,
             ComputedValue("font-size", *StyleForId("target")));
-}
-
-TEST_F(StyleResolverTest, NonCachableStyleCheckDoesNotAffectBaseComputedStyle) {
-  GetDocument().documentElement()->setInnerHTML(R"HTML(
-    <style>
-      .adjust { color: rgb(0, 0, 0); }
-    </style>
-    <div>
-      <div style="color: rgb(0, 128, 0)">
-        <div id="target" style="transition: color 1s linear"></div>
-      </div>
-    </div>
-  )HTML");
-  UpdateAllLifecyclePhasesForTest();
-
-  Element* target = GetDocument().getElementById("target");
-
-  EXPECT_EQ("rgb(0, 128, 0)", ComputedValue("color", *StyleForId("target")));
-
-  // Trigger a transition on an inherited property.
-  target->setAttribute(html_names::kClassAttr, "adjust");
-  UpdateAllLifecyclePhasesForTest();
-  ElementAnimations* element_animations = target->GetElementAnimations();
-  EXPECT_TRUE(element_animations);
-  Animation* transition = (*element_animations->Animations().begin()).key;
-  EXPECT_TRUE(transition);
-
-  // Advance to the midpoint of the transition.
-  transition->setCurrentTime(CSSNumberish::FromDouble(500));
-  UpdateAllLifecyclePhasesForTest();
-  EXPECT_EQ("rgb(0, 64, 0)", ComputedValue("color", *StyleForId("target")));
-  EXPECT_TRUE(element_animations->BaseComputedStyle());
-
-  element_animations->ClearBaseComputedStyle();
-
-  // Perform a non-cacheable style resolution, and ensure that the base computed
-  // style is not updated.
-  GetStyleEngine().GetStyleResolver().StyleForElement(
-      target, StyleRecalcContext(), nullptr, nullptr,
-      kMatchAllRulesExcludingSMIL);
-  EXPECT_FALSE(element_animations->BaseComputedStyle());
-
-  // Computing the style with default args updates the base computed style.
-  EXPECT_EQ("rgb(0, 64, 0)", ComputedValue("color", *StyleForId("target")));
-  EXPECT_TRUE(element_animations->BaseComputedStyle());
 }
 
 class StyleResolverFontRelativeUnitTest
@@ -356,8 +312,7 @@ TEST_P(StyleResolverFontRelativeUnitTest,
   auto computed_style = StyleForId("div");
 
   EXPECT_TRUE(computed_style->HasFontRelativeUnits());
-  ASSERT_TRUE(div->GetElementAnimations());
-  EXPECT_TRUE(div->GetElementAnimations()->BaseComputedStyle());
+  EXPECT_TRUE(computed_style->GetBaseComputedStyle());
 
   StyleResolverState state(GetDocument(), *div);
   EXPECT_FALSE(StyleResolver::CanReuseBaseComputedStyle(state));
@@ -381,8 +336,7 @@ TEST_P(StyleResolverFontRelativeUnitTest,
   auto computed_style = StyleForId("div");
 
   EXPECT_TRUE(computed_style->HasFontRelativeUnits());
-  ASSERT_TRUE(div->GetElementAnimations());
-  EXPECT_TRUE(div->GetElementAnimations()->BaseComputedStyle());
+  EXPECT_TRUE(computed_style->GetBaseComputedStyle());
 
   StyleResolverState state(GetDocument(), *div);
   EXPECT_TRUE(StyleResolver::CanReuseBaseComputedStyle(state));
@@ -394,9 +348,7 @@ INSTANTIATE_TEST_SUITE_P(All,
 
 // TODO(crbug.com/1180159): Remove this test when @container and transitions
 // work properly.
-TEST_F(StyleResolverTest, BaseNotReusableWithContainerQueries) {
-  ScopedCSSContainerQueriesForTest scoped_feature(true);
-
+TEST_F(StyleResolverTestCQ, BaseNotReusableWithContainerQueries) {
   GetDocument().documentElement()->setInnerHTML("<div id=div>Test</div>");
   UpdateAllLifecyclePhasesForTest();
   Element* div = GetDocument().getElementById("div");
@@ -616,18 +568,26 @@ TEST_F(StyleResolverTest, NoFetchForHighlightPseudoElements) {
   const auto* element_style = body->GetComputedStyle();
   ASSERT_TRUE(element_style);
 
+  StyleRequest pseudo_style_request;
+  pseudo_style_request.parent_override = element_style;
+  pseudo_style_request.layout_parent_override = element_style;
+
+  StyleRequest target_text_style_request = pseudo_style_request;
+  target_text_style_request.pseudo_id = kPseudoIdTargetText;
+
   scoped_refptr<ComputedStyle> target_text_style =
-      GetDocument().GetStyleResolver().PseudoStyleForElement(
-          GetDocument().body(), StyleRecalcContext(),
-          PseudoElementStyleRequest(kPseudoIdTargetText), element_style,
-          element_style);
+      GetDocument().GetStyleResolver().ResolveStyle(GetDocument().body(),
+                                                    StyleRecalcContext(),
+                                                    target_text_style_request);
   ASSERT_TRUE(target_text_style);
 
+  StyleRequest selection_style_style_request = pseudo_style_request;
+  selection_style_style_request.pseudo_id = kPseudoIdSelection;
+
   scoped_refptr<ComputedStyle> selection_style =
-      GetDocument().GetStyleResolver().PseudoStyleForElement(
+      GetDocument().GetStyleResolver().ResolveStyle(
           GetDocument().body(), StyleRecalcContext(),
-          PseudoElementStyleRequest(kPseudoIdSelection), element_style,
-          element_style);
+          selection_style_style_request);
   ASSERT_TRUE(selection_style);
 
   // Check that we don't fetch the cursor url() for ::target-text.
@@ -1099,9 +1059,197 @@ TEST_F(StyleResolverTest, InheritStyleImagesFromDisplayContents) {
       << "-webkit-mask-image is fetched";
 }
 
-TEST_F(StyleResolverTest, DependsOnContainerQueries) {
-  ScopedCSSContainerQueriesForTest scoped_feature(true);
+TEST_F(StyleResolverTest, TextShadowInHighlightPseudoNotCounted1) {
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
 
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      * {
+        text-shadow: 5px 5px green;
+      }
+    </style>
+    <div id="target">target</div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* target = GetDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  const auto* element_style = target->GetComputedStyle();
+  ASSERT_TRUE(element_style);
+
+  StyleRequest pseudo_style_request;
+  pseudo_style_request.parent_override = element_style;
+  pseudo_style_request.layout_parent_override = element_style;
+  pseudo_style_request.pseudo_id = kPseudoIdSelection;
+  scoped_refptr<ComputedStyle> selection_style =
+      GetDocument().GetStyleResolver().ResolveStyle(
+          target, StyleRecalcContext(), pseudo_style_request);
+  ASSERT_FALSE(selection_style);
+
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+}
+
+TEST_F(StyleResolverTest, TextShadowInHighlightPseudoNotCounted2) {
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      * {
+        text-shadow: 5px 5px green;
+      }
+      ::selection {
+        color: white;
+        background: blue;
+      }
+    </style>
+    <div id="target">target</div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* target = GetDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  const auto* element_style = target->GetComputedStyle();
+  ASSERT_TRUE(element_style);
+
+  StyleRequest pseudo_style_request;
+  pseudo_style_request.parent_override = element_style;
+  pseudo_style_request.layout_parent_override = element_style;
+  pseudo_style_request.pseudo_id = kPseudoIdSelection;
+  scoped_refptr<ComputedStyle> selection_style =
+      GetDocument().GetStyleResolver().ResolveStyle(
+          target, StyleRecalcContext(), pseudo_style_request);
+  ASSERT_TRUE(selection_style);
+
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+}
+
+TEST_F(StyleResolverTest, TextShadowInHighlightPseudotNone) {
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      * {
+        text-shadow: 5px 5px green;
+      }
+      ::selection {
+        text-shadow: none;
+      }
+    </style>
+    <div id="target">target</div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* target = GetDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  const auto* element_style = target->GetComputedStyle();
+  ASSERT_TRUE(element_style);
+
+  StyleRequest pseudo_style_request;
+  pseudo_style_request.parent_override = element_style;
+  pseudo_style_request.layout_parent_override = element_style;
+  pseudo_style_request.pseudo_id = kPseudoIdSelection;
+  scoped_refptr<ComputedStyle> selection_style =
+      GetDocument().GetStyleResolver().ResolveStyle(
+          target, StyleRecalcContext(), pseudo_style_request);
+  ASSERT_TRUE(selection_style);
+
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+}
+
+TEST_F(StyleResolverTest, TextShadowInHighlightPseudoNotNone1) {
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      ::selection {
+        text-shadow: 5px 5px green;
+      }
+    </style>
+    <div id="target">target</div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* target = GetDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  const auto* element_style = target->GetComputedStyle();
+  ASSERT_TRUE(element_style);
+
+  StyleRequest pseudo_style_request;
+  pseudo_style_request.parent_override = element_style;
+  pseudo_style_request.layout_parent_override = element_style;
+  pseudo_style_request.pseudo_id = kPseudoIdSelection;
+  scoped_refptr<ComputedStyle> selection_style =
+      GetDocument().GetStyleResolver().ResolveStyle(
+          target, StyleRecalcContext(), pseudo_style_request);
+  ASSERT_TRUE(selection_style);
+
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_TRUE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+}
+
+TEST_F(StyleResolverTest, TextShadowInHighlightPseudoNotNone2) {
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      * {
+        text-shadow: 5px 5px green;
+      }
+      ::selection {
+        text-shadow: 5px 5px green;
+      }
+    </style>
+    <div id="target">target</div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* target = GetDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  const auto* element_style = target->GetComputedStyle();
+  ASSERT_TRUE(element_style);
+
+  StyleRequest pseudo_style_request;
+  pseudo_style_request.parent_override = element_style;
+  pseudo_style_request.layout_parent_override = element_style;
+  pseudo_style_request.pseudo_id = kPseudoIdSelection;
+  scoped_refptr<ComputedStyle> selection_style =
+      GetDocument().GetStyleResolver().ResolveStyle(
+          target, StyleRecalcContext(), pseudo_style_request);
+  ASSERT_TRUE(selection_style);
+
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kTextShadowInHighlightPseudo));
+  EXPECT_TRUE(GetDocument().IsUseCounted(
+      WebFeature::kTextShadowNotNoneInHighlightPseudo));
+}
+
+TEST_F(StyleResolverTestCQ, DependsOnContainerQueries) {
   GetDocument().documentElement()->setInnerHTML(R"HTML(
     <style>
       #a { color: red; }
@@ -1139,12 +1287,10 @@ TEST_F(StyleResolverTest, DependsOnContainerQueries) {
   EXPECT_FALSE(e->ComputedStyleRef().DependsOnContainerQueries());
 }
 
-TEST_F(StyleResolverTest, DependsOnContainerQueriesPseudo) {
-  ScopedCSSContainerQueriesForTest scoped_feature(true);
-
+TEST_F(StyleResolverTestCQ, DependsOnContainerQueriesPseudo) {
   GetDocument().documentElement()->setInnerHTML(R"HTML(
     <style>
-      main { contain: size layout; width: 100px; }
+      main { contain: size layout style; width: 100px; }
       #a::before { content: "before"; }
       @container (min-width: 0px) {
         #a::after { content: "after"; }
@@ -1172,9 +1318,7 @@ TEST_F(StyleResolverTest, DependsOnContainerQueriesPseudo) {
 
 // Verify that the ComputedStyle::DependsOnContainerQuery flag does
 // not end up in the MatchedPropertiesCache (MPC).
-TEST_F(StyleResolverTest, DependsOnContainerQueriesMPC) {
-  ScopedCSSContainerQueriesForTest scoped_feature(true);
-
+TEST_F(StyleResolverTestCQ, DependsOnContainerQueriesMPC) {
   GetDocument().documentElement()->setInnerHTML(R"HTML(
     <style>
       @container (min-width: 9999999px) {

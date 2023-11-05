@@ -11,8 +11,10 @@
 #include "base/no_destructor.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/events/devices/device_data_manager.h"
+#include "ui/ozone/common/base_keyboard_hook.h"
 #include "ui/ozone/platform_object.h"
 #include "ui/ozone/platform_selection.h"
+#include "ui/ozone/public/platform_global_shortcut_listener.h"
 #include "ui/ozone/public/platform_menu_utils.h"
 #include "ui/ozone/public/platform_screen.h"
 #include "ui/ozone/public/platform_user_input_monitor.h"
@@ -104,6 +106,30 @@ PlatformMenuUtils* OzonePlatform::GetPlatformMenuUtils() {
   return nullptr;
 }
 
+PlatformUtils* OzonePlatform::GetPlatformUtils() {
+  return nullptr;
+}
+
+PlatformGlobalShortcutListener*
+OzonePlatform::GetPlatformGlobalShortcutListener(
+    PlatformGlobalShortcutListenerDelegate* delegate) {
+  return nullptr;
+}
+
+std::unique_ptr<PlatformKeyboardHook> OzonePlatform::CreateKeyboardHook(
+    PlatformKeyboardHookTypes type,
+    base::RepeatingCallback<void(KeyEvent* event)> callback,
+    absl::optional<base::flat_set<DomCode>> dom_codes,
+    gfx::AcceleratedWidget accelerated_widget) {
+  switch (type) {
+    case PlatformKeyboardHookTypes::kModifier:
+      return std::make_unique<BaseKeyboardHook>(std::move(dom_codes),
+                                                std::move(callback));
+    case PlatformKeyboardHookTypes::kMedia:
+      return nullptr;
+  }
+}
+
 bool OzonePlatform::IsNativePixmapConfigSupported(
     gfx::BufferFormat format,
     gfx::BufferUsage usage) const {
@@ -111,10 +137,20 @@ bool OzonePlatform::IsNativePixmapConfigSupported(
   return false;
 }
 
+bool OzonePlatform::ShouldUseCustomFrame() {
+  return GetPlatformProperties().custom_frame_pref_default;
+}
+
 const OzonePlatform::PlatformProperties&
 OzonePlatform::GetPlatformProperties() {
   static const base::NoDestructor<OzonePlatform::PlatformProperties> properties;
   return *properties;
+}
+
+const OzonePlatform::PlatformRuntimeProperties&
+OzonePlatform::GetPlatformRuntimeProperties() {
+  static const OzonePlatform::PlatformRuntimeProperties properties;
+  return properties;
 }
 
 const OzonePlatform::InitializedHostProperties&
@@ -138,7 +174,7 @@ OzonePlatform::GetPlatformUserInputMonitor(
   return {};
 }
 
-void OzonePlatform::PostMainMessageLoopStart(
+void OzonePlatform::PostCreateMainMessageLoop(
     base::OnceCallback<void()> shutdown_cb) {}
 
 void OzonePlatform::PostMainMessageLoopRun() {}

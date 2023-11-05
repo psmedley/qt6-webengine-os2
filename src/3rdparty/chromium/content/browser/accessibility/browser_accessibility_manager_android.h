@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MANAGER_ANDROID_H_
 #define CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MANAGER_ANDROID_H_
 
+#include <unordered_set>
 #include <utility>
 
 #include "content/browser/accessibility/browser_accessibility_manager.h"
@@ -48,6 +49,12 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   ~BrowserAccessibilityManagerAndroid() override;
 
   static ui::AXTreeUpdate GetEmptyDocument();
+
+  // Helper methods to set/check if this is running as part of a WebView.
+  void set_is_running_as_webview(bool is_webview) {
+    is_running_as_webview_ = is_webview;
+  }
+  bool IsRunningAsWebView() { return is_running_as_webview_; }
 
   // By default, the tree is pruned for a better screen reading experience,
   // including:
@@ -108,14 +115,28 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   // Helper method to clear AccessibilityNodeInfo cache on given node
   void ClearNodeInfoCacheForGivenId(int32_t unique_id);
 
+  // Only set on the root BrowserAccessibilityManager. Keeps track of if
+  // any node uses touch passthrough in any frame - if so, any incoming
+  // touch event needs to be processed for possible forwarding. This is
+  // just an optimization; once touch passthrough is enabled it stays
+  // on for this main frame until the page is reloaded. In the future if
+  // there's a need to optimize for touch passthrough being enabled only
+  // temporarily, this would need to be more sophisticated.
+  void EnableTouchPassthrough() { touch_passthrough_enabled_ = true; }
+  bool touch_passthrough_enabled() const { return touch_passthrough_enabled_; }
+
  private:
   // AXTreeObserver overrides.
   void OnAtomicUpdateFinished(
       ui::AXTree* tree,
       bool root_changed,
       const std::vector<ui::AXTreeObserver::Change>& changes) override;
-
   void OnNodeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
+  void OnNodeCreated(ui::AXTree* tree, ui::AXNode* node) override;
+  void OnBoolAttributeChanged(ui::AXTree* tree,
+                              ui::AXNode* node,
+                              ax::mojom::BoolAttribute attr,
+                              bool new_value) override;
 
   WebContentsAccessibilityAndroid* GetWebContentsAXFromRootManager();
 
@@ -133,6 +154,19 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
 
   // See docs for set_prune_tree_for_screen_reader, above.
   bool prune_tree_for_screen_reader_;
+
+  // Whether this manager is running as part of a WebView.
+  bool is_running_as_webview_ = false;
+
+  // Only set on the root BrowserAccessibilityManager. Keeps track of if
+  // any node uses touch passthrough in any frame. See comment next to
+  // any_node_uses_touch_passthrough(), above, for details.
+  bool touch_passthrough_enabled_ = false;
+
+  // An unordered_set of |unique_id| values for nodes cleared from the cache
+  // with each atomic update to prevent superfluous cache clear calls.
+  std::unordered_set<int32_t> nodes_already_cleared_ =
+      std::unordered_set<int32_t>();
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityManagerAndroid);
 };

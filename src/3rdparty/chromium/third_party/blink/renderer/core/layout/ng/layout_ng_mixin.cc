@@ -9,6 +9,13 @@
 
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/ng/layout_box_utils.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_block.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_progress.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_ruby_as_block.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_ruby_base.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_ruby_run.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_ruby_text.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space_builder.h"
@@ -16,6 +23,9 @@
 #include "third_party/blink/renderer/core/layout/ng/ng_length_utils.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_out_of_flow_layout_part.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/svg/layout_ng_svg_text.h"
+#include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table_caption.h"
+#include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table_cell_legacy.h"
 #include "third_party/blink/renderer/core/paint/ng/ng_box_fragment_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
@@ -84,17 +94,19 @@ bool LayoutNGMixin<Base>::NodeAtPoint(HitTestResult& result,
 
 template <typename Base>
 RecalcLayoutOverflowResult LayoutNGMixin<Base>::RecalcLayoutOverflow() {
-  if (!RuntimeEnabledFeatures::LayoutNGLayoutOverflowEnabled())
-    return Base::RecalcLayoutOverflow();
-
   RecalcLayoutOverflowResult child_result;
-  if (Base::ChildNeedsLayoutOverflowRecalc())
+  if (!RuntimeEnabledFeatures::LayoutNGLayoutOverflowRecalcEnabled() &&
+      Base::ChildNeedsLayoutOverflowRecalc())
     child_result = Base::RecalcChildLayoutOverflow();
 
   // Don't attempt to rebuild the fragment tree or recalculate
   // scrollable-overflow, layout will do this for us.
   if (Base::NeedsLayout())
     return RecalcLayoutOverflowResult();
+
+  if (RuntimeEnabledFeatures::LayoutNGLayoutOverflowRecalcEnabled() &&
+      Base::ChildNeedsLayoutOverflowRecalc())
+    child_result = RecalcChildLayoutOverflow();
 
   bool should_recalculate_layout_overflow =
       Base::SelfNeedsLayoutOverflowRecalc() ||
@@ -103,16 +115,18 @@ RecalcLayoutOverflowResult LayoutNGMixin<Base>::RecalcLayoutOverflow() {
   bool layout_overflow_changed = false;
 
   if (rebuild_fragment_tree || should_recalculate_layout_overflow) {
-    for (scoped_refptr<const NGLayoutResult>& layout_result :
-         Base::layout_results_) {
+    for (auto& layout_result : Base::layout_results_) {
       const auto& fragment =
           To<NGPhysicalBoxFragment>(layout_result->PhysicalFragment());
-      base::Optional<PhysicalRect> layout_overflow;
+      absl::optional<PhysicalRect> layout_overflow;
 
       // Recalculate our layout-overflow if a child had its layout-overflow
       // changed, or if we are marked as dirty.
       if (should_recalculate_layout_overflow) {
         const PhysicalRect old_layout_overflow = fragment.LayoutOverflow();
+#if DCHECK_IS_ON()
+        NGPhysicalBoxFragment::AllowPostLayoutScope allow_post_layout_scope;
+#endif
         const PhysicalRect new_layout_overflow =
             NGLayoutOverflowCalculator::RecalculateLayoutOverflowForFragment(
                 fragment);
@@ -151,6 +165,63 @@ RecalcLayoutOverflowResult LayoutNGMixin<Base>::RecalcLayoutOverflow() {
   return {layout_overflow_changed, rebuild_fragment_tree};
 }
 
+static void RecalcFragmentLayoutOverflow(RecalcLayoutOverflowResult& result,
+                                         const NGPhysicalFragment& fragment) {
+  for (const auto& child : fragment.PostLayoutChildren()) {
+    if (child->GetLayoutObject()) {
+      if (const auto* box = DynamicTo<NGPhysicalBoxFragment>(child.get())) {
+        if (LayoutBox* owner_box = box->MutableOwnerLayoutBox())
+          result.Unite(owner_box->RecalcLayoutOverflow());
+      }
+    } else {
+      // We enter this branch when the |child| is a fragmentainer.
+      RecalcFragmentLayoutOverflow(result, *child.get());
+    }
+  }
+}
+
+template <typename Base>
+RecalcLayoutOverflowResult LayoutNGMixin<Base>::RecalcChildLayoutOverflow() {
+  DCHECK(RuntimeEnabledFeatures::LayoutNGLayoutOverflowRecalcEnabled());
+  DCHECK(Base::ChildNeedsLayoutOverflowRecalc());
+  Base::ClearChildNeedsLayoutOverflowRecalc();
+
+#if DCHECK_IS_ON()
+  // We use PostLayout methods to navigate the fragment tree and reach the
+  // corresponding LayoutObjects, so we need to use AllowPostLayoutScope here.
+  NGPhysicalBoxFragment::AllowPostLayoutScope allow_post_layout_scope;
+#endif
+  RecalcLayoutOverflowResult result;
+  for (auto& layout_result : Base::layout_results_) {
+    const auto& fragment =
+        To<NGPhysicalBoxFragment>(layout_result->PhysicalFragment());
+    if (fragment.HasItems()) {
+      for (NGInlineCursor cursor(fragment); cursor; cursor.MoveToNext()) {
+        if (const NGPhysicalBoxFragment* child =
+                cursor.Current()->PostLayoutBoxFragment()) {
+          if (child->GetLayoutObject()->IsBox()) {
+            result.Unite(
+                child->MutableOwnerLayoutBox()->RecalcLayoutOverflow());
+          }
+        }
+      }
+    }
+
+    RecalcFragmentLayoutOverflow(result, fragment);
+  }
+
+  return result;
+}
+
+template <typename Base>
+void LayoutNGMixin<Base>::RecalcVisualOverflow() {
+  if (Base::CanUseFragmentsForVisualOverflow()) {
+    Base::RecalcFragmentsVisualOverflow();
+    return;
+  }
+  Base::RecalcVisualOverflow();
+}
+
 // The current fragment from the last layout cycle for this box.
 // When pre-NG layout calls functions of this block flow, fragment and/or
 // LayoutResult are required to compute the result.
@@ -176,16 +247,10 @@ MinMaxSizes LayoutNGMixin<Base>::ComputeIntrinsicLogicalWidths() const {
   if (!node.CanUseNewLayout())
     return Base::ComputeIntrinsicLogicalWidths();
 
-  LayoutUnit available_logical_height =
-      LayoutBoxUtils::AvailableLogicalHeight(*this, Base::ContainingBlock());
-
   NGConstraintSpace space = ConstraintSpaceForMinMaxSizes();
-  MinMaxSizes sizes =
-      node.ComputeMinMaxSizes(node.Style().GetWritingMode(),
-                              MinMaxSizesInput(available_logical_height,
-                                               MinMaxSizesType::kContent),
-                              &space)
-          .sizes;
+  MinMaxSizes sizes = node.ComputeMinMaxSizes(node.Style().GetWritingMode(),
+                                              MinMaxSizesType::kContent, space)
+                          .sizes;
 
   if (Base::IsTableCell()) {
     // If a table cell, or the column that it belongs to, has a specified fixed
@@ -212,7 +277,8 @@ NGConstraintSpace LayoutNGMixin<Base>::ConstraintSpaceForMinMaxSizes() const {
                                    style.GetWritingDirection(),
                                    /* is_new_fc */ true);
   builder.SetAvailableSize(
-      {Base::ContainingBlockLogicalWidthForContent(), kIndefiniteSize});
+      {Base::ContainingBlockLogicalWidthForContent(),
+       LayoutBoxUtils::AvailableLogicalHeight(*this, Base::ContainingBlock())});
 
   // Table cells borders may be collapsed, we can't calculate these directly
   // from the style.
@@ -292,7 +358,7 @@ void LayoutNGMixin<Base>::UpdateOutOfFlowBlockLayout() {
       NGBlockNode(this), static_position,
       DynamicTo<LayoutInline>(css_container));
 
-  base::Optional<LogicalSize> initial_containing_block_fixed_size;
+  absl::optional<LogicalSize> initial_containing_block_fixed_size;
   auto* layout_view = DynamicTo<LayoutView>(container);
   if (layout_view && !Base::GetDocument().Printing()) {
     if (LocalFrameView* frame_view = layout_view->GetFrameView()) {
@@ -309,7 +375,8 @@ void LayoutNGMixin<Base>::UpdateOutOfFlowBlockLayout() {
   // should get laid out by the actual containing block.
   NGOutOfFlowLayoutPart(css_container->CanContainAbsolutePositionObjects(),
                         css_container->CanContainFixedPositionObjects(),
-                        *container_style, constraint_space, &container_builder,
+                        css_container->IsLayoutGrid(), *container_style,
+                        constraint_space, &container_builder,
                         initial_containing_block_fixed_size)
       .Run(/* only_layout */ this);
   scoped_refptr<const NGLayoutResult> result =
@@ -317,7 +384,7 @@ void LayoutNGMixin<Base>::UpdateOutOfFlowBlockLayout() {
   // These are the unpositioned OOF descendants of the current OOF block.
   for (const auto& descendant :
        result->PhysicalFragment().OutOfFlowPositionedDescendants())
-    descendant.node.UseLegacyOutOfFlowPositioning();
+    descendant.Node().InsertIntoLegacyPositionedObjects();
 
   const auto& fragment = result->PhysicalFragment();
   DCHECK_GT(fragment.Children().size(), 0u);
@@ -365,7 +432,7 @@ LayoutNGMixin<Base>::UpdateInFlowBlockLayout() {
 
   for (const auto& descendant :
        physical_fragment.OutOfFlowPositionedDescendants())
-    descendant.node.UseLegacyOutOfFlowPositioning();
+    descendant.Node().InsertIntoLegacyPositionedObjects();
 
   // Even if we are a layout root, our baseline may have shifted. In this
   // (rare) case, mark our containing-block for layout.
@@ -382,6 +449,28 @@ LayoutNGMixin<Base>::UpdateInFlowBlockLayout() {
   return result;
 }
 
+template <typename Base>
+void LayoutNGMixin<Base>::UpdateMargins() {
+  const LayoutBlock* containing_block = Base::ContainingBlock();
+  if (!containing_block || !containing_block->IsLayoutBlockFlow())
+    return;
+
+  // In the legacy engine, for regular block container layout, children
+  // calculate and store margins on themselves, while in NG that's done by the
+  // container. Since this object is a LayoutNG entry-point, we'll have to do it
+  // on ourselves, since that's what the legacy container expects.
+  const ComputedStyle& style = Base::StyleRef();
+  const ComputedStyle& cb_style = containing_block->StyleRef();
+  const auto writing_direction = cb_style.GetWritingDirection();
+  LayoutUnit available_logical_width =
+      LayoutBoxUtils::AvailableLogicalWidth(*this, containing_block);
+  NGBoxStrut margins = ComputePhysicalMargins(style, available_logical_width)
+                           .ConvertToLogical(writing_direction);
+  ResolveInlineMargins(style, cb_style, available_logical_width,
+                       Base::LogicalWidth(), &margins);
+  Base::SetMargin(margins.ConvertToPhysical(writing_direction));
+}
+
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutBlock>;
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutBlockFlow>;
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutProgress>;
@@ -389,6 +478,7 @@ template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutRubyAsBlock>;
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutRubyBase>;
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutRubyRun>;
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutRubyText>;
+template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutSVGBlock>;
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutTableCaption>;
 template class CORE_TEMPLATE_EXPORT LayoutNGMixin<LayoutTableCell>;
 

@@ -188,6 +188,14 @@ class CHROME_DBUS_EXPORT ObjectProxy
                                SignalCallback signal_callback,
                                OnConnectedCallback on_connected_callback);
 
+  // Blocking version of ConnectToSignal.  Returns true on success.  Must be
+  // called from the DBus thread.
+  //
+  // BLOCKING CALL.
+  virtual bool ConnectToSignalAndBlock(const std::string& interface_name,
+                                       const std::string& signal_name,
+                                       SignalCallback signal_callback);
+
   // Sets a callback for "NameOwnerChanged" signal. The callback is called on
   // the origin thread when D-Bus system sends "NameOwnerChanged" for the name
   // represented by |service_name_|.
@@ -238,6 +246,10 @@ class CHROME_DBUS_EXPORT ObjectProxy
     // This must be called on the origin thread.
     ResponseOrErrorCallback ReleaseCallback();
 
+    // Whether |callback_| is null.
+    // TODO(http://crbug/1211451): Remove after fix.
+    bool IsNullCallback() const;
+
    private:
     scoped_refptr<base::SequencedTaskRunner> origin_task_runner_;
     ResponseOrErrorCallback callback_;
@@ -267,11 +279,6 @@ class CHROME_DBUS_EXPORT ObjectProxy
 
   // Tries to connect to NameOwnerChanged signal, ignores any error.
   void TryConnectToNameOwnerChangedSignal();
-
-  // Helper function for ConnectToSignal().
-  bool ConnectToSignalInternal(const std::string& interface_name,
-                               const std::string& signal_name,
-                               SignalCallback signal_callback);
 
   // Helper function for WaitForServiceToBeAvailable().
   void WaitForServiceToBeAvailableInternal();

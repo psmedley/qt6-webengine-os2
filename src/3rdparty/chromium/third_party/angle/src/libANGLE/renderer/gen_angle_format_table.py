@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # Copyright 2016 The ANGLE Project Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -70,7 +70,7 @@ static constexpr rx::FastCopyFunctionMap NoCopyFunctions;
 
 const Format gFormatInfoTable[] = {{
     // clang-format off
-    {{ FormatID::NONE, GL_NONE, GL_NONE, nullptr, NoCopyFunctions, nullptr, nullptr, GL_NONE, 0, 0, 0, 0, 0, 0, 0, 0, 0, false, false, false, false, gl::VertexAttribType::InvalidEnum }},
+    {{ FormatID::NONE, GL_NONE, GL_NONE, nullptr, NoCopyFunctions, nullptr, nullptr, GL_NONE, 0, 0, 0, 0, 0, 0, 0, 0, 0, false, false, false, false, false, gl::VertexAttribType::InvalidEnum }},
 {angle_format_info_cases}    // clang-format on
 }};
 
@@ -93,7 +93,7 @@ const Format *GetFormatInfoTable()
 
 def ceil_int(value, mod):
     assert mod > 0 and value > 0, 'integer modulation should be larger than 0'
-    return (value + mod - 1) / mod
+    return (value + mod - 1) // mod
 
 
 def is_depth_stencil(angle_format):
@@ -193,7 +193,7 @@ def get_color_write_function(angle_format):
     return 'WriteColor<' + channel_struct + ', ' + write_component_type + '>'
 
 
-format_entry_template = """    {{ FormatID::{id}, {glInternalFormat}, {fboImplementationInternalFormat}, {mipGenerationFunction}, {fastCopyFunctions}, {colorReadFunction}, {colorWriteFunction}, {namedComponentType}, {R}, {G}, {B}, {A}, {L}, {D}, {S}, {pixelBytes}, {componentAlignmentMask}, {isBlock}, {isFixed}, {isScaled}, {isSRGB}, {vertexAttribType} }},
+format_entry_template = """    {{ FormatID::{id}, {glInternalFormat}, {fboImplementationInternalFormat}, {mipGenerationFunction}, {fastCopyFunctions}, {colorReadFunction}, {colorWriteFunction}, {namedComponentType}, {R}, {G}, {B}, {A}, {L}, {D}, {S}, {pixelBytes}, {componentAlignmentMask}, {isBlock}, {isFixed}, {isScaled}, {isSRGB}, {isYUV}, {vertexAttribType} }},
 """
 
 
@@ -287,7 +287,7 @@ def json_to_table_data(format_id, json, angle_to_gl):
         "fastCopyFunctions": "NoCopyFunctions",
     }
 
-    for k, v in json.iteritems():
+    for k, v in sorted(json.items()):
         parsed[k] = v
 
     if "glInternalFormat" not in parsed:
@@ -341,6 +341,9 @@ def json_to_table_data(format_id, json, angle_to_gl):
     parsed["isFixed"] = bool_str("FIXED" in format_id)
     parsed["isScaled"] = bool_str("SCALED" in format_id)
     parsed["isSRGB"] = bool_str("SRGB" in format_id)
+    # For now we only look for the 'PLANE' substring in format string. Expand this condition
+    # when adding support for YUV formats that have different identifying markers.
+    parsed["isYUV"] = bool_str("PLANE" in format_id)
 
     parsed["vertexAttribType"] = "gl::VertexAttribType::" + get_vertex_attrib_type(format_id)
 
@@ -404,9 +407,9 @@ def main():
         outputs = ['Format_table_autogen.cpp', 'FormatID_autogen.h']
 
         if sys.argv[1] == 'inputs':
-            print ','.join(inputs)
+            print(','.join(inputs))
         elif sys.argv[1] == 'outputs':
-            print ','.join(outputs)
+            print(','.join(outputs))
         else:
             print('Invalid script parameters')
             return 1

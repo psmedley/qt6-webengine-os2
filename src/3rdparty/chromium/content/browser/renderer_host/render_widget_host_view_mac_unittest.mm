@@ -44,7 +44,6 @@
 #include "content/test/stub_render_widget_host_owner_delegate.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_render_widget_host.h"
-#include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -482,8 +481,6 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
     mock_clock_.Advance(base::TimeDelta::FromMilliseconds(100));
     ui::SetEventTickClockForTesting(&mock_clock_);
     RenderViewHostImplTestHarness::SetUp();
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeature(features::kDirectManipulationStylus);
 
     browser_context_ = std::make_unique<TestBrowserContext>();
     process_host_ =
@@ -579,8 +576,7 @@ TEST_F(RenderWidgetHostViewMacTest, AcceptsFirstResponder) {
 TEST_F(RenderWidgetHostViewMacTest, NSTextInputClientConformance) {
   EXPECT_NSEQ(NSMakeRange(0, 0), [rwhv_cocoa_ selectedRange]);
 
-  rwhv_mac_->SelectionChanged(base::UTF8ToUTF16("llo, world!"), 2,
-                              gfx::Range(5, 10));
+  rwhv_mac_->SelectionChanged(u"llo, world!", 2, gfx::Range(5, 10));
   EXPECT_NSEQ(NSMakeRange(5, 5), [rwhv_cocoa_ selectedRange]);
 
   NSRange actualRange = NSMakeRange(1u, 2u);
@@ -649,7 +645,7 @@ TEST_F(RenderWidgetHostViewMacTest, InvalidKeyCode) {
 }
 
 TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharacterRangeCaretCase) {
-  const base::string16 kDummyString = base::UTF8ToUTF16("hogehoge");
+  const std::u16string kDummyString = u"hogehoge";
   const size_t kDummyOffset = 0;
 
   gfx::Rect caret_rect(10, 11, 0, 10);
@@ -660,7 +656,7 @@ TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharacterRangeCaretCase) {
   rwhv_mac_->SelectionChanged(kDummyString, kDummyOffset, caret_range);
   rwhv_mac_->SelectionBoundsChanged(caret_rect, base::i18n::LEFT_TO_RIGHT,
                                     caret_rect, base::i18n::LEFT_TO_RIGHT,
-                                    false);
+                                    gfx::Rect(), false);
   EXPECT_TRUE(rwhv_mac_->GetCachedFirstRectForCharacterRange(caret_range, &rect,
                                                              &actual_range));
   EXPECT_EQ(caret_rect, rect);
@@ -679,7 +675,7 @@ TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharacterRangeCaretCase) {
   rwhv_mac_->SelectionChanged(kDummyString, kDummyOffset, caret_range);
   rwhv_mac_->SelectionBoundsChanged(caret_rect, base::i18n::LEFT_TO_RIGHT,
                                     caret_rect, base::i18n::LEFT_TO_RIGHT,
-                                    false);
+                                    gfx::Rect(), false);
   EXPECT_TRUE(rwhv_mac_->GetCachedFirstRectForCharacterRange(caret_range, &rect,
                                                              &actual_range));
   EXPECT_EQ(caret_rect, rect);
@@ -695,9 +691,9 @@ TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharacterRangeCaretCase) {
   // No caret.
   caret_range = gfx::Range(1, 2);
   rwhv_mac_->SelectionChanged(kDummyString, kDummyOffset, caret_range);
-  rwhv_mac_->SelectionBoundsChanged(caret_rect, base::i18n::LEFT_TO_RIGHT,
-                                    gfx::Rect(30, 11, 0, 10),
-                                    base::i18n::LEFT_TO_RIGHT, false);
+  rwhv_mac_->SelectionBoundsChanged(
+      caret_rect, base::i18n::LEFT_TO_RIGHT, gfx::Rect(30, 11, 0, 10),
+      base::i18n::LEFT_TO_RIGHT, gfx::Rect(), false);
   EXPECT_FALSE(rwhv_mac_->GetCachedFirstRectForCharacterRange(
       gfx::Range(0, 0), &rect, &actual_range));
   EXPECT_FALSE(rwhv_mac_->GetCachedFirstRectForCharacterRange(
@@ -1091,78 +1087,6 @@ TEST_F(RenderWidgetHostViewMacTest, PointerEventWithMouseType) {
   ASSERT_EQ("MouseMove", GetMessageNames(events));
   EXPECT_EQ(blink::WebPointerProperties::PointerType::kMouse,
             GetPointerType(events));
-}
-
-TEST_F(RenderWidgetHostViewMacTest, PointerEventWithPenTypeSendAsTouch) {
-  // Send a NSEvent of NSTabletProximity type which has a device type of pen.
-  NSEvent* event = MockTabletEventWithParams(kCGEventTabletProximity, true,
-                                             NSPenPointingDevice);
-  [rwhv_mac_->GetInProcessNSView() tabletEvent:event];
-  // Flush and clear other messages (e.g. begin frames) the RWHVMac also sends.
-  base::RunLoop().RunUntilIdle();
-  static_cast<RenderWidgetHostImpl*>(rwhv_mac_->GetRenderWidgetHost())
-      ->input_router()
-      ->ForceSetTouchActionAuto();
-
-  event = MockMouseEventWithParams(
-      kCGEventLeftMouseDown, {6, 9}, kCGMouseButtonLeft,
-      kCGEventMouseSubtypeTabletPoint, false, true);
-  [rwhv_mac_->GetInProcessNSView() mouseEvent:event];
-  base::RunLoop().RunUntilIdle();
-  MockWidgetInputHandler::MessageVector events =
-      host_->GetAndResetDispatchedMessages();
-  ASSERT_EQ("TouchStart", GetMessageNames(events));
-  EXPECT_EQ(blink::WebPointerProperties::PointerType::kPen,
-            GetPointerType(events));
-  events.clear();
-  base::RunLoop().RunUntilIdle();
-  events = host_->GetAndResetDispatchedMessages();
-
-  event = MockMouseEventWithParams(
-      kCGEventLeftMouseDragged, {16, 29}, kCGMouseButtonLeft,
-      kCGEventMouseSubtypeTabletPoint, false, true);
-  [rwhv_mac_->GetInProcessNSView() mouseEvent:event];
-  base::RunLoop().RunUntilIdle();
-  events = host_->GetAndResetDispatchedMessages();
-  ASSERT_EQ("TouchMove", GetMessageNames(events));
-  EXPECT_EQ(blink::WebPointerProperties::PointerType::kPen,
-            GetPointerType(events));
-
-  events.clear();
-  base::RunLoop().RunUntilIdle();
-  events = host_->GetAndResetDispatchedMessages();
-
-  event = MockMouseEventWithParams(kCGEventLeftMouseUp, {16, 29},
-                                   kCGMouseButtonLeft,
-                                   kCGEventMouseSubtypeTabletPoint, false);
-  [rwhv_mac_->GetInProcessNSView() mouseEvent:event];
-  base::RunLoop().RunUntilIdle();
-  events = host_->GetAndResetDispatchedMessages();
-  ASSERT_EQ("TouchEnd", GetMessageNames(events));
-  EXPECT_EQ(blink::WebPointerProperties::PointerType::kPen,
-            static_cast<const blink::WebTouchEvent&>(
-                events[0]->ToEvent()->Event()->Event())
-                .touches[0]
-                .pointer_type);
-
-  events.clear();
-  base::RunLoop().RunUntilIdle();
-  events = host_->GetAndResetDispatchedMessages();
-  ASSERT_EQ("GestureScrollEnd", GetMessageNames(events));
-
-  event =
-      MockMouseEventWithParams(kCGEventLeftMouseDown, {6, 9},
-                               kCGMouseButtonLeft, kCGEventMouseSubtypeDefault);
-  [rwhv_mac_->GetInProcessNSView() mouseEvent:event];
-  base::RunLoop().RunUntilIdle();
-  events = host_->GetAndResetDispatchedMessages();
-  ASSERT_EQ("MouseDown", GetMessageNames(events));
-  EXPECT_EQ(blink::WebPointerProperties::PointerType::kMouse,
-            GetPointerType(events));
-
-  events.clear();
-  base::RunLoop().RunUntilIdle();
-  events = host_->GetAndResetDispatchedMessages();
 }
 
 TEST_F(RenderWidgetHostViewMacTest, SendMouseMoveOnShowingContextMenu) {
@@ -1698,7 +1622,7 @@ TEST_F(RenderWidgetHostViewMacTest, EventLatencyOSMouseWheelHistogram) {
   base::HistogramTester histogram_tester;
 
   // Send an initial wheel event for scrolling by 3 lines.
-  // Verify that Event.Latency.OS.MOUSE_WHEEL histogram is computed properly.
+  // Verify that Event.Latency.OS2.MOUSE_WHEEL histogram is computed properly.
   NSEvent* wheelEvent = MockScrollWheelEventWithPhase(@selector(phaseBegan),3);
   [rwhv_mac_->GetInProcessNSView() scrollWheel:wheelEvent];
 
@@ -1709,12 +1633,13 @@ TEST_F(RenderWidgetHostViewMacTest, EventLatencyOSMouseWheelHistogram) {
       blink::mojom::InputEventResultState::kConsumed);
 
   histogram_tester.ExpectTotalCount("Event.Latency.OS.MOUSE_WHEEL", 1);
+  histogram_tester.ExpectTotalCount("Event.Latency.OS2.MOUSE_WHEEL", 1);
 }
 
 // This test verifies that |selected_text_| is updated accordingly with
 // different variations of RWHVMac::SelectChanged updates.
 TEST_F(RenderWidgetHostViewMacTest, SelectedText) {
-  base::string16 sample_text;
+  std::u16string sample_text;
   base::UTF8ToUTF16("hello world!", 12, &sample_text);
   gfx::Range range(6, 11);
 
@@ -2092,7 +2017,7 @@ TEST_F(InputMethodMacTest, TouchBarTextSuggestionsReplacement) {
         [FakeTextCheckingResult resultWithRange:NSMakeRange(0, 3)
                               replacementString:@"foo"];
 
-    const base::string16 kOriginalString = base::UTF8ToUTF16("abcxxxghi");
+    const std::u16string kOriginalString = u"abcxxxghi";
 
     // Change the selection once; requests completions from the spell checker.
     tab_view()->SelectionChanged(kOriginalString, 3, gfx::Range(3, 3));
@@ -2148,7 +2073,7 @@ TEST_F(InputMethodMacTest, TouchBarTextSuggestionsNotRequestedForPasswords) {
     EXPECT_NSNE(nil, candidate_list_item());
     candidate_list_item().allowsCollapsing = NO;
 
-    const base::string16 kOriginalString = base::UTF8ToUTF16("abcxxxghi");
+    const std::u16string kOriginalString = u"abcxxxghi";
 
     // Change the selection once; completions should *not* be requested.
     tab_view()->SelectionChanged(kOriginalString, 3, gfx::Range(3, 3));
@@ -2180,7 +2105,7 @@ TEST_F(InputMethodMacTest, TouchBarTextSuggestionsInvalidSelection) {
         [FakeTextCheckingResult resultWithRange:NSMakeRange(0, 3)
                               replacementString:@"foo"];
 
-    const base::string16 kOriginalString = base::UTF8ToUTF16("abcxxxghi");
+    const std::u16string kOriginalString = u"abcxxxghi";
 
     tab_view()->SelectionChanged(kOriginalString, 3,
                                  gfx::Range::InvalidRange());

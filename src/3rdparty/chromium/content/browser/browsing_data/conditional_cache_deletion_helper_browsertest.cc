@@ -28,6 +28,7 @@
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_cache.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 namespace content {
 
@@ -98,7 +99,7 @@ class ConditionalCacheDeletionHelperBrowserTest : public ContentBrowserTest {
   }
 
   StoragePartition* storage_partition() {
-    return BrowserContext::GetDefaultStoragePartition(browser_context());
+    return browser_context()->GetDefaultStoragePartition();
   }
 
  private:

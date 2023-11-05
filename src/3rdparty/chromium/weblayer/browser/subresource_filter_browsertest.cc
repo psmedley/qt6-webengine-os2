@@ -9,35 +9,30 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/subresource_filter/content/browser/ads_intervention_manager.h"
 #include "components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h"
-#include "components/subresource_filter/content/browser/fake_safe_browsing_database_manager.h"
 #include "components/subresource_filter/content/browser/ruleset_service.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
 #include "components/subresource_filter/content/browser/subresource_filter_profile_context.h"
-#include "components/subresource_filter/content/browser/test_ruleset_publisher.h"
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
-#include "components/subresource_filter/core/common/test_ruleset_creator.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
-#include "net/dns/mock_host_resolver.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "weblayer/browser/browser_process.h"
 #include "weblayer/browser/host_content_settings_map_factory.h"
-#include "weblayer/browser/subresource_filter_client_impl.h"
 #include "weblayer/browser/subresource_filter_profile_context_factory.h"
 #include "weblayer/browser/tab_impl.h"
 #include "weblayer/grit/weblayer_resources.h"
 #include "weblayer/shell/browser/shell.h"
-#include "weblayer/test/weblayer_browser_test.h"
+#include "weblayer/test/subresource_filter_browser_test_harness.h"
 #include "weblayer/test/weblayer_browser_test_utils.h"
 
 #if defined(OS_ANDROID)
 #include "components/infobars/android/infobar_android.h"  // nogncheck
-#include "components/infobars/core/infobar_manager.h"     // nogncheck
-#include "weblayer/browser/infobar_service.h"
+#include "components/infobars/content/content_infobar_manager.h"
+#include "components/infobars/core/infobar_manager.h"  // nogncheck
 #endif
 
 namespace weblayer {
@@ -50,17 +45,6 @@ const char kTimeSinceAdsInterventionTriggeredHistogram[] =
     "SubresourceFilter.PageLoad."
     "TimeSinceLastActiveAdsIntervention";
 const char kSubresourceFilterActionsHistogram[] = "SubresourceFilter.Actions2";
-
-// Returns whether a script resource that sets document.scriptExecuted to true
-// on load was loaded.
-bool WasParsedScriptElementLoaded(content::RenderFrameHost* rfh) {
-  DCHECK(rfh);
-  bool script_resource_was_loaded = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      rfh, "domAutomationController.send(!!document.scriptExecuted)",
-      &script_resource_was_loaded));
-  return script_resource_was_loaded;
-}
 
 #if defined(OS_ANDROID)
 class TestInfoBarManagerObserver : public infobars::InfoBarManager::Observer {
@@ -93,80 +77,16 @@ class TestInfoBarManagerObserver : public infobars::InfoBarManager::Observer {
 
 }  // namespace
 
-class SubresourceFilterBrowserTest : public WebLayerBrowserTest {
- public:
-  SubresourceFilterBrowserTest() {
-    feature_list_.InitAndEnableFeature(
-        subresource_filter::kAdsInterventionsEnforced);
-  }
-
-  ~SubresourceFilterBrowserTest() override = default;
-  SubresourceFilterBrowserTest(const SubresourceFilterBrowserTest&) = delete;
-  SubresourceFilterBrowserTest& operator=(const SubresourceFilterBrowserTest&) =
-      delete;
-
-  void SetUpOnMainThread() override {
-    // This test suite does "cross-site" navigations to various domains that
-    // must all resolve to localhost.
-    host_resolver()->AddRule("*", "127.0.0.1");
-
-    ASSERT_TRUE(embedded_test_server()->Start());
-  }
-
- protected:
-  void SetRulesetToDisallowURLsWithPathSuffix(const std::string& suffix) {
-    subresource_filter::testing::TestRulesetPair test_ruleset_pair;
-    test_ruleset_creator_.CreateRulesetToDisallowURLsWithPathSuffix(
-        suffix, &test_ruleset_pair);
-
-    subresource_filter::testing::TestRulesetPublisher test_ruleset_publisher(
-        BrowserProcess::GetInstance()->subresource_filter_ruleset_service());
-    ASSERT_NO_FATAL_FAILURE(
-        test_ruleset_publisher.SetRuleset(test_ruleset_pair.unindexed));
-  }
-
-#if !defined(OS_ANDROID)
-  // Installs a fake database manager so that the safe browsing activation
-  // throttle will be created (WebLayer currently has a safe browsing database
-  // available in production only on Android).
-  void InstallFakeSafeBrowsingDatabaseManagerInWebContents(
-      content::WebContents* web_contents) {
-    scoped_refptr<FakeSafeBrowsingDatabaseManager> database_manager =
-        base::MakeRefCounted<FakeSafeBrowsingDatabaseManager>();
-
-    auto* client_impl = static_cast<SubresourceFilterClientImpl*>(
-        subresource_filter::ContentSubresourceFilterThrottleManager::
-            FromWebContents(web_contents)
-                ->client());
-    client_impl->set_database_manager_for_testing(std::move(database_manager));
-  }
-#endif
-
- private:
-  subresource_filter::testing::TestRulesetCreator test_ruleset_creator_;
-  base::test::ScopedFeatureList feature_list_;
-};
-
 // Tests that the ruleset service is available.
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, RulesetService) {
   EXPECT_NE(BrowserProcess::GetInstance()->subresource_filter_ruleset_service(),
             nullptr);
 }
 
-// Tests that the ruleset is published as part of startup.
+// Tests that the expected ruleset data was published as part of startup.
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, RulesArePublished) {
   auto* ruleset_service =
       BrowserProcess::GetInstance()->subresource_filter_ruleset_service();
-
-  // Publishing might or might not have already finished at this point; wait for
-  // it to finish if necessary.
-  if (!ruleset_service->GetMostRecentlyIndexedVersion().IsValid()) {
-    base::RunLoop run_loop;
-    ruleset_service->SetRulesetPublishedCallbackForTesting(
-        run_loop.QuitClosure());
-
-    run_loop.Run();
-  }
 
   auto ruleset_version = ruleset_service->GetMostRecentlyIndexedVersion();
   EXPECT_TRUE(ruleset_version.IsValid());
@@ -204,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
   GURL test_url(embedded_test_server()->GetURL("/simple_page.html"));
 
   subresource_filter::TestSubresourceFilterObserver observer(web_contents);
-  base::Optional<subresource_filter::mojom::ActivationLevel> page_activation =
+  absl::optional<subresource_filter::mojom::ActivationLevel> page_activation =
       observer.GetPageActivation(test_url);
   EXPECT_FALSE(page_activation);
 
@@ -226,26 +146,18 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
 
 // Verifies that subframes that are flagged by the subresource filter ruleset
 // are blocked from loading on activated URLs.
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_DisallowedSubframeURLBlockedOnActivatedURL \
-  DISABLED_DisallowedSubframeURLBlockedOnActivatedURL
-#else
-#define MAYBE_DisallowedSubframeURLBlockedOnActivatedURL \
-  DisallowedSubframeURLBlockedOnActivatedURL
-#endif
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
-                       MAYBE_DisallowedSubframeURLBlockedOnActivatedURL) {
+                       DisallowedSubframeURLBlockedOnActivatedURL) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
 
   content::WebContentsConsoleObserver console_observer(web_contents);
   console_observer.SetPattern(subresource_filter::kActivationConsoleMessage);
 
-  GURL test_url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  GURL test_url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
 
   subresource_filter::TestSubresourceFilterObserver observer(web_contents);
-  base::Optional<subresource_filter::mojom::ActivationLevel> page_activation =
+  absl::optional<subresource_filter::mojom::ActivationLevel> page_activation =
       observer.GetPageActivation(test_url);
   EXPECT_FALSE(page_activation);
 
@@ -305,8 +217,8 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
                        DisallowedSubframeURLNotBlockedOnNonActivatedURL) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
 
-  GURL test_url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  GURL test_url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
 
   // Verify that the "ad" subframe is loaded if it is not flagged by the
   // ruleset.
@@ -325,20 +237,12 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
   EXPECT_TRUE(WasParsedScriptElementLoaded(web_contents->GetMainFrame()));
 }
 
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_ContentSettingsAllowlist_DoNotActivate \
-  DISABLED_ContentSettingsAllowlist_DoNotActivate
-#else
-#define MAYBE_ContentSettingsAllowlist_DoNotActivate \
-  ContentSettingsAllowlist_DoNotActivate
-#endif
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
-                       MAYBE_ContentSettingsAllowlist_DoNotActivate) {
+                       ContentSettingsAllowlist_DoNotActivate) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
 
-  GURL test_url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  GURL test_url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
 
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
@@ -364,20 +268,12 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
   EXPECT_TRUE(console_observer.messages().empty());
 }
 
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_ContentSettingsAllowlistGlobal_DoNotActivate \
-  DISABLED_ContentSettingsAllowlistGlobal_DoNotActivate
-#else
-#define MAYBE_ContentSettingsAllowlistGlobal_DoNotActivate \
-  ContentSettingsAllowlistGlobal_DoNotActivate
-#endif
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
-                       MAYBE_ContentSettingsAllowlistGlobal_DoNotActivate) {
+                       ContentSettingsAllowlistGlobal_DoNotActivate) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
 
-  GURL test_url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  GURL test_url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
 
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
@@ -409,32 +305,33 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
 // navigating away.
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, InfoBarPresentation) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
-  auto* infobar_service = InfoBarService::FromWebContents(web_contents);
+  auto* infobar_manager =
+      infobars::ContentInfoBarManager::FromWebContents(web_contents);
 
   // Configure the subresource filter to activate on the test URL and to block
   // its script from loading.
-  GURL test_url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  GURL test_url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
   ActivateSubresourceFilterInWebContentsForURL(web_contents, test_url);
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
 
   TestInfoBarManagerObserver infobar_observer;
-  infobar_service->AddObserver(&infobar_observer);
+  infobar_manager->AddObserver(&infobar_observer);
 
   base::RunLoop run_loop;
   infobar_observer.set_on_infobar_added_callback(run_loop.QuitClosure());
 
-  EXPECT_EQ(0u, infobar_service->infobar_count());
+  EXPECT_EQ(0u, infobar_manager->infobar_count());
 
   // Navigate such that the script is blocked and verify that the ads blocked
   // infobar is presented.
   NavigateAndWaitForCompletion(test_url, shell());
   run_loop.Run();
 
-  EXPECT_EQ(1u, infobar_service->infobar_count());
+  EXPECT_EQ(1u, infobar_manager->infobar_count());
   auto* infobar =
-      static_cast<infobars::InfoBarAndroid*>(infobar_service->infobar_at(0));
+      static_cast<infobars::InfoBarAndroid*>(infobar_manager->infobar_at(0));
   EXPECT_TRUE(infobar->HasSetJavaInfoBar());
   EXPECT_EQ(infobar->delegate()->GetIdentifier(),
             infobars::InfoBarDelegate::ADS_BLOCKED_INFOBAR_DELEGATE_ANDROID);
@@ -446,27 +343,19 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, InfoBarPresentation) {
   NavigateAndWaitForCompletion(GURL("about:blank"), shell());
   run_loop2.Run();
 
-  EXPECT_EQ(0u, infobar_service->infobar_count());
-  infobar_service->RemoveObserver(&infobar_observer);
+  EXPECT_EQ(0u, infobar_manager->infobar_count());
+  infobar_manager->RemoveObserver(&infobar_observer);
 }
 #endif
 
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_ContentSettingsAllowlistViaReload_DoNotActivate \
-  DISABLED_ContentSettingsAllowlistViaReload_DoNotActivate
-#else
-#define MAYBE_ContentSettingsAllowlistViaReload_DoNotActivate \
-  ContentSettingsAllowlistViaReload_DoNotActivate
-#endif
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
-                       MAYBE_ContentSettingsAllowlistViaReload_DoNotActivate) {
+                       ContentSettingsAllowlistViaReload_DoNotActivate) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
 
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
-  GURL test_url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  GURL test_url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
   ActivateSubresourceFilterInWebContentsForURL(web_contents, test_url);
 
   NavigateAndWaitForCompletion(test_url, shell());
@@ -474,31 +363,20 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
 
   // Allowlist via a reload.
   content::TestNavigationObserver navigation_observer(web_contents, 1);
-  subresource_filter::ContentSubresourceFilterThrottleManager::FromWebContents(
-      web_contents)
-      ->OnReloadRequested();
+  GetPrimaryPageThrottleManager()->OnReloadRequested();
   navigation_observer.Wait();
 
   EXPECT_TRUE(WasParsedScriptElementLoaded(web_contents->GetMainFrame()));
 }
 
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_ContentSettingsAllowlistViaReload_AllowlistIsByDomain \
-  DISABLED_ContentSettingsAllowlistViaReload_AllowlistIsByDomain
-#else
-#define MAYBE_ContentSettingsAllowlistViaReload_AllowlistIsByDomain \
-  ContentSettingsAllowlistViaReload_AllowlistIsByDomain
-#endif
-IN_PROC_BROWSER_TEST_F(
-    SubresourceFilterBrowserTest,
-    MAYBE_ContentSettingsAllowlistViaReload_AllowlistIsByDomain) {
+IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
+                       ContentSettingsAllowlistViaReload_AllowlistIsByDomain) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
 
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
-  GURL test_url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  GURL test_url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
   ActivateSubresourceFilterInWebContentsForURL(web_contents, test_url);
 
   NavigateAndWaitForCompletion(test_url, shell());
@@ -506,46 +384,31 @@ IN_PROC_BROWSER_TEST_F(
 
   // Allowlist via a reload.
   content::TestNavigationObserver navigation_observer(web_contents, 1);
-  subresource_filter::ContentSubresourceFilterThrottleManager::FromWebContents(
-      web_contents)
-      ->OnReloadRequested();
+  GetPrimaryPageThrottleManager()->OnReloadRequested();
   navigation_observer.Wait();
 
   EXPECT_TRUE(WasParsedScriptElementLoaded(web_contents->GetMainFrame()));
 
   // Another navigation to the same domain should be allowed too.
   NavigateAndWaitForCompletion(
-      embedded_test_server()->GetURL("/frame_with_included_script.html?query"),
+      embedded_test_server()->GetURL(
+          "/subresource_filter/frame_with_included_script.html?query"),
       shell());
   EXPECT_TRUE(WasParsedScriptElementLoaded(web_contents->GetMainFrame()));
 
   // A cross site blocklisted navigation should stay activated, however.
   GURL a_url(embedded_test_server()->GetURL(
-      "a.com", "/frame_with_included_script.html"));
+      "a.com", "/subresource_filter/frame_with_included_script.html"));
   ActivateSubresourceFilterInWebContentsForURL(web_contents, a_url);
   NavigateAndWaitForCompletion(a_url, shell());
   EXPECT_FALSE(WasParsedScriptElementLoaded(web_contents->GetMainFrame()));
 }
 
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_AdsInterventionEnforced_PageActivated \
-  DISABLED_AdsInterventionEnforced_PageActivated
-#else
-#define MAYBE_AdsInterventionEnforced_PageActivated \
-  AdsInterventionEnforced_PageActivated
-#endif
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
-                       MAYBE_AdsInterventionEnforced_PageActivated) {
+                       AdsInterventionEnforced_PageActivated) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
-#if !defined(OS_ANDROID)
-  InstallFakeSafeBrowsingDatabaseManagerInWebContents(web_contents);
-#endif
-
   base::HistogramTester histogram_tester;
   ukm::TestAutoSetUkmRecorder ukm_recorder;
-  auto* throttle_manager = subresource_filter::
-      ContentSubresourceFilterThrottleManager::FromWebContents(web_contents);
   auto* ads_intervention_manager =
       SubresourceFilterProfileContextFactory::GetForBrowserContext(
           web_contents->GetBrowserContext())
@@ -553,8 +416,8 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
   auto test_clock = std::make_unique<base::SimpleTestClock>();
   ads_intervention_manager->set_clock_for_testing(test_clock.get());
 
-  const GURL url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  const GURL url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
 
@@ -571,7 +434,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
 
   // Trigger an ads violation and renavigate the page. Should trigger
   // subresource filter activation.
-  throttle_manager->OnAdsViolationTriggered(
+  GetPrimaryPageThrottleManager()->OnAdsViolationTriggered(
       web_contents->GetMainFrame(),
       subresource_filter::mojom::AdsViolation::kMobileAdDensityByHeightAbove30);
   NavigateAndWaitForCompletion(url, shell());
@@ -627,26 +490,12 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
        static_cast<int>(AdsInterventionStatus::kExpired)));
 }
 
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_MultipleAdsInterventions_PageActivationClearedAfterFirst \
-  DISABLED_MultipleAdsInterventions_PageActivationClearedAfterFirst
-#else
-#define MAYBE_MultipleAdsInterventions_PageActivationClearedAfterFirst \
-  MultipleAdsInterventions_PageActivationClearedAfterFirst
-#endif
 IN_PROC_BROWSER_TEST_F(
     SubresourceFilterBrowserTest,
-    MAYBE_MultipleAdsInterventions_PageActivationClearedAfterFirst) {
+    MultipleAdsInterventions_PageActivationClearedAfterFirst) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
-#if !defined(OS_ANDROID)
-  InstallFakeSafeBrowsingDatabaseManagerInWebContents(web_contents);
-#endif
-
   base::HistogramTester histogram_tester;
   ukm::TestAutoSetUkmRecorder ukm_recorder;
-  auto* throttle_manager = subresource_filter::
-      ContentSubresourceFilterThrottleManager::FromWebContents(web_contents);
   auto* ads_intervention_manager =
       SubresourceFilterProfileContextFactory::GetForBrowserContext(
           web_contents->GetBrowserContext())
@@ -654,8 +503,8 @@ IN_PROC_BROWSER_TEST_F(
   auto test_clock = std::make_unique<base::SimpleTestClock>();
   ads_intervention_manager->set_clock_for_testing(test_clock.get());
 
-  const GURL url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  const GURL url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
 
@@ -672,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(
 
   // Trigger an ads violation and renavigate the page. Should trigger
   // subresource filter activation.
-  throttle_manager->OnAdsViolationTriggered(
+  GetPrimaryPageThrottleManager()->OnAdsViolationTriggered(
       web_contents->GetMainFrame(),
       subresource_filter::mojom::AdsViolation::kMobileAdDensityByHeightAbove30);
   NavigateAndWaitForCompletion(url, shell());
@@ -702,7 +551,7 @@ IN_PROC_BROWSER_TEST_F(
   // intervention. This intervention is a no-op.
   test_clock->Advance(subresource_filter::kAdsInterventionDuration.Get() -
                       base::TimeDelta::FromMinutes(30));
-  throttle_manager->OnAdsViolationTriggered(
+  GetPrimaryPageThrottleManager()->OnAdsViolationTriggered(
       web_contents->GetMainFrame(),
       subresource_filter::mojom::AdsViolation::kMobileAdDensityByHeightAbove30);
 
@@ -749,26 +598,12 @@ class SubresourceFilterBrowserTestWithoutAdsInterventionEnforcement
   base::test::ScopedFeatureList feature_list_;
 };
 
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_AdsInterventionNotEnforced_NoPageActivation \
-  DISABLED_AdsInterventionNotEnforced_NoPageActivation
-#else
-#define MAYBE_AdsInterventionNotEnforced_NoPageActivation \
-  AdsInterventionNotEnforced_NoPageActivation
-#endif
 IN_PROC_BROWSER_TEST_F(
     SubresourceFilterBrowserTestWithoutAdsInterventionEnforcement,
-    MAYBE_AdsInterventionNotEnforced_NoPageActivation) {
+    AdsInterventionNotEnforced_NoPageActivation) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
-#if !defined(OS_ANDROID)
-  InstallFakeSafeBrowsingDatabaseManagerInWebContents(web_contents);
-#endif
-
   base::HistogramTester histogram_tester;
   ukm::TestAutoSetUkmRecorder ukm_recorder;
-  auto* throttle_manager = subresource_filter::
-      ContentSubresourceFilterThrottleManager::FromWebContents(web_contents);
   auto* ads_intervention_manager =
       SubresourceFilterProfileContextFactory::GetForBrowserContext(
           web_contents->GetBrowserContext())
@@ -776,8 +611,8 @@ IN_PROC_BROWSER_TEST_F(
   auto test_clock = std::make_unique<base::SimpleTestClock>();
   ads_intervention_manager->set_clock_for_testing(test_clock.get());
 
-  const GURL url(
-      embedded_test_server()->GetURL("/frame_with_included_script.html"));
+  const GURL url(embedded_test_server()->GetURL(
+      "/subresource_filter/frame_with_included_script.html"));
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
 
@@ -791,7 +626,7 @@ IN_PROC_BROWSER_TEST_F(
 
   // Trigger an ads violation and renavigate to the page. Interventions are not
   // enforced so no activation should occur.
-  throttle_manager->OnAdsViolationTriggered(
+  GetPrimaryPageThrottleManager()->OnAdsViolationTriggered(
       web_contents->GetMainFrame(),
       subresource_filter::mojom::AdsViolation::kMobileAdDensityByHeightAbove30);
 
@@ -825,15 +660,8 @@ IN_PROC_BROWSER_TEST_F(
 // Test the "smart" UI, aka the logic to hide the UI on subsequent same-domain
 // navigations, until a certain time threshold has been reached. This is an
 // android-only feature.
-// Flaky on Windows. See https://crbug.com/1152429
-#if defined(OS_WIN)
-#define MAYBE_DoNotShowUIUntilThresholdReached \
-  DISABLED_DoNotShowUIUntilThresholdReached
-#else
-#define MAYBE_DoNotShowUIUntilThresholdReached DoNotShowUIUntilThresholdReached
-#endif
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
-                       MAYBE_DoNotShowUIUntilThresholdReached) {
+                       DoNotShowUIUntilThresholdReached) {
   auto* web_contents = static_cast<TabImpl*>(shell()->tab())->web_contents();
   auto* settings_manager =
       SubresourceFilterProfileContextFactory::GetForBrowserContext(
@@ -843,9 +671,9 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
   GURL a_url(embedded_test_server()->GetURL(
-      "a.com", "/frame_with_included_script.html"));
+      "a.com", "/subresource_filter/frame_with_included_script.html"));
   GURL b_url(embedded_test_server()->GetURL(
-      "b.com", "/frame_with_included_script.html"));
+      "b.com", "/subresource_filter/frame_with_included_script.html"));
   // Test utils only support one blocklisted site at a time.
   // TODO(csharrison): Add support for more than one URL.
   ActivateSubresourceFilterInWebContentsForURL(web_contents, a_url);

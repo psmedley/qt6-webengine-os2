@@ -26,6 +26,9 @@ class TextIteratorTextNodeHandler {
  public:
   TextIteratorTextNodeHandler(const TextIteratorBehavior&,
                               TextIteratorTextState*);
+  TextIteratorTextNodeHandler(const TextIteratorTextNodeHandler&) = delete;
+  TextIteratorTextNodeHandler& operator=(const TextIteratorTextNodeHandler&) =
+      delete;
 
   const Text* GetNode() const { return text_node_; }
 
@@ -103,7 +106,7 @@ class TextIteratorTextNodeHandler {
   // Used to do the whitespace collapsing logic.
   bool last_text_node_ended_with_collapsed_space_ = false;
 
-  // Used when text boxes are out of order (Hebrew/Arabic w/ embeded LTR text)
+  // Used when text boxes are out of order (Hebrew/Arabic w/ embedded LTR text)
   Vector<InlineTextBox*> sorted_text_boxes_;
   wtf_size_t sorted_text_boxes_position_ = 0;
 
@@ -111,8 +114,6 @@ class TextIteratorTextNodeHandler {
 
   // Contains state of emitted text.
   TextIteratorTextState& text_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextIteratorTextNodeHandler);
 };
 
 }  // namespace blink

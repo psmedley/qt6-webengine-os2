@@ -174,14 +174,14 @@ static scoped_refptr<SecurityOrigin> GetIsolatedWorldSecurityOrigin(
 
 scoped_refptr<SecurityOrigin> DOMWrapperWorld::IsolatedWorldSecurityOrigin(
     const base::UnguessableToken& cluster_id) {
-  DCHECK(this->IsIsolatedWorld());
+  DCHECK(IsIsolatedWorld());
   return GetIsolatedWorldSecurityOrigin(GetWorldId(), cluster_id);
 }
 
 scoped_refptr<const SecurityOrigin>
 DOMWrapperWorld::IsolatedWorldSecurityOrigin(
     const base::UnguessableToken& cluster_id) const {
-  DCHECK(this->IsIsolatedWorld());
+  DCHECK(IsIsolatedWorld());
   return GetIsolatedWorldSecurityOrigin(GetWorldId(), cluster_id);
 }
 
@@ -205,8 +205,8 @@ static IsolatedWorldStableIdMap& IsolatedWorldStableIds() {
 }
 
 String DOMWrapperWorld::NonMainWorldStableId() const {
-  DCHECK(!this->IsMainWorld());
-  return IsolatedWorldStableIds().at(GetWorldId());
+  DCHECK(!IsMainWorld());
+  return IsolatedWorldStableIds().DeprecatedAtOrEmptyValue(GetWorldId());
 }
 
 void DOMWrapperWorld::SetNonMainWorldStableId(int32_t world_id,
@@ -225,8 +225,9 @@ static IsolatedWorldHumanReadableNameMap& IsolatedWorldHumanReadableNames() {
 }
 
 String DOMWrapperWorld::NonMainWorldHumanReadableName() const {
-  DCHECK(!this->IsMainWorld());
-  return IsolatedWorldHumanReadableNames().at(GetWorldId());
+  DCHECK(!IsMainWorld());
+  return IsolatedWorldHumanReadableNames().DeprecatedAtOrEmptyValue(
+      GetWorldId());
 }
 
 void DOMWrapperWorld::SetNonMainWorldHumanReadableName(

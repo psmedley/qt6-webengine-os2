@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/component_export.h"
+#include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -26,18 +27,22 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobURLStoreImpl
                    base::WeakPtr<BlobUrlRegistry> registry);
   ~BlobURLStoreImpl() override;
 
-  void Register(mojo::PendingRemote<blink::mojom::Blob> blob,
-                const GURL& url,
-                RegisterCallback callback) override;
+  void Register(
+      mojo::PendingRemote<blink::mojom::Blob> blob,
+      const GURL& url,
+      // TODO(https://crbug.com/1224926): Remove this once experiment is over.
+      const base::UnguessableToken& unsafe_agent_cluster_id,
+      RegisterCallback callback) override;
   void Revoke(const GURL& url) override;
   void Resolve(const GURL& url, ResolveCallback callback) override;
   void ResolveAsURLLoaderFactory(
       const GURL& url,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
-      override;
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+      ResolveAsURLLoaderFactoryCallback callback) override;
   void ResolveForNavigation(
       const GURL& url,
-      mojo::PendingReceiver<blink::mojom::BlobURLToken> token) override;
+      mojo::PendingReceiver<blink::mojom::BlobURLToken> token,
+      ResolveForNavigationCallback callback) override;
 
  private:
   // Checks if the passed in url is a valid blob url for this blob url store.

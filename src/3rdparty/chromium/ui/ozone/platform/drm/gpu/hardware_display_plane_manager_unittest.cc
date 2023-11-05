@@ -187,7 +187,7 @@ void HardwareDisplayPlaneManagerTest::InitializeDrmState(
         }
         plane_prop.properties.push_back(
             {/* .id = */ pair.first, /* .value = */ value});
-      };
+      }
 
       plane_properties_.emplace_back(std::move(plane_prop));
     }
@@ -1118,10 +1118,10 @@ TEST_P(HardwareDisplayPlaneManagerAtomicTest,
   scoped_refptr<ui::PageFlipRequest> page_flip_request =
       base::MakeRefCounted<ui::PageFlipRequest>(base::TimeDelta());
 
-  std::unique_ptr<gfx::GpuFence> out_fence;
+  gfx::GpuFenceHandle release_fence;
   EXPECT_TRUE(fake_drm_->plane_manager()->Commit(&state_, page_flip_request,
-                                                 &out_fence));
-  EXPECT_EQ(nullptr, out_fence);
+                                                 &release_fence));
+  EXPECT_TRUE(release_fence.is_null());
 }
 
 TEST_P(HardwareDisplayPlaneManagerTest,
@@ -1172,6 +1172,23 @@ TEST_P(HardwareDisplayPlaneManagerTest, ForceOpaqueFormatsForAddFramebuffer) {
     EXPECT_EQ(drm_fb->opaque_framebuffer_pixel_format(),
               format_pair.used_fourcc);
   }
+
+  // If DRM supports high-bitdepth formats with Alpha, there's no need for
+  // opaque decaying. Note that we have to support all |kFourCCFormats|.
+  fake_drm_->SetPropertyBlob(ui::MockDrmDevice::AllocateInFormatsBlob(
+      kInFormatsBlobPropId, {DRM_FORMAT_ARGB2101010, DRM_FORMAT_ABGR2101010},
+      {}));
+  fake_drm_->InitializeState(crtc_properties_, connector_properties_,
+                             plane_properties_, property_names_, use_atomic_);
+
+  for (const auto& format_pair : kFourCCFormats) {
+    scoped_refptr<ui::DrmFramebuffer> drm_fb =
+        CreateBufferWithFormat(kDefaultBufferSize, format_pair.input_fourcc);
+
+    EXPECT_EQ(drm_fb->framebuffer_pixel_format(), format_pair.input_fourcc);
+    EXPECT_EQ(drm_fb->opaque_framebuffer_pixel_format(),
+              format_pair.used_fourcc);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(All,
@@ -1213,7 +1230,7 @@ std::unique_ptr<gfx::GpuFence> FakeFenceFD::GetGpuFence() const {
 }
 
 void FakeFenceFD::Signal() const {
-  base::WriteFileDescriptor(write_fd.get(), "a", 1);
+  base::WriteFileDescriptor(write_fd.get(), "a");
 }
 
 class HardwareDisplayPlaneManagerPlanesReadyTest : public testing::Test {
@@ -1357,11 +1374,11 @@ TEST_P(HardwareDisplayPlaneManagerAtomicTest, OverlaySourceCrop) {
     EXPECT_TRUE(fake_drm_->plane_manager()->AssignOverlayPlanes(
         &state_, assigns, crtc_properties_[0].id));
 
-    std::unique_ptr<gfx::GpuFence> out_fence;
+    gfx::GpuFenceHandle release_fence;
     scoped_refptr<ui::PageFlipRequest> page_flip_request =
         base::MakeRefCounted<ui::PageFlipRequest>(base::TimeDelta());
     EXPECT_TRUE(fake_drm_->plane_manager()->Commit(&state_, page_flip_request,
-                                                   &out_fence));
+                                                   &release_fence));
 
     EXPECT_EQ(2u << 16, GetPlanePropertyValue(kPlaneOffset, "SRC_W"));
     EXPECT_EQ(2u << 16, GetPlanePropertyValue(kPlaneOffset, "SRC_H"));
@@ -1380,9 +1397,9 @@ TEST_P(HardwareDisplayPlaneManagerAtomicTest, OverlaySourceCrop) {
 
     scoped_refptr<ui::PageFlipRequest> page_flip_request =
         base::MakeRefCounted<ui::PageFlipRequest>(base::TimeDelta());
-    std::unique_ptr<gfx::GpuFence> out_fence;
+    gfx::GpuFenceHandle release_fence;
     EXPECT_TRUE(fake_drm_->plane_manager()->Commit(&state_, page_flip_request,
-                                                   &out_fence));
+                                                   &release_fence));
 
     EXPECT_EQ(1u << 16, GetPlanePropertyValue(kPlaneOffset, "SRC_W"));
     EXPECT_EQ(2u << 16, GetPlanePropertyValue(kPlaneOffset, "SRC_H"));
@@ -1401,9 +1418,9 @@ TEST_P(HardwareDisplayPlaneManagerAtomicTest, OverlaySourceCrop) {
 
     scoped_refptr<ui::PageFlipRequest> page_flip_request =
         base::MakeRefCounted<ui::PageFlipRequest>(base::TimeDelta());
-    std::unique_ptr<gfx::GpuFence> out_fence;
+    gfx::GpuFenceHandle release_fence;
     EXPECT_TRUE(fake_drm_->plane_manager()->Commit(&state_, page_flip_request,
-                                                   &out_fence));
+                                                   &release_fence));
 
     EXPECT_EQ(2u << 16, GetPlanePropertyValue(kPlaneOffset, "SRC_W"));
     EXPECT_EQ(1u << 16, GetPlanePropertyValue(kPlaneOffset, "SRC_H"));

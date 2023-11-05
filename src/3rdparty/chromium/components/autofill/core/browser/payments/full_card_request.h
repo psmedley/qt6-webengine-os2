@@ -10,7 +10,6 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_client.h"
@@ -19,7 +18,7 @@
 
 namespace autofill {
 
-class AutofillManagerTest;
+class BrowserAutofillManagerTest;
 class AutofillMetricsTest;
 class CreditCardAccessManagerTest;
 class CreditCardCVCAuthenticatorTest;
@@ -34,6 +33,8 @@ class FullCardRequest final : public CardUnmaskDelegate {
  public:
   // The type of failure.
   enum FailureType {
+    UNKNOWN,
+
     // The user closed the prompt. The following scenarios are possible:
     // 1) The user declined to enter their CVC and closed the prompt.
     // 2) The user provided their CVC, got auth declined and then closed the
@@ -44,6 +45,14 @@ class FullCardRequest final : public CardUnmaskDelegate {
 
     // The card could not be looked up due to card auth declined or failed.
     VERIFICATION_DECLINED,
+
+    // The request failed due to transient failures when retrieving virtual card
+    // information.
+    VIRTUAL_CARD_RETRIEVAL_TRANSIENT_FAILURE,
+
+    // The request failed due to permanent failures when retrieving virtual card
+    // information.
+    VIRTUAL_CARD_RETRIEVAL_PERMANENT_FAILURE,
 
     // The request failed for technical reasons, such as a closing page or lack
     // of network connection.
@@ -57,7 +66,7 @@ class FullCardRequest final : public CardUnmaskDelegate {
     virtual void OnFullCardRequestSucceeded(
         const payments::FullCardRequest& full_card_request,
         const CreditCard& card,
-        const base::string16& cvc) = 0;
+        const std::u16string& cvc) = 0;
     virtual void OnFullCardRequestFailed(FailureType failure_type) = 0;
   };
 
@@ -102,28 +111,36 @@ class FullCardRequest final : public CardUnmaskDelegate {
   // Retrieves the pan for |card| after querying the user for CVC and invokes
   // Delegate::OnFullCardRequestSucceeded() or
   // Delegate::OnFullCardRequestFailed(). Only one request should be active at a
-  // time.
+  // time. |last_committed_url_origin| is the full origin of the url where the
+  // card retrieval happens. |last_committed_url_origin| needs to be specified
+  // if the full card request is for a virtual card.
   //
   // If the card is local, has a non-empty GUID, and the user has updated its
   // expiration date, then this function will write the new information to
   // autofill table on disk.
-  void GetFullCard(const CreditCard& card,
-                   AutofillClient::UnmaskCardReason reason,
-                   base::WeakPtr<ResultDelegate> result_delegate,
-                   base::WeakPtr<UIDelegate> ui_delegate);
+  void GetFullCard(
+      const CreditCard& card,
+      AutofillClient::UnmaskCardReason reason,
+      base::WeakPtr<ResultDelegate> result_delegate,
+      base::WeakPtr<UIDelegate> ui_delegate,
+      absl::optional<GURL> last_committed_url_origin = absl::nullopt);
 
   // Retrieves the pan for |card| through a FIDO assertion and invokes
   // Delegate::OnFullCardRequestSucceeded() or
   // Delegate::OnFullCardRequestFailed(). Only one request should be active at a
-  // time.
+  // time. |last_committed_url_origin| is the full origin of the url where the
+  // card retrieval happens. |last_committed_url_origin| needs to be specified
+  // if the full card request is for a virtual card.
   //
   // If the card is local, has a non-empty GUID, and the user has updated its
   // expiration date, then this function will write the new information to
   // autofill table on disk.
-  void GetFullCardViaFIDO(const CreditCard& card,
-                          AutofillClient::UnmaskCardReason reason,
-                          base::WeakPtr<ResultDelegate> result_delegate,
-                          base::Value fido_assertion_info);
+  void GetFullCardViaFIDO(
+      const CreditCard& card,
+      AutofillClient::UnmaskCardReason reason,
+      base::WeakPtr<ResultDelegate> result_delegate,
+      base::Value fido_assertion_info,
+      absl::optional<GURL> last_committed_url_origin = absl::nullopt);
 
   // Called by the payments client when a card has been unmasked.
   void OnDidGetRealPan(
@@ -144,7 +161,7 @@ class FullCardRequest final : public CardUnmaskDelegate {
   }
 
  private:
-  friend class autofill::AutofillManagerTest;
+  friend class autofill::BrowserAutofillManagerTest;
   friend class autofill::AutofillMetricsTest;
   friend class autofill::CreditCardAccessManagerTest;
   friend class autofill::CreditCardCVCAuthenticatorTest;
@@ -156,15 +173,19 @@ class FullCardRequest final : public CardUnmaskDelegate {
   //
   // If |ui_delegate| is set, then the user is queried for CVC.
   // Else if |fido_assertion_info| is a dictionary, FIDO verification is used.
+  // |last_committed_url_origin| is the url of the website on which the card is
+  // unmasked. |last_committed_url_origin| needs to be specified if the full
+  // card request is for a virtual card.
   //
   // If the card is local, has a non-empty GUID, and the user has updated its
   // expiration date, then this function will write the new information to
   // autofill table on disk.
-  void GetFullCard(const CreditCard& card,
-                   AutofillClient::UnmaskCardReason reason,
-                   base::WeakPtr<ResultDelegate> result_delegate,
-                   base::WeakPtr<UIDelegate> ui_delegate,
-                   base::Optional<base::Value> fido_assertion_info);
+  void GetFullCardImpl(const CreditCard& card,
+                       AutofillClient::UnmaskCardReason reason,
+                       base::WeakPtr<ResultDelegate> result_delegate,
+                       base::WeakPtr<UIDelegate> ui_delegate,
+                       absl::optional<base::Value> fido_assertion_info,
+                       absl::optional<GURL> last_committed_url_origin);
 
   // CardUnmaskDelegate:
   void OnUnmaskPromptAccepted(

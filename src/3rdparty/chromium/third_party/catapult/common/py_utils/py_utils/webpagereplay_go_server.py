@@ -4,6 +4,7 @@
 
 """Start and stop Web Page Replay."""
 
+from __future__ import print_function
 import logging
 import os
 import re
@@ -11,7 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-import urllib
+import six.moves.urllib.request # pylint: disable=import-error
 
 import py_utils
 from py_utils import atexit_with_log
@@ -136,7 +137,8 @@ class ReplayServer(object):
       cur_cwd = os.getcwd()
       os.chdir(go_folder)
       try:
-        print subprocess.check_output(['go', 'build', os.path.join(go_folder, 'wpr.go')])
+        print(subprocess.check_output(
+            ['go', 'build', os.path.join(go_folder, 'wpr.go')]))
       except subprocess.CalledProcessError:
         exit(1)
       os.chdir(cur_cwd)
@@ -392,7 +394,7 @@ class ReplayServer(object):
       if logging.getLogger('').isEnabledFor(log_level):
         logging.log(log_level, output)
       else:
-        print output
+        print(output)
 
     os.remove(self._temp_log_file_path)
     self._temp_log_file_path = None
@@ -420,7 +422,8 @@ class ReplayServer(object):
     """
     url = '%s://%s:%s/%s' % (
         protocol, self._replay_host, self._started_ports[protocol], url_path)
-    return urllib.urlopen(url, proxies={})
+
+    return six.moves.urllib.request.FancyURLopener({}).open(url) # pylint: disable=no-member
 
 def _ResetInterruptHandler():
   """Reset the interrupt handler back to the default.

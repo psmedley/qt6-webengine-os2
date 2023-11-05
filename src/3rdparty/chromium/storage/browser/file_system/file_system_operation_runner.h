@@ -43,7 +43,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileSystemOperationRunner {
   using WriteCallback = FileSystemOperation::WriteCallback;
   using OpenFileCallback = FileSystemOperation::OpenFileCallback;
   using ErrorBehavior = FileSystemOperation::ErrorBehavior;
-  using CopyProgressCallback = FileSystemOperation::CopyProgressCallback;
+  using CopyOrMoveProgressCallback =
+      FileSystemOperation::CopyOrMoveProgressCallback;
   using CopyFileProgressCallback =
       FileSystemOperation::CopyFileProgressCallback;
   using CopyOrMoveOption = FileSystemOperation::CopyOrMoveOption;
@@ -84,7 +85,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileSystemOperationRunner {
                    const FileSystemURL& dest_url,
                    CopyOrMoveOption option,
                    ErrorBehavior error_behavior,
-                   const CopyProgressCallback& progress_callback,
+                   const CopyOrMoveProgressCallback& progress_callback,
                    StatusCallback callback);
 
   // Moves a file or directory from |src_url| to |dest_url|. A new file
@@ -93,6 +94,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileSystemOperationRunner {
   OperationID Move(const FileSystemURL& src_url,
                    const FileSystemURL& dest_url,
                    CopyOrMoveOption option,
+                   ErrorBehavior error_behavior,
+                   const CopyOrMoveProgressCallback& progress_callback,
                    StatusCallback callback);
 
   // Checks if a directory is present at |url|.
@@ -151,13 +154,10 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileSystemOperationRunner {
                         const base::Time& last_modified_time,
                         StatusCallback callback);
 
-  // Opens a file at |url| with |file_flags|, where flags are OR'ed
-  // values of base::PlatformFileFlags.
-  //
-  // |peer_handle| is the process handle of a pepper plugin process, which
-  // is necessary for underlying IPC calls with Pepper plugins.
-  //
-  // This function is used only by Pepper as of writing.
+  // Opens a file at |url| with |file_flags|, where flags are OR'ed values of
+  // base::File::Flags. This operation is not supported on all filesystems or
+  // all situation e.g. it will always fail for the sandboxed system when in
+  // Incognito mode.
   OperationID OpenFile(const FileSystemURL& url,
                        int file_flags,
                        OpenFileCallback callback);
@@ -283,8 +283,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileSystemOperationRunner {
                          scoped_refptr<ShareableFileReference> file_ref);
 
   void OnCopyProgress(const OperationID id,
-                      const CopyProgressCallback& callback,
-                      FileSystemOperation::CopyProgressType type,
+                      const CopyOrMoveProgressCallback& callback,
+                      FileSystemOperation::CopyOrMoveProgressType type,
                       const FileSystemURL& source_url,
                       const FileSystemURL& dest_url,
                       int64_t size);

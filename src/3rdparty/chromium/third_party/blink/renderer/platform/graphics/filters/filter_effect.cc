@@ -23,6 +23,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/filter_effect.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 
@@ -138,7 +139,7 @@ sk_sp<PaintFilter> FilterEffect::CreateTransparentBlack() const {
       std::move(color_filter), nullptr, base::OptionalOrNullptr(GetCropRect()));
 }
 
-base::Optional<PaintFilter::CropRect> FilterEffect::GetCropRect() const {
+absl::optional<PaintFilter::CropRect> FilterEffect::GetCropRect() const {
   if (!ClipsToBounds())
     return {};
   FloatRect computed_bounds = FilterPrimitiveSubregion();

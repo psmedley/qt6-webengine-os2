@@ -96,14 +96,15 @@ hb_segment_properties_hash (const hb_segment_properties_t *p)
  * As an optimization, both info and out_info may point to the
  * same piece of memory, which is owned by info.  This remains the
  * case as long as out_len doesn't exceed i at any time.
- * In that case, swap_buffers() is no-op and the glyph operations operate
- * mostly in-place.
+ * In that case, swap_buffers() is mostly no-op and the glyph operations
+ * operate mostly in-place.
  *
  * As soon as out_info gets longer than info, out_info is moved over
- * to an alternate buffer (which we reuse the pos buffer for!), and its
+ * to an alternate buffer (which we reuse the pos buffer for), and its
  * current contents (out_len entries) are copied to the new place.
+ *
  * This should all remain transparent to the user.  swap_buffers() then
- * switches info and out_info.
+ * switches info over to out_info and does housekeeping.
  */
 
 
@@ -136,8 +137,8 @@ hb_buffer_t::enlarge (unsigned int size)
   if (unlikely (hb_unsigned_mul_overflows (new_allocated, sizeof (info[0]))))
     goto done;
 
-  new_pos = (hb_glyph_position_t *) realloc (pos, new_allocated * sizeof (pos[0]));
-  new_info = (hb_glyph_info_t *) realloc (info, new_allocated * sizeof (info[0]));
+  new_pos = (hb_glyph_position_t *) hb_realloc (pos, new_allocated * sizeof (pos[0]));
+  new_info = (hb_glyph_info_t *) hb_realloc (info, new_allocated * sizeof (info[0]));
 
 done:
   if (unlikely (!new_pos || !new_info))
@@ -218,9 +219,6 @@ hb_buffer_t::get_scratch_buffer (unsigned int *size)
 void
 hb_buffer_t::reset ()
 {
-  if (unlikely (hb_object_is_immutable (this)))
-    return;
-
   hb_unicode_funcs_destroy (unicode);
   unicode = hb_unicode_funcs_reference (hb_unicode_funcs_get_default ());
   flags = HB_BUFFER_FLAG_DEFAULT;
@@ -233,9 +231,6 @@ hb_buffer_t::reset ()
 void
 hb_buffer_t::clear ()
 {
-  if (unlikely (hb_object_is_immutable (this)))
-    return;
-
   hb_segment_properties_t default_props = HB_SEGMENT_PROPERTIES_DEFAULT;
   props = default_props;
   scratch_flags = HB_BUFFER_SCRATCH_FLAG_DEFAULT;
@@ -288,27 +283,12 @@ hb_buffer_t::add_info (const hb_glyph_info_t &glyph_info)
 
 
 void
-hb_buffer_t::remove_output ()
-{
-  if (unlikely (hb_object_is_immutable (this)))
-    return;
-
-  have_output = false;
-  have_positions = false;
-
-  out_len = 0;
-  out_info = info;
-}
-
-void
 hb_buffer_t::clear_output ()
 {
-  if (unlikely (hb_object_is_immutable (this)))
-    return;
-
   have_output = true;
   have_positions = false;
 
+  idx = 0;
   out_len = 0;
   out_info = info;
 }
@@ -316,9 +296,6 @@ hb_buffer_t::clear_output ()
 void
 hb_buffer_t::clear_positions ()
 {
-  if (unlikely (hb_object_is_immutable (this)))
-    return;
-
   have_output = false;
   have_positions = true;
 
@@ -331,51 +308,25 @@ hb_buffer_t::clear_positions ()
 void
 hb_buffer_t::swap_buffers ()
 {
-  if (unlikely (!successful)) return;
-
   assert (have_output);
-  have_output = false;
+
+  assert (idx <= len);
+
+  if (unlikely (!successful || !next_glyphs (len - idx)))
+    goto reset;
 
   if (out_info != info)
   {
-    hb_glyph_info_t *tmp_string;
-    tmp_string = info;
+    pos = (hb_glyph_position_t *) info;
     info = out_info;
-    out_info = tmp_string;
-    pos = (hb_glyph_position_t *) out_info;
   }
-
-  unsigned int tmp;
-  tmp = len;
   len = out_len;
-  out_len = tmp;
 
+reset:
+  have_output = false;
+  out_info = info;
+  out_len = 0;
   idx = 0;
-}
-
-
-void
-hb_buffer_t::replace_glyphs (unsigned int num_in,
-			     unsigned int num_out,
-			     const uint32_t *glyph_data)
-{
-  if (unlikely (!make_room_for (num_in, num_out))) return;
-
-  assert (idx + num_in <= len);
-
-  merge_clusters (idx, idx + num_in);
-
-  hb_glyph_info_t orig_info = info[idx];
-  hb_glyph_info_t *pinfo = &out_info[out_len];
-  for (unsigned int i = 0; i < num_out; i++)
-  {
-    *pinfo = orig_info;
-    pinfo->codepoint = glyph_data[i];
-    pinfo++;
-  }
-
-  idx  += num_in;
-  out_len += num_out;
 }
 
 bool
@@ -409,12 +360,11 @@ hb_buffer_t::move_to (unsigned int i)
     /* This will blow in our face if memory allocation fails later
      * in this same lookup...
      *
-     * We used to shift with extra 32 items, instead of the 0 below.
+     * We used to shift with extra 32 items.
      * But that would leave empty slots in the buffer in case of allocation
-     * failures.  Setting to zero for now to avoid other problems (see
-     * comments in shift_forward().  This can cause O(N^2) behavior more
-     * severely than adding 32 empty slots can... */
-    if (unlikely (idx < count && !shift_forward (count + 0))) return false;
+     * failures.  See comments in shift_forward().  This can cause O(N^2)
+     * behavior more severely than adding 32 empty slots can... */
+    if (unlikely (idx < count && !shift_forward (count - idx))) return false;
 
     assert (idx >= count);
 
@@ -666,7 +616,7 @@ DEFINE_NULL_INSTANCE (hb_buffer_t) =
   HB_BUFFER_CONTENT_TYPE_INVALID,
   HB_SEGMENT_PROPERTIES_DEFAULT,
   false, /* successful */
-  true, /* have_output */
+  false, /* have_output */
   true  /* have_positions */
 
   /* Zero is good enough for everything else. */
@@ -753,14 +703,14 @@ hb_buffer_destroy (hb_buffer_t *buffer)
 
   hb_unicode_funcs_destroy (buffer->unicode);
 
-  free (buffer->info);
-  free (buffer->pos);
+  hb_free (buffer->info);
+  hb_free (buffer->pos);
 #ifndef HB_NO_BUFFER_MESSAGE
   if (buffer->message_destroy)
     buffer->message_destroy (buffer->message_data);
 #endif
 
-  free (buffer);
+  hb_free (buffer);
 }
 
 /**
@@ -1222,6 +1172,9 @@ hb_buffer_get_invisible_glyph (hb_buffer_t    *buffer)
 void
 hb_buffer_reset (hb_buffer_t *buffer)
 {
+  if (unlikely (hb_object_is_immutable (buffer)))
+    return;
+
   buffer->reset ();
 }
 
@@ -1237,6 +1190,9 @@ hb_buffer_reset (hb_buffer_t *buffer)
 void
 hb_buffer_clear_contents (hb_buffer_t *buffer)
 {
+  if (unlikely (hb_object_is_immutable (buffer)))
+    return;
+
   buffer->clear ();
 }
 
@@ -1321,7 +1277,7 @@ hb_buffer_set_length (hb_buffer_t  *buffer,
   if (unlikely (hb_object_is_immutable (buffer)))
     return length == 0;
 
-  if (!buffer->ensure (length))
+  if (unlikely (!buffer->ensure (length)))
     return false;
 
   /* Wipe the new space */
@@ -1393,6 +1349,11 @@ hb_buffer_get_glyph_infos (hb_buffer_t  *buffer,
  * Returns @buffer glyph position array.  Returned pointer
  * is valid as long as @buffer contents are not modified.
  *
+ * If buffer did not have positions before, the positions will be
+ * initialized to zeros, unless this function is called from
+ * within a buffer message callback (see hb_buffer_set_message_func()),
+ * in which case %NULL is returned.
+ *
  * Return value: (transfer none) (array length=length):
  * The @buffer glyph position array.
  * The value valid as long as buffer has not been modified.
@@ -1403,11 +1364,16 @@ hb_glyph_position_t *
 hb_buffer_get_glyph_positions (hb_buffer_t  *buffer,
 			       unsigned int *length)
 {
-  if (!buffer->have_positions)
-    buffer->clear_positions ();
-
   if (length)
     *length = buffer->len;
+
+  if (!buffer->have_positions)
+  {
+    if (unlikely (buffer->message_depth))
+      return nullptr;
+
+    buffer->clear_positions ();
+  }
 
   return (hb_glyph_position_t *) buffer->pos;
 }
@@ -1551,7 +1517,10 @@ hb_buffer_add_utf (hb_buffer_t  *buffer,
   if (item_length == -1)
     item_length = text_length - item_offset;
 
-  buffer->ensure (buffer->len + item_length * sizeof (T) / 4);
+  if (unlikely (item_length < 0 ||
+		item_length > INT_MAX / 8 ||
+		!buffer->ensure (buffer->len + item_length * sizeof (T) / 4)))
+    return;
 
   /* If buffer is empty and pre-context provided, install it.
    * This check is written this way, to make sure people can
@@ -1768,11 +1737,6 @@ hb_buffer_append (hb_buffer_t *buffer,
   if (start == end)
     return;
 
-  if (!buffer->len)
-    buffer->content_type = source->content_type;
-  if (!buffer->have_positions && source->have_positions)
-    buffer->clear_positions ();
-
   if (buffer->len + (end - start) < buffer->len) /* Overflows. */
   {
     buffer->successful = false;
@@ -1783,6 +1747,11 @@ hb_buffer_append (hb_buffer_t *buffer,
   hb_buffer_set_length (buffer, buffer->len + (end - start));
   if (unlikely (!buffer->successful))
     return;
+
+  if (!orig_len)
+    buffer->content_type = source->content_type;
+  if (!buffer->have_positions && source->have_positions)
+    buffer->clear_positions ();
 
   memcpy (buffer->info + orig_len, source->info + start, (end - start) * sizeof (buffer->info[0]));
   if (buffer->have_positions)

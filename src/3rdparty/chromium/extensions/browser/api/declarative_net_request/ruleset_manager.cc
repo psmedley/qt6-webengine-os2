@@ -10,10 +10,9 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "components/web_cache/browser/web_cache_manager.h"
@@ -30,6 +29,7 @@
 #include "extensions/browser/extension_util.h"
 #include "extensions/common/api/declarative_net_request.h"
 #include "extensions/common/constants.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/origin.h"
 
 namespace extensions {
@@ -209,9 +209,10 @@ void RulesetManager::OnRenderFrameDeleted(content::RenderFrameHost* host) {
     ruleset.matcher->OnRenderFrameDeleted(host);
 }
 
-void RulesetManager::OnDidFinishNavigation(content::RenderFrameHost* host) {
+void RulesetManager::OnDidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
   for (ExtensionRulesetData& ruleset : rulesets_)
-    ruleset.matcher->OnDidFinishNavigation(host);
+    ruleset.matcher->OnDidFinishNavigation(navigation_handle);
 }
 
 void RulesetManager::SetObserverForTest(TestObserver* observer) {
@@ -242,7 +243,7 @@ bool RulesetManager::ExtensionRulesetData::operator<(
          std::tie(other.extension_install_time, other.extension_id);
 }
 
-base::Optional<RequestAction> RulesetManager::GetBeforeRequestAction(
+absl::optional<RequestAction> RulesetManager::GetBeforeRequestAction(
     const std::vector<RulesetAndPageAccess>& rulesets,
     const WebRequestInfo& request,
     const RequestParams& params) const {
@@ -253,7 +254,7 @@ base::Optional<RequestAction> RulesetManager::GetBeforeRequestAction(
 
   // The priorities of actions between different extensions is different from
   // the priorities of actions within an extension.
-  const auto action_priority = [](const base::Optional<RequestAction>& action) {
+  const auto action_priority = [](const absl::optional<RequestAction>& action) {
     if (!action.has_value())
       return 0;
     switch (action->type) {
@@ -272,7 +273,7 @@ base::Optional<RequestAction> RulesetManager::GetBeforeRequestAction(
     }
   };
 
-  base::Optional<RequestAction> action;
+  absl::optional<RequestAction> action;
 
   // This iterates in decreasing order of extension installation time. Hence
   // more recently installed extensions get higher priority in choosing the
@@ -409,7 +410,7 @@ std::vector<RequestAction> RulesetManager::EvaluateRequestInternal(
 
   // If the request is blocked/allowed/redirected, no further modifications can
   // happen. A new request will be created and subsequently evaluated.
-  base::Optional<RequestAction> action =
+  absl::optional<RequestAction> action =
       GetBeforeRequestAction(rulesets_to_evaluate, request, params);
   if (action) {
     actions.push_back(std::move(std::move(*action)));

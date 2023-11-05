@@ -10,9 +10,11 @@
 #include "base/macros.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 
-namespace chromeos {
-
+namespace ash {
 class SyncConsentScreen;
+}
+
+namespace chromeos {
 
 // Interface for dependency injection between SyncConsentScreen and its
 // WebUI representation.
@@ -23,7 +25,7 @@ class SyncConsentScreenView {
   virtual ~SyncConsentScreenView() = default;
 
   // Sets screen this view belongs to.
-  virtual void Bind(SyncConsentScreen* screen) = 0;
+  virtual void Bind(ash::SyncConsentScreen* screen) = 0;
 
   // Shows the contents of the screen.
   virtual void Show() = 0;
@@ -34,6 +36,10 @@ class SyncConsentScreenView {
   // Controls if the loading throbber is visible. This is used when
   // SyncScreenBehavior is unknown.
   virtual void SetThrobberVisible(bool visible) = 0;
+
+  // Set the minor mode flag, which controls whether we could use nudge
+  // techinuque on the UI.
+  virtual void SetIsMinorMode(bool value) = 0;
 };
 
 // The sole implementation of the SyncConsentScreenView, using WebUI.
@@ -54,10 +60,11 @@ class SyncConsentScreenHandler : public BaseScreenHandler,
       ::login::LocalizedValuesBuilder* builder) override;
 
   // SyncConsentScreenView:
-  void Bind(SyncConsentScreen* screen) override;
+  void Bind(ash::SyncConsentScreen* screen) override;
   void Show() override;
   void Hide() override;
   void SetThrobberVisible(bool visible) override;
+  void SetIsMinorMode(bool value) override;
 
  private:
   // BaseScreenHandler:
@@ -65,9 +72,9 @@ class SyncConsentScreenHandler : public BaseScreenHandler,
   void RegisterMessages() override;
 
   // WebUI message handlers
-  void HandleContinueAndReview(const ::login::StringList& consent_description,
-                               const std::string& consent_confirmation);
-  void HandleContinueWithDefaults(
+  void HandleNonSplitSettingsContinue(
+      const bool opted_in,
+      const bool review_sync,
       const ::login::StringList& consent_description,
       const std::string& consent_confirmation);
 
@@ -86,15 +93,26 @@ class SyncConsentScreenHandler : public BaseScreenHandler,
   void RememberLocalizedValue(const std::string& name,
                               const int resource_id,
                               ::login::LocalizedValuesBuilder* builder);
+  void RememberLocalizedValueWithDeviceName(
+      const std::string& name,
+      const int resource_id,
+      ::login::LocalizedValuesBuilder* builder);
 
   // Resource IDs of the displayed strings.
   std::unordered_set<int> known_string_ids_;
 
-  SyncConsentScreen* screen_ = nullptr;
+  ash::SyncConsentScreen* screen_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(SyncConsentScreenHandler);
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after the //chrome/browser/chromeos
+// source migration is finished.
+namespace ash {
+using ::chromeos::SyncConsentScreenHandler;
+using ::chromeos::SyncConsentScreenView;
+}  // namespace ash
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_SYNC_CONSENT_SCREEN_HANDLER_H_

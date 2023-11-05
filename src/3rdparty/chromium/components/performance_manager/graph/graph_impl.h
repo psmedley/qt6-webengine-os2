@@ -9,13 +9,10 @@
 
 #include <map>
 #include <memory>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include "base/containers/flat_map.h"
-#include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/process/process_handle.h"
 #include "base/sequence_checker.h"
@@ -23,6 +20,7 @@
 #include "components/performance_manager/public/graph/graph.h"
 #include "components/performance_manager/public/graph/graph_registered.h"
 #include "components/performance_manager/public/graph/node_attached_data.h"
+#include "components/performance_manager/public/graph/node_state.h"
 #include "components/performance_manager/public/render_process_host_id.h"
 #include "components/performance_manager/registered_objects.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
@@ -56,6 +54,9 @@ class GraphImpl : public Graph {
   GraphImpl(const GraphImpl&) = delete;
   GraphImpl& operator=(const GraphImpl&) = delete;
 
+  // Set up the graph.
+  void SetUp();
+
   // Tear down the graph to prepare for deletion.
   void TearDown();
 
@@ -76,12 +77,12 @@ class GraphImpl : public Graph {
   std::unique_ptr<GraphOwned> TakeFromGraph(GraphOwned* graph_owned) override;
   void RegisterObject(GraphRegistered* object) override;
   void UnregisterObject(GraphRegistered* object) override;
-  const SystemNode* FindOrCreateSystemNode() override;
+  const SystemNode* GetSystemNode() const override;
   std::vector<const ProcessNode*> GetAllProcessNodes() const override;
   std::vector<const FrameNode*> GetAllFrameNodes() const override;
   std::vector<const PageNode*> GetAllPageNodes() const override;
   std::vector<const WorkerNode*> GetAllWorkerNodes() const override;
-  bool IsEmpty() const override;
+  bool HasOnlySystemNode() const override;
   ukm::UkmRecorder* GetUkmRecorder() const override;
   NodeDataDescriberRegistry* GetNodeDataDescriberRegistry() const override;
   uintptr_t GetImplType() const override;
@@ -104,7 +105,10 @@ class GraphImpl : public Graph {
     return ukm_recorder_;
   }
 
-  SystemNodeImpl* FindOrCreateSystemNodeImpl();
+  SystemNodeImpl* GetSystemNodeImpl() const {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    return system_node_.get();
+  }
   std::vector<ProcessNodeImpl*> GetAllProcessNodeImpls() const;
   std::vector<FrameNodeImpl*> GetAllFrameNodeImpls() const;
   std::vector<PageNodeImpl*> GetAllPageNodeImpls() const;
@@ -154,6 +158,9 @@ class GraphImpl : public Graph {
  protected:
   friend class NodeBase;
 
+  // Used to implement `NodeBase::GetNodeState()` and `Node::GetNodeState()`.
+  NodeState GetNodeState(const NodeBase* node) const;
+
   // Provides access to per-node-class typed observers. Exposed to nodes via
   // TypedNodeBase.
   template <typename Observer>
@@ -176,8 +183,9 @@ class GraphImpl : public Graph {
   using ProcessByPidMap = std::map<base::ProcessId, ProcessNodeImpl*>;
   using FrameById = std::map<ProcessAndFrameId, FrameNodeImpl*>;
 
-  void OnNodeAdded(NodeBase* node);
-  void OnBeforeNodeRemoved(NodeBase* node);
+  void DispatchNodeAddedNotifications(NodeBase* node);
+  void DispatchNodeRemovedNotifications(NodeBase* node);
+  void RemoveNodeAttachedData(NodeBase* node);
 
   // Returns a new serialization ID.
   friend class NodeBase;
@@ -200,6 +208,7 @@ class GraphImpl : public Graph {
   template <typename NodeType, typename ReturnNodeType>
   std::vector<ReturnNodeType> GetAllNodesOfType() const;
 
+  void CreateSystemNode() VALID_CONTEXT_REQUIRED(sequence_checker_);
   void ReleaseSystemNode() VALID_CONTEXT_REQUIRED(sequence_checker_);
 
   std::unique_ptr<SystemNodeImpl> system_node_
@@ -253,6 +262,14 @@ class GraphImpl : public Graph {
   // The most recently assigned serialization ID.
   int64_t current_node_serialization_id_ GUARDED_BY_CONTEXT(sequence_checker_) =
       0u;
+
+  // The identity of the node currently being added to or removed from the
+  // graph, if any. This is used to prevent re-entrant notifications.
+  const NodeBase* node_in_transition_ = nullptr;
+
+  // The state of the node being added or removed. Any node in the graph not
+  // explicitly in transition is automatically in the kActiveInGraph state.
+  NodeState node_in_transition_state_ = NodeState::kNotInGraph;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

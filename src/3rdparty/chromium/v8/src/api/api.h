@@ -33,7 +33,7 @@ namespace debug {
 class AccessorPair;
 class GeneratorObject;
 class Script;
-class WeakMap;
+class EphemeronTable;
 }  // namespace debug
 
 // Constants used in the implementation of the API.  The most natural thing
@@ -126,7 +126,7 @@ class RegisteredExtension {
   V(Proxy, JSProxy)                            \
   V(debug::GeneratorObject, JSGeneratorObject) \
   V(debug::Script, Script)                     \
-  V(debug::WeakMap, JSWeakMap)                 \
+  V(debug::EphemeronTable, EphemeronHashTable) \
   V(debug::AccessorPair, AccessorPair)         \
   V(Promise, JSPromise)                        \
   V(Primitive, Object)                         \
@@ -135,7 +135,7 @@ class RegisteredExtension {
   V(ScriptOrModule, Script)                    \
   V(FixedArray, FixedArray)                    \
   V(ModuleRequest, ModuleRequest)              \
-  V(WasmMemoryObject, WasmMemoryObject)
+  IF_WASM(V, WasmMemoryObject, WasmMemoryObject)
 
 class Utils {
  public:
@@ -538,6 +538,10 @@ void InvokeFinalizationRegistryCleanupFromTask(
     Handle<Context> context,
     Handle<JSFinalizationRegistry> finalization_registry,
     Handle<Object> callback);
+
+template <typename T>
+EXPORT_TEMPLATE_DECLARE(V8_EXPORT_PRIVATE)
+T ConvertDouble(double d);
 
 }  // namespace internal
 }  // namespace v8

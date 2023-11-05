@@ -17,7 +17,6 @@
 class GrColorSpaceXform;
 class GrDirectContext;
 class GrImageContext;
-class GrSurfaceFillContext;
 class SkColorSpace;
 
 class SkImage_GpuBase : public SkImage_Base {
@@ -37,10 +36,6 @@ public:
 
     bool onIsValid(GrRecordingContext*) const final;
 
-#if GR_TEST_UTILS
-    void resetContext(sk_sp<GrImageContext> newContext);
-#endif
-
     static bool ValidateBackendTexture(const GrCaps*, const GrBackendTexture& tex,
                                        GrColorType grCT, SkColorType ct, SkAlphaType at,
                                        sk_sp<SkColorSpace> cs);
@@ -57,8 +52,7 @@ public:
                                                            sk_sp<GrRefCntedCallback> releaseHelper);
 
 protected:
-    SkImage_GpuBase(sk_sp<GrImageContext>, SkISize size, uint32_t uniqueID, SkColorType,
-                    SkAlphaType, sk_sp<SkColorSpace>);
+    SkImage_GpuBase(sk_sp<GrImageContext>, SkImageInfo, uint32_t uniqueID);
 
     sk_sp<GrImageContext> fContext;
 

@@ -4,52 +4,60 @@
 
 #include "components/password_manager/core/browser/possible_username_data.h"
 
-#include <vector>
+#include <string>
 
 #include "base/containers/contains.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "components/password_manager/core/browser/leak_detection/encryption_utils.h"
 
-using base::char16;
 using base::TimeDelta;
 
 namespace password_manager {
 
+namespace {
+
+// Find a field in |predictions| with given renderer id.
+const PasswordFieldPrediction* FindFieldPrediction(
+    const FormPredictions& predictions,
+    autofill::FieldRendererId field_renderer_id) {
+  for (const auto& field : predictions.fields) {
+    if (field.renderer_id == field_renderer_id)
+      return &field;
+  }
+  return nullptr;
+}
+
+}  // namespace
+
 PossibleUsernameData::PossibleUsernameData(
     std::string signon_realm,
     autofill::FieldRendererId renderer_id,
-    base::string16 value,
+    const std::u16string& field_name,
+    const std::u16string& value,
     base::Time last_change,
     int driver_id)
     : signon_realm(std::move(signon_realm)),
       renderer_id(renderer_id),
-      value(std::move(value)),
+      field_name(field_name),
+      value(value),
       last_change(last_change),
       driver_id(driver_id) {}
 PossibleUsernameData::PossibleUsernameData(const PossibleUsernameData&) =
     default;
 PossibleUsernameData::~PossibleUsernameData() = default;
 
-bool IsPossibleUsernameValid(
-    const PossibleUsernameData& possible_username,
-    const std::string& submitted_signon_realm,
-    const std::vector<base::string16>& possible_usernames) {
-  if (submitted_signon_realm != possible_username.signon_realm)
-    return false;
+bool PossibleUsernameData::IsStale() const {
+  return base::Time::Now() - last_change > kPossibleUsernameExpirationTimeout;
+}
 
-  // The goal is to avoid false positives in considering which strings might be
-  // username. In the initial version of the username first flow it is better to
-  // be conservative in that. This check only allows usernames that match
-  // existing usernames after canonicalization.
-  base::string16 (*Canonicalize)(base::StringPiece16) = &CanonicalizeUsername;
-  if (!base::Contains(possible_usernames, Canonicalize(possible_username.value),
-                      Canonicalize)) {
+bool PossibleUsernameData::HasSingleUsernameServerPrediction() const {
+  // Check if there is a server prediction.
+  if (!form_predictions)
     return false;
-  }
-
-  return base::Time::Now() - possible_username.last_change <=
-         kMaxDelayBetweenTypingUsernameAndSubmission;
+  const PasswordFieldPrediction* field_prediction =
+      FindFieldPrediction(*form_predictions, renderer_id);
+  return field_prediction &&
+         field_prediction->type == autofill::SINGLE_USERNAME;
 }
 
 }  // namespace password_manager

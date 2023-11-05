@@ -24,20 +24,20 @@ SurfaceFactoryOzone::SurfaceFactoryOzone() {}
 
 SurfaceFactoryOzone::~SurfaceFactoryOzone() {}
 
-std::vector<gl::GLImplementation>
+std::vector<gl::GLImplementationParts>
 SurfaceFactoryOzone::GetAllowedGLImplementations() {
-  return std::vector<gl::GLImplementation>();
+  return std::vector<gl::GLImplementationParts>();
 }
 
-GLOzone* SurfaceFactoryOzone::GetGLOzone(gl::GLImplementation implementation) {
+GLOzone* SurfaceFactoryOzone::GetGLOzone(
+    const gl::GLImplementationParts& implementation) {
   return nullptr;
 }
 
 #if BUILDFLAG(ENABLE_VULKAN)
 std::unique_ptr<gpu::VulkanImplementation>
 SurfaceFactoryOzone::CreateVulkanImplementation(bool use_swiftshader,
-                                                bool allow_protected_memory,
-                                                bool enforce_protected_memory) {
+                                                bool allow_protected_memory) {
   return nullptr;
 }
 
@@ -77,7 +77,7 @@ scoped_refptr<gfx::NativePixmap> SurfaceFactoryOzone::CreateNativePixmap(
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
-    base::Optional<gfx::Size> framebuffer_size) {
+    absl::optional<gfx::Size> framebuffer_size) {
   return nullptr;
 }
 

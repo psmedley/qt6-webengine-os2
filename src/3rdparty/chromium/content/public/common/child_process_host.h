@@ -12,13 +12,13 @@
 
 #include "base/clang_profiling_buildflags.h"
 #include "base/files/scoped_file.h"
-#include "base/optional.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class FilePath;
@@ -117,15 +117,6 @@ class CONTENT_EXPORT ChildProcessHost : public IPC::Sender {
     // third-party plug-ins.
     CHILD_PLUGIN,
 
-#if defined(ARCH_CPU_ARM64)
-    // Launch the child process as CHILD_NORMAL, but as x86_64 code under
-    // Rosetta translation. The executable being launched must contain x86_64
-    // code, either as a thin Mach-O file targeting x86_64, or a fat file with
-    // an x86_64 slice. Aside from the architecture, semantics are identical to
-    // CHILD_NORMAL, and this cannot be combined with any other CHILD_* values.
-    CHILD_LAUNCH_X86_64,
-#endif  // ARCH_CPU_ARM64
-
     // Marker for the start of embedder-specific helper child process types.
     // Values greater than CHILD_EMBEDDER_FIRST are reserved to be used by the
     // embedder to add custom process types and will be resolved via
@@ -155,13 +146,16 @@ class CONTENT_EXPORT ChildProcessHost : public IPC::Sender {
   //
   // Always valid immediately after ChildProcessHost construction, but may be
   // null if someone else has taken ownership.
-  virtual base::Optional<mojo::OutgoingInvitation>& GetMojoInvitation() = 0;
+  virtual absl::optional<mojo::OutgoingInvitation>& GetMojoInvitation() = 0;
 
-  // Creates the IPC channel over a Mojo message pipe. The pipe connection is
-  // brokered through the Service Manager like any other service connection.
+  // Creates a legacy IPC channel over a Mojo message pipe. Must be called if
+  // legacy IPC will be used to communicate with the child process, but
+  // otherwise should not be called.
   virtual void CreateChannelMojo() = 0;
 
-  // Returns true iff the IPC channel is currently being opened;
+  // Returns true iff the IPC channel is currently being opened; this means
+  // CreateChannelMojo() has been called, but OnChannelConnected() has not yet
+  // been invoked.
   virtual bool IsChannelOpening() = 0;
 
   // Adds an IPC message filter.  A reference will be kept to the filter.

@@ -5,8 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBTRANSPORT_OUTGOING_STREAM_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBTRANSPORT_OUTGOING_STREAM_H_
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 #include "base/containers/span.h"
 #include "base/types/strong_alias.h"
@@ -17,13 +17,11 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
-
-namespace v8 {
-class Isolate;
-}
+#include "v8/include/v8.h"
 
 namespace blink {
 
+class ExceptionState;
 class ScriptState;
 class StreamAbortInfo;
 class WritableStream;
@@ -43,10 +41,10 @@ class MODULES_EXPORT OutgoingStream final
     virtual ~Client() = default;
 
     // Request that a Fin message for this stream be sent to the server, and
-    // that the QuicTransport object drop its reference to the stream.
+    // that the WebTransport object drop its reference to the stream.
     virtual void SendFin() = 0;
 
-    // Indicates that this stream is aborted. QuicTransport should drop its
+    // Indicates that this stream is aborted. WebTransport should drop its
     // reference to the stream, and in a bidirectional stream the incoming side
     // should be reset.
     virtual void OnOutgoingStreamAbort() = 0;
@@ -61,8 +59,11 @@ class MODULES_EXPORT OutgoingStream final
   OutgoingStream(ScriptState*, Client*, mojo::ScopedDataPipeProducerHandle);
   ~OutgoingStream();
 
-  // Init() must be called before the stream is used.
-  void Init();
+  // Init() or InitWithExistingWritableStream() must be called before the stream
+  // is used.
+  void Init(ExceptionState&);
+
+  void InitWithExistingWritableStream(WritableStream*, ExceptionState&);
 
   // Implementation of OutgoingStream IDL, used by client classes to implement
   // it. https://wicg.github.io/web-transport/#outgoing-stream
@@ -78,13 +79,13 @@ class MODULES_EXPORT OutgoingStream final
 
   void AbortWriting(StreamAbortInfo*);
 
-  // Called from QuicTransport via a WebTransportStream. Expects a JavaScript
+  // Called from WebTransport via a WebTransportStream. Expects a JavaScript
   // scope to be entered.
   void Reset();
 
   State GetState() const { return state_; }
 
-  // Called from QuicTransport rather than using
+  // Called from WebTransport rather than using
   // ExecutionContextLifecycleObserver to ensure correct destruction order.
   // Does not execute JavaScript.
   void ContextDestroyed();

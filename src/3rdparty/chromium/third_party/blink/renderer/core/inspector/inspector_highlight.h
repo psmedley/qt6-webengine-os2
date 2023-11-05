@@ -91,15 +91,38 @@ struct CORE_EXPORT InspectorFlexContainerHighlightConfig {
  public:
   InspectorFlexContainerHighlightConfig();
 
-  base::Optional<LineStyle> container_border;
-  base::Optional<LineStyle> line_separator;
-  base::Optional<LineStyle> item_separator;
+  absl::optional<LineStyle> container_border;
+  absl::optional<LineStyle> line_separator;
+  absl::optional<LineStyle> item_separator;
 
-  base::Optional<BoxStyle> main_distributed_space;
-  base::Optional<BoxStyle> cross_distributed_space;
-  base::Optional<BoxStyle> row_gap_space;
-  base::Optional<BoxStyle> column_gap_space;
-  base::Optional<LineStyle> cross_alignment;
+  absl::optional<BoxStyle> main_distributed_space;
+  absl::optional<BoxStyle> cross_distributed_space;
+  absl::optional<BoxStyle> row_gap_space;
+  absl::optional<BoxStyle> column_gap_space;
+  absl::optional<LineStyle> cross_alignment;
+};
+
+struct CORE_EXPORT InspectorScrollSnapContainerHighlightConfig {
+  USING_FAST_MALLOC(InspectorScrollSnapContainerHighlightConfig);
+
+ public:
+  InspectorScrollSnapContainerHighlightConfig() = default;
+
+  absl::optional<LineStyle> snapport_border;
+  absl::optional<LineStyle> snap_area_border;
+
+  Color scroll_margin_color;
+  Color scroll_padding_color;
+};
+
+struct CORE_EXPORT InspectorContainerQueryContainerHighlightConfig {
+  USING_FAST_MALLOC(InspectorContainerQueryContainerHighlightConfig);
+
+ public:
+  InspectorContainerQueryContainerHighlightConfig() = default;
+
+  absl::optional<LineStyle> container_border;
+  absl::optional<LineStyle> descendant_border;
 };
 
 struct CORE_EXPORT InspectorFlexItemHighlightConfig {
@@ -108,9 +131,9 @@ struct CORE_EXPORT InspectorFlexItemHighlightConfig {
  public:
   InspectorFlexItemHighlightConfig();
 
-  base::Optional<BoxStyle> base_size_box;
-  base::Optional<LineStyle> base_size_border;
-  base::Optional<LineStyle> flexibility_arrow;
+  absl::optional<BoxStyle> base_size_box;
+  absl::optional<LineStyle> base_size_border;
+  absl::optional<LineStyle> flexibility_arrow;
 };
 
 struct CORE_EXPORT InspectorHighlightConfig {
@@ -143,6 +166,8 @@ struct CORE_EXPORT InspectorHighlightConfig {
   std::unique_ptr<InspectorFlexContainerHighlightConfig>
       flex_container_highlight_config;
   std::unique_ptr<InspectorFlexItemHighlightConfig> flex_item_highlight_config;
+  std::unique_ptr<InspectorContainerQueryContainerHighlightConfig>
+      container_query_container_highlight_config;
 };
 
 struct InspectorHighlightContrastInfo {
@@ -239,6 +264,7 @@ class CORE_EXPORT InspectorHighlight : public InspectorHighlightBase {
   std::unique_ptr<protocol::ListValue> grid_info_;
   std::unique_ptr<protocol::ListValue> flex_container_info_;
   std::unique_ptr<protocol::ListValue> flex_item_info_;
+  std::unique_ptr<protocol::ListValue> container_query_container_info_;
   bool show_rulers_;
   bool show_extension_lines_;
   bool show_accessibility_info_;
@@ -252,6 +278,25 @@ std::unique_ptr<protocol::DictionaryValue> InspectorGridHighlight(
 std::unique_ptr<protocol::DictionaryValue> InspectorFlexContainerHighlight(
     Node* node,
     const InspectorFlexContainerHighlightConfig& config);
+
+std::unique_ptr<protocol::DictionaryValue> InspectorScrollSnapHighlight(
+    Node* node,
+    const InspectorScrollSnapContainerHighlightConfig& config);
+
+std::unique_ptr<protocol::DictionaryValue> InspectorContainerQueryHighlight(
+    Node* node,
+    const InspectorContainerQueryContainerHighlightConfig& config);
+
+// CORE_EXPORT is required to make these functions available for unit tests.
+std::unique_ptr<protocol::DictionaryValue> CORE_EXPORT
+BuildSnapContainerInfo(Node* node);
+
+std::unique_ptr<protocol::DictionaryValue> CORE_EXPORT
+BuildContainerQueryContainerInfo(
+    Node* node,
+    const InspectorContainerQueryContainerHighlightConfig&
+        container_query_container_highlight_config,
+    float scale);
 
 }  // namespace blink
 

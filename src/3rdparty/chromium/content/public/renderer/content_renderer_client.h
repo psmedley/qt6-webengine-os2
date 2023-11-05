@@ -15,16 +15,15 @@
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "build/build_config.h"
 #include "content/public/common/content_client.h"
-#include "content/public/renderer/url_loader_throttle_provider.h"
-#include "content/public/renderer/websocket_handshake_throttle_provider.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/supported_types.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/platform/url_loader_throttle_provider.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
+#include "third_party/blink/public/platform/websocket_handshake_throttle_provider.h"
 #include "third_party/blink/public/web/web_navigation_policy.h"
 #include "third_party/blink/public/web/web_navigation_type.h"
 #include "ui/base/page_transition_types.h"
@@ -49,9 +48,10 @@ class WebLocalFrame;
 class WebPlugin;
 class WebPrescientNetworking;
 class WebServiceWorkerContextProxy;
-class WebThemeEngine;
 class WebURL;
 class WebURLRequest;
+class WebView;
+struct WebContentSecurityPolicyHeader;
 struct WebPluginParams;
 struct WebURLError;
 enum class ProtocolHandlerSecurityLevel;
@@ -68,7 +68,6 @@ class BinderMap;
 
 namespace content {
 class RenderFrame;
-class RenderView;
 
 // Embedder API for participating in renderer logic.
 class CONTENT_EXPORT ContentRendererClient {
@@ -86,8 +85,8 @@ class CONTENT_EXPORT ContentRendererClient {
   // Notifies that a new RenderFrame has been created.
   virtual void RenderFrameCreated(RenderFrame* render_frame) {}
 
-  // Notifies that a new RenderView has been created.
-  virtual void RenderViewCreated(RenderView* render_view) {}
+  // Notifies that a new WebView has been created.
+  virtual void WebViewCreated(blink::WebView* web_view) {}
 
   // Returns the bitmap to show when a plugin crashed, or NULL for none.
   virtual SkBitmap* GetSadPluginBitmap();
@@ -162,13 +161,9 @@ class CONTENT_EXPORT ContentRendererClient {
       const GURL& url,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-  // Allows the embedder to override the WebThemeEngine used. If it returns NULL
-  // the content layer will provide an engine.
-  virtual blink::WebThemeEngine* OverrideThemeEngine();
-
   // Allows the embedder to provide a WebSocketHandshakeThrottleProvider. If it
   // returns NULL then none will be used.
-  virtual std::unique_ptr<WebSocketHandshakeThrottleProvider>
+  virtual std::unique_ptr<blink::WebSocketHandshakeThrottleProvider>
   CreateWebSocketHandshakeThrottleProvider();
 
   // Called on the main-thread immediately after the io thread is
@@ -199,7 +194,6 @@ class CONTENT_EXPORT ContentRendererClient {
   // Returns true if the navigation was handled by the embedder and should be
   // ignored by WebKit. This method is used by CEF and android_webview.
   virtual bool HandleNavigation(RenderFrame* render_frame,
-                                bool is_content_initiated,
                                 bool render_view_was_created_by_renderer,
                                 blink::WebFrame* frame,
                                 const blink::WebURLRequest& request,
@@ -269,7 +263,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // reported source for the error; this can point to a page or a script,
   // and can be external or internal.
   virtual bool ShouldReportDetailedMessageForSource(
-      const base::string16& source);
+      const std::u16string& source);
 
   // Creates a permission client for in-renderer worker.
   virtual std::unique_ptr<blink::WebContentSettingsClient>
@@ -364,7 +358,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // more functional tuning on platforms with known implementation and hardware
   // limitations.
   // This is currently not supported when running the Chrome audio service.
-  virtual base::Optional<std::string>
+  virtual absl::optional<std::string>
   WebRTCPlatformSpecificAudioProcessingConfiguration();
 
   // Notifies that a worker context has been created. This function is called
@@ -380,12 +374,13 @@ class CONTENT_EXPORT ContentRendererClient {
   // suspended after a period of inactivity.
   virtual bool IsIdleMediaSuspendEnabled();
 
-  // Allows the embedder to return a (possibly null) URLLoaderThrottleProvider
-  // for a frame or worker. For frames this is called on the main thread, and
-  // for workers it's called on the main or worker threads depending on
-  // http://crbug.com/692909.
-  virtual std::unique_ptr<URLLoaderThrottleProvider>
-  CreateURLLoaderThrottleProvider(URLLoaderThrottleProviderType provider_type);
+  // Allows the embedder to return a (possibly null)
+  // blink::URLLoaderThrottleProvider for a frame or worker. For frames this is
+  // called on the main thread, and for workers it's called on the main or
+  // worker threads depending on http://crbug.com/692909.
+  virtual std::unique_ptr<blink::URLLoaderThrottleProvider>
+  CreateURLLoaderThrottleProvider(
+      blink::URLLoaderThrottleProviderType provider_type);
 
   // Called when Blink cannot find a frame with the given name in the frame's
   // browsing instance.  This gives the embedder a chance to return a frame
@@ -400,16 +395,16 @@ class CONTENT_EXPORT ContentRendererClient {
   // most once.
   virtual void DidSetUserAgent(const std::string& user_agent);
 
-  // Returns true if |url| still requires the native HTML Imports feature.
-  // Used for Web UI pages.
-  // TODO(937747): Remove this function when all WebUIs can function without
-  // HTML Imports.
-  virtual bool RequiresHtmlImports(const GURL& url);
-
   // Optionally returns audio renderer algorithm parameters.
-  virtual base::Optional<::media::AudioRendererAlgorithmParameters>
+  virtual absl::optional<::media::AudioRendererAlgorithmParameters>
   GetAudioRendererAlgorithmParameters(
       ::media::AudioParameters audio_parameters);
+
+  // Appends to `csp`, the default CSP which should be applied to the given
+  // `url`. This allows the embedder to customize the applied CSP.
+  virtual void AppendContentSecurityPolicy(
+      const blink::WebURL& url,
+      blink::WebVector<blink::WebContentSecurityPolicyHeader>* csp);
 };
 
 }  // namespace content

@@ -31,6 +31,10 @@ OUT_DIR = os.path.join(V8_DIR, 'check-header-includes')
 AUTO_EXCLUDE = [
   # flag-definitions.h needs a mode set for being included.
   'src/flags/flag-definitions.h',
+  # recorder.h should only be included conditionally.
+  'src/libplatform/tracing/recorder.h',
+  # trap-handler-simulator.h can only be included in simulator builds.
+  'src/trap-handler/trap-handler-simulator.h',
 ]
 AUTO_EXCLUDE_PATTERNS = [
   'src/base/atomicops_internals_.*',

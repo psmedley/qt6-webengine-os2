@@ -5,6 +5,7 @@
 #include "ui/aura/env.h"
 
 #include "base/command_line.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/observer_list_types.h"
@@ -32,10 +33,6 @@
 
 #if defined(USE_X11)
 #include "ui/base/x/x11_cursor_factory.h"
-#endif
-
-#if defined(OS_WIN) || defined(USE_X11)
-#include "ui/gfx/switches.h"
 #endif
 
 namespace aura {
@@ -165,20 +162,11 @@ WindowOcclusionTracker* Env::GetWindowOcclusionTracker() {
 }
 
 void Env::PauseWindowOcclusionTracking() {
-  const bool was_paused = GetWindowOcclusionTracker();
   GetWindowOcclusionTracker()->Pause();
-  if (!was_paused) {
-    for (EnvObserver& observer : observers_)
-      observer.OnWindowOcclusionTrackingPaused();
-  }
 }
 
 void Env::UnpauseWindowOcclusionTracking() {
   GetWindowOcclusionTracker()->Unpause();
-  if (!GetWindowOcclusionTracker()->IsPaused()) {
-    for (EnvObserver& observer : observers_)
-      observer.OnWindowOcclusionTrackingResumed();
-  }
 }
 
 void Env::AddEventObserver(ui::EventObserver* observer,
@@ -219,17 +207,13 @@ Env::Env()
     : env_controller_(std::make_unique<EnvInputStateController>(this)),
       gesture_recognizer_(std::make_unique<ui::GestureRecognizerImpl>()),
       input_state_lookup_(InputStateLookup::Create()) {
-#if (defined(OS_WIN) || defined(USE_X11)) && !defined(TOOLKIT_QT)
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kHeadless)) {
 #if defined(USE_X11)
-    // In Ozone/X11, the cursor factory is initialized by the platform
-    // initialization code.
-    if (!features::IsUsingOzonePlatform())
-      cursor_factory_ = std::make_unique<ui::X11CursorFactory>();
-#else
-    cursor_factory_ = std::make_unique<ui::WinCursorFactory>();
-#endif
-  }
+  // In Ozone/X11, the cursor factory is initialized by the platform
+  // initialization code.
+  if (!features::IsUsingOzonePlatform())
+    cursor_factory_ = std::make_unique<ui::X11CursorFactory>();
+#elif defined(OS_WIN) && !defined(TOOLKIT_QT)
+  cursor_factory_ = std::make_unique<ui::WinCursorFactory>();
 #endif
 }
 

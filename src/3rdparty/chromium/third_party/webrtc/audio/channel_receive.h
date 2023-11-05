@@ -44,7 +44,6 @@ namespace webrtc {
 class AudioDeviceModule;
 class FrameDecryptorInterface;
 class PacketRouter;
-class ProcessThread;
 class RateLimiter;
 class ReceiveStatistics;
 class RtcEventLog;
@@ -58,13 +57,23 @@ struct CallReceiveStatistics {
   int64_t payload_bytes_rcvd = 0;
   int64_t header_and_padding_bytes_rcvd = 0;
   int packetsReceived;
-  // The capture ntp time (in local timebase) of the first played out audio
+  uint32_t nacks_sent = 0;
+  // The capture NTP time (in local timebase) of the first played out audio
   // frame.
   int64_t capture_start_ntp_time_ms_;
   // The timestamp at which the last packet was received, i.e. the time of the
   // local clock when it was received - not the RTP timestamp of that packet.
   // https://w3c.github.io/webrtc-stats/#dom-rtcinboundrtpstreamstats-lastpacketreceivedtimestamp
   absl::optional<int64_t> last_packet_received_timestamp_ms;
+  // Remote outbound stats derived by the received RTCP sender reports.
+  // Note that the timestamps below correspond to the time elapsed since the
+  // Unix epoch.
+  // https://w3c.github.io/webrtc-stats/#remoteoutboundrtpstats-dict*
+  absl::optional<int64_t> last_sender_report_timestamp_ms;
+  absl::optional<int64_t> last_sender_report_remote_timestamp_ms;
+  uint32_t sender_reports_packets_sent = 0;
+  uint64_t sender_reports_bytes_sent = 0;
+  uint64_t sender_reports_reports_count = 0;
 };
 
 namespace voe {
@@ -150,11 +159,16 @@ class ChannelReceiveInterface : public RtpPacketSinkInterface {
   virtual void SetDepacketizerToDecoderFrameTransformer(
       rtc::scoped_refptr<webrtc::FrameTransformerInterface>
           frame_transformer) = 0;
+
+  virtual void SetFrameDecryptor(
+      rtc::scoped_refptr<webrtc::FrameDecryptorInterface> frame_decryptor) = 0;
+
+  virtual void OnLocalSsrcChange(uint32_t local_ssrc) = 0;
+  virtual uint32_t GetLocalSsrc() const = 0;
 };
 
 std::unique_ptr<ChannelReceiveInterface> CreateChannelReceive(
     Clock* clock,
-    ProcessThread* module_process_thread,
     NetEqFactory* neteq_factory,
     AudioDeviceModule* audio_device_module,
     Transport* rtcp_send_transport,

@@ -14,6 +14,7 @@
 
 #include "SampleUtils.h"
 
+#include "utils/ScopedAutoreleasePool.h"
 #include "utils/SystemUtils.h"
 #include "utils/WGPUHelpers.h"
 
@@ -36,78 +37,66 @@ void init() {
     swapChainFormat = static_cast<WGPUTextureFormat>(GetPreferredSwapChainTextureFormat());
     wgpuSwapChainConfigure(swapchain, swapChainFormat, WGPUTextureUsage_RenderAttachment, 640, 480);
 
-    const char* vs =
-        "[[builtin(vertex_index)]] var<in> VertexIndex : u32;\n"
-        "[[builtin(position)]] var<out> Position : vec4<f32>;\n"
-        "const pos : array<vec2<f32>, 3> = array<vec2<f32>, 3>(\n"
-        "    vec2<f32>( 0.0,  0.5),\n"
-        "    vec2<f32>(-0.5, -0.5),\n"
-        "    vec2<f32>( 0.5, -0.5)\n"
-        ");\n"
-        "[[stage(vertex)]] fn main() -> void {\n"
-        "    Position = vec4<f32>(pos[VertexIndex], 0.0, 1.0);\n"
-        "    return;\n"
-        "}\n";
-    WGPUShaderModule vsModule = utils::CreateShaderModuleFromWGSL(device, vs).Release();
+    const char* vs = R"(
+        [[stage(vertex)]] fn main(
+            [[builtin(vertex_index)]] VertexIndex : u32
+        ) -> [[builtin(position)]] vec4<f32> {
+            var pos = array<vec2<f32>, 3>(
+                vec2<f32>( 0.0,  0.5),
+                vec2<f32>(-0.5, -0.5),
+                vec2<f32>( 0.5, -0.5)
+            );
+            return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+        })";
+    WGPUShaderModule vsModule = utils::CreateShaderModule(device, vs).Release();
 
-    const char* fs =
-        "[[location(0)]] var<out> fragColor : vec4<f32>;\n"
-        "[[stage(fragment)]] fn main() -> void {\n"
-        "    fragColor = vec4<f32>(1.0, 0.0, 0.0, 1.0);\n"
-        "    return;\n"
-        "}\n";
-    WGPUShaderModule fsModule = utils::CreateShaderModuleFromWGSL(device, fs).Release();
+    const char* fs = R"(
+        [[stage(fragment)]] fn main() -> [[location(0)]] vec4<f32> {
+            return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        })";
+    WGPUShaderModule fsModule = utils::CreateShaderModule(device, fs).Release();
 
     {
         WGPURenderPipelineDescriptor descriptor = {};
 
-        descriptor.vertexStage.module = vsModule;
-        descriptor.vertexStage.entryPoint = "main";
+        // Fragment state
+        WGPUBlendState blend = {};
+        blend.color.operation = WGPUBlendOperation_Add;
+        blend.color.srcFactor = WGPUBlendFactor_One;
+        blend.color.dstFactor = WGPUBlendFactor_One;
+        blend.alpha.operation = WGPUBlendOperation_Add;
+        blend.alpha.srcFactor = WGPUBlendFactor_One;
+        blend.alpha.dstFactor = WGPUBlendFactor_One;
 
-        WGPUProgrammableStageDescriptor fragmentStage = {};
-        fragmentStage.module = fsModule;
-        fragmentStage.entryPoint = "main";
-        descriptor.fragmentStage = &fragmentStage;
+        WGPUColorTargetState colorTarget = {};
+        colorTarget.format = swapChainFormat;
+        colorTarget.blend = &blend;
+        colorTarget.writeMask = WGPUColorWriteMask_All;
 
-        descriptor.sampleCount = 1;
+        WGPUFragmentState fragment = {};
+        fragment.module = fsModule;
+        fragment.entryPoint = "main";
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        descriptor.fragment = &fragment;
 
-        WGPUBlendDescriptor blendDescriptor = {};
-        blendDescriptor.operation = WGPUBlendOperation_Add;
-        blendDescriptor.srcFactor = WGPUBlendFactor_One;
-        blendDescriptor.dstFactor = WGPUBlendFactor_One;
-        WGPUColorStateDescriptor colorStateDescriptor = {};
-        colorStateDescriptor.format = swapChainFormat;
-        colorStateDescriptor.alphaBlend = blendDescriptor;
-        colorStateDescriptor.colorBlend = blendDescriptor;
-        colorStateDescriptor.writeMask = WGPUColorWriteMask_All;
+        // Other state
+        descriptor.layout = nullptr;
+        descriptor.depthStencil = nullptr;
 
-        descriptor.colorStateCount = 1;
-        descriptor.colorStates = &colorStateDescriptor;
+        descriptor.vertex.module = vsModule;
+        descriptor.vertex.entryPoint = "main";
+        descriptor.vertex.bufferCount = 0;
+        descriptor.vertex.buffers = nullptr;
 
-        WGPUPipelineLayoutDescriptor pl = {};
-        pl.bindGroupLayoutCount = 0;
-        pl.bindGroupLayouts = nullptr;
-        descriptor.layout = wgpuDeviceCreatePipelineLayout(device, &pl);
+        descriptor.multisample.count = 1;
+        descriptor.multisample.mask = 0xFFFFFFFF;
+        descriptor.multisample.alphaToCoverageEnabled = false;
 
-        WGPUVertexStateDescriptor vertexState = {};
-        vertexState.indexFormat = WGPUIndexFormat_Undefined;
-        vertexState.vertexBufferCount = 0;
-        vertexState.vertexBuffers = nullptr;
-        descriptor.vertexState = &vertexState;
-
-        WGPURasterizationStateDescriptor rasterizationState = {};
-        rasterizationState.frontFace = WGPUFrontFace_CCW;
-        rasterizationState.cullMode = WGPUCullMode_None;
-        rasterizationState.depthBias = 0;
-        rasterizationState.depthBiasSlopeScale = 0.0;
-        rasterizationState.depthBiasClamp = 0.0;
-        descriptor.rasterizationState = &rasterizationState;
-
-        descriptor.primitiveTopology = WGPUPrimitiveTopology_TriangleList;
-        descriptor.sampleMask = 0xFFFFFFFF;
-        descriptor.alphaToCoverageEnabled = false;
-
-        descriptor.depthStencilState = nullptr;
+        descriptor.primitive.frontFace = WGPUFrontFace_CCW;
+        descriptor.primitive.cullMode = WGPUCullMode_None;
+        descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
 
         pipeline = wgpuDeviceCreateRenderPipeline(device, &descriptor);
     }
@@ -159,6 +148,7 @@ int main(int argc, const char* argv[]) {
     init();
 
     while (!ShouldQuit()) {
+        utils::ScopedAutoreleasePool pool;
         frame();
         utils::USleep(16000);
     }

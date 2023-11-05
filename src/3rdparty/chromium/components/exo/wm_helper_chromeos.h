@@ -113,6 +113,8 @@ class WMHelperChromeOS : public WMHelper, public VSyncTimingManager::Delegate {
   ui::mojom::DragOperation OnPerformDrop(
       const ui::DropTargetEvent& event,
       std::unique_ptr<ui::OSExchangeData> data) override;
+  WMHelper::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override;
 
   // Overridden from VSyncTimingManager::Delegate:
   void AddVSyncParameterObserver(
@@ -127,6 +129,10 @@ class WMHelperChromeOS : public WMHelper, public VSyncTimingManager::Delegate {
 
   DISALLOW_COPY_AND_ASSIGN(WMHelperChromeOS);
 };
+
+// Returnsn the default device scale factor used for
+// ClientControlledShellSurface (ARC).
+float GetDefaultDeviceScaleFactor();
 
 }  // namespace exo
 

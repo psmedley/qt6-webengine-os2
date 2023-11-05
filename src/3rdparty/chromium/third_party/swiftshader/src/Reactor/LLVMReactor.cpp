@@ -184,7 +184,11 @@ llvm::Value *lowerRCP(llvm::Value *x)
 	if(llvm::FixedVectorType *vectorTy = llvm::dyn_cast<llvm::FixedVectorType>(ty))
 	{
 		one = llvm::ConstantVector::getSplat(
+#	if LLVM_VERSION_MAJOR >= 11
+		    vectorTy->getElementCount(),
+#	else
 		    vectorTy->getNumElements(),
+#	endif
 		    llvm::ConstantFP::get(vectorTy->getElementType(), 1));
 	}
 	else
@@ -203,7 +207,11 @@ llvm::Value *lowerVectorShl(llvm::Value *x, uint64_t scalarY)
 {
 	llvm::FixedVectorType *ty = llvm::cast<llvm::FixedVectorType>(x->getType());
 	llvm::Value *y = llvm::ConstantVector::getSplat(
+#	if LLVM_VERSION_MAJOR >= 11
+	    ty->getElementCount(),
+#	else
 	    ty->getNumElements(),
+#	endif
 	    llvm::ConstantInt::get(ty->getElementType(), scalarY));
 	return jit->builder->CreateShl(x, y);
 }
@@ -212,7 +220,11 @@ llvm::Value *lowerVectorAShr(llvm::Value *x, uint64_t scalarY)
 {
 	llvm::FixedVectorType *ty = llvm::cast<llvm::FixedVectorType>(x->getType());
 	llvm::Value *y = llvm::ConstantVector::getSplat(
+#	if LLVM_VERSION_MAJOR >= 11
+	    ty->getElementCount(),
+#	else
 	    ty->getNumElements(),
+#	endif
 	    llvm::ConstantInt::get(ty->getElementType(), scalarY));
 	return jit->builder->CreateAShr(x, y);
 }
@@ -221,7 +233,11 @@ llvm::Value *lowerVectorLShr(llvm::Value *x, uint64_t scalarY)
 {
 	llvm::FixedVectorType *ty = llvm::cast<llvm::FixedVectorType>(x->getType());
 	llvm::Value *y = llvm::ConstantVector::getSplat(
+#	if LLVM_VERSION_MAJOR >= 11
+	    ty->getElementCount(),
+#	else
 	    ty->getNumElements(),
+#	endif
 	    llvm::ConstantInt::get(ty->getElementType(), scalarY));
 	return jit->builder->CreateLShr(x, y);
 }
@@ -409,16 +425,16 @@ llvm::Type *T(Type *t)
 	// Use 128-bit vectors to implement logically shorter ones.
 	switch(asInternalType(t))
 	{
-		case Type_v2i32: return T(Int4::type());
-		case Type_v4i16: return T(Short8::type());
-		case Type_v2i16: return T(Short8::type());
-		case Type_v8i8: return T(Byte16::type());
-		case Type_v4i8: return T(Byte16::type());
-		case Type_v2f32: return T(Float4::type());
-		case Type_LLVM: return reinterpret_cast<llvm::Type *>(t);
-		default:
-			UNREACHABLE("asInternalType(t): %d", int(asInternalType(t)));
-			return nullptr;
+	case Type_v2i32: return T(Int4::type());
+	case Type_v4i16: return T(Short8::type());
+	case Type_v2i16: return T(Short8::type());
+	case Type_v8i8: return T(Byte16::type());
+	case Type_v4i8: return T(Byte16::type());
+	case Type_v2f32: return T(Float4::type());
+	case Type_LLVM: return reinterpret_cast<llvm::Type *>(t);
+	default:
+		UNREACHABLE("asInternalType(t): %d", int(asInternalType(t)));
+		return nullptr;
 	}
 }
 
@@ -446,13 +462,13 @@ static size_t typeSize(Type *type)
 {
 	switch(asInternalType(type))
 	{
-		case Type_v2i32: return 8;
-		case Type_v4i16: return 8;
-		case Type_v2i16: return 4;
-		case Type_v8i8: return 8;
-		case Type_v4i8: return 4;
-		case Type_v2f32: return 8;
-		case Type_LLVM:
+	case Type_v2i32: return 8;
+	case Type_v4i16: return 8;
+	case Type_v2i16: return 4;
+	case Type_v8i8: return 8;
+	case Type_v4i8: return 4;
+	case Type_v2f32: return 8;
+	case Type_LLVM:
 		{
 			llvm::Type *t = T(type);
 
@@ -471,9 +487,9 @@ static size_t typeSize(Type *type)
 			return (bits + 7) / 8;
 		}
 		break;
-		default:
-			UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
-			return 0;
+	default:
+		UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
+		return 0;
 	}
 }
 
@@ -481,16 +497,16 @@ static unsigned int elementCount(Type *type)
 {
 	switch(asInternalType(type))
 	{
-		case Type_v2i32: return 2;
-		case Type_v4i16: return 4;
-		case Type_v2i16: return 2;
-		case Type_v8i8: return 8;
-		case Type_v4i8: return 4;
-		case Type_v2f32: return 2;
-		case Type_LLVM: return llvm::cast<llvm::FixedVectorType>(T(type))->getNumElements();
-		default:
-			UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
-			return 0;
+	case Type_v2i32: return 2;
+	case Type_v4i16: return 4;
+	case Type_v2i16: return 2;
+	case Type_v8i8: return 8;
+	case Type_v4i8: return 4;
+	case Type_v2f32: return 2;
+	case Type_LLVM: return llvm::cast<llvm::FixedVectorType>(T(type))->getNumElements();
+	default:
+		UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
+		return 0;
 	}
 }
 
@@ -516,13 +532,13 @@ Nucleus::Nucleus()
 #if !__has_feature(memory_sanitizer)
 	// thread_local variables in shared libraries are initialized at load-time,
 	// but this is not observed by MemorySanitizer if the loader itself was not
-	// instrumented, leading to false-positive unitialized variable errors.
+	// instrumented, leading to false-positive uninitialized variable errors.
 	ASSERT(jit == nullptr);
 	ASSERT(Variable::unmaterializedVariables == nullptr);
 #endif
 
 	jit = new JITBuilder(Nucleus::getDefaultConfig());
-	Variable::unmaterializedVariables = new Variable::UnmaterializedVariables{};
+	Variable::unmaterializedVariables = new Variable::UnmaterializedVariables();
 }
 
 Nucleus::~Nucleus()
@@ -873,28 +889,28 @@ Value *Nucleus::createLoad(Value *ptr, Type *type, bool isVolatile, unsigned int
 	RR_DEBUG_INFO_UPDATE_LOC();
 	switch(asInternalType(type))
 	{
-		case Type_v2i32:
-		case Type_v4i16:
-		case Type_v8i8:
-		case Type_v2f32:
-			return createBitCast(
-			    createInsertElement(
-			        V(llvm::UndefValue::get(llvm::VectorType::get(T(Long::type()), 2, false))),
-			        createLoad(createBitCast(ptr, Pointer<Long>::type()), Long::type(), isVolatile, alignment, atomic, memoryOrder),
-			        0),
-			    type);
-		case Type_v2i16:
-		case Type_v4i8:
-			if(alignment != 0)  // Not a local variable (all vectors are 128-bit).
-			{
-				Value *u = V(llvm::UndefValue::get(llvm::VectorType::get(T(Long::type()), 2, false)));
-				Value *i = createLoad(createBitCast(ptr, Pointer<Int>::type()), Int::type(), isVolatile, alignment, atomic, memoryOrder);
-				i = createZExt(i, Long::type());
-				Value *v = createInsertElement(u, i, 0);
-				return createBitCast(v, type);
-			}
-			// Fallthrough to non-emulated case.
-		case Type_LLVM:
+	case Type_v2i32:
+	case Type_v4i16:
+	case Type_v8i8:
+	case Type_v2f32:
+		return createBitCast(
+		    createInsertElement(
+		        V(llvm::UndefValue::get(llvm::VectorType::get(T(Long::type()), 2, false))),
+		        createLoad(createBitCast(ptr, Pointer<Long>::type()), Long::type(), isVolatile, alignment, atomic, memoryOrder),
+		        0),
+		    type);
+	case Type_v2i16:
+	case Type_v4i8:
+		if(alignment != 0)  // Not a local variable (all vectors are 128-bit).
+		{
+			Value *u = V(llvm::UndefValue::get(llvm::VectorType::get(T(Long::type()), 2, false)));
+			Value *i = createLoad(createBitCast(ptr, Pointer<Int>::type()), Int::type(), isVolatile, alignment, atomic, memoryOrder);
+			i = createZExt(i, Long::type());
+			Value *v = createInsertElement(u, i, 0);
+			return createBitCast(v, type);
+		}
+		// Fallthrough to non-emulated case.
+	case Type_LLVM:
 		{
 			auto elTy = T(type);
 			ASSERT(V(ptr)->getType()->getContainedType(0) == elTy);
@@ -946,9 +962,9 @@ Value *Nucleus::createLoad(Value *ptr, Type *type, bool isVolatile, unsigned int
 				return V(jit->builder->CreateLoad(V(out)));
 			}
 		}
-		default:
-			UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
-			return nullptr;
+	default:
+		UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
+		return nullptr;
 	}
 }
 
@@ -957,33 +973,33 @@ Value *Nucleus::createStore(Value *value, Value *ptr, Type *type, bool isVolatil
 	RR_DEBUG_INFO_UPDATE_LOC();
 	switch(asInternalType(type))
 	{
-		case Type_v2i32:
-		case Type_v4i16:
-		case Type_v8i8:
-		case Type_v2f32:
+	case Type_v2i32:
+	case Type_v4i16:
+	case Type_v8i8:
+	case Type_v2f32:
+		createStore(
+		    createExtractElement(
+		        createBitCast(value, T(llvm::VectorType::get(T(Long::type()), 2, false))), Long::type(), 0),
+		    createBitCast(ptr, Pointer<Long>::type()),
+		    Long::type(), isVolatile, alignment, atomic, memoryOrder);
+		return value;
+	case Type_v2i16:
+	case Type_v4i8:
+		if(alignment != 0)  // Not a local variable (all vectors are 128-bit).
+		{
 			createStore(
-			    createExtractElement(
-			        createBitCast(value, T(llvm::VectorType::get(T(Long::type()), 2, false))), Long::type(), 0),
-			    createBitCast(ptr, Pointer<Long>::type()),
-			    Long::type(), isVolatile, alignment, atomic, memoryOrder);
+			    createExtractElement(createBitCast(value, Int4::type()), Int::type(), 0),
+			    createBitCast(ptr, Pointer<Int>::type()),
+			    Int::type(), isVolatile, alignment, atomic, memoryOrder);
 			return value;
-		case Type_v2i16:
-		case Type_v4i8:
-			if(alignment != 0)  // Not a local variable (all vectors are 128-bit).
-			{
-				createStore(
-				    createExtractElement(createBitCast(value, Int4::type()), Int::type(), 0),
-				    createBitCast(ptr, Pointer<Int>::type()),
-				    Int::type(), isVolatile, alignment, atomic, memoryOrder);
-				return value;
-			}
-			// Fallthrough to non-emulated case.
-		case Type_LLVM:
+		}
+		// Fallthrough to non-emulated case.
+	case Type_LLVM:
 		{
 			auto elTy = T(type);
 			ASSERT(V(ptr)->getType()->getContainedType(0) == elTy);
 
-			if(__has_feature(memory_sanitizer) && !REACTOR_ENABLE_MEMORY_SANITIZER_INSTRUMENTATION)
+			if(__has_feature(memory_sanitizer) && !jit->msanInstrumentation)
 			{
 				// Mark all memory writes as initialized by calling __msan_unpoison
 				// void __msan_unpoison(const volatile void *a, size_t size)
@@ -1046,9 +1062,9 @@ Value *Nucleus::createStore(Value *value, Value *ptr, Type *type, bool isVolatil
 
 			return value;
 		}
-		default:
-			UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
-			return nullptr;
+	default:
+		UNREACHABLE("asInternalType(type): %d", int(asInternalType(type)));
+		return nullptr;
 	}
 }
 
@@ -1089,7 +1105,7 @@ void Nucleus::createMaskedStore(Value *ptr, Value *val, Value *mask, unsigned in
 	auto func = llvm::Intrinsic::getDeclaration(jit->module.get(), llvm::Intrinsic::masked_store, { elVecTy, elVecPtrTy });
 	jit->builder->CreateCall(func, { V(val), V(ptr), align, i1Mask });
 
-	if(__has_feature(memory_sanitizer) && !REACTOR_ENABLE_MEMORY_SANITIZER_INSTRUMENTATION)
+	if(__has_feature(memory_sanitizer) && !jit->msanInstrumentation)
 	{
 		// Mark memory writes as initialized by calling __msan_unpoison
 		// void __msan_unpoison(const volatile void *a, size_t size)
@@ -1297,61 +1313,101 @@ Value *Nucleus::createGEP(Value *ptr, Type *type, Value *index, bool unsignedInd
 Value *Nucleus::createAtomicAdd(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Add, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Add, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicSub(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Sub, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Sub, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicAnd(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::And, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::And, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicOr(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Or, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Or, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicXor(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Xor, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Xor, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicMin(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Min, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Min, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicMax(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Max, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Max, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicUMin(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::UMin, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::UMin, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicUMax(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::UMax, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::UMax, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicExchange(Value *ptr, Value *value, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Xchg, V(ptr), V(value), atomicOrdering(true, memoryOrder)));
+	return V(jit->builder->CreateAtomicRMW(llvm::AtomicRMWInst::Xchg, V(ptr), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                       llvm::MaybeAlign(),
+#endif
+	                                       atomicOrdering(true, memoryOrder)));
 }
 
 Value *Nucleus::createAtomicCompareExchange(Value *ptr, Value *value, Value *compare, std::memory_order memoryOrderEqual, std::memory_order memoryOrderUnequal)
@@ -1359,7 +1415,12 @@ Value *Nucleus::createAtomicCompareExchange(Value *ptr, Value *value, Value *com
 	RR_DEBUG_INFO_UPDATE_LOC();
 	// Note: AtomicCmpXchgInstruction returns a 2-member struct containing {result, success-flag}, not the result directly.
 	return V(jit->builder->CreateExtractValue(
-	    jit->builder->CreateAtomicCmpXchg(V(ptr), V(compare), V(value), atomicOrdering(true, memoryOrderEqual), atomicOrdering(true, memoryOrderUnequal)),
+	    jit->builder->CreateAtomicCmpXchg(V(ptr), V(compare), V(value),
+#if LLVM_VERSION_MAJOR >= 11
+	                                      llvm::MaybeAlign(),
+#endif
+	                                      atomicOrdering(true, memoryOrderEqual),
+	                                      atomicOrdering(true, memoryOrderUnequal)),
 	    llvm::ArrayRef<unsigned>(0u)));
 }
 
@@ -3277,7 +3338,7 @@ RValue<Float4> Frac(RValue<Float4> x)
 #if defined(__i386__) || defined(__x86_64__)
 	if(CPUID::supportsSSE4_1())
 	{
-		frc = x - Floor(x);
+		frc = x - x86::floorps(x);
 	}
 	else
 	{
@@ -3550,6 +3611,19 @@ RValue<Pointer<Byte>> ConstantData(void const *data, size_t size)
 
 Value *Call(RValue<Pointer<Byte>> fptr, Type *retTy, std::initializer_list<Value *> args, std::initializer_list<Type *> argTys)
 {
+	// If this is a MemorySanitizer build, but Reactor routine instrumentation is not enabled,
+	// mark all call arguments as initialized by calling __msan_unpoison_param().
+	if(__has_feature(memory_sanitizer) && !jit->msanInstrumentation)
+	{
+		// void __msan_unpoison_param(size_t n)
+		auto voidTy = llvm::Type::getVoidTy(*jit->context);
+		auto sizetTy = llvm::IntegerType::get(*jit->context, sizeof(size_t) * 8);
+		auto funcTy = llvm::FunctionType::get(voidTy, { sizetTy }, false);
+		auto func = jit->module->getOrInsertFunction("__msan_unpoison_param", funcTy);
+
+		jit->builder->CreateCall(func, { llvm::ConstantInt::get(sizetTy, args.size()) });
+	}
+
 	RR_DEBUG_INFO_UPDATE_LOC();
 	llvm::SmallVector<llvm::Type *, 8> paramTys;
 	for(auto ty : argTys) { paramTys.push_back(T(ty)); }
@@ -3611,7 +3685,17 @@ RValue<Int4> cvtps2dq(RValue<Float4> val)
 
 RValue<Float> rcpss(RValue<Float> val)
 {
-	Value *vector = Nucleus::createInsertElement(V(llvm::UndefValue::get(T(Float4::type()))), val.value(), 0);
+	Value *undef = V(llvm::UndefValue::get(T(Float4::type())));
+
+	// TODO(b/172238865): MemorySanitizer does not support the rcpss instruction,
+	// which makes it look at the entire 128-bit input operand for undefined bits.
+	// Use zero-initialized values instead.
+	if(__has_feature(memory_sanitizer))
+	{
+		undef = Float4(0).loadValue();
+	}
+
+	Value *vector = Nucleus::createInsertElement(undef, val.value(), 0);
 
 	return RValue<Float>(Nucleus::createExtractElement(createInstruction(llvm::Intrinsic::x86_sse_rcp_ss, vector), Float::type(), 0));
 }
@@ -3623,7 +3707,17 @@ RValue<Float> sqrtss(RValue<Float> val)
 
 RValue<Float> rsqrtss(RValue<Float> val)
 {
-	Value *vector = Nucleus::createInsertElement(V(llvm::UndefValue::get(T(Float4::type()))), val.value(), 0);
+	Value *undef = V(llvm::UndefValue::get(T(Float4::type())));
+
+	// TODO(b/172238865): MemorySanitizer does not support the rsqrtss instruction,
+	// which makes it look at the entire 128-bit input operand for undefined bits.
+	// Use zero-initialized values instead.
+	if(__has_feature(memory_sanitizer))
+	{
+		undef = Float4(0).loadValue();
+	}
+
+	Value *vector = Nucleus::createInsertElement(undef, val.value(), 0);
 
 	return RValue<Float>(Nucleus::createExtractElement(createInstruction(llvm::Intrinsic::x86_sse_rsqrt_ss, vector), Float::type(), 0));
 }
@@ -3658,6 +3752,15 @@ RValue<Float> roundss(RValue<Float> val, unsigned char imm)
 	llvm::Function *roundss = llvm::Intrinsic::getDeclaration(jit->module.get(), llvm::Intrinsic::x86_sse41_round_ss);
 
 	Value *undef = V(llvm::UndefValue::get(T(Float4::type())));
+
+	// TODO(b/172238865): MemorySanitizer does not support the roundss instruction,
+	// which makes it look at the entire 128-bit input operands for undefined bits.
+	// Use zero-initialized values instead.
+	if(__has_feature(memory_sanitizer))
+	{
+		undef = Float4(0).loadValue();
+	}
+
 	Value *vector = Nucleus::createInsertElement(undef, val.value(), 0);
 
 	return RValue<Float>(Nucleus::createExtractElement(V(jit->builder->CreateCall(roundss, { V(undef), V(vector), V(Nucleus::createConstantInt(imm)) })), Float::type(), 0));
@@ -3915,12 +4018,32 @@ RValue<Int4> pmaddwd(RValue<Short8> x, RValue<Short8> y)
 
 RValue<Int> movmskps(RValue<Float4> x)
 {
-	return RValue<Int>(createInstruction(llvm::Intrinsic::x86_sse_movmsk_ps, x.value()));
+	Value *v = x.value();
+
+	// TODO(b/172238865): MemorySanitizer does not support movmsk instructions,
+	// which makes it look at the entire 128-bit input for undefined bits. Mask off
+	// just the sign bits to avoid false positives.
+	if(__has_feature(memory_sanitizer))
+	{
+		v = As<Float4>(As<Int4>(v) & Int4(0x80000000u)).value();
+	}
+
+	return RValue<Int>(createInstruction(llvm::Intrinsic::x86_sse_movmsk_ps, v));
 }
 
 RValue<Int> pmovmskb(RValue<Byte8> x)
 {
-	return RValue<Int>(createInstruction(llvm::Intrinsic::x86_sse2_pmovmskb_128, x.value())) & 0xFF;
+	Value *v = x.value();
+
+	// TODO(b/172238865): MemorySanitizer does not support movmsk instructions,
+	// which makes it look at the entire 128-bit input for undefined bits. Mask off
+	// just the sign bits in the lower 64-bit vector to avoid false positives.
+	if(__has_feature(memory_sanitizer))
+	{
+		v = As<Byte16>(As<Int4>(v) & Int4(0x80808080u, 0x80808080u, 0, 0)).value();
+	}
+
+	return RValue<Int>(createInstruction(llvm::Intrinsic::x86_sse2_pmovmskb_128, v)) & 0xFF;
 }
 
 RValue<Int4> pmovzxbd(RValue<Byte16> x)

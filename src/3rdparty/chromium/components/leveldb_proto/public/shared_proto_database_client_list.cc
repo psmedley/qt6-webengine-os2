@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/metrics/field_trial_params.h"
-#include "base/stl_util.h"
 
 #include "base/notreached.h"
 #include "components/leveldb_proto/internal/leveldb_proto_feature_list.h"
@@ -91,6 +90,18 @@ std::string SharedProtoDatabaseClientList::ProtoDbTypeToString(
       return "CartDatabase";
     case ProtoDbType::COMMERCE_SUBSCRIPTION_DATABASE:
       return "CommerceSubscriptionDatabase";
+    case ProtoDbType::MERCHANT_TRUST_SIGNAL_DATABASE:
+      return "MerchantTrustSignalEventDatabase";
+    case ProtoDbType::SHARE_HISTORY_DATABASE:
+      return "ShareHistoryDatabase";
+    case ProtoDbType::SHARE_RANKING_DATABASE:
+      return "ShareRankingDatabase";
+    case ProtoDbType::SEGMENT_INFO_DATABASE:
+      return "SegmentInfoDatabase";
+    case ProtoDbType::SIGNAL_DATABASE:
+      return "SignalDatabase";
+    case ProtoDbType::SIGNAL_STORAGE_CONFIG_DATABASE:
+      return "SignalStorageConfigDatabase";
     case ProtoDbType::LAST:
       NOTREACHED();
       return std::string();

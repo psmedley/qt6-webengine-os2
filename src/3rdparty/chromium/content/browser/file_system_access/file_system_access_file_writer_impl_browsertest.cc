@@ -5,6 +5,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -131,7 +132,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemAccessFileWriterBrowserTest,
   }
 
   // Contents now in destination file.
-  EXPECT_EQ(int{file_contents.size()},
+  EXPECT_EQ(static_cast<int>(file_contents.size()),
             EvalJs(shell(),
                    "(async () => {"
                    "  await self.writer.close();"
@@ -167,7 +168,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemAccessFileWriterBrowserTest,
     EXPECT_EQ(initial_contents, swap_contents);
   }
 
-  EXPECT_EQ(int{expected_contents.size()},
+  EXPECT_EQ(static_cast<int>(expected_contents.size()),
             EvalJs(shell(),
                    "(async () => {"
                    "  await self.writer.write(new Blob(['bar']));"
@@ -202,7 +203,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemAccessFileWriterBrowserTest,
     EXPECT_EQ("", swap_contents);
   }
 
-  EXPECT_EQ(int{expected_contents.size()},
+  EXPECT_EQ(static_cast<int>(expected_contents.size()),
             EvalJs(shell(),
                    "(async () => {"
                    "  await self.writer.write(new Blob(['bar']));"

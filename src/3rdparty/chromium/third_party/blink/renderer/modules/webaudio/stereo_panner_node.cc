@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/bindings/modules/v8/v8_stereo_panner_options.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
@@ -21,7 +22,8 @@ StereoPannerHandler::StereoPannerHandler(AudioNode& node,
                                          AudioParamHandler& pan)
     : AudioHandler(kNodeTypeStereoPanner, node, sample_rate),
       pan_(&pan),
-      sample_accurate_pan_values_(audio_utilities::kRenderQuantumFrames) {
+      sample_accurate_pan_values_(
+          GetDeferredTaskHandler().RenderQuantumFrames()) {
   AddInput();
   AddOutput(2);
 
@@ -81,10 +83,11 @@ void StereoPannerHandler::Process(uint32_t frames_to_process) {
 }
 
 void StereoPannerHandler::ProcessOnlyAudioParams(uint32_t frames_to_process) {
-  float values[audio_utilities::kRenderQuantumFrames];
-  DCHECK_LE(frames_to_process, audio_utilities::kRenderQuantumFrames);
+  std::vector<float> values(GetDeferredTaskHandler().RenderQuantumFrames());
+  //float values[GetDeferredTaskHandler().RenderQuantumFrames()];
+  DCHECK_LE(frames_to_process, GetDeferredTaskHandler().RenderQuantumFrames());
 
-  pan_->CalculateSampleAccurateValues(values, frames_to_process);
+  pan_->CalculateSampleAccurateValues(values.data(), frames_to_process);
 }
 
 void StereoPannerHandler::Initialize() {

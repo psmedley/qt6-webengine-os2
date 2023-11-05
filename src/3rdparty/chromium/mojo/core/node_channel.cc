@@ -181,7 +181,7 @@ Channel::MessagePtr CreateMessage(MessageType type,
   else
     capacity = std::max(total_size, capacity);
   auto message =
-      std::make_unique<Channel::Message>(capacity, total_size, num_handles);
+      Channel::Message::CreateMessage(capacity, total_size, num_handles);
   Header* header = reinterpret_cast<Header*>(message->mutable_payload());
 
   // Make sure any header padding gets zeroed.
@@ -668,8 +668,8 @@ void NodeChannel::OnChannelMessage(const void* payload,
     }
 
     case MessageType::EVENT_MESSAGE: {
-      Channel::MessagePtr message(
-          new Channel::Message(payload_size, handles.size()));
+      Channel::MessagePtr message =
+          Channel::Message::CreateMessage(payload_size, handles.size());
       message->SetHandles(std::move(handles));
       memcpy(message->mutable_payload(), payload, payload_size);
       delegate_->OnEventMessage(remote_node_name_, std::move(message));
@@ -734,6 +734,11 @@ void NodeChannel::OnChannelMessage(const void* payload,
         // through the extent of this call because |this| is kept alive and
         // |remote_process_handle_| is never reset once set.
         from_process = remote_process_handle_.Handle();
+
+        // If we don't have a handle to the remote process, we should not be
+        // receiving relay requests from them because we're not the broker.
+        if (from_process == base::kNullProcessHandle)
+          break;
       }
       RelayEventMessageData data;
       if (GetMessagePayload(payload, payload_size, &data)) {
@@ -745,7 +750,7 @@ void NodeChannel::OnChannelMessage(const void* payload,
                                     sizeof(Header) + sizeof(data);
         Channel::MessagePtr message = Channel::Message::Deserialize(
             message_start, payload_size - sizeof(Header) - sizeof(data),
-            from_process);
+            Channel::HandlePolicy::kAcceptHandles, from_process);
         if (!message) {
           DLOG(ERROR) << "Dropping invalid relay message.";
           break;
@@ -764,8 +769,9 @@ void NodeChannel::OnChannelMessage(const void* payload,
       const void* data = static_cast<const void*>(
           reinterpret_cast<const Header*>(payload) + 1);
       Channel::MessagePtr message =
-          Channel::Message::Deserialize(data, payload_size - sizeof(Header));
-      if (!message || message->has_handles()) {
+          Channel::Message::Deserialize(data, payload_size - sizeof(Header),
+                                        Channel::HandlePolicy::kRejectHandles);
+      if (!message) {
         DLOG(ERROR) << "Dropping invalid broadcast message.";
         break;
       }
@@ -782,8 +788,8 @@ void NodeChannel::OnChannelMessage(const void* payload,
 
         size_t num_bytes = payload_size - sizeof(data) - sizeof(Header);
 
-        Channel::MessagePtr message(
-            new Channel::Message(num_bytes, handles.size()));
+        Channel::MessagePtr message =
+            Channel::Message::CreateMessage(num_bytes, handles.size());
         message->SetHandles(std::move(handles));
         if (num_bytes)
           memcpy(message->mutable_payload(),

@@ -9,7 +9,7 @@
 #include <algorithm>
 
 #include "base/check.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "base/strings/string_util.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_text_checking_result.h"
@@ -28,7 +28,7 @@ bool WebTestGrammarChecker::CheckGrammarOfString(
     const blink::WebString& text,
     std::vector<blink::WebTextCheckingResult>* results) {
   DCHECK(results);
-  base::string16 string_text = text.Utf16();
+  std::u16string string_text = text.Utf16();
   if (std::find_if(string_text.begin(), string_text.end(), IsASCIIAlpha) ==
       string_text.end())
     return true;
@@ -56,10 +56,10 @@ bool WebTestGrammarChecker::CheckGrammarOfString(
   };
   for (size_t i = 0; i < base::size(kGrammarErrors); ++i) {
     size_t offset = 0;
-    base::string16 error(
+    std::u16string error(
         kGrammarErrors[i].text,
         kGrammarErrors[i].text + strlen(kGrammarErrors[i].text));
-    while ((offset = string_text.find(error, offset)) != base::string16::npos) {
+    while ((offset = string_text.find(error, offset)) != std::u16string::npos) {
       results->push_back(blink::WebTextCheckingResult(
           blink::kWebTextDecorationTypeGrammar,
           offset + kGrammarErrors[i].location, kGrammarErrors[i].length));

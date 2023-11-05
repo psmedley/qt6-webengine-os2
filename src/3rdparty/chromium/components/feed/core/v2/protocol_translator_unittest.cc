@@ -64,14 +64,12 @@ feedwire::DataOperation MakeDataOperationWithContent(
   feedwire::DataOperation result = MakeDataOperation(operation);
   result.mutable_feature()->set_renderable_unit(feedwire::Feature::CONTENT);
   result.mutable_feature()
-      ->mutable_content_extension()
+      ->mutable_content()
       ->mutable_xsurface_content()
       ->set_xsurface_output(xsurface_content);
 
-  result.mutable_feature()
-      ->mutable_content_extension()
-      ->add_prefetch_metadata()
-      ->set_uri("http://uri-for-" + xsurface_content);
+  result.mutable_feature()->mutable_content()->add_prefetch_metadata()->set_uri(
+      "http://uri-for-" + xsurface_content);
   return result;
 }
 
@@ -97,7 +95,7 @@ RefreshResponseData TranslateWireResponse(feedwire::Response response,
 RefreshResponseData TranslateWireResponse(feedwire::Response response) {
   return TranslateWireResponse(response, true);
 }
-base::Optional<feedstore::DataOperation> TranslateDataOperation(
+absl::optional<feedstore::DataOperation> TranslateDataOperation(
     feedwire::DataOperation operation) {
   return ::feed::TranslateDataOperation(base::Time(), std::move(operation));
 }
@@ -204,7 +202,7 @@ TEST(ProtocolTranslatorTest, MissingResponseVersion) {
 TEST(ProtocolTranslatorTest, TranslateContent) {
   feedwire::DataOperation wire_operation =
       MakeDataOperationWithContent(feedwire::DataOperation::UPDATE_OR_APPEND);
-  base::Optional<feedstore::DataOperation> translated =
+  absl::optional<feedstore::DataOperation> translated =
       TranslateDataOperation(wire_operation);
   EXPECT_TRUE(translated);
   EXPECT_EQ("content", translated->content().frame());
@@ -216,7 +214,7 @@ TEST(ProtocolTranslatorTest, TranslateContent) {
 TEST(ProtocolTranslatorTest, TranslateContentFailsWhenMissingContent) {
   feedwire::DataOperation wire_operation =
       MakeDataOperationWithContent(feedwire::DataOperation::UPDATE_OR_APPEND);
-  wire_operation.mutable_feature()->clear_content_extension();
+  wire_operation.mutable_feature()->clear_content();
   EXPECT_FALSE(TranslateDataOperation(wire_operation));
 }
 
@@ -231,6 +229,28 @@ TEST(ProtocolTranslatorTest, TranslateRenderData) {
   EXPECT_EQ(
       "renderdata",
       translated.model_update_request->shared_states[0].shared_state_data());
+}
+
+TEST(ProtocolTranslatorTest, TranslateContentLifetime) {
+  feedwire::Response wire_response = EmptyWireResponse();
+  feedwire::ContentLifetime* content_lifetime =
+      wire_response.mutable_feed_response()
+          ->mutable_feed_response_metadata()
+          ->mutable_content_lifetime();
+  content_lifetime->set_stale_age_ms(123);
+  content_lifetime->set_invalid_age_ms(456);
+  RefreshResponseData translated = TranslateWireResponse(wire_response);
+  ASSERT_TRUE(translated.content_lifetime.has_value());
+  EXPECT_EQ(translated.content_lifetime->stale_age_ms(),
+            content_lifetime->stale_age_ms());
+  EXPECT_EQ(translated.content_lifetime->invalid_age_ms(),
+            content_lifetime->invalid_age_ms());
+}
+
+TEST(ProtocolTranslatorTest, TranslateMissingContentLifetime) {
+  feedwire::Response wire_response = EmptyWireResponse();
+  RefreshResponseData translated = TranslateWireResponse(wire_response);
+  EXPECT_FALSE(translated.content_lifetime.has_value());
 }
 
 TEST(ProtocolTranslatorTest, TranslateRenderDataFailsWithUnknownType) {
@@ -307,9 +327,19 @@ TEST(ProtocolTranslatorTest, TranslateRealResponse) {
   const std::string want = R"(source: 0
 stream_data: {
   last_added_time_millis: 10627200000
-  shared_state_id {
+  shared_state_ids {
     content_domain: "render_data"
   }
+  content_ids: 3328940074512586021
+  content_ids: 8191455549164721606
+  content_ids: -8109602013173974591
+  content_ids: -8979410608587540000
+  content_ids: -8421826555441408245
+  content_ids: -3490122365494686813
+  content_ids: 2741853109953412745
+  content_ids: 586433679892097787
+  content_ids: 790985792726953756
+  content_ids: 7324025093440047528
 }
 content: {
   content_id {

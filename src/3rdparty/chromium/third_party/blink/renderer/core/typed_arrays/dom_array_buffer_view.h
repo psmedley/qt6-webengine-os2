@@ -14,6 +14,7 @@ namespace blink {
 
 class CORE_EXPORT DOMArrayBufferView : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
+  static const WrapperTypeInfo wrapper_type_info_body_;
 
  public:
   enum ViewType {
@@ -112,14 +113,9 @@ class CORE_EXPORT DOMArrayBufferView : public ScriptWrappable {
   }
 
   // ScriptWrappable overrides:
-  v8::Local<v8::Value> Wrap(v8::Isolate*,
-                            v8::Local<v8::Object> creation_context) override {
+  v8::MaybeLocal<v8::Value> Wrap(ScriptState*) override {
     NOTREACHED();
-    return v8::Local<v8::Object>();
-  }
-  v8::MaybeLocal<v8::Value> WrapV2(ScriptState*) override {
-    NOTREACHED();
-    return v8::MaybeLocal<v8::Value>();
+    return v8::Local<v8::Value>();
   }
 
   void Trace(Visitor* visitor) const override {

@@ -13,7 +13,7 @@ import("//build/util/version.gni")
 
 declare_args() {
   # Should ANGLE be linked statically?
-  use_static_angle = false
+  use_static_angle = is_android
 
   # Should EGL support be compiled?
   # Can be overriden to test during bring up of EGL support on other platforms.
@@ -22,7 +22,8 @@ declare_args() {
 
   # Should Dawn support be compiled to back the WebGPU implementation?
   # Also controls linking Dawn depedencies in such as SPIRV-Tools/SPIRV-Cross.
-  use_dawn = false
+  use_dawn = is_mac || is_win || is_chromeos_ash ||
+             ((is_linux || is_chromeos_lacros) && !is_chromecast)
 
   # Should Dawn test binaries (unittests, end2end_tests, perf_tests) be built?
   # Independent of use_dawn, which controls whether Dawn is used in Chromium.

@@ -91,7 +91,7 @@ void BackgroundTracingConfigImpl::IntoDict(base::DictionaryValue* dict) {
   if (category_preset_ == CUSTOM_CATEGORY_PRESET) {
     dict->SetString(kConfigCustomCategoriesKey, custom_categories_);
   } else if (category_preset_ == CUSTOM_TRACE_CONFIG) {
-    base::Optional<base::Value> trace_config =
+    absl::optional<base::Value> trace_config =
         base::JSONReader::Read(trace_config_.ToString());
     if (trace_config) {
       dict->SetKey(kConfigTraceConfigKey, std::move(*trace_config));
@@ -115,16 +115,16 @@ void BackgroundTracingConfigImpl::IntoDict(base::DictionaryValue* dict) {
       break;
   }
 
-  std::unique_ptr<base::ListValue> configs_list(new base::ListValue());
+  base::ListValue configs_list;
   for (const auto& rule : rules_) {
     std::unique_ptr<base::DictionaryValue> config_dict(
         new base::DictionaryValue());
     DCHECK(rule);
     rule->IntoDict(config_dict.get());
-    configs_list->Append(std::move(config_dict));
+    configs_list.Append(std::move(config_dict));
   }
 
-  dict->Set(kConfigsKey, std::move(configs_list));
+  dict->SetKey(kConfigsKey, std::move(configs_list));
 
   if (!scenario_name_.empty())
     dict->SetString(kConfigScenarioName, scenario_name_);
@@ -268,7 +268,7 @@ BackgroundTracingConfigImpl::PreemptiveFromDict(
   if (!dict->GetList(kConfigsKey, &configs_list))
     return nullptr;
 
-  for (const auto& it : *configs_list) {
+  for (const auto& it : configs_list->GetList()) {
     const base::DictionaryValue* config_dict = nullptr;
     if (!it.GetAsDictionary(&config_dict))
       return nullptr;
@@ -319,7 +319,7 @@ BackgroundTracingConfigImpl::ReactiveFromDict(
   if (!dict->GetList(kConfigsKey, &configs_list))
     return nullptr;
 
-  for (const auto& it : *configs_list) {
+  for (const auto& it : configs_list->GetList()) {
     const base::DictionaryValue* config_dict = nullptr;
     if (!it.GetAsDictionary(&config_dict))
       return nullptr;
@@ -355,7 +355,7 @@ BackgroundTracingConfigImpl::SystemFromDict(const base::DictionaryValue* dict) {
   if (!dict->GetList(kConfigsKey, &configs_list))
     return nullptr;
 
-  for (const auto& it : *configs_list) {
+  for (const auto& it : configs_list->GetList()) {
     const base::DictionaryValue* config_dict = nullptr;
     if (!it.GetAsDictionary(&config_dict))
       return nullptr;
@@ -391,6 +391,7 @@ BackgroundTracingRule* BackgroundTracingConfigImpl::AddRule(
   std::unique_ptr<BackgroundTracingRule> rule =
       BackgroundTracingRule::CreateRuleFromDict(dict);
   if (rule) {
+    has_crash_scenario_ = rule->is_crash();
     rules_.push_back(std::move(rule));
     return rules_.back().get();
   }

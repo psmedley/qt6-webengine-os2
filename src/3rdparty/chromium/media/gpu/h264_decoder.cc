@@ -4,17 +4,18 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/optional.h"
-#include "base/stl_util.h"
 #include "media/base/media_switches.h"
 #include "media/gpu/h264_decoder.h"
 #include "media/video/h264_level_limits.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 namespace {
@@ -1049,7 +1050,7 @@ bool H264Decoder::FinishPicture(scoped_refptr<H264Picture> pic) {
         // outputting all pictures before it, to avoid outputting corrupted
         // frames.
         (*output_candidate)->frame_num == *recovery_frame_num_) {
-      recovery_frame_num_ = base::nullopt;
+      recovery_frame_num_ = absl::nullopt;
       if (!OutputPic(*output_candidate))
         return false;
     }
@@ -1440,7 +1441,7 @@ H264Decoder::DecodeResult H264Decoder::Decode() {
     H264Parser::Result par_res;
 
     if (!curr_nalu_) {
-      curr_nalu_.reset(new H264NALU());
+      curr_nalu_ = std::make_unique<H264NALU>();
       par_res = parser_.AdvanceToNextNALU(curr_nalu_.get());
       if (par_res == H264Parser::kEOStream) {
         CHECK_ACCELERATOR_RESULT(FinishPrevFrameIfPresent());

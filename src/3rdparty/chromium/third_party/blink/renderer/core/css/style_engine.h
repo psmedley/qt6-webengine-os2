@@ -36,6 +36,7 @@
 #include "third_party/blink/public/common/css/forced_colors.h"
 #include "third_party/blink/public/mojom/css/preferred_color_scheme.mojom-shared.h"
 #include "third_party/blink/public/web/web_document.h"
+#include "third_party/blink/renderer/core/animation/css/css_scroll_timeline.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/active_style_sheets.h"
 #include "third_party/blink/renderer/core/css/css_global_rule_set.h"
@@ -68,6 +69,7 @@ class CounterStyleMap;
 class CSSFontSelector;
 class CSSStyleSheet;
 class FontSelector;
+class HTMLSelectElement;
 class MediaQueryEvaluator;
 class Node;
 class RuleFeatureSet;
@@ -185,7 +187,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   }
   void InitialViewportChanged();
   void ViewportRulesChanged();
-  void HtmlImportAddedOrRemoved();
 
   void InjectSheet(const StyleSheetKey&, StyleSheetContents*,
                    WebDocument::CSSOrigin =
@@ -195,16 +196,12 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
                                WebDocument::kAuthorOrigin);
   CSSStyleSheet& EnsureInspectorStyleSheet();
   RuleSet* WatchedSelectorsRuleSet() {
-    DCHECK(!IsHTMLImport());
     DCHECK(global_rule_set_);
     return global_rule_set_->WatchedSelectorsRuleSet();
   }
 
   RuleSet* RuleSetForSheet(CSSStyleSheet&);
   void MediaQueryAffectingValueChanged(MediaValueChange change);
-  void UpdateActiveStyleSheetsInImport(
-      StyleEngine& root_engine,
-      DocumentStyleSheetCollector& parent_collector);
   void UpdateActiveStyle();
 
   String PreferredStylesheetSetName() const {
@@ -238,6 +235,14 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   }
   bool UsesWindowInactiveSelector() const {
     return GetRuleFeatureSet().UsesWindowInactiveSelector();
+  }
+  bool UsesContainerQueries() const {
+    return GetRuleFeatureSet().UsesContainerQueries() ||
+           uses_container_relative_units_;
+  }
+
+  void SetUsesContainerRelativeUnits() {
+    uses_container_relative_units_ = true;
   }
 
   bool UsesRemUnits() const { return uses_rem_units_; }
@@ -273,7 +278,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   bool MediaQueryAffectedByViewportChange();
   bool MediaQueryAffectedByDeviceChange();
   bool HasViewportDependentMediaQueries() {
-    DCHECK(!IsHTMLImport());
     DCHECK(global_rule_set_);
     UpdateActiveStyle();
     return !global_rule_set_->GetRuleFeatureSet()
@@ -378,6 +382,13 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   void EnvironmentVariableChanged();
 
+  // Called when the set of @scroll-timeline rules changes. E.g. if a new
+  // @scroll-timeline rule was inserted.
+  //
+  // Not to be confused with ScrollTimelineInvalidated, which is called when
+  // elements *referenced* by @scroll-timeline rules change.
+  void ScrollTimelinesChanged();
+
   bool NeedsWhitespaceReattachment() const {
     return !whitespace_reattach_set_.IsEmpty();
   }
@@ -401,7 +412,18 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   StyleRuleKeyframes* KeyframeStylesForAnimation(
       const AtomicString& animation_name);
-  StyleRuleScrollTimeline* FindScrollTimelineRule(const AtomicString& name);
+
+  void UpdateTimelines();
+
+  CSSScrollTimeline* FindScrollTimeline(const AtomicString& name);
+
+  // Called when information a @scroll-timeline depends on changes, e.g.
+  // when we have source:selector(#foo), and the element referenced by
+  // #foo changes.
+  //
+  // Not to be confused with ScrollTimelinesChanged, which is called when
+  // @scroll-timeline rules themselves change.
+  void ScrollTimelineInvalidated(CSSScrollTimeline&);
 
   CounterStyleMap* GetUserCounterStyleMap() { return user_counter_style_map_; }
   const CounterStyle& FindCounterStyleAcrossScopes(const AtomicString&,
@@ -427,7 +449,7 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void UpdateStyleAndLayoutTreeForContainer(Element& container,
                                             const LogicalSize&,
                                             LogicalAxes contained_axes);
-  void RecalcStyle() { RecalcStyle({}, StyleRecalcContext()); }
+  void RecalcStyle();
 
   void ClearEnsuredDescendantStyles(Element& element);
   void RebuildLayoutTree();
@@ -436,6 +458,7 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   bool InContainerQueryStyleRecalc() const {
     return in_container_query_style_recalc_;
   }
+  void ChangeRenderingForHTMLSelect(HTMLSelectElement& select);
 
   void SetColorSchemeFromMeta(const CSSValue* color_scheme);
   const CSSValue* GetMetaColorSchemeValue() const { return meta_color_scheme_; }
@@ -471,8 +494,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void MarkTreeScopeDirty(TreeScope&);
   void MarkUserStyleDirty();
 
-  bool IsHTMLImport() const { return is_html_import_; }
-  Document* HTMLImportRootDocument();
   Document& GetDocument() const { return *document_; }
 
   typedef HeapHashSet<Member<TreeScope>> UnorderedTreeScopeSet;
@@ -486,7 +507,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
                                        MediaValueChange);
 
   const RuleFeatureSet& GetRuleFeatureSet() const {
-    DCHECK(!IsHTMLImport());
     DCHECK(global_rule_set_);
     return global_rule_set_->GetRuleFeatureSet();
   }
@@ -571,17 +591,12 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   Member<Document> document_;
 
-  // True if this StyleEngine is for an HTML Import document.
-  bool is_html_import_{false};
-
   // Tracks the number of currently loading top-level stylesheets. Sheets loaded
   // using the @import directive are not included in this count. We use this
   // count of pending sheets to detect when it is safe to execute scripts
   // (parser-inserted scripts may not run until all pending stylesheets have
   // loaded). See:
   // https://html.spec.whatwg.org/multipage/semantics.html#interactions-of-styling-and-scripting
-  // Once the BlockHTMLParserOnStyleSheets flag has shipped, this is the same
-  // as pending_parser_blocking_stylesheets_.
   int pending_script_blocking_stylesheets_{0};
 
   // Tracks the number of currently loading top-level stylesheets which block
@@ -618,12 +633,14 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   String preferred_stylesheet_set_name_;
 
   bool uses_rem_units_{false};
+  bool uses_container_relative_units_{false};
   bool in_layout_tree_rebuild_{false};
   bool in_container_query_style_recalc_{false};
   bool in_dom_removal_{false};
   bool viewport_style_dirty_{false};
   bool fonts_need_update_{false};
   bool counter_styles_need_update_{false};
+  bool timelines_need_update_{false};
 
   // Set to true if we allow marking style dirty from style recalc. Ideally, we
   // should get rid of this, but we keep track of where we allow it with
@@ -679,7 +696,8 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   Member<CounterStyleMap> user_counter_style_map_;
 
   HeapHashMap<AtomicString, Member<StyleRuleScrollTimeline>>
-      scroll_timeline_map_;
+      scroll_timeline_rule_map_;
+  HeapHashMap<AtomicString, Member<CSSScrollTimeline>> scroll_timeline_map_;
 
   scoped_refptr<DocumentStyleEnvironmentVariables> environment_variables_;
 
@@ -721,4 +739,4 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_ENGINE_H_

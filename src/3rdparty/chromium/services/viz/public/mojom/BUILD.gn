@@ -19,11 +19,11 @@ mojom("mojom") {
     "compositing/compositor_render_pass_id.mojom",
     "compositing/copy_output_request.mojom",
     "compositing/copy_output_result.mojom",
-    "compositing/delegated_ink_metadata.mojom",
-    "compositing/delegated_ink_point.mojom",
     "compositing/filter_operation.mojom",
     "compositing/filter_operations.mojom",
     "compositing/frame_deadline.mojom",
+    "compositing/frame_sink_bundle.mojom",
+    "compositing/frame_sink_bundle_id.mojom",
     "compositing/frame_sink_id.mojom",
     "compositing/frame_timing_details.mojom",
     "compositing/local_surface_id.mojom",
@@ -49,6 +49,7 @@ mojom("mojom") {
   ]
 
   public_deps = [
+    ":resource_format",
     "//gpu/ipc/common:interfaces",
     "//media/mojo/mojom",
     "//mojo/public/mojom/base",
@@ -68,6 +69,16 @@ mojom("mojom") {
   export_header_blink = "third_party/blink/public/platform/web_common.h"
 
   shared_cpp_typemaps = [
+    {
+      types = [
+        {
+          mojom = "viz.mojom.FrameSinkBundleId"
+          cpp = "::viz::FrameSinkBundleId"
+        },
+      ]
+      traits_headers = [ "//services/viz/public/cpp/compositing/frame_sink_bundle_id_mojom_traits.h" ]
+      traits_public_deps = [ "//components/viz/common" ]
+    },
     {
       types = [
         {
@@ -97,10 +108,7 @@ mojom("mojom") {
         {
           mojom = "viz.mojom.ReturnedResource"
           cpp = "::viz::ReturnedResource"
-        },
-        {
-          mojom = "viz.mojom.ReturnedResourceArray"
-          cpp = "::viz::ReturnedResourceArray"
+          move_only = true
         },
       ]
       traits_headers = [ "//services/viz/public/cpp/compositing/returned_resource_mojom_traits.h" ]
@@ -275,34 +283,11 @@ mojom("mojom") {
     {
       types = [
         {
-          mojom = "viz.mojom.DelegatedInkMetadata"
-          cpp = "::std::unique_ptr<::viz::DelegatedInkMetadata>"
-          move_only = true
-          nullable_is_same_type = true
-        },
-      ]
-      traits_sources = [ "//services/viz/public/cpp/compositing/delegated_ink_metadata_mojom_traits.cc" ]
-      traits_headers = [ "//services/viz/public/cpp/compositing/delegated_ink_metadata_mojom_traits.h" ]
-      traits_public_deps = [ "//components/viz/common" ]
-    },
-    {
-      types = [
-        {
-          mojom = "viz.mojom.DelegatedInkPoint"
-          cpp = "::viz::DelegatedInkPoint"
-        },
-      ]
-      traits_sources = [ "//services/viz/public/cpp/compositing/delegated_ink_point_mojom_traits.cc" ]
-      traits_headers = [ "//services/viz/public/cpp/compositing/delegated_ink_point_mojom_traits.h" ]
-      traits_public_deps = [ "//components/viz/common" ]
-    },
-    {
-      types = [
-        {
           mojom = "viz.mojom.FilterOperation"
           cpp = "::cc::FilterOperation"
         },
       ]
+      traits_sources = [ "//services/viz/public/cpp/compositing/filter_operation_mojom_traits.cc" ]
       traits_headers = [
         "//services/viz/public/cpp/compositing/filter_operation_mojom_traits.h",
       ]
@@ -478,7 +463,7 @@ mojom("mojom") {
       traits_headers = [ "//services/viz/public/cpp/compositing/transferable_resource_mojom_traits.h" ]
       traits_public_deps = [ "//components/viz/common" ]
       traits_deps = [
-        "//gpu/ipc/common:mojom_traits",
+        "//gpu/ipc/common",
         "//ui/gfx/geometry/mojom",
       ]
     },
@@ -575,6 +560,7 @@ mojom("mojom") {
       traits_public_deps = [
         "//components/viz/common",
         "//gpu/ipc/common:interfaces",
+        "//gpu/ipc/common:interfaces_blink",
         "//services/viz/public/mojom",
         "//skia/public/mojom",
         "//ui/gfx/geometry/mojom",
@@ -582,17 +568,27 @@ mojom("mojom") {
         "//ui/latency/mojom",
       ]
     },
+  ]
+}
+
+mojom("resource_format") {
+  generate_java = true
+  sources = [ "compositing/resource_format.mojom" ]
+  cpp_typemaps = [
     {
       types = [
         {
-          mojom = "viz.mojom.DelegatedInkMetadata"
-          cpp = "::std::unique_ptr<::viz::DelegatedInkMetadata>"
-          move_only = true
-          nullable_is_same_type = true
+          mojom = "viz.mojom.ResourceFormat"
+          cpp = "::viz::ResourceFormat"
         },
       ]
-      traits_headers = [ "//services/viz/public/cpp/compositing/delegated_ink_metadata_mojom_traits.h" ]
-      traits_public_deps = [ "//components/viz/common" ]
+      traits_headers = [
+        "//services/viz/public/cpp/compositing/resource_format_mojom_traits.h",
+      ]
+      traits_sources = [
+        "//services/viz/public/cpp/compositing/resource_format_mojom_traits.cc",
+      ]
+      traits_public_deps = [ "//components/viz/common:resource_format" ]
     },
   ]
 }

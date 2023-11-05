@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/debug/alias.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -14,6 +15,7 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/bubble/bubble_border.h"
@@ -21,7 +23,6 @@
 #include "ui/views/buildflags.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/layout/layout_provider.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/style/platform_style.h"
 #include "ui/views/views_features.h"
 #include "ui/views/widget/widget.h"
@@ -35,6 +36,9 @@
 
 namespace views {
 
+// Debug information for https://crbug.com/1215247.
+int g_instance_count = 0;
+
 ////////////////////////////////////////////////////////////////////////////////
 // DialogDelegate::Params:
 DialogDelegate::Params::Params() = default;
@@ -44,6 +48,8 @@ DialogDelegate::Params::~Params() = default;
 // DialogDelegate:
 
 DialogDelegate::DialogDelegate() {
+  ++g_instance_count;
+
   WidgetDelegate::RegisterWindowWillCloseCallback(
       base::BindOnce(&DialogDelegate::WindowWillClose, base::Unretained(this)));
   UMA_HISTOGRAM_BOOLEAN("Dialog.DialogDelegate.Create", true);
@@ -103,7 +109,7 @@ Widget::InitParams DialogDelegate::GetDialogWidgetInitParams(
   if (!dialog || dialog->use_custom_frame()) {
     params.opacity = Widget::InitParams::WindowOpacity::kTranslucent;
     params.remove_standard_frame = true;
-#if !defined(OS_APPLE)
+#if !defined(OS_MAC)
     // Except on Mac, the bubble frame includes its own shadow; remove any
     // native shadowing. On Mac, the window server provides the shadow.
     params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
@@ -132,7 +138,7 @@ int DialogDelegate::GetDefaultDialogButton() const {
   return ui::DIALOG_BUTTON_NONE;
 }
 
-base::string16 DialogDelegate::GetDialogButtonLabel(
+std::u16string DialogDelegate::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (!GetParams().button_labels[button].empty())
     return GetParams().button_labels[button];
@@ -145,7 +151,7 @@ base::string16 DialogDelegate::GetDialogButtonLabel(
     return l10n_util::GetStringUTF16(IDS_APP_CLOSE);
   }
   NOTREACHED();
-  return base::string16();
+  return std::u16string();
 }
 
 bool DialogDelegate::IsDialogButtonEnabled(ui::DialogButton button) const {
@@ -280,19 +286,19 @@ BubbleFrameView* DialogDelegate::GetBubbleFrameView() const {
 }
 
 views::LabelButton* DialogDelegate::GetOkButton() const {
-  DCHECK(GetWidget()) << "Don't call this before OnDialogInitialized";
+  DCHECK(GetWidget()) << "Don't call this before OnWidgetInitialized";
   auto* client = GetDialogClientView();
   return client ? client->ok_button() : nullptr;
 }
 
 views::LabelButton* DialogDelegate::GetCancelButton() const {
-  DCHECK(GetWidget()) << "Don't call this before OnDialogInitialized";
+  DCHECK(GetWidget()) << "Don't call this before OnWidgetInitialized";
   auto* client = GetDialogClientView();
   return client ? client->cancel_button() : nullptr;
 }
 
 views::View* DialogDelegate::GetExtraView() const {
-  DCHECK(GetWidget()) << "Don't call this before OnDialogInitialized";
+  DCHECK(GetWidget()) << "Don't call this before OnWidgetInitialized";
   auto* client = GetDialogClientView();
   return client ? client->extra_view() : nullptr;
 }
@@ -350,7 +356,7 @@ void DialogDelegate::SetButtonEnabled(ui::DialogButton button, bool enabled) {
 }
 
 void DialogDelegate::SetButtonLabel(ui::DialogButton button,
-    base::string16 label) {
+                                    std::u16string label) {
   if (params_.button_labels[button] == label)
     return;
   params_.button_labels[button] = label;
@@ -387,9 +393,21 @@ void DialogDelegate::SetButtonRowInsets(const gfx::Insets& insets) {
 }
 
 void DialogDelegate::AcceptDialog() {
+  // Copy the dialog widget name onto the stack so it appears in crash dumps.
+  DEBUG_ALIAS_FOR_CSTR(last_widget_name, GetWidget()->GetName().c_str(), 64);
+
   DCHECK(IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
   if (already_started_close_ || !Accept())
     return;
+
+  // Check for Accept() deleting `this` but returning false. Empirically the
+  // steady state instance count with no dialogs open is zero, so if it's back
+  // to zero `this` is deleted https://crbug.com/1215247
+  if (g_instance_count <= 0) {
+    // LOG(FATAL) instead of CHECK() to put the widget name into a crash key.
+    // See "Product Data" in the crash tool if a crash report shows this line.
+    LOG(FATAL) << last_widget_name;
+  }
 
   already_started_close_ = true;
   GetWidget()->CloseWithReason(
@@ -411,6 +429,7 @@ void DialogDelegate::CancelDialog() {
 DialogDelegate::~DialogDelegate() {
   UMA_HISTOGRAM_LONG_TIMES("Dialog.DialogDelegate.Duration",
                            base::TimeTicks::Now() - creation_time_);
+  --g_instance_count;
 }
 
 ax::mojom::Role DialogDelegate::GetAccessibleWindowRole() {
@@ -425,22 +444,19 @@ int DialogDelegate::GetCornerRadius() const {
   if (GetModalType() == ui::MODAL_TYPE_WINDOW)
     return 2;
 #endif
-  return LayoutProvider::Get()->GetCornerRadiusMetric(views::EMPHASIS_MEDIUM);
+  if (params_.corner_radius)
+    return *params_.corner_radius;
+  return LayoutProvider::Get()->GetCornerRadiusMetric(views::Emphasis::kMedium);
 }
 
 std::unique_ptr<View> DialogDelegate::DisownFootnoteView() {
   return std::move(footnote_view_);
 }
 
-void DialogDelegate::OnWidgetInitialized() {
-  OnDialogInitialized();
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // DialogDelegateView:
 
 DialogDelegateView::DialogDelegateView() {
-  set_owned_by_client();
   SetOwnedByWidget(true);
   UMA_HISTOGRAM_BOOLEAN("Dialog.DialogDelegateView.Create", true);
 }

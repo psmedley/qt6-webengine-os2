@@ -6,9 +6,9 @@
 
 #include <stddef.h>
 
+#include "base/cxx17_backports.h"
 #include "base/i18n/message_formatter.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
 #include "net/base/escape.h"
@@ -22,15 +22,15 @@ using base::UTF8ToUTF16;
 
 namespace ssl_errors {
 
-ErrorInfo::ErrorInfo(const base::string16& details,
-                     const base::string16& short_description)
+ErrorInfo::ErrorInfo(const std::u16string& details,
+                     const std::u16string& short_description)
     : details_(details), short_description_(short_description) {}
 
 // static
 ErrorInfo ErrorInfo::CreateError(ErrorType error_type,
                                  net::X509Certificate* cert,
                                  const GURL& request_url) {
-  base::string16 details, short_description;
+  std::u16string details, short_description;
   switch (error_type) {
     case CERT_COMMON_NAME_INVALID: {
       std::vector<std::string> dns_names;

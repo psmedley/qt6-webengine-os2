@@ -406,6 +406,12 @@ Options (in lexicographical order):)",
                Removes duplicate types, decorations, capabilities and extension
                instructions.)");
   printf(R"(
+  --remove-unused-interface-variables
+               Removes variables referenced on the |OpEntryPoint| instruction 
+               that are not referenced in the entry point function or any function 
+               in its call tree.  Note that this could cause the shader interface 
+               to no longer match other shader stages.)");
+  printf(R"(
   --replace-invalid-opcode
                Replaces instructions whose opcode is valid for shader modules,
                but not for the current shader stage.  To have an effect, all
@@ -807,7 +813,7 @@ int main(int argc, const char** argv) {
   }
 
   std::vector<uint32_t> binary;
-  if (!ReadFile<uint32_t>(in_file, "rb", &binary)) {
+  if (!ReadBinaryFile<uint32_t>(in_file, &binary)) {
     return 1;
   }
 

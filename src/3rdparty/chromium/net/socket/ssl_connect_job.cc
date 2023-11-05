@@ -5,6 +5,7 @@
 #include "net/socket/ssl_connect_job.h"
 
 #include <cstdlib>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -100,6 +101,18 @@ const scoped_refptr<HttpProxySocketParams>&
 SSLSocketParams::GetHttpProxyConnectionParams() const {
   DCHECK_EQ(GetConnectionType(), HTTP_PROXY);
   return http_proxy_params_;
+}
+
+std::unique_ptr<SSLConnectJob> SSLConnectJob::Factory::Create(
+    RequestPriority priority,
+    const SocketTag& socket_tag,
+    const CommonConnectJobParams* common_connect_job_params,
+    scoped_refptr<SSLSocketParams> params,
+    ConnectJob::Delegate* delegate,
+    const NetLogWithSource* net_log) {
+  return std::make_unique<SSLConnectJob>(priority, socket_tag,
+                                         common_connect_job_params,
+                                         std::move(params), delegate, net_log);
 }
 
 SSLConnectJob::SSLConnectJob(
@@ -403,7 +416,6 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
   }
 
   const std::string& host = params_->host_and_port().host();
-  bool tls13_supported = IsTLS13ExperimentHost(host);
 
   if (result == OK) {
     DCHECK(!connect_timing_.ssl_start.is_null());
@@ -437,13 +449,6 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
     if (ssl_info.key_exchange_group != 0) {
       base::UmaHistogramSparse("Net.SSL_KeyExchange.ECDHE",
                                ssl_info.key_exchange_group);
-    }
-
-    if (tls13_supported) {
-      UMA_HISTOGRAM_CUSTOM_TIMES("Net.SSL_Connection_Latency_TLS13Experiment",
-                                 connect_duration,
-                                 base::TimeDelta::FromMilliseconds(1),
-                                 base::TimeDelta::FromMinutes(1), 100);
     }
 
     // Classify whether the connection required the legacy crypto fallback.
@@ -492,10 +497,6 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
   }
 
   base::UmaHistogramSparse("Net.SSL_Connection_Error", std::abs(result));
-  if (tls13_supported) {
-    base::UmaHistogramSparse("Net.SSL_Connection_Error_TLS13Experiment",
-                             std::abs(result));
-  }
 
   if (result == OK || IsCertificateError(result)) {
     SetSocket(std::move(ssl_socket_), std::move(dns_aliases_));

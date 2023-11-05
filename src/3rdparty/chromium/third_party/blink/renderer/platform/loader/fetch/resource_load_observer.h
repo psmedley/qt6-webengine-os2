@@ -23,7 +23,6 @@ class ResourceError;
 class ResourceRequest;
 class ResourceResponse;
 enum class ResourceType : uint8_t;
-struct FetchInitiatorInfo;
 
 // ResourceLoadObserver is a collection of functions which meet following
 // conditions.
@@ -48,11 +47,10 @@ class PLATFORM_EXPORT ResourceLoadObserver
 
   // Called when the request is about to be sent. This is called on initial and
   // every redirect request.
-  virtual void WillSendRequest(uint64_t identifier,
-                               const ResourceRequest&,
+  virtual void WillSendRequest(const ResourceRequest&,
                                const ResourceResponse& redirect_response,
                                ResourceType,
-                               const FetchInitiatorInfo&,
+                               const ResourceLoaderOptions&,
                                RenderBlockingBehavior) = 0;
 
   // Called when the priority of the request changes.
@@ -97,6 +95,11 @@ class PLATFORM_EXPORT ResourceLoadObserver
                               const ResourceError&,
                               int64_t encoded_data_length,
                               IsInternalRequest) = 0;
+
+  // Called when the RenderBlockingBehavior given to WillSendRequest changes.
+  virtual void DidChangeRenderBlockingBehavior(
+      Resource* resource,
+      const FetchParameters& params) = 0;
 
   virtual void Trace(Visitor*) const {}
 };

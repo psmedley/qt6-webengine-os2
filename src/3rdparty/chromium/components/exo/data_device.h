@@ -63,12 +63,13 @@ class DataDevice : public WMHelper::DragDropObserver,
   void OnDragExited() override;
   ui::mojom::DragOperation OnPerformDrop(
       const ui::DropTargetEvent& event) override;
+  WMHelper::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override;
 
   // Overridden from ui::ClipboardObserver:
   void OnClipboardDataChanged() override;
 
   // Overridden from SeatObserver:
-  void OnSurfaceFocusing(Surface* surface) override;
   void OnSurfaceFocused(Surface* surface) override;
 
   // Overridden from DataOfferObserver:

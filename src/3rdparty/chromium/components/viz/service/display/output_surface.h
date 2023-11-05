@@ -23,6 +23,9 @@
 #include "gpu/command_buffer/common/texture_in_use_response.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "gpu/ipc/gpu_task_scheduler_helper.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "skia/ext/skia_matrix_44.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/overlay_transform.h"
@@ -34,6 +37,9 @@
 #endif
 
 namespace gfx {
+namespace mojom {
+class DelegatedInkPointRenderer;
+}  // namespace mojom
 class ColorSpace;
 class Rect;
 class Size;
@@ -64,8 +70,12 @@ class VIZ_SERVICE_EXPORT OutputSurface {
   struct Capabilities {
     Capabilities();
     Capabilities(const Capabilities& capabilities);
+    Capabilities& operator=(const Capabilities& capabilities);
 
     int max_frames_pending = 1;
+    // If set, should be the max number of pending frames when running at or
+    // above 120hz. Otherwise, fallback to `max_frames_pending`.
+    absl::optional<int> max_frames_pending_120hz;
     // The number of buffers for the SkiaOutputDevice. If the
     // |supports_post_sub_buffer| true, SkiaOutputSurfaceImpl will track target
     // damaged area based on this number.
@@ -83,17 +93,16 @@ class VIZ_SERVICE_EXPORT OutputSurface {
     bool supports_post_sub_buffer = false;
     // Whether this OutputSurface supports commit overlay planes.
     bool supports_commit_overlay_planes = false;
+    // Whether this OutputSurface permits scheduling an isothetic sub-rectangle
+    // (i.e. viewport) of its contents for display, allowing the DirectRenderer
+    // to apply resize optimization by padding to its width/height.
+    bool supports_viewporter = false;
     // Whether this OutputSurface supports gpu vsync callbacks.
     bool supports_gpu_vsync = false;
     // OutputSurface's orientation mode.
     OrientationMode orientation_mode = OrientationMode::kLogic;
     // Whether this OutputSurface supports direct composition layers.
     bool supports_dc_layers = false;
-    // Set RGB10A2 overlay support flags true by force, which is used for
-    // playing hdr video.
-    // TODO(richard.li@intel.com): Remove this when Intel fixs its overlay caps.
-    // checking bug in their driver.
-    bool forces_rgb10a2_overlay_support_flags = false;
     // Whether this OutputSurface should skip DrawAndSwap(). This is true for
     // the unified display on Chrome OS. All drawing is handled by the physical
     // displays so the unified display should skip that work.
@@ -132,6 +141,10 @@ class VIZ_SERVICE_EXPORT OutputSurface {
     // True if the OutputSurface can resize to match the size of the root
     // surface. E.g. Wayland protocol allows this.
     bool resize_based_on_root_surface = false;
+    // Some configuration supports allocating frame buffers on demand.
+    // When enabled, `number_of_buffers` should be interpreted as the maximum
+    // number of buffers to allocate.
+    bool use_dynamic_frame_buffer_allocation = false;
 
     // SkColorType for all supported buffer formats.
     SkColorType sk_color_types[static_cast<int>(gfx::BufferFormat::LAST) + 1] =
@@ -162,10 +175,10 @@ class VIZ_SERVICE_EXPORT OutputSurface {
   // Downcasts to SkiaOutputSurface if it is one and returns nullptr otherwise.
   virtual SkiaOutputSurface* AsSkiaOutputSurface();
 
-  void set_color_matrix(const SkMatrix44& color_matrix) {
+  void set_color_matrix(const skia::Matrix44& color_matrix) {
     color_matrix_ = color_matrix;
   }
-  const SkMatrix44& color_matrix() const { return color_matrix_; }
+  const skia::Matrix44& color_matrix() const { return color_matrix_; }
 
   // Only useful for GPU backend.
   virtual gpu::SurfaceHandle GetSurfaceHandle() const;
@@ -286,6 +299,12 @@ class VIZ_SERVICE_EXPORT OutputSurface {
   virtual void SetFrameSinkId(const FrameSinkId& frame_sink_id) {}
 #endif
 
+  // Sends the pending delegated ink renderer receiver to GPU Main to allow the
+  // browser process to send points directly there.
+  virtual void InitDelegatedInkPointRendererReceiver(
+      mojo::PendingReceiver<gfx::mojom::DelegatedInkPointRenderer>
+          pending_receiver);
+
  protected:
   struct OutputSurface::Capabilities capabilities_;
   scoped_refptr<ContextProvider> context_provider_;
@@ -293,7 +312,7 @@ class VIZ_SERVICE_EXPORT OutputSurface {
 
  private:
   const Type type_;
-  SkMatrix44 color_matrix_;
+  skia::Matrix44 color_matrix_;
 
   DISALLOW_COPY_AND_ASSIGN(OutputSurface);
 };

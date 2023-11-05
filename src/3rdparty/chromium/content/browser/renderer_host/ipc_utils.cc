@@ -6,12 +6,10 @@
 
 #include <utility>
 
-#include "base/optional.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/common/frame.mojom.h"
-#include "content/common/frame_messages.h"
 #include "content/common/navigation_params_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -20,6 +18,8 @@
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/url_constants.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom.h"
 
 namespace content {
 
@@ -96,7 +96,7 @@ bool VerifyDownloadUrlParams(SiteInstance* site_instance,
 }
 
 bool VerifyOpenURLParams(SiteInstance* site_instance,
-                         const mojom::OpenURLParamsPtr& params,
+                         const blink::mojom::OpenURLParamsPtr& params,
                          GURL* out_validated_url,
                          scoped_refptr<network::SharedURLLoaderFactory>*
                              out_blob_url_loader_factory) {
@@ -118,8 +118,8 @@ bool VerifyOpenURLParams(SiteInstance* site_instance,
   if (params->blob_url_token.is_valid()) {
     *out_blob_url_loader_factory =
         ChromeBlobStorageContext::URLLoaderFactoryForToken(
-            BrowserContext::GetStoragePartition(
-                site_instance->GetBrowserContext(), site_instance),
+            site_instance->GetBrowserContext()->GetStoragePartition(
+                site_instance),
             std::move(params->blob_url_token));
   }
 
@@ -141,7 +141,7 @@ bool VerifyOpenURLParams(SiteInstance* site_instance,
 
 bool VerifyBeginNavigationCommonParams(
     SiteInstance* site_instance,
-    mojom::CommonNavigationParams* common_params) {
+    blink::mojom::CommonNavigationParams* common_params) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(site_instance);
   DCHECK(common_params);
@@ -164,7 +164,8 @@ bool VerifyBeginNavigationCommonParams(
   }
 
   // Verify |transition| is webby.
-  if (!PageTransitionIsWebTriggerable(common_params->transition)) {
+  if (!PageTransitionIsWebTriggerable(
+          ui::PageTransitionFromInt(common_params->transition))) {
     bad_message::ReceivedBadMessage(
         process, bad_message::RFHI_BEGIN_NAVIGATION_NON_WEBBY_TRANSITION);
     return false;

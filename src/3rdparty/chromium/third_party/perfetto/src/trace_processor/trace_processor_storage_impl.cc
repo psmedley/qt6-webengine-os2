@@ -17,7 +17,9 @@
 #include "src/trace_processor/trace_processor_storage_impl.h"
 
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/uuid.h"
 #include "src/trace_processor/forwarding_trace_parser.h"
+#include "src/trace_processor/importers/chrome_track_event.descriptor.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
@@ -26,21 +28,23 @@
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/default_modules.h"
-#include "src/trace_processor/importers/proto/args_table_utils.h"
 #include "src/trace_processor/importers/proto/async_track_set_tracker.h"
 #include "src/trace_processor/importers/proto/heap_profile_tracker.h"
 #include "src/trace_processor/importers/proto/metadata_tracker.h"
+#include "src/trace_processor/importers/proto/perf_sample_tracker.h"
 #include "src/trace_processor/importers/proto/proto_importer_module.h"
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 #include "src/trace_processor/importers/proto/stack_profile_tracker.h"
-#include "src/trace_processor/trace_blob_view.h"
+#include "src/trace_processor/importers/track_event.descriptor.h"
 #include "src/trace_processor/trace_sorter.h"
+#include "src/trace_processor/util/descriptors.h"
 
 namespace perfetto {
 namespace trace_processor {
 
 TraceProcessorStorageImpl::TraceProcessorStorageImpl(const Config& cfg) {
   context_.config = cfg;
+
   context_.storage.reset(new TraceStorage(context_.config));
   context_.track_tracker.reset(new TrackTracker(&context_));
   context_.async_track_set_tracker.reset(new AsyncTrackSetTracker(&context_));
@@ -51,10 +55,22 @@ TraceProcessorStorageImpl::TraceProcessorStorageImpl(const Config& cfg) {
   context_.process_tracker.reset(new ProcessTracker(&context_));
   context_.clock_tracker.reset(new ClockTracker(&context_));
   context_.heap_profile_tracker.reset(new HeapProfileTracker(&context_));
+  context_.perf_sample_tracker.reset(new PerfSampleTracker(&context_));
   context_.global_stack_profile_tracker.reset(new GlobalStackProfileTracker());
   context_.metadata_tracker.reset(new MetadataTracker(&context_));
   context_.global_args_tracker.reset(new GlobalArgsTracker(&context_));
-  context_.proto_to_args_table_.reset(new ProtoToArgsTable(&context_));
+  {
+    context_.descriptor_pool_.reset(new DescriptorPool());
+    auto status = context_.descriptor_pool_->AddFromFileDescriptorSet(
+        kTrackEventDescriptor.data(), kTrackEventDescriptor.size());
+
+    PERFETTO_DCHECK(status.ok());
+
+    status = context_.descriptor_pool_->AddFromFileDescriptorSet(
+        kChromeTrackEventDescriptor.data(), kChromeTrackEventDescriptor.size());
+
+    PERFETTO_DCHECK(status.ok());
+  }
 
   context_.slice_tracker->SetOnSliceBeginCallback(
       [this](TrackId track_id, SliceId slice_id) {
@@ -78,6 +94,19 @@ util::Status TraceProcessorStorageImpl::Parse(std::unique_ptr<uint8_t[]> data,
 
   auto scoped_trace = context_.storage->TraceExecutionTimeIntoStats(
       stats::parse_trace_duration_ns);
+
+  if (hash_input_size_remaining_ > 0 && !context_.uuid_found_in_trace) {
+    const size_t hash_size = std::min(hash_input_size_remaining_, size);
+    hash_input_size_remaining_ -= hash_size;
+
+    trace_hash_.Update(reinterpret_cast<const char*>(data.get()), hash_size);
+    base::Uuid uuid(static_cast<int64_t>(trace_hash_.digest()), 0);
+    const StringId id_for_uuid =
+        context_.storage->InternString(base::StringView(uuid.ToPrettyString()));
+    context_.metadata_tracker->SetMetadata(metadata::trace_uuid,
+                                           Variadic::String(id_for_uuid));
+  }
+
   util::Status status = context_.chunk_reader->Parse(std::move(data), size);
   unrecoverable_parse_error_ |= !status.ok();
   return status;

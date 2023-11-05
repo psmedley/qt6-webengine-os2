@@ -11,14 +11,13 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/metrics/user_metrics.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/platform_thread.h"
@@ -147,7 +146,7 @@ class MetricsServiceTest : public testing::Test {
     if (!metrics_state_manager_) {
       metrics_state_manager_ = MetricsStateManager::Create(
           GetLocalState(), enabled_state_provider_.get(), std::wstring(),
-          base::BindRepeating(&StoreNoClientInfoBackup),
+          base::FilePath(), base::BindRepeating(&StoreNoClientInfoBackup),
           base::BindRepeating(&ReturnNoBackup));
     }
     return metrics_state_manager_.get();
@@ -194,7 +193,7 @@ class MetricsServiceTest : public testing::Test {
   // the histogram was not found.
   int GetHistogramSampleCount(const ChromeUserMetricsExtension& uma_log,
                               base::StringPiece histogram_name) {
-    const auto histogram_name_hash = HashMetricName(histogram_name);
+    const auto histogram_name_hash = base::HashMetricName(histogram_name);
     int samples = 0;
     for (int i = 0; i < uma_log.histogram_event_size(); ++i) {
       const auto& histogram = uma_log.histogram_event(i);
@@ -261,7 +260,7 @@ class ExperimentTestMetricsProvider : public TestMetricsProvider {
 
 TEST_F(MetricsServiceTest, InitialStabilityLogAfterCleanShutDown) {
   EnableMetricsReporting();
-  GetLocalState()->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  CleanExitBeacon::SetStabilityExitedCleanlyForTesting(GetLocalState(), true);
 
   TestMetricsServiceClient client;
   TestMetricsService service(
@@ -305,7 +304,7 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAtProviderRequest) {
 
   // Set the clean exit flag, as that will otherwise cause a stabilty
   // log to be produced, irrespective provider requests.
-  GetLocalState()->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  CleanExitBeacon::SetStabilityExitedCleanlyForTesting(GetLocalState(), true);
 
   TestMetricsService service(
       GetMetricsStateManager(), &client, GetLocalState());
@@ -352,7 +351,7 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAtProviderRequest) {
 
 TEST_F(MetricsServiceTest, InitialStabilityLogAfterCrash) {
   EnableMetricsReporting();
-  GetLocalState()->ClearPref(prefs::kStabilityExitedCleanly);
+  CleanExitBeacon::SetStabilityExitedCleanlyForTesting(GetLocalState(), true);
 
   // Set up prefs to simulate restarting after a crash.
 
@@ -370,7 +369,7 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAfterCrash) {
       .SetBuildtimeAndVersion(MetricsLog::GetBuildTime(),
                               client.GetVersionString());
 
-  GetLocalState()->SetBoolean(prefs::kStabilityExitedCleanly, false);
+  CleanExitBeacon::SetStabilityExitedCleanlyForTesting(GetLocalState(), false);
 
   TestMetricsService service(
       GetMetricsStateManager(), &client, GetLocalState());
@@ -425,24 +424,23 @@ TEST_F(MetricsServiceTest, InitialLogsHaveOnDidCreateMetricsLogHistograms) {
       std::unique_ptr<MetricsProvider>(test_provider));
 
   service.InitializeMetricsRecordingState();
-  // Start() will create an initial log.
+  // Start() will create the first ongoing log.
   service.Start();
   ASSERT_EQ(TestMetricsService::INIT_TASK_SCHEDULED, service.state());
 
-  // Run pending tasks to finish the init task, which will create the
-  // |initial_metrics_log_|.
+  // Run pending tasks to finish init task and complete the first ongoing log.
   task_runner_->RunPendingTasks();
   ASSERT_EQ(TestMetricsService::SENDING_LOGS, service.state());
 
   MetricsLogStore* test_log_store = service.LogStoreForTest();
 
-  // Stage the next log, which should be the |initial_metrics_log_|.
+  // Stage the next log, which should be the first ongoing log.
   // Check that it has one sample in |kOnDidCreateMetricsLogHistogramName|.
   test_log_store->StageNextLog();
   EXPECT_EQ(1, GetSampleCountOfOnDidCreateLogHistogram(test_log_store));
 
-  // Discard the staged log and close and stage the next one. This is the
-  // first "ongoing log".
+  // Discard the staged log and close and stage the next log, which is the
+  // second "ongoing log".
   // Check that it has one sample in |kOnDidCreateMetricsLogHistogramName|.
   test_log_store->DiscardStagedLog();
   service.StageCurrentLogForTest();
@@ -452,6 +450,38 @@ TEST_F(MetricsServiceTest, InitialLogsHaveOnDidCreateMetricsLogHistograms) {
   test_log_store->DiscardStagedLog();
   service.StageCurrentLogForTest();
   EXPECT_EQ(1, GetSampleCountOfOnDidCreateLogHistogram(test_log_store));
+}
+
+TEST_F(MetricsServiceTest, FirstLogCreatedBeforeUnsentLogsSent) {
+  EnableMetricsReporting();
+  TestMetricsServiceClient client;
+  TestMetricsService service(GetMetricsStateManager(), &client,
+                             GetLocalState());
+
+  service.InitializeMetricsRecordingState();
+  // Start() will create the first ongoing log.
+  service.Start();
+  ASSERT_EQ(TestMetricsService::INIT_TASK_SCHEDULED, service.state());
+
+  MetricsLogStore* test_log_store = service.LogStoreForTest();
+
+  // Set up the log store with an existing fake log entry. The string content
+  // is never deserialized to proto, so we're just passing some dummy content.
+  ASSERT_EQ(0u, test_log_store->initial_log_count());
+  ASSERT_EQ(0u, test_log_store->ongoing_log_count());
+  test_log_store->StoreLog("blah_blah", MetricsLog::ONGOING_LOG, LogMetadata());
+  // Note: |initial_log_count()| refers to initial stability logs, so the above
+  // log is counted an ongoing log (per its type).
+  ASSERT_EQ(0u, test_log_store->initial_log_count());
+  ASSERT_EQ(1u, test_log_store->ongoing_log_count());
+
+  // Run pending tasks to finish init task and complete the first ongoing log.
+  task_runner_->RunPendingTasks();
+  ASSERT_EQ(TestMetricsService::SENDING_LOGS, service.state());
+  // When the init task is complete, the first ongoing log should be created
+  // and added to the ongoing logs.
+  EXPECT_EQ(0u, test_log_store->initial_log_count());
+  EXPECT_EQ(2u, test_log_store->ongoing_log_count());
 }
 
 TEST_F(MetricsServiceTest,

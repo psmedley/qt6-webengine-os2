@@ -11,7 +11,6 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -46,7 +45,7 @@ namespace printing {
 
 namespace {
 
-// Helper function to ensure |job| is valid until at least |callback| returns.
+// Helper function to ensure `job` is valid until at least `callback` returns.
 void HoldRefCallback(scoped_refptr<PrintJob> job, base::OnceClosure callback) {
   std::move(callback).Run();
 }
@@ -87,7 +86,7 @@ PrintJob::~PrintJob() {
 }
 
 void PrintJob::Initialize(std::unique_ptr<PrinterQuery> query,
-                          const base::string16& name,
+                          const std::u16string& name,
                           uint32_t page_count) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!worker_);
@@ -141,18 +140,19 @@ void PrintJob::StartConversionToNativeFormat(
     document()->DebugDumpData(print_data.get(), FILE_PATH_LITERAL(".pdf"));
 
   const PrintSettings& settings = document()->settings();
-  if (settings.printer_is_textonly()) {
+  if (settings.printer_language_is_textonly()) {
     StartPdfToTextConversion(print_data, page_size);
-  } else if (settings.printer_is_ps2() || settings.printer_is_ps3()) {
+  } else if (settings.printer_language_is_ps2() ||
+             settings.printer_language_is_ps3()) {
     StartPdfToPostScriptConversion(print_data, content_area, physical_offsets,
-                                   settings.printer_is_ps2());
+                                   settings.printer_language_is_ps2());
   } else {
     StartPdfToEmfConversion(print_data, page_size, content_area);
   }
 
   // Indicate that the PDF is fully rendered and we no longer need the renderer
   // and web contents, so the print job does not need to be cancelled if they
-  // die. This is needed on Windows because the PrintedDocument will not be
+  // die. This is needed on Windows because the `PrintedDocument` will not be
   // considered complete until PDF conversion finishes.
   document()->SetConvertingPdf();
 }
@@ -182,7 +182,7 @@ void PrintJob::StartPrinting() {
     return;
   }
 
-  // Real work is done in PrintJobWorker::StartPrinting().
+  // Real work is done in `PrintJobWorker::StartPrinting()`.
   worker_->PostTask(
       FROM_HERE, base::BindOnce(&HoldRefCallback, base::WrapRefCounted(this),
                                 base::BindOnce(&PrintJobWorker::StartPrinting,
@@ -234,7 +234,7 @@ void PrintJob::Cancel() {
     // InvokeLater since it would take too much time.
     worker_->Cancel();
   }
-  // Make sure a Cancel() is broadcast.
+  // Make sure a `Cancel()` is broadcast.
   auto details = base::MakeRefCounted<JobEventDetails>(JobEventDetails::FAILED,
                                                        0, nullptr);
   content::NotificationService::current()->Notify(
@@ -273,7 +273,7 @@ const PrintSettings& PrintJob::settings() const {
   return document()->settings();
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_CHROMEOS)
 void PrintJob::SetSource(PrintJob::Source source,
                          const std::string& source_id) {
   source_ = source;
@@ -287,7 +287,7 @@ PrintJob::Source PrintJob::source() const {
 const std::string& PrintJob::source_id() const {
   return source_id_;
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN) && !defined(TOOLKIT_QT)
 class PrintJob::PdfConversionState {
@@ -352,11 +352,11 @@ void PrintJob::StartPdfToEmfConversion(
   // seems to work with the fix for this bug applied.
   const PrintSettings& settings = document()->settings();
   bool print_text_with_gdi =
-      settings.print_text_with_gdi() && !settings.printer_is_xps() &&
+      settings.print_text_with_gdi() && !settings.printer_language_is_xps() &&
       base::FeatureList::IsEnabled(::features::kGdiTextPrinting);
 
   // TODO(thestig): Figure out why crbug.com/1083911 occurred, which is likely
-  // because |web_contents| was null. As a result, this section has many more
+  // because `web_contents` was null. As a result, this section has many more
   // pointer checks to avoid crashing.
   content::WebContents* web_contents = worker_->GetWebContents();
   content::BrowserContext* context =
@@ -501,29 +501,15 @@ void PrintJob::OnNotifyPrintJobEvent(const JobEventDetails& event_details) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   switch (event_details.type()) {
-    case JobEventDetails::FAILED: {
+    case JobEventDetails::FAILED:
       // No need to cancel since the worker already canceled itself.
       Stop();
       break;
-    }
-    case JobEventDetails::USER_INIT_DONE:
-    case JobEventDetails::DEFAULT_INIT_DONE:
-    case JobEventDetails::USER_INIT_CANCELED: {
-      DCHECK_EQ(event_details.document(), document_.get());
-      break;
-    }
-    case JobEventDetails::NEW_DOC:
-    case JobEventDetails::JOB_DONE:
-    case JobEventDetails::ALL_PAGES_REQUESTED: {
-      // Don't care.
-      break;
-    }
-    case JobEventDetails::DOC_DONE: {
-      // This will call Stop() and broadcast a JOB_DONE message.
+    case JobEventDetails::DOC_DONE:
+      // This will call `Stop()` and broadcast a `JOB_DONE` message.
       content::GetUIThreadTaskRunner({})->PostTask(
           FROM_HERE, base::BindOnce(&PrintJob::OnDocumentDone, this));
       break;
-    }
 #if defined(OS_WIN) && !defined(TOOLKIT_QT)
     case JobEventDetails::PAGE_DONE:
       if (pdf_conversion_state_) {
@@ -533,10 +519,8 @@ void PrintJob::OnNotifyPrintJobEvent(const JobEventDetails& event_details) {
       document_->DropPage(event_details.page());
       break;
 #endif  // defined(OS_WIN)
-    default: {
-      NOTREACHED();
+    default:
       break;
-    }
   }
 }
 
@@ -544,7 +528,7 @@ void PrintJob::OnDocumentDone() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Be sure to live long enough. The instance could be destroyed by the
-  // JOB_DONE broadcast.
+  // `JOB_DONE` broadcast.
   scoped_refptr<PrintJob> handle(this);
 
   // Stop the worker thread.
@@ -602,8 +586,8 @@ void PrintJob::ControlledWorkerShutdown() {
 
 bool PrintJob::PostTask(const base::Location& from_here,
                         base::OnceClosure task) {
-  return base::PostTask(from_here, {content::BrowserThread::UI},
-                        std::move(task));
+  return content::GetUIThreadTaskRunner({})->PostTask(from_here,
+                                                      std::move(task));
 }
 
 void PrintJob::HoldUntilStopIsCalled() {

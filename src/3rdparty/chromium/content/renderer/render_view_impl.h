@@ -8,36 +8,28 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <map>
-#include <memory>
-#include <set>
-#include <string>
-#include <vector>
-
-#include "base/containers/flat_map.h"
 #include "base/containers/id_map.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/process/process.h"
 #include "base/single_thread_task_runner.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
+#include "content/common/frame.mojom-forward.h"
 #include "content/public/common/drop_data.h"
 #include "content/public/common/page_visibility_state.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/referrer.h"
 #include "content/public/renderer/render_view.h"
-#include "content/renderer/render_frame_impl.h"
 #include "ipc/ipc_platform_file.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote_set.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy_features.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/mojom/renderer_preference_watcher.mojom.h"
@@ -61,8 +53,8 @@ struct WebWindowFeatures;
 
 namespace content {
 class AgentSchedulingGroup;
+class RenderFrameImpl;
 class RenderViewImplTest;
-class RenderViewObserver;
 class RenderViewTest;
 
 namespace mojom {
@@ -82,7 +74,6 @@ class CreateViewParams;
 // the owner of it. Thus a tab may have multiple RenderViewImpls, one for the
 // main frame, and one for each other frame tree generated.
 class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
-                                      public IPC::Listener,
                                       public RenderView {
  public:
   // Creates a new RenderView. Note that if the original opener has been closed,
@@ -95,7 +86,6 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
   // to send an additional IPC to finish making this view visible.
   static RenderViewImpl* Create(
       AgentSchedulingGroup& agent_scheduling_group,
-      CompositorDependencies* compositor_deps,
       mojom::CreateViewParamsPtr params,
       bool was_created_by_renderer,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
@@ -108,52 +98,6 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
   // Returns the RenderViewImpl for the given routing ID.
   static RenderViewImpl* FromRoutingID(int routing_id);
 
-  // When true, a hint to all RenderWidgets that they will never be
-  // user-visible and thus never need to produce pixels for display. This is
-  // separate from page visibility, as background pages can be marked visible in
-  // blink even though they are not user-visible. Page visibility controls blink
-  // behaviour for javascript, timers, and such to inform blink it is in the
-  // foreground or background. Whereas this bit refers to user-visibility and
-  // whether the tab needs to produce pixels to put on the screen at some point
-  // or not.
-  bool widgets_never_composited() const { return widgets_never_composited_; }
-
-  void set_send_content_state_immediately(bool value) {
-    send_content_state_immediately_ = value;
-  }
-
-  CompositorDependencies* compositor_deps() const { return compositor_deps_; }
-
-  // Functions to add and remove observers for this object.
-  void AddObserver(RenderViewObserver* observer);
-  void RemoveObserver(RenderViewObserver* observer);
-
-  // Passes along the page zoom to the WebView to set it on a newly attached
-  // LocalFrame.
-  void PropagatePageZoomToNewlyAttachedFrame(bool use_zoom_for_dsf,
-                                             float device_scale_factor);
-
-  // Starts a timer to send an UpdateState message on behalf of |frame|, if the
-  // timer isn't already running. This allows multiple state changing events to
-  // be coalesced into one update.
-  void StartNavStateSyncTimerIfNecessary(RenderFrameImpl* frame);
-
-  // Returns the length of the session history of this RenderView. Note that
-  // this only coincides with the actual length of the session history if this
-  // RenderView is the currently active RenderView of a WebContents.
-  unsigned GetLocalSessionHistoryLengthForTesting() const;
-
-  // Registers a watcher to observe changes in the
-  // blink::RendererPreferences.
-  void RegisterRendererPreferenceWatcher(
-      mojo::PendingRemote<blink::mojom::RendererPreferenceWatcher> watcher);
-
-  // Returns the current instance of blink::RendererPreferences.
-  const blink::RendererPreferences& GetRendererPreferences() const;
-
-  // IPC::Listener implementation.
-  bool OnMessageReceived(const IPC::Message& msg) override;
-
   // blink::WebViewClient implementation --------------------------------------
 
   blink::WebView* CreateView(
@@ -165,24 +109,10 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
       network::mojom::WebSandboxFlags sandbox_flags,
       const blink::SessionStorageNamespaceId& session_storage_namespace_id,
       bool& consumed_user_gesture,
-      const base::Optional<blink::WebImpression>& impression) override;
-  blink::WebPagePopup* CreatePopup(blink::WebLocalFrame* creator) override;
-  base::StringPiece GetSessionStorageNamespaceId() override;
-  void PrintPage(blink::WebLocalFrame* frame) override;
-  bool AcceptsLoadDrops() override;
-  bool CanUpdateLayout() override;
-  int HistoryBackListCount() override;
-  int HistoryForwardListCount() override;
-  void OnPageVisibilityChanged(PageVisibilityState visibility) override;
-  void OnPageFrozenChanged(bool frozen) override;
-  void DidUpdateRendererPreferences() override;
-  void OnSetHistoryOffsetAndLength(int history_offset,
-                                   int history_length) override;
+      const absl::optional<blink::WebImpression>& impression) override;
 
   // RenderView implementation -------------------------------------------------
 
-  bool Send(IPC::Message* message) override;
-  RenderFrameImpl* GetMainRenderFrame() override;
   int GetRoutingID() override;
   blink::WebView* GetWebView() override;
 
@@ -196,7 +126,6 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
 
  protected:
   RenderViewImpl(AgentSchedulingGroup& agent_scheduling_group,
-                 CompositorDependencies* compositor_deps,
                  const mojom::CreateViewParams& params);
   ~RenderViewImpl() override;
 
@@ -210,32 +139,16 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
   // code away from this class.
   friend class RenderFrameImpl;
 
-  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, SetHistoryLengthAndOffset);
-
   // Initialize() is separated out from the constructor because it is possible
   // to accidentally call virtual functions. All RenderViewImpl creation is
   // fronted by the Create() method which ensures Initialize() is always called
   // before any other code can interact with instances of this call.
-  void Initialize(CompositorDependencies* compositor_deps,
-                  mojom::CreateViewParamsPtr params,
+  void Initialize(mojom::CreateViewParamsPtr params,
                   bool was_created_by_renderer,
                   scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   static WindowOpenDisposition NavigationPolicyToDisposition(
       blink::WebNavigationPolicy policy);
-
-  // Misc private functions ----------------------------------------------------
-
-#if defined(OS_ANDROID)
-  // Make the video capture devices (e.g. webcam) stop/resume delivering video
-  // frames to their clients, depending on flag |suspend|. This is called in
-  // response to a RenderView PageHidden/Shown().
-  void SuspendVideoCaptureDevices(bool suspend);
-#endif
-
-  // In OOPIF-enabled modes, this tells each RenderFrame with a pending state
-  // update to inform the browser process.
-  void SendFrameStateUpdates();
 
   // ---------------------------------------------------------------------------
   // ADDING NEW FUNCTIONS? Please keep private functions alphabetized and put
@@ -254,48 +167,7 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
   // beyond the usual opener-relationship-based BrowsingInstance boundaries).
   const bool renderer_wide_named_frame_lookup_;
 
-  // A value provided by the browser to state that all RenderWidgets in this
-  // RenderView's frame tree will never be user-visible and thus never need to
-  // produce pixels for display. This is separate from Page visibility, as
-  // non-user-visible pages can still be marked visible for blink. Page
-  // visibility controls blink behaviour for javascript, timers, and such to
-  // inform blink it is in the foreground or background. Whereas this bit refers
-  // to user-visibility and whether the tab needs to produce pixels to put on
-  // the screen at some point or not.
-  const bool widgets_never_composited_;
-
-  // Dependency injection for RenderWidget and compositing to inject behaviour
-  // and not depend on RenderThreadImpl in tests.
-  CompositorDependencies* const compositor_deps_;
-
   // Settings ------------------------------------------------------------------
-
-  // Whether content state (such as form state, scroll position and page
-  // contents) should be sent to the browser immediately. This is normally
-  // false, but set to true by some tests.
-  bool send_content_state_immediately_ = false;
-
-  // Loading state -------------------------------------------------------------
-
-  // Timer used to delay the updating of nav state (see
-  // StartNavStateSyncTimerIfNecessary).
-  base::OneShotTimer nav_state_sync_timer_;
-
-  // Set of RenderFrame routing IDs for frames that having pending UpdateState
-  // messages to send when the next |nav_state_sync_timer_| fires.
-  std::set<int> frames_with_pending_state_;
-
-  // History list --------------------------------------------------------------
-
-  // The offset of the current item in the history list.
-  int history_list_offset_ = -1;
-
-  // The RenderView's current impression of the history length.  This includes
-  // any items that have committed in this process, but because of cross-process
-  // navigations, the history may have some entries that were committed in other
-  // processes.  We won't know about them until the next navigation in this
-  // process.
-  int history_list_length_ = 0;
 
   // View ----------------------------------------------------------------------
 
@@ -308,25 +180,12 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
   // The `AgentSchedulingGroup` this view is associated with.
   AgentSchedulingGroup& agent_scheduling_group_;
 
-  RenderFrameImpl* main_render_frame_ = nullptr;
-
 #if defined(OS_ANDROID)
   // Android Specific ----------------------------------------------------------
 
   // Whether this was a renderer-created or browser-created RenderView.
   bool was_created_by_renderer_ = false;
 #endif
-
-  // Misc ----------------------------------------------------------------------
-
-  // The SessionStorage namespace that we're assigned to has an ID, and that ID
-  // is passed to us upon creation.  WebKit asks for this ID upon first use and
-  // uses it whenever asking the browser process to allocate new storage areas.
-  blink::SessionStorageNamespaceId session_storage_namespace_id_;
-
-  // All the registered observers.  We expect this list to be small, so vector
-  // is fine.
-  base::ObserverList<RenderViewObserver>::Unchecked observers_;
 
   // ---------------------------------------------------------------------------
   // ADDING NEW DATA? Please see if it fits appropriately in one of the above

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -19,11 +20,11 @@
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
 #include "media/base/timestamp_constants.h"
+#include "media/base/video_aspect_ratio.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/ffmpeg/ffmpeg_decoding_loop.h"
-#include "media/filters/ffmpeg_glue.h"
 
 namespace media {
 
@@ -81,7 +82,6 @@ static void ReleaseVideoBufferImpl(void* opaque, uint8_t* data) {
 
 // static
 bool FFmpegVideoDecoder::IsCodecSupported(VideoCodec codec) {
-  FFmpegGlue::InitializeFFmpeg();
   return avcodec_find_decoder(VideoCodecToCodecID(codec)) != nullptr;
 }
 
@@ -110,7 +110,7 @@ SupportedVideoDecoderConfigs FFmpegVideoDecoder::SupportedConfigsForWebRTC() {
 }
 
 FFmpegVideoDecoder::FFmpegVideoDecoder(MediaLog* media_log)
-    : media_log_(media_log), state_(kUninitialized), decode_nalus_(false) {
+    : media_log_(media_log) {
   DVLOG(1) << __func__;
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
@@ -140,15 +140,13 @@ int FFmpegVideoDecoder::GetVideoBuffer(struct AVCodecContext* codec_context,
   if (ret < 0)
     return ret;
 
-  gfx::Size natural_size;
-  if (codec_context->sample_aspect_ratio.num > 0) {
-    natural_size = GetNaturalSize(size,
-                                  codec_context->sample_aspect_ratio.num,
-                                  codec_context->sample_aspect_ratio.den);
-  } else {
-    natural_size =
-        GetNaturalSize(gfx::Rect(size), config_.GetPixelAspectRatio());
+  VideoAspectRatio aspect_ratio = config_.aspect_ratio();
+  if (!aspect_ratio.IsValid() && codec_context->sample_aspect_ratio.num > 0) {
+    aspect_ratio =
+        VideoAspectRatio::PAR(codec_context->sample_aspect_ratio.num,
+                              codec_context->sample_aspect_ratio.den);
   }
+  gfx::Size natural_size = aspect_ratio.GetNaturalSize(gfx::Rect(size));
 
   // FFmpeg has specific requirements on the allocation size of the frame.  The
   // following logic replicates FFmpeg's allocation strategy to ensure buffers
@@ -159,6 +157,9 @@ int FFmpegVideoDecoder::GetVideoBuffer(struct AVCodecContext* codec_context,
   DCHECK_EQ(codec_context->lowres, 0);
   gfx::Size coded_size(std::max(size.width(), codec_context->coded_width),
                        std::max(size.height(), codec_context->coded_height));
+
+  if (force_allocation_error_)
+    return AVERROR(EINVAL);
 
   // FFmpeg expects the initial allocation to be zero-initialized.  Failure to
   // do so can lead to uninitialized value usage.  See http://crbug.com/390941
@@ -231,10 +232,6 @@ int FFmpegVideoDecoder::GetVideoBuffer(struct AVCodecContext* codec_context,
 
 VideoDecoderType FFmpegVideoDecoder::GetDecoderType() const {
   return VideoDecoderType::kFFmpeg;
-}
-
-std::string FFmpegVideoDecoder::GetDisplayName() const {
-  return "FFmpegVideoDecoder";
 }
 
 void FFmpegVideoDecoder::Initialize(const VideoDecoderConfig& config,
@@ -342,25 +339,27 @@ FFmpegVideoDecoder::~FFmpegVideoDecoder() {
 bool FFmpegVideoDecoder::FFmpegDecode(const DecoderBuffer& buffer) {
   // Create a packet for input data.
   // Due to FFmpeg API changes we no longer have const read-only pointers.
-  AVPacket packet;
-  av_init_packet(&packet);
+  // av_init_packet is deprecated and being removed, and ffmpeg clearly does
+  // not want to allow on-stack allocation of AVPackets.
+  AVPacket* packet = av_packet_alloc();
   if (buffer.end_of_stream()) {
-    packet.data = NULL;
-    packet.size = 0;
+    packet->data = NULL;
+    packet->size = 0;
   } else {
-    packet.data = const_cast<uint8_t*>(buffer.data());
-    packet.size = buffer.data_size();
+    packet->data = const_cast<uint8_t*>(buffer.data());
+    packet->size = buffer.data_size();
 
-    DCHECK(packet.data);
-    DCHECK_GT(packet.size, 0);
+    DCHECK(packet->data);
+    DCHECK_GT(packet->size, 0);
 
     // Let FFmpeg handle presentation timestamp reordering.
     codec_context_->reordered_opaque = buffer.timestamp().InMicroseconds();
   }
-
-  switch (decoding_loop_->DecodePacket(
-      &packet, base::BindRepeating(&FFmpegVideoDecoder::OnNewFrame,
-                                   base::Unretained(this)))) {
+  FFmpegDecodingLoop::DecodeStatus decode_status = decoding_loop_->DecodePacket(
+      packet, base::BindRepeating(&FFmpegVideoDecoder::OnNewFrame,
+                                  base::Unretained(this)));
+  av_packet_free(&packet);
+  switch (decode_status) {
     case FFmpegDecodingLoop::DecodeStatus::kSendPacketFailed:
       MEDIA_LOG(ERROR, media_log_)
           << "Failed to send video packet for decoding: "
@@ -371,7 +370,7 @@ bool FFmpegVideoDecoder::FFmpegDecode(const DecoderBuffer& buffer) {
       return false;
     case FFmpegDecodingLoop::DecodeStatus::kDecodeFrameFailed:
       MEDIA_LOG(DEBUG, media_log_)
-          << GetDisplayName() << " failed to decode a video frame: "
+          << GetDecoderType() << " failed to decode a video frame: "
           << AVErrorToString(decoding_loop_->last_averror_code()) << ", at "
           << buffer.AsHumanReadableString();
       return false;
@@ -427,13 +426,13 @@ bool FFmpegVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config,
   if (decode_nalus_)
     codec_context_->flags2 |= AV_CODEC_FLAG2_CHUNKS;
 
-  AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
+  const AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
   if (!codec || avcodec_open2(codec_context_.get(), codec, NULL) < 0) {
     ReleaseFFmpegResources();
     return false;
   }
 
-  decoding_loop_.reset(new FFmpegDecodingLoop(codec_context_.get()));
+  decoding_loop_ = std::make_unique<FFmpegDecodingLoop>(codec_context_.get());
   return true;
 }
 

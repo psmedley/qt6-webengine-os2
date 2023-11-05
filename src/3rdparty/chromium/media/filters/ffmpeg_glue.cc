@@ -58,10 +58,6 @@ static int64_t AVIOSeekOperation(void* opaque, int64_t offset, int whence) {
   return new_offset;
 }
 
-void FFmpegGlue::InitializeFFmpeg() {
-  av_register_all();
-}
-
 static void LogContainer(bool is_local_file,
                          container_names::MediaContainerName container) {
   base::UmaHistogramSparse("Media.DetectedContainer", container);
@@ -70,8 +66,6 @@ static void LogContainer(bool is_local_file,
 }
 
 FFmpegGlue::FFmpegGlue(FFmpegURLProtocol* protocol) {
-  InitializeFFmpeg();
-
   // Initialize an AVIOContext using our custom read and seek operations.  Don't
   // keep pointers to the buffer since FFmpeg may reallocate it on the fly.  It
   // will be cleaned up
@@ -94,9 +88,6 @@ FFmpegGlue::FFmpegGlue(FFmpegURLProtocol* protocol) {
 
   // Enable fast, but inaccurate seeks for MP3.
   format_context_->flags |= AVFMT_FLAG_FAST_SEEK;
-
-  // Ensures we can read out various metadata bits like vp8 alpha.
-  format_context_->flags |= AVFMT_FLAG_KEEP_SIDE_DATA;
 
   // Ensures format parsing errors will bail out. From an audit on 11/2017, all
   // instances were real failures. Solves bugs like http://crbug.com/710791.

@@ -8,7 +8,6 @@
 #define CORE_FPDFDOC_CPDF_ICONFIT_H_
 
 #include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/retain_ptr.h"
 
 class CPDF_Dictionary;
@@ -25,9 +24,15 @@ class CPDF_IconFit {
   bool IsProportionalScale() const;
   bool GetFittingBounds() const;
   CFX_PointF GetIconBottomLeftPosition() const;
-  CFX_PointF GetIconPosition() const;
+  CFX_VectorF GetScale(const CFX_SizeF& image_size,
+                       const CFX_FloatRect& rcPlate) const;
+  CFX_VectorF GetImageOffset(const CFX_SizeF& image_size,
+                             const CFX_VectorF& scale,
+                             const CFX_FloatRect& rcPlate) const;
 
  private:
+  CFX_PointF GetIconPosition() const;
+
   RetainPtr<const CPDF_Dictionary> const m_pDict;
 };
 

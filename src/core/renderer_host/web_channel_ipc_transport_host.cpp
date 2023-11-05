@@ -60,15 +60,6 @@ inline QDebug operator<<(QDebug stream, content::RenderFrameHost *frame)
     return stream << "frame " << frame->GetRoutingID() << " in process " << frame->GetProcess()->GetID();
 }
 
-template<class T>
-inline QDebug operator<<(QDebug stream, const base::Optional<T> &opt)
-{
-    if (opt)
-        return stream << *opt;
-    else
-        return stream << "nullopt";
-}
-
 WebChannelIPCTransportHost::WebChannelIPCTransportHost(content::WebContents *contents, uint worldId, QObject *parent)
     : QWebChannelAbstractTransport(parent)
     , content::WebContentsObserver(contents)
@@ -154,6 +145,14 @@ void WebChannelIPCTransportHost::RenderFrameDeleted(content::RenderFrameHost *rf
 {
     m_renderFrames.erase(rfh);
 }
+
+void WebChannelIPCTransportHost::BindReceiver(
+        mojo::PendingAssociatedReceiver<qtwebchannel::mojom::WebChannelTransportHost> receiver,
+        content::RenderFrameHost *rfh)
+{
+     m_receiver.Bind(rfh, std::move(receiver));
+}
+
 
 const mojo::AssociatedRemote<qtwebchannel::mojom::WebChannelTransportRender> &
 WebChannelIPCTransportHost::GetWebChannelIPCTransportRemote(content::RenderFrameHost *rfh)

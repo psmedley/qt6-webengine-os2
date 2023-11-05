@@ -360,6 +360,10 @@ bool Editor::DeleteSelectionAfterDraggingWithEvents(
   if (frame_->GetDocument()->GetFrame() != frame_)
     return false;
 
+  // No DOM mutation if EditContext is active.
+  if (frame_->GetInputMethodController().GetActiveEditContext())
+    return true;
+
   if (should_delete && drag_source->isConnected()) {
     DeleteSelectionWithSmartDelete(delete_mode,
                                    InputEvent::InputType::kDeleteByDrag,
@@ -393,6 +397,10 @@ bool Editor::ReplaceSelectionAfterDraggingWithEvents(
   // remaining actions;
   if (frame_->GetDocument()->GetFrame() != frame_)
     return false;
+
+  // No DOM mutation if EditContext is active.
+  if (frame_->GetInputMethodController().GetActiveEditContext())
+    return true;
 
   if (should_insert && drop_target->isConnected())
     ReplaceSelectionAfterDragging(fragment, insert_mode, drag_source_type);
@@ -455,8 +463,7 @@ Editor::Editor(LocalFrame& frame)
       should_style_with_css_(false),
       kill_ring_(std::make_unique<KillRing>()),
       are_marked_text_matches_highlighted_(false),
-      default_paragraph_separator_(EditorParagraphSeparator::kIsDiv),
-      overwrite_mode_enabled_(false) {}
+      default_paragraph_separator_(EditorParagraphSeparator::kIsDiv) {}
 
 Editor::~Editor() = default;
 
@@ -885,9 +892,13 @@ void Editor::SetMarkedTextMatchesAreHighlighted(bool flag) {
 
 void Editor::RespondToChangedSelection() {
   GetSpellChecker().RespondToChangedSelection();
-  frame_->Client()->DidChangeSelection(
-      !GetFrameSelection().GetSelectionInDOMTree().IsRange());
+  SyncSelection(blink::SyncCondition::kNotForced);
   SetStartNewKillRingSequence(true);
+}
+
+void Editor::SyncSelection(SyncCondition force_sync) {
+  frame_->Client()->DidChangeSelection(
+      !GetFrameSelection().GetSelectionInDOMTree().IsRange(), force_sync);
 }
 
 SpellChecker& Editor::GetSpellChecker() const {
@@ -901,11 +912,6 @@ FrameSelection& Editor::GetFrameSelection() const {
 void Editor::SetMark() {
   mark_ = GetFrameSelection().ComputeVisibleSelectionInDOMTree();
   mark_is_directional_ = GetFrameSelection().IsDirectional();
-}
-
-void Editor::ToggleOverwriteModeEnabled() {
-  overwrite_mode_enabled_ = !overwrite_mode_enabled_;
-  GetFrameSelection().SetShouldShowBlockCursor(overwrite_mode_enabled_);
 }
 
 void Editor::ReplaceSelection(const String& text) {

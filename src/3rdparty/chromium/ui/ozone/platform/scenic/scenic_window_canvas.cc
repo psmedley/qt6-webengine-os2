@@ -75,7 +75,8 @@ ScenicWindowCanvas::ScenicWindowCanvas(ScenicSurface* scenic_surface)
 
 ScenicWindowCanvas::~ScenicWindowCanvas() = default;
 
-void ScenicWindowCanvas::ResizeCanvas(const gfx::Size& viewport_size) {
+void ScenicWindowCanvas::ResizeCanvas(const gfx::Size& viewport_size,
+                                      float scale) {
   viewport_size_ = viewport_size;
   viewport_size_.SetToMax(gfx::Size(1, 1));
 
@@ -166,10 +167,7 @@ void ScenicWindowCanvas::PresentCanvas(const gfx::Rect& damage) {
   ZX_CHECK(status == ZX_OK, status);
   scenic_surface_->scenic_session()->EnqueueReleaseFence(
       std::move(release_fence_dup));
-  scenic_surface_->scenic_session()->Present2(
-      /*requested_presentation_time=*/0,
-      /*requested_prediction_span=*/0,
-      [](fuchsia::scenic::scheduling::FuturePresentationTimes info) {});
+  scenic_surface_->safe_presenter()->QueuePresent();
 
   // Move to the next buffer.
   current_frame_ = (current_frame_ + 1) % kNumBuffers;

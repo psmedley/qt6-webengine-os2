@@ -26,6 +26,7 @@
 #include "net/proxy_resolution/proxy_config_service_fixed.h"
 #include "net/proxy_resolution/proxy_config_with_annotation.h"
 #include "net/socket/client_socket_pool_manager.h"
+#include "net/socket/connect_job_factory.h"
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/spdy_test_util_common.h"
 #include "net/test/gtest_util.h"
@@ -236,13 +237,15 @@ TEST_P(ProxyResolvingClientSocketTest, NetworkIsolationKeyWithH2Proxy) {
   ssl_data2.next_proto = net::kProtoHTTP2;
   session_deps.socket_factory->AddSSLSocketDataProvider(&ssl_data2);
 
+  net::ConnectJobFactory connect_job_factory;
+
   // Connect to kDestination1 using kNetworkIsolationKey1. It should use a new
   // H2 session.
   net::CommonConnectJobParams common_connect_job_params =
       http_network_session->CreateCommonConnectJobParams();
   ProxyResolvingClientSocket socket1(
       http_network_session.get(), &common_connect_job_params, kDestination1,
-      kNetworkIsolationKey1, false /* use_tls */);
+      kNetworkIsolationKey1, false /* use_tls */, &connect_job_factory);
   net::TestCompletionCallback callback1;
   int result = socket1.Connect(callback1.callback());
   EXPECT_THAT(callback1.GetResult(result), net::test::IsOk());
@@ -251,7 +254,7 @@ TEST_P(ProxyResolvingClientSocketTest, NetworkIsolationKeyWithH2Proxy) {
   // H2 session.
   ProxyResolvingClientSocket socket2(
       http_network_session.get(), &common_connect_job_params, kDestination2,
-      kNetworkIsolationKey2, false /* use_tls */);
+      kNetworkIsolationKey2, false /* use_tls */, &connect_job_factory);
   net::TestCompletionCallback callback2;
   result = socket2.Connect(callback2.callback());
   EXPECT_THAT(callback2.GetResult(result), net::test::IsOk());
@@ -262,7 +265,7 @@ TEST_P(ProxyResolvingClientSocketTest, NetworkIsolationKeyWithH2Proxy) {
   // first H2 session.
   ProxyResolvingClientSocket socket3(
       http_network_session.get(), &common_connect_job_params, kDestination3,
-      kNetworkIsolationKey1, false /* use_tls */);
+      kNetworkIsolationKey1, false /* use_tls */, &connect_job_factory);
   net::TestCompletionCallback callback3;
   result = socket3.Connect(callback3.callback());
   EXPECT_THAT(callback3.GetResult(result), net::test::IsOk());
@@ -665,16 +668,12 @@ TEST_P(ProxyResolvingClientSocketTest, MultiroundAuth) {
   auth_cache->Add(GURL("http://bad:99"), net::HttpAuth::AUTH_PROXY,
                   "test_realm", net::HttpAuth::AUTH_SCHEME_BASIC,
                   net::NetworkIsolationKey(), "Basic realm=\"test_realm\"",
-                  net::AuthCredentials(base::ASCIIToUTF16("user"),
-                                       base::ASCIIToUTF16("password")),
-                  std::string());
+                  net::AuthCredentials(u"user", u"password"), std::string());
 
   auth_cache->Add(GURL("http://bad:99"), net::HttpAuth::AUTH_PROXY,
                   "test_realm2", net::HttpAuth::AUTH_SCHEME_BASIC,
                   net::NetworkIsolationKey(), "Basic realm=\"test_realm2\"",
-                  net::AuthCredentials(base::ASCIIToUTF16("user2"),
-                                       base::ASCIIToUTF16("password2")),
-                  std::string());
+                  net::AuthCredentials(u"user2", u"password2"), std::string());
 
   ProxyResolvingClientSocketFactory proxy_resolving_socket_factory(
       &context_with_proxy_);
@@ -730,9 +729,7 @@ TEST_P(ProxyResolvingClientSocketTest, ReusesHTTPAuthCache_Lookup) {
   auth_cache->Add(GURL("http://bad:99"), net::HttpAuth::AUTH_PROXY,
                   "test_realm", net::HttpAuth::AUTH_SCHEME_BASIC,
                   net::NetworkIsolationKey(), "Basic realm=\"test_realm\"",
-                  net::AuthCredentials(base::ASCIIToUTF16("user"),
-                                       base::ASCIIToUTF16("password")),
-                  std::string());
+                  net::AuthCredentials(u"user", u"password"), std::string());
 
   ProxyResolvingClientSocketFactory proxy_resolving_socket_factory(
       &context_with_proxy_);
@@ -765,9 +762,7 @@ TEST_P(ProxyResolvingClientSocketTest, FactoryUsesLatestHTTPAuthCache) {
   auth_cache->Add(GURL("http://bad:99"), net::HttpAuth::AUTH_PROXY,
                   "test_realm", net::HttpAuth::AUTH_SCHEME_BASIC,
                   net::NetworkIsolationKey(), "Basic realm=\"test_realm\"",
-                  net::AuthCredentials(base::ASCIIToUTF16("user"),
-                                       base::ASCIIToUTF16("password")),
-                  std::string());
+                  net::AuthCredentials(u"user", u"password"), std::string());
 
   const GURL kDestination("https://example.com:443");
 
@@ -830,9 +825,7 @@ TEST_P(ProxyResolvingClientSocketTest, ReusesHTTPAuthCache_Preemptive) {
   auth_cache->Add(GURL("http://bad:99"), net::HttpAuth::AUTH_PROXY,
                   "test_realm", net::HttpAuth::AUTH_SCHEME_BASIC,
                   net::NetworkIsolationKey(), "Basic realm=\"test_realm\"",
-                  net::AuthCredentials(base::ASCIIToUTF16("user"),
-                                       base::ASCIIToUTF16("password")),
-                  "/");
+                  net::AuthCredentials(u"user", u"password"), "/");
 
   ProxyResolvingClientSocketFactory proxy_resolving_socket_factory(
       &context_with_proxy_);

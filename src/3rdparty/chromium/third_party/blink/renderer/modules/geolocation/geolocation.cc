@@ -29,7 +29,7 @@
 
 #include "services/device/public/mojom/geoposition.mojom-blink.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
@@ -42,7 +42,6 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/geolocation/geolocation_coordinates.h"
 #include "third_party/blink/renderer/modules/geolocation/geolocation_error.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 namespace {
@@ -239,7 +238,7 @@ void Geolocation::StartRequest(GeoNotifier* notifier) {
   }
 
   if (!GetExecutionContext()->IsFeatureEnabled(
-          mojom::blink::FeaturePolicyFeature::kGeolocation,
+          mojom::blink::PermissionsPolicyFeature::kGeolocation,
           ReportOptions::kReportOnFailure, kFeaturePolicyConsoleWarning)) {
     UseCounter::Count(GetExecutionContext(),
                       WebFeature::kGeolocationDisabledByFeaturePolicy);
@@ -501,8 +500,12 @@ void Geolocation::OnPositionUpdated(
     last_position_ = CreateGeoposition(*position);
     PositionChanged();
   } else {
-    HandleError(
-        CreatePositionError(position->error_code, position->error_message));
+    GeolocationPositionError* position_error =
+        CreatePositionError(position->error_code, position->error_message);
+    if (position_error->code() == GeolocationPositionError::kPermissionDenied) {
+      position_error->SetIsFatal(true);
+    }
+    HandleError(position_error);
   }
   if (!disconnected_geolocation_)
     QueryNextPosition();

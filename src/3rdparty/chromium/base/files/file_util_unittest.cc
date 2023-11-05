@@ -20,6 +20,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/environment.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
@@ -29,10 +30,11 @@
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
+#include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/bind.h"
 #include "base/test/multiprocess_test.h"
 #include "base/test/scoped_environment_variable_override.h"
 #include "base/test/test_file_util.h"
@@ -481,7 +483,7 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
   // TEMP can have a lower case drive letter.
   std::wstring temp_base_a = base_a.value();
   ASSERT_FALSE(temp_base_a.empty());
-  temp_base_a[0] = ToUpperASCII(char16{temp_base_a[0]});
+  temp_base_a[0] = ToUpperASCII(char16_t{temp_base_a[0]});
   base_a = FilePath(temp_base_a);
 #endif
   ASSERT_TRUE(CreateDirectory(base_a));
@@ -3053,9 +3055,9 @@ TEST_F(FileUtilTest, AppendToFile) {
   FilePath foobar(data_dir.Append(FILE_PATH_LITERAL("foobar.txt")));
 
   std::string data("hello");
-  EXPECT_FALSE(AppendToFile(foobar, data.c_str(), data.size()));
+  EXPECT_FALSE(AppendToFile(foobar, data));
   EXPECT_TRUE(WriteFile(foobar, data));
-  EXPECT_TRUE(AppendToFile(foobar, data.c_str(), data.size()));
+  EXPECT_TRUE(AppendToFile(foobar, data));
 
   const std::wstring read_content = ReadTextFile(foobar);
   EXPECT_EQ(L"hellohello", read_content);
@@ -3568,6 +3570,39 @@ TEST_F(FileUtilTest, ReadStreamToString) {
   EXPECT_TRUE(ReadStreamToString(stream.get(), &contents));
   EXPECT_EQ(contents, std::string("there"));
 }
+
+#if defined(OS_POSIX)
+TEST_F(FileUtilTest, ReadStreamToString_ZeroLengthFile) {
+  Thread write_thread("write thread");
+  ASSERT_TRUE(write_thread.Start());
+
+  const size_t kSizes[] = {0, 1, 4095, 4096, 4097, 65535, 65536, 65537};
+
+  for (size_t size : kSizes) {
+    ScopedFD read_fd, write_fd;
+    // Pipes have a length of zero when stat()'d.
+    ASSERT_TRUE(CreatePipe(&read_fd, &write_fd, false /* non_blocking */));
+
+    std::string random_data;
+    if (size > 0) {
+      random_data = RandBytesAsString(size);
+    }
+    EXPECT_EQ(size, random_data.size());
+    write_thread.task_runner()->PostTask(
+        FROM_HERE,
+        BindLambdaForTesting([random_data, write_fd = std::move(write_fd)]() {
+          ASSERT_TRUE(WriteFileDescriptor(write_fd.get(), random_data));
+        }));
+
+    ScopedFILE read_file(fdopen(read_fd.release(), "r"));
+    ASSERT_TRUE(read_file);
+
+    std::string contents;
+    EXPECT_TRUE(ReadStreamToString(read_file.get(), &contents));
+    EXPECT_EQ(contents, random_data);
+  }
+}
+#endif
 
 TEST_F(FileUtilTest, ReadStreamToStringWithMaxSize) {
   ScopedFILE stream(
@@ -4260,6 +4295,46 @@ TEST(ScopedFD, ScopedFDCrashesOnCloseFailure) {
 }
 
 #endif  // defined(OS_POSIX) || defined(OS_FUCHSIA)
+
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
+TEST_F(FileUtilTest, CopyFileContentsWithSendfile) {
+  // This test validates that sendfile(2) can be used to copy a file contents
+  // and that it will honor the file offsets as CopyFileContents does.
+  FilePath file_name_from = temp_dir_.GetPath().Append(
+      FILE_PATH_LITERAL("copy_contents_file_in.txt"));
+  FilePath file_name_to = temp_dir_.GetPath().Append(
+      FILE_PATH_LITERAL("copy_contents_file_out.txt"));
+
+  const std::wstring from_contents(L"0123456789ABCDEF");
+  CreateTextFile(file_name_from, from_contents);
+  ASSERT_TRUE(PathExists(file_name_from));
+
+  const std::wstring to_contents(L"GHIJKL");
+  CreateTextFile(file_name_to, to_contents);
+  ASSERT_TRUE(PathExists(file_name_to));
+
+  File from(file_name_from, File::FLAG_OPEN | File::FLAG_READ);
+  ASSERT_TRUE(from.IsValid());
+
+  File to(file_name_to, File::FLAG_OPEN | File::FLAG_WRITE);
+  ASSERT_TRUE(to.IsValid());
+
+  // See to the 1st byte in each file.
+  ASSERT_EQ(from.Seek(File::Whence::FROM_BEGIN, 1), 1);
+  ASSERT_EQ(to.Seek(File::Whence::FROM_BEGIN, 1), 1);
+
+  bool retry_slow = false;
+
+  // Given the test setup there should never be a sendfile(2) failure.
+  ASSERT_TRUE(internal::CopyFileContentsWithSendfile(from, to, retry_slow));
+  from.Close();
+  to.Close();
+
+  // Expect the output file contents to be: G123456789ABCDEF because both
+  // file positions when we copied the file contents were at 1.
+  EXPECT_EQ(L"G123456789ABCDEF", ReadTextFile(file_name_to));
+}
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 
 }  // namespace
 

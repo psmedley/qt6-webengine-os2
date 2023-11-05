@@ -5,12 +5,12 @@
 #include "content/browser/payments/service_worker_core_thread_event_dispatcher.h"
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
 #include "components/payments/core/native_error_strings.h"
 #include "components/payments/core/payments_validators.h"
 #include "content/browser/payments/payment_app_provider_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
-#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 
 namespace content {
@@ -128,10 +128,8 @@ void OnResponseForAbortPaymentOnUiThread(
 
 }  // namespace
 
-ServiceWorkerCoreThreadEventDispatcher::ServiceWorkerCoreThreadEventDispatcher(
-    WebContents* web_contents)
-    : WebContentsObserver(web_contents) {}
-
+ServiceWorkerCoreThreadEventDispatcher::
+    ServiceWorkerCoreThreadEventDispatcher() = default;
 ServiceWorkerCoreThreadEventDispatcher::
     ~ServiceWorkerCoreThreadEventDispatcher() {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
@@ -142,9 +140,6 @@ void ServiceWorkerCoreThreadEventDispatcher::DispatchAbortPaymentEvent(
     scoped_refptr<ServiceWorkerVersion> active_version,
     blink::ServiceWorkerStatusCode service_worker_status) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  if (!web_contents())
-    return;
-
   if (service_worker_status != blink::ServiceWorkerStatusCode::kOk) {
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), false));
@@ -159,8 +154,7 @@ void ServiceWorkerCoreThreadEventDispatcher::DispatchAbortPaymentEvent(
   // This object self-deletes after either success or error callback is
   // invoked.
   RespondWithCallback* respond_with_callback = new AbortRespondWithCallback(
-      web_contents(), active_version, weak_ptr_factory_.GetWeakPtr(),
-      std::move(callback));
+      active_version, weak_ptr_factory_.GetWeakPtr(), std::move(callback));
 
   active_version->endpoint()->DispatchAbortPaymentEvent(
       respond_with_callback->BindNewPipeAndPassRemote(),
@@ -195,9 +189,6 @@ void ServiceWorkerCoreThreadEventDispatcher::DispatchCanMakePaymentEvent(
     scoped_refptr<ServiceWorkerVersion> active_version,
     blink::ServiceWorkerStatusCode service_worker_status) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  if (!web_contents())
-    return;
-
   if (service_worker_status != blink::ServiceWorkerStatusCode::kOk) {
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE,
@@ -216,9 +207,8 @@ void ServiceWorkerCoreThreadEventDispatcher::DispatchCanMakePaymentEvent(
   // This object self-deletes after either success or error callback is
   // invoked.
   RespondWithCallback* respond_with_callback =
-      new CanMakePaymentRespondWithCallback(web_contents(), active_version,
-                                            weak_ptr_factory_.GetWeakPtr(),
-                                            std::move(callback));
+      new CanMakePaymentRespondWithCallback(
+          active_version, weak_ptr_factory_.GetWeakPtr(), std::move(callback));
 
   active_version->endpoint()->DispatchCanMakePaymentEvent(
       std::move(event_data), respond_with_callback->BindNewPipeAndPassRemote(),
@@ -254,9 +244,6 @@ void ServiceWorkerCoreThreadEventDispatcher::DispatchPaymentRequestEvent(
     scoped_refptr<ServiceWorkerVersion> active_version,
     blink::ServiceWorkerStatusCode service_worker_status) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  if (!web_contents())
-    return;
-
   if (service_worker_status != blink::ServiceWorkerStatusCode::kOk) {
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE,
@@ -273,8 +260,7 @@ void ServiceWorkerCoreThreadEventDispatcher::DispatchPaymentRequestEvent(
       ServiceWorkerMetrics::EventType::PAYMENT_REQUEST, base::DoNothing());
 
   invoke_respond_with_callback_ = std::make_unique<InvokeRespondWithCallback>(
-      web_contents(), active_version, weak_ptr_factory_.GetWeakPtr(),
-      std::move(callback));
+      active_version, weak_ptr_factory_.GetWeakPtr(), std::move(callback));
 
   active_version->endpoint()->DispatchPaymentRequestEvent(
       std::move(event_data),

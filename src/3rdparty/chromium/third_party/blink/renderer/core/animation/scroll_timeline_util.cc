@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/animation/scroll_timeline_util.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/double_or_scroll_timeline_auto_keyword.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_double_scrolltimelineautokeyword.h"
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -22,13 +22,8 @@ scoped_refptr<CompositorScrollTimeline> ToCompositorScrollTimeline(
 
   auto* scroll_timeline = To<ScrollTimeline>(timeline);
   Node* scroll_source = scroll_timeline->ResolvedScrollSource();
-  base::Optional<CompositorElementId> element_id =
+  absl::optional<CompositorElementId> element_id =
       GetCompositorScrollElementId(scroll_source);
-
-  DoubleOrScrollTimelineAutoKeyword time_range;
-  scroll_timeline->timeRange(time_range);
-  // TODO(smcgruer): Handle 'auto' time range value.
-  DCHECK(time_range.IsDouble());
 
   LayoutBox* box =
       scroll_timeline->IsActive() ? scroll_source->GetLayoutBox() : nullptr;
@@ -38,14 +33,14 @@ scoped_refptr<CompositorScrollTimeline> ToCompositorScrollTimeline(
 
   return CompositorScrollTimeline::Create(
       element_id, orientation, scroll_timeline->GetResolvedScrollOffsets(),
-      time_range.GetAsDouble());
+      scroll_timeline->GetTimeRange());
 }
 
-base::Optional<CompositorElementId> GetCompositorScrollElementId(
+absl::optional<CompositorElementId> GetCompositorScrollElementId(
     const Node* node) {
   if (!node || !node->GetLayoutObject() ||
       !node->GetLayoutObject()->FirstFragment().PaintProperties()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
   return CompositorElementIdFromUniqueObjectId(
       node->GetLayoutObject()->UniqueId(),

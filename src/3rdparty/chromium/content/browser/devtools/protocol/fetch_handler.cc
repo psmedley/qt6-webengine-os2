@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/browser/devtools/devtools_io_context.h"
@@ -40,7 +41,7 @@ FetchHandler::FetchHandler(
 FetchHandler::~FetchHandler() = default;
 
 void FetchHandler::Wire(UberDispatcher* dispatcher) {
-  frontend_.reset(new Fetch::Frontend(dispatcher->channel()));
+  frontend_ = std::make_unique<Fetch::Frontend>(dispatcher->channel());
   Fetch::Dispatcher::wire(dispatcher, this);
 }
 
@@ -84,14 +85,15 @@ Response ToInterceptionPatterns(
 }
 
 bool FetchHandler::MaybeCreateProxyForInterception(
-    RenderProcessHost* rph,
+    int process_id,
+    StoragePartition* storage_partition,
     const base::UnguessableToken& frame_token,
     bool is_navigation,
     bool is_download,
     network::mojom::URLLoaderFactoryOverride* intercepting_factory) {
   return interceptor_ && interceptor_->CreateProxyForInterception(
-                             rph, frame_token, is_navigation, is_download,
-                             intercepting_factory);
+                             process_id, storage_partition, frame_token,
+                             is_navigation, is_download, intercepting_factory);
 }
 
 void FetchHandler::Enable(Maybe<Array<Fetch::RequestPattern>> patterns,
@@ -251,6 +253,7 @@ void FetchHandler::ContinueRequest(
     Maybe<String> method,
     Maybe<protocol::Binary> postData,
     Maybe<Array<Fetch::HeaderEntry>> headers,
+    Maybe<bool> interceptResponse,
     std::unique_ptr<ContinueRequestCallback> callback) {
   if (!interceptor_) {
     callback->sendFailure(Response::ServerError("Fetch domain is not enabled"));
@@ -271,7 +274,7 @@ void FetchHandler::ContinueRequest(
   auto modifications =
       std::make_unique<DevToolsURLLoaderInterceptor::Modifications>(
           std::move(url), std::move(method), std::move(postData),
-          std::move(request_headers));
+          std::move(request_headers), std::move(interceptResponse));
   interceptor_->ContinueInterceptedRequest(requestId, std::move(modifications),
                                            WrapCallback(std::move(callback)));
 }

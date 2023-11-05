@@ -21,6 +21,7 @@
 
 namespace angle
 {
+// Given x, create 1 << x.
 template <typename BitsT, typename ParamT>
 constexpr static BitsT Bit(ParamT x)
 {
@@ -28,6 +29,17 @@ constexpr static BitsT Bit(ParamT x)
     ASSERT(static_cast<size_t>(x) < sizeof(BitsT) * 8);
 
     return (static_cast<BitsT>(1) << static_cast<size_t>(x));
+}
+
+// Given x, create (1 << x) - 1, i.e. a mask with x bits set.
+template <typename BitsT, typename ParamT>
+constexpr static BitsT BitMask(ParamT x)
+{
+    if (static_cast<size_t>(x) == 0)
+    {
+        return 0;
+    }
+    return ((Bit<BitsT>(static_cast<ParamT>(static_cast<size_t>(x) - 1)) - 1) << 1) | 1;
 }
 
 template <size_t N, typename BitsT, typename ParamT = std::size_t>
@@ -92,6 +104,7 @@ class BitSetT final
     };
 
     using value_type = BitsT;
+    using param_type = ParamT;
 
     constexpr BitSetT();
     constexpr explicit BitSetT(BitsT value);
@@ -150,10 +163,7 @@ class BitSetT final
     constexpr ParamT last() const;
 
     // Produces a mask of ones up to the "x"th bit.
-    constexpr static BitsT Mask(std::size_t x)
-    {
-        return ((Bit<BitsT>(static_cast<ParamT>(x - 1)) - 1) << 1) + 1;
-    }
+    constexpr static BitsT Mask(std::size_t x) { return BitMask<BitsT>(static_cast<ParamT>(x)); }
 
   private:
     BitsT mBits;
@@ -486,22 +496,14 @@ using BitSet = typename priv::GetBitSet<N>::Type;
 template <std::size_t N>
 class BitSetArray final
 {
-  private:
-    static constexpr std::size_t kDefaultBitSetSizeMinusOne = priv::kDefaultBitSetSize - 1;
-    static constexpr std::size_t kShiftForDivision =
-        static_cast<std::size_t>(rx::Log2(static_cast<unsigned int>(priv::kDefaultBitSetSize)));
-    static constexpr std::size_t kArraySize =
-        ((N + kDefaultBitSetSizeMinusOne) >> kShiftForDivision);
-    constexpr static std::size_t kLastElementCount = (N & kDefaultBitSetSizeMinusOne);
-    constexpr static std::size_t kLastElementMask  = priv::BaseBitSetType::Mask(
-        kLastElementCount == 0 ? priv::kDefaultBitSetSize : kLastElementCount);
-
-    using BaseBitSet = priv::BaseBitSetType;
-    std::array<BaseBitSet, kArraySize> mBaseBitSetArray;
-
   public:
+    using BaseBitSet = priv::BaseBitSetType;
+
     BitSetArray();
     BitSetArray(const BitSetArray<N> &other);
+
+    using value_type = BaseBitSet::value_type;
+    using param_type = BaseBitSet::param_type;
 
     class Reference final
     {
@@ -671,6 +673,22 @@ class BitSetArray final
     std::size_t count() const;
     bool intersects(const BitSetArray &other) const;
     BitSetArray<N> &flip();
+    param_type first() const;
+    param_type last() const;
+
+    value_type bits(size_t index) const;
+
+  private:
+    static constexpr std::size_t kDefaultBitSetSizeMinusOne = priv::kDefaultBitSetSize - 1;
+    static constexpr std::size_t kShiftForDivision =
+        static_cast<std::size_t>(rx::Log2(static_cast<unsigned int>(priv::kDefaultBitSetSize)));
+    static constexpr std::size_t kArraySize =
+        ((N + kDefaultBitSetSizeMinusOne) >> kShiftForDivision);
+    constexpr static std::size_t kLastElementCount = (N & kDefaultBitSetSizeMinusOne);
+    constexpr static std::size_t kLastElementMask  = priv::BaseBitSetType::Mask(
+        kLastElementCount == 0 ? priv::kDefaultBitSetSize : kLastElementCount);
+
+    std::array<BaseBitSet, kArraySize> mBaseBitSetArray;
 };
 
 template <std::size_t N>
@@ -962,7 +980,7 @@ bool BitSetArray<N>::intersects(const BitSetArray<N> &other) const
 {
     for (std::size_t index = 0; index < kArraySize; index++)
     {
-        if (mBaseBitSetArray[index].bits() & other.mBaseBitSetArray[index].bits())
+        if ((mBaseBitSetArray[index].bits() & other.mBaseBitSetArray[index].bits()) != 0)
         {
             return true;
         }
@@ -981,6 +999,44 @@ BitSetArray<N> &BitSetArray<N>::flip()
     // The last element in mBaseBitSetArray may need special handling
     mBaseBitSetArray[kArraySize - 1] &= kLastElementMask;
     return *this;
+}
+
+template <std::size_t N>
+typename BitSetArray<N>::param_type BitSetArray<N>::first() const
+{
+    ASSERT(any());
+    for (size_t arrayIndex = 0; arrayIndex < kArraySize; ++arrayIndex)
+    {
+        const BaseBitSet &baseBitSet = mBaseBitSetArray[arrayIndex];
+        if (baseBitSet.any())
+        {
+            return baseBitSet.first() + arrayIndex * priv::kDefaultBitSetSize;
+        }
+    }
+    UNREACHABLE();
+    return 0;
+}
+
+template <std::size_t N>
+typename BitSetArray<N>::param_type BitSetArray<N>::last() const
+{
+    ASSERT(any());
+    for (size_t arrayIndex = kArraySize; arrayIndex > 0; --arrayIndex)
+    {
+        const BaseBitSet &baseBitSet = mBaseBitSetArray[arrayIndex - 1];
+        if (baseBitSet.any())
+        {
+            return baseBitSet.last() + (arrayIndex - 1) * priv::kDefaultBitSetSize;
+        }
+    }
+    UNREACHABLE();
+    return 0;
+}
+
+template <std::size_t N>
+typename BitSetArray<N>::value_type BitSetArray<N>::bits(size_t index) const
+{
+    return mBaseBitSetArray[index].bits();
 }
 }  // namespace angle
 

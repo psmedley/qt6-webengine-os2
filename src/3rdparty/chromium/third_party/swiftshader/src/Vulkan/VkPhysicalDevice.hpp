@@ -50,7 +50,7 @@ public:
 	void getProperties(VkSamplerYcbcrConversionImageFormatProperties *properties) const;
 #ifdef __ANDROID__
 	void getProperties(VkPhysicalDevicePresentationPropertiesANDROID *properties) const;
-	void getProperties(VkAndroidHardwareBufferUsageANDROID *properties) const;
+	void getProperties(const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo, VkAndroidHardwareBufferUsageANDROID *properties) const;
 #endif
 	void getProperties(const VkPhysicalDeviceExternalBufferInfo *pExternalBufferInfo, VkExternalBufferProperties *pExternalBufferProperties) const;
 	void getProperties(const VkPhysicalDeviceExternalFenceInfo *pExternalFenceInfo, VkExternalFenceProperties *pExternalFenceProperties) const;
@@ -65,6 +65,7 @@ public:
 	void getProperties(VkPhysicalDeviceVulkan12Properties *properties) const;
 	void getProperties(VkPhysicalDeviceDescriptorIndexingProperties *properties) const;
 	void getProperties(VkPhysicalDeviceDepthStencilResolveProperties *properties) const;
+	void getProperties(VkPhysicalDeviceCustomBorderColorPropertiesEXT *properties) const;
 	void getProperties(VkPhysicalDeviceVulkan11Properties *properties) const;
 
 	static void GetFormatProperties(Format format, VkFormatProperties *pFormatProperties);
@@ -72,15 +73,18 @@ public:
 	                              VkImageUsageFlags usage, VkImageCreateFlags flags,
 	                              VkImageFormatProperties *pImageFormatProperties) const;
 	uint32_t getQueueFamilyPropertyCount() const;
+
 	void getQueueFamilyProperties(uint32_t pQueueFamilyPropertyCount,
 	                              VkQueueFamilyProperties *pQueueFamilyProperties) const;
 	void getQueueFamilyProperties(uint32_t pQueueFamilyPropertyCount,
 	                              VkQueueFamilyProperties2 *pQueueFamilyProperties) const;
 	static const VkPhysicalDeviceMemoryProperties &GetMemoryProperties();
 
+	static const VkPhysicalDeviceLimits &getLimits();
+
 private:
-	const VkPhysicalDeviceLimits &getLimits() const;
-	VkSampleCountFlags getSampleCounts() const;
+	static VkSampleCountFlags getSampleCounts();
+	VkQueueFamilyProperties getQueueFamilyProperties() const;
 };
 
 using DispatchablePhysicalDevice = DispatchableObject<PhysicalDevice, VkPhysicalDevice>;

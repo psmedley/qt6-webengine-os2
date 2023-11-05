@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace network {
@@ -47,7 +47,7 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) OriginPolicyContents {
   ~OriginPolicyContents();
   OriginPolicyContents(
       const std::vector<std::string>& ids,
-      const base::Optional<std::string>& feature_policy,
+      const absl::optional<std::string>& feature_policy,
       const std::vector<std::string>& content_security_policies,
       const std::vector<std::string>& content_security_policies_report_only);
 
@@ -69,11 +69,11 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) OriginPolicyContents {
   // non-empty and to contain only valid origin policy IDs.
   std::vector<std::string> ids;
 
-  // The feature policy that is dictated by the origin policy, if any.
-  // https://w3c.github.io/webappsec-feature-policy/
+  // The permissions policy that is dictated by the origin policy, if any.
+  // https://w3c.github.io/webappsec-permissions-policy/
   // This is stored as a raw string, so it is not guaranteed to be an actual
-  // feature policy; Blink will attempt to parse and apply it.
-  base::Optional<std::string> feature_policy;
+  // permissions policy; Blink will attempt to parse and apply it.
+  absl::optional<std::string> permissions_policy;
 
   // These two fields together represent the CSP that should be applied to the
   // origin, based on the origin policy. They are stored as raw strings, so are

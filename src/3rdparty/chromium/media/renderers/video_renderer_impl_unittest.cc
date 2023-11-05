@@ -15,7 +15,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
@@ -86,17 +85,17 @@ class VideoRendererImplTest : public testing::Test {
         demuxer_stream_(DemuxerStream::VIDEO),
         simulate_decode_delay_(false),
         expect_init_success_(true) {
-    null_video_sink_.reset(
-        new NullVideoSink(false, base::TimeDelta::FromSecondsD(1.0 / 60),
-                          base::BindRepeating(&MockCB::FrameReceived,
-                                              base::Unretained(&mock_cb_)),
-                          base::ThreadTaskRunnerHandle::Get()));
+    null_video_sink_ = std::make_unique<NullVideoSink>(
+        false, base::TimeDelta::FromSecondsD(1.0 / 60),
+        base::BindRepeating(&MockCB::FrameReceived,
+                            base::Unretained(&mock_cb_)),
+        base::ThreadTaskRunnerHandle::Get());
 
-    renderer_.reset(new VideoRendererImpl(
+    renderer_ = std::make_unique<VideoRendererImpl>(
         base::ThreadTaskRunnerHandle::Get(), null_video_sink_.get(),
         base::BindRepeating(&VideoRendererImplTest::CreateVideoDecodersForTest,
                             base::Unretained(this)),
-        true, &media_log_, nullptr));
+        true, &media_log_, nullptr);
     renderer_->SetTickClockForTesting(&tick_clock_);
     null_video_sink_->set_tick_clock_for_testing(&tick_clock_);
     time_source_.SetTickClockForTesting(&tick_clock_);
@@ -635,7 +634,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_RightBefore) {
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
-  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>(100)));
+  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>(100)));
   StartPlayingFrom(59);
   Destroy();
 }
@@ -649,7 +648,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_RightAfter) {
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
-  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>(100)));
+  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>(100)));
   StartPlayingFrom(61);
   Destroy();
 }
@@ -777,7 +776,7 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
     EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH, _))
         .WillOnce(RunOnceClosure(event.GetClosure()));
     EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_))
-        .Times(4)
+        .Times(5)
         .WillRepeatedly(SaveArg<0>(&last_pipeline_statistics));
     EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
     EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -1150,12 +1149,12 @@ TEST_F(VideoRendererImplTest, VideoFrameRateChange) {
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
 
   // Send 50fps frames first.
-  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>(50)));
+  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>(50)));
   QueueFrames("0 20 40 60 80 100 120 140 160 180 200");
   QueueFrames("220 240 260 280 300 320 340 360 380 400");
 
   // Also queue some frames that aren't at 50fps, so that we get an unknown fps.
-  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>()));
+  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>()));
   QueueFrames("500 600");
 
   // Drain everything.
@@ -1177,14 +1176,13 @@ TEST_F(VideoRendererImplTest, VideoFrameRateChange) {
 class VideoRendererImplAsyncAddFrameReadyTest : public VideoRendererImplTest {
  public:
   void InitializeWithMockGpuMemoryBufferVideoFramePool() {
-    renderer_.reset(new VideoRendererImpl(
+    renderer_ = std::make_unique<VideoRendererImpl>(
         base::ThreadTaskRunnerHandle::Get(), null_video_sink_.get(),
         base::BindRepeating(&VideoRendererImplAsyncAddFrameReadyTest::
                                 CreateVideoDecodersForTest,
                             base::Unretained(this)),
         true, &media_log_,
-        std::make_unique<MockGpuMemoryBufferVideoFramePool>(
-            &frame_ready_cbs_)));
+        std::make_unique<MockGpuMemoryBufferVideoFramePool>(&frame_ready_cbs_));
     VideoRendererImplTest::Initialize();
   }
 
@@ -1377,7 +1375,7 @@ TEST_P(UnderflowTest, UnderflowAndRecoverTest) {
       // the have enough state.
       case UnderflowTestType::NORMAL:
         QueueFrames("80 100 120 140 160");
-        EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>(50)));
+        EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>(50)));
         break;
       // In either of these modes the HAVE_ENOUGH transition should still
       // occur with a single frame.
@@ -1459,7 +1457,7 @@ TEST_F(VideoRendererLatencyHintTest, HaveEnough_LowLatencyHint) {
 
   // Initial frames should trigger various callbacks.
   EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
-  EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(1);
+  EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(2);
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH, _));
@@ -1484,7 +1482,7 @@ TEST_F(VideoRendererLatencyHintTest, HaveEnough_LowLatencyHint) {
   EXPECT_EQ(renderer_->frames_queued_for_testing(), 4u);
 
   // Unset latencyHint, to verify default behavior.
-  renderer_->SetLatencyHint(base::nullopt);
+  renderer_->SetLatencyHint(absl::nullopt);
 
   // Flush to return to clean slate.
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING, _));
@@ -1519,7 +1517,7 @@ TEST_F(VideoRendererLatencyHintTest, HaveEnough_HighLatencyHint) {
 
   // Queue 12 frames, each 30 ms apart. At this framerate, 400ms rounds to 13
   // frames, so 12 frames should be 1 shy of the HaveEnough threshold.
-  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>(33)));
+  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>(33)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH, _))
       .Times(0);
   QueueFrames("0 30 60 90 120 150 180 210 240 270 300 330");
@@ -1539,7 +1537,7 @@ TEST_F(VideoRendererLatencyHintTest, HaveEnough_HighLatencyHint) {
   Mock::VerifyAndClearExpectations(&mock_cb_);
 
   // Unset latencyHint, to verify default behavior.
-  renderer_->SetLatencyHint(base::nullopt);
+  renderer_->SetLatencyHint(absl::nullopt);
 
   // Flush to return to clean slate.
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING, _));
@@ -1575,7 +1573,7 @@ TEST_F(VideoRendererLatencyHintTest,
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
-  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>(33)));
+  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>(33)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH, _));
   QueueFrames("0 30 60 90 120 150 180");
   StartPlayingFrom(0);
@@ -1635,7 +1633,7 @@ TEST_F(VideoRendererLatencyHintTest, LatencyHintOverridesLowDelay) {
   // 7 frames, so 6 frames should be 1 shy of the HaveEnough threshold. Verify
   // that HAVE_ENOUGH is not triggered in spite of being initialized with low
   // delay mode.
-  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(base::Optional<int>(33)));
+  EXPECT_CALL(mock_cb_, OnVideoFrameRateChange(absl::optional<int>(33)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH, _))
       .Times(0);
   QueueFrames("0 30 60 90 120 150");
@@ -1655,7 +1653,7 @@ TEST_F(VideoRendererLatencyHintTest, LatencyHintOverridesLowDelay) {
 
   // Unset latencyHint, to verify default behavior. NOTE: low delay mode is not
   // restored when latency hint unset.
-  renderer_->SetLatencyHint(base::nullopt);
+  renderer_->SetLatencyHint(absl::nullopt);
 
   // Flush to return to clean slate.
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING, _));
@@ -1712,7 +1710,7 @@ TEST_F(VideoRendererLatencyHintTest,
   Mock::VerifyAndClearExpectations(&mock_cb_);
 
   // Unset latency hint to verify 1-frame HAVE_ENOUGH threshold is maintained.
-  renderer_->SetLatencyHint(base::nullopt);
+  renderer_->SetLatencyHint(absl::nullopt);
 
   // Flush to return to clean slate.
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING, _));

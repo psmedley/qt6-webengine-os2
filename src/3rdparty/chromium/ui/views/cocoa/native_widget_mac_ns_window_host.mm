@@ -21,6 +21,7 @@
 #include "ui/base/cocoa/remote_layer_api.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ime/input_method.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/recyclable_compositor_mac.h"
 #include "ui/display/screen.h"
 #include "ui/events/cocoa/cocoa_event_utils.h"
@@ -117,7 +118,7 @@ class BridgedNativeWidgetHostDummy
   }
   void GetTooltipTextAt(const gfx::Point& location_in_content,
                         GetTooltipTextAtCallback callback) override {
-    base::string16 new_tooltip_text;
+    std::u16string new_tooltip_text;
     std::move(callback).Run(new_tooltip_text);
   }
   void GetIsFocusedViewTextual(
@@ -132,7 +133,7 @@ class BridgedNativeWidgetHostDummy
   void GetDialogButtonInfo(ui::DialogButton button,
                            GetDialogButtonInfoCallback callback) override {
     bool exists = false;
-    base::string16 label;
+    std::u16string label;
     bool is_enabled = false;
     bool is_default = false;
     std::move(callback).Run(exists, label, is_enabled, is_default);
@@ -333,6 +334,7 @@ void NativeWidgetMacNSWindowHost::CreateRemoteNSWindow(
     in_process_view_id_mapping_ =
         std::make_unique<remote_cocoa::ScopedNSViewIdMapping>(
             root_view_id_, [in_process_ns_window_ contentView]);
+    [in_process_ns_window_ enforceNeverMadeVisible];
   }
 
   // Initialize |remote_ns_window_remote_| to point to a bridge created by
@@ -462,13 +464,30 @@ void NativeWidgetMacNSWindowHost::SetBoundsInScreen(const gfx::Rect& bounds) {
   }
 }
 
-void NativeWidgetMacNSWindowHost::SetFullscreen(bool fullscreen) {
+void NativeWidgetMacNSWindowHost::SetFullscreen(bool fullscreen,
+                                                base::TimeDelta delay) {
   // Note that when the NSWindow begins a fullscreen transition, the value of
   // |target_fullscreen_state_| updates via OnWindowFullscreenTransitionStart.
   // The update here is necessary for the case where we are currently in
   // transition (and therefore OnWindowFullscreenTransitionStart will not be
   // called until the current transition completes).
   target_fullscreen_state_ = fullscreen;
+
+  if (!delay.is_zero()) {
+    // Synchronously requesting fullscreen after moving the window to another
+    // display causes the window to resign key. Workaround this OS-specific
+    // quirk by delaying the fullscreen request, after setting the target state,
+    // to encapsulate some of these details from the calling client window code,
+    // i.e. so BrowserView::ProcessFullscreen will still hide its frame, etc.
+    // TODO(crbug.com/1034783): Refine cross-display fullscreen implementations.
+    // TODO(crbug.com/1210548): Find a better solution to avoid key resignation.
+    auto callback = base::BindOnce(
+        &NativeWidgetMacNSWindowHost::SetFullscreenAfterDelay, widget_id_);
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, std::move(callback), delay);
+    return;
+  }
+
   GetNSWindowMojo()->SetFullscreen(target_fullscreen_state_);
 }
 
@@ -565,7 +584,14 @@ void NativeWidgetMacNSWindowHost::DestroyCompositor() {
       std::move(compositor_));
 }
 
-bool NativeWidgetMacNSWindowHost::SetWindowTitle(const base::string16& title) {
+// static
+void NativeWidgetMacNSWindowHost::SetFullscreenAfterDelay(
+    uint64_t bridged_native_widget_id) {
+  if (NativeWidgetMacNSWindowHost* host = GetFromId(bridged_native_widget_id))
+    host->GetNSWindowMojo()->SetFullscreen(host->target_fullscreen_state_);
+}
+
+bool NativeWidgetMacNSWindowHost::SetWindowTitle(const std::u16string& title) {
   if (window_title_ == title)
     return false;
   window_title_ = title;
@@ -720,6 +746,21 @@ NSView* NativeWidgetMacNSWindowHost::GetGlobalCaptureView() {
       [remote_cocoa::CocoaMouseCapture::GetGlobalCaptureWindow() contentView];
 }
 
+void NativeWidgetMacNSWindowHost::AddRemoteWindowControlsOverlayView(
+    remote_cocoa::mojom::WindowControlsOverlayNSViewType overlay_type) {
+  GetNSWindowMojo()->CreateWindowControlsOverlayNSView(overlay_type);
+}
+
+void NativeWidgetMacNSWindowHost::UpdateRemoteWindowControlsOverlayView(
+    const gfx::Rect& bounds,
+    remote_cocoa::mojom::WindowControlsOverlayNSViewType overlay_type) {
+  GetNSWindowMojo()->UpdateWindowControlsOverlayNSView(bounds, overlay_type);
+}
+
+void NativeWidgetMacNSWindowHost::RemoveRemoteWindowControlsOverlayView(
+    remote_cocoa::mojom::WindowControlsOverlayNSViewType overlay_type) {
+  GetNSWindowMojo()->RemoveWindowControlsOverlayNSView(overlay_type);
+}
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetMacNSWindowHost, remote_cocoa::BridgedNativeWidgetHostHelper:
 
@@ -791,7 +832,7 @@ void NativeWidgetMacNSWindowHost::OnVisibilityChanged(bool window_visible) {
 }
 
 void NativeWidgetMacNSWindowHost::OnWindowNativeThemeChanged() {
-  ui::NativeTheme::GetInstanceForNativeUi()->NotifyObservers();
+  ui::NativeTheme::GetInstanceForNativeUi()->NotifyOnNativeThemeUpdated();
 }
 
 void NativeWidgetMacNSWindowHost::OnScrollEvent(
@@ -801,7 +842,14 @@ void NativeWidgetMacNSWindowHost::OnScrollEvent(
 
 void NativeWidgetMacNSWindowHost::OnMouseEvent(
     std::unique_ptr<ui::Event> event) {
-  root_view_->GetWidget()->OnMouseEvent(event->AsMouseEvent());
+  ui::MouseEvent* mouse_event = event->AsMouseEvent();
+  if (scoped_cg_window_id_) {
+    scoped_cg_window_id_->OnMouseMoved(mouse_event->location_f(),
+                                       window_bounds_in_screen_.size());
+  }
+  root_view_->GetWidget()->OnMouseEvent(mouse_event);
+  // Note that |this| may be destroyed by the above call to OnMouseEvent.
+  // https://crbug.com/1193454
 }
 
 void NativeWidgetMacNSWindowHost::OnGestureEvent(
@@ -855,14 +903,22 @@ void NativeWidgetMacNSWindowHost::SetKeyboardAccessible(bool enabled) {
 void NativeWidgetMacNSWindowHost::OnIsFirstResponderChanged(
     bool is_first_responder) {
   accessibility_focus_overrider_.SetViewIsFirstResponder(is_first_responder);
+
+  FocusManager* focus_manager = root_view_->GetWidget()->GetFocusManager();
+  if (focus_manager->IsSettingFocusedView()) {
+    // This first responder change is not initiated by the os,
+    // but by the focus change within the browser (e.g. tab switch),
+    // so skip setting the focus.
+    return;
+  }
+
   if (is_first_responder) {
-    root_view_->GetWidget()->GetFocusManager()->RestoreFocusedView();
+    focus_manager->RestoreFocusedView();
   } else {
     // Do not call ClearNativeFocus because that will re-make the
     // BridgedNativeWidget first responder (and this is called to indicate that
     // it is no longer first responder).
-    root_view_->GetWidget()->GetFocusManager()->StoreFocusedView(
-        false /* clear_native_focus */);
+    focus_manager->StoreFocusedView(false /* clear_native_focus */);
   }
 }
 
@@ -884,7 +940,7 @@ bool NativeWidgetMacNSWindowHost::GetIsDraggableBackgroundAt(
 
 bool NativeWidgetMacNSWindowHost::GetTooltipTextAt(
     const gfx::Point& location_in_content,
-    base::string16* new_tooltip_text) {
+    std::u16string* new_tooltip_text) {
   views::View* view =
       root_view_->GetTooltipHandlerForPoint(location_in_content);
   if (view) {
@@ -1074,7 +1130,7 @@ void NativeWidgetMacNSWindowHost::DoDialogButtonAction(
 bool NativeWidgetMacNSWindowHost::GetDialogButtonInfo(
     ui::DialogButton button,
     bool* button_exists,
-    base::string16* button_label,
+    std::u16string* button_label,
     bool* is_button_enabled,
     bool* is_button_default) {
   *button_exists = false;
@@ -1241,7 +1297,7 @@ void NativeWidgetMacNSWindowHost::GetIsDraggableBackgroundAt(
 void NativeWidgetMacNSWindowHost::GetTooltipTextAt(
     const gfx::Point& location_in_content,
     GetTooltipTextAtCallback callback) {
-  base::string16 new_tooltip_text;
+  std::u16string new_tooltip_text;
   GetTooltipTextAt(location_in_content, &new_tooltip_text);
   std::move(callback).Run(new_tooltip_text);
 }
@@ -1264,7 +1320,7 @@ void NativeWidgetMacNSWindowHost::GetDialogButtonInfo(
     ui::DialogButton button,
     GetDialogButtonInfoCallback callback) {
   bool exists = false;
-  base::string16 label;
+  std::u16string label;
   bool is_enabled = false;
   bool is_default = false;
   GetDialogButtonInfo(button, &exists, &label, &is_enabled, &is_default);

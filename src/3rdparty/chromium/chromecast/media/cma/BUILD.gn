@@ -84,12 +84,14 @@ cast_source_set("unittests") {
       "backend/proxy/audio_decoder_pipeline_node_unittest.cc",
       "backend/proxy/buffer_id_manager_unittest.cc",
       "backend/proxy/cma_backend_proxy_unittest.cc",
+      "backend/proxy/media_pipeline_buffer_extension_unittest.cc",
       "backend/proxy/proxy_call_translator_unittest.cc",
+      "backend/proxy/push_buffer_pending_handler_unittest.cc",
       "backend/proxy/push_buffer_queue_unittest.cc",
     ]
     deps += [
       "//chromecast/media/cma/backend/proxy",
-      "//chromecast/media/cma/backend/proxy:cast_audio_decoder_service_proto",
+      "//third_party/openscreen/src/cast/cast_core/api:cast_audio_channel_service_proto",
 
       # TODO(b/174874712): Remove the explicit gRPC dependency.
       "//third_party/grpc:grpc++",

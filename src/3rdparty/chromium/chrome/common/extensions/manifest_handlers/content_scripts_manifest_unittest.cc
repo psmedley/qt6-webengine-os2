@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/common/chrome_paths.h"
@@ -97,8 +97,9 @@ TEST_F(ContentScriptsManifestTest, FailLoadingNonUTF8Scripts) {
                     .AppendASCII("bad_encoding");
 
   std::string error;
-  scoped_refptr<Extension> extension(file_util::LoadExtension(
-      install_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
+  scoped_refptr<Extension> extension(
+      file_util::LoadExtension(install_dir, mojom::ManifestLocation::kUnpacked,
+                               Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension.get() == NULL);
   ASSERT_STREQ(
       "Could not load file 'bad_encoding.js' for content script. "

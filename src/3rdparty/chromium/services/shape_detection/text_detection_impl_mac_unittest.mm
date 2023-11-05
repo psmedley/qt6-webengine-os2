@@ -6,6 +6,8 @@
 
 #import <AppKit/AppKit.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/mac/mac_util.h"
@@ -47,7 +49,7 @@ TEST_F(TextDetectionImplMacTest, ScanOnce) {
     return;
   }
 
-  impl_.reset(new TextDetectionImplMac);
+  impl_ = std::make_unique<TextDetectionImplMac>();
   base::ScopedCFTypeRef<CGColorSpaceRef> rgb_colorspace(
       CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB));
 
@@ -65,8 +67,7 @@ TEST_F(TextDetectionImplMacTest, ScanOnce) {
   // Create a line of Helvetica 16 text, and draw it in the |context|.
   base::scoped_nsobject<NSFont> helvetica([NSFont fontWithName:@"Helvetica"
                                                           size:16]);
-  NSDictionary* attributes = [NSDictionary
-      dictionaryWithObjectsAndKeys:helvetica, kCTFontAttributeName, nil];
+  NSDictionary* attributes = @{(id)kCTFontAttributeName : helvetica};
 
   base::scoped_nsobject<NSAttributedString> info([[NSAttributedString alloc]
       initWithString:@"https://www.chromium.org"

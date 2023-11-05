@@ -64,7 +64,9 @@ struct EGLPlatformParameters
                         shaderStencilOutputFeature, genMultipleMipsPerPassFeature, platformMethods,
                         robustness, emulatedPrerotation, asyncCommandQueueFeatureVulkan,
                         hasExplicitMemBarrierFeatureMtl, hasCheapRenderPassFeatureMtl,
-                        forceBufferGPUStorageFeatureMtl, supportsVulkanViewportFlip);
+                        forceBufferGPUStorageFeatureMtl, supportsVulkanViewportFlip, emulatedVAOs,
+                        directSPIRVGeneration, captureLimits, forceRobustResourceInit,
+                        directMetalGeneration);
     }
 
     EGLint renderer                               = EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE;
@@ -86,7 +88,13 @@ struct EGLPlatformParameters
     EGLint hasCheapRenderPassFeatureMtl           = EGL_DONT_CARE;
     EGLint forceBufferGPUStorageFeatureMtl        = EGL_DONT_CARE;
     EGLint supportsVulkanViewportFlip             = EGL_DONT_CARE;
-    angle::PlatformMethods *platformMethods       = nullptr;
+    EGLint emulatedVAOs                           = EGL_DONT_CARE;
+    EGLint directSPIRVGeneration                  = EGL_DONT_CARE;
+    EGLint captureLimits                          = EGL_DONT_CARE;
+    EGLint forceRobustResourceInit                = EGL_DONT_CARE;
+    EGLint directMetalGeneration                  = EGL_DONT_CARE;
+
+    angle::PlatformMethods *platformMethods = nullptr;
 };
 
 inline bool operator<(const EGLPlatformParameters &a, const EGLPlatformParameters &b)

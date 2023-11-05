@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "absl/base/macros.h"
+#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "quic/core/crypto/null_encrypter.h"
@@ -24,7 +25,6 @@
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_logging.h"
 #include "quic/platform/api/quic_mem_slice_storage.h"
-#include "quic/platform/api/quic_ptr_util.h"
 #include "quic/platform/api/quic_test.h"
 #include "quic/platform/api/quic_test_mem_slice_vector.h"
 #include "quic/test_tools/quic_config_peer.h"
@@ -114,7 +114,7 @@ class QuicStreamTest : public QuicTestWithParam<ParsedQuicVersion> {
                                          BIDIRECTIONAL);
     EXPECT_NE(nullptr, stream_);
     // session_ now owns stream_.
-    session_->ActivateStream(QuicWrapUnique(stream_));
+    session_->ActivateStream(absl::WrapUnique(stream_));
     // Ignore resetting when session_ is terminated.
     EXPECT_CALL(*session_, MaybeSendStopSendingFrame(kTestStreamId, _))
         .Times(AnyNumber());
@@ -264,7 +264,7 @@ TEST_P(QuicStreamTest, FromPendingStreamThenData) {
 
   auto stream = new TestStream(&pending, session_.get(),
                                StreamType::READ_UNIDIRECTIONAL, false);
-  session_->ActivateStream(QuicWrapUnique(stream));
+  session_->ActivateStream(absl::WrapUnique(stream));
 
   QuicStreamFrame frame2(kTestStreamId + 2, true, 3, ".");
   stream->OnStreamFrame(frame2);
@@ -1178,14 +1178,17 @@ TEST_P(QuicStreamTest, WriteMemSlices) {
   SetQuicFlag(FLAGS_quic_buffered_data_threshold, 100);
 
   Initialize();
-  char data[1024];
-  std::vector<std::pair<char*, size_t>> buffers;
-  buffers.push_back(std::make_pair(data, ABSL_ARRAYSIZE(data)));
-  buffers.push_back(std::make_pair(data, ABSL_ARRAYSIZE(data)));
-  QuicTestMemSliceVector vector1(buffers);
-  QuicTestMemSliceVector vector2(buffers);
-  QuicMemSliceSpan span1 = vector1.span();
-  QuicMemSliceSpan span2 = vector2.span();
+  constexpr QuicByteCount kDataSize = 1024;
+  QuicBufferAllocator* allocator =
+      connection_->helper()->GetStreamSendBufferAllocator();
+  std::vector<QuicMemSlice> vector1;
+  vector1.push_back(QuicMemSlice(QuicBuffer(allocator, kDataSize)));
+  vector1.push_back(QuicMemSlice(QuicBuffer(allocator, kDataSize)));
+  std::vector<QuicMemSlice> vector2;
+  vector2.push_back(QuicMemSlice(QuicBuffer(allocator, kDataSize)));
+  vector2.push_back(QuicMemSlice(QuicBuffer(allocator, kDataSize)));
+  absl::Span<QuicMemSlice> span1(vector1);
+  absl::Span<QuicMemSlice> span2(vector2);
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _, _))
       .WillOnce(InvokeWithoutArgs([this]() {
@@ -1196,7 +1199,7 @@ TEST_P(QuicStreamTest, WriteMemSlices) {
   QuicConsumedData consumed = stream_->WriteMemSlices(span1, false);
   EXPECT_EQ(2048u, consumed.bytes_consumed);
   EXPECT_FALSE(consumed.fin_consumed);
-  EXPECT_EQ(2 * ABSL_ARRAYSIZE(data) - 100, stream_->BufferedDataBytes());
+  EXPECT_EQ(2 * kDataSize - 100, stream_->BufferedDataBytes());
   EXPECT_FALSE(stream_->fin_buffered());
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _, _)).Times(0);
@@ -1204,12 +1207,11 @@ TEST_P(QuicStreamTest, WriteMemSlices) {
   consumed = stream_->WriteMemSlices(span2, true);
   EXPECT_EQ(0u, consumed.bytes_consumed);
   EXPECT_FALSE(consumed.fin_consumed);
-  EXPECT_EQ(2 * ABSL_ARRAYSIZE(data) - 100, stream_->BufferedDataBytes());
+  EXPECT_EQ(2 * kDataSize - 100, stream_->BufferedDataBytes());
   EXPECT_FALSE(stream_->fin_buffered());
 
   QuicByteCount data_to_write =
-      2 * ABSL_ARRAYSIZE(data) - 100 -
-      GetQuicFlag(FLAGS_quic_buffered_data_threshold) + 1;
+      2 * kDataSize - 100 - GetQuicFlag(FLAGS_quic_buffered_data_threshold) + 1;
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _, _))
       .WillOnce(InvokeWithoutArgs([this, data_to_write]() {
         return session_->ConsumeData(stream_->id(), data_to_write, 100u, NO_FIN,
@@ -1225,8 +1227,7 @@ TEST_P(QuicStreamTest, WriteMemSlices) {
   consumed = stream_->WriteMemSlices(span2, true);
   EXPECT_EQ(2048u, consumed.bytes_consumed);
   EXPECT_TRUE(consumed.fin_consumed);
-  EXPECT_EQ(2 * ABSL_ARRAYSIZE(data) +
-                GetQuicFlag(FLAGS_quic_buffered_data_threshold) - 1,
+  EXPECT_EQ(2 * kDataSize + GetQuicFlag(FLAGS_quic_buffered_data_threshold) - 1,
             stream_->BufferedDataBytes());
   EXPECT_TRUE(stream_->fin_buffered());
 
@@ -1437,7 +1438,7 @@ TEST_P(QuicStreamTest, MarkConnectionLevelWriteBlockedOnWindowUpdateFrame) {
   auto stream = new TestStream(GetNthClientInitiatedBidirectionalStreamId(
                                    GetParam().transport_version, 2),
                                session_.get(), BIDIRECTIONAL);
-  session_->ActivateStream(QuicWrapUnique(stream));
+  session_->ActivateStream(absl::WrapUnique(stream));
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _, _))
       .WillRepeatedly(Invoke(session_.get(), &MockQuicSession::ConsumeData));
@@ -1470,7 +1471,7 @@ TEST_P(QuicStreamTest,
   auto stream = new TestStream(GetNthClientInitiatedBidirectionalStreamId(
                                    GetParam().transport_version, 2),
                                session_.get(), BIDIRECTIONAL);
-  session_->ActivateStream(QuicWrapUnique(stream));
+  session_->ActivateStream(absl::WrapUnique(stream));
 
   std::string data(100, '.');
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _, _))
@@ -1634,8 +1635,7 @@ TEST_P(QuicStreamTest, RstStreamFrameChangesCloseOffset) {
 TEST_P(QuicStreamTest, EmptyStreamFrameWithNoFin) {
   Initialize();
   QuicStreamFrame empty_stream_frame(stream_->id(), false, 0, "");
-  if (GetQuicReloadableFlag(quic_accept_empty_stream_frame_with_no_fin) &&
-      stream_->version().HasIetfQuicFrames()) {
+  if (stream_->version().HasIetfQuicFrames()) {
     EXPECT_CALL(*connection_,
                 CloseConnection(QUIC_EMPTY_STREAM_FRAME_NO_FIN, _, _))
         .Times(0);

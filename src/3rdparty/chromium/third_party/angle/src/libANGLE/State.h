@@ -100,7 +100,8 @@ class State : angle::NonCopyable
           bool clientArraysEnabled,
           bool robustResourceInit,
           bool programBinaryCacheEnabled,
-          EGLenum contextPriority);
+          EGLenum contextPriority,
+          bool hasProtectedContent);
     ~State();
 
     void initialize(Context *context);
@@ -110,6 +111,7 @@ class State : angle::NonCopyable
     ContextID getContextID() const { return mID; }
     EGLenum getClientType() const { return mClientType; }
     EGLenum getContextPriority() const { return mContextPriority; }
+    bool hasProtectedContent() const { return mHasProtectedContent; }
     GLint getClientMajorVersion() const { return mClientVersion.major; }
     GLint getClientMinorVersion() const { return mClientVersion.minor; }
     const Version &getClientVersion() const { return mClientVersion; }
@@ -446,12 +448,28 @@ class State : angle::NonCopyable
 
     ANGLE_INLINE bool hasValidAtomicCounterBuffer() const
     {
-        return mValidAtomicCounterBufferCount > 0;
+        return mBoundAtomicCounterBuffersMask.any();
     }
 
     const OffsetBindingPointer<Buffer> &getIndexedUniformBuffer(size_t index) const;
     const OffsetBindingPointer<Buffer> &getIndexedAtomicCounterBuffer(size_t index) const;
     const OffsetBindingPointer<Buffer> &getIndexedShaderStorageBuffer(size_t index) const;
+
+    const angle::BitSet<gl::IMPLEMENTATION_MAX_UNIFORM_BUFFER_BINDINGS> &getUniformBuffersMask()
+        const
+    {
+        return mBoundUniformBuffersMask;
+    }
+    const angle::BitSet<gl::IMPLEMENTATION_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS>
+        &getAtomicCounterBuffersMask() const
+    {
+        return mBoundAtomicCounterBuffersMask;
+    }
+    const angle::BitSet<gl::IMPLEMENTATION_MAX_SHADER_STORAGE_BUFFER_BINDINGS>
+        &getShaderStorageBuffersMask() const
+    {
+        return mBoundShaderStorageBuffersMask;
+    }
 
     // Detach a buffer from all bindings
     angle::Result detachBuffer(Context *context, const Buffer *buffer);
@@ -654,8 +672,8 @@ class State : angle::NonCopyable
         DIRTY_BIT_ATOMIC_COUNTER_BUFFER_BINDING,
         DIRTY_BIT_MULTISAMPLING,
         DIRTY_BIT_SAMPLE_ALPHA_TO_ONE,
-        DIRTY_BIT_COVERAGE_MODULATION,  // CHROMIUM_framebuffer_mixed_samples
-        DIRTY_BIT_FRAMEBUFFER_SRGB,     // GL_EXT_sRGB_write_control
+        DIRTY_BIT_COVERAGE_MODULATION,                  // CHROMIUM_framebuffer_mixed_samples
+        DIRTY_BIT_FRAMEBUFFER_SRGB_WRITE_CONTROL_MODE,  // GL_EXT_sRGB_write_control
         DIRTY_BIT_CURRENT_VALUES,
         DIRTY_BIT_PROVOKING_VERTEX,
         DIRTY_BIT_SAMPLE_SHADING,
@@ -688,12 +706,12 @@ class State : angle::NonCopyable
         DIRTY_OBJECT_IMAGES_INIT,
         DIRTY_OBJECT_READ_ATTACHMENTS,
         DIRTY_OBJECT_DRAW_ATTACHMENTS,
-        DIRTY_OBJECT_READ_FRAMEBUFFER,
-        DIRTY_OBJECT_DRAW_FRAMEBUFFER,
         DIRTY_OBJECT_VERTEX_ARRAY,
         DIRTY_OBJECT_TEXTURES,  // Top-level dirty bit. Also see mDirtyTextures.
         DIRTY_OBJECT_IMAGES,    // Top-level dirty bit. Also see mDirtyImages.
         DIRTY_OBJECT_SAMPLERS,  // Top-level dirty bit. Also see mDirtySamplers.
+        DIRTY_OBJECT_READ_FRAMEBUFFER,
+        DIRTY_OBJECT_DRAW_FRAMEBUFFER,
         DIRTY_OBJECT_PROGRAM,
         DIRTY_OBJECT_UNKNOWN,
         DIRTY_OBJECT_MAX = DIRTY_OBJECT_UNKNOWN,
@@ -764,6 +782,8 @@ class State : angle::NonCopyable
     void onImageStateChange(const Context *context, size_t unit);
 
     void onUniformBufferStateChange(size_t uniformBufferIndex);
+    void onAtomicCounterBufferStateChange(size_t atomicCounterBufferIndex);
+    void onShaderStorageBufferStateChange(size_t shaderStorageBufferIndex);
 
     bool isCurrentTransformFeedback(const TransformFeedback *tf) const
     {
@@ -890,6 +910,11 @@ class State : angle::NonCopyable
 
     const std::vector<ImageUnit> &getImageUnits() const { return mImageUnits; }
 
+    const ProgramPipelineManager *getProgramPipelineManagerForCapture() const
+    {
+        return mProgramPipelineManager;
+    }
+
   private:
     friend class Context;
 
@@ -922,9 +947,9 @@ class State : angle::NonCopyable
     using DirtyObjectHandler = angle::Result (State::*)(const Context *context, Command command);
     static constexpr DirtyObjectHandler kDirtyObjectHandlers[DIRTY_OBJECT_MAX] = {
         &State::syncActiveTextures,  &State::syncTexturesInit,    &State::syncImagesInit,
-        &State::syncReadAttachments, &State::syncDrawAttachments, &State::syncReadFramebuffer,
-        &State::syncDrawFramebuffer, &State::syncVertexArray,     &State::syncTextures,
-        &State::syncImages,          &State::syncSamplers,        &State::syncProgram};
+        &State::syncReadAttachments, &State::syncDrawAttachments, &State::syncVertexArray,
+        &State::syncTextures,        &State::syncImages,          &State::syncSamplers,
+        &State::syncReadFramebuffer, &State::syncDrawFramebuffer, &State::syncProgram};
 
     // Robust init must happen before Framebuffer init for the Vulkan back-end.
     static_assert(DIRTY_OBJECT_ACTIVE_TEXTURES < DIRTY_OBJECT_TEXTURES_INIT, "init order");
@@ -938,13 +963,20 @@ class State : angle::NonCopyable
     static_assert(DIRTY_OBJECT_IMAGES_INIT == 2, "check DIRTY_OBJECT_IMAGES_INIT index");
     static_assert(DIRTY_OBJECT_READ_ATTACHMENTS == 3, "check DIRTY_OBJECT_READ_ATTACHMENTS index");
     static_assert(DIRTY_OBJECT_DRAW_ATTACHMENTS == 4, "check DIRTY_OBJECT_DRAW_ATTACHMENTS index");
-    static_assert(DIRTY_OBJECT_READ_FRAMEBUFFER == 5, "check DIRTY_OBJECT_READ_FRAMEBUFFER index");
-    static_assert(DIRTY_OBJECT_DRAW_FRAMEBUFFER == 6, "check DIRTY_OBJECT_DRAW_FRAMEBUFFER index");
-    static_assert(DIRTY_OBJECT_VERTEX_ARRAY == 7, "check DIRTY_OBJECT_VERTEX_ARRAY index");
-    static_assert(DIRTY_OBJECT_TEXTURES == 8, "check DIRTY_OBJECT_TEXTURES index");
-    static_assert(DIRTY_OBJECT_IMAGES == 9, "check DIRTY_OBJECT_IMAGES index");
-    static_assert(DIRTY_OBJECT_SAMPLERS == 10, "check DIRTY_OBJECT_SAMPLERS index");
+    static_assert(DIRTY_OBJECT_VERTEX_ARRAY == 5, "check DIRTY_OBJECT_VERTEX_ARRAY index");
+    static_assert(DIRTY_OBJECT_TEXTURES == 6, "check DIRTY_OBJECT_TEXTURES index");
+    static_assert(DIRTY_OBJECT_IMAGES == 7, "check DIRTY_OBJECT_IMAGES index");
+    static_assert(DIRTY_OBJECT_SAMPLERS == 8, "check DIRTY_OBJECT_SAMPLERS index");
+    static_assert(DIRTY_OBJECT_READ_FRAMEBUFFER == 9, "check DIRTY_OBJECT_READ_FRAMEBUFFER index");
+    static_assert(DIRTY_OBJECT_DRAW_FRAMEBUFFER == 10, "check DIRTY_OBJECT_DRAW_FRAMEBUFFER index");
     static_assert(DIRTY_OBJECT_PROGRAM == 11, "check DIRTY_OBJECT_PROGRAM index");
+
+    // Container (FBO) object must handled after the texture so that if texture code adds dirty bit
+    // to container object, they will be picked up in the same draw call.
+    static_assert(DIRTY_OBJECT_TEXTURES < DIRTY_OBJECT_READ_FRAMEBUFFER,
+                  "State::syncDirtyObjects order");
+    static_assert(DIRTY_OBJECT_TEXTURES < DIRTY_OBJECT_DRAW_FRAMEBUFFER,
+                  "State::syncDirtyObjects order");
 
     // Dispatch table for buffer update functions.
     static const angle::PackedEnumMap<BufferBinding, BufferBindingSetter> kBufferSetters;
@@ -953,6 +985,7 @@ class State : angle::NonCopyable
 
     EGLenum mClientType;
     EGLenum mContextPriority;
+    bool mHasProtectedContent;
     Version mClientVersion;
 
     // Caps to use for validation
@@ -1068,8 +1101,13 @@ class State : angle::NonCopyable
 
     BufferVector mUniformBuffers;
     BufferVector mAtomicCounterBuffers;
-    uint32_t mValidAtomicCounterBufferCount;
     BufferVector mShaderStorageBuffers;
+
+    angle::BitSet<gl::IMPLEMENTATION_MAX_UNIFORM_BUFFER_BINDINGS> mBoundUniformBuffersMask;
+    angle::BitSet<gl::IMPLEMENTATION_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS>
+        mBoundAtomicCounterBuffersMask;
+    angle::BitSet<gl::IMPLEMENTATION_MAX_SHADER_STORAGE_BUFFER_BINDINGS>
+        mBoundShaderStorageBuffersMask;
 
     BindingPointer<TransformFeedback> mTransformFeedback;
 
@@ -1125,6 +1163,16 @@ class State : angle::NonCopyable
     DrawBufferMask mBlendFuncConstantAlphaDrawBuffers;
     DrawBufferMask mBlendFuncConstantColorDrawBuffers;
     bool mNoSimultaneousConstantColorAndAlphaBlendFunc;
+
+    // GL_EXT_primitive_bounding_box
+    GLfloat mBoundingBoxMinX;
+    GLfloat mBoundingBoxMinY;
+    GLfloat mBoundingBoxMinZ;
+    GLfloat mBoundingBoxMinW;
+    GLfloat mBoundingBoxMaxX;
+    GLfloat mBoundingBoxMaxY;
+    GLfloat mBoundingBoxMaxZ;
+    GLfloat mBoundingBoxMaxW;
 };
 
 ANGLE_INLINE angle::Result State::syncDirtyObjects(const Context *context,

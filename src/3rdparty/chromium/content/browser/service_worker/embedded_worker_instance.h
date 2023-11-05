@@ -17,10 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "base/threading/sequence_bound.h"
-#include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_metrics.h"
@@ -31,6 +28,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
@@ -115,14 +113,14 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
     // worker died. When this is called, status is STOPPED.
     virtual void OnDetached(EmbeddedWorkerStatus old_status) {}
 
-    virtual void OnReportException(const base::string16& error_message,
+    virtual void OnReportException(const std::u16string& error_message,
                                    int line_number,
                                    int column_number,
                                    const GURL& source_url) {}
     virtual void OnReportConsoleMessage(
         blink::mojom::ConsoleMessageSource source,
         blink::mojom::ConsoleMessageLevel message_level,
-        const base::string16& message,
+        const std::u16string& message,
         int line_number,
         const GURL& source_url) {}
   };
@@ -168,6 +166,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   int process_id() const;
   int thread_id() const { return thread_id_; }
   int worker_devtools_agent_route_id() const;
+  base::UnguessableToken WorkerDevtoolsId() const;
 
   // DEPRECATED, only for use by ServiceWorkerVersion.
   // TODO(crbug.com/855852): Remove the Listener interface.
@@ -236,11 +235,12 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
       RenderProcessHost* rph,
       int routing_id,
       const url::Origin& origin,
-      const base::Optional<network::CrossOriginEmbedderPolicy>&
+      const absl::optional<network::CrossOriginEmbedderPolicy>&
           cross_origin_embedder_policy,
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter,
-      ContentBrowserClient::URLLoaderFactoryType factory_type);
+      ContentBrowserClient::URLLoaderFactoryType factory_type,
+      const std::string& devtools_worker_token);
 
   // Creates a set of factory bundles for scripts and subresources. This must be
   // called after the COEP value for the worker script is known.
@@ -256,8 +256,8 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
 
   // Returns the unique token that has been generated to identify this worker
   // instance, and its corresponding GlobalScope in the renderer process. If the
-  // service worker is not currently running, this is base::nullopt.
-  const base::Optional<blink::ServiceWorkerToken>& token() const {
+  // service worker is not currently running, this is absl::nullopt.
+  const absl::optional<blink::ServiceWorkerToken>& token() const {
     return token_;
   }
 
@@ -298,13 +298,13 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   // Resets the embedded worker instance to the initial state. Changes
   // the internal status from STARTING or RUNNING to STOPPED.
   void OnStopped() override;
-  void OnReportException(const base::string16& error_message,
+  void OnReportException(const std::u16string& error_message,
                          int line_number,
                          int column_number,
                          const GURL& source_url) override;
   void OnReportConsoleMessage(blink::mojom::ConsoleMessageSource source,
                               blink::mojom::ConsoleMessageLevel message_level,
-                              const base::string16& message,
+                              const std::u16string& message,
                               int line_number,
                               const GURL& source_url) override;
 
@@ -399,7 +399,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   // the browser process, but not persistent across service worker restarts.
   // This token is set every time the worker starts, and is plumbed through to
   // the corresponding ServiceWorkerGlobalScope in the renderer process.
-  base::Optional<blink::ServiceWorkerToken> token_;
+  absl::optional<blink::ServiceWorkerToken> token_;
 
   base::WeakPtrFactory<EmbeddedWorkerInstance> weak_factory_{this};
 

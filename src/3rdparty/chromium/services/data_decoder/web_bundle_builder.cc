@@ -75,7 +75,7 @@ WebBundleBuilder::~WebBundleBuilder() = default;
 
 void WebBundleBuilder::SetExchanges(
     std::vector<mojom::SerializedResourceInfoPtr> resources,
-    std::vector<base::Optional<mojo_base::BigBuffer>> bodies) {
+    std::vector<absl::optional<mojo_base::BigBuffer>> bodies) {
   CHECK_EQ(resources.size(), bodies.size());
   int64_t responses_offset = 1 + GetNumUintBytes(resources.size());
   for (size_t i = 0; i < resources.size(); ++i) {
@@ -84,7 +84,8 @@ void WebBundleBuilder::SetExchanges(
     Headers headers = {{":status", "200"}, {"content-type", info->mime_type}};
     uint64_t response_length =
         GetEncodedByteSizeOfResponse(headers, body ? body->size() : 0);
-    ResponseLocation location = {responses_offset, response_length};
+    ResponseLocation location = {responses_offset,
+                                 static_cast<int64_t>(response_length)};
     responses_offset += response_length;
     cbor::Value::ArrayValue response_array;
     response_array.emplace_back(Encode(CreateHeaderMap(headers)));
@@ -123,7 +124,7 @@ void WebBundleBuilder::AddSection(base::StringPiece name, cbor::Value section) {
 
 std::vector<uint8_t> WebBundleBuilder::CreateBundle(
     std::vector<mojom::SerializedResourceInfoPtr> resources,
-    std::vector<base::Optional<mojo_base::BigBuffer>> bodies) {
+    std::vector<absl::optional<mojo_base::BigBuffer>> bodies) {
   SetExchanges(std::move(resources), std::move(bodies));
   AddSection("index", cbor::Value(index_));
   AddSection("responses", cbor::Value(responses_));

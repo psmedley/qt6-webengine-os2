@@ -11,8 +11,8 @@
 #include "base/bits.h"
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
+#include "base/memory/page_size.h"
 #include "base/no_destructor.h"
-#include "base/process/process_metrics.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
@@ -260,7 +260,7 @@ void* GuardedPageAllocator::Allocate(size_t size,
   size_t offset;
   if (free_slot & 1)
     // Return right-aligned allocation to detect overflows.
-    offset = state_.page_size - base::bits::Align(size, align);
+    offset = state_.page_size - base::bits::AlignUp(size, align);
   else
     // Return left-aligned allocation to detect underflows.
     offset = 0;

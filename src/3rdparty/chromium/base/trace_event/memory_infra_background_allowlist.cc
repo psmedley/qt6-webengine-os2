@@ -21,6 +21,7 @@ namespace {
 // little processor and memory overhead.
 // TODO(ssid): Some dump providers do not create ownership edges on background
 // dump. So, the effective size will not be correct.
+// clang-format off
 const char* const kDumpProviderAllowlist[] = {
     "android::ResourceManagerImpl",
     "AutocompleteController",
@@ -77,8 +78,13 @@ const char* const kDumpProviderAllowlist[] = {
 // A list of string names that are allowed for the memory allocator dumps in
 // background mode.
 const char* const kAllocatorDumpNameAllowlist[] = {
+    // Some of the blink values vary based on compile time flags. The compile
+    // timeflags are not in base, so all are listed here.
+    "blink_gc/main/allocated_objects",
     "blink_gc/main/heap",
     "blink_gc/workers/heap/worker_0x?",
+    "blink_gc/workers/worker_0x?/heap",
+    "blink_gc/workers/worker_0x?/allocated_objects",
     "blink_objects/AdSubframe",
     "blink_objects/ArrayBufferContents",
     "blink_objects/AudioHandler",
@@ -139,8 +145,14 @@ const char* const kAllocatorDumpNameAllowlist[] = {
     "malloc/allocated_objects",
     "malloc/metadata_fragmentation_caches",
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-    "malloc/thread_cache",
-    "malloc/thread_cache/main_thread",
+    "malloc/partitions",
+    "malloc/partitions/allocator",
+    "malloc/partitions/allocator/thread_cache",
+    "malloc/partitions/allocator/thread_cache/main_thread",
+    "malloc/partitions/aligned",
+    "malloc/partitions/original",
+    "malloc/partitions/nonscannable",
+    "malloc/win_heap",
 #endif
     "media/webmediaplayer/audio/player_0x?",
     "media/webmediaplayer/data_source/player_0x?",
@@ -359,10 +371,8 @@ const char* const kAllocatorDumpNameAllowlist[] = {
     "sync/0x?/store",
     "sync/0x?/model_type/APP",
     "sync/0x?/model_type/APP_LIST",
-    "sync/0x?/model_type/APP_NOTIFICATION",
     "sync/0x?/model_type/APP_SETTING",
     "sync/0x?/model_type/ARC_PACKAGE",
-    "sync/0x?/model_type/ARTICLE",
     "sync/0x?/model_type/AUTOFILL",
     "sync/0x?/model_type/AUTOFILL_PROFILE",
     "sync/0x?/model_type/AUTOFILL_WALLET",
@@ -370,16 +380,11 @@ const char* const kAllocatorDumpNameAllowlist[] = {
     "sync/0x?/model_type/BOOKMARK",
     "sync/0x?/model_type/DEVICE_INFO",
     "sync/0x?/model_type/DICTIONARY",
-    "sync/0x?/model_type/EXPERIMENTS",
     "sync/0x?/model_type/EXTENSION",
     "sync/0x?/model_type/EXTENSION_SETTING",
-    "sync/0x?/model_type/FAVICON_IMAGE",
-    "sync/0x?/model_type/FAVICON_TRACKING",
     "sync/0x?/model_type/HISTORY_DELETE_DIRECTIVE",
     "sync/0x?/model_type/MANAGED_USER",
     "sync/0x?/model_type/MANAGED_USER_SETTING",
-    "sync/0x?/model_type/MANAGED_USER_SHARED_SETTING",
-    "sync/0x?/model_type/MANAGED_USER_WHITELIST",
     "sync/0x?/model_type/NIGORI",
     "sync/0x?/model_type/OS_PREFERENCE",
     "sync/0x?/model_type/OS_PRIORITY_PREFERENCE",
@@ -393,8 +398,6 @@ const char* const kAllocatorDumpNameAllowlist[] = {
     "sync/0x?/model_type/SEND_TAB_TO_SELF",
     "sync/0x?/model_type/SESSION",
     "sync/0x?/model_type/SHARING_MESSAGE",
-    "sync/0x?/model_type/SYNCED_NOTIFICATION",
-    "sync/0x?/model_type/SYNCED_NOTIFICATION_APP_INFO",
     "sync/0x?/model_type/THEME",
     "sync/0x?/model_type/TYPED_URL",
     "sync/0x?/model_type/USER_CONSENT",
@@ -402,8 +405,9 @@ const char* const kAllocatorDumpNameAllowlist[] = {
     "sync/0x?/model_type/WALLET_METADATA",
     "sync/0x?/model_type/WEB_APP",
     "sync/0x?/model_type/WIFI_CONFIGURATION",
-    "sync/0x?/model_type/WIFI_CREDENTIAL",
+    "sync/0x?/model_type/WORKSPACE_DESK",
     "tab_restore/service_helper_0x?/entries",
+    "tab_restore/service_helper_0x?/entries/group_0x?",
     "tab_restore/service_helper_0x?/entries/tab_0x?",
     "tab_restore/service_helper_0x?/entries/window_0x?",
     "tracing/heap_profiler_blink_gc/AllocationRegister",
@@ -411,6 +415,7 @@ const char* const kAllocatorDumpNameAllowlist[] = {
     "tracing/heap_profiler_partition_alloc/AllocationRegister",
     nullptr  // End of list marker.
 };
+// clang-format on
 
 const char* const* g_dump_provider_allowlist = kDumpProviderAllowlist;
 const char* const* g_allocator_dump_name_allowlist =

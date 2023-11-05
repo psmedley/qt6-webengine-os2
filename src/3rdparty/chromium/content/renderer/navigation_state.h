@@ -8,11 +8,9 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/time/time.h"
 #include "content/common/frame.mojom.h"
-#include "content/common/navigation_params.h"
-#include "content/common/navigation_params.mojom.h"
 #include "content/renderer/navigation_client.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom.h"
 
 namespace blink {
 class WebDocumentLoader;
@@ -28,15 +26,15 @@ class CONTENT_EXPORT NavigationState {
  public:
   ~NavigationState();
 
-  static std::unique_ptr<NavigationState> CreateBrowserInitiated(
-      mojom::CommonNavigationParamsPtr common_params,
-      mojom::CommitNavigationParamsPtr commit_params,
+  static std::unique_ptr<NavigationState> Create(
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::CommitNavigationParamsPtr commit_params,
       mojom::NavigationClient::CommitNavigationCallback
           per_navigation_mojo_interface_callback,
       std::unique_ptr<NavigationClient> navigation_client,
       bool was_initiated_in_this_frame);
 
-  static std::unique_ptr<NavigationState> CreateContentInitiated();
+  static std::unique_ptr<NavigationState> CreateForSynchronousCommit();
 
   static NavigationState* FromDocumentLoader(
       blink::WebDocumentLoader* document_loader);
@@ -44,13 +42,12 @@ class CONTENT_EXPORT NavigationState {
   // True iff the frame's navigation was within the same document.
   bool WasWithinSameDocument();
 
-  // True if this navigation was not initiated via WebFrame::LoadRequest.
-  bool IsContentInitiated();
+  bool IsForSynchronousCommit();
 
-  const mojom::CommonNavigationParams& common_params() const {
+  const blink::mojom::CommonNavigationParams& common_params() const {
     return *common_params_;
   }
-  const mojom::CommitNavigationParams& commit_params() const {
+  const blink::mojom::CommitNavigationParams& commit_params() const {
     return *commit_params_;
   }
   bool has_navigation_client() const { return navigation_client_.get(); }
@@ -71,9 +68,9 @@ class CONTENT_EXPORT NavigationState {
       mojom::DidCommitProvisionalLoadInterfaceParamsPtr interface_params);
 
  private:
-  NavigationState(mojom::CommonNavigationParamsPtr common_params,
-                  mojom::CommitNavigationParamsPtr commit_params,
-                  bool is_content_initiated,
+  NavigationState(blink::mojom::CommonNavigationParamsPtr common_params,
+                  blink::mojom::CommitNavigationParamsPtr commit_params,
+                  bool is_for_synchronous_commit,
                   content::mojom::NavigationClient::CommitNavigationCallback
                       commit_callback,
                   std::unique_ptr<NavigationClient> navigation_client,
@@ -89,10 +86,12 @@ class CONTENT_EXPORT NavigationState {
   // Used to ensure consistent observer notifications about a navigation.
   bool was_initiated_in_this_frame_;
 
-  // True if this navigation was not initiated via WebFrame::LoadRequest.
-  const bool is_content_initiated_;
+  // True if this navigation is for a renderer synchronous commit (e.g. the
+  // synchronous about:blank navigation, same-origin initiated same-document
+  // navigations), rather than using the browser's navigation stack.
+  const bool is_for_synchronous_commit_;
 
-  mojom::CommonNavigationParamsPtr common_params_;
+  blink::mojom::CommonNavigationParamsPtr common_params_;
 
   // Note: if IsContentInitiated() is false, whether this navigation should
   // replace the current entry in the back/forward history list is determined by
@@ -105,7 +104,7 @@ class CONTENT_EXPORT NavigationState {
   // swaps because FrameLoader::loadWithNavigationAction treats loads before a
   // FrameLoader has committedFirstRealDocumentLoad as a replacement. (Added for
   // http://crbug.com/178380).
-  mojom::CommitNavigationParamsPtr commit_params_;
+  blink::mojom::CommitNavigationParamsPtr commit_params_;
 
   // The NavigationClient interface gives control over the navigation ongoing in
   // the browser process.

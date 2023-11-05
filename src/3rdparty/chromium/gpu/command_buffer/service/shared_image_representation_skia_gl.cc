@@ -11,6 +11,7 @@
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "third_party/skia/include/core/SkPromiseImageTexture.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
+#include "third_party/skia/include/gpu/GrContextThreadSafeProxy.h"
 #include "ui/gl/gl_bindings.h"
 
 namespace gpu {
@@ -39,11 +40,11 @@ SharedImageRepresentationSkiaGL::Create(
     SharedImageBacking* backing,
     MemoryTypeTracker* tracker) {
   GrBackendTexture backend_texture;
-  if (!GetGrBackendTexture(context_state->feature_info(),
-                           gl_representation->GetTextureBase()->target(),
-                           backing->size(),
-                           gl_representation->GetTextureBase()->service_id(),
-                           backing->format(), &backend_texture)) {
+  if (!GetGrBackendTexture(
+          context_state->feature_info(),
+          gl_representation->GetTextureBase()->target(), backing->size(),
+          gl_representation->GetTextureBase()->service_id(), backing->format(),
+          context_state->gr_context()->threadSafeProxy(), &backend_texture)) {
     return nullptr;
   }
   auto promise_texture = SkPromiseImageTexture::Make(backend_texture);
@@ -74,6 +75,8 @@ SharedImageRepresentationSkiaGL::SharedImageRepresentationSkiaGL(
 SharedImageRepresentationSkiaGL::~SharedImageRepresentationSkiaGL() {
   DCHECK_EQ(RepresentationAccessMode::kNone, mode_);
   surface_.reset();
+  if (!has_context())
+    gl_representation_->OnContextLost();
 }
 
 sk_sp<SkSurface> SharedImageRepresentationSkiaGL::BeginWriteAccess(

@@ -9,13 +9,13 @@
 #include "base/bind.h"
 #include "base/check_op.h"
 #include "base/memory/ptr_util.h"
-#include "base/optional.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "net/url_request/redirect_info.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
@@ -86,13 +86,12 @@ class SyncLoadContext::SignalHelper final {
   base::WaitableEvent* redirect_or_response_event_;
   base::WaitableEvent* abort_event_;
   base::WaitableEventWatcher abort_watcher_;
-  base::Optional<base::OneShotTimer> timeout_timer_;
+  absl::optional<base::OneShotTimer> timeout_timer_;
 };
 
 // static
 void SyncLoadContext::StartAsyncWithWaitableEvent(
     std::unique_ptr<network::ResourceRequest> request,
-    int routing_id,
     scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner,
     const net::NetworkTrafficAnnotationTag& traffic_annotation,
     uint32_t loader_options,
@@ -113,9 +112,9 @@ void SyncLoadContext::StartAsyncWithWaitableEvent(
       context_for_redirect, redirect_or_response_event, abort_event, timeout,
       std::move(download_to_blob_registry), loading_task_runner));
   context->resource_request_sender_->SendAsync(
-      std::move(request), routing_id, std::move(loading_task_runner),
-      traffic_annotation, loader_options, cors_exempt_header_list,
-      context, context->url_loader_factory_, std::move(throttles),
+      std::move(request), std::move(loading_task_runner), traffic_annotation,
+      loader_options, cors_exempt_header_list, context,
+      context->url_loader_factory_, std::move(throttles),
       std::move(resource_load_info_notifier_wrapper),
       WebBackForwardCacheLoaderHelper());
 }
@@ -163,18 +162,17 @@ bool SyncLoadContext::OnReceivedRedirect(
     std::vector<std::string>* removed_headers) {
   DCHECK(!Completed());
   if (removed_headers) {
-    // TODO(yoav): Get the actual FeaturePolicy here to support selective
+    // TODO(yoav): Get the actual PermissionsPolicy here to support selective
     // removal for sync XHR.
-    FindClientHintsToRemove(nullptr /* feature_policy */, redirect_info.new_url,
-                            removed_headers);
+    FindClientHintsToRemove(nullptr /* permissions_policy */,
+                            redirect_info.new_url, removed_headers);
   }
 
   response_->url = redirect_info.new_url;
   response_->head = std::move(head);
   response_->redirect_info = redirect_info;
   *context_for_redirect_ = this;
-  resource_request_sender_->SetDefersLoading(
-      WebURLLoader::DeferType::kDeferred);
+  resource_request_sender_->Freeze(WebLoaderFreezeMode::kStrict);
   signals_->SignalRedirectOrResponseComplete();
   return true;
 }
@@ -188,8 +186,7 @@ void SyncLoadContext::FollowRedirect() {
   response_->redirect_info = net::RedirectInfo();
   *context_for_redirect_ = nullptr;
 
-  resource_request_sender_->SetDefersLoading(
-      WebURLLoader::DeferType::kNotDeferred);
+  resource_request_sender_->Freeze(WebLoaderFreezeMode::kNone);
 }
 
 void SyncLoadContext::CancelRedirect() {
@@ -248,6 +245,7 @@ void SyncLoadContext::OnCompletedRequest(
   response_->error_code = status.error_code;
   response_->extended_error_code = status.extended_error_code;
   response_->resolve_error_info = status.resolve_error_info;
+  response_->should_collapse_initiator = status.should_collapse_initiator;
   response_->cors_error = status.cors_error_status;
   response_->head->encoded_data_length = status.encoded_data_length;
   response_->head->encoded_body_length = status.encoded_body_length;

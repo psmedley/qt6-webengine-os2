@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "third_party/blink/renderer/core/css/has_matched_cache_scope.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/selector_checker.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -96,10 +97,8 @@ struct AllElementsSelectorQueryTrait {
 
 inline bool SelectorMatches(const CSSSelector& selector,
                             Element& element,
-                            const ContainerNode& root_node) {
-  SelectorChecker::Init init;
-  init.mode = SelectorChecker::kQueryingRules;
-  SelectorChecker checker(init);
+                            const ContainerNode& root_node,
+                            const SelectorChecker& checker) {
   SelectorChecker::SelectorCheckingContext context(&element);
   context.selector = &selector;
   context.scope = &root_node;
@@ -108,11 +107,13 @@ inline bool SelectorMatches(const CSSSelector& selector,
 
 bool SelectorQuery::Matches(Element& target_element) const {
   QUERY_STATS_RESET();
+  HasMatchedCacheScope has_matched_cache_scope(&target_element.GetDocument());
   return SelectorListMatches(target_element, target_element);
 }
 
 Element* SelectorQuery::Closest(Element& target_element) const {
   QUERY_STATS_RESET();
+  HasMatchedCacheScope has_matched_cache_scope(&target_element.GetDocument());
   if (selectors_.IsEmpty())
     return nullptr;
 
@@ -126,6 +127,7 @@ Element* SelectorQuery::Closest(Element& target_element) const {
 
 StaticElementList* SelectorQuery::QueryAll(ContainerNode& root_node) const {
   QUERY_STATS_RESET();
+  HasMatchedCacheScope has_matched_cache_scope(&root_node.GetDocument());
   NthIndexCache nth_index_cache(root_node.GetDocument());
   HeapVector<Member<Element>> result;
   Execute<AllElementsSelectorQueryTrait>(root_node, result);
@@ -134,6 +136,7 @@ StaticElementList* SelectorQuery::QueryAll(ContainerNode& root_node) const {
 
 Element* SelectorQuery::QueryFirst(ContainerNode& root_node) const {
   QUERY_STATS_RESET();
+  HasMatchedCacheScope has_matched_cache_scope(&root_node.GetDocument());
   NthIndexCache nth_index_cache(root_node.GetDocument());
   Element* matched_element = nullptr;
   Execute<SingleElementSelectorQueryTrait>(root_node, matched_element);
@@ -146,11 +149,12 @@ static void CollectElementsByClassName(
     const AtomicString& class_name,
     const CSSSelector* selector,
     typename SelectorQueryTrait::OutputType& output) {
+  SelectorChecker checker(SelectorChecker::kQueryingRules);
   for (Element& element : ElementTraversal::DescendantsOf(root_node)) {
     QUERY_STATS_INCREMENT(fast_class);
     if (!element.HasClassName(class_name))
       continue;
-    if (selector && !SelectorMatches(*selector, element, root_node))
+    if (selector && !SelectorMatches(*selector, element, root_node, checker))
       continue;
     SelectorQueryTrait::AppendElement(output, element);
     if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
@@ -267,10 +271,11 @@ void SelectorQuery::ExecuteForTraverseRoot(
   DCHECK_EQ(selectors_.size(), 1u);
 
   const CSSSelector& selector = *selectors_[0];
+  SelectorChecker checker(SelectorChecker::kQueryingRules);
 
   for (Element& element : ElementTraversal::DescendantsOf(traverse_root)) {
     QUERY_STATS_INCREMENT(fast_scan);
-    if (SelectorMatches(selector, element, root_node)) {
+    if (SelectorMatches(selector, element, root_node, checker)) {
       SelectorQueryTrait::AppendElement(output, element);
       if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
         return;
@@ -280,8 +285,9 @@ void SelectorQuery::ExecuteForTraverseRoot(
 
 bool SelectorQuery::SelectorListMatches(ContainerNode& root_node,
                                         Element& element) const {
+  SelectorChecker checker(SelectorChecker::kQueryingRules);
   for (auto* const selector : selectors_) {
-    if (SelectorMatches(*selector, element, root_node))
+    if (SelectorMatches(*selector, element, root_node, checker))
       return true;
   }
   return false;
@@ -310,6 +316,7 @@ void SelectorQuery::ExecuteWithId(
 
   const CSSSelector& first_selector = *selectors_[0];
   const TreeScope& scope = root_node.ContainingTreeScope();
+  SelectorChecker checker(SelectorChecker::kQueryingRules);
 
   if (scope.ContainsMultipleElementsWithId(selector_id_)) {
     // We don't currently handle cases where there's multiple elements with the
@@ -323,7 +330,7 @@ void SelectorQuery::ExecuteWithId(
       if (!element->IsDescendantOf(&root_node))
         continue;
       QUERY_STATS_INCREMENT(fast_id);
-      if (SelectorMatches(first_selector, *element, root_node)) {
+      if (SelectorMatches(first_selector, *element, root_node, checker)) {
         SelectorQueryTrait::AppendElement(output, *element);
         if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
           return;
@@ -339,7 +346,7 @@ void SelectorQuery::ExecuteWithId(
     if (!element->IsDescendantOf(&root_node))
       return;
     QUERY_STATS_INCREMENT(fast_id);
-    if (SelectorMatches(first_selector, *element, root_node))
+    if (SelectorMatches(first_selector, *element, root_node, checker))
       SelectorQueryTrait::AppendElement(output, *element);
     return;
   }

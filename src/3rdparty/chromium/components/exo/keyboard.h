@@ -10,9 +10,8 @@
 #include "ash/ime/ime_controller_impl.h"
 #include "ash/public/cpp/keyboard/keyboard_controller_observer.h"
 #include "base/containers/flat_map.h"
-#include "base/containers/flat_set.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
+#include "components/exo/key_state.h"
 #include "components/exo/keyboard_observer.h"
 #include "components/exo/seat_observer.h"
 #include "components/exo/surface_observer.h"
@@ -39,6 +38,8 @@ class Keyboard : public ui::EventHandler,
                  public ash::ImeControllerImpl::Observer {
  public:
   Keyboard(std::unique_ptr<KeyboardDelegate> delegate, Seat* seat);
+  Keyboard(const Keyboard&) = delete;
+  Keyboard& operator=(const Keyboard&) = delete;
   ~Keyboard() override;
 
   KeyboardDelegate* delegate() const { return delegate_.get(); }
@@ -64,7 +65,6 @@ class Keyboard : public ui::EventHandler,
   void OnSurfaceDestroying(Surface* surface) override;
 
   // Overridden from SeatObserver:
-  void OnSurfaceFocusing(Surface* gaining_focus) override;
   void OnSurfaceFocused(Surface* gained_focus) override;
 
   // Overridden from ash::KeyboardControllerObserver
@@ -117,7 +117,7 @@ class Keyboard : public ui::EventHandler,
   // Set of currently pressed keys. First value is a platform code and second
   // value is the code that was delivered to client. See Seat.h for more
   // details.
-  base::flat_map<ui::DomCode, ui::DomCode> pressed_keys_;
+  base::flat_map<ui::DomCode, KeyState> pressed_keys_;
 
   // Key state changes that are expected to be acknowledged.
   using KeyStateChange = std::pair<ui::KeyEvent, base::TimeTicks>;
@@ -137,8 +137,6 @@ class Keyboard : public ui::EventHandler,
   base::ObserverList<KeyboardObserver>::Unchecked observer_list_;
 
   base::WeakPtrFactory<Keyboard> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Keyboard);
 };
 
 }  // namespace exo

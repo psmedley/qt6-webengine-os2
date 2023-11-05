@@ -17,8 +17,8 @@
 #include "quic/platform/api/quic_flag_utils.h"
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_logging.h"
-#include "common/platform/api/quiche_text_utils.h"
 #include "common/quiche_endian.h"
+#include "common/quiche_text_utils.h"
 
 namespace quic {
 namespace {
@@ -47,7 +47,7 @@ void SetVersionFlag(const ParsedQuicVersion& version, bool should_enable) {
   const bool enable = should_enable;
   const bool disable = !should_enable;
   if (version == ParsedQuicVersion::RFCv1()) {
-    SetQuicReloadableFlag(quic_enable_version_rfcv1, enable);
+    SetQuicReloadableFlag(quic_disable_version_rfcv1, disable);
   } else if (version == ParsedQuicVersion::Draft29()) {
     SetQuicReloadableFlag(quic_disable_version_draft_29, disable);
   } else if (version == ParsedQuicVersion::T051()) {
@@ -59,8 +59,8 @@ void SetVersionFlag(const ParsedQuicVersion& version, bool should_enable) {
   } else if (version == ParsedQuicVersion::Q043()) {
     SetQuicReloadableFlag(quic_disable_version_q043, disable);
   } else {
-    QUIC_BUG << "Cannot " << (enable ? "en" : "dis") << "able version "
-             << version;
+    QUIC_BUG(quic_bug_10589_1)
+        << "Cannot " << (enable ? "en" : "dis") << "able version " << version;
   }
 }
 
@@ -232,9 +232,10 @@ QuicVersionLabel CreateQuicVersionLabel(ParsedQuicVersion parsed_version) {
   } else if (parsed_version == ParsedQuicVersion::ReservedForNegotiation()) {
     return CreateRandomVersionLabelForNegotiation();
   }
-  QUIC_BUG << "Unsupported version "
-           << QuicVersionToString(parsed_version.transport_version) << " "
-           << HandshakeProtocolToString(parsed_version.handshake_protocol);
+  QUIC_BUG(quic_bug_10589_2)
+      << "Unsupported version "
+      << QuicVersionToString(parsed_version.transport_version) << " "
+      << HandshakeProtocolToString(parsed_version.handshake_protocol);
   return 0;
 }
 
@@ -255,7 +256,8 @@ ParsedQuicVersionVector AllSupportedVersionsWithQuicCrypto() {
       versions.push_back(version);
     }
   }
-  QUIC_BUG_IF(versions.empty()) << "No version with QUIC crypto found.";
+  QUIC_BUG_IF(quic_bug_10589_3, versions.empty())
+      << "No version with QUIC crypto found.";
   return versions;
 }
 
@@ -266,7 +268,8 @@ ParsedQuicVersionVector CurrentSupportedVersionsWithQuicCrypto() {
       versions.push_back(version);
     }
   }
-  QUIC_BUG_IF(versions.empty()) << "No version with QUIC crypto found.";
+  QUIC_BUG_IF(quic_bug_10589_4, versions.empty())
+      << "No version with QUIC crypto found.";
   return versions;
 }
 
@@ -277,7 +280,8 @@ ParsedQuicVersionVector AllSupportedVersionsWithTls() {
       versions.push_back(version);
     }
   }
-  QUIC_BUG_IF(versions.empty()) << "No version with TLS handshake found.";
+  QUIC_BUG_IF(quic_bug_10589_5, versions.empty())
+      << "No version with TLS handshake found.";
   return versions;
 }
 
@@ -288,7 +292,20 @@ ParsedQuicVersionVector CurrentSupportedVersionsWithTls() {
       versions.push_back(version);
     }
   }
-  QUIC_BUG_IF(versions.empty()) << "No version with TLS handshake found.";
+  QUIC_BUG_IF(quic_bug_10589_6, versions.empty())
+      << "No version with TLS handshake found.";
+  return versions;
+}
+
+ParsedQuicVersionVector CurrentSupportedHttp3Versions() {
+  ParsedQuicVersionVector versions;
+  for (const ParsedQuicVersion& version : CurrentSupportedVersions()) {
+    if (version.UsesHttp3()) {
+      versions.push_back(version);
+    }
+  }
+  QUIC_BUG_IF(no_version_uses_http3, versions.empty())
+      << "No version speaking Http3 found.";
   return versions;
 }
 
@@ -390,7 +407,7 @@ ParsedQuicVersionVector FilterSupportedVersions(
   filtered_versions.reserve(versions.size());
   for (const ParsedQuicVersion& version : versions) {
     if (version == ParsedQuicVersion::RFCv1()) {
-      if (GetQuicReloadableFlag(quic_enable_version_rfcv1)) {
+      if (!GetQuicReloadableFlag(quic_disable_version_rfcv1)) {
         filtered_versions.push_back(version);
       }
     } else if (version == ParsedQuicVersion::Draft29()) {
@@ -414,7 +431,8 @@ ParsedQuicVersionVector FilterSupportedVersions(
         filtered_versions.push_back(version);
       }
     } else {
-      QUIC_BUG << "QUIC version " << version << " has no flag protection";
+      QUIC_BUG(quic_bug_10589_7)
+          << "QUIC version " << version << " has no flag protection";
       filtered_versions.push_back(version);
     }
   }
@@ -593,7 +611,6 @@ std::string AlpnForVersion(ParsedQuicVersion parsed_version) {
 
 void QuicVersionInitializeSupportForIetfDraft() {
   // Enable necessary flags.
-  SetQuicRestartFlag(quic_enable_zero_rtt_for_tls_v2, true);
 }
 
 void QuicEnableVersion(const ParsedQuicVersion& version) {

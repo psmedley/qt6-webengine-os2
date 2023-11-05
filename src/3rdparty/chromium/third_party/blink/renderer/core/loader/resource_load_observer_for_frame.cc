@@ -4,14 +4,21 @@
 
 #include "third_party/blink/renderer/core/loader/resource_load_observer_for_frame.h"
 
+#include "base/stl_util.h"
+#include "components/power_scheduler/power_mode_arbiter.h"
+#include "services/network/public/cpp/cors/cors_error_status.h"
+#include "services/network/public/mojom/cors.mojom-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/security/address_space_feature.h"
 #include "third_party/blink/renderer/core/core_probes_inl.h"
+#include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
-#include "third_party/blink/renderer/core/loader/address_space_feature.h"
 #include "third_party/blink/renderer/core/loader/alternate_signed_exchange_resource_info.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
@@ -27,12 +34,99 @@
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_info.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 
 namespace blink {
+namespace {
+
+// The list of features which should be reported as deprecated.
+constexpr WebFeature kDeprecatedAddressSpaceFeatures[] = {
+    WebFeature::kAddressSpacePublicNonSecureContextEmbeddedPrivate,
+    WebFeature::kAddressSpacePublicNonSecureContextEmbeddedLocal,
+    WebFeature::kAddressSpacePrivateNonSecureContextEmbeddedLocal,
+};
+
+// Returns whether |feature| is deprecated.
+bool IsDeprecatedAddressSpaceFeature(WebFeature feature) {
+  for (WebFeature entry : kDeprecatedAddressSpaceFeatures) {
+    if (feature == entry) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Increments the correct kAddressSpace* WebFeature UseCounter corresponding to
+// the given |client_frame| performing a subresource fetch |fetch_type| and
+// receiving the given |response|.
+//
+// Does nothing if |client_frame| is nullptr.
+void RecordAddressSpaceFeature(LocalFrame* client_frame,
+                               const ResourceResponse& response) {
+  if (!client_frame) {
+    return;
+  }
+
+  LocalDOMWindow* window = client_frame->DomWindow();
+  absl::optional<WebFeature> feature =
+      AddressSpaceFeature(FetchType::kSubresource, window->AddressSpace(),
+                          window->IsSecureContext(), response.AddressSpace());
+  if (!feature.has_value()) {
+    return;
+  }
+
+  // This WebFeature encompasses all private network requests.
+  UseCounter::Count(window,
+                    WebFeature::kMixedContentPrivateHostnameInPublicHostname);
+
+  if (IsDeprecatedAddressSpaceFeature(*feature)) {
+    Deprecation::CountDeprecation(window, *feature);
+  } else {
+    UseCounter::Count(window, *feature);
+  }
+}
+
+// Same as above, for cases where the fetch failed.
+// Does nothing if the fetch failed due to an error other than a failed Private
+// Network Access check.
+void RecordAddressSpaceFeature(LocalFrame* client_frame,
+                               const ResourceError& error) {
+  if (!client_frame) {
+    return;
+  }
+
+  absl::optional<network::CorsErrorStatus> status = error.CorsErrorStatus();
+  if (!status.has_value() ||
+      status->cors_error !=
+          network::mojom::CorsError::kInsecurePrivateNetwork) {
+    // Not the right kind of error, ignore.
+    return;
+  }
+
+  LocalDOMWindow* window = client_frame->DomWindow();
+  absl::optional<WebFeature> feature = AddressSpaceFeature(
+      FetchType::kSubresource, window->AddressSpace(),
+      window->IsSecureContext(), status->resource_address_space);
+  if (!feature.has_value()) {
+    return;
+  }
+
+  // This WebFeature encompasses all private network requests.
+  UseCounter::Count(window,
+                    WebFeature::kMixedContentPrivateHostnameInPublicHostname);
+
+  // Count the feature but do not log it as a deprecation, since its use is
+  // forbidden and has resulted in the fetch failing. In other words, the
+  // document only *attempted* to use a feature that is no longer available.
+  UseCounter::Count(window, *feature);
+}
+
+}  // namespace
 
 ResourceLoadObserverForFrame::ResourceLoadObserverForFrame(
     DocumentLoader& loader,
@@ -40,7 +134,10 @@ ResourceLoadObserverForFrame::ResourceLoadObserverForFrame(
     const ResourceFetcherProperties& fetcher_properties)
     : document_loader_(loader),
       document_(document),
-      fetcher_properties_(fetcher_properties) {}
+      fetcher_properties_(fetcher_properties),
+      power_mode_voter_(
+          power_scheduler::PowerModeArbiter::GetInstance()->NewVoter(
+              "PowerModeVoter.ResourceLoads")) {}
 ResourceLoadObserverForFrame::~ResourceLoadObserverForFrame() = default;
 
 void ResourceLoadObserverForFrame::DidStartRequest(
@@ -69,37 +166,38 @@ void ResourceLoadObserverForFrame::DidStartRequest(
 }
 
 void ResourceLoadObserverForFrame::WillSendRequest(
-    uint64_t identifier,
     const ResourceRequest& request,
     const ResourceResponse& redirect_response,
     ResourceType resource_type,
-    const FetchInitiatorInfo& initiator_info,
+    const ResourceLoaderOptions& options,
     RenderBlockingBehavior render_blocking_behavior) {
   LocalFrame* frame = document_->GetFrame();
   DCHECK(frame);
   if (redirect_response.IsNull()) {
     // Progress doesn't care about redirects, only notify it when an
     // initial request is sent.
-    frame->Loader().Progress().WillStartLoading(identifier, request.Priority());
+    frame->Loader().Progress().WillStartLoading(request.InspectorId(),
+                                                request.Priority());
   }
   probe::WillSendRequest(
-      GetProbe(), identifier, document_loader_,
+      GetProbe(), document_loader_,
       fetcher_properties_->GetFetchClientSettingsObject().GlobalObjectUrl(),
-      request, redirect_response, initiator_info, resource_type,
-      render_blocking_behavior);
+      request, redirect_response, options, resource_type,
+      render_blocking_behavior, base::TimeTicks::Now());
   if (auto* idleness_detector = frame->GetIdlenessDetector())
     idleness_detector->OnWillSendRequest(document_->Fetcher());
   if (auto* interactive_detector = InteractiveDetector::From(*document_))
-    interactive_detector->OnResourceLoadBegin(base::nullopt);
+    interactive_detector->OnResourceLoadBegin(absl::nullopt);
+  UpdatePowerModeVote();
 }
 
 void ResourceLoadObserverForFrame::DidChangePriority(
     uint64_t identifier,
     ResourceLoadPriority priority,
     int intra_priority_value) {
-  TRACE_EVENT1("devtools.timeline", "ResourceChangePriority", "data",
-               inspector_change_resource_priority_event::Data(
-                   document_loader_, identifier, priority));
+  DEVTOOLS_TIMELINE_TRACE_EVENT("ResourceChangePriority",
+                                inspector_change_resource_priority_event::Data,
+                                document_loader_, identifier, priority);
   probe::DidChangeResourcePriority(document_->GetFrame(), document_loader_,
                                    identifier, priority);
 }
@@ -148,7 +246,7 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
       return;
   }
 
-  RecordAddressSpaceFeature(FetchType::kSubresource, frame, response);
+  RecordAddressSpaceFeature(frame, response);
 
   std::unique_ptr<AlternateSignedExchangeResourceInfo> alternate_resource_info;
 
@@ -245,6 +343,7 @@ void ResourceLoadObserverForFrame::DidFinishLoading(
   if (IdlenessDetector* idleness_detector = frame->GetIdlenessDetector()) {
     idleness_detector->OnDidLoadResource();
   }
+  UpdatePowerModeVote();
   document_->CheckCompleted();
 }
 
@@ -261,6 +360,8 @@ void ResourceLoadObserverForFrame::DidFailLoading(
   probe::DidFailLoading(GetProbe(), identifier, document_loader_, error,
                         frame->GetDevToolsFrameToken());
 
+  RecordAddressSpaceFeature(frame, error);
+
   // Notification to FrameConsole should come AFTER InspectorInstrumentation
   // call, DevTools front-end relies on this.
   if (!is_internal_request) {
@@ -269,12 +370,28 @@ void ResourceLoadObserverForFrame::DidFailLoading(
   if (auto* interactive_detector = InteractiveDetector::From(*document_)) {
     // We have not yet recorded load_finish_time. Pass nullopt here; we will
     // call base::TimeTicks::Now() lazily when we need it.
-    interactive_detector->OnResourceLoadEnd(base::nullopt);
+    interactive_detector->OnResourceLoadEnd(absl::nullopt);
   }
   if (IdlenessDetector* idleness_detector = frame->GetIdlenessDetector()) {
     idleness_detector->OnDidLoadResource();
   }
+  UpdatePowerModeVote();
   document_->CheckCompleted();
+}
+
+void ResourceLoadObserverForFrame::DidChangeRenderBlockingBehavior(
+    Resource* resource,
+    const FetchParameters& params) {
+  TRACE_EVENT_INSTANT_WITH_TIMESTAMP1(
+      "devtools.timeline", "PreloadRenderBlockingStatusChange",
+      TRACE_EVENT_SCOPE_THREAD, base::TimeTicks::Now(), "data",
+      [&](perfetto::TracedValue ctx) {
+        inspector_change_render_blocking_behavior_event::Data(
+            std::move(ctx), document_->Loader(),
+            resource->GetResourceRequest().InspectorId(),
+            resource->GetResourceRequest(),
+            params.GetResourceRequest().GetRenderBlockingBehavior());
+      });
 }
 
 void ResourceLoadObserverForFrame::Trace(Visitor* visitor) const {
@@ -289,7 +406,25 @@ CoreProbeSink* ResourceLoadObserverForFrame::GetProbe() {
 }
 
 void ResourceLoadObserverForFrame::CountUsage(WebFeature feature) {
-  document_loader_->GetUseCounterHelper().Count(feature, document_->GetFrame());
+  document_loader_->GetUseCounter().Count(feature, document_->GetFrame());
+}
+
+void ResourceLoadObserverForFrame::UpdatePowerModeVote() {
+  // Vote for loading as long as there are at least three pending requests.
+  int request_count = document_->Fetcher()->ActiveRequestCount();
+  bool should_vote_loading = request_count > 2;
+
+  if (should_vote_loading == power_mode_vote_is_loading_)
+    return;
+
+  if (should_vote_loading) {
+    power_mode_voter_->VoteFor(power_scheduler::PowerMode::kLoading);
+  } else {
+    power_mode_voter_->ResetVoteAfterTimeout(
+        power_scheduler::PowerModeVoter::kLoadingTimeout);
+  }
+
+  power_mode_vote_is_loading_ = should_vote_loading;
 }
 
 }  // namespace blink

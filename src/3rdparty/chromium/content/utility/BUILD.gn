@@ -4,8 +4,10 @@
 
 import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/jumbo.gni")
+import("//chromeos/assistant/assistant.gni")
 import("//device/vr/buildflags/buildflags.gni")
 import("//media/media_options.gni")
+import("//printing/buildflags/buildflags.gni")
 
 jumbo_source_set("utility") {
   # Only the public target should depend on this. All other targets (even
@@ -44,10 +46,12 @@ jumbo_source_set("utility") {
     "//content/child",
     "//content/public/child:child_sources",
     "//content/public/common:common_sources",
+    "//content/services/auction_worklet",
     "//device/vr/buildflags",
     "//media:media_buildflags",
     "//mojo/public/cpp/bindings",
     "//net",
+    "//printing/buildflags",
     "//sandbox",
     "//services/audio",
     "//services/data_decoder:lib",
@@ -65,9 +69,9 @@ jumbo_source_set("utility") {
     "//url",
   ]
 
-  # When pepper CDMs are supported, we also support running the CDM in the
-  # utility process using mojo MediaService.
-  if (enable_library_cdms) {
+  # When library CDMs are supported, we support running the CDM in the utility
+  # process using mojo MediaService. On Windows, we use MediaFoundationService.
+  if (enable_library_cdms || is_win) {
     deps += [
       "//media",
       "//media/mojo:buildflags",
@@ -77,6 +81,7 @@ jumbo_source_set("utility") {
 
   if (is_chromeos_ash) {
     deps += [
+      "//chromeos/assistant:buildflags",
       "//chromeos/services/ime:sandbox_hook",
       "//chromeos/services/tts:sandbox_hook",
     ]
@@ -89,13 +94,25 @@ jumbo_source_set("utility") {
     ]
   }
 
+  if (enable_cros_libassistant) {
+    deps += [ "//chromeos/services/libassistant:sandbox_hook" ]
+  }
+
   # PAC execution is done in process on Android.
   if (!is_android) {
     deps += [ "//services/proxy_resolver:lib" ]
   }
 
-  if ((is_linux || is_chromeos) && !use_qt) {
-    deps += [ "//content/utility/speech:speech_recognition_sandbox_hook" ]
+  if (is_linux || is_chromeos) {
+    deps += [
+      "//services/network:network_sandbox_hook",
+    ]
+    if (enable_basic_printing) {
+      deps += [ "//printing:printing_sandbox_hook" ]
+    }
+    if (!use_qt) {
+      deps += [ "//content/utility/speech:speech_recognition_sandbox_hook" ]
+    }
   }
 
   if (enable_vr && !is_android) {

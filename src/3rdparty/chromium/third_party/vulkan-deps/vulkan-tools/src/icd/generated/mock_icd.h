@@ -57,7 +57,7 @@ static const std::unordered_map<std::string, uint32_t> instance_extension_map = 
     {"VK_KHR_wayland_surface", 6},
     {"VK_KHR_android_surface", 6},
     {"VK_KHR_win32_surface", 6},
-    {"VK_EXT_debug_report", 9},
+    {"VK_EXT_debug_report", 10},
     {"VK_GGP_stream_descriptor_surface", 1},
     {"VK_NV_external_memory_capabilities", 1},
     {"VK_KHR_get_physical_device_properties2", 2},
@@ -79,9 +79,11 @@ static const std::unordered_map<std::string, uint32_t> instance_extension_map = 
     {"VK_FUCHSIA_imagepipe_surface", 1},
     {"VK_EXT_metal_surface", 1},
     {"VK_KHR_surface_protected_capabilities", 1},
-    {"VK_EXT_validation_features", 4},
+    {"VK_EXT_validation_features", 5},
     {"VK_EXT_headless_surface", 1},
+    {"VK_EXT_acquire_drm_display", 1},
     {"VK_EXT_directfb_surface", 1},
+    {"VK_QNX_screen_surface", 1},
 };
 // Map of device extension name to version
 static const std::unordered_map<std::string, uint32_t> device_extension_map = {
@@ -95,14 +97,19 @@ static const std::unordered_map<std::string, uint32_t> device_extension_map = {
     {"VK_AMD_shader_trinary_minmax", 1},
     {"VK_AMD_shader_explicit_vertex_parameter", 1},
     {"VK_EXT_debug_marker", 4},
+    {"VK_KHR_video_queue", 2},
+    {"VK_KHR_video_decode_queue", 1},
     {"VK_AMD_gcn_shader", 1},
     {"VK_NV_dedicated_allocation", 1},
     {"VK_EXT_transform_feedback", 1},
+    {"VK_NVX_binary_import", 1},
     {"VK_NVX_image_view_handle", 2},
     {"VK_AMD_draw_indirect_count", 2},
     {"VK_AMD_negative_viewport_height", 1},
     {"VK_AMD_gpu_shader_half_float", 2},
     {"VK_AMD_shader_ballot", 1},
+    {"VK_EXT_video_encode_h264", 2},
+    {"VK_EXT_video_decode_h264", 3},
     {"VK_AMD_texture_gather_bias_lod", 1},
     {"VK_AMD_shader_info", 1},
     {"VK_AMD_shader_image_load_store_lod", 1},
@@ -130,7 +137,7 @@ static const std::unordered_map<std::string, uint32_t> device_extension_map = {
     {"VK_EXT_conditional_rendering", 2},
     {"VK_KHR_shader_float16_int8", 1},
     {"VK_KHR_16bit_storage", 1},
-    {"VK_KHR_incremental_present", 1},
+    {"VK_KHR_incremental_present", 2},
     {"VK_KHR_descriptor_update_template", 1},
     {"VK_NV_clip_space_w_scaling", 1},
     {"VK_EXT_display_control", 1},
@@ -170,7 +177,7 @@ static const std::unordered_map<std::string, uint32_t> device_extension_map = {
     {"VK_KHR_image_format_list", 1},
     {"VK_EXT_blend_operation_advanced", 2},
     {"VK_NV_fragment_coverage_to_color", 1},
-    {"VK_KHR_acceleration_structure", 11},
+    {"VK_KHR_acceleration_structure", 12},
     {"VK_KHR_ray_tracing_pipeline", 1},
     {"VK_KHR_ray_query", 1},
     {"VK_NV_framebuffer_mixed_samples", 1},
@@ -197,8 +204,9 @@ static const std::unordered_map<std::string, uint32_t> device_extension_map = {
     {"VK_KHR_shader_atomic_int64", 1},
     {"VK_KHR_shader_clock", 1},
     {"VK_AMD_pipeline_compiler_control", 1},
-    {"VK_EXT_calibrated_timestamps", 1},
+    {"VK_EXT_calibrated_timestamps", 2},
     {"VK_AMD_shader_core_properties", 2},
+    {"VK_EXT_video_decode_h265", 1},
     {"VK_AMD_memory_overallocation_behavior", 1},
     {"VK_EXT_vertex_attribute_divisor", 3},
     {"VK_GGP_frame_token", 1},
@@ -238,11 +246,13 @@ static const std::unordered_map<std::string, uint32_t> device_extension_map = {
     {"VK_EXT_buffer_device_address", 2},
     {"VK_EXT_tooling_info", 1},
     {"VK_EXT_separate_stencil_usage", 1},
+    {"VK_KHR_present_wait", 1},
     {"VK_NV_cooperative_matrix", 1},
     {"VK_NV_coverage_reduction_mode", 1},
     {"VK_EXT_fragment_shader_interlock", 1},
     {"VK_EXT_ycbcr_image_arrays", 1},
     {"VK_KHR_uniform_buffer_standard_layout", 1},
+    {"VK_EXT_provoking_vertex", 1},
     {"VK_EXT_full_screen_exclusive", 4},
     {"VK_KHR_buffer_device_address", 1},
     {"VK_EXT_line_rasterization", 1},
@@ -252,31 +262,50 @@ static const std::unordered_map<std::string, uint32_t> device_extension_map = {
     {"VK_EXT_extended_dynamic_state", 1},
     {"VK_KHR_deferred_host_operations", 4},
     {"VK_KHR_pipeline_executable_properties", 1},
+    {"VK_EXT_shader_atomic_float2", 1},
     {"VK_EXT_shader_demote_to_helper_invocation", 1},
     {"VK_NV_device_generated_commands", 3},
+    {"VK_NV_inherited_viewport_scissor", 1},
     {"VK_EXT_texel_buffer_alignment", 1},
-    {"VK_QCOM_render_pass_transform", 1},
+    {"VK_QCOM_render_pass_transform", 2},
     {"VK_EXT_device_memory_report", 2},
     {"VK_EXT_robustness2", 1},
     {"VK_EXT_custom_border_color", 12},
     {"VK_GOOGLE_user_type", 1},
     {"VK_KHR_pipeline_library", 1},
     {"VK_KHR_shader_non_semantic_info", 1},
+    {"VK_KHR_present_id", 1},
     {"VK_EXT_private_data", 1},
     {"VK_EXT_pipeline_creation_cache_control", 3},
+    {"VK_KHR_video_encode_queue", 2},
     {"VK_NV_device_diagnostics_config", 1},
     {"VK_QCOM_render_pass_store_ops", 2},
     {"VK_KHR_synchronization2", 1},
+    {"VK_KHR_shader_subgroup_uniform_control_flow", 1},
     {"VK_KHR_zero_initialize_workgroup_memory", 1},
     {"VK_NV_fragment_shading_rate_enums", 1},
+    {"VK_NV_ray_tracing_motion_blur", 1},
+    {"VK_EXT_ycbcr_2plane_444_formats", 1},
     {"VK_EXT_fragment_density_map2", 1},
-    {"VK_QCOM_rotated_copy_commands", 0},
+    {"VK_QCOM_rotated_copy_commands", 1},
     {"VK_EXT_image_robustness", 1},
     {"VK_KHR_workgroup_memory_explicit_layout", 1},
     {"VK_KHR_copy_commands2", 1},
     {"VK_EXT_4444_formats", 1},
     {"VK_NV_acquire_winrt_display", 1},
     {"VK_VALVE_mutable_descriptor_type", 1},
+    {"VK_EXT_vertex_input_dynamic_state", 2},
+    {"VK_EXT_physical_device_drm", 1},
+    {"VK_FUCHSIA_external_memory", 1},
+    {"VK_FUCHSIA_external_semaphore", 1},
+    {"VK_HUAWEI_subpass_shading", 2},
+    {"VK_HUAWEI_invocation_mask", 1},
+    {"VK_NV_external_memory_rdma", 1},
+    {"VK_EXT_extended_dynamic_state2", 1},
+    {"VK_EXT_color_write_enable", 1},
+    {"VK_EXT_global_priority_query", 1},
+    {"VK_EXT_multi_draw", 1},
+    {"VK_EXT_load_store_op_none", 1},
 };
 
 
@@ -1490,6 +1519,78 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL GetPhysicalDeviceWin32PresentationSupportK
 #endif /* VK_USE_PLATFORM_WIN32_KHR */
 
 
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetPhysicalDeviceVideoCapabilitiesKHR(
+    VkPhysicalDevice                            physicalDevice,
+    const VkVideoProfileKHR*                    pVideoProfile,
+    VkVideoCapabilitiesKHR*                     pCapabilities);
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetPhysicalDeviceVideoFormatPropertiesKHR(
+    VkPhysicalDevice                            physicalDevice,
+    const VkPhysicalDeviceVideoFormatInfoKHR*   pVideoFormatInfo,
+    uint32_t*                                   pVideoFormatPropertyCount,
+    VkVideoFormatPropertiesKHR*                 pVideoFormatProperties);
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateVideoSessionKHR(
+    VkDevice                                    device,
+    const VkVideoSessionCreateInfoKHR*          pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkVideoSessionKHR*                          pVideoSession);
+
+static VKAPI_ATTR void VKAPI_CALL DestroyVideoSessionKHR(
+    VkDevice                                    device,
+    VkVideoSessionKHR                           videoSession,
+    const VkAllocationCallbacks*                pAllocator);
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetVideoSessionMemoryRequirementsKHR(
+    VkDevice                                    device,
+    VkVideoSessionKHR                           videoSession,
+    uint32_t*                                   pVideoSessionMemoryRequirementsCount,
+    VkVideoGetMemoryPropertiesKHR*              pVideoSessionMemoryRequirements);
+
+static VKAPI_ATTR VkResult VKAPI_CALL BindVideoSessionMemoryKHR(
+    VkDevice                                    device,
+    VkVideoSessionKHR                           videoSession,
+    uint32_t                                    videoSessionBindMemoryCount,
+    const VkVideoBindMemoryKHR*                 pVideoSessionBindMemories);
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateVideoSessionParametersKHR(
+    VkDevice                                    device,
+    const VkVideoSessionParametersCreateInfoKHR* pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkVideoSessionParametersKHR*                pVideoSessionParameters);
+
+static VKAPI_ATTR VkResult VKAPI_CALL UpdateVideoSessionParametersKHR(
+    VkDevice                                    device,
+    VkVideoSessionParametersKHR                 videoSessionParameters,
+    const VkVideoSessionParametersUpdateInfoKHR* pUpdateInfo);
+
+static VKAPI_ATTR void VKAPI_CALL DestroyVideoSessionParametersKHR(
+    VkDevice                                    device,
+    VkVideoSessionParametersKHR                 videoSessionParameters,
+    const VkAllocationCallbacks*                pAllocator);
+
+static VKAPI_ATTR void VKAPI_CALL CmdBeginVideoCodingKHR(
+    VkCommandBuffer                             commandBuffer,
+    const VkVideoBeginCodingInfoKHR*            pBeginInfo);
+
+static VKAPI_ATTR void VKAPI_CALL CmdEndVideoCodingKHR(
+    VkCommandBuffer                             commandBuffer,
+    const VkVideoEndCodingInfoKHR*              pEndCodingInfo);
+
+static VKAPI_ATTR void VKAPI_CALL CmdControlVideoCodingKHR(
+    VkCommandBuffer                             commandBuffer,
+    const VkVideoCodingControlInfoKHR*          pCodingControlInfo);
+#endif /* VK_ENABLE_BETA_EXTENSIONS */
+
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+
+static VKAPI_ATTR void VKAPI_CALL CmdDecodeVideoKHR(
+    VkCommandBuffer                             commandBuffer,
+    const VkVideoDecodeInfoKHR*                 pFrameInfo);
+#endif /* VK_ENABLE_BETA_EXTENSIONS */
+
 
 
 static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceFeatures2KHR(
@@ -1885,6 +1986,13 @@ static VKAPI_ATTR void VKAPI_CALL CmdSetFragmentShadingRateKHR(
 
 
 
+static VKAPI_ATTR VkResult VKAPI_CALL WaitForPresentKHR(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    uint64_t                                    presentId,
+    uint64_t                                    timeout);
+
+
 
 static VKAPI_ATTR VkDeviceAddress VKAPI_CALL GetBufferDeviceAddressKHR(
     VkDevice                                    device,
@@ -1943,6 +2051,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL GetPipelineExecutableInternalRepresentatio
 
 
 
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+
+static VKAPI_ATTR void VKAPI_CALL CmdEncodeVideoKHR(
+    VkCommandBuffer                             commandBuffer,
+    const VkVideoEncodeInfoKHR*                 pEncodeInfo);
+#endif /* VK_ENABLE_BETA_EXTENSIONS */
+
+
 static VKAPI_ATTR void VKAPI_CALL CmdSetEvent2KHR(
     VkCommandBuffer                             commandBuffer,
     VkEvent                                     event,
@@ -1986,6 +2102,7 @@ static VKAPI_ATTR void VKAPI_CALL GetQueueCheckpointData2NV(
     VkQueue                                     queue,
     uint32_t*                                   pCheckpointDataCount,
     VkCheckpointData2NV*                        pCheckpointData);
+
 
 
 
@@ -2110,6 +2227,33 @@ static VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectByteCountEXT(
     uint32_t                                    vertexStride);
 
 
+static VKAPI_ATTR VkResult VKAPI_CALL CreateCuModuleNVX(
+    VkDevice                                    device,
+    const VkCuModuleCreateInfoNVX*              pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkCuModuleNVX*                              pModule);
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateCuFunctionNVX(
+    VkDevice                                    device,
+    const VkCuFunctionCreateInfoNVX*            pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkCuFunctionNVX*                            pFunction);
+
+static VKAPI_ATTR void VKAPI_CALL DestroyCuModuleNVX(
+    VkDevice                                    device,
+    VkCuModuleNVX                               module,
+    const VkAllocationCallbacks*                pAllocator);
+
+static VKAPI_ATTR void VKAPI_CALL DestroyCuFunctionNVX(
+    VkDevice                                    device,
+    VkCuFunctionNVX                             function,
+    const VkAllocationCallbacks*                pAllocator);
+
+static VKAPI_ATTR void VKAPI_CALL CmdCuLaunchKernelNVX(
+    VkCommandBuffer                             commandBuffer,
+    const VkCuLaunchInfoNVX*                    pLaunchInfo);
+
+
 static VKAPI_ATTR uint32_t VKAPI_CALL GetImageViewHandleNVX(
     VkDevice                                    device,
     const VkImageViewHandleInfoNVX*             pInfo);
@@ -2140,6 +2284,12 @@ static VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCountAMD(
 
 
 
+
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+#endif /* VK_ENABLE_BETA_EXTENSIONS */
+
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+#endif /* VK_ENABLE_BETA_EXTENSIONS */
 
 
 
@@ -2586,6 +2736,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL GetCalibratedTimestampsEXT(
     uint64_t*                                   pMaxDeviation);
 
 
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+#endif /* VK_ENABLE_BETA_EXTENSIONS */
+
 
 
 #ifdef VK_USE_PLATFORM_GGP
@@ -2737,6 +2890,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL GetPhysicalDeviceSupportedFramebufferMixed
 
 
 
+
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 
 static VKAPI_ATTR VkResult VKAPI_CALL GetPhysicalDeviceSurfacePresentModes2EXT(
@@ -2843,6 +2997,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
 
 
 
+
 static VKAPI_ATTR void VKAPI_CALL GetGeneratedCommandsMemoryRequirementsNV(
     VkDevice                                    device,
     const VkGeneratedCommandsMemoryRequirementsInfoNV* pInfo,
@@ -2876,6 +3031,19 @@ static VKAPI_ATTR void VKAPI_CALL DestroyIndirectCommandsLayoutNV(
 
 
 
+
+
+
+static VKAPI_ATTR VkResult VKAPI_CALL AcquireDrmDisplayEXT(
+    VkPhysicalDevice                            physicalDevice,
+    int32_t                                     drmFd,
+    VkDisplayKHR                                display);
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetDrmDisplayEXT(
+    VkPhysicalDevice                            physicalDevice,
+    int32_t                                     drmFd,
+    uint32_t                                    connectorId,
+    VkDisplayKHR*                               display);
 
 
 
@@ -2919,6 +3087,8 @@ static VKAPI_ATTR void VKAPI_CALL CmdSetFragmentShadingRateEnumNV(
 
 
 
+
+
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 
 static VKAPI_ATTR VkResult VKAPI_CALL AcquireWinrtDisplayNV(
@@ -2944,6 +3114,123 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL GetPhysicalDeviceDirectFBPresentationSuppo
     uint32_t                                    queueFamilyIndex,
     IDirectFB*                                  dfb);
 #endif /* VK_USE_PLATFORM_DIRECTFB_EXT */
+
+
+
+static VKAPI_ATTR void VKAPI_CALL CmdSetVertexInputEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    vertexBindingDescriptionCount,
+    const VkVertexInputBindingDescription2EXT*  pVertexBindingDescriptions,
+    uint32_t                                    vertexAttributeDescriptionCount,
+    const VkVertexInputAttributeDescription2EXT* pVertexAttributeDescriptions);
+
+
+#ifdef VK_USE_PLATFORM_FUCHSIA
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetMemoryZirconHandleFUCHSIA(
+    VkDevice                                    device,
+    const VkMemoryGetZirconHandleInfoFUCHSIA*   pGetZirconHandleInfo,
+    zx_handle_t*                                pZirconHandle);
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetMemoryZirconHandlePropertiesFUCHSIA(
+    VkDevice                                    device,
+    VkExternalMemoryHandleTypeFlagBits          handleType,
+    zx_handle_t                                 zirconHandle,
+    VkMemoryZirconHandlePropertiesFUCHSIA*      pMemoryZirconHandleProperties);
+#endif /* VK_USE_PLATFORM_FUCHSIA */
+
+#ifdef VK_USE_PLATFORM_FUCHSIA
+
+static VKAPI_ATTR VkResult VKAPI_CALL ImportSemaphoreZirconHandleFUCHSIA(
+    VkDevice                                    device,
+    const VkImportSemaphoreZirconHandleInfoFUCHSIA* pImportSemaphoreZirconHandleInfo);
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetSemaphoreZirconHandleFUCHSIA(
+    VkDevice                                    device,
+    const VkSemaphoreGetZirconHandleInfoFUCHSIA* pGetZirconHandleInfo,
+    zx_handle_t*                                pZirconHandle);
+#endif /* VK_USE_PLATFORM_FUCHSIA */
+
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI(
+    VkDevice                                    device,
+    VkRenderPass                                renderpass,
+    VkExtent2D*                                 pMaxWorkgroupSize);
+
+static VKAPI_ATTR void VKAPI_CALL CmdSubpassShadingHUAWEI(
+    VkCommandBuffer                             commandBuffer);
+
+
+static VKAPI_ATTR void VKAPI_CALL CmdBindInvocationMaskHUAWEI(
+    VkCommandBuffer                             commandBuffer,
+    VkImageView                                 imageView,
+    VkImageLayout                               imageLayout);
+
+
+static VKAPI_ATTR VkResult VKAPI_CALL GetMemoryRemoteAddressNV(
+    VkDevice                                    device,
+    const VkMemoryGetRemoteAddressInfoNV*       pMemoryGetRemoteAddressInfo,
+    VkRemoteAddressNV*                          pAddress);
+
+
+static VKAPI_ATTR void VKAPI_CALL CmdSetPatchControlPointsEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    patchControlPoints);
+
+static VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBool32                                    rasterizerDiscardEnable);
+
+static VKAPI_ATTR void VKAPI_CALL CmdSetDepthBiasEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBool32                                    depthBiasEnable);
+
+static VKAPI_ATTR void VKAPI_CALL CmdSetLogicOpEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkLogicOp                                   logicOp);
+
+static VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveRestartEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBool32                                    primitiveRestartEnable);
+
+#ifdef VK_USE_PLATFORM_SCREEN_QNX
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateScreenSurfaceQNX(
+    VkInstance                                  instance,
+    const VkScreenSurfaceCreateInfoQNX*         pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkSurfaceKHR*                               pSurface);
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL GetPhysicalDeviceScreenPresentationSupportQNX(
+    VkPhysicalDevice                            physicalDevice,
+    uint32_t                                    queueFamilyIndex,
+    struct _screen_window*                      window);
+#endif /* VK_USE_PLATFORM_SCREEN_QNX */
+
+
+static VKAPI_ATTR void                                    VKAPI_CALL CmdSetColorWriteEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    attachmentCount,
+    const VkBool32*                             pColorWriteEnables);
+
+
+
+static VKAPI_ATTR void VKAPI_CALL CmdDrawMultiEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    drawCount,
+    const VkMultiDrawInfoEXT*                   pVertexInfo,
+    uint32_t                                    instanceCount,
+    uint32_t                                    firstInstance,
+    uint32_t                                    stride);
+
+static VKAPI_ATTR void VKAPI_CALL CmdDrawMultiIndexedEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    drawCount,
+    const VkMultiDrawIndexedInfoEXT*            pIndexInfo,
+    uint32_t                                    instanceCount,
+    uint32_t                                    firstInstance,
+    uint32_t                                    stride,
+    const int32_t*                              pVertexOffset);
 
 
 
@@ -3315,6 +3602,45 @@ static const std::unordered_map<std::string, void*> name_to_funcptr_map = {
 #ifdef VK_USE_PLATFORM_WIN32_KHR
     {"vkGetPhysicalDeviceWin32PresentationSupportKHR", (void*)GetPhysicalDeviceWin32PresentationSupportKHR},
 #endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkGetPhysicalDeviceVideoCapabilitiesKHR", (void*)GetPhysicalDeviceVideoCapabilitiesKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkGetPhysicalDeviceVideoFormatPropertiesKHR", (void*)GetPhysicalDeviceVideoFormatPropertiesKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkCreateVideoSessionKHR", (void*)CreateVideoSessionKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkDestroyVideoSessionKHR", (void*)DestroyVideoSessionKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkGetVideoSessionMemoryRequirementsKHR", (void*)GetVideoSessionMemoryRequirementsKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkBindVideoSessionMemoryKHR", (void*)BindVideoSessionMemoryKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkCreateVideoSessionParametersKHR", (void*)CreateVideoSessionParametersKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkUpdateVideoSessionParametersKHR", (void*)UpdateVideoSessionParametersKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkDestroyVideoSessionParametersKHR", (void*)DestroyVideoSessionParametersKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkCmdBeginVideoCodingKHR", (void*)CmdBeginVideoCodingKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkCmdEndVideoCodingKHR", (void*)CmdEndVideoCodingKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkCmdControlVideoCodingKHR", (void*)CmdControlVideoCodingKHR},
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkCmdDecodeVideoKHR", (void*)CmdDecodeVideoKHR},
+#endif
     {"vkGetPhysicalDeviceFeatures2KHR", (void*)GetPhysicalDeviceFeatures2KHR},
     {"vkGetPhysicalDeviceProperties2KHR", (void*)GetPhysicalDeviceProperties2KHR},
     {"vkGetPhysicalDeviceFormatProperties2KHR", (void*)GetPhysicalDeviceFormatProperties2KHR},
@@ -3389,6 +3715,7 @@ static const std::unordered_map<std::string, void*> name_to_funcptr_map = {
     {"vkSignalSemaphoreKHR", (void*)SignalSemaphoreKHR},
     {"vkGetPhysicalDeviceFragmentShadingRatesKHR", (void*)GetPhysicalDeviceFragmentShadingRatesKHR},
     {"vkCmdSetFragmentShadingRateKHR", (void*)CmdSetFragmentShadingRateKHR},
+    {"vkWaitForPresentKHR", (void*)WaitForPresentKHR},
     {"vkGetBufferDeviceAddressKHR", (void*)GetBufferDeviceAddressKHR},
     {"vkGetBufferOpaqueCaptureAddressKHR", (void*)GetBufferOpaqueCaptureAddressKHR},
     {"vkGetDeviceMemoryOpaqueCaptureAddressKHR", (void*)GetDeviceMemoryOpaqueCaptureAddressKHR},
@@ -3400,6 +3727,9 @@ static const std::unordered_map<std::string, void*> name_to_funcptr_map = {
     {"vkGetPipelineExecutablePropertiesKHR", (void*)GetPipelineExecutablePropertiesKHR},
     {"vkGetPipelineExecutableStatisticsKHR", (void*)GetPipelineExecutableStatisticsKHR},
     {"vkGetPipelineExecutableInternalRepresentationsKHR", (void*)GetPipelineExecutableInternalRepresentationsKHR},
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    {"vkCmdEncodeVideoKHR", (void*)CmdEncodeVideoKHR},
+#endif
     {"vkCmdSetEvent2KHR", (void*)CmdSetEvent2KHR},
     {"vkCmdResetEvent2KHR", (void*)CmdResetEvent2KHR},
     {"vkCmdWaitEvents2KHR", (void*)CmdWaitEvents2KHR},
@@ -3428,6 +3758,11 @@ static const std::unordered_map<std::string, void*> name_to_funcptr_map = {
     {"vkCmdBeginQueryIndexedEXT", (void*)CmdBeginQueryIndexedEXT},
     {"vkCmdEndQueryIndexedEXT", (void*)CmdEndQueryIndexedEXT},
     {"vkCmdDrawIndirectByteCountEXT", (void*)CmdDrawIndirectByteCountEXT},
+    {"vkCreateCuModuleNVX", (void*)CreateCuModuleNVX},
+    {"vkCreateCuFunctionNVX", (void*)CreateCuFunctionNVX},
+    {"vkDestroyCuModuleNVX", (void*)DestroyCuModuleNVX},
+    {"vkDestroyCuFunctionNVX", (void*)DestroyCuFunctionNVX},
+    {"vkCmdCuLaunchKernelNVX", (void*)CmdCuLaunchKernelNVX},
     {"vkGetImageViewHandleNVX", (void*)GetImageViewHandleNVX},
     {"vkGetImageViewAddressNVX", (void*)GetImageViewAddressNVX},
     {"vkCmdDrawIndirectCountAMD", (void*)CmdDrawIndirectCountAMD},
@@ -3571,6 +3906,8 @@ static const std::unordered_map<std::string, void*> name_to_funcptr_map = {
     {"vkCmdBindPipelineShaderGroupNV", (void*)CmdBindPipelineShaderGroupNV},
     {"vkCreateIndirectCommandsLayoutNV", (void*)CreateIndirectCommandsLayoutNV},
     {"vkDestroyIndirectCommandsLayoutNV", (void*)DestroyIndirectCommandsLayoutNV},
+    {"vkAcquireDrmDisplayEXT", (void*)AcquireDrmDisplayEXT},
+    {"vkGetDrmDisplayEXT", (void*)GetDrmDisplayEXT},
     {"vkCreatePrivateDataSlotEXT", (void*)CreatePrivateDataSlotEXT},
     {"vkDestroyPrivateDataSlotEXT", (void*)DestroyPrivateDataSlotEXT},
     {"vkSetPrivateDataEXT", (void*)SetPrivateDataEXT},
@@ -3588,6 +3925,37 @@ static const std::unordered_map<std::string, void*> name_to_funcptr_map = {
 #ifdef VK_USE_PLATFORM_DIRECTFB_EXT
     {"vkGetPhysicalDeviceDirectFBPresentationSupportEXT", (void*)GetPhysicalDeviceDirectFBPresentationSupportEXT},
 #endif
+    {"vkCmdSetVertexInputEXT", (void*)CmdSetVertexInputEXT},
+#ifdef VK_USE_PLATFORM_FUCHSIA
+    {"vkGetMemoryZirconHandleFUCHSIA", (void*)GetMemoryZirconHandleFUCHSIA},
+#endif
+#ifdef VK_USE_PLATFORM_FUCHSIA
+    {"vkGetMemoryZirconHandlePropertiesFUCHSIA", (void*)GetMemoryZirconHandlePropertiesFUCHSIA},
+#endif
+#ifdef VK_USE_PLATFORM_FUCHSIA
+    {"vkImportSemaphoreZirconHandleFUCHSIA", (void*)ImportSemaphoreZirconHandleFUCHSIA},
+#endif
+#ifdef VK_USE_PLATFORM_FUCHSIA
+    {"vkGetSemaphoreZirconHandleFUCHSIA", (void*)GetSemaphoreZirconHandleFUCHSIA},
+#endif
+    {"vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI", (void*)GetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI},
+    {"vkCmdSubpassShadingHUAWEI", (void*)CmdSubpassShadingHUAWEI},
+    {"vkCmdBindInvocationMaskHUAWEI", (void*)CmdBindInvocationMaskHUAWEI},
+    {"vkGetMemoryRemoteAddressNV", (void*)GetMemoryRemoteAddressNV},
+    {"vkCmdSetPatchControlPointsEXT", (void*)CmdSetPatchControlPointsEXT},
+    {"vkCmdSetRasterizerDiscardEnableEXT", (void*)CmdSetRasterizerDiscardEnableEXT},
+    {"vkCmdSetDepthBiasEnableEXT", (void*)CmdSetDepthBiasEnableEXT},
+    {"vkCmdSetLogicOpEXT", (void*)CmdSetLogicOpEXT},
+    {"vkCmdSetPrimitiveRestartEnableEXT", (void*)CmdSetPrimitiveRestartEnableEXT},
+#ifdef VK_USE_PLATFORM_SCREEN_QNX
+    {"vkCreateScreenSurfaceQNX", (void*)CreateScreenSurfaceQNX},
+#endif
+#ifdef VK_USE_PLATFORM_SCREEN_QNX
+    {"vkGetPhysicalDeviceScreenPresentationSupportQNX", (void*)GetPhysicalDeviceScreenPresentationSupportQNX},
+#endif
+    {"vkCmdSetColorWriteEnableEXT", (void*)CmdSetColorWriteEnableEXT},
+    {"vkCmdDrawMultiEXT", (void*)CmdDrawMultiEXT},
+    {"vkCmdDrawMultiIndexedEXT", (void*)CmdDrawMultiIndexedEXT},
     {"vkCreateAccelerationStructureKHR", (void*)CreateAccelerationStructureKHR},
     {"vkDestroyAccelerationStructureKHR", (void*)DestroyAccelerationStructureKHR},
     {"vkCmdBuildAccelerationStructuresKHR", (void*)CmdBuildAccelerationStructuresKHR},

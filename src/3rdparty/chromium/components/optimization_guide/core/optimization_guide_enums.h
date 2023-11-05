@@ -129,30 +129,69 @@ enum class PredictionManagerModelStatus {
 // Keep in sync with OptimizationGuidePredictionModelDownloadStatus
 // in enums.xml.
 enum class PredictionModelDownloadStatus {
-  kUnknown,
+  kUnknown = 0,
   // The downloaded file was successfully verified and processed.
-  kSuccess,
+  kSuccess = 1,
   // The downloaded file was not a valid CRX file.
-  kFailedCrxVerification,
+  kFailedCrxVerification = 2,
   // A temporary directory for unzipping the CRX file failed to be created.
-  kFailedUnzipDirectoryCreation,
+  kFailedUnzipDirectoryCreation = 3,
   // The CRX file failed to be unzipped.
-  kFailedCrxUnzip,
+  kFailedCrxUnzip = 4,
   // The model info failed to be read from disk.
-  kFailedModelInfoFileRead,
+  kFailedModelInfoFileRead = 5,
   // The model info failed to be parsed.
-  kFailedModelInfoParsing,
+  kFailedModelInfoParsing = 6,
   // The model file was not found in the CRX file.
-  kFailedModelFileNotFound,
+  kFailedModelFileNotFound = 7,
   // The model file failed to be moved to a more permanent directory.
-  kFailedModelFileOtherError,
+  kFailedModelFileOtherError = 8,
   // The model info was invalid.
-  kFailedModelInfoInvalid,
+  kFailedModelInfoInvalid = 9,
   // The CRX file was a valid CRX file but did not come from a valid publisher.
-  kFailedCrxInvalidPublisher,
+  kFailedCrxInvalidPublisher = 10,
+  // The opt guide parent directory for storing models in does not exist.
+  kOptGuideDirectoryDoesNotExist = 11,
+  // The new directory to persist this model version's files could not be
+  // created.
+  kCouldNotCreateDirectory = 12,
 
   // Add new values above this line.
-  kMaxValue = kFailedCrxInvalidPublisher,
+  kMaxValue = kCouldNotCreateDirectory,
+};
+
+// The state of the model file needed for execution.
+//
+// Keep in sync with ModelExecutorLoadingState in enums.xml.
+enum class ModelExecutorLoadingState {
+  // The model state is not known.
+  kUnknown = 0,
+  // The provided model file was not valid.
+  kModelFileInvalid = 1,
+  // The model is memory-mapped and available for
+  // use with TFLite.
+  kModelFileValidAndMemoryMapped = 2,
+
+  // New values above this line.
+  kMaxValue = kModelFileValidAndMemoryMapped,
+};
+
+// The status for the page content annotations being stored.
+//
+// Keep in sync with OptimizationGuidePageContentAnnotationsStorageStatus in
+// enums.xml.
+enum PageContentAnnotationsStorageStatus {
+  kUnknown = 0,
+  // The content annotations were requested to be stored in the History Service.
+  kSuccess = 1,
+  // There were no visits for the URL found in the History Service.
+  kNoVisitsForUrl = 2,
+  // The specific visit that we wanted to annotate could not be found in the
+  // History Service.
+  kSpecificVisitForUrlNotFound = 3,
+
+  // Add new values above this line.
+  kMaxValue = kSpecificVisitForUrlNotFound,
 };
 
 }  // namespace optimization_guide

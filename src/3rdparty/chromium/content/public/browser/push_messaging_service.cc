@@ -12,6 +12,7 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace content {
 
@@ -64,7 +65,8 @@ void UpdatePushSubscriptionIdOnIO(
     base::OnceClosure callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   service_worker_context->StoreRegistrationUserData(
-      service_worker_registration_id, url::Origin::Create(origin),
+      service_worker_registration_id,
+      blink::StorageKey(url::Origin::Create(origin)),
       {{kPushRegistrationIdServiceWorkerKey, subscription_id}},
       base::BindOnce(&CallClosureFromIO, std::move(callback)));
 }
@@ -79,7 +81,8 @@ void StorePushSubscriptionOnIOForTesting(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   service_worker_context->StoreRegistrationUserData(
-      service_worker_registration_id, url::Origin::Create(origin),
+      service_worker_registration_id,
+      blink::StorageKey(url::Origin::Create(origin)),
       {{kPushRegistrationIdServiceWorkerKey, subscription_id},
        {kPushSenderIdServiceWorkerKey, sender_id}},
       base::BindOnce(&CallClosureFromIO, std::move(callback)));
@@ -88,7 +91,7 @@ void StorePushSubscriptionOnIOForTesting(
 scoped_refptr<ServiceWorkerContextWrapper> GetServiceWorkerContext(
     BrowserContext* browser_context, const GURL& origin) {
   StoragePartition* partition =
-      BrowserContext::GetStoragePartitionForSite(browser_context, origin);
+      browser_context->GetStoragePartitionForUrl(origin);
   return base::WrapRefCounted(static_cast<ServiceWorkerContextWrapper*>(
       partition->GetServiceWorkerContext()));
 }

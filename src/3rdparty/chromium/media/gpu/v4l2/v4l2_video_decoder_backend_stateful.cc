@@ -10,9 +10,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"
+#include "base/containers/contains.h"
 #include "base/logging.h"
-#include "base/optional.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "media/base/video_codecs.h"
@@ -21,6 +21,7 @@
 #include "media/gpu/v4l2/v4l2_device.h"
 #include "media/gpu/v4l2/v4l2_vda_helpers.h"
 #include "media/gpu/v4l2/v4l2_video_decoder_backend.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -96,6 +97,9 @@ bool V4L2StatefulVideoDecoderBackend::Initialize() {
     return false;
   }
 
+  framerate_control_ =
+      std::make_unique<V4L2FrameRateControl>(device_, task_runner_);
+
   return true;
 }
 
@@ -161,6 +165,10 @@ void V4L2StatefulVideoDecoderBackend::DoDecodeWork() {
         .tv_usec = timespec.tv_nsec / 1000,
     };
     current_input_buffer_->SetTimeStamp(timestamp);
+
+    const int64_t flat_timespec =
+        base::TimeDelta::FromTimeSpec(timespec).InMilliseconds();
+    encoding_timestamps_[flat_timespec] = base::TimeTicks::Now();
   }
 
   // From here on we have both a decode request and input buffer, so we can
@@ -238,7 +246,7 @@ void V4L2StatefulVideoDecoderBackend::ScheduleDecodeWork() {
 }
 
 void V4L2StatefulVideoDecoderBackend::ProcessEventQueue() {
-  while (base::Optional<struct v4l2_event> ev = device_->DequeueEvent()) {
+  while (absl::optional<struct v4l2_event> ev = device_->DequeueEvent()) {
     if (ev->type == V4L2_EVENT_SOURCE_CHANGE &&
         (ev->u.src_change.changes & V4L2_EVENT_SRC_CH_RESOLUTION)) {
       ChangeResolution();
@@ -269,7 +277,7 @@ void V4L2StatefulVideoDecoderBackend::EnqueueOutputBuffers() {
     bool ret = false;
     bool no_buffer = false;
 
-    base::Optional<V4L2WritableBufferRef> buffer;
+    absl::optional<V4L2WritableBufferRef> buffer;
     switch (mem_type) {
       case V4L2_MEMORY_MMAP:
         buffer = output_queue_->GetFreeBuffer();
@@ -292,6 +300,7 @@ void V4L2StatefulVideoDecoderBackend::EnqueueOutputBuffers() {
           break;
         }
 
+        framerate_control_->AttachToVideoFrame(video_frame);
         ret = std::move(*buffer).QueueDMABuf(std::move(video_frame));
         break;
       }
@@ -341,7 +350,7 @@ scoped_refptr<VideoFrame> V4L2StatefulVideoDecoderBackend::GetPoolVideoFrame() {
 // static
 void V4L2StatefulVideoDecoderBackend::ReuseOutputBufferThunk(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    base::Optional<base::WeakPtr<V4L2StatefulVideoDecoderBackend>> weak_this,
+    absl::optional<base::WeakPtr<V4L2StatefulVideoDecoderBackend>> weak_this,
     V4L2ReadableBufferRef buffer) {
   DVLOGF(3);
   DCHECK(weak_this);
@@ -381,7 +390,17 @@ void V4L2StatefulVideoDecoderBackend::OnOutputBufferDequeued(
         .tv_sec = timeval.tv_sec,
         .tv_nsec = timeval.tv_usec * 1000,
     };
-    const base::TimeDelta timestamp = base::TimeDelta::FromTimeSpec(timespec);
+
+    const int64_t flat_timespec =
+        base::TimeDelta::FromTimeSpec(timespec).InMilliseconds();
+    // TODO(b/190615065) |flat_timespec| might be repeated with H.264
+    // bitstreams, investigate why, and change the if() to DCHECK().
+    if (base::Contains(encoding_timestamps_, flat_timespec)) {
+      UMA_HISTOGRAM_TIMES(
+          "Media.PlatformVideoDecoding.Decode",
+          base::TimeTicks::Now() - encoding_timestamps_[flat_timespec]);
+      encoding_timestamps_.erase(flat_timespec);
+    }
 
     scoped_refptr<VideoFrame> frame;
 
@@ -407,6 +426,7 @@ void V4L2StatefulVideoDecoderBackend::OnOutputBufferDequeued(
         NOTREACHED();
     }
 
+    const base::TimeDelta timestamp = base::TimeDelta::FromTimeSpec(timespec);
     client_->OutputFrame(std::move(frame), *visible_rect_, timestamp);
   }
 
@@ -628,7 +648,8 @@ void V4L2StatefulVideoDecoderBackend::ClearPendingRequests(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOGF(3);
 
-  resolution_change_cb_.Reset();
+  if (resolution_change_cb_)
+    std::move(resolution_change_cb_).Run();
 
   if (flush_cb_) {
     std::move(flush_cb_).Run(status);

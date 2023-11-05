@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/core/events/pointer_event_factory.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/input/input_device_capabilities.h"
 #include "third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h"
@@ -25,6 +26,7 @@
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/map_coordinates_flags.h"
+#include "third_party/blink/renderer/core/pointer_type_names.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/int_point.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
@@ -122,9 +124,6 @@ MouseEvent* CreateMouseOrPointerEvent(
   // any event attributes not initialized in the |PointerEventInit| below get
   // their default values, all of which are appropriate for a simulated
   // |PointerEvent|.
-  //
-  // TODO(mustaq): Set |pointerId| to -1 after we have a spec change to fix the
-  // issue https://github.com/w3c/pointerevents/issues/343.
   PointerEventInit* initializer = PointerEventInit::Create();
   PopulateSimulatedMouseEventInit(event_type, node, underlying_event,
                                   initializer, creation_scope);
@@ -156,8 +155,10 @@ MouseEvent* CreateMouseOrPointerEvent(
   if (event_class_type == EventClassType::kPointer) {
     if (creation_scope == SimulatedClickCreationScope::kFromAccessibility) {
       initializer->setPointerId(PointerEventFactory::kMouseId);
-      initializer->setPointerType("mouse");
+      initializer->setPointerType(pointer_type_names::kMouse);
       initializer->setIsPrimary(true);
+    } else {
+      initializer->setPointerId(PointerEventFactory::kReservedNonPointerId);
     }
     created_event = MakeGarbageCollected<PointerEvent>(
         event_type, initializer, timestamp, synthetic_type);

@@ -11,18 +11,6 @@ namespace optimization_guide {
 TestOptimizationGuideDecider::TestOptimizationGuideDecider() = default;
 TestOptimizationGuideDecider::~TestOptimizationGuideDecider() = default;
 
-void TestOptimizationGuideDecider::RegisterOptimizationTargets(
-    const std::vector<proto::OptimizationTarget>& optimization_targets) {}
-
-void TestOptimizationGuideDecider::ShouldTargetNavigationAsync(
-    content::NavigationHandle* navigation_handle,
-    proto::OptimizationTarget optimization_target,
-    const base::flat_map<proto::ClientModelFeature, float>&
-        client_model_feature_values,
-    OptimizationGuideTargetDecisionCallback callback) {
-  std::move(callback).Run(OptimizationGuideDecision::kFalse);
-}
-
 void TestOptimizationGuideDecider::RegisterOptimizationTypes(
     const std::vector<proto::OptimizationType>& optimization_types) {}
 
@@ -33,15 +21,6 @@ void TestOptimizationGuideDecider::CanApplyOptimizationAsync(
   std::move(callback).Run(OptimizationGuideDecision::kFalse,
                           /*optimization_metadata=*/{});
 }
-
-void TestOptimizationGuideDecider::AddObserverForOptimizationTargetModel(
-    optimization_guide::proto::OptimizationTarget optimization_target,
-    const base::Optional<proto::Any>& model_metadata,
-    optimization_guide::OptimizationTargetModelObserver* observer) {}
-
-void TestOptimizationGuideDecider::RemoveObserverForOptimizationTargetModel(
-    optimization_guide::proto::OptimizationTarget optimization_target,
-    optimization_guide::OptimizationTargetModelObserver* observer) {}
 
 OptimizationGuideDecision TestOptimizationGuideDecider::CanApplyOptimization(
     const GURL& url,

@@ -101,7 +101,7 @@ ZipReader::EntryInfo::EntryInfo(const std::string& file_name_in_zip,
   is_unsafe_ = file_path_.ReferencesParent();
 
   // We also consider that the file name is unsafe, if it's invalid UTF-8.
-  base::string16 file_name_utf16;
+  std::u16string file_name_utf16;
   if (!base::UTF8ToUTF16(file_name_in_zip.data(), file_name_in_zip.size(),
                          &file_name_utf16)) {
     is_unsafe_ = true;
@@ -129,7 +129,7 @@ ZipReader::EntryInfo::EntryInfo(const std::string& file_name_in_zip,
   exploded_time.second = raw_file_info.tmu_date.tm_sec;
   exploded_time.millisecond = 0;
 
-  if (!base::Time::FromLocalExploded(exploded_time, &last_modified_))
+  if (!base::Time::FromUTCExploded(exploded_time, &last_modified_))
     last_modified_ = base::Time::UnixEpoch();
 }
 

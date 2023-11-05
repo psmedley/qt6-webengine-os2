@@ -21,6 +21,7 @@
 #include "google_apis/gaia/oauth2_access_token_manager.h"
 #include "google_apis/gaia/oauth2_access_token_manager_test_util.h"
 #include "net/http/http_status_code.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -102,7 +103,9 @@ class ProfileOAuth2TokenServiceTest : public testing::Test {
   }
 
   void TearDown() override {
-    // Makes sure that all the clean up tasks are run.
+    oauth2_service_.reset();
+    // Makes sure that all the clean up tasks are run:
+    // OAuth2AccessTokenManager::Fetcher is destroyed using DeleteSoon().
     base::RunLoop().RunUntilIdle();
   }
 

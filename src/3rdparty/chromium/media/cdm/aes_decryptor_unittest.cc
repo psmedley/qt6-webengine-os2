@@ -11,10 +11,10 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/debug/leak_annotations.h"
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/values.h"
@@ -33,7 +33,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-#include "media/cdm/api/content_decryption_module.h"
+// GN check does not understand conditionals. Android & Fuchsia need nogncheck.
+#include "media/cdm/api/content_decryption_module.h"  // nogncheck
 #include "media/cdm/cdm_adapter.h"
 #include "media/cdm/cdm_auxiliary_helper.h"
 #include "media/cdm/external_clear_key_test_helper.h"
@@ -59,7 +60,7 @@ MATCHER(NotEmpty, "") {
 }
 MATCHER(IsJSONDictionary, "") {
   std::string result(arg.begin(), arg.end());
-  base::Optional<base::Value> root = base::JSONReader::Read(result);
+  absl::optional<base::Value> root = base::JSONReader::Read(result);
   return (root && root->type() == base::Value::Type::DICTIONARY);
 }
 MATCHER(IsNullTime, "") {
@@ -270,7 +271,7 @@ class AesDecryptorTest : public testing::TestWithParam<TestType> {
       scoped_feature_list_.InitWithFeatures(
           {media::kExternalClearKeyForTesting}, {});
 
-      helper_.reset(new ExternalClearKeyTestHelper());
+      helper_ = std::make_unique<ExternalClearKeyTestHelper>();
 
 #if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
       CdmModule::GetInstance()->Initialize(helper_->LibraryPath(), {});
@@ -380,7 +381,8 @@ class AesDecryptorTest : public testing::TestWithParam<TestType> {
 
   // Closes the session specified by |session_id|.
   void CloseSession(const std::string& session_id) {
-    EXPECT_CALL(cdm_client_, OnSessionClosed(session_id));
+    EXPECT_CALL(cdm_client_,
+                OnSessionClosed(session_id, CdmSessionClosedReason::kClose));
     cdm_->CloseSession(session_id, CreatePromise(RESOLVED));
   }
 

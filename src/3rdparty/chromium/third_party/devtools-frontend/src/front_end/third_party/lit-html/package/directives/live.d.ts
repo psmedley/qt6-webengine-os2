@@ -1,17 +1,16 @@
 /**
  * @license
- * Copyright (c) 2020 The Polymer Project Authors. All rights reserved.
- * This code may only be used under the BSD style license found at
- * http://polymer.github.io/LICENSE.txt
- * The complete set of authors may be found at
- * http://polymer.github.io/AUTHORS.txt
- * The complete set of contributors may be found at
- * http://polymer.github.io/CONTRIBUTORS.txt
- * Code distributed by Google as part of the polymer project is also
- * subject to an additional IP rights grant found at
- * http://polymer.github.io/PATENTS.txt
+ * Copyright 2020 Google LLC
+ * SPDX-License-Identifier: BSD-3-Clause
  */
-import { AttributePart, BooleanAttributePart, PropertyPart } from '../lit-html.js';
+import { Directive, DirectiveParameters, PartInfo } from '../directive.js';
+import { AttributePart } from '../lit-html.js';
+
+declare class LiveDirective extends Directive {
+    constructor(partInfo: PartInfo);
+    render(value: unknown): unknown;
+    update(part: AttributePart, [value]: DirectiveParameters<this>): unknown;
+}
 /**
  * Checks binding values against live DOM values, instead of previously bound
  * values, when determining whether to update the value.
@@ -23,8 +22,8 @@ import { AttributePart, BooleanAttributePart, PropertyPart } from '../lit-html.j
  *
  * In these cases if the DOM value changes, but the value set through lit-html
  * bindings hasn't, lit-html won't know to update the DOM value and will leave
- * it alone. If this is not what you want—if you want to overwrite the DOM
- * value with the bound value no matter what—use the `live()` directive:
+ * it alone. If this is not what you want--if you want to overwrite the DOM
+ * value with the bound value no matter what--use the `live()` directive:
  *
  *     html`<input .value=${live(x)}>`
  *
@@ -34,5 +33,10 @@ import { AttributePart, BooleanAttributePart, PropertyPart } from '../lit-html.j
  * you use `live()` with an attribute binding, make sure that only strings are
  * passed in, or the binding will update every render.
  */
-export declare const live: (value: unknown) => (part: AttributePart | BooleanAttributePart | PropertyPart) => void;
+export declare const live: (value: unknown) => import("../directive.js").DirectiveResult<typeof LiveDirective>;
+/**
+ * The type of the class that powers this directive. Necessary for naming the
+ * directive's return type.
+ */
+export type { LiveDirective };
 //# sourceMappingURL=live.d.ts.map

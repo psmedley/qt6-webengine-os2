@@ -27,11 +27,11 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/save_page_type.h"
-#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/referrer.h"
 #include "net/base/net_errors.h"
 #include "services/data_decoder/public/mojom/web_bundler.mojom.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom-forward.h"
 #include "url/gurl.h"
 
 class GURL;
@@ -42,12 +42,12 @@ class DownloadItemImpl;
 
 namespace content {
 class DownloadManagerImpl;
+class Page;
 class FrameTreeNode;
 class RenderFrameHostImpl;
 class SaveFileManager;
 class SaveItem;
 class SavePackage;
-class WebContents;
 
 // SavePackage manages the process of saving a page as only-HTML, complete-HTML
 // or MHTML and provides status information about the job.
@@ -65,7 +65,6 @@ class WebContents;
 // saving job, and exist for the duration of one contents's life time.
 class CONTENT_EXPORT SavePackage
     : public base::RefCountedThreadSafe<SavePackage>,
-      public WebContentsObserver,
       public base::SupportsWeakPtr<SavePackage> {
  public:
   enum WaitState {
@@ -90,7 +89,7 @@ class CONTENT_EXPORT SavePackage
   // Constructor for user initiated page saving. This constructor results in a
   // SavePackage that will generate and sanitize a suggested name for the user
   // in the "Save As" dialog box.
-  explicit SavePackage(WebContents* web_contents);
+  explicit SavePackage(Page& page);
 
   // Initialize the SavePackage. Returns true if it initializes properly.  Need
   // to make sure that this method must be called in the UI thread because using
@@ -162,12 +161,12 @@ class CONTENT_EXPORT SavePackage
 
   // Used only for testing. Bypasses the file and directory name generation /
   // sanitization by providing well known paths better suited for tests.
-  SavePackage(WebContents* web_contents,
+  SavePackage(Page& page,
               SavePageType save_type,
               const base::FilePath& file_full_path,
               const base::FilePath& directory_full_path);
 
-  ~SavePackage() override;
+  ~SavePackage();
 
   void InitWithDownloadItem(
       SavePackageDownloadCreatedCallback download_created_callback,
@@ -186,6 +185,9 @@ class CONTENT_EXPORT SavePackage
 
   void Stop(bool cancel_download_item);
   void CheckFinish();
+
+  // Clears the associated page.
+  void ClearPage();
 
   // Initiate a saving job of a specific URL. We send the request to
   // SaveFileManager, which will dispatch it to different approach according to
@@ -244,6 +246,7 @@ class CONTENT_EXPORT SavePackage
   // with the help of CreatePendingSaveItem, EnqueueSavableResource,
   // EnqueueFrame.
   void GetSavableResourceLinks();
+  void GetSavableResourceLinksForRenderFrameHost(RenderFrameHost* rfh);
 
   // Helper for finding or creating a SaveItem with the given parameters.
   SaveItem* CreatePendingSaveItem(
@@ -308,11 +311,11 @@ class CONTENT_EXPORT SavePackage
   // Remove SaveItem from in progress map and put it to saved map.
   void PutInProgressItemToSavedMap(SaveItem* save_item);
 
-  // Retrieves the URL to be saved from the WebContents.
-  static GURL GetUrlToBeSaved(WebContents* web_contents);
+  // Retrieves the URL to be saved from the main frame.
+  static GURL GetUrlToBeSaved(RenderFrameHost* main_frame);
 
   static base::FilePath CreateDirectoryOnFileThread(
-      const base::string16& title,
+      const std::u16string& title,
       const GURL& page_url,
       bool can_save_as_complete,
       const std::string& mime_type,
@@ -342,6 +345,10 @@ class CONTENT_EXPORT SavePackage
   // which is not correct but matches the way the total and received number of
   // files is presented as the total and received bytes.
   int64_t CurrentSpeed() const;
+
+  // The current page, may be null if the primary page has been navigated away
+  // or destroyed.
+  Page* page_;
 
   // A queue for items we are about to start saving.
   base::circular_deque<std::unique_ptr<SaveItem>> waiting_item_queue_;
@@ -391,7 +398,7 @@ class CONTENT_EXPORT SavePackage
   base::FilePath saved_main_directory_path_;
 
   // The title of the page the user wants to save.
-  const base::string16 title_;
+  const std::u16string title_;
 
   // Used to calculate package download speed (in files per second).
   const base::TimeTicks start_tick_;

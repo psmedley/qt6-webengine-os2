@@ -9,7 +9,7 @@ import "chrome/services/printing/public/mojom/pdf_to_pwg_raster_converter.mojom"
 
 [EnableIf=is_chromeos]
 import "chrome/services/printing/public/mojom/pdf_flattener.mojom";
-[EnableIf=is_chromeos]
+[EnableIf=is_chromeos_ash]
 import "chrome/services/printing/public/mojom/pdf_thumbnailer.mojom";
 
 [EnableIf=is_win]
@@ -30,7 +30,7 @@ interface PrintingService {
   BindPdfFlattener(pending_receiver<PdfFlattener> receiver);
 
   // Binds an interface that is used to generate thumbnails for PDF content.
-  [EnableIf=is_chromeos]
+  [EnableIf=is_chromeos_ash]
   BindPdfThumbnailer(pending_receiver<PdfThumbnailer> receiver);
 
   // Binds an interface that can be used to do PDF to EMF conversion. Windows

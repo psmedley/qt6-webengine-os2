@@ -66,6 +66,7 @@
 #include <qwebengineurlschemehandler.h>
 #include <qwebengineview.h>
 #include <qimagewriter.h>
+#include <QColorSpace>
 
 static void removeRecursive(const QString& dirname)
 {
@@ -78,6 +79,13 @@ static void removeRecursive(const QString& dirname)
             dir.remove(entries[i].fileName());
     QDir().rmdir(dirname);
 }
+
+struct TestBasePage : QWebEnginePage
+{
+    explicit TestBasePage(QWebEngineProfile *profile, QObject *parent = nullptr) : QWebEnginePage(profile, parent) { }
+    explicit TestBasePage(QObject *parent = nullptr) : QWebEnginePage(parent) { }
+    QSignalSpy loadSpy { this, &QWebEnginePage::loadFinished };
+};
 
 class tst_QWebEnginePage : public QObject
 {
@@ -95,7 +103,9 @@ public Q_SLOTS:
 private Q_SLOTS:
     void initTestCase();
     void cleanupTestCase();
+    void comboBoxPopupPositionAfterMove_data();
     void comboBoxPopupPositionAfterMove();
+    void comboBoxPopupPositionAfterChildMove_data();
     void comboBoxPopupPositionAfterChildMove();
     void acceptNavigationRequest();
     void acceptNavigationRequestNavigationType();
@@ -247,6 +257,8 @@ private Q_SLOTS:
     void testChooseFilesParameters();
     void fileSystemAccessDialog();
 
+    void localToRemoteNavigation();
+
 private:
     static QPoint elementCenter(QWebEnginePage *page, const QString &id);
     static bool isFalseJavaScriptResult(QWebEnginePage *page, const QString &javaScript);
@@ -261,6 +273,18 @@ private:
             + QDateTime::currentDateTime().toString(QLatin1String("yyyyMMddhhmmss"));
         return tmpd;
     }
+
+    QScopedPointer<QPointingDevice> s_touchDevice;
+    void makeClick(QWindow *window, bool withTouch = false, const QPoint &p = QPoint()) {
+        if (!withTouch) {
+            QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(), p);
+        } else {
+            if (!s_touchDevice)
+                s_touchDevice.reset(QTest::createTouchDevice());
+            QTest::touchEvent(window, s_touchDevice.get()).press(1, p);
+            QTest::touchEvent(window, s_touchDevice.get()).release(1, p);
+        }
+    };
 };
 
 tst_QWebEnginePage::tst_QWebEnginePage()
@@ -306,6 +330,14 @@ void tst_QWebEnginePage::initTestCase()
     QWebEngineUrlScheme echo("echo");
     echo.setSyntax(QWebEngineUrlScheme::Syntax::Path);
     QWebEngineUrlScheme::registerScheme(echo);
+
+    QWebEngineUrlScheme local("local");
+    local.setFlags(QWebEngineUrlScheme::LocalScheme);
+    QWebEngineUrlScheme::registerScheme(local);
+
+    QWebEngineUrlScheme remote("remote");
+    remote.setFlags(QWebEngineUrlScheme::CorsEnabled);
+    QWebEngineUrlScheme::registerScheme(remote);
 }
 
 void tst_QWebEnginePage::cleanupTestCase()
@@ -520,6 +552,7 @@ void tst_QWebEnginePage::pasteImage()
     QByteArray data = evaluateJavaScriptSync(page, "window.myImageDataURL").toByteArray();
     data.remove(0, data.indexOf(";base64,") + 8);
     QImage image = QImage::fromData(QByteArray::fromBase64(data), "PNG");
+    image.setColorSpace(origImage.colorSpace());
     if (image.format() == QImage::Format_RGB32)
         image.reinterpretAsFormat(QImage::Format_ARGB32);
     QCOMPARE(image, origImage);
@@ -929,7 +962,8 @@ void tst_QWebEnginePage::localStorageVisibility()
     // ...first check second page (for storage to appear) as applying settings is batched and done asynchronously
     QTRY_VERIFY(evaluateJavaScriptSync(&webPage2, QString("(window.localStorage != undefined)")).toBool());
     // Switching the feature off does not actively remove the object from webPage1.
-    QVERIFY(evaluateJavaScriptSync(&webPage1, QString("(window.localStorage != undefined)")).toBool());
+// FIXME: 94-based: now it does
+//     QVERIFY(evaluateJavaScriptSync(&webPage1, QString("(window.localStorage != undefined)")).toBool());
 
     // The object disappears only after reloading.
     webPage1.triggerAction(QWebEnginePage::Reload);
@@ -1296,6 +1330,13 @@ static QWindow *findNewTopLevelWindow(const QWindowList &oldTopLevelWindows)
     return nullptr;
 }
 
+void tst_QWebEnginePage::comboBoxPopupPositionAfterMove_data()
+{
+    QTest::addColumn<bool>("withTouch");
+    QTest::addRow("mouse") << false;
+    QTest::addRow("touch") << true;
+}
+
 void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
 {
     QWebEngineView view;
@@ -1309,9 +1350,10 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
                                "</select></body></html>"));
     QTRY_COMPARE(loadSpy.count(), 1);
     const auto oldTlws = QGuiApplication::topLevelWindows();
+
+    QFETCH(bool, withTouch);
     QWindow *window = view.windowHandle();
-    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(),
-                      elementCenter(view.page(), "foo"));
+    makeClick(window, withTouch, elementCenter(view.page(), "foo"));
 
     QWindow *popup = nullptr;
     QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
@@ -1320,7 +1362,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
     QPoint popupPos = popup->position();
 
     // Close the popup by clicking somewhere into the page.
-    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(), QPoint(1, 1));
+    makeClick(window, withTouch, QPoint(1, 1));
     QTRY_VERIFY(!QGuiApplication::topLevelWindows().contains(popup));
 
     auto jsViewPosition = [&view]() {
@@ -1339,14 +1381,20 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
     const QPoint offset(12, 13);
     view.move(view.pos() + offset);
     QTRY_COMPARE(jsViewPosition(), view.pos());
-    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(),
-                      elementCenter(view.page(), "foo"));
+    makeClick(window, withTouch, elementCenter(view.page(), "foo"));
     QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
     QTRY_VERIFY(QGuiApplication::topLevelWindows().contains(popup));
     QTRY_VERIFY(!popup->position().isNull());
     QCOMPARE(popupPos + offset, popup->position());
-    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(), QPoint(1, 1));
+    makeClick(window, withTouch, QPoint(1, 1));
     QTRY_VERIFY(!QGuiApplication::topLevelWindows().contains(popup));
+}
+
+void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove_data()
+{
+    QTest::addColumn<bool>("withTouch");
+    QTest::addRow("mouse") << false;
+    QTest::addRow("touch") << true;
 }
 
 void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
@@ -1371,9 +1419,10 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
                                "</select></body></html>"));
     QTRY_COMPARE(loadSpy.count(), 1);
     const auto oldTlws = QGuiApplication::topLevelWindows();
+
+    QFETCH(bool, withTouch);
     QWindow *window = view.window()->windowHandle();
-    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(),
-                      view.mapTo(view.window(), elementCenter(view.page(), "foo")));
+    makeClick(window, withTouch, view.mapTo(view.window(), elementCenter(view.page(), "foo")));
 
     QWindow *popup = nullptr;
     QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
@@ -1382,8 +1431,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
     QPoint popupPos = popup->position();
 
     // Close the popup by clicking somewhere into the page.
-    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(),
-                      view.mapTo(view.window(), QPoint(1, 1)));
+    makeClick(window, withTouch, view.mapTo(view.window(), QPoint(1, 1)));
     QTRY_VERIFY(!QGuiApplication::topLevelWindows().contains(popup));
 
     int originalViewWidth = view.size().width();
@@ -1398,8 +1446,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
     spacer.setMinimumWidth(spacer.size().width() + offset);
     QTRY_COMPARE(jsViewWidth(), originalViewWidth - offset);
 
-    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(),
-                      view.mapTo(view.window(), elementCenter(view.page(), "foo")));
+    makeClick(window, withTouch, view.mapTo(view.window(), elementCenter(view.page(), "foo")));
     QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
     QTRY_VERIFY(!popup->position().isNull());
     QCOMPARE(popupPos + QPoint(50, 0), popup->position());
@@ -3098,25 +3145,42 @@ void tst_QWebEnginePage::toPlainTextLoadFinishedRace()
 
 void tst_QWebEnginePage::setZoomFactor()
 {
-    QWebEnginePage page;
+    TestBasePage page, page2;
 
-    QVERIFY(qFuzzyCompare(page.zoomFactor(), 1.0));
+    QCOMPARE(page.zoomFactor(), 1.0);
     page.setZoomFactor(2.5);
-    QVERIFY(qFuzzyCompare(page.zoomFactor(), 2.5));
+    QCOMPARE(page.zoomFactor(), 2.5);
 
-    const QUrl urlToLoad("qrc:/resources/test1.html");
+    const QUrl url1("qrc:/resources/test1.html"), url2(QUrl("qrc:/resources/test2.html"));
 
-    QSignalSpy finishedSpy(&page, SIGNAL(loadFinished(bool)));
-    page.load(urlToLoad);
-    QTRY_COMPARE(finishedSpy.count(), 1);
-    QVERIFY(finishedSpy.at(0).first().toBool());
-    QVERIFY(qFuzzyCompare(page.zoomFactor(), 2.5));
+    page.load(url1);
+    QTRY_COMPARE(page.loadSpy.count(), 1);
+    QVERIFY(page.loadSpy.at(0).first().toBool());
+    QCOMPARE(page.zoomFactor(), 2.5);
 
-    page.setZoomFactor(5.5);
-    QVERIFY(qFuzzyCompare(page.zoomFactor(), 2.5));
+    page.setZoomFactor(5.5); // max accepted zoom: kMaximumPageZoomFactor = 5.0
+    QCOMPARE(page.zoomFactor(), 2.5);
 
-    page.setZoomFactor(0.1);
-    QVERIFY(qFuzzyCompare(page.zoomFactor(), 2.5));
+    page.setZoomFactor(0.1); // min accepted zoom: kMinimumPageZoomFactor = 0.25
+    QCOMPARE(page.zoomFactor(), 2.5);
+
+    // try loading different url and check new values after load
+    page.loadSpy.clear();
+    for (auto &&p : {
+            qMakePair(&page, 2.5), // navigating away to different url should keep zoom
+            qMakePair(&page2, 1.0), // same url navigation in diffent page shouldn't be affected
+        }) {
+        auto &&page = *p.first; auto zoomFactor = p.second;
+        page.load(url2);
+        QTRY_COMPARE(page.loadSpy.count(), 1);
+        QVERIFY(page.loadSpy.last().first().toBool());
+        QCOMPARE(page.zoomFactor(), zoomFactor);
+    }
+
+    // should have no influence on first page
+    page2.setZoomFactor(3.5);
+    for (auto &&p : { qMakePair(&page, 2.5), qMakePair(&page2, 3.5), })
+        QCOMPARE(p.first->zoomFactor(), p.second);
 }
 
 void tst_QWebEnginePage::mouseButtonTranslation()
@@ -4757,6 +4821,8 @@ void tst_QWebEnginePage::testChooseFilesParameters_data()
                                           << QWebEnginePage::FileSelectOpenMultiple << QStringList();
     QTest::addRow("Folder upload") << QString("multiple webkitdirectory") << QString()
                                    << QWebEnginePage::FileSelectUploadFolder << QStringList();
+    QTest::addRow("Save file") << QString("") << QString()
+                                   << QWebEnginePage::FileSelectSave << QStringList();
     mimeTypes = QStringList() << "audio/*";
     QTest::addRow("MIME type: audio") << QString() << QString("accept='%1'").arg(mimeTypes.join(','))
                                       << QWebEnginePage::FileSelectOpen << mimeTypes;
@@ -4790,9 +4856,16 @@ void tst_QWebEnginePage::testChooseFilesParameters()
     view.show();
     QVERIFY(QTest::qWaitForWindowExposed(&view));
 
-    page.setHtml(QString("<html><body>"
-                         "<input id='filePicker' type='file' name='filePicker' %1 %2 />"
-                         "</body></html>").arg(uploadAttribute, mimeTypeAttribute));
+    if (expectedFileSelectionMode != QWebEnginePage::FileSelectSave) {
+        page.setHtml(QString("<html><body>"
+                             "<input id='filePicker' type='file' name='filePicker' %1 %2 />"
+                             "</body></html>").arg(uploadAttribute, mimeTypeAttribute));
+    } else {
+        page.setHtml(QString("<html><body>"
+                             "<button id='filePicker' value='trigger' "
+                             "onclick='window.showSaveFilePicker()'"
+                             "</body></html>"), QString("qrc:/"));
+    }
     QVERIFY(spyFinished.wait());
     QTRY_COMPARE(spyFinished.count(), 1);
 
@@ -4945,6 +5018,61 @@ void tst_QWebEnginePage::isSafeRedirect()
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 20000);
     QCOMPARE(page.url(), expectedUrl);
     spy.clear();
+}
+
+class LocalRemoteUrlSchemeHandler : public QWebEngineUrlSchemeHandler
+{
+public:
+    LocalRemoteUrlSchemeHandler(QObject *parent = nullptr)
+        : QWebEngineUrlSchemeHandler(parent)
+    {
+    }
+    ~LocalRemoteUrlSchemeHandler() = default;
+
+    void requestStarted(QWebEngineUrlRequestJob *job) override
+    {
+        QBuffer *buffer = new QBuffer(job);
+        buffer->setData("<html><body><a href='remote://test.html' id='link'>Click link</a></body></html>");
+        job->reply("text/html", buffer);
+        loaded = true;
+    }
+    bool loaded = false;
+};
+
+void tst_QWebEnginePage::localToRemoteNavigation()
+{
+    LocalRemoteUrlSchemeHandler local;
+    LocalRemoteUrlSchemeHandler remote;
+    QWebEngineProfile profile;
+    profile.installUrlSchemeHandler("local", &local);
+    profile.installUrlSchemeHandler("remote", &remote);
+
+    QWebEnginePage page(&profile);
+    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
+    QWebEngineView view;
+    view.resize(640, 480);
+    view.show();
+    view.setPage(&page);
+    page.setUrl(QUrl("local://test.html"));
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_COMPARE_WITH_TIMEOUT(loadSpy.count(), 1, 20000);
+    QVERIFY(local.loaded);
+
+    // Should navigate:
+    QTest::mouseClick(view.focusProxy(), Qt::LeftButton, {}, elementCenter(&page, "link"));
+    QTRY_COMPARE_WITH_TIMEOUT(loadSpy.count(), 2, 20000);
+    QVERIFY(remote.loaded);
+    local.loaded = false;
+    remote.loaded = false;
+
+    page.setUrl(QUrl("local://test.html"));
+    QTRY_COMPARE_WITH_TIMEOUT(loadSpy.count(), 3, 20000);
+    QVERIFY(local.loaded && !remote.loaded);
+
+    // Should not navigate:
+    page.runJavaScript(QStringLiteral("document.getElementById(\"link\").click()"));
+    QTest::qWait(500);
+    QVERIFY(!remote.loaded);
 }
 
 static QByteArrayList params = {QByteArrayLiteral("--use-fake-device-for-media-stream")};

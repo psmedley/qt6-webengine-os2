@@ -116,7 +116,7 @@ class NetworkChangeNotifierAndroid::BlockingThreadObjects {
 
 NetworkChangeNotifierAndroid::~NetworkChangeNotifierAndroid() {
   ClearGlobalPointer();
-  delegate_->RemoveObserver(this);
+  delegate_->UnregisterObserver(this);
 }
 
 NetworkChangeNotifier::ConnectionType
@@ -146,7 +146,6 @@ bool NetworkChangeNotifierAndroid::AreNetworkHandlesCurrentlySupported() const {
   return force_network_handles_supported_for_testing_ ||
          (base::android::BuildInfo::GetInstance()->sdk_int() >=
               base::android::SDK_VERSION_LOLLIPOP &&
-          !delegate_->IsProcessBoundToNetwork() &&
           !delegate_->RegisterNetworkCallbackFailed());
 }
 
@@ -207,7 +206,7 @@ NetworkChangeNotifierAndroid::NetworkChangeNotifierAndroid(
       force_network_handles_supported_for_testing_(false) {
   CHECK_EQ(NetId::INVALID, NetworkChangeNotifier::kInvalidNetworkHandle)
       << "kInvalidNetworkHandle doesn't match NetId::INVALID";
-  delegate_->AddObserver(this);
+  delegate_->RegisterObserver(this);
   // Since Android P, ConnectivityManager's signals include VPNs so we don't
   // need to use AddressTrackerLinux.
   if (base::android::BuildInfo::GetInstance()->sdk_int() <

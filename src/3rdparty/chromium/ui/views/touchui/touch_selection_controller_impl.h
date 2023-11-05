@@ -69,11 +69,12 @@ class VIEWS_EXPORT TouchSelectionControllerImpl
   bool ShouldShowHandleFor(const gfx::SelectionBound& bound) const;
 
   // ui::TouchSelectionMenuClient:
+  const char* GetType() override;
   bool IsCommandIdEnabled(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
   void RunContextMenu() override;
   bool ShouldShowQuickMenu() override;
-  base::string16 GetSelectedText() override;
+  std::u16string GetSelectedText() override;
 
   // WidgetObserver:
   void OnWidgetClosing(Widget* widget) override;

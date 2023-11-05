@@ -7,7 +7,6 @@
 
 #include <bitset>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
@@ -15,7 +14,7 @@
 
 namespace blink {
 namespace mojom {
-enum class FeaturePolicyFeature;
+enum class PermissionsPolicyFeature;
 }  // namespace mojom
 
 class ExecutionContext;
@@ -27,6 +26,8 @@ class CORE_EXPORT Deprecation final {
 
  public:
   Deprecation();
+  Deprecation(const Deprecation&) = delete;
+  Deprecation& operator=(const Deprecation&) = delete;
 
   static void WarnOnDeprecatedProperties(const LocalFrame*,
                                          CSSPropertyID unresolved_property);
@@ -65,8 +66,6 @@ class CORE_EXPORT Deprecation final {
       features_deprecation_bits_;
   std::bitset<kNumCSSPropertyIDs> css_property_deprecation_bits_;
   unsigned mute_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(Deprecation);
 };
 
 }  // namespace blink

@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/metrics/histogram_functions.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -21,7 +22,6 @@
 #include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/modules/permissions/permission_status.h"
 #include "third_party/blink/renderer/modules/permissions/permission_utils.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
@@ -48,6 +48,7 @@ Permissions* Permissions::permissions(NavigatorBase& navigator) {
 
 Permissions::Permissions(NavigatorBase& navigator)
     : Supplement<NavigatorBase>(navigator),
+      ExecutionContextLifecycleObserver(navigator.GetExecutionContext()),
       service_(navigator.GetExecutionContext()) {}
 
 ScriptPromise Permissions::query(ScriptState* script_state,
@@ -169,10 +170,16 @@ ScriptPromise Permissions::requestAll(
   return promise;
 }
 
+void Permissions::ContextDestroyed() {
+  base::UmaHistogramCounts1000("Permissions.API.CreatedPermissionStatusObjects",
+                               created_permission_status_objects_);
+}
+
 void Permissions::Trace(Visitor* visitor) const {
   visitor->Trace(service_);
   ScriptWrappable::Trace(visitor);
   Supplement<NavigatorBase>::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 PermissionService* Permissions::GetService(
@@ -199,7 +206,7 @@ void Permissions::TaskComplete(ScriptPromiseResolver* resolver,
       resolver->GetExecutionContext()->IsContextDestroyed())
     return;
   resolver->Resolve(
-      PermissionStatus::Take(resolver, result, std::move(descriptor)));
+      PermissionStatus::Take(*this, resolver, result, std::move(descriptor)));
 }
 
 void Permissions::BatchTaskComplete(
@@ -218,7 +225,7 @@ void Permissions::BatchTaskComplete(
   result.ReserveInitialCapacity(caller_index_to_internal_index.size());
   for (int internal_index : caller_index_to_internal_index) {
     result.push_back(PermissionStatus::CreateAndListen(
-        resolver->GetExecutionContext(), results[internal_index],
+        *this, resolver->GetExecutionContext(), results[internal_index],
         descriptors[internal_index]->Clone()));
   }
   resolver->Resolve(result);

@@ -7,13 +7,15 @@
 #ifndef CORE_FPDFAPI_PARSER_CPDF_INDIRECT_OBJECT_HOLDER_H_
 #define CORE_FPDFAPI_PARSER_CPDF_INDIRECT_OBJECT_HOLDER_H_
 
+#include <stdint.h>
+
 #include <map>
 #include <memory>
 #include <type_traits>
 #include <utility>
 
 #include "core/fpdfapi/parser/cpdf_object.h"
-#include "core/fxcrt/fx_system.h"
+#include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/string_pool_template.h"
 #include "core/fxcrt/weak_ptr.h"
 
@@ -75,7 +77,7 @@ class CPDF_IndirectObjectHolder {
   virtual RetainPtr<CPDF_Object> ParseIndirectObject(uint32_t objnum);
 
  private:
-  uint32_t m_LastObjNum;
+  uint32_t m_LastObjNum = 0;
   std::map<uint32_t, RetainPtr<CPDF_Object>> m_IndirectObjs;
   WeakPtr<ByteStringPool> m_pByteStringPool;
 };

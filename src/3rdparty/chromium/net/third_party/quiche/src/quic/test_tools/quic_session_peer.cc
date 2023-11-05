@@ -8,7 +8,6 @@
 #include "quic/core/quic_session.h"
 #include "quic/core/quic_stream.h"
 #include "quic/core/quic_utils.h"
-#include "quic/platform/api/quic_map_util.h"
 
 namespace quic {
 namespace test {
@@ -40,7 +39,8 @@ void QuicSessionPeer::SetNextOutgoingBidirectionalStreamId(QuicSession* session,
 void QuicSessionPeer::SetMaxOpenIncomingStreams(QuicSession* session,
                                                 uint32_t max_streams) {
   if (VersionHasIetfQuicFrames(session->transport_version())) {
-    QUIC_BUG << "SetmaxOpenIncomingStreams deprecated for IETF QUIC";
+    QUIC_BUG(quic_bug_10193_1)
+        << "SetmaxOpenIncomingStreams deprecated for IETF QUIC";
     session->ietf_streamid_manager_.SetMaxOpenIncomingUnidirectionalStreams(
         max_streams);
     session->ietf_streamid_manager_.SetMaxOpenIncomingBidirectionalStreams(
@@ -75,7 +75,8 @@ void QuicSessionPeer::SetMaxOpenIncomingUnidirectionalStreams(
 void QuicSessionPeer::SetMaxOpenOutgoingStreams(QuicSession* session,
                                                 uint32_t max_streams) {
   if (VersionHasIetfQuicFrames(session->transport_version())) {
-    QUIC_BUG << "SetmaxOpenOutgoingStreams deprecated for IETF QUIC";
+    QUIC_BUG(quic_bug_10193_2)
+        << "SetmaxOpenOutgoingStreams deprecated for IETF QUIC";
     return;
   }
   session->stream_id_manager_.set_max_open_outgoing_streams(max_streams);
@@ -150,24 +151,20 @@ bool QuicSessionPeer::IsStreamClosed(QuicSession* session, QuicStreamId id) {
 
 // static
 bool QuicSessionPeer::IsStreamCreated(QuicSession* session, QuicStreamId id) {
-  return QuicContainsKey(session->stream_map_, id);
+  return session->stream_map_.contains(id);
 }
 
 // static
 bool QuicSessionPeer::IsStreamAvailable(QuicSession* session, QuicStreamId id) {
   if (VersionHasIetfQuicFrames(session->transport_version())) {
     if (id % QuicUtils::StreamIdDelta(session->transport_version()) < 2) {
-      return QuicContainsKey(
-          session->ietf_streamid_manager_.bidirectional_stream_id_manager_
-              .available_streams_,
-          id);
+      return session->ietf_streamid_manager_.bidirectional_stream_id_manager_
+          .available_streams_.contains(id);
     }
-    return QuicContainsKey(
-        session->ietf_streamid_manager_.unidirectional_stream_id_manager_
-            .available_streams_,
-        id);
+    return session->ietf_streamid_manager_.unidirectional_stream_id_manager_
+        .available_streams_.contains(id);
   }
-  return QuicContainsKey(session->stream_id_manager_.available_streams_, id);
+  return session->stream_id_manager_.available_streams_.contains(id);
 }
 
 // static

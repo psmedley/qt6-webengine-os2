@@ -6,8 +6,7 @@
 
 #include <utility>
 
-#include "spdy/platform/api/spdy_estimate_memory_usage.h"
-#include "spdy/platform/api/spdy_logging.h"
+#include "common/platform/api/quiche_logging.h"
 
 namespace spdy {
 
@@ -95,10 +94,6 @@ void HpackOutputStream::BoundedTakeString(size_t max_size,
   } else {
     TakeString(output);
   }
-}
-
-size_t HpackOutputStream::EstimateMemoryUsage() const {
-  return SpdyEstimateMemoryUsage(buffer_);
 }
 
 }  // namespace spdy

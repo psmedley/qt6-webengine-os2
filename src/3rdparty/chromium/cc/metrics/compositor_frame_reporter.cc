@@ -9,11 +9,12 @@
 #include <string>
 #include <utility>
 
+#include "base/cxx17_backports.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/strcat.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_id_helper.h"
 #include "cc/base/rolling_time_delta_history.h"
 #include "cc/metrics/dropped_frame_counter.h"
 #include "cc/metrics/frame_sequence_tracker.h"
@@ -45,6 +46,12 @@ constexpr int kBlinkBreakdownInitialIndex =
 // plus one for general case.
 constexpr int kFrameSequenceTrackerTypeCount =
     static_cast<int>(FrameSequenceTrackerType::kMaxType) + 1;
+
+// Maximum number of partial update dependents a reporter can own. When a
+// reporter with too many dependents is terminated, it will terminate all its
+// dependents which will block the pipeline for a long time. Too many dependents
+// also means too much memory usage.
+constexpr size_t kMaxOwnedPartialUpdateDependents = 300u;
 
 // Names for the viz breakdowns that are shown in trace as substages under
 // PipelineReporter -> SubmitCompositorFrameToPresentationCompositorFrame or
@@ -140,7 +147,6 @@ constexpr const char* GetEventLatencyDispatchToCompositorBreakdownName(
           NOTREACHED();
           return nullptr;
       }
-      break;
     case EventMetrics::DispatchStage::kRendererMainFinished:
       switch (compositor_stage) {
         case CompositorFrameReporter::StageType::
@@ -164,7 +170,6 @@ constexpr const char* GetEventLatencyDispatchToCompositorBreakdownName(
           NOTREACHED();
           return nullptr;
       }
-      break;
     default:
       NOTREACHED();
       return nullptr;
@@ -333,15 +338,6 @@ std::string GetEventLatencyHistogramBaseName(
 
 base::TimeTicks ComputeSafeDeadlineForFrame(const viz::BeginFrameArgs& args) {
   return args.frame_time + (args.interval * 1.5);
-}
-
-bool IsScrollActive(const CompositorFrameReporter::ActiveTrackers& trackers) {
-  return trackers.test(
-             static_cast<size_t>(FrameSequenceTrackerType::kWheelScroll)) ||
-         trackers.test(
-             static_cast<size_t>(FrameSequenceTrackerType::kTouchScroll)) ||
-         trackers.test(
-             static_cast<size_t>(FrameSequenceTrackerType::kScrollbarScroll));
 }
 
 }  // namespace
@@ -539,16 +535,20 @@ CompositorFrameReporter::CompositorFrameReporter(
     LatencyUkmReporter* latency_ukm_reporter,
     bool should_report_metrics,
     SmoothThread smooth_thread,
+    FrameSequenceMetrics::ThreadType scrolling_thread,
     int layer_tree_host_id,
     DroppedFrameCounter* dropped_frame_counter)
     : should_report_metrics_(should_report_metrics),
       args_(args),
       active_trackers_(active_trackers),
+      scrolling_thread_(scrolling_thread),
       latency_ukm_reporter_(latency_ukm_reporter),
       dropped_frame_counter_(dropped_frame_counter),
       smooth_thread_(smooth_thread),
       layer_tree_host_id_(layer_tree_host_id) {
   dropped_frame_counter_->OnBeginFrame(args, IsScrollActive(active_trackers_));
+  DCHECK(IsScrollActive(active_trackers_) ||
+         scrolling_thread_ == FrameSequenceMetrics::ThreadType::kUnknown);
 }
 
 std::unique_ptr<CompositorFrameReporter>
@@ -565,7 +565,8 @@ CompositorFrameReporter::CopyReporterAtBeginImplStage() {
   }
   auto new_reporter = std::make_unique<CompositorFrameReporter>(
       active_trackers_, args_, latency_ukm_reporter_, should_report_metrics_,
-      smooth_thread_, layer_tree_host_id_, dropped_frame_counter_);
+      smooth_thread_, scrolling_thread_, layer_tree_host_id_,
+      dropped_frame_counter_);
   new_reporter->did_finish_impl_frame_ = did_finish_impl_frame_;
   new_reporter->impl_frame_finish_time_ = impl_frame_finish_time_;
   new_reporter->main_frame_abort_time_ = main_frame_abort_time_;
@@ -576,7 +577,7 @@ CompositorFrameReporter::CopyReporterAtBeginImplStage() {
 
   // Set up the new reporter so that it depends on |this| for partial update
   // information.
-  new_reporter->SetPartialUpdateDecider(weak_factory_.GetWeakPtr());
+  new_reporter->SetPartialUpdateDecider(this);
 
   return new_reporter;
 }
@@ -672,10 +673,17 @@ void CompositorFrameReporter::SetVizBreakdown(
   viz_breakdown_ = viz_breakdown;
 }
 
-void CompositorFrameReporter::SetEventsMetrics(
+void CompositorFrameReporter::AddEventsMetrics(
     EventMetrics::List events_metrics) {
-  DCHECK_EQ(0u, events_metrics_.size());
-  events_metrics_ = std::move(events_metrics);
+  events_metrics_.insert(events_metrics_.end(),
+                         std::make_move_iterator(events_metrics.begin()),
+                         std::make_move_iterator(events_metrics.end()));
+}
+
+EventMetrics::List CompositorFrameReporter::TakeEventsMetrics() {
+  EventMetrics::List result = std::move(events_metrics_);
+  events_metrics_.clear();
+  return result;
 }
 
 void CompositorFrameReporter::TerminateReporter() {
@@ -960,7 +968,7 @@ void CompositorFrameReporter::ReportEventLatencyHistograms() const {
       "EventLatency." + total_latency_stage_name;
 
   for (const auto& event_metrics : events_metrics_) {
-    DCHECK(event_metrics.get());
+    DCHECK(event_metrics);
     const std::string histogram_base_name =
         GetEventLatencyHistogramBaseName(*event_metrics);
     const int event_type_index = static_cast<int>(event_metrics->type());
@@ -1034,11 +1042,12 @@ void CompositorFrameReporter::ReportCompositorLatencyTraceEvents() const {
     return;
 
   if (IsDroppedFrameAffectingSmoothness()) {
-    devtools_instrumentation::DidDropSmoothnessFrame(layer_tree_host_id_,
-                                                     args_.frame_time);
+    devtools_instrumentation::DidDropSmoothnessFrame(
+        layer_tree_host_id_, args_.frame_time, args_.frame_id.sequence_number);
   }
 
-  const auto trace_track = perfetto::Track(reinterpret_cast<uint64_t>(this));
+  const auto trace_track =
+      perfetto::Track(base::trace_event::GetNextGlobalTraceId());
   TRACE_EVENT_BEGIN(
       "cc,benchmark", "PipelineReporter", trace_track, args_.frame_time,
       [&](perfetto::EventContext context) {
@@ -1059,48 +1068,69 @@ void CompositorFrameReporter::ReportCompositorLatencyTraceEvents() const {
         reporter->set_state(state);
         reporter->set_frame_source(args_.frame_id.source_id);
         reporter->set_frame_sequence(args_.frame_id.sequence_number);
+        reporter->set_layer_tree_host_id(layer_tree_host_id_);
+        reporter->set_has_missing_content(has_missing_content_);
         if (IsDroppedFrameAffectingSmoothness()) {
           DCHECK(state == ChromeFrameReporter::STATE_DROPPED ||
                  state == ChromeFrameReporter::STATE_PRESENTED_PARTIAL);
           reporter->set_affects_smoothness(true);
         }
+        ChromeFrameReporter::ScrollState scroll_state;
+        switch (scrolling_thread_) {
+          case FrameSequenceMetrics::ThreadType::kMain:
+            scroll_state = ChromeFrameReporter::SCROLL_MAIN_THREAD;
+            break;
+          case FrameSequenceMetrics::ThreadType::kCompositor:
+            scroll_state = ChromeFrameReporter::SCROLL_COMPOSITOR_THREAD;
+            break;
+          case FrameSequenceMetrics::ThreadType::kUnknown:
+            scroll_state = ChromeFrameReporter::SCROLL_NONE;
+            break;
+        }
+        reporter->set_scroll_state(scroll_state);
+        reporter->set_has_main_animation(
+            HasMainThreadAnimation(active_trackers_));
+        reporter->set_has_compositor_animation(
+            HasCompositorThreadAnimation(active_trackers_));
+
+        bool has_smooth_input_main = false;
+        for (const auto& event_metrics : events_metrics_) {
+          has_smooth_input_main |= event_metrics->HasSmoothInputEvent();
+        }
+        reporter->set_has_smooth_input_main(has_smooth_input_main);
+
         // TODO(crbug.com/1086974): Set 'drop reason' if applicable.
       });
 
-  // The trace-viewer cannot seem to handle a single child-event that has the
-  // same start/end timestamps as the parent-event. So avoid adding the
-  // child-events if there's only one.
-  if (stage_history_.size() > 1) {
-    for (const auto& stage : stage_history_) {
-      const int stage_type_index = static_cast<int>(stage.stage_type);
-      CHECK_LT(stage_type_index, static_cast<int>(StageType::kStageTypeCount));
-      CHECK_GE(stage_type_index, 0);
-      if (stage.start_time >= frame_termination_time_)
-        break;
-      DCHECK_GE(stage.end_time, stage.start_time);
-      if (stage.start_time == stage.end_time)
-        continue;
-      const char* stage_name = GetStageName(stage_type_index);
-      TRACE_EVENT_BEGIN("cc,benchmark", perfetto::StaticString{stage_name},
-                        trace_track, stage.start_time);
-      if (stage.stage_type ==
-          StageType::kSubmitCompositorFrameToPresentationCompositorFrame) {
-        DCHECK(processed_viz_breakdown_);
-        for (auto it = processed_viz_breakdown_->CreateIterator(true);
-             it.IsValid(); it.Advance()) {
-          base::TimeTicks start_time = it.GetStartTime();
-          base::TimeTicks end_time = it.GetEndTime();
-          if (start_time >= end_time)
-            continue;
-          const char* breakdown_name = GetVizBreakdownName(it.GetBreakdown());
-          TRACE_EVENT_BEGIN("cc,benchmark",
-                            perfetto::StaticString{breakdown_name}, trace_track,
-                            start_time);
-          TRACE_EVENT_END("cc,benchmark", trace_track, end_time);
-        }
+  for (const auto& stage : stage_history_) {
+    const int stage_type_index = static_cast<int>(stage.stage_type);
+    CHECK_LT(stage_type_index, static_cast<int>(StageType::kStageTypeCount));
+    CHECK_GE(stage_type_index, 0);
+    if (stage.start_time >= frame_termination_time_)
+      break;
+    DCHECK_GE(stage.end_time, stage.start_time);
+    if (stage.start_time == stage.end_time)
+      continue;
+    const char* stage_name = GetStageName(stage_type_index);
+    TRACE_EVENT_BEGIN("cc,benchmark", perfetto::StaticString{stage_name},
+                      trace_track, stage.start_time);
+    if (stage.stage_type ==
+        StageType::kSubmitCompositorFrameToPresentationCompositorFrame) {
+      DCHECK(processed_viz_breakdown_);
+      for (auto it = processed_viz_breakdown_->CreateIterator(true);
+           it.IsValid(); it.Advance()) {
+        base::TimeTicks start_time = it.GetStartTime();
+        base::TimeTicks end_time = it.GetEndTime();
+        if (start_time >= end_time)
+          continue;
+        const char* breakdown_name = GetVizBreakdownName(it.GetBreakdown());
+        TRACE_EVENT_BEGIN("cc,benchmark",
+                          perfetto::StaticString{breakdown_name}, trace_track,
+                          start_time);
+        TRACE_EVENT_END("cc,benchmark", trace_track, end_time);
       }
-      TRACE_EVENT_END("cc,benchmark", trace_track, stage.end_time);
     }
+    TRACE_EVENT_END("cc,benchmark", trace_track, stage.end_time);
   }
 
   TRACE_EVENT_END("cc,benchmark", trace_track, frame_termination_time_);
@@ -1242,6 +1272,12 @@ bool CompositorFrameReporter::IsDroppedFrameAffectingSmoothness() const {
     return smooth_thread_ != SmoothThread::kSmoothNone;
   }
 
+  // If the frame includes new main-thread update, even if it's for an earlier
+  // begin-frame, then do not count it as a dropped frame affecting smoothness.
+  if (is_accompanied_by_main_thread_update_) {
+    return false;
+  }
+
   // If the frame was shown, but included only partial updates, then it hurt
   // smoothness only if the main-thread is affecting smoothness (e.g. running an
   // animation, or scroll etc.).
@@ -1255,10 +1291,6 @@ bool CompositorFrameReporter::IsDroppedFrameAffectingSmoothness() const {
   return false;
 }
 
-base::WeakPtr<CompositorFrameReporter> CompositorFrameReporter::GetWeakPtr() {
-  return weak_factory_.GetWeakPtr();
-}
-
 void CompositorFrameReporter::AdoptReporter(
     std::unique_ptr<CompositorFrameReporter> reporter) {
   // If |this| reporter is dependent on another reporter to decide about partial
@@ -1270,32 +1302,36 @@ void CompositorFrameReporter::AdoptReporter(
 }
 
 void CompositorFrameReporter::SetPartialUpdateDecider(
-    base::WeakPtr<CompositorFrameReporter> decider) {
+    CompositorFrameReporter* decider) {
   DCHECK(decider);
-  has_partial_update_ = true;
-  partial_update_decider_ = decider;
-  decider->partial_update_dependents_.push(GetWeakPtr());
   DCHECK(partial_update_dependents_.empty());
+  has_partial_update_ = true;
+  partial_update_decider_ = decider->GetWeakPtr();
+  decider->partial_update_dependents_.push(GetWeakPtr());
 }
 
 void CompositorFrameReporter::DiscardOldPartialUpdateReporters() {
   DCHECK_LE(owned_partial_update_dependents_.size(),
             partial_update_dependents_.size());
-  while (owned_partial_update_dependents_.size() > 300u) {
+  // Remove old owned partial update dependents if there are too many.
+  while (owned_partial_update_dependents_.size() >
+         kMaxOwnedPartialUpdateDependents) {
     auto& dependent = owned_partial_update_dependents_.front();
     dependent->set_has_partial_update(false);
-    partial_update_dependents_.pop();
     owned_partial_update_dependents_.pop();
     discarded_partial_update_dependents_count_++;
   }
+
+  // Remove dependent reporters from the front of `partial_update_dependents_`
+  // queue if they are already destroyed.
+  while (!partial_update_dependents_.empty() &&
+         !partial_update_dependents_.front()) {
+    partial_update_dependents_.pop();
+  }
 }
 
-bool CompositorFrameReporter::MightHavePartialUpdate() const {
-  return !!partial_update_decider_;
-}
-
-size_t CompositorFrameReporter::GetPartialUpdateDependentsCount() const {
-  return partial_update_dependents_.size();
+base::WeakPtr<CompositorFrameReporter> CompositorFrameReporter::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 }  // namespace cc

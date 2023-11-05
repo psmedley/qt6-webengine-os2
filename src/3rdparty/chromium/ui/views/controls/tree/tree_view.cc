@@ -8,15 +8,16 @@
 #include <utility>
 
 #include "base/containers/adapters.h"
+#include "base/cxx17_backports.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/ptr_util.h"
-#include "base/numerics/ranges.h"
 #include "build/build_config.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/ime/input_method.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -41,9 +42,7 @@
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/tree/tree_view_controller.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/style/platform_style.h"
-#include "ui/views/vector_icons.h"
 
 using ui::TreeModel;
 using ui::TreeModelNode;
@@ -78,6 +77,12 @@ bool EventIsDoubleTapOrClick(const ui::LocatedEvent& event) {
   return !!(event.flags() & ui::EF_IS_DOUBLE_CLICK);
 }
 
+int GetSpaceThicknessForFocusRing() {
+  static const int kSpaceThicknessForFocusRing =
+      FocusRing::kHaloThickness - FocusRing::kHaloInset;
+  return kSpaceThicknessForFocusRing;
+}
+
 }  // namespace
 
 TreeView::TreeView()
@@ -85,7 +90,7 @@ TreeView::TreeView()
       drawing_provider_(std::make_unique<TreeViewDrawingProvider>()) {
   // Always focusable, even on Mac (consistent with NSOutlineView).
   SetFocusBehavior(FocusBehavior::ALWAYS);
-#if defined(OS_APPLE)
+#if defined(OS_MAC)
   constexpr bool kUseMdIcons = true;
 #else
   constexpr bool kUseMdIcons = false;
@@ -245,7 +250,7 @@ TreeModelNode* TreeView::GetEditingNode() {
 }
 
 void TreeView::SetSelectedNode(TreeModelNode* model_node) {
-  UpdateSelection(model_node, kActiveAndSelected);
+  UpdateSelection(model_node, SelectionType::kActiveAndSelected);
 }
 
 const TreeModelNode* TreeView::GetSelectedNode() const {
@@ -253,7 +258,7 @@ const TreeModelNode* TreeView::GetSelectedNode() const {
 }
 
 void TreeView::SetActiveNode(TreeModelNode* model_node) {
-  UpdateSelection(model_node, kActive);
+  UpdateSelection(model_node, SelectionType::kActive);
 }
 
 const TreeModelNode* TreeView::GetActiveNode() const {
@@ -272,9 +277,9 @@ void TreeView::Collapse(ui::TreeModelNode* model_node) {
   bool was_expanded = IsExpanded(model_node);
   if (node->is_expanded()) {
     if (selected_node_ && selected_node_->HasAncestor(node))
-      UpdateSelection(model_node, kActiveAndSelected);
+      UpdateSelection(model_node, SelectionType::kActiveAndSelected);
     else if (active_node_ && active_node_->HasAncestor(node))
-      UpdateSelection(model_node, kActive);
+      UpdateSelection(model_node, SelectionType::kActive);
     node->set_is_expanded(false);
   }
   if (was_expanded) {
@@ -355,9 +360,9 @@ void TreeView::SetRootShown(bool root_shown) {
     const auto& children = model_->GetChildren(root_.model_node());
     TreeModelNode* first_child = children.empty() ? nullptr : children.front();
     if (selected_node_ == &root_)
-      UpdateSelection(first_child, kActiveAndSelected);
+      UpdateSelection(first_child, SelectionType::kActiveAndSelected);
     else if (active_node_ == &root_)
-      UpdateSelection(first_child, kActive);
+      UpdateSelection(first_child, SelectionType::kActive);
   }
 
   AXVirtualView* ax_view = root_.accessibility_view();
@@ -527,9 +532,10 @@ void TreeView::TreeNodesAdded(TreeModel* model,
     std::unique_ptr<AXVirtualView> ax_view =
         CreateAndSetAccessibilityView(child.get());
     parent_node->Add(std::move(child), i);
-    DCHECK_LE(int{i}, parent_node->accessibility_view()->GetChildCount());
+    DCHECK_LE(static_cast<int>(i),
+              parent_node->accessibility_view()->GetChildCount());
     parent_node->accessibility_view()->AddChildViewAt(std::move(ax_view),
-                                                      int{i});
+                                                      static_cast<int>(i));
   }
   if (IsExpanded(parent)) {
     NotifyAccessibilityEvent(ax::mojom::Event::kRowCountChanged, true);
@@ -581,9 +587,9 @@ void TreeView::TreeNodesRemoved(TreeModel* model,
       nearest_node = parent;
     }
     if (reset_selected_node)
-      UpdateSelection(nearest_node, kActiveAndSelected);
+      UpdateSelection(nearest_node, SelectionType::kActiveAndSelected);
     else if (reset_active_node)
-      UpdateSelection(nearest_node, kActive);
+      UpdateSelection(nearest_node, SelectionType::kActive);
   }
 
   if (IsExpanded(parent)) {
@@ -609,7 +615,7 @@ void TreeView::TreeNodeChanged(TreeModel* model, TreeModelNode* model_node) {
 }
 
 void TreeView::ContentsChanged(Textfield* sender,
-                               const base::string16& new_contents) {}
+                               const std::u16string& new_contents) {}
 
 bool TreeView::HandleKeyEvent(Textfield* sender,
                               const ui::KeyEvent& key_event) {
@@ -659,7 +665,7 @@ void TreeView::SetSelectedRow(int row) {
   SetSelectedNode(GetNodeForRow(row));
 }
 
-base::string16 TreeView::GetTextForRow(int row) {
+std::u16string TreeView::GetTextForRow(int row) {
   return GetNodeForRow(row)->GetTitle();
 }
 
@@ -672,8 +678,8 @@ gfx::Point TreeView::GetKeyboardContextMenuLocation() {
     if (node_bounds.Intersects(vis_bounds))
       node_bounds.Intersect(vis_bounds);
     gfx::Point menu_point(node_bounds.CenterPoint());
-    x = base::ClampToRange(menu_point.x(), vis_bounds.x(), vis_bounds.right());
-    y = base::ClampToRange(menu_point.y(), vis_bounds.y(), vis_bounds.bottom());
+    x = base::clamp(menu_point.x(), vis_bounds.x(), vis_bounds.right());
+    y = base::clamp(menu_point.y(), vis_bounds.y(), vis_bounds.bottom());
   }
   gfx::Point screen_loc(x, y);
   if (base::i18n::IsRTL())
@@ -699,8 +705,9 @@ bool TreeView::OnKeyPressed(const ui::KeyEvent& event) {
 
     case ui::VKEY_UP:
     case ui::VKEY_DOWN:
-      IncrementSelection(event.key_code() == ui::VKEY_UP ? INCREMENT_PREVIOUS
-                                                         : INCREMENT_NEXT);
+      IncrementSelection(event.key_code() == ui::VKEY_UP
+                             ? IncrementType::kPrevious
+                             : IncrementType::kNext);
       return true;
 
     case ui::VKEY_LEFT:
@@ -788,8 +795,9 @@ void TreeView::UpdateSelection(TreeModelNode* model_node,
   // Force update if old value was nullptr to handle case of TreeNodesRemoved
   // explicitly resetting selected_node_ or active_node_ before invoking this.
   bool active_changed = (!active_node_ || active_node_ != node);
-  bool selection_changed = (selection_type == kActiveAndSelected &&
-                            (!selected_node_ || selected_node_ != node));
+  bool selection_changed =
+      (selection_type == SelectionType::kActiveAndSelected &&
+       (!selected_node_ || selected_node_ != node));
 
   // Update tree view states to new values.
   if (active_changed)
@@ -952,7 +960,7 @@ void TreeView::PopulateAccessibilityData(InternalNode* node,
     // Per the ARIA Spec, aria-posinset and aria-setsize are 1-based
     // not 0-based.
     int pos_in_parent = node->parent()->GetIndexOf(node) + 1;
-    int sibling_size = int{node->parent()->children().size()};
+    int sibling_size = static_cast<int>(node->parent()->children().size());
     data->AddIntAttribute(ax::mojom::IntAttribute::kPosInSet,
                           int32_t{pos_in_parent});
     data->AddIntAttribute(ax::mojom::IntAttribute::kSetSize,
@@ -989,6 +997,18 @@ void TreeView::UpdatePreferredSize() {
       root_.GetMaxWidth(this, text_offset_, root_shown_ ? 1 : 0) +
           kTextHorizontalPadding * 2,
       row_height_ * GetRowCount());
+
+  // When the editor is visible, more space is needed beyond the regular row,
+  // such as for drawing the focus ring.
+  // If this tree view is scrolled through layers, there is contension for
+  // updating layer bounds and scroll within the same layout call. So an
+  // extra row's height is added as the buffer space.
+  int horizontal_space = GetSpaceThicknessForFocusRing();
+  int vertical_space =
+      std::max(0, (empty_editor_size_.height() - font_list_.GetHeight()) / 2 -
+                      kTextVerticalPadding) +
+      GetSpaceThicknessForFocusRing() + row_height_;
+  preferred_size_.Enlarge(horizontal_space, vertical_space);
 }
 
 void TreeView::LayoutEditor() {
@@ -1019,8 +1039,12 @@ void TreeView::LayoutEditor() {
         gfx::Size(std::min(row_bounds.width(), content_bounds.width()),
                   std::min(row_bounds.height(), content_bounds.height())));
   }
+  // The visible bounds should include the focus ring which is outside the
+  // |row_bounds|.
+  gfx::Rect outter_bounds = row_bounds;
+  outter_bounds.Inset(gfx::Insets(-GetSpaceThicknessForFocusRing()));
   // Scroll as necessary to ensure that the editor is visible.
-  ScrollRectToVisible(row_bounds);
+  ScrollRectToVisible(outter_bounds);
   editor_->SetBoundsRect(row_bounds);
   editor_->Layout();
 }
@@ -1086,7 +1110,7 @@ void TreeView::PaintRow(gfx::Canvas* canvas,
   }
 
   // Paint the auxiliary text.
-  base::string16 aux_text =
+  std::u16string aux_text =
       drawing_provider()->GetAuxiliaryTextForNode(this, node->model_node());
   if (!aux_text.empty()) {
     gfx::Rect aux_text_bounds = GetAuxiliaryTextBoundsForNode(node);
@@ -1117,7 +1141,7 @@ void TreeView::PaintExpandControl(gfx::Canvas* canvas,
                                   const gfx::Rect& node_bounds,
                                   bool expanded) {
   gfx::ImageSkia arrow = gfx::CreateVectorIcon(
-      kSubmenuArrowIcon,
+      vector_icons::kSubmenuArrowIcon,
       color_utils::DeriveDefaultIconColor(
           drawing_provider()->GetTextColorForNode(this, nullptr)));
   if (expanded) {
@@ -1322,7 +1346,7 @@ void TreeView::IncrementSelection(IncrementType type) {
     // If nothing is selected select the first or last node.
     if (root_.children().empty())
       return;
-    if (type == INCREMENT_PREVIOUS) {
+    if (type == IncrementType::kPrevious) {
       int row_count = GetRowCount();
       int depth = 0;
       DCHECK(row_count);
@@ -1337,9 +1361,9 @@ void TreeView::IncrementSelection(IncrementType type) {
   }
 
   int depth = 0;
-  int delta = type == INCREMENT_PREVIOUS ? -1 : 1;
+  int delta = type == IncrementType::kPrevious ? -1 : 1;
   int row = GetRowForInternalNode(active_node_, &depth);
-  int new_row = base::ClampToRange(row + delta, 0, GetRowCount() - 1);
+  int new_row = base::clamp(row + delta, 0, GetRowCount() - 1);
   if (new_row == row)
     return;  // At the end/beginning.
   SetSelectedNode(GetNodeByRow(new_row, &depth)->model_node());

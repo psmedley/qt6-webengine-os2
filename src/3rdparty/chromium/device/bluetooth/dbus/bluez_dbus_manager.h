@@ -25,6 +25,8 @@ namespace bluez {
 
 // Style Note: Clients are sorted by names.
 class BluetoothAdapterClient;
+class BluetoothAdminPolicyClient;
+class BluetoothAdvertisementMonitorManagerClient;
 class BluetoothAgentManagerClient;
 class BluetoothBatteryClient;
 class BluetoothDebugManagerClient;
@@ -118,6 +120,9 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManager {
   // All returned objects are owned by BluezDBusManager.  Do not use these
   // pointers after BluezDBusManager has been shut down.
   BluetoothAdapterClient* GetBluetoothAdapterClient();
+  BluetoothAdminPolicyClient* GetBluetoothAdminPolicyClient();
+  BluetoothAdvertisementMonitorManagerClient*
+  GetBluetoothAdvertisementMonitorManagerClient();
   BluetoothLEAdvertisingManagerClient* GetBluetoothLEAdvertisingManagerClient();
   BluetoothAgentManagerClient* GetBluetoothAgentManagerClient();
   BluetoothBatteryClient* GetBluetoothBatteryClient();
@@ -185,6 +190,10 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManagerSetter {
 
   void SetBluetoothAdapterClient(
       std::unique_ptr<BluetoothAdapterClient> client);
+  void SetBluetoothAdminPolicyClient(
+      std::unique_ptr<BluetoothAdminPolicyClient> client);
+  void SetBluetoothAdvertisementMonitorManagerClient(
+      std::unique_ptr<BluetoothAdvertisementMonitorManagerClient> client);
   void SetBluetoothLEAdvertisingManagerClient(
       std::unique_ptr<BluetoothLEAdvertisingManagerClient> client);
   void SetBluetoothAgentManagerClient(

@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handler.h"
 #include "url/gurl.h"
@@ -48,17 +47,17 @@ struct InputComponents : public Extension::ManifestData {
 class InputComponentsHandler : public ManifestHandler {
  public:
   InputComponentsHandler();
+  InputComponentsHandler(const InputComponentsHandler&) = delete;
+  InputComponentsHandler& operator=(const InputComponentsHandler&) = delete;
   ~InputComponentsHandler() override;
 
-  bool Parse(Extension* extension, base::string16* error) override;
+  bool Parse(Extension* extension, std::u16string* error) override;
 
   // Requires kOptionsPage is already parsed.
   const std::vector<std::string> PrerequisiteKeys() const override;
 
  private:
   base::span<const char* const> Keys() const override;
-
-  DISALLOW_COPY_AND_ASSIGN(InputComponentsHandler);
 };
 
 }  // namespace extensions

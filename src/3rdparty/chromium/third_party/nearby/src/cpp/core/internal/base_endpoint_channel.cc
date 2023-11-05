@@ -16,6 +16,8 @@
 
 #include <cassert>
 
+#include "absl/strings/escaping.h"
+#include "absl/strings/str_cat.h"
 #include "core/internal/offline_frames.h"
 #include "platform/base/byte_array.h"
 #include "platform/base/exception.h"
@@ -23,8 +25,6 @@
 #include "platform/public/mutex.h"
 #include "platform/public/mutex_lock.h"
 #include "proto/connections_enums.pb.h"
-#include "absl/strings/escaping.h"
-#include "absl/strings/str_cat.h"
 
 namespace location {
 namespace nearby {
@@ -66,6 +66,7 @@ ExceptionOr<ByteArray> ReadExactly(InputStream* reader, std::int64_t size) {
     ByteArray result = read_bytes.result();
 
     if (result.Empty()) {
+      NEARBY_LOGS(WARNING) << __func__ << ": Empty result when reading bytes.";
       return ExceptionOr<ByteArray>(Exception::kIo);
     }
 
@@ -106,6 +107,8 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
     }
 
     if (read_int.result() < 0 || read_int.result() > kMaxAllowedReadBytes) {
+      NEARBY_LOGS(WARNING) << __func__ << ": Read an invalid number of bytes: "
+                           << read_int.result();
       return ExceptionOr<ByteArray>(Exception::kIo);
     }
 
@@ -134,12 +137,24 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
         // TODO(apolyudov): verify this happens at most once per session.
         result = {};
         auto parsed = parser::FromBytes(ByteArray(input));
-        if (parsed.ok() &&
-            parser::GetFrameType(parsed.result()) == V1Frame::KEEP_ALIVE) {
-          result = ByteArray(input);
+        if (parsed.ok()) {
+          if (parser::GetFrameType(parsed.result()) == V1Frame::KEEP_ALIVE) {
+            NEARBY_LOGS(INFO)
+                << __func__
+                << ": Read unencrypted KEEP_ALIVE on encrypted channel.";
+            result = ByteArray(input);
+          } else {
+            NEARBY_LOGS(WARNING)
+                << __func__ << ": Read unexpected unencrypted frame of type "
+                << parser::GetFrameType(parsed.result());
+          }
+        } else {
+          NEARBY_LOGS(WARNING)
+              << __func__ << ": Unable to parse data as unencrypted message.";
         }
       }
       if (result.Empty()) {
+        NEARBY_LOGS(WARNING) << __func__ << ": Unable to parse read result.";
         return ExceptionOr<ByteArray>(Exception::kInvalidProtocolBuffer);
       }
     }
@@ -174,7 +189,10 @@ Exception BaseEndpointChannel::Write(const ByteArray& data) {
         // If encryption is enabled, encode the message.
         std::unique_ptr<std::string> encrypted =
             crypto_context_->EncodeMessageToPeer(std::string(data));
-        if (!encrypted) return {Exception::kIo};
+        if (!encrypted) {
+          NEARBY_LOGS(WARNING) << __func__ << ": Failed to encrypt data.";
+          return {Exception::kIo};
+        }
         encrypted_data = ByteArray(std::move(*encrypted));
         data_to_write = &encrypted_data;
       }
@@ -183,14 +201,20 @@ Exception BaseEndpointChannel::Write(const ByteArray& data) {
     Exception write_exception =
         WriteInt(writer_, static_cast<std::int32_t>(data_to_write->size()));
     if (write_exception.Raised()) {
+      NEARBY_LOGS(WARNING) << __func__ << ": Failed to write header: "
+                           << write_exception.value;
       return write_exception;
     }
     write_exception = writer_->Write(*data_to_write);
     if (write_exception.Raised()) {
+      NEARBY_LOGS(WARNING) << __func__ << ": Failed to write data: "
+                           << write_exception.value;
       return write_exception;
     }
     Exception flush_exception = writer_->Flush();
     if (flush_exception.Raised()) {
+      NEARBY_LOGS(WARNING) << __func__ << ": Failed to flush writer: "
+                           << flush_exception.value;
       return flush_exception;
     }
   }
@@ -216,7 +240,8 @@ void BaseEndpointChannel::CloseIo() {
     // IO and Read() will proceed normally (with Exception::kIo).
     Exception exception = reader_->Close();
     if (!exception.Ok()) {
-      // Add logging.
+      NEARBY_LOGS(WARNING) << __func__
+                           << ": Exception closing reader: " << exception.value;
     }
   }
   {
@@ -225,36 +250,30 @@ void BaseEndpointChannel::CloseIo() {
     // IO and Write() will proceed normally (with Exception::kIo).
     Exception exception = writer_->Close();
     if (!exception.Ok()) {
-      // Add logging.
+      NEARBY_LOGS(WARNING) << __func__
+                           << ": Exception closing writer: " << exception.value;
     }
   }
 }
 
 void BaseEndpointChannel::Close(
     proto::connections::DisconnectionReason reason) {
+  NEARBY_LOGS(INFO) << __func__
+                    << ": Closing endpoint channel, reason: " << reason;
   Close();
 }
 
 std::string BaseEndpointChannel::GetType() const {
   MutexLock crypto_lock(&crypto_mutex_);
   std::string subtype = IsEncryptionEnabledLocked() ? "ENCRYPTED_" : "";
+  std::string medium = proto::connections::Medium_Name(
+      proto::connections::Medium::UNKNOWN_MEDIUM);
 
-  switch (GetMedium()) {
-    case proto::connections::Medium::BLUETOOTH:
-      return absl::StrCat(subtype, "BLUETOOTH");
-    case proto::connections::Medium::BLE:
-      return absl::StrCat(subtype, "BLE");
-    case proto::connections::Medium::MDNS:
-      return absl::StrCat(subtype, "MDNS");
-    case proto::connections::Medium::WIFI_HOTSPOT:
-      return absl::StrCat(subtype, "WIFI_HOTSPOT");
-    case proto::connections::Medium::WIFI_LAN:
-      return absl::StrCat(subtype, "WIFI_LAN");
-    case proto::connections::Medium::WEB_RTC:
-      return absl::StrCat(subtype, "WEB_RTC");
-    default:
-      return "UNKNOWN";
+  if (GetMedium() != proto::connections::Medium::UNKNOWN_MEDIUM) {
+    medium =
+        absl::StrCat(subtype, proto::connections::Medium_Name(GetMedium()));
   }
+  return medium;
 }
 
 std::string BaseEndpointChannel::GetName() const { return channel_name_; }
@@ -306,6 +325,8 @@ void BaseEndpointChannel::BlockUntilUnpaused() {
   while (is_paused_) {
     Exception wait_succeeded = is_paused_cond_.Wait();
     if (!wait_succeeded.Ok()) {
+      NEARBY_LOGS(WARNING) << __func__ << ": Failure waiting to unpause: "
+                           << wait_succeeded.value;
       return;
     }
   }

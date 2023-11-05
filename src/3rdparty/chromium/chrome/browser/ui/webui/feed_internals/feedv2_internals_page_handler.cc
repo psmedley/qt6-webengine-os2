@@ -13,8 +13,10 @@
 #include "components/feed/core/common/pref_names.h"
 #include "components/feed/core/proto/v2/ui.pb.h"
 #include "components/feed/core/shared_prefs/pref_names.h"
+#include "components/feed/core/v2/config.h"
+#include "components/feed/core/v2/public/feed_api.h"
 #include "components/feed/core/v2/public/feed_service.h"
-#include "components/feed/core/v2/public/feed_stream_api.h"
+#include "components/feed/core/v2/public/stream_type.h"
 #include "components/feed/core/v2/public/types.h"
 #include "components/feed/feed_feature_list.h"
 #include "components/offline_pages/core/prefetch/prefetch_prefs.h"
@@ -58,12 +60,18 @@ void FeedV2InternalsPageHandler::GetGeneralProperties(
   properties->is_feed_allowed = IsFeedAllowed();
   properties->is_prefetching_enabled =
       offline_pages::prefetch_prefs::IsEnabled(pref_service_);
+  properties->is_web_feed_follow_intro_debug_enabled =
+      IsWebFeedFollowIntroDebugEnabled();
+  properties->use_feed_query_requests_for_web_feeds =
+      ShouldUseFeedQueryRequestsForWebFeeds();
   if (debug_data.fetch_info)
     properties->feed_fetch_url = debug_data.fetch_info->base_request_url;
   if (debug_data.upload_info)
     properties->feed_actions_url = debug_data.upload_info->base_request_url;
 
   properties->load_stream_status = debug_data.load_stream_status;
+
+  properties->following_feed_order = GetFollowingFeedOrder();
 
   std::move(callback).Run(std::move(properties));
 }
@@ -156,4 +164,54 @@ void FeedV2InternalsPageHandler::OverrideFeedStreamData(
   slice->set_slice_id("SetByInternalsPage");
   slice->mutable_xsurface_slice()->set_xsurface_frame(data.data(), data.size());
   feed_stream_->SetForcedStreamUpdateForDebugging(stream_update);
+}
+
+bool FeedV2InternalsPageHandler::IsWebFeedFollowIntroDebugEnabled() {
+  return pref_service_->GetBoolean(feed::prefs::kEnableWebFeedFollowIntroDebug);
+}
+
+void FeedV2InternalsPageHandler::SetWebFeedFollowIntroDebugEnabled(
+    const bool enabled) {
+  pref_service_->SetBoolean(feed::prefs::kEnableWebFeedFollowIntroDebug,
+                            enabled);
+}
+
+bool FeedV2InternalsPageHandler::ShouldUseFeedQueryRequestsForWebFeeds() {
+  return feed::GetFeedConfig().use_feed_query_requests_for_web_feeds;
+}
+
+void FeedV2InternalsPageHandler::SetUseFeedQueryRequestsForWebFeeds(
+    const bool use_legacy) {
+  feed::SetUseFeedQueryRequestsForWebFeeds(use_legacy);
+}
+
+feed_internals::mojom::FeedOrder
+FeedV2InternalsPageHandler::GetFollowingFeedOrder() {
+  feed::ContentOrder order =
+      feed_stream_->GetContentOrderFromPrefs(feed::kWebFeedStream);
+  switch (order) {
+    case feed::ContentOrder::kUnspecified:
+      return feed_internals::mojom::FeedOrder::kUnspecified;
+    case feed::ContentOrder::kGrouped:
+      return feed_internals::mojom::FeedOrder::kGrouped;
+    case feed::ContentOrder::kReverseChron:
+      return feed_internals::mojom::FeedOrder::kReverseChron;
+  }
+}
+
+void FeedV2InternalsPageHandler::SetFollowingFeedOrder(
+    const feed_internals::mojom::FeedOrder new_order) {
+  feed::ContentOrder order_to_set;
+  switch (new_order) {
+    case feed_internals::mojom::FeedOrder::kUnspecified:
+      order_to_set = feed::ContentOrder::kUnspecified;
+      break;
+    case feed_internals::mojom::FeedOrder::kGrouped:
+      order_to_set = feed::ContentOrder::kGrouped;
+      break;
+    case feed_internals::mojom::FeedOrder::kReverseChron:
+      order_to_set = feed::ContentOrder::kReverseChron;
+      break;
+  }
+  feed_stream_->SetContentOrder(feed::kWebFeedStream, order_to_set);
 }

@@ -127,6 +127,18 @@ TEST(CSSSelector, Specificity_Slotted) {
   EXPECT_EQ(Specificity("::slotted(*)"), Specificity("::first-line"));
 }
 
+TEST(CSSSelector, Specificity_Host) {
+  EXPECT_EQ(Specificity(":host"), Specificity(".host"));
+  EXPECT_EQ(Specificity(":host(.a)"), Specificity(".host .a"));
+  EXPECT_EQ(Specificity(":host(div#a.b)"), Specificity(".host div#a.b"));
+}
+
+TEST(CSSSelector, Specificity_HostContext) {
+  EXPECT_EQ(Specificity(":host-context(.a)"), Specificity(".host-context .a"));
+  EXPECT_EQ(Specificity(":host-context(div#a.b)"),
+            Specificity(".host-context div#a.b"));
+}
+
 TEST(CSSSelector, Specificity_Not) {
   EXPECT_EQ(Specificity(":not(div)"), Specificity(":is(div)"));
   EXPECT_EQ(Specificity(":not(.a)"), Specificity(":is(.a)"));
@@ -138,6 +150,24 @@ TEST(CSSSelector, Specificity_Not) {
             Specificity(".a :is(.e+.f, .g>.b, .h#i)"));
   EXPECT_EQ(Specificity(":not(.c + .c + .c, .b + .c:not(span), .b + .c + .e)"),
             Specificity(":is(.c + .c + .c, .b + .c:not(span), .b + .c + .e)"));
+}
+
+TEST(CSSSelector, Specificity_Has) {
+  EXPECT_EQ(Specificity(":has(div)"), Specificity("div"));
+  EXPECT_EQ(Specificity(":has(div)"), Specificity("* div"));
+  EXPECT_EQ(Specificity(":has(~ div)"), Specificity("* ~ div"));
+  EXPECT_EQ(Specificity(":has(> .a)"), Specificity("* > .a"));
+  EXPECT_EQ(Specificity(":has(+ div.a)"), Specificity("* + div.a"));
+  EXPECT_EQ(Specificity(".a :has(.b, div.c)"), Specificity(".a div.c"));
+  EXPECT_EQ(Specificity(".a :has(.c#d, .e)"), Specificity(".a .c#d"));
+  EXPECT_EQ(Specificity(":has(.e+.f, .g>.b, .h)"), Specificity(".e+.f"));
+  EXPECT_EQ(Specificity(".a :has(.e+.f, .g>.b, .h#i)"), Specificity(".a .h#i"));
+  EXPECT_EQ(Specificity(".a+:has(.b+span.f, :has(.c>.e, .g))"),
+            Specificity(".a+.b+span.f"));
+  EXPECT_EQ(Specificity("div > :has(div:where(span:where(.b ~ .c)))"),
+            Specificity("div > div"));
+  EXPECT_EQ(Specificity(":has(.c + .c + .c, .b + .c:not(span), .b + .c + .e)"),
+            Specificity(".c + .c + .c"));
 }
 
 TEST(CSSSelector, HasLinkOrVisited) {

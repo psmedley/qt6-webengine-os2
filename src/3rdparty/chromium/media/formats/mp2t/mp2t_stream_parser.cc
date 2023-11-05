@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/optional.h"
 #include "media/base/media_tracks.h"
 #include "media/base/stream_parser_buffer.h"
 #include "media/base/text_track_config.h"
@@ -25,6 +24,7 @@
 #include "media/formats/mp2t/ts_section_pat.h"
 #include "media/formats/mp2t/ts_section_pes.h"
 #include "media/formats/mp2t/ts_section_pmt.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
 #include "media/formats/mp2t/ts_section_cat.h"
@@ -192,9 +192,8 @@ Mp2tStreamParser::BufferQueueWithConfig::BufferQueueWithConfig(
 Mp2tStreamParser::BufferQueueWithConfig::~BufferQueueWithConfig() {
 }
 
-Mp2tStreamParser::Mp2tStreamParser(
-    const std::vector<std::string>& allowed_codecs,
-    bool sbr_in_mimetype)
+Mp2tStreamParser::Mp2tStreamParser(base::span<const std::string> allowed_codecs,
+                                   bool sbr_in_mimetype)
     : sbr_in_mimetype_(sbr_in_mimetype),
       selected_audio_pid_(-1),
       selected_video_pid_(-1),
@@ -240,7 +239,7 @@ Mp2tStreamParser::Mp2tStreamParser(
   }
 }
 
-Mp2tStreamParser::~Mp2tStreamParser() {}
+Mp2tStreamParser::~Mp2tStreamParser() = default;
 
 void Mp2tStreamParser::Init(
     InitCB init_cb,
@@ -968,7 +967,7 @@ void Mp2tStreamParser::RegisterNewKeyIdAndIv(const std::string& key_id,
         break;
       case EncryptionScheme::kCbcs:
         decrypt_config_ =
-            DecryptConfig::CreateCbcsConfig(key_id, iv, {}, base::nullopt);
+            DecryptConfig::CreateCbcsConfig(key_id, iv, {}, absl::nullopt);
         break;
     }
   }

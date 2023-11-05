@@ -11,18 +11,19 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/feature_list.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "components/google/core/common/google_util.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/image_annotation/image_annotation_metrics.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
 
@@ -491,7 +492,7 @@ std::string Annotator::FormatJsonRequest(
   for (std::deque<ServerRequestInfo>::iterator it = begin; it != end; ++it) {
     // Re-encode image bytes into base64, which can be represented in JSON.
     std::string base64_data;
-    Base64Encode(
+    base::Base64Encode(
         base::StringPiece(reinterpret_cast<const char*>(it->image_bytes.data()),
                           it->image_bytes.size()),
         &base64_data);
@@ -700,8 +701,8 @@ void Annotator::OnServerResponseReceived(
 
 void Annotator::OnResponseJsonParsed(
     const std::set<RequestKey>& request_keys,
-    const base::Optional<base::Value> json_data,
-    const base::Optional<std::string>& error) {
+    const absl::optional<base::Value> json_data,
+    const absl::optional<std::string>& error) {
   const bool success = json_data.has_value() && !error.has_value();
   ReportJsonParseSuccess(success);
 
@@ -894,8 +895,8 @@ void Annotator::OnServerLangsResponseReceived(
 }
 
 void Annotator::OnServerLangsResponseJsonParsed(
-    base::Optional<base::Value> json_data,
-    const base::Optional<std::string>& error) {
+    absl::optional<base::Value> json_data,
+    const absl::optional<std::string>& error) {
   if (!json_data.has_value() || error.has_value()) {
     DVLOG(1) << "Parsing server langs response JSON failed with error: "
              << error.value_or("No reason reported.");

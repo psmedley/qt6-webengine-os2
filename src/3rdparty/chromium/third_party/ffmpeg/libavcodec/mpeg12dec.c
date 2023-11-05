@@ -30,7 +30,9 @@
 #include "libavutil/attributes.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
+#include "libavutil/mem_internal.h"
 #include "libavutil/stereo3d.h"
+#include "libavutil/video_enc_params.h"
 
 #include "avcodec.h"
 #include "bytestream.h"
@@ -46,7 +48,6 @@
 #include "mpegvideodata.h"
 #include "profiles.h"
 #include "thread.h"
-#include "version.h"
 #include "xvmc_internal.h"
 
 #define A53_MAX_CC_COUNT 2000
@@ -1049,14 +1050,10 @@ static av_cold int mpeg_decode_init(AVCodecContext *avctx)
     Mpeg1Context *s    = avctx->priv_data;
     MpegEncContext *s2 = &s->mpeg_enc_ctx;
 
-    ff_mpv_decode_defaults(s2);
-
     if (   avctx->codec_tag != AV_RL32("VCR2")
         && avctx->codec_tag != AV_RL32("BW10"))
         avctx->coded_width = avctx->coded_height = 0; // do not trust dimensions from input
     ff_mpv_decode_init(s2, avctx);
-
-    s->mpeg_enc_ctx.avctx  = avctx;
 
     /* we need some permutation to store matrices,
      * until the decoder sets the real permutation. */
@@ -1068,7 +1065,6 @@ static av_cold int mpeg_decode_init(AVCodecContext *avctx)
     s->mpeg_enc_ctx_allocated      = 0;
     s->mpeg_enc_ctx.picture_number = 0;
     s->repeat_field                = 0;
-    s->mpeg_enc_ctx.codec_id       = avctx->codec->id;
     avctx->color_range             = AVCOL_RANGE_MPEG;
     return 0;
 }
@@ -1343,9 +1339,11 @@ static int mpeg1_decode_picture(AVCodecContext *avctx, const uint8_t *buf,
 {
     Mpeg1Context *s1  = avctx->priv_data;
     MpegEncContext *s = &s1->mpeg_enc_ctx;
-    int ref, f_code, vbv_delay;
+    int ref, f_code, vbv_delay, ret;
 
-    init_get_bits(&s->gb, buf, buf_size * 8);
+    ret = init_get_bits8(&s->gb, buf, buf_size);
+    if (ret < 0)
+        return ret;
 
     ref = get_bits(&s->gb, 10); /* temporal ref */
     s->pict_type = get_bits(&s->gb, 3);
@@ -2442,12 +2440,6 @@ static void mpeg_decode_gop(AVCodecContext *avctx,
 
     tc = s-> timecode_frame_start = get_bits(&s->gb, 25);
 
-#if FF_API_PRIVATE_OPT
-FF_DISABLE_DEPRECATION_WARNINGS
-    avctx->timecode_frame_start = tc;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-
     s->closed_gop = get_bits1(&s->gb);
     /* broken_link indicates that after editing the
      * reference frames of the first B-Frames after GOP I-Frame
@@ -2881,12 +2873,13 @@ static av_cold int mpeg_decode_end(AVCodecContext *avctx)
 {
     Mpeg1Context *s = avctx->priv_data;
 
-    ff_mpv_common_end(&s->mpeg_enc_ctx);
+    if (s->mpeg_enc_ctx_allocated)
+        ff_mpv_common_end(&s->mpeg_enc_ctx);
     av_buffer_unref(&s->a53_buf_ref);
     return 0;
 }
 
-AVCodec ff_mpeg1video_decoder = {
+const AVCodec ff_mpeg1video_decoder = {
     .name                  = "mpeg1video",
     .long_name             = NULL_IF_CONFIG_SMALL("MPEG-1 video"),
     .type                  = AVMEDIA_TYPE_VIDEO,
@@ -2898,11 +2891,12 @@ AVCodec ff_mpeg1video_decoder = {
     .capabilities          = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 |
                              AV_CODEC_CAP_TRUNCATED | AV_CODEC_CAP_DELAY |
                              AV_CODEC_CAP_SLICE_THREADS,
-    .caps_internal         = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE |
+                             FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush                 = flush,
     .max_lowres            = 3,
     .update_thread_context = ONLY_IF_THREADS_ENABLED(mpeg_decode_update_thread_context),
-    .hw_configs            = (const AVCodecHWConfigInternal*[]) {
+    .hw_configs            = (const AVCodecHWConfigInternal *const []) {
 #if CONFIG_MPEG1_NVDEC_HWACCEL
                                HWACCEL_NVDEC(mpeg1),
 #endif
@@ -2919,7 +2913,7 @@ AVCodec ff_mpeg1video_decoder = {
                            },
 };
 
-AVCodec ff_mpeg2video_decoder = {
+const AVCodec ff_mpeg2video_decoder = {
     .name           = "mpeg2video",
     .long_name      = NULL_IF_CONFIG_SMALL("MPEG-2 video"),
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -2931,11 +2925,12 @@ AVCodec ff_mpeg2video_decoder = {
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 |
                       AV_CODEC_CAP_TRUNCATED | AV_CODEC_CAP_DELAY |
                       AV_CODEC_CAP_SLICE_THREADS,
-    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE |
+                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush          = flush,
     .max_lowres     = 3,
     .profiles       = NULL_IF_CONFIG_SMALL(ff_mpeg2_video_profiles),
-    .hw_configs     = (const AVCodecHWConfigInternal*[]) {
+    .hw_configs     = (const AVCodecHWConfigInternal *const []) {
 #if CONFIG_MPEG2_DXVA2_HWACCEL
                         HWACCEL_DXVA2(mpeg2),
 #endif
@@ -2965,7 +2960,7 @@ AVCodec ff_mpeg2video_decoder = {
 };
 
 //legacy decoder
-AVCodec ff_mpegvideo_decoder = {
+const AVCodec ff_mpegvideo_decoder = {
     .name           = "mpegvideo",
     .long_name      = NULL_IF_CONFIG_SMALL("MPEG-1 video"),
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -2975,7 +2970,8 @@ AVCodec ff_mpegvideo_decoder = {
     .close          = mpeg_decode_end,
     .decode         = mpeg_decode_frame,
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_TRUNCATED | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
-    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE |
+                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush          = flush,
     .max_lowres     = 3,
 };
@@ -3095,9 +3091,7 @@ static av_cold int ipu_decode_init(AVCodecContext *avctx)
 
     avctx->pix_fmt = AV_PIX_FMT_YUV420P;
 
-    ff_mpv_decode_defaults(m);
     ff_mpv_decode_init(m, avctx);
-    s->m.avctx = avctx;
     ff_mpv_idct_init(m);
     ff_mpeg12_common_init(m);
     ff_mpeg12_init_vlcs();
@@ -3128,7 +3122,7 @@ static av_cold int ipu_decode_end(AVCodecContext *avctx)
     return 0;
 }
 
-AVCodec ff_ipu_decoder = {
+const AVCodec ff_ipu_decoder = {
     .name           = "ipu",
     .long_name      = NULL_IF_CONFIG_SMALL("IPU Video"),
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -3138,5 +3132,5 @@ AVCodec ff_ipu_decoder = {
     .decode         = ipu_decode_frame,
     .close          = ipu_decode_end,
     .capabilities   = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
 };

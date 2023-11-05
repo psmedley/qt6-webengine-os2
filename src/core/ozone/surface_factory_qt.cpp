@@ -52,24 +52,28 @@ SurfaceFactoryQt::SurfaceFactoryQt()
 {
 #if defined(USE_GLX)
     if (GLContextHelper::getGlxPlatformInterface()) {
-        m_impl = { gl::kGLImplementationDesktopGL };
+        m_impl = { gl::GLImplementationParts(gl::kGLImplementationDesktopGL),
+                   gl::GLImplementationParts(gl::kGLImplementationDisabled) };
         m_ozone.reset(new ui::GLOzoneGLXQt());
     } else
 #endif
     if (GLContextHelper::getEglPlatformInterface()) {
-        m_impl = { gl::kGLImplementationDesktopGL, gl::kGLImplementationEGLGLES2 };
+        m_impl = { gl::GLImplementationParts(gl::kGLImplementationDesktopGL),
+                   gl::GLImplementationParts(gl::kGLImplementationEGLGLES2),
+                   gl::GLImplementationParts(gl::kGLImplementationDisabled) };
         m_ozone.reset(new ui::GLOzoneEGLQt());
     } else {
-        qFatal("No suitable graphics backend found\n");
+        qWarning("No suitable graphics backend found\n");
+        m_impl = { gl::GLImplementationParts(gl::kGLImplementationDisabled) };
     }
 }
 
-std::vector<gl::GLImplementation> SurfaceFactoryQt::GetAllowedGLImplementations()
+std::vector<gl::GLImplementationParts> SurfaceFactoryQt::GetAllowedGLImplementations()
 {
     return m_impl;
 }
 
-ui::GLOzone* SurfaceFactoryQt::GetGLOzone(gl::GLImplementation implementation)
+ui::GLOzone *SurfaceFactoryQt::GetGLOzone(const gl::GLImplementationParts &implementation)
 {
     return m_ozone.get();
 }

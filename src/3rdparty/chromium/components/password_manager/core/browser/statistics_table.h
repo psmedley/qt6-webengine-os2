@@ -25,7 +25,7 @@ struct InteractionsStats {
   GURL origin_domain;
 
   // The value of the username.
-  base::string16 username_value;
+  std::u16string username_value;
 
   // Number of times the user dismissed the bubble.
   int dismissal_count = 0;
@@ -61,9 +61,6 @@ class StatisticsTable {
   // successfully.
   bool RemoveRow(const GURL& domain);
 
-  // Returns all statistics from the database.
-  std::vector<InteractionsStats> GetAllRows();
-
   // Returns the statistics for |domain| if it exists.
   std::vector<InteractionsStats> GetRows(const GURL& domain);
 
@@ -77,6 +74,9 @@ class StatisticsTable {
 
   // Returns the number of rows (origin/username pairs) in the table.
   int GetNumAccounts();
+
+  // Returns all statistics from the database.
+  std::vector<InteractionsStats> GetAllRowsForTest();
 
  private:
   sql::Database* db_ = nullptr;

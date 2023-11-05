@@ -8,12 +8,13 @@
 #include <string>
 
 #include "base/component_export.h"
-#include "base/optional.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(OS_FUCHSIA)
+#include <fuchsia/ui/composition/cpp/fidl.h>
 #include <fuchsia/ui/views/cpp/fidl.h>
 #include <lib/ui/scenic/cpp/view_ref_pair.h>
 #endif
@@ -47,6 +48,10 @@ enum class PlatformWindowShadowType {
 
 class WorkspaceExtensionDelegate;
 
+#if defined(OS_FUCHSIA)
+class ScenicWindowDelegate;
+#endif
+
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
 class X11ExtensionDelegate;
 #endif
@@ -77,9 +82,17 @@ struct COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowInitProperties {
   PlatformWindowOpacity opacity = PlatformWindowOpacity::kOpaqueWindow;
 
 #if defined(OS_FUCHSIA)
-  fuchsia::ui::views::ViewToken view_token;
+  zx::handle view_token;
   scenic::ViewRefPair view_ref_pair;
   static bool allow_null_view_token_for_test;
+
+  // Specifies whether handling of keypress events from the system is enabled.
+  bool enable_keyboard = false;
+
+  // Specifies whether system virtual keyboard support is enabled.
+  bool enable_virtual_keyboard = false;
+
+  ScenicWindowDelegate* scenic_window_delegate = nullptr;
 #endif
 
   bool activatable = true;
@@ -96,7 +109,7 @@ struct COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowInitProperties {
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
   bool prefer_dark_theme = false;
   gfx::ImageSkia* icon = nullptr;
-  base::Optional<int> background_color;
+  absl::optional<int> background_color;
 
   // Specifies the res_name and res_class fields,
   // respectively, of the WM_CLASS window property. Controls window grouping

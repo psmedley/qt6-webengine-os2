@@ -60,7 +60,6 @@ class AppServiceImpl : public apps::mojom::AppService {
               apps::mojom::WindowInfoPtr window_info) override;
   void LaunchAppWithFiles(apps::mojom::AppType app_type,
                           const std::string& app_id,
-                          apps::mojom::LaunchContainer container,
                           int32_t event_flags,
                           apps::mojom::LaunchSource launch_source,
                           apps::mojom::FilePathsPtr file_paths) override;
@@ -80,8 +79,8 @@ class AppServiceImpl : public apps::mojom::AppService {
                  bool report_abuse) override;
   void PauseApp(apps::mojom::AppType app_type,
                 const std::string& app_id) override;
-  void UnpauseApps(apps::mojom::AppType app_type,
-                   const std::string& app_id) override;
+  void UnpauseApp(apps::mojom::AppType app_type,
+                  const std::string& app_id) override;
   void StopApp(apps::mojom::AppType app_type,
                const std::string& app_id) override;
   void GetMenuModel(apps::mojom::AppType app_type,
@@ -107,6 +106,12 @@ class AppServiceImpl : public apps::mojom::AppService {
       apps::mojom::AppType app_type,
       const std::string& app_id,
       apps::mojom::IntentFilterPtr intent_filter) override;
+  void SetResizeLocked(apps::mojom::AppType app_type,
+                       const std::string& app_id,
+                       apps::mojom::OptionalBool locked) override;
+  void SetWindowMode(apps::mojom::AppType app_type,
+                     const std::string& app_id,
+                     apps::mojom::WindowMode window_mode) override;
 
   // Retern the preferred_apps_ for testing.
   PreferredAppsList& GetPreferredAppsForTesting();
@@ -172,4 +177,4 @@ class AppServiceImpl : public apps::mojom::AppService {
 
 }  // namespace apps
 
-#endif  // CHROME_SERVICES_APP_SERVICE_APP_SERVICE_IMPL_H_
+#endif  // COMPONENTS_SERVICES_APP_SERVICE_APP_SERVICE_IMPL_H_

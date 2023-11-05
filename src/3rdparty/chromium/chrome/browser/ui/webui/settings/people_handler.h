@@ -94,7 +94,7 @@ class PeopleHandler : public SettingsPageUIHandler,
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, EnterWrongExistingPassphrase);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, CannotCreateBlankPassphrase);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest,
-                           CannotCreatePassphraseIfEncryptEverythingDisallowed);
+                           CannotCreatePassphraseIfCustomPassphraseDisallowed);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest,
                            CannotOverwritePassphraseWithNewOne);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest,
@@ -132,7 +132,7 @@ class PeopleHandler : public SettingsPageUIHandler,
   void OnExtendedAccountInfoRemoved(const AccountInfo& info) override;
 
   // syncer::SyncServiceObserver implementation.
-  void OnStateChanged(syncer::SyncService* sync) override;
+  void OnStateChanged(syncer::SyncService* sync_service) override;
 
   // content::WebContentsObserver implementation
   void BeforeUnloadDialogCancelled() override;
@@ -156,6 +156,7 @@ class PeopleHandler : public SettingsPageUIHandler,
   void HandleSetDecryptionPassphrase(const base::ListValue* args);
   void HandleShowSyncSetupUI(const base::ListValue* args);
   void HandleSyncPrefsDispatch(const base::ListValue* args);
+  void HandleOfferTrustedVaultOptInDispatch(const base::ListValue* args);
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   void HandleAttemptUserExit(const base::ListValue* args);
   void HandleTurnOnSync(const base::ListValue* args);

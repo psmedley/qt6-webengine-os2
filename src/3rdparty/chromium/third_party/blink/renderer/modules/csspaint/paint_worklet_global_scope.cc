@@ -59,7 +59,7 @@ bool ParseInputArguments(v8::Local<v8::Context> context,
         return false;
 
       for (const auto& type : argument_types) {
-        base::Optional<CSSSyntaxDefinition> syntax_definition =
+        absl::optional<CSSSyntaxDefinition> syntax_definition =
             CSSSyntaxStringParser(type).Parse();
         if (!syntax_definition) {
           exception_state->ThrowTypeError("Invalid argument types.");
@@ -236,7 +236,7 @@ void PaintWorkletGlobalScope::registerPaint(const ScriptState* script_state,
 
 CSSPaintDefinition* PaintWorkletGlobalScope::FindDefinition(
     const String& name) {
-  return paint_definitions_.at(name);
+  return paint_definitions_.DeprecatedAtOrEmptyValue(name);
 }
 
 double PaintWorkletGlobalScope::devicePixelRatio() const {

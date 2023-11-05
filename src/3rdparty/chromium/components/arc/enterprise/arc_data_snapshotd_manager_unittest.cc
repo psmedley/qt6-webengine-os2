@@ -5,6 +5,8 @@
 #include "components/arc/enterprise/arc_data_snapshotd_manager.h"
 
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "ash/constants/ash_switches.h"
 #include "base/callback_helpers.h"
@@ -30,6 +32,7 @@
 #include "ui/ozone/public/ozone_switches.h"
 
 using testing::_;
+using testing::Eq;
 using testing::Invoke;
 using testing::WithArgs;
 
@@ -47,7 +50,8 @@ class TestUpstartClient : public chromeos::FakeUpstartClient {
   // FakeUpstartClient overrides:
   MOCK_METHOD(void,
               StartArcDataSnapshotd,
-              (chromeos::VoidDBusMethodCallback),
+              (const std::vector<std::string>&,
+               chromeos::VoidDBusMethodCallback),
               (override));
 
   MOCK_METHOD(void,
@@ -80,6 +84,10 @@ class FakeDelegate : public ArcDataSnapshotdManager::Delegate {
 
   std::unique_ptr<ArcAppsTracker> CreateAppsTracker() override {
     return std::make_unique<FakeAppsTracker>();
+  }
+
+  void RestartChrome(const base::CommandLine& cmd) override {
+    EXPECT_EQ(cmd.GetSwitchValueASCII(switches::kOzonePlatform), kHeadless);
   }
 
   bool stopped_callback_num() const { return stopped_callback_num_; }
@@ -166,6 +174,7 @@ class ArcDataSnapshotdManagerBasicTest : public testing::Test {
     upstart_client_ = std::make_unique<TestUpstartClient>();
 
     arc::prefs::RegisterLocalStatePrefs(local_state_.registry());
+    local_state_.SetInitializationCompleted();
 
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         chromeos::switches::kFirstExecAfterBoot);
@@ -186,9 +195,10 @@ class ArcDataSnapshotdManagerBasicTest : public testing::Test {
     chromeos::DBusThreadManager::Shutdown();
   }
 
-  void ExpectStartDaemon(bool success) {
-    EXPECT_CALL(*upstart_client(), StartArcDataSnapshotd(_))
-        .WillOnce(WithArgs<0>(
+  void ExpectStartDaemon(bool success,
+                         const std::vector<std::string>& env = {}) {
+    EXPECT_CALL(*upstart_client(), StartArcDataSnapshotd(Eq(env), _))
+        .WillOnce(WithArgs<1>(
             Invoke([success](chromeos::VoidDBusMethodCallback callback) {
               std::move(callback).Run(success);
             })));
@@ -230,10 +240,12 @@ class ArcDataSnapshotdManagerBasicTest : public testing::Test {
     ArcDataSnapshotdManager::Snapshot snapshot(local_state());
     snapshot.Parse();
     int actual_number = 0;
-    if (snapshot.previous()) {
+    if (snapshot.previous_snapshot()) {
+      EXPECT_FALSE(snapshot.previous_snapshot()->is_last());
       actual_number++;
     }
-    if (snapshot.last()) {
+    if (snapshot.last_snapshot()) {
+      EXPECT_TRUE(snapshot.last_snapshot()->is_last());
       actual_number++;
     }
     EXPECT_EQ(expected_snapshots_number, actual_number);
@@ -245,8 +257,8 @@ class ArcDataSnapshotdManagerBasicTest : public testing::Test {
     ArcDataSnapshotdManager::Snapshot snapshot(local_state());
     snapshot.Parse();
 
-    EXPECT_TRUE(snapshot.last());
-    EXPECT_TRUE(snapshot.last()->is_verified());
+    EXPECT_TRUE(snapshot.last_snapshot());
+    EXPECT_TRUE(snapshot.last_snapshot()->is_verified());
   }
 
   void ExpectStartTrackingApps() {
@@ -269,15 +281,17 @@ class ArcDataSnapshotdManagerBasicTest : public testing::Test {
   // Set up local_state with info for previous and last snapshots and blocked ui
   // mode.
   void SetupLocalState(bool blocked_ui_mode) {
-    auto last = ArcDataSnapshotdManager::SnapshotInfo::CreateForTesting(
-        base::SysInfo::OperatingSystemVersion(), base::Time::Now(),
-        false /* verified */, false /* updated */, true /* last */);
-    auto previous = ArcDataSnapshotdManager::SnapshotInfo::CreateForTesting(
-        base::SysInfo::OperatingSystemVersion(), base::Time::Now(),
-        false /* verified */, false /* updated */, false /* last */);
+    auto last_snapshot =
+        ArcDataSnapshotdManager::SnapshotInfo::CreateForTesting(
+            base::SysInfo::OperatingSystemVersion(), base::Time::Now(),
+            false /* verified */, false /* updated */, true /* is_last */);
+    auto previous_snapshot =
+        ArcDataSnapshotdManager::SnapshotInfo::CreateForTesting(
+            base::SysInfo::OperatingSystemVersion(), base::Time::Now(),
+            false /* verified */, false /* updated */, false /* is_last */);
     auto snapshot = ArcDataSnapshotdManager::Snapshot::CreateForTesting(
-        local_state(), blocked_ui_mode, false /* started */, std::move(last),
-        std::move(previous));
+        local_state(), blocked_ui_mode, false /* started */,
+        std::move(last_snapshot), std::move(previous_snapshot));
     snapshot->Sync();
   }
 
@@ -295,6 +309,11 @@ class ArcDataSnapshotdManagerBasicTest : public testing::Test {
   FakeDelegate* delegate() { return delegate_; }
   FakeSnapshotSessionController* session_controller() {
     return session_controller_;
+  }
+
+  chromeos::FakeArcDataSnapshotdClient* client() const {
+    return static_cast<chromeos::FakeArcDataSnapshotdClient*>(
+        chromeos::DBusThreadManager::Get()->GetArcDataSnapshotdClient());
   }
 
  protected:
@@ -325,7 +344,7 @@ class ArcDataSnapshotdManagerBasicTest : public testing::Test {
   void ClearLocalState() {
     auto snapshot = ArcDataSnapshotdManager::Snapshot::CreateForTesting(
         local_state(), false /* blocked_ui_mode */, false /* started */,
-        nullptr /* last */, nullptr /* previous */);
+        nullptr /* last_snapshot */, nullptr /* previous_snapshot */);
     snapshot->Sync();
   }
 
@@ -370,10 +389,9 @@ class ArcDataSnapshotdManagerFlowTest
 
   bool is_dbus_client_available() { return GetParam(); }
 
-  void CheckHeadlessMode() {
+  void EnableHeadlessMode() {
     auto* command_line = base::CommandLine::ForCurrentProcess();
-    EXPECT_EQ(command_line->GetSwitchValueASCII(switches::kOzonePlatform),
-              "headless");
+    command_line->AppendSwitchASCII(switches::kOzonePlatform, kHeadless);
   }
 
   void RunUntilIdle() override {
@@ -399,11 +417,11 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, Basic) {
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
   EXPECT_FALSE(manager->bridge());
 
-  ExpectStartDaemon(true /*success */);
+  ExpectStartDaemon(true /* success */);
   manager->EnsureDaemonStarted(base::DoNothing());
   EXPECT_TRUE(manager->bridge());
 
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   manager->EnsureDaemonStopped(base::DoNothing());
   EXPECT_FALSE(manager->bridge());
 }
@@ -417,7 +435,7 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, DoubleStart) {
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
   EXPECT_FALSE(manager->bridge());
 
-  ExpectStartDaemon(true /*success */);
+  ExpectStartDaemon(true /* success */);
   manager->EnsureDaemonStarted(base::DoNothing());
   EXPECT_TRUE(manager->bridge());
 
@@ -427,7 +445,7 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, DoubleStart) {
   EXPECT_TRUE(manager->bridge());
 
   // Stop daemon from dtor.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
 }
 
 // Test that arc-data-snapshotd daemon is already running when |manager| gets
@@ -454,7 +472,7 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, UpstartFailures) {
 TEST_F(ArcDataSnapshotdManagerBasicTest, RestoredAfterCrash) {
   SetUpRestoredSessionCommandLine();
   // The attempt to stop the daemon, started before crash.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   auto* manager = CreateManager();
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kRestored);
   EXPECT_FALSE(manager->IsAutoLoginConfigured());
@@ -462,11 +480,11 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, RestoredAfterCrash) {
 
   EXPECT_FALSE(manager->bridge());
 
-  ExpectStartDaemon(true /*success */);
+  ExpectStartDaemon(true /* success */);
   manager->EnsureDaemonStarted(base::DoNothing());
 
   // Stop daemon from dtor.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
 }
 
 // Test failure LoadSnapshot flow when no user is logged in.
@@ -478,7 +496,7 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, LoadSnapshotsFailureNoUser) {
   ArcDataSnapshotdManager::set_snapshot_enabled_for_testing(true /* enabled */);
 
   // Stop daemon, nothing to do.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   auto* manager = CreateManager();
   // No snapshots in local_state either.
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
@@ -502,7 +520,7 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, LoadSnapshotsFailureNoSnapshots) {
   ArcDataSnapshotdManager::set_snapshot_enabled_for_testing(true /* enabled */);
 
   // Stop daemon, nothing to do.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   auto* manager = CreateManager();
   // No snapshots in local_state either.
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
@@ -527,7 +545,7 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, LoadSnapshotsFailureDisabled) {
   ArcDataSnapshotdManager::set_snapshot_enabled_for_testing(true /* enabled */);
 
   // Stop daemon, nothing to do.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   auto* manager = CreateManager();
   // No snapshots in local_state either.
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
@@ -667,10 +685,8 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, OnSnapshotSessionFailedLoad) {
   ArcDataSnapshotdManager::set_snapshot_enabled_for_testing(true /* enabled */);
 
   // Stop daemon, nothing to do.
-  ExpectStopDaemon(true /*success */);
-  base::RunLoop attempt_exit_run_loop;
-  auto* manager = CreateManager(base::BindLambdaForTesting(
-      [&attempt_exit_run_loop]() { attempt_exit_run_loop.Quit(); }));
+  ExpectStopDaemon(true /* success */);
+  auto* manager = CreateManager(base::DoNothing());
 
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
   CheckSnapshots(2 /* expected_snapshots_number */,
@@ -683,7 +699,6 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, OnSnapshotSessionFailedLoad) {
 
   // MGS failure.
   session_controller()->StopSession(false /* success */);
-  attempt_exit_run_loop.Run();
 
   // Remove failed snapshot.
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
@@ -696,7 +711,7 @@ TEST_F(ArcDataSnapshotdManagerBasicTest, OnSnapshotSessionFailedTake) {
   ArcDataSnapshotdManager::set_snapshot_enabled_for_testing(true /* enabled */);
 
   // Stop daemon, nothing to do.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   base::RunLoop attempt_exit_run_loop;
   auto* manager = CreateManager(base::BindLambdaForTesting(
       [&attempt_exit_run_loop]() { attempt_exit_run_loop.Quit(); }));
@@ -955,9 +970,9 @@ TEST_P(ArcDataSnapshotdManagerFlowTest, ClearSnapshotsBasic) {
   // Once |manager| is created, it tries to clear both snapshots, because the
   // mechanism is disabled by default, and stop the daemon.
   // Start to clear snapshots.
-  ExpectStartDaemon(true /*success */);
+  ExpectStartDaemon(true /* success */);
   // Stop once finished clearing.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   auto* manager = CreateManager();
   RunUntilIdle();
 
@@ -982,15 +997,15 @@ TEST_P(ArcDataSnapshotdManagerFlowTest, BlockedUiBasic) {
   // Once |manager| is created, it tries to clear both snapshots, because the
   // mechanism is disabled by default, and stop the daemon.
   // Start to clear snapshots.
-  ExpectStartDaemon(true /*success */);
+  ExpectStartDaemon(true /* success */, {kRestartFreconEnv});
   // Stop once finished clearing.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   bool is_attempt_user_exit_called = false;
+  EnableHeadlessMode();
   auto* manager = CreateManager(
       base::BindLambdaForTesting([&is_attempt_user_exit_called]() {
         is_attempt_user_exit_called = true;
       }));
-  CheckHeadlessMode();
   EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kBlockedUi);
   EXPECT_TRUE(manager->IsAutoLoginConfigured());
   EXPECT_FALSE(manager->IsAutoLoginAllowed());
@@ -1027,7 +1042,7 @@ TEST_P(ArcDataSnapshotdManagerFlowTest, LoadSnapshotsBasic) {
   ArcDataSnapshotdManager::set_snapshot_enabled_for_testing(true /* enabled */);
 
   // Stop daemon, nothing to do.
-  ExpectStopDaemon(true /*success */);
+  ExpectStopDaemon(true /* success */);
   auto* manager = CreateManager();
   RunUntilIdle();
 
@@ -1041,7 +1056,7 @@ TEST_P(ArcDataSnapshotdManagerFlowTest, LoadSnapshotsBasic) {
   LoginAsPublicSession();
 
   // Start daemon to load a snapshot.
-  ExpectStartDaemon(true /*success */);
+  ExpectStartDaemon(true /* success */);
   ExpectStopDaemon(true /* success */);
   base::RunLoop run_loop;
   manager->StartLoadingSnapshot(
@@ -1051,15 +1066,64 @@ TEST_P(ArcDataSnapshotdManagerFlowTest, LoadSnapshotsBasic) {
   run_loop.Run();
   if (is_dbus_client_available()) {
     EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kRunning);
-    // Exit MGS successfully.
-    LogoutPublicSession();
-    manager->OnSnapshotSessionStopped();
+    manager->OnSnapshotSessionPolicyCompliant();
     CheckVerifiedLastSnapshot();
+    CheckSnapshots(2 /* expected_snapshots_number */,
+                   false /* expected_blocked_ui_mode */);
+    EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kRunning);
+  } else {
+    CheckSnapshots(0 /* expected_snapshots_number */,
+                   false /* expected_blocked_ui_mode */);
+    EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
   }
 
-  EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kNone);
-  CheckSnapshots(2 /* expected_snapshots_number */,
-                 false /* expected_blocked_ui_mode */);
+  // Exit MGS successfully.
+  LogoutPublicSession();
+}
+
+// Test escape snapshot generating flow.
+TEST_P(ArcDataSnapshotdManagerFlowTest, EscapeBasic) {
+  // Set up two snapshots (previous and last) in local_state.
+  SetupLocalState(true /* blocked_ui_mode */);
+  CheckSnapshots(2 /* expected_snapshots_number */);
+  // Enable snapshotting mechanism for testing.
+  ArcDataSnapshotdManager::set_snapshot_enabled_for_testing(true /* enabled */);
+
+  // Once |manager| is created, it tries to clear both snapshots, because the
+  // mechanism is disabled by default, and stop the daemon.
+  // Start to clear snapshots.
+  ExpectStartDaemon(true /* success */, {kRestartFreconEnv});
+  // Stop once finished clearing.
+  ExpectStopDaemon(true /* success */);
+  bool is_attempt_user_exit_called = false;
+  EnableHeadlessMode();
+  auto* manager = CreateManager(
+      base::BindLambdaForTesting([&is_attempt_user_exit_called]() {
+        is_attempt_user_exit_called = true;
+      }));
+  EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kBlockedUi);
+
+  RunUntilIdle();
+
+  if (is_dbus_client_available()) {
+    EXPECT_FALSE(is_attempt_user_exit_called);
+    EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kMgsToLaunch);
+    EXPECT_TRUE(manager->bridge());
+
+    // Check that connected to the cancellation signal.
+    EXPECT_FALSE(client()->signal_callback().is_null());
+
+    // Send a cancellation signal.
+    client()->signal_callback().Run();
+    RunUntilIdle();
+    EXPECT_TRUE(is_attempt_user_exit_called);
+  } else {
+    EXPECT_TRUE(is_attempt_user_exit_called);
+    EXPECT_EQ(manager->state(), ArcDataSnapshotdManager::State::kBlockedUi);
+    EXPECT_FALSE(manager->bridge());
+    // Check that not connected to the cancellation signal.
+    EXPECT_TRUE(client()->signal_callback().is_null());
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(ArcDataSnapshotdManagerFlowTest,

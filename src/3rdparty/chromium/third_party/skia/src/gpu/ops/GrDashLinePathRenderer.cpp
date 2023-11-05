@@ -5,13 +5,14 @@
  * found in the LICENSE file.
  */
 
+#include "src/gpu/ops/GrDashLinePathRenderer.h"
+
 #include "src/gpu/GrAuditTrail.h"
 #include "src/gpu/GrGpu.h"
-#include "src/gpu/GrSurfaceDrawContext.h"
 #include "src/gpu/geometry/GrStyledShape.h"
-#include "src/gpu/ops/GrDashLinePathRenderer.h"
 #include "src/gpu/ops/GrDashOp.h"
 #include "src/gpu/ops/GrMeshDrawOp.h"
+#include "src/gpu/v1/SurfaceDrawContext_v1.h"
 
 GrPathRenderer::CanDrawPath
 GrDashLinePathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const {
@@ -29,7 +30,7 @@ GrDashLinePathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const {
 }
 
 bool GrDashLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
-    GR_AUDIT_TRAIL_AUTO_FRAME(args.fRenderTargetContext->auditTrail(),
+    GR_AUDIT_TRAIL_AUTO_FRAME(args.fContext->priv().auditTrail(),
                               "GrDashLinePathRenderer::onDrawPath");
     GrDashOp::AAMode aaMode;
     switch (args.fAAType) {
@@ -53,6 +54,6 @@ bool GrDashLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
     if (!op) {
         return false;
     }
-    args.fRenderTargetContext->addDrawOp(args.fClip, std::move(op));
+    args.fSurfaceDrawContext->addDrawOp(args.fClip, std::move(op));
     return true;
 }

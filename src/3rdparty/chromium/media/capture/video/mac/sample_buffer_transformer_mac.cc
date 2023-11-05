@@ -15,9 +15,6 @@
 
 namespace media {
 
-const base::Feature kInCaptureConvertToNv12{"InCaptureConvertToNv12",
-                                            base::FEATURE_ENABLED_BY_DEFAULT};
-
 namespace {
 
 // NV12 a.k.a. 420v
@@ -479,7 +476,7 @@ void SampleBufferTransformer::Reconfigure(
     Transformer transformer,
     OSType destination_pixel_format,
     const gfx::Size& destination_size,
-    base::Optional<size_t> buffer_pool_size) {
+    absl::optional<size_t> buffer_pool_size) {
   DCHECK(transformer != Transformer::kLibyuv ||
          destination_pixel_format == kPixelFormatI420 ||
          destination_pixel_format == kPixelFormatNv12)
@@ -526,9 +523,8 @@ base::ScopedCFTypeRef<CVPixelBufferRef> SampleBufferTransformer::Transform(
   base::ScopedCFTypeRef<CVPixelBufferRef> destination_pixel_buffer =
       destination_pixel_buffer_pool_->CreateBuffer();
   if (!destination_pixel_buffer) {
-    // Maximum destination buffers exceeded. Old buffers are not being released
-    // (and thus not returned to the pool) in time.
-    LOG(ERROR) << "Maximum destination buffers exceeded";
+    // Most likely the buffer count was exceeded, but other errors are possible.
+    LOG(ERROR) << "Failed to create a destination buffer";
     return base::ScopedCFTypeRef<CVPixelBufferRef>();
   }
   // Do pixel transfer or libyuv conversion + rescale.
@@ -549,9 +545,8 @@ base::ScopedCFTypeRef<CVPixelBufferRef> SampleBufferTransformer::Transform(
   base::ScopedCFTypeRef<CVPixelBufferRef> destination_pixel_buffer =
       destination_pixel_buffer_pool_->CreateBuffer();
   if (!destination_pixel_buffer) {
-    // Maximum destination buffers exceeded. Old buffers are not being released
-    // (and thus not returned to the pool) in time.
-    LOG(ERROR) << "Maximum destination buffers exceeded";
+    // Most likely the buffer count was exceeded, but other errors are possible.
+    LOG(ERROR) << "Failed to create a destination buffer";
     return base::ScopedCFTypeRef<CVPixelBufferRef>();
   }
   // Sample buffer path - it's MJPEG. Do libyuv conversion + rescale.

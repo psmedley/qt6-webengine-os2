@@ -23,6 +23,7 @@
 #include "components/search_engines/template_url_data_util.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "components/variations/scoped_variations_ids_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -42,9 +43,9 @@ void SetOverrides(sync_preferences::TestingPrefServiceSyncable* prefs,
   entry->SetString("encoding", "UTF-8");
   entry->SetInteger("id", 1001);
   entry->SetString("suggest_url", "http://foo.com/suggest?q={searchTerms}");
-  auto alternate_urls = std::make_unique<base::ListValue>();
-  alternate_urls->AppendString("http://foo.com/alternate?q={searchTerms}");
-  entry->Set("alternate_urls", std::move(alternate_urls));
+  base::ListValue alternate_urls;
+  alternate_urls.AppendString("http://foo.com/alternate?q={searchTerms}");
+  entry->SetKey("alternate_urls", std::move(alternate_urls));
   overrides->Append(std::move(entry));
 
   entry = std::make_unique<base::DictionaryValue>();
@@ -83,7 +84,8 @@ class DefaultSearchManagerTest : public testing::Test {
   DefaultSearchManagerTest() {}
 
   void SetUp() override {
-    pref_service_.reset(new sync_preferences::TestingPrefServiceSyncable);
+    pref_service_ =
+        std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
     DefaultSearchManager::RegisterProfilePrefs(pref_service_->registry());
     TemplateURLPrepopulateData::RegisterProfilePrefs(pref_service_->registry());
   }
@@ -93,6 +95,8 @@ class DefaultSearchManagerTest : public testing::Test {
   }
 
  private:
+  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
+      variations::VariationsIdsProvider::Mode::kUseSignedInState};
   std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> pref_service_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultSearchManagerTest);
@@ -103,8 +107,8 @@ TEST_F(DefaultSearchManagerTest, ReadAndWritePref) {
   DefaultSearchManager manager(pref_service(),
                                DefaultSearchManager::ObserverCallback());
   TemplateURLData data;
-  data.SetShortName(base::UTF8ToUTF16("name1"));
-  data.SetKeyword(base::UTF8ToUTF16("key1"));
+  data.SetShortName(u"name1");
+  data.SetKeyword(u"key1");
   data.SetURL("http://foo1/{searchTerms}");
   data.suggestions_url = "http://sugg1";
   data.alternate_urls.push_back("http://foo1/alt");

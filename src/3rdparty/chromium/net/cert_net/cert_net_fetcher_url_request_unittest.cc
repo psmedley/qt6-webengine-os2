@@ -18,6 +18,7 @@
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_server_properties.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/quic/quic_context.h"
@@ -67,7 +68,7 @@ class RequestContext : public URLRequestContext {
         std::make_unique<HttpServerProperties>());
     storage_.set_quic_context(std::make_unique<QuicContext>());
 
-    HttpNetworkSession::Context session_context;
+    HttpNetworkSessionContext session_context;
     session_context.host_resolver = host_resolver();
     session_context.cert_verifier = cert_verifier();
     session_context.transport_security_state = transport_security_state();
@@ -77,7 +78,7 @@ class RequestContext : public URLRequestContext {
     session_context.http_server_properties = http_server_properties();
     session_context.quic_context = quic_context();
     storage_.set_http_network_session(std::make_unique<HttpNetworkSession>(
-        HttpNetworkSession::Params(), session_context));
+        HttpNetworkSessionParams(), session_context));
     storage_.set_http_transaction_factory(std::make_unique<HttpCache>(
         storage_.http_network_session(), HttpCache::DefaultBackend::InMemory(0),
         false /* is_main_cache */));
@@ -185,9 +186,9 @@ class CertNetFetcherURLRequestTest : public PlatformTest {
 
   void StartNetworkThread() {
     // Start the network thread.
-    network_thread_.reset(new base::Thread("network thread"));
+    network_thread_ = std::make_unique<base::Thread>("network thread");
     base::Thread::Options options(base::MessagePumpType::IO, 0);
-    EXPECT_TRUE(network_thread_->StartWithOptions(options));
+    EXPECT_TRUE(network_thread_->StartWithOptions(std::move(options)));
 
     // Initialize the URLRequestContext (and wait till it has completed).
     base::WaitableEvent done(base::WaitableEvent::ResetPolicy::MANUAL,
@@ -200,7 +201,7 @@ class CertNetFetcherURLRequestTest : public PlatformTest {
   }
 
   void InitOnNetworkThread(base::WaitableEvent* done) {
-    state_.reset(new NetworkThreadState);
+    state_ = std::make_unique<NetworkThreadState>();
     state_->context.set_network_delegate(&state_->network_delegate);
     done->Signal();
   }
@@ -259,7 +260,7 @@ class SecureDnsInterceptor : public net::URLRequestInterceptor {
   // URLRequestInterceptor implementation:
   std::unique_ptr<net::URLRequestJob> MaybeInterceptRequest(
       net::URLRequest* request) const override {
-    EXPECT_TRUE(request->disable_secure_dns());
+    EXPECT_EQ(SecureDnsPolicy::kDisable, request->secure_dns_policy());
     *invoked_interceptor_ = true;
     return nullptr;
   }

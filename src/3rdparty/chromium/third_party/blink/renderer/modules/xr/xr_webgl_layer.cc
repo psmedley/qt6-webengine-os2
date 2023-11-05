@@ -4,8 +4,9 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_webgl_layer.h"
 
-#include "base/numerics/ranges.h"
+#include "base/cxx17_backports.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -17,7 +18,6 @@
 #include "third_party/blink/renderer/modules/xr/xr_utils.h"
 #include "third_party/blink/renderer/modules/xr/xr_view.h"
 #include "third_party/blink/renderer/modules/xr/xr_viewport.h"
-#include "third_party/blink/renderer/modules/xr/xr_webgl_rendering_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/geometry/double_size.h"
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
@@ -40,7 +40,7 @@ const char kCleanFrameWarning[] =
 }  // namespace
 
 XRWebGLLayer* XRWebGLLayer::Create(XRSession* session,
-                                   const XRWebGLRenderingContext& context,
+                                   const V8XRWebGLRenderingContext* context,
                                    const XRWebGLLayerInit* initializer,
                                    ExceptionState& exception_state) {
   if (session->ended()) {
@@ -115,8 +115,8 @@ XRWebGLLayer* XRWebGLLayer::Create(XRSession* session,
     // small to see or unreasonably large.
     // TODO: Would be best to have the max value communicated from the service
     // rather than limited to the native res.
-    framebuffer_scale = base::ClampToRange(
-        initializer->framebufferScaleFactor(), kFramebufferMinScale, max_scale);
+    framebuffer_scale = base::clamp(initializer->framebufferScaleFactor(),
+                                    kFramebufferMinScale, max_scale);
   }
 
   DoubleSize framebuffers_size = session->DefaultFramebufferSize();
@@ -217,11 +217,11 @@ XRViewport* XRWebGLLayer::getViewport(XRView* view) {
   return GetViewportForEye(view->EyeValue());
 }
 
-XRViewport* XRWebGLLayer::GetViewportForEye(XRView::XREye eye) {
+XRViewport* XRWebGLLayer::GetViewportForEye(device::mojom::blink::XREye eye) {
   if (viewports_dirty_)
     UpdateViewports();
 
-  if (eye == XRView::kEyeRight)
+  if (eye == device::mojom::blink::XREye::kRight)
     return right_viewport_;
 
   // This code path also handles an eye of "none".
@@ -290,18 +290,30 @@ HTMLCanvasElement* XRWebGLLayer::output_canvas() const {
   return nullptr;
 }
 
-uint32_t XRWebGLLayer::CameraImageTextureId() const {
-  return camera_image_texture_id_;
-}
+WebGLTexture* XRWebGLLayer::GetCameraTexture() {
+  DVLOG(1) << __func__;
 
-base::Optional<gpu::MailboxHolder> XRWebGLLayer::CameraImageMailboxHolder()
-    const {
-  return camera_image_mailbox_holder_;
+  // We already have a WebGL texture for the camera image - return it:
+  if (camera_image_texture_) {
+    return camera_image_texture_;
+  }
+
+  // We don't have a WebGL texture, and we cannot create it - return null:
+  if (!camera_image_texture_id_) {
+    return nullptr;
+  }
+
+  // We don't have a WebGL texture, but we can create it, so create, store and
+  // return it:
+  camera_image_texture_ = MakeGarbageCollected<WebGLUnownedTexture>(
+      webgl_context_, camera_image_texture_id_, GL_TEXTURE_2D);
+
+  return camera_image_texture_;
 }
 
 void XRWebGLLayer::OnFrameStart(
-    const base::Optional<gpu::MailboxHolder>& buffer_mailbox_holder,
-    const base::Optional<gpu::MailboxHolder>& camera_image_mailbox_holder) {
+    const absl::optional<gpu::MailboxHolder>& buffer_mailbox_holder,
+    const absl::optional<gpu::MailboxHolder>& camera_image_mailbox_holder) {
   if (framebuffer_) {
     framebuffer_->MarkOpaqueBufferComplete(true);
     framebuffer_->SetContentsChanged(false);
@@ -320,24 +332,27 @@ void XRWebGLLayer::OnFrameStart(
       camera_image_mailbox_holder_ = camera_image_mailbox_holder;
       camera_image_texture_id_ =
           GetBufferTextureId(camera_image_mailbox_holder_);
-      BindBufferTexture(camera_image_mailbox_holder_);
+      DVLOG(3) << __func__
+               << ": camera_image_texture_id_=" << camera_image_texture_id_;
+      BindCameraBufferTexture(camera_image_mailbox_holder_);
     }
   }
 }
 
 uint32_t XRWebGLLayer::GetBufferTextureId(
-    const base::Optional<gpu::MailboxHolder>& buffer_mailbox_holder) {
+    const absl::optional<gpu::MailboxHolder>& buffer_mailbox_holder) {
   gpu::gles2::GLES2Interface* gl = drawing_buffer_->ContextGL();
   gl->WaitSyncTokenCHROMIUM(buffer_mailbox_holder->sync_token.GetConstData());
   DVLOG(3) << __func__ << ": buffer_mailbox_holder->sync_token="
            << buffer_mailbox_holder->sync_token.ToDebugString();
   GLuint texture_id = gl->CreateAndTexStorage2DSharedImageCHROMIUM(
       buffer_mailbox_holder->mailbox.name);
+  DVLOG(3) << __func__ << ": texture_id=" << texture_id;
   return texture_id;
 }
 
-void XRWebGLLayer::BindBufferTexture(
-    const base::Optional<gpu::MailboxHolder>& buffer_mailbox_holder) {
+void XRWebGLLayer::BindCameraBufferTexture(
+    const absl::optional<gpu::MailboxHolder>& buffer_mailbox_holder) {
   gpu::gles2::GLES2Interface* gl = drawing_buffer_->ContextGL();
 
   if (buffer_mailbox_holder) {
@@ -385,12 +400,25 @@ void XRWebGLLayer::OnFrameEnd() {
       session()->xr()->frameProvider()->SubmitWebGLLayer(this,
                                                          framebuffer_dirty);
       if (camera_image_mailbox_holder_ && camera_image_texture_id_) {
-        DVLOG(3) << __func__ << "Deleting camera image texture";
+        DVLOG(3) << __func__
+                 << ": deleting camera image texture, camera_image_texture_id_="
+                 << camera_image_texture_id_;
         gpu::gles2::GLES2Interface* gl = drawing_buffer_->ContextGL();
+
         gl->EndSharedImageAccessDirectCHROMIUM(camera_image_texture_id_);
         gl->DeleteTextures(1, &camera_image_texture_id_);
+
+        // Notify our WebGLUnownedTexture (created from
+        // camera_image_texture_id_) that we have deleted it. Also, release the
+        // reference since we no longer need it (note that it could still be
+        // kept alive by the JS application, but should be a defunct object).
+        if (camera_image_texture_) {
+          camera_image_texture_->OnGLDeleteTextures();
+          camera_image_texture_ = nullptr;
+        }
+
         camera_image_texture_id_ = 0;
-        camera_image_mailbox_holder_ = base::nullopt;
+        camera_image_mailbox_holder_ = absl::nullopt;
       }
     }
   }
@@ -424,6 +452,7 @@ void XRWebGLLayer::Trace(Visitor* visitor) const {
   visitor->Trace(right_viewport_);
   visitor->Trace(webgl_context_);
   visitor->Trace(framebuffer_);
+  visitor->Trace(camera_image_texture_);
   XRLayer::Trace(visitor);
 }
 

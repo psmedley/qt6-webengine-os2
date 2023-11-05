@@ -1,16 +1,16 @@
 Name: icu
 URL: https://github.com/unicode-org/icu
-Version: 68.1
-CPEPrefix: cpe:/a:icu-project:international_components_for_unicode:68.1
+Version: 69-1
+CPEPrefix: cpe:/a:icu-project:international_components_for_unicode:69.1
 License: MIT
 Security Critical: yes
 
 Description:
-This directory contains the source code of ICU 68.1 for C/C++.
+This directory contains the source code of ICU 69.1 for C/C++.
 
 A. How to update ICU
 
-1. Run "scripts/update.sh <version>" (e.g. 68-1).
+1. Run "scripts/update.sh <version>" (e.g. 69-1).
    This will download ICU from the upstream git repository.
    It does preserve Chrome-specific build files and
    converter files. (see section C)
@@ -210,6 +210,10 @@ D. Local Modifications
       Put ICU_DATA_ENTRY_POINT(icudtXX_dat) in common when we use
       the icu data file or icudt.dll
 
+  - patches/unused-var.patch:
+    upstream bug: https://unicode-org.atlassian.net/browse/ICU-21664
+    fix: https://github.com/unicode-org/icu/commit/1d560c37e559b36f951c79c48af03679f6831b7a
+
 5. ISO-2022-JP encoding (fromUnicode) change per WHATWG encoding spec.
   - patches/iso2022jp.patch
   - upstream bug:
@@ -225,68 +229,7 @@ D. Local Modifications
   - patches/ardatepattern.patch
   - https://bugs.chromium.org/p/chromium/issues/detail?id=1139186
 
-8. Patch fix for CFI due to unnecessary cast
-  - patches/fixCFI.patch
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1440
-  - updtream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21373
-
-9. Patch fix for > 8 items in ListFormatter Memory READ
-  - patches/listformatmemread.patch
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1450
-  - updtream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21383
-
-10. Patch fix for Locale::setKeywordValue
-    patches/setkeywordvalue.patch
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1461
-  - updtream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21385
-
-11. Patch Windows to fix Host timezone detection
-    patches/wintz.patch
-    patches/wintz2.patch
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1465
-    https://github.com/unicode-org/icu/pull/1539
-  - updtream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21392
-    https://unicode-org.atlassian.net/browse/ICU-21465
-
-12. Patch fixing crash in list format
-    patches/formatted_string_builder.patch
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1479
-  - updtream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21410
-
-13. Patch locale canoncalization fixes
-    patches/loc.patch
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1470
-    https://github.com/unicode-org/icu/pull/1475
-    https://github.com/unicode-org/icu/pull/1478
-    https://github.com/unicode-org/icu/pull/1491
-    https://github.com/unicode-org/icu/pull/1504
-  - updtream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21401
-    https://unicode-org.atlassian.net/browse/ICU-21402
-    https://unicode-org.atlassian.net/browse/ICU-21408
-    https://unicode-org.atlassian.net/browse/ICU-21406
-    https://unicode-org.atlassian.net/browse/ICU-21414
-    https://unicode-org.atlassian.net/browse/ICU-21433
-
-14. Patch locale canoncalization fixes which is part of 68.2
-    patches/loc2.patch
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1502
-  - updtream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21430
-
-15. Remove explicit std::atomic<NumberRangeFormatterImpl*> template
+8.  Remove explicit std::atomic<NumberRangeFormatterImpl*> template
     instantiation
     patches/atomic_template_instantiation.patch
   - The explicit instantiation was added to silence MSVC C4251 warnings:
@@ -298,23 +241,44 @@ D. Local Modifications
     At this time, it's not clear if this particular instantiation with
     NumberRangeFormatterImpl* was ever necessary for MSVC. Further testing with
     MSVC is required to upstream this patch.
+  - https://unicode-org.atlassian.net/browse/ICU-21482
 
-16. Patch data/unit/fa.txt back to pre68.1 version
-    patches/back_patch_fa_unit_to_67.patch
-  - upstream bug:
-    https://unicode-org.atlassian.net/browse/CLDR-14476
-    https://unicode-org.atlassian.net/browse/ICU-21485
+9.  Patch source/common/uposixdefs.h so it compiles on Fuchsia on Macs.
+    patches/fuchsia.patch
+  - context bug: https://bugs.chromium.org/p/chromium/issues/detail?id=1184527
 
-17. Patch regexp to fix security bug
-    patches/regex_minMatchLength.patch
-  - upstream bug:
-    https://unicode-org.atlassian.net/browse/ICU-21492
-  - updatream PR:
-    https://github.com/unicode-org/icu/pull/1577
-
-18. Patch locale to fix assign and assing move operators:
+10. Patch locale to fix assign and assing move operators:
     patches/locid_operators.patch
   - upstream bug:
     https://unicode-org.atlassian.net/browse/ICU-21587
   - upstream PR:
     https://github.com/unicode-org/icu/pull/1698
+
+11. Patch source/common/uresbund.cpp  for missing "emoji" and "eor"
+    patches/Collator_getKeywordValues.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-21641
+  - upstream PR:
+    https://github.com/unicode-org/icu/pull/1743
+
+12. Patch source/common/serv.cpp to fix memory leak
+    patches/ICUService_getKey.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-21644
+  - upstream PR:
+    https://github.com/unicode-org/icu/pull/1751
+
+13. Patch icu4c/source/common/uloc_tag.cpp to fix buffer issue.
+    patches/ultag_parse_Null.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-21676
+  - upstream PR:
+    https://github.com/unicode-org/icu/pull/1767
+
+14. Patch loclikely.cpp and uloc.cpp for long locale bug.
+    patches/loclikely_uloc.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-21639
+  - upstream PR:
+    https://github.com/unicode-org/icu/pull/1762
+

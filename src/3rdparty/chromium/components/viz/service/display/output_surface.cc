@@ -26,6 +26,8 @@ namespace viz {
 OutputSurface::Capabilities::Capabilities() = default;
 OutputSurface::Capabilities::Capabilities(const Capabilities& capabilities) =
     default;
+OutputSurface::Capabilities& OutputSurface::Capabilities::operator=(
+    const Capabilities& capabilities) = default;
 
 OutputSurface::OutputSurface(Type type) : type_(type) {}
 
@@ -93,6 +95,12 @@ void OutputSurface::SetGpuVSyncEnabled(bool enabled) {
 
 gpu::Mailbox OutputSurface::GetOverlayMailbox() const {
   return gpu::Mailbox();
+}
+
+void OutputSurface::InitDelegatedInkPointRendererReceiver(
+    mojo::PendingReceiver<gfx::mojom::DelegatedInkPointRenderer>
+        pending_receiver) {
+  NOTREACHED();
 }
 
 }  // namespace viz

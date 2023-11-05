@@ -25,11 +25,11 @@ class GarbageCollectedBase {
   void* operator new[](size_t) = delete;
   // The garbage collector is taking care of reclaiming the object. Also,
   // virtual destructor requires an unambiguous, accessible 'operator delete'.
-  void operator delete(void*) {
-#ifdef V8_ENABLE_CHECKS
-    internal::Abort();
-#endif  // V8_ENABLE_CHECKS
-  }
+//  void operator delete(void*) {
+//#ifdef V8_ENABLE_CHECKS
+//    internal::Abort();
+//#endif  // V8_ENABLE_CHECKS
+//  }
   void operator delete[](void*) = delete;
 
  protected:
@@ -73,10 +73,11 @@ class GarbageCollectedBase {
  * };
  * \endcode
  */
-template <typename>
+template <typename T>
 class GarbageCollected : public internal::GarbageCollectedBase {
  public:
   using IsGarbageCollectedTypeMarker = void;
+  using ParentMostGarbageCollectedType = T;
 
  protected:
   GarbageCollected() = default;

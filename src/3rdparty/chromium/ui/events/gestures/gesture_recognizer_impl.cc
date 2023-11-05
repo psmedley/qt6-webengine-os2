@@ -62,7 +62,13 @@ bool RemoveValueFromMap(std::map<Key, T>* map, const Value& value) {
 
 GestureRecognizerImpl::GestureRecognizerImpl() = default;
 
-GestureRecognizerImpl::~GestureRecognizerImpl() = default;
+GestureRecognizerImpl::~GestureRecognizerImpl() {
+  // The gesture recognizer impl observes the gesture providers that are owned
+  // by `consumer_gesture_provider_`. Clear `consumer_gesture_provider_`
+  // explicitly so that the notifications sent by gesture providers during
+  // destruction are handled properly.
+  consumer_gesture_provider_.clear();
+}
 
 // Checks if this finger is already down, if so, returns the current target.
 // Otherwise, returns NULL.
@@ -388,9 +394,36 @@ void GestureRecognizerImpl::RemoveGestureEventHelper(
     helpers_.erase(it);
 }
 
+bool GestureRecognizerImpl::DoesConsumerHaveActiveTouch(
+    GestureConsumer* consumer) const {
+  for (const auto& id_consumer_pair : touch_id_target_) {
+    if (id_consumer_pair.second == consumer)
+      return true;
+  }
+
+  return false;
+}
+
+void GestureRecognizerImpl::SendSynthesizedEndEvents(
+    GestureConsumer* consumer) {
+  GetGestureProviderForConsumer(consumer)->SendSynthesizedEndEvents();
+}
+
 void GestureRecognizerImpl::OnGestureEvent(GestureConsumer* raw_input_consumer,
                                            GestureEvent* event) {
   DispatchGestureEvent(raw_input_consumer, event);
+}
+
+void GestureRecognizerImpl::OnGestureProviderAuraWillBeDestroyed(
+    GestureProviderAura* gesture_provider) {
+  // Clean `event_to_gesture_provider_` by removing invalid raw pointers.
+  for (auto iter = event_to_gesture_provider_.begin();
+       iter != event_to_gesture_provider_.end();) {
+    if (iter->second == gesture_provider)
+      iter = event_to_gesture_provider_.erase(iter);
+    else
+      ++iter;
+  }
 }
 
 GestureEventHelper* GestureRecognizerImpl::FindDispatchHelperForConsumer(

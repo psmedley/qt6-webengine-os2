@@ -79,6 +79,13 @@ typedef NSAutoreleasePool AutoreleasePoolType;
 
 class BASE_EXPORT MessagePumpCFRunLoopBase : public MessagePump {
  public:
+  enum class LudicrousSlackSetting : uint8_t {
+    kLudicrousSlackUninitialized,
+    kLudicrousSlackOff,
+    kLudicrousSlackOn,
+    kLudicrousSlackSuspended,
+  };
+
   // MessagePump:
   void Run(Delegate* delegate) override;
   void Quit() override;
@@ -94,6 +101,11 @@ class BASE_EXPORT MessagePumpCFRunLoopBase : public MessagePump {
   virtual void Attach(Delegate* delegate);
   virtual void Detach();
 #endif  // OS_IOS
+
+  // Exposed for testing.
+  LudicrousSlackSetting GetLudicrousSlackStateForTesting() const {
+    return GetLudicrousSlackState();
+  }
 
  protected:
   // Needs access to CreateAutoreleasePool.
@@ -149,6 +161,10 @@ class BASE_EXPORT MessagePumpCFRunLoopBase : public MessagePump {
   // The maximum number of run loop modes that can be monitored.
   static constexpr int kNumModes = 4;
 
+  // Returns the current ludicrous slack state, which implies reading both the
+  // feature flag and the suspension state.
+  LudicrousSlackSetting GetLudicrousSlackState() const;
+
   // All sources of delayed work scheduling converge to this, using TimeDelta
   // avoids querying Now() for key callers.
   void ScheduleDelayedWorkImpl(TimeDelta delta);
@@ -180,6 +196,9 @@ class BASE_EXPORT MessagePumpCFRunLoopBase : public MessagePump {
   // permits nestable tasks.
   static void RunNestingDeferredWorkSource(void* info);
   void RunNestingDeferredWork();
+
+  // Called before the run loop goes to sleep to notify delegate.
+  void BeforeWait();
 
   // Schedules possible nesting-deferred work to be processed before the run
   // loop goes to sleep, exits, or begins processing sources at the top of its
@@ -229,6 +248,10 @@ class BASE_EXPORT MessagePumpCFRunLoopBase : public MessagePump {
   Delegate* delegate_;
 
   base::TimerSlack timer_slack_;
+
+  // Cache the ludicrous slack setting.
+  LudicrousSlackSetting ludicrous_slack_setting_ =
+      LudicrousSlackSetting::kLudicrousSlackUninitialized;
 
   // The recursion depth of the currently-executing CFRunLoopRun loop on the
   // run loop's thread.  0 if no run loops are running inside of whatever scope

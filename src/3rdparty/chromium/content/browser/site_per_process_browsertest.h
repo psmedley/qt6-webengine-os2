@@ -23,6 +23,10 @@ class SitePerProcessBrowserTestBase : public ContentBrowserTest {
  public:
   SitePerProcessBrowserTestBase();
 
+  SitePerProcessBrowserTestBase(const SitePerProcessBrowserTestBase&) = delete;
+  SitePerProcessBrowserTestBase& operator=(
+      const SitePerProcessBrowserTestBase&) = delete;
+
  protected:
   std::string DepictFrameTree(FrameTreeNode* node);
 
@@ -37,11 +41,11 @@ class SitePerProcessBrowserTestBase : public ContentBrowserTest {
       FrameTreeNode* frame_tree_node,
       const blink::mojom::ViewportIntersectionState& intersection_state);
 
+  void RunPostedTasks();
+
  private:
   FrameTreeVisualizer visualizer_;
   base::test::ScopedFeatureList feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(SitePerProcessBrowserTestBase);
 };
 
 class SitePerProcessBrowserTest
@@ -50,12 +54,14 @@ class SitePerProcessBrowserTest
  public:
   SitePerProcessBrowserTest();
 
+  SitePerProcessBrowserTest(const SitePerProcessBrowserTest&) = delete;
+  SitePerProcessBrowserTest& operator=(const SitePerProcessBrowserTest&) =
+      delete;
+
   std::string GetExpectedOrigin(const std::string& host);
 
  private:
   base::test::ScopedFeatureList feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(SitePerProcessBrowserTest);
 };
 
 }  // namespace content

@@ -19,15 +19,9 @@
 
 AXRootObjWrapper::AXRootObjWrapper(views::AXAuraObjCache::Delegate* delegate,
                                    views::AXAuraObjCache* cache)
-    : AXAuraObjWrapper(cache), delegate_(delegate) {
-  if (display::Screen::GetScreen())
-    display::Screen::GetScreen()->AddObserver(this);
-}
+    : AXAuraObjWrapper(cache), delegate_(delegate) {}
 
-AXRootObjWrapper::~AXRootObjWrapper() {
-  if (display::Screen::GetScreen())
-    display::Screen::GetScreen()->RemoveObserver(this);
-}
+AXRootObjWrapper::~AXRootObjWrapper() = default;
 
 bool AXRootObjWrapper::HasChild(views::AXAuraObjWrapper* child) {
   std::vector<views::AXAuraObjWrapper*> children;
@@ -46,7 +40,11 @@ void AXRootObjWrapper::GetChildren(
 
 void AXRootObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
   out_node_data->id = unique_id_.Get();
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  out_node_data->role = ax::mojom::Role::kClient;
+#else
   out_node_data->role = ax::mojom::Role::kDesktop;
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
   display::Screen* screen = display::Screen::GetScreen();
   if (!screen)

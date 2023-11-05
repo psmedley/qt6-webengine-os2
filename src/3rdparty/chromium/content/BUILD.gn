@@ -97,6 +97,7 @@ if (is_component_build) {
       "//base",
       "//build:chromeos_buildflags",
       "//media:media_buildflags",
+      "//printing/buildflags",
       "//sandbox:sandbox_buildflags",
       "//sandbox/linux:sandbox",
       "//sandbox/policy",
@@ -119,6 +120,8 @@ grit("content_resources") {
   ]
   deps = [
     "//gpu/ipc/common:vulkan_interface_webui_js",
+    "//ui/base/mojom:mojom_js",
+    "//ui/gfx/geometry/mojom:mojom_js",
     "//url/mojom:url_mojom_origin_js",
     "//url/mojom:url_mojom_origin_webui_js",
   ]

@@ -5,6 +5,7 @@
 #include "content/browser/devtools/worker_devtools_agent_host.h"
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "content/browser/devtools/devtools_session.h"
 #include "content/browser/devtools/protocol/io_handler.h"
 #include "content/browser/devtools/protocol/network_handler.h"
@@ -16,6 +17,10 @@
 #include "content/public/common/child_process_host.h"
 
 namespace content {
+
+namespace protocol {
+class TargetAutoAttacher;
+}  // namespace protocol
 
 WorkerDevToolsAgentHost::WorkerDevToolsAgentHost(
     int process_id,
@@ -31,6 +36,8 @@ WorkerDevToolsAgentHost::WorkerDevToolsAgentHost(
       url_(url),
       name_(name),
       parent_id_(parent_id),
+      auto_attacher_(std::make_unique<protocol::RendererAutoAttacherBase>(
+          GetRendererChannel())),
       destroyed_callback_(std::move(destroyed_callback)),
       devtools_worker_token_(devtools_worker_token) {
   DCHECK(agent_remote);
@@ -90,7 +97,7 @@ bool WorkerDevToolsAgentHost::AttachSession(DevToolsSession* session,
   session->AddHandler(std::make_unique<protocol::IOHandler>(GetIOContext()));
   session->AddHandler(std::make_unique<protocol::TargetHandler>(
       protocol::TargetHandler::AccessMode::kAutoAttachOnly, GetId(),
-      GetRendererChannel(), session->GetRootSession()));
+      auto_attacher_.get(), session->GetRootSession()));
   session->AddHandler(std::make_unique<protocol::NetworkHandler>(
       GetId(), devtools_worker_token_, GetIOContext(), base::DoNothing()));
   return true;
@@ -109,11 +116,11 @@ DedicatedWorkerHost* WorkerDevToolsAgentHost::GetDedicatedWorkerHost() {
       blink::DedicatedWorkerToken(devtools_worker_token_));
 }
 
-base::Optional<network::CrossOriginEmbedderPolicy>
+absl::optional<network::CrossOriginEmbedderPolicy>
 WorkerDevToolsAgentHost::cross_origin_embedder_policy(const std::string&) {
   DedicatedWorkerHost* host = GetDedicatedWorkerHost();
   if (!host) {
-    return base::nullopt;
+    return absl::nullopt;
   }
   return host->cross_origin_embedder_policy();
 }

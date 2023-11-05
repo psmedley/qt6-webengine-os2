@@ -170,7 +170,6 @@ void SVGAnimationElement::ParseAttribute(
     if (!ParseValues(params.new_value, values_)) {
       ReportAttributeParsingError(SVGParseStatus::kParsingFailed, name,
                                   params.new_value);
-      return;
     }
     UpdateAnimationMode();
     AnimationAttributeChanged();
@@ -385,9 +384,8 @@ void SVGAnimationElement::CalculateKeyTimesForCalcModePaced() {
     total_distance += distance;
     calculated_key_times.push_back(distance);
   }
-  if (!total_distance) {
+  if (!std::isfinite(total_distance) || !total_distance)
     return;
-  }
 
   // Normalize.
   for (unsigned n = 1; n < calculated_key_times.size() - 1; ++n) {

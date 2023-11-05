@@ -54,6 +54,9 @@ const int kDefaultDownloadExpiredTimeInDays = 90;
 // Default time for an overwritten download to be removed from the history.
 const int kDefaultOverwrittenDownloadExpiredTimeInDays = 90;
 
+// Default buffer size in bytes to write to the download file.
+const int kDefaultDownloadFileBufferSize = 4096;
+
 #if defined(OS_ANDROID)
 // Default maximum length of a downloaded file name on Android.
 const int kDefaultMaxFileNameLengthOnAndroid = 127;
@@ -269,6 +272,7 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
   request->url = params->url();
   request->request_initiator = params->initiator();
   request->trusted_params = network::ResourceRequest::TrustedParams();
+  request->has_user_gesture = params->has_user_gesture();
 
   if (params->isolation_info().has_value()) {
     request->trusted_params->isolation_info = params->isolation_info().value();
@@ -280,8 +284,10 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
     // cross-site URL has been visited before.
     url::Origin origin = url::Origin::Create(params->url());
     request->trusted_params->isolation_info = net::IsolationInfo::Create(
-        net::IsolationInfo::RequestType::kMainFrame, origin, origin,
-        net::SiteForCookies::FromOrigin(origin));
+        params->update_first_party_url_on_redirect()
+            ? net::IsolationInfo::RequestType::kMainFrame
+            : net::IsolationInfo::RequestType::kOther,
+        origin, origin, net::SiteForCookies::FromOrigin(origin));
     request->site_for_cookies = net::SiteForCookies::FromUrl(params->url());
   }
 
@@ -289,7 +295,8 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
   request->referrer = params->referrer();
   request->referrer_policy = params->referrer_policy();
   request->is_main_frame = true;
-  request->update_first_party_url_on_redirect = true;
+  request->update_first_party_url_on_redirect =
+      params->update_first_party_url_on_redirect();
 
   // Downloads should be treated as navigations from Fetch spec perspective.
   // See also:
@@ -424,6 +431,7 @@ DownloadDBEntry CreateDownloadDBEntryFromItem(const DownloadItemImpl& item) {
   in_progress_info.total_bytes = item.GetTotalBytes();
   in_progress_info.current_path = item.GetFullPath();
   in_progress_info.target_path = item.GetTargetFilePath();
+  in_progress_info.reroute_info = item.GetRerouteInfo();
   in_progress_info.received_bytes = item.GetReceivedBytes();
   in_progress_info.start_time = item.GetStartTime();
   in_progress_info.end_time = item.GetEndTime();
@@ -438,6 +446,7 @@ DownloadDBEntry CreateDownloadDBEntryFromItem(const DownloadItemImpl& item) {
   in_progress_info.bytes_wasted = item.GetBytesWasted();
   in_progress_info.auto_resume_count = item.GetAutoResumeCount();
   in_progress_info.download_schedule = item.GetDownloadSchedule();
+  in_progress_info.credentials_mode = item.GetCredentialsMode();
 
   download_info.in_progress_info = in_progress_info;
 
@@ -448,13 +457,13 @@ DownloadDBEntry CreateDownloadDBEntryFromItem(const DownloadItemImpl& item) {
 }
 
 std::unique_ptr<DownloadEntry> CreateDownloadEntryFromDownloadDBEntry(
-    base::Optional<DownloadDBEntry> entry) {
+    absl::optional<DownloadDBEntry> entry) {
   if (!entry || !entry->download_info)
     return nullptr;
 
-  base::Optional<InProgressInfo> in_progress_info =
+  absl::optional<InProgressInfo> in_progress_info =
       entry->download_info->in_progress_info;
-  base::Optional<UkmInfo> ukm_info = entry->download_info->ukm_info;
+  absl::optional<UkmInfo> ukm_info = entry->download_info->ukm_info;
   if (!ukm_info || !in_progress_info)
     return nullptr;
 
@@ -653,6 +662,12 @@ base::TimeDelta GetOverwrittenDownloadDeleteTime() {
       kOverwrittenDownloadDeleteTimeFinchKey,
       kDefaultOverwrittenDownloadExpiredTimeInDays);
   return base::TimeDelta::FromDays(expired_days);
+}
+
+int GetDownloadFileBufferSize() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kAllowFileBufferSizeControl, kDownloadFileBufferSizeFinchKey,
+      kDefaultDownloadFileBufferSize);
 }
 
 }  // namespace download

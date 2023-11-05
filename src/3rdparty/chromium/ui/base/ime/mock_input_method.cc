@@ -70,6 +70,12 @@ bool MockInputMethod::OnUntranslatedIMEMessage(const MSG event,
     *result = NativeEventResult();
   return false;
 }
+
+void MockInputMethod::OnInputLocaleChanged() {}
+
+bool MockInputMethod::IsInputLocaleCJK() const {
+  return false;
+}
 #endif
 
 void MockInputMethod::OnTextInputTypeChanged(const TextInputClient* client) {
@@ -85,40 +91,22 @@ void MockInputMethod::OnCaretBoundsChanged(const TextInputClient* client) {
 void MockInputMethod::CancelComposition(const TextInputClient* client) {
 }
 
-void MockInputMethod::OnInputLocaleChanged() {
-}
-
-bool MockInputMethod::IsInputLocaleCJK() const {
-  return false;
-}
-
 TextInputType MockInputMethod::GetTextInputType() const {
   return TEXT_INPUT_TYPE_NONE;
-}
-
-TextInputMode MockInputMethod::GetTextInputMode() const {
-  return TEXT_INPUT_MODE_DEFAULT;
-}
-
-int MockInputMethod::GetTextInputFlags() const {
-  return 0;
-}
-
-bool MockInputMethod::CanComposeInline() const {
-  return true;
 }
 
 bool MockInputMethod::IsCandidatePopupOpen() const {
   return false;
 }
 
-bool MockInputMethod::GetClientShouldDoLearning() {
-  return false;
-}
-
 void MockInputMethod::ShowVirtualKeyboardIfEnabled() {
   for (InputMethodObserver& observer : observer_list_)
     observer.OnShowVirtualKeyboardIfEnabled();
+}
+
+void MockInputMethod::SetVirtualKeyboardVisibilityIfEnabled(bool should_show) {
+  for (InputMethodObserver& observer : observer_list_)
+    observer.OnVirtualKeyboardVisibilityChangedIfEnabled(should_show);
 }
 
 void MockInputMethod::AddObserver(InputMethodObserver* observer) {

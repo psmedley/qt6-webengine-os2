@@ -27,6 +27,11 @@
        * @type {?function(!ExtensionDescriptor)}
        */
       this._addExtensionCallback = null;
+
+      /**
+       * @type {!Array<string>}
+       */
+      this._originsForbiddenForExtensions = [];
     }
 
     /**
@@ -86,6 +91,20 @@
           this._pendingExtensionDescriptors.push(...extensions);
         }
       }
+    }
+
+    /**
+     * @param {!Array<string>} forbiddenOrigins
+     */
+    setOriginsForbiddenForExtensions(forbiddenOrigins) {
+      this._originsForbiddenForExtensions = forbiddenOrigins;
+    }
+
+    /**
+     * @return {!Array<string>}
+     */
+    getOriginsForbiddenForExtensions() {
+      return this._originsForbiddenForExtensions;
     }
 
     /**
@@ -379,6 +398,8 @@
     CssEditorOpened: 'DevTools.CssEditorOpened',
     DeveloperResourceLoaded: 'DevTools.DeveloperResourceLoaded',
     DeveloperResourceScheme: 'DevTools.DeveloperResourceScheme',
+    LinearMemoryInspectorRevealedFrom: 'DevTools.LinearMemoryInspector.RevealedFrom',
+    LinearMemoryInspectorTarget: 'DevTools.LinearMemoryInspector.Target',
   };
 
   /**
@@ -1322,30 +1343,6 @@
           this.name = selector;
         }
       });
-
-      function overrideCreateElementWithClass() {
-        window.removeEventListener('DOMContentLoaded', overrideCreateElementWithClass);
-
-        const origCreateElementWithClass = Document.prototype.createElementWithClass;
-        Document.prototype.createElementWithClass = function(tagName, className, ...rest) {
-          if (tagName !== 'button' || (className !== 'soft-dropdown' && className !== 'dropdown-button')) {
-            return origCreateElementWithClass.call(this, tagName, className, ...rest);
-          }
-          const element = origCreateElementWithClass.call(this, 'div', className, ...rest);
-          element.tabIndex = 0;
-          element.role = 'button';
-          return element;
-        };
-      }
-
-      // Document.prototype.createElementWithClass is a DevTools method, so we
-      // need to wait for DOMContentLoaded in order to override it.
-      if (window.document.head &&
-          (window.document.readyState === 'complete' || window.document.readyState === 'interactive')) {
-        overrideCreateElementWithClass();
-      } else {
-        window.addEventListener('DOMContentLoaded', overrideCreateElementWithClass);
-      }
     }
 
     // Custom Elements V0 polyfill

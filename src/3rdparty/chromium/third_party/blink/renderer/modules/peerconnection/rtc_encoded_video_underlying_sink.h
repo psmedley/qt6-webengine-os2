@@ -7,7 +7,6 @@
 
 #include "third_party/blink/renderer/core/streams/underlying_sink_base.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/webrtc/api/frame_transformer_interface.h"
 
 namespace blink {
 
@@ -19,9 +18,7 @@ class MODULES_EXPORT RTCEncodedVideoUnderlyingSink final
  public:
   using TransformerCallback =
       base::RepeatingCallback<RTCEncodedVideoStreamTransformer*()>;
-  RTCEncodedVideoUnderlyingSink(ScriptState*,
-                                TransformerCallback,
-                                webrtc::TransformableFrameInterface::Direction);
+  RTCEncodedVideoUnderlyingSink(ScriptState*, TransformerCallback);
 
   // UnderlyingSinkBase
   ScriptPromise start(ScriptState*,
@@ -40,7 +37,6 @@ class MODULES_EXPORT RTCEncodedVideoUnderlyingSink final
 
  private:
   TransformerCallback transformer_callback_;
-  webrtc::TransformableFrameInterface::Direction expected_direction_;
 };
 
 }  // namespace blink

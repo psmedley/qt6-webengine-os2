@@ -5,6 +5,7 @@
 #include "content/browser/accessibility/hit_testing_browsertest.h"
 
 #include "base/check.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
@@ -55,6 +56,8 @@ void AccessibilityHitTestingBrowserTest::SetUpCommandLine(
       base::StringPrintf("%.2f", device_scale_factor));
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kEnableUseZoomForDSF, use_zoom_for_dsf ? "true" : "false");
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kEnableBlinkFeatures, "AccessibilityAriaTouchPassthrough");
 }
 
 std::string AccessibilityHitTestingBrowserTest::TestPassToString::operator()(
@@ -341,8 +344,14 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(::testing::Values(1, 2), ::testing::Bool()),
     AccessibilityHitTestingBrowserTest::TestPassToString());
 
+#if defined(THREAD_SANITIZER)
+// TODO(https://crbug.com/1224979): Times out flakily on TSAN builds.
+#define MAYBE_CachingAsyncHitTest DISABLED_CachingAsyncHitTest
+#else
+#define MAYBE_CachingAsyncHitTest CachingAsyncHitTest
+#endif
 IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest,
-                       CachingAsyncHitTest) {
+                       MAYBE_CachingAsyncHitTest) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   EXPECT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
@@ -377,7 +386,13 @@ IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest,
   }
 }
 
-IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest, HitTest) {
+#if defined(THREAD_SANITIZER)
+// TODO(https://crbug.com/1224938): Times out flakily on TSAN builds.
+#define MAYBE_HitTest DISABLED_HitTest
+#else
+#define MAYBE_HitTest HitTest
+#endif
+IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest, MAYBE_HitTest) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   EXPECT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
@@ -508,14 +523,11 @@ IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingCrossProcessBrowserTest,
 
   // Scroll div up 100px.
   int scroll_delta = 100;
-  double actual_scroll_delta = 0;
   std::string scroll_string = base::StringPrintf(
-      "window.scrollTo(0, %d); "
-      "window.domAutomationController.send(window.scrollY);",
-      scroll_delta);
-  EXPECT_TRUE(ExecuteScriptAndExtractDouble(
-      child->current_frame_host(), scroll_string, &actual_scroll_delta));
-  EXPECT_NEAR(static_cast<double>(scroll_delta), actual_scroll_delta, 1.0);
+      "window.scrollTo(0, %d); window.scrollY;", scroll_delta);
+  EXPECT_NEAR(
+      EvalJs(child->current_frame_host(), scroll_string).ExtractDouble(),
+      static_cast<double>(scroll_delta), 1.0);
 
   // After scrolling.
   {
@@ -635,8 +647,14 @@ IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest,
   }
 }
 
+#if defined(THREAD_SANITIZER)
+// TODO(https://crbug.com/1224978): Times out flakily on TSAN builds.
+#define MAYBE_HitTest_WithPinchZoom DISABLED_HitTest_WithPinchZoom
+#else
+#define MAYBE_HitTest_WithPinchZoom HitTest_WithPinchZoom
+#endif
 IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest,
-                       HitTest_WithPinchZoom) {
+                       MAYBE_HitTest_WithPinchZoom) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   EXPECT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
@@ -752,9 +770,7 @@ IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest,
 
 // GetAXPlatformNode is currently only supported on windows and linux (excluding
 // Chrome OS or Chromecast)
-#if defined(OS_WIN) ||                                       \
-    ((defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) && \
-     !BUILDFLAG(IS_CHROMECAST))
+#if defined(OS_WIN) || (defined(OS_LINUX) && !BUILDFLAG(IS_CHROMECAST))
 IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingBrowserTest,
                        NearestLeafInIframes) {
   ASSERT_TRUE(embedded_test_server()->Start());

@@ -3,14 +3,13 @@
 // found in the LICENSE file.
 
 import 'chrome://resources/cr_elements/cr_grid/cr_grid.js';
-import '../../img.js';
+import 'chrome://resources/cr_elements/cr_auto_img/cr_auto_img.js';
 import '../../strings.m.js';
 import '../module_header.js';
 
-import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {I18nBehavior, loadTimeData} from '../../i18n_setup.js';
 import {ModuleDescriptor} from '../module_descriptor.js';
 
 import {FooProxy} from './foo_proxy.js';
@@ -82,12 +81,10 @@ function createDummyElement(titleId) {
 export const dummyDescriptor = new ModuleDescriptor(
     /*id=*/ 'dummy',
     /*name=*/ loadTimeData.getString('modulesDummyTitle'),
-    /*heightPx=*/ 314,
     () => Promise.resolve(createDummyElement('modulesDummyTitle')));
 
 /** @type {!ModuleDescriptor} */
 export const dummyDescriptor2 = new ModuleDescriptor(
     /*id=*/ 'dummy2',
     /*name=*/ loadTimeData.getString('modulesDummy2Title'),
-    /*heightPx=*/ 314,
     () => Promise.resolve(createDummyElement('modulesDummy2Title')));

@@ -5,9 +5,9 @@
 #ifndef COMPONENTS_PERMISSIONS_REQUEST_TYPE_H_
 #define COMPONENTS_PERMISSIONS_REQUEST_TYPE_H_
 
-#include "base/optional.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 enum class ContentSettingsType;
 
@@ -29,6 +29,7 @@ enum class RequestType {
   kClipboard,
   kDiskQuota,
 #if !defined(OS_ANDROID)
+  kFileHandling,
   kFontAccess,
 #endif
   kGeolocation,
@@ -40,7 +41,7 @@ enum class RequestType {
   kNfcDevice,
 #endif
   kNotifications,
-#if defined(OS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS) || defined(OS_WIN)
   kProtectedMediaIdentifier,
 #endif
 #if !defined(OS_ANDROID)
@@ -51,6 +52,9 @@ enum class RequestType {
   kVrSession,
 #if !defined(OS_ANDROID)
   kWindowPlacement,
+  kMaxValue = kWindowPlacement
+#else
+  kMaxValue = kVrSession
 #endif
 };
 
@@ -64,6 +68,9 @@ typedef const gfx::VectorIcon& IconId;
 
 RequestType ContentSettingsTypeToRequestType(
     ContentSettingsType content_settings_type);
+
+absl::optional<ContentSettingsType> RequestTypeToContentSettingsType(
+    RequestType request_type);
 
 // Returns the icon to display.
 IconId GetIconId(RequestType type);

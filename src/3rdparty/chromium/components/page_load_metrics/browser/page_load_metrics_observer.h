@@ -9,11 +9,9 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/optional.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
-#include "components/page_load_metrics/browser/page_load_metrics_event.h"
 #include "components/page_load_metrics/browser/page_load_metrics_observer_delegate.h"
 #include "components/page_load_metrics/common/page_load_timing.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "net/base/host_port_pair.h"
@@ -22,6 +20,7 @@
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/use_counter/use_counter_feature.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -30,11 +29,19 @@ class RenderFrameHost;
 
 namespace page_load_metrics {
 
+// Get bucketed value of viewport initial scale from given MobileFriendliness
+// metrics.
+int GetBucketedViewportInitialScale(const blink::MobileFriendliness& mf);
+
+// Get bucketed value of hardcoded viewport width from given MobileFriendliness
+// metrics.
+int GetBucketedViewportHardcodedWidth(const blink::MobileFriendliness& mf);
+
 // Struct for storing per-frame memory update data.
 struct MemoryUpdate {
-  content::GlobalFrameRoutingId routing_id;
+  content::GlobalRenderFrameHostId routing_id;
   int64_t delta_bytes;
-  MemoryUpdate(content::GlobalFrameRoutingId id, int64_t delta);
+  MemoryUpdate(content::GlobalRenderFrameHostId id, int64_t delta);
 };
 
 // Storage types reported to page load metrics observers on storage
@@ -124,34 +131,19 @@ struct PageRenderData {
 
   // How many times LayoutNG-based LayoutObject::UpdateLayout() is called.
   uint64_t ng_layout_call_count = 0;
+
+  uint64_t flexbox_ng_layout_block_count = 0;
+
+  uint64_t grid_ng_layout_block_count = 0;
 };
 
 // Information related to layout shift normalization for different strategies.
 struct NormalizedCLSData {
   NormalizedCLSData() = default;
 
-  // Maximum CLS of 300ms sliding windows.
-  double sliding_windows_duration300ms_max_cls = 0.0;
-
-  // Maximum CLS of 1000ms sliding windows.
-  double sliding_windows_duration1000ms_max_cls = 0.0;
-
   // Maximum CLS of session windows. The gap between two consecutive shifts is
   // not bigger than 1000ms and the maximum window size is 5000ms.
-  double session_windows_gap1000ms_max5000ms_max_cls = 0.0;
-
-  // Maximum CLS of session windows. The gap between two consecutive shifts is
-  // not bigger than 1000ms.
-  double session_windows_gap1000ms_maxMax_max_cls = 0.0;
-
-  // The average CLS of session windows. The gap between two consecutive shifts
-  // is not bigger than 5000ms.
-  double session_windows_gap5000ms_maxMax_average_cls = 0.0;
-
-  // Maximum CLS of session windows. The gap between two consecutive shifts is
-  // not bigger than 1000ms or segmented by a user input. The maximum window
-  // size is 5000ms.
-  double session_windows_by_inputs_gap1000ms_max5000ms_max_cls = 0.0;
+  float session_windows_gap1000ms_max5000ms_max_cls = 0.0;
 
   // If true, will not report the data in UKM.
   bool data_tainted = false;
@@ -167,8 +159,6 @@ struct ExtraRequestCompleteInfo {
       bool was_cached,
       int64_t raw_body_bytes,
       int64_t original_network_content_length,
-      std::unique_ptr<data_reduction_proxy::DataReductionProxyData>
-          data_reduction_proxy_data,
       network::mojom::RequestDestination request_destination,
       int net_error,
       std::unique_ptr<net::LoadTimingInfo> load_timing_info);
@@ -198,10 +188,6 @@ struct ExtraRequestCompleteInfo {
   // The number of body (not header) bytes that the data reduction proxy saw
   // before it compressed the requests.
   const int64_t original_network_content_length;
-
-  // Data related to data saver.
-  const std::unique_ptr<data_reduction_proxy::DataReductionProxyData>
-      data_reduction_proxy_data;
 
   // The type of the request as gleaned from the mime type.  This may
   // be more accurate than the type in the ExtraRequestStartInfo since we can
@@ -263,6 +249,15 @@ class PageLoadMetricsObserver {
   virtual ObservePolicy OnStart(content::NavigationHandle* navigation_handle,
                                 const GURL& currently_committed_url,
                                 bool started_in_foreground);
+
+  // For prerendered pages, OnPrerenderStart is called instead of OnStart. The
+  // default implementation returns STOP_OBSERVING, so that observers that are
+  // not aware of prerender will not see prerendered page loads.
+  // TODO(crbug.com/1190112): Prerender support is still in progress. Observers
+  // may not receive some signals.
+  virtual ObservePolicy OnPrerenderStart(
+      content::NavigationHandle* navigation_handle,
+      const GURL& currently_committed_url);
 
   // OnRedirect is triggered when a page load redirects to another URL.
   // The navigation handle holds relevant data for the navigation, but will
@@ -371,6 +366,9 @@ class PageLoadMetricsObserver {
   virtual void OnTimingUpdate(content::RenderFrameHost* subframe_rfh,
                               const mojom::PageLoadTiming& timing) {}
 
+  virtual void OnMobileFriendlinessUpdate(
+      const blink::MobileFriendliness& mobile_friendliness) {}
+
   // OnRenderDataUpdate is triggered when an updated PageRenderData is available
   // at the subframe level. This method may be called multiple times over the
   // course of the page load.
@@ -419,7 +417,8 @@ class PageLoadMetricsObserver {
   // coded as WebPerformance::
   // kRequestAnimationFramesToRecordAfterBackForwardCacheRestore.
   virtual void OnRequestAnimationFramesAfterBackForwardCacheRestoreInPage(
-      const mojom::BackForwardCacheTiming& timing) {}
+      const mojom::BackForwardCacheTiming& timing,
+      size_t index) {}
 
   // Unlike other paint callbacks, OnFirstMeaningfulPaintInMainFrameDocument is
   // tracked per document, and is reported for the main frame document only.
@@ -436,7 +435,7 @@ class PageLoadMetricsObserver {
   // Invoked when new use counter features are observed across all frames.
   virtual void OnFeaturesUsageObserved(
       content::RenderFrameHost* rfh,
-      const mojom::PageLoadFeatures& features) {}
+      const std::vector<blink::UseCounterFeature>& features) {}
 
   // The smoothness metrics is shared over shared-memory. The observer should
   // create a mapping (by calling |shared_memory.Map()|) so that they are able
@@ -515,7 +514,7 @@ class PageLoadMetricsObserver {
   virtual void OnLoadedResource(
       const ExtraRequestCompleteInfo& extra_request_complete_info) {}
 
-  virtual void FrameReceivedFirstUserActivation(
+  virtual void FrameReceivedUserActivation(
       content::RenderFrameHost* render_frame_host) {}
 
   // Called when the display property changes on the frame.
@@ -527,7 +526,9 @@ class PageLoadMetricsObserver {
   virtual void FrameSizeChanged(content::RenderFrameHost* render_frame_host,
                                 const gfx::Size& frame_size) {}
 
-  virtual void OnFrameDeleted(content::RenderFrameHost* render_frame_host) {}
+  virtual void OnRenderFrameDeleted(
+      content::RenderFrameHost* render_frame_host) {}
+  virtual void OnSubFrameDeleted(int frame_tree_node_id) {}
 
   // Called when a cookie is read for a resource request or by document.cookie.
   virtual void OnCookiesRead(const GURL& url,
@@ -549,15 +550,20 @@ class PageLoadMetricsObserver {
                                  bool blocked_by_policy,
                                  StorageType access_type) {}
 
-  // Called when |event| occurs in this page load.
-  virtual void OnEventOccurred(PageLoadMetricsEvent event) {}
+  // Called when prefetch is likely to occur in this page load.
+  virtual void OnPrefetchLikely() {}
 
   // Called when the page tracked was just activated after being loaded inside a
   // portal.
   virtual void DidActivatePortal(base::TimeTicks activation_time) {}
 
+  // Called when the page tracked was just activated after being prerendered.
+  // |navigation_handle| is for the activation navigation.
+  virtual void DidActivatePrerenderedPage(
+      content::NavigationHandle* navigation_handle) {}
+
   // Called when V8 per-frame memory usage updates are available. Each
-  // MemoryUpdate consists of a GlobalFrameRoutingId and a nonzero int64_t
+  // MemoryUpdate consists of a GlobalRenderFrameHostId and a nonzero int64_t
   // change in bytes used.
   virtual void OnV8MemoryChanged(
       const std::vector<MemoryUpdate>& memory_updates) {}

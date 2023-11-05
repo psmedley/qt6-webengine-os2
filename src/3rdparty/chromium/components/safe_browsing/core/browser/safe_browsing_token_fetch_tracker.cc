@@ -6,15 +6,14 @@
 
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task/post_task.h"
+#include "base/sequence_checker.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
-#include "components/safe_browsing/core/common/thread_utils.h"
 
 namespace safe_browsing {
 
 SafeBrowsingTokenFetchTracker::SafeBrowsingTokenFetchTracker()
     : weak_ptr_factory_(this) {
-  DCHECK(CurrentlyOnThread(ThreadID::UI));
 }
 
 SafeBrowsingTokenFetchTracker::~SafeBrowsingTokenFetchTracker() {
@@ -26,12 +25,12 @@ SafeBrowsingTokenFetchTracker::~SafeBrowsingTokenFetchTracker() {
 int SafeBrowsingTokenFetchTracker::StartTrackingTokenFetch(
     SafeBrowsingTokenFetcher::Callback on_token_fetched_callback,
     OnTokenFetchTimeoutCallback on_token_fetch_timeout_callback) {
-  DCHECK(CurrentlyOnThread(ThreadID::UI));
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   const int request_id = requests_sent_;
   requests_sent_++;
   callbacks_[request_id] = std::move(on_token_fetched_callback);
-  base::PostDelayedTask(
-      FROM_HERE, CreateTaskTraits(ThreadID::UI),
+  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
       base::BindOnce(&SafeBrowsingTokenFetchTracker::OnTokenFetchTimeout,
                      weak_ptr_factory_.GetWeakPtr(), request_id,
                      std::move(on_token_fetch_timeout_callback)),

@@ -5,9 +5,9 @@
 #ifndef MEDIA_BASE_FEEDBACK_SIGNAL_ACCUMULATOR_H_
 #define MEDIA_BASE_FEEDBACK_SIGNAL_ACCUMULATOR_H_
 
-#include "base/time/time.h"
-
 #include <algorithm>
+#include <cmath>
+#include "base/time/time.h"
 
 namespace media {
 

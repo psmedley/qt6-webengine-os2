@@ -9,15 +9,13 @@
 namespace performance_manager {
 
 // static
-const char* PageNode::ToString(PageNode::OpenedType opened_type) {
-  switch (opened_type) {
-    case PageNode::OpenedType::kInvalid:
+const char* PageNode::ToString(PageNode::EmbeddingType embedding_type) {
+  switch (embedding_type) {
+    case PageNode::EmbeddingType::kInvalid:
       return "kInvalid";
-    case PageNode::OpenedType::kPopup:
-      return "kPopup";
-    case PageNode::OpenedType::kGuestView:
+    case PageNode::EmbeddingType::kGuestView:
       return "kGuestView";
-    case PageNode::OpenedType::kPortal:
+    case PageNode::EmbeddingType::kPortal:
       return "kPortal";
   }
   NOTREACHED();
@@ -40,6 +38,19 @@ const char* PageNode::ToString(PageNode::LoadingState loading_state) {
   NOTREACHED();
 }
 
+// static
+const char* PageNode::ToString(PageNode::PageState page_state) {
+  switch (page_state) {
+    case PageState::kActive:
+      return "kActive";
+    case PageState::kPrerendering:
+      return "kPrerendering";
+    case PageState::kBackForwardCache:
+      return "kBackForwardCache";
+  }
+  NOTREACHED();
+}
+
 PageNode::PageNode() = default;
 PageNode::~PageNode() = default;
 
@@ -51,8 +62,8 @@ PageNode::ObserverDefaultImpl::~ObserverDefaultImpl() = default;
 
 std::ostream& operator<<(
     std::ostream& os,
-    performance_manager::PageNode::OpenedType opened_type) {
-  os << performance_manager::PageNode::ToString(opened_type);
+    performance_manager::PageNode::EmbeddingType embedding_type) {
+  os << performance_manager::PageNode::ToString(embedding_type);
   return os;
 }
 

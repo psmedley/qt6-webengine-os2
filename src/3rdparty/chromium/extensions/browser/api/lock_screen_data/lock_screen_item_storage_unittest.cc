@@ -12,13 +12,13 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/containers/queue.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -194,7 +194,7 @@ class ItemRegistry {
         std::make_unique<base::DictionaryValue>();
 
     for (const std::string& item_id : items_)
-      result->Set(item_id, std::make_unique<base::DictionaryValue>());
+      result->SetKey(item_id, base::Value(base::Value::Type::DICTIONARY));
 
     return result;
   }

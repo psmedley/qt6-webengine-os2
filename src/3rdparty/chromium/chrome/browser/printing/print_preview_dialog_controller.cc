@@ -4,16 +4,14 @@
 
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
 
-#include <stddef.h>
-
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/auto_reset.h"
+#include "base/containers/contains.h"
 #include "base/macros.h"
-#include "base/path_service.h"
-#include "base/strings/utf_string_conversions.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -24,16 +22,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/url_constants.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/host_zoom_map.h"
-#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
@@ -49,7 +44,7 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/chromeos/arc/print_spooler/print_session_impl.h"
+#include "chrome/browser/ash/arc/print_spooler/print_session_impl.h"
 #endif
 
 using content::NavigationController;
@@ -85,8 +80,8 @@ class PrintPreviewDialogDelegate : public ui::WebDialogDelegate,
   ~PrintPreviewDialogDelegate() override;
 
   ui::ModalType GetDialogModalType() const override;
-  base::string16 GetDialogTitle() const override;
-  base::string16 GetAccessibleDialogTitle() const override;
+  std::u16string GetDialogTitle() const override;
+  std::u16string GetAccessibleDialogTitle() const override;
   GURL GetDialogContentURL() const override;
   void GetWebUIMessageHandlers(
       std::vector<WebUIMessageHandler*>* handlers) const override;
@@ -116,12 +111,12 @@ ui::ModalType PrintPreviewDialogDelegate::GetDialogModalType() const {
   return ui::MODAL_TYPE_WINDOW;
 }
 
-base::string16 PrintPreviewDialogDelegate::GetDialogTitle() const {
+std::u16string PrintPreviewDialogDelegate::GetDialogTitle() const {
   // Only used on Windows? UI folks prefer no title.
-  return base::string16();
+  return std::u16string();
 }
 
-base::string16 PrintPreviewDialogDelegate::GetAccessibleDialogTitle() const {
+std::u16string PrintPreviewDialogDelegate::GetAccessibleDialogTitle() const {
   return l10n_util::GetStringUTF16(IDS_PRINT_PREVIEW_TITLE);
 }
 
@@ -243,19 +238,16 @@ WebContents* PrintPreviewDialogController::GetOrCreatePreviewDialog(
 
 WebContents* PrintPreviewDialogController::GetPrintPreviewForContents(
     WebContents* contents) const {
-  // |preview_dialog_map_| is keyed by the preview dialog, so if find()
-  // succeeds, then |contents| is the preview dialog.
-  auto it = preview_dialog_map_.find(contents);
-  if (it != preview_dialog_map_.end())
+  // |preview_dialog_map_| is keyed by the preview dialog, so if
+  // base::Contains() succeeds, then |contents| is the preview dialog.
+  if (base::Contains(preview_dialog_map_, contents))
     return contents;
 
-  for (it = preview_dialog_map_.begin();
-       it != preview_dialog_map_.end();
-       ++it) {
+  for (const auto& it : preview_dialog_map_) {
     // If |contents| is an initiator.
-    if (contents == it->second) {
+    if (contents == it.second) {
       // Return the associated preview dialog.
-      return it->first;
+      return it.first;
     }
   }
   return nullptr;
@@ -264,7 +256,7 @@ WebContents* PrintPreviewDialogController::GetPrintPreviewForContents(
 WebContents* PrintPreviewDialogController::GetInitiator(
     WebContents* preview_dialog) {
   auto it = preview_dialog_map_.find(preview_dialog);
-  return (it != preview_dialog_map_.end()) ? it->second : nullptr;
+  return it != preview_dialog_map_.end() ? it->second : nullptr;
 }
 
 void PrintPreviewDialogController::ForEachPreviewDialog(
@@ -275,8 +267,8 @@ void PrintPreviewDialogController::ForEachPreviewDialog(
 
 // static
 bool PrintPreviewDialogController::IsPrintPreviewURL(const GURL& url) {
-  return (url.SchemeIs(content::kChromeUIScheme) &&
-          url.host_piece() == chrome::kChromeUIPrintHost);
+  return url.SchemeIs(content::kChromeUIScheme) &&
+         url.host_piece() == chrome::kChromeUIPrintHost;
 }
 
 void PrintPreviewDialogController::EraseInitiatorInfo(
@@ -286,7 +278,7 @@ void PrintPreviewDialogController::EraseInitiatorInfo(
     return;
 
   web_contents_collection_.StopObserving(it->second);
-  preview_dialog_map_[preview_dialog] = nullptr;
+  it->second = nullptr;
 }
 
 PrintPreviewDialogController::~PrintPreviewDialogController() = default;

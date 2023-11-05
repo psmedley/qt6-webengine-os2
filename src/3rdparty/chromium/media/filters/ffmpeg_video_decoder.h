@@ -41,7 +41,6 @@ class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
 
   // VideoDecoder implementation.
   VideoDecoderType GetDecoderType() const override;
-  std::string GetDisplayName() const override;
   void Initialize(const VideoDecoderConfig& config,
                   bool low_delay,
                   CdmContext* cdm_context,
@@ -57,6 +56,8 @@ class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
   int GetVideoBuffer(struct AVCodecContext* codec_context,
                      AVFrame* frame,
                      int flags);
+
+  void force_allocation_error_for_testing() { force_allocation_error_ = true; }
 
  private:
   enum DecoderState {
@@ -80,9 +81,9 @@ class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  MediaLog* media_log_;
+  MediaLog* const media_log_;
 
-  DecoderState state_;
+  DecoderState state_ = kUninitialized;
 
   OutputCB output_cb_;
 
@@ -93,7 +94,9 @@ class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
 
   VideoFramePool frame_pool_;
 
-  bool decode_nalus_;
+  bool decode_nalus_ = false;
+
+  bool force_allocation_error_ = false;
 
   std::unique_ptr<FFmpegDecodingLoop> decoding_loop_;
 

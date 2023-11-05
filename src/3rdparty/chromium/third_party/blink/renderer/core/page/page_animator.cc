@@ -59,18 +59,21 @@ void PageAnimator::ServiceScriptedAnimations(
   Clock().SetAllowedToDynamicallyUpdateTime(false);
   Clock().UpdateTime(monotonic_animation_start_time);
 
-  DocumentsVector documents =
-      GetAllDocuments(page_->MainFrame(), OnlyNonThrottled);
+  DocumentsVector documents = GetAllDocuments(page_->MainFrame(), AllDocuments);
 
   for (auto& document : documents) {
-    ScopedFrameBlamer frame_blamer(document->GetFrame());
-    TRACE_EVENT0("blink,rail", "PageAnimator::serviceScriptedAnimations");
+    absl::optional<ScopedFrameBlamer> frame_blamer;
+    // TODO(szager): The following logic evolved piecemeal, and this conditional
+    // is suspect.
+    if (!document->View() || !document->View()->CanThrottleRendering()) {
+      frame_blamer.emplace(document->GetFrame());
+      TRACE_EVENT0("blink,rail", "PageAnimator::serviceScriptedAnimations");
+    }
     if (!document->View()) {
       document->GetDocumentAnimations()
           .UpdateAnimationTimingForAnimationFrame();
       continue;
     }
-    DCHECK(!document->View()->CanThrottleRendering());
     document->View()->ServiceScriptedAnimations(monotonic_animation_start_time);
   }
 
@@ -78,23 +81,14 @@ void PageAnimator::ServiceScriptedAnimations(
 }
 
 void PageAnimator::PostAnimate() {
-  DocumentsVector documents;
-  for (Frame* frame = page_->MainFrame(); frame;
-       frame = frame->Tree().TraverseNext()) {
-    if (frame->IsLocalFrame())
-      documents.push_back(To<LocalFrame>(frame)->GetDocument());
-  }
-
   // If we don't have an imminently incoming frame, we need to let the
   // AnimationClock update its own time to properly service out-of-lifecycle
   // events such as setInterval (see https://crbug.com/995806). This isn't a
   // perfect heuristic, but at the very least we know that if there is a pending
   // RAF we will be getting a new frame and thus don't need to unlock the clock.
-  bool next_frame_has_raf = false;
-  for (auto& document : documents)
-    next_frame_has_raf |= document->NextFrameHasPendingRAF();
-  if (!next_frame_has_raf)
+  if (!next_frame_has_pending_raf_)
     Clock().SetAllowedToDynamicallyUpdateTime(true);
+  next_frame_has_pending_raf_ = false;
 }
 
 void PageAnimator::SetHasCanvasInvalidation() {
@@ -105,9 +99,15 @@ void PageAnimator::ReportFrameAnimations(cc::AnimationHost* animation_host) {
   if (animation_host) {
     animation_host->SetHasCanvasInvalidation(has_canvas_invalidation_);
     animation_host->SetHasInlineStyleMutation(has_inline_style_mutation_);
+    animation_host->SetHasSmilAnimation(has_smil_animation_);
+    animation_host->SetCurrentFrameHadRaf(current_frame_had_raf_);
+    animation_host->SetNextFrameHasPendingRaf(next_frame_has_pending_raf_);
   }
   has_canvas_invalidation_ = false;
   has_inline_style_mutation_ = false;
+  has_smil_animation_ = false;
+  current_frame_had_raf_ = false;
+  // next_frame_has_pending_raf_ is reset at PostAnimate().
 }
 
 void PageAnimator::SetSuppressFrameRequestsWorkaroundFor704763Only(
@@ -121,6 +121,18 @@ void PageAnimator::SetSuppressFrameRequestsWorkaroundFor704763Only(
 
 void PageAnimator::SetHasInlineStyleMutation() {
   has_inline_style_mutation_ = true;
+}
+
+void PageAnimator::SetHasSmilAnimation() {
+  has_smil_animation_ = true;
+}
+
+void PageAnimator::SetCurrentFrameHadRaf() {
+  current_frame_had_raf_ = true;
+}
+
+void PageAnimator::SetNextFrameHasPendingRaf() {
+  next_frame_has_pending_raf_ = true;
 }
 
 DISABLE_CFI_PERF

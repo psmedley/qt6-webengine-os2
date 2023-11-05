@@ -16,7 +16,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/template_expressions.h"
 #include "ui/resources/grit/webui_generated_resources.h"
-#include "ui/resources/grit/webui_resources.h"
 
 namespace webui {
 
@@ -24,7 +23,7 @@ namespace {
 
 // Appends a script tag with a variable name |templateData| that has the JSON
 // assigned to it.
-void AppendJsonHtml(const base::DictionaryValue* json, std::string* output) {
+void AppendJsonHtml(const base::Value* json, std::string* output) {
   std::string javascript_string;
   AppendJsonJS(json, &javascript_string, /*from_js_module=*/false);
 
@@ -59,7 +58,7 @@ void AppendJsTemplateSourceHtml(std::string* output) {
   // fetch and cache the pointer of the jstemplate resource source text.
   std::string jstemplate_src =
       ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
-          IDR_WEBUI_JS_JSTEMPLATE_COMPILED_JS);
+          IDR_JSTEMPLATE_JSTEMPLATE_COMPILED_JS);
 
   if (jstemplate_src.empty()) {
     NOTREACHED() << "Unable to get jstemplate src";
@@ -72,22 +71,30 @@ void AppendJsTemplateSourceHtml(std::string* output) {
 }
 
 // Appends the code that processes the JsTemplate with the JSON. You should
-// call AppendJsTemplateSourceHtml and AppendJsonHtml before calling this.
-void AppendJsTemplateProcessHtml(
-    const base::StringPiece& template_id,
-    std::string* output) {
+// call AppendJsTemplateSourceHtml and AppendLoadTimeData before calling this.
+void AppendJsTemplateProcessHtml(const base::Value* json,
+                                 const base::StringPiece& template_id,
+                                 std::string* output) {
+  std::string jstext;
+  JSONStringValueSerializer serializer(&jstext);
+  serializer.Serialize(*json);
+
   output->append("<script>");
+  output->append("const pageData = ");
+  output->append(jstext);
+  output->append(";");
+  output->append("loadTimeData.data = pageData;");
   output->append("var tp = document.getElementById('");
   output->append(template_id.data(), template_id.size());
   output->append("');");
-  output->append("jstProcess(loadTimeData.createJsEvalContext(), tp);");
+  output->append("jstProcess(new JsEvalContext(pageData), tp);");
   output->append("</script>");
 }
 
 }  // namespace
 
 std::string GetI18nTemplateHtml(const base::StringPiece& html_template,
-                                const base::DictionaryValue* json) {
+                                const base::Value* json) {
   ui::TemplateReplacements replacements;
   ui::TemplateReplacementsFromDictionaryValue(*json, &replacements);
   std::string output =
@@ -100,21 +107,20 @@ std::string GetI18nTemplateHtml(const base::StringPiece& html_template,
 }
 
 std::string GetTemplatesHtml(const base::StringPiece& html_template,
-                             const base::DictionaryValue* json,
+                             const base::Value* json,
                              const base::StringPiece& template_id) {
   ui::TemplateReplacements replacements;
   ui::TemplateReplacementsFromDictionaryValue(*json, &replacements);
   std::string output =
       ui::ReplaceTemplateExpressions(html_template, replacements);
 
-  AppendLoadTimeData(&output);
-  AppendJsonHtml(json, &output);
   AppendJsTemplateSourceHtml(&output);
-  AppendJsTemplateProcessHtml(template_id, &output);
+  AppendLoadTimeData(&output);
+  AppendJsTemplateProcessHtml(json, template_id, &output);
   return output;
 }
 
-void AppendJsonJS(const base::DictionaryValue* json,
+void AppendJsonJS(const base::Value* json,
                   std::string* output,
                   bool from_js_module) {
   // Convert the template data to a json string.

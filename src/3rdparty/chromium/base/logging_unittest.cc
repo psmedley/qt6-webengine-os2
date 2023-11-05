@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <sstream>
+#include <string>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -12,9 +13,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/process/process.h"
 #include "base/run_loop.h"
 #include "base/sanitizer_buildflags.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
@@ -60,6 +61,7 @@
 #include "base/fuchsia/process_context.h"
 #include "base/fuchsia/test_log_listener_safe.h"
 #endif  // OS_FUCHSIA
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace logging {
 
@@ -291,7 +293,7 @@ TEST_F(LoggingTest, AlwaysLogErrorsToStderr) {
   EXPECT_TRUE(did_log_info);
   EXPECT_TRUE(did_log_error);
 }
-#endif
+#endif  // defined(OS_POSIX) || defined(OS_FUCHSIA)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(LoggingTest, InitWithFileDescriptor) {
@@ -712,7 +714,8 @@ namespace nested_test {
 
 #if defined(OS_FUCHSIA)
 
-// Verifies that calling the log macro goes to the Fuchsia system logs.
+// Verifies that calling the log macro goes to the Fuchsia system logs, by
+// default.
 TEST_F(LoggingTest, FuchsiaSystemLogging) {
   constexpr char kLogMessage[] = "system log!";
 
@@ -721,17 +724,21 @@ TEST_F(LoggingTest, FuchsiaSystemLogging) {
   // Connect the test LogListenerSafe to the Log.
   std::unique_ptr<fuchsia::logger::LogFilterOptions> options =
       std::make_unique<fuchsia::logger::LogFilterOptions>();
-  options->tags = {"base_unittests__exec"};
+  options->filter_by_pid = true;
+  options->pid = base::Process::Current().Pid();
   fuchsia::logger::LogPtr log = base::ComponentContextForProcess()
                                     ->svc()
                                     ->Connect<fuchsia::logger::Log>();
   listener.ListenToLog(log.get(), std::move(options));
 
+  // Ensure that logging is directed to the system debug log.
+  CHECK(InitLogging({.logging_dest = LOG_DEFAULT}));
+
   // Emit the test log message, and spin the loop until it is reported to the
   // test listener.
   LOG(ERROR) << kLogMessage;
 
-  base::Optional<fuchsia::logger::LogMessage> logged_message =
+  absl::optional<fuchsia::logger::LogMessage> logged_message =
       listener.RunUntilMessageReceived(kLogMessage);
 
   ASSERT_TRUE(logged_message.has_value());
@@ -860,33 +867,33 @@ TEST_F(LoggingTest, LogCrosSyslogFormat) {
 }
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-// We define a custom operator<< for string16 so we can use it with logging.
-// This tests that conversion.
+// We define a custom operator<< for std::u16string so we can use it with
+// logging. This tests that conversion.
 TEST_F(LoggingTest, String16) {
   // Basic stream test.
   {
     std::ostringstream stream;
-    stream << "Empty '" << base::string16() << "' standard '"
-           << base::string16(base::ASCIIToUTF16("Hello, world")) << "'";
+    stream << "Empty '" << std::u16string() << "' standard '"
+           << std::u16string(u"Hello, world") << "'";
     EXPECT_STREQ("Empty '' standard 'Hello, world'", stream.str().c_str());
   }
 
   // Interesting edge cases.
   {
     // These should each get converted to the invalid character: EF BF BD.
-    base::string16 initial_surrogate;
+    std::u16string initial_surrogate;
     initial_surrogate.push_back(0xd800);
-    base::string16 final_surrogate;
+    std::u16string final_surrogate;
     final_surrogate.push_back(0xdc00);
 
     // Old italic A = U+10300, will get converted to: F0 90 8C 80 'z'.
-    base::string16 surrogate_pair;
+    std::u16string surrogate_pair;
     surrogate_pair.push_back(0xd800);
     surrogate_pair.push_back(0xdf00);
     surrogate_pair.push_back('z');
 
     // Will get converted to the invalid char + 's': EF BF BD 's'.
-    base::string16 unterminated_surrogate;
+    std::u16string unterminated_surrogate;
     unterminated_surrogate.push_back(0xd800);
     unterminated_surrogate.push_back('s');
 

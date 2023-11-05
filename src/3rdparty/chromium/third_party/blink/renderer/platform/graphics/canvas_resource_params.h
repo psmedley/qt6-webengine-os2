@@ -52,7 +52,11 @@ class PLATFORM_EXPORT CanvasResourceParams {
   gfx::ColorSpace GetStorageGfxColorSpace() const;
   sk_sp<SkColorSpace> GetSkColorSpace() const;
   SkAlphaType GetSkAlphaType() const { return alpha_type_; }
-  const SkSurfaceProps* GetSkSurfaceProps() const;
+  SkSurfaceProps GetSkSurfaceProps() const;
+  bool CanUseLcdText() const {
+    // LCD text is safe when canvas is guaranteed not to be semi-transparent.
+    return alpha_type_ == kOpaque_SkAlphaType;
+  }
 
   // Gpu memory buffer parameters
   gfx::BufferFormat GetBufferFormat() const;

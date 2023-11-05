@@ -4,6 +4,7 @@
 
 #include "content/browser/code_cache/generated_code_cache.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -12,6 +13,7 @@
 #include "base/test/task_environment.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
+#include "net/base/network_isolation_key.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -69,8 +71,8 @@ class GeneratedCodeCacheTest : public testing::Test {
   // to test the pending operaions path.
   void InitializeCacheAndReOpen(GeneratedCodeCache::CodeCacheType cache_type) {
     InitializeCache(cache_type);
-    generated_code_cache_.reset(
-        new GeneratedCodeCache(cache_path_, kMaxSizeInBytes, cache_type));
+    generated_code_cache_ = std::make_unique<GeneratedCodeCache>(
+        cache_path_, kMaxSizeInBytes, cache_type);
   }
 
   void WriteToCache(const GURL& url,
@@ -78,19 +80,22 @@ class GeneratedCodeCacheTest : public testing::Test {
                     const std::string& data,
                     base::Time response_time) {
     std::vector<uint8_t> vector_data(data.begin(), data.end());
-    generated_code_cache_->WriteEntry(url, origin_lock, response_time,
+    generated_code_cache_->WriteEntry(url, origin_lock,
+                                      net::NetworkIsolationKey(), response_time,
                                       vector_data);
   }
 
   void DeleteFromCache(const GURL& url, const GURL& origin_lock) {
-    generated_code_cache_->DeleteEntry(url, origin_lock);
+    generated_code_cache_->DeleteEntry(url, origin_lock,
+                                       net::NetworkIsolationKey());
   }
 
   void FetchFromCache(const GURL& url, const GURL& origin_lock) {
     received_ = false;
     GeneratedCodeCache::ReadDataCallback callback = base::BindOnce(
         &GeneratedCodeCacheTest::FetchEntryCallback, base::Unretained(this));
-    generated_code_cache_->FetchEntry(url, origin_lock, std::move(callback));
+    generated_code_cache_->FetchEntry(
+        url, origin_lock, net::NetworkIsolationKey(), std::move(callback));
   }
 
   void DoomAll() {

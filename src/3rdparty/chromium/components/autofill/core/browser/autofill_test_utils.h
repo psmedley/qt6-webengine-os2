@@ -68,6 +68,21 @@ struct FormGroupValue {
 // Convenience declaration for multiple FormGroup values.
 using FormGroupValues = std::vector<FormGroupValue>;
 
+// Creates a non-empty LocalFrameToken (no variation among different calls).
+LocalFrameToken GetLocalFrameToken();
+
+// Creates new, pairwise distinct FormRendererIds.
+FormRendererId MakeFormRendererId();
+
+// Creates new, pairwise distinct FieldRendererIds.
+FieldRendererId MakeFieldRendererId();
+
+// Creates new, pairwise distinct FormGlobalIds.
+FormGlobalId MakeFormGlobalId();
+
+// Creates new, pairwise distinct FieldGlobalIds.
+FieldGlobalId MakeFieldGlobalId();
+
 // Helper function to set values and verification statuses to a form group.
 void SetFormGroupValues(FormGroup& form_group,
                         const std::vector<FormGroupValue>& values);
@@ -143,6 +158,11 @@ void CreateTestCreditCardFormData(FormData* form,
                                   bool split_names = false,
                                   const char* unique_id = nullptr);
 
+// Strips those members from |form| and |field| that are not serialized via
+// mojo, i.e., resets them to `{}`.
+FormData WithoutUnserializedData(FormData form);
+FormFieldData WithoutUnserializedData(FormFieldData field);
+
 // Returns a full profile with valid info according to rules for Canada.
 AutofillProfile GetFullValidProfileForCanada();
 
@@ -206,12 +226,15 @@ CreditCardCloudTokenData GetCreditCardCloudTokenData1();
 // one above.
 CreditCardCloudTokenData GetCreditCardCloudTokenData2();
 
-// Returns an autofill card linked offer data full of dummy info.
+// Returns an Autofill card-linked offer data full of dummy info.
 AutofillOfferData GetCardLinkedOfferData1();
 
-// Returns an autofill card linked offer data full of dummy info, different from
+// Returns an Autofill card-linked offer data full of dummy info, different from
 // the one above.
 AutofillOfferData GetCardLinkedOfferData2();
+
+// Returns an Autofill promo code offer data full of dummy info.
+AutofillOfferData GetPromoCodeOfferData();
 
 // A unit testing utility that is common to a number of the Autofill unit
 // tests.  |SetProfileInfo| provides a quick way to populate a profile with
@@ -347,7 +370,8 @@ std::vector<FormSignature> GetEncodedSignatures(
 void GenerateTestAutofillPopup(
     AutofillExternalDelegate* autofill_external_delegate);
 
-std::string ObfuscatedCardDigitsAsUTF8(const std::string& str);
+std::string ObfuscatedCardDigitsAsUTF8(const std::string& str,
+                                       int obfuscation_length = 4);
 
 // Returns 2-digit month string, like "02", "10".
 std::string NextMonth();

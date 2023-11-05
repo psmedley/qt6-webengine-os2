@@ -10,11 +10,12 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
+#include "base/unguessable_token.h"
 #include "components/payments/content/android_app_communication.h"
 #include "components/payments/content/payment_app.h"
 #include "components/payments/core/android_app_description.h"
 #include "content/public/browser/global_routing_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace payments {
@@ -42,7 +43,7 @@ class AndroidPaymentApp : public PaymentApp {
       const std::string& payment_request_id,
       std::unique_ptr<AndroidAppDescription> description,
       base::WeakPtr<AndroidAppCommunication> communication,
-      content::GlobalFrameRoutingId frame_routing_id);
+      content::GlobalRenderFrameHostId frame_routing_id);
   ~AndroidPaymentApp() override;
 
   AndroidPaymentApp(const AndroidPaymentApp& other) = delete;
@@ -53,13 +54,13 @@ class AndroidPaymentApp : public PaymentApp {
   bool IsCompleteForPayment() const override;
   uint32_t GetCompletenessScore() const override;
   bool CanPreselect() const override;
-  base::string16 GetMissingInfoLabel() const override;
+  std::u16string GetMissingInfoLabel() const override;
   bool HasEnrolledInstrument() const override;
   void RecordUse() override;
   bool NeedsInstallation() const override;
   std::string GetId() const override;
-  base::string16 GetLabel() const override;
-  base::string16 GetSublabel() const override;
+  std::u16string GetLabel() const override;
+  std::u16string GetSublabel() const override;
   const SkBitmap* icon_bitmap() const override;
   bool IsValidForModifier(
       const std::string& method,
@@ -74,11 +75,12 @@ class AndroidPaymentApp : public PaymentApp {
   void UpdateWith(
       mojom::PaymentRequestDetailsUpdatePtr details_update) override;
   void OnPaymentDetailsNotUpdated() override;
+  void AbortPaymentApp(base::OnceCallback<void(bool)> abort_callback) override;
   bool IsPreferred() const override;
 
  private:
   void OnPaymentAppResponse(base::WeakPtr<Delegate> delegate,
-                            const base::Optional<std::string>& error_message,
+                            const absl::optional<std::string>& error_message,
                             bool is_activity_result_ok,
                             const std::string& payment_method_identifier,
                             const std::string& stringified_details);
@@ -90,7 +92,14 @@ class AndroidPaymentApp : public PaymentApp {
   const std::string payment_request_id_;
   const std::unique_ptr<AndroidAppDescription> description_;
   base::WeakPtr<AndroidAppCommunication> communication_;
-  content::GlobalFrameRoutingId frame_routing_id_;
+  content::GlobalRenderFrameHostId frame_routing_id_;
+
+  // Token used to uniquely identify a particular payment app instance between
+  // Android and Chrome.
+  base::UnguessableToken payment_app_token_;
+  // True when InvokePaymentApp() has been called but no response has been
+  // received yet.
+  bool payment_app_open_;
 
   base::WeakPtrFactory<AndroidPaymentApp> weak_ptr_factory_{this};
 };

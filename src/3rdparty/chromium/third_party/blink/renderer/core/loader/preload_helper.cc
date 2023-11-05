@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/html/parser/html_srcset_parser.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/alternate_signed_exchange_resource_info.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/importance_attribute.h"
 #include "third_party/blink/renderer/core/loader/link_load_parameters.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
@@ -150,6 +151,9 @@ void PreloadHelper::DnsPrefetchIfNeeded(
     Document* document,
     LocalFrame* frame,
     LinkCaller caller) {
+  if (document && document->Loader() && document->Loader()->Archive()) {
+    return;
+  }
   if (params.rel.IsDNSPrefetch()) {
     UseCounter::Count(document, WebFeature::kLinkRelDnsPrefetch);
     if (caller == kLinkCalledFromHeader)
@@ -182,6 +186,9 @@ void PreloadHelper::PreconnectIfNeeded(
     Document* document,
     LocalFrame* frame,
     LinkCaller caller) {
+  if (document && document->Loader() && document->Loader()->Archive()) {
+    return;
+  }
   if (params.rel.IsPreconnect() && params.href.IsValid() &&
       params.href.ProtocolIsInHTTPFamily()) {
     UseCounter::Count(document, WebFeature::kLinkRelPreconnect);
@@ -222,7 +229,7 @@ void PreloadHelper::PreconnectIfNeeded(
 // served from the cache correctly. Until
 // https://github.com/w3c/preload/issues/97 is resolved and implemented we need
 // to disable these preloads.
-base::Optional<ResourceType> PreloadHelper::GetResourceTypeFromAsAttribute(
+absl::optional<ResourceType> PreloadHelper::GetResourceTypeFromAsAttribute(
     const String& as) {
   DCHECK_EQ(as.DeprecatedLower(), as);
   if (as == "image")
@@ -237,7 +244,7 @@ base::Optional<ResourceType> PreloadHelper::GetResourceTypeFromAsAttribute(
     return ResourceType::kFont;
   if (as == "fetch")
     return ResourceType::kRaw;
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 // |base_url| is used in Link HTTP Header based preloads to resolve relative
@@ -254,7 +261,7 @@ Resource* PreloadHelper::PreloadIfNeeded(
   if (!document.Loader() || !params.rel.IsLinkPreload())
     return nullptr;
 
-  base::Optional<ResourceType> resource_type =
+  absl::optional<ResourceType> resource_type =
       PreloadHelper::GetResourceTypeFromAsAttribute(params.as);
 
   MediaValues* media_values = nullptr;
@@ -288,7 +295,7 @@ Resource* PreloadHelper::PreloadIfNeeded(
 
   if (caller == kLinkCalledFromHeader)
     UseCounter::Count(document, WebFeature::kLinkHeaderPreload);
-  if (resource_type == base::nullopt) {
+  if (resource_type == absl::nullopt) {
     String message;
     if (IsValidButUnsupportedAsAttribute(params.as)) {
       message = String("<link rel=preload> uses an unsupported `as` value");
@@ -325,6 +332,8 @@ Resource* PreloadHelper::PreloadIfNeeded(
   options.parser_disposition = parser_disposition;
   FetchParameters link_fetch_params(std::move(resource_request), options);
   link_fetch_params.SetCharset(document.Encoding());
+  link_fetch_params.SetRenderBlockingBehavior(
+      RenderBlockingBehavior::kNonBlocking);
 
   if (params.cross_origin != kCrossOriginAttributeNotSet) {
     link_fetch_params.SetCrossOriginAccessControl(
@@ -518,6 +527,10 @@ void PreloadHelper::ModulePreloadIfNeeded(
 
 Resource* PreloadHelper::PrefetchIfNeeded(const LinkLoadParameters& params,
                                           Document& document) {
+  if (document.Loader() && document.Loader()->Archive()) {
+    return nullptr;
+  }
+
   if (params.rel.IsLinkPrefetch() && params.href.IsValid() &&
       document.GetFrame()) {
     UseCounter::Count(document, WebFeature::kLinkRelPrefetch);
@@ -611,7 +624,7 @@ void PreloadHelper::LoadLinksFromHeader(
       DCHECK(RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
           document->GetExecutionContext()));
       KURL url = params.href;
-      base::Optional<ResourceType> resource_type =
+      absl::optional<ResourceType> resource_type =
           PreloadHelper::GetResourceTypeFromAsAttribute(params.as);
       if (resource_type == ResourceType::kImage &&
           !params.image_srcset.IsEmpty()) {
@@ -709,11 +722,6 @@ Resource* PreloadHelper::StartPreload(ResourceType type,
       params.MutableResourceRequest().SetUseStreamOnResponse(true);
       params.MutableOptions().data_buffering_policy = kDoNotBufferData;
       resource = RawResource::FetchTextTrack(params, resource_fetcher, nullptr);
-      break;
-    case ResourceType::kImportResource:
-      params.MutableResourceRequest().SetUseStreamOnResponse(true);
-      params.MutableOptions().data_buffering_policy = kDoNotBufferData;
-      resource = RawResource::FetchImport(params, resource_fetcher, nullptr);
       break;
     case ResourceType::kRaw:
       params.MutableResourceRequest().SetUseStreamOnResponse(true);

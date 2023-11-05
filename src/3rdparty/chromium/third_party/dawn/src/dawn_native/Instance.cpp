@@ -18,6 +18,7 @@
 #include "common/Log.h"
 #include "dawn_native/ErrorData.h"
 #include "dawn_native/Surface.h"
+#include "dawn_platform/DawnPlatform.h"
 
 #if defined(DAWN_USE_X11)
 #    include "dawn_native/XlibXcbFunctions.h"
@@ -64,6 +65,7 @@ namespace dawn_native {
         return instance.Detach();
     }
 
+    // TODO(crbug.com/dawn/832): make the platform an initialization parameter of the instance.
     bool InstanceBase::Initialize(const InstanceDescriptor*) {
         return true;
     }
@@ -150,10 +152,12 @@ namespace dawn_native {
         Register(vulkan::Connect(this, true), wgpu::BackendType::Vulkan);
 #    endif  // defined(DAWN_ENABLE_SWIFTSHADER)
 #endif      // defined(DAWN_ENABLE_BACKEND_VULKAN)
-#if defined(DAWN_ENABLE_BACKEND_OPENGL)
+#if defined(DAWN_ENABLE_BACKEND_DESKTOP_GL)
         Register(opengl::Connect(this, wgpu::BackendType::OpenGL), wgpu::BackendType::OpenGL);
+#endif  // defined(DAWN_ENABLE_BACKEND_DESKTOP_GL)
+#if defined(DAWN_ENABLE_BACKEND_OPENGLES)
         Register(opengl::Connect(this, wgpu::BackendType::OpenGLES), wgpu::BackendType::OpenGLES);
-#endif  // defined(DAWN_ENABLE_BACKEND_OPENGL)
+#endif  // defined(DAWN_ENABLE_BACKEND_OPENGLES)
 #if defined(DAWN_ENABLE_BACKEND_NULL)
         Register(null::Connect(this), wgpu::BackendType::Null);
 #endif  // defined(DAWN_ENABLE_BACKEND_NULL)
@@ -223,8 +227,15 @@ namespace dawn_native {
         mPlatform = platform;
     }
 
-    dawn_platform::Platform* InstanceBase::GetPlatform() const {
-        return mPlatform;
+    dawn_platform::Platform* InstanceBase::GetPlatform() {
+        if (mPlatform != nullptr) {
+            return mPlatform;
+        }
+
+        if (mDefaultPlatform == nullptr) {
+            mDefaultPlatform = std::make_unique<dawn_platform::Platform>();
+        }
+        return mDefaultPlatform.get();
     }
 
     const XlibXcbFunctions* InstanceBase::GetOrCreateXlibXcbFunctions() {
@@ -238,7 +249,7 @@ namespace dawn_native {
 #endif  // defined(DAWN_USE_X11)
     }
 
-    Surface* InstanceBase::CreateSurface(const SurfaceDescriptor* descriptor) {
+    Surface* InstanceBase::APICreateSurface(const SurfaceDescriptor* descriptor) {
         if (ConsumedError(ValidateSurfaceDescriptor(this, descriptor))) {
             return nullptr;
         }

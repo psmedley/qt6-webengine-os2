@@ -4,7 +4,15 @@
 
 #include "content/browser/web_database/web_database_host_impl.h"
 
+#include <memory>
+#include <string>
+#include <utility>
+
 #include "base/bind.h"
+#include "base/callback_helpers.h"
+#include "base/files/file_path.h"
+#include "base/location.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -17,19 +25,23 @@
 #include "content/test/fake_mojo_message_dispatch_context.h"
 #include "mojo/public/cpp/system/functions.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
+#include "storage/browser/database/database_tracker.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
+#include "storage/browser/quota/special_storage_policy.h"
 #include "storage/common/database/database_identifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
 namespace {
 
-base::string16 ConstructVfsFileName(const url::Origin& origin,
-                                    const base::string16& name,
-                                    const base::string16& suffix) {
+std::u16string ConstructVfsFileName(const url::Origin& origin,
+                                    const std::u16string& name,
+                                    const std::u16string& suffix) {
   std::string identifier = storage::GetIdentifierFromOrigin(origin);
-  return base::UTF8ToUTF16(identifier) + base::ASCIIToUTF16("/") + name +
-         base::ASCIIToUTF16("#") + suffix;
+  return base::UTF8ToUTF16(identifier) + u"/" + name + u"#" + suffix;
 }
 
 }  // namespace
@@ -43,18 +55,24 @@ class WebDatabaseHostImplTest : public ::testing::Test {
     render_process_host_ =
         std::make_unique<MockRenderProcessHost>(&browser_context_);
 
-    scoped_refptr<storage::DatabaseTracker> db_tracker =
-        base::MakeRefCounted<storage::DatabaseTracker>(
-            base::FilePath(), /*is_incognito=*/false,
-            /*special_storage_policy=*/nullptr,
-            /*quota_manager_proxy=*/nullptr);
-
-    task_runner_ = db_tracker->task_runner();
-    host_ = std::make_unique<WebDatabaseHostImpl>(process_id(),
-                                                  std::move(db_tracker));
+    db_tracker_ =
+        storage::DatabaseTracker::Create(base::FilePath(),
+                                         /*is_incognito=*/false,
+                                         /*special_storage_policy=*/nullptr,
+                                         /*quota_manager_proxy=*/nullptr);
+    // Raw pointer usage is safe because `host_` stores a reference to the
+    // DatabaseTracker, keeping it alive for the duration of the test.
+    task_runner_ = db_tracker_->task_runner();
+    host_ = std::make_unique<WebDatabaseHostImpl>(process_id(), db_tracker_);
   }
 
   void TearDown() override {
+    base::RunLoop run_loop;
+    task_runner_->PostTask(FROM_HERE, base::BindLambdaForTesting([&]() {
+                             db_tracker_->Shutdown();
+                             run_loop.Quit();
+                           }));
+    run_loop.Run();
     task_runner_->DeleteSoon(FROM_HERE, std::move(host_));
     RunUntilIdle();
   }
@@ -71,7 +89,8 @@ class WebDatabaseHostImplTest : public ::testing::Test {
         }));
     run_loop.Run();
     RunUntilIdle();
-    EXPECT_EQ("Unauthorized origin.", bad_message_observer.WaitForBadMessage());
+    EXPECT_EQ("WebDatabaseHost: Unauthorized origin.",
+              bad_message_observer.WaitForBadMessage());
   }
 
   template <typename Callable>
@@ -86,7 +105,8 @@ class WebDatabaseHostImplTest : public ::testing::Test {
         }));
     run_loop.Run();
     RunUntilIdle();
-    EXPECT_EQ("Invalid origin.", bad_message_observer.WaitForBadMessage());
+    EXPECT_EQ("WebDatabaseHost: Invalid origin.",
+              bad_message_observer.WaitForBadMessage());
   }
 
   void CallRenderProcessHostCleanup() { render_process_host_.reset(); }
@@ -108,6 +128,7 @@ class WebDatabaseHostImplTest : public ::testing::Test {
   BrowserTaskEnvironment task_environment_;
   TestBrowserContext browser_context_;
   std::unique_ptr<MockRenderProcessHost> render_process_host_;
+  scoped_refptr<storage::DatabaseTracker> db_tracker_;
   std::unique_ptr<WebDatabaseHostImpl> host_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
@@ -119,13 +140,13 @@ TEST_F(WebDatabaseHostImplTest, BadMessagesUnauthorized) {
   const url::Origin correct_origin = url::Origin::Create(correct_url);
   const url::Origin incorrect_origin =
       url::Origin::Create(GURL("http://incorrect.net"));
-  const base::string16 db_name(base::ASCIIToUTF16("db_name"));
-  const base::string16 suffix(base::ASCIIToUTF16("suffix"));
-  const base::string16 bad_vfs_file_name =
+  const std::u16string db_name(u"db_name");
+  const std::u16string suffix(u"suffix");
+  const std::u16string bad_vfs_file_name =
       ConstructVfsFileName(incorrect_origin, db_name, suffix);
 
   auto* security_policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  security_policy->AddIsolatedOrigins(
+  security_policy->AddFutureIsolatedOrigins(
       {correct_origin, incorrect_origin},
       ChildProcessSecurityPolicy::IsolatedOriginSource::TEST);
   LockProcessToURL(correct_url);
@@ -137,36 +158,29 @@ TEST_F(WebDatabaseHostImplTest, BadMessagesUnauthorized) {
 
   CheckUnauthorizedOrigin([&]() {
     host()->OpenFile(bad_vfs_file_name,
-                     /*desired_flags=*/0, base::BindOnce([](base::File) {}));
+                     /*desired_flags=*/0, base::DoNothing());
   });
 
   CheckUnauthorizedOrigin([&]() {
     host()->DeleteFile(bad_vfs_file_name,
-                       /*sync_dir=*/false, base::BindOnce([](int32_t) {}));
+                       /*sync_dir=*/false, base::DoNothing());
   });
 
   CheckUnauthorizedOrigin([&]() {
-    host()->GetFileAttributes(bad_vfs_file_name,
-                              base::BindOnce([](int32_t) {}));
-  });
-
-  CheckUnauthorizedOrigin([&]() {
-    host()->GetFileSize(bad_vfs_file_name, base::BindOnce([](int64_t) {}));
+    host()->GetFileAttributes(bad_vfs_file_name, base::DoNothing());
   });
 
   CheckUnauthorizedOrigin([&]() {
     host()->SetFileSize(bad_vfs_file_name, /*expected_size=*/0,
-                        base::BindOnce([](bool) {}));
+                        base::DoNothing());
   });
 
   CheckUnauthorizedOrigin([&]() {
-    host()->GetSpaceAvailable(incorrect_origin, base::BindOnce([](int64_t) {}));
+    host()->GetSpaceAvailable(incorrect_origin, base::DoNothing());
   });
 
-  CheckUnauthorizedOrigin([&]() {
-    host()->Opened(incorrect_origin, db_name, base::ASCIIToUTF16("description"),
-                   /*estimated_size=*/0);
-  });
+  CheckUnauthorizedOrigin(
+      [&]() { host()->Opened(incorrect_origin, db_name, u"description"); });
 
   CheckUnauthorizedOrigin(
       [&]() { host()->Modified(incorrect_origin, db_name); });
@@ -180,16 +194,13 @@ TEST_F(WebDatabaseHostImplTest, BadMessagesUnauthorized) {
 
 TEST_F(WebDatabaseHostImplTest, BadMessagesInvalid) {
   const url::Origin opaque_origin;
-  const base::string16 db_name(base::ASCIIToUTF16("db_name"));
+  const std::u16string db_name(u"db_name");
 
-  CheckInvalidOrigin([&]() {
-    host()->GetSpaceAvailable(opaque_origin, base::BindOnce([](int64_t) {}));
-  });
+  CheckInvalidOrigin(
+      [&]() { host()->GetSpaceAvailable(opaque_origin, base::DoNothing()); });
 
-  CheckInvalidOrigin([&]() {
-    host()->Opened(opaque_origin, db_name, base::ASCIIToUTF16("description"),
-                   /*estimated_size=*/0);
-  });
+  CheckInvalidOrigin(
+      [&]() { host()->Opened(opaque_origin, db_name, u"description"); });
 
   CheckInvalidOrigin([&]() { host()->Modified(opaque_origin, db_name); });
 
@@ -205,13 +216,13 @@ TEST_F(WebDatabaseHostImplTest, ProcessShutdown) {
   const url::Origin correct_origin = url::Origin::Create(correct_url);
   const url::Origin incorrect_origin =
       url::Origin::Create(GURL("http://incorrect.net"));
-  const base::string16 db_name(base::ASCIIToUTF16("db_name"));
-  const base::string16 suffix(base::ASCIIToUTF16("suffix"));
-  const base::string16 bad_vfs_file_name =
+  const std::u16string db_name(u"db_name");
+  const std::u16string suffix(u"suffix");
+  const std::u16string bad_vfs_file_name =
       ConstructVfsFileName(incorrect_origin, db_name, suffix);
 
   auto* security_policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  security_policy->AddIsolatedOrigins(
+  security_policy->AddFutureIsolatedOrigins(
       {correct_origin, incorrect_origin},
       ChildProcessSecurityPolicy::IsolatedOriginSource::TEST);
   LockProcessToURL(correct_url);
@@ -219,7 +230,7 @@ TEST_F(WebDatabaseHostImplTest, ProcessShutdown) {
   bool success_callback_was_called = false;
   auto success_callback = base::BindLambdaForTesting(
       [&](base::File) { success_callback_was_called = true; });
-  base::Optional<std::string> error_callback_message;
+  absl::optional<std::string> error_callback_message;
 
   mojo::SetDefaultProcessErrorHandler(base::BindLambdaForTesting(
       [&](const std::string& message) { error_callback_message = message; }));
@@ -239,7 +250,8 @@ TEST_F(WebDatabaseHostImplTest, ProcessShutdown) {
 
     EXPECT_FALSE(success_callback_was_called);
     EXPECT_TRUE(error_callback_message.has_value());
-    EXPECT_EQ("Unauthorized origin.", error_callback_message.value());
+    EXPECT_EQ("WebDatabaseHost: Unauthorized origin.",
+              error_callback_message.value());
   }
 
   success_callback_was_called = false;

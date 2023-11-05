@@ -32,7 +32,8 @@ ConfigParameters::ConfigParameters()
       clientArraysEnabled(true),
       robustAccess(false),
       samples(-1),
-      resetStrategy(EGL_NO_RESET_NOTIFICATION_EXT)
+      resetStrategy(EGL_NO_RESET_NOTIFICATION_EXT),
+      colorSpace(EGL_COLORSPACE_LINEAR)
 {}
 
 ConfigParameters::~ConfigParameters() = default;
@@ -88,6 +89,11 @@ EGLSurface EGLWindow::getSurface() const
 EGLContext EGLWindow::getContext() const
 {
     return mContext;
+}
+
+bool EGLWindow::isContextVersion(EGLint glesMajorVersion, EGLint glesMinorVersion) const
+{
+    return mClientMajorVersion == glesMajorVersion && mClientMinorVersion == glesMinorVersion;
 }
 
 bool EGLWindow::initializeGL(OSWindow *osWindow,
@@ -248,6 +254,16 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
         enabledFeatureOverrides.push_back("asynchronousCommandProcessing");
     }
 
+    if (params.directSPIRVGeneration == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("directSPIRVGeneration");
+    }
+
+    if (params.directMetalGeneration == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("directMetalGeneration");
+    }
+
     if (params.hasExplicitMemBarrierFeatureMtl == EGL_FALSE)
     {
         disabledFeatureOverrides.push_back("has_explicit_mem_barrier_mtl");
@@ -261,6 +277,21 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
     if (params.forceBufferGPUStorageFeatureMtl == EGL_TRUE)
     {
         enabledFeatureOverrides.push_back("force_buffer_gpu_storage_mtl");
+    }
+
+    if (params.emulatedVAOs == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("sync_vertex_arrays_to_default");
+    }
+
+    if (params.captureLimits == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("enable_capture_limits");
+    }
+
+    if (params.forceRobustResourceInit == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("forceRobustResourceInit");
     }
 
     const bool hasFeatureControlANGLE =
@@ -403,6 +434,19 @@ bool EGLWindow::initializeSurface(OSWindow *osWindow,
                                                                              : EGL_FALSE);
     }
 
+    bool hasGLColorSpace = strstr(displayExtensions, "EGL_KHR_gl_colorspace") != nullptr;
+    if (!hasGLColorSpace && mConfigParams.colorSpace != EGL_COLORSPACE_LINEAR)
+    {
+        fprintf(stderr, "Mising EGL_KHR_gl_colorspace.\n");
+        destroyGL();
+        return false;
+    }
+    if (hasGLColorSpace)
+    {
+        surfaceAttributes.push_back(EGL_GL_COLORSPACE_KHR);
+        surfaceAttributes.push_back(mConfigParams.colorSpace);
+    }
+
     surfaceAttributes.push_back(EGL_NONE);
 
     osWindow->resetNativeWindow();
@@ -526,7 +570,9 @@ EGLContext EGLWindow::createContext(EGLContext share) const
             contextAttributes.push_back(mConfigParams.debug ? EGL_TRUE : EGL_FALSE);
         }
 
-        if (hasKHRCreateContextNoError)
+        // TODO (http://anglebug.com/5809)
+        // Mesa does not allow EGL_CONTEXT_OPENGL_NO_ERROR_KHR for GLES1.
+        if (hasKHRCreateContextNoError && mConfigParams.noError)
         {
             contextAttributes.push_back(EGL_CONTEXT_OPENGL_NO_ERROR_KHR);
             contextAttributes.push_back(mConfigParams.noError ? EGL_TRUE : EGL_FALSE);

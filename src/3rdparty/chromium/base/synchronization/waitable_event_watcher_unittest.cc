@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
@@ -204,7 +203,8 @@ TEST_P(WaitableEventWatcherTest, StartWatchingInCallback) {
   RunLoop().Run();
 }
 
-TEST_P(WaitableEventWatcherTest, MultipleWatchersManual) {
+// Disabled due to flakes; see https://crbug.com/1188547.
+TEST_P(WaitableEventWatcherTest, DISABLED_MultipleWatchersManual) {
   test::TaskEnvironment task_environment(GetParam());
 
   WaitableEvent event(WaitableEvent::ResetPolicy::MANUAL,

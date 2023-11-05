@@ -7,8 +7,8 @@
 #include <limits>
 
 #include "base/numerics/checked_math.h"
-#include "base/optional.h"
 #include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/unpacked_serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/geometry/dom_matrix.h"
 #include "third_party/blink/renderer/core/geometry/dom_matrix_read_only.h"
 #include "third_party/blink/renderer/core/geometry/dom_point.h"
@@ -27,6 +28,7 @@
 #include "third_party/blink/renderer/core/geometry/dom_rect_read_only.h"
 #include "third_party/blink/renderer/core/html/canvas/image_data.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
+#include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
@@ -40,7 +42,6 @@
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
-#include "third_party/skia/include/core/SkFilterQuality.h"
 
 namespace blink {
 
@@ -438,8 +439,8 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
           computed_byte_length.ValueOrDie() != byte_length)
         return nullptr;
       ImageData* image_data = ImageData::ValidateAndCreate(
-          width, height, base::nullopt, settings.GetImageDataSettings(),
-          exception_state);
+          width, height, absl::nullopt, settings.GetImageDataSettings(),
+          ImageData::ValidateAndCreateParams(), exception_state);
       if (!image_data)
         return nullptr;
       SkPixmap image_data_pixmap = image_data->GetSkPixmap();
@@ -550,9 +551,9 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
       canvas->SetPlaceholderCanvasId(canvas_id);
       canvas->SetFrameSinkId(client_id, sink_id);
       if (filter_quality == 0)
-        canvas->SetFilterQuality(kNone_SkFilterQuality);
+        canvas->SetFilterQuality(cc::PaintFlags::FilterQuality::kNone);
       else
-        canvas->SetFilterQuality(kLow_SkFilterQuality);
+        canvas->SetFilterQuality(cc::PaintFlags::FilterQuality::kLow);
       return canvas;
     }
     case kReadableStreamTransferTag: {
@@ -661,7 +662,7 @@ File* V8ScriptValueDeserializer::ReadFile() {
   auto blob_handle = GetOrCreateBlobDataHandle(uuid, type, kSizeForDataHandle);
   if (!blob_handle)
     return nullptr;
-  base::Optional<base::Time> last_modified;
+  absl::optional<base::Time> last_modified;
   if (has_snapshot && std::isfinite(last_modified_ms))
     last_modified = base::Time::FromJsTime(last_modified_ms);
   return File::CreateFromSerialization(path, name, relative_path,
@@ -754,13 +755,19 @@ V8ScriptValueDeserializer::GetWasmModuleFromId(v8::Isolate* isolate,
     ExecutionContext* execution_context = ExecutionContext::From(script_state_);
     DCHECK(serialized_script_value_->origin());
     UseCounter::Count(execution_context, WebFeature::kWasmModuleSharing);
+    const v8::CompiledWasmModule& wasm_module =
+        serialized_script_value_->WasmModules()[id];
     if (!serialized_script_value_->origin()->IsSameOriginWith(
             execution_context->GetSecurityOrigin())) {
       UseCounter::Count(execution_context,
                         WebFeature::kCrossOriginWasmModuleSharing);
+      AuditsIssue::ReportCrossOriginWasmModuleSharingIssue(
+          execution_context, wasm_module.source_url(),
+          serialized_script_value_->origin()->ToString(),
+          execution_context->GetSecurityOrigin()->ToString(),
+          true /* is_warning */);
     }
-    return v8::WasmModuleObject::FromCompiledModule(
-        isolate, serialized_script_value_->WasmModules()[id]);
+    return v8::WasmModuleObject::FromCompiledModule(isolate, wasm_module);
   }
   CHECK(serialized_script_value_->WasmModules().IsEmpty());
   return v8::MaybeLocal<v8::WasmModuleObject>();

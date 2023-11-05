@@ -10,12 +10,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/sessions/core/sessions_export.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/sessions/core/tab_restore_service_client.h"
 #include "components/sessions/core/tab_restore_service_helper.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class PrefService;
 class TabRestoreServiceImplTest;
@@ -35,10 +35,14 @@ class SESSIONS_EXPORT TabRestoreServiceImpl : public TabRestoreService {
   // TabRestoreService:
   void AddObserver(TabRestoreServiceObserver* observer) override;
   void RemoveObserver(TabRestoreServiceObserver* observer) override;
-  base::Optional<SessionID> CreateHistoricalTab(LiveTab* live_tab,
+  absl::optional<SessionID> CreateHistoricalTab(LiveTab* live_tab,
                                                 int index) override;
   void BrowserClosing(LiveTabContext* context) override;
   void BrowserClosed(LiveTabContext* context) override;
+  void CreateHistoricalGroup(LiveTabContext* context,
+                             const tab_groups::TabGroupId& id) override;
+  void GroupClosed(const tab_groups::TabGroupId& group) override;
+  void GroupCloseStopped(const tab_groups::TabGroupId& group) override;
   void ClearEntries() override;
   void DeleteNavigationEntries(const DeletionPredicate& predicate) override;
   const Entries& entries() const override;

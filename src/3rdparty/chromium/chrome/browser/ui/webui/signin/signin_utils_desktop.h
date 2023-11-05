@@ -10,17 +10,15 @@
 class Profile;
 class SigninUIError;
 
-// Argument for |CanOfferSignin|.
-enum CanOfferSigninType {
-  CAN_OFFER_SIGNIN_FOR_ALL_ACCOUNTS,
-  CAN_OFFER_SIGNIN_FOR_SECONDARY_ACCOUNT
-};
-
 // Returns a non-error if sign-in is allowed for account with |email| and
 // |gaia_id| to |profile|. If the sign-in is not allowed, then the error type
 // and the error message are passed in the returned value.
+// This function can be used either for new signins or for reauthentication of
+// an already existing account. In the case of reauth, the function checks that
+// the account being reauthenticated matches the current Sync account.
+// TODO(alexilin): consider renaming this function to CanOfferSyncOrReauth() or
+// similar to make it clear that this function is about signin into Sync.
 SigninUIError CanOfferSignin(Profile* profile,
-                             CanOfferSigninType can_offer_type,
                              const std::string& gaia_id,
                              const std::string& email);
 

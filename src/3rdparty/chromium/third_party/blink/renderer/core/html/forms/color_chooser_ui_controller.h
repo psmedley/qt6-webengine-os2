@@ -26,7 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_COLOR_CHOOSER_UI_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_COLOR_CHOOSER_UI_CONTROLLER_H_
 
-#include <memory>
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/choosers/color_chooser.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -63,7 +63,9 @@ class CORE_EXPORT ColorChooserUIController
   void DidChooseColor(uint32_t color) final;
 
  protected:
+#if defined(OS_ANDROID) || defined(TOOLKIT_QT)
   void OpenColorChooser();
+#endif
   mojo::Remote<mojom::blink::ColorChooser> chooser_;
   Member<blink::ColorChooserClient> client_;
 
@@ -71,9 +73,7 @@ class CORE_EXPORT ColorChooserUIController
 
  private:
   mojo::Remote<mojom::blink::ColorChooserFactory> color_chooser_factory_;
-  HeapMojoReceiver<mojom::blink::ColorChooserClient,
-                   ColorChooserUIController,
-                   HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoReceiver<mojom::blink::ColorChooserClient, ColorChooserUIController>
       receiver_;
 };
 

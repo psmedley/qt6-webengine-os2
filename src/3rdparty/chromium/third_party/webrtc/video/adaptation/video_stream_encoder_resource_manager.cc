@@ -32,6 +32,7 @@
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/time_utils.h"
+#include "rtc_base/trace_event.h"
 #include "system_wrappers/include/field_trial.h"
 #include "video/adaptation/quality_scaler_resource.h"
 
@@ -257,6 +258,9 @@ VideoStreamEncoderResourceManager::VideoStreamEncoderResourceManager(
       quality_rampup_experiment_(
           QualityRampUpExperimentHelper::CreateIfEnabled(this, clock_)),
       encoder_settings_(absl::nullopt) {
+  TRACE_EVENT0(
+      "webrtc",
+      "VideoStreamEncoderResourceManager::VideoStreamEncoderResourceManager");
   RTC_CHECK(degradation_preference_provider_);
   RTC_CHECK(encoder_stats_observer_);
 }
@@ -451,7 +455,7 @@ void VideoStreamEncoderResourceManager::OnEncodeCompleted(
     int64_t time_sent_in_us,
     absl::optional<int> encode_duration_us) {
   RTC_DCHECK_RUN_ON(encoder_queue_);
-  // Inform |encode_usage_resource_| of the encode completed event.
+  // Inform `encode_usage_resource_` of the encode completed event.
   uint32_t timestamp = encoded_image.Timestamp();
   int64_t capture_time_us =
       encoded_image.capture_time_ms_ * rtc::kNumMicrosecsPerMillisec;
@@ -494,7 +498,7 @@ void VideoStreamEncoderResourceManager::OnMaybeEncodeFrame() {
         quality_scaler_resource_, bandwidth,
         DataRate::BitsPerSec(encoder_target_bitrate_bps_.value_or(0)),
         DataRate::KilobitsPerSec(encoder_settings_->video_codec().maxBitrate),
-        LastInputFrameSizeOrDefault());
+        LastFrameSizeOrDefault());
   }
 }
 
@@ -521,7 +525,10 @@ void VideoStreamEncoderResourceManager::ConfigureQualityScaler(
   const auto scaling_settings = encoder_info.scaling_settings;
   const bool quality_scaling_allowed =
       IsResolutionScalingEnabled(degradation_preference_) &&
-      scaling_settings.thresholds;
+      (scaling_settings.thresholds.has_value() ||
+       (encoder_settings_.has_value() &&
+        encoder_settings_->encoder_config().is_quality_scaling_allowed)) &&
+      encoder_info.is_qp_trusted.value_or(true);
 
   // TODO(https://crbug.com/webrtc/11222): Should this move to
   // QualityScalerResource?
@@ -535,9 +542,9 @@ void VideoStreamEncoderResourceManager::ConfigureQualityScaler(
         experimental_thresholds = QualityScalingExperiment::GetQpThresholds(
             GetVideoCodecTypeOrGeneric(encoder_settings_));
       }
-      UpdateQualityScalerSettings(experimental_thresholds
-                                      ? *experimental_thresholds
-                                      : *(scaling_settings.thresholds));
+      UpdateQualityScalerSettings(experimental_thresholds.has_value()
+                                      ? experimental_thresholds
+                                      : scaling_settings.thresholds);
     }
   } else {
     UpdateQualityScalerSettings(absl::nullopt);
@@ -549,7 +556,7 @@ void VideoStreamEncoderResourceManager::ConfigureQualityScaler(
     absl::optional<VideoEncoder::QpThresholds> thresholds =
         balanced_settings_.GetQpThresholds(
             GetVideoCodecTypeOrGeneric(encoder_settings_),
-            LastInputFrameSizeOrDefault());
+            LastFrameSizeOrDefault());
     if (thresholds) {
       quality_scaler_resource_->SetQpThresholds(*thresholds);
     }
@@ -589,10 +596,13 @@ CpuOveruseOptions VideoStreamEncoderResourceManager::GetCpuOveruseOptions()
   return options;
 }
 
-int VideoStreamEncoderResourceManager::LastInputFrameSizeOrDefault() const {
+int VideoStreamEncoderResourceManager::LastFrameSizeOrDefault() const {
   RTC_DCHECK_RUN_ON(encoder_queue_);
-  return input_state_provider_->InputState().frame_size_pixels().value_or(
-      kDefaultInputPixelsWidth * kDefaultInputPixelsHeight);
+  return input_state_provider_->InputState()
+      .single_active_stream_pixels()
+      .value_or(
+          input_state_provider_->InputState().frame_size_pixels().value_or(
+              kDefaultInputPixelsWidth * kDefaultInputPixelsHeight));
 }
 
 void VideoStreamEncoderResourceManager::OnVideoSourceRestrictionsUpdated(
@@ -718,16 +728,20 @@ bool VideoStreamEncoderResourceManager::IsSimulcast(
     const VideoEncoderConfig& encoder_config) {
   const std::vector<VideoStream>& simulcast_layers =
       encoder_config.simulcast_layers;
+  if (simulcast_layers.size() <= 1) {
+    return false;
+  }
 
-  bool is_simulcast = simulcast_layers.size() > 1;
-  bool is_lowest_layer_active = simulcast_layers[0].active;
+  if (simulcast_layers[0].active) {
+    // We can't distinguish between simulcast and singlecast when only the
+    // lowest spatial layer is active. Treat this case as simulcast.
+    return true;
+  }
+
   int num_active_layers =
       std::count_if(simulcast_layers.begin(), simulcast_layers.end(),
                     [](const VideoStream& layer) { return layer.active; });
-
-  // We can't distinguish between simulcast and singlecast when only the
-  // lowest spatial layer is active. Treat this case as simulcast.
-  return is_simulcast && (num_active_layers > 1 || is_lowest_layer_active);
+  return num_active_layers > 1;
 }
 
 }  // namespace webrtc

@@ -6,6 +6,7 @@
 #define V8_PARSING_PARSER_BASE_H_
 
 #include <stdint.h>
+
 #include <utility>
 #include <vector>
 
@@ -18,8 +19,8 @@
 #include "src/codegen/bailout-reason.h"
 #include "src/common/globals.h"
 #include "src/common/message-template.h"
-#include "src/logging/counters.h"
 #include "src/logging/log.h"
+#include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/function-kind.h"
 #include "src/parsing/expression-scope.h"
 #include "src/parsing/func-name-inferrer.h"
@@ -240,14 +241,13 @@ class ParserBase {
   const Impl* impl() const { return static_cast<const Impl*>(this); }
 
   ParserBase(Zone* zone, Scanner* scanner, uintptr_t stack_limit,
-             v8::Extension* extension, AstValueFactory* ast_value_factory,
+             AstValueFactory* ast_value_factory,
              PendingCompilationErrorHandler* pending_error_handler,
              RuntimeCallStats* runtime_call_stats, Logger* logger,
              UnoptimizedCompileFlags flags, bool parsing_on_main_thread)
       : scope_(nullptr),
         original_scope_(nullptr),
         function_state_(nullptr),
-        extension_(extension),
         fni_(ast_value_factory),
         ast_value_factory_(ast_value_factory),
         ast_node_factory_(ast_value_factory, zone),
@@ -594,7 +594,6 @@ class ParserBase {
           instance_fields(parser->impl()->NewClassPropertyList(4)),
           constructor(parser->impl()->NullExpression()),
           has_seen_constructor(false),
-          has_name_static_property(false),
           has_static_computed_names(false),
           has_static_elements(false),
           has_static_private_methods(false),
@@ -614,7 +613,6 @@ class ParserBase {
     FunctionLiteralT constructor;
 
     bool has_seen_constructor;
-    bool has_name_static_property;
     bool has_static_computed_names;
     bool has_static_elements;
     bool has_static_private_methods;
@@ -1060,13 +1058,13 @@ class ParserBase {
   bool is_resumable() const {
     return IsResumableFunction(function_state_->kind());
   }
-  bool is_class_static_block() const {
-    return function_state_->kind() ==
-           FunctionKind::kClassStaticInitializerFunction;
-  }
   bool is_await_allowed() const {
     return is_async_function() || (flags().allow_harmony_top_level_await() &&
                                    IsModule(function_state_->kind()));
+  }
+  bool is_await_as_identifier_disallowed() {
+    return flags().is_module() ||
+           IsAwaitAsIdentifierDisallowed(function_state_->kind());
   }
   const PendingCompilationErrorHandler* pending_error_handler() const {
     return pending_error_handler_;
@@ -1452,8 +1450,9 @@ class ParserBase {
 
   // Convenience method which determines the type of return statement to emit
   // depending on the current function type.
-  inline StatementT BuildReturnStatement(ExpressionT expr, int pos,
-                                         int end_pos = kNoSourcePosition) {
+  inline StatementT BuildReturnStatement(
+      ExpressionT expr, int pos,
+      int end_pos = ReturnStatement::kFunctionLiteralReturnPosition) {
     if (impl()->IsNull(expr)) {
       expr = factory()->NewUndefinedLiteral(kNoSourcePosition);
     } else if (is_async_generator()) {
@@ -1539,7 +1538,6 @@ class ParserBase {
   Scope* object_literal_scope_ = nullptr;
   Scope* original_scope_;  // The top scope for the current parsing item.
   FunctionState* function_state_;  // Function state stack.
-  v8::Extension* extension_;
   FuncNameInferrer fni_;
   AstValueFactory* ast_value_factory_;  // Not owned.
   typename Types::Factory ast_node_factory_;
@@ -1651,8 +1649,7 @@ ParserBase<Impl>::ParseAndClassifyIdentifier(Token::Value next) {
   }
 
   if (!Token::IsValidIdentifier(next, language_mode(), is_generator(),
-                                flags().is_module() || is_async_function() ||
-                                    is_class_static_block())) {
+                                is_await_as_identifier_disallowed())) {
     ReportUnexpectedToken(next);
     return impl()->EmptyIdentifierString();
   }
@@ -1676,7 +1673,8 @@ typename ParserBase<Impl>::IdentifierT ParserBase<Impl>::ParseIdentifier(
 
   if (!Token::IsValidIdentifier(
           next, language_mode(), IsGeneratorFunction(function_kind),
-          flags().is_module() || IsAsyncFunction(function_kind))) {
+          flags().is_module() ||
+              IsAwaitAsIdentifierDisallowed(function_kind))) {
     ReportUnexpectedToken(next);
     return impl()->EmptyIdentifierString();
   }
@@ -1948,7 +1946,7 @@ ParserBase<Impl>::ParsePrimaryExpression() {
       return ParseTemplateLiteral(impl()->NullExpression(), beg_pos, false);
 
     case Token::MOD:
-      if (flags().allow_natives_syntax() || extension_ != nullptr) {
+      if (flags().allow_natives_syntax() || impl()->ParsingExtension()) {
         return ParseV8Intrinsic();
       }
       break;
@@ -2314,11 +2312,6 @@ ParserBase<Impl>::ParseClassPropertyDefinition(ClassInfo* class_info,
     name_expression = ParseProperty(prop_info);
   }
 
-  if (!class_info->has_name_static_property && prop_info->is_static &&
-      impl()->IsName(prop_info->name)) {
-    class_info->has_name_static_property = true;
-  }
-
   switch (prop_info->kind) {
     case ParsePropertyKind::kAssign:
     case ParsePropertyKind::kClassField:
@@ -2569,9 +2562,8 @@ ParserBase<Impl>::ParseObjectPropertyDefinition(ParsePropertyInfo* prop_info,
       //    IdentifierReference Initializer?
       DCHECK_EQ(function_flags, ParseFunctionFlag::kIsNormal);
 
-      if (!Token::IsValidIdentifier(
-              name_token, language_mode(), is_generator(),
-              flags().is_module() || is_async_function())) {
+      if (!Token::IsValidIdentifier(name_token, language_mode(), is_generator(),
+                                    is_await_as_identifier_disallowed())) {
         ReportUnexpectedToken(Next());
         return impl()->NullLiteralProperty();
       }
@@ -2851,10 +2843,6 @@ ParserBase<Impl>::ParseAssignmentExpressionCoverGrammar() {
   Token::Value op = peek();
 
   if (!Token::IsArrowOrAssignmentOp(op)) return expression;
-  if (Token::IsLogicalAssignmentOp(op) &&
-      !flags().allow_harmony_logical_assignment()) {
-    return expression;
-  }
 
   // Arrow functions.
   if (V8_UNLIKELY(op == Token::ARROW)) {
@@ -3392,11 +3380,7 @@ ParserBase<Impl>::ParseLeftHandSideContinuation(ExpressionT result) {
       return result;
     }
 
-    if (has_spread) {
-      result = impl()->SpreadCall(result, args, pos, Call::NOT_EVAL, false);
-    } else {
-      result = factory()->NewCall(result, args, pos, Call::NOT_EVAL);
-    }
+    result = factory()->NewCall(result, args, pos, has_spread);
 
     maybe_arrow.ValidateExpression();
 
@@ -3469,11 +3453,6 @@ ParserBase<Impl>::ParseLeftHandSideContinuation(ExpressionT result) {
           // function literal eagerly, we can also compile it eagerly.
           if (result->IsFunctionLiteral()) {
             result->AsFunctionLiteral()->SetShouldEagerCompile();
-            if (scope()->is_script_scope()) {
-              // A non-top-level iife is likely to be executed multiple times
-              // and so shouldn`t be optimized as one-shot.
-              result->AsFunctionLiteral()->mark_as_oneshot_iife();
-            }
           }
         }
         bool has_spread;
@@ -3490,13 +3469,8 @@ ParserBase<Impl>::ParseLeftHandSideContinuation(ExpressionT result) {
         Call::PossiblyEval is_possibly_eval =
             CheckPossibleEvalCall(result, is_optional, scope());
 
-        if (has_spread) {
-          result = impl()->SpreadCall(result, args, pos, is_possibly_eval,
-                                      is_optional);
-        } else {
-          result = factory()->NewCall(result, args, pos, is_possibly_eval,
-                                      is_optional);
-        }
+        result = factory()->NewCall(result, args, pos, has_spread,
+                                    is_possibly_eval, is_optional);
 
         fni_.RemoveLastFunction();
         break;
@@ -3576,11 +3550,7 @@ ParserBase<Impl>::ParseMemberWithPresentNewPrefixesExpression() {
       bool has_spread;
       ParseArguments(&args, &has_spread);
 
-      if (has_spread) {
-        result = impl()->SpreadCallNew(result, args, new_pos);
-      } else {
-        result = factory()->NewCallNew(result, args, new_pos);
-      }
+      result = factory()->NewCallNew(result, args, new_pos, has_spread);
     }
     // The expression can still continue with . or [ after the arguments.
     return ParseMemberExpressionContinuation(result);
@@ -3594,7 +3564,7 @@ ParserBase<Impl>::ParseMemberWithPresentNewPrefixesExpression() {
 
   // NewExpression without arguments.
   ExpressionListT args(pointer_buffer());
-  return factory()->NewCallNew(result, args, new_pos);
+  return factory()->NewCallNew(result, args, new_pos, false);
 }
 
 template <typename Impl>
@@ -4443,6 +4413,12 @@ bool ParserBase<Impl>::IsNextLetKeyword() {
     case Token::ASYNC:
       return true;
     case Token::FUTURE_STRICT_RESERVED_WORD:
+    case Token::ESCAPED_STRICT_RESERVED_WORD:
+      // The early error rule for future reserved keywords
+      // (ES#sec-identifiers-static-semantics-early-errors) uses the static
+      // semantics StringValue of IdentifierName, which normalizes escape
+      // sequences. So, both escaped and unescaped future reserved keywords are
+      // allowed as identifiers in sloppy mode.
       return is_sloppy(language_mode());
     default:
       return false;
@@ -4453,12 +4429,11 @@ template <typename Impl>
 typename ParserBase<Impl>::ExpressionT
 ParserBase<Impl>::ParseArrowFunctionLiteral(
     const FormalParametersT& formal_parameters) {
-  const RuntimeCallCounterId counters[2] = {
-      RuntimeCallCounterId::kParseArrowFunctionLiteral,
-      RuntimeCallCounterId::kPreParseArrowFunctionLiteral};
-  RuntimeCallTimerScope runtime_timer(runtime_call_stats_,
-                                      counters[Impl::IsPreParser()],
-                                      RuntimeCallStats::kThreadSpecific);
+  RCS_SCOPE(runtime_call_stats_,
+            Impl::IsPreParser()
+                ? RuntimeCallCounterId::kPreParseArrowFunctionLiteral
+                : RuntimeCallCounterId::kParseArrowFunctionLiteral,
+            RuntimeCallStats::kThreadSpecific);
   base::ElapsedTimer timer;
   if (V8_UNLIKELY(FLAG_log_function_events)) timer.Start();
 
@@ -4647,7 +4622,7 @@ typename ParserBase<Impl>::ExpressionT ParserBase<Impl>::ParseClassLiteral(
   ClassInfo class_info(this);
   class_info.is_anonymous = is_anonymous;
 
-  scope()->set_start_position(end_position());
+  scope()->set_start_position(class_token_pos);
   if (Check(Token::EXTENDS)) {
     ClassScope::HeritageParsingScope heritage(class_scope);
     FuncNameInferrerState fni_state(&fni_);
@@ -5040,14 +5015,18 @@ void ParserBase<Impl>::ParseStatementList(StatementListT* body,
 
   while (peek() == Token::STRING) {
     bool use_strict = false;
+#if V8_ENABLE_WEBASSEMBLY
     bool use_asm = false;
+#endif  // V8_ENABLE_WEBASSEMBLY
 
     Scanner::Location token_loc = scanner()->peek_location();
 
     if (scanner()->NextLiteralExactlyEquals("use strict")) {
       use_strict = true;
+#if V8_ENABLE_WEBASSEMBLY
     } else if (scanner()->NextLiteralExactlyEquals("use asm")) {
       use_asm = true;
+#endif  // V8_ENABLE_WEBASSEMBLY
     }
 
     StatementT stat = ParseStatementListItem();
@@ -5069,9 +5048,11 @@ void ParserBase<Impl>::ParseStatementList(StatementListT* body,
                                 "use strict");
         return;
       }
+#if V8_ENABLE_WEBASSEMBLY
     } else if (use_asm) {
       // Directive "use asm".
       impl()->SetAsmModule();
+#endif  // V8_ENABLE_WEBASSEMBLY
     } else {
       // Possibly an unknown directive.
       // Should not change mode, but will increment usage counters
@@ -5420,10 +5401,10 @@ ParserBase<Impl>::ParseExpressionOrLabelledStatement(
     }
   }
 
-  // If we have an extension, we allow a native function declaration.
-  // A native function declaration starts with "native function" with
-  // no line-terminator between the two words.
-  if (extension_ != nullptr && peek() == Token::FUNCTION &&
+  // We allow a native function declaration if we're parsing the source for an
+  // extension. A native function declaration starts with "native function"
+  // with no line-terminator between the two words.
+  if (impl()->ParsingExtension() && peek() == Token::FUNCTION &&
       !scanner()->HasLineTerminatorBeforeNext() && impl()->IsNative(expr) &&
       !scanner()->literal_contains_escapes()) {
     return ParseNativeDeclaration();
@@ -5563,6 +5544,14 @@ typename ParserBase<Impl>::StatementT ParserBase<Impl>::ParseReturnStatement() {
     case MODULE_SCOPE:
       impl()->ReportMessageAt(loc, MessageTemplate::kIllegalReturn);
       return impl()->NullStatement();
+    case BLOCK_SCOPE:
+      // Class static blocks disallow return. They are their own var scopes and
+      // have a varblock scope.
+      if (function_state_->kind() == kClassStaticInitializerFunction) {
+        impl()->ReportMessageAt(loc, MessageTemplate::kIllegalReturn);
+        return impl()->NullStatement();
+      }
+      break;
     default:
       break;
   }
@@ -5997,7 +5986,8 @@ typename ParserBase<Impl>::StatementT ParserBase<Impl>::ParseForStatement(
       expression = ParseExpressionCoverGrammar();
       // `for (async of` is disallowed but `for (async.x of` is allowed, so
       // check if the token is ASYNC after parsing the expression.
-      bool expression_is_async = scanner()->current_token() == Token::ASYNC;
+      bool expression_is_async = scanner()->current_token() == Token::ASYNC &&
+                                 !scanner()->literal_contains_escapes();
       // Initializer is reference followed by in/of.
       lhs_end_pos = end_position();
       is_for_each = CheckInOrOf(&for_info.mode);

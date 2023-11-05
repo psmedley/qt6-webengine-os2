@@ -12,7 +12,6 @@
 #include "base/auto_reset.h"
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -28,11 +27,11 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/url_database.h"
+#include "components/omnibox/browser/actions/omnibox_pedal.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/omnibox_controller_emitter.h"
-#include "components/omnibox/browser/omnibox_pedal.h"
 #include "components/search_engines/omnibox_focus_type.h"
 #include "components/search_engines/template_url.h"
 #include "content/public/browser/web_ui.h"
@@ -171,8 +170,7 @@ struct TypeConverter<mojom::AutocompleteMatchPtr, AutocompleteMatch> {
     result->keyword = base::UTF16ToUTF8(input.keyword);
     result->duplicates = static_cast<int32_t>(input.duplicate_matches.size());
     result->from_previous = input.from_previous;
-    result->pedal_id =
-        input.pedal ? static_cast<int32_t>(input.pedal->id()) : 0;
+    result->pedal_id = input.action ? input.action->GetID() : 0;
     result->additional_info =
         mojo::ConvertTo<std::vector<mojom::AutocompleteAdditionalInfoPtr>>(
             input.additional_info);
@@ -224,7 +222,7 @@ void OmniboxPageHandler::OnResultChanged(AutocompleteController* controller,
       (base::Time::Now() - time_omnibox_started_).InMilliseconds();
   response->done = controller->done();
   response->type = AutocompleteInput::TypeToString(input_.type());
-  const base::string16 host =
+  const std::u16string host =
       input_.text().substr(input_.parts().host.begin, input_.parts().host.len);
   response->host = base::UTF16ToUTF8(host);
   bool is_typed_host;
@@ -301,7 +299,7 @@ void OmniboxPageHandler::OnBitmapFetched(const std::string& image_url,
   page_->HandleAnswerImageData(image_url, data_url);
 }
 
-bool OmniboxPageHandler::LookupIsTypedHost(const base::string16& host,
+bool OmniboxPageHandler::LookupIsTypedHost(const std::u16string& host,
                                            bool* is_typed_host) const {
   history::HistoryService* const history_service =
       HistoryServiceFactory::GetForProfile(profile_,

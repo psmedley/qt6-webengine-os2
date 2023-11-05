@@ -44,6 +44,15 @@ class RendererSettings;
 class VIZ_SERVICE_EXPORT OverlayProcessorInterface {
  public:
 #if defined(OS_APPLE)
+  using PlatformOverlayCandidate = CALayerOverlay;
+#elif defined(OS_WIN)
+  using PlatformOverlayCandidate = DCLayerOverlay;
+#else
+  // Default.
+  using PlatformOverlayCandidate = OverlayCandidate;
+#endif
+
+#if defined(OS_APPLE)
   using CandidateList = CALayerOverlayList;
 #elif defined(OS_WIN)
   using CandidateList = DCLayerOverlayList;
@@ -72,6 +81,9 @@ class VIZ_SERVICE_EXPORT OverlayProcessorInterface {
     // Rect on the display to position to. This takes in account of Display's
     // rotation.
     gfx::RectF display_rect;
+    // Specifies the region within the buffer to be cropped and (maybe)scaled to
+    // place inside |display_rect|.
+    gfx::RectF uv_rect;
     // Size of output surface in pixels.
     gfx::Size resource_size;
     // Format of the buffer to scanout.
@@ -92,6 +104,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorInterface {
   // API.
   static OutputSurfaceOverlayPlane ProcessOutputSurfaceAsOverlay(
       const gfx::Size& viewport_size,
+      const gfx::Size& resource_size,
       const gfx::BufferFormat& buffer_format,
       const gfx::ColorSpace& color_space,
       bool has_alpha,
@@ -125,7 +138,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorInterface {
   virtual void ProcessForOverlays(
       DisplayResourceProvider* resource_provider,
       AggregatedRenderPassList* render_passes,
-      const SkMatrix44& output_color_matrix,
+      const skia::Matrix44& output_color_matrix,
       const FilterOperationsMap& render_pass_filters,
       const FilterOperationsMap& render_pass_backdrop_filters,
       SurfaceDamageRectList surface_damage_rect_list,
@@ -136,11 +149,11 @@ class VIZ_SERVICE_EXPORT OverlayProcessorInterface {
 
   // For Mac, if we successfully generated a candidate list for CALayerOverlay,
   // we no longer need the |output_surface_plane|. This function takes a pointer
-  // to the base::Optional instance so the instance can be reset.
+  // to the absl::optional instance so the instance can be reset.
   // TODO(weiliangc): Internalize the |output_surface_plane| inside the overlay
   // processor.
   virtual void AdjustOutputSurfaceOverlay(
-      base::Optional<OutputSurfaceOverlayPlane>* output_surface_plane) = 0;
+      absl::optional<OutputSurfaceOverlayPlane>* output_surface_plane) = 0;
 
   // Before the overlay refactor to use OverlayProcessorOnGpu, overlay
   // candidates are stored inside DirectRenderer. Those overlay candidates are
@@ -168,6 +181,9 @@ class VIZ_SERVICE_EXPORT OverlayProcessorInterface {
   // Overlay processor uses a frame counter to determine the potential power
   // benefits of individual overlay candidates.
   virtual void SetFrameSequenceNumber(uint64_t frame_sequence_number) {}
+
+  // If true, video capture is enabled for this frame.
+  virtual void SetIsVideoCaptureEnabled(bool enabled) {}
 
  protected:
   OverlayProcessorInterface() = default;

@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
-#include "base/optional.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
 #include "base/strings/pattern.h"
@@ -38,6 +37,7 @@
 #include "testing/gtest/include/gtest/gtest-death-test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
@@ -222,10 +222,10 @@ TEST_F(SysInfoTest, HardwareModelNameFormatMacAndiOS) {
 
 TEST_F(SysInfoTest, GetHardwareInfo) {
   test::TaskEnvironment task_environment;
-  base::Optional<SysInfo::HardwareInfo> hardware_info;
+  absl::optional<SysInfo::HardwareInfo> hardware_info;
 
   auto callback = base::BindOnce(
-      [](base::Optional<SysInfo::HardwareInfo>* target_info,
+      [](absl::optional<SysInfo::HardwareInfo>* target_info,
          SysInfo::HardwareInfo info) { *target_info = std::move(info); },
       &hardware_info);
   SysInfo::GetHardwareInfo(std::move(callback));
@@ -249,10 +249,10 @@ TEST_F(SysInfoTest, GetHardwareInfo) {
 TEST_F(SysInfoTest, GetHardwareInfoWMIMatchRegistry) {
   base::win::ScopedCOMInitializer com_initializer;
   test::TaskEnvironment task_environment;
-  base::Optional<SysInfo::HardwareInfo> hardware_info;
+  absl::optional<SysInfo::HardwareInfo> hardware_info;
 
   auto callback = base::BindOnce(
-      [](base::Optional<SysInfo::HardwareInfo>* target_info,
+      [](absl::optional<SysInfo::HardwareInfo>* target_info,
          SysInfo::HardwareInfo info) { *target_info = std::move(info); },
       &hardware_info);
   SysInfo::GetHardwareInfo(std::move(callback));
@@ -376,6 +376,19 @@ TEST_F(SysInfoTest, IsRunningOnChromeOS) {
     test::ScopedChromeOSVersionInfo version(kLsbRelease3, Time());
     EXPECT_TRUE(SysInfo::IsRunningOnChromeOS());
   }
+}
+
+// Regression test for https://crbug.com/1148904.
+TEST_F(SysInfoTest, ScopedChromeOSVersionInfoDoesNotChangeEnvironment) {
+  std::unique_ptr<Environment> environment = Environment::Create();
+  ASSERT_FALSE(environment->HasVar("LSB_RELEASE"));
+  {
+    const char kLsbRelease[] =
+        "CHROMEOS_RELEASE_NAME=Chrome OS\n"
+        "CHROMEOS_RELEASE_VERSION=1.2.3.4\n";
+    test::ScopedChromeOSVersionInfo version(kLsbRelease, Time());
+  }
+  EXPECT_FALSE(environment->HasVar("LSB_RELEASE"));
 }
 
 TEST_F(SysInfoTest, CrashOnBaseImage) {

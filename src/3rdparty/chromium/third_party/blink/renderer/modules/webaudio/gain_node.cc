@@ -24,7 +24,9 @@
  */
 
 #include "third_party/blink/renderer/modules/webaudio/gain_node.h"
+
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gain_options.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
@@ -39,10 +41,7 @@ GainHandler::GainHandler(AudioNode& node,
     : AudioHandler(kNodeTypeGain, node, sample_rate),
       gain_(&gain),
       sample_accurate_gain_values_(
-          audio_utilities::kRenderQuantumFrames)  // FIXME: can probably
-                                                  // share temp buffer
-                                                  // in context
-{
+          GetDeferredTaskHandler().RenderQuantumFrames()) {
   AddInput();
   AddOutput(1);
 
@@ -100,11 +99,11 @@ void GainHandler::Process(uint32_t frames_to_process) {
 
 void GainHandler::ProcessOnlyAudioParams(uint32_t frames_to_process) {
   DCHECK(Context()->IsAudioThread());
-  DCHECK_LE(frames_to_process, audio_utilities::kRenderQuantumFrames);
+  DCHECK_LE(frames_to_process, GetDeferredTaskHandler().RenderQuantumFrames());
 
-  float values[audio_utilities::kRenderQuantumFrames];
+  std::vector<float> values(GetDeferredTaskHandler().RenderQuantumFrames());
 
-  gain_->CalculateSampleAccurateValues(values, frames_to_process);
+  gain_->CalculateSampleAccurateValues(values.data(), frames_to_process);
 }
 
 // FIXME: this can go away when we do mixing with gain directly in summing
@@ -119,7 +118,7 @@ void GainHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
   Context()->AssertGraphOwner();
 
   DCHECK(input);
-  DCHECK_EQ(input, &this->Input(0));
+  DCHECK_EQ(input, &Input(0));
 
   unsigned number_of_channels = input->NumberOfChannels();
 

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/ng/custom/custom_layout_work_task.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/core/layout/ng/custom/custom_intrinsic_sizes.h"
 #include "third_party/blink/renderer/core/layout/ng/custom/custom_layout_child.h"
@@ -47,18 +48,17 @@ void CustomLayoutWorkTask::Trace(Visitor* visitor) const {
   visitor->Trace(options_);
 }
 
-void CustomLayoutWorkTask::Run(
-    const NGConstraintSpace& parent_space,
-    const ComputedStyle& parent_style,
-    const LayoutUnit child_percentage_resolution_block_size_for_min_max,
-    bool* child_depends_on_percentage_block_size) {
+void CustomLayoutWorkTask::Run(const NGConstraintSpace& parent_space,
+                               const ComputedStyle& parent_style,
+                               const LayoutUnit child_available_block_size,
+                               bool* child_depends_on_block_constraints) {
   DCHECK(token_->IsValid());
   NGLayoutInputNode child = child_->GetLayoutNode();
 
   if (type_ == CustomLayoutWorkTask::TaskType::kIntrinsicSizes) {
-    RunIntrinsicSizesTask(parent_style,
-                          child_percentage_resolution_block_size_for_min_max,
-                          child, child_depends_on_percentage_block_size);
+    RunIntrinsicSizesTask(parent_space, parent_style,
+                          child_available_block_size, child,
+                          child_depends_on_block_constraints);
   } else {
     DCHECK_EQ(type_, CustomLayoutWorkTask::TaskType::kLayoutFragment);
     RunLayoutFragmentTask(parent_space, parent_style, child);
@@ -147,24 +147,26 @@ void CustomLayoutWorkTask::RunLayoutFragmentTask(
 }
 
 void CustomLayoutWorkTask::RunIntrinsicSizesTask(
+    const NGConstraintSpace& parent_space,
     const ComputedStyle& parent_style,
-    const LayoutUnit child_percentage_resolution_block_size_for_min_max,
+    const LayoutUnit child_available_block_size,
     NGLayoutInputNode child,
-    bool* child_depends_on_percentage_block_size) {
+    bool* child_depends_on_block_constraints) {
   DCHECK_EQ(type_, CustomLayoutWorkTask::TaskType::kIntrinsicSizes);
   DCHECK(resolver_);
 
-  MinMaxSizesInput input(child_percentage_resolution_block_size_for_min_max,
-                         MinMaxSizesType::kContent);
+  NGMinMaxConstraintSpaceBuilder builder(parent_space, parent_style, child,
+                                         /* is_new_fc */ true);
+  builder.SetAvailableBlockSize(child_available_block_size);
+  const auto space = builder.ToConstraintSpace();
+
   MinMaxSizesResult result = ComputeMinAndMaxContentContribution(
-      parent_style, To<NGBlockNode>(child), input);
+      parent_style, To<NGBlockNode>(child), space);
   resolver_->Resolve(MakeGarbageCollected<CustomIntrinsicSizes>(
       child_, token_, result.sizes.min_size, result.sizes.max_size));
 
-  if (child_depends_on_percentage_block_size) {
-    *child_depends_on_percentage_block_size |=
-        result.depends_on_percentage_block_size;
-  }
+  if (child_depends_on_block_constraints)
+    *child_depends_on_block_constraints |= result.depends_on_block_constraints;
 }
 
 }  // namespace blink

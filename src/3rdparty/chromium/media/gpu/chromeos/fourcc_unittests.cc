@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/optional.h"
 #include "media/gpu/chromeos/fourcc.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #include "media/gpu/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -21,8 +21,8 @@ namespace media {
 // Checks that converting a V4L2 pixel format to Fourcc and back to V4L2
 // yields the same format as the original one.
 static void CheckFromV4L2PixFmtAndBack(uint32_t fmt) {
-  base::Optional<Fourcc> fourcc = Fourcc::FromV4L2PixFmt(fmt);
-  EXPECT_NE(fourcc, base::nullopt);
+  absl::optional<Fourcc> fourcc = Fourcc::FromV4L2PixFmt(fmt);
+  EXPECT_NE(fourcc, absl::nullopt);
   EXPECT_EQ(fourcc->ToV4L2PixFmt(), fmt);
 }
 
@@ -47,6 +47,7 @@ TEST(FourccTest, V4L2PixFmtToV4L2PixFmt) {
   CheckFromV4L2PixFmtAndBack(V4L2_PIX_FMT_NV12);
   CheckFromV4L2PixFmtAndBack(V4L2_PIX_FMT_NV21);
   CheckFromV4L2PixFmtAndBack(V4L2_PIX_FMT_NV12M);
+  CheckFromV4L2PixFmtAndBack(V4L2_PIX_FMT_YUV422P);
   CheckFromV4L2PixFmtAndBack(V4L2_PIX_FMT_YUV422M);
   CheckFromV4L2PixFmtAndBack(V4L2_PIX_FMT_MT21C);
   CheckFromV4L2PixFmtAndBack(V4L2_MM21);
@@ -75,6 +76,8 @@ TEST(FourccTest, V4L2PixFmtToVideoPixelFormat) {
             Fourcc::FromV4L2PixFmt(V4L2_PIX_FMT_YVU420M)->ToVideoPixelFormat());
 
   EXPECT_EQ(PIXEL_FORMAT_I422,
+            Fourcc::FromV4L2PixFmt(V4L2_PIX_FMT_YUV422P)->ToVideoPixelFormat());
+  EXPECT_EQ(PIXEL_FORMAT_I422,
             Fourcc::FromV4L2PixFmt(V4L2_PIX_FMT_YUV422M)->ToVideoPixelFormat());
 
   // Noted that previously in V4L2Device::V4L2PixFmtToVideoPixelFormat(),
@@ -84,7 +87,7 @@ TEST(FourccTest, V4L2PixFmtToVideoPixelFormat) {
             Fourcc::FromV4L2PixFmt(V4L2_PIX_FMT_RGB32)->ToVideoPixelFormat());
 
   // Randomly pick an unmapped v4l2 fourcc.
-  EXPECT_EQ(base::nullopt, Fourcc::FromV4L2PixFmt(V4L2_PIX_FMT_Z16));
+  EXPECT_EQ(absl::nullopt, Fourcc::FromV4L2PixFmt(V4L2_PIX_FMT_Z16));
 }
 
 TEST(FourccTest, VideoPixelFormatToV4L2PixFmt) {
@@ -108,6 +111,13 @@ TEST(FourccTest, VideoPixelFormatToV4L2PixFmt) {
   EXPECT_EQ(
       V4L2_PIX_FMT_YVU420M,
       Fourcc::FromVideoPixelFormat(PIXEL_FORMAT_YV12, false)->ToV4L2PixFmt());
+
+  EXPECT_EQ(
+      V4L2_PIX_FMT_YUV422P,
+      Fourcc::FromVideoPixelFormat(PIXEL_FORMAT_I422, true)->ToV4L2PixFmt());
+  EXPECT_EQ(
+      V4L2_PIX_FMT_YUV422M,
+      Fourcc::FromVideoPixelFormat(PIXEL_FORMAT_I422, false)->ToV4L2PixFmt());
 }
 #endif  // BUILDFLAG(USE_V4L2_CODEC)
 
@@ -115,10 +125,10 @@ TEST(FourccTest, VideoPixelFormatToV4L2PixFmt) {
 // Checks that converting a VaFourCC to Fourcc and back to VaFourCC
 // yields the same format as the original one.
 static void CheckFromVAFourCCAndBack(uint32_t va_fourcc) {
-  base::Optional<Fourcc> fourcc = Fourcc::FromVAFourCC(va_fourcc);
-  EXPECT_NE(fourcc, base::nullopt);
-  base::Optional<uint32_t> to_va_fourcc = fourcc->ToVAFourCC();
-  EXPECT_NE(to_va_fourcc, base::nullopt);
+  absl::optional<Fourcc> fourcc = Fourcc::FromVAFourCC(va_fourcc);
+  EXPECT_NE(fourcc, absl::nullopt);
+  absl::optional<uint32_t> to_va_fourcc = fourcc->ToVAFourCC();
+  EXPECT_NE(to_va_fourcc, absl::nullopt);
   EXPECT_EQ(*to_va_fourcc, va_fourcc);
 }
 
@@ -194,6 +204,8 @@ TEST(FourccTest, FourccToSinglePlanar) {
   EXPECT_EQ(Fourcc(Fourcc::YUYV).ToSinglePlanar(), Fourcc(Fourcc::YUYV));
   EXPECT_EQ(Fourcc(Fourcc::NV12).ToSinglePlanar(), Fourcc(Fourcc::NV12));
   EXPECT_EQ(Fourcc(Fourcc::NV21).ToSinglePlanar(), Fourcc(Fourcc::NV21));
+  EXPECT_EQ(Fourcc(Fourcc::YU16).ToSinglePlanar(), Fourcc(Fourcc::YU16));
+  EXPECT_EQ(Fourcc(Fourcc::YM16).ToSinglePlanar(), Fourcc(Fourcc::YU16));
   EXPECT_EQ(Fourcc(Fourcc::P010).ToSinglePlanar(), Fourcc(Fourcc::P010));
   EXPECT_EQ(Fourcc(Fourcc::YM12).ToSinglePlanar(),
             Fourcc(Fourcc::YU12).ToSinglePlanar());

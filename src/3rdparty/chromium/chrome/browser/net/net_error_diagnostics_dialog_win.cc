@@ -10,6 +10,7 @@
 #include <windows.h>   // NOLINT
 
 #include <memory>
+#include <string>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -20,7 +21,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/native_library.h"
 #include "base/scoped_native_library.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
 #include "base/threading/thread.h"
@@ -89,8 +89,7 @@ bool CanShowNetworkDiagnosticsDialog(content::WebContents* web_contents) {
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   // The Windows diagnostic tool logs URLs it's run with, so it shouldn't be
   // used with incognito or guest profiles.  See https://crbug.com/929141
-  return !profile->IsIncognitoProfile() && !profile->IsGuestSession() &&
-         !profile->IsEphemeralGuestProfile();
+  return !profile->IsIncognitoProfile() && !profile->IsGuestSession();
 }
 
 void ShowNetworkDiagnosticsDialog(content::WebContents* web_contents,

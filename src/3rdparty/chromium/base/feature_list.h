@@ -16,14 +16,15 @@
 #include "base/containers/flat_map.h"
 #include "base/gtest_prod_util.h"
 #include "base/metrics/field_trial_params.h"
-#include "base/metrics/persistent_memory_allocator.h"
 #include "base/strings/string_piece.h"
 #include "base/synchronization/lock.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
 class FieldTrial;
 class FieldTrialList;
+class PersistentMemoryAllocator;
 
 // Specifies whether a given feature is enabled or disabled by default.
 // NOTE: The actual runtime state may be different, due to a field trial or a
@@ -225,11 +226,26 @@ class BASE_EXPORT FeatureList {
   void GetCommandLineFeatureOverrides(std::string* enable_overrides,
                                       std::string* disable_overrides);
 
+  // Returns the field trial associated with the given feature |name|. Used for
+  // getting the FieldTrial without requiring a struct Feature.
+  base::FieldTrial* GetAssociatedFieldTrialByFeatureName(StringPiece name);
+
+  // Get associated field trial for the given feature |name| only if override
+  // enables it.
+  FieldTrial* GetEnabledFieldTrialByFeatureName(StringPiece name);
+
   // Returns whether the given |feature| is enabled. Must only be called after
   // the singleton instance has been registered via SetInstance(). Additionally,
   // a feature with a given name must only have a single corresponding Feature
   // struct, which is checked in builds with DCHECKs enabled.
   static bool IsEnabled(const Feature& feature);
+
+  // If the given |feature| is overridden, returns its enabled state; otherwise,
+  // returns an empty optional. Must only be called after the singleton instance
+  // has been registered via SetInstance(). Additionally, a feature with a given
+  // name must only have a single corresponding Feature struct, which is checked
+  // in builds with DCHECKs enabled.
+  static absl::optional<bool> GetStateIfOverridden(const Feature& feature);
 
   // Returns the field trial associated with the given |feature|. Must only be
   // called after the singleton instance has been registered via SetInstance().
@@ -313,6 +329,11 @@ class BASE_EXPORT FeatureList {
     OverrideEntry(OverrideState overridden_state, FieldTrial* field_trial);
   };
 
+  // Returns the override for the field trial associated with the given feature
+  // |name| or null if the feature is not found.
+  const base::FeatureList::OverrideEntry* GetOverrideEntryByFeatureName(
+      StringPiece name);
+
   // Finalizes the initialization state of the FeatureList, so that no further
   // overrides can be registered. This is called by SetInstance() on the
   // singleton feature list that is being registered.
@@ -322,6 +343,16 @@ class BASE_EXPORT FeatureList {
   // public FeatureList::IsEnabled() static function on the global singleton.
   // Requires the FeatureList to have already been fully initialized.
   bool IsFeatureEnabled(const Feature& feature);
+
+  // Returns whether the given |feature| is enabled. This is invoked by the
+  // public FeatureList::GetStateIfOverridden() static function on the global
+  // singleton. Requires the FeatureList to have already been fully initialized.
+  absl::optional<bool> IsFeatureEnabledIfOverridden(const Feature& feature);
+
+  // Returns the override state of a given |feature|. If the feature was not
+  // overridden, returns OVERRIDE_USE_DEFAULT. Performs any necessary callbacks
+  // for when the feature state has been observed, e.g. actvating field trials.
+  OverrideState GetOverrideState(const Feature& feature);
 
   // Returns the field trial associated with the given |feature|. This is
   // invoked by the public FeatureList::GetFieldTrial() static function on the

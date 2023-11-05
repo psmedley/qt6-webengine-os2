@@ -39,8 +39,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/type_converter.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
-#include "third_party/blink/public/mojom/frame/navigation_initiator.mojom-blink.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/mojom/frame/user_activation_update_types.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_provider.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_provider_client.h"
@@ -70,7 +69,6 @@
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
-#include "third_party/blink/renderer/core/frame/csp/conversion_util.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -90,6 +88,7 @@
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/loader/history_item.h"
+#include "third_party/blink/renderer/core/mobile_metrics/mobile_friendliness_checker.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/plugin_data.h"
@@ -310,7 +309,7 @@ bool LocalFrameClientImpl::HasWebView() const {
 }
 
 bool LocalFrameClientImpl::InShadowTree() const {
-  return web_frame_->InShadowTree();
+  return web_frame_->GetTreeScopeType() == mojom::blink::TreeScopeType::kShadow;
 }
 
 void LocalFrameClientImpl::WillBeDetached() {
@@ -383,15 +382,21 @@ void LocalFrameClientImpl::DispatchDidHandleOnloadEvents() {
 void LocalFrameClientImpl::DidFinishSameDocumentNavigation(
     HistoryItem* item,
     WebHistoryCommitType commit_type,
-    bool content_initiated,
-    bool is_history_api_navigation) {
+    bool is_synchronously_committed,
+    mojom::blink::SameDocumentNavigationType same_document_navigation_type,
+    bool is_client_redirect) {
   bool should_create_history_entry = commit_type == kWebStandardCommit;
   // TODO(dglazkov): Does this need to be called for subframes?
   web_frame_->ViewImpl()->DidCommitLoad(should_create_history_entry, true);
   if (web_frame_->Client()) {
     web_frame_->Client()->DidFinishSameDocumentNavigation(
-        commit_type, content_initiated, is_history_api_navigation);
+        commit_type, is_synchronously_committed, same_document_navigation_type,
+        is_client_redirect);
   }
+}
+
+void LocalFrameClientImpl::DispatchDidOpenDocumentInputStream(const KURL& url) {
+  web_frame_->Client()->DidOpenDocumentInputStream(url);
 }
 
 void LocalFrameClientImpl::DispatchDidReceiveTitle(const String& title) {
@@ -404,8 +409,7 @@ void LocalFrameClientImpl::DispatchDidCommitLoad(
     HistoryItem* item,
     WebHistoryCommitType commit_type,
     bool should_reset_browser_interface_broker,
-    network::mojom::WebSandboxFlags sandbox_flags,
-    const blink::ParsedFeaturePolicy& feature_policy_header,
+    const blink::ParsedPermissionsPolicy& permissions_policy_header,
     const blink::DocumentPolicyFeatureState& document_policy_header) {
   if (!web_frame_->Parent()) {
     web_frame_->ViewImpl()->DidCommitLoad(commit_type == kWebStandardCommit,
@@ -414,8 +418,8 @@ void LocalFrameClientImpl::DispatchDidCommitLoad(
 
   if (web_frame_->Client()) {
     web_frame_->Client()->DidCommitNavigation(
-        commit_type, should_reset_browser_interface_broker, sandbox_flags,
-        feature_policy_header, document_policy_header);
+        commit_type, should_reset_browser_interface_broker,
+        permissions_policy_header, document_policy_header);
 
     // With local to local swap it's possible for the frame to be deleted as a
     // side effect of JS event handlers called in DidCommitNavigation
@@ -482,11 +486,10 @@ void LocalFrameClientImpl::BeginNavigation(
     mojo::PendingRemote<mojom::blink::BlobURLToken> blob_url_token,
     base::TimeTicks input_start_time,
     const String& href_translate,
-    const base::Optional<WebImpression>& impression,
-    WTF::Vector<network::mojom::blink::ContentSecurityPolicyPtr> initiator_csp,
+    const absl::optional<WebImpression>& impression,
     network::mojom::IPAddressSpace initiator_address_space,
-    mojo::PendingRemote<mojom::blink::NavigationInitiator> navigation_initiator,
     const LocalFrameToken* initiator_frame_token,
+    std::unique_ptr<SourceLocation> source_location,
     mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
         initiator_policy_container_keep_alive_handle) {
   if (!web_frame_->Client())
@@ -525,9 +528,7 @@ void LocalFrameClientImpl::BeginNavigation(
     // |initiator_policy_container_keep_alive_handle|.
     if (!navigation_info->initiator_policy_container_keep_alive_handle) {
       navigation_info->initiator_policy_container_keep_alive_handle =
-          origin_window->GetFrame()
-              ->GetPolicyContainer()
-              ->IssueKeepAliveHandle();
+          origin_window->GetPolicyContainer()->IssueKeepAliveHandle();
     }
   } else {
     // TODO(https://crbug.com/1173409 and https://crbug.com/1059959): Check that
@@ -535,13 +536,7 @@ void LocalFrameClientImpl::BeginNavigation(
     // |initiator_policy_container_keep_alive_handle| if |origin_window| is not
     // set.
   }
-  for (auto& csp_policy : initiator_csp) {
-    navigation_info->initiator_csp.emplace_back(
-        ConvertToPublic(std::move(csp_policy)));
-  }
   navigation_info->initiator_address_space = initiator_address_space;
-  navigation_info->navigation_initiator_remote =
-      std::move(navigation_initiator);
 
   navigation_info->impression = impression;
 
@@ -578,21 +573,19 @@ void LocalFrameClientImpl::BeginNavigation(
     navigation_info->initiator_frame_is_ad = frame->IsAdSubframe();
   }
 
-  navigation_info->blocking_downloads_in_sandbox_enabled =
-      RuntimeEnabledFeatures::BlockingDownloadsInSandboxEnabled();
-
   // The frame has navigated either by itself or by the action of the
   // |origin_window| when it is defined. |source_location| represents the
   // line of code that has initiated the navigation. It is used to let web
-  // developpers locate the root cause of blocked navigations.
-  // TODO(crbug.com/804504): This is likely wrong -- this is often invoked
-  // asynchronously as a result of ScheduledURLNavigation::Fire(), so JS
-  // stack is not available here.
-  std::unique_ptr<SourceLocation> source_location =
-      origin_window
-          ? SourceLocation::Capture(origin_window)
-          : SourceLocation::Capture(web_frame_->GetFrame()->DomWindow());
-  if (source_location && !source_location->IsUnknown()) {
+  // developers locate the root cause of blocked navigations.
+  // If `origin_window` is defined, then `source_location` must be, too, since
+  // it should have been captured when creating the `FrameLoadRequest`.
+  // Otherwise, try to capture the `source_location` from the current frame.
+  if (!source_location) {
+    DCHECK(!origin_window);
+    source_location =
+        SourceLocation::Capture(web_frame_->GetFrame()->DomWindow());
+  }
+  if (!source_location->IsUnknown()) {
     navigation_info->source_location.url = source_location->Url();
     navigation_info->source_location.line_number =
         source_location->LineNumber();
@@ -626,17 +619,19 @@ void LocalFrameClientImpl::BeginNavigation(
   navigation_info->frame_policy =
       owner ? owner->GetFramePolicy() : FramePolicy();
 
-  // owner->GetFramePolicy() above only contains the sandbox flags defined by
+  // navigation_info->frame_policy is only used for the synchronous
+  // re-navigation to about:blank. See:
+  // - |RenderFrameImpl::SynchronouslyCommitAboutBlankForBug778318| and
+  // - |WebNavigationParams::CreateFromInfo|
+  //
+  // |owner->GetFramePolicy()| above only contains the sandbox flags defined by
   // the <iframe> element. It doesn't take into account inheritance from the
-  // parent or the opener. This is not a problem in the general case, because
-  // this attribute is simply dropped! It matter only for the "fake" navigation
-  // to the "fake" initial empty document. It is:
-  // RenderFrameImpl::CommitInitialEmptyDocument().
-  // This one doesn't go toward the browser process, it commits synchronously.
-  // The sandbox flags must be defined. They correspond to the one already in
-  // use for the 'real' initial empty document.
-  navigation_info->frame_policy.sandbox_flags =
-      web_frame_->GetFrame()->Loader().PendingEffectiveSandboxFlags();
+  // parent or the opener. The synchronous re-navigation to about:blank and the
+  // initial empty document must both have the same sandbox flags. Make a copy:
+  navigation_info->frame_policy.sandbox_flags = web_frame_->GetFrame()
+                                                    ->DomWindow()
+                                                    ->GetSecurityContext()
+                                                    .GetSandboxFlags();
 
   navigation_info->href_translate = href_translate;
 
@@ -665,9 +660,9 @@ bool LocalFrameClientImpl::NavigateBackForward(int offset) const {
   DCHECK(web_frame_->Client());
 
   DCHECK(offset);
-  if (offset > webview->Client()->HistoryForwardListCount())
+  if (offset > webview->HistoryForwardListCount())
     return false;
-  if (offset < -webview->Client()->HistoryBackListCount())
+  if (offset < -webview->HistoryBackListCount())
     return false;
 
   bool has_user_gesture =
@@ -705,18 +700,9 @@ void LocalFrameClientImpl::DidObserveLoadingBehavior(
 }
 
 void LocalFrameClientImpl::DidObserveNewFeatureUsage(
-    mojom::WebFeature feature) {
+    const UseCounterFeature& feature) {
   if (web_frame_->Client())
     web_frame_->Client()->DidObserveNewFeatureUsage(feature);
-}
-
-void LocalFrameClientImpl::DidObserveNewCssPropertyUsage(
-    mojom::CSSSampleId css_property,
-    bool is_animated) {
-  if (web_frame_->Client()) {
-    web_frame_->Client()->DidObserveNewCssPropertyUsage(css_property,
-                                                        is_animated);
-  }
 }
 
 void LocalFrameClientImpl::DidObserveLayoutShift(double score,
@@ -725,19 +711,16 @@ void LocalFrameClientImpl::DidObserveLayoutShift(double score,
     client->DidObserveLayoutShift(score, after_input_or_scroll);
 }
 
-void LocalFrameClientImpl::DidObserveInputForLayoutShiftTracking(
-    base::TimeTicks timestamp) {
-  if (WebLocalFrameClient* client = web_frame_->Client())
-    client->DidObserveInputForLayoutShiftTracking(timestamp);
-}
-
 void LocalFrameClientImpl::DidObserveLayoutNg(uint32_t all_block_count,
                                               uint32_t ng_block_count,
                                               uint32_t all_call_count,
-                                              uint32_t ng_call_count) {
+                                              uint32_t ng_call_count,
+                                              uint32_t flexbox_ng_block_count,
+                                              uint32_t grid_ng_block_count) {
   if (WebLocalFrameClient* client = web_frame_->Client()) {
     client->DidObserveLayoutNg(all_block_count, ng_block_count, all_call_count,
-                               ng_call_count);
+                               ng_call_count, flexbox_ng_block_count,
+                               grid_ng_block_count);
   }
 }
 
@@ -745,6 +728,18 @@ void LocalFrameClientImpl::DidObserveLazyLoadBehavior(
     WebLocalFrameClient::LazyLoadBehavior lazy_load_behavior) {
   if (WebLocalFrameClient* client = web_frame_->Client())
     client->DidObserveLazyLoadBehavior(lazy_load_behavior);
+}
+
+void LocalFrameClientImpl::PreloadSubresourceOptimizationsForOrigins(
+    const WTF::HashSet<scoped_refptr<const SecurityOrigin>, SecurityOriginHash>&
+        origins) {
+  if (WebLocalFrameClient* client = web_frame_->Client()) {
+    std::vector<WebSecurityOrigin> origins_list;
+    for (const auto& origin : origins) {
+      origins_list.emplace_back(origin);
+    }
+    client->PreloadSubresourceOptimizationsForOrigins(origins_list);
+  }
 }
 
 void LocalFrameClientImpl::SelectorMatchChanged(
@@ -759,14 +754,14 @@ void LocalFrameClientImpl::SelectorMatchChanged(
 DocumentLoader* LocalFrameClientImpl::CreateDocumentLoader(
     LocalFrame* frame,
     WebNavigationType navigation_type,
-    ContentSecurityPolicy* content_security_policy,
     std::unique_ptr<WebNavigationParams> navigation_params,
+    std::unique_ptr<PolicyContainer> policy_container,
     std::unique_ptr<WebDocumentLoader::ExtraData> extra_data) {
   DCHECK(frame);
   WebDocumentLoaderImpl* document_loader =
       MakeGarbageCollected<WebDocumentLoaderImpl>(frame, navigation_type,
-                                                  content_security_policy,
-                                                  std::move(navigation_params));
+                                                  std::move(navigation_params),
+                                                  std::move(policy_container));
   document_loader->SetExtraData(std::move(extra_data));
   if (web_frame_->Client())
     web_frame_->Client()->DidCreateDocumentLoader(document_loader);
@@ -791,10 +786,10 @@ String LocalFrameClientImpl::UserAgent() {
   return user_agent_;
 }
 
-base::Optional<UserAgentMetadata> LocalFrameClientImpl::UserAgentMetadata() {
+absl::optional<UserAgentMetadata> LocalFrameClientImpl::UserAgentMetadata() {
   bool ua_override_on = web_frame_->Client() &&
                         !web_frame_->Client()->UserAgentOverride().IsEmpty();
-  base::Optional<blink::UserAgentMetadata> user_agent_metadata =
+  absl::optional<blink::UserAgentMetadata> user_agent_metadata =
       ua_override_on ? web_frame_->Client()->UserAgentMetadataOverride()
                      : Platform::Current()->UserAgentMetadata();
 
@@ -834,6 +829,11 @@ std::pair<RemoteFrame*, PortalToken> LocalFrameClientImpl::CreatePortal(
 
 RemoteFrame* LocalFrameClientImpl::AdoptPortal(HTMLPortalElement* portal) {
   return web_frame_->AdoptPortal(portal);
+}
+
+RemoteFrame* LocalFrameClientImpl::CreateFencedFrame(
+    HTMLFencedFrameElement* fenced_frame) {
+  return web_frame_->CreateFencedFrame(fenced_frame);
 }
 
 WebPluginContainerImpl* LocalFrameClientImpl::CreatePlugin(
@@ -913,10 +913,7 @@ void LocalFrameClientImpl::DispatchDidChangeManifest() {
 
 unsigned LocalFrameClientImpl::BackForwardLength() {
   WebViewImpl* webview = web_frame_->ViewImpl();
-  if (!webview || !webview->Client())
-    return 0;
-  return webview->Client()->HistoryBackListCount() + 1 +
-         webview->Client()->HistoryForwardListCount();
+  return webview ? webview->HistoryListLength() : 0;
 }
 
 BlameContext* LocalFrameClientImpl::GetFrameBlameContext() {
@@ -989,9 +986,10 @@ bool LocalFrameClientImpl::HandleCurrentKeyboardEvent() {
       ->HandleCurrentKeyboardEvent();
 }
 
-void LocalFrameClientImpl::DidChangeSelection(bool is_selection_empty) {
+void LocalFrameClientImpl::DidChangeSelection(bool is_selection_empty,
+                                              blink::SyncCondition force_sync) {
   if (web_frame_->Client())
-    web_frame_->Client()->DidChangeSelection(is_selection_empty);
+    web_frame_->Client()->DidChangeSelection(is_selection_empty, force_sync);
 }
 
 void LocalFrameClientImpl::DidChangeContents() {
@@ -1080,6 +1078,13 @@ std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
 LocalFrameClientImpl::CreateResourceLoadInfoNotifierWrapper() {
   DCHECK(web_frame_->Client());
   return web_frame_->Client()->CreateResourceLoadInfoNotifierWrapper();
+}
+
+void LocalFrameClientImpl::BindDevToolsAgent(
+    mojo::PendingAssociatedRemote<mojom::blink::DevToolsAgentHost> host,
+    mojo::PendingAssociatedReceiver<mojom::blink::DevToolsAgent> receiver) {
+  if (WebDevToolsAgentImpl* devtools = DevToolsAgent())
+    devtools->BindReceiver(std::move(host), std::move(receiver));
 }
 
 void LocalFrameClientImpl::UpdateSubresourceFactory(

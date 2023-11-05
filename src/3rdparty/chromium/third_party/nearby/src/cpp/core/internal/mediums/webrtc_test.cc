@@ -14,12 +14,12 @@
 
 #include "core/internal/mediums/webrtc.h"
 
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 #include "core/internal/mediums/webrtc/webrtc_socket_wrapper.h"
 #include "platform/base/listeners.h"
 #include "platform/base/medium_environment.h"
 #include "platform/public/mutex_lock.h"
-#include "gmock/gmock.h"
-#include "gtest/gtest.h"
 
 namespace location {
 namespace nearby {
@@ -384,12 +384,12 @@ TEST_F(WebRtcTest, ContinueAcceptingConnectionsOnComplete) {
   // Simulate a failure in receiving messages stream, WebRtc should restart
   // accepting connections.
   env_.SendWebRtcSignalingComplete(self_id.GetId(),
-                                                            /*success=*/false);
+                                   /*success=*/false);
   EXPECT_TRUE(webrtc.IsAcceptingConnections(service_id));
 
   // And a "success" message should not cause accepting connections to stop.
   env_.SendWebRtcSignalingComplete(self_id.GetId(),
-                                                            /*success=*/true);
+                                   /*success=*/true);
   EXPECT_TRUE(webrtc.IsAcceptingConnections(service_id));
 
   webrtc.StopAcceptingConnections(service_id);

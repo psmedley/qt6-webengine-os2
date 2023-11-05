@@ -24,7 +24,7 @@
 #include "quic/platform/api/quic_flag_utils.h"
 #include "quic/platform/api/quic_flags.h"
 #include "quic/platform/api/quic_logging.h"
-#include "quic/platform/api/quic_map_util.h"
+#include "common/print_elements.h"
 
 namespace quic {
 
@@ -117,7 +117,8 @@ QuicSentPacketManager::QuicSentPacketManager(
       use_standard_deviation_for_pto_(false),
       pto_multiplier_without_rtt_samples_(3),
       num_ptos_for_path_degrading_(0),
-      ignore_pings_(false) {
+      ignore_pings_(false),
+      ignore_ack_delay_(false) {
   SetSendAlgorithm(congestion_control_type);
   if (pto_enabled_) {
     QUIC_RELOADABLE_FLAG_COUNT_N(quic_default_on_pto, 1, 2);
@@ -158,7 +159,7 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
     }
   }
   if (config.HasClientSentConnectionOption(kMAD0, perspective)) {
-    rtt_stats_.set_ignore_max_ack_delay(true);
+    ignore_ack_delay_ = true;
   }
   if (config.HasClientSentConnectionOption(kMAD2, perspective)) {
     // Set the minimum to the alarm granularity.
@@ -179,7 +180,7 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
 
   if (config.HasClientSentConnectionOption(kPTOS, perspective)) {
     if (!pto_enabled_) {
-      QUIC_PEER_BUG
+      QUIC_PEER_BUG(quic_peer_bug_12552_1)
           << "PTO is not enabled when receiving PTOS connection option.";
       pto_enabled_ = true;
       max_probe_packets_per_pto_ = 1;
@@ -339,6 +340,21 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
 
 void QuicSentPacketManager::ApplyConnectionOptions(
     const QuicTagVector& connection_options) {
+  absl::optional<CongestionControlType> cc_type;
+  if (ContainsQuicTag(connection_options, kB2ON)) {
+    cc_type = kBBRv2;
+  } else if (ContainsQuicTag(connection_options, kTBBR)) {
+    cc_type = kBBR;
+  } else if (ContainsQuicTag(connection_options, kRENO)) {
+    cc_type = kRenoBytes;
+  } else if (ContainsQuicTag(connection_options, kQBIC)) {
+    cc_type = kCubicBytes;
+  }
+
+  if (cc_type.has_value()) {
+    SetSendAlgorithm(*cc_type);
+  }
+
   send_algorithm_->ApplyConnectionOptions(connection_options);
 }
 
@@ -624,9 +640,10 @@ void QuicSentPacketManager::MarkForRetransmission(
       unacked_packets_.GetMutableTransmissionInfo(packet_number);
   // A previous RTO retransmission may cause connection close; packets without
   // retransmittable frames can be marked for loss retransmissions.
-  QUIC_BUG_IF(transmission_type != LOSS_RETRANSMISSION &&
-              transmission_type != RTO_RETRANSMISSION &&
-              !unacked_packets_.HasRetransmittableFrames(*transmission_info))
+  QUIC_BUG_IF(quic_bug_12552_2, transmission_type != LOSS_RETRANSMISSION &&
+                                    transmission_type != RTO_RETRANSMISSION &&
+                                    !unacked_packets_.HasRetransmittableFrames(
+                                        *transmission_info))
       << "packet number " << packet_number
       << " transmission_type: " << transmission_type << " transmission_info "
       << transmission_info->DebugString();
@@ -761,7 +778,8 @@ QuicAckFrequencyFrame QuicSentPacketManager::GetUpdatedAckFrequencyFrame()
     const {
   QuicAckFrequencyFrame frame;
   if (!CanSendAckFrequency()) {
-    QUIC_BUG << "New AckFrequencyFrame is created while it shouldn't.";
+    QUIC_BUG(quic_bug_10750_1)
+        << "New AckFrequencyFrame is created while it shouldn't.";
     return frame;
   }
 
@@ -789,7 +807,8 @@ bool QuicSentPacketManager::OnPacketSent(
   QuicPacketNumber packet_number = packet.packet_number;
   QUICHE_DCHECK_LE(FirstSendingPacketNumber(), packet_number);
   QUICHE_DCHECK(!unacked_packets_.IsUnacked(packet_number));
-  QUIC_BUG_IF(packet.encrypted_length == 0) << "Cannot send empty packets.";
+  QUIC_BUG_IF(quic_bug_10750_2, packet.encrypted_length == 0)
+      << "Cannot send empty packets.";
   if (pending_timer_transmission_count_ > 0) {
     --pending_timer_transmission_count_;
   }
@@ -880,7 +899,8 @@ QuicSentPacketManager::OnRetransmissionTimeout() {
       pending_timer_transmission_count_ = max_probe_packets_per_pto_;
       return PTO_MODE;
   }
-  QUIC_BUG << "Unknown retransmission mode " << GetRetransmissionMode();
+  QUIC_BUG(quic_bug_10750_3)
+      << "Unknown retransmission mode " << GetRetransmissionMode();
   return GetRetransmissionMode();
 }
 
@@ -953,7 +973,7 @@ bool QuicSentPacketManager::MaybeRetransmitOldestPacket(TransmissionType type) {
 
 void QuicSentPacketManager::RetransmitRtoPackets() {
   QUICHE_DCHECK(!pto_enabled_);
-  QUIC_BUG_IF(pending_timer_transmission_count_ > 0)
+  QUIC_BUG_IF(quic_bug_12552_3, pending_timer_transmission_count_ > 0)
       << "Retransmissions already queued:" << pending_timer_transmission_count_;
   // Mark two packets for retransmission.
   std::vector<QuicPacketNumber> retransmissions;
@@ -983,7 +1003,7 @@ void QuicSentPacketManager::RetransmitRtoPackets() {
     MarkForRetransmission(retransmission, RTO_RETRANSMISSION);
   }
   if (retransmissions.empty()) {
-    QUIC_BUG_IF(pending_timer_transmission_count_ != 0);
+    QUIC_BUG_IF(quic_bug_12552_4, pending_timer_transmission_count_ != 0);
     // No packets to be RTO retransmitted, raise up a credit to allow
     // connection to send.
     QUIC_CODE_COUNT(no_packets_to_be_rto_retransmitted);
@@ -1000,8 +1020,9 @@ void QuicSentPacketManager::MaybeSendProbePackets() {
     // Find out the packet number space to send probe packets.
     if (!GetEarliestPacketSentTimeForPto(&packet_number_space)
              .IsInitialized()) {
-      QUIC_BUG_IF(unacked_packets_.perspective() == Perspective::IS_SERVER)
-          << "earlist_sent_time not initialized when trying to send PTO "
+      QUIC_BUG_IF(quic_earliest_sent_time_not_initialized,
+                  unacked_packets_.perspective() == Perspective::IS_SERVER)
+          << "earliest_sent_time not initialized when trying to send PTO "
              "retransmissions";
       return;
     }
@@ -1173,8 +1194,8 @@ bool QuicSentPacketManager::MaybeUpdateRTT(QuicPacketNumber largest_acked,
       unacked_packets_.GetTransmissionInfo(largest_acked);
   // Ensure the packet has a valid sent time.
   if (transmission_info.sent_time == QuicTime::Zero()) {
-    QUIC_BUG << "Acked packet has zero sent time, largest_acked:"
-             << largest_acked;
+    QUIC_BUG(quic_bug_10750_4)
+        << "Acked packet has zero sent time, largest_acked:" << largest_acked;
     return false;
   }
   if (transmission_info.state == NOT_CONTRIBUTING_RTT) {
@@ -1401,7 +1422,7 @@ const QuicTime::Delta QuicSentPacketManager::GetProbeTimeoutDelay(
   QUICHE_DCHECK(pto_enabled_);
   if (rtt_stats_.smoothed_rtt().IsZero()) {
     // Respect kMinHandshakeTimeoutMs to avoid a potential amplification attack.
-    QUIC_BUG_IF(rtt_stats_.initial_rtt().IsZero());
+    QUIC_BUG_IF(quic_bug_12552_6, rtt_stats_.initial_rtt().IsZero());
     return std::max(
                pto_multiplier_without_rtt_samples_ * rtt_stats_.initial_rtt(),
                QuicTime::Delta::FromMilliseconds(kMinHandshakeTimeoutMs)) *
@@ -1506,8 +1527,18 @@ void QuicSentPacketManager::OnAckFrameStart(QuicPacketNumber largest_acked,
                                             QuicTime ack_receive_time) {
   QUICHE_DCHECK(packets_acked_.empty());
   QUICHE_DCHECK_LE(largest_acked, unacked_packets_.largest_sent_packet());
-  if (ack_delay_time > peer_max_ack_delay()) {
-    ack_delay_time = peer_max_ack_delay();
+  if (GetQuicReloadableFlag(quic_ignore_peer_max_ack_delay_during_handshake) &&
+      supports_multiple_packet_number_spaces() && !handshake_finished_) {
+    QUIC_RELOADABLE_FLAG_COUNT(quic_ignore_peer_max_ack_delay_during_handshake);
+    // Ignore peer_max_ack_delay and use received ack_delay during
+    // handshake.
+  } else {
+    if (ack_delay_time > peer_max_ack_delay()) {
+      ack_delay_time = peer_max_ack_delay();
+    }
+    if (ignore_ack_delay_) {
+      ack_delay_time = QuicTime::Delta::Zero();
+    }
   }
   rtt_updated_ =
       MaybeUpdateRTT(largest_acked, ack_delay_time, ack_receive_time);
@@ -1576,16 +1607,18 @@ AckResult QuicSentPacketManager::OnAckFrameEnd(
         unacked_packets_.GetMutableTransmissionInfo(acked_packet.packet_number);
     if (!QuicUtils::IsAckable(info->state)) {
       if (info->state == ACKED) {
-        QUIC_BUG << "Trying to ack an already acked packet: "
-                 << acked_packet.packet_number
-                 << ", last_ack_frame_: " << last_ack_frame_
-                 << ", least_unacked: " << unacked_packets_.GetLeastUnacked()
-                 << ", packets_acked_: " << packets_acked_;
+        QUIC_BUG(quic_bug_10750_5)
+            << "Trying to ack an already acked packet: "
+            << acked_packet.packet_number
+            << ", last_ack_frame_: " << last_ack_frame_
+            << ", least_unacked: " << unacked_packets_.GetLeastUnacked()
+            << ", packets_acked_: " << quiche::PrintElements(packets_acked_);
       } else {
-        QUIC_PEER_BUG << "Received " << ack_decrypted_level
-                      << " ack for unackable packet: "
-                      << acked_packet.packet_number << " with state: "
-                      << QuicUtils::SentPacketStateToString(info->state);
+        QUIC_PEER_BUG(quic_peer_bug_10750_6)
+            << "Received " << ack_decrypted_level
+            << " ack for unackable packet: " << acked_packet.packet_number
+            << " with state: "
+            << QuicUtils::SentPacketStateToString(info->state);
         if (supports_multiple_packet_number_spaces()) {
           if (info->state == NEVER_SENT) {
             return UNSENT_PACKETS_ACKED;
@@ -1789,7 +1822,7 @@ void QuicSentPacketManager::OnAckFrequencyFrameAcked(
     in_use_sent_ack_delays_.pop_front_n(stale_entry_count);
   }
   if (in_use_sent_ack_delays_.empty()) {
-    QUIC_BUG << "in_use_sent_ack_delays_ is empty.";
+    QUIC_BUG(quic_bug_10750_7) << "in_use_sent_ack_delays_ is empty.";
     return;
   }
   peer_max_ack_delay_ = std::max_element(in_use_sent_ack_delays_.cbegin(),

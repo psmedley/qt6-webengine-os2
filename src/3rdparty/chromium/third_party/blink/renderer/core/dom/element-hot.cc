@@ -163,12 +163,10 @@ void Element::SetAttributeHinted(const AtomicString& local_name,
                        kNotInSynchronizationOfLazyAttribute);
 }
 
-void Element::SetAttributeHinted(
-    const AtomicString& local_name,
-    WTF::AtomicStringTable::WeakResult hint,
-    const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL&
-        string_or_trusted,
-    ExceptionState& exception_state) {
+void Element::SetAttributeHinted(const AtomicString& local_name,
+                                 WTF::AtomicStringTable::WeakResult hint,
+                                 const V8TrustedString* trusted_string,
+                                 ExceptionState& exception_state) {
   if (!Document::IsValidName(local_name)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidCharacterError,
@@ -181,7 +179,7 @@ void Element::SetAttributeHinted(
   QualifiedName q_name = QualifiedName::Null();
   std::tie(index, q_name) = LookupAttributeQNameHinted(local_name, hint);
   AtomicString value(TrustedTypesCheckFor(
-      ExpectedTrustedTypeForAttribute(q_name), string_or_trusted,
+      ExpectedTrustedTypeForAttribute(q_name), trusted_string,
       GetExecutionContext(), exception_state));
   if (exception_state.HadException())
     return;

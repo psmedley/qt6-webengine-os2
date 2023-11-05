@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/modules/webaudio/dynamics_compressor_node.h"
 
 #include "third_party/blink/renderer/bindings/modules/v8/v8_dynamics_compressor_options.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
@@ -108,15 +109,15 @@ void DynamicsCompressorHandler::Process(uint32_t frames_to_process) {
 void DynamicsCompressorHandler::ProcessOnlyAudioParams(
     uint32_t frames_to_process) {
   DCHECK(Context()->IsAudioThread());
-  DCHECK_LE(frames_to_process, audio_utilities::kRenderQuantumFrames);
+  DCHECK_LE(frames_to_process, GetDeferredTaskHandler().RenderQuantumFrames());
 
-  float values[audio_utilities::kRenderQuantumFrames];
+  Vector<float> values(GetDeferredTaskHandler().RenderQuantumFrames());
 
-  threshold_->CalculateSampleAccurateValues(values, frames_to_process);
-  knee_->CalculateSampleAccurateValues(values, frames_to_process);
-  ratio_->CalculateSampleAccurateValues(values, frames_to_process);
-  attack_->CalculateSampleAccurateValues(values, frames_to_process);
-  release_->CalculateSampleAccurateValues(values, frames_to_process);
+  threshold_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  knee_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  ratio_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  attack_->CalculateSampleAccurateValues(values.data(), frames_to_process);
+  release_->CalculateSampleAccurateValues(values.data(), frames_to_process);
 }
 
 void DynamicsCompressorHandler::Initialize() {

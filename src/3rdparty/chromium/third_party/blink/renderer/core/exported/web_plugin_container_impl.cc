@@ -106,7 +106,6 @@
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-blink.h"
 
@@ -177,10 +176,10 @@ void WebPluginContainerImpl::Paint(GraphicsContext& context,
   IntRect visual_rect = FrameRect();
   visual_rect.Move(paint_offset);
 
-  if (WantsWheelEvents()) {
-    context.GetPaintController().RecordScrollHitTestData(
-        *GetLayoutEmbeddedContent(), DisplayItem::kPluginScrollHitTest, nullptr,
-        visual_rect);
+  if (WantsWheelEvents() &&
+      base::FeatureList::IsEnabled(::features::kWheelEventRegions)) {
+    context.GetPaintController().RecordHitTestData(
+        *GetLayoutEmbeddedContent(), visual_rect, TouchAction::kAuto, true);
   }
 
   if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled() && layer_) {
@@ -223,22 +222,14 @@ void WebPluginContainerImpl::UpdateGeometry() {
     layout->UpdateGeometry(*this);
 }
 
-void WebPluginContainerImpl::InvalidateRect(const IntRect& rect) {
-  // InvalidateRect can be called from Dispose when this plugin is no longer
-  // attached.  In this case, we return immediately.
+void WebPluginContainerImpl::Invalidate() {
+  // This can be called from Dispose when this plugin is no longer attached.
+  // In this case, we return immediately.
   if (!IsAttached())
     return;
 
-  auto* layout_object = To<LayoutBox>(element_->GetLayoutObject());
-  if (!layout_object)
-    return;
-
-  IntRect dirty_rect = rect;
-  dirty_rect.Move(
-      (layout_object->BorderLeft() + layout_object->PaddingLeft()).ToInt(),
-      (layout_object->BorderTop() + layout_object->PaddingTop()).ToInt());
-
-  layout_object->InvalidatePaintRectangle(PhysicalRect(dirty_rect));
+  if (auto* layout_object = element_->GetLayoutObject())
+    layout_object->SetShouldDoFullPaintInvalidation();
 }
 
 void WebPluginContainerImpl::SetFocused(bool focused,
@@ -532,14 +523,6 @@ void WebPluginContainerImpl::EnqueueMessageEvent(
   element_->EnqueueEvent(*event, TaskType::kInternalDefault);
 }
 
-void WebPluginContainerImpl::Invalidate() {
-  InvalidateRect(IntRect(0, 0, Size().Width(), Size().Height()));
-}
-
-void WebPluginContainerImpl::InvalidateRect(const gfx::Rect& rect) {
-  InvalidateRect(static_cast<IntRect>(rect));
-}
-
 void WebPluginContainerImpl::ScheduleAnimation() {
   if (auto* frame_view = element_->GetDocument().View())
     frame_view->ScheduleAnimation();
@@ -826,16 +809,15 @@ void WebPluginContainerImpl::Trace(Visitor* visitor) const {
 }
 
 void WebPluginContainerImpl::HandleMouseEvent(MouseEvent& event) {
+  // TODO(dtapuska): Move WebMouseEventBuilder into the anonymous namespace
+  // in this class.
+  WebMouseEventBuilder transformed_event(element_->GetLayoutObject(), event);
+  if (transformed_event.GetType() == WebInputEvent::Type::kUndefined)
+    return;
+
   // We cache the parent LocalFrameView here as the plugin widget could be
   // deleted in the call to HandleEvent. See http://b/issue?id=1362948
   LocalFrameView* parent = ParentFrameView();
-
-  // TODO(dtapuska): Move WebMouseEventBuilder into the anonymous namespace
-  // in this class.
-  WebMouseEventBuilder transformed_event(parent, element_->GetLayoutObject(),
-                                         event);
-  if (transformed_event.GetType() == WebInputEvent::Type::kUndefined)
-    return;
 
   if (event.type() == event_type_names::kMousedown)
     FocusPlugin();
@@ -1064,8 +1046,7 @@ void WebPluginContainerImpl::HandleGestureEvent(GestureEvent& event) {
 }
 
 void WebPluginContainerImpl::SynthesizeMouseEventIfPossible(TouchEvent& event) {
-  WebMouseEventBuilder web_event(ParentFrameView(), element_->GetLayoutObject(),
-                                 event);
+  WebMouseEventBuilder web_event(element_->GetLayoutObject(), event);
   if (web_event.GetType() == WebInputEvent::Type::kUndefined)
     return;
 

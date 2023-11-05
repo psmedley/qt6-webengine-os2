@@ -8,15 +8,10 @@
 #include <map>
 #include <memory>
 
-#include "base/callback_forward.h"
 #include "content/public/common/content_client.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
-
-namespace IPC {
-class Message;
-}
 
 namespace mojo {
 class BinderMap;
@@ -32,9 +27,6 @@ class CONTENT_EXPORT ContentUtilityClient {
 
   // Notifies us that the UtilityThread has been created.
   virtual void UtilityThreadStarted() {}
-
-  // Allows the embedder to filter messages.
-  virtual bool OnMessageReceived(const IPC::Message& message);
 
   // Allows the embedder to register interface binders to handle interface
   // requests coming in from the browser process. These are requests that the
@@ -74,6 +66,8 @@ class CONTENT_EXPORT ContentUtilityClient {
 
   virtual void RegisterNetworkBinders(
       service_manager::BinderRegistry* registry) {}
+
+  virtual bool GetDefaultUserDataDirectory(base::FilePath* path);
 };
 
 }  // namespace content

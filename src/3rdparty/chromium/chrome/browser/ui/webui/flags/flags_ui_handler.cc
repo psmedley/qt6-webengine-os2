@@ -14,16 +14,13 @@
 #include "components/version_info/channel.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "base/system/sys_info.h"
-#include "chrome/browser/chromeos/login/session/user_session_manager.h"
-#include "components/account_id/account_id.h"
-#include "components/pref_registry/pref_registry_syncable.h"
-#include "components/user_manager/user_manager.h"
+#include "chrome/browser/ash/settings/about_flags.h"
+#include "chrome/browser/profiles/profile.h"
 #endif
 
 FlagsUIHandler::FlagsUIHandler()
     : access_(flags_ui::kGeneralAccessFlagsOnly),
-      experimental_features_requested_(false),
+      experimental_features_callback_id_(""),
       deprecated_features_only_(false) {}
 
 FlagsUIHandler::~FlagsUIHandler() {}
@@ -57,35 +54,44 @@ void FlagsUIHandler::Init(flags_ui::FlagsStorage* flags_storage,
   flags_storage_.reset(flags_storage);
   access_ = access;
 
-  if (experimental_features_requested_)
-    HandleRequestExperimentalFeatures(nullptr);
+  if (!experimental_features_callback_id_.empty())
+    SendExperimentalFeatures();
 }
 
 void FlagsUIHandler::HandleRequestExperimentalFeatures(
     const base::ListValue* args) {
-  experimental_features_requested_ = true;
+  AllowJavascript();
+  const base::Value& callback_id = args->GetList()[0];
+
+  experimental_features_callback_id_ = callback_id.GetString();
   // Bail out if the handler hasn't been initialized yet. The request will be
   // handled after the initialization.
-  if (!flags_storage_)
+  if (!flags_storage_) {
     return;
+  }
 
+  SendExperimentalFeatures();
+}
+
+void FlagsUIHandler::SendExperimentalFeatures() {
   base::DictionaryValue results;
 
-  std::unique_ptr<base::ListValue> supported_features(new base::ListValue);
-  std::unique_ptr<base::ListValue> unsupported_features(new base::ListValue);
+  base::Value::ListStorage supported_features;
+  base::Value::ListStorage unsupported_features;
 
   if (deprecated_features_only_) {
     about_flags::GetFlagFeatureEntriesForDeprecatedPage(
-        flags_storage_.get(), access_, supported_features.get(),
-        unsupported_features.get());
+        flags_storage_.get(), access_, supported_features,
+        unsupported_features);
   } else {
     about_flags::GetFlagFeatureEntries(flags_storage_.get(), access_,
-                                       supported_features.get(),
-                                       unsupported_features.get());
+                                       supported_features,
+                                       unsupported_features);
   }
 
-  results.Set(flags_ui::kSupportedFeatures, std::move(supported_features));
-  results.Set(flags_ui::kUnsupportedFeatures, std::move(unsupported_features));
+  results.SetKey(flags_ui::kSupportedFeatures, base::Value(supported_features));
+  results.SetKey(flags_ui::kUnsupportedFeatures,
+                 base::Value(unsupported_features));
   results.SetBoolean(flags_ui::kNeedsRestart,
                      about_flags::IsRestartNeededToCommitChanges());
   results.SetBoolean(flags_ui::kShowOwnerWarning,
@@ -103,8 +109,9 @@ void FlagsUIHandler::HandleRequestExperimentalFeatures(
   results.SetBoolean(flags_ui::kShowBetaChannelPromotion, false);
   results.SetBoolean(flags_ui::kShowDevChannelPromotion, false);
 #endif
-  web_ui()->CallJavascriptFunctionUnsafe(flags_ui::kReturnExperimentalFeatures,
-                                         results);
+  ResolveJavascriptCallback(base::Value(experimental_features_callback_id_),
+                            results);
+  experimental_features_callback_id_.clear();
 }
 
 void FlagsUIHandler::HandleEnableExperimentalFeatureMessage(
@@ -149,28 +156,12 @@ void FlagsUIHandler::HandleSetOriginListFlagMessage(
 void FlagsUIHandler::HandleRestartBrowser(const base::ListValue* args) {
   DCHECK(flags_storage_);
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  // On ChromeOS be less intrusive and restart inside the user session after
+  // On Chrome OS be less intrusive and restart inside the user session after
   // we apply the newly selected flags.
-  base::CommandLine user_flags(base::CommandLine::NO_PROGRAM);
-  about_flags::ConvertFlagsToSwitches(flags_storage_.get(), &user_flags,
-                                      flags_ui::kAddSentinels);
-
-  // Adhere to policy-enforced command-line switch handling when
-  // applying modified flags..
-  chromeos::UserSessionManager::ApplyUserPolicyToSwitches(
-      Profile::FromWebUI(web_ui())->GetPrefs(), &user_flags);
-
-  base::CommandLine::StringVector flags;
-  // argv[0] is the program name |base::CommandLine::NO_PROGRAM|.
-  flags.assign(user_flags.argv().begin() + 1, user_flags.argv().end());
   VLOG(1) << "Restarting to apply per-session flags...";
-  AccountId account_id =
-      user_manager::UserManager::Get()->GetActiveUser()->GetAccountId();
-  chromeos::UserSessionManager::GetInstance()->SetSwitchesForUser(
-      account_id,
-      chromeos::UserSessionManager::CommandLineSwitchesType::
-          kPolicyAndFlagsAndKioskControl,
-      flags);
+  ash::about_flags::FeatureFlagsUpdate(*flags_storage_,
+                                       Profile::FromWebUI(web_ui())->GetPrefs())
+      .UpdateSessionManager();
 #endif
   chrome::AttemptRestart();
 }

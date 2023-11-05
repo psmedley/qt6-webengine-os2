@@ -9,10 +9,12 @@
 #include <vector>
 
 #include "base/lazy_instance.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/api/commands/commands.h"
 #include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
@@ -103,7 +105,7 @@ CommandService::CommandService(content::BrowserContext* context)
   ExtensionFunctionRegistry::GetInstance()
       .RegisterFunction<GetAllCommandsFunction>();
 
-  extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
+  extension_registry_observation_.Observe(ExtensionRegistry::Get(profile_));
 }
 
 CommandService::~CommandService() {
@@ -319,8 +321,8 @@ Command CommandService::FindCommandByName(const std::string& extension_id,
         shortcut, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     CHECK(tokens.size() >= 2);
 
-    return Command(command_name, base::string16(), tokens[1].as_string(),
-           global);
+    return Command(command_name, std::u16string(), std::string(tokens[1]),
+                   global);
   }
 
   return Command();
@@ -485,7 +487,7 @@ bool CommandService::CanAutoAssign(const Command &command,
       return false;  // Browser and page actions are not global in nature.
 
     if (extension->permissions_data()->HasAPIPermission(
-            APIPermission::kCommandsAccessibility))
+            mojom::APIPermissionID::kCommandsAccessibility))
       return true;
 
     // Global shortcuts are restricted to (Ctrl|Command)+Shift+[0-9].
@@ -583,17 +585,17 @@ void CommandService::RemoveDefunctExtensionSuggestedCommandPrefs(
         if (!browser_action_command ||
             browser_action_command->accelerator().key_code() ==
                 ui::VKEY_UNKNOWN) {
-          suggested_key_prefs->Remove(it.key(), NULL);
+          suggested_key_prefs->RemoveKey(it.key());
         }
       } else if (it.key() == manifest_values::kPageActionCommandEvent) {
         if (!CommandsInfo::GetPageActionCommand(extension))
-          suggested_key_prefs->Remove(it.key(), NULL);
+          suggested_key_prefs->RemoveKey(it.key());
       } else if (it.key() == manifest_values::kActionCommandEvent) {
         if (!CommandsInfo::GetActionCommand(extension))
-          suggested_key_prefs->Remove(it.key(), nullptr);
+          suggested_key_prefs->RemoveKey(it.key());
       } else if (named_commands) {
         if (named_commands->find(it.key()) == named_commands->end())
-          suggested_key_prefs->Remove(it.key(), NULL);
+          suggested_key_prefs->RemoveKey(it.key());
       }
     }
 
@@ -670,7 +672,7 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
   for (KeysToRemove::const_iterator it = keys_to_remove.begin();
        it != keys_to_remove.end(); ++it) {
     std::string key = *it;
-    bindings->Remove(key, NULL);
+    bindings->RemoveKey(key);
   }
 
   for (const Command& removed_command : removed_commands) {

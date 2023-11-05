@@ -4,8 +4,8 @@
 
 #include "third_party/blink/renderer/core/loader/mixed_content_checker.h"
 
-#include <base/macros.h>
 #include <memory>
+
 #include "base/memory/scoped_refptr.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -206,14 +206,14 @@ TEST(MixedContentCheckerTest, DetectMixedFavicon) {
   EXPECT_TRUE(MixedContentChecker::ShouldBlockFetch(
       &dummy_page_holder->GetFrame(), mojom::blink::RequestContextType::FAVICON,
       http_favicon_url, ResourceRequest::RedirectStatus::kNoRedirect,
-      http_favicon_url, base::Optional<String>(),
+      http_favicon_url, absl::optional<String>(),
       ReportingDisposition::kSuppressReporting, *notifier_remote));
 
   // Test that a secure favicon is not blocked.
   EXPECT_FALSE(MixedContentChecker::ShouldBlockFetch(
       &dummy_page_holder->GetFrame(), mojom::blink::RequestContextType::FAVICON,
       https_favicon_url, ResourceRequest::RedirectStatus::kNoRedirect,
-      https_favicon_url, base::Optional<String>(),
+      https_favicon_url, absl::optional<String>(),
       ReportingDisposition::kSuppressReporting, *notifier_remote));
 }
 

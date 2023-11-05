@@ -33,9 +33,11 @@
 #include <memory>
 
 #include "base/metrics/histogram_functions.h"
+#include "build/build_config.h"
 #include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/layers/solid_color_scrollbar_layer.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
@@ -70,6 +72,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
 
@@ -88,6 +91,8 @@ VisualViewport::VisualViewport(Page& owner)
       unique_id, CompositorElementIdNamespace::kPrimary);
   scroll_element_id_ = CompositorElementIdFromUniqueObjectId(
       unique_id, CompositorElementIdNamespace::kScroll);
+  elasticity_effect_node_id_ = CompositorElementIdFromUniqueObjectId(
+      unique_id, CompositorElementIdNamespace::kEffectFilter);
   Reset();
 }
 
@@ -99,6 +104,11 @@ TransformPaintPropertyNode* VisualViewport::GetDeviceEmulationTransformNode()
 TransformPaintPropertyNode*
 VisualViewport::GetOverscrollElasticityTransformNode() const {
   return overscroll_elasticity_transform_node_.get();
+}
+
+EffectPaintPropertyNode* VisualViewport::GetOverscrollElasticityEffectNode()
+    const {
+  return overscroll_elasticity_effect_node_.get();
 }
 
 TransformPaintPropertyNode* VisualViewport::GetPageScaleNode() const {
@@ -287,6 +297,40 @@ PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
     }
   }
 
+#if defined(OS_ANDROID)
+  // TODO(https://crbug.com/1226115): Remove this forced effect node creation
+  // once we have completed the experiment to measure additional memory usage.
+  bool force_overscroll_effect_node =
+      base::GetFieldTrialParamValueByFeature(
+          ::features::kElasticOverscroll, ::features::kElasticOverscrollType) ==
+      ::features::kElasticOverscrollTypeFilter;
+  if (force_overscroll_effect_node ||
+      (Platform::Current()->IsElasticOverscrollEnabled() &&
+       base::GetFieldTrialParamValueByFeature(
+           ::features::kElasticOverscroll,
+           ::features::kElasticOverscrollType) !=
+           ::features::kElasticOverscrollTypeTransform)) {
+    bool needs_overscroll_effect_node = !MaximumScrollOffset().IsZero();
+    if (needs_overscroll_effect_node && !overscroll_elasticity_effect_node_) {
+      EffectPaintPropertyNode::State state;
+      state.output_clip = context.current.clip;
+      state.local_transform_space = transform_parent;
+      state.direct_compositing_reasons =
+          CompositingReason::kActiveFilterAnimation;
+      state.compositor_element_id = elasticity_effect_node_id_;
+      // The filter will be animated on the compositor in response to
+      // overscroll.
+      state.has_active_filter_animation = true;
+      overscroll_elasticity_effect_node_ =
+          EffectPaintPropertyNode::Create(*effect_parent, std::move(state));
+    }
+    if (overscroll_elasticity_effect_node_) {
+      context.current_effect = effect_parent =
+          overscroll_elasticity_effect_node_.get();
+    }
+  }
+#endif
+
   if (scrollbar_layer_horizontal_) {
     EffectPaintPropertyNode::State state;
     state.local_transform_space = transform_parent;
@@ -328,7 +372,7 @@ PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
 
   if (change == PaintPropertyChangeType::kNodeAddedOrRemoved &&
       LocalMainFrame()) {
-    LocalMainFrame()->View()->SetVisualViewportNeedsRepaint();
+    LocalMainFrame()->View()->SetVisualViewportOrOverlayNeedsRepaint();
   }
 
   return change;
@@ -381,7 +425,7 @@ void VisualViewport::SetSize(const IntSize& size) {
     DCHECK(scrollbar_layer_vertical_);
     UpdateScrollbarLayer(kHorizontalScrollbar);
     UpdateScrollbarLayer(kVerticalScrollbar);
-    LocalMainFrame()->View()->SetVisualViewportNeedsRepaint();
+    LocalMainFrame()->View()->SetVisualViewportOrOverlayNeedsRepaint();
   }
 
   EnqueueResizeEvent();
@@ -621,12 +665,21 @@ void VisualViewport::InitializeScrollbars() {
   // longer supplies scrollbars.
   LocalFrame* frame = LocalMainFrame();
   if (frame && frame->View())
-    frame->View()->VisualViewportScrollbarsChanged();
+    frame->View()->SetVisualViewportOrOverlayNeedsRepaint();
+}
+
+EScrollbarWidth VisualViewport::CSSScrollbarWidth() const {
+  if (LocalFrame* main_frame = LocalMainFrame()) {
+    if (Document* main_document = main_frame->GetDocument())
+      return main_document->GetLayoutView()->StyleRef().ScrollbarWidth();
+  }
+
+  return EScrollbarWidth::kAuto;
 }
 
 int VisualViewport::ScrollbarThickness() const {
   return ScrollbarThemeOverlayMobile::GetInstance().ScrollbarThickness(
-      ScaleFromDIP());
+      ScaleFromDIP(), CSSScrollbarWidth());
 }
 
 void VisualViewport::UpdateScrollbarLayer(ScrollbarOrientation orientation) {
@@ -636,8 +689,8 @@ void VisualViewport::UpdateScrollbarLayer(ScrollbarOrientation orientation) {
   if (!scrollbar_layer) {
     auto& theme = ScrollbarThemeOverlayMobile::GetInstance();
     float scale = ScaleFromDIP();
-    int thumb_thickness = theme.ThumbThickness(scale);
-    int scrollbar_margin = theme.ScrollbarMargin(scale);
+    int thumb_thickness = theme.ThumbThickness(scale, CSSScrollbarWidth());
+    int scrollbar_margin = theme.ScrollbarMargin(scale, CSSScrollbarWidth());
     cc::ScrollbarOrientation cc_orientation =
         orientation == kHorizontalScrollbar
             ? cc::ScrollbarOrientation::HORIZONTAL
@@ -848,7 +901,7 @@ mojom::blink::ColorScheme VisualViewport::UsedColorScheme() const {
     if (Document* main_document = main_frame->GetDocument())
       return main_document->GetLayoutView()->StyleRef().UsedColorScheme();
   }
-  return ComputedStyle::InitialStyle().UsedColorScheme();
+  return mojom::blink::ColorScheme::kLight;
 }
 
 void VisualViewport::UpdateScrollOffset(const ScrollOffset& position,
@@ -857,11 +910,8 @@ void VisualViewport::UpdateScrollOffset(const ScrollOffset& position,
                              FloatPoint(position))) {
     return;
   }
-  if (IsExplicitScrollType(scroll_type)) {
+  if (IsExplicitScrollType(scroll_type))
     NotifyRootFrameViewport();
-    if (scroll_type != mojom::blink::ScrollType::kCompositor && scroll_layer_)
-      scroll_layer_->ShowScrollbars();
-  }
 }
 
 cc::Layer* VisualViewport::LayerForScrolling() const {

@@ -7,10 +7,11 @@
 #ifndef CORE_FPDFAPI_PAGE_CPDF_PAGEOBJECT_H_
 #define CORE_FPDFAPI_PAGE_CPDF_PAGEOBJECT_H_
 
+#include <stdint.h>
+
 #include "core/fpdfapi/page/cpdf_contentmarks.h"
 #include "core/fpdfapi/page/cpdf_graphicstates.h"
 #include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_system.h"
 
 class CPDF_FormObject;
 class CPDF_ImageObject;
@@ -63,6 +64,12 @@ class CPDF_PageObject : public CPDF_GraphicStates {
   FX_RECT GetBBox() const;
   FX_RECT GetTransformedBBox(const CFX_Matrix& matrix) const;
 
+  CPDF_ContentMarks* GetContentMarks() { return &m_ContentMarks; }
+  const CPDF_ContentMarks* GetContentMarks() const { return &m_ContentMarks; }
+  void SetContentMarks(const CPDF_ContentMarks& marks) {
+    m_ContentMarks = marks;
+  }
+
   // Get what content stream the object was parsed from in its page. This number
   // is the index of the content stream in the "Contents" array, or 0 if there
   // is a single content stream. If the object is newly created,
@@ -75,7 +82,6 @@ class CPDF_PageObject : public CPDF_GraphicStates {
     m_ContentStream = new_content_stream;
   }
 
-  CPDF_ContentMarks m_ContentMarks;
 
  protected:
   void CopyData(const CPDF_PageObject* pSrcObject);
@@ -83,6 +89,7 @@ class CPDF_PageObject : public CPDF_GraphicStates {
   CFX_FloatRect m_Rect;
 
  private:
+  CPDF_ContentMarks m_ContentMarks;
   bool m_bDirty = false;
   int32_t m_ContentStream;
 };

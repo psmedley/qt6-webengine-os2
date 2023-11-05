@@ -6,14 +6,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/presentation_request.h"
@@ -229,8 +230,8 @@ void PresentationServiceImpl::StartPresentation(
   }
 
   start_presentation_request_id_ = GetNextRequestId();
-  pending_start_presentation_cb_.reset(
-      new NewPresentationCallbackWrapper(std::move(callback)));
+  pending_start_presentation_cb_ =
+      std::make_unique<NewPresentationCallbackWrapper>(std::move(callback));
   PresentationRequest request({render_process_id_, render_frame_id_},
                               presentation_urls,
                               render_frame_host_->GetLastCommittedOrigin());
@@ -459,12 +460,13 @@ void PresentationServiceImpl::DidFinishNavigation(
   // RenderFrameHost, we should reset the connections when a navigation
   // finished but we're still using the same RenderFrameHost.
   // We don't need to do anything when the navigation didn't actually commit,
-  // won't use the same RenderFrameHost, or is restoring a RenderFrameHost from
-  // the back-forward cache.
+  // won't use the same RenderFrameHost, is restoring a RenderFrameHost from
+  // the back-forward cache, or is activating a prerendered page.
   DVLOG(2) << "PresentationServiceImpl::DidNavigateAnyFrame";
   if (!navigation_handle->HasCommitted() ||
       !FrameMatches(navigation_handle->GetRenderFrameHost()) ||
-      navigation_handle->IsServedFromBackForwardCache()) {
+      navigation_handle->IsServedFromBackForwardCache() ||
+      navigation_handle->IsPrerenderedPageActivation()) {
     return;
   }
 

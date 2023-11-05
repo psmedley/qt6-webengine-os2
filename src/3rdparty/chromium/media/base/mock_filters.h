@@ -69,10 +69,10 @@ class MockPipelineClient : public Pipeline::Client {
   MOCK_METHOD1(OnVideoConfigChange, void(const VideoDecoderConfig&));
   MOCK_METHOD1(OnVideoNaturalSizeChange, void(const gfx::Size&));
   MOCK_METHOD1(OnVideoOpacityChange, void(bool));
-  MOCK_METHOD1(OnVideoFrameRateChange, void(base::Optional<int>));
+  MOCK_METHOD1(OnVideoFrameRateChange, void(absl::optional<int>));
   MOCK_METHOD0(OnVideoAverageKeyframeDistanceUpdate, void());
-  MOCK_METHOD1(OnAudioDecoderChange, void(const AudioDecoderInfo&));
-  MOCK_METHOD1(OnVideoDecoderChange, void(const VideoDecoderInfo&));
+  MOCK_METHOD1(OnAudioPipelineInfoChange, void(const AudioPipelineInfo&));
+  MOCK_METHOD1(OnVideoPipelineInfoChange, void(const VideoPipelineInfo&));
   MOCK_METHOD1(OnRemotePlayStateChange, void(MediaStatus::State state));
 };
 
@@ -103,7 +103,7 @@ class MockPipeline : public Pipeline {
   MOCK_METHOD2(OnEnabledAudioTracksChanged,
                void(const std::vector<MediaTrack::Id>&, base::OnceClosure));
   MOCK_METHOD2(OnSelectedVideoTrackChanged,
-               void(base::Optional<MediaTrack::Id>, base::OnceClosure));
+               void(absl::optional<MediaTrack::Id>, base::OnceClosure));
 
   // TODO(sandersd): This should automatically return true between Start() and
   // Stop(). (Or better, remove it from the interface entirely.)
@@ -116,7 +116,7 @@ class MockPipeline : public Pipeline {
   MOCK_METHOD1(SetPlaybackRate, void(double));
   MOCK_CONST_METHOD0(GetVolume, float());
   MOCK_METHOD1(SetVolume, void(float));
-  MOCK_METHOD1(SetLatencyHint, void(base::Optional<base::TimeDelta>));
+  MOCK_METHOD1(SetLatencyHint, void(absl::optional<base::TimeDelta>));
   MOCK_METHOD1(SetPreservesPitch, void(bool));
   MOCK_METHOD1(SetAutoplayInitiated, void(bool));
 
@@ -175,7 +175,7 @@ class MockDemuxer : public Demuxer {
   MOCK_CONST_METHOD0(GetTimelineOffset, base::Time());
   MOCK_CONST_METHOD0(GetMemoryUsage, int64_t());
   MOCK_CONST_METHOD0(GetContainerForMetrics,
-                     base::Optional<container_names::MediaContainerName>());
+                     absl::optional<container_names::MediaContainerName>());
   MOCK_METHOD3(OnEnabledAudioTracksChanged,
                void(const std::vector<MediaTrack::Id>&,
                     base::TimeDelta,
@@ -220,17 +220,25 @@ class MockDemuxerStream : public DemuxerStream {
 class MockVideoDecoder : public VideoDecoder {
  public:
   MockVideoDecoder();
-  explicit MockVideoDecoder(std::string decoder_name);
+  // Give a decoder a specific ID, like 42, so that different decoders in unit
+  // tests can be differentiated from one another. All of these decoders have
+  // a decoder type of kTesting, so that can't be used to differentiate them.
+  explicit MockVideoDecoder(int decoder_id);
   MockVideoDecoder(bool is_platform_decoder,
                    bool supports_decryption,
-                   std::string decoder_name);
+                   int decoder_id);
   ~MockVideoDecoder() override;
 
   // Decoder implementation
   bool IsPlatformDecoder() const override;
   bool SupportsDecryption() const override;
-  std::string GetDisplayName() const override;
-  VideoDecoderType GetDecoderType() const override;
+  VideoDecoderType GetDecoderType() const override {
+    return VideoDecoderType::kTesting;
+  }
+
+  // Allows getting the unique ID from a mock decoder so that they can be
+  // identified during tests without having to add unique VideoDecoderTypes.
+  int GetDecoderId() const { return decoder_id_; }
 
   // VideoDecoder implementation.
   void Initialize(const VideoDecoderConfig& config,
@@ -262,7 +270,7 @@ class MockVideoDecoder : public VideoDecoder {
  private:
   const bool is_platform_decoder_;
   const bool supports_decryption_;
-  const std::string decoder_name_;
+  const int decoder_id_ = 0;
   DISALLOW_COPY_AND_ASSIGN(MockVideoDecoder);
 };
 
@@ -335,17 +343,22 @@ class MockVideoEncoder : public VideoEncoder {
 class MockAudioDecoder : public AudioDecoder {
  public:
   MockAudioDecoder();
-  explicit MockAudioDecoder(std::string decoder_name);
+  explicit MockAudioDecoder(int decoder_id);
   explicit MockAudioDecoder(bool is_platform_decoder,
                             bool supports_decryption,
-                            std::string decoder_name);
+                            int decoder_id);
   ~MockAudioDecoder() override;
 
   // Decoder implementation
   bool IsPlatformDecoder() const override;
   bool SupportsDecryption() const override;
-  std::string GetDisplayName() const override;
-  AudioDecoderType GetDecoderType() const override;
+  AudioDecoderType GetDecoderType() const override {
+    return AudioDecoderType::kTesting;
+  }
+
+  // Allows getting the unique ID from a mock decoder so that they can be
+  // identified during tests without having to add unique VideoDecoderTypes.
+  int GetDecoderId() const { return decoder_id_; }
 
   // AudioDecoder implementation.
   void Initialize(const AudioDecoderConfig& config,
@@ -368,7 +381,7 @@ class MockAudioDecoder : public AudioDecoder {
  private:
   const bool is_platform_decoder_;
   const bool supports_decryption_;
-  const std::string decoder_name_;
+  const int decoder_id_ = 0;
   DISALLOW_COPY_AND_ASSIGN(MockAudioDecoder);
 };
 
@@ -388,7 +401,7 @@ class MockRendererClient : public RendererClient {
   MOCK_METHOD1(OnVideoConfigChange, void(const VideoDecoderConfig&));
   MOCK_METHOD1(OnVideoNaturalSizeChange, void(const gfx::Size&));
   MOCK_METHOD1(OnVideoOpacityChange, void(bool));
-  MOCK_METHOD1(OnVideoFrameRateChange, void(base::Optional<int>));
+  MOCK_METHOD1(OnVideoFrameRateChange, void(absl::optional<int>));
   MOCK_METHOD1(OnDurationChange, void(base::TimeDelta));
   MOCK_METHOD1(OnRemotePlayStateChange, void(MediaStatus::State state));
   MOCK_METHOD0(IsVideoStreamAvailable, bool());
@@ -418,7 +431,7 @@ class MockVideoRenderer : public VideoRenderer {
   MOCK_METHOD0(OnTimeProgressing, void());
   MOCK_METHOD0(OnTimeStopped, void());
   MOCK_METHOD1(SetLatencyHint,
-               void(base::Optional<base::TimeDelta> latency_hint));
+               void(absl::optional<base::TimeDelta> latency_hint));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoRenderer);
@@ -446,7 +459,7 @@ class MockAudioRenderer : public AudioRenderer {
   MOCK_METHOD0(StartPlaying, void());
   MOCK_METHOD1(SetVolume, void(float volume));
   MOCK_METHOD1(SetLatencyHint,
-               void(base::Optional<base::TimeDelta> latency_hint));
+               void(absl::optional<base::TimeDelta> latency_hint));
   MOCK_METHOD1(SetPreservesPitch, void(bool));
   MOCK_METHOD1(SetAutoplayInitiated, void(bool));
 
@@ -469,7 +482,7 @@ class MockRenderer : public Renderer {
                void(MediaResource* media_resource,
                     RendererClient* client,
                     PipelineStatusCallback& init_cb));
-  MOCK_METHOD1(SetLatencyHint, void(base::Optional<base::TimeDelta>));
+  MOCK_METHOD1(SetLatencyHint, void(absl::optional<base::TimeDelta>));
   MOCK_METHOD1(SetPreservesPitch, void(bool));
   MOCK_METHOD1(SetAutoplayInitiated, void(bool));
   void Flush(base::OnceClosure flush_cb) override { OnFlush(flush_cb); }
@@ -560,7 +573,9 @@ class MockCdmClient {
                void(const std::string& session_id,
                     CdmMessageType message_type,
                     const std::vector<uint8_t>& message));
-  MOCK_METHOD1(OnSessionClosed, void(const std::string& session_id));
+  MOCK_METHOD2(OnSessionClosed,
+               void(const std::string& session_id,
+                    CdmSessionClosedReason reason));
 
   // Add OnSessionKeysChangeCalled() function so we can store |keys_info|.
   MOCK_METHOD2(OnSessionKeysChangeCalled,
@@ -624,13 +639,15 @@ class MockCdmContext : public CdmContext {
   MOCK_METHOD1(GetMediaFoundationCdmProxy,
                bool(GetMediaFoundationCdmProxyCB get_mf_cdm_proxy_cb));
 #endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  MOCK_METHOD0(GetChromeOsCdmContext, chromeos::ChromeOsCdmContext*());
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+  absl::optional<base::UnguessableToken> GetCdmId() const override;
 
-  base::Optional<base::UnguessableToken> GetCdmId() const override;
-
-  void set_cdm_id(const base::UnguessableToken* cdm_id);
+  void set_cdm_id(const base::UnguessableToken& cdm_id);
 
  private:
-  base::Optional<base::UnguessableToken> cdm_id_;
+  absl::optional<base::UnguessableToken> cdm_id_;
 
   DISALLOW_COPY_AND_ASSIGN(MockCdmContext);
 };
@@ -684,11 +701,19 @@ class MockCdmKeyStatusPromise : public KeyStatusCdmPromise {
 
 class MockCdm : public ContentDecryptionModule {
  public:
+  MockCdm();
   MockCdm(const std::string& key_system,
           const SessionMessageCB& session_message_cb,
           const SessionClosedCB& session_closed_cb,
           const SessionKeysChangeCB& session_keys_change_cb,
           const SessionExpirationUpdateCB& session_expiration_update_cb);
+
+  void Initialize(
+      const std::string& key_system,
+      const SessionMessageCB& session_message_cb,
+      const SessionClosedCB& session_closed_cb,
+      const SessionKeysChangeCB& session_keys_change_cb,
+      const SessionExpirationUpdateCB& session_expiration_update_cb);
 
   // ContentDecryptionModule implementation.
   MOCK_METHOD2(SetServerCertificate,
@@ -719,7 +744,8 @@ class MockCdm : public ContentDecryptionModule {
   void CallSessionMessageCB(const std::string& session_id,
                             CdmMessageType message_type,
                             const std::vector<uint8_t>& message);
-  void CallSessionClosedCB(const std::string& session_id);
+  void CallSessionClosedCB(const std::string& session_id,
+                           CdmSessionClosedReason reason);
   void CallSessionKeysChangeCB(const std::string& session_id,
                                bool has_additional_usable_key,
                                CdmKeysInfo keys_info);
@@ -727,16 +753,12 @@ class MockCdm : public ContentDecryptionModule {
                                      base::Time new_expiry_time);
 
   const std::string& GetKeySystem() const { return key_system_; }
-  const url::Origin& GetSecurityOrigin() const { return security_origin_; }
 
  protected:
   ~MockCdm() override;
 
  private:
   std::string key_system_;
-  url::Origin security_origin_;
-
-  // Callbacks.
   SessionMessageCB session_message_cb_;
   SessionClosedCB session_closed_cb_;
   SessionKeysChangeCB session_keys_change_cb_;
@@ -747,7 +769,7 @@ class MockCdm : public ContentDecryptionModule {
 
 class MockCdmFactory : public CdmFactory {
  public:
-  MockCdmFactory();
+  explicit MockCdmFactory(scoped_refptr<MockCdm> cdm);
   ~MockCdmFactory() override;
 
   // CdmFactory implementation.
@@ -762,15 +784,12 @@ class MockCdmFactory : public CdmFactory {
               const SessionExpirationUpdateCB& session_expiration_update_cb,
               CdmCreatedCB cdm_created_cb) override;
 
-  // Return a pointer to the created CDM.
-  MockCdm* GetCreatedCdm();
-
   // Provide a callback to be called before the CDM is created and returned.
   void SetBeforeCreationCB(base::RepeatingClosure before_creation_cb);
 
  private:
   // Reference to the created CDM.
-  scoped_refptr<MockCdm> created_cdm_;
+  scoped_refptr<MockCdm> mock_cdm_;
 
   // Callback to be used before Create() successfully calls |cdm_created_cb|.
   base::RepeatingClosure before_creation_cb_;
@@ -816,7 +835,7 @@ class MockMediaClient : public media::MediaClient {
   MOCK_METHOD1(IsSupportedVideoType, bool(const media::VideoType& type));
   MOCK_METHOD1(IsSupportedBitstreamAudioCodec, bool(media::AudioCodec codec));
   MOCK_METHOD1(GetAudioRendererAlgorithmParameters,
-               base::Optional<::media::AudioRendererAlgorithmParameters>(
+               absl::optional<::media::AudioRendererAlgorithmParameters>(
                    media::AudioParameters audio_parameters));
 
  private:

@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_IMPL_UNIFIED_HEAP_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_IMPL_UNIFIED_HEAP_CONTROLLER_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/platform/heap/heap_stats_collector.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "v8/include/v8.h"
@@ -32,10 +31,11 @@ class ThreadState;
 class PLATFORM_EXPORT UnifiedHeapController final
     : public v8::EmbedderHeapTracer,
       public ThreadHeapStatsObserver {
-  DISALLOW_IMPLICIT_CONSTRUCTORS(UnifiedHeapController);
-
  public:
+  UnifiedHeapController() = delete;
   explicit UnifiedHeapController(ThreadState*);
+  UnifiedHeapController(const UnifiedHeapController&) = delete;
+  UnifiedHeapController& operator=(const UnifiedHeapController&) = delete;
   ~UnifiedHeapController() override;
 
   // v8::EmbedderHeapTracer implementation.
@@ -45,9 +45,6 @@ class PLATFORM_EXPORT UnifiedHeapController final
   void RegisterV8References(const std::vector<std::pair<void*, void*>>&) final;
   bool AdvanceTracing(double) final;
   bool IsTracingDone() final;
-  bool IsRootForNonTracingGC(const v8::TracedReference<v8::Value>&) final;
-  bool IsRootForNonTracingGC(const v8::TracedGlobal<v8::Value>&) final;
-  void ResetHandleInNonTracingGC(const v8::TracedReference<v8::Value>&) final;
 
   ThreadState* thread_state() const { return thread_state_; }
 

@@ -25,18 +25,16 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/optional.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
+#include "base/timer/timer.h"
 #include "base/unguessable_token.h"
-#include "base/values.h"
 #include "build/build_config.h"
 #include "cc/input/browser_controls_state.h"
 #include "content/common/buildflags.h"
 #include "content/common/download/mhtml_file_writer.mojom.h"
 #include "content/common/frame.mojom.h"
-#include "content/common/frame_replication_state.mojom-forward.h"
-#include "content/common/navigation_params.mojom.h"
+#include "content/common/navigation_client.mojom.h"
 #include "content/common/render_accessibility.mojom.h"
 #include "content/common/renderer.mojom.h"
 #include "content/common/web_ui.mojom.h"
@@ -45,7 +43,6 @@
 #include "content/public/common/widget_type.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_media_playback_options.h"
-#include "content/public/renderer/websocket_handshake_throttle_provider.h"
 #include "content/renderer/content_security_policy_util.h"
 #include "content/renderer/frame_blame_context.h"
 #include "content/renderer/media/media_factory.h"
@@ -67,13 +64,14 @@
 #include "services/network/public/mojom/url_response_head.mojom-forward.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/common/feature_policy/document_policy.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
 #include "third_party/blink/public/common/loader/loading_behavior_flag.h"
 #include "third_party/blink/public/common/loader/previews_state.h"
+#include "third_party/blink/public/common/permissions_policy/document_policy.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/common/unique_name/unique_name_helper.h"
@@ -82,19 +80,23 @@
 #include "third_party/blink/public/mojom/commit_result/commit_result.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
-#include "third_party/blink/public/mojom/frame/frame.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-forward.h"
+#include "third_party/blink/public/mojom/frame/frame_replication_state.mojom-forward.h"
 #include "third_party/blink/public/mojom/frame/policy_container.mojom-shared.h"
+#include "third_party/blink/public/mojom/frame/triggering_event_info.mojom-shared.h"
 #include "third_party/blink/public/mojom/frame/user_activation_update_types.mojom.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-forward.h"
+#include "third_party/blink/public/mojom/loader/code_cache.mojom.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info_notifier.mojom.h"
 #include "third_party/blink/public/mojom/media/renderer_audio_input_stream_factory.mojom.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom-forward.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_object.mojom.h"
 #include "third_party/blink/public/mojom/use_counter/css_property_id.mojom.h"
 #include "third_party/blink/public/platform/child_url_loader_factory_bundle.h"
 #include "third_party/blink/public/platform/web_media_player.h"
+#include "third_party/blink/public/platform/websocket_handshake_throttle_provider.h"
 #include "third_party/blink/public/web/web_ax_object.h"
 #include "third_party/blink/public/web/web_document_loader.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
@@ -103,7 +105,6 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_meaningful_layout.h"
-#include "third_party/blink/public/web/web_script_execution_callback.h"
 #include "ui/accessibility/ax_event.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/gfx/range/range.h"
@@ -126,7 +127,6 @@ class WebElement;
 class WebFrameRequestBlocker;
 class WebLocalFrame;
 class WebMediaStreamDeviceObserver;
-class WebSecurityOrigin;
 class WebString;
 class WebURL;
 struct FramePolicy;
@@ -149,7 +149,6 @@ namespace content {
 
 class AgentSchedulingGroup;
 class BlinkInterfaceRegistryImpl;
-class CompositorDependencies;
 class DocumentState;
 class MediaPermissionDispatcher;
 class NavigationClient;
@@ -173,10 +172,9 @@ class CONTENT_EXPORT RenderFrameImpl
   static RenderFrameImpl* CreateMainFrame(
       AgentSchedulingGroup& agent_scheduling_group,
       RenderViewImpl* render_view,
-      CompositorDependencies* compositor_deps,
       blink::WebFrame* opener,
       bool is_for_nested_main_frame,
-      mojom::FrameReplicationStatePtr replication_state,
+      blink::mojom::FrameReplicationStatePtr replication_state,
       const base::UnguessableToken& devtools_frame_token,
       mojom::CreateLocalMainFrameParamsPtr params);
 
@@ -210,12 +208,12 @@ class CONTENT_EXPORT RenderFrameImpl
       mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker>
           browser_interface_broker,
       int previous_routing_id,
-      const base::Optional<blink::FrameToken>& opener_frame_token,
+      const absl::optional<blink::FrameToken>& opener_frame_token,
       int parent_routing_id,
       int previous_sibling_routing_id,
       const base::UnguessableToken& devtools_frame_token,
-      mojom::FrameReplicationStatePtr replicated_state,
-      CompositorDependencies* compositor_deps,
+      blink::mojom::TreeScopeType tree_scope_type,
+      blink::mojom::FrameReplicationStatePtr replicated_state,
       mojom::CreateFrameWidgetParamsPtr widget_params,
       blink::mojom::FrameOwnerPropertiesPtr frame_owner_properties,
       bool has_committed_real_load,
@@ -259,17 +257,6 @@ class CONTENT_EXPORT RenderFrameImpl
   // Looks up and returns the WebFrame corresponding to a given frame routing
   // ID.
   static blink::WebFrame* ResolveWebFrame(int opener_frame_routing_id);
-
-  // Possibly set the kOpenerCrossOrigin and kSandboxNoGesture policy in
-  // |download_policy|.
-  static void MaybeSetDownloadFramePolicy(
-      bool is_opener_navigation,
-      const blink::WebURLRequest& request,
-      const blink::WebSecurityOrigin& current_origin,
-      bool has_download_sandbox_flag,
-      bool blocking_downloads_in_sandbox_enabled,
-      bool from_ad,
-      blink::NavigationDownloadPolicy* download_policy);
 
   // Overwrites the given URL to use an HTML5 embed if possible.
   blink::WebURL OverrideFlashEmbedWithHTML(const blink::WebURL& url) override;
@@ -337,8 +324,6 @@ class CONTENT_EXPORT RenderFrameImpl
 
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
-  void ScriptedPrint(bool user_initiated);
-
   // IPC::Sender
   bool Send(IPC::Message* msg) override;
 
@@ -350,15 +335,20 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // RenderFrame implementation:
   RenderView* GetRenderView() override;
+  RenderFrame* GetMainRenderFrame() override;
   RenderAccessibility* GetRenderAccessibility() override;
-  std::unique_ptr<AXTreeSnapshotter> CreateAXTreeSnapshotter() override;
+  std::unique_ptr<AXTreeSnapshotter> CreateAXTreeSnapshotter(
+      ui::AXMode ax_mode) override;
   int GetRoutingID() override;
   blink::WebLocalFrame* GetWebFrame() override;
+  const blink::WebLocalFrame* GetWebFrame() const override;
+  blink::WebView* GetWebView() override;
+  const blink::WebView* GetWebView() const override;
   const blink::web_pref::WebPreferences& GetBlinkPreferences() override;
   void ShowVirtualKeyboard() override;
   blink::WebPlugin* CreatePlugin(const WebPluginInfo& info,
                                  const blink::WebPluginParams& params) override;
-  void ExecuteJavaScript(const base::string16& javascript) override;
+  void ExecuteJavaScript(const std::u16string& javascript) override;
   bool IsMainFrame() override;
   bool IsHidden() override;
   void BindLocalInterface(
@@ -371,7 +361,7 @@ class CONTENT_EXPORT RenderFrameImpl
   void PluginDidStopLoading() override;
 #endif
   bool IsFTPDirectoryListing() override;
-  void SetSelectedText(const base::string16& selection_text,
+  void SetSelectedText(const std::u16string& selection_text,
                        size_t offset,
                        const gfx::Range& range,
                        bool user_initiated) override;
@@ -398,6 +388,7 @@ class CONTENT_EXPORT RenderFrameImpl
   gfx::RectF ElementBoundsInWindow(const blink::WebElement& element) override;
   void ConvertViewportToWindow(gfx::Rect* rect) override;
   float GetDeviceScaleFactor() override;
+  blink::scheduler::WebAgentGroupScheduler& GetAgentGroupScheduler() override;
 
   // blink::mojom::AutoplayConfigurationClient implementation:
   void AddAutoplayFlags(const url::Origin& origin,
@@ -425,12 +416,6 @@ class CONTENT_EXPORT RenderFrameImpl
   void Clone(mojo::PendingReceiver<blink::mojom::ResourceLoadInfoNotifier>
                  pending_resource_load_info_notifier) override;
 
-#if defined(OS_ANDROID)
-  void ExtractSmartClipData(
-      const gfx::Rect& rect,
-      const ExtractSmartClipDataCallback callback) override;
-#endif
-
   // mojom::FrameBindingsControl implementation:
   void AllowBindings(int32_t enabled_bindings_flags) override;
   void EnableMojoJsBindings() override;
@@ -440,14 +425,14 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // These mirror mojom::NavigationClient, called by NavigationClient.
   void CommitNavigation(
-      mojom::CommonNavigationParamsPtr common_params,
-      mojom::CommitNavigationParamsPtr commit_params,
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::CommitNavigationParamsPtr commit_params,
       network::mojom::URLResponseHeadPtr response_head,
       mojo::ScopedDataPipeConsumerHandle response_body,
       network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
           subresource_loader_factories,
-      base::Optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
+      absl::optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
           subresource_overrides,
       blink::mojom::ControllerServiceWorkerInfoPtr
           controller_service_worker_info,
@@ -456,14 +441,18 @@ class CONTENT_EXPORT RenderFrameImpl
           prefetch_loader_factory,
       const base::UnguessableToken& devtools_navigation_token,
       blink::mojom::PolicyContainerPtr policy_container,
+      mojo::PendingRemote<blink::mojom::CodeCacheHost> code_cache_host,
+      mojom::CookieManagerInfoPtr cookie_manager_info,
+      mojom::StorageInfoPtr storage_info,
       mojom::NavigationClient::CommitNavigationCallback commit_callback);
   void CommitFailedNavigation(
-      mojom::CommonNavigationParamsPtr common_params,
-      mojom::CommitNavigationParamsPtr commit_params,
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::CommitNavigationParamsPtr commit_params,
       bool has_stale_copy_in_cache,
       int error_code,
+      int extended_error_code,
       net::ResolveErrorInfo resolve_error_info,
-      const base::Optional<std::string>& error_page_content,
+      const absl::optional<std::string>& error_page_content,
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
           subresource_loader_factories,
       blink::mojom::PolicyContainerPtr policy_container,
@@ -524,6 +513,8 @@ class CONTENT_EXPORT RenderFrameImpl
   blink::WebRemoteFrame* AdoptPortal(
       const blink::PortalToken& portal_token,
       const blink::WebElement& portal_element) override;
+  blink::WebRemoteFrame* CreateFencedFrame(
+      const blink::WebElement& fenced_frame_element) override;
   blink::WebFrame* FindFrame(const blink::WebString& name) override;
   void WillDetach() override;
   void FrameDetached() override;
@@ -547,8 +538,7 @@ class CONTENT_EXPORT RenderFrameImpl
   void DidCommitNavigation(
       blink::WebHistoryCommitType commit_type,
       bool should_reset_browser_interface_broker,
-      network::mojom::WebSandboxFlags sandbox_flags,
-      const blink::ParsedFeaturePolicy& feature_policy_header,
+      const blink::ParsedPermissionsPolicy& permissions_policy_header,
       const blink::DocumentPolicyFeatureState& document_policy_header) override;
   void DidCommitDocumentReplacementNavigation(
       blink::WebDocumentLoader* document_loader) override;
@@ -561,14 +551,19 @@ class CONTENT_EXPORT RenderFrameImpl
   void RunScriptsAtDocumentIdle() override;
   void DidHandleOnloadEvents() override;
   void DidFinishLoad() override;
-  void DidFinishSameDocumentNavigation(blink::WebHistoryCommitType commit_type,
-                                       bool content_initiated,
-                                       bool is_history_api_navigation) override;
+  void DidFinishSameDocumentNavigation(
+      blink::WebHistoryCommitType commit_type,
+      bool is_synchronously_committed,
+      blink::mojom::SameDocumentNavigationType same_document_navigation_type,
+      bool is_client_redirect) override;
+  void WillFreezePage() override;
+  void DidOpenDocumentInputStream(const blink::WebURL& url) override;
   void DidSetPageLifecycleState() override;
   void DidUpdateCurrentHistoryItem() override;
   base::UnguessableToken GetDevToolsFrameToken() override;
   void AbortClientNavigation() override;
-  void DidChangeSelection(bool is_empty_selection) override;
+  void DidChangeSelection(bool is_empty_selection,
+                          blink::SyncCondition force_sync) override;
   void FocusedElementChanged(const blink::WebElement& element) override;
   void OnMainFrameIntersectionChanged(const gfx::Rect& intersect_rect) override;
   void WillSendRequest(blink::WebURLRequest& request,
@@ -582,16 +577,15 @@ class CONTENT_EXPORT RenderFrameImpl
   void DidObserveInputDelay(base::TimeDelta input_delay) override;
   void DidChangeCpuTiming(base::TimeDelta time) override;
   void DidObserveLoadingBehavior(blink::LoadingBehaviorFlag behavior) override;
-  void DidObserveNewFeatureUsage(blink::mojom::WebFeature feature) override;
-  void DidObserveNewCssPropertyUsage(blink::mojom::CSSSampleId css_property,
-                                     bool is_animated) override;
+  void DidObserveNewFeatureUsage(
+      const blink::UseCounterFeature& feature) override;
   void DidObserveLayoutShift(double score, bool after_input_or_scroll) override;
-  void DidObserveInputForLayoutShiftTracking(
-      base::TimeTicks timestamp) override;
   void DidObserveLayoutNg(uint32_t all_block_count,
                           uint32_t ng_block_count,
                           uint32_t all_call_count,
-                          uint32_t ng_call_count) override;
+                          uint32_t ng_call_count,
+                          uint32_t flexbox_ng_block_count,
+                          uint32_t grid_ng_block_count) override;
   void DidObserveLazyLoadBehavior(
       blink::WebLocalFrameClient::LazyLoadBehavior lazy_load_behavior) override;
   void DidCreateScriptContext(v8::Local<v8::Context> context,
@@ -599,11 +593,13 @@ class CONTENT_EXPORT RenderFrameImpl
   void WillReleaseScriptContext(v8::Local<v8::Context> context,
                                 int world_id) override;
   void DidChangeScrollOffset() override;
+  void PreloadSubresourceOptimizationsForOrigins(
+      const std::vector<blink::WebSecurityOrigin>& origins) override;
   blink::WebMediaStreamDeviceObserver* MediaStreamDeviceObserver() override;
   bool AllowRTCLegacyTLSProtocols() override;
   blink::WebEncryptedMediaClient* EncryptedMediaClient() override;
   blink::WebString UserAgentOverride() override;
-  base::Optional<blink::UserAgentMetadata> UserAgentMetadataOverride() override;
+  absl::optional<blink::UserAgentMetadata> UserAgentMetadataOverride() override;
   blink::WebString DoNotTrackValue() override;
   blink::mojom::RendererAudioInputStreamFactory* GetAudioInputStreamFactory();
   bool AllowContentInitiatedDataUrlNavigations(
@@ -620,11 +616,12 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnStopLoading() override;
   void DraggableRegionsChanged() override;
   blink::BrowserInterfaceBrokerProxy* GetBrowserInterfaceBroker() override;
+
   // Dispatches the current state of selection on the webpage to the browser if
-  // it has changed.
-  // TODO(varunjain): delete this method once we figure out how to keep
-  // selection handles in sync with the webpage.
-  void SyncSelectionIfRequired(bool is_empty_selection, bool user_initiated) override;
+  // it has changed or if the forced flag is passed. The forced flag is used
+  // when the browser selection may be out of sync with the renderer due to
+  // incorrect prediction.
+  void SyncSelectionIfRequired(blink::SyncCondition force_sync, bool is_empty_selection, bool user_initiated) override;
   void CreateAudioInputStream(
       blink::CrossVariantMojoRemote<
           blink::mojom::RendererAudioInputStreamFactoryClientInterfaceBase>
@@ -645,6 +642,23 @@ class CONTENT_EXPORT RenderFrameImpl
   void SetUpSharedMemoryForSmoothness(
       base::ReadOnlySharedMemoryRegion shared_memory) override;
   blink::WebURL LastCommittedUrlForUKM() override;
+  void ScriptedPrint() override;
+
+  // Possibly defers the loading of media resources.
+  //
+  // This function defers in two cases:
+  // - In the normal case, it calls ContentRendererClient::DeferMediaLoad()
+  //   to give the embedder a chance to defer.
+  // - If the frame is prerendering, this function defers the load. It
+  //   calls ContentRendererClient::DeferMediaLoad() once activation
+  //   occurs.
+  //
+  // `closure` is run when loading should proceed. Returns true if running
+  // of |closure| is deferred; false if run immediately.
+  //
+  // If `has_played_media_before` is true, the render frame has previously
+  // started media playback (i.e. played audio and video).
+  bool DeferMediaLoad(bool has_played_media_before, base::OnceClosure closure);
 
   // Binds to the MHTML file generation service in the browser.
   void BindMhtmlFileWriter(
@@ -723,9 +737,14 @@ class CONTENT_EXPORT RenderFrameImpl
   void SetWebURLLoaderFactoryOverrideForTest(
       std::unique_ptr<blink::WebURLLoaderFactoryForTest> factory);
 
-  blink::scheduler::WebAgentGroupScheduler& GetAgentGroupScheduler() override;
+  // Clones and returns `this` frame's blink::ChildURLLoaderFactoryBundle.
+  scoped_refptr<blink::ChildURLLoaderFactoryBundle> CloneLoaderFactories();
 
   url::Origin GetSecurityOriginOfTopFrame();
+
+  void set_send_content_state_immediately(bool value) {
+    send_content_state_immediately_ = value;
+  }
 
  protected:
   explicit RenderFrameImpl(CreateParams params);
@@ -746,28 +765,7 @@ class CONTENT_EXPORT RenderFrameImpl
                            TestOverlayRoutingTokenSendsLater);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameImplTest,
                            TestOverlayRoutingTokenSendsNow);
-
-  // A wrapper class used as the callback for JavaScript executed
-  // in an isolated world.
-  class JavaScriptIsolatedWorldRequest
-      : public blink::WebScriptExecutionCallback {
-   public:
-    JavaScriptIsolatedWorldRequest(
-        base::WeakPtr<RenderFrameImpl> render_frame_impl,
-        bool wants_result,
-        JavaScriptExecuteRequestInIsolatedWorldCallback callback);
-    void Completed(
-        const blink::WebVector<v8::Local<v8::Value>>& result) override;
-
-   private:
-    ~JavaScriptIsolatedWorldRequest() override;
-
-    base::WeakPtr<RenderFrameImpl> render_frame_impl_;
-    bool wants_result_;
-    JavaScriptExecuteRequestInIsolatedWorldCallback callback_;
-
-    DISALLOW_COPY_AND_ASSIGN(JavaScriptIsolatedWorldRequest);
-  };
+  FRIEND_TEST_ALL_PREFIXES(RenderFrameImplTest, SendUpdateCancelsPending);
 
   // Similar to base::AutoReset, but skips restoration of the original value if
   // |this| is already destroyed.
@@ -818,51 +816,32 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // mojom::Frame implementation:
   void CommitSameDocumentNavigation(
-      mojom::CommonNavigationParamsPtr common_params,
-      mojom::CommitNavigationParamsPtr commit_params,
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::CommitNavigationParamsPtr commit_params,
       CommitSameDocumentNavigationCallback callback) override;
-  void HandleRendererDebugURL(const GURL& url) override;
   void UpdateSubresourceLoaderFactories(
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
           subresource_loader_factories) override;
-  void BindDevToolsAgent(
-      mojo::PendingAssociatedRemote<blink::mojom::DevToolsAgentHost> host,
-      mojo::PendingAssociatedReceiver<blink::mojom::DevToolsAgent> receiver)
-      override;
-  void JavaScriptMethodExecuteRequest(
-      const base::string16& object_name,
-      const base::string16& method_name,
-      base::Value arguments,
-      bool wants_result,
-      JavaScriptMethodExecuteRequestCallback callback) override;
-  void JavaScriptExecuteRequest(
-      const base::string16& javascript,
-      bool wants_result,
-      JavaScriptExecuteRequestCallback callback) override;
-  void JavaScriptExecuteRequestForTests(
-      const base::string16& javascript,
-      bool wants_result,
-      bool has_user_gesture,
-      int32_t world_id,
-      JavaScriptExecuteRequestForTestsCallback callback) override;
-  void JavaScriptExecuteRequestInIsolatedWorld(
-      const base::string16& javascript,
-      bool wants_result,
-      int32_t world_id,
-      JavaScriptExecuteRequestInIsolatedWorldCallback callback) override;
   void SetWantErrorMessageStackTrace() override;
   void Unload(int proxy_routing_id,
               bool is_loading,
-              mojom::FrameReplicationStatePtr replicated_frame_state,
-              const blink::RemoteFrameToken& frame_token) override;
+              blink::mojom::FrameReplicationStatePtr replicated_frame_state,
+              const blink::RemoteFrameToken& frame_token,
+              mojom::RemoteMainFrameInterfacesPtr remote_main_frame_interfaces)
+      override;
   void Delete(mojom::FrameDeleteIntention intent) override;
+  void UndoCommitNavigation(
+      int proxy_routing_id,
+      bool is_loading,
+      blink::mojom::FrameReplicationStatePtr replicated_frame_state,
+      const blink::RemoteFrameToken& frame_token,
+      mojom::RemoteMainFrameInterfacesPtr remote_main_frame_interfaces)
+      override;
   void BlockRequests() override;
   void ResumeBlockedRequests() override;
   void GetInterfaceProvider(
       mojo::PendingReceiver<service_manager::mojom::InterfaceProvider> receiver)
       override;
-  void GetCanonicalUrlForSharing(
-      GetCanonicalUrlForSharingCallback callback) override;
   void SnapshotAccessibilityTree(
       mojom::SnapshotAccessibilityTreeParamsPtr params,
       SnapshotAccessibilityTreeCallback callback) override;
@@ -896,28 +875,15 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // Returns a blink::ChildURLLoaderFactoryBundle which can be used to request
   // subresources for this frame.
-  // For frames with committed navigations, this bundle is created with the
-  // factories provided by the browser at navigation time. For any other frames
-  // (i.e. frames on the initial about:blank Document), the bundle returned here
-  // is lazily cloned from the parent or opener's own bundle.
-  blink::ChildURLLoaderFactoryBundle* GetLoaderFactoryBundle();
-
-  // Clones and returns the creator's (parent's or opener's)
-  // blink::ChildURLLoaderFactoryBundle.
-  scoped_refptr<blink::ChildURLLoaderFactoryBundle>
-  GetLoaderFactoryBundleFromCreator();
-
-  // Returns a mostly empty bundle, with a fallback that uses a process-wide,
-  // direct-network factory.
   //
-  // TODO(lukasza): https://crbug.com/1114822: Remove once the fallback is no
-  // longer needed.
-  scoped_refptr<blink::ChildURLLoaderFactoryBundle>
-  GetLoaderFactoryBundleFallback();
+  // The returned bundle was typically sent by the browser process when
+  // committing a navigation, but in some cases (about:srcdoc, initial empty
+  // document) it may be inherited from the parent or opener.
+  blink::ChildURLLoaderFactoryBundle* GetLoaderFactoryBundle();
 
   scoped_refptr<blink::ChildURLLoaderFactoryBundle> CreateLoaderFactoryBundle(
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle> info,
-      base::Optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
+      absl::optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
           subresource_overrides,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           prefetch_loader_factory);
@@ -937,14 +903,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // finally get right encoding of page.
   void UpdateEncoding(blink::WebFrame* frame, const std::string& encoding_name);
 
-  base::Value GetJavaScriptExecutionResult(v8::Local<v8::Value> result);
-
   void InitializeMediaStreamDeviceObserver();
-
-  // Does preparation for the navigation to |url|.
-  void PrepareRenderViewForNavigation(
-      const GURL& url,
-      const mojom::CommitNavigationParams& commit_params);
 
   // Sends a FrameHostMsg_BeginNavigation to the browser
   void BeginNavigationInternal(std::unique_ptr<blink::WebNavigationInfo> info,
@@ -980,23 +939,26 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // Commit navigation with |navigation_params| prepared.
   void CommitNavigationWithParams(
-      mojom::CommonNavigationParamsPtr common_params,
-      mojom::CommitNavigationParamsPtr commit_params,
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::CommitNavigationParamsPtr commit_params,
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
           subresource_loader_factories,
-      base::Optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
+      absl::optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
           subresource_overrides,
       blink::mojom::ControllerServiceWorkerInfoPtr
           controller_service_worker_info,
       blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           prefetch_loader_factory,
+      mojo::PendingRemote<blink::mojom::CodeCacheHost> code_cache_host,
+      mojom::CookieManagerInfoPtr cookie_manager_info,
+      mojom::StorageInfoPtr storage_info,
       std::unique_ptr<DocumentState> document_state,
       std::unique_ptr<blink::WebNavigationParams> navigation_params);
 
   // Decodes a data url for navigation commit.
-  void DecodeDataURL(const mojom::CommonNavigationParams& common_params,
-                     const mojom::CommitNavigationParams& commit_params,
+  void DecodeDataURL(const blink::mojom::CommonNavigationParams& common_params,
+                     const blink::mojom::CommitNavigationParams& commit_params,
                      std::string* mime_type,
                      std::string* charset,
                      std::string* data,
@@ -1028,10 +990,9 @@ class CONTENT_EXPORT RenderFrameImpl
   mojom::DidCommitProvisionalLoadParamsPtr MakeDidCommitProvisionalLoadParams(
       blink::WebHistoryCommitType commit_type,
       ui::PageTransition transition,
-      network::mojom::WebSandboxFlags sandbox_flags,
-      const blink::ParsedFeaturePolicy& feature_policy_header,
+      const blink::ParsedPermissionsPolicy& permissions_policy_header,
       const blink::DocumentPolicyFeatureState& document_policy_header,
-      const base::Optional<base::UnguessableToken>& embedding_token);
+      const absl::optional<base::UnguessableToken>& embedding_token);
 
   // Updates the navigation history depending on the passed parameters.
   // This could result either in the creation of a new entry or a modification
@@ -1053,12 +1014,11 @@ class CONTENT_EXPORT RenderFrameImpl
   void DidCommitNavigationInternal(
       blink::WebHistoryCommitType commit_type,
       ui::PageTransition transition,
-      network::mojom::WebSandboxFlags sandbox_flags,
-      const blink::ParsedFeaturePolicy& feature_policy_header,
+      const blink::ParsedPermissionsPolicy& permissions_policy_header,
       const blink::DocumentPolicyFeatureState& document_policy_header,
       mojom::DidCommitProvisionalLoadInterfaceParamsPtr interface_params,
       mojom::DidCommitSameDocumentNavigationParamsPtr same_document_params,
-      const base::Optional<base::UnguessableToken>& embedding_token);
+      const absl::optional<base::UnguessableToken>& embedding_token);
 
   blink::WebComputedAXTree* GetOrCreateWebComputedAXTree() override;
 
@@ -1078,7 +1038,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // Updates the state of this frame when asked to commit a navigation.
   void PrepareFrameForCommit(
       const GURL& url,
-      const mojom::CommitNavigationParams& commit_params);
+      const blink::mojom::CommitNavigationParams& commit_params);
 
   // Returns true if UA (and UA client hints) overrides in renderer preferences
   // should be used.
@@ -1095,7 +1055,8 @@ class CONTENT_EXPORT RenderFrameImpl
   // implemented later.
   // TODO(crbug.com/1110744): Support unload-in-commit.
   void SetOldPageLifecycleStateFromNewPageCommitIfNeeded(
-      const mojom::OldPageInfo* old_page_info);
+      const blink::mojom::OldPageInfo* old_page_info,
+      const GURL& new_page_url);
 
   // Updates the state when asked to commit a history navigation.  Sets
   // |item_for_history_navigation| and |load_type| to the appropriate values for
@@ -1122,21 +1083,32 @@ class CONTENT_EXPORT RenderFrameImpl
   // When this happens, the navigation will be sent back to the browser process
   // so that it can be performed in cross-document fashion.
   blink::mojom::CommitResult PrepareForHistoryNavigationCommit(
-      const mojom::CommonNavigationParams& common_params,
-      const mojom::CommitNavigationParams& commit_params,
+      const blink::mojom::CommonNavigationParams& common_params,
+      const blink::mojom::CommitNavigationParams& commit_params,
       blink::WebHistoryItem* item_for_history_navigation,
       blink::WebFrameLoadType* load_type);
-
-  // Ignores the navigation commit and stop its processing in the RenderFrame.
-  // This will drop the NavigationRequest in the RenderFrameHost.
-  // Note: This is only meant to be used before building the DocumentState.
-  // Commit abort and navigation end is handled by it afterwards.
-  void AbortCommitNavigation();
 
   // Implements AddMessageToConsole().
   void AddMessageToConsoleImpl(blink::mojom::ConsoleMessageLevel level,
                                const std::string& message,
                                bool discard_duplicates);
+
+  // Start a delayed timer to update the frame sync state to the browser.
+  // Debounces many updates in quick succession.
+  void StartDelayedSyncTimer();
+
+  // Swaps out the RenderFrame, creating a new RenderFrameProxy and then
+  // swapping it into the frame tree to replace `this`. Returns false if
+  // swapping out `this` ends up detaching this frame instead when running the
+  // unload handlers, and true otherwise.
+  //
+  // Important: after this method returns, `this` has been deleted.
+  bool SwapOutAndDeleteThis(
+      int proxy_routing_id,
+      bool is_loading,
+      blink::mojom::FrameReplicationStatePtr replicated_frame_state,
+      const blink::RemoteFrameToken& frame_token,
+      mojom::RemoteMainFrameInterfacesPtr remote_main_frame_interfaces);
 
   // Stores the WebLocalFrame we are associated with.  This is null from the
   // constructor until BindToFrame() is called, and it is null after
@@ -1216,7 +1188,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // portion of this string that is the actual selected text starts at index
   // |selection_range_.GetMin() - selection_text_offset_| and has length
   // |selection_range_.length()|.
-  base::string16 selection_text_;
+  std::u16string selection_text_;
   // The offset corresponding to the start of |selection_text_| in the document.
   size_t selection_text_offset_;
   // Range over the document corresponding to the actual selected text (which
@@ -1229,6 +1201,11 @@ class CONTENT_EXPORT RenderFrameImpl
 
   mojo::Remote<blink::mojom::RendererAudioInputStreamFactory>
       audio_input_stream_factory_;
+
+  // This interface handles generated code cache requests both to fetch code
+  // cache when loading resources and to store code caches when code caches are
+  // generated during the JS / Wasm script execution.
+  mojo::Remote<blink::mojom::CodeCacheHost> code_cache_host_;
 
   // The media permission dispatcher attached to this frame.
   std::unique_ptr<MediaPermissionDispatcher> media_permission_dispatcher_;
@@ -1291,11 +1268,11 @@ class CONTENT_EXPORT RenderFrameImpl
   // - (a.com) performing a navigation in (b.com) *will not* create a request
   //   NavigationClient but
   // - (a.com) performing a navigation in (example.a.com) *will* create a
-  // request
+  //   request NavigationClient
   //
-  // Finally, note that the initiating RenderFrameImpl does *not* own the
-  // request NavigationClient. Rather, the RanderFrameImpl that the navigation
-  // *targets* is the RenderFrameImpl that owns the request NavigationClient.
+  // Note that the initiating RenderFrameImpl does *not* own the request
+  // NavigationClient. Rather, the RanderFrameImpl that the navigation *targets*
+  // is the RenderFrameImpl that owns the request NavigationClient.
   //
   // ## Commit NavigationClient ##
   // Always set in the RenderFrameImpl that has been selected to commit a
@@ -1307,33 +1284,24 @@ class CONTENT_EXPORT RenderFrameImpl
   // the commit NavigationClient.
   //
   // ## Navigation Cancellation ##
-  // Cancellation is signalled by resetting the NavigationClient.  This will
-  // eventually trigger a connection error in the browser process, which
-  // normally invokes NavigationRequest::OnRendererAbortedNavigation().
+  // Cancellation is signalled by closing the NavigationClient message pipe.
+  // This will eventually trigger a connection error in the browser process,
+  // which normally invokes NavigationRequest::OnRendererAbortedNavigation().
   //
   // However, once the NavigationRequest reaches READY_TO_COMMIT in the browser
-  // process, *only* the commit NavigationClient may cancel the navigation. This
-  // has several implications:
+  // process, *only* the commit NavigationClient may cancel the navigation by
+  // closing the message pipe. Thus, only navigations which reuse the RFH may be
+  // cancelled (or more accurately, ignored) at this point.
   //
-  // - Web APIs like window.stop() and document() use AbortClientNavigation().
-  //   However, once the NavigationRequest reaches READY_TO_COMMIT, cancellation
-  //   is only respected if the navigation reuses the same RenderFrameImpl;
-  //   otherwise, it is ignored.
+  // Unfortunately, this behavior is important for web compatibility: there are
+  // sites which depend on a call to window.stop() or document.open() to cancel
+  // a same-site navigation: see https://crbug.com/763106 for background.
   //
-  //   Note that using RenderDocument means that all cross-document navigations
-  //   will use a provisional RenderFrameImpl: as such, all cross-document
-  //   navigations with RenderDocument will ignore cancellation after
-  //   READY_TO_COMMIT. This will be a compatibility issue for shipping
-  //   RenderDocument: see https://crbug.com/763106 for historical context.
-  //
-  // - If the frame is owned by an <object> element, CommitFailedNavigation()
-  //   will first trigger the fallback path (for remote frames, this
-  //   unconditionally sends the RenderFallbackContentInParentProcess() IPC; for
-  //   local frames, things are a bit more complicated...) before then
-  //   unconditionally calling AbortCommitNavigation() to ignore the commit.
-  //
-  //   TODO(dcheng): The browser side knows the owner type of the navigating
-  //   frame. Don't bother sending a commit at all in that case.
+  // Note that using RenderDocument means that all cross-document navigations
+  // will use a provisional RenderFrameImpl: as such, all cross-document
+  // navigations with RenderDocument will ignore cancellation after
+  // READY_TO_COMMIT. This is a known compatibility issue with RenderDocument
+  // and will need to eventually be addressed.
   std::unique_ptr<NavigationClient> navigation_client_impl_;
 
   // Creates various media clients.
@@ -1384,10 +1352,16 @@ class CONTENT_EXPORT RenderFrameImpl
   // another.
   scoped_refptr<blink::ChildURLLoaderFactoryBundle> pending_loader_factories_;
 
+  mojo::PendingRemote<blink::mojom::CodeCacheHost> pending_code_cache_host_;
+  mojom::CookieManagerInfoPtr pending_cookie_manager_info_;
+  mojom::StorageInfoPtr pending_storage_info_;
+  // The storage key which |pending_storage_info_| is associated with.
+  blink::StorageKey original_storage_key_;
+
   scoped_refptr<blink::WebFrameRequestBlocker> frame_request_blocker_;
 
   // AndroidOverlay routing token from the browser, if we have one yet.
-  base::Optional<base::UnguessableToken> overlay_routing_token_;
+  absl::optional<base::UnguessableToken> overlay_routing_token_;
 
   // Used for devtools instrumentation and trace-ability. This token is
   // used to tag calls and requests in order to attribute them to the context
@@ -1406,9 +1380,9 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // Used for tracking a frame's main frame document intersection and
   // and replicating it to the browser when it changes.
-  base::Optional<gfx::Rect> mainframe_intersection_rect_;
+  absl::optional<gfx::Rect> mainframe_intersection_rect_;
 
-  std::unique_ptr<WebSocketHandshakeThrottleProvider>
+  std::unique_ptr<blink::WebSocketHandshakeThrottleProvider>
       websocket_handshake_throttle_provider_;
 
   RenderFrameMediaPlaybackOptions renderer_media_playback_options_;
@@ -1486,6 +1460,14 @@ class CONTENT_EXPORT RenderFrameImpl
 
   NavigationCommitState navigation_commit_state_ =
       NavigationCommitState::kInitialEmptyDocument;
+
+  // Timer used to delay the updating of frame state.
+  base::OneShotTimer delayed_state_sync_timer_;
+
+  // Whether content state (such as form state, scroll position and page
+  // contents) should be sent to the browser immediately. This is normally
+  // false, but set to true by some tests.
+  bool send_content_state_immediately_ = false;
 
   base::WeakPtrFactory<RenderFrameImpl> weak_factory_{this};
 

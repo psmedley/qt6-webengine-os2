@@ -20,7 +20,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/time/time.h"
 #include "components/history/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
@@ -33,6 +32,8 @@
 #include "components/tab_groups/tab_group_color.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
+
+#undef LoadBitmap
 
 namespace sessions {
 
@@ -113,9 +114,10 @@ const SessionCommand::id_type kCommandSetWindowAppName = 7;
 // Deprecated for kCommandSetTabUserAgentOverride2
 const SessionCommand::id_type kCommandSetTabUserAgentOverride = 8;
 const SessionCommand::id_type kCommandWindow = 9;
-const SessionCommand::id_type kCommandGroup = 10;
+const SessionCommand::id_type kCommandSetTabGroupData = 10;
 const SessionCommand::id_type kCommandSetTabUserAgentOverride2 = 11;
 const SessionCommand::id_type kCommandSetWindowUserTitle = 12;
+const SessionCommand::id_type kCommandCreateGroup = 13;
 
 // Number of entries (not commands) before we clobber the file and write
 // everything.
@@ -142,6 +144,18 @@ void RemoveEntryByID(
         // Erase it if it's our target.
         if (tab.id == id) {
           window.tabs.erase(it);
+          return;
+        }
+      }
+    }
+    // If this entry is a group, look through its tabs.
+    if (entry.type == TabRestoreService::GROUP) {
+      auto& group = static_cast<TabRestoreService::Group&>(entry);
+      for (auto it = group.tabs.begin(); it != group.tabs.end(); ++it) {
+        const TabRestoreService::Tab& tab = **it;
+        // Erase it if it's our target.
+        if (tab.id == id) {
+          group.tabs.erase(it);
           return;
         }
       }
@@ -346,6 +360,61 @@ CreateWindowEntryFromCommand(const SessionCommand* command,
   return window;
 }
 
+// Fields that can appear in the Pickle version of a Group command. This is
+// used as a convenient destination for parsing the various fields in a
+// CreateGroupCommand.
+struct GroupCommandFields {
+  absl::optional<base::Token> tab_group_token;
+  int session_id = 0;
+  int num_tabs = 0;
+  int browser_id = 0;
+  std::u16string title;
+  uint32_t color = 0;
+};
+
+std::unique_ptr<sessions::TabRestoreService::Group> CreateGroupEntryFromCommand(
+    const SessionCommand* command,
+    SessionID* session_id,
+    int32_t* num_tabs) {
+  const std::unique_ptr<base::Pickle> pickle(command->PayloadAsPickle());
+  if (!pickle) {
+    return nullptr;
+  }
+
+  base::PickleIterator it(*pickle);
+  GroupCommandFields parsed_fields;
+
+  // The first version of the pickle contains all of the following fields, so
+  // they should all successfully parse if the command is in fact a pickle.
+  parsed_fields.tab_group_token = ReadTokenFromPickle(&it);
+  if (!parsed_fields.tab_group_token.has_value()) {
+    return nullptr;
+  }
+  if (!it.ReadInt(&parsed_fields.session_id) ||
+      !it.ReadInt(&parsed_fields.num_tabs) ||
+      !it.ReadInt(&parsed_fields.browser_id) ||
+      !it.ReadString16(&parsed_fields.title) ||
+      !it.ReadUInt32(&parsed_fields.color)) {
+    return nullptr;
+  }
+
+  // Copy the parsed data.
+  GroupCommandFields fields = parsed_fields;
+
+  // Create the Group entry.
+  std::unique_ptr<sessions::TabRestoreService::Group> group =
+      std::make_unique<sessions::TabRestoreService::Group>();
+  group->group_id =
+      tab_groups::TabGroupId::FromRawToken(fields.tab_group_token.value());
+  group->browser_id = fields.browser_id;
+  group->visual_data =
+      tab_groups::TabGroupVisualData(fields.title, fields.color);
+  *session_id = SessionID::FromSerializedValue(fields.session_id);
+  *num_tabs = fields.num_tabs;
+
+  return group;
+}
+
 }  // namespace
 
 // TabRestoreServiceImpl::PersistenceDelegate
@@ -396,6 +465,12 @@ class TabRestoreServiceImpl::PersistenceDelegate
   // Schedules the commands for a window close.
   void ScheduleCommandsForWindow(const Window& window);
 
+  // Schedules the commands for a group close.
+  void ScheduleCommandsForGroup(const Group& group);
+
+  // Schedules the commands for a list of tabs (from a window or group).
+  void ScheduleCommandsForTabs(const std::vector<std::unique_ptr<Tab>>& tabs);
+
   // Schedules the commands for a tab close. |selected_index| gives the index of
   // the selected navigation.
   void ScheduleCommandsForTab(const Tab& tab, int selected_index);
@@ -409,6 +484,14 @@ class TabRestoreServiceImpl::PersistenceDelegate
       ui::WindowShowState show_state,
       const std::string& workspace,
       base::Time timestamp);
+
+  // Creates a group close command.
+  static std::unique_ptr<SessionCommand> CreateGroupCommand(
+      SessionID session_id,
+      size_t num_tabs,
+      tab_groups::TabGroupId group_id,
+      SessionID::id_type browser_id,
+      tab_groups::TabGroupVisualData visual_data);
 
   // Creates a tab close command.
   static std::unique_ptr<SessionCommand> CreateSelectedNavigationInTabCommand(
@@ -495,8 +578,7 @@ TabRestoreServiceImpl::PersistenceDelegate::PersistenceDelegate(
       command_storage_manager_(std::make_unique<CommandStorageManager>(
           CommandStorageManager::kTabRestore,
           client_->GetPathToSaveTo(),
-          this,
-          /* use_marker */ true)),
+          this)),
       tab_restore_service_helper_(nullptr),
       entries_to_write_(0),
       entries_written_(0),
@@ -538,6 +620,9 @@ void TabRestoreServiceImpl::PersistenceDelegate::OnWillSaveCommands() {
         case WINDOW:
           ScheduleCommandsForWindow(static_cast<Window&>(entry));
           break;
+        case GROUP:
+          ScheduleCommandsForGroup(static_cast<Group&>(entry));
+          break;
       }
       entries_written_++;
     }
@@ -555,9 +640,9 @@ void TabRestoreServiceImpl::PersistenceDelegate::
 void TabRestoreServiceImpl::PersistenceDelegate::OnClearEntries() {
   // Mark all the tabs as closed so that we don't attempt to restore them.
   const Entries& entries = tab_restore_service_helper_->entries();
-  for (auto i = entries.begin(); i != entries.end(); ++i)
+  for (const auto& entry : entries)
     command_storage_manager_->ScheduleCommand(
-        CreateRestoredEntryCommand((*i)->id));
+        CreateRestoredEntryCommand(entry->id));
 
   entries_to_write_ = 0;
 
@@ -684,10 +769,25 @@ void TabRestoreServiceImpl::PersistenceDelegate::ScheduleCommandsForWindow(
         kCommandSetWindowUserTitle, window.id, window.user_title));
   }
 
-  for (size_t i = 0; i < window.tabs.size(); ++i) {
-    int selected_index = GetSelectedNavigationIndexToPersist(*window.tabs[i]);
+  ScheduleCommandsForTabs(window.tabs);
+}
+
+void TabRestoreServiceImpl::PersistenceDelegate::ScheduleCommandsForGroup(
+    const Group& group) {
+  DCHECK(!group.tabs.empty());
+
+  command_storage_manager_->ScheduleCommand(
+      CreateGroupCommand(group.id, group.tabs.size(), group.group_id,
+                         group.browser_id, group.visual_data));
+  ScheduleCommandsForTabs(group.tabs);
+}
+
+void TabRestoreServiceImpl::PersistenceDelegate::ScheduleCommandsForTabs(
+    const std::vector<std::unique_ptr<Tab>>& tabs) {
+  for (const std::unique_ptr<Tab>& tab : tabs) {
+    int selected_index = GetSelectedNavigationIndexToPersist(*tab);
     if (selected_index != -1)
-      ScheduleCommandsForTab(*window.tabs[i], selected_index);
+      ScheduleCommandsForTab(*tab, selected_index);
   }
 }
 
@@ -730,7 +830,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::ScheduleCommandsForTab(
     pickle.WriteString16(visual_data->title());
     pickle.WriteUInt32(static_cast<int>(visual_data->color()));
     std::unique_ptr<SessionCommand> command(
-        new SessionCommand(kCommandGroup, pickle));
+        new SessionCommand(kCommandSetTabGroupData, pickle));
     command_storage_manager_->ScheduleCommand(std::move(command));
   }
 
@@ -791,6 +891,30 @@ TabRestoreServiceImpl::PersistenceDelegate::CreateWindowCommand(
 
   std::unique_ptr<SessionCommand> command(
       new SessionCommand(kCommandWindow, pickle));
+  return command;
+}
+
+// static
+std::unique_ptr<SessionCommand>
+TabRestoreServiceImpl::PersistenceDelegate::CreateGroupCommand(
+    SessionID session_id,
+    size_t num_tabs,
+    tab_groups::TabGroupId tab_group_id,
+    SessionID::id_type browser_id,
+    tab_groups::TabGroupVisualData visual_data) {
+  static_assert(sizeof(SessionID::id_type) == sizeof(int),
+                "SessionID::id_type has changed size.");
+
+  base::Pickle pickle;
+  WriteTokenToPickle(&pickle, tab_group_id.token());
+  pickle.WriteInt(static_cast<int>(session_id.id()));
+  pickle.WriteInt(static_cast<int>(num_tabs));
+  pickle.WriteInt(static_cast<int>(browser_id));
+  pickle.WriteString16(visual_data.title());
+  pickle.WriteUInt32(static_cast<int>(visual_data.color()));
+
+  std::unique_ptr<SessionCommand> command(
+      new SessionCommand(kCommandCreateGroup, pickle));
   return command;
 }
 
@@ -871,22 +995,25 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
   std::vector<std::unique_ptr<Entry>> entries;
   // If non-null we're processing the navigations of this tab.
   Tab* current_tab = nullptr;
-  // If non-null we're processing the tabs of this window.
-  Window* current_window = nullptr;
-  // If > 0, we've gotten a window command but not all the tabs yet.
-  int pending_window_tabs = 0;
-  for (auto i = commands.begin(); i != commands.end(); ++i) {
-    const SessionCommand& command = *(*i);
+  // If non-null we're processing the tabs of this window. The int represents
+  // the number of tabs left to process within the window.
+  absl::optional<std::pair<Window*, int>> current_window;
+  // If non-null we're processing the tabs of this group. The int represents
+  // the number of tabs left to process within the group.
+  absl::optional<std::pair<Group*, int>> current_group;
+  for (const auto& i : commands) {
+    const SessionCommand& command = *i;
     switch (command.id()) {
       case kCommandRestoredEntry: {
-        if (pending_window_tabs > 0) {
+        if (current_window.has_value() || current_group.has_value()) {
           // Should never receive a restored command while waiting for all the
-          // tabs in a window.
+          // tabs in a window or group.
           return;
         }
 
         current_tab = nullptr;
-        current_window = nullptr;
+        current_window = absl::nullopt;
+        current_group = absl::nullopt;
 
         RestoredEntryPayload payload;
         if (!command.GetPayload(&payload, sizeof(payload)))
@@ -898,29 +1025,56 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
       case kCommandWindowDeprecated:
       case kCommandWindow: {
         // Should never receive a window command while waiting for all the
-        // tabs in a window.
-        if (pending_window_tabs > 0)
+        // tabs in a window or group.
+        if (current_window.has_value() || current_group.has_value()) {
           return;
+        }
 
-        // Try to parse the command, and silently skip if it fails.
         int32_t num_tabs = 0;
         SessionID window_id = SessionID::InvalidValue();
         std::unique_ptr<Window> window =
             CreateWindowEntryFromCommand(&command, &window_id, &num_tabs);
-        if (!window)
+        if (!window) {
           return;
+        }
 
         // Should always have at least 1 tab. Likely indicates corruption.
-        pending_window_tabs = num_tabs;
-        if (pending_window_tabs <= 0)
+        if (num_tabs <= 0) {
           return;
+        }
 
         RemoveEntryByID(window_id, &entries);
-        current_window = window.get();
+        current_window =
+            absl::make_optional(std::make_pair(window.get(), num_tabs));
         entries.push_back(std::move(window));
         break;
       }
+      case kCommandCreateGroup: {
+        // Should never receive a group command while waiting for all the
+        // tabs in a window or group.
+        if (current_window.has_value() || current_group.has_value()) {
+          return;
+        }
 
+        int32_t num_tabs = 0;
+        SessionID group_id = SessionID::InvalidValue();
+        std::unique_ptr<Group> group =
+            CreateGroupEntryFromCommand(&command, &group_id, &num_tabs);
+        if (!group) {
+          return;
+        }
+
+        // Should always have at least 1 tab. Likely indicates corruption.
+        if (num_tabs <= 0) {
+          return;
+        }
+
+        RemoveEntryByID(group_id, &entries);
+        current_group =
+            absl::make_optional(std::make_pair(group.get(), num_tabs));
+        entries.push_back(std::move(group));
+        break;
+      }
       case kCommandSelectedNavigationInTab: {
         SelectedNavigationInTabPayload2 payload;
         if (!command.GetPayload(&payload, sizeof(payload))) {
@@ -934,16 +1088,29 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
           payload.timestamp = 0;
         }
 
-        if (pending_window_tabs > 0) {
-          if (!current_window) {
+        if (current_window.has_value()) {
+          DCHECK_EQ(current_group.has_value(), false);
+          if (!current_window->first) {
             // We should have created a window already.
             NOTREACHED();
             return;
           }
-          current_window->tabs.push_back(std::make_unique<Tab>());
-          current_tab = current_window->tabs.back().get();
-          if (--pending_window_tabs == 0)
-            current_window = nullptr;
+          current_window->first->tabs.push_back(std::make_unique<Tab>());
+          current_tab = current_window->first->tabs.back().get();
+          if (--current_window->second == 0) {
+            current_window = absl::nullopt;
+          }
+        } else if (current_group.has_value()) {
+          if (!current_group->first) {
+            // We should have created a group already.
+            NOTREACHED();
+            return;
+          }
+          current_group->first->tabs.push_back(std::make_unique<Tab>());
+          current_tab = current_group->first->tabs.back().get();
+          if (--current_group->second == 0) {
+            current_group = absl::nullopt;
+          }
         } else {
           RemoveEntryByID(SessionID::FromSerializedValue(payload.id), &entries);
           entries.push_back(std::make_unique<Tab>());
@@ -984,15 +1151,15 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
         break;
       }
 
-      case kCommandGroup: {
+      case kCommandSetTabGroupData: {
         if (!current_tab) {
           // Should be in a tab when we get this.
           return;
         }
         std::unique_ptr<base::Pickle> pickle(command.PayloadAsPickle());
         base::PickleIterator iter(*pickle);
-        base::Optional<base::Token> group_token = ReadTokenFromPickle(&iter);
-        base::string16 title;
+        absl::optional<base::Token> group_token = ReadTokenFromPickle(&iter);
+        std::u16string title;
         uint32_t color_int;
         if (!iter.ReadString16(&title)) {
           break;
@@ -1010,7 +1177,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
       }
 
       case kCommandSetWindowAppName: {
-        if (!current_window) {
+        if (!current_window->first) {
           // We should have created a window already.
           NOTREACHED();
           return;
@@ -1021,7 +1188,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
         if (!RestoreSetWindowAppNameCommand(command, &window_id, &app_name))
           return;
 
-        current_window->app_name.swap(app_name);
+        current_window->first->app_name.swap(app_name);
         break;
       }
 
@@ -1054,7 +1221,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
         current_tab->user_agent_override.ua_string_override.swap(
             user_agent_override);
         current_tab->user_agent_override.opaque_ua_metadata_override =
-            base::nullopt;
+            absl::nullopt;
         break;
       }
 
@@ -1065,7 +1232,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
         }
         SessionID tab_id = SessionID::InvalidValue();
         std::string user_agent_override;
-        base::Optional<std::string> opaque_ua_metadata_override;
+        absl::optional<std::string> opaque_ua_metadata_override;
         if (!RestoreSetTabUserAgentOverrideCommand2(
                 command, &tab_id, &user_agent_override,
                 &opaque_ua_metadata_override)) {
@@ -1079,7 +1246,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
       }
 
       case kCommandSetWindowUserTitle: {
-        if (!current_window) {
+        if (!current_window->first) {
           // We should have created a window already.
           NOTREACHED();
           return;
@@ -1090,7 +1257,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
         if (!RestoreSetWindowUserTitleCommand(command, &window_id, &title))
           return;
 
-        current_window->user_title.swap(title);
+        current_window->first->user_title.swap(title);
         break;
       }
 
@@ -1140,29 +1307,28 @@ bool TabRestoreServiceImpl::PersistenceDelegate::ConvertSessionWindowToWindow(
   // grouped tab.
   std::map<tab_groups::TabGroupId, tab_groups::TabGroupVisualData>
       group_visual_datas;
-  for (size_t i = 0; i < session_window->tab_groups.size(); ++i) {
-    auto group_id = session_window->tab_groups[i]->id;
-    group_visual_datas[group_id] = session_window->tab_groups[i]->visual_data;
+  for (auto& tab_group : session_window->tab_groups) {
+    auto group_id = tab_group->id;
+    group_visual_datas[group_id] = tab_group->visual_data;
   }
 
-  for (size_t i = 0; i < session_window->tabs.size(); ++i) {
-    if (session_window->tabs[i]->navigations.empty())
+  for (auto& i : session_window->tabs) {
+    if (i->navigations.empty())
       continue;
 
     window->tabs.push_back(std::make_unique<Tab>());
     Tab& tab = *window->tabs.back();
 
-    auto group_id = session_window->tabs[i]->group;
+    auto group_id = i->group;
     if (group_id.has_value()) {
       tab.group = group_id;
       tab.group_visual_data = group_visual_datas[group_id.value()];
     }
 
-    tab.pinned = session_window->tabs[i]->pinned;
-    tab.navigations.swap(session_window->tabs[i]->navigations);
-    tab.current_navigation_index =
-        session_window->tabs[i]->current_navigation_index;
-    tab.extension_app_id = session_window->tabs[i]->extension_app_id;
+    tab.pinned = i->pinned;
+    tab.navigations.swap(i->navigations);
+    tab.current_navigation_index = i->current_navigation_index;
+    tab.extension_app_id = i->extension_app_id;
     tab.timestamp = base::Time();
   }
 
@@ -1244,7 +1410,7 @@ TabRestoreServiceImpl::TabRestoreServiceImpl(
   UpdatePersistenceDelegate();
 }
 
-TabRestoreServiceImpl::~TabRestoreServiceImpl() {}
+TabRestoreServiceImpl::~TabRestoreServiceImpl() = default;
 
 void TabRestoreServiceImpl::AddObserver(TabRestoreServiceObserver* observer) {
   helper_.AddObserver(observer);
@@ -1255,7 +1421,7 @@ void TabRestoreServiceImpl::RemoveObserver(
   helper_.RemoveObserver(observer);
 }
 
-base::Optional<SessionID> TabRestoreServiceImpl::CreateHistoricalTab(
+absl::optional<SessionID> TabRestoreServiceImpl::CreateHistoricalTab(
     LiveTab* live_tab,
     int index) {
   return helper_.CreateHistoricalTab(live_tab, index);
@@ -1267,6 +1433,21 @@ void TabRestoreServiceImpl::BrowserClosing(LiveTabContext* context) {
 
 void TabRestoreServiceImpl::BrowserClosed(LiveTabContext* context) {
   helper_.BrowserClosed(context);
+}
+
+void TabRestoreServiceImpl::CreateHistoricalGroup(
+    LiveTabContext* context,
+    const tab_groups::TabGroupId& id) {
+  helper_.CreateHistoricalGroup(context, id);
+}
+
+void TabRestoreServiceImpl::GroupClosed(const tab_groups::TabGroupId& group) {
+  helper_.GroupClosed(group);
+}
+
+void TabRestoreServiceImpl::GroupCloseStopped(
+    const tab_groups::TabGroupId& group) {
+  helper_.GroupCloseStopped(group);
 }
 
 void TabRestoreServiceImpl::ClearEntries() {

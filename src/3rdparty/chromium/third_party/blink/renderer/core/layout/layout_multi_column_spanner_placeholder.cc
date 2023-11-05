@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_multi_column_spanner_placeholder.h"
 
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/layout/layout_multi_column_flow_thread.h"
 
 namespace blink {
@@ -64,8 +65,8 @@ void LayoutMultiColumnSpannerPlaceholder::UpdateProperties(
     const ComputedStyle& parent_style) {
   NOT_DESTROYED();
   scoped_refptr<ComputedStyle> new_style =
-      ComputedStyle::CreateAnonymousStyleWithDisplay(parent_style,
-                                                     EDisplay::kBlock);
+      GetDocument().GetStyleResolver().CreateAnonymousStyleWithDisplay(
+          parent_style, EDisplay::kBlock);
   CopyMarginProperties(*new_style, layout_object_in_flow_thread_->StyleRef());
   SetStyle(std::move(new_style));
 }

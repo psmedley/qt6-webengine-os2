@@ -5,11 +5,14 @@
  * found in the LICENSE file.
  */
 
+#include "src/gpu/ops/GrLatticeOp.h"
+
 #include "include/core/SkBitmap.h"
 #include "include/core/SkRect.h"
 #include "src/core/SkLatticeIter.h"
 #include "src/core/SkMatrixPriv.h"
 #include "src/gpu/GrDrawOpTest.h"
+#include "src/gpu/GrGeometryProcessor.h"
 #include "src/gpu/GrGpu.h"
 #include "src/gpu/GrOpFlushState.h"
 #include "src/gpu/GrProgramInfo.h"
@@ -19,9 +22,7 @@
 #include "src/gpu/SkGr.h"
 #include "src/gpu/glsl/GrGLSLColorSpaceXformHelper.h"
 #include "src/gpu/glsl/GrGLSLFragmentShaderBuilder.h"
-#include "src/gpu/glsl/GrGLSLGeometryProcessor.h"
 #include "src/gpu/glsl/GrGLSLVarying.h"
-#include "src/gpu/ops/GrLatticeOp.h"
 #include "src/gpu/ops/GrMeshDrawOp.h"
 #include "src/gpu/ops/GrSimpleMeshDrawOpHelper.h"
 
@@ -41,37 +42,42 @@ public:
 
     const char* name() const override { return "LatticeGP"; }
 
-    void getGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder* b) const override {
+    void addToKey(const GrShaderCaps&, GrProcessorKeyBuilder* b) const override {
         b->add32(GrColorSpaceXform::XformKey(fColorSpaceXform.get()));
     }
 
-    GrGLSLPrimitiveProcessor* createGLSLInstance(const GrShaderCaps& caps) const override {
-        class GLSLProcessor : public GrGLSLGeometryProcessor {
+    std::unique_ptr<ProgramImpl> makeProgramImpl(const GrShaderCaps&) const override {
+        class Impl : public ProgramImpl {
         public:
             void setData(const GrGLSLProgramDataManager& pdman,
-                         const GrPrimitiveProcessor& proc) override {
-                const auto& latticeGP = proc.cast<LatticeGP>();
+                         const GrShaderCaps&,
+                         const GrGeometryProcessor& geomProc) override {
+                const auto& latticeGP = geomProc.cast<LatticeGP>();
                 fColorSpaceXformHelper.setData(pdman, latticeGP.fColorSpaceXform.get());
             }
 
         private:
             void onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) override {
                 using Interpolation = GrGLSLVaryingHandler::Interpolation;
-                const auto& latticeGP = args.fGP.cast<LatticeGP>();
+                const auto& latticeGP = args.fGeomProc.cast<LatticeGP>();
                 fColorSpaceXformHelper.emitCode(args.fUniformHandler,
                                                 latticeGP.fColorSpaceXform.get());
 
                 args.fVaryingHandler->emitAttributes(latticeGP);
-                this->writeOutputPosition(args.fVertBuilder, gpArgs, latticeGP.fInPosition.name());
+                WriteOutputPosition(args.fVertBuilder, gpArgs, latticeGP.fInPosition.name());
                 gpArgs->fLocalCoordVar = latticeGP.fInTextureCoords.asShaderVar();
 
                 args.fFragBuilder->codeAppend("float2 textureCoords;");
-                args.fVaryingHandler->addPassThroughAttribute(latticeGP.fInTextureCoords,
-                                                              "textureCoords");
+                args.fVaryingHandler->addPassThroughAttribute(
+                        latticeGP.fInTextureCoords.asShaderVar(),
+                        "textureCoords");
                 args.fFragBuilder->codeAppend("float4 textureDomain;");
                 args.fVaryingHandler->addPassThroughAttribute(
-                        latticeGP.fInTextureDomain, "textureDomain", Interpolation::kCanBeFlat);
-                args.fVaryingHandler->addPassThroughAttribute(latticeGP.fInColor,
+                        latticeGP.fInTextureDomain.asShaderVar(),
+                        "textureDomain",
+                        Interpolation::kCanBeFlat);
+                args.fFragBuilder->codeAppendf("half4 %s;", args.fOutputColor);
+                args.fVaryingHandler->addPassThroughAttribute(latticeGP.fInColor.asShaderVar(),
                                                               args.fOutputColor,
                                                               Interpolation::kCanBeFlat);
                 args.fFragBuilder->codeAppendf("%s = ", args.fOutputColor);
@@ -82,11 +88,13 @@ public:
                         "clamp(textureCoords, textureDomain.xy, textureDomain.zw)",
                         &fColorSpaceXformHelper);
                 args.fFragBuilder->codeAppend(";");
-                args.fFragBuilder->codeAppendf("%s = half4(1);", args.fOutputCoverage);
+                args.fFragBuilder->codeAppendf("const half4 %s = half4(1);", args.fOutputCoverage);
             }
+
             GrGLSLColorSpaceXformHelper fColorSpaceXformHelper;
         };
-        return new GLSLProcessor;
+
+        return std::make_unique<Impl>();
     }
 
 private:
@@ -164,7 +172,7 @@ public:
 
     const char* name() const override { return "NonAALatticeOp"; }
 
-    void visitProxies(const VisitProxyFunc& func) const override {
+    void visitProxies(const GrVisitProxyFunc& func) const override {
         func(fView.proxy(), GrMipmapped::kNo);
         if (fProgramInfo) {
             fProgramInfo->visitFPProxies(func);
@@ -175,16 +183,15 @@ public:
 
     FixedFunctionFlags fixedFunctionFlags() const override { return fHelper.fixedFunctionFlags(); }
 
-    GrProcessorSet::Analysis finalize(
-            const GrCaps& caps, const GrAppliedClip* clip, bool hasMixedSampledCoverage,
-            GrClampType clampType) override {
+    GrProcessorSet::Analysis finalize(const GrCaps& caps, const GrAppliedClip* clip,
+                                      GrClampType clampType) override {
         auto opaque = fPatches[0].fColor.isOpaque() && fAlphaType == kOpaque_SkAlphaType
                               ? GrProcessorAnalysisColor::Opaque::kYes
                               : GrProcessorAnalysisColor::Opaque::kNo;
         auto analysisColor = GrProcessorAnalysisColor(opaque);
-        auto result = fHelper.finalizeProcessors(
-                caps, clip, hasMixedSampledCoverage, clampType, GrProcessorAnalysisCoverage::kNone,
-                &analysisColor);
+        auto result = fHelper.finalizeProcessors(caps, clip, clampType,
+                                                 GrProcessorAnalysisCoverage::kNone,
+                                                 &analysisColor);
         analysisColor.isConstant(&fPatches[0].fColor);
         fWideColor = !fPatches[0].fColor.fitsInBytes();
         return result;
@@ -196,8 +203,9 @@ private:
     void onCreateProgramInfo(const GrCaps* caps,
                              SkArenaAlloc* arena,
                              const GrSurfaceProxyView& writeView,
+                             bool usesMSAASurface,
                              GrAppliedClip&& appliedClip,
-                             const GrXferProcessor::DstProxyView& dstProxyView,
+                             const GrDstProxyView& dstProxyView,
                              GrXferBarrierFlags renderPassXferBarriers,
                              GrLoadOp colorLoadOp) override {
 
@@ -217,7 +225,7 @@ private:
                                                                    &GrUserStencilSettings::kUnused);
     }
 
-    void onPrepareDraws(Target* target) override {
+    void onPrepareDraws(GrMeshDrawTarget* target) override {
         if (!fProgramInfo) {
             this->createProgramInfo(target);
             if (!fProgramInfo) {
@@ -235,7 +243,7 @@ private:
             return;
         }
 
-        const size_t kVertexStride = fProgramInfo->primProc().vertexStride();
+        const size_t kVertexStride = fProgramInfo->geomProc().vertexStride();
 
         QuadHelper helper(target, kVertexStride, numRects);
 
@@ -321,7 +329,8 @@ private:
         }
 
         flushState->bindPipelineAndScissorClip(*fProgramInfo, chainBounds);
-        flushState->bindTextures(fProgramInfo->primProc(), *fView.proxy(),
+        flushState->bindTextures(fProgramInfo->geomProc(),
+                                 *fView.proxy(),
                                  fProgramInfo->pipeline());
         flushState->drawMesh(*fMesh);
     }

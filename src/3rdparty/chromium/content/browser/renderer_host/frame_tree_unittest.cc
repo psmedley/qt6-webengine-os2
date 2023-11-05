@@ -9,12 +9,12 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "content/browser/renderer_host/navigator.h"
 #include "content/browser/renderer_host/render_frame_host_factory.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/frame_messages.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -150,7 +150,62 @@ class FrameTreeTest : public RenderViewHostImplTestHarness {
     }
     return result;
   }
+
+  size_t GetIteratorSize(FrameTree::NodeIterator iterator) {
+    return iterator.queue_.size();
+  }
 };
+
+// Confirm expected operation of the node queue that supports node iterators.
+TEST_F(FrameTreeTest, FrameNodeQueue) {
+  main_test_rfh()->InitializeRenderFrameIfNeeded();
+
+  // Use the FrameTree of the WebContents so that it has all the delegates it
+  // needs.  We may want to consider a test version of this.
+  FrameTree* frame_tree = contents()->GetFrameTree();
+  FrameTreeNode* root = frame_tree->root();
+
+  constexpr auto kOwnerType = blink::mojom::FrameOwnerElementType::kIframe;
+  int process_id = root->current_frame_host()->GetProcess()->GetID();
+  frame_tree->AddFrame(root->current_frame_host(), process_id, 14,
+                       CreateStubFrameRemote(),
+                       CreateStubBrowserInterfaceBrokerReceiver(),
+                       CreateStubPolicyContainerBindParams(),
+                       blink::mojom::TreeScopeType::kDocument, std::string(),
+                       "uniqueName0", false, blink::LocalFrameToken(),
+                       base::UnguessableToken::Create(), blink::FramePolicy(),
+                       blink::mojom::FrameOwnerProperties(), false, kOwnerType);
+  frame_tree->AddFrame(root->current_frame_host(), process_id, 15,
+                       CreateStubFrameRemote(),
+                       CreateStubBrowserInterfaceBrokerReceiver(),
+                       CreateStubPolicyContainerBindParams(),
+                       blink::mojom::TreeScopeType::kDocument, std::string(),
+                       "uniqueName1", false, blink::LocalFrameToken(),
+                       base::UnguessableToken::Create(), blink::FramePolicy(),
+                       blink::mojom::FrameOwnerProperties(), false, kOwnerType);
+  frame_tree->AddFrame(root->current_frame_host(), process_id, 16,
+                       CreateStubFrameRemote(),
+                       CreateStubBrowserInterfaceBrokerReceiver(),
+                       CreateStubPolicyContainerBindParams(),
+                       blink::mojom::TreeScopeType::kDocument, std::string(),
+                       "uniqueName2", false, blink::LocalFrameToken(),
+                       base::UnguessableToken::Create(), blink::FramePolicy(),
+                       blink::mojom::FrameOwnerProperties(), false, kOwnerType);
+
+  EXPECT_EQ(3U, root->child_count());
+  FrameTree::NodeIterator node_iterator = frame_tree->Nodes().begin();
+
+  // Before the iterator advances the frame node queue should be empty.
+  EXPECT_EQ(0U, GetIteratorSize(node_iterator));
+
+  std::advance(node_iterator, 1);
+
+  // Advancing the iterator should fill the queue, then pop the first node
+  // from the front of the queue and make it the current node (available by
+  // dereferencing the iterator).
+  EXPECT_EQ(2U, GetIteratorSize(node_iterator));
+  EXPECT_EQ(root->child_at(0), *node_iterator);
+}
 
 // Exercise tree manipulation routines.
 //  - Add a series of nodes and verify tree structure.

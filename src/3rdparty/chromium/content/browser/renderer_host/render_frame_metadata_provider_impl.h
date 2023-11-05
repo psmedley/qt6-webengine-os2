@@ -60,6 +60,8 @@ class CONTENT_EXPORT RenderFrameMetadataProviderImpl
 
  private:
   friend class FakeRenderWidgetHostViewAura;
+  friend class DelegatedInkPointTest;
+  friend class RenderWidgetHostViewAndroidTest;
 
   // Paired with the mojom::RenderFrameMetadataObserverClient overrides, these
   // methods are enqueued in |frame_token_message_queue_|. They are invoked when
@@ -88,7 +90,7 @@ class CONTENT_EXPORT RenderFrameMetadataProviderImpl
 
   cc::RenderFrameMetadata last_render_frame_metadata_;
 
-  base::Optional<viz::LocalSurfaceId> last_local_surface_id_;
+  absl::optional<viz::LocalSurfaceId> last_local_surface_id_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
@@ -101,9 +103,9 @@ class CONTENT_EXPORT RenderFrameMetadataProviderImpl
       render_frame_metadata_observer_remote_;
 
 #if defined(OS_ANDROID)
-  base::Optional<bool> pending_report_all_root_scrolls_;
+  absl::optional<bool> pending_report_all_root_scrolls_;
 #endif
-  base::Optional<bool> pending_report_all_frame_submission_for_testing_;
+  absl::optional<bool> pending_report_all_frame_submission_for_testing_;
 
   base::WeakPtrFactory<RenderFrameMetadataProviderImpl> weak_factory_{this};
 

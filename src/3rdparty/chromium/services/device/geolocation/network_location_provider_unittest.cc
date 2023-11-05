@@ -30,12 +30,13 @@
 #include "services/device/geolocation/wifi_data_provider.h"
 #include "services/device/public/cpp/geolocation/geoposition.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_MAC)
-#include "services/device/public/cpp/test/fake_geolocation_system_permission.h"
+#include "services/device/public/cpp/test/fake_geolocation_manager.h"
 #endif
 
 namespace device {
@@ -51,11 +52,14 @@ struct LocationUpdateListener {
                         const mojom::Geoposition& position) {
     last_position = position;
     update_count++;
+    if (position.error_code != mojom::Geoposition::ErrorCode::NONE)
+      error_count++;
   }
 
   const LocationProvider::LocationProviderUpdateCallback callback;
   mojom::Geoposition last_position;
   int update_count = 0;
+  int error_count = 0;
 };
 
 // A mock implementation of WifiDataProvider for testing. Adapted from
@@ -131,15 +135,14 @@ class GeolocationNetworkProviderTest : public testing::Test {
       bool set_permission_granted,
       const std::string& api_key = std::string()) {
 #if defined(OS_MAC)
-    fake_permission_manager_ =
-        std::make_unique<FakeSystemGeolocationPermissionsManager>();
+    fake_geolocation_manager_ = std::make_unique<FakeGeolocationManager>();
     auto provider = std::make_unique<NetworkLocationProvider>(
         test_url_loader_factory_.GetSafeWeakWrapper(),
-        fake_permission_manager_.get(), base::ThreadTaskRunnerHandle::Get(),
+        fake_geolocation_manager_.get(), base::ThreadTaskRunnerHandle::Get(),
         api_key, &position_cache_);
     // For macOS we must simulate the granting of location permission
     if (grant_system_permission_by_default_) {
-      fake_permission_manager_->set_status(
+      fake_geolocation_manager_->SetSystemPermission(
           LocationSystemPermissionStatus::kAllowed);
       base::RunLoop().RunUntilIdle();
     }
@@ -158,8 +161,7 @@ class GeolocationNetworkProviderTest : public testing::Test {
   bool grant_system_permission_by_default_ = true;
 
 #if defined(OS_MAC)
-  std::unique_ptr<FakeSystemGeolocationPermissionsManager>
-      fake_permission_manager_;
+  std::unique_ptr<FakeGeolocationManager> fake_geolocation_manager_;
 #endif
 
  protected:
@@ -184,7 +186,7 @@ class GeolocationNetworkProviderTest : public testing::Test {
       ap.radio_signal_strength = ap_count - i;
       ap.channel = IndexToChannel(i);
       ap.signal_to_noise = i + 42;
-      ap.ssid = base::ASCIIToUTF16("Some nice+network|name\\");
+      ap.ssid = u"Some nice+network|name\\";
       data.access_point_data.insert(ap);
     }
     return data;
@@ -197,7 +199,7 @@ class GeolocationNetworkProviderTest : public testing::Test {
       ap.radio_signal_strength = ap_count - i;
       ap.channel = IndexToChannel(i);
       ap.signal_to_noise = i + 42;
-      ap.ssid = base::ASCIIToUTF16("Some nice+network|name\\");
+      ap.ssid = u"Some nice+network|name\\";
       data.access_point_data.insert(ap);
     }
     return data;
@@ -280,7 +282,7 @@ class GeolocationNetworkProviderTest : public testing::Test {
     std::string upload_data = network::GetUploadData(pending_request.request);
     ASSERT_FALSE(upload_data.empty());
 
-    base::Optional<base::Value> parsed_json =
+    absl::optional<base::Value> parsed_json =
         base::JSONReader::Read(upload_data);
     ASSERT_TRUE(parsed_json);
 
@@ -598,9 +600,9 @@ TEST_F(GeolocationNetworkProviderTest, MacOSSystemPermissionsTest) {
   // be called immediately.
   provider->OnPermissionGranted();
 
-  // Ensure the callback was never called.
+  // Ensure there was an error callback.
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(0, listener.update_count);
+  EXPECT_EQ(1, listener.error_count);
 
   // Now try to make a request for new wifi data.
   wifi_data_provider_->set_got_data(true);
@@ -621,7 +623,7 @@ TEST_F(GeolocationNetworkProviderTest, MacOSSystemPermissionsTest) {
   // Ensure that we immediately make a new network request to acquire the
   // location when permission is granted.
   static_cast<NetworkLocationProvider*>(provider.get())
-      ->OnSystemPermissionUpdate(LocationSystemPermissionStatus::kAllowed);
+      ->OnSystemPermissionUpdated(LocationSystemPermissionStatus::kAllowed);
   ASSERT_EQ(1, test_url_loader_factory_.NumPending());
 
   // Clear pending requests for later testing.
@@ -642,7 +644,7 @@ TEST_F(GeolocationNetworkProviderTest, MacOSSystemPermissionsTest) {
   // Ensure more network requests are not sent out when permission is denied
   // again.
   static_cast<NetworkLocationProvider*>(provider.get())
-      ->OnSystemPermissionUpdate(LocationSystemPermissionStatus::kDenied);
+      ->OnSystemPermissionUpdated(LocationSystemPermissionStatus::kDenied);
   provider->StartProvider(false);
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(4));
   base::RunLoop().RunUntilIdle();

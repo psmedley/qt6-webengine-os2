@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/task/thread_pool.h"
 #include "base/test/gtest_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
@@ -33,9 +34,9 @@ LanguageCode kLanguageEn("en");
 
 MatchingPattern GetCompanyPatternEn() {
   autofill::MatchingPattern m_p;
-  m_p.positive_pattern = "company|business|organization|organisation";
+  m_p.positive_pattern = u"company|business|organization|organisation";
   m_p.positive_score = 1.1;
-  m_p.negative_pattern = "";
+  m_p.negative_pattern = u"";
   m_p.match_field_attributes = MATCH_NAME;
   m_p.match_field_input_types = MATCH_TEXT;
   m_p.language = kLanguageEn;
@@ -44,9 +45,9 @@ MatchingPattern GetCompanyPatternEn() {
 
 MatchingPattern GetCompanyPatternDe() {
   autofill::MatchingPattern m_p;
-  m_p.positive_pattern = "|(?<!con)firma|firmenname";
+  m_p.positive_pattern = u"|(?<!con)firma|firmenname";
   m_p.positive_score = 1.1;
-  m_p.negative_pattern = "";
+  m_p.negative_pattern = u"";
   m_p.match_field_attributes = MATCH_LABEL | MATCH_NAME;
   m_p.match_field_input_types = MATCH_TEXT;
   m_p.language = kLanguageDe;
@@ -77,7 +78,7 @@ void OnJsonParsed(base::OnceClosure done_callback,
                   data_decoder::DataDecoder::ValueOrError result) {
   base::Version version =
       field_type_parsing::ExtractVersionFromJsonObject(result.value.value());
-  base::Optional<PatternProvider::Map> patterns =
+  absl::optional<PatternProvider::Map> patterns =
       field_type_parsing::GetConfigurationFromJsonObject(result.value.value());
   ASSERT_TRUE(patterns);
   ASSERT_TRUE(version.IsValid());

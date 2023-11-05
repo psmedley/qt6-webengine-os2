@@ -95,10 +95,10 @@ class LineReader {
 
  private:
   String text_;
-  size_t index_;
+  wtf_size_t index_;
 };
 
 }  // namespace test
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_UNIT_TEST_HELPERS_H_

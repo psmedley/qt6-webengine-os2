@@ -12,8 +12,8 @@ Are you a Google employee? See
 
 ## System requirements
 
-* A 64-bit Mac running 10.12.6 or later.
-* [Xcode](https://developer.apple.com/xcode) 12.0 or higher.
+* A 64-bit Mac running 10.15.4 or later.
+* [Xcode](https://developer.apple.com/xcode) 12.2 or higher.
 * The current version of the JDK (required for the Closure compiler).
 
 ## Install `depot_tools`
@@ -318,7 +318,7 @@ $ gclient sync
 
 The first command updates the primary Chromium source repository and rebases
 any of your local branches on top of tip-of-tree (aka the Git branch
-`origin/master`). If you don't want to use this script, you can also just use
+`origin/main`). If you don't want to use this script, you can also just use
 `git pull` or other common Git commands to update the repo.
 
 The second command syncs dependencies to the appropriate versions and re-runs
@@ -350,7 +350,7 @@ script import lldbinit
 ```
 
 This will also allow you to see the content of some of Chromium types in the
-debugger like `base::string16`, ... If you want to use `lldb` directly, name
+debugger like `std::u16string`, ... If you want to use `lldb` directly, name
 the file `~/.lldbinit` instead of `~/.lldbinit-Xcode`.
 
 Note: if you are using `ios/build/tools/setup-gn.py` to generate the Xcode

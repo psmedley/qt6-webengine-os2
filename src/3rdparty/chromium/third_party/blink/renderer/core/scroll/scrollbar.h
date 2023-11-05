@@ -29,6 +29,7 @@
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -194,6 +195,9 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   float EffectiveZoom() const;
   bool ContainerIsRightToLeft() const;
 
+  // scrollbar-width CSS property
+  EScrollbarWidth CSSScrollbarWidth() const;
+
   // The Element that supplies our style information. If the scrollbar is
   // for a document, this is either the <body> or <html> element. Otherwise, it
   // is the element that owns our PaintLayerScrollableArea.
@@ -259,6 +263,13 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
 
   IntRect frame_rect_;
   Member<Element> style_source_;
+
+  // Tracks scroll delta that has been injected into the compositor thread as a
+  // GestureScrollUpdate but hasn't yet updated the scroll position on main.
+  // Scrollbar::MouseMoved needs this to calculate deltas during thumb drags.
+  // In particular we often process two mousemoves in the same frame thanks to
+  // MouseEventManager::RecomputeMouseHoverState sending fake ones.
+  ScrollOffset pending_injected_delta_;
 };
 
 }  // namespace blink

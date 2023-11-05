@@ -3,18 +3,20 @@
 // found in the LICENSE file.
 
 #include "components/exo/wm_helper_chromeos.h"
-#include "components/exo/wm_helper.h"
 
 #include "ash/frame_throttler/frame_throttling_controller.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "base/callback_helpers.h"
 #include "base/memory/singleton.h"
+#include "components/exo/wm_helper.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
+#include "ui/compositor/layer.h"
 #include "ui/display/manager/display_configurator.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/types/display_snapshot.h"
@@ -153,6 +155,13 @@ ui::mojom::DragOperation WMHelperChromeOS::OnPerformDrop(
   return operation;
 }
 
+WMHelper::DropCallback WMHelperChromeOS::GetDropCallback(
+    const ui::DropTargetEvent& event) {
+  // TODO(crbug.com/1197501): Return drop callback
+  NOTIMPLEMENTED();
+  return base::NullCallback();
+}
+
 void WMHelperChromeOS::AddVSyncParameterObserver(
     mojo::PendingRemote<viz::mojom::VSyncParameterObserver> observer) {
   GetPrimaryRoot()->layer()->GetCompositor()->AddVSyncParameterObserver(
@@ -233,24 +242,13 @@ bool WMHelperChromeOS::InTabletMode() const {
 }
 
 double WMHelperChromeOS::GetDefaultDeviceScaleFactor() const {
-  if (!display::Display::HasInternalDisplay())
-    return 1.0;
-
-  if (display::Display::HasForceDeviceScaleFactor())
-    return display::Display::GetForcedDeviceScaleFactor();
-
-  display::DisplayManager* display_manager =
-      ash::Shell::Get()->display_manager();
-  const display::ManagedDisplayInfo& display_info =
-      display_manager->GetDisplayInfo(display::Display::InternalDisplayId());
-  DCHECK(display_info.display_modes().size());
-  return display_info.display_modes()[0].device_scale_factor();
+  return exo::GetDefaultDeviceScaleFactor();
 }
 
 double WMHelperChromeOS::GetDeviceScaleFactorForWindow(
     aura::Window* window) const {
   if (default_scale_cancellation_)
-    return GetDefaultDeviceScaleFactor();
+    return exo::GetDefaultDeviceScaleFactor();
   const display::Screen* screen = display::Screen::GetScreen();
   display::Display display = screen->GetDisplayNearestWindow(window);
   return display.device_scale_factor();
@@ -276,6 +274,21 @@ WMHelper::LifetimeManager* WMHelperChromeOS::GetLifetimeManager() {
 
 aura::client::CaptureClient* WMHelperChromeOS::GetCaptureClient() {
   return wm::CaptureController::Get();
+}
+
+float GetDefaultDeviceScaleFactor() {
+  if (!display::Display::HasInternalDisplay())
+    return 1.0;
+
+  if (display::Display::HasForceDeviceScaleFactor())
+    return display::Display::GetForcedDeviceScaleFactor();
+
+  display::DisplayManager* display_manager =
+      ash::Shell::Get()->display_manager();
+  const display::ManagedDisplayInfo& display_info =
+      display_manager->GetDisplayInfo(display::Display::InternalDisplayId());
+  DCHECK(display_info.display_modes().size());
+  return display_info.display_modes()[0].device_scale_factor();
 }
 
 }  // namespace exo

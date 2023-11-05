@@ -9,10 +9,11 @@
 #include "base/json/json_reader.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/no_destructor.h"
 #include "base/version.h"
 #include "components/password_manager/core/common/password_manager_features.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -21,7 +22,7 @@ namespace {
 constexpr int kCacheTimeoutInMinutes = 5;
 constexpr int kFetchTimeoutInSeconds = 3;
 
-constexpr int kMaxDownloadSizeInBytes = 10 * 1024;
+constexpr int kMaxDownloadSizeInBytes = 512 * 1024;
 
 using ParsingResult =
     password_manager::PasswordScriptsFetcherImpl::ParsingResult;
@@ -165,7 +166,7 @@ bool PasswordScriptsFetcherImpl::IsScriptAvailable(
 }
 
 void PasswordScriptsFetcherImpl::StartFetch() {
-  static const base::NoDestructor<base::TimeDelta> kFetchTimeout(
+  static const base::TimeDelta kFetchTimeout(
       base::TimeDelta::FromSeconds(kFetchTimeoutInSeconds));
   if (url_loader_)
     return;
@@ -195,7 +196,7 @@ void PasswordScriptsFetcherImpl::StartFetch() {
         })");
   url_loader_ = network::SimpleURLLoader::Create(std::move(resource_request),
                                                  traffic_annotation);
-  url_loader_->SetTimeoutDuration(*kFetchTimeout);
+  url_loader_->SetTimeoutDuration(kFetchTimeout);
   url_loader_->DownloadToString(
       url_loader_factory_.get(),
       base::BindOnce(&PasswordScriptsFetcherImpl::OnFetchComplete,
@@ -247,7 +248,7 @@ base::flat_set<ParsingResult> PasswordScriptsFetcherImpl::ParseResponse(
   base::JSONReader::ValueWithError data =
       base::JSONReader::ReadAndReturnValueWithError(*response_body);
 
-  if (data.value == base::nullopt) {
+  if (data.value == absl::nullopt) {
     DVLOG(1) << "Parse error: " << data.error_message;
     return {ParsingResult::kInvalidJson};
   }
@@ -255,7 +256,7 @@ base::flat_set<ParsingResult> PasswordScriptsFetcherImpl::ParseResponse(
     return {ParsingResult::kInvalidJson};
 
   base::flat_set<ParsingResult> warnings;
-  for (const auto& script_it : data.value->DictItems()) {
+  for (const auto script_it : data.value->DictItems()) {
     // |script_it.first| is an identifier (normally, a domain name, e.g.
     // example.com) that we don't care about.
     // |script_it.second| provides domain-specific parameters.
@@ -268,10 +269,10 @@ base::flat_set<ParsingResult> PasswordScriptsFetcherImpl::ParseResponse(
 }
 
 bool PasswordScriptsFetcherImpl::IsCacheStale() const {
-  static const base::NoDestructor<base::TimeDelta> kCacheTimeout(
+  static const base::TimeDelta kCacheTimeout(
       base::TimeDelta::FromMinutes(kCacheTimeoutInMinutes));
   return last_fetch_timestamp_.is_null() ||
-         base::TimeTicks::Now() - last_fetch_timestamp_ >= *kCacheTimeout;
+         base::TimeTicks::Now() - last_fetch_timestamp_ >= kCacheTimeout;
 }
 
 void PasswordScriptsFetcherImpl::RunResponseCallback(

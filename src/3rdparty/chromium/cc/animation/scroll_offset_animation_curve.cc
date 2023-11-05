@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/memory/ptr_util.h"
-#include "base/numerics/ranges.h"
 #include "ui/gfx/animation/keyframe/timing_function.h"
 #include "ui/gfx/animation/tween.h"
 
@@ -56,7 +56,7 @@ static float MaximumDimension(const gfx::Vector2dF& delta) {
 
 static std::unique_ptr<TimingFunction> EaseInOutWithInitialSlope(double slope) {
   // Clamp slope to a sane value.
-  slope = base::ClampToRange(slope, -100.0, 100.0);
+  slope = base::clamp(slope, -100.0, 100.0);
 
   // Based on CubicBezierTimingFunction::EaseType::EASE_OUT_NATURAL preset
   // with first control point scaled.
@@ -129,13 +129,13 @@ base::TimeDelta VelocityBasedDurationBound(gfx::Vector2dF old_delta,
 
 }  // namespace
 
-base::Optional<double>
+absl::optional<double>
     ScrollOffsetAnimationCurve::animation_duration_for_testing_;
 
 ScrollOffsetAnimationCurve::ScrollOffsetAnimationCurve(
     const gfx::ScrollOffset& target_value,
     AnimationType animation_type,
-    base::Optional<DurationBehavior> duration_behavior)
+    absl::optional<DurationBehavior> duration_behavior)
     : target_value_(target_value),
       animation_type_(animation_type),
       duration_behavior_(duration_behavior),
@@ -165,7 +165,7 @@ ScrollOffsetAnimationCurve::ScrollOffsetAnimationCurve(
     const gfx::ScrollOffset& target_value,
     std::unique_ptr<TimingFunction> timing_function,
     AnimationType animation_type,
-    base::Optional<DurationBehavior> duration_behavior)
+    absl::optional<DurationBehavior> duration_behavior)
     : target_value_(target_value),
       timing_function_(std::move(timing_function)),
       animation_type_(animation_type),
@@ -197,8 +197,8 @@ base::TimeDelta ScrollOffsetAnimationCurve::EaseInOutSegmentDuration(
       case DurationBehavior::INVERSE_DELTA:
         duration = kInverseDeltaOffset +
                    std::abs(MaximumDimension(delta)) * kInverseDeltaSlope;
-        duration = base::ClampToRange(duration, kInverseDeltaMinDuration,
-                                      kInverseDeltaMaxDuration);
+        duration = base::clamp(duration, kInverseDeltaMinDuration,
+                               kInverseDeltaMaxDuration);
         break;
     }
     duration /= kDurationDivisor;
@@ -231,7 +231,7 @@ base::TimeDelta ScrollOffsetAnimationCurve::EaseInOutBoundedSegmentDuration(
 base::TimeDelta ScrollOffsetAnimationCurve::SegmentDuration(
     const gfx::Vector2dF& delta,
     base::TimeDelta delayed_by,
-    base::Optional<double> velocity) {
+    absl::optional<double> velocity) {
   switch (animation_type_) {
     case AnimationType::kEaseOutNatural:
       // FIXME Check!
@@ -274,7 +274,7 @@ base::TimeDelta ScrollOffsetAnimationCurve::ImpulseSegmentDuration(
   } else {
     double duration_in_milliseconds =
         kImpulseMillisecondsPerPixel * std::abs(MaximumDimension(delta));
-    duration_in_milliseconds = base::ClampToRange(
+    duration_in_milliseconds = base::clamp(
         duration_in_milliseconds, kImpulseMinDurationMs, kImpulseMaxDurationMs);
     duration = base::TimeDelta::FromMillisecondsD(duration_in_milliseconds);
   }

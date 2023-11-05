@@ -4,12 +4,18 @@
 
 #include "src/interpreter/bytecode-generator.h"
 
+#include <map>
+#include <unordered_map>
+#include <unordered_set>
+
 #include "src/api/api-inl.h"
 #include "src/ast/ast-source-ranges.h"
+#include "src/ast/ast.h"
 #include "src/ast/scopes.h"
 #include "src/builtins/builtins-constructor.h"
 #include "src/codegen/compiler.h"
 #include "src/codegen/unoptimized-compilation-info.h"
+#include "src/common/globals.h"
 #include "src/interpreter/bytecode-flags.h"
 #include "src/interpreter/bytecode-jump-table.h"
 #include "src/interpreter/bytecode-label.h"
@@ -18,6 +24,7 @@
 #include "src/interpreter/control-flow-builders.h"
 #include "src/logging/local-logger.h"
 #include "src/logging/log.h"
+#include "src/numbers/conversions.h"
 #include "src/objects/debug-objects.h"
 #include "src/objects/literal-objects-inl.h"
 #include "src/objects/objects-inl.h"
@@ -122,10 +129,10 @@ class V8_NODISCARD BytecodeGenerator::ControlScope {
   void Continue(Statement* stmt) {
     PerformCommand(CMD_CONTINUE, stmt, kNoSourcePosition);
   }
-  void ReturnAccumulator(int source_position = kNoSourcePosition) {
+  void ReturnAccumulator(int source_position) {
     PerformCommand(CMD_RETURN, nullptr, source_position);
   }
-  void AsyncReturnAccumulator(int source_position = kNoSourcePosition) {
+  void AsyncReturnAccumulator(int source_position) {
     PerformCommand(CMD_ASYNC_RETURN, nullptr, source_position);
   }
 
@@ -738,11 +745,11 @@ class V8_NODISCARD BytecodeGenerator::TestResultScope final
 // Used to build a list of toplevel declaration data.
 class BytecodeGenerator::TopLevelDeclarationsBuilder final : public ZoneObject {
  public:
-  template <typename LocalIsolate>
+  template <typename IsolateT>
   Handle<FixedArray> AllocateDeclarations(UnoptimizedCompilationInfo* info,
                                           BytecodeGenerator* generator,
                                           Handle<Script> script,
-                                          LocalIsolate* isolate) {
+                                          IsolateT* isolate) {
     DCHECK(has_constant_pool_entry_);
 
     Handle<FixedArray> data =
@@ -1185,14 +1192,14 @@ using NullContextScopeFor = typename NullContextScopeHelper<Isolate>::Type;
 
 }  // namespace
 
-template <typename LocalIsolate>
+template <typename IsolateT>
 Handle<BytecodeArray> BytecodeGenerator::FinalizeBytecode(
-    LocalIsolate* isolate, Handle<Script> script) {
+    IsolateT* isolate, Handle<Script> script) {
   DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
 #ifdef DEBUG
   // Unoptimized compilation should be context-independent. Verify that we don't
   // access the native context by nulling it out during finalization.
-  NullContextScopeFor<LocalIsolate> null_context_scope(isolate);
+  NullContextScopeFor<IsolateT> null_context_scope(isolate);
 #endif
 
   AllocateDeferredConstants(isolate, script);
@@ -1223,14 +1230,14 @@ template Handle<BytecodeArray> BytecodeGenerator::FinalizeBytecode(
 template Handle<BytecodeArray> BytecodeGenerator::FinalizeBytecode(
     LocalIsolate* isolate, Handle<Script> script);
 
-template <typename LocalIsolate>
+template <typename IsolateT>
 Handle<ByteArray> BytecodeGenerator::FinalizeSourcePositionTable(
-    LocalIsolate* isolate) {
+    IsolateT* isolate) {
   DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
 #ifdef DEBUG
   // Unoptimized compilation should be context-independent. Verify that we don't
   // access the native context by nulling it out during finalization.
-  NullContextScopeFor<LocalIsolate> null_context_scope(isolate);
+  NullContextScopeFor<IsolateT> null_context_scope(isolate);
 #endif
 
   Handle<ByteArray> source_position_table =
@@ -1239,7 +1246,7 @@ Handle<ByteArray> BytecodeGenerator::FinalizeSourcePositionTable(
   LOG_CODE_EVENT(isolate,
                  CodeLinePosInfoRecordEvent(
                      info_->bytecode_array()->GetFirstBytecodeAddress(),
-                     *source_position_table));
+                     *source_position_table, JitCodeEvent::BYTE_CODE));
 
   return source_position_table;
 }
@@ -1255,8 +1262,8 @@ int BytecodeGenerator::CheckBytecodeMatches(BytecodeArray bytecode) {
 }
 #endif
 
-template <typename LocalIsolate>
-void BytecodeGenerator::AllocateDeferredConstants(LocalIsolate* isolate,
+template <typename IsolateT>
+void BytecodeGenerator::AllocateDeferredConstants(IsolateT* isolate,
                                                   Handle<Script> script) {
   if (top_level_builder()->has_top_level_declaration()) {
     // Build global declaration pair array.
@@ -1458,7 +1465,7 @@ void BytecodeGenerator::GenerateBytecodeBody() {
   // end of the function without an explicit return being present on all paths.
   if (!builder()->RemainderOfBlockIsDead()) {
     builder()->LoadUndefined();
-    BuildReturn();
+    BuildReturn(literal->return_position());
   }
 }
 
@@ -1772,10 +1779,14 @@ void BytecodeGenerator::VisitReturnStatement(ReturnStatement* stmt) {
   AllocateBlockCoverageSlotIfEnabled(stmt, SourceRangeKind::kContinuation);
   builder()->SetStatementPosition(stmt);
   VisitForAccumulatorValue(stmt->expression());
+  int return_position = stmt->end_position();
+  if (return_position == ReturnStatement::kFunctionLiteralReturnPosition) {
+    return_position = info()->literal()->return_position();
+  }
   if (stmt->is_async_return()) {
-    execution_control()->AsyncReturnAccumulator(stmt->end_position());
+    execution_control()->AsyncReturnAccumulator(return_position);
   } else {
-    execution_control()->ReturnAccumulator(stmt->end_position());
+    execution_control()->ReturnAccumulator(return_position);
   }
 }
 
@@ -1786,53 +1797,320 @@ void BytecodeGenerator::VisitWithStatement(WithStatement* stmt) {
   VisitInScope(stmt->statement(), stmt->scope());
 }
 
+namespace {
+
+bool IsSmiLiteralSwitchCaseValue(Expression* expr) {
+  if (expr->IsSmiLiteral() ||
+      (expr->IsLiteral() && expr->AsLiteral()->IsNumber() &&
+       expr->AsLiteral()->AsNumber() == 0.0)) {
+    return true;
+#ifdef DEBUG
+  } else if (expr->IsLiteral() && expr->AsLiteral()->IsNumber()) {
+    DCHECK(!IsSmiDouble(expr->AsLiteral()->AsNumber()));
+#endif
+  }
+  return false;
+}
+
+// Precondition: we called IsSmiLiteral to check this.
+inline int ReduceToSmiSwitchCaseValue(Expression* expr) {
+  if (V8_LIKELY(expr->IsSmiLiteral())) {
+    return expr->AsLiteral()->AsSmiLiteral().value();
+  } else {
+    // Only the zero case is possible otherwise.
+    DCHECK(expr->IsLiteral() && expr->AsLiteral()->IsNumber() &&
+           expr->AsLiteral()->AsNumber() == -0.0);
+    return 0;
+  }
+}
+
+// Is the range of Smi's small enough relative to number of cases?
+inline bool IsSpreadAcceptable(int spread, int ncases) {
+  return spread < FLAG_switch_table_spread_threshold * ncases;
+}
+
+struct SwitchInfo {
+  static const int kDefaultNotFound = -1;
+
+  std::map<int, CaseClause*> covered_cases;
+  int default_case;
+
+  SwitchInfo() { default_case = kDefaultNotFound; }
+
+  bool DefaultExists() { return default_case != kDefaultNotFound; }
+  bool CaseExists(int j) {
+    return covered_cases.find(j) != covered_cases.end();
+  }
+  bool CaseExists(Expression* expr) {
+    return IsSmiLiteralSwitchCaseValue(expr)
+               ? CaseExists(ReduceToSmiSwitchCaseValue(expr))
+               : false;
+  }
+  CaseClause* GetClause(int j) { return covered_cases[j]; }
+
+  bool IsDuplicate(CaseClause* clause) {
+    return IsSmiLiteralSwitchCaseValue(clause->label()) &&
+           CaseExists(clause->label()) &&
+           clause != GetClause(ReduceToSmiSwitchCaseValue(clause->label()));
+  }
+  int MinCase() {
+    return covered_cases.size() == 0 ? INT_MAX : covered_cases.begin()->first;
+  }
+  int MaxCase() {
+    return covered_cases.size() == 0 ? INT_MIN : covered_cases.rbegin()->first;
+  }
+  void Print() {
+    std::cout << "Covered_cases: " << '\n';
+    for (auto iter = covered_cases.begin(); iter != covered_cases.end();
+         ++iter) {
+      std::cout << iter->first << "->" << iter->second << '\n';
+    }
+    std::cout << "Default_case: " << default_case << '\n';
+  }
+};
+
+// Checks whether we should use a jump table to implement a switch operation.
+bool IsSwitchOptimizable(SwitchStatement* stmt, SwitchInfo* info) {
+  ZonePtrList<CaseClause>* cases = stmt->cases();
+
+  for (int i = 0; i < cases->length(); ++i) {
+    CaseClause* clause = cases->at(i);
+    if (clause->is_default()) {
+      continue;
+    } else if (!(clause->label()->IsLiteral())) {
+      // Don't consider Smi cases after a non-literal, because we
+      // need to evaluate the non-literal.
+      break;
+    } else if (IsSmiLiteralSwitchCaseValue(clause->label())) {
+      int value = ReduceToSmiSwitchCaseValue(clause->label());
+      info->covered_cases.insert({value, clause});
+    }
+  }
+
+  // GCC also jump-table optimizes switch statements with 6 cases or more.
+  if (!(static_cast<int>(info->covered_cases.size()) >=
+            FLAG_switch_table_min_cases &&
+        IsSpreadAcceptable(info->MaxCase() - info->MinCase(),
+                           cases->length()))) {
+    // Invariant- covered_cases has all cases and only cases that will go in the
+    // jump table.
+    info->covered_cases.clear();
+    return false;
+  } else {
+    return true;
+  }
+}
+
+}  // namespace
+
+// This adds a jump table optimization for switch statements with Smi cases.
+// If there are 5+ non-duplicate Smi clauses, and they are sufficiently compact,
+// we generate a jump table. In the fall-through path, we put the compare-jumps
+// for the non-Smi cases.
+
+// e.g.
+//
+// switch(x){
+//   case -0: out = 10;
+//   case 1: out = 11; break;
+//   case 0: out = 12; break;
+//   case 2: out = 13;
+//   case 3: out = 14; break;
+//   case 0.5: out = 15; break;
+//   case 4: out = 16;
+//   case y: out = 17;
+//   case 5: out = 18;
+//   default: out = 19; break;
+// }
+
+// becomes this pseudo-bytecode:
+
+//   lda x
+//   star r1
+//   test_type number
+//   jump_if_false @fallthrough
+//   ldar r1
+//   test_greater_than_or_equal_to smi_min
+//   jump_if_false @fallthrough
+//   ldar r1
+//   test_less_than_or_equal_to smi_max
+//   jump_if_false @fallthrough
+//   ldar r1
+//   bitwise_or 0
+//   star r2
+//   test_strict_equal r1
+//   jump_if_false @fallthrough
+//   ldar r2
+//   switch_on_smi {1: @case_1, 2: @case_2, 3: @case_3, 4: @case_4}
+// @fallthrough:
+//   jump_if_strict_equal -0.0 @case_minus_0.0
+//   jump_if_strict_equal 0.5  @case_0.5
+//   jump_if_strict_equal y    @case_y
+//   jump_if_strict_equal 5    @case_5
+//   jump @default
+// @case_minus_0.0:
+//   <out = 10>
+// @case_1
+//   <out = 11, break>
+// @case_0:
+//   <out = 12, break>
+// @case_2:
+//   <out = 13>
+// @case_3:
+//   <out = 14, break>
+// @case_0.5:
+//   <out = 15, break>
+// @case_4:
+//   <out = 16>
+// @case_y:
+//   <out = 17>
+// @case_5:
+//   <out = 18>
+// @default:
+//   <out = 19, break>
+
 void BytecodeGenerator::VisitSwitchStatement(SwitchStatement* stmt) {
   // We need this scope because we visit for register values. We have to
   // maintain a execution result scope where registers can be allocated.
   ZonePtrList<CaseClause>* clauses = stmt->cases();
-  SwitchBuilder switch_builder(builder(), block_coverage_builder_, stmt,
-                               clauses->length());
-  ControlScopeForBreakable scope(this, stmt, &switch_builder);
-  int default_index = -1;
 
-  builder()->SetStatementPosition(stmt);
+  SwitchInfo info;
+  BytecodeJumpTable* jump_table = nullptr;
+  bool use_jump_table = IsSwitchOptimizable(stmt, &info);
 
-  // Keep the switch value in a register until a case matches.
-  Register tag = VisitForRegisterValue(stmt->tag());
-  FeedbackSlot slot = clauses->length() > 0
-                          ? feedback_spec()->AddCompareICSlot()
-                          : FeedbackSlot::Invalid();
+  // N_comp_cases is number of cases we will generate comparison jumps for.
+  // Note we ignore duplicate cases, since they are very unlikely.
 
-  // Iterate over all cases and create nodes for label comparison.
-  for (int i = 0; i < clauses->length(); i++) {
-    CaseClause* clause = clauses->at(i);
-
-    // The default is not a test, remember index.
-    if (clause->is_default()) {
-      default_index = i;
-      continue;
-    }
-
-    // Perform label comparison as if via '===' with tag.
-    VisitForAccumulatorValue(clause->label());
-    builder()->CompareOperation(Token::Value::EQ_STRICT, tag,
-                                feedback_index(slot));
-    switch_builder.Case(ToBooleanMode::kAlreadyBoolean, i);
+  int n_comp_cases = clauses->length();
+  if (use_jump_table) {
+    n_comp_cases -= static_cast<int>(info.covered_cases.size());
+    jump_table = builder()->AllocateJumpTable(
+        info.MaxCase() - info.MinCase() + 1, info.MinCase());
   }
 
-  if (default_index >= 0) {
-    // Emit default jump if there is a default case.
-    switch_builder.DefaultAt(default_index);
+  // Are we still using any if-else bytecodes to evaluate the switch?
+  bool use_jumps = n_comp_cases != 0;
+
+  SwitchBuilder switch_builder(builder(), block_coverage_builder_, stmt,
+                               n_comp_cases, jump_table);
+  ControlScopeForBreakable scope(this, stmt, &switch_builder);
+  builder()->SetStatementPosition(stmt);
+
+  VisitForAccumulatorValue(stmt->tag());
+
+  if (use_jump_table) {
+    // This also fills empty slots in jump table.
+    Register r2 = register_allocator()->NewRegister();
+
+    Register r1 = register_allocator()->NewRegister();
+    builder()->StoreAccumulatorInRegister(r1);
+
+    builder()->CompareTypeOf(TestTypeOfFlags::LiteralFlag::kNumber);
+    switch_builder.JumpToFallThroughIfFalse();
+    builder()->LoadAccumulatorWithRegister(r1);
+
+    // TODO(leszeks): Note these are duplicated range checks with the
+    // SwitchOnSmi handler for the most part.
+
+    builder()->LoadLiteral(Smi::kMinValue);
+    builder()->StoreAccumulatorInRegister(r2);
+    builder()->CompareOperation(
+        Token::Value::GTE, r1,
+        feedback_index(feedback_spec()->AddCompareICSlot()));
+
+    switch_builder.JumpToFallThroughIfFalse();
+    builder()->LoadAccumulatorWithRegister(r1);
+
+    builder()->LoadLiteral(Smi::kMaxValue);
+    builder()->StoreAccumulatorInRegister(r2);
+    builder()->CompareOperation(
+        Token::Value::LTE, r1,
+        feedback_index(feedback_spec()->AddCompareICSlot()));
+
+    switch_builder.JumpToFallThroughIfFalse();
+    builder()->LoadAccumulatorWithRegister(r1);
+
+    builder()->BinaryOperationSmiLiteral(
+        Token::Value::BIT_OR, Smi::FromInt(0),
+        feedback_index(feedback_spec()->AddBinaryOpICSlot()));
+
+    builder()->StoreAccumulatorInRegister(r2);
+    builder()->CompareOperation(
+        Token::Value::EQ_STRICT, r1,
+        feedback_index(feedback_spec()->AddCompareICSlot()));
+
+    switch_builder.JumpToFallThroughIfFalse();
+    builder()->LoadAccumulatorWithRegister(r2);
+
+    switch_builder.EmitJumpTableIfExists(info.MinCase(), info.MaxCase(),
+                                         info.covered_cases);
+
+    if (use_jumps) {
+      builder()->LoadAccumulatorWithRegister(r1);
+    }
+  }
+
+  int case_compare_ctr = 0;
+#ifdef DEBUG
+  std::unordered_map<int, int> case_ctr_checker;
+#endif
+
+  if (use_jumps) {
+    Register tag_holder = register_allocator()->NewRegister();
+    FeedbackSlot slot = clauses->length() > 0
+                            ? feedback_spec()->AddCompareICSlot()
+                            : FeedbackSlot::Invalid();
+    builder()->StoreAccumulatorInRegister(tag_holder);
+
+    for (int i = 0; i < clauses->length(); ++i) {
+      CaseClause* clause = clauses->at(i);
+      if (clause->is_default()) {
+        info.default_case = i;
+      } else if (!info.CaseExists(clause->label())) {
+        // Perform label comparison as if via '===' with tag.
+        VisitForAccumulatorValue(clause->label());
+        builder()->CompareOperation(Token::Value::EQ_STRICT, tag_holder,
+                                    feedback_index(slot));
+#ifdef DEBUG
+        case_ctr_checker[i] = case_compare_ctr;
+#endif
+        switch_builder.JumpToCaseIfTrue(ToBooleanMode::kAlreadyBoolean,
+                                        case_compare_ctr++);
+      }
+    }
+  }
+
+  // For fall-throughs after comparisons (or out-of-range/non-Smi's for jump
+  // tables).
+  if (info.DefaultExists()) {
+    switch_builder.JumpToDefault();
   } else {
-    // Otherwise if we have reached here none of the cases matched, so jump to
-    // the end.
     switch_builder.Break();
   }
 
-  // Iterate over all cases and create the case bodies.
-  for (int i = 0; i < clauses->length(); i++) {
+  case_compare_ctr = 0;
+  for (int i = 0; i < clauses->length(); ++i) {
     CaseClause* clause = clauses->at(i);
-    switch_builder.SetCaseTarget(i, clause);
+    if (i != info.default_case) {
+      if (!info.IsDuplicate(clause)) {
+        bool use_table = use_jump_table && info.CaseExists(clause->label());
+        if (!use_table) {
+// Guarantee that we should generate compare/jump if no table.
+#ifdef DEBUG
+          DCHECK(case_ctr_checker[i] == case_compare_ctr);
+#endif
+          switch_builder.BindCaseTargetForCompareJump(case_compare_ctr++,
+                                                      clause);
+        } else {
+          // Use jump table if this is not a duplicate label.
+          switch_builder.BindCaseTargetForJumpTable(
+              ReduceToSmiSwitchCaseValue(clause->label()), clause);
+        }
+      }
+    } else {
+      switch_builder.BindDefault(clause);
+    }
+    // Regardless, generate code (in case of fall throughs).
     VisitStatements(clause->statements());
   }
 }
@@ -2228,15 +2506,6 @@ void BytecodeGenerator::AddToEagerLiteralsIfEager(FunctionLiteral* literal) {
     DCHECK(!IsInEagerLiterals(literal, *eager_inner_literals_));
     eager_inner_literals_->push_back(literal);
   }
-}
-
-bool BytecodeGenerator::ShouldOptimizeAsOneShot() const {
-  if (!FLAG_enable_one_shot_optimization) return false;
-
-  if (loop_depth_ > 0) return false;
-
-  return info()->literal()->is_toplevel() ||
-         info()->literal()->is_oneshot_iife();
 }
 
 void BytecodeGenerator::BuildClassLiteral(ClassLiteral* expr, Register name) {
@@ -2672,25 +2941,13 @@ void BytecodeGenerator::VisitRegExpLiteral(RegExpLiteral* expr) {
 
 void BytecodeGenerator::BuildCreateObjectLiteral(Register literal,
                                                  uint8_t flags, size_t entry) {
-  if (ShouldOptimizeAsOneShot()) {
-    RegisterList args = register_allocator()->NewRegisterList(2);
-    builder()
-        ->LoadConstantPoolEntry(entry)
-        .StoreAccumulatorInRegister(args[0])
-        .LoadLiteral(Smi::FromInt(flags))
-        .StoreAccumulatorInRegister(args[1])
-        .CallRuntime(Runtime::kCreateObjectLiteralWithoutAllocationSite, args)
-        .StoreAccumulatorInRegister(literal);
-
-  } else {
-    // TODO(cbruni): Directly generate runtime call for literals we cannot
-    // optimize once the CreateShallowObjectLiteral stub is in sync with the TF
-    // optimizations.
-    int literal_index = feedback_index(feedback_spec()->AddLiteralSlot());
-    builder()
-        ->CreateObjectLiteral(entry, literal_index, flags)
-        .StoreAccumulatorInRegister(literal);
-  }
+  // TODO(cbruni): Directly generate runtime call for literals we cannot
+  // optimize once the CreateShallowObjectLiteral stub is in sync with the TF
+  // optimizations.
+  int literal_index = feedback_index(feedback_spec()->AddLiteralSlot());
+  builder()
+      ->CreateObjectLiteral(entry, literal_index, flags)
+      .StoreAccumulatorInRegister(literal);
 }
 
 void BytecodeGenerator::VisitObjectLiteral(ObjectLiteral* expr) {
@@ -2952,7 +3209,6 @@ void BytecodeGenerator::VisitObjectLiteral(ObjectLiteral* expr) {
       }
       case ObjectLiteral::Property::PROTOTYPE:
         UNREACHABLE();  // Handled specially above.
-        break;
     }
   }
 
@@ -3047,30 +3303,15 @@ void BytecodeGenerator::BuildCreateArrayLiteral(
     // and one-shot optimization.
     uint8_t flags = CreateArrayLiteralFlags::Encode(
         expr->IsFastCloningSupported(), expr->ComputeFlags());
-    bool optimize_as_one_shot = ShouldOptimizeAsOneShot();
-    size_t entry;
-    if (is_empty && optimize_as_one_shot) {
-      entry = builder()->EmptyArrayBoilerplateDescriptionConstantPoolEntry();
-    } else if (!is_empty) {
-      entry = builder()->AllocateDeferredConstantPoolEntry();
-      array_literals_.push_back(std::make_pair(expr, entry));
-    }
-
-    if (optimize_as_one_shot) {
-      RegisterList args = register_allocator()->NewRegisterList(2);
-      builder()
-          ->LoadConstantPoolEntry(entry)
-          .StoreAccumulatorInRegister(args[0])
-          .LoadLiteral(Smi::FromInt(flags))
-          .StoreAccumulatorInRegister(args[1])
-          .CallRuntime(Runtime::kCreateArrayLiteralWithoutAllocationSite, args);
-    } else if (is_empty) {
+    if (is_empty) {
       // Empty array literal fast-path.
       int literal_index = feedback_index(feedback_spec()->AddLiteralSlot());
       DCHECK(expr->IsFastCloningSupported());
       builder()->CreateEmptyArrayLiteral(literal_index);
     } else {
       // Create array literal from boilerplate.
+      size_t entry = builder()->AllocateDeferredConstantPoolEntry();
+      array_literals_.push_back(std::make_pair(expr, entry));
       int literal_index = feedback_index(feedback_spec()->AddLiteralSlot());
       builder()->CreateArrayLiteral(entry, literal_index, flags);
     }
@@ -3106,6 +3347,8 @@ void BytecodeGenerator::BuildCreateArrayLiteral(
           .StoreAccumulatorInRegister(index);
     }
   } else {
+    // TODO(v8:11582): Support allocating boilerplates here.
+
     // In other cases, we prepare an empty array to be filled in below.
     DCHECK(!elements->is_empty());
     int literal_index = feedback_index(feedback_spec()->AddLiteralSlot());
@@ -3281,7 +3524,7 @@ void BytecodeGenerator::BuildVariableLoad(Variable* variable,
       break;
     }
     case VariableLocation::REPL_GLOBAL: {
-      DCHECK(variable->IsReplGlobalLet());
+      DCHECK(variable->IsReplGlobal());
       FeedbackSlot slot = GetCachedLoadGlobalICSlot(typeof_mode, variable);
       builder()->LoadGlobal(variable->raw_name(), feedback_index(slot),
                             typeof_mode);
@@ -3307,7 +3550,7 @@ void BytecodeGenerator::BuildReturn(int source_position) {
   if (info()->flags().collect_type_profile()) {
     builder()->CollectTypeProfile(info()->literal()->return_position());
   }
-  builder()->SetReturnPosition(source_position, info()->literal());
+  builder()->SetStatementPosition(source_position);
   builder()->Return();
 }
 
@@ -3470,7 +3713,8 @@ void BytecodeGenerator::BuildVariableAssignment(
       break;
     }
     case VariableLocation::REPL_GLOBAL: {
-      // A let declaration like 'let x = 7' is effectively translated to:
+      // A let or const declaration like 'let x = 7' is effectively translated
+      // to:
       //   <top of the script>:
       //     ScriptContext.x = TheHole;
       //   ...
@@ -3480,19 +3724,23 @@ void BytecodeGenerator::BuildVariableAssignment(
       // The ScriptContext slot for 'x' that we store to here is not
       // necessarily the ScriptContext of this script, but rather the
       // first ScriptContext that has a slot for name 'x'.
-      DCHECK(variable->IsReplGlobalLet());
+      DCHECK(variable->IsReplGlobal());
       if (op == Token::INIT) {
         RegisterList store_args = register_allocator()->NewRegisterList(2);
         builder()
             ->StoreAccumulatorInRegister(store_args[1])
             .LoadLiteral(variable->raw_name())
             .StoreAccumulatorInRegister(store_args[0]);
-        builder()->CallRuntime(Runtime::kStoreGlobalNoHoleCheckForReplLet,
-                               store_args);
+        builder()->CallRuntime(
+            Runtime::kStoreGlobalNoHoleCheckForReplLetOrConst, store_args);
       } else {
-        FeedbackSlot slot =
-            GetCachedStoreGlobalICSlot(language_mode(), variable);
-        builder()->StoreGlobal(variable->raw_name(), feedback_index(slot));
+        if (mode == VariableMode::kConst) {
+          builder()->CallRuntime(Runtime::kThrowConstAssignError);
+        } else {
+          FeedbackSlot slot =
+              GetCachedStoreGlobalICSlot(language_mode(), variable);
+          builder()->StoreGlobal(variable->raw_name(), feedback_index(slot));
+        }
       }
       break;
     }
@@ -3502,12 +3750,8 @@ void BytecodeGenerator::BuildVariableAssignment(
 void BytecodeGenerator::BuildLoadNamedProperty(const Expression* object_expr,
                                                Register object,
                                                const AstRawString* name) {
-  if (ShouldOptimizeAsOneShot()) {
-    builder()->LoadNamedPropertyNoFeedback(object, name);
-  } else {
-    FeedbackSlot slot = GetCachedLoadICSlot(object_expr, name);
-    builder()->LoadNamedProperty(object, name, feedback_index(slot));
-  }
+  FeedbackSlot slot = GetCachedLoadICSlot(object_expr, name);
+  builder()->LoadNamedProperty(object, name, feedback_index(slot));
 }
 
 void BytecodeGenerator::BuildStoreNamedProperty(const Expression* object_expr,
@@ -3519,13 +3763,9 @@ void BytecodeGenerator::BuildStoreNamedProperty(const Expression* object_expr,
     builder()->StoreAccumulatorInRegister(value);
   }
 
-  if (ShouldOptimizeAsOneShot()) {
-    builder()->StoreNamedPropertyNoFeedback(object, name, language_mode());
-  } else {
-    FeedbackSlot slot = GetCachedStoreICSlot(object_expr, name);
-    builder()->StoreNamedProperty(object, name, feedback_index(slot),
-                                  language_mode());
-  }
+  FeedbackSlot slot = GetCachedStoreICSlot(object_expr, name);
+  builder()->StoreNamedProperty(object, name, feedback_index(slot),
+                                language_mode());
 
   if (!execution_result()->IsEffect()) {
     builder()->LoadAccumulatorWithRegister(value);
@@ -3957,7 +4197,7 @@ void BytecodeGenerator::BuildDestructuringArrayAssignment(
 // var rest_runtime_callargs = new Array(3);
 // rest_runtime_callargs[0] = value;
 //
-// rest_runtime_callargs[1] = value;
+// rest_runtime_callargs[1] = "y";
 // y = value.y;
 //
 // var temp1 = %ToName(x++);
@@ -4394,9 +4634,9 @@ void BytecodeGenerator::VisitYield(Yield* expr) {
     builder()->Bind(jump_table, JSGeneratorObject::kReturn);
     builder()->LoadAccumulatorWithRegister(input);
     if (IsAsyncGeneratorFunction(function_kind())) {
-      execution_control()->AsyncReturnAccumulator();
+      execution_control()->AsyncReturnAccumulator(kNoSourcePosition);
     } else {
-      execution_control()->ReturnAccumulator();
+      execution_control()->ReturnAccumulator(kNoSourcePosition);
     }
   }
 
@@ -4546,9 +4786,9 @@ void BytecodeGenerator::VisitYieldStar(YieldStar* expr) {
           if (iterator_type == IteratorType::kAsync) {
             // Await input.
             BuildAwait(expr->position());
-            execution_control()->AsyncReturnAccumulator();
+            execution_control()->AsyncReturnAccumulator(kNoSourcePosition);
           } else {
-            execution_control()->ReturnAccumulator();
+            execution_control()->ReturnAccumulator(kNoSourcePosition);
           }
         }
 
@@ -4638,9 +4878,9 @@ void BytecodeGenerator::VisitYieldStar(YieldStar* expr) {
       .JumpIfFalse(ToBooleanMode::kAlreadyBoolean, &completion_is_output_value)
       .LoadAccumulatorWithRegister(output_value);
   if (iterator_type == IteratorType::kAsync) {
-    execution_control()->AsyncReturnAccumulator();
+    execution_control()->AsyncReturnAccumulator(kNoSourcePosition);
   } else {
-    execution_control()->ReturnAccumulator();
+    execution_control()->ReturnAccumulator(kNoSourcePosition);
   }
 
   builder()->Bind(&completion_is_output_value);
@@ -5022,18 +5262,30 @@ void BytecodeGenerator::VisitCall(Call* expr) {
     return VisitCallSuper(expr);
   }
 
+  // We compile the call differently depending on the presence of spreads and
+  // their positions.
+  //
+  // If there is only one spread and it is the final argument, there is a
+  // special CallWithSpread bytecode.
+  //
+  // If there is a non-final spread, we rewrite calls like
+  //     callee(1, ...x, 2)
+  // to
+  //     %reflect_apply(callee, receiver, [1, ...x, 2])
+  const Call::SpreadPosition spread_position = expr->spread_position();
+
   // Grow the args list as we visit receiver / arguments to avoid allocating all
   // the registers up-front. Otherwise these registers are unavailable during
   // receiver / argument visiting and we can end up with memory leaks due to
   // registers keeping objects alive.
-  Register callee = register_allocator()->NewRegister();
   RegisterList args = register_allocator()->NewGrowableRegisterList();
 
+  // The callee is the first register in args for ease of calling %reflect_apply
+  // if we have a non-final spread. For all other cases it is popped from args
+  // before emitting the call below.
+  Register callee = register_allocator()->GrowRegisterList(&args);
+
   bool implicit_undefined_receiver = false;
-  // When a call contains a spread, a Call AST node is only created if there is
-  // exactly one spread, and it is the last argument.
-  bool is_spread_call = expr->only_last_arg_is_spread();
-  bool optimize_as_one_shot = ShouldOptimizeAsOneShot();
 
   // TODO(petermarshall): We have a lot of call bytecodes that are very similar,
   // see if we can reduce the number by adding a separate argument which
@@ -5052,7 +5304,7 @@ void BytecodeGenerator::VisitCall(Call* expr) {
     }
     case Call::GLOBAL_CALL: {
       // Receiver is undefined for global calls.
-      if (!is_spread_call && !optimize_as_one_shot) {
+      if (spread_position == Call::kNoSpread) {
         implicit_undefined_receiver = true;
       } else {
         // TODO(leszeks): There's no special bytecode for tail calls or spread
@@ -5088,7 +5340,7 @@ void BytecodeGenerator::VisitCall(Call* expr) {
     }
     case Call::OTHER_CALL: {
       // Receiver is undefined for other calls.
-      if (!is_spread_call && !optimize_as_one_shot) {
+      if (spread_position == Call::kNoSpread) {
         implicit_undefined_receiver = true;
       } else {
         // TODO(leszeks): There's no special bytecode for tail calls or spread
@@ -5137,25 +5389,51 @@ void BytecodeGenerator::VisitCall(Call* expr) {
     BuildIncrementBlockCoverageCounterIfEnabled(right_range);
   }
 
-  // Evaluate all arguments to the function call and store in sequential args
-  // registers.
-  VisitArguments(expr->arguments(), &args);
-  int receiver_arg_count = implicit_undefined_receiver ? 0 : 1;
-  CHECK_EQ(receiver_arg_count + expr->arguments()->length(),
-           args.register_count());
+  int receiver_arg_count = -1;
+  if (spread_position == Call::kHasNonFinalSpread) {
+    // If we're building %reflect_apply, build the array literal and put it in
+    // the 3rd argument.
+    DCHECK(!implicit_undefined_receiver);
+    DCHECK_EQ(args.register_count(), 2);
+    BuildCreateArrayLiteral(expr->arguments(), nullptr);
+    builder()->StoreAccumulatorInRegister(
+        register_allocator()->GrowRegisterList(&args));
+  } else {
+    // If we're not building %reflect_apply and don't need to build an array
+    // literal, pop the callee and evaluate all arguments to the function call
+    // and store in sequential args registers.
+    args = args.PopLeft();
+    VisitArguments(expr->arguments(), &args);
+    receiver_arg_count = implicit_undefined_receiver ? 0 : 1;
+    CHECK_EQ(receiver_arg_count + expr->arguments()->length(),
+             args.register_count());
+  }
 
   // Resolve callee for a potential direct eval call. This block will mutate the
   // callee value.
   if (expr->is_possibly_eval() && expr->arguments()->length() > 0) {
     RegisterAllocationScope inner_register_scope(this);
+    RegisterList runtime_call_args = register_allocator()->NewRegisterList(6);
     // Set up arguments for ResolvePossiblyDirectEval by copying callee, source
     // strings and function closure, and loading language and
     // position.
-    Register first_arg = args[receiver_arg_count];
-    RegisterList runtime_call_args = register_allocator()->NewRegisterList(6);
+
+    // Move the first arg.
+    if (spread_position == Call::kHasNonFinalSpread) {
+      int feedback_slot_index =
+          feedback_index(feedback_spec()->AddKeyedLoadICSlot());
+      Register args_array = args[2];
+      builder()
+          ->LoadLiteral(Smi::FromInt(0))
+          .LoadKeyedProperty(args_array, feedback_slot_index)
+          .StoreAccumulatorInRegister(runtime_call_args[1]);
+    } else {
+      // FIXME(v8:5690): Support final spreads for eval.
+      DCHECK_GE(receiver_arg_count, 0);
+      builder()->MoveRegister(args[receiver_arg_count], runtime_call_args[1]);
+    }
     builder()
         ->MoveRegister(callee, runtime_call_args[0])
-        .MoveRegister(first_arg, runtime_call_args[1])
         .MoveRegister(Register::function_closure(), runtime_call_args[2])
         .LoadLiteral(Smi::FromEnum(language_mode()))
         .StoreAccumulatorInRegister(runtime_call_args[3])
@@ -5172,13 +5450,12 @@ void BytecodeGenerator::VisitCall(Call* expr) {
 
   builder()->SetExpressionPosition(expr);
 
-  if (is_spread_call) {
+  if (spread_position == Call::kHasFinalSpread) {
     DCHECK(!implicit_undefined_receiver);
     builder()->CallWithSpread(callee, args,
                               feedback_index(feedback_spec()->AddCallICSlot()));
-  } else if (optimize_as_one_shot) {
-    DCHECK(!implicit_undefined_receiver);
-    builder()->CallNoFeedback(callee, args);
+  } else if (spread_position == Call::kHasNonFinalSpread) {
+    builder()->CallJSRuntime(Context::REFLECT_APPLY_INDEX, args);
   } else if (call_type == Call::NAMED_PROPERTY_CALL ||
              call_type == Call::KEYED_PROPERTY_CALL) {
     DCHECK(!implicit_undefined_receiver);
@@ -5198,10 +5475,20 @@ void BytecodeGenerator::VisitCallSuper(Call* expr) {
   SuperCallReference* super = expr->expression()->AsSuperCallReference();
   const ZonePtrList<Expression>* args = expr->arguments();
 
-  int first_spread_index = 0;
-  for (; first_spread_index < args->length(); first_spread_index++) {
-    if (args->at(first_spread_index)->IsSpread()) break;
-  }
+  // We compile the super call differently depending on the presence of spreads
+  // and their positions.
+  //
+  // If there is only one spread and it is the final argument, there is a
+  // special ConstructWithSpread bytecode.
+  //
+  // It there is a non-final spread, we rewrite something like
+  //    super(1, ...x, 2)
+  // to
+  //    %reflect_construct(constructor, [1, ...x, 2], new_target)
+  //
+  // That is, we implement (non-last-arg) spreads in super calls via our
+  // mechanism for spreads in array literals.
+  const Call::SpreadPosition spread_position = expr->spread_position();
 
   // Prepare the constructor to the super call.
   Register this_function = VisitForRegisterValue(super->this_function_var());
@@ -5210,14 +5497,7 @@ void BytecodeGenerator::VisitCallSuper(Call* expr) {
       ->LoadAccumulatorWithRegister(this_function)
       .GetSuperConstructor(constructor);
 
-  if (first_spread_index < expr->arguments()->length() - 1) {
-    // We rewrite something like
-    //    super(1, ...x, 2)
-    // to
-    //    %reflect_construct(constructor, [1, ...x, 2], new_target)
-    // That is, we implement (non-last-arg) spreads in super calls via our
-    // mechanism for spreads in array literals.
-
+  if (spread_position == Call::kHasNonFinalSpread) {
     // First generate the array containing all arguments.
     BuildCreateArrayLiteral(args, nullptr);
 
@@ -5244,11 +5524,11 @@ void BytecodeGenerator::VisitCallSuper(Call* expr) {
 
     int feedback_slot_index = feedback_index(feedback_spec()->AddCallICSlot());
 
-    if (first_spread_index == expr->arguments()->length() - 1) {
+    if (spread_position == Call::kHasFinalSpread) {
       builder()->ConstructWithSpread(constructor, args_regs,
                                      feedback_slot_index);
     } else {
-      DCHECK_EQ(first_spread_index, expr->arguments()->length());
+      DCHECK_EQ(spread_position, Call::kNoSpread);
       // Call construct.
       // TODO(turbofan): For now we do gather feedback on super constructor
       // calls, utilizing the existing machinery to inline the actual call
@@ -5296,8 +5576,37 @@ void BytecodeGenerator::VisitCallSuper(Call* expr) {
 }
 
 void BytecodeGenerator::VisitCallNew(CallNew* expr) {
-  Register constructor = VisitForRegisterValue(expr->expression());
   RegisterList args = register_allocator()->NewGrowableRegisterList();
+
+  // Load the constructor. It's in the first register in args for ease of
+  // calling %reflect_construct if we have a non-final spread. For all other
+  // cases it is popped before emitting the construct below.
+  VisitAndPushIntoRegisterList(expr->expression(), &args);
+
+  // We compile the new differently depending on the presence of spreads and
+  // their positions.
+  //
+  // If there is only one spread and it is the final argument, there is a
+  // special ConstructWithSpread bytecode.
+  //
+  // If there is a non-final spread, we rewrite calls like
+  //     new ctor(1, ...x, 2)
+  // to
+  //     %reflect_construct(ctor, [1, ...x, 2])
+  const CallNew::SpreadPosition spread_position = expr->spread_position();
+
+  if (spread_position == CallNew::kHasNonFinalSpread) {
+    BuildCreateArrayLiteral(expr->arguments(), nullptr);
+    builder()->SetExpressionPosition(expr);
+    builder()
+        ->StoreAccumulatorInRegister(
+            register_allocator()->GrowRegisterList(&args))
+        .CallJSRuntime(Context::REFLECT_CONSTRUCT_INDEX, args);
+    return;
+  }
+
+  Register constructor = args.first_register();
+  args = args.PopLeft();
   VisitArguments(expr->arguments(), &args);
 
   // The accumulator holds new target which is the same as the
@@ -5306,9 +5615,10 @@ void BytecodeGenerator::VisitCallNew(CallNew* expr) {
   builder()->LoadAccumulatorWithRegister(constructor);
 
   int feedback_slot_index = feedback_index(feedback_spec()->AddCallICSlot());
-  if (expr->only_last_arg_is_spread()) {
+  if (spread_position == CallNew::kHasFinalSpread) {
     builder()->ConstructWithSpread(constructor, args, feedback_slot_index);
   } else {
+    DCHECK_EQ(spread_position, CallNew::kNoSpread);
     builder()->Construct(constructor, args, feedback_slot_index);
   }
 }
@@ -5338,7 +5648,7 @@ void BytecodeGenerator::VisitForTypeOfValue(Expression* expr) {
     // perform a non-contextual load in case the operand is a variable proxy.
     VariableProxy* proxy = expr->AsVariableProxy();
     BuildVariableLoadForAccumulatorValue(proxy->var(), proxy->hole_check_mode(),
-                                         INSIDE_TYPEOF);
+                                         TypeofMode::kInside);
   } else {
     VisitForAccumulatorValue(expr);
   }
@@ -6768,7 +7078,7 @@ int BytecodeGenerator::feedback_index(FeedbackSlot slot) const {
 FeedbackSlot BytecodeGenerator::GetCachedLoadGlobalICSlot(
     TypeofMode typeof_mode, Variable* variable) {
   FeedbackSlotCache::SlotKind slot_kind =
-      typeof_mode == INSIDE_TYPEOF
+      typeof_mode == TypeofMode::kInside
           ? FeedbackSlotCache::SlotKind::kLoadGlobalInsideTypeof
           : FeedbackSlotCache::SlotKind::kLoadGlobalNotInsideTypeof;
   FeedbackSlot slot(feedback_slot_cache()->Get(slot_kind, variable));

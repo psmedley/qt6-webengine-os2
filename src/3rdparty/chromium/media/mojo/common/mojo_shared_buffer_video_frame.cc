@@ -61,7 +61,8 @@ MojoSharedBufferVideoFrame::CreateDefaultForTesting(
     return Create(
         format, coded_size, visible_rect, dimensions, std::move(handle),
         allocation_size,
-        {0 /* y_offset */, uint32_t(coded_size.GetArea()), uint32_t(coded_size.GetArea() * 5 / 4)},
+        {0 /* y_offset */, static_cast<uint32_t>(coded_size.GetArea()),
+         static_cast<uint32_t>(coded_size.GetArea() * 5 / 4)},
         {coded_size.width(), coded_size.width() / 2, coded_size.width() / 2},
         timestamp);
   } else {
@@ -71,15 +72,16 @@ MojoSharedBufferVideoFrame::CreateDefaultForTesting(
     // as follows:
     //  - Yplane, full size (each element represents a 1x1 block)
     //  - UVplane, full width, half height (each pair represents a 2x2 block)
-    return Create(format, coded_size, visible_rect, dimensions,
-                  std::move(handle), allocation_size,
-                  {0 /* y_offset */, uint32_t(coded_size.GetArea())},
-                  {coded_size.width(), coded_size.width()}, timestamp);
+    return Create(
+        format, coded_size, visible_rect, dimensions, std::move(handle),
+        allocation_size,
+        {0 /* y_offset */, static_cast<uint32_t>(coded_size.GetArea())},
+        {coded_size.width(), coded_size.width()}, timestamp);
   }
 }
 
 scoped_refptr<MojoSharedBufferVideoFrame>
-MojoSharedBufferVideoFrame::CreateFromYUVFrame(const VideoFrame& frame) {
+MojoSharedBufferVideoFrame::CreateFromYUVFrame(VideoFrame& frame) {
   size_t num_planes = VideoFrame::NumPlanes(frame.format());
   DCHECK_LE(num_planes, 3u);
   DCHECK_GE(num_planes, 2u);
@@ -99,6 +101,11 @@ MojoSharedBufferVideoFrame::CreateFromYUVFrame(const VideoFrame& frame) {
 
   mojo::ScopedSharedBufferHandle handle =
       mojo::SharedBufferHandle::Create(aggregate_size);
+  if (!handle->is_valid()) {
+    DLOG(ERROR) << "Can't create new frame backing memory";
+    return nullptr;
+  }
+  mojo::ScopedSharedBufferMapping dst_mapping = handle->Map(aggregate_size);
 
   // The data from |frame| may not be consecutive between planes. Copy data into
   // a shared memory buffer which is tightly packed. Padding inside each planes
@@ -111,7 +118,21 @@ MojoSharedBufferVideoFrame::CreateFromYUVFrame(const VideoFrame& frame) {
           frame.timestamp());
   CHECK(!!mojo_frame);
 
-  // Copy plane data.
+  // If the source memory region is a shared memory region we must map it too.
+  base::WritableSharedMemoryMapping src_mapping;
+  if (frame.storage_type() == VideoFrame::STORAGE_SHMEM) {
+    if (!frame.shm_region()->IsValid()) {
+      DLOG(ERROR) << "Invalid source shared memory region";
+      return nullptr;
+    }
+    src_mapping = frame.shm_region()->Map();
+    if (!src_mapping.IsValid()) {
+      DLOG(ERROR) << "Can't map source shared memory region";
+      return nullptr;
+    }
+  }
+
+  // Copy plane data while mappings are in scope.
   for (size_t i = 0; i < num_planes; ++i) {
     memcpy(mojo_frame->shared_buffer_data() + offsets[i],
            static_cast<const void*>(frame.data(i)), sizes[i]);

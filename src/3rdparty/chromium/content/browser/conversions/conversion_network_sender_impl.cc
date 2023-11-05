@@ -9,22 +9,26 @@
 
 #include "base/bind.h"
 #include "base/check.h"
+#include "base/json/json_writer.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
+#include "base/values.h"
+#include "content/browser/conversions/conversion_report.h"
+#include "content/browser/conversions/sent_report_info.h"
 #include "content/public/browser/storage_partition.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/schemeful_site.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "url/gurl.h"
-#include "url/origin.h"
 #include "url/url_canon.h"
 
 namespace content {
@@ -43,44 +47,53 @@ enum class Status {
 };
 
 // Called when a network request is started for |report|, for logging metrics.
-void LogMetricsOnReportSend(ConversionReport* report) {
-  DCHECK(report);
-
+void LogMetricsOnReportSend(const ConversionReport& report) {
   // Reports sent from the WebUI should not log metrics.
-  if (report->report_time == base::Time::Min())
+  if (report.report_time == base::Time::Min())
     return;
 
   // Use a large time range to capture users that might not open the browser for
   // a long time while a conversion report is pending. Revisit this range if it
   // is non-ideal for real world data.
-  // Add |extra_delay| to the reported time which will include the amount of
-  // time since the report was originally scheduled, for reports at startup
-  // whose |report_time| changes due to additional startup delay.
   base::Time now = base::Time::Now();
   base::TimeDelta time_since_original_report_time =
-      (now - report->report_time) + report->extra_delay;
-  base::UmaHistogramCustomTimes("Conversions.ExtraReportDelay",
+      (now - report.original_report_time);
+  base::UmaHistogramCustomTimes("Conversions.ExtraReportDelay2",
                                 time_since_original_report_time,
                                 base::TimeDelta::FromSeconds(1),
-                                base::TimeDelta::FromDays(7), /*buckets=*/100);
+                                base::TimeDelta::FromDays(24), /*buckets=*/100);
 
   base::TimeDelta time_from_conversion_to_report_send =
-      report->report_time - report->conversion_time;
+      report.report_time - report.conversion_time;
   UMA_HISTOGRAM_COUNTS_1000("Conversions.TimeFromConversionToReportSend",
                             time_from_conversion_to_report_send.InHours());
 }
 
 GURL GetReportUrl(const content::ConversionReport& report) {
   url::Replacements<char> replacements;
-  const char kEndpointPath[] = "/.well-known/register-conversion";
+  static constexpr char kEndpointPath[] =
+      "/.well-known/attribution-reporting/report-attribution";
   replacements.SetPath(kEndpointPath, url::Component(0, strlen(kEndpointPath)));
-  std::string query = base::StrCat(
-      {"impression-data=", report.impression.impression_data(),
-       "&conversion-data=", report.conversion_data,
-       "&credit=", base::NumberToString(report.attribution_credit)});
-  replacements.SetQuery(query.c_str(), url::Component(0, query.length()));
   return report.impression.reporting_origin().GetURL().ReplaceComponents(
       replacements);
+}
+
+std::string GetReportPostBody(const content::ConversionReport& report) {
+  base::Value dict(base::Value::Type::DICTIONARY);
+
+  // The API denotes these values as strings; a `uint64_t` cannot be put in
+  // a dict as an integer in order to be opaque to various API configurations.
+  dict.SetStringKey("source_event_id",
+                    base::NumberToString(report.impression.impression_data()));
+
+  dict.SetStringKey("trigger_data",
+                    base::NumberToString(report.conversion_data));
+
+  // Write the dict to json;
+  std::string output_json;
+  bool success = base::JSONWriter::Write(dict, &output_json);
+  DCHECK(success);
+  return output_json;
 }
 
 }  // namespace
@@ -91,7 +104,7 @@ ConversionNetworkSenderImpl::ConversionNetworkSenderImpl(
 
 ConversionNetworkSenderImpl::~ConversionNetworkSenderImpl() = default;
 
-void ConversionNetworkSenderImpl::SendReport(ConversionReport* report,
+void ConversionNetworkSenderImpl::SendReport(const ConversionReport& report,
                                              ReportSentCallback sent_callback) {
   // The browser process URLLoaderFactory is not created by default, so don't
   // create it until it is directly needed.
@@ -100,10 +113,12 @@ void ConversionNetworkSenderImpl::SendReport(ConversionReport* report,
         storage_partition_->GetURLLoaderFactoryForBrowserProcess();
   }
 
+  GURL report_url = GetReportUrl(report);
+
   auto resource_request = std::make_unique<network::ResourceRequest>();
-  resource_request->url = GetReportUrl(*report);
+  resource_request->url = report_url;
   resource_request->referrer =
-      GURL(report->impression.ConversionDestination().Serialize());
+      GURL(report.impression.ConversionDestination().Serialize());
   resource_request->method = net::HttpRequestHeaders::kPostMethod;
   resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->load_flags =
@@ -145,6 +160,9 @@ void ConversionNetworkSenderImpl::SendReport(ConversionReport* report,
                                         std::move(simple_url_loader));
   simple_url_loader_ptr->SetTimeoutDuration(base::TimeDelta::FromSeconds(30));
 
+  std::string report_body = GetReportPostBody(report);
+  simple_url_loader_ptr->AttachStringForUpload(report_body, "application/json");
+
   // Retry once on network change. A network change during DNS resolution
   // results in a DNS error rather than a network change error, so retry in
   // those cases as well.
@@ -152,7 +170,9 @@ void ConversionNetworkSenderImpl::SendReport(ConversionReport* report,
   // retry succeeds/fails.
   int retry_mode = network::SimpleURLLoader::RETRY_ON_NETWORK_CHANGE |
                    network::SimpleURLLoader::RETRY_ON_NAME_NOT_RESOLVED;
-  simple_url_loader_ptr->SetRetryOptions(1 /* max_retries */, retry_mode);
+  simple_url_loader_ptr->SetRetryOptions(/*max_retries=*/1, retry_mode);
+
+  DCHECK(report.conversion_id);
 
   // Unretained is safe because the URLLoader is owned by |this| and will be
   // deleted before |this|.
@@ -160,7 +180,9 @@ void ConversionNetworkSenderImpl::SendReport(ConversionReport* report,
       url_loader_factory_.get(),
       base::BindOnce(&ConversionNetworkSenderImpl::OnReportSent,
                      base::Unretained(this), std::move(it),
-                     std::move(sent_callback)));
+                     std::move(report_url), std::move(report_body),
+                     std::move(sent_callback), *report.conversion_id,
+                     report.original_report_time));
   LogMetricsOnReportSend(report);
 }
 
@@ -171,22 +193,56 @@ void ConversionNetworkSenderImpl::SetURLLoaderFactoryForTesting(
 
 void ConversionNetworkSenderImpl::OnReportSent(
     UrlLoaderList::iterator it,
+    GURL report_url,
+    std::string report_body,
     ReportSentCallback sent_callback,
+    int64_t conversion_id,
+    base::Time original_report_time,
     scoped_refptr<net::HttpResponseHeaders> headers) {
   network::SimpleURLLoader* loader = it->get();
 
   // Consider a non-200 HTTP code as a non-internal error.
-  bool internal_ok = loader->NetError() == net::OK ||
-                     loader->NetError() == net::ERR_HTTP_RESPONSE_CODE_FAILURE;
-  bool external_ok = headers && headers->response_code() == net::HTTP_OK;
+  int net_error = loader->NetError();
+  bool internal_ok =
+      net_error == net::OK || net_error == net::ERR_HTTP_RESPONSE_CODE_FAILURE;
+
+  int response_code = headers ? headers->response_code() : -1;
+  bool external_ok = response_code == net::HTTP_OK;
   Status status =
       internal_ok && external_ok
           ? Status::kOk
           : !internal_ok ? Status::kInternalError : Status::kExternalError;
   base::UmaHistogramEnumeration("Conversions.ReportStatus", status);
 
+  // Since net errors are always negative and HTTP errors are always positive,
+  // it is fine to combine these in a single histogram.
+  base::UmaHistogramSparse("Conversions.Report.HttpResponseOrNetErrorCode",
+                           internal_ok ? response_code : net_error);
+
+  if (loader->GetNumRetries() > 0) {
+    base::UmaHistogramBoolean("Conversions.ReportRetrySucceed",
+                              status == Status::kOk);
+  }
+
   loaders_in_progress_.erase(it);
-  std::move(sent_callback).Run();
+
+  // Retry reports that have not received headers and failed with one of the
+  // specified error codes. These codes are chosen from the
+  // "Conversions.Report.HttpResponseOrNetErrorCode" histogram. HTTP errors
+  // should not be retried to prevent over requesting servers.
+  bool should_retry =
+      !headers && (net_error == net::ERR_INTERNET_DISCONNECTED ||
+                   net_error == net::ERR_NAME_NOT_RESOLVED ||
+                   net_error == net::ERR_TIMED_OUT ||
+                   net_error == net::ERR_CONNECTION_TIMED_OUT ||
+                   net_error == net::ERR_CONNECTION_ABORTED ||
+                   net_error == net::ERR_CONNECTION_RESET);
+
+  std::move(sent_callback)
+      .Run(SentReportInfo(conversion_id, original_report_time,
+                          std::move(report_url), std::move(report_body),
+                          headers ? headers->response_code() : 0,
+                          should_retry));
 }
 
 }  // namespace content

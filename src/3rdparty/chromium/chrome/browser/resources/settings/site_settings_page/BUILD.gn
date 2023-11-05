@@ -6,7 +6,7 @@ import("//third_party/closure_compiler/compile_js.gni")
 import("//tools/polymer/html_to_js.gni")
 import("../settings.gni")
 
-js_type_check("closure_compile_module") {
+js_type_check("closure_compile") {
   is_polymer3 = true
   closure_flags = settings_closure_flags
   deps = [
@@ -19,11 +19,11 @@ js_type_check("closure_compile_module") {
 js_library("recent_site_permissions") {
   deps = [
     "..:route",
-    "..:router.m",
-    "../people_page:sync_browser_proxy.m",
-    "../prefs:prefs_behavior.m",
+    "..:router",
+    "../people_page:sync_browser_proxy",
+    "../prefs:prefs_behavior",
     "../site_settings:constants",
-    "../site_settings:site_settings_behavior",
+    "../site_settings:site_settings_mixin",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
     "//ui/webui/resources/js:i18n_behavior.m",
     "//ui/webui/resources/js:load_time_data.m",
@@ -33,7 +33,8 @@ js_library("recent_site_permissions") {
 
 js_library("site_settings_list") {
   deps = [
-    "..:router.m",
+    "..:base_mixin",
+    "..:router",
     "../site_settings:constants",
     "../site_settings:site_settings_prefs_browser_proxy",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
@@ -49,7 +50,7 @@ js_library("site_settings_page") {
     ":recent_site_permissions",
     ":site_settings_list",
     "..:route",
-    "..:router.m",
+    "..:router",
     "../site_settings:constants",
     "../site_settings:site_settings_prefs_browser_proxy",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",

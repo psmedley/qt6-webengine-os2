@@ -1,5 +1,5 @@
-return {
-  freshness = {
-    owner = 'titovartem',
-  }
-}
+config = super()
+
+config.freshness.owner = 'titovartem'
+
+return config

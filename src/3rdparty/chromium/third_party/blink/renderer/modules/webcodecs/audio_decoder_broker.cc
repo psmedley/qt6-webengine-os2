@@ -48,8 +48,8 @@ struct CrossThreadCopier<media::Status>
 };
 
 template <>
-struct CrossThreadCopier<base::Optional<DecoderDetails>>
-    : public CrossThreadCopierPassThrough<base::Optional<DecoderDetails>> {
+struct CrossThreadCopier<absl::optional<DecoderDetails>>
+    : public CrossThreadCopierPassThrough<absl::optional<DecoderDetails>> {
   STATIC_ONLY(CrossThreadCopier);
 };
 
@@ -65,7 +65,7 @@ class MediaAudioTaskWrapper {
  public:
   using CrossThreadOnceInitCB =
       WTF::CrossThreadOnceFunction<void(media::Status status,
-                                        base::Optional<DecoderDetails>)>;
+                                        absl::optional<DecoderDetails>)>;
   using CrossThreadOnceDecodeCB =
       WTF::CrossThreadOnceFunction<void(media::Status)>;
   using CrossThreadOnceResetCB = WTF::CrossThreadOnceClosure;
@@ -124,8 +124,9 @@ class MediaAudioTaskWrapper {
                            weak_factory_.GetWeakPtr()));
 
     selector_->SelectDecoder(
-        config, WTF::Bind(&MediaAudioTaskWrapper::OnDecoderSelected,
-                          weak_factory_.GetWeakPtr()));
+        config, /*low_delay=*/false,
+        WTF::Bind(&MediaAudioTaskWrapper::OnDecoderSelected,
+                  weak_factory_.GetWeakPtr()));
   }
 
   void Decode(scoped_refptr<media::DecoderBuffer> buffer, int cb_id) {
@@ -195,11 +196,10 @@ class MediaAudioTaskWrapper {
     decoder_ = std::move(decoder);
 
     media::Status status(media::StatusCode::kDecoderUnsupportedConfig);
-    base::Optional<DecoderDetails> decoder_details;
+    absl::optional<DecoderDetails> decoder_details;
     if (decoder_) {
       status = media::OkStatus();
-      decoder_details = DecoderDetails({decoder_->GetDisplayName(),
-                                        decoder_->GetDecoderType(),
+      decoder_details = DecoderDetails({decoder_->GetDecoderType(),
                                         decoder_->IsPlatformDecoder(),
                                         decoder_->NeedsBitstreamConversion()});
     }
@@ -258,8 +258,6 @@ class MediaAudioTaskWrapper {
   base::WeakPtrFactory<MediaAudioTaskWrapper> weak_factory_{this};
 };
 
-constexpr char AudioDecoderBroker::kDefaultDisplayName[];
-
 AudioDecoderBroker::AudioDecoderBroker(media::MediaLog* media_log,
                                        ExecutionContext& execution_context)
     // Use a worker task runner to avoid scheduling decoder
@@ -279,13 +277,8 @@ AudioDecoderBroker::~AudioDecoderBroker() {
   media_task_runner_->DeleteSoon(FROM_HERE, std::move(media_tasks_));
 }
 
-std::string AudioDecoderBroker::GetDisplayName() const {
-  return decoder_details_ ? decoder_details_->display_name
-                          : AudioDecoderBroker::kDefaultDisplayName;
-}
-
 media::AudioDecoderType AudioDecoderBroker::GetDecoderType() const {
-  return decoder_details_ ? decoder_details_->decoder_id
+  return decoder_details_ ? decoder_details_->decoder_type
                           : media::AudioDecoderType::kBroker;
 }
 
@@ -334,7 +327,7 @@ int AudioDecoderBroker::CreateCallbackId() {
 }
 
 void AudioDecoderBroker::OnInitialize(media::Status status,
-                                      base::Optional<DecoderDetails> details) {
+                                      absl::optional<DecoderDetails> details) {
   DVLOG(2) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   decoder_details_ = details;

@@ -21,8 +21,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_SCRIPT_ELEMENT_BASE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_SCRIPT_ELEMENT_BASE_H_
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/create_element_flags.h"
+#include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -30,6 +32,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
+
 class Document;
 class Element;
 class ExecutionContext;
@@ -91,8 +94,8 @@ class CORE_EXPORT ScriptElementBase : public GarbageCollectedMixin {
   virtual Document& GetDocument() const = 0;
   virtual ExecutionContext* GetExecutionContext() const = 0;
 
-  virtual void SetScriptElementForBinding(
-      HTMLScriptElementOrSVGScriptElement&) = 0;
+  virtual V8HTMLOrSVGScriptElement* AsV8HTMLOrSVGScriptElement() = 0;
+  virtual DOMNodeId GetDOMNodeId() = 0;
 
   virtual void DispatchLoadEvent() = 0;
   virtual void DispatchErrorEvent() = 0;
@@ -107,4 +110,4 @@ class CORE_EXPORT ScriptElementBase : public GarbageCollectedMixin {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_SCRIPT_ELEMENT_BASE_H_

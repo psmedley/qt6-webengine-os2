@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_V8_DOM_WRAPPER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_V8_DOM_WRAPPER_H_
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "third_party/blink/renderer/platform/bindings/binding_security_for_platform.h"
 #include "third_party/blink/renderer/platform/bindings/custom_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
@@ -53,15 +53,7 @@ class V8DOMWrapper {
   STATIC_ONLY(V8DOMWrapper);
 
  public:
-  PLATFORM_EXPORT static v8::Local<v8::Object> CreateWrapper(
-      v8::Isolate*,
-      v8::Local<v8::Object> creation_context,
-      const WrapperTypeInfo*);
-  // This is another version of CreateWrapper which returns
-  // v8::MaybeLocal in order to throw an exception.
-  // TODO(canonmukai): We should replace CreateWrapper with
-  // CreateWrapperV2 soon.
-  PLATFORM_EXPORT static v8::MaybeLocal<v8::Object> CreateWrapperV2(
+  PLATFORM_EXPORT static v8::MaybeLocal<v8::Object> CreateWrapper(
       ScriptState*,
       const WrapperTypeInfo*);
   PLATFORM_EXPORT static bool IsWrapper(v8::Isolate*, v8::Local<v8::Value>);
@@ -166,37 +158,6 @@ class V8WrapperInstantiationScope {
   STACK_ALLOCATED();
 
  public:
-  V8WrapperInstantiationScope(v8::Local<v8::Object> creation_context,
-                              v8::Isolate* isolate,
-                              const WrapperTypeInfo* type)
-      : context_(isolate->GetCurrentContext()),
-        try_catch_(isolate),
-        type_(type) {
-    // creationContext should not be empty. Because if we have an
-    // empty creationContext, we will end up creating
-    // a new object in the context currently entered. This is wrong.
-    CHECK(!creation_context.IsEmpty());
-    v8::Local<v8::Context> context_for_wrapper =
-        creation_context->CreationContext();
-
-    // For performance, we enter the context only if the currently running
-    // context is different from the context that we are about to enter.
-    if (context_for_wrapper == context_)
-      return;
-
-    if (!BindingSecurityForPlatform::ShouldAllowWrapperCreationOrThrowException(
-            isolate->GetCurrentContext(), context_for_wrapper, type_)) {
-      DCHECK(try_catch_.HasCaught());
-      try_catch_.ReThrow();
-      access_check_failed_ = true;
-      return;
-    }
-
-    did_enter_context_ = true;
-    context_ = context_for_wrapper;
-    context_->Enter();
-  }
-
   // This is an overload of constructor for CreateWrapperV2.
   V8WrapperInstantiationScope(ScriptState* script_state,
                               const WrapperTypeInfo* type)

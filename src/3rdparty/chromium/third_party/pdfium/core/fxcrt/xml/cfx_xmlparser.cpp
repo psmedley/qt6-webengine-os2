@@ -7,7 +7,6 @@
 #include "core/fxcrt/xml/cfx_xmlparser.h"
 
 #include <algorithm>
-#include <cwctype>
 #include <iterator>
 #include <stack>
 #include <utility>
@@ -40,7 +39,7 @@ struct FX_XMLNAMECHAR {
   bool bStartChar;
 };
 
-const FX_XMLNAMECHAR g_XMLNameChars[] = {
+constexpr FX_XMLNAMECHAR kXMLNameChars[] = {
     {L'-', L'.', false},    {L'0', L'9', false},     {L':', L':', false},
     {L'A', L'Z', true},     {L'_', L'_', true},      {L'a', L'z', true},
     {0xB7, 0xB7, false},    {0xC0, 0xD6, true},      {0xD8, 0xF6, true},
@@ -55,9 +54,9 @@ const FX_XMLNAMECHAR g_XMLNameChars[] = {
 // static
 bool CFX_XMLParser::IsXMLNameChar(wchar_t ch, bool bFirstChar) {
   auto* it = std::lower_bound(
-      std::begin(g_XMLNameChars), std::end(g_XMLNameChars), ch,
+      std::begin(kXMLNameChars), std::end(kXMLNameChars), ch,
       [](const FX_XMLNAMECHAR& arg, wchar_t ch) { return arg.wEnd < ch; });
-  return it != std::end(g_XMLNameChars) && ch >= it->wStart &&
+  return it != std::end(kXMLNameChars) && ch >= it->wStart &&
          (!bFirstChar || it->bStartChar);
 }
 
@@ -65,10 +64,10 @@ CFX_XMLParser::CFX_XMLParser(const RetainPtr<IFX_SeekableReadStream>& pStream) {
   DCHECK(pStream);
 
   auto proxy = pdfium::MakeRetain<CFX_SeekableStreamProxy>(pStream);
-  uint16_t wCodePage = proxy->GetCodePage();
-  if (wCodePage != FX_CODEPAGE_UTF16LE && wCodePage != FX_CODEPAGE_UTF16BE &&
-      wCodePage != FX_CODEPAGE_UTF8) {
-    proxy->SetCodePage(FX_CODEPAGE_UTF8);
+  FX_CodePage wCodePage = proxy->GetCodePage();
+  if (wCodePage != FX_CodePage::kUTF16LE &&
+      wCodePage != FX_CodePage::kUTF16BE && wCodePage != FX_CodePage::kUTF8) {
+    proxy->SetCodePage(FX_CodePage::kUTF8);
   }
   stream_ = proxy;
 
@@ -504,15 +503,15 @@ void CFX_XMLParser::ProcessTextChar(wchar_t character) {
         if (character != 0)
           current_text_.push_back(character);
       } else {
-        if (csEntity.Compare(L"amp") == 0) {
+        if (csEntity == L"amp") {
           current_text_.push_back(L'&');
-        } else if (csEntity.Compare(L"lt") == 0) {
+        } else if (csEntity == L"lt") {
           current_text_.push_back(L'<');
-        } else if (csEntity.Compare(L"gt") == 0) {
+        } else if (csEntity == L"gt") {
           current_text_.push_back(L'>');
-        } else if (csEntity.Compare(L"apos") == 0) {
+        } else if (csEntity == L"apos") {
           current_text_.push_back(L'\'');
-        } else if (csEntity.Compare(L"quot") == 0) {
+        } else if (csEntity == L"quot") {
           current_text_.push_back(L'"');
         }
       }

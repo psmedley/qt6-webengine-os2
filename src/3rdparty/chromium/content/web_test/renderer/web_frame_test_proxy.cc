@@ -4,6 +4,7 @@
 
 #include "content/web_test/renderer/web_frame_test_proxy.h"
 
+#include "base/strings/stringprintf.h"
 #include "components/plugins/renderer/plugin_placeholder.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/web_test/common/web_test_string_util.h"
@@ -138,7 +139,7 @@ class TestRenderFrameObserver : public RenderFrameObserver {
 
   void DidStartNavigation(
       const GURL& url,
-      base::Optional<blink::WebNavigationType> navigation_type) override {
+      absl::optional<blink::WebNavigationType> navigation_type) override {
     if (test_runner_->ShouldDumpFrameLoadCallbacks()) {
       std::string description = frame_proxy()->GetFrameDescriptionForWebTests();
       test_runner_->PrintMessage(description + " - DidStartNavigation\n");
@@ -164,14 +165,9 @@ class TestRenderFrameObserver : public RenderFrameObserver {
       test_runner_->PrintMessage(description + " - didCommitLoadForFrame\n");
     }
 
-    if (render_frame()->IsMainFrame()) {
-      // Track main frames once they are swapped in, if they started
-      // provisional.
+    // Track main frames once they are swapped in, if they started provisional.
+    if (render_frame()->IsMainFrame())
       test_runner_->AddMainFrame(frame_proxy());
-
-      // Looking for navigations to about:blank after a test completes.
-      test_runner_->DidCommitNavigationInMainFrame(frame_proxy());
-    }
   }
 
   void DidFinishSameDocumentNavigation() override {
@@ -215,7 +211,7 @@ class TestRenderFrameObserver : public RenderFrameObserver {
   void ScriptedPrint(bool user_initiated) override {
     // This is using the main frame for the size, but maybe it should be using
     // the frame's size.
-    blink::WebSize page_size_in_pixels =
+    gfx::Size page_size_in_pixels =
         frame_proxy()->GetLocalRootWebFrameWidget()->Size();
     if (page_size_in_pixels.IsEmpty())
       return;
@@ -270,6 +266,7 @@ void WebFrameTestProxy::Reset() {
   CHECK(IsMainFrame());
 
   if (IsMainFrame()) {
+    GetWebFrame()->ClearActiveFindMatchForTesting();
     GetWebFrame()->SetName(blink::WebString());
     GetWebFrame()->ClearOpener();
 
@@ -392,13 +389,14 @@ void WebFrameTestProxy::DidStopLoading() {
   test_runner()->RemoveLoadingFrame(GetWebFrame());
 }
 
-void WebFrameTestProxy::DidChangeSelection(bool is_selection_empty) {
+void WebFrameTestProxy::DidChangeSelection(bool is_selection_empty,
+                                           blink::SyncCondition force_sync) {
   if (test_runner()->ShouldDumpEditingCallbacks()) {
     test_runner()->PrintMessage(
         "EDITING DELEGATE: "
         "webViewDidChangeSelection:WebViewDidChangeSelectionNotification\n");
   }
-  RenderFrameImpl::DidChangeSelection(is_selection_empty);
+  RenderFrameImpl::DidChangeSelection(is_selection_empty, force_sync);
 }
 
 void WebFrameTestProxy::DidChangeContents() {
@@ -420,7 +418,7 @@ WebFrameTestProxy::GetEffectiveConnectionType() {
 
 void WebFrameTestProxy::UpdateContextMenuDataForTesting(
     const blink::ContextMenuData& context_menu_data,
-    const base::Optional<gfx::Point>& location) {
+    const absl::optional<gfx::Point>& location) {
   blink::FrameWidgetTestHelper* frame_widget =
       GetLocalRootFrameWidgetTestHelper();
   frame_widget->GetEventSender()->SetContextMenuData(context_menu_data);
@@ -697,7 +695,7 @@ void WebFrameTestProxy::CheckIfAudioSinkExistsAndIsAuthorized(
     blink::WebSetSinkIdCompleteCallback completion_callback) {
   std::string device_id = sink_id.Utf8();
   if (device_id == "valid" || device_id.empty())
-    std::move(completion_callback).Run(/*error =*/base::nullopt);
+    std::move(completion_callback).Run(/*error =*/absl::nullopt);
   else if (device_id == "unauthorized")
     std::move(completion_callback)
         .Run(blink::WebSetSinkIdError::kNotAuthorized);
@@ -711,6 +709,8 @@ void WebFrameTestProxy::DidClearWindowObject() {
   // Avoid installing bindings on the about:blank in between tests. This is
   // especially problematic for web platform tests that would inject javascript
   // into the page when installing bindings.
+  v8::MicrotasksScope microtask_scope(blink::MainThreadIsolate(),
+                                      v8::MicrotasksScope::kDoNotRunMicrotasks);
   if (test_runner()->TestIsRunning()) {
     blink::WebLocalFrame* frame = GetWebFrame();
     // These calls will install the various JS bindings for web tests into the

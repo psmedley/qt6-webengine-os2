@@ -41,7 +41,7 @@ static void CompareRenderPassLists(
     EXPECT_EQ(expected->has_transparent_background,
               actual->has_transparent_background);
     EXPECT_EQ(expected->generate_mipmap, actual->generate_mipmap);
-
+    EXPECT_EQ(expected->has_per_quad_damage, actual->has_per_quad_damage);
     EXPECT_EQ(expected->shared_quad_state_list.size(),
               actual->shared_quad_state_list.size());
     EXPECT_EQ(expected->quad_list.size(), actual->quad_list.size());
@@ -67,7 +67,7 @@ TEST(CompositorRenderPassTest,
   filters.Append(cc::FilterOperation::CreateOpacityFilter(0.5));
   cc::FilterOperations backdrop_filters;
   backdrop_filters.Append(cc::FilterOperation::CreateInvertFilter(1.0));
-  base::Optional<gfx::RRectF> backdrop_filter_bounds(
+  absl::optional<gfx::RRectF> backdrop_filter_bounds(
       {10, 20, 130, 140, 1, 2, 3, 4, 5, 6, 7, 8});
   gfx::ContentColorUsage content_color_usage = gfx::ContentColorUsage::kHDR;
   bool has_transparent_background = true;
@@ -86,7 +86,7 @@ TEST(CompositorRenderPassTest,
   // Stick a quad in the pass, this should not get copied.
   SharedQuadState* shared_state = pass->CreateAndAppendSharedQuadState();
   shared_state->SetAll(gfx::Transform(), gfx::Rect(), gfx::Rect(),
-                       gfx::MaskFilterInfo(), gfx::Rect(), false, false, 1,
+                       gfx::MaskFilterInfo(), absl::nullopt, false, 1,
                        SkBlendMode::kSrcOver, 0);
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
@@ -129,23 +129,25 @@ TEST(CompositorRenderPassTest, CopyAllShouldBeIdentical) {
   filters.Append(cc::FilterOperation::CreateOpacityFilter(0.5));
   cc::FilterOperations backdrop_filters;
   backdrop_filters.Append(cc::FilterOperation::CreateInvertFilter(1.0));
-  base::Optional<gfx::RRectF> backdrop_filter_bounds(
+  absl::optional<gfx::RRectF> backdrop_filter_bounds(
       {10, 20, 130, 140, 1, 2, 3, 4, 5, 6, 7, 8});
   bool has_transparent_background = true;
   bool cache_render_pass = false;
   bool has_damage_from_contributing_content = false;
   bool generate_mipmap = false;
+  bool has_per_quad_damage = false;
 
   auto pass = CompositorRenderPass::Create();
   pass->SetAll(id, output_rect, damage_rect, transform_to_root, filters,
                backdrop_filters, backdrop_filter_bounds, SubtreeCaptureId{1u},
-               has_transparent_background, cache_render_pass,
-               has_damage_from_contributing_content, generate_mipmap);
+               output_rect.size(), has_transparent_background,
+               cache_render_pass, has_damage_from_contributing_content,
+               generate_mipmap, has_per_quad_damage);
 
   // Two quads using one shared state.
   SharedQuadState* shared_state1 = pass->CreateAndAppendSharedQuadState();
   shared_state1->SetAll(gfx::Transform(), gfx::Rect(0, 0, 1, 1), gfx::Rect(),
-                        gfx::MaskFilterInfo(), gfx::Rect(), false, false, 1,
+                        gfx::MaskFilterInfo(), absl::nullopt, false, 1,
                         SkBlendMode::kSrcOver, 0);
 
   auto* color_quad1 = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
@@ -161,7 +163,7 @@ TEST(CompositorRenderPassTest, CopyAllShouldBeIdentical) {
   // And two quads using another shared state.
   SharedQuadState* shared_state2 = pass->CreateAndAppendSharedQuadState();
   shared_state2->SetAll(gfx::Transform(), gfx::Rect(0, 0, 2, 2), gfx::Rect(),
-                        gfx::MaskFilterInfo(), gfx::Rect(), false, false, 1,
+                        gfx::MaskFilterInfo(), absl::nullopt, false, 1,
                         SkBlendMode::kSrcOver, 0);
 
   auto* color_quad3 = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
@@ -184,26 +186,28 @@ TEST(CompositorRenderPassTest, CopyAllShouldBeIdentical) {
   contrib_filters.Append(cc::FilterOperation::CreateSepiaFilter(0.5));
   cc::FilterOperations contrib_backdrop_filters;
   contrib_backdrop_filters.Append(cc::FilterOperation::CreateSaturateFilter(1));
-  base::Optional<gfx::RRectF> contrib_backdrop_filter_bounds(
+  absl::optional<gfx::RRectF> contrib_backdrop_filter_bounds(
       {20, 30, 140, 150, 1, 2, 3, 4, 5, 6, 7, 8});
   bool contrib_has_transparent_background = true;
   bool contrib_cache_render_pass = false;
   bool contrib_has_damage_from_contributing_content = false;
   bool contrib_generate_mipmap = false;
+  bool contrib_has_per_quad_damage = false;
 
   auto contrib = CompositorRenderPass::Create();
-  contrib->SetAll(
-      contrib_id, contrib_output_rect, contrib_damage_rect,
-      contrib_transform_to_root, contrib_filters, contrib_backdrop_filters,
-      contrib_backdrop_filter_bounds, SubtreeCaptureId{2u},
-      contrib_has_transparent_background, contrib_cache_render_pass,
-      contrib_has_damage_from_contributing_content, contrib_generate_mipmap);
+  contrib->SetAll(contrib_id, contrib_output_rect, contrib_damage_rect,
+                  contrib_transform_to_root, contrib_filters,
+                  contrib_backdrop_filters, contrib_backdrop_filter_bounds,
+                  SubtreeCaptureId{2u}, contrib_output_rect.size(),
+                  contrib_has_transparent_background, contrib_cache_render_pass,
+                  contrib_has_damage_from_contributing_content,
+                  contrib_generate_mipmap, contrib_has_per_quad_damage);
 
   SharedQuadState* contrib_shared_state =
       contrib->CreateAndAppendSharedQuadState();
-  contrib_shared_state->SetAll(gfx::Transform(), gfx::Rect(0, 0, 2, 2),
-                               gfx::Rect(), gfx::MaskFilterInfo(), gfx::Rect(),
-                               false, false, 1, SkBlendMode::kSrcOver, 0);
+  contrib_shared_state->SetAll(
+      gfx::Transform(), gfx::Rect(0, 0, 2, 2), gfx::Rect(),
+      gfx::MaskFilterInfo(), absl::nullopt, false, 1, SkBlendMode::kSrcOver, 0);
 
   auto* contrib_quad = contrib->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   contrib_quad->SetNew(contrib->shared_quad_state_list.back(),
@@ -239,23 +243,24 @@ TEST(CompositorRenderPassTest, CopyAllWithCulledQuads) {
   filters.Append(cc::FilterOperation::CreateOpacityFilter(0.5));
   cc::FilterOperations backdrop_filters;
   backdrop_filters.Append(cc::FilterOperation::CreateInvertFilter(1.0));
-  base::Optional<gfx::RRectF> backdrop_filter_bounds(
+  absl::optional<gfx::RRectF> backdrop_filter_bounds(
       {10, 20, 130, 140, 1, 2, 3, 4, 5, 6, 7, 8});
   bool has_transparent_background = true;
   bool cache_render_pass = false;
   bool has_damage_from_contributing_content = false;
   bool generate_mipmap = false;
-
+  bool has_per_quad_damage = false;
   auto pass = CompositorRenderPass::Create();
   pass->SetAll(id, output_rect, damage_rect, transform_to_root, filters,
                backdrop_filters, backdrop_filter_bounds, SubtreeCaptureId(),
-               has_transparent_background, cache_render_pass,
-               has_damage_from_contributing_content, generate_mipmap);
+               output_rect.size(), has_transparent_background,
+               cache_render_pass, has_damage_from_contributing_content,
+               generate_mipmap, has_per_quad_damage);
 
   // A shared state with a quad.
   SharedQuadState* shared_state1 = pass->CreateAndAppendSharedQuadState();
   shared_state1->SetAll(gfx::Transform(), gfx::Rect(0, 0, 1, 1), gfx::Rect(),
-                        gfx::MaskFilterInfo(), gfx::Rect(), false, false, 1,
+                        gfx::MaskFilterInfo(), absl::nullopt, false, 1,
                         SkBlendMode::kSrcOver, 0);
 
   auto* color_quad1 = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
@@ -266,19 +271,19 @@ TEST(CompositorRenderPassTest, CopyAllWithCulledQuads) {
   // A shared state with no quads, they were culled.
   SharedQuadState* shared_state2 = pass->CreateAndAppendSharedQuadState();
   shared_state2->SetAll(gfx::Transform(), gfx::Rect(0, 0, 2, 2), gfx::Rect(),
-                        gfx::MaskFilterInfo(), gfx::Rect(), false, false, 1,
+                        gfx::MaskFilterInfo(), absl::nullopt, false, 1,
                         SkBlendMode::kSrcOver, 0);
 
   // A second shared state with no quads.
   SharedQuadState* shared_state3 = pass->CreateAndAppendSharedQuadState();
   shared_state3->SetAll(gfx::Transform(), gfx::Rect(0, 0, 2, 2), gfx::Rect(),
-                        gfx::MaskFilterInfo(), gfx::Rect(), false, false, 1,
+                        gfx::MaskFilterInfo(), absl::nullopt, false, 1,
                         SkBlendMode::kSrcOver, 0);
 
   // A last shared state with a quad again.
   SharedQuadState* shared_state4 = pass->CreateAndAppendSharedQuadState();
   shared_state4->SetAll(gfx::Transform(), gfx::Rect(0, 0, 2, 2), gfx::Rect(),
-                        gfx::MaskFilterInfo(), gfx::Rect(), false, false, 1,
+                        gfx::MaskFilterInfo(), absl::nullopt, false, 1,
                         SkBlendMode::kSrcOver, 0);
 
   auto* color_quad2 = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
@@ -301,8 +306,8 @@ TEST(CompositorRenderPassTest, ReplacedQuadsShouldntMove) {
   auto* quad = pass->quad_list.AllocateAndConstruct<SolidColorDrawQuad>();
   gfx::Rect quad_rect(1, 2, 3, 4);
   quad->SetNew(quad_state, quad_rect, quad_rect, SkColor(), false);
-  pass->ReplaceExistingQuadWithOpaqueTransparentSolidColor(
-      pass->quad_list.begin());
+  pass->ReplaceExistingQuadWithSolidColor(pass->quad_list.begin(), SkColor(),
+                                          SkBlendMode::kSrcOver);
   EXPECT_EQ(pass->quad_list.begin()->rect, quad_rect);
 }
 
@@ -312,9 +317,48 @@ TEST(CompositorRenderPassTest, ReplacedQuadsShouldntBeOpaque) {
   auto* quad = pass->quad_list.AllocateAndConstruct<SolidColorDrawQuad>();
   gfx::Rect quad_rect(1, 2, 3, 4);
   quad->SetNew(quad_state, quad_rect, quad_rect, SkColor(), false);
-  pass->ReplaceExistingQuadWithOpaqueTransparentSolidColor(
-      pass->quad_list.begin());
+  pass->ReplaceExistingQuadWithSolidColor(pass->quad_list.begin(), SkColor(),
+                                          SkBlendMode::kSrcOver);
   EXPECT_FALSE(pass->quad_list.begin()->shared_quad_state->are_contents_opaque);
+}
+
+TEST(CompositorRenderPassTest, ReplacedQuadsGetColor) {
+  auto pass = CompositorRenderPass::Create();
+  const SharedQuadState* quad_state = pass->CreateAndAppendSharedQuadState();
+  auto* quad = pass->quad_list.AllocateAndConstruct<SolidColorDrawQuad>();
+  const gfx::Rect quad_rect(1, 2, 3, 4);
+  quad->SetNew(quad_state, quad_rect, quad_rect, SK_ColorRED, false);
+  pass->ReplaceExistingQuadWithSolidColor(pass->quad_list.begin(),
+                                          SK_ColorGREEN, SkBlendMode::kSrcOver);
+  EXPECT_EQ(SK_ColorGREEN, quad->color);
+}
+
+TEST(CompositorRenderPassTest, ReplacedQuadsGetBlendMode) {
+  auto pass = CompositorRenderPass::Create();
+  SharedQuadState* quad_state = pass->CreateAndAppendSharedQuadState();
+  // Make |are_contents_opaque| already false, to test that the blend mode is
+  // recognized as a reason for needing a new |SharedQuadState|.
+  quad_state->are_contents_opaque = false;
+  auto* quad = pass->quad_list.AllocateAndConstruct<SolidColorDrawQuad>();
+  const gfx::Rect quad_rect(1, 2, 3, 4);
+  quad->SetNew(quad_state, quad_rect, quad_rect, SkColor(), false);
+  pass->ReplaceExistingQuadWithSolidColor(pass->quad_list.begin(), SkColor(),
+                                          SkBlendMode::kDstOut);
+  EXPECT_EQ(SkBlendMode::kDstOut, quad->shared_quad_state->blend_mode);
+}
+
+TEST(CompositorRenderPassTest,
+     ReplacedQuadsKeepOldSharedQuadStateWhenPossible) {
+  auto pass = CompositorRenderPass::Create();
+  SharedQuadState* quad_state = pass->CreateAndAppendSharedQuadState();
+  quad_state->are_contents_opaque = false;
+  quad_state->blend_mode = SkBlendMode::kSoftLight;
+  auto* quad = pass->quad_list.AllocateAndConstruct<SolidColorDrawQuad>();
+  const gfx::Rect quad_rect(1, 2, 3, 4);
+  quad->SetNew(quad_state, quad_rect, quad_rect, SK_ColorRED, false);
+  pass->ReplaceExistingQuadWithSolidColor(
+      pass->quad_list.begin(), SK_ColorGREEN, SkBlendMode::kSoftLight);
+  EXPECT_EQ(quad_state, quad->shared_quad_state);
 }
 
 }  // namespace

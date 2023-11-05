@@ -16,12 +16,11 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/web_applications/components/app_registrar.h"
-#include "chrome/browser/web_applications/components/install_finalizer.h"
-#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
-#include "chrome/browser/web_applications/components/web_app_provider_base.h"
+#include "chrome/browser/web_applications/os_integration_manager.h"
 #include "chrome/browser/web_applications/test/test_web_app_ui_manager.h"
+#include "chrome/browser/web_applications/web_app_provider.h"
+#include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/test/browser_test.h"
@@ -39,6 +38,7 @@
 
 using extensions::Extension;
 using extensions::Manifest;
+using extensions::mojom::ManifestLocation;
 
 namespace {
 
@@ -97,7 +97,7 @@ class ExtensionManagementApiTest : public extensions::ExtensionApiTest {
 
   void InstallNamedExtension(const base::FilePath& path,
                              const std::string& name,
-                             Manifest::Location install_source) {
+                             ManifestLocation install_source) {
     const Extension* extension = InstallExtension(path.AppendASCII(name), 1,
                                                   install_source);
     ASSERT_TRUE(extension);
@@ -112,19 +112,21 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, Basics) {
   LoadExtensions();
 
   base::FilePath basedir = test_data_dir_.AppendASCII("management");
-  InstallNamedExtension(basedir, "internal_extension", Manifest::INTERNAL);
+  InstallNamedExtension(basedir, "internal_extension",
+                        ManifestLocation::kInternal);
   InstallNamedExtension(basedir, "external_extension",
-                        Manifest::EXTERNAL_PREF);
+                        ManifestLocation::kExternalPref);
   InstallNamedExtension(basedir, "admin_extension",
-                        Manifest::EXTERNAL_POLICY_DOWNLOAD);
-  InstallNamedExtension(basedir, "version_name", Manifest::INTERNAL);
+                        ManifestLocation::kExternalPolicyDownload);
+  InstallNamedExtension(basedir, "version_name", ManifestLocation::kInternal);
 
-  ASSERT_TRUE(RunExtensionSubtest("management/test", "basics.html"));
+  ASSERT_TRUE(RunExtensionTest("management/test", {.page_url = "basics.html"}));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, NoPermission) {
   LoadExtensions();
-  ASSERT_TRUE(RunExtensionSubtest("management/no_permission", "test.html"));
+  ASSERT_TRUE(
+      RunExtensionTest("management/no_permission", {.page_url = "test.html"}));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, Uninstall) {
@@ -132,7 +134,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, Uninstall) {
   // Confirmation dialog will be shown for uninstallations except for self.
   extensions::ScopedTestDialogAutoConfirm auto_confirm(
       extensions::ScopedTestDialogAutoConfirm::ACCEPT);
-  ASSERT_TRUE(RunExtensionSubtest("management/test", "uninstall.html"));
+  ASSERT_TRUE(
+      RunExtensionTest("management/test", {.page_url = "uninstall.html"}));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, CreateAppShortcut) {
@@ -141,13 +144,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, CreateAppShortcut) {
   LoadNamedExtension(basedir, "packaged_app");
 
   extensions::ManagementCreateAppShortcutFunction::SetAutoConfirmForTest(true);
-  ASSERT_TRUE(RunExtensionSubtest("management/test",
-                                  "createAppShortcut.html"));
+  ASSERT_TRUE(RunExtensionTest("management/test",
+                               {.page_url = "createAppShortcut.html"}));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, GenerateAppForLink) {
-  ASSERT_TRUE(RunExtensionSubtest("management/test",
-                                  "generateAppForLink.html"));
+  ASSERT_TRUE(RunExtensionTest("management/test",
+                               {.page_url = "generateAppForLink.html"}));
 }
 
 class InstallReplacementWebAppApiTest : public ExtensionManagementApiTest {
@@ -204,13 +207,9 @@ class InstallReplacementWebAppApiTest : public ExtensionManagementApiTest {
 
     chrome::SetAutoAcceptPWAInstallConfirmationForTesting(true);
     const GURL start_url = https_test_server_.GetURL(web_app_start_url);
-    web_app::AppId web_app_id = web_app::GenerateAppIdFromURL(start_url);
-    auto* provider =
-        web_app::WebAppProviderBase::GetProviderBase(browser()->profile());
-    // Async legacy finalizer install was causing this test to be flaky (see
-    // crbug.com/1094616).
-    provider->install_finalizer().RemoveLegacyInstallFinalizerForTesting();
-
+    web_app::AppId web_app_id =
+        web_app::GenerateAppId(/*manifest_id=*/absl::nullopt, start_url);
+    auto* provider = web_app::WebAppProvider::Get(browser()->profile());
     EXPECT_FALSE(provider->registrar().IsLocallyInstalled(start_url));
     EXPECT_EQ(0, static_cast<int>(
                      provider->ui_manager().GetNumWindowsForApp(web_app_id)));
@@ -342,8 +341,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, ManagementPolicyAllowed) {
   extensions::ExtensionSystem::Get(
       browser()->profile())->management_policy()->UnregisterAllProviders();
 
-  ASSERT_TRUE(RunExtensionSubtest("management/management_policy",
-                                  "allowed.html"));
+  ASSERT_TRUE(RunExtensionTest("management/management_policy",
+                               {.page_url = "allowed.html"}));
   // The last thing the test does is uninstall the "enabled_extension".
   EXPECT_FALSE(
       registry->GetExtensionById(extension_ids_["enabled_extension"],
@@ -367,8 +366,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, ManagementPolicyProhibited) {
       extensions::TestManagementPolicyProvider::MUST_REMAIN_ENABLED |
       extensions::TestManagementPolicyProvider::MUST_REMAIN_INSTALLED);
   policy->RegisterProvider(&provider);
-  ASSERT_TRUE(RunExtensionSubtest("management/management_policy",
-                                  "prohibited.html"));
+  ASSERT_TRUE(RunExtensionTest("management/management_policy",
+                               {.page_url = "prohibited.html"}));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchPanelApp) {
@@ -479,5 +478,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, MAYBE_LaunchType) {
   base::FilePath basedir = test_data_dir_.AppendASCII("management");
   LoadNamedExtension(basedir, "packaged_app");
 
-  ASSERT_TRUE(RunExtensionSubtest("management/test", "launchType.html"));
+  ASSERT_TRUE(
+      RunExtensionTest("management/test", {.page_url = "launchType.html"}));
 }

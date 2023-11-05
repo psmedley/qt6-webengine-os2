@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_compositor.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
 #include "third_party/blink/renderer/platform/testing/find_cc_layer.h"
@@ -414,7 +415,7 @@ TEST_P(FrameThrottlingTest, ForAllThrottledLocalFrameViews) {
   EXPECT_EQ(1u, throttled_count);
 }
 
-TEST_P(FrameThrottlingTest, HiddenCrossOriginZeroByZeroFramesAreNotThrottled) {
+TEST_P(FrameThrottlingTest, HiddenCrossOriginZeroByZeroFramesAreThrottled) {
   // Create a document with doubly nested iframes.
   SimRequest main_resource("https://example.com/", "text/html");
   SimRequest frame_resource("https://example.com/iframe.html", "text/html");
@@ -436,12 +437,27 @@ TEST_P(FrameThrottlingTest, HiddenCrossOriginZeroByZeroFramesAreNotThrottled) {
   EXPECT_FALSE(frame_document->View()->CanThrottleRendering());
   EXPECT_FALSE(inner_frame_document->View()->CanThrottleRendering());
 
-  // The frame is not throttled because its dimensions are 0x0.
+  // The frame is throttled because its dimensions are 0x0, as per experimental
+  // feature ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes.
   frame_element->setAttribute(kStyleAttr, "transform: translateY(480px)");
   CompositeFrame();
   EXPECT_FALSE(GetDocument().View()->CanThrottleRendering());
+  // When ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes is enabled,
+  // we will throttle the frame.
   EXPECT_FALSE(frame_document->View()->CanThrottleRendering());
-  EXPECT_FALSE(inner_frame_document->View()->CanThrottleRendering());
+  EXPECT_TRUE(inner_frame_document->View()->CanThrottleRendering());
+  {
+    // Re-test with flag disabled.
+    ScopedThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframesForTest
+        scoped_flag_override(false);
+
+    frame_document->View()->GetLayoutView()->SetNeedsLayout("test");
+    frame_document->View()->ScheduleAnimation();
+    frame_document->View()->GetLayoutView()->Layer()->SetNeedsRepaint();
+    frame_document->View()->ForceUpdateViewportIntersections();
+    CompositeFrame();
+    EXPECT_FALSE(inner_frame_document->View()->CanThrottleRendering());
+  }
 }
 
 TEST_P(FrameThrottlingTest, ThrottledLifecycleUpdate) {
@@ -495,6 +511,7 @@ TEST_P(FrameThrottlingTest, UnthrottlingFrameSchedulesAnimation) {
 
   LoadURL("https://example.com/");
   main_resource.Complete("<iframe sandbox id=frame></iframe>");
+  CompositeFrame();
 
   auto* frame_element =
       To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
@@ -536,8 +553,7 @@ TEST_P(FrameThrottlingTest, ThrottledFrameCompositing) {
   auto* frame_view = frame_element->contentDocument()->View();
   EXPECT_FALSE(frame_view->CanThrottleRendering());
   auto* frame_layout_view = frame_view->GetLayoutView();
-  EXPECT_TRUE(frame_layout_view->Compositor()->CanBeComposited(
-      frame_layout_view->Layer()));
+  EXPECT_TRUE(frame_layout_view->Layer()->CanBeComposited());
   auto* frame_graphics_layer =
       frame_layout_view->Layer()->GraphicsLayerBacking(frame_layout_view);
   EXPECT_TRUE(frame_graphics_layer);
@@ -566,8 +582,7 @@ TEST_P(FrameThrottlingTest, ThrottledFrameCompositing) {
   CompositeFrame();
   EXPECT_FALSE(frame_view->CanThrottleRendering());
   ASSERT_EQ(frame_layout_view, frame_view->GetLayoutView());
-  EXPECT_TRUE(frame_layout_view->Compositor()->CanBeComposited(
-      frame_layout_view->Layer()));
+  EXPECT_TRUE(frame_layout_view->Layer()->CanBeComposited());
   EXPECT_EQ(container->GetCompositingState(), kNotComposited);
   EXPECT_EQ(
       frame_graphics_layer,
@@ -1060,6 +1075,7 @@ TEST_P(FrameThrottlingTest, DumpThrottledFrame) {
   main_resource.Complete(
       "main <iframe id=frame sandbox=allow-scripts src=iframe.html></iframe>");
   frame_resource.Complete("");
+  CompositeFrame();
   auto* frame_element =
       To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
   frame_element->setAttribute(kStyleAttr, "transform: translateY(480px)");
@@ -1154,6 +1170,11 @@ TEST_P(FrameThrottlingTest, ThrottleInnerCompositedLayer) {
   EXPECT_TRUE(frame_element->contentDocument()->View()->CanThrottleRendering());
   // The inner div should still be composited.
   EXPECT_EQ(1u, CcLayersByDOMElementId(root_layer, "div").size());
+  // The owner document may included stale painted output for the iframe in its
+  // cache; make sure it gets invalidated.
+  EXPECT_FALSE(To<LayoutBoxModelObject>(frame_element->GetLayoutObject())
+                   ->Layer()
+                   ->IsValid());
 
   // If painting of the iframe is throttled, we should only receive drawing
   // commands for the main frame.
@@ -1172,14 +1193,8 @@ TEST_P(FrameThrottlingTest, ThrottleInnerCompositedLayer) {
   // And a throttled full lifecycle update.
   UpdateAllLifecyclePhases();
 
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-    // Leave the composited layer of the inner div as-is because we don't
-    // repaint it.
-    EXPECT_EQ(1u, CcLayersByDOMElementId(root_layer, "div").size());
-  } else {
-    // The inner div is no longer composited.
-    EXPECT_EQ(0u, CcLayersByDOMElementId(root_layer, "div").size());
-  }
+  // The inner div is no longer composited.
+  EXPECT_EQ(0u, CcLayersByDOMElementId(root_layer, "div").size());
 
   auto commands_throttled1 = CompositeFrame();
   EXPECT_LT(commands_throttled1.DrawCount(), full_draw_count);
@@ -1189,6 +1204,9 @@ TEST_P(FrameThrottlingTest, ThrottleInnerCompositedLayer) {
   CompositeFrame();
   EXPECT_FALSE(
       frame_element->contentDocument()->View()->CanThrottleRendering());
+  EXPECT_FALSE(To<LayoutBoxModelObject>(frame_element->GetLayoutObject())
+                   ->Layer()
+                   ->IsValid());
   auto commands_not_throttled1 = CompositeFrame();
   // The inner div is still not composited.
   EXPECT_EQ(0u, CcLayersByDOMElementId(root_layer, "div").size());
@@ -1413,7 +1431,21 @@ TEST_P(FrameThrottlingTest, DisplayNoneNotThrottled) {
   // Setting display:none unthrottles the frame.
   frame_element->setAttribute(kStyleAttr, "display: none");
   CompositeFrame();
-  EXPECT_FALSE(frame_document->View()->CanThrottleRendering());
+  // When ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes is enabled,
+  // we will throttle cross-origin display:none.
+  EXPECT_TRUE(frame_document->View()->CanThrottleRendering());
+  {
+    // Re-test with flag disabled.
+    ScopedThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframesForTest
+        scoped_flag_override(false);
+
+    frame_document->View()->GetLayoutView()->SetNeedsLayout("test");
+    frame_document->View()->ScheduleAnimation();
+    frame_document->View()->GetLayoutView()->Layer()->SetNeedsRepaint();
+    frame_document->View()->ForceUpdateViewportIntersections();
+    CompositeFrame();
+    EXPECT_FALSE(frame_document->View()->CanThrottleRendering());
+  }
 }
 
 TEST_P(FrameThrottlingTest, DisplayNoneChildrenRemainThrottled) {
@@ -1440,14 +1472,35 @@ TEST_P(FrameThrottlingTest, DisplayNoneChildrenRemainThrottled) {
   EXPECT_TRUE(
       child_frame_element->contentDocument()->View()->CanThrottleRendering());
 
-  // Setting display:none for the parent frame unthrottles the parent but not
-  // the child. This behavior matches Safari.
+  // Setting display:none for the parent frame throttles the parent and also
+  // the child. This behavior differs from Safari.
   frame_element->setAttribute(kStyleAttr, "display: none");
   CompositeFrame();
-  EXPECT_FALSE(
-      frame_element->contentDocument()->View()->CanThrottleRendering());
+  // When ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes is enabled,
+  // the cross-origin, display:none frame will be throttled.
+  EXPECT_TRUE(frame_element->contentDocument()->View()->CanThrottleRendering());
   EXPECT_TRUE(
       child_frame_element->contentDocument()->View()->CanThrottleRendering());
+  {
+    // Re-test with flag disabled.
+    ScopedThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframesForTest
+        scoped_flag_override(false);
+
+    frame_element->contentDocument()->View()->GetLayoutView()->SetNeedsLayout(
+        "test");
+    frame_element->contentDocument()->View()->ScheduleAnimation();
+    frame_element->contentDocument()
+        ->View()
+        ->GetLayoutView()
+        ->Layer()
+        ->SetNeedsRepaint();
+    frame_element->contentDocument()
+        ->View()
+        ->ForceUpdateViewportIntersections();
+    CompositeFrame();
+    EXPECT_FALSE(
+        frame_element->contentDocument()->View()->CanThrottleRendering());
+  }
 }
 
 TEST_P(FrameThrottlingTest, RebuildCompositedLayerTreeOnLayerRemoval) {
@@ -1540,7 +1593,7 @@ TEST_P(FrameThrottlingTest, LifecycleUpdateAfterUnthrottledCompositingUpdate) {
 
   frame_document->getElementById("div")->setAttribute(kStyleAttr,
                                                       "will-change: transform");
-  GetDocument().View()->UpdateLifecycleToCompositingCleanPlusScrolling(
+  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint(
       DocumentUpdateReason::kTest);
 
   // Then do a full lifecycle with throttling enabled. This should not crash.
@@ -1734,6 +1787,60 @@ TEST_P(FrameThrottlingTest, LifecycleThrottledFrameNeedsRepaint) {
       frame_document->GetLayoutView()->Layer()->SelfOrDescendantNeedsRepaint());
   EXPECT_FALSE(
       GetDocument().GetLayoutView()->Layer()->SelfOrDescendantNeedsRepaint());
+}
+
+namespace {
+
+class TestEventListener : public NativeEventListener {
+ public:
+  TestEventListener() = default;
+  void Invoke(ExecutionContext*, Event*) final { count_++; }
+  int GetCallCount() const { return count_; }
+
+ private:
+  int count_ = 0;
+};
+
+}  // namespace
+
+TEST_P(FrameThrottlingTest, ThrottledIframeGetsResizeEvents) {
+  ScopedThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframesForTest
+      scoped_flag_override(true);
+  WebView().GetSettings()->SetJavaScriptEnabled(true);
+
+  // Set up child-iframe that can be throttled and make sure it still gets a
+  // resize event when it loads.
+  SimRequest main_resource("https://example.com/", "text/html");
+  SimRequest frame_resource("https://sub.example.com/iframe.html", "text/html");
+  LoadURL("https://example.com/");
+
+  // The frame is initially throttled.
+  main_resource.Complete(R"HTML(
+      <iframe id="frame" src="https://sub.example.com/iframe.html"
+              style="margin-top: 2000px"></iframe>
+  )HTML");
+  frame_resource.Complete(R"HTML(
+    Hello, world!
+  )HTML");
+
+  // Load and verify throttling.
+  auto* frame_element =
+      To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
+  auto* listener = MakeGarbageCollected<TestEventListener>();
+  frame_element->contentWindow()->addEventListener("resize", listener);
+  EXPECT_EQ(listener->GetCallCount(), 0);
+  CompositeFrame();
+  EXPECT_TRUE(frame_element->contentDocument()->View()->CanThrottleRendering());
+  EXPECT_EQ(listener->GetCallCount(), 1);
+
+  // Composite a second frame to pick up the resize.
+  frame_element->SetInlineStyleProperty(CSSPropertyID::kWidth, "200px");
+  // This should trigger resize event without clearing NeedsBeginMainFrame().
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
+  CompositeFrame();
+  EXPECT_EQ(listener->GetCallCount(), 2);
+
+  frame_element->contentWindow()->removeEventListener("resize", listener);
 }
 
 TEST_P(FrameThrottlingTest, AncestorTouchActionAndWheelEventHandlers) {
@@ -2027,7 +2134,7 @@ TEST_P(FrameThrottlingTest, CullRectUpdate) {
   EXPECT_FALSE(frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_EQ(IntRect(0, 0, 630, 100),
             frame_object->FirstFragment().GetCullRect().Rect());
-  EXPECT_EQ(IntRect(-4000, -4000, 8630, 8100),
+  EXPECT_EQ(IntRect(0, 0, 630, 100),
             child_layout_view->FirstFragment().GetCullRect().Rect());
   EXPECT_FALSE(child_layout_view->Layer()->NeedsCullRectUpdate());
 }

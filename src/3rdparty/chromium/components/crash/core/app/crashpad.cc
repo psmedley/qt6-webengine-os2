@@ -274,6 +274,18 @@ void SetUploadConsent(bool consent) {
 void DumpWithoutCrashing() {
   CRASHPAD_SIMULATE_CRASH();
 }
+
+#if defined(OS_IOS)
+void DumpWithoutCrashAndDeferProcessing() {
+  CRASHPAD_SIMULATE_CRASH_AND_DEFER_PROCESSING();
+}
+
+void DumpWithoutCrashAndDeferProcessingAtPath(const base::FilePath& path) {
+  CRASHPAD_SIMULATE_CRASH_AND_DEFER_PROCESSING_AT_PATH(path);
+}
+
+#endif
+
 #endif
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)

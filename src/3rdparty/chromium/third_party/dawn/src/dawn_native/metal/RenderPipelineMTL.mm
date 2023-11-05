@@ -14,6 +14,7 @@
 
 #include "dawn_native/metal/RenderPipelineMTL.h"
 
+#include "dawn_native/VertexFormat.h"
 #include "dawn_native/metal/DeviceMTL.h"
 #include "dawn_native/metal/PipelineLayoutMTL.h"
 #include "dawn_native/metal/ShaderModuleMTL.h"
@@ -25,74 +26,76 @@ namespace dawn_native { namespace metal {
     namespace {
         MTLVertexFormat VertexFormatType(wgpu::VertexFormat format) {
             switch (format) {
-                case wgpu::VertexFormat::UChar2:
+                case wgpu::VertexFormat::Uint8x2:
                     return MTLVertexFormatUChar2;
-                case wgpu::VertexFormat::UChar4:
+                case wgpu::VertexFormat::Uint8x4:
                     return MTLVertexFormatUChar4;
-                case wgpu::VertexFormat::Char2:
+                case wgpu::VertexFormat::Sint8x2:
                     return MTLVertexFormatChar2;
-                case wgpu::VertexFormat::Char4:
+                case wgpu::VertexFormat::Sint8x4:
                     return MTLVertexFormatChar4;
-                case wgpu::VertexFormat::UChar2Norm:
+                case wgpu::VertexFormat::Unorm8x2:
                     return MTLVertexFormatUChar2Normalized;
-                case wgpu::VertexFormat::UChar4Norm:
+                case wgpu::VertexFormat::Unorm8x4:
                     return MTLVertexFormatUChar4Normalized;
-                case wgpu::VertexFormat::Char2Norm:
+                case wgpu::VertexFormat::Snorm8x2:
                     return MTLVertexFormatChar2Normalized;
-                case wgpu::VertexFormat::Char4Norm:
+                case wgpu::VertexFormat::Snorm8x4:
                     return MTLVertexFormatChar4Normalized;
-                case wgpu::VertexFormat::UShort2:
+                case wgpu::VertexFormat::Uint16x2:
                     return MTLVertexFormatUShort2;
-                case wgpu::VertexFormat::UShort4:
+                case wgpu::VertexFormat::Uint16x4:
                     return MTLVertexFormatUShort4;
-                case wgpu::VertexFormat::Short2:
+                case wgpu::VertexFormat::Sint16x2:
                     return MTLVertexFormatShort2;
-                case wgpu::VertexFormat::Short4:
+                case wgpu::VertexFormat::Sint16x4:
                     return MTLVertexFormatShort4;
-                case wgpu::VertexFormat::UShort2Norm:
+                case wgpu::VertexFormat::Unorm16x2:
                     return MTLVertexFormatUShort2Normalized;
-                case wgpu::VertexFormat::UShort4Norm:
+                case wgpu::VertexFormat::Unorm16x4:
                     return MTLVertexFormatUShort4Normalized;
-                case wgpu::VertexFormat::Short2Norm:
+                case wgpu::VertexFormat::Snorm16x2:
                     return MTLVertexFormatShort2Normalized;
-                case wgpu::VertexFormat::Short4Norm:
+                case wgpu::VertexFormat::Snorm16x4:
                     return MTLVertexFormatShort4Normalized;
-                case wgpu::VertexFormat::Half2:
+                case wgpu::VertexFormat::Float16x2:
                     return MTLVertexFormatHalf2;
-                case wgpu::VertexFormat::Half4:
+                case wgpu::VertexFormat::Float16x4:
                     return MTLVertexFormatHalf4;
-                case wgpu::VertexFormat::Float:
+                case wgpu::VertexFormat::Float32:
                     return MTLVertexFormatFloat;
-                case wgpu::VertexFormat::Float2:
+                case wgpu::VertexFormat::Float32x2:
                     return MTLVertexFormatFloat2;
-                case wgpu::VertexFormat::Float3:
+                case wgpu::VertexFormat::Float32x3:
                     return MTLVertexFormatFloat3;
-                case wgpu::VertexFormat::Float4:
+                case wgpu::VertexFormat::Float32x4:
                     return MTLVertexFormatFloat4;
-                case wgpu::VertexFormat::UInt:
+                case wgpu::VertexFormat::Uint32:
                     return MTLVertexFormatUInt;
-                case wgpu::VertexFormat::UInt2:
+                case wgpu::VertexFormat::Uint32x2:
                     return MTLVertexFormatUInt2;
-                case wgpu::VertexFormat::UInt3:
+                case wgpu::VertexFormat::Uint32x3:
                     return MTLVertexFormatUInt3;
-                case wgpu::VertexFormat::UInt4:
+                case wgpu::VertexFormat::Uint32x4:
                     return MTLVertexFormatUInt4;
-                case wgpu::VertexFormat::Int:
+                case wgpu::VertexFormat::Sint32:
                     return MTLVertexFormatInt;
-                case wgpu::VertexFormat::Int2:
+                case wgpu::VertexFormat::Sint32x2:
                     return MTLVertexFormatInt2;
-                case wgpu::VertexFormat::Int3:
+                case wgpu::VertexFormat::Sint32x3:
                     return MTLVertexFormatInt3;
-                case wgpu::VertexFormat::Int4:
+                case wgpu::VertexFormat::Sint32x4:
                     return MTLVertexFormatInt4;
+                default:
+                    UNREACHABLE();
             }
         }
 
-        MTLVertexStepFunction InputStepModeFunction(wgpu::InputStepMode mode) {
+        MTLVertexStepFunction VertexStepModeFunction(wgpu::VertexStepMode mode) {
             switch (mode) {
-                case wgpu::InputStepMode::Vertex:
+                case wgpu::VertexStepMode::Vertex:
                     return MTLVertexStepFunctionPerVertex;
-                case wgpu::InputStepMode::Instance:
+                case wgpu::VertexStepMode::Instance:
                     return MTLVertexStepFunctionPerInstance;
             }
         }
@@ -132,17 +135,17 @@ namespace dawn_native { namespace metal {
                     return MTLBlendFactorZero;
                 case wgpu::BlendFactor::One:
                     return MTLBlendFactorOne;
-                case wgpu::BlendFactor::SrcColor:
+                case wgpu::BlendFactor::Src:
                     return MTLBlendFactorSourceColor;
-                case wgpu::BlendFactor::OneMinusSrcColor:
+                case wgpu::BlendFactor::OneMinusSrc:
                     return MTLBlendFactorOneMinusSourceColor;
                 case wgpu::BlendFactor::SrcAlpha:
                     return MTLBlendFactorSourceAlpha;
                 case wgpu::BlendFactor::OneMinusSrcAlpha:
                     return MTLBlendFactorOneMinusSourceAlpha;
-                case wgpu::BlendFactor::DstColor:
+                case wgpu::BlendFactor::Dst:
                     return MTLBlendFactorDestinationColor;
-                case wgpu::BlendFactor::OneMinusDstColor:
+                case wgpu::BlendFactor::OneMinusDst:
                     return MTLBlendFactorOneMinusDestinationColor;
                 case wgpu::BlendFactor::DstAlpha:
                     return MTLBlendFactorDestinationAlpha;
@@ -150,11 +153,20 @@ namespace dawn_native { namespace metal {
                     return MTLBlendFactorOneMinusDestinationAlpha;
                 case wgpu::BlendFactor::SrcAlphaSaturated:
                     return MTLBlendFactorSourceAlphaSaturated;
-                case wgpu::BlendFactor::BlendColor:
+                case wgpu::BlendFactor::Constant:
                     return alpha ? MTLBlendFactorBlendAlpha : MTLBlendFactorBlendColor;
-                case wgpu::BlendFactor::OneMinusBlendColor:
+                case wgpu::BlendFactor::OneMinusConstant:
                     return alpha ? MTLBlendFactorOneMinusBlendAlpha
                                  : MTLBlendFactorOneMinusBlendColor;
+
+                // Deprecated blend factors should be normalized prior to this call.
+                case wgpu::BlendFactor::SrcColor:
+                case wgpu::BlendFactor::OneMinusSrcColor:
+                case wgpu::BlendFactor::DstColor:
+                case wgpu::BlendFactor::OneMinusDstColor:
+                case wgpu::BlendFactor::BlendColor:
+                case wgpu::BlendFactor::OneMinusBlendColor:
+                    UNREACHABLE();
             }
         }
 
@@ -198,21 +210,23 @@ namespace dawn_native { namespace metal {
         }
 
         void ComputeBlendDesc(MTLRenderPipelineColorAttachmentDescriptor* attachment,
-                              const ColorStateDescriptor* descriptor,
+                              const ColorTargetState* state,
                               bool isDeclaredInFragmentShader) {
-            attachment.blendingEnabled = BlendEnabled(descriptor);
-            attachment.sourceRGBBlendFactor =
-                MetalBlendFactor(descriptor->colorBlend.srcFactor, false);
-            attachment.destinationRGBBlendFactor =
-                MetalBlendFactor(descriptor->colorBlend.dstFactor, false);
-            attachment.rgbBlendOperation = MetalBlendOperation(descriptor->colorBlend.operation);
-            attachment.sourceAlphaBlendFactor =
-                MetalBlendFactor(descriptor->alphaBlend.srcFactor, true);
-            attachment.destinationAlphaBlendFactor =
-                MetalBlendFactor(descriptor->alphaBlend.dstFactor, true);
-            attachment.alphaBlendOperation = MetalBlendOperation(descriptor->alphaBlend.operation);
+            attachment.blendingEnabled = state->blend != nullptr;
+            if (attachment.blendingEnabled) {
+                attachment.sourceRGBBlendFactor =
+                    MetalBlendFactor(state->blend->color.srcFactor, false);
+                attachment.destinationRGBBlendFactor =
+                    MetalBlendFactor(state->blend->color.dstFactor, false);
+                attachment.rgbBlendOperation = MetalBlendOperation(state->blend->color.operation);
+                attachment.sourceAlphaBlendFactor =
+                    MetalBlendFactor(state->blend->alpha.srcFactor, true);
+                attachment.destinationAlphaBlendFactor =
+                    MetalBlendFactor(state->blend->alpha.dstFactor, true);
+                attachment.alphaBlendOperation = MetalBlendOperation(state->blend->alpha.operation);
+            }
             attachment.writeMask =
-                MetalColorWriteMask(descriptor->writeMask, isDeclaredInFragmentShader);
+                MetalColorWriteMask(state->writeMask, isDeclaredInFragmentShader);
         }
 
         MTLStencilOperation MetalStencilOperation(wgpu::StencilOperation stencilOperation) {
@@ -236,8 +250,7 @@ namespace dawn_native { namespace metal {
             }
         }
 
-        NSRef<MTLDepthStencilDescriptor> MakeDepthStencilDesc(
-            const DepthStencilStateDescriptor* descriptor) {
+        NSRef<MTLDepthStencilDescriptor> MakeDepthStencilDesc(const DepthStencilState* descriptor) {
             NSRef<MTLDepthStencilDescriptor> mtlDepthStencilDescRef =
                 AcquireNSRef([MTLDepthStencilDescriptor new]);
             MTLDepthStencilDescriptor* mtlDepthStencilDescriptor = mtlDepthStencilDescRef.Get();
@@ -306,12 +319,12 @@ namespace dawn_native { namespace metal {
     }  // anonymous namespace
 
     // static
-    ResultOrError<RenderPipeline*> RenderPipeline::Create(
+    ResultOrError<Ref<RenderPipeline>> RenderPipeline::Create(
         Device* device,
         const RenderPipelineDescriptor* descriptor) {
         Ref<RenderPipeline> pipeline = AcquireRef(new RenderPipeline(device, descriptor));
         DAWN_TRY(pipeline->Initialize(descriptor));
-        return pipeline.Detach();
+        return pipeline;
     }
 
     MaybeError RenderPipeline::Initialize(const RenderPipelineDescriptor* descriptor) {
@@ -334,24 +347,32 @@ namespace dawn_native { namespace metal {
         }
         descriptorMTL.vertexDescriptor = vertexDesc.Get();
 
-        ShaderModule* vertexModule = ToBackend(descriptor->vertexStage.module);
-        const char* vertexEntryPoint = descriptor->vertexStage.entryPoint;
+        ShaderModule* vertexModule = ToBackend(descriptor->vertex.module);
+        const char* vertexEntryPoint = descriptor->vertex.entryPoint;
         ShaderModule::MetalFunctionData vertexData;
+
+        const VertexState* vertexStatePtr = &descriptor->vertex;
+        VertexState vertexState;
+        if (vertexStatePtr == nullptr) {
+            vertexState = {};
+            vertexStatePtr = &vertexState;
+        }
+
         DAWN_TRY(vertexModule->CreateFunction(vertexEntryPoint, SingleShaderStage::Vertex,
-                                              ToBackend(GetLayout()), &vertexData, 0xFFFFFFFF,
-                                              this));
+                                              ToBackend(GetLayout()), &vertexData, 0xFFFFFFFF, this,
+                                              vertexStatePtr));
 
         descriptorMTL.vertexFunction = vertexData.function.Get();
         if (vertexData.needsStorageBufferLength) {
             mStagesRequiringStorageBufferLength |= wgpu::ShaderStage::Vertex;
         }
 
-        ShaderModule* fragmentModule = ToBackend(descriptor->fragmentStage->module);
-        const char* fragmentEntryPoint = descriptor->fragmentStage->entryPoint;
+        ShaderModule* fragmentModule = ToBackend(descriptor->fragment->module);
+        const char* fragmentEntryPoint = descriptor->fragment->entryPoint;
         ShaderModule::MetalFunctionData fragmentData;
         DAWN_TRY(fragmentModule->CreateFunction(fragmentEntryPoint, SingleShaderStage::Fragment,
                                                 ToBackend(GetLayout()), &fragmentData,
-                                                descriptor->sampleMask));
+                                                GetSampleMask()));
 
         descriptorMTL.fragmentFunction = fragmentData.function.Get();
         if (fragmentData.needsStorageBufferLength) {
@@ -376,31 +397,30 @@ namespace dawn_native { namespace metal {
         for (ColorAttachmentIndex i : IterateBitSet(GetColorAttachmentsMask())) {
             descriptorMTL.colorAttachments[static_cast<uint8_t>(i)].pixelFormat =
                 MetalPixelFormat(GetColorAttachmentFormat(i));
-            const ColorStateDescriptor* descriptor = GetColorStateDescriptor(i);
+            const ColorTargetState* descriptor = GetColorTargetState(i);
             ComputeBlendDesc(descriptorMTL.colorAttachments[static_cast<uint8_t>(i)], descriptor,
                              fragmentOutputsWritten[i]);
         }
 
         descriptorMTL.inputPrimitiveTopology = MTLInputPrimitiveTopology(GetPrimitiveTopology());
         descriptorMTL.sampleCount = GetSampleCount();
-        descriptorMTL.alphaToCoverageEnabled = descriptor->alphaToCoverageEnabled;
+        descriptorMTL.alphaToCoverageEnabled = IsAlphaToCoverageEnabled();
 
-        {
-            NSError* error = nullptr;
-            mMtlRenderPipelineState =
-                AcquireNSPRef([mtlDevice newRenderPipelineStateWithDescriptor:descriptorMTL
-                                                                        error:&error]);
-            if (error != nullptr) {
-                NSLog(@" error => %@", error);
-                return DAWN_INTERNAL_ERROR("Error creating rendering pipeline state");
-            }
+        NSError* error = nullptr;
+        mMtlRenderPipelineState =
+            AcquireNSPRef([mtlDevice newRenderPipelineStateWithDescriptor:descriptorMTL
+                                                                    error:&error]);
+        if (error != nullptr) {
+            return DAWN_INTERNAL_ERROR(std::string("Error creating pipeline state") +
+                                       [error.localizedDescription UTF8String]);
         }
+        ASSERT(mMtlRenderPipelineState != nil);
 
         // Create depth stencil state and cache it, fetch the cached depth stencil state when we
-        // call setDepthStencilState() for a given render pipeline in CommandEncoder, in order to
-        // improve performance.
+        // call setDepthStencilState() for a given render pipeline in CommandEncoder, in order
+        // to improve performance.
         NSRef<MTLDepthStencilDescriptor> depthStencilDesc =
-            MakeDepthStencilDesc(GetDepthStencilStateDescriptor());
+            MakeDepthStencilDesc(GetDepthStencilState());
         mMtlDepthStencilState =
             AcquireNSPRef([mtlDevice newDepthStencilStateWithDescriptor:depthStencilDesc.Get()]);
 
@@ -458,8 +478,9 @@ namespace dawn_native { namespace metal {
                     if (attrib.vertexBufferSlot != slot) {
                         continue;
                     }
-                    maxArrayStride = std::max(
-                        maxArrayStride, VertexFormatSize(attrib.format) + size_t(attrib.offset));
+                    maxArrayStride =
+                        std::max(maxArrayStride, GetVertexFormatInfo(attrib.format).byteSize +
+                                                     size_t(attrib.offset));
                 }
                 layoutDesc.stepFunction = MTLVertexStepFunctionConstant;
                 layoutDesc.stepRate = 0;
@@ -467,7 +488,7 @@ namespace dawn_native { namespace metal {
                 // multiple of 4 if it's not.
                 layoutDesc.stride = Align(maxArrayStride, 4);
             } else {
-                layoutDesc.stepFunction = InputStepModeFunction(info.stepMode);
+                layoutDesc.stepFunction = VertexStepModeFunction(info.stepMode);
                 layoutDesc.stepRate = 1;
                 layoutDesc.stride = info.arrayStride;
             }

@@ -23,10 +23,13 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/speech_recognition_session_preamble.h"
 #include "services/network/public/cpp/simple_url_loader_stream_consumer.h"
-#include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "third_party/blink/public/mojom/speech/speech_recognition_error.mojom.h"
 #include "third_party/blink/public/mojom/speech/speech_recognition_grammar.mojom.h"
 #include "third_party/blink/public/mojom/speech/speech_recognition_result.mojom.h"
+
+namespace base {
+class TimeDelta;
+}
 
 namespace network {
 class SharedURLLoaderFactory;
@@ -210,6 +213,9 @@ class CONTENT_EXPORT SpeechRecognitionEngine
   // Upload a single chunk of audio data. Handles both unframed and framed
   // upload formats, and uses the appropriate one.
   void UploadAudioChunk(const std::string& data, FrameType type, bool is_final);
+
+  // The total audio duration of the upstream request.
+  base::TimeDelta upstream_audio_duration_;
 
   Config config_;
   std::unique_ptr<speech::UpstreamLoader> upstream_loader_;

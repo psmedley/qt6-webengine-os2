@@ -13,6 +13,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/paint_preview/browser/paint_preview_base_service_test_factory.h"
 #include "components/paint_preview/browser/paint_preview_file_mixin.h"
 #include "components/paint_preview/common/mojom/paint_preview_recorder.mojom.h"
@@ -25,6 +26,10 @@
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/lacros/lacros_test_helper.h"
+#endif
 
 namespace paint_preview {
 
@@ -64,7 +69,7 @@ base::FilePath CreateDir(scoped_refptr<FileManager> manager,
       base::BindOnce(&FileManager::CreateOrGetDirectory, manager, key, false),
       base::BindOnce(
           [](base::OnceClosure quit, base::FilePath* out,
-             const base::Optional<base::FilePath>& path) {
+             const absl::optional<base::FilePath>& path) {
             EXPECT_TRUE(path.has_value());
             EXPECT_FALSE(path->empty());
             *out = path.value();
@@ -178,7 +183,8 @@ class PaintPreviewBaseServiceTest
       RecordingPersistence persistence,
       gfx::Rect clip_rect,
       bool capture_links,
-      size_t max_per_capture_size) {
+      size_t max_per_capture_size,
+      uint64_t max_decoded_image_size_bytes) {
     PaintPreviewBaseService::CaptureParams capture_params;
     capture_params.web_contents = web_contents;
     capture_params.root_dir = root_dir;
@@ -186,12 +192,17 @@ class PaintPreviewBaseServiceTest
     capture_params.clip_rect = clip_rect;
     capture_params.capture_links = capture_links;
     capture_params.max_per_capture_size = max_per_capture_size;
+    capture_params.max_decoded_image_size_bytes = max_decoded_image_size_bytes;
     return capture_params;
   }
 
  private:
-  std::unique_ptr<SimpleFactoryKey> key_ = nullptr;
-  std::unique_ptr<SimpleFactoryKey> rejection_policy_key_ = nullptr;
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Instantiate LacrosService for WakeLock support during capturing.
+  chromeos::ScopedLacrosServiceTestHelper scoped_lacros_service_test_helper_;
+#endif
+  std::unique_ptr<SimpleFactoryKey> key_;
+  std::unique_ptr<SimpleFactoryKey> rejection_policy_key_;
 };
 
 TEST_P(PaintPreviewBaseServiceTest, CaptureMainFrame) {
@@ -200,9 +211,10 @@ TEST_P(PaintPreviewBaseServiceTest, CaptureMainFrame) {
   params->clip_rect = gfx::Rect(0, 0, 0, 0);
   params->is_main_frame = true;
   params->max_capture_size = 50;
+  params->max_decoded_image_size_bytes = 1000;
   recorder.SetExpectedParams(std::move(params));
   auto response = mojom::PaintPreviewCaptureResponse::New();
-  response->embedding_token = base::nullopt;
+  response->embedding_token = absl::nullopt;
   if (GetParam() == RecordingPersistence::kMemoryBuffer) {
     response->skp.emplace(mojo_base::BigBuffer());
   }
@@ -218,7 +230,7 @@ TEST_P(PaintPreviewBaseServiceTest, CaptureMainFrame) {
   base::RunLoop loop;
   service->CapturePaintPreview(
       CreateCaptureParams(web_contents(), &path, GetParam(),
-                          gfx::Rect(0, 0, 0, 0), true, 50),
+                          gfx::Rect(0, 0, 0, 0), true, 50, 1000),
       base::BindOnce(
           [](base::OnceClosure quit_closure,
              PaintPreviewBaseService::CaptureStatus expected_status,
@@ -273,7 +285,7 @@ TEST_P(PaintPreviewBaseServiceTest, CaptureFailed) {
   params->max_capture_size = 0;
   recorder.SetExpectedParams(std::move(params));
   auto response = mojom::PaintPreviewCaptureResponse::New();
-  response->embedding_token = base::nullopt;
+  response->embedding_token = absl::nullopt;
   recorder.SetResponse(mojom::PaintPreviewStatus::kFailed, std::move(response));
   OverrideInterface(&recorder);
 
@@ -286,7 +298,8 @@ TEST_P(PaintPreviewBaseServiceTest, CaptureFailed) {
   base::RunLoop loop;
   service->CapturePaintPreview(
       CreateCaptureParams(web_contents(), &path, GetParam(),
-                          gfx::Rect(0, 0, 0, 0), true, 0),
+                          gfx::Rect(0, 0, 0, 0), true, 0,
+                          std::numeric_limits<uint64_t>::max()),
       base::BindOnce(
           [](base::OnceClosure quit_closure,
              PaintPreviewBaseService::CaptureStatus expected_status,
@@ -309,7 +322,7 @@ TEST_P(PaintPreviewBaseServiceTest, CaptureDisallowed) {
   params->max_capture_size = 0;
   recorder.SetExpectedParams(std::move(params));
   auto response = mojom::PaintPreviewCaptureResponse::New();
-  response->embedding_token = base::nullopt;
+  response->embedding_token = absl::nullopt;
   recorder.SetResponse(mojom::PaintPreviewStatus::kFailed, std::move(response));
   OverrideInterface(&recorder);
 
@@ -322,7 +335,8 @@ TEST_P(PaintPreviewBaseServiceTest, CaptureDisallowed) {
   base::RunLoop loop;
   service->CapturePaintPreview(
       CreateCaptureParams(web_contents(), &path, GetParam(),
-                          gfx::Rect(0, 0, 0, 0), true, 0),
+                          gfx::Rect(0, 0, 0, 0), true, 0,
+                          std::numeric_limits<uint64_t>::max()),
       base::BindOnce(
           [](base::OnceClosure quit_closure,
              PaintPreviewBaseService::CaptureStatus expected_status,

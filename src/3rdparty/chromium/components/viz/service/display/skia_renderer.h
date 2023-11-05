@@ -27,7 +27,7 @@ namespace viz {
 class AggregatedRenderPassDrawQuad;
 class DebugBorderDrawQuad;
 class DelegatedInkPointRendererBase;
-class DelegatedInkPointRendererSkia;
+class DelegatedInkHandler;
 class PictureDrawQuad;
 class SkiaOutputSurface;
 class SolidColorDrawQuad;
@@ -51,7 +51,8 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
 
   void SwapBuffers(SwapFrameData swap_frame_data) override;
   void SwapBuffersSkipped() override;
-  void SwapBuffersComplete() override;
+  void SwapBuffersComplete(gfx::GpuFenceHandle release_fence) override;
+  void BuffersPresented() override;
   void DidReceiveReleasedOverlays(
       const std::vector<gpu::Mailbox>& released_overlays) override;
 
@@ -59,7 +60,10 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
     disable_picture_quad_image_filtering_ = disable;
   }
 
-  DelegatedInkPointRendererBase* GetDelegatedInkPointRenderer() override;
+  DelegatedInkPointRendererBase* GetDelegatedInkPointRenderer(
+      bool create_if_necessary) override;
+  void SetDelegatedInkMetadata(
+      std::unique_ptr<gfx::DelegatedInkMetadata> metadata) override;
 
  protected:
   bool CanPartialSwap() override;
@@ -91,9 +95,10 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
   void DidChangeVisibility() override;
   void FinishDrawingQuadList() override;
   void GenerateMipmap() override;
-  bool CreateDelegatedInkPointRenderer() override;
+  void SetDelegatedInkPointRendererSkiaForTest(
+      std::unique_ptr<DelegatedInkPointRendererSkia> renderer) override;
 
-  std::unique_ptr<DelegatedInkPointRendererSkia> delegated_ink_point_renderer_;
+  std::unique_ptr<DelegatedInkHandler> delegated_ink_handler_;
 
  private:
   enum class BypassMode;
@@ -108,8 +113,8 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
   // Callers should init an SkAutoCanvasRestore before calling this function.
   // |scissor_rect| and |rounded_corner_bounds| should be in device space,
   // i.e. same space that |cdt| will transform subsequent draws into.
-  void PrepareCanvas(const base::Optional<gfx::Rect>& scissor_rect,
-                     const base::Optional<gfx::RRectF>& rounded_corner_bounds,
+  void PrepareCanvas(const absl::optional<gfx::Rect>& scissor_rect,
+                     const absl::optional<gfx::RRectF>& rounded_corner_bounds,
                      const gfx::Transform* cdt);
   // Further modify the canvas as needed to apply the effects represented by
   // |rpdq_params|. Call Prepare[Paint|Color]OrCanvasForRPDQ when possible,
@@ -242,8 +247,9 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
   // be sent to GPU scheduler.
   void FlushOutputSurface();
 
-#if defined(OS_APPLE)
-  void PrepareRenderPassOverlay(CALayerOverlay* overlay);
+#if defined(OS_APPLE) || defined(USE_OZONE)
+  void PrepareRenderPassOverlay(
+      OverlayProcessorInterface::PlatformOverlayCandidate* overlay);
 #endif
 
   DisplayResourceProviderSkia* resource_provider() {
@@ -256,6 +262,7 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
     bool generate_mipmap;
     gfx::ColorSpace color_space;
     ResourceFormat format;
+    gpu::Mailbox mailbox;
   };
   base::flat_map<AggregatedRenderPassId, RenderPassBacking>
       render_pass_backings_;
@@ -277,8 +284,8 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
   // State common to all quads in a batch. Draws that require an SkPaint not
   // captured by this state cannot be batched.
   struct BatchedQuadState {
-    base::Optional<gfx::Rect> scissor_rect;
-    base::Optional<gfx::RRectF> rounded_corner_bounds;
+    absl::optional<gfx::Rect> scissor_rect;
+    absl::optional<gfx::RRectF> rounded_corner_bounds;
     SkBlendMode blend_mode;
     SkSamplingOptions sampling;
     SkCanvas::SrcRectConstraint constraint;
@@ -302,7 +309,7 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
   // the compositor thread. And the sync token will be released when the DDL
   // for the current frame is replayed on the GPU thread.
   // It is only used with DDL.
-  base::Optional<DisplayResourceProviderSkia::LockSetForExternalUse>
+  absl::optional<DisplayResourceProviderSkia::LockSetForExternalUse>
       lock_set_for_external_use_;
 
   // Locks for overlays are pending for swapbuffers.
@@ -314,6 +321,11 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
   // be moved to |committed_overlay_locks_| after SwapBuffers() completed.
   std::vector<DisplayResourceProviderSkia::ScopedReadLockSharedImage>
       committed_overlay_locks_;
+
+  // Locks for overlays that have release fences and read lock fences.
+  base::circular_deque<
+      std::vector<DisplayResourceProviderSkia::ScopedReadLockSharedImage>>
+      read_lock_release_fence_overlay_locks_;
 
 #if defined(OS_APPLE)
   class ScopedReadLockComparator {
@@ -341,6 +353,9 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
   base::flat_map<gfx::ColorSpace,
                  base::flat_map<gfx::ColorSpace, sk_sp<SkRuntimeEffect>>>
       color_filter_cache_;
+
+  bool UsingSkiaForDelegatedInk() const;
+  uint32_t debug_tint_modulate_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(SkiaRenderer);
 };

@@ -10,9 +10,9 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -44,6 +44,7 @@
 #include "extensions/common/value_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace {
 
@@ -55,7 +56,7 @@ class FakeUpdateClient : public update_client::UpdateClient {
 
   // Returns the data we've gotten from the CrxDataCallback for ids passed to
   // the Update function.
-  std::vector<base::Optional<update_client::CrxComponent>>* data() {
+  std::vector<absl::optional<update_client::CrxComponent>>* data() {
     return &data_;
   }
 
@@ -150,7 +151,7 @@ class FakeUpdateClient : public update_client::UpdateClient {
  protected:
   ~FakeUpdateClient() override = default;
 
-  std::vector<base::Optional<update_client::CrxComponent>> data_;
+  std::vector<absl::optional<update_client::CrxComponent>> data_;
   std::vector<UninstallPing> uninstall_pings_;
   std::vector<Observer*> observers_;
 
@@ -274,7 +275,7 @@ class FakeExtensionSystem : public MockExtensionSystem {
     if (!next_install_callback_.is_null()) {
       std::move(next_install_callback_).Run();
     }
-    std::move(install_update_callback).Run(base::nullopt);
+    std::move(install_update_callback).Run(absl::nullopt);
   }
 
   void PerformActionBasedOnOmahaAttributes(
@@ -292,10 +293,8 @@ class FakeExtensionSystem : public MockExtensionSystem {
     const base::Value* allowlist_value = attributes.FindKey("_esbAllowlist");
     if (allowlist_value) {
       bool is_allowlisted = allowlist_value->GetBool();
-      ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(browser_context());
-      extension_prefs->SetExtensionAllowlistState(
-          extension_id,
-          is_allowlisted ? ALLOWLIST_ALLOWLISTED : ALLOWLIST_NOT_ALLOWLISTED);
+      extension_allowlist_states_[extension_id] =
+          is_allowlisted ? ALLOWLIST_ALLOWLISTED : ALLOWLIST_NOT_ALLOWLISTED;
     }
   }
 
@@ -304,9 +303,17 @@ class FakeExtensionSystem : public MockExtensionSystem {
     return false;
   }
 
+  AllowlistState GetExtensionAllowlistState(const std::string& extension_id) {
+    if (!base::Contains(extension_allowlist_states_, extension_id))
+      return ALLOWLIST_UNDEFINED;
+
+    return extension_allowlist_states_[extension_id];
+  }
+
  private:
   std::vector<InstallUpdateRequest> install_requests_;
   base::OnceClosure next_install_callback_;
+  base::flat_map<std::string, AllowlistState> extension_allowlist_states_;
 };
 
 class UpdateServiceTest : public ExtensionsTest {
@@ -520,7 +527,6 @@ TEST_F(UpdateServiceTest, UninstallPings) {
 TEST_F(UpdateServiceTest, NoPerformAction) {
   std::string extension_id = crx_file::id_util::GenerateId("id");
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context());
-  ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(browser_context());
   scoped_refptr<const Extension> extension1 =
       ExtensionBuilder("1").SetVersion("1.2").SetID(extension_id).Build();
   EXPECT_TRUE(registry->AddEnabled(extension1));
@@ -544,7 +550,7 @@ TEST_F(UpdateServiceTest, NoPerformAction) {
       0, UpdateClientEvents::COMPONENT_CHECKING_FOR_UPDATES);
   EXPECT_FALSE(registry->disabled_extensions().GetByID(extension_id));
   EXPECT_EQ(extensions::ALLOWLIST_UNDEFINED,
-            extension_prefs->GetExtensionAllowlistState(extension_id));
+            extension_system()->GetExtensionAllowlistState(extension_id));
 }
 
 TEST_F(UpdateServiceTest, CheckOmahaMalwareAttributes) {
@@ -576,7 +582,6 @@ TEST_F(UpdateServiceTest, CheckOmahaMalwareAttributes) {
 
 TEST_F(UpdateServiceTest, CheckOmahaAllowlistAttributes) {
   std::string extension_id = crx_file::id_util::GenerateId("id");
-  ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(browser_context());
   scoped_refptr<const Extension> extension1 =
       ExtensionBuilder("1").SetVersion("1.2").SetID(extension_id).Build();
 
@@ -598,13 +603,12 @@ TEST_F(UpdateServiceTest, CheckOmahaAllowlistAttributes) {
   update_client()->RunDelayedUpdate(0,
                                     UpdateClientEvents::COMPONENT_UPDATE_FOUND);
   EXPECT_EQ(extensions::ALLOWLIST_ALLOWLISTED,
-            extension_prefs->GetExtensionAllowlistState(extension_id));
+            extension_system()->GetExtensionAllowlistState(extension_id));
 }
 
 TEST_F(UpdateServiceTest, CheckNoOmahaAttributes) {
   std::string extension_id = crx_file::id_util::GenerateId("id");
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context());
-  ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(browser_context());
   scoped_refptr<const Extension> extension1 =
       ExtensionBuilder("1").SetVersion("1.2").SetID(extension_id).Build();
   EXPECT_TRUE(registry->AddDisabled(extension1));
@@ -627,7 +631,7 @@ TEST_F(UpdateServiceTest, CheckNoOmahaAttributes) {
                                     UpdateClientEvents::COMPONENT_NOT_UPDATED);
   EXPECT_TRUE(registry->enabled_extensions().GetByID(extension_id));
   EXPECT_EQ(extensions::ALLOWLIST_UNDEFINED,
-            extension_prefs->GetExtensionAllowlistState(extension_id));
+            extension_system()->GetExtensionAllowlistState(extension_id));
 }
 
 TEST_F(UpdateServiceTest, UpdateFoundNotification) {

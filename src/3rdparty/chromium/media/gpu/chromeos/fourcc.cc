@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "base/notreached.h"
-#include "base/strings/stringprintf.h"
 #include "media/gpu/macros.h"
 
 #if BUILDFLAG(USE_V4L2_CODEC)
@@ -24,7 +23,7 @@ Fourcc::~Fourcc() = default;
 Fourcc& Fourcc::operator=(const Fourcc& other) = default;
 
 // static
-base::Optional<Fourcc> Fourcc::FromUint32(uint32_t fourcc) {
+absl::optional<Fourcc> Fourcc::FromUint32(uint32_t fourcc) {
   switch (fourcc) {
     case AR24:
     case AB24:
@@ -40,6 +39,7 @@ base::Optional<Fourcc> Fourcc::FromUint32(uint32_t fourcc) {
     case NV21:
     case NM12:
     case NM21:
+    case YU16:
     case YM16:
     case MT21:
     case MM21:
@@ -47,11 +47,11 @@ base::Optional<Fourcc> Fourcc::FromUint32(uint32_t fourcc) {
       return Fourcc(static_cast<Value>(fourcc));
   }
   DVLOGF(3) << "Unmapped fourcc: " << FourccToString(fourcc);
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 // static
-base::Optional<Fourcc> Fourcc::FromVideoPixelFormat(
+absl::optional<Fourcc> Fourcc::FromVideoPixelFormat(
     VideoPixelFormat pixel_format,
     bool single_planar) {
   if (single_planar) {
@@ -76,12 +76,13 @@ base::Optional<Fourcc> Fourcc::FromVideoPixelFormat(
         return Fourcc(NV12);
       case PIXEL_FORMAT_NV21:
         return Fourcc(NV21);
+      case PIXEL_FORMAT_I422:
+        return Fourcc(YU16);
       case PIXEL_FORMAT_P016LE:
         return Fourcc(P010);
       case PIXEL_FORMAT_UYVY:
         NOTREACHED();
         FALLTHROUGH;
-      case PIXEL_FORMAT_I422:
       case PIXEL_FORMAT_I420A:
       case PIXEL_FORMAT_I444:
       case PIXEL_FORMAT_RGB24:
@@ -147,7 +148,7 @@ base::Optional<Fourcc> Fourcc::FromVideoPixelFormat(
   }
   DVLOGF(3) << "Unmapped " << VideoPixelFormatToString(pixel_format) << " for "
             << (single_planar ? "single-planar" : "multi-planar");
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 VideoPixelFormat Fourcc::ToVideoPixelFormat() const {
@@ -176,6 +177,7 @@ VideoPixelFormat Fourcc::ToVideoPixelFormat() const {
     case NV21:
     case NM21:
       return PIXEL_FORMAT_NV21;
+    case YU16:
     case YM16:
       return PIXEL_FORMAT_I422;
     // V4L2_PIX_FMT_MT21C is only used for MT8173 hardware video decoder output
@@ -200,7 +202,7 @@ VideoPixelFormat Fourcc::ToVideoPixelFormat() const {
 
 #if BUILDFLAG(USE_V4L2_CODEC)
 // static
-base::Optional<Fourcc> Fourcc::FromV4L2PixFmt(uint32_t v4l2_pix_fmt) {
+absl::optional<Fourcc> Fourcc::FromV4L2PixFmt(uint32_t v4l2_pix_fmt) {
   // We can do that because we adopt the same internal definition of Fourcc as
   // V4L2.
   return FromUint32(v4l2_pix_fmt);
@@ -215,7 +217,7 @@ uint32_t Fourcc::ToV4L2PixFmt() const {
 
 #if BUILDFLAG(USE_VAAPI)
 // static
-base::Optional<Fourcc> Fourcc::FromVAFourCC(uint32_t va_fourcc) {
+absl::optional<Fourcc> Fourcc::FromVAFourCC(uint32_t va_fourcc) {
   switch (va_fourcc) {
     case VA_FOURCC_I420:
       return Fourcc(YU12);
@@ -241,10 +243,10 @@ base::Optional<Fourcc> Fourcc::FromVAFourCC(uint32_t va_fourcc) {
       return Fourcc(P010);
   }
   DVLOGF(3) << "Unmapped VAFourCC: " << FourccToString(va_fourcc);
-  return base::nullopt;
+  return absl::nullopt;
 }
 
-base::Optional<uint32_t> Fourcc::ToVAFourCC() const {
+absl::optional<uint32_t> Fourcc::ToVAFourCC() const {
   switch (value_) {
     case YU12:
       return VA_FOURCC_I420;
@@ -272,21 +274,22 @@ base::Optional<uint32_t> Fourcc::ToVAFourCC() const {
     case YM21:
     case NM12:
     case NM21:
+    case YU16:
     case YM16:
     case MT21:
     case MM21:
       // VAAPI does not know about these formats, so signal this by returning
       // nullopt.
       DVLOGF(3) << "Fourcc not convertible to VaFourCC: " << ToString();
-      return base::nullopt;
+      return absl::nullopt;
   }
   NOTREACHED() << "Unmapped Fourcc: " << ToString();
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 #endif  // BUILDFLAG(USE_VAAPI)
 
-base::Optional<Fourcc> Fourcc::ToSinglePlanar() const {
+absl::optional<Fourcc> Fourcc::ToSinglePlanar() const {
   switch (value_) {
     case AR24:
     case AB24:
@@ -308,10 +311,12 @@ base::Optional<Fourcc> Fourcc::ToSinglePlanar() const {
       return Fourcc(NV12);
     case NM21:
       return Fourcc(NV21);
+    case YU16:
     case YM16:
+      return Fourcc(YU16);
     case MT21:
     case MM21:
-      return base::nullopt;
+      return absl::nullopt;
   }
 }
 
@@ -331,6 +336,7 @@ bool Fourcc::IsMultiPlanar() const {
     case YUYV:
     case NV12:
     case NV21:
+    case YU16:
     case P010:
       return false;
     case YM12:
@@ -369,6 +375,7 @@ static_assert(Fourcc::NV12 == V4L2_PIX_FMT_NV12, "Mismatch Fourcc");
 static_assert(Fourcc::NV21 == V4L2_PIX_FMT_NV21, "Mismatch Fourcc");
 static_assert(Fourcc::NM12 == V4L2_PIX_FMT_NV12M, "Mismatch Fourcc");
 static_assert(Fourcc::NM21 == V4L2_PIX_FMT_NV21M, "Mismatch Fourcc");
+static_assert(Fourcc::YU16 == V4L2_PIX_FMT_YUV422P, "Mismatch Fourcc");
 static_assert(Fourcc::YM16 == V4L2_PIX_FMT_YUV422M, "Mismatch Fourcc");
 static_assert(Fourcc::MT21 == V4L2_PIX_FMT_MT21C, "Mismatch Fourcc");
 #ifdef V4L2_PIX_FMT_MM21

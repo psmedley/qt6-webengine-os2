@@ -10,9 +10,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
 #include "base/memory/ref_counted.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/base/request_priority.h"
 #include "net/log/net_log_with_source.h"
@@ -60,11 +60,6 @@ class RequeingBufferProducer : public SpdyBufferProducer {
 
   std::unique_ptr<SpdyBuffer> ProduceBuffer() override {
     return std::move(buffer_);
-  }
-
-  size_t EstimateMemoryUsage() const override {
-    NOTREACHED();
-    return 0;
   }
 
   static void ConsumeCallback(SpdyWriteQueue* queue,

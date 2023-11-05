@@ -501,8 +501,8 @@ class Node(object):
       elif name == 'is_bsd':
         value = 'bsd' in target_platform
       elif name == 'is_posix':
-        value = (target_platform in ('darwin', 'linux2', 'linux3', 'sunos5',
-                                     'android', 'ios')
+        value = (target_platform.startswith('linux')
+                 or target_platform in ('darwin', 'sunos5', 'android', 'ios')
                  or 'bsd' in target_platform
                  or target_platform.startswith('os2'))
       elif name == 'pp_ifdef':

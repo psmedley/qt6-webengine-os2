@@ -6,13 +6,12 @@
 #define COMPONENTS_FEDERATED_LEARNING_FEATURES_FEATURES_H_
 
 #include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 
 namespace federated_learning {
 
+extern const base::Feature kFlocBypassIPIsPubliclyRoutableCheck;
 extern const base::Feature kFlocIdComputedEventLogging;
-
-extern const base::Feature kFlocIdSortingLshBasedComputation;
-
 extern const base::Feature
     kFlocPagesWithAdResourcesDefaultIncludedInFlocComputation;
 

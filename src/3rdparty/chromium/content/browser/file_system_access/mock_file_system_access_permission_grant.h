@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_FILE_SYSTEM_ACCESS_MOCK_FILE_SYSTEM_ACCESS_PERMISSION_GRANT_H_
 #define CONTENT_BROWSER_FILE_SYSTEM_ACCESS_MOCK_FILE_SYSTEM_ACCESS_PERMISSION_GRANT_H_
 
+#include "base/files/file_path.h"
 #include "content/public/browser/file_system_access_permission_grant.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -19,12 +20,12 @@ class MockFileSystemAccessPermissionGrant
   MOCK_METHOD(PermissionStatus, GetStatus, (), (override));
   MOCK_METHOD(base::FilePath, GetPath, (), (override));
   void RequestPermission(
-      GlobalFrameRoutingId frame_id,
+      GlobalRenderFrameHostId frame_id,
       UserActivationState user_activation_state,
       base::OnceCallback<void(PermissionRequestOutcome)> callback) override;
   MOCK_METHOD(void,
               RequestPermission_,
-              (GlobalFrameRoutingId frame_id,
+              (GlobalRenderFrameHostId frame_id,
                UserActivationState user_activation_state,
                base::OnceCallback<void(PermissionRequestOutcome)>&));
 

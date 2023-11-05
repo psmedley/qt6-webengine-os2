@@ -5,6 +5,7 @@
 #include "headless/lib/browser/headless_request_context_manager.h"
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -25,7 +26,7 @@
 #include "services/network/url_request_context_builder_mojo.h"
 
 #if defined(HEADLESS_USE_PREFS)
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/os_crypt.h"  // nogncheck
 #include "content/public/common/network_service_util.h"
 #endif
 
@@ -186,8 +187,22 @@ HeadlessRequestContextManager::CreateSystemContext(
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   auto auth_params = ::network::mojom::HttpAuthDynamicParams::New();
-  auth_params->server_allowlist =
-      command_line->GetSwitchValueASCII(switches::kAuthServerAllowlist);
+
+  // Support both current and deprecated switches for now, with the current
+  // switch value overriding the deprecated one. Expect the deprecated switch
+  // support to be removed soon, see crbug/1142696.
+  if (command_line->HasSwitch(switches::kAuthServerAllowlist)) {
+    auth_params->server_allowlist =
+        command_line->GetSwitchValueASCII(switches::kAuthServerAllowlist);
+  } else if (command_line->HasSwitch(
+                 switches::kAuthServerAllowlistDeprecated)) {
+    LOG(ERROR) << "'" << switches::kAuthServerAllowlistDeprecated
+               << "' is deprecated and will be removed soon. Please use '"
+               << switches::kAuthServerAllowlist << "' instead.";
+    auth_params->server_allowlist = command_line->GetSwitchValueASCII(
+        switches::kAuthServerAllowlistDeprecated);
+  }
+
   auto* network_service = content::GetNetworkService();
   network_service->ConfigureHttpAuthPrefs(std::move(auth_params));
 
@@ -200,7 +215,7 @@ HeadlessRequestContextManager::CreateSystemContext(
       network_context_params.get(), cert_verifier_creation_params.get());
   network_context_params->cert_verifier_params =
       content::GetCertVerifierParams(std::move(cert_verifier_creation_params));
-  network_service->CreateNetworkContext(
+  content::CreateNetworkContextInNetworkService(
       manager->system_context_.InitWithNewPipeAndPassReceiver(),
       std::move(network_context_params));
 

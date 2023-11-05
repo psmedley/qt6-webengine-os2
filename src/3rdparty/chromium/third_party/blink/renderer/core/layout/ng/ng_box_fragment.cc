@@ -13,16 +13,13 @@ namespace blink {
 
 FontHeight NGBoxFragment::BaselineMetrics(const NGLineBoxStrut& margins,
                                           FontBaseline baseline_type) const {
-  DCHECK(physical_fragment_.IsAtomicInline() ||
-         physical_fragment_.IsListMarker());
-
   // For checkbox and radio controls, we always use the border edge instead of
   // the margin edge.
   if (physical_fragment_.Style().IsCheckboxOrRadioPart()) {
     return FontHeight(margins.line_over + BlockSize(), margins.line_under);
   }
 
-  if (const base::Optional<LayoutUnit> baseline = Baseline()) {
+  if (const absl::optional<LayoutUnit> baseline = Baseline()) {
     FontHeight metrics = writing_direction_.IsFlippedLines()
                              ? FontHeight(BlockSize() - *baseline, *baseline)
                              : FontHeight(*baseline, BlockSize() - *baseline);

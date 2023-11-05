@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
 #include "base/win/com_init_util.h"
 #include "base/win/registry.h"
@@ -50,7 +51,7 @@ bool SetDefaultPath(IFileDialog* file_dialog,
     default_folder = default_path;
   } else {
     default_folder = default_path.DirName();
-    default_file_name = default_path.BaseName();
+    default_file_name = GetSanitizedFileName(default_path.BaseName());
   }
 
   // Do not fail the file dialog operation if the specified folder is invalid.
@@ -101,8 +102,8 @@ bool SetOptions(IFileDialog* file_dialog, DWORD dialog_options) {
 
 // Configures a |file_dialog| object given the specified parameters.
 bool ConfigureDialog(IFileDialog* file_dialog,
-                     const base::string16& title,
-                     const base::string16& ok_button_label,
+                     const std::u16string& title,
+                     const std::u16string& ok_button_label,
                      const base::FilePath& default_path,
                      const std::vector<FileFilterSpec>& filter,
                      int filter_index,
@@ -134,7 +135,7 @@ bool ConfigureDialog(IFileDialog* file_dialog,
 // and extension of the user selected file name. |def_ext| is the default
 // extension to give to the file if the user did not enter an extension.
 bool RunSaveFileDialog(HWND owner,
-                       const base::string16& title,
+                       const std::u16string& title,
                        const base::FilePath& default_path,
                        const std::vector<FileFilterSpec>& filter,
                        DWORD dialog_options,
@@ -148,7 +149,7 @@ bool RunSaveFileDialog(HWND owner,
     return false;
   }
 
-  if (!ConfigureDialog(file_save_dialog.Get(), title, base::string16(),
+  if (!ConfigureDialog(file_save_dialog.Get(), title, std::u16string(),
                        default_path, filter, *filter_index, dialog_options)) {
     return false;
   }
@@ -183,8 +184,8 @@ bool RunSaveFileDialog(HWND owner,
 // Runs an Open file dialog box, with similar semantics for input parameters as
 // RunSaveFileDialog.
 bool RunOpenFileDialog(HWND owner,
-                       const base::string16& title,
-                       const base::string16& ok_button_label,
+                       const std::u16string& title,
+                       const std::u16string& ok_button_label,
                        const base::FilePath& default_path,
                        const std::vector<FileFilterSpec>& filter,
                        DWORD dialog_options,
@@ -255,12 +256,12 @@ bool RunOpenFileDialog(HWND owner,
 // thread.
 bool ExecuteSelectFolder(HWND owner,
                          SelectFileDialog::Type type,
-                         const base::string16& title,
+                         const std::u16string& title,
                          const base::FilePath& default_path,
                          std::vector<base::FilePath>* paths) {
   DCHECK(paths);
 
-  base::string16 new_title = title;
+  std::u16string new_title = title;
   if (new_title.empty() && type == SelectFileDialog::SELECT_UPLOAD_FOLDER) {
     // If it's for uploading don't use default dialog title to
     // make sure we clearly tell it's for uploading.
@@ -268,7 +269,7 @@ bool ExecuteSelectFolder(HWND owner,
         l10n_util::GetStringUTF16(IDS_SELECT_UPLOAD_FOLDER_DIALOG_TITLE);
   }
 
-  base::string16 ok_button_label;
+  std::u16string ok_button_label;
   if (type == SelectFileDialog::SELECT_UPLOAD_FOLDER) {
     ok_button_label = l10n_util::GetStringUTF16(
         IDS_SELECT_UPLOAD_FOLDER_DIALOG_UPLOAD_BUTTON);
@@ -284,19 +285,19 @@ bool ExecuteSelectFolder(HWND owner,
 }
 
 bool ExecuteSelectSingleFile(HWND owner,
-                             const base::string16& title,
+                             const std::u16string& title,
                              const base::FilePath& default_path,
                              const std::vector<FileFilterSpec>& filter,
                              int* filter_index,
                              std::vector<base::FilePath>* paths) {
   // Note: The title is not passed down for historical reasons.
   // TODO(pmonette): Figure out if it's a worthwhile improvement.
-  return RunOpenFileDialog(owner, base::string16(), base::string16(),
+  return RunOpenFileDialog(owner, std::u16string(), std::u16string(),
                            default_path, filter, 0, filter_index, paths);
 }
 
 bool ExecuteSelectMultipleFile(HWND owner,
-                               const base::string16& title,
+                               const std::u16string& title,
                                const base::FilePath& default_path,
                                const std::vector<FileFilterSpec>& filter,
                                int* filter_index,
@@ -305,7 +306,7 @@ bool ExecuteSelectMultipleFile(HWND owner,
 
   // Note: The title is not passed down for historical reasons.
   // TODO(pmonette): Figure out if it's a worthwhile improvement.
-  return RunOpenFileDialog(owner, base::string16(), base::string16(),
+  return RunOpenFileDialog(owner, std::u16string(), std::u16string(),
                            default_path, filter, dialog_options, filter_index,
                            paths);
 }
@@ -325,7 +326,7 @@ bool ExecuteSaveFile(HWND owner,
 
   // Note: The title is not passed down for historical reasons.
   // TODO(pmonette): Figure out if it's a worthwhile improvement.
-  return RunSaveFileDialog(owner, base::string16(), default_path, filter,
+  return RunSaveFileDialog(owner, std::u16string(), default_path, filter,
                            dialog_options, def_ext, filter_index, path);
 }
 
@@ -371,9 +372,36 @@ std::wstring AppendExtensionIfNeeded(const std::wstring& filename,
   return return_value;
 }
 
+base::FilePath GetSanitizedFileName(const base::FilePath& file_name) {
+  base::StringTokenizerT<std::wstring, std::wstring::const_iterator> t(
+      file_name.value(), L"%");
+  t.set_options(base::StringTokenizer::RETURN_EMPTY_TOKENS);
+  std::wstring result;
+  bool token_valid = t.GetNext();
+  while (token_valid) {
+    // Append substring before the first "%".
+    result.append(t.token());
+    // Done if we are reaching the end delimiter,
+    if (!t.GetNext()) {
+      break;
+    }
+    std::wstring string_after_first_percent = t.token();
+    token_valid = t.GetNext();
+    // If there are no other "%", append the string after
+    // the first "%". Otherwise, remove the string between
+    // the "%" and continue handing the remaining string.
+    if (!token_valid) {
+      result.append(L"%");
+      result.append(string_after_first_percent);
+      break;
+    }
+  }
+  return base::FilePath(result);
+}
+
 void ExecuteSelectFile(
     SelectFileDialog::Type type,
-    const base::string16& title,
+    const std::u16string& title,
     const base::FilePath& default_path,
     const std::vector<FileFilterSpec>& filter,
     int file_type_index,

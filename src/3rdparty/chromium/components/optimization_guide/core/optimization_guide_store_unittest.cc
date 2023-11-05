@@ -11,7 +11,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
@@ -23,6 +22,7 @@
 #include "components/optimization_guide/proto/models.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 using leveldb_proto::test::FakeDB;
@@ -58,8 +58,6 @@ std::unique_ptr<proto::PredictionModel> CreatePredictionModel() {
   optimization_guide::proto::ModelInfo* model_info =
       prediction_model->mutable_model_info();
   model_info->set_version(1);
-  model_info->add_supported_model_features(
-      proto::CLIENT_MODEL_FEATURE_EFFECTIVE_CONNECTION_TYPE);
   model_info->set_optimization_target(
       proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD);
   model_info->add_supported_model_types(
@@ -83,11 +81,11 @@ class OptimizationGuideStoreTest : public testing::Test {
   // Initializes the entries contained within the database on startup.
   void SeedInitialData(
       MetadataSchemaState state,
-      base::Optional<size_t> component_hint_count = base::Optional<size_t>(),
-      base::Optional<base::Time> fetched_hints_update =
-          base::Optional<base::Time>(),
-      base::Optional<base::Time> host_model_features_update =
-          base::Optional<base::Time>()) {
+      absl::optional<size_t> component_hint_count = absl::optional<size_t>(),
+      absl::optional<base::Time> fetched_hints_update =
+          absl::optional<base::Time>(),
+      absl::optional<base::Time> host_model_features_update =
+          absl::optional<base::Time>()) {
     db_store_.clear();
 
     // Add a metadata schema entry if its state isn't kMissing. The version
@@ -173,13 +171,20 @@ class OptimizationGuideStoreTest : public testing::Test {
   void SeedPredictionModelUpdateData(
       StoreUpdateData* update_data,
       optimization_guide::proto::OptimizationTarget optimization_target,
-      base::Optional<base::FilePath> model_file_path = base::nullopt) {
+      absl::optional<base::FilePath> model_file_path = absl::nullopt,
+      base::flat_set<base::FilePath> additional_file_paths = {}) {
     std::unique_ptr<optimization_guide::proto::PredictionModel>
         prediction_model = CreatePredictionModel();
     prediction_model->mutable_model_info()->set_optimization_target(
         optimization_target);
     if (model_file_path) {
-      SetFilePathInPredictionModel(*model_file_path, prediction_model.get());
+      prediction_model->mutable_model()->set_download_url(
+          FilePathToString(*model_file_path));
+    }
+    for (const base::FilePath& additional_file : additional_file_paths) {
+      prediction_model->mutable_model_info()
+          ->add_additional_files()
+          ->set_file_path(FilePathToString(additional_file));
     }
     update_data->CopyPredictionModelIntoUpdateData(*prediction_model);
   }
@@ -1511,6 +1516,117 @@ TEST_F(OptimizationGuideStoreTest,
   EXPECT_EQ(hint_entry_key, "2_2.0.0_domain1.org");
 }
 
+TEST_F(OptimizationGuideStoreTest, SuccessfulRemovedFetchedHintsByKey) {
+  MetadataSchemaState schema_state = MetadataSchemaState::kValid;
+  SeedInitialData(schema_state, 10);
+  CreateDatabase();
+  InitializeStore(schema_state);
+
+  std::unique_ptr<StoreUpdateData> component_update_data =
+      guide_store()->MaybeCreateUpdateDataForComponentHints(
+          base::Version(kUpdateComponentVersion));
+  ASSERT_TRUE(component_update_data);
+
+  proto::Hint hint1;
+  hint1.set_key("domain1.org");
+  hint1.set_key_representation(proto::HOST);
+  component_update_data->MoveHintIntoUpdateData(std::move(hint1));
+  proto::Hint hint2;
+  hint2.set_key("domain2.org");
+  hint2.set_key_representation(proto::HOST);
+  component_update_data->MoveHintIntoUpdateData(std::move(hint2));
+  UpdateComponentHints(std::move(component_update_data));
+
+  std::unique_ptr<StoreUpdateData> fetched_update_data =
+      guide_store()->CreateUpdateDataForFetchedHints(base::Time().Now());
+
+  proto::Hint fetched_hint1;
+  fetched_hint1.set_key("domain2.org");
+  fetched_hint1.set_key_representation(proto::HOST);
+  fetched_update_data->MoveHintIntoUpdateData(std::move(fetched_hint1));
+  proto::Hint fetched_hint2;
+  fetched_hint2.set_key("domain3.org");
+  fetched_hint2.set_key_representation(proto::HOST);
+  fetched_update_data->MoveHintIntoUpdateData(std::move(fetched_hint2));
+  UpdateFetchedHints(std::move(fetched_update_data));
+
+  base::RunLoop run_loop;
+  guide_store()->RemoveFetchedHintsByKey(run_loop.QuitClosure(),
+                                         {
+                                             "domain1.org",
+                                             "domain2.org",
+                                             "domain3.org",
+                                             "domain4.org",
+                                         });
+  db()->UpdateCallback(/*success=*/true);
+  run_loop.Run();
+
+  OptimizationGuideStore::EntryKey hint_entry_key;
+
+  // Check for keys that should exist.
+  EXPECT_TRUE(guide_store()->FindHintEntryKey("domain1.org", &hint_entry_key));
+  EXPECT_EQ("2_2.0.0_domain1.org", hint_entry_key);
+  EXPECT_TRUE(guide_store()->FindHintEntryKey("domain2.org", &hint_entry_key));
+  EXPECT_EQ("2_2.0.0_domain2.org", hint_entry_key);
+
+  // Check for keys that should not exist.
+  EXPECT_FALSE(guide_store()->FindHintEntryKey("domain3.org", &hint_entry_key));
+}
+
+TEST_F(OptimizationGuideStoreTest, FailedRemovedFetchedHintsByKey) {
+  MetadataSchemaState schema_state = MetadataSchemaState::kValid;
+  SeedInitialData(schema_state, 10);
+  CreateDatabase();
+  InitializeStore(schema_state);
+
+  std::unique_ptr<StoreUpdateData> component_update_data =
+      guide_store()->MaybeCreateUpdateDataForComponentHints(
+          base::Version(kUpdateComponentVersion));
+  ASSERT_TRUE(component_update_data);
+
+  proto::Hint hint1;
+  hint1.set_key("domain1.org");
+  hint1.set_key_representation(proto::HOST);
+  component_update_data->MoveHintIntoUpdateData(std::move(hint1));
+  proto::Hint hint2;
+  hint2.set_key("domain2.org");
+  hint2.set_key_representation(proto::HOST);
+  component_update_data->MoveHintIntoUpdateData(std::move(hint2));
+  UpdateComponentHints(std::move(component_update_data));
+
+  std::unique_ptr<StoreUpdateData> fetched_update_data =
+      guide_store()->CreateUpdateDataForFetchedHints(base::Time().Now());
+  ASSERT_TRUE(fetched_update_data);
+
+  proto::Hint fetched_hint1;
+  fetched_hint1.set_key("domain2.org");
+  fetched_hint1.set_key_representation(proto::HOST);
+  fetched_update_data->MoveHintIntoUpdateData(std::move(fetched_hint1));
+  proto::Hint fetched_hint2;
+  fetched_hint2.set_key("domain3.org");
+  fetched_hint2.set_key_representation(proto::HOST);
+  fetched_update_data->MoveHintIntoUpdateData(std::move(fetched_hint2));
+  UpdateFetchedHints(std::move(fetched_update_data));
+
+  bool did_callback_run = false;
+  base::OnceClosure callback = base::BindOnce(
+      [](bool* set_when_run) { *set_when_run = true; }, &did_callback_run);
+  guide_store()->RemoveFetchedHintsByKey(std::move(callback), {
+                                                                  "domain1.org",
+                                                                  "domain2.org",
+                                                                  "domain3.org",
+                                                                  "domain4.org",
+                                                              });
+  RunUntilIdle();
+  db()->UpdateCallback(/*success=*/false);
+  RunUntilIdle();
+  EXPECT_FALSE(did_callback_run);
+
+  // The callback did not succeed, so the store should no longer be available.
+  EXPECT_EQ(0U, GetStoreEntryKeyCount());
+  EXPECT_FALSE(guide_store()->IsAvailable());
+}
+
 TEST_F(OptimizationGuideStoreTest, ClearFetchedHints) {
   base::HistogramTester histogram_tester;
   MetadataSchemaState schema_state = MetadataSchemaState::kValid;
@@ -2037,7 +2153,121 @@ TEST_F(OptimizationGuideStoreTest,
 }
 
 TEST_F(OptimizationGuideStoreTest,
+       LoadPredictionModelWithAdditionalFileDoesntExist) {
+  base::HistogramTester histogram_tester;
+  MetadataSchemaState schema_state = MetadataSchemaState::kValid;
+  SeedInitialData(schema_state, 0);
+  CreateDatabase();
+  InitializeStore(schema_state);
+
+  base::Time update_time = base::Time().Now();
+  std::unique_ptr<StoreUpdateData> update_data =
+      guide_store()->CreateUpdateDataForPredictionModels(
+          update_time +
+          optimization_guide::features::StoredModelsInactiveDuration());
+  ASSERT_TRUE(update_data);
+
+  base::FilePath model_file_path = temp_dir().AppendASCII("model.tflite");
+  ASSERT_EQ(static_cast<int32_t>(3),
+            base::WriteFile(model_file_path, "boo", 3));
+
+  base::FilePath additional_file_path = temp_dir().AppendASCII("doesntexist");
+
+  SeedPredictionModelUpdateData(
+      update_data.get(), proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
+      temp_dir().AppendASCII("doesntexist"), {additional_file_path});
+  UpdatePredictionModels(std::move(update_data));
+
+  OptimizationGuideStore::EntryKey entry_key;
+  bool success = guide_store()->FindPredictionModelEntryKey(
+      proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, &entry_key);
+  EXPECT_TRUE(success);
+
+  guide_store()->LoadPredictionModel(
+      entry_key,
+      base::BindOnce(&OptimizationGuideStoreTest::OnPredictionModelLoaded,
+                     base::Unretained(this)));
+  // OnPredictionModelLoaded callback
+  db()->GetCallback(true);
+  // Wait for file to be verified.
+  RunUntilIdle();
+  // OnLoadModelsToBeUpdated callback
+  db()->LoadCallback(true);
+  // OnUpdateStore callback
+  db()->UpdateCallback(true);
+  // OnLoadEntryKeys callback
+  db()->LoadCallback(true);
+
+  EXPECT_FALSE(last_loaded_prediction_model());
+
+  // Make sure key is deleted.
+  success = guide_store()->FindPredictionModelEntryKey(
+      proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, &entry_key);
+  EXPECT_FALSE(success);
+
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.ModelFilesVerified.PainfulPageLoad", false, 1);
+}
+
+TEST_F(OptimizationGuideStoreTest,
+       LoadPredictionModelWithAdditionalFileThatExists) {
+  base::HistogramTester histogram_tester;
+  MetadataSchemaState schema_state = MetadataSchemaState::kValid;
+  SeedInitialData(schema_state, 0);
+  CreateDatabase();
+  InitializeStore(schema_state);
+
+  base::Time update_time = base::Time().Now();
+  std::unique_ptr<StoreUpdateData> update_data =
+      guide_store()->CreateUpdateDataForPredictionModels(
+          update_time +
+          optimization_guide::features::StoredModelsInactiveDuration());
+  ASSERT_TRUE(update_data);
+
+  base::FilePath model_file_path = temp_dir().AppendASCII("model.tflite");
+  ASSERT_EQ(static_cast<int32_t>(3),
+            base::WriteFile(model_file_path, "boo", 3));
+
+  base::FilePath additional_file_path =
+      temp_dir().AppendASCII("additional_file.txt");
+  ASSERT_EQ(static_cast<int32_t>(3),
+            base::WriteFile(additional_file_path, "ah!", 3));
+
+  SeedPredictionModelUpdateData(update_data.get(),
+                                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
+                                model_file_path, {additional_file_path});
+  UpdatePredictionModels(std::move(update_data));
+
+  OptimizationGuideStore::EntryKey entry_key;
+  bool success = guide_store()->FindPredictionModelEntryKey(
+      proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, &entry_key);
+  EXPECT_TRUE(success);
+
+  guide_store()->LoadPredictionModel(
+      entry_key,
+      base::BindOnce(&OptimizationGuideStoreTest::OnPredictionModelLoaded,
+                     base::Unretained(this)));
+  // OnPredictionModelLoaded callback
+  db()->GetCallback(true);
+  // Wait for file to be verified.
+  RunUntilIdle();
+
+  proto::PredictionModel* loaded_model = last_loaded_prediction_model();
+  ASSERT_TRUE(loaded_model);
+  EXPECT_EQ(StringToFilePath(loaded_model->model().download_url()).value(),
+            model_file_path);
+  ASSERT_EQ(loaded_model->model_info().additional_files().size(), 1);
+  EXPECT_EQ(StringToFilePath(
+                loaded_model->model_info().additional_files(0).file_path()),
+            additional_file_path);
+
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.ModelFilesVerified.PainfulPageLoad", true, 1);
+}
+
+TEST_F(OptimizationGuideStoreTest,
        LoadPredictionModelWithDownloadUrlThatExists) {
+  base::HistogramTester histogram_tester;
   MetadataSchemaState schema_state = MetadataSchemaState::kValid;
   SeedInitialData(schema_state, 0);
   CreateDatabase();
@@ -2072,7 +2302,11 @@ TEST_F(OptimizationGuideStoreTest,
 
   proto::PredictionModel* loaded_model = last_loaded_prediction_model();
   EXPECT_TRUE(loaded_model);
-  EXPECT_EQ(GetFilePathFromPredictionModel(*loaded_model).value(), file_path);
+  EXPECT_EQ(StringToFilePath(loaded_model->model().download_url()).value(),
+            file_path);
+
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.ModelFilesVerified.PainfulPageLoad", true, 1);
 }
 
 TEST_F(OptimizationGuideStoreTest, UpdatePredictionModelsDeletesOldFile) {
@@ -2081,13 +2315,18 @@ TEST_F(OptimizationGuideStoreTest, UpdatePredictionModelsDeletesOldFile) {
   CreateDatabase();
   InitializeStore(schema_state);
 
+  base::FilePath old_dir = temp_dir().AppendASCII("model_v1");
+  base::FilePath new_dir = temp_dir().AppendASCII("model_v2");
+  ASSERT_TRUE(base::CreateDirectory(old_dir));
+  ASSERT_TRUE(base::CreateDirectory(new_dir));
+
   base::Time update_time = base::Time().Now();
   std::unique_ptr<StoreUpdateData> update_data =
       guide_store()->CreateUpdateDataForPredictionModels(
           update_time +
           optimization_guide::features::StoredModelsInactiveDuration());
   ASSERT_TRUE(update_data);
-  base::FilePath old_file_path = temp_dir().AppendASCII("oldfile");
+  base::FilePath old_file_path = old_dir.AppendASCII("model.tflite");
   ASSERT_EQ(static_cast<int32_t>(3), base::WriteFile(old_file_path, "boo", 3));
   SeedPredictionModelUpdateData(update_data.get(),
                                 proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
@@ -2104,7 +2343,7 @@ TEST_F(OptimizationGuideStoreTest, UpdatePredictionModelsDeletesOldFile) {
           update_time +
           optimization_guide::features::StoredModelsInactiveDuration());
   ASSERT_TRUE(update_data2);
-  base::FilePath new_file_path = temp_dir().AppendASCII("newfile");
+  base::FilePath new_file_path = new_dir.AppendASCII("model.tflite");
   ASSERT_EQ(static_cast<int32_t>(3), base::WriteFile(new_file_path, "boo", 3));
   SeedPredictionModelUpdateData(update_data2.get(),
                                 proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
@@ -2114,6 +2353,70 @@ TEST_F(OptimizationGuideStoreTest, UpdatePredictionModelsDeletesOldFile) {
 
   // Make sure old file is deleted when model updated for target.
   EXPECT_FALSE(base::PathExists(old_file_path));
+  EXPECT_FALSE(base::PathExists(old_dir));
+
+  EXPECT_TRUE(base::PathExists(new_file_path));
+  EXPECT_TRUE(base::PathExists(new_dir));
+}
+
+TEST_F(OptimizationGuideStoreTest,
+       BackwardCompatibilityForParentDirectoryStorage) {
+  MetadataSchemaState schema_state = MetadataSchemaState::kValid;
+  SeedInitialData(schema_state, 0);
+  CreateDatabase();
+  InitializeStore(schema_state);
+
+  base::FilePath old_dir = temp_dir().AppendASCII("OptGuideModels");
+  base::FilePath new_dir = old_dir.AppendASCII("foo_target_v2");
+  ASSERT_TRUE(base::CreateDirectory(old_dir));
+  ASSERT_TRUE(base::CreateDirectory(new_dir));
+
+  base::FilePath old_unassociated_model_path =
+      old_dir.AppendASCII("other_model.tflite");
+  ASSERT_EQ(static_cast<int32_t>(3),
+            base::WriteFile(old_unassociated_model_path, "boo", 3));
+
+  base::Time update_time = base::Time().Now();
+  std::unique_ptr<StoreUpdateData> update_data =
+      guide_store()->CreateUpdateDataForPredictionModels(
+          update_time +
+          optimization_guide::features::StoredModelsInactiveDuration());
+  ASSERT_TRUE(update_data);
+  base::FilePath old_file_path = old_dir.AppendASCII("model_v1.tflite");
+  ASSERT_EQ(static_cast<int32_t>(3), base::WriteFile(old_file_path, "boo", 3));
+  SeedPredictionModelUpdateData(update_data.get(),
+                                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
+                                old_file_path);
+  UpdatePredictionModels(std::move(update_data));
+
+  OptimizationGuideStore::EntryKey entry_key;
+  bool success = guide_store()->FindPredictionModelEntryKey(
+      proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, &entry_key);
+  EXPECT_TRUE(success);
+
+  std::unique_ptr<StoreUpdateData> update_data2 =
+      guide_store()->CreateUpdateDataForPredictionModels(
+          update_time +
+          optimization_guide::features::StoredModelsInactiveDuration());
+  ASSERT_TRUE(update_data2);
+  base::FilePath new_file_path = new_dir.Append(GetBaseFileNameForModels());
+  ASSERT_EQ(static_cast<int32_t>(3), base::WriteFile(new_file_path, "boo", 3));
+  SeedPredictionModelUpdateData(update_data2.get(),
+                                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
+                                new_file_path);
+  UpdatePredictionModels(std::move(update_data2));
+  RunUntilIdle();
+
+  // The old file should have been deleted, but not its containing directory
+  // because that is recognized as the OptGuideModel parent storage directory.
+  EXPECT_FALSE(base::PathExists(old_file_path));
+  EXPECT_TRUE(base::PathExists(old_dir));
+
+  // The other unassociated old-code model should not have been touched.
+  EXPECT_TRUE(base::PathExists(old_unassociated_model_path));
+
+  EXPECT_TRUE(base::PathExists(new_file_path));
+  EXPECT_TRUE(base::PathExists(new_dir));
 }
 
 TEST_F(OptimizationGuideStoreTest, RemovePredictionModelEntryKeyDeletesFile) {

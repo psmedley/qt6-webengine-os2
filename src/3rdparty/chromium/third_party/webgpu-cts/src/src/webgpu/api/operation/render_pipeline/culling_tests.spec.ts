@@ -18,7 +18,6 @@ Use 2 triangles with different winding orders:
   - Some primitive topologies (triangle-list, TODO: triangle-strip)
 `;
 
-import { poptions, params } from '../../../../common/framework/params_builder.js';
 import { makeTestGroup } from '../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../gpu_test.js';
 
@@ -41,36 +40,35 @@ function faceColor(face: 'cw' | 'ccw', frontFace: GPUFrontFace, cullMode: GPUCul
 export const g = makeTestGroup(GPUTest);
 
 g.test('culling')
-  .params(
-    params()
-      .combine(poptions('frontFace', ['ccw', 'cw'] as const))
-      .combine(poptions('cullMode', ['none', 'front', 'back'] as const))
-      .combine(
-        poptions('depthStencilFormat', [
-          null,
-          'depth24plus',
-          'depth32float',
-          'depth24plus-stencil8',
-        ] as const)
-      )
+  .params(u =>
+    u
+      .combine('frontFace', ['ccw', 'cw'] as const)
+      .combine('cullMode', ['none', 'front', 'back'] as const)
+      .beginSubcases()
+      .combine('depthStencilFormat', [
+        null,
+        'depth24plus',
+        'depth32float',
+        'depth24plus-stencil8',
+      ] as const)
       // TODO: test triangle-strip as well
-      .combine(poptions('primitiveTopology', ['triangle-list'] as const))
+      .combine('primitiveTopology', ['triangle-list'] as const)
   )
   .fn(t => {
     const size = 4;
     const format = 'rgba8unorm';
 
     const texture = t.device.createTexture({
-      size: { width: size, height: size, depth: 1 },
+      size: { width: size, height: size, depthOrArrayLayers: 1 },
       format,
-      usage: GPUTextureUsage.OUTPUT_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
     });
 
     const depthTexture = t.params.depthStencilFormat
       ? t.device.createTexture({
-          size: { width: size, height: size, depth: 1 },
+          size: { width: size, height: size, depthOrArrayLayers: 1 },
           format: t.params.depthStencilFormat,
-          usage: GPUTextureUsage.OUTPUT_ATTACHMENT,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT,
         })
       : null;
 
@@ -78,13 +76,14 @@ g.test('culling')
     const pass = encoder.beginRenderPass({
       colorAttachments: [
         {
-          attachment: texture.createView(),
+          view: texture.createView(),
           loadValue: { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
+          storeOp: 'store',
         },
       ],
       depthStencilAttachment: depthTexture
         ? {
-            attachment: depthTexture.createView(),
+            view: depthTexture.createView(),
             depthLoadValue: 1.0,
             depthStoreOp: 'store',
             stencilLoadValue: 0,
@@ -98,50 +97,48 @@ g.test('culling')
     // 2. The bottom-right one is clockwise (CW)
     pass.setPipeline(
       t.device.createRenderPipeline({
-        vertexStage: {
+        vertex: {
           module: t.device.createShaderModule({
             code: `
-              [[builtin(position)]] var<out> Position : vec4<f32>;
-              [[builtin(vertex_idx)]] var<in> VertexIndex : i32;
-
-              [[stage(vertex)]] fn main() -> void {
-                const pos : array<vec2<f32>, 6> = array<vec2<f32>, 6>(
+              [[stage(vertex)]] fn main(
+                [[builtin(vertex_index)]] VertexIndex : u32
+                ) -> [[builtin(position)]] vec4<f32> {
+                var pos : array<vec2<f32>, 6> = array<vec2<f32>, 6>(
                     vec2<f32>(-1.0,  1.0),
                     vec2<f32>(-1.0,  0.0),
                     vec2<f32>( 0.0,  1.0),
                     vec2<f32>( 0.0, -1.0),
                     vec2<f32>( 1.0,  0.0),
                     vec2<f32>( 1.0, -1.0));
-                Position = vec4<f32>(pos[VertexIndex], 0.0, 1.0);
-                return;
+                return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
               }`,
           }),
           entryPoint: 'main',
         },
-        fragmentStage: {
+        fragment: {
           module: t.device.createShaderModule({
             code: `
-              [[location(0)]] var<out> fragColor : vec4<f32>;
-              [[builtin(front_facing)]] var<in> FrontFacing : bool;
-
-              [[stage(fragment)]] fn main() -> void {
+              [[stage(fragment)]] fn main(
+                [[builtin(front_facing)]] FrontFacing : bool
+                ) -> [[location(0)]] vec4<f32> {
+                var color : vec4<f32>;
                 if (FrontFacing) {
-                  fragColor = vec4<f32>(0.0, 1.0, 0.0, 1.0);
+                  color = vec4<f32>(0.0, 1.0, 0.0, 1.0);
                 } else {
-                  fragColor = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+                  color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
                 }
-                return;
+                return color;
               }`,
           }),
           entryPoint: 'main',
+          targets: [{ format }],
         },
-        primitiveTopology: t.params.primitiveTopology,
-        rasterizationState: {
+        primitive: {
+          topology: t.params.primitiveTopology,
           frontFace: t.params.frontFace,
           cullMode: t.params.cullMode,
         },
-        colorStates: [{ format }],
-        depthStencilState: depthTexture
+        depthStencil: depthTexture
           ? { format: t.params.depthStencilFormat as GPUTextureFormat }
           : undefined,
       })
@@ -150,7 +147,7 @@ g.test('culling')
     pass.draw(6, 1, 0, 0);
     pass.endPass();
 
-    t.device.defaultQueue.submit([encoder.finish()]);
+    t.device.queue.submit([encoder.finish()]);
 
     // front facing color is green, non front facing is red, background is blue
     const kCCWTriangleTopLeftColor = faceColor('ccw', t.params.frontFace, t.params.cullMode);

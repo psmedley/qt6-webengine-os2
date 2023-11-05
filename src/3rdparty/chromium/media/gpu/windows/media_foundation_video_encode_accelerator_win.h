@@ -18,8 +18,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
+#include "media/base/bitrate.h"
 #include "media/base/win/dxgi_device_manager.h"
-#include "media/base/win/mf_initializer.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/video/video_encode_accelerator.h"
 
@@ -46,9 +46,10 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
   bool Initialize(const Config& config, Client* client) override;
   void Encode(scoped_refptr<VideoFrame> frame, bool force_keyframe) override;
   void UseOutputBitstreamBuffer(BitstreamBuffer buffer) override;
-  void RequestEncodingParametersChange(uint32_t bitrate,
+  void RequestEncodingParametersChange(const media::Bitrate& bitrate,
                                        uint32_t framerate) override;
   void Destroy() override;
+  bool IsGpuFrameResizeSupported() override;
 
   // Preloads dlls required for encoding. Returns true if all required dlls are
   // correctly loaded.
@@ -109,7 +110,7 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
       std::unique_ptr<BitstreamBufferRef> buffer_ref);
 
   // Changes encode parameters on |encoder_thread_|.
-  void RequestEncodingParametersChangeTask(uint32_t bitrate,
+  void RequestEncodingParametersChangeTask(const Bitrate& bitrate,
                                            uint32_t framerate);
 
   // Destroys encode session on |encoder_thread_|.
@@ -117,6 +118,12 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
 
   // Releases resources encoder holds.
   void ReleaseEncoderResources();
+
+  // Initialize video processing (for scaling)
+  HRESULT InitializeD3DVideoProcessing(ID3D11Texture2D* input_texture);
+
+  // Perform D3D11 scaling operation
+  HRESULT PerformD3DScaling(ID3D11Texture2D* input_texture);
 
   const bool compatible_with_win7_;
 
@@ -136,7 +143,12 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
   gfx::Size input_visible_size_;
   size_t bitstream_buffer_size_;
   uint32_t frame_rate_;
-  uint32_t target_bitrate_;
+  Bitrate bitrate_;
+  bool low_latency_mode_;
+
+  // Group of picture length for encoded output stream, indicates the
+  // distance between two key frames.
+  absl::optional<uint32_t> gop_length_;
 
   Microsoft::WRL::ComPtr<IMFActivate> activate_;
   Microsoft::WRL::ComPtr<IMFTransform> encoder_;
@@ -152,9 +164,14 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
   bool input_required_;
   Microsoft::WRL::ComPtr<IMFSample> input_sample_;
   Microsoft::WRL::ComPtr<IMFSample> output_sample_;
-
-  // MediaFoundation session.
-  MFSessionLifetime session_;
+  Microsoft::WRL::ComPtr<ID3D11VideoProcessor> video_processor_;
+  Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator>
+      video_processor_enumerator_;
+  Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device_;
+  Microsoft::WRL::ComPtr<ID3D11VideoContext> video_context_;
+  D3D11_VIDEO_PROCESSOR_CONTENT_DESC vp_desc_ = {};
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> scaled_d3d11_texture_;
+  Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> vp_output_view_;
 
   // To expose client callbacks from VideoEncodeAccelerator.
   // NOTE: all calls to this object *MUST* be executed on

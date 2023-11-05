@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_READABLE_STREAM_BYTES_CONSUMER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_READABLE_STREAM_BYTES_CONSUMER_H_
 
-#include <memory>
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -26,6 +25,9 @@ class ScriptState;
 class CORE_EXPORT ReadableStreamBytesConsumer final : public BytesConsumer {
  public:
   ReadableStreamBytesConsumer(ScriptState*, ReadableStream*);
+  ReadableStreamBytesConsumer(const ReadableStreamBytesConsumer&) = delete;
+  ReadableStreamBytesConsumer& operator=(const ReadableStreamBytesConsumer&) =
+      delete;
   ~ReadableStreamBytesConsumer() override;
 
   Result BeginRead(const char** buffer, size_t* available) override;
@@ -57,7 +59,6 @@ class CORE_EXPORT ReadableStreamBytesConsumer final : public BytesConsumer {
   size_t pending_offset_ = 0;
   PublicState state_ = PublicState::kReadableOrWaiting;
   bool is_reading_ = false;
-  DISALLOW_COPY_AND_ASSIGN(ReadableStreamBytesConsumer);
 };
 
 }  // namespace blink

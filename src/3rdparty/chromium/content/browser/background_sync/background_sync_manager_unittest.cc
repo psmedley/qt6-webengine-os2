@@ -12,13 +12,13 @@
 
 #include "base/bind.h"
 #include "base/check.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_entropy_provider.h"
 #include "base/test/simple_test_clock.h"
@@ -48,8 +48,10 @@
 #include "services/network/test/test_network_connection_tracker.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
 
 namespace content {
 
@@ -58,8 +60,8 @@ namespace {
 using ::testing::_;
 using ::testing::Return;
 
-const char kScope1[] = "https://example.com/a";
-const char kScope2[] = "https://example.com/b";
+const char kScope1[] = "https://example.com/a/";
+const char kScope2[] = "https://example.com/b/";
 const char kScript1[] = "https://example.com/a/script.js";
 const char kScript2[] = "https://example.com/b/script.js";
 
@@ -115,7 +117,7 @@ class BackgroundSyncManagerTest
     // TODO(jkarlin): Create a new object with all of the necessary SW calls
     // so that we can inject test versions instead of bringing up all of this
     // extra SW stuff.
-    helper_.reset(new EmbeddedWorkerTestHelper(base::FilePath()));
+    helper_ = std::make_unique<EmbeddedWorkerTestHelper>(base::FilePath());
 
     std::unique_ptr<MockPermissionManager> mock_permission_manager(
         new testing::NiceMock<MockPermissionManager>());
@@ -134,8 +136,8 @@ class BackgroundSyncManagerTest
     // Create a StoragePartition with the correct BrowserContext so that the
     // BackgroundSyncManager can find the BrowserContext through it.
     storage_partition_impl_ = static_cast<StoragePartitionImpl*>(
-        BrowserContext::GetStoragePartitionForSite(
-            helper_->browser_context(), GURL("https://example.com")));
+        helper_->browser_context()->GetStoragePartitionForUrl(
+            GURL("https://example.com")));
     helper_->context_wrapper()->set_storage_partition(storage_partition_impl_);
 
     SetMaxSyncAttemptsAndRestartManager(1);
@@ -162,19 +164,23 @@ class BackgroundSyncManagerTest
     bool called_2 = false;
     blink::mojom::ServiceWorkerRegistrationOptions options1;
     options1.scope = GURL(kScope1);
+    blink::StorageKey key1(url::Origin::Create(GURL(kScope1)));
     blink::mojom::ServiceWorkerRegistrationOptions options2;
     options2.scope = GURL(kScope2);
+    blink::StorageKey key2(url::Origin::Create(GURL(kScope2)));
     helper_->context()->RegisterServiceWorker(
-        GURL(kScript1), options1,
+        GURL(kScript1), key1, options1,
         blink::mojom::FetchClientSettingsObject::New(),
         base::BindOnce(&RegisterServiceWorkerCallback, &called_1,
-                       &sw_registration_id_1_));
+                       &sw_registration_id_1_),
+        /*requesting_frame_id=*/GlobalRenderFrameHostId());
 
     helper_->context()->RegisterServiceWorker(
-        GURL(kScript2), options2,
+        GURL(kScript2), key2, options2,
         blink::mojom::FetchClientSettingsObject::New(),
         base::BindOnce(&RegisterServiceWorkerCallback, &called_2,
-                       &sw_registration_id_2_));
+                       &sw_registration_id_2_),
+        /*requesting_frame_id=*/GlobalRenderFrameHostId());
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(called_1);
     EXPECT_TRUE(called_2);
@@ -182,12 +188,12 @@ class BackgroundSyncManagerTest
     // Hang onto the registrations as they need to be "live" when
     // calling BackgroundSyncManager::Register.
     helper_->context_wrapper()->FindReadyRegistrationForId(
-        sw_registration_id_1_, url::Origin::Create(GURL(kScope1)),
+        sw_registration_id_1_, key1,
         base::BindOnce(FindServiceWorkerRegistrationCallback,
                        &sw_registration_1_));
 
     helper_->context_wrapper()->FindReadyRegistrationForId(
-        sw_registration_id_2_, url::Origin::Create(GURL(kScope1)),
+        sw_registration_id_2_, key1,
         base::BindOnce(FindServiceWorkerRegistrationCallback,
                        &sw_registration_2_));
     base::RunLoop().RunUntilIdle();
@@ -531,8 +537,10 @@ class BackgroundSyncManagerTest
 
   void UnregisterServiceWorker(uint64_t sw_registration_id) {
     bool called = false;
+    const GURL scope = ScopeForSWId(sw_registration_id);
     helper_->context()->UnregisterServiceWorker(
-        ScopeForSWId(sw_registration_id), /*is_immediate=*/false,
+        scope, blink::StorageKey(url::Origin::Create(scope)),
+        /*is_immediate=*/false,
         base::BindOnce(&UnregisterServiceWorkerCallback, &called));
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(called);

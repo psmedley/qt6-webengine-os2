@@ -60,6 +60,8 @@ jumbo_static_library("core") {
     "payments_validators.h",
     "secure_payment_confirmation_instrument.cc",
     "secure_payment_confirmation_instrument.h",
+    "secure_payment_confirmation_metrics.cc",
+    "secure_payment_confirmation_metrics.h",
     "url_util.cc",
     "url_util.h",
   ]
@@ -75,8 +77,6 @@ jumbo_static_library("core") {
       "payments_profile_comparator.h",
       "strings_util.cc",
       "strings_util.h",
-      "web_payment_request.cc",
-      "web_payment_request.h",
     ]
   }
 
@@ -172,6 +172,7 @@ jumbo_source_set("unit_tests") {
     "payment_method_data_unittest.cc",
     "payment_shipping_option_unittest.cc",
     "payments_validators_unittest.cc",
+    "secure_payment_confirmation_instrument_unittest.cc",
     "url_util_unittest.cc",
   ]
 
@@ -183,7 +184,6 @@ jumbo_source_set("unit_tests") {
       "payment_request_data_util_unittest.cc",
       "payment_response_unittest.cc",
       "payments_profile_comparator_unittest.cc",
-      "web_payment_request_unittest.cc",
     ]
   }
 

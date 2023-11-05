@@ -14,9 +14,9 @@
 #include "quic/core/quic_packets.h"
 #include "quic/core/quic_time.h"
 #include "quic/core/tls_chlo_extractor.h"
-#include "quic/platform/api/quic_containers.h"
 #include "quic/platform/api/quic_export.h"
 #include "quic/platform/api/quic_socket_address.h"
+#include "common/quiche_linked_hash_map.h"
 
 namespace quic {
 
@@ -69,6 +69,7 @@ class QUIC_NO_EXPORT QuicBufferedPacketStore {
     QuicTime creation_time;
     // The ALPNs from the CHLO, if found.
     std::vector<std::string> alpns;
+    std::string sni;
     // Indicating whether this is an IETF QUIC connection.
     bool ietf_quic;
     // If buffered_packets contains the CHLO, it is the version of the CHLO.
@@ -77,9 +78,9 @@ class QUIC_NO_EXPORT QuicBufferedPacketStore {
     TlsChloExtractor tls_chlo_extractor;
   };
 
-  using BufferedPacketMap = QuicLinkedHashMap<QuicConnectionId,
-                                              BufferedPacketList,
-                                              QuicConnectionIdHash>;
+  using BufferedPacketMap = quiche::QuicheLinkedHashMap<QuicConnectionId,
+                                                        BufferedPacketList,
+                                                        QuicConnectionIdHash>;
 
   class QUIC_NO_EXPORT VisitorInterface {
    public:
@@ -110,6 +111,7 @@ class QUIC_NO_EXPORT QuicBufferedPacketStore {
                                     QuicSocketAddress peer_address,
                                     bool is_chlo,
                                     const std::vector<std::string>& alpns,
+                                    const absl::string_view sni,
                                     const ParsedQuicVersion& version);
 
   // Returns true if there are any packets buffered for |connection_id|.
@@ -119,11 +121,12 @@ class QUIC_NO_EXPORT QuicBufferedPacketStore {
   // only be called when HasBufferedPackets(connection_id) is true.
   // Returns whether we've now parsed a full multi-packet TLS CHLO.
   // When this returns true, |out_alpns| is populated with the list of ALPNs
-  // extracted from the CHLO.
+  // extracted from the CHLO. |out_sni| is populated with the SNI tag in CHLO.
   bool IngestPacketForTlsChloExtraction(const QuicConnectionId& connection_id,
                                         const ParsedQuicVersion& version,
                                         const QuicReceivedPacket& packet,
-                                        std::vector<std::string>* out_alpns);
+                                        std::vector<std::string>* out_alpns,
+                                        std::string* out_sni);
 
   // Returns the list of buffered packets for |connection_id| and removes them
   // from the store. Returns an empty list if no early arrived packets for this
@@ -183,7 +186,7 @@ class QUIC_NO_EXPORT QuicBufferedPacketStore {
 
   // Keeps track of connection with CHLO buffered up already and the order they
   // arrive.
-  QuicLinkedHashMap<QuicConnectionId, bool, QuicConnectionIdHash>
+  quiche::QuicheLinkedHashMap<QuicConnectionId, bool, QuicConnectionIdHash>
       connections_with_chlo_;
 };
 

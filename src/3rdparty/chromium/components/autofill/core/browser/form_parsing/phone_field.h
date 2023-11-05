@@ -9,11 +9,11 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/strings/string_piece.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/phone_number.h"
 #include "components/autofill/core/browser/form_parsing/form_field.h"
@@ -92,7 +92,7 @@ class PhoneField : public FormField {
   PhoneField();
 
   // Returns the regular expression string corresponding to |regex_id|
-  static std::string GetRegExp(RegexType regex_id);
+  static std::u16string GetRegExp(RegexType regex_id);
 
   // Returns the constant name of the regex corresponding to |regex_id|.
   // This is useful for logging purposes.
@@ -104,7 +104,7 @@ class PhoneField : public FormField {
 
   // Convenient wrapper for ParseFieldSpecifics().
   static bool ParsePhoneField(AutofillScanner* scanner,
-                              const std::string& regex,
+                              base::StringPiece16 regex,
                               AutofillField** field,
                               const RegExLogging& logging,
                               const bool is_country_code_field,

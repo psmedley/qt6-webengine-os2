@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/macros.h"
 #include "base/notreached.h"
 #include "build/build_config.h"
@@ -46,7 +47,7 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/chromeos/policy/dlp/dlp_content_manager.h"
+#include "chrome/browser/ash/policy/dlp/dlp_content_manager.h"
 #endif
 
 using content::BrowserThread;
@@ -69,11 +70,11 @@ const extensions::Extension* GetExtension(WebContents* web_contents) {
 
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
-base::string16 GetTitle(WebContents* web_contents) {
+std::u16string GetTitle(WebContents* web_contents) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!web_contents)
-    return base::string16();
+    return std::u16string();
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   const extensions::Extension* const extension = GetExtension(web_contents);
@@ -149,7 +150,7 @@ class MediaStreamCaptureIndicator::WebContentsDeviceUsage
   std::unique_ptr<content::MediaStreamUI> RegisterMediaStream(
       const blink::MediaStreamDevices& devices,
       std::unique_ptr<MediaStreamUI> ui,
-      const base::string16 application_title);
+      const std::u16string application_title);
 
   // Increment ref-counts up based on the type of each device provided.
   void AddDevices(const blink::MediaStreamDevices& devices,
@@ -192,7 +193,7 @@ class MediaStreamCaptureIndicator::UIDelegate : public content::MediaStreamUI {
   UIDelegate(base::WeakPtr<WebContentsDeviceUsage> device_usage,
              const blink::MediaStreamDevices& devices,
              std::unique_ptr<::MediaStreamUI> ui,
-             const base::string16 application_title)
+             const std::u16string application_title)
       : device_usage_(device_usage),
         devices_(devices),
         ui_(std::move(ui)),
@@ -251,7 +252,7 @@ class MediaStreamCaptureIndicator::UIDelegate : public content::MediaStreamUI {
   base::WeakPtr<WebContentsDeviceUsage> device_usage_;
   const blink::MediaStreamDevices devices_;
   const std::unique_ptr<::MediaStreamUI> ui_;
-  const base::string16 application_title_;
+  const std::u16string application_title_;
   bool started_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(UIDelegate);
@@ -261,7 +262,7 @@ std::unique_ptr<content::MediaStreamUI>
 MediaStreamCaptureIndicator::WebContentsDeviceUsage::RegisterMediaStream(
     const blink::MediaStreamDevices& devices,
     std::unique_ptr<MediaStreamUI> ui,
-    const base::string16 application_title) {
+    const std::u16string application_title) {
   return std::make_unique<UIDelegate>(weak_factory_.GetWeakPtr(), devices,
                                       std::move(ui),
                                       std::move(application_title));
@@ -305,7 +306,7 @@ void MediaStreamCaptureIndicator::WebContentsDeviceUsage::RemoveDevices(
     }
   }
 
-  if (web_contents()) {
+  if (web_contents() && !web_contents()->IsBeingDestroyed()) {
     web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
     content_settings::UpdateLocationBarUiForWebContents(web_contents());
   }
@@ -367,7 +368,7 @@ MediaStreamCaptureIndicator::RegisterMediaStream(
     content::WebContents* web_contents,
     const blink::MediaStreamDevices& devices,
     std::unique_ptr<MediaStreamUI> ui,
-    const base::string16 application_title) {
+    const std::u16string application_title) {
   DCHECK(web_contents);
   auto& usage = usage_map_[web_contents];
   if (!usage)
@@ -508,7 +509,7 @@ void MediaStreamCaptureIndicator::MaybeCreateStatusTrayIcon(bool audio,
     return;
 
   gfx::ImageSkia image;
-  base::string16 tool_tip;
+  std::u16string tool_tip;
   GetStatusTrayIconInfo(audio, video, &image, &tool_tip);
   DCHECK(!image.isNull());
   DCHECK(!tool_tip.empty());
@@ -590,7 +591,7 @@ void MediaStreamCaptureIndicator::GetStatusTrayIconInfo(
     bool audio,
     bool video,
     gfx::ImageSkia* image,
-    base::string16* tool_tip) {
+    std::u16string* tool_tip) {
 #if defined(OS_ANDROID)
   NOTREACHED();
 #else   // !defined(OS_ANDROID)

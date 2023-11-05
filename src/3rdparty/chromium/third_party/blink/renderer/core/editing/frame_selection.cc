@@ -145,7 +145,7 @@ Element* FrameSelection::RootEditableElementOrDocumentElement() const {
   return selection_root ? selection_root : GetDocument().documentElement();
 }
 
-size_t FrameSelection::CharacterIndexForPoint(const IntPoint& point) const {
+wtf_size_t FrameSelection::CharacterIndexForPoint(const IntPoint& point) const {
   const EphemeralRange range = GetFrame()->GetEditor().RangeForPoint(point);
   if (range.IsNull())
     return kNotFound;
@@ -575,6 +575,18 @@ bool FrameSelection::ShouldPaintCaret(const LayoutBlock& block) const {
   DCHECK_GE(GetDocument().Lifecycle().GetState(),
             DocumentLifecycle::kLayoutClean);
   bool result = frame_caret_->ShouldPaintCaret(block);
+  DCHECK(!result ||
+         (ComputeVisibleSelectionInDOMTree().IsCaret() &&
+          (IsEditablePosition(ComputeVisibleSelectionInDOMTree().Start()) ||
+           frame_->IsCaretBrowsingEnabled())));
+  return result;
+}
+
+bool FrameSelection::ShouldPaintCaret(
+    const NGPhysicalBoxFragment& box_fragment) const {
+  DCHECK_GE(GetDocument().Lifecycle().GetState(),
+            DocumentLifecycle::kLayoutClean);
+  bool result = frame_caret_->ShouldPaintCaret(box_fragment);
   DCHECK(!result ||
          (ComputeVisibleSelectionInDOMTree().IsCaret() &&
           (IsEditablePosition(ComputeVisibleSelectionInDOMTree().Start()) ||
@@ -1090,24 +1102,6 @@ void FrameSelection::SetSelectionFromNone() {
                                  .Collapse(FirstPositionInOrBeforeNode(*body))
                                  .Build());
   }
-}
-
-// TODO(yoichio): We should have LocalFrame having FrameCaret,
-// Editor and PendingSelection using FrameCaret directly
-// and get rid of this.
-bool FrameSelection::ShouldShowBlockCursor() const {
-  return frame_caret_->ShouldShowBlockCursor();
-}
-
-// TODO(yoichio): We should have LocalFrame having FrameCaret,
-// Editor and PendingSelection using FrameCaret directly
-// and get rid of this.
-// TODO(yoichio): We should use "caret-shape" in "CSS Basic User Interface
-// Module Level 4" https://drafts.csswg.org/css-ui-4/
-// To use "caret-shape", we need to expose inserting mode information to CSS;
-// https://github.com/w3c/csswg-drafts/issues/133
-void FrameSelection::SetShouldShowBlockCursor(bool should_show_block_cursor) {
-  frame_caret_->SetShouldShowBlockCursor(should_show_block_cursor);
 }
 
 #if DCHECK_IS_ON()

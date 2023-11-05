@@ -17,11 +17,13 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/interactive_detector.h"
 #include "third_party/blink/renderer/core/loader/progress_tracker.h"
+#include "third_party/blink/renderer/core/mobile_metrics/mobile_friendliness_checker.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
+#include "third_party/blink/renderer/platform/graphics/paint/ignore_paint_timing_scope.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/document_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -48,7 +50,7 @@ class RecodingTimeAfterBackForwardCacheRestoreFrameCallback
  public:
   RecodingTimeAfterBackForwardCacheRestoreFrameCallback(
       PaintTiming* paint_timing,
-      size_t record_index)
+      wtf_size_t record_index)
       : paint_timing_(paint_timing), record_index_(record_index) {}
   ~RecodingTimeAfterBackForwardCacheRestoreFrameCallback() override = default;
 
@@ -80,7 +82,7 @@ class RecodingTimeAfterBackForwardCacheRestoreFrameCallback
 
  private:
   Member<PaintTiming> paint_timing_;
-  const size_t record_index_;
+  const wtf_size_t record_index_;
   size_t count_ = 0;
 };
 
@@ -103,6 +105,7 @@ void PaintTiming::MarkFirstPaint() {
   // markFirstPaint().
   if (!first_paint_.is_null())
     return;
+  DCHECK_EQ(IgnorePaintTimingScope::IgnoreDepth(), 0);
   SetFirstPaint(clock_->NowTicks());
 }
 
@@ -113,12 +116,15 @@ void PaintTiming::MarkFirstContentfulPaint() {
   // markFirstContentfulPaint().
   if (!first_contentful_paint_.is_null())
     return;
+  if (IgnorePaintTimingScope::IgnoreDepth() > 0)
+    return;
   SetFirstContentfulPaint(clock_->NowTicks());
 }
 
 void PaintTiming::MarkFirstImagePaint() {
   if (!first_image_paint_.is_null())
     return;
+  DCHECK_EQ(IgnorePaintTimingScope::IgnoreDepth(), 0);
   first_image_paint_ = clock_->NowTicks();
   SetFirstContentfulPaint(first_image_paint_);
   RegisterNotifyPresentationTime(PaintEvent::kFirstImagePaint);
@@ -175,6 +181,8 @@ void PaintTiming::SetFirstMeaningfulPaint(
 void PaintTiming::NotifyPaint(bool is_first_paint,
                               bool text_painted,
                               bool image_painted) {
+  if (IgnorePaintTimingScope::IgnoreDepth() > 0)
+    return;
   if (is_first_paint)
     MarkFirstPaint();
   if (text_painted)
@@ -222,13 +230,7 @@ void PaintTiming::SetFirstPaint(base::TimeTicks stamp) {
   if (!first_paint_.is_null())
     return;
 
-  LocalFrame* frame = GetFrame();
-  if (frame && frame->GetDocument()) {
-    Document* document = frame->GetDocument();
-    document->MarkFirstPaint();
-    if (frame->IsMainFrame())
-      document->Fetcher()->MarkFirstPaint();
-  }
+  DCHECK_EQ(IgnorePaintTimingScope::IgnoreDepth(), 0);
 
   first_paint_ = stamp;
   RegisterNotifyPresentationTime(PaintEvent::kFirstPaint);
@@ -237,6 +239,7 @@ void PaintTiming::SetFirstPaint(base::TimeTicks stamp) {
 void PaintTiming::SetFirstContentfulPaint(base::TimeTicks stamp) {
   if (!first_contentful_paint_.is_null())
     return;
+  DCHECK_EQ(IgnorePaintTimingScope::IgnoreDepth(), 0);
   SetFirstPaint(stamp);
   first_contentful_paint_ = stamp;
   RegisterNotifyPresentationTime(PaintEvent::kFirstContentfulPaint);
@@ -247,11 +250,11 @@ void PaintTiming::SetFirstContentfulPaint(base::TimeTicks stamp) {
     return;
   frame->View()->OnFirstContentfulPaint();
 
-  if (frame->GetDocument() && frame->GetDocument()->Fetcher())
-    frame->GetDocument()->Fetcher()->MarkFirstContentfulPaint();
-
   if (frame->GetFrameScheduler())
-    frame->GetFrameScheduler()->OnFirstContentfulPaint();
+    frame->GetFrameScheduler()->OnFirstContentfulPaintInMainFrame();
+
+  if (auto* mf_checker = frame->View()->GetMobileFriendlinessChecker())
+    mf_checker->NotifyFirstContentfulPaint();
 }
 
 void PaintTiming::RegisterNotifyPresentationTime(PaintEvent event) {
@@ -262,7 +265,7 @@ void PaintTiming::RegisterNotifyPresentationTime(PaintEvent event) {
 
 void PaintTiming::
     RegisterNotifyFirstPaintAfterBackForwardCacheRestorePresentationTime(
-        size_t index) {
+        wtf_size_t index) {
   RegisterNotifyPresentationTime(CrossThreadBindOnce(
       &PaintTiming::
           ReportFirstPaintAfterBackForwardCacheRestorePresentationTime,
@@ -295,7 +298,6 @@ void PaintTiming::ReportPresentationTime(PaintEvent event,
   //
   // TODO(crbug.com/738235): Consider not reporting any timestamp when failing
   // for reasons other than kDidNotSwapSwapFails.
-  ReportSwapResultHistogram(result);
   switch (event) {
     case PaintEvent::kFirstPaint:
       SetFirstPaintPresentation(timestamp);
@@ -315,11 +317,10 @@ void PaintTiming::ReportPresentationTime(PaintEvent event,
 }
 
 void PaintTiming::ReportFirstPaintAfterBackForwardCacheRestorePresentationTime(
-    size_t index,
+    wtf_size_t index,
     WebSwapResult result,
     base::TimeTicks timestamp) {
   DCHECK(IsMainThread());
-  ReportSwapResultHistogram(result);
   SetFirstPaintAfterBackForwardCacheRestorePresentation(timestamp, index);
 }
 
@@ -378,7 +379,7 @@ void PaintTiming::SetFirstImagePaintPresentation(base::TimeTicks stamp) {
 
 void PaintTiming::SetFirstPaintAfterBackForwardCacheRestorePresentation(
     base::TimeTicks stamp,
-    size_t index) {
+    wtf_size_t index) {
   // The elements are allocated when the page is restored from the cache.
   DCHECK_GE(first_paints_after_back_forward_cache_restore_presentation_.size(),
             index);
@@ -389,7 +390,7 @@ void PaintTiming::SetFirstPaintAfterBackForwardCacheRestorePresentation(
 }
 
 void PaintTiming::SetRequestAnimationFrameAfterBackForwardCacheRestore(
-    size_t index,
+    wtf_size_t index,
     size_t count) {
   auto now = clock_->NowTicks();
 
@@ -403,15 +404,10 @@ void PaintTiming::SetRequestAnimationFrameAfterBackForwardCacheRestore(
   current_rafs[count] = now;
 }
 
-void PaintTiming::ReportSwapResultHistogram(WebSwapResult result) {
-  UMA_HISTOGRAM_ENUMERATION("PageLoad.Internal.Renderer.PaintTiming.SwapResult",
-                            result);
-}
-
 void PaintTiming::OnRestoredFromBackForwardCache() {
   // Allocate the last element with 0, which indicates that the first paint
   // after this navigation doesn't happen yet.
-  size_t index =
+  wtf_size_t index =
       first_paints_after_back_forward_cache_restore_presentation_.size();
   DCHECK_EQ(index,
             request_animation_frames_after_back_forward_cache_restore_.size());

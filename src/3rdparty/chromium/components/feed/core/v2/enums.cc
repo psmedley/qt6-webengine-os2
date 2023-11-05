@@ -61,10 +61,53 @@ std::ostream& operator<<(std::ostream& out, LoadStreamStatus value) {
       return out << "kLoadedStaleDataFromStoreDueToNetworkFailure";
     case LoadStreamStatus::kDataInStoreIsExpired:
       return out << "kDataInStoreIsExpired";
+    case LoadStreamStatus::kDataInStoreIsForAnotherUser:
+      return out << "kDataInStoreIsForAnotherUser";
+    case LoadStreamStatus::kAbortWithPendingClearAll:
+      return out << "kAbortWithPendingClearAll";
+    case LoadStreamStatus::kAlreadyHaveUnreadContent:
+      return out << "kAlreadyHaveUnreadContent";
+    case LoadStreamStatus::kNotAWebFeedSubscriber:
+      return out << "kNotAWebFeedSubscriber";
   }
 #else
   return out << (static_cast<int>(value));
 #endif  // ifndef NDEBUG
+}
+
+bool IsLoadingSuccessfulAndFresh(LoadStreamStatus status) {
+  switch (status) {
+    case LoadStreamStatus::kLoadedFromStore:
+    case LoadStreamStatus::kLoadedFromNetwork:
+      return true;
+    case LoadStreamStatus::kNoStatus:
+    case LoadStreamStatus::kFailedWithStoreError:
+    case LoadStreamStatus::kNoStreamDataInStore:
+    case LoadStreamStatus::kModelAlreadyLoaded:
+    case LoadStreamStatus::kNoResponseBody:
+    case LoadStreamStatus::kProtoTranslationFailed:
+    case LoadStreamStatus::kDataInStoreIsStale:
+    case LoadStreamStatus::kDataInStoreIsStaleTimestampInFuture:
+    case LoadStreamStatus::
+        kCannotLoadFromNetworkSupressedForHistoryDelete_DEPRECATED:
+    case LoadStreamStatus::kCannotLoadFromNetworkOffline:
+    case LoadStreamStatus::kCannotLoadFromNetworkThrottled:
+    case LoadStreamStatus::kLoadNotAllowedEulaNotAccepted:
+    case LoadStreamStatus::kLoadNotAllowedArticlesListHidden:
+    case LoadStreamStatus::kCannotParseNetworkResponseBody:
+    case LoadStreamStatus::kLoadMoreModelIsNotLoaded:
+    case LoadStreamStatus::kLoadNotAllowedDisabledByEnterprisePolicy:
+    case LoadStreamStatus::kNetworkFetchFailed:
+    case LoadStreamStatus::kCannotLoadMoreNoNextPageToken:
+    case LoadStreamStatus::kDataInStoreStaleMissedLastRefresh:
+    case LoadStreamStatus::kLoadedStaleDataFromStoreDueToNetworkFailure:
+    case LoadStreamStatus::kDataInStoreIsExpired:
+    case LoadStreamStatus::kDataInStoreIsForAnotherUser:
+    case LoadStreamStatus::kAbortWithPendingClearAll:
+    case LoadStreamStatus::kAlreadyHaveUnreadContent:
+    case LoadStreamStatus::kNotAWebFeedSubscriber:
+      return false;
+  }
 }
 
 std::ostream& operator<<(std::ostream& out, UploadActionsStatus value) {
@@ -86,6 +129,10 @@ std::ostream& operator<<(std::ostream& out, UploadActionsStatus value) {
       return out << "kAbortUploadForSignedOutUser";
     case UploadActionsStatus::kAbortUploadBecauseDisabled:
       return out << "kAbortUploadBecauseDisabled";
+    case UploadActionsStatus::kAbortUploadForWrongUser:
+      return out << "kAbortUploadForWrongUser";
+    case UploadActionsStatus::kAbortUploadActionsWithPendingClearAll:
+      return out << "kAbortUploadActionsWithPendingClearAll";
   }
 #else
   return out << (static_cast<int>(value));
@@ -113,6 +160,21 @@ std::ostream& operator<<(std::ostream& out, UploadActionsBatchStatus value) {
 #else
   return out << (static_cast<int>(value));
 #endif  // ifndef NDEBUG
+}
+
+std::ostream& operator<<(std::ostream& out, WebFeedRefreshStatus value) {
+  switch (value) {
+    case WebFeedRefreshStatus::kNoStatus:
+      return out << "kNoStatus";
+    case WebFeedRefreshStatus::kSuccess:
+      return out << "kSuccess";
+    case WebFeedRefreshStatus::kNetworkFailure:
+      return out << "kNetworkFailure";
+    case WebFeedRefreshStatus::kNetworkRequestThrottled:
+      return out << "kNetworkRequestThrottled";
+    case WebFeedRefreshStatus::kAbortFetchWebFeedPendingClearAll:
+      return out << "kAbortFetchWebFeedPendingClearAll";
+  }
 }
 
 }  // namespace feed

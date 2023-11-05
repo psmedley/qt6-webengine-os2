@@ -7,8 +7,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/stringprintf.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/devtools/devtools_instrumentation.h"
@@ -229,8 +231,8 @@ void Portal::Navigate(const GURL& url,
   FrameTreeNode* portal_root = portal_contents_->GetFrameTree()->root();
   RenderFrameHostImpl* portal_frame = portal_root->current_frame_host();
 
-  // TODO(lfg): Figure out download policies for portals.
-  // https://github.com/WICG/portals/issues/150
+  // TODO(crbug.com/1237547): Change our implementation to disallow downloads for
+  // portals.
   blink::NavigationDownloadPolicy download_policy;
 
   // Navigations in portals do not affect the host's session history. Upon
@@ -255,8 +257,8 @@ void Portal::Navigate(const GURL& url,
       owner_render_frame_host_->GetLastCommittedOrigin(),
       owner_render_frame_host_->GetSiteInstance(),
       mojo::ConvertTo<Referrer>(referrer), ui::PAGE_TRANSITION_LINK,
-      should_replace_entry, download_policy, "GET", nullptr, "", nullptr, false,
-      base::nullopt);
+      should_replace_entry, download_policy, "GET", nullptr, "", nullptr,
+      network::mojom::SourceLocation::New(), false, absl::nullopt);
 
   std::move(callback).Run();
 }
@@ -467,7 +469,7 @@ bool Portal::IsSameOrigin() const {
 std::pair<bool, blink::mojom::PortalActivateResult> Portal::CanActivate() {
   WebContentsImpl* outer_contents = GetPortalHostContents();
 
-  DCHECK(owner_render_frame_host_->IsCurrent())
+  DCHECK(owner_render_frame_host_->IsActive())
       << "The binding should have been closed when the portal's outer "
          "FrameTreeNode was deleted due to swap out.";
 
@@ -605,6 +607,11 @@ void Portal::ActivateImpl(blink::TransferableMessage data,
 
   devtools_instrumentation::PortalActivated(outer_contents->GetMainFrame());
   successor_contents_raw->set_portal(nullptr);
+
+  // It's important we call this before destroying the outer contents'
+  // RenderWidgetHostView, otherwise the dialog may not be cleaned up correctly.
+  // See crbug.com/1292261 for more details.
+  outer_contents->CancelActiveAndPendingDialogs();
 
   std::unique_ptr<WebContents> predecessor_web_contents =
       delegate->ActivatePortalWebContents(outer_contents,

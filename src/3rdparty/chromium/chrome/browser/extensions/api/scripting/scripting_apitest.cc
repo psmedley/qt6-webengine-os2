@@ -66,7 +66,7 @@ IN_PROC_BROWSER_TEST_F(ScriptingAPITest, MainFrameTests) {
   OpenURLInNewTab(
       embedded_test_server()->GetURL("chromium.org", "/title2.html"));
 
-  ASSERT_TRUE(RunExtensionTest({.name = "scripting/main_frame"},
+  ASSERT_TRUE(RunExtensionTest("scripting/main_frame", {},
                                {.ignore_manifest_warnings = true}))
       << message_;
 }
@@ -84,6 +84,15 @@ IN_PROC_BROWSER_TEST_F(ScriptingAPITest, SubFramesTests) {
   ASSERT_TRUE(RunExtensionTest("scripting/sub_frames")) << message_;
 }
 
+// Test validating we don't insert content into nested WebContents.
+IN_PROC_BROWSER_TEST_F(ScriptingAPITest, NestedWebContents) {
+  OpenURLInCurrentTab(
+      embedded_test_server()->GetURL("a.com", "/page_with_embedded_pdf.html"));
+
+  // From there, the test continues in the JS.
+  ASSERT_TRUE(RunExtensionTest("scripting/nested_web_contents")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(ScriptingAPITest, CSSInjection) {
   OpenURLInCurrentTab(
       embedded_test_server()->GetURL("example.com", "/simple.html"));
@@ -97,6 +106,10 @@ IN_PROC_BROWSER_TEST_F(ScriptingAPITest, CSSInjection) {
 
 IN_PROC_BROWSER_TEST_F(ScriptingAPITest, CSSRemoval) {
   ASSERT_TRUE(RunExtensionTest("scripting/remove_css")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ScriptingAPITest, DynamicContentScripts) {
+  ASSERT_TRUE(RunExtensionTest("scripting/dynamic_scripts")) << message_;
 }
 
 }  // namespace extensions

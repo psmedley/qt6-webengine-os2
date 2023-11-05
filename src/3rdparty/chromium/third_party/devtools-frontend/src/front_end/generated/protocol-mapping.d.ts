@@ -38,6 +38,14 @@ export namespace ProtocolMapping {
     'BackgroundService.backgroundServiceEventReceived':
         [Protocol.BackgroundService.BackgroundServiceEventReceivedEvent];
     /**
+     * Fired when page is about to start a download.
+     */
+    'Browser.downloadWillBegin': [Protocol.Browser.DownloadWillBeginEvent];
+    /**
+     * Fired when download makes progress. Last call has |done| == true.
+     */
+    'Browser.downloadProgress': [Protocol.Browser.DownloadProgressEvent];
+    /**
      * Fires whenever a web font is updated.  A non-empty font parameter indicates a successfully loaded
      * web font
      */
@@ -94,7 +102,7 @@ export namespace ProtocolMapping {
      */
     'DOM.childNodeRemoved': [Protocol.DOM.ChildNodeRemovedEvent];
     /**
-     * Called when distrubution is changed.
+     * Called when distribution is changed.
      */
     'DOM.distributedNodesUpdated': [Protocol.DOM.DistributedNodesUpdatedEvent];
     /**
@@ -141,6 +149,11 @@ export namespace ProtocolMapping {
      * beginFrame to detect whether the frames were suppressed.
      */
     'HeadlessExperimental.needsBeginFramesChanged': [Protocol.HeadlessExperimental.NeedsBeginFramesChangedEvent];
+    /**
+     * Emitted only when `Input.setInterceptDrags` is enabled. Use this data with `Input.dispatchDragEvent` to
+     * restore normal drag and drop behavior.
+     */
+    'Input.dragIntercepted': [Protocol.Input.DragInterceptedEvent];
     /**
      * Fired when remote debugging connection is about to be terminated. Contains detach reason.
      */
@@ -262,6 +275,24 @@ export namespace ProtocolMapping {
      */
     'Network.trustTokenOperationDone': [Protocol.Network.TrustTokenOperationDoneEvent];
     /**
+     * Fired once when parsing the .wbn file has succeeded.
+     * The event contains the information about the web bundle contents.
+     */
+    'Network.subresourceWebBundleMetadataReceived': [Protocol.Network.SubresourceWebBundleMetadataReceivedEvent];
+    /**
+     * Fired once when parsing the .wbn file has failed.
+     */
+    'Network.subresourceWebBundleMetadataError': [Protocol.Network.SubresourceWebBundleMetadataErrorEvent];
+    /**
+     * Fired when handling requests for resources within a .wbn file.
+     * Note: this will only be fired for resources that are requested by the webpage.
+     */
+    'Network.subresourceWebBundleInnerResponseParsed': [Protocol.Network.SubresourceWebBundleInnerResponseParsedEvent];
+    /**
+     * Fired when request for resources within a .wbn file failed.
+     */
+    'Network.subresourceWebBundleInnerResponseError': [Protocol.Network.SubresourceWebBundleInnerResponseErrorEvent];
+    /**
      * Fired when the node should be inspected. This happens after call to `setInspectMode` or when
      * user manually inspects an element.
      */
@@ -323,10 +354,12 @@ export namespace ProtocolMapping {
     'Page.frameStoppedLoading': [Protocol.Page.FrameStoppedLoadingEvent];
     /**
      * Fired when page is about to start a download.
+     * Deprecated. Use Browser.downloadWillBegin instead.
      */
     'Page.downloadWillBegin': [Protocol.Page.DownloadWillBeginEvent];
     /**
      * Fired when download makes progress. Last call has |done| == true.
+     * Deprecated. Use Browser.downloadProgress instead.
      */
     'Page.downloadProgress': [Protocol.Page.DownloadProgressEvent];
     /**
@@ -351,6 +384,13 @@ export namespace ProtocolMapping {
      * Fired for top level page lifecycle events such as navigation, load, paint, etc.
      */
     'Page.lifecycleEvent': [Protocol.Page.LifecycleEventEvent];
+    /**
+     * Fired for failed bfcache history navigations if BackForwardCache feature is enabled. Do
+     * not assume any ordering with the Page.frameNavigated event. This event is fired only for
+     * main-frame history navigation where the document changes (non-same-document navigations),
+     * when bfcache navigation fails.
+     */
+    'Page.backForwardCacheNotUsed': [Protocol.Page.BackForwardCacheNotUsedEvent];
     'Page.loadEventFired': [Protocol.Page.LoadEventFiredEvent];
     /**
      * Fired when same-document navigation happens, e.g. due to history API usage or anchor navigation.
@@ -547,8 +587,8 @@ export namespace ProtocolMapping {
      */
     'Media.playerErrorsRaised': [Protocol.Media.PlayerErrorsRaisedEvent];
     /**
-     * Called whenever a player is created, or when a new agent joins and recieves
-     * a list of active players. If an agent is restored, it will recieve the full
+     * Called whenever a player is created, or when a new agent joins and receives
+     * a list of active players. If an agent is restored, it will receive the full
      * list of player ids and all events again.
      */
     'Media.playersCreated': [Protocol.Media.PlayersCreatedEvent];
@@ -595,7 +635,7 @@ export namespace ProtocolMapping {
      * Reports coverage delta since the last poll (either from an event like this, or from
      * `takePreciseCoverage` for the current isolate. May only be sent if precise code
      * coverage has been started. This event can be trigged by the embedder to, for example,
-     * trigger collection of coverage data immediatelly at a certain point in time.
+     * trigger collection of coverage data immediately at a certain point in time.
      */
     'Profiler.preciseCoverageDeltaUpdate': [Protocol.Profiler.PreciseCoverageDeltaUpdateEvent];
     /**
@@ -763,7 +803,7 @@ export namespace ProtocolMapping {
      * Runs the contrast check for the target page. Found issues are reported
      * using Audits.issueAdded event.
      */
-    'Audits.checkContrast': {paramsType: []; returnType: void;};
+    'Audits.checkContrast': {paramsType: [Protocol.Audits.CheckContrastRequest?]; returnType: void;};
     /**
      * Enables event updates for the service.
      */
@@ -798,6 +838,10 @@ export namespace ProtocolMapping {
      * Set the behavior when downloading a file.
      */
     'Browser.setDownloadBehavior': {paramsType: [Protocol.Browser.SetDownloadBehaviorRequest]; returnType: void;};
+    /**
+     * Cancel a download if in progress
+     */
+    'Browser.cancelDownload': {paramsType: [Protocol.Browser.CancelDownloadRequest]; returnType: void;};
     /**
      * Close browser gracefully.
      */
@@ -951,6 +995,12 @@ export namespace ProtocolMapping {
      */
     'CSS.setMediaText':
         {paramsType: [Protocol.CSS.SetMediaTextRequest]; returnType: Protocol.CSS.SetMediaTextResponse;};
+    /**
+     * Modifies the expression of a container query.
+     */
+    'CSS.setContainerQueryText': {
+      paramsType: [Protocol.CSS.SetContainerQueryTextRequest]; returnType: Protocol.CSS.SetContainerQueryTextResponse;
+    };
     /**
      * Modifies the rule selector.
      */
@@ -1267,6 +1317,21 @@ export namespace ProtocolMapping {
     'DOM.getFrameOwner':
         {paramsType: [Protocol.DOM.GetFrameOwnerRequest]; returnType: Protocol.DOM.GetFrameOwnerResponse;};
     /**
+     * Returns the container of the given node based on container query conditions.
+     * If containerName is given, it will find the nearest container with a matching name;
+     * otherwise it will find the nearest container regardless of its container name.
+     */
+    'DOM.getContainerForNode':
+        {paramsType: [Protocol.DOM.GetContainerForNodeRequest]; returnType: Protocol.DOM.GetContainerForNodeResponse;};
+    /**
+     * Returns the descendants of a container query container that have
+     * container queries against this container.
+     */
+    'DOM.getQueryingDescendantsForContainer': {
+      paramsType: [Protocol.DOM.GetQueryingDescendantsForContainerRequest];
+      returnType: Protocol.DOM.GetQueryingDescendantsForContainerResponse;
+    };
+    /**
      * Returns event listeners of the given object.
      */
     'DOMDebugger.getEventListeners': {
@@ -1386,11 +1451,11 @@ export namespace ProtocolMapping {
      */
     'Emulation.canEmulate': {paramsType: []; returnType: Protocol.Emulation.CanEmulateResponse;};
     /**
-     * Clears the overriden device metrics.
+     * Clears the overridden device metrics.
      */
     'Emulation.clearDeviceMetricsOverride': {paramsType: []; returnType: void;};
     /**
-     * Clears the overriden Geolocation Position and Error.
+     * Clears the overridden Geolocation Position and Error.
      */
     'Emulation.clearGeolocationOverride': {paramsType: []; returnType: void;};
     /**
@@ -1569,6 +1634,10 @@ export namespace ProtocolMapping {
       returnType: Protocol.IndexedDB.RequestDatabaseNamesResponse;
     };
     /**
+     * Dispatches a drag event into the page.
+     */
+    'Input.dispatchDragEvent': {paramsType: [Protocol.Input.DispatchDragEventRequest]; returnType: void;};
+    /**
      * Dispatches a key event to the page.
      */
     'Input.dispatchKeyEvent': {paramsType: [Protocol.Input.DispatchKeyEventRequest]; returnType: void;};
@@ -1577,6 +1646,12 @@ export namespace ProtocolMapping {
      * for example an emoji keyboard or an IME.
      */
     'Input.insertText': {paramsType: [Protocol.Input.InsertTextRequest]; returnType: void;};
+    /**
+     * This method sets the current candidate text for ime.
+     * Use imeCommitComposition to commit the final text.
+     * Use imeSetComposition with empty string as text to cancel composition.
+     */
+    'Input.imeSetComposition': {paramsType: [Protocol.Input.ImeSetCompositionRequest]; returnType: void;};
     /**
      * Dispatches a mouse event to the page.
      */
@@ -1594,6 +1669,11 @@ export namespace ProtocolMapping {
      * Ignores input events (useful while auditing page).
      */
     'Input.setIgnoreInputEvents': {paramsType: [Protocol.Input.SetIgnoreInputEventsRequest]; returnType: void;};
+    /**
+     * Prevents default drag and drop behavior and instead emits `Input.dragIntercepted` events.
+     * Drag and drop behavior can be directly controlled via `Input.dispatchDragEvent`.
+     */
+    'Input.setInterceptDrags': {paramsType: [Protocol.Input.SetInterceptDragsRequest]; returnType: void;};
     /**
      * Synthesizes a pinch gesture over a time period by issuing appropriate touch events.
      */
@@ -1722,6 +1802,14 @@ export namespace ProtocolMapping {
      */
     'Memory.getSamplingProfile': {paramsType: []; returnType: Protocol.Memory.GetSamplingProfileResponse;};
     /**
+     * Sets a list of content encodings that will be accepted. Empty list means no encoding is accepted.
+     */
+    'Network.setAcceptedEncodings': {paramsType: [Protocol.Network.SetAcceptedEncodingsRequest]; returnType: void;};
+    /**
+     * Clears accepted encodings set by setAcceptedEncodings
+     */
+    'Network.clearAcceptedEncodingsOverride': {paramsType: []; returnType: void;};
+    /**
      * Tells whether clearing browser cache is supported.
      */
     'Network.canClearBrowserCache': {paramsType: []; returnType: Protocol.Network.CanClearBrowserCacheResponse;};
@@ -1847,11 +1935,6 @@ export namespace ProtocolMapping {
      */
     'Network.setCookies': {paramsType: [Protocol.Network.SetCookiesRequest]; returnType: void;};
     /**
-     * For testing.
-     */
-    'Network.setDataSizeLimitsForTest':
-        {paramsType: [Protocol.Network.SetDataSizeLimitsForTestRequest]; returnType: void;};
-    /**
      * Specifies whether to always send extra HTTP headers with the requests from this page.
      */
     'Network.setExtraHTTPHeaders': {paramsType: [Protocol.Network.SetExtraHTTPHeadersRequest]; returnType: void;};
@@ -1917,6 +2000,9 @@ export namespace ProtocolMapping {
     'Overlay.hideHighlight': {paramsType: []; returnType: void;};
     /**
      * Highlights owner element of the frame with given id.
+     * Deprecated: Doesn't work reliablity and cannot be fixed due to process
+     * separatation (the owner node might be in a different process). Determine
+     * the owner node in the client and use highlightNode.
      */
     'Overlay.highlightFrame': {paramsType: [Protocol.Overlay.HighlightFrameRequest]; returnType: void;};
     /**
@@ -1961,6 +2047,10 @@ export namespace ProtocolMapping {
      */
     'Overlay.setShowGridOverlays': {paramsType: [Protocol.Overlay.SetShowGridOverlaysRequest]; returnType: void;};
     'Overlay.setShowFlexOverlays': {paramsType: [Protocol.Overlay.SetShowFlexOverlaysRequest]; returnType: void;};
+    'Overlay.setShowScrollSnapOverlays':
+        {paramsType: [Protocol.Overlay.SetShowScrollSnapOverlaysRequest]; returnType: void;};
+    'Overlay.setShowContainerQueryOverlays':
+        {paramsType: [Protocol.Overlay.SetShowContainerQueryOverlaysRequest]; returnType: void;};
     /**
      * Requests that backend shows paint rectangles
      */
@@ -2022,7 +2112,7 @@ export namespace ProtocolMapping {
     'Page.captureSnapshot':
         {paramsType: [Protocol.Page.CaptureSnapshotRequest?]; returnType: Protocol.Page.CaptureSnapshotResponse;};
     /**
-     * Clears the overriden device metrics.
+     * Clears the overridden device metrics.
      */
     'Page.clearDeviceMetricsOverride': {paramsType: []; returnType: void;};
     /**
@@ -2030,7 +2120,7 @@ export namespace ProtocolMapping {
      */
     'Page.clearDeviceOrientationOverride': {paramsType: []; returnType: void;};
     /**
-     * Clears the overriden Geolocation Position and Error.
+     * Clears the overridden Geolocation Position and Error.
      */
     'Page.clearGeolocationOverride': {paramsType: []; returnType: void;};
     /**
@@ -2139,6 +2229,11 @@ export namespace ProtocolMapping {
       returnType: Protocol.Page.GetPermissionsPolicyStateResponse;
     };
     /**
+     * Get Origin Trials on given frame.
+     */
+    'Page.getOriginTrials':
+        {paramsType: [Protocol.Page.GetOriginTrialsRequest]; returnType: Protocol.Page.GetOriginTrialsResponse;};
+    /**
      * Overrides the values of device screen dimensions (window.screen.width, window.screen.height,
      * window.innerWidth, window.innerHeight, and "device-width"/"device-height"-related CSS media
      * query results).
@@ -2206,9 +2301,22 @@ export namespace ProtocolMapping {
     'Page.stopScreencast': {paramsType: []; returnType: void;};
     /**
      * Forces compilation cache to be generated for every subresource script.
+     * See also: `Page.produceCompilationCache`.
      */
     'Page.setProduceCompilationCache':
         {paramsType: [Protocol.Page.SetProduceCompilationCacheRequest]; returnType: void;};
+    /**
+     * Requests backend to produce compilation cache for the specified scripts.
+     * Unlike setProduceCompilationCache, this allows client to only produce cache
+     * for specific scripts. `scripts` are appeneded to the list of scripts
+     * for which the cache for would produced. Disabling compilation cache with
+     * `setProduceCompilationCache` would reset all pending cache requests.
+     * The list may also be reset during page navigation.
+     * When script with a matching URL is encountered, the cache is optionally
+     * produced upon backend discretion, based on internal heuristics.
+     * See also: `Page.compilationCacheProduced`.
+     */
+    'Page.produceCompilationCache': {paramsType: [Protocol.Page.ProduceCompilationCacheRequest]; returnType: void;};
     /**
      * Seeds compilation cache for given url. Compilation cache does not survive
      * cross-process navigation.
@@ -2350,6 +2458,13 @@ export namespace ProtocolMapping {
      * current browsing context.
      */
     'Storage.getTrustTokens': {paramsType: []; returnType: Protocol.Storage.GetTrustTokensResponse;};
+    /**
+     * Removes all Trust Tokens issued by the provided issuerOrigin.
+     * Leaves other stored data, including the issuer's Redemption Records, intact.
+     */
+    'Storage.clearTrustTokens': {
+      paramsType: [Protocol.Storage.ClearTrustTokensRequest]; returnType: Protocol.Storage.ClearTrustTokensResponse;
+    };
     /**
      * Returns information about the system.
      */

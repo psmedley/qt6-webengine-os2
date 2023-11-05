@@ -21,7 +21,6 @@
 #include "src/gpu/GrDistanceFieldGenFromVector.h"
 #include "src/gpu/GrDrawOpTest.h"
 #include "src/gpu/GrResourceProvider.h"
-#include "src/gpu/GrSurfaceDrawContext.h"
 #include "src/gpu/GrVertexWriter.h"
 #include "src/gpu/effects/GrBitmapTextGeoProc.h"
 #include "src/gpu/effects/GrDistanceFieldGeoProc.h"
@@ -31,6 +30,7 @@
 #include "src/gpu/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
 #include "src/gpu/ops/GrSmallPathAtlasMgr.h"
 #include "src/gpu/ops/GrSmallPathShapeData.h"
+#include "src/gpu/v1/SurfaceDrawContext_v1.h"
 
 // mip levels
 static constexpr SkScalar kIdealMinMIP = 12;
@@ -66,13 +66,18 @@ GrPathRenderer::CanDrawPath GrSmallPathRenderer::onCanDrawPath(const CanDrawPath
         return CanDrawPath::kNo;
     }
 
-    // Only support paths with bounds within kMaxDim by kMaxDim,
-    // scaled to have bounds within kMaxSize by kMaxSize.
-    // The goal is to accelerate rendering of lots of small paths that may be scaling.
     SkScalar scaleFactors[2] = { 1, 1 };
+    // TODO: handle perspective distortion
     if (!args.fViewMatrix->hasPerspective() && !args.fViewMatrix->getMinMaxScales(scaleFactors)) {
         return CanDrawPath::kNo;
     }
+    // For affine transformations, too much shear can produce artifacts.
+    if (!scaleFactors[0] || scaleFactors[1]/scaleFactors[0] > 4) {
+        return CanDrawPath::kNo;
+    }
+    // Only support paths with bounds within kMaxDim by kMaxDim,
+    // scaled to have bounds within kMaxSize by kMaxSize.
+    // The goal is to accelerate rendering of lots of small paths that may be scaling.
     SkRect bounds = args.fShape->styledBounds();
     SkScalar minDim = std::min(bounds.width(), bounds.height());
     SkScalar maxDim = std::max(bounds.width(), bounds.height());
@@ -132,18 +137,17 @@ public:
 
     const char* name() const override { return "SmallPathOp"; }
 
-    void visitProxies(const VisitProxyFunc& func) const override {
+    void visitProxies(const GrVisitProxyFunc& func) const override {
         fHelper.visitProxies(func);
     }
 
     FixedFunctionFlags fixedFunctionFlags() const override { return fHelper.fixedFunctionFlags(); }
 
-    GrProcessorSet::Analysis finalize(
-            const GrCaps& caps, const GrAppliedClip* clip, bool hasMixedSampledCoverage,
-            GrClampType clampType) override {
-        return fHelper.finalizeProcessors(
-                caps, clip, hasMixedSampledCoverage, clampType,
-                GrProcessorAnalysisCoverage::kSingleChannel, &fShapes.front().fColor, &fWideColor);
+    GrProcessorSet::Analysis finalize(const GrCaps& caps, const GrAppliedClip* clip,
+                                      GrClampType clampType) override {
+        return fHelper.finalizeProcessors(caps, clip, clampType,
+                                          GrProcessorAnalysisCoverage::kSingleChannel,
+                                          &fShapes.front().fColor, &fWideColor);
     }
 
 private:
@@ -164,8 +168,9 @@ private:
     void onCreateProgramInfo(const GrCaps*,
                              SkArenaAlloc*,
                              const GrSurfaceProxyView& writeView,
+                             bool usesMSAASurface,
                              GrAppliedClip&&,
-                             const GrXferProcessor::DstProxyView&,
+                             const GrDstProxyView&,
                              GrXferBarrierFlags renderPassXferBarriers,
                              GrLoadOp colorLoadOp) override {
         // We cannot surface the SmallPathOp's programInfo at record time. As currently
@@ -176,13 +181,13 @@ private:
     void onPrePrepareDraws(GrRecordingContext*,
                            const GrSurfaceProxyView& writeView,
                            GrAppliedClip*,
-                           const GrXferProcessor::DstProxyView&,
+                           const GrDstProxyView&,
                            GrXferBarrierFlags renderPassXferBarriers,
                            GrLoadOp colorLoadOp) override {
         // TODO [PI]: implement
     }
 
-    void onPrepareDraws(Target* target) override {
+    void onPrepareDraws(GrMeshDrawTarget* target) override {
         int instanceCount = fShapes.count();
 
         GrSmallPathAtlasMgr* atlasMgr = target->smallPathAtlasManager();
@@ -292,7 +297,9 @@ private:
                     SkScalar log = SkScalarCeilToScalar(SkScalarLog2(maxScale));
                     mipScale = SkScalarPow(2, log);
                 }
-                SkASSERT(maxScale <= mipScale);
+                // Log2 isn't very precise at values close to a power of 2,
+                // so add a little tolerance here. A little bit of scaling up is fine.
+                SkASSERT(maxScale <= mipScale + SK_ScalarNearlyZero);
 
                 SkScalar mipSize = mipScale*SkScalarAbs(maxDim);
                 // For sizes less than kIdealMinMIP we want to use as large a distance field as we can
@@ -357,7 +364,7 @@ private:
         this->flush(target, &flushInfo);
     }
 
-    bool addToAtlasWithRetry(GrMeshDrawOp::Target* target,
+    bool addToAtlasWithRetry(GrMeshDrawTarget* target,
                              FlushInfo* flushInfo,
                              GrSmallPathAtlasMgr* atlasMgr,
                              int width, int height, const void* image,
@@ -385,7 +392,7 @@ private:
         return GrDrawOpAtlas::ErrorCode::kSucceeded == code;
     }
 
-    bool addDFPathToAtlas(GrMeshDrawOp::Target* target, FlushInfo* flushInfo,
+    bool addDFPathToAtlas(GrMeshDrawTarget* target, FlushInfo* flushInfo,
                           GrSmallPathAtlasMgr* atlasMgr, GrSmallPathShapeData* shapeData,
                           const GrStyledShape& shape, uint32_t dimension, SkScalar scale) const {
 
@@ -477,7 +484,7 @@ private:
                                          drawBounds, SK_DistanceFieldPad, shapeData);
     }
 
-    bool addBMPathToAtlas(GrMeshDrawOp::Target* target, FlushInfo* flushInfo,
+    bool addBMPathToAtlas(GrMeshDrawTarget* target, FlushInfo* flushInfo,
                           GrSmallPathAtlasMgr* atlasMgr, GrSmallPathShapeData* shapeData,
                           const GrStyledShape& shape, const SkMatrix& ctm) const {
         const SkRect& bounds = shape.bounds();
@@ -568,7 +575,7 @@ private:
         }
     }
 
-    void flush(GrMeshDrawOp::Target* target, FlushInfo* flushInfo) const {
+    void flush(GrMeshDrawTarget* target, FlushInfo* flushInfo) const {
         GrSmallPathAtlasMgr* atlasMgr = target->smallPathAtlasManager();
         if (!atlasMgr) {
             return;
@@ -688,7 +695,7 @@ private:
 };
 
 bool GrSmallPathRenderer::onDrawPath(const DrawPathArgs& args) {
-    GR_AUDIT_TRAIL_AUTO_FRAME(args.fRenderTargetContext->auditTrail(),
+    GR_AUDIT_TRAIL_AUTO_FRAME(args.fContext->priv().auditTrail(),
                               "GrSmallPathRenderer::onDrawPath");
 
     // we've already bailed on inverse filled paths, so this is safe
@@ -698,7 +705,7 @@ bool GrSmallPathRenderer::onDrawPath(const DrawPathArgs& args) {
     GrOp::Owner op = SmallPathOp::Make(
             args.fContext, std::move(args.fPaint), *args.fShape, *args.fViewMatrix,
             args.fGammaCorrect, args.fUserStencilSettings);
-    args.fRenderTargetContext->addDrawOp(args.fClip, std::move(op));
+    args.fSurfaceDrawContext->addDrawOp(args.fClip, std::move(op));
 
     return true;
 }

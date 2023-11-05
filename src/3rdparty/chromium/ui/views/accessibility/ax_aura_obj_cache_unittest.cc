@@ -21,6 +21,8 @@
 #include "ui/views/accessibility/ax_event_manager.h"
 #include "ui/views/accessibility/ax_event_observer.h"
 #include "ui/views/accessibility/ax_tree_source_views.h"
+#include "ui/views/accessibility/ax_virtual_view.h"
+#include "ui/views/accessibility/ax_virtual_view_wrapper.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/test/widget_test.h"
@@ -96,6 +98,59 @@ TEST_F(AXAuraObjCacheTest, TestViewRemoval) {
   delete parent;
 }
 
+// Helper for the ViewDestruction test.
+class ViewBlurObserver : public ViewObserver {
+ public:
+  ViewBlurObserver(AXAuraObjCache* cache, View* view) : cache_(cache) {
+    observation_.Observe(view);
+  }
+
+  // This is fired while the view is being destroyed, after the cache entry is
+  // removed by the AXWidgetObjWrapper. Re-create the cache entry so we can
+  // test that it will also be removed.
+  void OnViewBlurred(View* view) override {
+    ASSERT_FALSE(was_called());
+    observation_.Reset();
+
+    ASSERT_EQ(cache_->GetID(view), 0);
+    cache_->GetOrCreate(view);
+  }
+
+  bool was_called() { return !observation_.IsObserving(); }
+
+ private:
+  AXAuraObjCache* cache_;
+  base::ScopedObservation<View, ViewObserver> observation_{this};
+};
+
+// Test that stale cache entries are not left behind if a cache entry is
+// re-created during View destruction.
+TEST_F(AXAuraObjCacheTest, ViewDestruction) {
+  AXAuraObjCache cache;
+
+  WidgetAutoclosePtr widget(CreateTopLevelPlatformWidget());
+  auto* button = new LabelButton(Button::PressedCallback(), u"button");
+  widget->GetRootView()->AddChildView(button);
+  widget->Activate();
+  button->RequestFocus();
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(button->HasFocus());
+
+  cache.GetOrCreate(widget.get());
+  cache.GetOrCreate(button);
+  // Everything should have an ID, indicating it's in the cache.
+  EXPECT_GT(cache.GetID(widget.get()), 0);
+  EXPECT_GT(cache.GetID(button), 0);
+
+  ViewBlurObserver observer(&cache, button);
+  delete button;
+
+  // The button object is destroyed, so there should be no stale cache entries.
+  EXPECT_NE(button, nullptr);
+  EXPECT_EQ(ui::kInvalidAXNodeID, cache.GetID(button));
+  EXPECT_TRUE(observer.was_called());
+}
+
 TEST_F(AXAuraObjCacheTest, ValidTree) {
   // Create a parent window.
   auto parent_widget = std::make_unique<Widget>();
@@ -103,8 +158,7 @@ TEST_F(AXAuraObjCacheTest, ValidTree) {
   params.bounds = gfx::Rect(0, 0, 200, 200);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   parent_widget->Init(std::move(params));
-  parent_widget->GetNativeWindow()->SetTitle(
-      base::ASCIIToUTF16("ParentWindow"));
+  parent_widget->GetNativeWindow()->SetTitle(u"ParentWindow");
   parent_widget->Show();
 
   // Create a child window.
@@ -115,12 +169,11 @@ TEST_F(AXAuraObjCacheTest, ValidTree) {
   params.bounds = gfx::Rect(100, 100, 200, 200);
   params.ownership = views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET;
   child_widget->Init(std::move(params));
-  child_widget->GetNativeWindow()->SetTitle(base::ASCIIToUTF16("ChildWindow"));
+  child_widget->GetNativeWindow()->SetTitle(u"ChildWindow");
   child_widget->Show();
 
   // Create a child view.
-  auto* button = new LabelButton(Button::PressedCallback(),
-                                 base::ASCIIToUTF16("ChildButton"));
+  auto* button = new LabelButton(Button::PressedCallback(), u"ChildButton");
   button->SetSize(gfx::Size(20, 20));
   child_widget->GetContentsView()->AddChildView(button);
 
@@ -149,18 +202,20 @@ TEST_F(AXAuraObjCacheTest, GetFocusIsUnignoredAncestor) {
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
   params.bounds = gfx::Rect(0, 0, 200, 200);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.activatable = views::Widget::InitParams::ACTIVATABLE_YES;
+  params.activatable = views::Widget::InitParams::Activatable::kYes;
   widget->Init(std::move(params));
   widget->Show();
 
   // Note that AXAuraObjCache::GetFocusedView has some logic to force focus on
   // the first child of the client view when one cannot be found from the
-  // FocusManager.
+  // FocusManager if it has a child tree id.
   auto* client = widget->non_client_view()->client_view();
   ASSERT_NE(nullptr, client);
   auto* client_child = client->children().front();
   ASSERT_NE(nullptr, client_child);
   client_child->GetViewAccessibility().OverrideRole(ax::mojom::Role::kDialog);
+  client_child->GetViewAccessibility().OverrideChildTreeID(
+      ui::AXTreeID::CreateNewAXTreeID());
 
   View* parent = new View();
   widget->GetRootView()->AddChildView(parent);
@@ -194,11 +249,13 @@ TEST_F(AXAuraObjCacheTest, GetFocusIsUnignoredAncestor) {
   ASSERT_EQ(ax::mojom::Role::kGroup, GetData(cache.GetFocus()).role);
   ASSERT_EQ(ax_child, cache.GetFocus());
 
+  // Ignore should cause focus to move upwards.
   child->GetViewAccessibility().OverrideIsIgnored(true);
   ASSERT_EQ(ax::mojom::Role::kTextField, GetData(cache.GetFocus()).role);
   ASSERT_EQ(ax_parent, cache.GetFocus());
 
-  parent->GetViewAccessibility().OverrideIsIgnored(true);
+  // Propagate focus to ancestor should also cause focus to move upward.
+  parent->GetViewAccessibility().set_propagate_focus_to_ancestor(true);
   ASSERT_EQ(ax::mojom::Role::kWindow, GetData(cache.GetFocus()).role);
   ASSERT_EQ(cache.GetOrCreate(widget->GetRootView()), cache.GetFocus());
 
@@ -218,9 +275,6 @@ class TestingWidgetDelegateView : public WidgetDelegateView {
       delete;
 
  private:
-  // WidgetDelegate:
-  void DeleteDelegate() override { delete this; }
-
   base::RunLoop* run_loop_;
 };
 
@@ -255,7 +309,7 @@ TEST_F(AXAuraObjCacheTest, DoNotCreateWidgetWrapperOnDestroyed) {
 
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
   params.bounds = gfx::Rect(0, 0, 200, 200);
-  params.activatable = views::Widget::InitParams::ACTIVATABLE_YES;
+  params.activatable = views::Widget::InitParams::Activatable::kYes;
   params.delegate = delegate;
   widget->Init(std::move(params));
   widget->Show();
@@ -267,6 +321,33 @@ TEST_F(AXAuraObjCacheTest, DoNotCreateWidgetWrapperOnDestroyed) {
   run_loop.Run();
 
   EXPECT_EQ(ui::kInvalidAXNodeID, cache.GetID(widget));
+}
+
+TEST_F(AXAuraObjCacheTest, VirtualViews) {
+  AXAuraObjCache cache;
+  auto widget = std::make_unique<Widget>();
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.activatable = views::Widget::InitParams::Activatable::kYes;
+  widget->Init(std::move(params));
+  widget->Show();
+
+  View* parent = new View();
+  widget->GetRootView()->AddChildView(parent);
+  auto* virtual_label = new AXVirtualView;
+  virtual_label->GetCustomData().role = ax::mojom::Role::kStaticText;
+  virtual_label->GetCustomData().SetName("Label");
+  parent->GetViewAccessibility().AddVirtualChildView(
+      base::WrapUnique(virtual_label));
+
+  auto* wrapper = virtual_label->GetOrCreateWrapper(&cache);
+  ui::AXNodeID id = wrapper->GetUniqueId();
+  auto* wrapper2 = cache.Get(id);
+  EXPECT_EQ(wrapper, wrapper2);
+
+  parent->GetViewAccessibility().RemoveVirtualChildView(virtual_label);
+  EXPECT_EQ(nullptr, cache.Get(id));
 }
 
 }  // namespace

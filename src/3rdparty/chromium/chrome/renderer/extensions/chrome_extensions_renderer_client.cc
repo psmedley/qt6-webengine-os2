@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/optional.h"
 #include "base/stl_util.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/common/chrome_switches.h"
@@ -45,6 +44,7 @@
 #include "net/cookies/site_for_cookies.h"
 #include "services/metrics/public/cpp/mojo_ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -141,13 +141,15 @@ void ChromeExtensionsRendererClient::RenderThreadStarted() {
         std::make_unique<ChromeExtensionsDispatcherDelegate>());
   }
   extension_dispatcher_->OnRenderThreadStarted(thread);
-  permissions_policy_delegate_.reset(
-      new extensions::RendererPermissionsPolicyDelegate(
-          extension_dispatcher_.get()));
-  resource_request_policy_.reset(
-      new extensions::ResourceRequestPolicy(extension_dispatcher_.get()));
-  guest_view_container_dispatcher_.reset(
-      new extensions::ExtensionsGuestViewContainerDispatcher());
+  permissions_policy_delegate_ =
+      std::make_unique<extensions::RendererPermissionsPolicyDelegate>(
+
+          extension_dispatcher_.get());
+  resource_request_policy_ =
+      std::make_unique<extensions::ResourceRequestPolicy>(
+          extension_dispatcher_.get());
+  guest_view_container_dispatcher_ =
+      std::make_unique<extensions::ExtensionsGuestViewContainerDispatcher>();
 
   thread->AddObserver(extension_dispatcher_.get());
   thread->AddObserver(guest_view_container_dispatcher_.get());
@@ -298,9 +300,10 @@ void ChromeExtensionsRendererClient::WillSendRequest(
 void ChromeExtensionsRendererClient::SetExtensionDispatcherForTest(
     std::unique_ptr<extensions::Dispatcher> extension_dispatcher) {
   extension_dispatcher_ = std::move(extension_dispatcher);
-  permissions_policy_delegate_.reset(
-      new extensions::RendererPermissionsPolicyDelegate(
-          extension_dispatcher_.get()));
+  permissions_policy_delegate_ =
+      std::make_unique<extensions::RendererPermissionsPolicyDelegate>(
+
+          extension_dispatcher_.get());
 }
 
 extensions::Dispatcher*

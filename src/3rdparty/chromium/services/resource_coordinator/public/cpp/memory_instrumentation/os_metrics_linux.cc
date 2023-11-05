@@ -11,13 +11,14 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/library_loader/anchor_functions.h"
-#include "base/android/library_loader/anchor_functions_buildflags.h"
 #endif
+#include "base/android/library_loader/anchor_functions_buildflags.h"
 #include "base/debug/elf_reader.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/format_macros.h"
+#include "base/memory/page_size.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/string_number_conversions.h"
@@ -71,8 +72,7 @@ bool ResetPeakRSSIfPossible(base::ProcessId pid) {
   base::ScopedFD clear_refs_fd(open(clear_refs_file.value().c_str(), O_WRONLY));
   is_peak_rss_resettable =
       clear_refs_fd.get() >= 0 &&
-      base::WriteFileDescriptor(clear_refs_fd.get(), kClearPeakRssCommand,
-                                sizeof(kClearPeakRssCommand) - 1);
+      base::WriteFileDescriptor(clear_refs_fd.get(), kClearPeakRssCommand);
   return is_peak_rss_resettable;
 }
 
@@ -301,7 +301,7 @@ bool OSMetrics::FillOSMemoryDump(base::ProcessId pid,
 
   auto process_metrics = CreateProcessMetrics(pid);
 
-  const static size_t page_size = base::GetPageSize();
+  static const size_t page_size = base::GetPageSize();
   uint64_t rss_anon_bytes = (resident_pages - shared_pages) * page_size;
   uint64_t vm_swap_bytes = process_metrics->GetVmSwapBytes();
 

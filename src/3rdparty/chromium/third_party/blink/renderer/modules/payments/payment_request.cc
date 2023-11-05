@@ -11,11 +11,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -747,9 +746,10 @@ bool AllowedToUsePaymentRequest(const ExecutionContext* execution_context) {
   if (execution_context->IsContextDestroyed())
     return false;
 
-  // 2. If Feature Policy is enabled, return the policy for "payment" feature.
+  // 2. If Permissions Policy is enabled, return the policy for "payment"
+  // feature.
   return execution_context->IsFeatureEnabled(
-      mojom::blink::FeaturePolicyFeature::kPayment,
+      mojom::blink::PermissionsPolicyFeature::kPayment,
       ReportOptions::kReportOnFailure);
 }
 
@@ -832,6 +832,9 @@ ScriptPromise PaymentRequest::show(ScriptState* script_state,
           GetExecutionContext())) {
     payment_request_allowed |= local_frame->IsPaymentRequestTokenActive();
     if (!payment_request_allowed) {
+      UseCounter::Count(GetExecutionContext(),
+                        WebFeature::kPaymentRequestShowWithoutGestureOrToken);
+
       String message =
           "PaymentRequest.show() requires either transient user activation or "
           "delegated payment request capability";
@@ -1148,7 +1151,7 @@ void PaymentRequest::OnUpdatePaymentDetails(
   }
 
   if (!options_->requestShipping())
-    validated_details->shipping_options = base::nullopt;
+    validated_details->shipping_options = absl::nullopt;
 
   if (is_waiting_for_show_promise_to_resolve_) {
     is_waiting_for_show_promise_to_resolve_ = false;
@@ -1319,7 +1322,7 @@ PaymentRequest::PaymentRequest(
       skip_to_gpay_ready = false;
     }
   } else {
-    validated_details->shipping_options = base::nullopt;
+    validated_details->shipping_options = absl::nullopt;
   }
 
   DCHECK(shipping_type_.IsNull() || shipping_type_ == "shipping" ||
@@ -1550,6 +1553,10 @@ void PaymentRequest::OnError(PaymentErrorReason error,
       not_supported_for_invalid_origin_or_ssl_error_ = error_message;
       break;
 
+    case PaymentErrorReason::NOT_ALLOWED_ERROR:
+      exception_code = DOMExceptionCode::kNotAllowedError;
+      break;
+
     case PaymentErrorReason::UNKNOWN:
       break;
   }
@@ -1724,7 +1731,9 @@ void PaymentRequest::DispatchPaymentRequestUpdateEvent(
                                              FROM_HERE);
 
   event_target->DispatchEvent(*event);
-  if (!event->is_waiting_for_update()) {
+  // Check whether the execution context still exists, because DispatchEvent()
+  // could have destroyed it.
+  if (GetExecutionContext() && !event->is_waiting_for_update()) {
     // DispatchEvent runs synchronously. The method is_waiting_for_update()
     // returns false if the merchant did not call event.updateWith() within the
     // event handler, which is optional, so the renderer sends a message to the

@@ -82,7 +82,7 @@ class V8RuntimeAgentImpl : public protocol::Runtime::Backend {
       Maybe<bool> silent, Maybe<bool> returnByValue,
       Maybe<bool> generatePreview, Maybe<bool> userGesture,
       Maybe<bool> awaitPromise, Maybe<int> executionContextId,
-      Maybe<String16> objectGroup,
+      Maybe<String16> objectGroup, Maybe<bool> throwOnSideEffect,
       std::unique_ptr<CallFunctionOnCallback>) override;
   Response releaseObject(const String16& objectId) override;
   Response getProperties(
@@ -129,7 +129,8 @@ class V8RuntimeAgentImpl : public protocol::Runtime::Backend {
   void reportExecutionContextCreated(InspectedContext*);
   void reportExecutionContextDestroyed(InspectedContext*);
   void inspect(std::unique_ptr<protocol::Runtime::RemoteObject> objectToInspect,
-               std::unique_ptr<protocol::DictionaryValue> hints);
+               std::unique_ptr<protocol::DictionaryValue> hints,
+               int executionContextId);
   void messageAdded(V8ConsoleMessage*);
   bool enabled() const { return m_enabled; }
 
@@ -148,7 +149,8 @@ class V8RuntimeAgentImpl : public protocol::Runtime::Backend {
   bool m_enabled;
   std::unordered_map<String16, std::unique_ptr<v8::Global<v8::Script>>>
       m_compiledScripts;
-  std::set<String16> m_activeBindings;
+  // Binding name -> executionContextIds mapping.
+  std::unordered_map<String16, std::unordered_set<int>> m_activeBindings;
 };
 
 }  // namespace v8_inspector

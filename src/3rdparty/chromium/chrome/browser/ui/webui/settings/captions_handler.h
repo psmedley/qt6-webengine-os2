@@ -5,8 +5,9 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_SETTINGS_CAPTIONS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_SETTINGS_CAPTIONS_HANDLER_H_
 
-#include "chrome/browser/accessibility/soda_installer.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
+#include "components/soda/constants.h"
+#include "components/soda/soda_installer.h"
 
 class PrefService;
 
@@ -27,15 +28,20 @@ class CaptionsHandler : public SettingsPageUIHandler,
   void OnJavascriptDisallowed() override;
 
  private:
-  void HandleCaptionsSubpageReady(const base::ListValue* args);
+  void HandleLiveCaptionSectionReady(const base::ListValue* args);
   void HandleOpenSystemCaptionsDialog(const base::ListValue* args);
 
   // SodaInstaller::Observer overrides:
   void OnSodaInstalled() override;
+  void OnSodaLanguagePackInstalled(speech::LanguageCode language_code) override;
   void OnSodaError() override;
-  void OnSodaProgress(int progress) override;
+  void OnSodaLanguagePackError(speech::LanguageCode language_code) override;
+  void OnSodaProgress(int combined_progress) override;
+  void OnSodaLanguagePackProgress(int language_progress,
+                                  speech::LanguageCode language_code) override;
 
   PrefService* prefs_;
+  bool soda_available_ = true;
 };
 
 }  // namespace settings

@@ -14,7 +14,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/strings/string16.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/model/metadata_batch.h"
 #include "components/sync/model/sync_metadata_store.h"
@@ -64,6 +63,10 @@ struct PaymentsCustomerData;
 //
 //   guid               A guid string to uniquely identify the profile.
 //                      Added in version 31.
+//   label              A user-chosen and user-visible label for the profile to
+//                      help identifying the semantics of the profile. The user
+//                      can choose an arbitrary string in principle, but the
+//                      values '$HOME$' and '$WORK$' indicate a special meaning.
 //   company_name
 //   street_address     The combined lines of the street address.
 //                      Added in version 54.
@@ -98,6 +101,9 @@ struct PaymentsCustomerData;
 //                      A flag indicating whether the validity states of
 //                      different fields according to the client validity api is
 //                      updated or not. Added in version 80.
+//   disallow_settings_visible_updates
+//                      If true, a profile does not qualify to get merged with
+//                      a profile observed in a form submission.
 //
 // autofill_profile_addresses
 //   guid               The guid string that identifies the profile to which
@@ -265,6 +271,13 @@ struct PaymentsCustomerData;
 //   instrument_id      Credit card id assigned by the server to identify this
 //                      card. This is opaque to the client, and |id| is the
 //                      legacy version of this.
+//   virtual_card_enrollment_state
+//                      An enum indicating the virtual card enrollment state of
+//                      this card. UNSPECIFIED is the default value. UNENROLLED
+//                      means this card has not been enrolled to have virtual
+//                      cards. ENROLLED means the card has been enrolled and
+//                      has related virtual credit cards.
+//   card_art_url       URL to generate the card art image for this card.
 //
 // unmasked_credit_cards
 //                      When a masked credit credit card is unmasked and the
@@ -378,8 +391,8 @@ struct PaymentsCustomerData;
 //
 //   vpa_id             A string representing the UPI ID (a.k.a. VPA) value.
 //
-// offer_data           The data for credit card offers which will be presented
-//                      in payments autofill flows.
+// offer_data           The data for Autofill offers which will be presented in
+//                      payments autofill flows.
 //
 //   offer_id           The unique server ID for this offer data.
 //   offer_reward_amount
@@ -389,6 +402,14 @@ struct PaymentsCustomerData;
 //   expiry             The timestamp when the offer will go expired. Expired
 //                      offers will not be shown in the frontend.
 //   offer_details_url  The link leading to the offer details page on Gpay app.
+//   promo_code         The promo code to be autofilled for a promo code offer.
+//   value_prop_text    Server-driven UI string to explain the value of the
+//                      offer.
+//   see_details_text   Server-driven UI string to imply or link additional
+//                      details.
+//   usage_instructions_text
+//                      Server-driven UI string to instruct the user on how they
+//                      can redeem the offer.
 //
 // offer_eligible_instrument
 //                      Contains the mapping of credit cards and card linked
@@ -407,6 +428,14 @@ struct PaymentsCustomerData;
 //                      offer_id in the offer_data table.
 //   merchant_domain    List of full origins for merchant websites on which
 //                      this offer would apply.
+// TODO(crbug.com/1196021): Remove unused table.
+// credit_card_art_images
+//                      Contains the card art image for the server credit card.
+//
+//   id                 The server id of the credit card.
+//   instrument_id      The non-legacy server instrument id of the card.
+//   card_art_image     The customized card art image. Stored in the form of
+//                      BLOB.
 
 class AutofillTable : public WebDatabaseTable,
                       public syncer::SyncMetadataStore {
@@ -438,8 +467,8 @@ class AutofillTable : public WebDatabaseTable,
   // Retrieves a vector of all values which have been recorded in the autofill
   // table as the value in a form element with name |name| and which start with
   // |prefix|.  The comparison of the prefix is case insensitive.
-  bool GetFormValuesForElementName(const base::string16& name,
-                                   const base::string16& prefix,
+  bool GetFormValuesForElementName(const std::u16string& name,
+                                   const std::u16string& prefix,
                                    std::vector<AutofillEntry>* entries,
                                    int limit);
 
@@ -460,8 +489,8 @@ class AutofillTable : public WebDatabaseTable,
   bool RemoveExpiredFormElements(std::vector<AutofillChange>* changes);
 
   // Removes the row from the autofill table for the given |name| |value| pair.
-  virtual bool RemoveFormElement(const base::string16& name,
-                                 const base::string16& value);
+  virtual bool RemoveFormElement(const std::u16string& name,
+                                 const std::u16string& value);
 
   // Returns the number of unique values such that for all autofill entries with
   // that value, the interval between creation date and last usage is entirely
@@ -473,8 +502,8 @@ class AutofillTable : public WebDatabaseTable,
   virtual bool GetAllAutofillEntries(std::vector<AutofillEntry>* entries);
 
   // Retrieves a single entry from the autofill table.
-  virtual bool GetAutofillTimestamps(const base::string16& name,
-                                     const base::string16& value,
+  virtual bool GetAutofillTimestamps(const std::u16string& name,
+                                     const std::u16string& value,
                                      base::Time* date_created,
                                      base::Time* date_last_used);
 
@@ -536,7 +565,7 @@ class AutofillTable : public WebDatabaseTable,
   // available) or "unmasked" (everything is available). These functions set
   // that state.
   bool UnmaskServerCreditCard(const CreditCard& masked,
-                              const base::string16& full_number);
+                              const std::u16string& full_number);
   bool MaskServerCreditCard(const std::string& id);
 
   // Methods to add, update, remove and get the metadata for server cards and
@@ -577,9 +606,9 @@ class AutofillTable : public WebDatabaseTable,
 
   // |autofill_offer_data| must include all existing offers, since table will
   // be completely overwritten.
-  void SetCreditCardOffers(
+  void SetAutofillOffers(
       const std::vector<AutofillOfferData>& autofill_offer_data);
-  bool GetCreditCardOffers(
+  bool GetAutofillOffers(
       std::vector<std::unique_ptr<AutofillOfferData>>* autofill_offer_data);
 
   // Adds |upi_id| to the saved UPI IDs.
@@ -684,6 +713,10 @@ class AutofillTable : public WebDatabaseTable,
   bool MigrateToVersion90AddNewStructuredAddressColumns();
   bool MigrateToVersion91AddMoreStructuredAddressColumns();
   bool MigrateToVersion92AddNewPrefixedNameColumn();
+  bool MigrateToVersion93AddAutofillProfileLabelColumn();
+  bool MigrateToVersion94AddPromoCodeColumnsToOfferData();
+  bool MigrateToVersion95AddVirtualCardMetadata();
+  bool MigrateToVersion96AddAutofillProfileDisallowConfirmableMergesColumn();
 
   // Max data length saved in the table, AKA the maximum length allowed for
   // form data.
@@ -769,7 +802,7 @@ class AutofillTable : public WebDatabaseTable,
 
   // Adds to |unmasked_credit_cards|.
   void AddUnmaskedCreditCard(const std::string& id,
-                             const base::string16& full_number);
+                             const std::u16string& full_number);
 
   // Deletes server credit cards by |id|. Returns true if a row was deleted.
   bool DeleteFromMaskedCreditCards(const std::string& id);
@@ -796,6 +829,7 @@ class AutofillTable : public WebDatabaseTable,
   bool InitOfferDataTable();
   bool InitOfferEligibleInstrumentTable();
   bool InitOfferMerchantDomainTable();
+  bool InitCreditCardArtImagesTable();
 
   std::unique_ptr<AutofillTableEncryptor> autofill_table_encryptor_;
 

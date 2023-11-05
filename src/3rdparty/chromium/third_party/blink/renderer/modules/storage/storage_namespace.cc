@@ -30,12 +30,11 @@
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
-#include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/renderer/modules/storage/cached_storage_area.h"
 #include "third_party/blink/renderer/modules/storage/inspector_dom_storage_agent.h"
 #include "third_party/blink/renderer/modules/storage/storage_area.h"
@@ -47,29 +46,30 @@ namespace blink {
 const char StorageNamespace::kSupplementName[] = "SessionStorageNamespace";
 
 StorageNamespace::StorageNamespace(StorageController* controller)
-    : controller_(controller) {}
+    : Supplement(nullptr), controller_(controller) {}
 StorageNamespace::StorageNamespace(StorageController* controller,
                                    const String& namespace_id)
-    : controller_(controller), namespace_id_(namespace_id) {}
+    : Supplement(nullptr),
+      controller_(controller),
+      namespace_id_(namespace_id) {}
 
 // static
-void StorageNamespace::ProvideSessionStorageNamespaceTo(Page& page,
-                                                        WebViewClient* client) {
-  if (client) {
-    if (client->GetSessionStorageNamespaceId().empty())
-      return;
-    auto* ss_namespace =
-        StorageController::GetInstance()->CreateSessionStorageNamespace(
-            String(client->GetSessionStorageNamespaceId().data(),
-                   client->GetSessionStorageNamespaceId().size()));
-    if (!ss_namespace)
-      return;
-    ProvideTo(page, ss_namespace);
-  }
+void StorageNamespace::ProvideSessionStorageNamespaceTo(
+    Page& page,
+    const SessionStorageNamespaceId& namespace_id) {
+  if (namespace_id.empty())
+    return;
+  auto* ss_namespace =
+      StorageController::GetInstance()->CreateSessionStorageNamespace(
+          String(namespace_id.data(), namespace_id.length()));
+  if (!ss_namespace)
+    return;
+  ProvideTo(page, ss_namespace);
 }
 
 scoped_refptr<CachedStorageArea> StorageNamespace::GetCachedArea(
-    const SecurityOrigin* origin_ptr) {
+    const SecurityOrigin* origin_ptr,
+    mojo::PendingRemote<mojom::blink::StorageArea> storage_area) {
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused.
   enum class CacheMetrics {
@@ -87,10 +87,12 @@ scoped_refptr<CachedStorageArea> StorageNamespace::GetCachedArea(
                                           : CacheMetrics::kUnused;
     result = cache_it->value;
   }
-  if (IsSessionStorage())
-    LOCAL_HISTOGRAM_ENUMERATION("SessionStorage.RendererAreaCacheHit", metric);
-  else
-    UMA_HISTOGRAM_ENUMERATION("LocalStorage.RendererAreaCacheHit", metric);
+  if (IsSessionStorage()) {
+    base::UmaHistogramEnumeration("Storage.SessionStorage.RendererAreaCacheHit",
+                                  metric);
+  } else {
+    base::UmaHistogramEnumeration("LocalStorage.RendererAreaCacheHit", metric);
+  }
 
   if (result)
     return result;
@@ -101,9 +103,32 @@ scoped_refptr<CachedStorageArea> StorageNamespace::GetCachedArea(
   result = base::MakeRefCounted<CachedStorageArea>(
       IsSessionStorage() ? CachedStorageArea::AreaType::kSessionStorage
                          : CachedStorageArea::AreaType::kLocalStorage,
-      origin, controller_->TaskRunner(), this);
+      origin, controller_->TaskRunner(), this,
+      /*is_session_storage_for_prerendering=*/false, std::move(storage_area));
   cached_areas_.insert(std::move(origin), result);
   return result;
+}
+
+scoped_refptr<CachedStorageArea> StorageNamespace::CreateCachedAreaForPrerender(
+    const SecurityOrigin* origin_ptr,
+    mojo::PendingRemote<mojom::blink::StorageArea> storage_area) {
+  DCHECK((IsSessionStorage()));
+  scoped_refptr<const SecurityOrigin> origin(origin_ptr);
+  return base::MakeRefCounted<CachedStorageArea>(
+      IsSessionStorage() ? CachedStorageArea::AreaType::kSessionStorage
+                         : CachedStorageArea::AreaType::kLocalStorage,
+      origin, controller_->TaskRunner(), this,
+      /*is_session_storage_for_prerendering=*/true, std::move(storage_area));
+}
+
+void StorageNamespace::EvictSessionStorageCachedData() {
+  // Currently this is called to evict the cached data only when prerendering
+  // was triggered. TODO(crbug.com/1215680): investigate if more cache eviction
+  // is needed for non-prerender use cases.
+  DCHECK(IsSessionStorage());
+  for (auto& entry : cached_areas_) {
+    entry.value->EvictCachedData();
+  }
 }
 
 void StorageNamespace::CloneTo(const String& target) {
@@ -123,7 +148,7 @@ void StorageNamespace::CloneTo(const String& target) {
   // First, we synchronize StorageNamespace against every cached StorageArea.
   // This ensures that all StorageArea operations (e.g. Put, Delete) up to this
   // point will have executed before the StorageNamespace implementation is able
-  // to receive or process the following |Clone()| call. Given the above
+  // to receive or process the following `Clone()` call. Given the above
   // example, this would mean that A.x=42 and B.y=13 definitely WILL be present
   // in the cloned namespace.
   for (auto& entry : cached_areas_) {
@@ -135,7 +160,7 @@ void StorageNamespace::CloneTo(const String& target) {
 
   // Finally, we synchronize every StorageArea against StorageNamespace. This
   // ensures that any future calls on each StorageArea cannot be received and
-  // processed until after the above |Clone()| call executes.  Given the example
+  // processed until after the above `Clone()` call executes.  Given the example
   // above, this would mean that A.x=43 definitely WILL NOT be present in the
   // cloned namespace; only the original namespace will be updated, and A.x will
   // still hold a value of 42 in the new clone.

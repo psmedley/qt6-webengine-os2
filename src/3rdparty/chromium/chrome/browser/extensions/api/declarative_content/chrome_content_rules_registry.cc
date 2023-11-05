@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/declarative_content/chrome_content_rules_registry.h"
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/macros.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -132,6 +133,18 @@ void ChromeContentRulesRegistry::WebContentsDestroyed(
   active_rules_.erase(web_contents);
 }
 
+void ChromeContentRulesRegistry::OnWatchedPageChanged(
+    content::WebContents* contents,
+    const std::vector<std::string>& css_selectors) {
+  if (base::Contains(active_rules_, contents)) {
+    EvaluationScope evaluation_scope(this);
+    for (const std::unique_ptr<ContentPredicateEvaluator>& evaluator :
+         evaluators_) {
+      evaluator->OnWatchedPageChanged(contents, css_selectors);
+    }
+  }
+}
+
 ChromeContentRulesRegistry::ContentRule::ContentRule(
     const Extension* extension,
     std::vector<std::unique_ptr<const ContentCondition>> conditions,
@@ -155,7 +168,7 @@ ChromeContentRulesRegistry::CreateRule(
     conditions.push_back(
         CreateContentCondition(extension, predicate_factories, *value, error));
     if (!error->empty())
-      return std::unique_ptr<ContentRule>();
+      return nullptr;
   }
 
   std::vector<std::unique_ptr<const ContentAction>> actions;
@@ -163,7 +176,7 @@ ChromeContentRulesRegistry::CreateRule(
     actions.push_back(ContentAction::Create(browser_context(), extension,
                                             *value, error));
     if (!error->empty())
-      return std::unique_ptr<ContentRule>();
+      return nullptr;
   }
 
   // Note: |api_rule| may contain tags, but these are ignored.

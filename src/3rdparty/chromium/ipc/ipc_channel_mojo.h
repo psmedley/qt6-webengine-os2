@@ -80,11 +80,11 @@ class COMPONENT_EXPORT(IPC) ChannelMojo
   // These access protected API of IPC::Message, which has ChannelMojo
   // as a friend class.
   static MojoResult WriteToMessageAttachmentSet(
-      base::Optional<std::vector<mojo::native::SerializedHandlePtr>> handles,
+      absl::optional<std::vector<mojo::native::SerializedHandlePtr>> handles,
       Message* message);
   static MojoResult ReadFromMessageAttachmentSet(
       Message* message,
-      base::Optional<std::vector<mojo::native::SerializedHandlePtr>>* handles);
+      absl::optional<std::vector<mojo::native::SerializedHandlePtr>>* handles);
 
   // MessagePipeReader::Delegate
   void OnPeerPidReceived(int32_t peer_pid) override;
@@ -92,8 +92,7 @@ class COMPONENT_EXPORT(IPC) ChannelMojo
   void OnBrokenDataReceived() override;
   void OnPipeError() override;
   void OnAssociatedInterfaceRequest(
-      const std::string& name,
-      mojo::ScopedInterfaceEndpointHandle handle) override;
+      mojo::GenericPendingAssociatedReceiver receiver) override;
 
  private:
   ChannelMojo(
@@ -104,10 +103,7 @@ class COMPONENT_EXPORT(IPC) ChannelMojo
       const scoped_refptr<base::SingleThreadTaskRunner>& proxy_task_runner,
       const scoped_refptr<mojo::internal::MessageQuotaChecker>& quota_checker);
 
-  void ForwardMessageFromThreadSafePtr(mojo::Message message);
-  void ForwardMessageWithResponderFromThreadSafePtr(
-      mojo::Message message,
-      std::unique_ptr<mojo::MessageReceiver> responder);
+  void ForwardMessage(mojo::Message message);
 
   // Channel::AssociatedInterfaceSupport:
   std::unique_ptr<mojo::ThreadSafeForwarder<mojom::Channel>>
@@ -115,9 +111,10 @@ class COMPONENT_EXPORT(IPC) ChannelMojo
   void AddGenericAssociatedInterface(
       const std::string& name,
       const GenericAssociatedInterfaceFactory& factory) override;
-  void GetGenericRemoteAssociatedInterface(
-      const std::string& name,
-      mojo::ScopedInterfaceEndpointHandle handle) override;
+  void GetRemoteAssociatedInterface(
+      mojo::GenericPendingAssociatedReceiver receiver) override;
+
+  void FinishConnectOnIOThread();
 
   base::WeakPtr<ChannelMojo> weak_ptr_;
 

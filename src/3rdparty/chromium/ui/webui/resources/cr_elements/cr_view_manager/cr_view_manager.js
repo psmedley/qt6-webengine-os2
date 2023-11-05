@@ -2,7 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-(function() {
+import {html, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {assert} from '../../js/assert.m.js';
+
 /**
  * TODO(dpapad): shim for not having Animation.finished implemented. Can
  * replace with Animation.finished if Chrome implements it (see:
@@ -48,8 +51,15 @@ viewAnimations.set('fade-out', element => {
   return whenFinished(animation);
 });
 
-Polymer({
-  is: 'cr-view-manager',
+/** @polymer */
+export class CrViewManagerElement extends PolymerElement {
+  static get is() {
+    return 'cr-view-manager';
+  }
+
+  static get template() {
+    return html`{__html_template__}`;
+  }
 
   /**
    * @param {!Element} element
@@ -70,7 +80,7 @@ Polymer({
       element.dispatchEvent(
           new CustomEvent('view-exit-finish', {bubbles: true, composed: true}));
     });
-  },
+  }
 
   /**
    * @param {!Element} view
@@ -91,7 +101,7 @@ Polymer({
       effectiveView.dispatchEvent(new CustomEvent(
           'view-enter-finish', {bubbles: true, composed: true}));
     });
-  },
+  }
 
   /**
    * @param {string} newViewId
@@ -112,7 +122,7 @@ Polymer({
     }
 
     return Promise.all(promises);
-  },
-});
-/* #ignore */ console.warn('crbug/1173575, non-JS module files deprecated.');
-})();
+  }
+}
+
+customElements.define(CrViewManagerElement.is, CrViewManagerElement);

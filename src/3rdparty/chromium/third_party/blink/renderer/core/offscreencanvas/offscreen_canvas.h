@@ -27,8 +27,8 @@ class CanvasContextCreationAttributesCore;
 class CanvasResourceProvider;
 class ImageBitmap;
 class
-    OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContext;
-typedef OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContext
+    OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContextOrGPUCanvasContext;
+typedef OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContextOrGPUCanvasContext
     OffscreenRenderingContext;
 
 class CORE_EXPORT OffscreenCanvas final
@@ -57,7 +57,8 @@ class CORE_EXPORT OffscreenCanvas final
 
   // CanvasResourceDispatcherClient
   bool BeginFrame() override;
-  void SetFilterQualityInResource(SkFilterQuality filter_quality) override;
+  void SetFilterQualityInResource(
+      cc::PaintFlags::FilterQuality filter_quality) override;
 
   // API Methods
   ImageBitmap* transferToImageBitmap(ScriptState*, ExceptionState&);
@@ -100,10 +101,6 @@ class CORE_EXPORT OffscreenCanvas final
   uint32_t ClientId() const { return client_id_; }
   uint32_t SinkId() const { return sink_id_; }
 
-  void SetFilterQuality(const SkFilterQuality& quality) {
-    filter_quality_ = quality;
-  }
-
   void AllowHighPerformancePowerPreference() {
     allow_high_performance_power_preference_ = true;
   }
@@ -117,8 +114,8 @@ class CORE_EXPORT OffscreenCanvas final
   bool PushFrameIfNeeded();
   bool PushFrame(scoped_refptr<CanvasResource> frame,
                  const SkIRect& damage_rect) override;
-  void DidDraw(const FloatRect&) override;
-  void DidDraw() override;
+  void DidDraw(const SkIRect&) override;
+  using CanvasRenderingContextHost::DidDraw;
   void Commit(scoped_refptr<CanvasResource> bitmap_image,
               const SkIRect& damage_rect) override;
   bool ShouldAccelerate2dContext() const override;
@@ -126,11 +123,11 @@ class CORE_EXPORT OffscreenCanvas final
   UkmParameters GetUkmParameters() override;
 
   // Partial CanvasResourceHost implementation
-  void NotifyGpuContextLost() override {}
+  void NotifyGpuContextLost() override;
   void SetNeedsCompositingUpdate() override {}
   // TODO(fserb): Merge this with HTMLCanvasElement::UpdateMemoryUsage
   void UpdateMemoryUsage() override;
-  SkFilterQuality FilterQuality() const override { return filter_quality_; }
+  size_t GetMemoryUsage() const override;
 
   // EventTarget implementation
   const AtomicString& InterfaceName() const final {
@@ -151,13 +148,15 @@ class CORE_EXPORT OffscreenCanvas final
   // ImageBitmapSource implementation
   IntSize BitmapSourceSize() const final;
   ScriptPromise CreateImageBitmap(ScriptState*,
-                                  base::Optional<IntRect>,
+                                  absl::optional<IntRect>,
                                   const ImageBitmapOptions*,
                                   ExceptionState&) final;
 
   // CanvasImageSource implementation
-  scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
-                                               const FloatSize&) final;
+  scoped_refptr<Image> GetSourceImageForCanvas(
+      SourceImageStatus*,
+      const FloatSize&,
+      const AlphaDisposition alpha_disposition = kPremultiplyAlpha) final;
   bool WouldTaintOrigin() const final { return !origin_clean_; }
   FloatSize ElementSize(const FloatSize& default_object_size,
                         const RespectImageOrientationEnum) const final {
@@ -252,8 +251,6 @@ class CORE_EXPORT OffscreenCanvas final
   bool needs_matrix_clip_restore_ = false;
   bool needs_push_frame_ = false;
   bool inside_worker_raf_ = false;
-
-  SkFilterQuality filter_quality_ = kLow_SkFilterQuality;
 
   // An offscreen canvas should only prefer the high-performance GPU if it is
   // initialized by transferring control from an HTML canvas that is not

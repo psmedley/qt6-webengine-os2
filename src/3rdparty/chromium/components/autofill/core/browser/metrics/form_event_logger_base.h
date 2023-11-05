@@ -7,12 +7,15 @@
 
 #include <string>
 
+#include "base/time/time.h"
+#include "components/autofill/core/browser/autofill_ablation_study.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/metrics/form_events.h"
 #include "components/autofill/core/browser/sync_utils.h"
 #include "components/autofill/core/common/form_field_data.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace autofill {
 
@@ -49,21 +52,28 @@ class FormEventLoggerBase {
   void OnUserHideSuggestions(const FormStructure& form,
                              const AutofillField& field);
 
-  void OnDidShowSuggestions(const FormStructure& form,
-                            const AutofillField& field,
-                            const base::TimeTicks& form_parsed_timestamp,
-                            AutofillSyncSigninState sync_state,
-                            bool off_the_record);
+  virtual void OnDidShowSuggestions(
+      const FormStructure& form,
+      const AutofillField& field,
+      const base::TimeTicks& form_parsed_timestamp,
+      AutofillSyncSigninState sync_state,
+      bool off_the_record);
 
   void OnWillSubmitForm(AutofillSyncSigninState sync_state,
                         const FormStructure& form);
 
-  void OnFormSubmitted(bool force_logging,
-                       AutofillSyncSigninState sync_state,
+  void OnFormSubmitted(AutofillSyncSigninState sync_state,
                        const FormStructure& form);
 
   void OnTypedIntoNonFilledField();
   void OnEditedAutofilledField();
+
+  // See BrowserAutofillManager::SuggestionContext for the definitions of the
+  // AblationGroup parameters.
+  void SetAblationStatus(AblationGroup ablation_group,
+                         AblationGroup conditional_ablation_group);
+  void SetTimeFromInteractionToSubmission(
+      base::TimeDelta time_from_interaction_to_submission);
 
  protected:
   virtual ~FormEventLoggerBase();
@@ -82,7 +92,7 @@ class FormEventLoggerBase {
   // |form_type_name_|.
   virtual void LogUkmInteractedWithForm(FormSignature form_signature);
 
-  virtual void OnSuggestionsShownOnce() {}
+  virtual void OnSuggestionsShownOnce(const FormStructure& form) {}
   virtual void OnSuggestionsShownSubmittedOnce(const FormStructure& form) {}
 
   // Logs |event| in a histogram prefixed with |name| according to the
@@ -96,6 +106,11 @@ class FormEventLoggerBase {
   // Records UMA metrics on the funnel and key metrics. This is not virtual
   // because it is called in the destructor.
   void RecordFunnelAndKeyMetrics();
+
+  // Records UMA metrics if this form submission happened as part of an ablation
+  // study or the corresponding control group. This is not virtual because it is
+  // called in the destructor.
+  void RecordAblationMetrics();
 
   // Constructor parameters.
   std::string form_type_name_;
@@ -116,6 +131,9 @@ class FormEventLoggerBase {
   bool logged_suggestion_filled_was_server_data_ = false;
   bool has_logged_typed_into_non_filled_field_ = false;
   bool has_logged_edited_autofilled_field_ = false;
+  AblationGroup ablation_group_ = AblationGroup::kDefault;
+  AblationGroup conditional_ablation_group_ = AblationGroup::kDefault;
+  absl::optional<base::TimeDelta> time_from_interaction_to_submission_;
 
   // The last field that was polled for suggestions.
   FormFieldData last_polled_field_;

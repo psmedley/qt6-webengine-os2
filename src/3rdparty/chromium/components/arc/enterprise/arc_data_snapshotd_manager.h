@@ -7,8 +7,10 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "components/arc/enterprise/arc_apps_tracker.h"
@@ -30,6 +32,17 @@ namespace data_snapshotd {
 
 class ArcDataRemoveRequestedPrefHandler;
 class ArcDataSnapshotdBridge;
+
+// Ozone platform headless command line switch value.
+extern const char kHeadless[];
+// Environment variable to be passed to UpstartClient::StartArcDataSnapshotd
+// if the frecon (freon console from platform/frecon) must be restarted.
+// The environment variable is passed in order to restart frecon from a
+// configuration script and not grant excessive permissions to
+// arc-data-snapshotd.
+// The restart of frecon is needed only when system UI is shown (in BlockedUi
+// state).
+extern const char kRestartFreconEnv[];
 
 // This class manages ARC data/ directory snapshots and controls the lifetime of
 // the arc-data-snapshotd daemon.
@@ -79,6 +92,8 @@ class ArcDataSnapshotdManager final
 
     // Creates an ARC apps tracker.
     virtual std::unique_ptr<ArcAppsTracker> CreateAppsTracker() = 0;
+
+    virtual void RestartChrome(const base::CommandLine& command_line) = 0;
   };
 
   // This class operates with a snapshot related info either last or
@@ -87,8 +102,8 @@ class ArcDataSnapshotdManager final
   class SnapshotInfo {
    public:
     // Creates new snapshot with current parameters.
-    explicit SnapshotInfo(bool last);
-    SnapshotInfo(const base::Value* value, bool last);
+    explicit SnapshotInfo(bool is_last);
+    SnapshotInfo(const base::Value* value, bool is_last);
     SnapshotInfo(const SnapshotInfo&) = delete;
     SnapshotInfo& operator=(const SnapshotInfo&) = delete;
     ~SnapshotInfo();
@@ -100,7 +115,7 @@ class ArcDataSnapshotdManager final
         const base::Time& creation_date,
         bool verified,
         bool updated,
-        bool last);
+        bool is_last);
 
     // Syncs stored snapshot info to dictionaty |value|.
     void Sync(base::Value* value);
@@ -114,8 +129,10 @@ class ArcDataSnapshotdManager final
     void set_verified(bool verified) { verified_ = true; }
     bool is_verified() const { return verified_; }
 
+    void set_is_last(bool is_last) { is_last_ = is_last; }
     bool is_last() const { return is_last_; }
 
+    void set_updated(bool updated) { updated_ = updated; }
     bool updated() const { return updated_; }
 
    private:
@@ -123,7 +140,7 @@ class ArcDataSnapshotdManager final
                  const base::Time& creation_date,
                  bool verified,
                  bool updated,
-                 bool last);
+                 bool is_last);
 
     // Returns dictionary path in arc.snapshot local state preference.
     std::string GetDictPath() const;
@@ -133,6 +150,7 @@ class ArcDataSnapshotdManager final
     // Called once this snapshot is expired.
     void OnSnapshotExpired();
 
+    // True if the instance is the last snapshot taken.
     bool is_last_;
 
     // Values should be kept in sync with values stored in arc.snapshot.last or
@@ -168,13 +186,19 @@ class ArcDataSnapshotdManager final
         PrefService* local_state,
         bool blocked_ui_mode,
         bool started,
-        std::unique_ptr<SnapshotInfo> last,
-        std::unique_ptr<SnapshotInfo> previous);
+        std::unique_ptr<SnapshotInfo> last_snapshot,
+        std::unique_ptr<SnapshotInfo> previous_snapshot);
 
     // Parses the snapshot info from arc.snapshot preference.
     void Parse();
     // Syncs stored snapshot info to local state.
     void Sync();
+
+    // Syncs stored snapshot info to local state.
+    // |callback| is executed once all changes to the local state have been
+    // committed.
+    void Sync(base::OnceClosure callback);
+
     // Clears snapshot related info in arc.snapshot preference either last
     // if |last| is true or previous otherwise.
     void ClearSnapshot(bool last);
@@ -194,15 +218,15 @@ class ArcDataSnapshotdManager final
     }
     bool is_blocked_ui_mode() const { return blocked_ui_mode_; }
     bool started() const { return started_; }
-    SnapshotInfo* last() { return last_.get(); }
-    SnapshotInfo* previous() { return previous_.get(); }
+    SnapshotInfo* last_snapshot() { return last_snapshot_.get(); }
+    SnapshotInfo* previous_snapshot() { return previous_snapshot_.get(); }
 
    private:
     Snapshot(PrefService* local_state,
              bool blocked_ui_mode,
              bool started,
-             std::unique_ptr<SnapshotInfo> last,
-             std::unique_ptr<SnapshotInfo> previous);
+             std::unique_ptr<SnapshotInfo> last_snapshot,
+             std::unique_ptr<SnapshotInfo> previous_snapshot);
 
     // Unowned pointer - outlives this instance.
     PrefService* const local_state_;
@@ -211,8 +235,8 @@ class ArcDataSnapshotdManager final
     // preference.
     bool blocked_ui_mode_ = false;
     bool started_ = false;
-    std::unique_ptr<SnapshotInfo> last_;
-    std::unique_ptr<SnapshotInfo> previous_;
+    std::unique_ptr<SnapshotInfo> last_snapshot_;
+    std::unique_ptr<SnapshotInfo> previous_snapshot_;
   };
 
   ArcDataSnapshotdManager(PrefService* local_state,
@@ -240,6 +264,8 @@ class ArcDataSnapshotdManager final
   // Returns true if autologin is allowed to be performed and manager is not
   // waiting for the response from arc-data-snapshotd daemon.
   bool IsAutoLoginAllowed();
+  // Returns true if blocked UI screen is shown.
+  bool IsBlockedUiScreenShown();
 
   // Returns true if ARC data snapshot update is in progress.
   bool IsSnapshotInProgress();
@@ -272,6 +298,9 @@ class ArcDataSnapshotdManager final
 
   State state() const { return state_; }
 
+  base::OnceClosure& get_reset_autologin_callback_for_testing() {
+    return reset_autologin_callback_;
+  }
   void set_reset_autologin_callback(base::OnceClosure callback) {
     reset_autologin_callback_ = std::move(callback);
   }
@@ -287,6 +316,9 @@ class ArcDataSnapshotdManager final
   }
 
  private:
+  // Local State initialization observer.
+  void OnLocalStateInitialized(bool intialized);
+
   // Attempts to arc-data-snapshotd daemon regardless of state of the class.
   // Runs |callback| once finished.
   void StopDaemon(base::OnceClosure callback);
@@ -339,6 +371,14 @@ class ArcDataSnapshotdManager final
 
   // Called once a progress bar is updated.
   void OnUiUpdated(bool success);
+
+  // Called once user escapes the blocked UI screen.
+  void OnUiClosed();
+
+  // Returns the list of daemon enviromnet variables to be passed to upstart of
+  // arc-data-snapshotd daemon.
+  // Currently, sets RESTART_FRECON=1 if the UI should be blocked.
+  std::vector<std::string> GetStartEnvVars();
 
   static bool is_snapshot_enabled_for_testing_;
 

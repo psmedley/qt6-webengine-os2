@@ -4,9 +4,10 @@
 
 #include "third_party/blink/renderer/core/animation/animatable.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/unrestricted_double_or_keyframe_animation_options.h"
-#include "third_party/blink/renderer/bindings/core/v8/unrestricted_double_or_keyframe_effect_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_get_animations_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_keyframe_animation_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_keyframeanimationoptions_unrestricteddouble.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_keyframeeffectoptions_unrestricteddouble.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
@@ -18,7 +19,7 @@
 #include "third_party/blink/renderer/core/animation/timing_input.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/feature_policy/layout_animations_policy.h"
+#include "third_party/blink/renderer/core/permissions_policy/layout_animations_policy.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
@@ -28,8 +29,8 @@ namespace {
 
 // A helper method which is used to trigger a violation report for cases where
 // the |element.animate| API is used to animate a CSS property which is blocked
-// by the feature policy 'layout-animations'.
-void ReportFeaturePolicyViolationsIfNecessary(
+// by the permissions policy 'layout-animations'.
+void ReportPermissionsPolicyViolationsIfNecessary(
     const ExecutionContext& context,
     const KeyframeEffectModelBase& effect) {
   for (const auto& property_handle : effect.Properties()) {
@@ -43,15 +44,22 @@ void ReportFeaturePolicyViolationsIfNecessary(
   }
 }
 
-UnrestrictedDoubleOrKeyframeEffectOptions CoerceEffectOptions(
-    UnrestrictedDoubleOrKeyframeAnimationOptions options) {
-  if (options.IsKeyframeAnimationOptions()) {
-    return UnrestrictedDoubleOrKeyframeEffectOptions::FromKeyframeEffectOptions(
-        options.GetAsKeyframeAnimationOptions());
-  } else {
-    return UnrestrictedDoubleOrKeyframeEffectOptions::FromUnrestrictedDouble(
-        options.GetAsUnrestrictedDouble());
+V8UnionKeyframeEffectOptionsOrUnrestrictedDouble* CoerceEffectOptions(
+    const V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble* options) {
+  switch (options->GetContentType()) {
+    case V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble::ContentType::
+        kKeyframeAnimationOptions:
+      return MakeGarbageCollected<
+          V8UnionKeyframeEffectOptionsOrUnrestrictedDouble>(
+          options->GetAsKeyframeAnimationOptions());
+    case V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble::ContentType::
+        kUnrestrictedDouble:
+      return MakeGarbageCollected<
+          V8UnionKeyframeEffectOptionsOrUnrestrictedDouble>(
+          options->GetAsUnrestrictedDouble());
   }
+  NOTREACHED();
+  return nullptr;
 }
 
 }  // namespace
@@ -60,7 +68,7 @@ UnrestrictedDoubleOrKeyframeEffectOptions CoerceEffectOptions(
 Animation* Animatable::animate(
     ScriptState* script_state,
     const ScriptValue& keyframes,
-    const UnrestrictedDoubleOrKeyframeAnimationOptions& options,
+    const V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble* options,
     ExceptionState& exception_state) {
   if (!script_state->ContextIsValid())
     return nullptr;
@@ -78,14 +86,14 @@ Animation* Animatable::animate(
   if (!element->GetExecutionContext())
     return nullptr;
 
-  ReportFeaturePolicyViolationsIfNecessary(*element->GetExecutionContext(),
-                                           *effect->Model());
-  if (!options.IsKeyframeAnimationOptions())
+  ReportPermissionsPolicyViolationsIfNecessary(*element->GetExecutionContext(),
+                                               *effect->Model());
+  if (!options->IsKeyframeAnimationOptions())
     return element->GetDocument().Timeline().Play(effect);
 
   Animation* animation;
   const KeyframeAnimationOptions* options_dict =
-      options.GetAsKeyframeAnimationOptions();
+      options->GetAsKeyframeAnimationOptions();
   if (!options_dict->hasTimeline()) {
     animation = element->GetDocument().Timeline().Play(effect);
   } else if (AnimationTimeline* timeline = options_dict->timeline()) {
@@ -120,8 +128,8 @@ Animation* Animatable::animate(ScriptState* script_state,
   if (!element->GetExecutionContext())
     return nullptr;
 
-  ReportFeaturePolicyViolationsIfNecessary(*element->GetExecutionContext(),
-                                           *effect->Model());
+  ReportPermissionsPolicyViolationsIfNecessary(*element->GetExecutionContext(),
+                                               *effect->Model());
   return element->GetDocument().Timeline().Play(effect);
 }
 

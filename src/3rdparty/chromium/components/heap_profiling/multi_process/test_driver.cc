@@ -5,6 +5,7 @@
 #include "components/heap_profiling/multi_process/test_driver.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 
 #include "base/allocator/partition_allocator/partition_root.h"
@@ -19,7 +20,6 @@
 #include "base/test/bind.h"
 #include "base/threading/platform_thread.h"
 #include "base/trace_event/heap_profiler.h"
-#include "base/trace_event/heap_profiler_event_filter.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/heap_profiling/multi_process/supervisor.h"
@@ -343,10 +343,11 @@ TestDriver::TestDriver()
     : wait_for_ui_thread_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                           base::WaitableEvent::InitialState::NOT_SIGNALED) {
   base::PartitionAllocGlobalInit(HandleOOM);
-  partition_allocator_.init({base::PartitionOptions::Alignment::kRegular,
+  partition_allocator_.init({base::PartitionOptions::AlignedAlloc::kDisallowed,
                              base::PartitionOptions::ThreadCache::kDisabled,
                              base::PartitionOptions::Quarantine::kDisallowed,
-                             base::PartitionOptions::RefCount::kDisabled});
+                             base::PartitionOptions::Cookies::kAllowed,
+                             base::PartitionOptions::RefCount::kDisallowed});
 }
 TestDriver::~TestDriver() {
   base::PartitionAllocGlobalUninitForTesting();
@@ -587,7 +588,7 @@ void TestDriver::CollectResults(bool synchronous) {
   std::unique_ptr<base::RunLoop> run_loop;
 
   if (synchronous) {
-    run_loop.reset(new base::RunLoop);
+    run_loop = std::make_unique<base::RunLoop>();
     finish_tracing_closure = run_loop->QuitClosure();
   } else {
     finish_tracing_closure = base::BindOnce(
@@ -636,8 +637,7 @@ bool TestDriver::ValidateBrowserAllocations(base::Value* dump_json) {
   // the same [an effectively empty] backtrace and get glommed together. More
   // investigation is necessary. For now, I'm turning this off for Android.
   // https://crbug.com/786450.
-  if (!HasPseudoFrames())
-    should_validate_dumps = false;
+  should_validate_dumps = false;
 #endif
 
   std::string thread_name = ShouldIncludeNativeThreadNames() ? kThreadName : "";
@@ -730,15 +730,9 @@ bool TestDriver::ShouldIncludeNativeThreadNames() {
   return options_.stack_mode == mojom::StackMode::NATIVE_WITH_THREAD_NAMES;
 }
 
-bool TestDriver::HasPseudoFrames() {
-  return options_.stack_mode == mojom::StackMode::PSEUDO ||
-         options_.stack_mode == mojom::StackMode::MIXED;
-}
-
 bool TestDriver::HasNativeFrames() {
   return options_.stack_mode == mojom::StackMode::NATIVE_WITH_THREAD_NAMES ||
-         options_.stack_mode == mojom::StackMode::NATIVE_WITHOUT_THREAD_NAMES ||
-         options_.stack_mode == mojom::StackMode::MIXED;
+         options_.stack_mode == mojom::StackMode::NATIVE_WITHOUT_THREAD_NAMES;
 }
 
 void TestDriver::WaitForProfilingToStartForBrowserUIThread() {

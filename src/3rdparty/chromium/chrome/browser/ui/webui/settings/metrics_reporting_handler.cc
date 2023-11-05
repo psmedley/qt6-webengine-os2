@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/branding_buildflags.h"
 #include "build/chromeos_buildflags.h"
 
-#if defined(GOOGLE_CHROME_BUILD) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS_ASH)
 
 #include "chrome/browser/ui/webui/settings/metrics_reporting_handler.h"
 
@@ -21,7 +22,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chromeos/crosapi/mojom/metrics_reporting.mojom.h"  // nogncheck
-#include "chromeos/lacros/lacros_chrome_service_impl.h"
+#include "chromeos/lacros/lacros_service.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace settings {
@@ -81,7 +82,7 @@ std::unique_ptr<base::DictionaryValue>
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   // To match the pre-Lacros settings UX, we show the managed icon if the ash
   // device-level metrics reporting pref is managed. https://crbug.com/1148604
-  auto* lacros_chrome_service = chromeos::LacrosChromeServiceImpl::Get();
+  auto* lacros_chrome_service = chromeos::LacrosService::Get();
   // Service may be null in tests.
   bool managed = lacros_chrome_service &&
                  lacros_chrome_service->init_params()->ash_metrics_managed ==
@@ -113,7 +114,7 @@ void MetricsReportingHandler::HandleSetMetricsReportingEnabled(
   // To match the pre-Lacros settings UX, the metrics reporting toggle in Lacros
   // browser settings controls both browser metrics reporting and OS metrics
   // reporting. See https://crbug.com/1148604.
-  auto* lacros_chrome_service = chromeos::LacrosChromeServiceImpl::Get();
+  auto* lacros_chrome_service = chromeos::LacrosService::Get();
   // Service may be null in tests.
   if (!lacros_chrome_service)
     return;
@@ -150,4 +151,4 @@ void MetricsReportingHandler::SendMetricsReportingChange() {
 
 }  // namespace settings
 
-#endif  // defined(GOOGLE_CHROME_BUILD) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS_ASH)

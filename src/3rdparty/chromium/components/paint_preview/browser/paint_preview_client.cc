@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_functions.h"
@@ -15,6 +16,7 @@
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
+#include "base/trace_event/trace_event.h"
 #include "base/unguessable_token.h"
 #include "components/paint_preview/common/capture_result.h"
 #include "components/paint_preview/common/mojom/paint_preview_recorder.mojom-forward.h"
@@ -23,6 +25,7 @@
 #include "components/ukm/content/source_url_recorder.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -116,8 +119,12 @@ mojom::PaintPreviewCaptureParamsPtr CreateRecordingRequestParams(
   // when clip_rects are used intentionally to limit capture time.
   mojo_params->clip_rect_is_hint = true;
   mojo_params->is_main_frame = capture_params.is_main_frame;
+  mojo_params->skip_accelerated_content =
+      capture_params.skip_accelerated_content;
   mojo_params->file = std::move(file);
   mojo_params->max_capture_size = capture_params.max_capture_size;
+  mojo_params->max_decoded_image_size_bytes =
+      capture_params.max_decoded_image_size_bytes;
   return mojo_params;
 }
 
@@ -312,6 +319,10 @@ void PaintPreviewClient::CapturePaintPreview(
   document_data.accepted_tokens = CreateAcceptedTokenList(render_frame_host);
   document_data.capture_links = params.inner.capture_links;
   document_data.max_per_capture_size = params.inner.max_capture_size;
+  document_data.max_decoded_image_size_bytes =
+      params.inner.max_decoded_image_size_bytes;
+  document_data.skip_accelerated_content =
+      params.inner.skip_accelerated_content;
   all_document_data_.insert(
       {params.inner.document_guid, std::move(document_data)});
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
@@ -336,6 +347,8 @@ void PaintPreviewClient::CaptureSubframePaintPreview(
   params.is_main_frame = false;
   params.capture_links = it->second.capture_links;
   params.max_capture_size = it->second.max_per_capture_size;
+  params.max_decoded_image_size_bytes = it->second.max_decoded_image_size_bytes;
+  params.skip_accelerated_content = it->second.skip_accelerated_content;
   CapturePaintPreviewInternal(params, render_subframe_host);
 }
 
@@ -417,7 +430,7 @@ void PaintPreviewClient::CapturePaintPreviewInternal(
       params,
       base::BindOnce(&PaintPreviewClient::RequestCaptureOnUIThread,
                      weak_ptr_factory_.GetWeakPtr(), frame_guid, params,
-                     content::GlobalFrameRoutingId(
+                     content::GlobalRenderFrameHostId(
                          render_frame_host->GetProcess()->GetID(),
                          render_frame_host->GetRoutingID())));
 }
@@ -425,7 +438,7 @@ void PaintPreviewClient::CapturePaintPreviewInternal(
 void PaintPreviewClient::RequestCaptureOnUIThread(
     const base::UnguessableToken& frame_guid,
     const RecordingParams& params,
-    const content::GlobalFrameRoutingId& render_frame_id,
+    const content::GlobalRenderFrameHostId& render_frame_id,
     mojom::PaintPreviewStatus status,
     mojom::PaintPreviewCaptureParamsPtr capture_params) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -486,7 +499,7 @@ void PaintPreviewClient::RequestCaptureOnUIThread(
 void PaintPreviewClient::OnPaintPreviewCapturedCallback(
     const base::UnguessableToken& frame_guid,
     const RecordingParams& params,
-    const content::GlobalFrameRoutingId& render_frame_id,
+    const content::GlobalRenderFrameHostId& render_frame_id,
     mojom::PaintPreviewStatus status,
     mojom::PaintPreviewCaptureResponsePtr response) {
   // There is no retry logic so always treat a frame as processed regardless of

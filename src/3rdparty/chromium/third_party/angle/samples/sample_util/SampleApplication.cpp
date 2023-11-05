@@ -120,8 +120,8 @@ SampleApplication::SampleApplication(std::string name,
         mDriverType = angle::GLESDriverType::SystemWGL;
 #else
         mGLWindow = EGLWindow::New(glesMajorVersion, glesMinorVersion);
-        mEntryPointsLib.reset(
-            angle::OpenSharedLibraryWithExtension(angle::GetNativeEGLLibraryNameWithExtension()));
+        mEntryPointsLib.reset(angle::OpenSharedLibraryWithExtension(
+            angle::GetNativeEGLLibraryNameWithExtension(), angle::SearchType::SystemDir));
         mDriverType = angle::GLESDriverType::SystemEGL;
 #endif  // defined(ANGLE_PLATFORM_WINDOWS)
     }
@@ -129,7 +129,7 @@ SampleApplication::SampleApplication(std::string name,
     {
         mGLWindow = mEGLWindow = EGLWindow::New(glesMajorVersion, glesMinorVersion);
         mEntryPointsLib.reset(
-            angle::OpenSharedLibrary(ANGLE_EGL_LIBRARY_NAME, angle::SearchType::ApplicationDir));
+            angle::OpenSharedLibrary(ANGLE_EGL_LIBRARY_NAME, angle::SearchType::ModuleDir));
     }
 }
 
@@ -219,7 +219,7 @@ int SampleApplication::run()
 #if defined(ANGLE_ENABLE_ASSERTS)
     if (IsGLExtensionEnabled("GL_KHR_debug"))
     {
-        EnableDebugCallback(this);
+        EnableDebugCallback(nullptr, nullptr);
     }
 #endif
 

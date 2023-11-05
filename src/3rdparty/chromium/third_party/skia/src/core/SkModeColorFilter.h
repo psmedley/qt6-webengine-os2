@@ -16,7 +16,7 @@ public:
         return sk_sp<SkColorFilter>(new SkModeColorFilter(color, mode));
     }
 
-    uint32_t onGetFlags() const override;
+    bool onIsAlphaUnchanged() const override;
 
 #if SK_SUPPORT_GPU
     GrFPResult asFragmentProcessor(std::unique_ptr<GrFragmentProcessor> inputFP,
@@ -33,7 +33,7 @@ protected:
 
     bool onAppendStages(const SkStageRec& rec, bool shaderIsOpaque) const override;
     skvm::Color onProgram(skvm::Builder*, skvm::Color,
-                          SkColorSpace*, skvm::Uniforms*, SkArenaAlloc*) const override;
+                          const SkColorInfo&, skvm::Uniforms*, SkArenaAlloc*) const override;
 
 private:
     SkColor     fColor;

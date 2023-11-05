@@ -15,6 +15,7 @@
 #include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/base/features.h"
@@ -118,7 +119,6 @@ Layer::Layer()
       force_render_surface_for_testing_(false),
       subtree_property_changed_(false),
       may_contain_video_(false),
-      needs_show_scrollbars_(false),
       has_transform_node_(false),
       has_clip_node_(false),
       subtree_has_copy_request_(false) {}
@@ -349,9 +349,13 @@ void Layer::SetBounds(const gfx::Size& size) {
 
   // Rounded corner clipping, bounds clipping and mask clipping can result in
   // new areas of subtrees being exposed on a bounds change. Ensure the damaged
-  // areas are updated.
+  // areas are updated. Also, if the layer subtree (rooted at this layer) is
+  // marked as capturable (via a valid SubtreeCaptureId), then the property tree
+  // needs rebuild so that |EffectNode::subtree_size| is updated with the new
+  // size of this layer.
   if (!layer_tree_host_->IsUsingLayerLists()) {
-    if (masks_to_bounds() || mask_layer() || HasRoundedCorner()) {
+    if (subtree_capture_id().is_valid() || masks_to_bounds() || mask_layer() ||
+        HasRoundedCorner()) {
       SetSubtreePropertyChanged();
       SetPropertyTreesNeedRebuild();
     }
@@ -1379,9 +1383,6 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
     trees->scroll_tree.SetScrollOffsetClobberActiveValue(layer->element_id());
   }
 
-  if (needs_show_scrollbars_)
-    layer->set_needs_show_scrollbars(true);
-
   layer->UnionUpdateRect(inputs_.update_rect);
   layer->SetNeedsPushProperties();
 
@@ -1389,7 +1390,6 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
   layer->UpdateDebugInfo(debug_info_.get());
 
   // Reset any state that should be cleared for the next update.
-  needs_show_scrollbars_ = false;
   subtree_property_changed_ = false;
   inputs_.update_rect = gfx::Rect();
 }

@@ -21,19 +21,19 @@ found in the LICENSE file.
  * are no pointers in memory which point to explicitly freed objects before
  * actually releasing their memory.
  *
- * pa:pcscan:<process_name>
+ * pa:pcscan:<process_name>:<scanner|mutator>
  * ========================
  * The overall time spent on scanning the partition alloc heap for a specific
- * process (can be either 'browser_process' or 'renderer_processes').
+ * process either in the scanner or mutator thread (process_name can be either 'browser_process' or 'renderer_processes').
  *
- * pa:pcscan:<process_name>:<phase>
+ * pa:pcscan:<process_name>:<scanner|mutator>:<phase>
  * ========================
  * Time spent on a certain PCScan phase ('clear', 'scan' or 'sweep').
  */
 tr.exportTo('tr.metrics.pa', function() {
   function pcscanMetric(histograms, model) {
-    function createNumericForProcess(name, processName, desc) {
-      function createNumericForEventTime(name, desc) {
+    function createTimeNumericForProcess(name, processName, context, desc) {
+      function createNumeric(name, desc) {
         const n = new tr.v.Histogram(name,
             tr.b.Unit.byName.timeDurationInMs_smallerIsBetter);
         n.description = desc;
@@ -46,36 +46,112 @@ tr.exportTo('tr.metrics.pa', function() {
           sum: true});
         return n;
       }
-      const scheme = ['pa', 'pcscan', processName];
+      const scheme = ['pa', 'pcscan', processName, context];
       if (name) scheme.push(name);
-      return createNumericForEventTime(scheme.join(':'), desc);
+      return createNumeric(scheme.join(':'), desc);
     }
+
+    function createSizeNumericForProcess(name, processName, desc) {
+      function createNumeric(name, desc) {
+        const n = new tr.v.Histogram(name,
+            tr.b.Unit.byName.sizeInBytes_smallerIsBetter);
+        n.description = desc;
+        n.customizeSummaryOptions({
+          avg: true,
+          count: true,
+          max: true,
+          min: true,
+          std: true,
+          sum: true});
+        return n;
+      }
+      const scheme = ['pa', 'pcscan', processName, name];
+      return createNumeric(scheme.join(':'), desc);
+    }
+
+    function createPercentNumericForProcess(name, processName, desc) {
+      function createNumeric(name, desc) {
+        const n = new tr.v.Histogram(name,
+            tr.b.Unit.byName.normalizedPercentage_smallerIsBetter);
+        n.description = desc;
+        n.customizeSummaryOptions({
+          avg: true,
+          count: true,
+          max: true,
+          min: true,
+          std: true,
+          sum: true});
+        return n;
+      }
+      const scheme = ['pa', 'pcscan', processName, name];
+      return createNumeric(scheme.join(':'), desc);
+    }
+
 
     function createHistsForProcess(processName) {
       return {
-        scan: createNumericForProcess('scan', processName,
-            'Time for scanning heap for quarantine pointers'),
-        sweep: createNumericForProcess('sweep', processName,
+        scanner_scan: createTimeNumericForProcess('scan', processName, 'scanner',
+            'Time for scanning heap for quarantine pointers on concurrent threads'),
+        scanner_sweep: createTimeNumericForProcess('sweep', processName, 'scanner',
             'Time for sweeping quarantine'),
-        clear: createNumericForProcess('clear', processName,
+        scanner_clear: createTimeNumericForProcess('clear', processName, 'scanner',
             'Time for clearing quarantine entries'),
-        total: createNumericForProcess('', processName,
-            'Total time for PCScan execution')
+        scanner_total: createTimeNumericForProcess('', processName, 'scanner',
+            'Total time for PCScan execution on concurrent threads'),
+        mutator_scan_stack: createTimeNumericForProcess('scan_stack', processName, 'mutator',
+            'Time for scanning stack for quarantine pointers on mutator threads'),
+        mutator_scan: createTimeNumericForProcess('scan', processName, 'mutator',
+            'Time for scanning heap for quarantine pointers on mutator threads'),
+        mutator_clear: createTimeNumericForProcess('clear', processName, 'mutator',
+            'Time for clearing heap quarantine entries on mutator threads'),
+        mutator_total: createTimeNumericForProcess('', processName, 'mutator',
+            'Total time for PCScan execution on mutator threads (inside safepoints)'),
+        survived_quarantine_size: createSizeNumericForProcess(
+            'survived_quarantine_size', processName,
+            'Size in bytes of survived quarantined objects after each *Scan cycle'),
+        survived_quarantine_percent: createPercentNumericForProcess(
+            'survived_quarantine_percent', processName,
+            'Percent of survived quarantined objects after a *Scan cycle relative ' +
+            'to the size of quarantined objects before the cycle'),
       };
     }
 
-    function addSample(hists, slice) {
-      if (!(slice instanceof tr.model.ThreadSlice)) return;
+    function addSliceSample(hists, slice) {
       if (slice.category !== 'partition_alloc') return;
+      if (!(slice instanceof tr.model.ThreadSlice)) return;
 
-      if (slice.title === 'PCScan.Scan') {
-        hists.scan.addSample(slice.duration);
-      } else if (slice.title === 'PCScan.Sweep') {
-        hists.sweep.addSample(slice.duration);
-      } else if (slice.title === 'PCScan.Clear') {
-        hists.clear.addSample(slice.duration);
-      } else if (slice.title === 'PCScan') {
-        hists.total.addSample(slice.duration);
+      if (slice.title === 'PCScan.Scanner.Scan') {
+        hists.scanner_scan.addSample(slice.duration);
+      } else if (slice.title === 'PCScan.Scanner.Sweep') {
+        hists.scanner_sweep.addSample(slice.duration);
+      } else if (slice.title === 'PCScan.Scanner.Clear') {
+        hists.scanner_clear.addSample(slice.duration);
+      } else if (slice.title === 'PCScan.Scanner') {
+        hists.scanner_total.addSample(slice.duration);
+      } else if (slice.title === 'PCScan.Mutator.ScanStack') {
+        hists.mutator_scan_stack.addSample(slice.duration);
+      } else if (slice.title === 'PCScan.Mutator.Scan') {
+        hists.mutator_scan.addSample(slice.duration);
+      } else if (slice.title === 'PCScan.Mutator.Clear') {
+        hists.mutator_clear.addSample(slice.duration);
+      } else if (slice.title === 'PCScan.Mutator') {
+        hists.mutator_total.addSample(slice.duration);
+      }
+    }
+
+    function addCounterSample(hists, counter) {
+      if (counter.category !== 'partition_alloc') return;
+      if (!(counter instanceof tr.model.Counter)) return;
+
+      for (const series of counter.series) {
+        for (const sample of series.samples) {
+          if (counter.name === 'PCScan.SurvivedQuarantineSize') {
+            hists.survived_quarantine_size.addSample(sample.value);
+          } else if (counter.name === 'PCScan.SurvivedQuarantinePercent') {
+            // Divide by 1000, since StatsCollector multiplies it by 1000.
+            hists.survived_quarantine_percent.addSample(sample.value / 1000);
+          }
+        }
       }
     }
 
@@ -87,7 +163,10 @@ tr.exportTo('tr.metrics.pa', function() {
           processHists.set(processName, createHistsForProcess(processName));
         }
         for (const slice of helper.process.getDescendantEvents()) {
-          addSample(processHists.get(processName), slice);
+          addSliceSample(processHists.get(processName), slice);
+        }
+        for (const tid in helper.process.counters) {
+          addCounterSample(processHists.get(processName), helper.process.counters[tid]);
         }
       }
     }

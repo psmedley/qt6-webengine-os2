@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/files/scoped_file.h"
+#include "base/logging.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/ozone/platform/wayland/common/data_util.h"
 #include "ui/ozone/platform/wayland/common/wayland_object.h"
@@ -24,10 +25,8 @@ namespace ui {
 WaylandDataDevice::WaylandDataDevice(WaylandConnection* connection,
                                      wl_data_device* data_device)
     : WaylandDataDeviceBase(connection), data_device_(data_device) {
-  static const struct wl_data_device_listener kDataDeviceListener = {
-      WaylandDataDevice::OnOffer, WaylandDataDevice::OnEnter,
-      WaylandDataDevice::OnLeave, WaylandDataDevice::OnMotion,
-      WaylandDataDevice::OnDrop,  WaylandDataDevice::OnSelection};
+  static constexpr wl_data_device_listener kDataDeviceListener = {
+      &OnOffer, &OnEnter, &OnLeave, &OnMotion, &OnDrop, &OnSelection};
   wl_data_device_add_listener(data_device_.get(), &kDataDeviceListener, this);
 }
 
@@ -74,8 +73,8 @@ void WaylandDataDevice::RequestData(WaylandDataOffer* offer,
 }
 
 void WaylandDataDevice::SetSelectionSource(WaylandDataSource* source) {
-  DCHECK(source);
-  wl_data_device_set_selection(data_device_.get(), source->data_source(),
+  auto* data_source = source ? source->data_source() : nullptr;
+  wl_data_device_set_selection(data_device_.get(), data_source,
                                connection()->serial());
   connection()->ScheduleFlush();
 }

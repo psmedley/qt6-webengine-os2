@@ -4,7 +4,8 @@
 
 #include "components/autofill/core/browser/payments/test_authentication_requester.h"
 
-#include "base/strings/string16.h"
+#include <string>
+
 #include "build/build_config.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 
@@ -41,14 +42,13 @@ bool TestAuthenticationRequester::UserOptedInToFidoFromSettingsPageOnMobile()
 
 #if !defined(OS_IOS)
 void TestAuthenticationRequester::OnFIDOAuthenticationComplete(
-    bool did_succeed,
-    const CreditCard* card,
-    const base::string16& cvc) {
-  did_succeed_ = did_succeed;
+    const CreditCardFIDOAuthenticator::FidoAuthenticationResponse& response) {
+  did_succeed_ = response.did_succeed;
   if (did_succeed_) {
-    DCHECK(card);
-    number_ = card->number();
+    DCHECK(response.card);
+    number_ = response.card->number();
   }
+  failure_type_ = response.failure_type;
 }
 
 void TestAuthenticationRequester::OnFidoAuthorizationComplete(

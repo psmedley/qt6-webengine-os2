@@ -15,6 +15,7 @@
 #include "SampleUtils.h"
 
 #include "utils/ComboRenderPipelineDescriptor.h"
+#include "utils/ScopedAutoreleasePool.h"
 #include "utils/SystemUtils.h"
 #include "utils/WGPUHelpers.h"
 
@@ -36,7 +37,7 @@ float RandomFloat(float min, float max) {
 
 constexpr size_t kNumTriangles = 10000;
 
-struct alignas(kMinDynamicBufferOffsetAlignment) ShaderData {
+struct alignas(kMinUniformBufferOffsetAlignment) ShaderData {
     float scale;
     float time;
     float offsetX;
@@ -55,71 +56,75 @@ void init() {
     swapchain.Configure(GetPreferredSwapChainTextureFormat(), wgpu::TextureUsage::RenderAttachment,
                         640, 480);
 
-    wgpu::ShaderModule vsModule =
-        utils::CreateShaderModule(device, utils::SingleShaderStage::Vertex, R"(
-        #version 450
+    wgpu::ShaderModule vsModule = utils::CreateShaderModule(device, R"(
+        [[block]] struct Constants {
+            scale : f32;
+            time : f32;
+            offsetX : f32;
+            offsetY : f32;
+            scalar : f32;
+            scalarOffset : f32;
+        };
+        [[group(0), binding(0)]] var<uniform> c : Constants;
 
-        layout(std140, set = 0, binding = 0) uniform Constants {
-            float scale;
-            float time;
-            float offsetX;
-            float offsetY;
-            float scalar;
-            float scalarOffset;
-        } c;
+        struct VertexOut {
+            [[location(0)]] v_color : vec4<f32>;
+            [[builtin(position)]] Position : vec4<f32>;
+        };
 
-        layout(location = 0) out vec4 v_color;
+        [[stage(vertex)]] fn main([[builtin(vertex_index)]] VertexIndex : u32) -> VertexOut {
+            var positions : array<vec4<f32>, 3> = array<vec4<f32>, 3>(
+                vec4<f32>( 0.0,  0.1, 0.0, 1.0),
+                vec4<f32>(-0.1, -0.1, 0.0, 1.0),
+                vec4<f32>( 0.1, -0.1, 0.0, 1.0)
+            );
 
-        const vec4 positions[3] = vec4[3](
-            vec4( 0.0f,  0.1f, 0.0f, 1.0f),
-            vec4(-0.1f, -0.1f, 0.0f, 1.0f),
-            vec4( 0.1f, -0.1f, 0.0f, 1.0f)
-        );
+            var colors : array<vec4<f32>, 3> = array<vec4<f32>, 3>(
+                vec4<f32>(1.0, 0.0, 0.0, 1.0),
+                vec4<f32>(0.0, 1.0, 0.0, 1.0),
+                vec4<f32>(0.0, 0.0, 1.0, 1.0)
+            );
 
-        const vec4 colors[3] = vec4[3](
-            vec4(1.0f, 0.0f, 0.0f, 1.0f),
-            vec4(0.0f, 1.0f, 0.0f, 1.0f),
-            vec4(0.0f, 0.0f, 1.0f, 1.0f)
-        );
+            var position : vec4<f32> = positions[VertexIndex];
+            var color : vec4<f32> = colors[VertexIndex];
 
-        void main() {
-            vec4 position = positions[gl_VertexIndex];
-            vec4 color = colors[gl_VertexIndex];
-
-            float fade = mod(c.scalarOffset + c.time * c.scalar / 10.0, 1.0);
+            // TODO(dawn:572): Revisit once modf has been reworked in WGSL.
+            var fade : f32 = c.scalarOffset + c.time * c.scalar / 10.0;
+            fade = fade - floor(fade);
             if (fade < 0.5) {
                 fade = fade * 2.0;
             } else {
                 fade = (1.0 - fade) * 2.0;
             }
-            float xpos = position.x * c.scale;
-            float ypos = position.y * c.scale;
-            float angle = 3.14159 * 2.0 * fade;
-            float xrot = xpos * cos(angle) - ypos * sin(angle);
-            float yrot = xpos * sin(angle) + ypos * cos(angle);
+
+            var xpos : f32 = position.x * c.scale;
+            var ypos : f32 = position.y * c.scale;
+            let angle : f32 = 3.14159 * 2.0 * fade;
+            let xrot : f32 = xpos * cos(angle) - ypos * sin(angle);
+            let yrot : f32 = xpos * sin(angle) + ypos * cos(angle);
             xpos = xrot + c.offsetX;
             ypos = yrot + c.offsetY;
-            v_color = vec4(fade, 1.0 - fade, 0.0, 1.0) + color;
-            gl_Position = vec4(xpos, ypos, 0.0, 1.0);
+
+            var output : VertexOut;
+            output.v_color = vec4<f32>(fade, 1.0 - fade, 0.0, 1.0) + color;
+            output.Position = vec4<f32>(xpos, ypos, 0.0, 1.0);
+            return output;
         })");
 
-    wgpu::ShaderModule fsModule = utils::CreateShaderModuleFromWGSL(device, R"(
-        [[location(0)]] var<out> FragColor : vec4<f32>;
-        [[location(0)]] var<in> v_color : vec4<f32>;
-
-        [[stage(fragment)]] fn main() -> void {
-            FragColor = v_color;
-            return;
+    wgpu::ShaderModule fsModule = utils::CreateShaderModule(device, R"(
+        [[stage(fragment)]] fn main([[location(0)]] v_color : vec4<f32>)
+                                 -> [[location(0)]] vec4<f32> {
+            return v_color;
         })");
 
     wgpu::BindGroupLayout bgl = utils::MakeBindGroupLayout(
-        device, {{0, wgpu::ShaderStage::Vertex, wgpu::BindingType::UniformBuffer, true}});
+        device, {{0, wgpu::ShaderStage::Vertex, wgpu::BufferBindingType::Uniform, true}});
 
-    utils::ComboRenderPipelineDescriptor descriptor(device);
+    utils::ComboRenderPipelineDescriptor descriptor;
     descriptor.layout = utils::MakeBasicPipelineLayout(device, &bgl);
-    descriptor.vertexStage.module = vsModule;
-    descriptor.cFragmentStage.module = fsModule;
-    descriptor.cColorStates[0].format = GetPreferredSwapChainTextureFormat();
+    descriptor.vertex.module = vsModule;
+    descriptor.cFragment.module = fsModule;
+    descriptor.cTargets[0].format = GetPreferredSwapChainTextureFormat();
 
     pipeline = device.CreateRenderPipeline(&descriptor);
 
@@ -180,6 +185,7 @@ int main(int argc, const char* argv[]) {
     init();
 
     while (!ShouldQuit()) {
+        utils::ScopedAutoreleasePool pool;
         frame();
         utils::USleep(16000);
     }

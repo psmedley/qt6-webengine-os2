@@ -9,10 +9,7 @@
 #include "base/memory/ref_counted.h"
 #include "cc/paint/paint_canvas.h"
 #include "content/common/content_export.h"
-#include "content/common/frame_messages.h"
-#include "content/common/frame_proxy.mojom.h"
-#include "content/common/frame_replication_state.mojom-forward.h"
-#include "content/renderer/child_frame_compositor.h"
+#include "content/common/frame.mojom.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -20,11 +17,11 @@
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
 #include "third_party/blink/public/common/frame/frame_visual_properties.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
-#include "third_party/blink/public/common/widget/screen_info.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom.h"
+#include "third_party/blink/public/mojom/frame/frame_replication_state.mojom-forward.h"
 #include "third_party/blink/public/mojom/frame/user_activation_update_types.mojom.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-forward.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-forward.h"
@@ -32,15 +29,10 @@
 #include "third_party/blink/public/web/web_remote_frame_client.h"
 #include "url/origin.h"
 
-namespace blink {
-class WebFrameWidget;
-}
-
 namespace content {
 
 class AgentSchedulingGroup;
 class BlinkInterfaceRegistryImpl;
-class ChildFrameCompositingHelper;
 class RenderFrameImpl;
 class RenderViewImpl;
 
@@ -66,9 +58,7 @@ class RenderViewImpl;
 // RenderFrame is created for it.
 class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
                                         public IPC::Sender,
-                                        public ChildFrameCompositor,
-                                        public blink::WebRemoteFrameClient,
-                                        public mojom::RenderFrameProxy {
+                                        public blink::WebRemoteFrameClient {
  public:
   // This method should be used to create a RenderFrameProxy, which will replace
   // an existing RenderFrame during its cross-process navigation from the
@@ -79,7 +69,7 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
       AgentSchedulingGroup& agent_scheduling_group,
       RenderFrameImpl* frame_to_replace,
       int routing_id,
-      blink::mojom::TreeScopeType scope,
+      blink::mojom::TreeScopeType tree_scope_type,
       const blink::RemoteFrameToken& proxy_frame_token);
 
   // This method should be used to create a RenderFrameProxy, when there isn't
@@ -99,21 +89,23 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
       AgentSchedulingGroup& agent_scheduling_group,
       const blink::RemoteFrameToken& frame_token,
       int routing_id,
-      const base::Optional<blink::FrameToken>& opener_frame_token,
+      const absl::optional<blink::FrameToken>& opener_frame_token,
       int render_view_routing_id,
       int parent_routing_id,
-      mojom::FrameReplicationStatePtr replicated_state,
-      const base::UnguessableToken& devtools_frame_token);
+      blink::mojom::TreeScopeType tree_scope_type,
+      blink::mojom::FrameReplicationStatePtr replicated_state,
+      const base::UnguessableToken& devtools_frame_token,
+      mojom::RemoteMainFrameInterfacesPtr remote_main_frame_interfaces);
 
-  // Creates a RenderFrameProxy to be used with a portal owned by |parent|.
-  // |routing_id| is the routing id of this new RenderFrameProxy.
-  static RenderFrameProxy* CreateProxyForPortal(
+  // Creates a RenderFrameProxy to be used with a portal or fenced frame owned
+  // by |parent|. |routing_id| is the routing id of this new RenderFrameProxy.
+  static RenderFrameProxy* CreateProxyForPortalOrFencedFrame(
       AgentSchedulingGroup& agent_scheduling_group,
       RenderFrameImpl* parent,
       int proxy_routing_id,
       const blink::RemoteFrameToken& frame_token,
       const base::UnguessableToken& devtools_frame_token,
-      const blink::WebElement& portal_element);
+      const blink::WebElement& frame_owner_element);
 
   // Returns the RenderFrameProxy for the given routing ID.
   static RenderFrameProxy* FromRoutingID(int routing_id);
@@ -135,7 +127,7 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
 
   // Pass replicated information, such as security origin, to this
   // RenderFrameProxy's WebRemoteFrame.
-  void SetReplicatedState(mojom::FrameReplicationStatePtr state);
+  void SetReplicatedState(blink::mojom::FrameReplicationStatePtr state);
 
   int routing_id() { return routing_id_; }
   RenderViewImpl* render_view() { return render_view_; }
@@ -146,50 +138,13 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
   void FrameDetached(DetachType type) override;
   blink::AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() override;
 
-  void Navigate(
-      const blink::WebURLRequest& request,
-      bool should_replace_current_entry,
-      bool is_opener_navigation,
-      bool initiator_frame_has_download_sandbox_flag,
-      bool blocking_downloads_in_sandbox_enabled,
-      bool initiator_frame_is_ad,
-      blink::CrossVariantMojoRemote<blink::mojom::BlobURLTokenInterfaceBase>
-          blob_url_token,
-      const base::Optional<blink::WebImpression>& impression,
-      const blink::LocalFrameToken* initiator_frame_token,
-      blink::CrossVariantMojoRemote<
-          blink::mojom::PolicyContainerHostKeepAliveHandleInterfaceBase>
-          initiator_policy_container_keep_alive_handle) override;
-  bool RemoteProcessGone() const override;
-  void DidSetFrameSinkId() override;
-  base::UnguessableToken GetDevToolsFrameToken() override;
-
   void DidStartLoading();
 
  private:
   RenderFrameProxy(AgentSchedulingGroup& agent_scheduling_group,
                    int routing_id);
 
-  void Init(blink::WebRemoteFrame* frame,
-            RenderViewImpl* render_view,
-            blink::WebFrameWidget* ancestor_widget,
-            bool parent_is_local);
-
-  mojom::RenderFrameProxyHost* GetFrameProxyHost();
-
-  // mojom::RenderFrameProxy implementation:
-  void ChildProcessGone() override;
-
-  // blink::WebRemoteFrameClient implementation:
-  void WillSynchronizeVisualProperties(
-      bool capture_sequence_number_changed,
-      const viz::SurfaceId& surface_id,
-      const gfx::Size& compositor_viewport_size) override;
-
-  // ChildFrameCompositor:
-  cc::Layer* GetLayer() override;
-  void SetLayer(scoped_refptr<cc::Layer> layer, bool is_surface_layer) override;
-  SkBitmap* GetSadPageBitmap() override;
+  void Init(blink::WebRemoteFrame* frame, RenderViewImpl* render_view);
 
   // The |AgentSchedulingGroup| this proxy is associated with. NOTE: This is
   // different than the |AgentSchedulingGroup| associated with the frame being
@@ -204,33 +159,10 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
 
   // Provides the mojo interface to this RenderFrameProxy's
   // RenderFrameProxyHost.
-  mojo::AssociatedRemote<mojom::RenderFrameProxyHost> frame_proxy_host_remote_;
   std::unique_ptr<blink::AssociatedInterfaceProvider>
       remote_associated_interfaces_;
 
-  // Mojo receiver to this content::mojom::RenderFrameProxy.
-  mojo::AssociatedReceiver<mojom::RenderFrameProxy>
-      render_frame_proxy_receiver_{this};
-
-  // Can be nullptr when this RenderFrameProxy's parent is not a RenderFrame.
-  std::unique_ptr<ChildFrameCompositingHelper> compositing_helper_;
-
   RenderViewImpl* render_view_ = nullptr;
-
-  // The WebFrameWidget of the nearest ancestor local root. If the proxy has no
-  // local root ancestor (eg it is a proxy of the root frame) then the pointer
-  // is null.
-  blink::WebFrameWidget* ancestor_web_frame_widget_ = nullptr;
-
-  // Contains token to be used as a frame id in the devtools protocol.
-  // It is derived from the content's devtools_frame_token, is
-  // defined by the browser and passed into Blink upon frame creation.
-  base::UnguessableToken devtools_frame_token_;
-
-  bool remote_process_gone_ = false;
-
-  // The layer used to embed the out-of-process content.
-  scoped_refptr<cc::Layer> embedded_layer_;
 
   service_manager::BinderRegistry binder_registry_;
   blink::AssociatedInterfaceRegistry associated_interfaces_;

@@ -20,12 +20,14 @@
 #include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_store.h"
 #include "net/cookies/cookie_store_test_callbacks.h"
 #include "net/cookies/cookie_store_test_helpers.h"
 #include "net/cookies/test_cookie_access_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 #if defined(OS_IOS)
@@ -195,9 +197,12 @@ class CookieStoreTest : public testing::Test {
       const GURL& url,
       const std::string& cookie_line,
       const CookieOptions& options,
-      base::Optional<base::Time> server_time = base::nullopt) {
-    auto cookie = CanonicalCookie::Create(url, cookie_line, base::Time::Now(),
-                                          server_time);
+      absl::optional<base::Time> server_time = absl::nullopt,
+      absl::optional<base::Time> system_time = absl::nullopt) {
+    auto cookie = CanonicalCookie::Create(
+        url, cookie_line, system_time.value_or(base::Time::Now()), server_time,
+        absl::nullopt /* cookie_partition_key */);
+
     if (!cookie)
       return false;
     DCHECK(cs);
@@ -225,6 +230,19 @@ class CookieStoreTest : public testing::Test {
     return callback.result().status.IsInclude();
   }
 
+  bool SetCookieWithSystemTime(CookieStore* cs,
+                               const GURL& url,
+                               const std::string& cookie_line,
+                               const base::Time& system_time) {
+    CookieOptions options;
+    if (!CookieStoreTestTraits::supports_http_only)
+      options.set_include_httponly();
+    options.set_same_site_cookie_context(
+        net::CookieOptions::SameSiteCookieContext::MakeInclusive());
+    return CreateAndSetCookie(cs, url, cookie_line, options, absl::nullopt,
+                              absl::make_optional(system_time));
+  }
+
   bool SetCookieWithServerTime(CookieStore* cs,
                                const GURL& url,
                                const std::string& cookie_line,
@@ -235,7 +253,7 @@ class CookieStoreTest : public testing::Test {
     options.set_same_site_cookie_context(
         net::CookieOptions::SameSiteCookieContext::MakeInclusive());
     return CreateAndSetCookie(cs, url, cookie_line, options,
-                              base::make_optional(server_time));
+                              absl::make_optional(server_time));
   }
 
   bool SetCookie(CookieStore* cs,
@@ -254,9 +272,9 @@ class CookieStoreTest : public testing::Test {
       const GURL& url,
       const std::string& cookie_line) {
     CookieInclusionStatus create_status;
-    auto cookie = CanonicalCookie::Create(url, cookie_line, base::Time::Now(),
-                                          base::nullopt /* server_time */,
-                                          &create_status);
+    auto cookie = CanonicalCookie::Create(
+        url, cookie_line, base::Time::Now(), absl::nullopt /* server_time */,
+        absl::nullopt /* cookie_partition_key */, &create_status);
     if (!cookie)
       return create_status;
 
@@ -423,7 +441,8 @@ TYPED_TEST_P(CookieStoreTest, FilterTest) {
   std::unique_ptr<CanonicalCookie> cc(CanonicalCookie::CreateSanitizedCookie(
       this->www_foo_foo_.url(), "A", "B", std::string(), "/foo", one_hour_ago,
       one_hour_from_now, base::Time(), false, false,
-      CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_DEFAULT, false));
+      CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_DEFAULT, false,
+      absl::nullopt));
   ASSERT_TRUE(cc);
   EXPECT_TRUE(this->SetCanonicalCookie(
       cs, std::move(cc), this->www_foo_foo_.url(), true /*modify_httponly*/));
@@ -433,7 +452,8 @@ TYPED_TEST_P(CookieStoreTest, FilterTest) {
   cc = CanonicalCookie::CreateSanitizedCookie(
       this->www_foo_bar_.url(), "C", "D", this->www_foo_bar_.domain(), "/bar",
       two_hours_ago, base::Time(), one_hour_ago, false, true,
-      CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_DEFAULT, false);
+      CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_DEFAULT, false,
+      absl::nullopt);
   ASSERT_TRUE(cc);
   EXPECT_TRUE(this->SetCanonicalCookie(
       cs, std::move(cc), this->www_foo_bar_.url(), true /*modify_httponly*/));
@@ -445,7 +465,8 @@ TYPED_TEST_P(CookieStoreTest, FilterTest) {
   cc = CanonicalCookie::CreateSanitizedCookie(
       this->http_www_foo_.url(), "E", "F", std::string(), std::string(),
       base::Time(), base::Time(), base::Time(), true, false,
-      CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false);
+      CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false,
+      absl::nullopt);
   ASSERT_TRUE(cc);
   EXPECT_FALSE(this->SetCanonicalCookie(
       cs, std::move(cc), this->http_www_foo_.url(), true /*modify_httponly*/));
@@ -453,7 +474,8 @@ TYPED_TEST_P(CookieStoreTest, FilterTest) {
   cc = CanonicalCookie::CreateSanitizedCookie(
       this->https_www_foo_.url(), "E", "F", std::string(), std::string(),
       base::Time(), base::Time(), base::Time(), true, false,
-      CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false);
+      CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false,
+      absl::nullopt);
   ASSERT_TRUE(cc);
   EXPECT_TRUE(this->SetCanonicalCookie(
       cs, std::move(cc), this->https_www_foo_.url(), true /*modify_httponly*/));
@@ -580,7 +602,8 @@ TYPED_TEST_P(CookieStoreTest, SetCanonicalCookieTest) {
   CookieInclusionStatus status;
   auto cookie = CanonicalCookie::Create(
       this->http_www_foo_.url(), "foo=1; Secure", base::Time::Now(),
-      base::nullopt /* server_time */, &status);
+      absl::nullopt /* server_time */, absl::nullopt /* cookie_partition_key */,
+      &status);
   EXPECT_TRUE(cookie->IsSecure());
   EXPECT_TRUE(status.IsInclude());
   EXPECT_TRUE(this->SetCanonicalCookieReturnAccessResult(
@@ -629,7 +652,8 @@ TYPED_TEST_P(CookieStoreTest, SetCanonicalCookieTest) {
     CookieInclusionStatus create_status;
     auto c = CanonicalCookie::Create(
         this->http_www_foo_.url(), "bar=1; HttpOnly", base::Time::Now(),
-        base::nullopt /* server_time */, &create_status);
+        absl::nullopt /* server_time */,
+        absl::nullopt /* cookie_partition_key */, &create_status);
     EXPECT_TRUE(c->IsHttpOnly());
     EXPECT_TRUE(create_status.IsInclude());
     EXPECT_TRUE(this->SetCanonicalCookieReturnAccessResult(
@@ -1251,8 +1275,8 @@ TYPED_TEST_P(CookieStoreTest, EmptyExpires) {
   this->MatchCookieLines(cookie_line,
                          this->GetCookiesWithOptions(cs, url, options));
 
-  base::Optional<base::Time> server_time =
-      base::make_optional(base::Time::Now() - base::TimeDelta::FromHours(1));
+  absl::optional<base::Time> server_time =
+      absl::make_optional(base::Time::Now() - base::TimeDelta::FromHours(1));
   this->CreateAndSetCookie(cs, url, set_cookie_line, options, server_time);
   this->MatchCookieLines(cookie_line,
                          this->GetCookiesWithOptions(cs, url, options));

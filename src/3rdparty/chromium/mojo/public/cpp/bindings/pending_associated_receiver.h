@@ -9,6 +9,7 @@
 
 #include <utility>
 
+#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/associated_interface_request.h"
@@ -17,6 +18,9 @@
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace mojo {
+
+template <typename T>
+class PendingAssociatedRemote;
 
 template <typename T>
 struct PendingAssociatedReceiverConverter;
@@ -87,6 +91,9 @@ class PendingAssociatedReceiver {
     handle_.ResetWithReason(custom_reason, description);
   }
 
+  REINITIALIZES_AFTER_MOVE PendingAssociatedRemote<Interface>
+  InitWithNewEndpointAndPassRemote() WARN_UNUSED_RESULT;
+
   // Associates this endpoint with a dedicated message pipe. This allows the
   // entangled AssociatedReceiver/AssociatedRemote endpoints to be used without
   // ever being associated with any other mojom interfaces.
@@ -100,11 +107,11 @@ class PendingAssociatedReceiver {
 
     MessagePipe pipe;
     scoped_refptr<internal::MultiplexRouter> router0 =
-        new internal::MultiplexRouter(
+        internal::MultiplexRouter::CreateAndStartReceiving(
             std::move(pipe.handle0), internal::MultiplexRouter::MULTI_INTERFACE,
             false, base::SequencedTaskRunnerHandle::Get());
     scoped_refptr<internal::MultiplexRouter> router1 =
-        new internal::MultiplexRouter(
+        internal::MultiplexRouter::CreateAndStartReceiving(
             std::move(pipe.handle1), internal::MultiplexRouter::MULTI_INTERFACE,
             true, base::SequencedTaskRunnerHandle::Get());
 
@@ -127,6 +134,21 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) NullAssociatedReceiver {
     return PendingAssociatedReceiver<Interface>();
   }
 };
+
+}  // namespace mojo
+
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+
+namespace mojo {
+
+template <typename Interface>
+PendingAssociatedRemote<Interface>
+PendingAssociatedReceiver<Interface>::InitWithNewEndpointAndPassRemote() {
+  ScopedInterfaceEndpointHandle remote_handle;
+  ScopedInterfaceEndpointHandle::CreatePairPendingAssociation(&handle_,
+                                                              &remote_handle);
+  return PendingAssociatedRemote<Interface>(std::move(remote_handle), 0u);
+}
 
 }  // namespace mojo
 

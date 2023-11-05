@@ -8,10 +8,11 @@
 #define FXBARCODE_CBC_QRCODE_H_
 
 #include "core/fxcrt/fx_string.h"
-#include "core/fxcrt/fx_system.h"
 #include "fxbarcode/cbc_codebase.h"
 
 class CBC_QRCodeWriter;
+class CFX_Matrix;
+class CFX_RenderDevice;
 
 class CBC_QRCode final : public CBC_CodeBase {
  public:
@@ -21,7 +22,7 @@ class CBC_QRCode final : public CBC_CodeBase {
   // CBC_CodeBase:
   bool Encode(WideStringView contents) override;
   bool RenderDevice(CFX_RenderDevice* device,
-                    const CFX_Matrix* matrix) override;
+                    const CFX_Matrix& matrix) override;
   BC_TYPE GetType() override;
 
  private:

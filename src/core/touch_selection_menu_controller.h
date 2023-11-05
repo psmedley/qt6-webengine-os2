@@ -50,16 +50,19 @@ class TouchSelectionControllerClientQt;
 class Q_WEBENGINECORE_PRIVATE_EXPORT TouchSelectionMenuController : public QObject {
     Q_OBJECT
 public:
-    enum TouchSelectionCommand {
-        Cut,
-        Copy,
-        Paste
+    enum TouchSelectionCommandFlag {
+        Cut = 0x1,
+        Copy = 0x2,
+        Paste = 0x4
     };
+    Q_DECLARE_FLAGS(TouchSelectionCommandFlags, TouchSelectionCommandFlag)
+    Q_FLAG(TouchSelectionCommandFlag)
 
     TouchSelectionMenuController(TouchSelectionControllerClientQt *touchSelectionControllerClient);
     ~TouchSelectionMenuController();
     int buttonCount();
-    bool isCommandEnabled(TouchSelectionCommand);
+    bool isCommandEnabled(TouchSelectionCommandFlag);
+    TouchSelectionCommandFlags availableActions();
 
 public Q_SLOTS:
     void cut();

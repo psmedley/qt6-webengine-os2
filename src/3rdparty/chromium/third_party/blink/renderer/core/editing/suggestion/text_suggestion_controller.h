@@ -31,6 +31,8 @@ class CORE_EXPORT TextSuggestionController final
     : public GarbageCollected<TextSuggestionController> {
  public:
   explicit TextSuggestionController(LocalDOMWindow&);
+  TextSuggestionController(const TextSuggestionController&) = delete;
+  TextSuggestionController& operator=(const TextSuggestionController&) = delete;
 
   bool IsMenuOpen() const;
 
@@ -72,11 +74,7 @@ class CORE_EXPORT TextSuggestionController final
 
   bool is_suggestion_menu_open_;
   const Member<LocalDOMWindow> window_;
-  HeapMojoRemote<mojom::blink::TextSuggestionHost,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      text_suggestion_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextSuggestionController);
+  HeapMojoRemote<mojom::blink::TextSuggestionHost> text_suggestion_host_;
 };
 
 }  // namespace blink

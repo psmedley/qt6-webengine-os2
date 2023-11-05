@@ -95,7 +95,8 @@ class LayerTreeHostCopyRequestTestMultipleRequests
     switch (frame) {
       case 1:
         child->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-            viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+            viz::CopyOutputRequest::ResultFormat::RGBA,
+            viz::CopyOutputRequest::ResultDestination::kSystemMemory,
             base::BindOnce(&LayerTreeHostCopyRequestTestMultipleRequests::
                                CopyOutputCallback,
                            base::Unretained(this), 0)));
@@ -113,18 +114,21 @@ class LayerTreeHostCopyRequestTestMultipleRequests
         EXPECT_EQ(gfx::Size(10, 10).ToString(), callbacks_[0].ToString());
 
         child->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-            viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+            viz::CopyOutputRequest::ResultFormat::RGBA,
+            viz::CopyOutputRequest::ResultDestination::kSystemMemory,
             base::BindOnce(&LayerTreeHostCopyRequestTestMultipleRequests::
                                CopyOutputCallback,
                            base::Unretained(this), 1)));
         root->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-            viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+            viz::CopyOutputRequest::ResultFormat::RGBA,
+            viz::CopyOutputRequest::ResultDestination::kSystemMemory,
             base::BindOnce(&LayerTreeHostCopyRequestTestMultipleRequests::
                                CopyOutputCallback,
                            base::Unretained(this), 2)));
         grand_child->RequestCopyOfOutput(
             std::make_unique<viz::CopyOutputRequest>(
-                viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+                viz::CopyOutputRequest::ResultFormat::RGBA,
+                viz::CopyOutputRequest::ResultDestination::kSystemMemory,
                 base::BindOnce(&LayerTreeHostCopyRequestTestMultipleRequests::
                                    CopyOutputCallback,
                                base::Unretained(this), 3)));
@@ -158,7 +162,8 @@ class LayerTreeHostCopyRequestTestMultipleRequests
                           std::unique_ptr<viz::CopyOutputResult> result) {
     EXPECT_TRUE(layer_tree_host()->GetTaskRunnerProvider()->IsMainThread());
     EXPECT_FALSE(result->IsEmpty());
-    const SkBitmap& bitmap = result->AsSkBitmap();
+    auto scoped_sk_bitmap = result->ScopedAccessSkBitmap();
+    const SkBitmap& bitmap = scoped_sk_bitmap.bitmap();
     EXPECT_TRUE(bitmap.readyToDraw());
     EXPECT_EQ(result->size(), gfx::Size(bitmap.width(), bitmap.height()));
     callbacks_[id] = result->size();
@@ -178,6 +183,10 @@ INSTANTIATE_TEST_SUITE_P(
     LayerTreeHostCopyRequestTestMultipleRequests,
     CombineWithCompositorModes(viz::GetRendererTypesNoDawn()),
     PrintTupleToStringParamName());
+
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestMultipleRequests);
 
 TEST_P(LayerTreeHostCopyRequestTestMultipleRequests, Test) {
   RunTest(compositor_mode());
@@ -222,6 +231,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestMultipleRequestsOutOfOrder);
+
 TEST_P(LayerTreeHostCopyRequestTestMultipleRequestsOutOfOrder, Test) {
   RunTest(compositor_mode());
 }
@@ -251,7 +264,8 @@ class LayerTreeHostCopyRequestCompletionCausesCommit
     switch (frame) {
       case 1:
         layer_->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-            viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+            viz::CopyOutputRequest::ResultFormat::RGBA,
+            viz::CopyOutputRequest::ResultDestination::kSystemMemory,
             base::BindOnce(&LayerTreeHostCopyRequestCompletionCausesCommit::
                                CopyOutputCallback)));
         break;
@@ -280,6 +294,10 @@ INSTANTIATE_TEST_SUITE_P(
     LayerTreeHostCopyRequestCompletionCausesCommit,
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
+
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestCompletionCausesCommit);
 
 TEST_P(LayerTreeHostCopyRequestCompletionCausesCommit, Test) {
   RunTest(compositor_mode());
@@ -313,13 +331,15 @@ class LayerTreeHostCopyRequestTestLayerDestroyed
       case 1:
         main_destroyed_->RequestCopyOfOutput(std::make_unique<
                                              viz::CopyOutputRequest>(
-            viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+            viz::CopyOutputRequest::ResultFormat::RGBA,
+            viz::CopyOutputRequest::ResultDestination::kSystemMemory,
             base::BindOnce(
                 &LayerTreeHostCopyRequestTestLayerDestroyed::CopyOutputCallback,
                 base::Unretained(this), &main_destroyed_event_)));
         impl_destroyed_->RequestCopyOfOutput(std::make_unique<
                                              viz::CopyOutputRequest>(
-            viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+            viz::CopyOutputRequest::ResultFormat::RGBA,
+            viz::CopyOutputRequest::ResultDestination::kSystemMemory,
             base::BindOnce(
                 &LayerTreeHostCopyRequestTestLayerDestroyed::CopyOutputCallback,
                 base::Unretained(this), &impl_destroyed_event_)));
@@ -388,6 +408,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestLayerDestroyed);
+
 TEST_P(LayerTreeHostCopyRequestTestLayerDestroyed, Test) {
   RunTest(compositor_mode());
 }
@@ -420,7 +444,8 @@ class LayerTreeHostCopyRequestTestInHiddenSubtree
 
   void AddCopyRequest(Layer* layer) {
     layer->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-        viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+        viz::CopyOutputRequest::ResultFormat::RGBA,
+        viz::CopyOutputRequest::ResultDestination::kSystemMemory,
         base::BindOnce(
             &LayerTreeHostCopyRequestTestInHiddenSubtree::CopyOutputCallback,
             base::Unretained(this))));
@@ -494,6 +519,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestInHiddenSubtree);
+
 TEST_P(LayerTreeHostCopyRequestTestInHiddenSubtree, Test) {
   RunTest(compositor_mode());
 }
@@ -542,7 +571,8 @@ class LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest
     PostSetNeedsCommitToMainThread();
 
     copy_layer_->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-        viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+        viz::CopyOutputRequest::ResultFormat::RGBA,
+        viz::CopyOutputRequest::ResultDestination::kSystemMemory,
         base::BindOnce(
             &LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest::
                 CopyOutputCallback,
@@ -615,6 +645,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest);
+
 TEST_P(LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest, Test) {
   RunTest(compositor_mode());
 }
@@ -645,7 +679,8 @@ class LayerTreeHostCopyRequestTestClippedOut
     PostSetNeedsCommitToMainThread();
 
     copy_layer_->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-        viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+        viz::CopyOutputRequest::ResultFormat::RGBA,
+        viz::CopyOutputRequest::ResultDestination::kSystemMemory,
         base::BindOnce(
             &LayerTreeHostCopyRequestTestClippedOut::CopyOutputCallback,
             base::Unretained(this))));
@@ -670,6 +705,10 @@ INSTANTIATE_TEST_SUITE_P(
     LayerTreeHostCopyRequestTestClippedOut,
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
+
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestClippedOut);
 
 TEST_P(LayerTreeHostCopyRequestTestClippedOut, Test) {
   RunTest(compositor_mode());
@@ -704,7 +743,8 @@ class LayerTreeHostCopyRequestTestScaledLayer
 
     std::unique_ptr<viz::CopyOutputRequest> request =
         std::make_unique<viz::CopyOutputRequest>(
-            viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+            viz::CopyOutputRequest::ResultFormat::RGBA,
+            viz::CopyOutputRequest::ResultDestination::kSystemMemory,
             base::BindOnce(
                 &LayerTreeHostCopyRequestTestScaledLayer::CopyOutputCallback,
                 base::Unretained(this)));
@@ -731,6 +771,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestScaledLayer);
+
 TEST_P(LayerTreeHostCopyRequestTestScaledLayer, Test) {
   RunTest(compositor_mode());
 }
@@ -753,7 +797,8 @@ class LayerTreeHostTestAsyncTwoReadbacksWithoutDraw
 
   void AddCopyRequest(Layer* layer) {
     layer->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-        viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+        viz::CopyOutputRequest::ResultFormat::RGBA,
+        viz::CopyOutputRequest::ResultDestination::kSystemMemory,
         base::BindOnce(
             &LayerTreeHostTestAsyncTwoReadbacksWithoutDraw::CopyOutputCallback,
             base::Unretained(this))));
@@ -825,6 +870,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostTestAsyncTwoReadbacksWithoutDraw);
+
 TEST_P(LayerTreeHostTestAsyncTwoReadbacksWithoutDraw, Test) {
   RunTest(compositor_mode());
 }
@@ -876,7 +925,9 @@ class LayerTreeHostCopyRequestTestDeleteSharedImage
       std::unique_ptr<viz::CopyOutputResult> result) {
     EXPECT_TRUE(layer_tree_host()->GetTaskRunnerProvider()->IsMainThread());
     EXPECT_EQ(gfx::Size(10, 10).ToString(), result->size().ToString());
-    EXPECT_EQ(result->format(), viz::CopyOutputResult::Format::RGBA_TEXTURE);
+    EXPECT_EQ(result->format(), viz::CopyOutputResult::Format::RGBA);
+    EXPECT_EQ(result->destination(),
+              viz::CopyOutputResult::Destination::kNativeTextures);
     EXPECT_NE(result->GetTextureResult(), nullptr);
 
     // Save the result for later.
@@ -889,7 +940,8 @@ class LayerTreeHostCopyRequestTestDeleteSharedImage
 
   void InsertCopyRequest() {
     copy_layer_->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-        viz::CopyOutputRequest::ResultFormat::RGBA_TEXTURE,
+        viz::CopyOutputRequest::ResultFormat::RGBA,
+        viz::CopyOutputResult::Destination::kNativeTextures,
         base::BindOnce(&LayerTreeHostCopyRequestTestDeleteSharedImage::
                            ReceiveCopyRequestOutputAndCommit,
                        base::Unretained(this))));
@@ -975,6 +1027,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestDeleteSharedImage);
+
 TEST_P(LayerTreeHostCopyRequestTestDeleteSharedImage, Test) {
   RunTest(compositor_mode());
 }
@@ -1047,6 +1103,22 @@ class LayerTreeHostCopyRequestTestCountSharedImages
     }
   }
 
+  std::unique_ptr<TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+      const viz::RendererSettings& renderer_settings,
+      double refresh_rate,
+      scoped_refptr<viz::ContextProvider> compositor_context_provider,
+      scoped_refptr<viz::RasterContextProvider> worker_context_provider)
+      override {
+    // Since this test counts shared images and SkiaRenderer uses shared images
+    // for render passes, we need render pass allocation to be stable.
+    auto settings = renderer_settings;
+    settings.disable_render_pass_bypassing = true;
+    auto frame_sink = LayerTreeHostCopyRequestTest::CreateLayerTreeFrameSink(
+        settings, refresh_rate, std::move(compositor_context_provider),
+        std::move(worker_context_provider));
+    return frame_sink;
+  }
+
   void DisplayDidDrawAndSwapOnThread() override {
     auto* sii = display_context_provider_->SharedImageInterface();
     switch (num_swaps_++) {
@@ -1094,7 +1166,8 @@ class LayerTreeHostCopyRequestTestCreatesSharedImage
   void RequestCopy(Layer* layer) override {
     // Request a normal texture copy. This should create a new shared image.
     copy_layer_->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-        viz::CopyOutputRequest::ResultFormat::RGBA_TEXTURE,
+        viz::CopyOutputRequest::ResultFormat::RGBA,
+        viz::CopyOutputResult::Destination::kNativeTextures,
         base::BindOnce(
             &LayerTreeHostCopyRequestTestCreatesSharedImage::CopyOutputCallback,
             base::Unretained(this))));
@@ -1102,21 +1175,25 @@ class LayerTreeHostCopyRequestTestCreatesSharedImage
 
   void CopyOutputCallback(std::unique_ptr<viz::CopyOutputResult> result) {
     EXPECT_FALSE(result->IsEmpty());
-    EXPECT_EQ(result->format(), viz::CopyOutputResult::Format::RGBA_TEXTURE);
+    EXPECT_EQ(result->format(), viz::CopyOutputResult::Format::RGBA);
+    EXPECT_EQ(result->destination(),
+              viz::CopyOutputResult::Destination::kNativeTextures);
     ASSERT_NE(nullptr, result->GetTextureResult());
     release_ = result->TakeTextureOwnership();
-    EXPECT_TRUE(release_);
+    EXPECT_EQ(1u, release_.size());
   }
 
   void AfterTest() override {
-    release_->Run(gpu::SyncToken(), false);
+    for (auto& release : release_) {
+      std::move(release).Run(gpu::SyncToken(), false);
+    }
 
     // Except the copy to have made a new shared image.
     EXPECT_EQ(num_shared_images_without_readback_ + 1,
               num_shared_images_with_readback_);
   }
 
-  std::unique_ptr<viz::SingleReleaseCallback> release_;
+  viz::CopyOutputResult::ReleaseCallbacks release_;
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1124,6 +1201,10 @@ INSTANTIATE_TEST_SUITE_P(
     LayerTreeHostCopyRequestTestCreatesSharedImage,
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
+
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestCreatesSharedImage);
 
 TEST_P(LayerTreeHostCopyRequestTestCreatesSharedImage, Test) {
   RunTest(compositor_mode());
@@ -1171,7 +1252,8 @@ class LayerTreeHostCopyRequestTestDestroyBeforeCopy
         // drawing to take place.
         std::unique_ptr<viz::CopyOutputRequest> request =
             std::make_unique<viz::CopyOutputRequest>(
-                viz::CopyOutputRequest::ResultFormat::RGBA_TEXTURE,
+                viz::CopyOutputRequest::ResultFormat::RGBA,
+                viz::CopyOutputResult::Destination::kNativeTextures,
                 base::BindOnce(&LayerTreeHostCopyRequestTestDestroyBeforeCopy::
                                    CopyOutputCallback,
                                base::Unretained(this)));
@@ -1212,6 +1294,10 @@ INSTANTIATE_TEST_SUITE_P(
     LayerTreeHostCopyRequestTestDestroyBeforeCopy,
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
+
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestDestroyBeforeCopy);
 
 TEST_P(LayerTreeHostCopyRequestTestDestroyBeforeCopy, Test) {
   RunTest(compositor_mode());
@@ -1259,7 +1345,8 @@ class LayerTreeHostCopyRequestTestShutdownBeforeCopy
         // drawing to take place.
         std::unique_ptr<viz::CopyOutputRequest> request =
             std::make_unique<viz::CopyOutputRequest>(
-                viz::CopyOutputRequest::ResultFormat::RGBA_TEXTURE,
+                viz::CopyOutputRequest::ResultFormat::RGBA,
+                viz::CopyOutputResult::Destination::kNativeTextures,
                 base::BindOnce(&LayerTreeHostCopyRequestTestShutdownBeforeCopy::
                                    CopyOutputCallback,
                                base::Unretained(this)));
@@ -1296,6 +1383,10 @@ INSTANTIATE_TEST_SUITE_P(
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
 
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestShutdownBeforeCopy);
+
 TEST_P(LayerTreeHostCopyRequestTestShutdownBeforeCopy, Test) {
   RunTest(compositor_mode());
 }
@@ -1328,7 +1419,8 @@ class LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest
     // Send a copy request after the first commit.
     if (layer_tree_host()->SourceFrameNumber() == 1) {
       child_->RequestCopyOfOutput(std::make_unique<viz::CopyOutputRequest>(
-          viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+          viz::CopyOutputRequest::ResultFormat::RGBA,
+          viz::CopyOutputRequest::ResultDestination::kSystemMemory,
           base::BindOnce(
               &LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest::
                   CopyOutputCallback,
@@ -1427,6 +1519,10 @@ INSTANTIATE_TEST_SUITE_P(
     LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest,
     CombineWithCompositorModes(viz::GetGpuRendererTypesNoDawn()),
     PrintTupleToStringParamName());
+
+// viz::GetGpuRendererTypesNoDawn() is empty on some platforms.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest);
 
 TEST_P(LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest, Test) {
   RunTest(compositor_mode());

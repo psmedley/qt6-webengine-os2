@@ -12,6 +12,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/system/system_monitor.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "media/capture/video/fuchsia/video_capture_device_fuchsia.h"
@@ -99,8 +100,8 @@ class VideoCaptureDeviceFactoryFuchsia::DeviceConfigFetcher {
 
   uint64_t device_id_;
   fuchsia::camera3::DevicePtr device_;
-  base::Optional<std::string> description_;
-  base::Optional<VideoCaptureFormats> formats_;
+  absl::optional<std::string> description_;
+  absl::optional<VideoCaptureFormats> formats_;
   base::OnceClosure on_fetched_callback_;
 };
 
@@ -178,7 +179,7 @@ void VideoCaptureDeviceFactoryFuchsia::OnDeviceWatcherDisconnected(
   // Clear the list of devices, so we don't report any camera devices while
   // DeviceWatcher is disconnected. We will try connecting DeviceWatcher again
   // when GetDevicesInfo() is called.
-  devices_ = base::nullopt;
+  devices_ = absl::nullopt;
   num_pending_device_info_requests_ = 0;
 
   MaybeResolvePendingDeviceInfoCallbacks();
@@ -285,6 +286,14 @@ void VideoCaptureDeviceFactoryFuchsia::
     MaybeResolvePendingDeviceInfoCallbacks() {
   if (num_pending_device_info_requests_ > 0)
     return;
+
+  // Notify system monitor if devices have changed. This will indirectly update
+  // media device manager and the web app eventually.
+  auto* system_monitor = base::SystemMonitor::Get();
+  if (system_monitor) {
+    system_monitor->ProcessDevicesChanged(
+        base::SystemMonitor::DEVTYPE_VIDEO_CAPTURE);
+  }
 
   std::vector<GetDevicesInfoCallback> callbacks;
   callbacks.swap(pending_devices_info_requests_);

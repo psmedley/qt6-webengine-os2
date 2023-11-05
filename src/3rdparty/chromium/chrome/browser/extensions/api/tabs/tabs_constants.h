@@ -103,6 +103,7 @@ extern const char kSupportedInWindowsOnlyError[];
 extern const char kInvalidWindowTypeError[];
 extern const char kInvalidWindowStateError[];
 extern const char kScreenshotsDisabled[];
+extern const char kScreenshotsDisabledByDlp[];
 extern const char kCannotUpdateMuteCaptured[];
 extern const char kCannotDetermineLanguageOfUnloadedTab[];
 extern const char kMissingLockWindowFullscreenPrivatePermission[];
@@ -111,6 +112,8 @@ extern const char kBrowserWindowNotAllowed[];
 extern const char kLockedFullscreenModeNewTabError[];
 extern const char kGroupParamsError[];
 extern const char kCannotNavigateToDevtools[];
+extern const char kCannotHighlightTabs[];
+extern const char kNotAllowedForDevToolsError[];
 
 }  // namespace tabs_constants
 }  // namespace extensions
