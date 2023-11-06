@@ -26,6 +26,7 @@ qt_internal_add_module(WebEngineWidgets
         Qt::Gui
         Qt::Widgets
         Qt::WebEngineCore
+    OS2_SHORT_NAME Qt6WebEW
 )
 
 qt_internal_extend_target(WebEngineWidgets CONDITION QT_FEATURE_webengine_printing_and_pdf

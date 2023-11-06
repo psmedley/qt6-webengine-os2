@@ -51,6 +51,7 @@ qt_internal_add_qml_module(WebEngineQuick
         Qt::Qml
         Qt::Quick
         Qt::WebEngineCore
+    OS2_SHORT_NAME Qt6WebEQ
 )
 
 qt_internal_extend_target(qtwebenginequickplugin

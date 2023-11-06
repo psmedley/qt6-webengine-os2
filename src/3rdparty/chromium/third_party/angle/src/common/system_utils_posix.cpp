@@ -179,10 +179,12 @@ Library *OpenSharedLibraryWithExtension(const char *libraryName, SearchType sear
     }
 
     int extraFlags = 0;
+#ifndef ANGLE_PLATFORM_OS2
     if (searchType == SearchType::AlreadyLoaded)
     {
         extraFlags = RTLD_NOLOAD;
     }
+#endif
 
     std::string fullPath = directory + libraryName;
 #if ANGLE_PLATFORM_IOS

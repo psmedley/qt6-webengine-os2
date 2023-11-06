@@ -147,7 +147,7 @@ declare_args() {
   # For now the IPC layer is conservatively not enabled on Chromium+Windows
   # builds.
   enable_perfetto_ipc =
-      !is_fuchsia && !is_nacl && !is_os2
+      !is_fuchsia && !is_nacl && !is_os2 &&
       (perfetto_build_standalone || perfetto_build_with_android ||
        (build_with_chromium && !is_win))
 

@@ -211,7 +211,7 @@ EGLAttrib GetDisplayTypeFromEnvironment()
     return EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE;
 #elif defined(ANGLE_ENABLE_VULKAN)
     return EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE;
-#elif defined(ANGLE_ENABLE_NULL)
+#elif defined(ANGLE_ENABLE_NULL) || defined(__OS2__) //FIXME
     return EGL_PLATFORM_ANGLE_TYPE_NULL_ANGLE;
 #else
 #    error No default ANGLE platform type

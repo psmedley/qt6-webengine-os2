@@ -26,6 +26,7 @@ qt_internal_add_qml_module(WebEngineQuickDelegatesQml
     NO_SYNC_QT
     PLUGIN_TARGET qtwebenginequickdelegatesplugin
     DEPENDENCIES QtQuickControls2
+    OS2_SHORT_NAME Qt6WebQD
 )
 
 qt_internal_add_resource(qtwebenginequickdelegatesplugin "qtwebenginequickdelegatesplugin"

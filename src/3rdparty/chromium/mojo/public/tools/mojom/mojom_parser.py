@@ -31,7 +31,8 @@ from mojom.parse import conditional_features
 
 # Disable this for easier debugging.
 # In Python 2, subprocesses just hang when exceptions are thrown :(.
-_ENABLE_MULTIPROCESSING = sys.version_info[0] > 2
+#_ENABLE_MULTIPROCESSING = sys.version_info[0] > 2
+_ENABLE_MULTIPROCESSING =0
 
 if sys.version_info < (3, 4):
   _MULTIPROCESSING_USES_FORK = sys.platform.startswith('linux')
