@@ -34,12 +34,15 @@ inline int vswprintf(wchar_t* buffer, size_t size,
 }
 
 #ifdef __OS2__
-inline const char16* as_u16cstr(const wchar_t* str) {
-  return reinterpret_cast<const char16*>(str);
+inline const char16_t* as_u16cstr(const wchar_t* str) {
+  return reinterpret_cast<const char16_t*>(str);
 }
-inline const char16* as_u16cstr(WStringPiece str) {
-  return reinterpret_cast<const char16*>(str.data());
+inline const char16_t* as_u16cstr(WStringPiece str) {
+  return reinterpret_cast<const char16_t*>(str.data());
 }
+// The following section contains overloads of the cross-platform APIs for
+// std::wstring and base::WStringPiece.
+BASE_EXPORT bool IsStringASCII(WStringPiece str);
 #endif
 
 }  // namespace base

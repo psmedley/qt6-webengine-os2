@@ -5,6 +5,7 @@
 #include "ui/gl/init/gl_factory.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_context_stub.h"

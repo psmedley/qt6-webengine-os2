@@ -6,6 +6,7 @@
 #include "content/browser/child_process_launcher_helper_posix.h"
 
 #include "base/command_line.h"
+#include "base/notreached.h"
 #include "base/posix/global_descriptors.h"
 #include "base/process/launch.h"
 #include "content/browser/child_process_launcher.h"

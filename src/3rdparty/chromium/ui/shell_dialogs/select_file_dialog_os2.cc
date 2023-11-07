@@ -5,6 +5,7 @@
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 
 namespace ui {
 
