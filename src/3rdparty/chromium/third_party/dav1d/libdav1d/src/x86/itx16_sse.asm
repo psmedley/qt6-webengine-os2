@@ -119,7 +119,7 @@ tbl_8x16_2d: db 0, 14, 30, 46
 tbl_8x16_v: db 0, 4, 8, 12
 tbl_8x16_h: db 0, 32, 64, 96
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

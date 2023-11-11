@@ -11,7 +11,7 @@
 
 %include "vpx_ports/x86_abi_support.asm"
 
-SECTION_TEXT
+section .text
 globalsym(vpx_clear_system_state)
 sym(vpx_clear_system_state):
     emms

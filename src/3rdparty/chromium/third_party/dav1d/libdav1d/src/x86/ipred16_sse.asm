@@ -68,7 +68,7 @@ cextern smooth_weights_1d_16bpc
 cextern smooth_weights_2d_16bpc
 cextern filter_intra_taps
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

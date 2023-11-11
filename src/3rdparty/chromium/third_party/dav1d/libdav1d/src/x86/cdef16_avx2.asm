@@ -54,7 +54,7 @@ pw_2048:   times 2 dw 2048
 
 cextern cdef_dir_8bpc_avx2.main
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

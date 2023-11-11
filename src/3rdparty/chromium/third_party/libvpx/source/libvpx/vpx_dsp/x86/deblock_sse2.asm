@@ -83,7 +83,7 @@
         add         rbx,        16
 %endmacro
 
-SECTION_TEXT
+SECTION .text
 
 ;void vpx_post_proc_down_and_across_mb_row_sse2
 ;(

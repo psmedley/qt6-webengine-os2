@@ -113,24 +113,15 @@
     %elifidn __OUTPUT_FORMAT__,aout
         SECTION .text
     %elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SEGMENT TEXT32 CLASS=CODE USE32 ALIGN=%1
-    %elifidn __OUTPUT_FORMAT__,elf
-        SECTION .rdata align=%1
+        SECTION CONST32 public align=%1 use32 class=CONST flat
     %else
         SECTION .rodata align=%1
     %endif
 %endmacro
 
-; Needed on OS/2 where it is 16-bit by default.
-%macro SECTION_TEXT 0
-    %ifidn __OUTPUT_FORMAT__,obj
-        SEGMENT TEXT32 CLASS=CODE USE32
-    %else
-        SECTION .text
-    %endif
-%endmacro
+%ifidn __OUTPUT_FORMAT__,obj
+    %define .text TEXT32 public align=16 use32 class=CODE flat
+%endif
 
 ; PIC macros from vpx_ports/x86_abi_support.asm.
 %ifidn __OUTPUT_FORMAT__,elf32
@@ -140,8 +131,6 @@
 %elifidn __OUTPUT_FORMAT__,win32
 %define ABI_IS_32BIT 1
 %elifidn __OUTPUT_FORMAT__,aout
-%define ABI_IS_32BIT 1
-%elifidn __OUTPUT_FORMAT__,obj
 %define ABI_IS_32BIT 1
 %else
 %define ABI_IS_32BIT 0

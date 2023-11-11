@@ -199,7 +199,7 @@ BIDIR_JMP_TABLE  blend_avx2,              4, 8, 16, 32
 BIDIR_JMP_TABLE  blend_v_avx2,         2, 4, 8, 16, 32
 BIDIR_JMP_TABLE  blend_h_avx2,         2, 4, 8, 16, 32, 32, 32
 
-SECTION_TEXT
+SECTION .text
 
 INIT_XMM avx2
 cglobal put_bilin, 4, 8, 0, dst, ds, src, ss, w, h, mxy

@@ -202,7 +202,7 @@ BIDIR_JMP_TABLE w_mask_420_avx512icl,      4, 8, 16, 32, 64, 128
 BIDIR_JMP_TABLE w_mask_422_avx512icl,      4, 8, 16, 32, 64, 128
 BIDIR_JMP_TABLE w_mask_444_avx512icl,      4, 8, 16, 32, 64, 128
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

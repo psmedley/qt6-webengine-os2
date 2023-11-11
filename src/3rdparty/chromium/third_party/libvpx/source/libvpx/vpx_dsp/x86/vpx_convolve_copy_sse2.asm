@@ -10,7 +10,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 %macro convolve_fn 1-2
 %ifidn %1, avg

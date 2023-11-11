@@ -11,7 +11,7 @@
 
 %include "vpx_ports/x86_abi_support.asm"
 
-SECTION_TEXT
+SECTION .text
 
 ;void vpx_plane_add_noise_sse2(uint8_t *start, const int8_t *noise,
 ;                              int blackclamp, int whiteclamp,

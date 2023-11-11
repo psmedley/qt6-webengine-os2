@@ -15,7 +15,7 @@
 %define vp8_filter_weight 128
 %define VP8_FILTER_SHIFT  7
 
-SECTION_TEXT
+SECTION .text
 
 ;void vp8_filter_block1d_h6_mmx
 ;(

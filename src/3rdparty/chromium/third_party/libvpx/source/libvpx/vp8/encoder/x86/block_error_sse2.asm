@@ -11,7 +11,7 @@
 
 %include "vpx_ports/x86_abi_support.asm"
 
-SECTION_TEXT
+SECTION .text
 
 ;int vp8_block_error_sse2(short *coeff_ptr,  short *dcoef_ptr)
 globalsym(vp8_block_error_sse2)

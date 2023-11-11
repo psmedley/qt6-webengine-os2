@@ -47,7 +47,7 @@ pw_4096: times 16 dw 4096
 
 pb_mask: dd 1, 1, 2, 2, 4, 4, 8, 8
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

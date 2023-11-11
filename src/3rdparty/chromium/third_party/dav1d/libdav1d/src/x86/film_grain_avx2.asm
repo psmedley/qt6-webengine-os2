@@ -90,7 +90,7 @@ endstruc
 
 cextern gaussian_sequence
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

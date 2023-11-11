@@ -22,7 +22,7 @@ pw2_8:  times 8 dw 4
 pw2_16:  times 8 dw 8
 pw2_32:  times 8 dw 16
 
-SECTION_TEXT
+SECTION .text
 
 ; ------------------------------------------
 ; input: x, y, z, result

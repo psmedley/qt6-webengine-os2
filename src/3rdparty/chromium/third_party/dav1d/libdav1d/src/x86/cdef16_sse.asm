@@ -37,7 +37,7 @@ cextern cdef_dir_8bpc_ssse3.main
 cextern cdef_dir_8bpc_sse4.main
 cextern shufw_6543210x
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

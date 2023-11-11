@@ -62,7 +62,7 @@ pd_0xF00801C7: times 4 dd 0XF00801C7
 
 cextern sgr_x_by_x
 
-SECTION_TEXT
+SECTION .text
 
 %if ARCH_X86_32
  %define PIC_base_offset $$

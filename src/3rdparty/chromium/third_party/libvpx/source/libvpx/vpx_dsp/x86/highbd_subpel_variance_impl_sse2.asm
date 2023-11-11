@@ -28,7 +28,7 @@ bilin_filter_m_sse2: times  8 dw 16
                      times  8 dw  2
                      times  8 dw 14
 
-SECTION_TEXT
+SECTION .text
 
 ; int vpx_sub_pixel_varianceNxh(const uint8_t *src, ptrdiff_t src_stride,
 ;                               int x_offset, int y_offset,

@@ -171,7 +171,7 @@
 %endm
 %endif
 
-SECTION_TEXT
+SECTION .text
 
 globalsym(vpx_highbd_filter_block1d4_v2_sse2)
 sym(vpx_highbd_filter_block1d4_v2_sse2):

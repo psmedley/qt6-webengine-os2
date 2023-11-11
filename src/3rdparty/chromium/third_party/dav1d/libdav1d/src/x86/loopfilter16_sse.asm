@@ -50,7 +50,7 @@ pw_4096: times 8 dw 4096
 
 pb_mask: dd 1, 1, 2, 2
 
-SECTION_TEXT
+SECTION .text
 
 %if ARCH_X86_32
 %if STACK_ALIGNMENT < 16

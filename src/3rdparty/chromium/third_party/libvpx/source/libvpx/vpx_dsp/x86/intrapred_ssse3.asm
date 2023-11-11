@@ -28,7 +28,7 @@ sh_b54321089: db 5, 4, 3, 2, 1, 0, 8, 9, 0, 0, 0, 0, 0, 0, 0, 0
 sh_b89abcdef: db 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0
 sh_bfedcba9876543210: db 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 
-SECTION_TEXT
+SECTION .text
 
 INIT_XMM ssse3
 cglobal d45_predictor_16x16, 3, 6, 4, dst, stride, above, dst8, line, goffset

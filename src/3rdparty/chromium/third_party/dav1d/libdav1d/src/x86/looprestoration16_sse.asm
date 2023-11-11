@@ -61,7 +61,7 @@ wiener_round:  dd 1049600, 1048832
 
 cextern sgr_x_by_x
 
-SECTION_TEXT
+SECTION .text
 
 %macro movif64 2 ; dst, src
  %if ARCH_X86_64

@@ -140,7 +140,7 @@ pw_2675x8:      times 8 dw  2675*8
 pw_4085x8:      times 8 dw  4085*8
 pw_m301x8:      times 8 dw  -301*8
 
-SECTION_TEXT
+SECTION .text
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

@@ -11,7 +11,7 @@
 
 %include "vpx_ports/x86_abi_support.asm"
 
-SECTION_TEXT
+SECTION .text
 
 ;unsigned int vpx_highbd_calc16x16var_sse2
 ;(

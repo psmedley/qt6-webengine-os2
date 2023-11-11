@@ -83,7 +83,7 @@
     ret
 %endmacro
 
-SECTION_TEXT
+SECTION .text
 
 ;void vp8_copy32xn_sse3(
 ;    unsigned char *src_ptr,
