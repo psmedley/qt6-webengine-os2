@@ -67,10 +67,6 @@
         fakegot:
     %elifidn __OUTPUT_FORMAT__,aout
         section .text
-    %elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SEGMENT TEXT32 CLASS=CODE USE32 ALIGN=%1
     %else
         SECTION .rodata align=%1
     %endif
@@ -80,8 +76,6 @@
 %macro SECTION_TEXT 0-1 16
     %ifidn __OUTPUT_FORMAT__,aout
         SECTION .text
-    %elifidn __OUTPUT_FORMAT__,obj
-        SEGMENT TEXT32 CLASS=CODE USE32 ALIGN=%1
     %else
         SECTION .text align=%1
     %endif

@@ -13,7 +13,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 ; void aom_subtract_block(int rows, int cols,
 ;                         int16_t *diff, ptrdiff_t diff_stride,

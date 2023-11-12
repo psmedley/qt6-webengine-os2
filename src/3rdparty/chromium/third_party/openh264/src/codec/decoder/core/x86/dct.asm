@@ -42,7 +42,7 @@
 
 %include "asm_inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 ;void WelsBlockZero16x16_sse2(int16_t * block, int32_t stride);
 WELS_EXTERN WelsBlockZero16x16_sse2

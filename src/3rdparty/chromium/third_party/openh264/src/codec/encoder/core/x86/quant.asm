@@ -43,7 +43,7 @@
 %include "asm_inc.asm"
 
 
-SECTION_TEXT
+SECTION .text
 ;************************************************
 ;NEW_QUANT
 ;************************************************
@@ -172,7 +172,7 @@ WELS_EXTERN WelsQuantFour4x4Max_sse2
     punpckldq   %1, %1
 %endmacro
 
-SECTION_TEXT
+SECTION .text
 
 %macro MMX_Quant4  4
     pxor    %2, %2

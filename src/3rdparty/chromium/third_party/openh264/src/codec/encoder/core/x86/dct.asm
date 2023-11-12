@@ -39,7 +39,7 @@
 
 %include "asm_inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 ;***********************************************************************
 ; SSE2 functions

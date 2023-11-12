@@ -13,7 +13,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 %macro AVG_4x2x4 2
   movh                  m2, [second_predq]

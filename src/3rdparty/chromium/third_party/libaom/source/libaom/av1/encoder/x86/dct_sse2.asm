@@ -13,7 +13,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 %macro TRANSFORM_COLS 0
   paddw           m0,        m1

@@ -59,10 +59,6 @@
 
 %ifdef X86_32_PICASM
 SECTION .text align=32
-%elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=32
 %endif
@@ -112,7 +108,7 @@ db 80h, 80h, 80h, 80h, 80h, 80h, 80h, 80h, 80h, 80h, 80h, 02h, 05h, 08h, 0bh, 0e
 ; Code
 ;***********************************************************************
 
-SECTION_TEXT
+SECTION .text
 
 ;***********************************************************************
 ;   void DyadicBilinearDownsamplerWidthx32_sse( unsigned char* pDst, const int iDstStride,

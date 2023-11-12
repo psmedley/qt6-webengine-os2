@@ -46,10 +46,6 @@
 ;*******************************************************************************
 %ifdef X86_32_PICASM
 SECTION .text align=32
-%elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=32
 %endif
@@ -118,7 +114,7 @@ h264_mc_hc_32:
 ; Code
 ;*******************************************************************************
 
-SECTION_TEXT
+SECTION .text
 
 %ifdef X86_32_PICASM
 
@@ -239,7 +235,7 @@ movd    %9, %1
 ; Code
 ;*******************************************************************************
 
-SECTION_TEXT
+SECTION .text
 
 ;***********************************************************************
 ; void McHorVer22Width8HorFirst_sse2(const int16_t *pSrc,
@@ -530,7 +526,7 @@ WELS_EXTERN McHorVer02WidthEq8_sse2
 ; Code
 ;***********************************************************************
 
-SECTION_TEXT
+SECTION .text
 
 
 

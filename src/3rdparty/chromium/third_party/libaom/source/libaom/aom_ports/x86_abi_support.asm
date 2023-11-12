@@ -27,8 +27,6 @@
 %define ABI_IS_32BIT 1
 %elifidn __OUTPUT_FORMAT__,aout
 %define ABI_IS_32BIT 1
-%elifidn __OUTPUT_FORMAT__,obj
-%define ABI_IS_32BIT 1
 %else
 %define ABI_IS_32BIT 0
 %endif
@@ -398,27 +396,11 @@
 %macro SECTION_RODATA 0
 section .text
 %endmacro
-%elifidn __OUTPUT_FORMAT__,obj
-%define SECTION_RODATA section .text
-section .text align=16 use32 class=CODE
-group CGROUP text
 %elifidn __OUTPUT_FORMAT__,aout
 %define SECTION_RODATA section .data
 %else
 %define SECTION_RODATA section .rodata
 %endif
-
-; Name of the text section
-;
-; Needed on OS/2 where it is 16-bit by default.
-;
-%macro SECTION_TEXT 0
-    %ifidn __OUTPUT_FORMAT__,obj
-        SEGMENT TEXT32 CLASS=CODE USE32
-    %else
-        SECTION .text
-    %endif
-%endmacro
 
 
 ; Tell GNU ld that we don't require an executable stack.

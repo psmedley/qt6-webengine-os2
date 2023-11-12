@@ -13,7 +13,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 %macro REORDER_INPUTS 0
   ; a c d b  to  a b c d

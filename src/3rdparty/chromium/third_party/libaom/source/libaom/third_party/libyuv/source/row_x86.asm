@@ -15,7 +15,7 @@
 %endif
 %include "x86inc.asm"
 
-SECTION_TEXT
+SECTION .text
 
 ; cglobal numeric constants are parameters, gpr regs, mm regs
 

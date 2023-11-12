@@ -47,10 +47,6 @@
 
 %ifdef X86_32_PICASM
 SECTION .text align=16
-%elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=16
 %endif
@@ -72,7 +68,7 @@ WELS_SHUFB0000111122223333:
     times 4 db 3
 
 
-SECTION_TEXT
+SECTION .text
 
 ; Unsigned byte absolute difference.
 ; a=%1 b=%2 clobber=%3

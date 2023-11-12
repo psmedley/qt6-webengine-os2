@@ -36,10 +36,6 @@
 ;***********************************************************************
 %ifdef X86_32_PICASM
 SECTION .text align=16
-%elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=16
 %endif
@@ -49,7 +45,7 @@ mv_x_inc_x4     dw  0x10, 0x10, 0x10, 0x10
 mv_y_inc_x4     dw  0x04, 0x04, 0x04, 0x04
 mx_x_offset_x4  dw  0x00, 0x04, 0x08, 0x0C
 
-SECTION_TEXT
+SECTION .text
 %ifdef X86_32
 ;**********************************************************************************************************************
 ;void SumOf8x8BlockOfFrame_sse2(uint8_t* pRefPicture, const int32_t kiWidth, const int32_t kiHeight, const int32_t kiRefStride,

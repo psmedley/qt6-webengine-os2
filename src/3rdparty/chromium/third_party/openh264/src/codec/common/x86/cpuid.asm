@@ -50,7 +50,7 @@
 ; Code
 ;******************************************************************************************
 
-SECTION_TEXT
+SECTION .text
 
 ; refer to "The IA-32 Intel(R) Architecture Software Developers Manual, Volume 2A A-M"
 ; section CPUID - CPU Identification

@@ -47,10 +47,6 @@
 
 %ifdef X86_32_PICASM
 SECTION .text align=16
-%elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=16
 %endif
@@ -187,7 +183,7 @@ mmx_0x02: dw 0x02, 0x00, 0x00, 0x00
 ; Code
 ;***********************************************************************
 
-SECTION_TEXT
+SECTION .text
 
 ;***********************************************************************
 ;   void WelsI4x4LumaPredH_sse2(uint8_t *pred, uint8_t *pRef, int32_t stride)

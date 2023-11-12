@@ -183,7 +183,7 @@
 %endmacro   ; end of TRANSPOSE8x16_WRITE_ALT_SSE2
 
 
-SECTION_TEXT
+SECTION .text
 
 WELS_EXTERN TransposeMatrixBlock16x16_sse2
 ; void TransposeMatrixBlock16x16_sse2( void *dst/*16x16*/, const int32_t dst_stride, void *src/*16x16*/, const int32_t src_stride );

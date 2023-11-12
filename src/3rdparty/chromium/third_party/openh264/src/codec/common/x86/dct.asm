@@ -62,10 +62,6 @@
 
 %ifdef X86_32_PICASM
 SECTION .text align=32
-%elifidn __OUTPUT_FORMAT__,obj
-        ; OMF needs special handling to ensure everything is in the same segment
-        ; and that the segment is 32 bit.
-        SECTION TEXT32 align=16 public use32 class=CODE
 %else
 SECTION .rodata align=32
 %endif
@@ -121,7 +117,7 @@ wels_4xp0w_4xm8000w:
     times 4 dw 0
     times 4 dw -8000h
 
-SECTION_TEXT
+SECTION .text
 
 ;***********************************************************************
 ; MMX functions

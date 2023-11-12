@@ -200,7 +200,7 @@
     movdqu      [rdi + %2], xmm0
 %endm
 
-SECTION_TEXT
+SECTION .text
 
 ;void aom_filter_block1d4_v8_sse2
 ;(

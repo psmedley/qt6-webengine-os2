@@ -108,7 +108,7 @@
     dec         rcx
 %endm
 
-SECTION_TEXT
+SECTION .text
 
 globalsym(aom_filter_block1d4_v2_ssse3)
 sym(aom_filter_block1d4_v2_ssse3):
