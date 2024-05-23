@@ -7,6 +7,7 @@
 #include <fuchsia/legacymetrics/cpp/fidl_test_base.h>
 #include <fuchsia/media/cpp/fidl.h>
 #include <fuchsia/modular/cpp/fidl.h>
+#include <fuchsia/web/cpp/fidl.h>
 #include <lib/fdio/directory.h>
 #include <lib/fidl/cpp/binding.h>
 #include <lib/sys/cpp/component_context.h>
@@ -14,39 +15,40 @@
 #include <lib/zx/channel.h>
 #include <zircon/processargs.h>
 
-#include "base/base_paths_fuchsia.h"
+#include "base/base_paths.h"
 #include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/fuchsia/file_utils.h"
 #include "base/fuchsia/filtered_service_directory.h"
 #include "base/fuchsia/fuchsia_logging.h"
+#include "base/fuchsia/mem_buffer_util.h"
 #include "base/fuchsia/process_context.h"
 #include "base/fuchsia/scoped_service_binding.h"
 #include "base/fuchsia/test_component_controller.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_run_loop_timeout.h"
 #include "base/test/task_environment.h"
+#include "base/test/test_future.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "fuchsia/base/agent_impl.h"
-#include "fuchsia/base/mem_buffer_util.h"
 #include "fuchsia/base/string_util.h"
 #include "fuchsia/base/test/context_provider_test_connector.h"
 #include "fuchsia/base/test/fake_component_context.h"
 #include "fuchsia/base/test/fit_adapter.h"
 #include "fuchsia/base/test/frame_test_util.h"
-#include "fuchsia/base/test/result_receiver.h"
 #include "fuchsia/base/test/test_devtools_list_fetcher.h"
 #include "fuchsia/base/test/url_request_rewrite_test_util.h"
 #include "fuchsia/runners/cast/cast_runner.h"
 #include "fuchsia/runners/cast/cast_runner_switches.h"
 #include "fuchsia/runners/cast/fake_api_bindings.h"
 #include "fuchsia/runners/cast/fake_application_config_manager.h"
+#include "fuchsia/runners/cast/fidl/fidl/chromium/cast/cpp/fidl.h"
+#include "media/fuchsia/audio/fake_audio_device_enumerator.h"
 #include "net/test/embedded_test_server/default_handlers.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -289,7 +291,8 @@ class TestCastComponent {
     // Populate |component_services_| with services for the component to use.
     fidl::InterfaceHandle<fuchsia::io::Directory> directory;
     component_services_.GetOrCreateDirectory("svc")->Serve(
-        fuchsia::io::OPEN_RIGHT_READABLE | fuchsia::io::OPEN_RIGHT_WRITABLE,
+        fuchsia::io::OpenFlags::RIGHT_READABLE |
+            fuchsia::io::OpenFlags::RIGHT_WRITABLE,
         directory.NewRequest().TakeChannel());
 
     ASSERT_EQ(component_services_.AddPublicService(
@@ -317,7 +320,7 @@ class TestCastComponent {
     fuchsia::web::ContentDirectoryProvider provider;
     provider.set_name("testdata");
     base::FilePath pkg_path;
-    CHECK(base::PathService::Get(base::DIR_ASSETS, &pkg_path));
+    CHECK(base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &pkg_path));
     provider.set_directory(base::OpenDirectoryHandle(
         pkg_path.AppendASCII("fuchsia/runners/cast/testdata")));
     std::vector<fuchsia::web::ContentDirectoryProvider> providers;
@@ -336,25 +339,23 @@ class TestCastComponent {
   // promise is returned.
   std::string ExecuteJavaScript(const std::string& code) {
     fuchsia::web::WebMessage message;
-    message.set_data(cr_fuchsia::MemBufferFromString(code, "test-msg"));
+    message.set_data(base::MemBufferFromString(code, "test-msg"));
     test_port_->PostMessage(
         std::move(message),
         [](fuchsia::web::MessagePort_PostMessage_Result result) {
           EXPECT_TRUE(result.is_response());
         });
 
-    base::RunLoop response_loop;
-    cr_fuchsia::ResultReceiver<fuchsia::web::WebMessage> response(
-        response_loop.QuitClosure());
+    base::test::TestFuture<fuchsia::web::WebMessage> response;
     test_port_->ReceiveMessage(
-        cr_fuchsia::CallbackToFitFunction(response.GetReceiveCallback()));
-    response_loop.Run();
+        cr_fuchsia::CallbackToFitFunction(response.GetCallback()));
+    EXPECT_TRUE(response.Wait());
 
-    std::string response_string;
-    EXPECT_TRUE(
-        cr_fuchsia::StringFromMemBuffer(response->data(), &response_string));
+    absl::optional<std::string> response_string =
+        base::StringFromMemBuffer(response.Get().data());
+    EXPECT_TRUE(response_string.has_value());
 
-    return response_string;
+    return response_string.value_or(std::string());
   }
 
   void CheckAppUrl(const GURL& app_url) {
@@ -405,6 +406,11 @@ class TestCastComponent {
     test_port_ = nullptr;
   }
 
+  void OnComponentStateCreated(base::OnceClosure callback) {
+    ASSERT_FALSE(component_state_created_callback_);
+    component_state_created_callback_ = std::move(callback);
+  }
+
   FakeApplicationConfigManager* app_config_manager() {
     return &app_config_manager_;
   }
@@ -427,7 +433,7 @@ class TestCastComponent {
     // return the results over a MessagePort.
     std::vector<chromium::cast::ApiBinding> binding_list;
     chromium::cast::ApiBinding eval_js_binding;
-    eval_js_binding.set_before_load_script(cr_fuchsia::MemBufferFromString(
+    eval_js_binding.set_before_load_script(base::MemBufferFromString(
         "function valueOrUndefinedString(value) {"
         "    return (typeof(value) == 'undefined') ? 'undefined' : value;"
         "}"
@@ -457,7 +463,14 @@ class TestCastComponent {
 
   void WaitComponentStateCreated() {
     base::RunLoop run_loop;
-    component_state_created_callback_ = run_loop.QuitClosure();
+    base::OnceClosure old_component_state_created_callback =
+        std::move(component_state_created_callback_);
+    component_state_created_callback_ = base::BindLambdaForTesting([&] {
+      if (old_component_state_created_callback) {
+        std::move(old_component_state_created_callback).Run();
+      }
+      run_loop.Quit();
+    });
     run_loop.Run();
   }
 
@@ -501,49 +514,9 @@ enum CastRunnerFeatures {
   kCastRunnerFeaturesNone = 0,
   kCastRunnerFeaturesHeadless = 1,
   kCastRunnerFeaturesVulkan = 1 << 1,
-  kCastRunnerFeaturesFrameHost = 1 << 2
+  kCastRunnerFeaturesFrameHost = 1 << 2,
+  kCastRunnerFeaturesFakeAudioDeviceEnumerator = 1 << 3,
 };
-
-sys::ServiceDirectory StartCastRunner(
-    CastRunnerFeatures runner_features,
-    fidl::InterfaceRequest<fuchsia::sys::ComponentController>
-        component_controller_request) {
-  fuchsia::sys::LaunchInfo launch_info;
-  launch_info.url =
-      "fuchsia-pkg://fuchsia.com/cast_runner#meta/cast_runner.cmx";
-
-  // Clone stderr from the current process to CastRunner and ask it to
-  // redirect all logs to stderr.
-  launch_info.err = fuchsia::sys::FileDescriptor::New();
-  launch_info.err->type0 = PA_FD;
-  zx_status_t status = fdio_fd_clone(
-      STDERR_FILENO, launch_info.err->handle0.reset_and_get_address());
-  ZX_CHECK(status == ZX_OK, status);
-
-  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  command_line.AppendSwitchASCII("enable-logging", "stderr");
-
-  if (runner_features & kCastRunnerFeaturesHeadless)
-    command_line.AppendSwitch(kForceHeadlessForTestsSwitch);
-  if (!(runner_features & kCastRunnerFeaturesVulkan))
-    command_line.AppendSwitch(kDisableVulkanForTestsSwitch);
-  if (runner_features & kCastRunnerFeaturesFrameHost)
-    command_line.AppendSwitch(kEnableFrameHostComponent);
-
-  // Add all switches and arguments, skipping the program.
-  launch_info.arguments.emplace(std::vector<std::string>(
-      command_line.argv().begin() + 1, command_line.argv().end()));
-
-  fidl::InterfaceHandle<fuchsia::io::Directory> cast_runner_services_dir;
-  launch_info.directory_request =
-      cast_runner_services_dir.NewRequest().TakeChannel();
-
-  fuchsia::sys::LauncherPtr launcher;
-  base::ComponentContextForProcess()->svc()->Connect(launcher.NewRequest());
-  launcher->CreateComponent(std::move(launch_info),
-                            std::move(component_controller_request));
-  return sys::ServiceDirectory(std::move(cast_runner_services_dir));
-}
 
 }  // namespace
 
@@ -580,6 +553,65 @@ class CastRunnerIntegrationTest : public testing::Test {
     EXPECT_TRUE(test_server_.Start());
   }
 
+  sys::ServiceDirectory StartCastRunner(
+      CastRunnerFeatures runner_features,
+      fidl::InterfaceRequest<fuchsia::sys::ComponentController>
+          component_controller_request) {
+    fuchsia::sys::LaunchInfo launch_info;
+    launch_info.url =
+        "fuchsia-pkg://fuchsia.com/cast_runner#meta/cast_runner.cmx";
+
+    // Clone stderr from the current process to CastRunner and ask it to
+    // redirect all logs to stderr.
+    launch_info.err = fuchsia::sys::FileDescriptor::New();
+    launch_info.err->type0 = PA_FD;
+    zx_status_t status = fdio_fd_clone(
+        STDERR_FILENO, launch_info.err->handle0.reset_and_get_address());
+    ZX_CHECK(status == ZX_OK, status);
+
+    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+    command_line.AppendSwitchASCII("enable-logging", "stderr");
+
+    if (runner_features & kCastRunnerFeaturesHeadless)
+      command_line.AppendSwitch(kForceHeadlessForTestsSwitch);
+    if (!(runner_features & kCastRunnerFeaturesVulkan))
+      command_line.AppendSwitch(kDisableVulkanForTestsSwitch);
+    if (runner_features & kCastRunnerFeaturesFrameHost)
+      command_line.AppendSwitch(kEnableFrameHostComponent);
+
+    // Add all switches and arguments, skipping the program.
+    launch_info.arguments.emplace(std::vector<std::string>(
+        command_line.argv().begin() + 1, command_line.argv().end()));
+
+    std::unique_ptr<fuchsia::sys::ServiceList> additional_services =
+        std::make_unique<fuchsia::sys::ServiceList>();
+    auto* svc_dir = services_for_cast_runner_.GetOrCreateDirectory("svc");
+    if (runner_features & kCastRunnerFeaturesFakeAudioDeviceEnumerator) {
+      fake_audio_device_enumerator_ =
+          std::make_unique<media::FakeAudioDeviceEnumerator>(svc_dir);
+      additional_services->names.push_back(
+          fuchsia::media::AudioDeviceEnumerator::Name_);
+    }
+
+    fuchsia::io::DirectoryHandle svc_dir_handle;
+    svc_dir->Serve(fuchsia::io::OpenFlags::RIGHT_READABLE |
+                       fuchsia::io::OpenFlags::RIGHT_WRITABLE,
+                   svc_dir_handle.NewRequest().TakeChannel());
+    additional_services->host_directory = svc_dir_handle.TakeChannel();
+
+    launch_info.additional_services = std::move(additional_services);
+
+    fuchsia::io::DirectoryHandle cast_runner_services_dir;
+    launch_info.directory_request =
+        cast_runner_services_dir.NewRequest().TakeChannel();
+
+    fuchsia::sys::LauncherPtr launcher;
+    base::ComponentContextForProcess()->svc()->Connect(launcher.NewRequest());
+    launcher->CreateComponent(std::move(launch_info),
+                              std::move(component_controller_request));
+    return sys::ServiceDirectory(std::move(cast_runner_services_dir));
+  }
+
   base::test::SingleThreadTaskEnvironment task_environment_{
       base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   net::EmbeddedTestServer test_server_;
@@ -597,6 +629,9 @@ class CastRunnerIntegrationTest : public testing::Test {
   // restart ContextProvider, so we can't pass the services directory from
   // ContextProvider to CastRunner directly.
   sys::OutgoingDirectory services_for_cast_runner_;
+
+  std::unique_ptr<media::FakeAudioDeviceEnumerator>
+      fake_audio_device_enumerator_;
 
   fuchsia::sys::RunnerPtr cast_runner_;
 };
@@ -714,9 +749,10 @@ TEST_F(CastRunnerIntegrationTest, RemoteDebugging) {
   base::Value devtools_list =
       cr_fuchsia::GetDevToolsListFromPort(CastRunner::kRemoteDebuggingPort);
   ASSERT_TRUE(devtools_list.is_list());
-  EXPECT_EQ(devtools_list.GetList().size(), 1u);
+  EXPECT_EQ(devtools_list.GetListDeprecated().size(), 1u);
 
-  base::Value* devtools_url = devtools_list.GetList()[0].FindPath("url");
+  base::Value* devtools_url =
+      devtools_list.GetListDeprecated()[0].FindPath("url");
   ASSERT_TRUE(devtools_url->is_string());
   EXPECT_EQ(devtools_url->GetString(), app_url.spec());
 }
@@ -778,7 +814,7 @@ TEST_F(CastRunnerIntegrationTest, ApplicationConfigAgentUrl) {
   // bindings returned for the single-agent scenario are not initialized.
   std::vector<chromium::cast::ApiBinding> binding_list;
   chromium::cast::ApiBinding echo_binding;
-  echo_binding.set_before_load_script(cr_fuchsia::MemBufferFromString(
+  echo_binding.set_before_load_script(base::MemBufferFromString(
       "window.echo = cast.__platform__.PortConnector.bind('dummyService');",
       "test"));
   binding_list.emplace_back(std::move(echo_binding));
@@ -837,7 +873,7 @@ TEST_F(CastRunnerIntegrationTest, ApplicationConfigAgentUrlRewriteOptional) {
   // bindings returned for the single-agent scenario are not initialized.
   std::vector<chromium::cast::ApiBinding> binding_list;
   chromium::cast::ApiBinding echo_binding;
-  echo_binding.set_before_load_script(cr_fuchsia::MemBufferFromString(
+  echo_binding.set_before_load_script(base::MemBufferFromString(
       "window.echo = cast.__platform__.PortConnector.bind('dummyService');",
       "test"));
   binding_list.emplace_back(std::move(echo_binding));
@@ -876,7 +912,14 @@ TEST_F(CastRunnerIntegrationTest, ApplicationConfigAgentUrlRewriteOptional) {
   shutdown_run_loop.Run();
 }
 
-TEST_F(CastRunnerIntegrationTest, MicrophoneRedirect) {
+class AudioCastRunnerIntegrationTest : public CastRunnerIntegrationTest {
+ public:
+  AudioCastRunnerIntegrationTest()
+      : CastRunnerIntegrationTest(
+            kCastRunnerFeaturesFakeAudioDeviceEnumerator) {}
+};
+
+TEST_F(AudioCastRunnerIntegrationTest, MicrophoneRedirect) {
   TestCastComponent component(cast_runner_.get());
   GURL app_url = test_server_.GetURL("/microphone.html");
   auto app_config =
@@ -900,7 +943,6 @@ TEST_F(CastRunnerIntegrationTest, MicrophoneRedirect) {
               }),
           fuchsia::media::Audio::Name_),
       ZX_OK);
-
   component.ExecuteJavaScript("connectMicrophone();");
 
   // Will quit once AudioCapturer is connected.

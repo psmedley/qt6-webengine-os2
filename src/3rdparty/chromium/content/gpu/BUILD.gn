@@ -102,6 +102,13 @@ target(link_target_type, "gpu_sources") {
     ]
   }
 
+  if (is_chromeos_ash) {
+    deps += [
+      "//components/services/font/public/cpp",
+      "//components/services/font/public/mojom",
+    ]
+  }
+
   if (is_android) {
     deps += [
       "//components/tracing:graphics_provider",
@@ -119,14 +126,6 @@ target(link_target_type, "gpu_sources") {
 
   if (is_mac) {
     deps += [ "//components/metal_util" ]
-  }
-
-  if (use_x11) {
-    deps += [
-      "//ui/events/platform/x11",
-      "//ui/gfx/linux:gpu_memory_buffer_support_x11",
-      "//ui/gfx/x",
-    ]
   }
 
   if (use_ozone) {

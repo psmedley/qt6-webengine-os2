@@ -1,48 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "ui_delegates_manager.h"
 
 #include "api/qquickwebengineaction_p.h"
-#include "api/qquickwebengineview_p.h"
+#include "api/qquickwebengineview_p_p.h"
 
 #include <authentication_dialog_controller.h>
+#include <autofill_popup_controller.h>
 #include <color_chooser_controller.h>
 #include <file_picker_controller.h>
 #include <javascript_dialog_controller.h>
@@ -58,6 +23,9 @@
 #include <QtQml/qqmlcontext.h>
 #include <QtQml/qqmlengine.h>
 #include <QtQml/qqmlproperty.h>
+#include <QtQuick/qquickwindow.h>
+
+#include <algorithm>
 
 // Uncomment for QML debugging
 //#define UI_DELEGATES_DEBUG
@@ -125,11 +93,14 @@ const char *defaultPropertyName(QObject *obj)
 #define COMPONENT_MEMBER_INIT(TYPE, COMPONENT) \
     , COMPONENT##Component(0)
 
+// clang-format off
 UIDelegatesManager::UIDelegatesManager(QQuickWebEngineView *view)
     : m_view(view)
     , m_toolTip(nullptr)
     , m_touchSelectionMenu(nullptr)
+    , m_autofillPopup(nullptr)
     FOR_EACH_COMPONENT_TYPE(COMPONENT_MEMBER_INIT, NO_SEPARATOR)
+// clang-format on
 {
 }
 
@@ -165,7 +136,7 @@ bool UIDelegatesManager::ensureComponentLoaded(ComponentType type)
     if (!engine)
         return false;
 
-    for (const QString &importDir : qAsConst(m_importDirs)) {
+    for (const QString &importDir : std::as_const(m_importDirs)) {
         const QString componentFilePath = importDir % QLatin1Char('/') % fileName;
 
         if (!QFileInfo(componentFilePath).exists())
@@ -385,6 +356,10 @@ void UIDelegatesManager::showDialog(QSharedPointer<AuthenticationDialogControlle
 
 void UIDelegatesManager::showFilePicker(QSharedPointer<FilePickerController> controller)
 {
+    if (controller->mode() == FilePickerController::UploadFolder) {
+        showDirectoryPicker(controller);
+        return;
+    }
 
     if (!ensureComponentLoaded(FilePicker))
         return;
@@ -396,19 +371,21 @@ void UIDelegatesManager::showFilePicker(QSharedPointer<FilePickerController> con
     filePicker->setParent(m_view);
     filePickerComponent->completeCreate();
 
+    static int fileModeIndex = filePicker->metaObject()->indexOfEnumerator("FileMode");
+    QMetaEnum fileModeEnum = filePicker->metaObject()->enumerator(fileModeIndex);
+
     // Fine-tune some properties depending on the mode.
     switch (controller->mode()) {
     case FilePickerController::Open:
+        filePicker->setProperty("fileMode", fileModeEnum.keyToValue("OpenFile"));
         break;
     case FilePickerController::Save:
-        filePicker->setProperty("selectExisting", false);
+        filePicker->setProperty("fileMode", fileModeEnum.keyToValue("SaveFile"));
         break;
     case FilePickerController::OpenMultiple:
-        filePicker->setProperty("selectMultiple", true);
+        filePicker->setProperty("fileMode", fileModeEnum.keyToValue("OpenFiles"));
         break;
     case FilePickerController::UploadFolder:
-        filePicker->setProperty("selectFolder", true);
-        break;
     default:
         Q_UNREACHABLE();
     }
@@ -430,6 +407,35 @@ void UIDelegatesManager::showFilePicker(QSharedPointer<FilePickerController> con
     QObject::connect(filePicker, rejectSignal.method(), filePicker, filePicker->metaObject()->method(deleteLaterIndex));
 
     QMetaObject::invokeMethod(filePicker, "open");
+}
+
+void UIDelegatesManager::showDirectoryPicker(QSharedPointer<FilePickerController> controller)
+{
+    if (!ensureComponentLoaded(DirectoryPicker))
+        return;
+
+    QQmlContext *context = qmlContext(m_view);
+    QObject *directoryPicker = directoryPickerComponent->beginCreate(context);
+    if (QQuickItem *item = qobject_cast<QQuickItem*>(directoryPicker))
+        item->setParentItem(m_view);
+    directoryPicker->setParent(m_view);
+    directoryPickerComponent->completeCreate();
+
+    QQmlProperty directoryPickedSignal(directoryPicker, QStringLiteral("onFolderSelected"));
+    CHECK_QML_SIGNAL_PROPERTY(directoryPickedSignal, directoryPickerComponent->url());
+    QQmlProperty rejectSignal(directoryPicker, QStringLiteral("onRejected"));
+    CHECK_QML_SIGNAL_PROPERTY(rejectSignal, directoryPickerComponent->url());
+    static int acceptedIndex = controller->metaObject()->indexOfSlot("accepted(QVariant)");
+    QObject::connect(directoryPicker, directoryPickedSignal.method(), controller.data(), controller->metaObject()->method(acceptedIndex));
+    static int rejectedIndex = controller->metaObject()->indexOfSlot("rejected()");
+    QObject::connect(directoryPicker, rejectSignal.method(), controller.data(), controller->metaObject()->method(rejectedIndex));
+
+    // delete when done.
+    static int deleteLaterIndex = directoryPicker->metaObject()->indexOfSlot("deleteLater()");
+    QObject::connect(directoryPicker, directoryPickedSignal.method(), directoryPicker, directoryPicker->metaObject()->method(deleteLaterIndex));
+    QObject::connect(directoryPicker, rejectSignal.method(), directoryPicker, directoryPicker->metaObject()->method(deleteLaterIndex));
+
+    QMetaObject::invokeMethod(directoryPicker, "open");
 }
 
 class TemporaryCursorMove
@@ -565,6 +571,158 @@ void UIDelegatesManager::showTouchSelectionMenu(QtWebEngineCore::TouchSelectionM
 void UIDelegatesManager::hideTouchSelectionMenu()
 {
     QTimer::singleShot(0, m_view, [this] { m_touchSelectionMenu.reset(); });
+}
+
+bool AutofillPopupEventFilter::eventFilter(QObject *object, QEvent *event)
+{
+    if (event->type() == QEvent::ShortcutOverride) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        if (keyEvent->key() == Qt::Key_Escape) {
+            m_manager->hideAutofillPopup();
+            return true;
+        }
+
+        // Ignore shortcuts while the popup is open. It may result unwanted
+        // edit commands sent to Chromium that blocks the key press.
+        event->ignore();
+        return true;
+    }
+
+    // AutofillPopupControllerImpl::HandleKeyPressEvent()
+    // chrome/browser/ui/autofill/autofill_popup_controller_impl.cc
+
+    if (event->type() == QEvent::KeyPress) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        switch (keyEvent->key()) {
+        case Qt::Key_Up:
+            m_controller->selectPreviousSuggestion();
+            return true;
+        case Qt::Key_Down:
+            m_controller->selectNextSuggestion();
+            return true;
+        case Qt::Key_PageUp:
+            m_controller->selectFirstSuggestion();
+            return true;
+        case Qt::Key_PageDown:
+            m_controller->selectLastSuggestion();
+            return true;
+        case Qt::Key_Escape:
+            m_manager->hideAutofillPopup();
+            return true;
+        case Qt::Key_Enter:
+        case Qt::Key_Return:
+            m_controller->acceptSuggestion();
+            return true;
+        case Qt::Key_Delete:
+            // Remove suggestion is not supported for datalist.
+            // Forward delete to view to be able to remove selected text.
+            break;
+        case Qt::Key_Tab:
+            m_controller->acceptSuggestion();
+            break;
+        default:
+            break;
+        }
+    }
+
+    // Do not forward release events of the overridden key presses.
+    if (event->type() == QEvent::KeyRelease) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        switch (keyEvent->key()) {
+        case Qt::Key_Up:
+        case Qt::Key_Down:
+        case Qt::Key_PageUp:
+        case Qt::Key_PageDown:
+        case Qt::Key_Escape:
+        case Qt::Key_Enter:
+        case Qt::Key_Return:
+            return true;
+        default:
+            break;
+        }
+    }
+
+    return QObject::eventFilter(object, event);
+}
+
+void UIDelegatesManager::showAutofillPopup(QtWebEngineCore::AutofillPopupController *controller,
+                                           QPointF pos, int width, bool autoselectFirstSuggestion)
+{
+    static const int padding = 1;
+    static const int itemHeight = 20;
+    const int proposedHeight = itemHeight * (controller->model()->rowCount()) + padding * 2;
+
+    bool popupWasNull = false;
+    if (m_autofillPopup.isNull()) {
+        popupWasNull = true;
+        if (!ensureComponentLoaded(AutofillPopup))
+            return;
+
+        QQmlContext *context = qmlContext(m_view);
+        m_autofillPopup.reset(autofillPopupComponent->beginCreate(context));
+        if (QQuickItem *item = qobject_cast<QQuickItem *>(m_autofillPopup.data()))
+            item->setParentItem(m_view);
+        m_autofillPopup->setParent(m_view);
+    }
+
+    m_autofillPopup->setProperty("controller", QVariant::fromValue(controller));
+    m_autofillPopup->setProperty("x", pos.x());
+    m_autofillPopup->setProperty("y", pos.y());
+    m_autofillPopup->setProperty("width", width);
+    m_autofillPopup->setProperty("height",
+                                 std::min(proposedHeight, qRound(m_view->height() - pos.y())));
+    m_autofillPopup->setProperty("padding", padding);
+    m_autofillPopup->setProperty("itemHeight", itemHeight);
+
+    if (popupWasNull) {
+        QQmlProperty selectedSignal(m_autofillPopup.data(), QStringLiteral("onSelected"));
+        CHECK_QML_SIGNAL_PROPERTY(selectedSignal, autofillPopupComponent->url());
+        static int selectSuggestionIndex =
+                controller->metaObject()->indexOfSlot("selectSuggestion(int)");
+        QObject::connect(m_autofillPopup.data(), selectedSignal.method(), controller,
+                         controller->metaObject()->method(selectSuggestionIndex));
+
+        QQmlProperty acceptedSignal(m_autofillPopup.data(), QStringLiteral("onAccepted"));
+        CHECK_QML_SIGNAL_PROPERTY(acceptedSignal, autofillPopupComponent->url());
+        static int acceptSuggestionIndex =
+                controller->metaObject()->indexOfSlot("acceptSuggestion()");
+        QObject::connect(m_autofillPopup.data(), acceptedSignal.method(), controller,
+                         controller->metaObject()->method(acceptSuggestionIndex));
+
+        QObject::connect(controller, &QtWebEngineCore::AutofillPopupController::currentIndexChanged,
+                         [this](const QModelIndex &index) {
+                             QMetaObject::invokeMethod(m_autofillPopup.data(), "setCurrentIndex",
+                                                       Qt::DirectConnection,
+                                                       Q_ARG(QVariant, index.row()));
+                         });
+
+        autofillPopupComponent->completeCreate();
+
+        m_view->window()->installEventFilter(
+                new AutofillPopupEventFilter(controller, this, m_autofillPopup.data()));
+
+        QMetaObject::invokeMethod(m_autofillPopup.data(), "open");
+        controller->notifyPopupShown();
+    }
+
+    if (autoselectFirstSuggestion)
+        controller->selectFirstSuggestion();
+}
+
+void UIDelegatesManager::hideAutofillPopup()
+{
+    if (!m_autofillPopup)
+        return;
+
+    QTimer::singleShot(0, m_view, [this] {
+        if (m_autofillPopup) {
+            QtWebEngineCore::AutofillPopupController *controller =
+                    m_autofillPopup->property("controller")
+                            .value<QtWebEngineCore::AutofillPopupController *>();
+            m_autofillPopup.reset();
+            controller->notifyPopupHidden();
+        }
+    });
 }
 
 bool UIDelegatesManager::initializeImportDirs(QStringList &dirs, QQmlEngine *engine)

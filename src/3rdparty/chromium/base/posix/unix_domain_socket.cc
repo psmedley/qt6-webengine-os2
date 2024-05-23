@@ -6,9 +6,8 @@
 
 #include <errno.h>
 #include <sys/socket.h>
-#if !defined(OS_NACL_NONSFI)
+#include <sys/uio.h>
 #include <sys/un.h>
-#endif
 #include <unistd.h>
 
 #include <vector>
@@ -20,18 +19,13 @@
 #include "base/posix/eintr_wrapper.h"
 #include "build/build_config.h"
 
-#if !defined(OS_NACL_NONSFI)
-#include <sys/uio.h>
-#endif
-
 namespace base {
 
 const size_t UnixDomainSocket::kMaxFileDescriptors = 16;
 
-#if !defined(OS_NACL_NONSFI)
 bool CreateSocketPair(ScopedFD* one, ScopedFD* two) {
   int raw_socks[2];
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   // macOS does not support SEQPACKET.
   const int flags = SOCK_STREAM;
 #else
@@ -39,7 +33,7 @@ bool CreateSocketPair(ScopedFD* one, ScopedFD* two) {
 #endif
   if (socketpair(AF_UNIX, flags, 0, raw_socks) == -1)
     return false;
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   // On macOS, preventing SIGPIPE is done with socket option.
   const int no_sigpipe = 1;
   if (setsockopt(raw_socks[0], SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe,
@@ -56,15 +50,14 @@ bool CreateSocketPair(ScopedFD* one, ScopedFD* two) {
 
 // static
 bool UnixDomainSocket::EnableReceiveProcessId(int fd) {
-#if !defined(OS_APPLE) && !defined(OS_OS2)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
   const int enable = 1;
   return setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable)) == 0;
 #else
   // SO_PASSCRED is not supported on macOS or OS/2.
   return true;
-#endif  // OS_APPLE && OS_OS2
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
 }
-#endif  // !defined(OS_NACL_NONSFI)
 
 // static
 bool UnixDomainSocket::SendMsg(int fd,
@@ -97,7 +90,7 @@ bool UnixDomainSocket::SendMsg(int fd,
 // regarded for SOCK_SEQPACKET in the AF_UNIX domain, but it is mandated by
 // POSIX. On Mac MSG_NOSIGNAL is not supported, so we need to ensure that
 // SO_NOSIGPIPE is set during socket creation.
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   const int flags = 0;
   int no_sigpipe = 0;
   socklen_t no_sigpipe_len = sizeof(no_sigpipe);
@@ -110,7 +103,7 @@ bool UnixDomainSocket::SendMsg(int fd,
   const int flags = 0;
 #else
   const int flags = MSG_NOSIGNAL;
-#endif  // OS_APPLE
+#endif  // BUILDFLAG(IS_APPLE)
   const ssize_t r = HANDLE_EINTR(sendmsg(fd, &msg, flags));
   const bool ret = static_cast<ssize_t>(length) == r;
   delete[] control_buffer;
@@ -150,11 +143,11 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
 
   const size_t kControlBufferSize =
       CMSG_SPACE(sizeof(int) * kMaxFileDescriptors)
-#if !defined(OS_NACL_NONSFI) && !defined(OS_APPLE) && !defined(OS_OS2)
-      // The PNaCl toolchain for Non-SFI binary build, OS/2 and macOS do not support
-      // ucred. macOS supports xucred, but this structure is insufficient.
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
+      // macOS does not support ucred.
+      // macOS supports xucred, but this structure is insufficient.
       + CMSG_SPACE(sizeof(struct ucred))
-#endif  // !defined(OS_NACL_NONSFI) && !defined(OS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
       ;
   char control_buffer[kControlBufferSize];
   msg.msg_control = control_buffer;
@@ -178,16 +171,15 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
         wire_fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
         wire_fds_len = payload_len / sizeof(int);
       }
-#if !defined(OS_NACL_NONSFI) && !defined(OS_APPLE) && !defined(OS_OS2)
-      // The PNaCl toolchain for Non-SFI binary build and macOS do not support
-      // SCM_CREDENTIALS.
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
+      // macOS does not support SCM_CREDENTIALS.
       if (cmsg->cmsg_level == SOL_SOCKET &&
           cmsg->cmsg_type == SCM_CREDENTIALS) {
         DCHECK_EQ(payload_len, sizeof(struct ucred));
         DCHECK_EQ(pid, -1);
         pid = reinterpret_cast<struct ucred*>(CMSG_DATA(cmsg))->pid;
       }
-#endif  // !defined(OS_NACL_NONSFI) && !defined(OS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
     }
   }
 
@@ -209,7 +201,7 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
   }
 
   if (out_pid) {
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
     socklen_t pid_size = sizeof(pid);
     if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &pid_size) != 0)
       pid = -1;
@@ -228,7 +220,6 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
   return r;
 }
 
-#if !defined(OS_NACL_NONSFI)
 // static
 ssize_t UnixDomainSocket::SendRecvMsg(int fd,
                                       uint8_t* reply,
@@ -286,6 +277,5 @@ ssize_t UnixDomainSocket::SendRecvMsgWithFlags(int fd,
 
   return reply_len;
 }
-#endif  // !defined(OS_NACL_NONSFI)
 
 }  // namespace base

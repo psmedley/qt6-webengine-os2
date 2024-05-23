@@ -67,7 +67,7 @@ class CFWL_Edit : public CFWL_Widget, public CFDE_TextEditEngine::Delegate {
   virtual void SetText(const WideString& wsText);
   virtual void SetTextSkipNotify(const WideString& wsText);
 
-  int32_t GetTextLength() const;
+  size_t GetTextLength() const;
   WideString GetText() const;
   void ClearText();
 
@@ -80,8 +80,8 @@ class CFWL_Edit : public CFWL_Widget, public CFDE_TextEditEngine::Delegate {
   int32_t GetLimit() const;
   void SetLimit(int32_t nLimit);
   void SetAliasChar(wchar_t wAlias);
-  Optional<WideString> Copy();
-  Optional<WideString> Cut();
+  absl::optional<WideString> Copy();
+  absl::optional<WideString> Cut();
   bool Paste(const WideString& wsPaste);
   bool Undo();
   bool Redo();

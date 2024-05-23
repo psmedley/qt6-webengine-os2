@@ -21,7 +21,6 @@
 #include "build/build_config.h"
 #include "components/autofill/core/browser/address_profile_save_manager.h"
 #include "components/autofill/core/browser/autofill_client.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/autofill_structured_address_name.h"
@@ -32,6 +31,8 @@
 #include "components/autofill/core/browser/geo/autofill_country.h"
 #include "components/autofill/core/browser/geo/phone_number_i18n.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
+#include "components/autofill/core/browser/payments/virtual_card_enrollment_manager.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_features.h"
@@ -104,39 +105,10 @@ bool IsValidFieldTypeAndValue(const ServerFieldTypeSet types_seen,
 // No verification of validity of the contents is performed. This is an
 // existence check only.
 bool IsMinimumAddress(const AutofillProfile& profile,
-                      const std::string& variation_country_code,
+                      const std::string& predicted_country_code,
                       const std::string& app_locale,
                       LogBuffer* import_log_buffer) {
-  // Try to acquire the country code form the filled form.
-  std::string country_code =
-      base::UTF16ToASCII(profile.GetRawInfo(ADDRESS_HOME_COUNTRY));
-
-  if (import_log_buffer && !country_code.empty()) {
-    *import_log_buffer << LogMessage::kImportAddressProfileFromFormCountrySource
-                       << "Country entry in form." << CTag{};
-  }
-
-  // As a fallback, use the finch state to get a country code.
-  if (country_code.empty() && !variation_country_code.empty()) {
-    country_code = variation_country_code;
-    if (import_log_buffer && !country_code.empty()) {
-      *import_log_buffer
-          << LogMessage::kImportAddressProfileFromFormCountrySource
-          << "Variations service." << CTag{};
-    }
-  }
-
-  // As the last resort, derive the country code from the app_locale.
-  if (country_code.empty()) {
-    country_code = AutofillCountry::CountryCodeForLocale(app_locale);
-    if (import_log_buffer && !country_code.empty()) {
-      *import_log_buffer
-          << LogMessage::kImportAddressProfileFromFormCountrySource
-          << "App locale." << CTag{};
-    }
-  }
-
-  AutofillCountry country(country_code, app_locale);
+  AutofillCountry country(predicted_country_code, app_locale);
 
   // Include the details of the country to the log.
   if (import_log_buffer)
@@ -199,6 +171,19 @@ bool IsMinimumAddress(const AutofillProfile& profile,
     is_zip_or_state_requirement_violated = true;
   }
 
+  bool is_line1_or_house_number_violated = false;
+  if (country.requires_line1_or_house_number() &&
+      profile.GetRawInfo(ADDRESS_HOME_LINE1).empty() &&
+      profile.GetRawInfo(ADDRESS_HOME_HOUSE_NUMBER).empty()) {
+    if (import_log_buffer) {
+      *import_log_buffer
+          << LogMessage::kImportAddressProfileFromFormFailed
+          << "Missing required ADDRESS_HOME_LINE1 or ADDRESS_HOME_HOUSE_NUMBER."
+          << CTag{};
+    }
+    is_line1_or_house_number_violated = true;
+  }
+
   // Collect metrics regarding the requirements.
   AutofillMetrics::LogAddressFormImportRequirementMetric(
       is_line1_missing ? AddressImportRequirement::LINE1_REQUIREMENT_VIOLATED
@@ -226,7 +211,8 @@ bool IsMinimumAddress(const AutofillProfile& profile,
 
   // Return true if all requirements are fulfilled.
   return !(is_line1_missing || is_city_missing || is_state_missing ||
-           is_zip_missing || is_zip_or_state_requirement_violated);
+           is_zip_missing || is_zip_or_state_requirement_violated ||
+           is_line1_or_house_number_violated);
 }
 
 }  // namespace
@@ -244,7 +230,7 @@ FormDataImporter::FormDataImporter(AutofillClient* client,
       address_profile_save_manager_(
           std::make_unique<AddressProfileSaveManager>(client,
                                                       personal_data_manager)),
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
       local_card_migration_manager_(
           std::make_unique<LocalCardMigrationManager>(client,
                                                       payments_client,
@@ -252,12 +238,16 @@ FormDataImporter::FormDataImporter(AutofillClient* client,
                                                       personal_data_manager)),
       upi_vpa_save_manager_(
           std::make_unique<UpiVpaSaveManager>(client, personal_data_manager)),
-#endif  // #if !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
       personal_data_manager_(personal_data_manager),
-      app_locale_(app_locale) {
+      app_locale_(app_locale),
+      virtual_card_enrollment_manager_(
+          std::make_unique<VirtualCardEnrollmentManager>(personal_data_manager,
+                                                         payments_client,
+                                                         client)) {
 }
 
-FormDataImporter::~FormDataImporter() {}
+FormDataImporter::~FormDataImporter() = default;
 
 void FormDataImporter::ImportFormData(const FormStructure& submitted_form,
                                       bool profile_autofill_enabled,
@@ -265,85 +255,36 @@ void FormDataImporter::ImportFormData(const FormStructure& submitted_form,
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> detected_upi_id;
 
+  std::vector<AddressProfileImportCandidate> address_profile_import_candidates;
+
   bool is_credit_card_upstream_enabled =
       credit_card_save_manager_->IsCreditCardUploadEnabled();
-  // ImportFormData will set the |imported_credit_card_record_type_|. If the
-  // imported card is invalid or already a server card, or if
-  // |credit_card_save_manager_| does not allow uploading,
-  // |imported_credit_card| will be nullptr.
+
   ImportFormData(submitted_form, profile_autofill_enabled,
                  credit_card_autofill_enabled,
                  /*should_return_local_card=*/is_credit_card_upstream_enabled,
-                 &imported_credit_card, &detected_upi_id);
+                 &imported_credit_card, address_profile_import_candidates,
+                 &detected_upi_id);
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  if (detected_upi_id && credit_card_autofill_enabled &&
-      base::FeatureList::IsEnabled(features::kAutofillSaveAndFillVPA)) {
-    upi_vpa_save_manager_->OfferLocalSave(*detected_upi_id);
+  // Create a vector of address profile import candidates.
+  // This is used to make preliminarily imported profiles available
+  // to the credit card import logic.
+  std::vector<AutofillProfile> preliminary_imported_address_profiles;
+  for (const auto& candidate : address_profile_import_candidates) {
+    if (candidate.all_requirements_fulfilled)
+      preliminary_imported_address_profiles.push_back(candidate.profile);
   }
-#endif  // #if !defined(OS_ANDROID) && !defined(OS_IOS)
+  credit_card_save_manager_->SetPreliminarilyImportedAutofillProfile(
+      preliminary_imported_address_profiles);
 
-  // If no card was successfully imported from the form, return.
-  if (imported_credit_card_record_type_ ==
-      ImportedCreditCardRecordType::NO_CARD) {
-    return;
-  }
-  // Do not offer upload save for google domain.
-  if (net::HasGoogleHost(submitted_form.main_frame_origin().GetURL()) &&
-      is_credit_card_upstream_enabled) {
-    return;
-  }
+  bool cc_prompt_potentially_shown = ProcessCreditCardImportCandidate(
+      submitted_form, std::move(imported_credit_card), detected_upi_id,
+      credit_card_autofill_enabled, is_credit_card_upstream_enabled);
 
-  // Do not offer credit card save at all if Autofill Assistant is running.
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillSuppressCreditCardSaveForAssistant) &&
-      client_->IsAutofillAssistantShowing()) {
-    return;
-  }
-
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  // A credit card was successfully imported, but it's possible it is already a
-  // local or server card. First, check to see if we should offer local card
-  // migration in this case, as local cards could go either way.
-  if (local_card_migration_manager_ &&
-      local_card_migration_manager_->ShouldOfferLocalCardMigration(
-          imported_credit_card.get(), imported_credit_card_record_type_)) {
-    local_card_migration_manager_->AttemptToOfferLocalCardMigration(
-        /*is_from_settings_page=*/false);
-    return;
-  }
-#endif  // #if !defined(OS_ANDROID) && !defined(OS_IOS)
-
-  // Local card migration will not be offered. If we do not have a new card to
-  // save (or a local card to upload save), return.
-  if (!imported_credit_card)
-    return;
-
-  // We have a card to save; decide what type of save flow to display.
-  if (is_credit_card_upstream_enabled) {
-    // Attempt to offer upload save. Because we pass
-    // |credit_card_upstream_enabled| to ImportFormData, this block can be
-    // reached on observing either a new card or one already stored locally
-    // which doesn't match an existing server card. If Google Payments declines
-    // allowing upload, |credit_card_save_manager_| is tasked with deciding if
-    // we should fall back to local save or not.
-    DCHECK(imported_credit_card_record_type_ ==
-               ImportedCreditCardRecordType::LOCAL_CARD ||
-           imported_credit_card_record_type_ ==
-               ImportedCreditCardRecordType::NEW_CARD);
-    credit_card_save_manager_->AttemptToOfferCardUploadSave(
-        submitted_form, from_dynamic_change_form_, has_non_focusable_field_,
-        *imported_credit_card,
-        /*uploading_local_card=*/imported_credit_card_record_type_ ==
-            ImportedCreditCardRecordType::LOCAL_CARD);
-  } else {
-    // If upload save is not allowed, new cards should be saved locally.
-    DCHECK(imported_credit_card_record_type_ ==
-           ImportedCreditCardRecordType::NEW_CARD);
-    credit_card_save_manager_->AttemptToOfferCardLocalSave(
-        from_dynamic_change_form_, has_non_focusable_field_,
-        *imported_credit_card);
-  }
+  // If a prompt for credit cards is potentially shown, do not allow for a
+  // second address profile import dialog.
+  ProcessAddressProfileImportCandidates(address_profile_import_candidates,
+                                        !cc_prompt_potentially_shown);
 }
 
 CreditCard FormDataImporter::ExtractCreditCardFromForm(
@@ -353,14 +294,52 @@ CreditCard FormDataImporter::ExtractCreditCardFromForm(
 }
 
 // static
-bool FormDataImporter::IsValidLearnableProfile(
+std::string FormDataImporter::GetPredictedCountryCode(
     const AutofillProfile& profile,
     const std::string& variation_country_code,
     const std::string& app_locale,
     LogBuffer* import_log_buffer) {
+  // Try to acquire the country code form the filled form.
+  std::string country_code =
+      base::UTF16ToASCII(profile.GetRawInfo(ADDRESS_HOME_COUNTRY));
+
+  if (import_log_buffer && !country_code.empty()) {
+    *import_log_buffer << LogMessage::kImportAddressProfileFromFormCountrySource
+                       << "Country entry in form." << CTag{};
+  }
+
+  // As a fallback, use the variation service state to get a country code.
+  if (country_code.empty() && !variation_country_code.empty()) {
+    country_code = variation_country_code;
+    if (import_log_buffer) {
+      *import_log_buffer
+          << LogMessage::kImportAddressProfileFromFormCountrySource
+          << "Variations service." << CTag{};
+    }
+  }
+
+  // As the last resort, derive the country code from the app_locale.
+  if (country_code.empty()) {
+    country_code = AutofillCountry::CountryCodeForLocale(app_locale);
+    if (import_log_buffer && !country_code.empty()) {
+      *import_log_buffer
+          << LogMessage::kImportAddressProfileFromFormCountrySource
+          << "App locale." << CTag{};
+    }
+  }
+
+  return country_code;
+}
+
+// static
+bool FormDataImporter::IsValidLearnableProfile(
+    const AutofillProfile& profile,
+    const std::string& predicted_country_code,
+    const std::string& app_locale,
+    LogBuffer* import_log_buffer) {
   // Check if the imported address qualifies as a minimum address.
   bool is_not_minimum_address = false;
-  if (!IsMinimumAddress(profile, variation_country_code, app_locale,
+  if (!IsMinimumAddress(profile, predicted_country_code, app_locale,
                         import_log_buffer)) {
     is_not_minimum_address = true;
   }
@@ -430,6 +409,8 @@ bool FormDataImporter::ImportFormData(
     bool credit_card_autofill_enabled,
     bool should_return_local_card,
     std::unique_ptr<CreditCard>* imported_credit_card,
+    std::vector<AddressProfileImportCandidate>&
+        address_profile_import_candidates,
     absl::optional<std::string>* imported_upi_id) {
   // We try the same |form| for both credit card and address import/update.
   // - ImportCreditCard may update an existing card, or fill
@@ -451,9 +432,8 @@ bool FormDataImporter::ImportFormData(
   // Only import addresses if enabled.
   if (profile_autofill_enabled &&
       !base::FeatureList::IsEnabled(features::kAutofillDisableAddressImport)) {
-    address_import = ImportAddressProfiles(
-        submitted_form,
-        /*allow_save_prompts=*/imported_credit_card->get() == nullptr);
+    address_import = ImportAddressProfiles(submitted_form,
+                                           address_profile_import_candidates);
   }
 
   if (cc_import || address_import || imported_upi_id->has_value())
@@ -463,8 +443,9 @@ bool FormDataImporter::ImportFormData(
   return false;
 }
 
-bool FormDataImporter::ImportAddressProfiles(const FormStructure& form,
-                                             bool allow_save_prompts) {
+bool FormDataImporter::ImportAddressProfiles(
+    const FormStructure& form,
+    std::vector<AddressProfileImportCandidate>& import_candidates) {
   // Create a buffer to collect logging output for the autofill-internals.
   LogBuffer import_log_buffer;
   import_log_buffer << LoggingScope::kAddressProfileFormImport;
@@ -498,9 +479,8 @@ bool FormDataImporter::ImportAddressProfiles(const FormStructure& form,
                         << section << CTag{};
       // Try to import an address profile from the form fields of this section.
       // Only allow for a prompt if no other complete profile was found so far.
-      if (ImportAddressProfileForSection(
-              form, section, allow_save_prompts && num_complete_profiles == 0,
-              &import_log_buffer))
+      if (ImportAddressProfileForSection(form, section, import_candidates,
+                                         &import_log_buffer))
         num_complete_profiles++;
       // And close the div of the section import log.
       import_log_buffer << CTag{"div"};
@@ -512,7 +492,7 @@ bool FormDataImporter::ImportAddressProfiles(const FormStructure& form,
           AutofillMetrics::AddressProfileImportStatusMetric::REGULAR_IMPORT);
     } else if (sections.size() > 1) {
       // Try to import by combining all sections.
-      if (ImportAddressProfileForSection(form, "", allow_save_prompts,
+      if (ImportAddressProfileForSection(form, "", import_candidates,
                                          &import_log_buffer)) {
         num_complete_profiles++;
         AutofillMetrics::LogAddressFormImportStatustMetric(
@@ -539,7 +519,7 @@ bool FormDataImporter::ImportAddressProfiles(const FormStructure& form,
 bool FormDataImporter::ImportAddressProfileForSection(
     const FormStructure& form,
     const std::string& section,
-    bool allow_save_prompts,
+    std::vector<AddressProfileImportCandidate>& import_candidates,
     LogBuffer* import_log_buffer) {
   // The candidate for profile import. There are many ways for the candidate to
   // be rejected (see everywhere this function returns false).
@@ -569,17 +549,11 @@ bool FormDataImporter::ImportAddressProfileForSection(
   // since they do not belong to the first phone number in the form.
   bool ignore_phone_number_fields = false;
 
+  // Metadata about the way we construct candidate_profile.
+  ProfileImportMetadata import_metadata;
+
   // Go through each |form| field and attempt to constitute a valid profile.
   for (const auto& field : form) {
-    // TODO(crbug/1213301): Remove this. This hack replaces the UNKNOWN_TYPE
-    // (due to autocomplete) of fields of a specific signature with their server
-    // or heuristic type. The changed value is reset below.
-    bool is_autocomplete_workaround =
-        base::FeatureList::IsEnabled(
-            features::kAutofillIgnoreAutocompleteForImport) &&
-        field->GetFieldSignature() == FieldSignature(2281611779) &&
-        field->Type().IsUnknown();
-
     // Reject fields that are not within the specified |section|.
     // If section is empty, use all fields.
     if (field->section != section && !section.empty())
@@ -596,17 +570,10 @@ bool FormDataImporter::ImportAddressProfileForSection(
         !field->is_focusable &&
         !base::FeatureList::IsEnabled(
             features::kAutofillProfileImportFromUnfocusableFields);
-    if ((!is_autocomplete_workaround && !field->IsFieldFillable()) ||
-        skip_unfocussable_field || value.empty()) {
+    if (!field->IsFieldFillable() || skip_unfocussable_field || value.empty())
       continue;
-    }
 
     AutofillType field_type = field->Type();
-    if (is_autocomplete_workaround) {
-      field_type = AutofillType(field->server_type() != NO_SERVER_DATA
-                                    ? field->server_type()
-                                    : field->heuristic_type());
-    }
 
     // Credit card fields are handled by ImportCreditCard().
     if (field_type.group() == FieldTypeGroup::kCreditCard)
@@ -692,33 +659,90 @@ bool FormDataImporter::ImportAddressProfileForSection(
     }
   }
 
+  const std::string predicted_country_code = GetPredictedCountryCode(
+      candidate_profile, client_->GetVariationConfigCountryCode(), app_locale_,
+      import_log_buffer);
+  // If the form doesn't contain a country field, complement the profile using
+  // |predicted_country_code|. To give users the opportunity to edit, this is
+  // only done with explicit save prompts enabled.
+  // TODO(crbug.com/1297032): Cleanup kAutofillComplementCountryCodeOnImport
+  // check when launched.
+  if (!has_invalid_country &&
+      candidate_profile.GetRawInfo(ADDRESS_HOME_COUNTRY).empty() &&
+      base::FeatureList::IsEnabled(
+          features::kAutofillAddressProfileSavePrompt) &&
+      base::FeatureList::IsEnabled(
+          features::kAutofillComplementCountryCodeOnImport)) {
+    candidate_profile.SetInfoWithVerificationStatus(
+        AutofillType(ADDRESS_HOME_COUNTRY),
+        base::ASCIIToUTF16(predicted_country_code), app_locale_,
+        VerificationStatus::kObserved);
+    import_metadata.did_complement_country = true;
+  }
+
   // Construct the phone number. Reject the whole profile if the number is
-  // invalid.
+  // invalid, unless |kAutofillRemoveInvalidPhoneNumberOnImport| is enabled.
   if (!combined_phone.IsEmpty()) {
+    const std::string predicted_country_code_without_variation =
+        GetPredictedCountryCode(candidate_profile, "", app_locale_, nullptr);
+    // If kAutofillConsiderVariationCountryCodeForPhoneNumbers is enabled,
+    // a consistent country code prediction for addresses and phone numbers is
+    // used. Otherwise the variation service state is not considered for phone
+    // numbers. This makes a difference, if the country code cannot be found
+    // in the profile.
+    // ParseNumber() implicity accepts both a country code and a locale. This
+    // will be refactored with crbug/1296077. The parameter for
+    // SetInfoWithVerificationStatus() has to be consistent with ParseNumber().
+    // TODO(crbug.com/1295721): Cleanup when launched.
+    const std::string& phone_number_region =
+        predicted_country_code != predicted_country_code_without_variation &&
+                base::FeatureList::IsEnabled(
+                    features::
+                        kAutofillConsiderVariationCountryCodeForPhoneNumbers)
+            ? predicted_country_code
+            : app_locale_;
     std::u16string constructed_number;
-    if (!combined_phone.ParseNumber(candidate_profile, app_locale_,
+    if (!combined_phone.ParseNumber(candidate_profile, phone_number_region,
                                     &constructed_number) ||
         !candidate_profile.SetInfoWithVerificationStatus(
             AutofillType(PHONE_HOME_WHOLE_NUMBER), constructed_number,
-            app_locale_, VerificationStatus::kObserved)) {
-      if (import_log_buffer) {
-        *import_log_buffer << LogMessage::kImportAddressProfileFromFormFailed
-                           << "Invalid phone number." << CTag{};
+            phone_number_region, VerificationStatus::kObserved)) {
+      if (base::FeatureList::IsEnabled(
+              features::kAutofillRemoveInvalidPhoneNumberOnImport)) {
+        DCHECK(candidate_profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER).empty());
+        import_metadata.did_remove_invalid_phone_number = true;
+      } else {
+        if (import_log_buffer) {
+          *import_log_buffer << LogMessage::kImportAddressProfileFromFormFailed
+                             << "Invalid phone number." << CTag{};
+        }
+        has_invalid_phone_number = true;
       }
-      has_invalid_phone_number = true;
+    }
+  }
+
+  // Filter unexpected values that are not shown in the settings.
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillRemoveInaccessibleProfileValues)) {
+    const ServerFieldTypeSet inaccessible_fields =
+        candidate_profile.FindInaccessibleProfileValues(predicted_country_code);
+    candidate_profile.ClearFields(inaccessible_fields);
+    AutofillMetrics::LogRemovedSettingInaccessibleFields(
+        !inaccessible_fields.empty());
+    for (const ServerFieldType inaccessible_field : inaccessible_fields) {
+      AutofillMetrics::LogRemovedSettingInaccessibleField(
+          predicted_country_code, inaccessible_field);
     }
   }
 
   // Reject the profile if minimum address and validation requirements are not
   // met.
-  const std::string variation_country_code =
-      client_->GetVariationConfigCountryCode();
   bool is_invalid_learnable_profile =
-      !IsValidLearnableProfile(candidate_profile, variation_country_code,
+      !IsValidLearnableProfile(candidate_profile, predicted_country_code,
                                app_locale_, import_log_buffer);
 
   // Do not import a profile if any of the requirements is violated.
-  bool all_fullfilled =
+  bool all_fulfilled =
       !(has_multiple_distinct_email_addresses || has_invalid_field_types ||
         has_invalid_country || has_invalid_phone_number ||
         is_invalid_learnable_profile);
@@ -748,8 +772,8 @@ bool FormDataImporter::ImportAddressProfileForSection(
           : AddressImportRequirement::COUNTRY_VALID_REQUIREMENT_FULFILLED);
 
   AutofillMetrics::LogAddressFormImportRequirementMetric(
-      all_fullfilled ? AddressImportRequirement::OVERALL_REQUIREMENT_FULFILLED
-                     : AddressImportRequirement::OVERALL_REQUIREMENT_VIOLATED);
+      all_fulfilled ? AddressImportRequirement::OVERALL_REQUIREMENT_FULFILLED
+                    : AddressImportRequirement::OVERALL_REQUIREMENT_VIOLATED);
 
   bool candidate_has_structured_data =
       base::FeatureList::IsEnabled(
@@ -759,30 +783,150 @@ bool FormDataImporter::ImportAddressProfileForSection(
   // If the profile does not fulfill import requirements but contains the
   // structured address or name information, it is eligible for silently
   // updating the existing profiles.
-  if (!all_fullfilled && !candidate_has_structured_data) {
+  if (!all_fulfilled && !candidate_has_structured_data)
     return false;
-  }
 
   if (!candidate_profile.FinalizeAfterImport())
     return false;
-
-  // Restrict the import to silent updates meaning that no prompt will be shown
-  // in case the import requirements are not fulfilled or if save prompts are
-  // not allowed in case they are enabled at all.
-  bool only_silent_updates =
-      !all_fullfilled ||
-      (!allow_save_prompts && base::FeatureList::IsEnabled(
-                                  features::kAutofillAddressProfileSavePrompt));
 
   // At this stage, the saving of the profile can only be omitted by the
   // incognito mode but the import is not triggered if the browser is in the
   // incognito mode.
   DCHECK(!personal_data_manager_->IsOffTheRecord());
-  address_profile_save_manager_->ImportProfileFromForm(
-      candidate_profile, app_locale_, form.source_url(),
-      /*allow_only_silent_updates=*/only_silent_updates);
 
-  return !only_silent_updates;
+  import_candidates.push_back(
+      AddressProfileImportCandidate{.profile = candidate_profile,
+                                    .url = form.source_url(),
+                                    .all_requirements_fulfilled = all_fulfilled,
+                                    .import_metadata = import_metadata});
+
+  // Return true if a compelete importable profile was found.
+  return all_fulfilled;
+}
+
+bool FormDataImporter::ProcessAddressProfileImportCandidates(
+    const std::vector<AddressProfileImportCandidate>& import_candidates,
+    bool allow_prompt) {
+  // At this point, no credit card prompt was shown. Initiate the import of
+  // addresses is possible.
+  int imported_profiles = 0;
+  if (allow_prompt || !base::FeatureList::IsEnabled(
+                          features::kAutofillAddressProfileSavePrompt)) {
+    for (const auto& candidate : import_candidates) {
+      // First try to import a single complete profile.
+      if (!candidate.all_requirements_fulfilled)
+        continue;
+      address_profile_save_manager_->ImportProfileFromForm(
+          candidate.profile, app_locale_, candidate.url,
+          /*allow_only_silent_updates=*/false, candidate.import_metadata);
+      // Limit the number of importable profiles to 2.
+      if (++imported_profiles >= 2)
+        return true;
+    }
+  }
+  // If a profile was already imported, do not try to use partial profiles for
+  // silent updates.
+  if (imported_profiles > 0)
+    return true;
+  // Otherwise try again but restrict the import to silent updates.
+  for (const auto& candidate : import_candidates) {
+    // First try to import a single complete profile.
+    address_profile_save_manager_->ImportProfileFromForm(
+        candidate.profile, app_locale_, candidate.url,
+        /*allow_only_silent_updates=*/true, candidate.import_metadata);
+  }
+  return false;
+}
+
+bool FormDataImporter::ProcessCreditCardImportCandidate(
+    const FormStructure& submitted_form,
+    std::unique_ptr<CreditCard> imported_credit_card,
+    absl::optional<std::string> detected_upi_id,
+    bool credit_card_autofill_enabled,
+    bool is_credit_card_upstream_enabled) {
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  if (detected_upi_id && credit_card_autofill_enabled &&
+      base::FeatureList::IsEnabled(features::kAutofillSaveAndFillVPA)) {
+    upi_vpa_save_manager_->OfferLocalSave(*detected_upi_id);
+  }
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+  // If no card was successfully imported from the form, return.
+  if (imported_credit_card_record_type_ ==
+      ImportedCreditCardRecordType::NO_CARD) {
+    return false;
+  }
+  // Do not offer upload save for google domain.
+  if (net::HasGoogleHost(submitted_form.main_frame_origin().GetURL()) &&
+      is_credit_card_upstream_enabled) {
+    return false;
+  }
+
+  // Do not offer credit card save at all if Autofill Assistant is running.
+  if (client_->IsAutofillAssistantShowing())
+    return false;
+
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillEnableUpdateVirtualCardEnrollment)) {
+    if (imported_credit_card &&
+        imported_credit_card->virtual_card_enrollment_state() ==
+            CreditCard::VirtualCardEnrollmentState::UNENROLLED_AND_ELIGIBLE) {
+      virtual_card_enrollment_manager_->OfferVirtualCardEnroll(
+          *imported_credit_card, VirtualCardEnrollmentSource::kDownstream);
+      return true;
+    }
+  }
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  // A credit card was successfully imported, but it's possible it is already a
+  // local or server card. First, check to see if we should offer local card
+  // migration in this case, as local cards could go either way.
+  if (local_card_migration_manager_ &&
+      local_card_migration_manager_->ShouldOfferLocalCardMigration(
+          imported_credit_card.get(), imported_credit_card_record_type_)) {
+    local_card_migration_manager_->AttemptToOfferLocalCardMigration(
+        /*is_from_settings_page=*/false);
+    return true;
+  }
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+  // Local card migration will not be offered. We check to see if it is valid to
+  // offer upload save or local card save, which will happen below if we do not
+  // early return false in this if-statement.
+  if (!ShouldOfferUploadCardOrLocalCardSave(imported_credit_card.get(),
+                                            is_credit_card_upstream_enabled)) {
+    return false;
+  }
+
+  // We have a card to save; decide what type of save flow to display.
+  if (is_credit_card_upstream_enabled) {
+    // Attempt to offer upload save. Because we pass
+    // |credit_card_upstream_enabled| to ImportFormData, this block can be
+    // reached on observing either a new card or one already stored locally
+    // which doesn't match an existing server card. If Google Payments declines
+    // allowing upload, |credit_card_save_manager_| is tasked with deciding if
+    // we should fall back to local save or not.
+    DCHECK(imported_credit_card_record_type_ ==
+               ImportedCreditCardRecordType::LOCAL_CARD ||
+           imported_credit_card_record_type_ ==
+               ImportedCreditCardRecordType::NEW_CARD);
+    credit_card_save_manager_->AttemptToOfferCardUploadSave(
+        submitted_form, from_dynamic_change_form_, has_non_focusable_field_,
+        *imported_credit_card,
+        /*uploading_local_card=*/imported_credit_card_record_type_ ==
+            ImportedCreditCardRecordType::LOCAL_CARD);
+    return true;
+  };
+  // If upload save is not allowed, new cards should be saved locally.
+  DCHECK(imported_credit_card_record_type_ ==
+         ImportedCreditCardRecordType::NEW_CARD);
+  if (credit_card_save_manager_->AttemptToOfferCardLocalSave(
+          from_dynamic_change_form_, has_non_focusable_field_,
+          *imported_credit_card)) {
+    return true;
+  }
+
+  return false;
 }
 
 bool FormDataImporter::ImportCreditCard(
@@ -823,13 +967,21 @@ bool FormDataImporter::ImportCreditCard(
     return false;
   }
 
-  // If the imported card is a known virtual card, abort saving.
+  // If the imported card is a known virtual card, abort importing.
   if (fetched_virtual_cards_.contains(candidate_credit_card.LastFourDigits()))
     return false;
 
   // Can import one valid card per form. Start by treating it as NEW_CARD, but
   // overwrite this type if we discover it is already a local or server card.
   imported_credit_card_record_type_ = ImportedCreditCardRecordType::NEW_CARD;
+
+  // Denotes whether the extracted card matches a local card. Used to help
+  // determine the return value of this function for use by tests. This will be
+  // used to ensure if we found a matched local card and
+  // |should_return_local_card| is false, that we return true so that this
+  // function matches the legacy implementation.
+  // TODO(crbug.com/1291243): Deprecate returning bool values.
+  bool matched_local_card = false;
 
   // Attempt to merge with an existing credit card. Don't present a prompt if we
   // have already saved this card number, unless |should_return_local_card| is
@@ -842,6 +994,7 @@ bool FormDataImporter::ImportCreditCard(
     // modified directly by the UpdateFromImportedCard() call.
     CreditCard card_copy(*card);
     if (card_copy.UpdateFromImportedCard(candidate_credit_card, app_locale_)) {
+      matched_local_card = true;
       personal_data_manager_->UpdateCreditCard(card_copy);
       // Mark that the credit card imported from the submitted form is
       // already a local card.
@@ -852,28 +1005,22 @@ bool FormDataImporter::ImportCreditCard(
       // database, copy the nickname to the |candidate_credit_card| so that the
       // nickname also shows in the Upstream bubble.
       candidate_credit_card.SetNickname(card_copy.nickname());
-
-      // If we should not return the local card, return that we merged it,
-      // without setting |imported_credit_card|.
-      if (!should_return_local_card)
-        return true;
-
-      break;
     }
   }
 
-  // Also don't offer to save if we already have this stored as a server
-  // card. We only check the number because if the new card has the same number
-  // as the server card, upload is guaranteed to fail. There's no mechanism for
-  // entries with the same number but different names or expiration dates as
-  // there is for local cards.
+  // If we are able to find a matching server card for the imported card, we set
+  // |imported_credit_card_record_type_| to SERVER_CARD, and set
+  // |imported_credit_card| to point to the corresponding CreditCard. Note: if a
+  // local card was found in the previous for-loop, this will override
+  // |imported_credit_card| to the server card data (it would previously be set
+  // to the local card data) as we want the server to be the source of truth.
   for (const CreditCard* card :
        personal_data_manager_->GetServerCreditCards()) {
     if ((card->record_type() == CreditCard::MASKED_SERVER_CARD &&
          card->LastFourDigits() == candidate_credit_card.LastFourDigits()) ||
         (card->record_type() == CreditCard::FULL_SERVER_CARD &&
          candidate_credit_card.HasSameNumberAs(*card))) {
-      // Don't update card if the expiration date is missing
+      // Don't import the card if the expiration date is missing.
       if (candidate_credit_card.expiration_month() == 0 ||
           candidate_credit_card.expiration_year() == 0) {
         return false;
@@ -897,7 +1044,13 @@ bool FormDataImporter::ImportCreditCard(
                 : AutofillMetrics::
                       MASKED_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH);
       }
-      return false;
+      // We found a server card that matches the data in the form. Set
+      // |imported_credit_card| to point to the corresponding CreditCard so that
+      // a future flow that would need this data can use it (such as virtual
+      // card enrollment flow).
+      *imported_credit_card = std::make_unique<CreditCard>(*card);
+
+      return matched_local_card && !should_return_local_card;
     }
   }
   *imported_credit_card = std::make_unique<CreditCard>(candidate_credit_card);
@@ -974,6 +1127,35 @@ absl::optional<std::string> FormDataImporter::ImportUpiId(
       return base::UTF16ToUTF8(field->value);
   }
   return absl::nullopt;
+}
+
+bool FormDataImporter::ShouldOfferUploadCardOrLocalCardSave(
+    const CreditCard* imported_credit_card,
+    bool is_credit_card_upload_enabled) {
+  // If we have an invalid card in the form, a duplicate field type, or we have
+  // entered a virtual card, |imported_credit_card| will be set
+  // to nullptr and thus we do not want to offer upload save or local card save.
+  if (!imported_credit_card)
+    return false;
+
+  // We do not want to offer upload save or local card save for server cards.
+  if (imported_credit_card_record_type_ ==
+      ImportedCreditCardRecordType::SERVER_CARD) {
+    return false;
+  }
+
+  // If we have a local card but credit card upload is not enabled, we do not
+  // want to offer upload save as it is disabled and we do not want to offer
+  // local card save as it is already saved as a local card.
+  if (!is_credit_card_upload_enabled &&
+      imported_credit_card_record_type_ ==
+          ImportedCreditCardRecordType::LOCAL_CARD) {
+    return false;
+  }
+
+  // We know |imported_credit_card| is either a new card, or a local card with
+  // upload enabled.
+  return true;
 }
 
 }  // namespace autofill

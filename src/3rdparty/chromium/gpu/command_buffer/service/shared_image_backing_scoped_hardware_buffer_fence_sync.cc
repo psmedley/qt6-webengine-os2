@@ -6,6 +6,7 @@
 
 #include "base/android/scoped_hardware_buffer_fence_sync.h"
 #include "base/android/scoped_hardware_buffer_handle.h"
+#include "base/memory/raw_ptr.h"
 #include "base/posix/eintr_wrapper.h"
 #include "components/viz/common/gpu/vulkan_context_provider.h"
 #include "components/viz/common/resources/resource_format_utils.h"
@@ -55,11 +56,6 @@ class SharedImageRepresentationOverlayScopedHardwareBufferFenceSync
         backing());
   }
 
-  void NotifyOverlayPromotion(bool promotion,
-                              const gfx::Rect& bounds) override {
-    NOTREACHED();
-  }
-
   bool BeginReadAccess(std::vector<gfx::GpuFence>* acquire_fences) override {
     gfx::GpuFenceHandle begin_read_handle;
     hardware_buffer_ = ahb_backing()->BeginOverlayAccess(begin_read_handle);
@@ -80,7 +76,7 @@ class SharedImageRepresentationOverlayScopedHardwareBufferFenceSync
     return nullptr;
   }
 
-  AHardwareBuffer* hardware_buffer_ = nullptr;
+  raw_ptr<AHardwareBuffer> hardware_buffer_ = nullptr;
 };
 
 SharedImageBackingScopedHardwareBufferFenceSync::
@@ -179,6 +175,13 @@ class SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync
     DCHECK(texture_);
   }
 
+  SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync(
+      const SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync&) =
+      delete;
+  SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync& operator=(
+      const SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync&) =
+      delete;
+
   ~SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync() override {
     if (texture_)
       texture_->RemoveLightweightRef(has_context());
@@ -205,10 +208,7 @@ class SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync
     return ahb_backing;
   }
 
-  gles2::Texture* texture_;
-
-  DISALLOW_COPY_AND_ASSIGN(
-      SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync);
+  raw_ptr<gles2::Texture> texture_;
 };
 
 class SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync
@@ -226,6 +226,14 @@ class SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync
     // TODO(https://crbug.com/1172769): Remove this CHECK.
     CHECK(texture_);
   }
+
+  SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync(
+      const SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync&) =
+      delete;
+  SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync&
+  operator=(
+      const SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync&) =
+      delete;
 
   ~SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync()
       override {
@@ -258,9 +266,6 @@ class SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync
   }
 
   scoped_refptr<gles2::TexturePassthrough> texture_;
-
-  DISALLOW_COPY_AND_ASSIGN(
-      SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync);
 };
 
 class SharedImageRepresentationSkiaVkScopedHardwareBufferFenceSync

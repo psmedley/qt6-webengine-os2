@@ -4,13 +4,11 @@
 
 #include "components/autofill/core/browser/autofill_manager.h"
 
-#include "base/bind.h"
 #include "base/containers/adapters.h"
 #include "base/feature_list.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
+#include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_data_validation.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_internals/log_message.h"
@@ -18,17 +16,16 @@
 #include "components/autofill/core/common/autofill_payments_features.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_tick_clock.h"
+#if !defined(TOOLKIT_QT)
 #include "components/translate/core/common/language_detection_details.h"
 #include "google_apis/google_api_keys.h"
+#endif
 #include "ui/gfx/geometry/rect_f.h"
 
 namespace autofill {
 
+#if !defined(TOOLKIT_QT)
 namespace {
-
-// Set a conservative upper bound on the number of forms we are willing to
-// cache, simply to prevent unbounded memory consumption.
-const size_t kAutofillManagerMaxFormCacheSize = 100;
 
 // Returns the AutofillField* corresponding to |field| in |form| or nullptr,
 // if not found.
@@ -49,6 +46,9 @@ AutofillField* FindAutofillFillField(const FormStructure& form,
 // Returns true if |live_form| does not match |cached_form|.
 bool CachedFormNeedsUpdate(const FormData& live_form,
                            const FormStructure& cached_form) {
+  if (cached_form.version() > live_form.version)
+    return false;
+
   if (live_form.fields.size() != cached_form.field_count())
     return true;
 
@@ -74,9 +74,11 @@ std::string GetAPIKeyForUrl(version_info::Channel channel) {
 }
 
 }  // namespace
+#endif  // !defined(TOOLKIT_QT)
 
 using base::TimeTicks;
 
+#if !defined(TOOLKIT_QT)
 // static
 void AutofillManager::LogAutofillTypePredictionsAvailable(
     LogManager* log_manager,
@@ -104,6 +106,7 @@ bool AutofillManager::IsRawMetadataUploadingEnabled(
   return channel == version_info::Channel::CANARY ||
          channel == version_info::Channel::DEV;
 }
+#endif  // !defined(TOOLKIT_QT)
 
 AutofillManager::AutofillManager(
     AutofillDriver* driver,
@@ -117,6 +120,16 @@ AutofillManager::AutofillManager(
   DCHECK(client);
 }
 
+#if defined(TOOLKIT_QT)
+AutofillManager::AutofillManager(
+    AutofillDriver* driver,
+    AutofillClient* client,
+    AutofillDownloadManagerState enable_download_manager,
+    version_info::Channel channel)
+    : driver_(driver),
+      client_(client)
+{}
+#else
 AutofillManager::AutofillManager(
     AutofillDriver* driver,
     AutofillClient* client,
@@ -143,18 +156,14 @@ AutofillManager::AutofillManager(
 
 AutofillManager::~AutofillManager() {
   translate_observation_.Reset();
-  if (!query_result_delay_task_.IsCancelled())
-    query_result_delay_task_.Cancel();
 }
 
 void AutofillManager::OnLanguageDetermined(
     const translate::LanguageDetectionDetails& details) {
-  if (!base::FeatureList::IsEnabled(
-          features::kAutofillParsingPatternsLanguageDetection)) {
+  if (!base::FeatureList::IsEnabled(features::kAutofillPageLanguageDetection)) {
     return;
   }
-  for (auto& p : form_structures_) {
-    std::unique_ptr<FormStructure>& form_structure = p.second;
+  for (auto& [form_id, form_structure] : form_structures_) {
     form_structure->set_current_page_language(
         LanguageCode(details.adopted_language));
     form_structure->DetermineHeuristicTypes(form_interactions_ukm_logger(),
@@ -181,21 +190,30 @@ void AutofillManager::OnFormSubmitted(const FormData& form,
   if (IsValidFormData(form))
     OnFormSubmittedImpl(form, known_success, source);
 }
+#endif  // defined(TOOLKIT_QT)
 
-void AutofillManager::OnFormsSeen(const std::vector<FormData>& forms) {
-  if (!IsValidFormDataVector(forms) || !driver_->RendererIsAvailable())
+void AutofillManager::OnFormsSeen(
+    const std::vector<FormData>& updated_forms,
+    const std::vector<FormGlobalId>& removed_forms) {
+#if !defined(TOOLKIT_QT)
+  if (base::FeatureList::IsEnabled(features::kAutofillDisplaceRemovedForms)) {
+    // Erase forms that have been removed from the DOM. This prevents
+    // |form_structures_| from growing up its upper bound
+    // kAutofillManagerMaxFormCacheSize.
+    for (FormGlobalId removed_form : removed_forms)
+      form_structures_.erase(removed_form);
+  }
+
+  if (!IsValidFormDataVector(updated_forms) || !driver_->RendererIsAvailable())
     return;
 
   // This should be called even forms is empty, AutofillProviderAndroid uses
   // this event to detect form submission.
-  if (!ShouldParseForms(forms))
-    return;
-
-  if (forms.empty())
+  if (!ShouldParseForms(updated_forms))
     return;
 
   std::vector<const FormData*> new_forms;
-  for (const FormData& form : forms) {
+  for (const FormData& form : updated_forms) {
     const auto parse_form_start_time = AutofillTickClock::NowTicks();
     FormStructure* cached_form_structure =
         FindCachedFormByRendererId(form.global_id());
@@ -226,8 +244,10 @@ void AutofillManager::OnFormsSeen(const std::vector<FormData>& forms) {
   if (new_forms.empty())
     return;
   OnFormsParsed(new_forms);
+#endif  // !defined(TOOLKIT_QT)
 }
 
+#if !defined(TOOLKIT_QT)
 void AutofillManager::OnFormsParsed(const std::vector<const FormData*>& forms) {
   DCHECK(!forms.empty());
   OnBeforeProcessParsedForms();
@@ -281,6 +301,7 @@ void AutofillManager::OnFormsParsed(const std::vector<const FormData*>& forms) {
     download_manager()->StartQueryRequest(queryable_forms);
   }
 }
+#endif  // !defined(TOOLKIT_QT)
 
 void AutofillManager::OnTextFieldDidChange(const FormData& form,
                                            const FormFieldData& field,
@@ -331,6 +352,7 @@ void AutofillManager::OnFocusOnFormField(const FormData& form,
   OnFocusOnFormFieldImpl(form, field, bounding_box);
 }
 
+#if !defined(TOOLKIT_QT)
 // Returns true if |live_form| does not match |cached_form|.
 bool AutofillManager::GetCachedFormAndField(const FormData& form,
                                             const FormFieldData& field,
@@ -386,11 +408,11 @@ size_t AutofillManager::FindCachedFormsBySignature(
     FormSignature form_signature,
     std::vector<FormStructure*>* form_structures) const {
   size_t hits_num = 0;
-  for (const auto& p : form_structures_) {
-    if (p.second->form_signature() == form_signature) {
+  for (const auto& [form_id, form_structure] : form_structures_) {
+    if (form_structure->form_signature() == form_signature) {
       ++hits_num;
       if (form_structures)
-        form_structures->push_back(p.second.get());
+        form_structures->push_back(form_structure.get());
     }
   }
   return hits_num;
@@ -449,13 +471,16 @@ FormStructure* AutofillManager::ParseForm(const FormData& form,
 
   return parsed_form_structure;
 }
+#endif  // !defined(TOOLKIT_QT)
 
 void AutofillManager::Reset() {
-  query_result_delay_task_.Cancel();
+#if !defined(TOOLKIT_QT)
   form_structures_.clear();
   form_interactions_ukm_logger_ = CreateFormInteractionsUkmLogger();
+#endif
 }
 
+#if !defined(TOOLKIT_QT)
 void AutofillManager::OnLoadedServerPredictions(
     std::string response,
     const std::vector<FormSignature>& queried_form_signatures) {
@@ -504,32 +529,6 @@ void AutofillManager::OnLoadedServerPredictions(
 
   LogAutofillTypePredictionsAvailable(log_manager_, queried_forms);
 
-  // TODO(crbug.com/1176816): Remove the test code after initial integration.
-  int delay = 0;
-  if (auto* cmd = base::CommandLine::ForCurrentProcess()) {
-    // This command line helps to simulate query result arriving after autofill
-    // is triggered and shall be used for manual test only.
-    std::string value = cmd->GetSwitchValueASCII(
-        "autofill-server-query-result-delay-in-seconds");
-    if (!base::StringToInt(value, &delay))
-      delay = 0;
-  }
-
-  if (delay > 0) {
-    query_result_delay_task_.Reset(
-        base::BindOnce(&AutofillManager::PropagateAutofillPredictionsToDriver,
-                       base::Unretained(this)));
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE,
-        base::BindOnce(query_result_delay_task_.callback(), queried_forms),
-        base::TimeDelta::FromSeconds(delay));
-  } else {
-    PropagateAutofillPredictionsToDriver(queried_forms);
-  }
-}
-
-void AutofillManager::PropagateAutofillPredictionsToDriver(
-    const std::vector<FormStructure*>& queried_forms) {
   // Forward form structures to the password generation manager to detect
   // account creation forms.
   driver()->PropagateAutofillPredictions(queried_forms);
@@ -539,5 +538,6 @@ void AutofillManager::OnServerRequestError(
     FormSignature form_signature,
     AutofillDownloadManager::RequestType request_type,
     int http_error) {}
+#endif  // !defined(TOOLKIT_QT)
 
 }  // namespace autofill

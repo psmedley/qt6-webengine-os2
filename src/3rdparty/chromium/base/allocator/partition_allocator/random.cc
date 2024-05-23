@@ -4,46 +4,66 @@
 
 #include "base/allocator/partition_allocator/random.h"
 
+#include <type_traits>
+
 #include "base/allocator/partition_allocator/partition_lock.h"
 #include "base/rand_util.h"
 
-namespace base {
-
 namespace partition_alloc {
+
 class RandomGenerator {
  public:
-  RandomGenerator() = default;
-  uint32_t RandomValue() {
-    internal::ScopedGuard<true> guard(lock_);
-    if (!generator_.seeded())
-      generator_.Seed();
+  constexpr RandomGenerator() {}
 
-    return generator_.RandUint32();
+  uint32_t RandomValue() {
+    ::partition_alloc::internal::ScopedGuard guard(lock_);
+    return GetGenerator()->RandUint32();
   }
 
   void SeedForTesting(uint64_t seed) {
-    internal::ScopedGuard<true> guard(lock_);
-    generator_.SeedForTesting(seed);
+    ::partition_alloc::internal::ScopedGuard guard(lock_);
+    GetGenerator()->ReseedForTesting(seed);
   }
 
  private:
-  internal::PartitionLock lock_ = {};
-  InsecureRandomGenerator generator_ GUARDED_BY(lock_) = {};
+  ::partition_alloc::internal::Lock lock_ = {};
+  bool initialized_ GUARDED_BY(lock_) = false;
+  union {
+    base::InsecureRandomGenerator instance_ GUARDED_BY(lock_);
+    uint8_t instance_buffer_[sizeof(base::InsecureRandomGenerator)] GUARDED_BY(
+        lock_) = {};
+  };
+
+  base::InsecureRandomGenerator* GetGenerator()
+      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
+    if (!initialized_) {
+      new (instance_buffer_) base::InsecureRandomGenerator();
+      initialized_ = true;
+    }
+    return &instance_;
+  }
 };
-}  // namespace partition_alloc
+
+// Note: this is redundant, since the anonymous union is incompatible with a
+// non-trivial default destructor. Not meant to be destructed anyway.
+static_assert(std::is_trivially_destructible<RandomGenerator>::value, "");
 
 namespace {
 
-partition_alloc::RandomGenerator g_generator = {};
+RandomGenerator g_generator = {};
 
 }  // namespace
+
+namespace internal {
 
 uint32_t RandomValue() {
   return g_generator.RandomValue();
 }
 
+}  // namespace internal
+
 void SetMmapSeedForTesting(uint64_t seed) {
   return g_generator.SeedForTesting(seed);
 }
 
-}  // namespace base
+}  // namespace partition_alloc

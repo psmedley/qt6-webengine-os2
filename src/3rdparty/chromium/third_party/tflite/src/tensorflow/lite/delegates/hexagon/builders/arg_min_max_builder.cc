@@ -26,7 +26,7 @@ TfLiteStatus ArgMinMaxOpBuilder::PopulateSubGraph(const TfLiteIntArray* inputs,
                                                   const TfLiteIntArray* outputs,
                                                   TfLiteContext* context) {
   if (inputs->size != 2) {
-    context->ReportError(context, "Expecting 2 inputs %d != 2\n", inputs->size);
+    TF_LITE_KERNEL_LOG(context, "Expecting 2 inputs %d != 2\n", inputs->size);
     return kTfLiteError;
   }
 
@@ -39,9 +39,9 @@ TfLiteStatus ArgMinMaxOpBuilder::PopulateSubGraph(const TfLiteIntArray* inputs,
   const int axis_tensor_id = inputs->data[1];
   const auto& axis = context->tensors[axis_tensor_id];
   if (axis.allocation_type != kTfLiteMmapRo) {
-    context->ReportError(context,
-                         "Axis tensor doesn't have correct allocation type: %s",
-                         axis.name);
+    TF_LITE_KERNEL_LOG(context,
+                       "Axis tensor doesn't have correct allocation type: %s",
+                       axis.name);
     return kTfLiteError;
   }
 
@@ -54,15 +54,7 @@ TfLiteStatus ArgMinMaxOpBuilder::PopulateSubGraph(const TfLiteIntArray* inputs,
   AddInput(TensorID(input_axis_const->GetID(), 0));
 
   // Compute Min/Max
-  TF_LITE_ENSURE_STATUS(
-      ComputeMinAndMaxQuantValues(input_tensor, &input_min_, &input_max_));
-  auto* input_min_const = graph_builder_->AddConstNodeWithData(
-      kScalarShape, reinterpret_cast<char*>(&input_min_), sizeof(input_min_));
-  auto* input_max_const = graph_builder_->AddConstNodeWithData(
-      kScalarShape, reinterpret_cast<char*>(&input_max_), sizeof(input_max_));
-
-  AddInput(TensorID(input_min_const->GetID(), 0));
-  AddInput(TensorID(input_max_const->GetID(), 0));
+  TF_LITE_ENSURE_STATUS(ComputeAndAddMinAndMax(context, input_tensor));
 
   // Output Node
   int output_batch_size, output_height_size, output_width_size,

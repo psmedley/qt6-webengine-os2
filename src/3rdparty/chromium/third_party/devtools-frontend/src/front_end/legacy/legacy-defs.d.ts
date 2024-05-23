@@ -1,17 +1,6 @@
 // Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-interface StringConstructor {
-  sprintf(format: string, ...var_arg: any): string;
-}
-
-interface Window {
-  UI: {themeSupport: unknown}
-}
-
-interface RegExp {
-  __fromRegExpQuery: boolean;
-}
 
 declare class AnchorBox {
   x: number;
@@ -119,22 +108,33 @@ interface Node {
   deepTextContent(): string
   window(): Window;
   childTextNodes(): Node[];
+  __widget?: any;
 }
 
 declare function isEnterOrSpaceKey(event: Event): boolean;
 declare function isEscKey(event: Event): boolean;
-declare function createPlainTextSearchRegex(query: string, flags?: string): RegExp;
 declare function onInvokeElement(element: Element, callback: (event: Event) => void): void;
 
-interface ServicePort {
-  setHandlers(messageHandler: (arg: string) => void, closeHandler: () => void): void;
+// The following types exist in Chrome but were removed for various reasons
+// from the TypeScript DOM library.
+//
+// TODO(crbug.com/1247609): Replace use sites with appropriate web platform types.
 
-  send(message: string): Promise<boolean>;
-
-  close(): Promise<boolean>;
+interface DOMError {
+  readonly name: string;
+  readonly message: string;
 }
 
-declare class diff_match_patch {
-  diff_main(text1: string, text2: string): Array<{0: number, 1: string}>;
-  diff_cleanupSemantic(diff: Array<{0: number, 1: string}>): void;
+interface ShadowRoot {
+  elementFromPoint(x: number, y: number): Element | null;
+  getSelection(): Selection | null;
+}
+
+interface HTMLDialogElement {
+  open: boolean;
+  returnValue: string;
+
+  close(returnValue?: string): void;
+  show(): void;
+  showModal(): void;
 }

@@ -5,13 +5,14 @@
 #include "components/autofill/core/browser/test_autofill_client.h"
 
 #include "base/strings/utf_string_conversions.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/payments/local_card_migration_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/version_info/channel.h"
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 #include "components/autofill/core/browser/payments/test_internal_authenticator.h"
 #endif
 
@@ -101,8 +102,12 @@ translate::TranslateDriver* TestAutofillClient::GetTranslateDriver() {
   return &mock_translate_driver_;
 }
 
-#if !defined(OS_IOS)
-std::unique_ptr<InternalAuthenticator>
+std::string TestAutofillClient::GetVariationConfigCountryCode() const {
+  return variation_config_country_code_;
+}
+
+#if !BUILDFLAG(IS_IOS)
+std::unique_ptr<webauthn::InternalAuthenticator>
 TestAutofillClient::CreateCreditCardInternalAuthenticator(
     content::RenderFrameHost* rfh) {
   return std::make_unique<TestInternalAuthenticator>();
@@ -118,7 +123,17 @@ void TestAutofillClient::ShowUnmaskPrompt(
 
 void TestAutofillClient::OnUnmaskVerificationResult(PaymentsRpcResult result) {}
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+raw_ptr<VirtualCardEnrollmentManager>
+TestAutofillClient::GetVirtualCardEnrollmentManager() {
+  return form_data_importer_->GetVirtualCardEnrollmentManager();
+}
+
+void TestAutofillClient::ShowVirtualCardEnrollDialog(
+    const VirtualCardEnrollmentFields& virtual_card_enrollment_fields,
+    base::OnceClosure accept_virtual_card_callback,
+    base::OnceClosure decline_virtual_card_callback) {}
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 std::vector<std::string>
 TestAutofillClient::GetAllowedMerchantsForVirtualCards() {
   return allowed_merchants_;
@@ -173,7 +188,7 @@ void TestAutofillClient::OfferVirtualCardOptions(
     const std::vector<CreditCard*>& candidates,
     base::OnceCallback<void(const std::string&)> callback) {}
 
-#else  // defined(OS_ANDROID) || defined(OS_IOS)
+#else  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 void TestAutofillClient::ConfirmAccountNameFixFlow(
     base::OnceCallback<void(const std::u16string&)> callback) {
   credit_card_name_fix_flow_bubble_was_shown_ = true;
@@ -198,7 +213,7 @@ void TestAutofillClient::ConfirmSaveCreditCardLocally(
   confirm_save_credit_card_locally_called_ = true;
   offer_to_save_credit_card_bubble_was_shown_ = options.show_prompt;
   save_credit_card_options_ = options;
-  std::move(callback).Run(AutofillClient::ACCEPTED);
+  std::move(callback).Run(AutofillClient::SaveCardOfferUserDecision::kAccepted);
 }
 
 void TestAutofillClient::ConfirmSaveCreditCardToCloud(
@@ -208,7 +223,8 @@ void TestAutofillClient::ConfirmSaveCreditCardToCloud(
     UploadSaveCardPromptCallback callback) {
   offer_to_save_credit_card_bubble_was_shown_ = options.show_prompt;
   save_credit_card_options_ = options;
-  std::move(callback).Run(AutofillClient::ACCEPTED, {});
+  std::move(callback).Run(AutofillClient::SaveCardOfferUserDecision::kAccepted,
+                          {});
 }
 
 void TestAutofillClient::CreditCardUploadCompleted(bool card_saved) {}
@@ -256,9 +272,14 @@ void TestAutofillClient::HideAutofillPopup(PopupHidingReason reason) {}
 
 void TestAutofillClient::ShowVirtualCardErrorDialog(bool is_permanent_error) {
   virtual_card_error_dialog_shown_ = true;
+  virtual_card_error_dialog_is_permanent_error_ = is_permanent_error;
 }
 
 bool TestAutofillClient::IsAutocompleteEnabled() {
+  return true;
+}
+
+bool TestAutofillClient::IsPasswordManagerEnabled() {
   return true;
 }
 
@@ -290,7 +311,7 @@ void TestAutofillClient::LoadRiskData(
   std::move(callback).Run("some risk data");
 }
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 bool TestAutofillClient::IsQueryIDRelevant(int query_id) {
   return true;
 }
@@ -305,6 +326,10 @@ void TestAutofillClient::set_form_origin(const GURL& url) {
   // Also reset source_id_.
   source_id_ = ukm::UkmRecorder::GetNewSourceID();
   test_ukm_recorder_.UpdateSourceURL(source_id_, form_origin_);
+}
+
+void TestAutofillClient::set_last_committed_url(const GURL& url) {
+  last_committed_url_ = url;
 }
 
 ukm::TestUkmRecorder* TestAutofillClient::GetTestUkmRecorder() {

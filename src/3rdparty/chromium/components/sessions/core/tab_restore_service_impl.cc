@@ -14,9 +14,10 @@
 #include "base/bind.h"
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
+#include "base/containers/adapters.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/notreached.h"
@@ -128,12 +129,16 @@ const size_t kMaxEntries = TabRestoreServiceHelper::kMaxEntries;
 void RemoveEntryByID(
     SessionID id,
     std::vector<std::unique_ptr<TabRestoreService::Entry>>* entries) {
+  // If the id is invalid, return.
+  if (id == SessionID::InvalidValue())
+    return;
   // Look for the entry in the top-level collection.
-  for (auto it = entries->begin(); it != entries->end(); ++it) {
-    TabRestoreService::Entry& entry = **it;
+  for (auto entry_it = entries->begin(); entry_it != entries->end();
+       ++entry_it) {
+    TabRestoreService::Entry& entry = **entry_it;
     // Erase it if it's our target.
-    if (entry.id == id) {
-      entries->erase(it);
+    if (entry.id == id || entry.original_id == id) {
+      entries->erase(entry_it);
       return;
     }
     // If this entry is a window, look through its tabs.
@@ -342,7 +347,7 @@ CreateWindowEntryFromCommand(const SessionCommand* command,
       std::make_unique<sessions::TabRestoreService::Window>();
   window->selected_tab_index = fields.selected_tab_index;
   window->timestamp = base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromMicroseconds(fields.timestamp));
+      base::Microseconds(fields.timestamp));
   *window_id = SessionID::FromSerializedValue(fields.window_id);
   *num_tabs = fields.num_tabs;
 
@@ -351,12 +356,12 @@ CreateWindowEntryFromCommand(const SessionCommand* command,
         fields.window_width == 0 && fields.window_height == 0)) {
     window->bounds.SetRect(fields.window_x, fields.window_y,
                            fields.window_width, fields.window_height);
-    // |show_state| was converted from window->show_state earlier during
-    // validation.
-    window->show_state = show_state;
-    window->workspace = std::move(fields.workspace);
   }
 
+  // |show_state| was converted from window->show_state earlier during
+  // validation.
+  window->show_state = show_state;
+  window->workspace = std::move(fields.workspace);
   return window;
 }
 
@@ -430,6 +435,9 @@ class TabRestoreServiceImpl::PersistenceDelegate
  public:
   explicit PersistenceDelegate(TabRestoreServiceClient* client);
 
+  PersistenceDelegate(const PersistenceDelegate&) = delete;
+  PersistenceDelegate& operator=(const PersistenceDelegate&) = delete;
+
   ~PersistenceDelegate() override;
 
   // CommandStorageManagerDelegate:
@@ -474,6 +482,8 @@ class TabRestoreServiceImpl::PersistenceDelegate
   // Schedules the commands for a tab close. |selected_index| gives the index of
   // the selected navigation.
   void ScheduleCommandsForTab(const Tab& tab, int selected_index);
+
+  void ScheduleRestoredEntryCommandsForTest(SessionID id);
 
   // Creates a window close command.
   static std::unique_ptr<SessionCommand> CreateWindowCommand(
@@ -546,11 +556,11 @@ class TabRestoreServiceImpl::PersistenceDelegate
 
  private:
   // The associated client.
-  TabRestoreServiceClient* client_;
+  raw_ptr<TabRestoreServiceClient> client_;
 
   std::unique_ptr<CommandStorageManager> command_storage_manager_;
 
-  TabRestoreServiceHelper* tab_restore_service_helper_;
+  raw_ptr<TabRestoreServiceHelper> tab_restore_service_helper_;
 
   // The number of entries to write.
   int entries_to_write_;
@@ -568,8 +578,6 @@ class TabRestoreServiceImpl::PersistenceDelegate
 
   // Used when loading previous tabs/session and open tabs/session.
   base::WeakPtrFactory<PersistenceDelegate> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PersistenceDelegate);
 };
 
 TabRestoreServiceImpl::PersistenceDelegate::PersistenceDelegate(
@@ -1044,6 +1052,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
         }
 
         RemoveEntryByID(window_id, &entries);
+        window->original_id = window_id;
         current_window =
             absl::make_optional(std::make_pair(window.get(), num_tabs));
         entries.push_back(std::move(window));
@@ -1070,6 +1079,7 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
         }
 
         RemoveEntryByID(group_id, &entries);
+        group->original_id = group_id;
         current_group =
             absl::make_optional(std::make_pair(group.get(), num_tabs));
         entries.push_back(std::move(group));
@@ -1116,9 +1126,10 @@ void TabRestoreServiceImpl::PersistenceDelegate::CreateEntriesFromCommands(
           entries.push_back(std::make_unique<Tab>());
           current_tab = static_cast<Tab*>(entries.back().get());
           current_tab->timestamp = base::Time::FromDeltaSinceWindowsEpoch(
-              base::TimeDelta::FromMicroseconds(payload.timestamp));
+              base::Microseconds(payload.timestamp));
         }
         current_tab->current_navigation_index = payload.index;
+        current_tab->original_id = SessionID::FromSerializedValue(payload.id);
         break;
       }
 
@@ -1278,9 +1289,9 @@ void TabRestoreServiceImpl::PersistenceDelegate::ValidateAndDeleteEmptyEntries(
   std::vector<std::unique_ptr<Entry>> valid_entries;
 
   // Iterate from the back so that we keep the most recently closed entries.
-  for (auto i = entries->rbegin(); i != entries->rend(); ++i) {
-    if (TabRestoreServiceHelper::ValidateEntry(**i))
-      valid_entries.push_back(std::move(*i));
+  for (std::unique_ptr<Entry>& entry : base::Reversed(*entries)) {
+    if (TabRestoreServiceHelper::ValidateEntry(*entry))
+      valid_entries.push_back(std::move(entry));
   }
   // NOTE: at this point the entries are ordered with newest at the front.
   entries->swap(valid_entries);
@@ -1329,6 +1340,7 @@ bool TabRestoreServiceImpl::PersistenceDelegate::ConvertSessionWindowToWindow(
     tab.navigations.swap(i->navigations);
     tab.current_navigation_index = i->current_navigation_index;
     tab.extension_app_id = i->extension_app_id;
+    tab.extra_data = std::move(i->extra_data);
     tab.timestamp = base::Time();
   }
 
@@ -1339,6 +1351,7 @@ bool TabRestoreServiceImpl::PersistenceDelegate::ConvertSessionWindowToWindow(
   window->selected_tab_index =
       std::min(session_window->selected_tab_index,
                static_cast<int>(window->tabs.size() - 1));
+  window->extra_data = std::move(session_window->extra_data);
   window->timestamp = base::Time();
   window->bounds = session_window->bounds;
   window->show_state = session_window->show_state;
@@ -1391,6 +1404,11 @@ void TabRestoreServiceImpl::PersistenceDelegate::LoadStateChanged() {
   tab_restore_service_helper_->NotifyTabsChanged();
 
   tab_restore_service_helper_->NotifyLoaded();
+}
+
+void TabRestoreServiceImpl::PersistenceDelegate::
+    ScheduleRestoredEntryCommandsForTest(SessionID id) {
+  command_storage_manager_->ScheduleCommand(CreateRestoredEntryCommand(id));
 }
 
 // TabRestoreServiceImpl -------------------------------------------------
@@ -1469,9 +1487,8 @@ std::vector<LiveTab*> TabRestoreServiceImpl::RestoreMostRecentEntry(
   return helper_.RestoreMostRecentEntry(context);
 }
 
-std::unique_ptr<TabRestoreService::Tab>
-TabRestoreServiceImpl::RemoveTabEntryById(SessionID id) {
-  return helper_.RemoveTabEntryById(id);
+void TabRestoreServiceImpl::RemoveTabEntryById(SessionID id) {
+  helper_.RemoveTabEntryById(id);
 }
 
 std::vector<LiveTab*> TabRestoreServiceImpl::RestoreEntryById(
@@ -1542,6 +1559,11 @@ TabRestoreService::Entries* TabRestoreServiceImpl::mutable_entries() {
 
 void TabRestoreServiceImpl::PruneEntries() {
   helper_.PruneEntries();
+}
+
+void TabRestoreServiceImpl::CreateRestoredEntryCommandForTest(SessionID id) {
+  if (persistence_delegate_)
+    persistence_delegate_->ScheduleRestoredEntryCommandsForTest(id);
 }
 
 }  // namespace sessions

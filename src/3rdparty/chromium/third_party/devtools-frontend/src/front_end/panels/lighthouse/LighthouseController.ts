@@ -105,6 +105,26 @@ const UIStrings = {
   */
   applyMobileEmulationDuring: 'Apply mobile emulation during auditing',
   /**
+   * @description ARIA label for a radio button input to select the Lighthouse mode.
+   */
+  lighthouseMode: 'Lighthouse mode',
+  /**
+   * @description Tooltip text of a radio button to select the Lighthouse mode. "Navigation" is a Lighthouse mode that audits a page navigation. "Timespan" is a Lighthouse mode that audits user interactions over a period of time. "Snapshot" is a Lighthouse mode that audits the current page state.
+   */
+  runLighthouseInMode: 'Run Lighthouse in navigation, timespan, or snapshot mode',
+  /**
+   * @description Label of a radio option for a Lighthouse mode that audits a page navigation.
+   */
+  navigation: 'Navigation',
+  /**
+   * @description Label of a radio option for a Lighthouse mode that audits user interactions over a period of time.
+   */
+  timespan: 'Timespan',
+  /**
+   * @description Label of a radio option for a Lighthouse mode that audits the current page state.
+   */
+  snapshot: 'Snapshot',
+  /**
   *@description Text for the mobile platform, as opposed to desktop
   */
   mobile: 'Mobile',
@@ -126,6 +146,14 @@ const UIStrings = {
   */
   clearStorage: 'Clear storage',
   /**
+   * @description Text of checkbox to use the legacy Lighthouse navigation mode
+   */
+  legacyNavigation: 'Legacy navigation',
+  /**
+   * @description Tooltip text that appears when hovering over the 'Legacy navigation' checkbox in the settings pane opened by clicking the setting cog in the start view of the audits panel. "Navigation mode" is a Lighthouse mode that analyzes a page navigation.
+   */
+  useLegacyNavigation: 'Analyze the page using classic Lighthouse when in navigation mode.',
+  /**
   * @description Tooltip text of checkbox to reset storage features prior to running audits in
   * Lighthouse. Resetting the storage clears/empties it to a neutral state.
   */
@@ -136,7 +164,7 @@ const str_ = i18n.i18n.registerUIStrings('panels/lighthouse/LighthouseController
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 const i18nLazyString = i18n.i18n.getLazilyComputedLocalizedString.bind(undefined, str_);
 
-export class LighthouseController extends Common.ObjectWrapper.ObjectWrapper implements
+export class LighthouseController extends Common.ObjectWrapper.ObjectWrapper<EventTypes> implements
     SDK.TargetManager.SDKModelObserver<SDK.ServiceWorkerManager.ServiceWorkerManager> {
   private manager?: SDK.ServiceWorkerManager.ServiceWorkerManager|null;
   private serviceWorkerListeners?: Common.EventTarget.EventDescriptor[];
@@ -243,7 +271,11 @@ export class LighthouseController extends Common.ObjectWrapper.ObjectWrapper imp
       return '';
     }
     const mainTarget = this.manager.target();
-    const usageData = await mainTarget.storageAgent().invoke_getUsageAndQuota({origin: mainTarget.inspectedURL()});
+    const origin = mainTarget.inspectedURL();
+    if (!origin) {
+      return '';
+    }
+    const usageData = await mainTarget.storageAgent().invoke_getUsageAndQuota({origin});
     const locations = usageData.usageBreakdown.filter(usage => usage.usage)
                           .map(usage => STORAGE_TYPE_NAMES.get(usage.storageType))
                           .map(i18nStringFn => i18nStringFn ? i18nStringFn() : undefined)
@@ -262,43 +294,27 @@ export class LighthouseController extends Common.ObjectWrapper.ObjectWrapper imp
       return '';
     }
     const mainTarget = this.manager.target();
-    const runtimeModel = mainTarget.model(SDK.RuntimeModel.RuntimeModel);
-    const executionContext = runtimeModel && runtimeModel.defaultExecutionContext();
-    let inspectedURL = mainTarget.inspectedURL();
-    if (!executionContext) {
+    // target.inspectedURL is reliably populated, however it lacks any url #hash
+    const inspectedURL = mainTarget.inspectedURL();
+
+    // We'll use the navigationHistory to acquire the current URL including hash
+    const resourceTreeModel = mainTarget.model(SDK.ResourceTreeModel.ResourceTreeModel);
+    const navHistory = resourceTreeModel && await resourceTreeModel.navigationHistory();
+    if (!resourceTreeModel || !navHistory) {
       return inspectedURL;
     }
 
-    // Evaluate location.href for a more specific URL than inspectedURL provides so that SPA hash navigation routes
-    // will be respected and audited.
-    try {
-      const result = await executionContext.evaluate(
-          {
-            expression: 'window.location.href',
-            objectGroup: 'lighthouse',
-            includeCommandLineAPI: false,
-            silent: false,
-            returnByValue: true,
-            generatePreview: false,
-            allowUnsafeEvalBlockedByCSP: undefined,
-            disableBreaks: undefined,
-            replMode: undefined,
-            throwOnSideEffect: undefined,
-            timeout: undefined,
-          },
-          /* userGesture */ false, /* awaitPromise */ false);
-      if ((!('exceptionDetails' in result) || !result.exceptionDetails) && 'object' in result && result.object) {
-        inspectedURL = result.object.value;
-        result.object.release();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-
-    return inspectedURL;
+    const {currentIndex, entries} = navHistory;
+    const navigationEntry = entries[currentIndex];
+    return navigationEntry.url;
   }
 
-  getFlags(): {internalDisableDeviceScreenEmulation: boolean, emulatedFormFactor: (string|undefined)} {
+  getFlags(): {
+    internalDisableDeviceScreenEmulation: boolean,
+    emulatedFormFactor: (string|undefined),
+    legacyNavigation: boolean,
+    mode: string,
+  } {
     const flags = {
       // DevTools handles all the emulation. This tells Lighthouse to not bother with emulation.
       internalDisableDeviceScreenEmulation: true,
@@ -306,11 +322,12 @@ export class LighthouseController extends Common.ObjectWrapper.ObjectWrapper imp
     for (const runtimeSetting of RuntimeSettings) {
       runtimeSetting.setFlags(flags, runtimeSetting.setting.get());
     }
-    return /** @type {{internalDisableDeviceScreenEmulation: boolean, emulatedFormFactor: (string|undefined)}} */ flags as
-        {
-          internalDisableDeviceScreenEmulation: boolean,
-          emulatedFormFactor: (string | undefined),
-        };
+    return flags as {
+      internalDisableDeviceScreenEmulation: boolean,
+      emulatedFormFactor: (string | undefined),
+      legacyNavigation: boolean,
+      mode: string,
+    };
   }
 
   getCategoryIDs(): string[] {
@@ -346,7 +363,7 @@ export class LighthouseController extends Common.ObjectWrapper.ObjectWrapper imp
 
     this.dispatchEventToListeners(Events.PageAuditabilityChanged, {helpText});
 
-    this.hasImportantResourcesNotCleared().then(warning => {
+    void this.hasImportantResourcesNotCleared().then(warning => {
       this.dispatchEventToListeners(Events.PageWarningsChanged, {warning});
     });
   }
@@ -361,42 +378,48 @@ const STORAGE_TYPE_NAMES = new Map([
 export const Presets: Preset[] = [
   // configID maps to Lighthouse's Object.keys(config.categories)[0] value
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.cat_perf', true),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.cat_perf', true, Common.Settings.SettingStorageType.Synced),
     configID: 'performance',
     title: i18nLazyString(UIStrings.performance),
     description: i18nLazyString(UIStrings.howLongDoesThisAppTakeToShow),
     plugin: false,
   },
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.cat_pwa', true),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.cat_pwa', true, Common.Settings.SettingStorageType.Synced),
     configID: 'pwa',
     title: i18nLazyString(UIStrings.progressiveWebApp),
     description: i18nLazyString(UIStrings.doesThisPageMeetTheStandardOfA),
     plugin: false,
   },
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.cat_best_practices', true),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.cat_best_practices', true, Common.Settings.SettingStorageType.Synced),
     configID: 'best-practices',
     title: i18nLazyString(UIStrings.bestPractices),
     description: i18nLazyString(UIStrings.doesThisPageFollowBestPractices),
     plugin: false,
   },
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.cat_a11y', true),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.cat_a11y', true, Common.Settings.SettingStorageType.Synced),
     configID: 'accessibility',
     title: i18nLazyString(UIStrings.accessibility),
     description: i18nLazyString(UIStrings.isThisPageUsableByPeopleWith),
     plugin: false,
   },
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.cat_seo', true),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.cat_seo', true, Common.Settings.SettingStorageType.Synced),
     configID: 'seo',
     title: i18nLazyString(UIStrings.seo),
     description: i18nLazyString(UIStrings.isThisPageOptimizedForSearch),
     plugin: false,
   },
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.cat_pubads', false),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.cat_pubads', false, Common.Settings.SettingStorageType.Synced),
     plugin: true,
     configID: 'lighthouse-plugin-publisher-ads',
     title: i18nLazyString(UIStrings.publisherAds),
@@ -410,7 +433,8 @@ export type Flags = {
 
 export const RuntimeSettings: RuntimeSetting[] = [
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.device_type', 'mobile'),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.device_type', 'mobile', Common.Settings.SettingStorageType.Synced),
     title: i18nLazyString(UIStrings.applyMobileEmulation),
     description: i18nLazyString(UIStrings.applyMobileEmulationDuring),
     setFlags: (flags: Flags, value: string|boolean): void => {
@@ -424,8 +448,24 @@ export const RuntimeSettings: RuntimeSetting[] = [
     learnMore: undefined,
   },
   {
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.mode', 'navigation', Common.Settings.SettingStorageType.Synced),
+    title: i18nLazyString(UIStrings.lighthouseMode),
+    description: i18nLazyString(UIStrings.runLighthouseInMode),
+    setFlags: (flags: Flags, value: string|boolean): void => {
+      flags.mode = value;
+    },
+    options: [
+      {label: i18nLazyString(UIStrings.navigation), value: 'navigation'},
+      {label: i18nLazyString(UIStrings.timespan), value: 'timespan'},
+      {label: i18nLazyString(UIStrings.snapshot), value: 'snapshot'},
+    ],
+    learnMore: undefined,
+  },
+  {
     // This setting is disabled, but we keep it around to show in the UI.
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.throttling', true),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.throttling', true, Common.Settings.SettingStorageType.Synced),
     title: i18nLazyString(UIStrings.simulatedThrottling),
     // We will disable this when we have a Lantern trace viewer within DevTools.
     learnMore:
@@ -437,7 +477,8 @@ export const RuntimeSettings: RuntimeSetting[] = [
     options: undefined,
   },
   {
-    setting: Common.Settings.Settings.instance().createSetting('lighthouse.clear_storage', true),
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.clear_storage', true, Common.Settings.SettingStorageType.Synced),
     title: i18nLazyString(UIStrings.clearStorage),
     description: i18nLazyString(UIStrings.resetStorageLocalstorage),
     setFlags: (flags: Flags, value: string|boolean): void => {
@@ -446,15 +487,53 @@ export const RuntimeSettings: RuntimeSetting[] = [
     options: undefined,
     learnMore: undefined,
   },
+  {
+    setting: Common.Settings.Settings.instance().createSetting(
+        'lighthouse.legacy_navigation', true, Common.Settings.SettingStorageType.Synced),
+    title: i18nLazyString(UIStrings.legacyNavigation),
+    description: i18nLazyString(UIStrings.useLegacyNavigation),
+    setFlags: (flags: Flags, value: string|boolean): void => {
+      flags.legacyNavigation = value;
+    },
+    options: undefined,
+    learnMore: undefined,
+  },
 ];
 
-export const Events = {
-  PageAuditabilityChanged: Symbol('PageAuditabilityChanged'),
-  PageWarningsChanged: Symbol('PageWarningsChanged'),
-  AuditProgressChanged: Symbol('AuditProgressChanged'),
-  RequestLighthouseStart: Symbol('RequestLighthouseStart'),
-  RequestLighthouseCancel: Symbol('RequestLighthouseCancel'),
+// TODO(crbug.com/1167717): Make this a const enum again
+// eslint-disable-next-line rulesdir/const_enum
+export enum Events {
+  PageAuditabilityChanged = 'PageAuditabilityChanged',
+  PageWarningsChanged = 'PageWarningsChanged',
+  AuditProgressChanged = 'AuditProgressChanged',
+  RequestLighthouseTimespanStart = 'RequestLighthouseTimespanStart',
+  RequestLighthouseTimespanEnd = 'RequestLighthouseTimespanEnd',
+  RequestLighthouseStart = 'RequestLighthouseStart',
+  RequestLighthouseCancel = 'RequestLighthouseCancel',
+}
+
+export interface PageAuditabilityChangedEvent {
+  helpText: string;
+}
+
+export interface PageWarningsChangedEvent {
+  warning: string;
+}
+
+export interface AuditProgressChangedEvent {
+  message: string;
+}
+
+export type EventTypes = {
+  [Events.PageAuditabilityChanged]: PageAuditabilityChangedEvent,
+  [Events.PageWarningsChanged]: PageWarningsChangedEvent,
+  [Events.AuditProgressChanged]: AuditProgressChangedEvent,
+  [Events.RequestLighthouseTimespanStart]: boolean,
+  [Events.RequestLighthouseTimespanEnd]: boolean,
+  [Events.RequestLighthouseStart]: boolean,
+  [Events.RequestLighthouseCancel]: void,
 };
+
 export interface Preset {
   setting: Common.Settings.Setting<boolean>;
   configID: string;

@@ -33,7 +33,7 @@ CPDF_Dictionary::~CPDF_Dictionary() {
   // and break cyclic references.
   m_ObjNum = kInvalidObjNum;
   for (auto& it : m_Map) {
-    if (it.second && it.second->GetObjNum() == kInvalidObjNum)
+    if (it.second->GetObjNum() == kInvalidObjNum)
       it.second.Leak();
   }
 }
@@ -75,16 +75,12 @@ RetainPtr<CPDF_Object> CPDF_Dictionary::CloneNonCyclic(
   for (const auto& it : locker) {
     if (!pdfium::Contains(*pVisited, it.second.Get())) {
       std::set<const CPDF_Object*> visited(*pVisited);
-      if (auto obj = it.second->CloneNonCyclic(bDirect, &visited))
+      auto obj = it.second->CloneNonCyclic(bDirect, &visited);
+      if (obj)
         pCopy->m_Map.insert(std::make_pair(it.first, std::move(obj)));
     }
   }
   return pCopy;
-}
-
-// static
-bool CPDF_Dictionary::IsValidKey(const ByteString& key) {
-  return !key.IsEmpty() && key.AsStringView().IsASCII();
 }
 
 const CPDF_Object* CPDF_Dictionary::GetObjectFor(const ByteString& key) const {
@@ -152,6 +148,11 @@ float CPDF_Dictionary::GetNumberFor(const ByteString& key) const {
   return p ? p->GetNumber() : 0;
 }
 
+RetainPtr<CPDF_Dictionary> CPDF_Dictionary::GetMutableDictFor(
+    const ByteString& key) {
+  return pdfium::WrapRetain(GetDictFor(key));
+}
+
 const CPDF_Dictionary* CPDF_Dictionary::GetDictFor(
     const ByteString& key) const {
   const CPDF_Object* p = GetDirectObjectFor(key);
@@ -167,6 +168,11 @@ const CPDF_Dictionary* CPDF_Dictionary::GetDictFor(
 CPDF_Dictionary* CPDF_Dictionary::GetDictFor(const ByteString& key) {
   return const_cast<CPDF_Dictionary*>(
       static_cast<const CPDF_Dictionary*>(this)->GetDictFor(key));
+}
+
+RetainPtr<CPDF_Array> CPDF_Dictionary::GetMutableArrayFor(
+    const ByteString& key) {
+  return pdfium::WrapRetain(GetArrayFor(key));
 }
 
 const CPDF_Array* CPDF_Dictionary::GetArrayFor(const ByteString& key) const {
@@ -215,7 +221,6 @@ std::vector<ByteString> CPDF_Dictionary::GetKeys() const {
 
 CPDF_Object* CPDF_Dictionary::SetFor(const ByteString& key,
                                      RetainPtr<CPDF_Object> pObj) {
-  CHECK(IsValidKey(key));
   CHECK(!IsLocked());
   if (!pObj) {
     m_Map.erase(key);

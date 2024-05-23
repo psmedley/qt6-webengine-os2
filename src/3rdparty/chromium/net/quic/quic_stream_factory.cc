@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -13,20 +14,21 @@
 #include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/location.h"
+#include "base/memory/memory_pressure_monitor.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
-#include "base/trace_event/memory_allocator_dump.h"
-#include "base/trace_event/memory_usage_estimator.h"
-#include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "crypto/openssl_util.h"
@@ -49,7 +51,6 @@
 #include "net/quic/quic_chromium_connection_helper.h"
 #include "net/quic/quic_chromium_packet_reader.h"
 #include "net/quic/quic_chromium_packet_writer.h"
-#include "net/quic/quic_client_session_cache.h"
 #include "net/quic/quic_context.h"
 #include "net/quic/quic_crypto_client_stream_factory.h"
 #include "net/quic/quic_http_stream.h"
@@ -61,15 +62,16 @@
 #include "net/socket/udp_client_socket.h"
 #include "net/ssl/cert_compression.h"
 #include "net/ssl/ssl_key_logger.h"
-#include "net/third_party/quiche/src/quic/core/crypto/null_decrypter.h"
-#include "net/third_party/quiche/src/quic/core/crypto/proof_verifier.h"
-#include "net/third_party/quiche/src/quic/core/crypto/quic_random.h"
-#include "net/third_party/quiche/src/quic/core/http/quic_client_promised_info.h"
-#include "net/third_party/quiche/src/quic/core/http/quic_client_push_promise_index.h"
-#include "net/third_party/quiche/src/quic/core/quic_clock.h"
-#include "net/third_party/quiche/src/quic/core/quic_connection.h"
-#include "net/third_party/quiche/src/quic/core/quic_utils.h"
-#include "net/third_party/quiche/src/quic/platform/api/quic_flags.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/null_decrypter.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/proof_verifier.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_client_session_cache.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_random.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/quic_client_promised_info.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/quic_client_push_promise_index.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_clock.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_connection.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_utils.h"
+#include "net/third_party/quiche/src/quiche/quic/platform/api/quic_flags.h"
 #include "third_party/boringssl/src/include/openssl/aead.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
@@ -235,12 +237,21 @@ class QuicStreamFactory::QuicCryptoClientConfigOwner {
  public:
   QuicCryptoClientConfigOwner(
       std::unique_ptr<quic::ProofVerifier> proof_verifier,
-      std::unique_ptr<QuicClientSessionCache> session_cache,
+      std::unique_ptr<quic::QuicClientSessionCache> session_cache,
       QuicStreamFactory* quic_stream_factory)
       : config_(std::move(proof_verifier), std::move(session_cache)),
+        clock_(base::DefaultClock::GetInstance()),
         quic_stream_factory_(quic_stream_factory) {
     DCHECK(quic_stream_factory_);
+    memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
+        FROM_HERE,
+        base::BindRepeating(&QuicCryptoClientConfigOwner::OnMemoryPressure,
+                            base::Unretained(this)));
   }
+
+  QuicCryptoClientConfigOwner(const QuicCryptoClientConfigOwner&) = delete;
+  QuicCryptoClientConfigOwner& operator=(const QuicCryptoClientConfigOwner&) =
+      delete;
 
   ~QuicCryptoClientConfigOwner() { DCHECK_EQ(num_refs_, 0); }
 
@@ -249,6 +260,30 @@ class QuicStreamFactory::QuicCryptoClientConfigOwner {
   int num_refs() const { return num_refs_; }
 
   QuicStreamFactory* quic_stream_factory() { return quic_stream_factory_; }
+
+  void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+    quic::SessionCache* session_cache = config_.mutable_session_cache();
+    if (!session_cache) {
+      return;
+    }
+    time_t now = clock_->Now().ToTimeT();
+    uint64_t now_u64 = 0;
+    if (now > 0) {
+      now_u64 = static_cast<uint64_t>(now);
+    }
+    switch (memory_pressure_level) {
+      case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
+        break;
+      case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
+        session_cache->RemoveExpiredEntries(
+            quic::QuicWallTime::FromUNIXSeconds(now_u64));
+        break;
+      case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
+        session_cache->Clear();
+        break;
+    }
+  }
 
  private:
   friend class CryptoClientConfigHandle;
@@ -267,9 +302,9 @@ class QuicStreamFactory::QuicCryptoClientConfigOwner {
 
   int num_refs_ = 0;
   quic::QuicCryptoClientConfig config_;
-  QuicStreamFactory* const quic_stream_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(QuicCryptoClientConfigOwner);
+  raw_ptr<base::Clock> clock_;
+  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
+  const raw_ptr<QuicStreamFactory> quic_stream_factory_;
 };
 
 // Class that owns a reference to a QuicCryptoClientConfigOwner. Handles
@@ -288,6 +323,8 @@ class QuicStreamFactory::CryptoClientConfigHandle
   explicit CryptoClientConfigHandle(const CryptoClientConfigHandle& other)
       : CryptoClientConfigHandle(other.map_iterator_) {}
 
+  CryptoClientConfigHandle& operator=(const CryptoClientConfigHandle&) = delete;
+
   ~CryptoClientConfigHandle() override {
     DCHECK_GT(map_iterator_->second->num_refs(), 0);
     map_iterator_->second->ReleaseRef();
@@ -303,8 +340,6 @@ class QuicStreamFactory::CryptoClientConfigHandle
 
  private:
   QuicCryptoClientConfigMap::iterator map_iterator_;
-
-  DISALLOW_ASSIGN(CryptoClientConfigHandle);
 };
 
 // Responsible for creating a new QUIC session to the specified server, and
@@ -325,6 +360,9 @@ class QuicStreamFactory::Job {
       bool use_dns_aliases,
       int cert_verify_flags,
       const NetLogWithSource& net_log);
+
+  Job(const Job&) = delete;
+  Job& operator=(const Job&) = delete;
 
   ~Job();
 
@@ -413,10 +451,10 @@ class QuicStreamFactory::Job {
       return false;
 
     std::vector<net::IPEndPoint> endpoints =
-        fresh_resolve_host_request_->GetAddressResults().value().endpoints();
+        fresh_resolve_host_request_->GetAddressResults()->endpoints();
 
     IPEndPoint stale_address =
-        resolve_host_request_->GetAddressResults().value().front();
+        resolve_host_request_->GetAddressResults()->front();
 
     if (std::find(endpoints.begin(), endpoints.end(), stale_address) !=
         endpoints.end()) {
@@ -452,9 +490,9 @@ class QuicStreamFactory::Job {
   }
 
   IoState io_state_;
-  QuicStreamFactory* factory_;
+  raw_ptr<QuicStreamFactory> factory_;
   quic::ParsedQuicVersion quic_version_;
-  HostResolver* host_resolver_;
+  raw_ptr<HostResolver> host_resolver_;
   const QuicSessionAliasKey key_;
   const std::unique_ptr<CryptoClientConfigHandle> client_config_handle_;
   RequestPriority priority_;
@@ -481,8 +519,6 @@ class QuicStreamFactory::Job {
   base::TimeTicks quic_connection_start_time_;
   std::set<QuicStreamRequest*> stream_requests_;
   base::WeakPtrFactory<Job> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Job);
 };
 
 QuicStreamFactory::Job::Job(
@@ -607,8 +643,7 @@ void QuicStreamFactory::Job::OnResolveHostComplete(int rv) {
       resolve_host_request_ = std::move(fresh_resolve_host_request_);
       io_state_ = STATE_RESOLVE_HOST_COMPLETE;
     } else if (factory_->HasMatchingIpSession(
-                   key_,
-                   fresh_resolve_host_request_->GetAddressResults().value(),
+                   key_, *fresh_resolve_host_request_->GetAddressResults(),
                    use_dns_aliases_)) {
       // Session with resolved IP has already existed, so close racing
       // connection, run callback, and return.
@@ -766,7 +801,7 @@ int QuicStreamFactory::Job::DoResolveHostComplete(int rv) {
   // Inform the factory of this resolution, which will set up
   // a session alias, if possible.
   if (factory_->HasMatchingIpSession(
-          key_, resolve_host_request_->GetAddressResults().value(),
+          key_, *resolve_host_request_->GetAddressResults(),
           use_dns_aliases_)) {
     LogConnectionIpPooling(true);
     return OK;
@@ -788,9 +823,8 @@ int QuicStreamFactory::Job::DoConnect() {
   DCHECK_NE(quic_version_, quic::ParsedQuicVersion::Unsupported());
   int rv = factory_->CreateSession(
       key_, quic_version_, cert_verify_flags_, require_confirmation,
-      resolve_host_request_->GetAddressResults().value(),
-      dns_resolution_start_time_, dns_resolution_end_time_, net_log_, &session_,
-      &network_);
+      *resolve_host_request_->GetAddressResults(), dns_resolution_start_time_,
+      dns_resolution_end_time_, net_log_, &session_, &network_);
   DVLOG(1) << "Created session on network: " << network_;
 
   if (rv != OK) {
@@ -956,10 +990,10 @@ int QuicStreamFactory::Job::DoConfirmConnection(int rv) {
   }
   LogConnectionIpPooling(false);
 
-  std::vector<std::string> dns_aliases =
+  std::set<std::string> dns_aliases =
       use_dns_aliases_ && resolve_host_request_->GetDnsAliasResults()
-          ? resolve_host_request_->GetDnsAliasResults().value()
-          : std::vector<std::string>();
+          ? *resolve_host_request_->GetDnsAliasResults()
+          : std::set<std::string>();
   factory_->ActivateSession(key_, session_, std::move(dns_aliases));
 
   return OK;
@@ -1647,31 +1681,15 @@ base::TimeDelta QuicStreamFactory::GetTimeDelayForWaitingJob(
   const int kDefaultRTT = 300 * quic::kNumMicrosPerMilli;
   if (!srtt)
     srtt = kDefaultRTT;
-  return base::TimeDelta::FromMicroseconds(srtt);
+  return base::Microseconds(srtt);
 }
 
-void QuicStreamFactory::DumpMemoryStats(
-    base::trace_event::ProcessMemoryDump* pmd,
-    const std::string& parent_absolute_name) const {
-  if (all_sessions_.empty() && active_jobs_.empty())
-    return;
-  base::trace_event::MemoryAllocatorDump* factory_dump =
-      pmd->CreateAllocatorDump(parent_absolute_name + "/quic_stream_factory");
-  factory_dump->AddScalar("all_sessions",
-                          base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                          all_sessions_.size());
-  factory_dump->AddScalar("active_jobs",
-                          base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                          active_jobs_.size());
-}
-
-const std::vector<std::string>& QuicStreamFactory::GetDnsAliasesForSessionKey(
+const std::set<std::string>& QuicStreamFactory::GetDnsAliasesForSessionKey(
     const QuicSessionKey& key) const {
   auto it = dns_aliases_by_session_key_.find(key);
 
   if (it == dns_aliases_by_session_key_.end()) {
-    static const base::NoDestructor<std::vector<std::string>>
-        emptyvector_result;
+    static const base::NoDestructor<std::set<std::string>> emptyvector_result;
     return *emptyvector_result;
   }
 
@@ -1693,10 +1711,13 @@ bool QuicStreamFactory::HasMatchingIpSession(const QuicSessionAliasKey& key,
         continue;
       active_sessions_[key.session_key()] = session;
 
-      std::vector<std::string> dns_aliases =
-          use_dns_aliases ? dns_alias_utility::SanitizeDnsAliases(
-                                address_list.dns_aliases())
-                          : std::vector<std::string>();
+      std::set<std::string> dns_aliases;
+      if (use_dns_aliases) {
+        base::ranges::copy(address_list.dns_aliases(),
+                           std::inserter(dns_aliases, dns_aliases.end()));
+        dns_aliases = dns_alias_utility::FixUpDnsAliases(dns_aliases);
+      }
+
       MapSessionToAliasKey(session, key, std::move(dns_aliases));
 
       return true;
@@ -1800,7 +1821,7 @@ int QuicStreamFactory::CreateSession(
   std::unique_ptr<CryptoClientConfigHandle> crypto_config_handle =
       CreateCryptoConfigHandle(key.session_key().network_isolation_key());
   InitializeCachedStateInCryptoConfig(*crypto_config_handle, server_id,
-                                      server_info, &connection_id);
+                                      server_info);
 
   QuicChromiumPacketWriter* writer =
       new QuicChromiumPacketWriter(socket.get(), task_runner_);
@@ -1851,7 +1872,6 @@ int QuicStreamFactory::CreateSession(
       params_.max_migrations_to_non_default_network_on_write_error,
       params_.max_migrations_to_non_default_network_on_path_degrading,
       yield_after_packets_, yield_after_duration_,
-      params_.go_away_on_path_degrading,
       params_.headers_include_h2_stream_dependency, cert_verify_flags, config,
       std::move(crypto_config_handle),
       network_connection_.connection_description(), dns_resolution_start_time,
@@ -1879,7 +1899,7 @@ int QuicStreamFactory::CreateSession(
 
 void QuicStreamFactory::ActivateSession(const QuicSessionAliasKey& key,
                                         QuicChromiumClientSession* session,
-                                        std::vector<std::string> dns_aliases) {
+                                        std::set<std::string> dns_aliases) {
   DCHECK(!HasActiveSession(key.session_key()));
   UMA_HISTOGRAM_COUNTS_1M("Net.QuicActiveSessions", active_sessions_.size());
   active_sessions_[key.session_key()] = session;
@@ -1913,7 +1933,7 @@ void QuicStreamFactory::ConfigureInitialRttEstimate(
   // Sometimes *srtt is negative. See https://crbug.com/1225616.
   // TODO(ricea): When the root cause of the negative value is fixed, change the
   // non-negative assertion to a DCHECK.
-  if (srtt != nullptr && *srtt > base::TimeDelta()) {
+  if (srtt && srtt->is_positive()) {
     SetInitialRttEstimate(*srtt, INITIAL_RTT_CACHED, config);
     return;
   }
@@ -1921,21 +1941,18 @@ void QuicStreamFactory::ConfigureInitialRttEstimate(
   NetworkChangeNotifier::ConnectionType type =
       network_connection_.connection_type();
   if (type == NetworkChangeNotifier::CONNECTION_2G) {
-    SetInitialRttEstimate(base::TimeDelta::FromMilliseconds(1200),
-                          INITIAL_RTT_CACHED, config);
+    SetInitialRttEstimate(base::Milliseconds(1200), INITIAL_RTT_CACHED, config);
     return;
   }
 
   if (type == NetworkChangeNotifier::CONNECTION_3G) {
-    SetInitialRttEstimate(base::TimeDelta::FromMilliseconds(400),
-                          INITIAL_RTT_CACHED, config);
+    SetInitialRttEstimate(base::Milliseconds(400), INITIAL_RTT_CACHED, config);
     return;
   }
 
-  if (params_.initial_rtt_for_handshake > base::TimeDelta()) {
+  if (params_.initial_rtt_for_handshake.is_positive()) {
     SetInitialRttEstimate(
-        base::TimeDelta::FromMicroseconds(
-            params_.initial_rtt_for_handshake.InMicroseconds()),
+        base::Microseconds(params_.initial_rtt_for_handshake.InMicroseconds()),
         INITIAL_RTT_DEFAULT, config);
     return;
   }
@@ -1989,9 +2006,6 @@ void QuicStreamFactory::InitializeMigrationOptions() {
   params_.retry_on_alternate_network_before_handshake = false;
   params_.migrate_idle_sessions = false;
 
-  DCHECK(!(migrate_sessions_early && params_.go_away_on_path_degrading));
-  DCHECK(!(allow_port_migration && params_.go_away_on_path_degrading));
-
   // TODO(zhongyi): deprecate |goaway_sessions_on_ip_change| if the experiment
   // is no longer needed.
   // goaway_sessions_on_ip_change and close_sessions_on_ip_change should never
@@ -2012,8 +2026,12 @@ void QuicStreamFactory::InitializeMigrationOptions() {
   // not be simultaneously set.
   DCHECK(!allow_port_migration || !migrate_sessions_early);
 
-  if (allow_port_migration)
+  if (allow_port_migration) {
     params_.allow_port_migration = true;
+    if (migrate_idle_sessions) {
+      params_.migrate_idle_sessions = true;
+    }
+  }
 
   if (!NetworkChangeNotifier::AreNetworkHandlesSupported())
     return;
@@ -2029,8 +2047,7 @@ void QuicStreamFactory::InitializeMigrationOptions() {
   params_.migrate_sessions_on_network_change_v2 = true;
 
   if (!migrate_sessions_early) {
-    DCHECK(!migrate_idle_sessions &&
-           !retry_on_alternate_network_before_handshake);
+    DCHECK(!retry_on_alternate_network_before_handshake);
     return;
   }
 
@@ -2055,8 +2072,7 @@ void QuicStreamFactory::InitializeMigrationOptions() {
 void QuicStreamFactory::InitializeCachedStateInCryptoConfig(
     const CryptoClientConfigHandle& crypto_config_handle,
     const quic::QuicServerId& server_id,
-    const std::unique_ptr<QuicServerInfo>& server_info,
-    quic::QuicConnectionId* connection_id) {
+    const std::unique_ptr<QuicServerInfo>& server_info) {
   quic::QuicCryptoClientConfig::CachedState* cached =
       crypto_config_handle.GetConfig()->LookupOrCreate(server_id);
 
@@ -2100,7 +2116,7 @@ void QuicStreamFactory::ProcessGoingAwaySession(
         alternative_service,
         session->quic_session_key().network_isolation_key());
     ServerNetworkStats network_stats;
-    network_stats.srtt = base::TimeDelta::FromMicroseconds(stats.srtt_us);
+    network_stats.srtt = base::Microseconds(stats.srtt_us);
     network_stats.bandwidth_estimate = stats.estimated_bandwidth;
     http_server_properties_->SetServerNetworkStats(
         server, session->quic_session_key().network_isolation_key(),
@@ -2135,7 +2151,7 @@ void QuicStreamFactory::ProcessGoingAwaySession(
 void QuicStreamFactory::MapSessionToAliasKey(
     QuicChromiumClientSession* session,
     const QuicSessionAliasKey& key,
-    std::vector<std::string> dns_aliases) {
+    std::set<std::string> dns_aliases) {
   session_aliases_[session].insert(key);
   dns_aliases_by_session_key_[key.session_key()] = std::move(dns_aliases);
 }
@@ -2193,7 +2209,7 @@ QuicStreamFactory::CreateCryptoConfigHandle(
               sct_auditing_delegate_,
               HostsFromOrigins(params_.origins_to_force_quic_on),
               actual_network_isolation_key),
-          std::make_unique<QuicClientSessionCache>(), this);
+          std::make_unique<quic::QuicClientSessionCache>(), this);
 
   quic::QuicCryptoClientConfig* crypto_config = crypto_config_owner->config();
   crypto_config->set_user_agent_id(params_.user_agent_id);

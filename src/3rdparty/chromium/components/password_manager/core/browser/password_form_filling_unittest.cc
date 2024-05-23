@@ -17,6 +17,7 @@
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/autofill/core/common/unique_ids.h"
+#include "components/password_manager/core/browser/mock_webauthn_credentials_delegate.h"
 #include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_form_metrics_recorder.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
@@ -64,6 +65,10 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
               (const GURL&),
               (const, override));
   MOCK_METHOD(bool, IsCommittedMainFrameSecure, (), (const, override));
+  MOCK_METHOD(MockWebAuthnCredentialsDelegate*,
+              GetWebAuthnCredentialsDelegate,
+              (),
+              (override));
 };
 
 // Matcher for PasswordAndMetadata.
@@ -115,6 +120,11 @@ class PasswordFormFillingTest : public testing::Test {
 
     metrics_recorder_ = base::MakeRefCounted<PasswordFormMetricsRecorder>(
         true, client_.GetUkmSourceId(), /*pref_service=*/nullptr);
+
+    ON_CALL(client_, GetWebAuthnCredentialsDelegate)
+        .WillByDefault(Return(&webauthn_credentials_delegate_));
+    ON_CALL(webauthn_credentials_delegate_, IsWebAuthnAutofillEnabled)
+        .WillByDefault(Return(false));
   }
 
  protected:
@@ -125,6 +135,7 @@ class PasswordFormFillingTest : public testing::Test {
   PasswordForm psl_saved_match_;
   scoped_refptr<PasswordFormMetricsRecorder> metrics_recorder_;
   std::vector<const PasswordForm*> federated_matches_;
+  MockWebAuthnCredentialsDelegate webauthn_credentials_delegate_;
 };
 
 TEST_F(PasswordFormFillingTest, NoSavedCredentials) {
@@ -158,7 +169,7 @@ TEST_F(PasswordFormFillingTest, Autofill) {
 
   // On Android Touch To Fill will prevent autofilling credentials on page load.
   // On iOS Reauth is always required.
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   EXPECT_EQ(LikelyFormFilling::kFillOnAccountSelect, likely_form_filling);
   EXPECT_TRUE(fill_data.wait_for_username);
 #else
@@ -235,7 +246,7 @@ TEST_F(PasswordFormFillingTest, TestFillOnLoadSuggestion) {
     if (test_case.current_password_present) {
       // On Android Touch To Fill will prevent autofilling credentials on page
       // load. On iOS Reauth is always required.
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
       EXPECT_EQ(LikelyFormFilling::kFillOnAccountSelect, likely_form_filling);
 #else
       EXPECT_EQ(LikelyFormFilling::kFillOnPageLoad, likely_form_filling);
@@ -246,13 +257,37 @@ TEST_F(PasswordFormFillingTest, TestFillOnLoadSuggestion) {
   }
 }
 
+#if !defined(ANDROID) && !BUILDFLAG(IS_IOS)
+TEST_F(PasswordFormFillingTest, DontFillOnLoadWebAuthnCredentials) {
+  MockWebAuthnCredentialsDelegate webauthn_credentials_delegate;
+  observed_form_.accepts_webauthn_credentials = true;
+  for (bool webauthn_autofill_enabled : {false, true}) {
+    PasswordFormFillData fill_data;
+    EXPECT_CALL(client_, GetWebAuthnCredentialsDelegate())
+        .WillOnce(Return(&webauthn_credentials_delegate));
+    EXPECT_CALL(webauthn_credentials_delegate, IsWebAuthnAutofillEnabled())
+        .WillOnce(Return(webauthn_autofill_enabled));
+    EXPECT_CALL(driver_, FillPasswordForm(_)).WillOnce(SaveArg<0>(&fill_data));
+    EXPECT_CALL(client_, PasswordWasAutofilled);
+    LikelyFormFilling likely_form_filling = SendFillInformationToRenderer(
+        &client_, &driver_, observed_form_, {&saved_match_}, federated_matches_,
+        &saved_match_, /*blocked_by_user=*/false, metrics_recorder_.get());
+    if (webauthn_autofill_enabled) {
+      EXPECT_EQ(LikelyFormFilling::kFillOnAccountSelect, likely_form_filling);
+    } else {
+      EXPECT_EQ(LikelyFormFilling::kFillOnPageLoad, likely_form_filling);
+    }
+  }
+}
+#endif
+
 // Test autofill when username and password are prefilled. Overwrite password
 // if server side classification thought the username was a placeholder or the
 // classification failed. Do not overwrite if username doesn't look like a
 // placeholder.
 // Skip for Android and iOS since it uses touch to fill, meaning placeholders
 // will never be overwritten.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 TEST_F(PasswordFormFillingTest, TestFillOnLoadSuggestionWithPrefill) {
   const struct {
     const char* description;
@@ -345,7 +380,7 @@ TEST_F(PasswordFormFillingTest, NoAutofillOnHttp) {
   ASSERT_FALSE(GURL(saved_http_match.signon_realm).SchemeIsCryptographic());
   std::vector<const PasswordForm*> best_matches = {&saved_http_match};
 
-#if !defined(OS_IOS) && !defined(ANDROID)
+#if !BUILDFLAG(IS_IOS) && !defined(ANDROID)
   EXPECT_CALL(client_, IsCommittedMainFrameSecure).WillOnce(Return(false));
 #endif
   LikelyFormFilling likely_form_filling = SendFillInformationToRenderer(
@@ -354,7 +389,7 @@ TEST_F(PasswordFormFillingTest, NoAutofillOnHttp) {
   EXPECT_EQ(LikelyFormFilling::kFillOnAccountSelect, likely_form_filling);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 TEST_F(PasswordFormFillingTest, TouchToFill) {
   std::vector<const PasswordForm*> best_matches = {&saved_match_};
 

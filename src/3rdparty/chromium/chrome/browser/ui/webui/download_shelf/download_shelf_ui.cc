@@ -33,7 +33,7 @@ DownloadShelfUI::DownloadShelfUI(content::WebUI* web_ui)
     : ui::MojoWebUIController(web_ui, true),
       progress_timer_(std::make_unique<base::RetainingOneShotTimer>(
           FROM_HERE,
-          base::TimeDelta::FromMilliseconds(30),
+          base::Milliseconds(30),
           base::BindRepeating(&DownloadShelfUI::NotifyDownloadProgress,
                               base::Unretained(this)))),
       download_manager_(Profile::FromWebUI(web_ui)->GetDownloadManager()),
@@ -145,10 +145,10 @@ void DownloadShelfUI::OpenDownload(uint32_t download_id) {
 
 void DownloadShelfUI::DoShowDownload(
     DownloadUIModel::DownloadUIModelPtr download_model,
-    base::TimeTicks show_download_start_time_ticks) {
+    base::Time show_download_start_time) {
   DownloadUIModel* download = AddDownload(std::move(download_model));
   show_download_time_map_.insert_or_assign(download->download()->GetId(),
-                                           show_download_start_time_ticks);
+                                           show_download_start_time);
   // Observe any changes on the download item in order to propagate such changes
   // to the UI.
   download->download()->AddObserver(this);
@@ -169,7 +169,7 @@ std::vector<DownloadUIModel*> DownloadShelfUI::GetDownloads() {
   return downloads;
 }
 
-base::TimeTicks DownloadShelfUI::GetShowDownloadTime(uint32_t download_id) {
+base::Time DownloadShelfUI::GetShowDownloadTime(uint32_t download_id) {
   return show_download_time_map_[download_id];
 }
 
@@ -252,7 +252,7 @@ void DownloadShelfUI::SetProgressTimerForTesting(
     std::unique_ptr<base::RetainingOneShotTimer> timer) {
   progress_timer_ = std::move(timer);
   progress_timer_->Start(
-      FROM_HERE, base::TimeDelta::FromMilliseconds(30),
+      FROM_HERE, base::Milliseconds(30),
       base::BindRepeating(&DownloadShelfUI::NotifyDownloadProgress,
                           base::Unretained(this)));
 }

@@ -10,9 +10,15 @@
 #include "base/files/file.h"
 #include "base/logging.h"
 #include "base/notreached.h"
-#include "net/third_party/quiche/src/quic/core/quic_error_codes.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_error_codes.h"
 
 namespace net {
+
+// Validate all error values in net_error_list.h are negative.
+#define NET_ERROR(label, value) \
+  static_assert(value < 0, "ERR_" #label " should be negative");
+#include "net/base/net_error_list.h"
+#undef NET_ERROR
 
 std::string ErrorToString(int error) {
   return "net::" + ErrorToShortString(error);
@@ -110,7 +116,7 @@ Error FileErrorToNetError(base::File::Error file_error) {
       return ERR_ACCESS_DENIED;
     case base::File::FILE_ERROR_MAX:
       NOTREACHED();
-      FALLTHROUGH;
+      [[fallthrough]];
     case base::File::FILE_ERROR_NOT_A_DIRECTORY:
     case base::File::FILE_ERROR_NOT_A_FILE:
     case base::File::FILE_ERROR_NOT_EMPTY:

@@ -30,7 +30,7 @@
 
 namespace blink {
 
-class LayoutIFrame final : public LayoutEmbeddedContent {
+class CORE_EXPORT LayoutIFrame : public LayoutEmbeddedContent {
  public:
   explicit LayoutIFrame(HTMLFrameOwnerElement*);
 
@@ -49,10 +49,13 @@ class LayoutIFrame final : public LayoutEmbeddedContent {
     NOT_DESTROYED();
     return type == kLayoutObjectIFrame || LayoutEmbeddedContent::IsOfType(type);
   }
+};
 
-  PaintLayerType LayerTypeRequired() const override;
-  void StyleWillChange(StyleDifference,
-                       const ComputedStyle& new_style) override;
+template <>
+struct DowncastTraits<LayoutIFrame> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsLayoutIFrame();
+  }
 };
 
 }  // namespace blink

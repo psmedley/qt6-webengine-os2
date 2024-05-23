@@ -5,7 +5,6 @@
 #include "src/compiler/memory-lowering.h"
 
 #include "src/codegen/interface-descriptors-inl.h"
-#include "src/common/external-pointer.h"
 #include "src/compiler/access-builder.h"
 #include "src/compiler/js-graph.h"
 #include "src/compiler/linkage.h"
@@ -14,6 +13,7 @@
 #include "src/compiler/node.h"
 #include "src/compiler/simplified-operator.h"
 #include "src/roots/roots-inl.h"
+#include "src/sandbox/external-pointer.h"
 
 #if V8_ENABLE_WEBASSEMBLY
 #include "src/wasm/wasm-linkage.h"
@@ -60,7 +60,6 @@ class MemoryLowering::AllocationGroup final : public ZoneObject {
 
 MemoryLowering::MemoryLowering(JSGraph* jsgraph, Zone* zone,
                                JSGraphAssembler* graph_assembler,
-                               PoisoningMitigationLevel poisoning_level,
                                AllocationFolding allocation_folding,
                                WriteBarrierAssertFailedCallback callback,
                                const char* function_debug_name)
@@ -71,7 +70,6 @@ MemoryLowering::MemoryLowering(JSGraph* jsgraph, Zone* zone,
       machine_(jsgraph->machine()),
       graph_assembler_(graph_assembler),
       allocation_folding_(allocation_folding),
-      poisoning_level_(poisoning_level),
       write_barrier_assert_failed_(callback),
       function_debug_name_(function_debug_name) {}
 
@@ -86,12 +84,14 @@ Reduction MemoryLowering::Reduce(Node* node) {
     case IrOpcode::kAllocateRaw:
       return ReduceAllocateRaw(node);
     case IrOpcode::kLoadFromObject:
+    case IrOpcode::kLoadImmutableFromObject:
       return ReduceLoadFromObject(node);
     case IrOpcode::kLoadElement:
       return ReduceLoadElement(node);
     case IrOpcode::kLoadField:
       return ReduceLoadField(node);
     case IrOpcode::kStoreToObject:
+    case IrOpcode::kInitializeImmutableInObject:
       return ReduceStoreToObject(node);
     case IrOpcode::kStoreElement:
       return ReduceStoreElement(node);
@@ -282,7 +282,7 @@ Reduction MemoryLowering::ReduceAllocateRaw(
 
       // Setup a mutable reservation size node; will be patched as we fold
       // additional allocations into this new group.
-      Node* size = __ UniqueIntPtrConstant(object_size);
+      Node* reservation_size = __ UniqueIntPtrConstant(object_size);
 
       // Load allocation top and limit.
       Node* top =
@@ -292,7 +292,7 @@ Reduction MemoryLowering::ReduceAllocateRaw(
 
       // Check if we need to collect garbage before we can start bump pointer
       // allocation (always done for folded allocations).
-      Node* check = __ UintLessThan(__ IntAdd(top, size), limit);
+      Node* check = __ UintLessThan(__ IntAdd(top, reservation_size), limit);
 
       __ GotoIfNot(check, &call_runtime);
       __ Goto(&done, top);
@@ -300,8 +300,8 @@ Reduction MemoryLowering::ReduceAllocateRaw(
       __ Bind(&call_runtime);
       {
         EnsureAllocateOperator();
-        Node* vfalse = __ BitcastTaggedToWord(
-            __ Call(allocate_operator_.get(), allocate_builtin, size));
+        Node* vfalse = __ BitcastTaggedToWord(__ Call(
+            allocate_operator_.get(), allocate_builtin, reservation_size));
         vfalse = __ IntSub(vfalse, __ IntPtrConstant(kHeapObjectTag));
         __ Goto(&done, vfalse);
       }
@@ -321,8 +321,8 @@ Reduction MemoryLowering::ReduceAllocateRaw(
       control = gasm()->control();
 
       // Start a new allocation group.
-      AllocationGroup* group =
-          zone()->New<AllocationGroup>(value, allocation_type, size, zone());
+      AllocationGroup* group = zone()->New<AllocationGroup>(
+          value, allocation_type, reservation_size, zone());
       *state_ptr =
           AllocationState::Open(group, object_size, top, effect, zone());
     }
@@ -374,7 +374,8 @@ Reduction MemoryLowering::ReduceAllocateRaw(
 }
 
 Reduction MemoryLowering::ReduceLoadFromObject(Node* node) {
-  DCHECK_EQ(IrOpcode::kLoadFromObject, node->opcode());
+  DCHECK(node->opcode() == IrOpcode::kLoadFromObject ||
+         node->opcode() == IrOpcode::kLoadImmutableFromObject);
   ObjectAccess const& access = ObjectAccessOf(node->op());
 
   MachineType machine_type = access.machine_type;
@@ -401,20 +402,17 @@ Reduction MemoryLowering::ReduceLoadElement(Node* node) {
   node->ReplaceInput(1, ComputeIndex(access, index));
   MachineType type = access.machine_type;
   DCHECK(!type.IsMapWord());
-  if (NeedsPoisoning(access.load_sensitivity)) {
-    NodeProperties::ChangeOp(node, machine()->PoisonedLoad(type));
-  } else {
-    NodeProperties::ChangeOp(node, machine()->Load(type));
-  }
+  NodeProperties::ChangeOp(node, machine()->Load(type));
   return Changed(node);
 }
 
 Node* MemoryLowering::DecodeExternalPointer(
     Node* node, ExternalPointerTag external_pointer_tag) {
-#ifdef V8_HEAP_SANDBOX
-  DCHECK(V8_HEAP_SANDBOX_BOOL);
-  DCHECK(node->opcode() == IrOpcode::kLoad ||
-         node->opcode() == IrOpcode::kPoisonedLoad);
+#ifdef V8_SANDBOXED_EXTERNAL_POINTERS
+  DCHECK(V8_SANDBOXED_EXTERNAL_POINTERS_BOOL);
+  DCHECK(node->opcode() == IrOpcode::kLoad);
+  DCHECK_EQ(kExternalPointerSize, kUInt32Size);
+  DCHECK_NE(kExternalPointerNullTag, external_pointer_tag);
   Node* effect = NodeProperties::GetEffectInput(node);
   Node* control = NodeProperties::GetControlInput(node);
   __ InitializeEffectControl(effect, control);
@@ -422,29 +420,35 @@ Node* MemoryLowering::DecodeExternalPointer(
   // Clone the load node and put it here.
   // TODO(turbofan): consider adding GraphAssembler::Clone() suitable for
   // cloning nodes from arbitrary locaions in effect/control chains.
-  Node* index = __ AddNode(graph()->CloneNode(node));
+  STATIC_ASSERT(kExternalPointerIndexShift > kSystemPointerSizeLog2);
+  Node* shifted_index = __ AddNode(graph()->CloneNode(node));
+  Node* shift_amount =
+      __ Int32Constant(kExternalPointerIndexShift - kSystemPointerSizeLog2);
+  Node* offset = __ Word32Shr(shifted_index, shift_amount);
 
   // Uncomment this to generate a breakpoint for debugging purposes.
   // __ DebugBreak();
 
   // Decode loaded external pointer.
-  STATIC_ASSERT(kExternalPointerSize == kSystemPointerSize);
-  Node* external_pointer_table_address = __ ExternalConstant(
+  //
+  // Here we access the external pointer table through an ExternalReference.
+  // Alternatively, we could also hardcode the address of the table since it is
+  // never reallocated. However, in that case we must be able to guarantee that
+  // the generated code is never executed under a different Isolate, as that
+  // would allow access to external objects from different Isolates. It also
+  // would break if the code is serialized/deserialized at some point.
+  Node* table_address = __ ExternalConstant(
       ExternalReference::external_pointer_table_address(isolate()));
-  Node* table = __ Load(MachineType::Pointer(), external_pointer_table_address,
+  Node* table = __ Load(MachineType::Pointer(), table_address,
                         Internals::kExternalPointerTableBufferOffset);
-  // TODO(v8:10391, saelo): bounds check if table is not caged
-  Node* offset = __ Int32Mul(index, __ Int32Constant(8));
   Node* decoded_ptr =
       __ Load(MachineType::Pointer(), table, __ ChangeUint32ToUint64(offset));
-  if (external_pointer_tag != 0) {
-    Node* tag = __ IntPtrConstant(~external_pointer_tag);
-    decoded_ptr = __ WordAnd(decoded_ptr, tag);
-  }
+  Node* tag = __ IntPtrConstant(~external_pointer_tag);
+  decoded_ptr = __ WordAnd(decoded_ptr, tag);
   return decoded_ptr;
 #else
   return node;
-#endif  // V8_HEAP_SANDBOX
+#endif  // V8_SANDBOXED_EXTERNAL_POINTERS
 }
 
 Reduction MemoryLowering::ReduceLoadMap(Node* node) {
@@ -469,42 +473,35 @@ Reduction MemoryLowering::ReduceLoadField(Node* node) {
   Node* offset = __ IntPtrConstant(access.offset - access.tag());
   node->InsertInput(graph_zone(), 1, offset);
   MachineType type = access.machine_type;
-  if (V8_HEAP_SANDBOX_BOOL &&
-      access.type.Is(Type::SandboxedExternalPointer())) {
-    // External pointer table indices are 32bit numbers
+  if (V8_SANDBOXED_EXTERNAL_POINTERS_BOOL &&
+      access.type.Is(Type::ExternalPointer())) {
+    // External pointer table indices are stored as 32-bit numbers
     type = MachineType::Uint32();
   }
 
   if (type.IsMapWord()) {
-    DCHECK(!NeedsPoisoning(access.load_sensitivity));
-    DCHECK(!access.type.Is(Type::SandboxedExternalPointer()));
+    DCHECK(!access.type.Is(Type::ExternalPointer()));
     return ReduceLoadMap(node);
   }
 
-  if (NeedsPoisoning(access.load_sensitivity)) {
-    NodeProperties::ChangeOp(node, machine()->PoisonedLoad(type));
-  } else {
-    NodeProperties::ChangeOp(node, machine()->Load(type));
-  }
+  NodeProperties::ChangeOp(node, machine()->Load(type));
 
-  if (V8_HEAP_SANDBOX_BOOL &&
-      access.type.Is(Type::SandboxedExternalPointer())) {
-#ifdef V8_HEAP_SANDBOX
+#ifdef V8_SANDBOXED_EXTERNAL_POINTERS
+  if (access.type.Is(Type::ExternalPointer())) {
     ExternalPointerTag tag = access.external_pointer_tag;
-#else
-    ExternalPointerTag tag = kExternalPointerNullTag;
-#endif
+    DCHECK_NE(kExternalPointerNullTag, tag);
     node = DecodeExternalPointer(node, tag);
     return Replace(node);
-  } else {
-    DCHECK(!access.type.Is(Type::SandboxedExternalPointer()));
   }
+#endif
+
   return Changed(node);
 }
 
 Reduction MemoryLowering::ReduceStoreToObject(Node* node,
                                               AllocationState const* state) {
-  DCHECK_EQ(IrOpcode::kStoreToObject, node->opcode());
+  DCHECK(node->opcode() == IrOpcode::kStoreToObject ||
+         node->opcode() == IrOpcode::kInitializeImmutableInObject);
   ObjectAccess const& access = ObjectAccessOf(node->op());
   Node* object = node->InputAt(0);
   Node* value = node->InputAt(2);
@@ -543,9 +540,10 @@ Reduction MemoryLowering::ReduceStoreField(Node* node,
   DCHECK_EQ(IrOpcode::kStoreField, node->opcode());
   FieldAccess const& access = FieldAccessOf(node->op());
   // External pointer must never be stored by optimized code.
-  DCHECK_IMPLIES(V8_HEAP_SANDBOX_BOOL,
-                 !access.type.Is(Type::ExternalPointer()) &&
-                     !access.type.Is(Type::SandboxedExternalPointer()));
+  DCHECK_IMPLIES(V8_SANDBOXED_EXTERNAL_POINTERS_BOOL,
+                 !access.type.Is(Type::ExternalPointer()));
+  // SandboxedPointers are not currently stored by optimized code.
+  DCHECK(!access.type.Is(Type::SandboxedPointer()));
   MachineType machine_type = access.machine_type;
   Node* object = node->InputAt(0);
   Node* value = node->InputAt(1);
@@ -653,21 +651,6 @@ WriteBarrierKind MemoryLowering::ComputeWriteBarrierKind(
     write_barrier_assert_failed_(node, object, function_debug_name_, zone());
   }
   return write_barrier_kind;
-}
-
-bool MemoryLowering::NeedsPoisoning(LoadSensitivity load_sensitivity) const {
-  // Safe loads do not need poisoning.
-  if (load_sensitivity == LoadSensitivity::kSafe) return false;
-
-  switch (poisoning_level_) {
-    case PoisoningMitigationLevel::kDontPoison:
-      return false;
-    case PoisoningMitigationLevel::kPoisonAll:
-      return true;
-    case PoisoningMitigationLevel::kPoisonCriticalOnly:
-      return load_sensitivity == LoadSensitivity::kCritical;
-  }
-  UNREACHABLE();
 }
 
 MemoryLowering::AllocationGroup::AllocationGroup(Node* node,

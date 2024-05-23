@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/style/style_fetched_image_set.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
@@ -146,7 +145,7 @@ String CSSImageSetValue::CustomCSSText() const {
   }
 
   result.Append(')');
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 bool CSSImageSetValue::HasFailedOrCanceledSubresources() const {

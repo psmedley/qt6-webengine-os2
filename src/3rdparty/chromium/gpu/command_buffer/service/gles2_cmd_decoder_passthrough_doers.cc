@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_passthrough.h"
 
 #include <memory>
@@ -22,6 +23,8 @@
 #include "gpu/command_buffer/service/shared_image_factory.h"
 #include "gpu/command_buffer/service/shared_image_representation.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/overlay_plane_data.h"
+#include "ui/gfx/overlay_priority_hint.h"
 #include "ui/gl/ca_renderer_layer_params.h"
 #include "ui/gl/dc_renderer_layer_params.h"
 #include "ui/gl/gl_utils.h"
@@ -290,7 +293,7 @@ class ScopedUnpackStateButAlignmentReset {
   }
 
  private:
-  gl::GLApi* api_;
+  raw_ptr<gl::GLApi> api_;
   GLint skip_pixels_ = 0;
   GLint skip_rows_ = 0;
   GLint skip_images_ = 0;
@@ -316,7 +319,7 @@ class ScopedPackStateRowLengthReset {
   }
 
  private:
-  gl::GLApi* api_;
+  raw_ptr<gl::GLApi> api_;
   GLint row_length_ = 0;
 };
 
@@ -538,6 +541,10 @@ error::Error GLES2DecoderPassthroughImpl::DoBindTexture(GLenum target,
   RemovePendingBindingTexture(target, active_texture_unit_);
 
   if (service_id != 0) {
+    // Label the texture with additional context info
+    const char* label = ContextTypeToLabel(feature_info_->context_type());
+    api()->glObjectLabelFn(GL_TEXTURE, service_id, strlen(label), label);
+
     // Create a new texture object to track this texture
     if (!resources_->texture_object_map.GetServiceID(texture,
                                                      &texture_passthrough) ||
@@ -2547,6 +2554,12 @@ error::Error GLES2DecoderPassthroughImpl::DoReadPixelsAsync(
   }
 
   pending_read_pixels.fence = gl::GLFence::Create();
+  if (!pending_read_pixels.fence) {
+    InsertError(GL_INVALID_OPERATION, "gl::GLFence::Create() failed.");
+    MarkContextLost(error::kUnknown);
+    group_->LoseContexts(error::kUnknown);
+    return error::kLostContext;
+  }
 
   if (CheckErrorCallbackState()) {
     return error::kNoError;
@@ -2644,6 +2657,10 @@ error::Error GLES2DecoderPassthroughImpl::DoShaderBinary(GLsizei n,
                                                          GLenum binaryformat,
                                                          const void* binary,
                                                          GLsizei length) {
+#if 1  // No binary shader support.
+  InsertError(GL_INVALID_ENUM, "Invalid enum.");
+  return error::kNoError;
+#else
   std::vector<GLuint> service_shaders(n, 0);
   for (GLsizei i = 0; i < n; i++) {
     service_shaders[i] = GetShaderServiceID(shaders[i], resources_);
@@ -2651,6 +2668,7 @@ error::Error GLES2DecoderPassthroughImpl::DoShaderBinary(GLsizei n,
   api()->glShaderBinaryFn(n, service_shaders.data(), binaryformat, binary,
                           length);
   return error::kNoError;
+#endif
 }
 
 error::Error GLES2DecoderPassthroughImpl::DoShaderSource(GLuint shader,
@@ -3717,10 +3735,22 @@ error::Error GLES2DecoderPassthroughImpl::DoEndQueryEXT(GLenum target,
   switch (target) {
     case GL_COMMANDS_COMPLETED_CHROMIUM:
       pending_query.commands_completed_fence = gl::GLFence::Create();
+      if (!pending_query.commands_completed_fence) {
+        InsertError(GL_INVALID_OPERATION, "gl::GLFence::Create() failed.");
+        MarkContextLost(error::kUnknown);
+        group_->LoseContexts(error::kUnknown);
+        return error::kLostContext;
+      }
       break;
 
     case GL_READBACK_SHADOW_COPIES_UPDATED_CHROMIUM:
       pending_query.buffer_shadow_update_fence = gl::GLFence::Create();
+      if (!pending_query.buffer_shadow_update_fence) {
+        InsertError(GL_INVALID_OPERATION, "gl::GLFence::Create() failed.");
+        MarkContextLost(error::kUnknown);
+        group_->LoseContexts(error::kUnknown);
+        return error::kLostContext;
+      }
       pending_query.buffer_shadow_updates = std::move(buffer_shadow_updates_);
       buffer_shadow_updates_.clear();
       break;
@@ -4855,10 +4885,15 @@ error::Error GLES2DecoderPassthroughImpl::DoScheduleOverlayPlaneCHROMIUM(
   }
 
   if (!surface_->ScheduleOverlayPlane(
-          plane_z_order, transform, image,
-          gfx::Rect(bounds_x, bounds_y, bounds_width, bounds_height),
-          gfx::RectF(uv_x, uv_y, uv_width, uv_height), enable_blend,
-          /*damage_rect=*/gfx::Rect(), std::move(gpu_fence))) {
+          image, std::move(gpu_fence),
+          gfx::OverlayPlaneData(
+              plane_z_order, transform,
+              gfx::RectF(bounds_x, bounds_y, bounds_width, bounds_height),
+              gfx::RectF(uv_x, uv_y, uv_width, uv_height), enable_blend,
+              /*damage_rect=*/gfx::Rect(), /*opacity=*/1.0f,
+              gfx::OverlayPriorityHint::kNone,
+              /*rounded_corners*/ gfx::RRectF(), image->color_space(),
+              /*hdr_metadata=*/absl::nullopt))) {
     InsertError(GL_INVALID_OPERATION, "failed to schedule overlay");
     return error::kNoError;
   }
@@ -5255,17 +5290,6 @@ error::Error GLES2DecoderPassthroughImpl::DoDestroyGpuFenceCHROMIUM(
   return error::kNoError;
 }
 
-error::Error GLES2DecoderPassthroughImpl::DoUnpremultiplyAndDitherCopyCHROMIUM(
-    GLuint src_texture,
-    GLuint dst_texture,
-    GLint x,
-    GLint y,
-    GLsizei width,
-    GLsizei height) {
-  NOTIMPLEMENTED();
-  return error::kNoError;
-}
-
 error::Error
 GLES2DecoderPassthroughImpl::DoSetReadbackBufferShadowAllocationINTERNAL(
     GLuint buffer_id,
@@ -5384,7 +5408,7 @@ GLES2DecoderPassthroughImpl::DoCreateAndTexStorage2DSharedImageINTERNAL(
   resources_->texture_object_map.RemoveClientID(texture_client_id);
   resources_->texture_object_map.SetIDMapping(texture_client_id, texture);
   resources_->texture_shared_image_map[texture_client_id] =
-      PassthroughResources::SharedImageData(std::move(shared_image));
+      PassthroughResources::SharedImageData(std::move(shared_image), api());
 
   return error::kNoError;
 }

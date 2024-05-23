@@ -12,10 +12,12 @@
 #include "base/callback_helpers.h"
 #include "base/containers/flat_set.h"
 #include "base/containers/span.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
+#include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/types/strong_alias.h"
 #include "build/build_config.h"
@@ -89,7 +91,8 @@ struct CredentialView {
   CredentialView(std::string signon_realm,
                  GURL url,
                  std::u16string username,
-                 std::u16string password);
+                 std::u16string password,
+                 base::Time last_used_time);
   // Enable explicit construction from PasswordForm for convenience.
   explicit CredentialView(const PasswordForm& form);
   CredentialView(const CredentialView& credential);
@@ -102,6 +105,7 @@ struct CredentialView {
   GURL url;
   std::u16string username;
   std::u16string password;
+  base::Time last_used_time;
 };
 
 // All information needed by UI to represent InsecureCredential. It's a result
@@ -112,7 +116,6 @@ struct CredentialView {
 struct CredentialWithPassword : CredentialView {
   explicit CredentialWithPassword(const CredentialView& credential);
   explicit CredentialWithPassword(const InsecureCredential& credential);
-
   CredentialWithPassword(const CredentialWithPassword& other);
   CredentialWithPassword(CredentialWithPassword&& other);
   ~CredentialWithPassword();
@@ -122,6 +125,7 @@ struct CredentialWithPassword : CredentialView {
   base::Time create_time;
   InsecureCredentialTypeFlags insecure_type =
       InsecureCredentialTypeFlags::kSecure;
+  IsMuted is_muted{false};
 };
 
 // Comparator that can compare CredentialView or CredentialsWithPasswords.
@@ -136,10 +140,10 @@ struct PasswordCredentialLess {
 struct CredentialMetadata;
 
 // This class provides clients with saved insecure credentials and possibility
-// to save new LeakedCredentials, edit/delete insecure credentials and match
-// insecure credentials with corresponding autofill::PasswordForms. It supports
-// an observer interface, and clients can register themselves to get notified
-// about changes to the list.
+// to save new LeakedCredentials, edit/delete/[un]mute insecure credentials and
+// match insecure credentials with corresponding autofill::PasswordForms. It
+// supports an observer interface, and clients can register themselves to get
+// notified about changes to the list.
 class InsecureCredentialsManager : public SavedPasswordsPresenter::Observer {
  public:
   using CredentialsView = base::span<const CredentialWithPassword>;
@@ -162,7 +166,7 @@ class InsecureCredentialsManager : public SavedPasswordsPresenter::Observer {
 
   void Init();
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   // Computes weak credentials in a separate thread and then passes the result
   // to OnWeakCheckDone.
   void StartWeakCheck(base::OnceClosure on_check_done = base::DoNothing());
@@ -180,6 +184,14 @@ class InsecureCredentialsManager : public SavedPasswordsPresenter::Observer {
   // Attempts to remove |credential| from the password store. Returns whether
   // the remove succeeded.
   bool RemoveCredential(const CredentialView& credential);
+
+  // Attempts to mute |credential| from the password store.
+  // Returns whether the mute succeeded.
+  bool MuteCredential(const CredentialView& credential);
+
+  // Attempts to unmute |credential| from the password store.
+  // Returns whether the unmute succeeded.
+  bool UnmuteCredential(const CredentialView& credential);
 
   // Returns a vector of currently insecure credentials.
   std::vector<CredentialWithPassword> GetInsecureCredentials() const;
@@ -228,7 +240,7 @@ class InsecureCredentialsManager : public SavedPasswordsPresenter::Observer {
 
   // A weak handle to the presenter used to join the list of insecure
   // credentials with saved passwords. Needs to outlive this instance.
-  SavedPasswordsPresenter* presenter_ = nullptr;
+  raw_ptr<SavedPasswordsPresenter> presenter_ = nullptr;
 
   // The password stores containing the insecure credentials.
   scoped_refptr<PasswordStoreInterface> profile_store_;

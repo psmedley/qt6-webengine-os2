@@ -75,6 +75,9 @@ class WaitForSwapDisplayClient : public DisplayClient {
  public:
   WaitForSwapDisplayClient() = default;
 
+  WaitForSwapDisplayClient(const WaitForSwapDisplayClient&) = delete;
+  WaitForSwapDisplayClient& operator=(const WaitForSwapDisplayClient&) = delete;
+
   void DisplayOutputSurfaceLost() override {}
   void DisplayWillDrawAndSwap(
       bool will_draw_and_swap,
@@ -103,8 +106,6 @@ class WaitForSwapDisplayClient : public DisplayClient {
 
  private:
   std::unique_ptr<base::RunLoop> loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(WaitForSwapDisplayClient);
 };
 
 std::unique_ptr<CompositorRenderPass> CreateTestRootRenderPass() {
@@ -232,12 +233,15 @@ template <typename RendererType>
 class RendererPerfTest : public VizPerfTest {
  public:
   RendererPerfTest()
-      : manager_(&shared_bitmap_manager_),
+      : manager_(FrameSinkManagerImpl::InitParams(&shared_bitmap_manager_)),
         support_(
             std::make_unique<CompositorFrameSinkSupport>(nullptr,
                                                          &manager_,
                                                          kArbitraryFrameSinkId,
                                                          true /* is_root */)) {}
+
+  RendererPerfTest(const RendererPerfTest&) = delete;
+  RendererPerfTest& operator=(const RendererPerfTest&) = delete;
 
   // Overloaded for concrete RendererType below.
   std::unique_ptr<OutputSurface> CreateOutputSurface(
@@ -253,7 +257,7 @@ class RendererPerfTest : public VizPerfTest {
     else
       printf("Using GLRenderer\n");
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     renderer_settings_.color_space = gfx::ColorSpace::CreateSRGB();
     renderer_settings_.initial_screen_size = kSurfaceSize;
 #endif
@@ -367,7 +371,8 @@ class RendererPerfTest : public VizPerfTest {
                                 .Build();
     support_->SubmitCompositorFrame(id_allocator_.GetCurrentLocalSurfaceId(),
                                     std::move(frame));
-    ASSERT_TRUE(display_->DrawAndSwap(base::TimeTicks::Now()));
+    ASSERT_TRUE(display_->DrawAndSwap(
+        {base::TimeTicks::Now(), base::TimeTicks::Now()}));
   }
 
   ResourceId MapResourceId(base::flat_map<ResourceId, ResourceId>* resource_map,
@@ -666,8 +671,6 @@ class RendererPerfTest : public VizPerfTest {
   std::unique_ptr<ClientResourceProvider> child_resource_provider_;
   std::vector<TransferableResource> resource_list_;
   std::unique_ptr<gl::DisableNullDrawGLBindings> enable_pixel_output_;
-
-  DISALLOW_COPY_AND_ASSIGN(RendererPerfTest);
 };
 
 template <>

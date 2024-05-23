@@ -6,6 +6,7 @@ import("//build/config/jumbo.gni")
 import("//build/config/gclient_args.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/v8_target_cpu.gni")
+import("release_branch_toggle.gni")
 import("split_static_library.gni")
 
 declare_args() {
@@ -31,13 +32,6 @@ declare_args() {
 
   # Support for backtrace_symbols on linux.
   v8_enable_backtrace = ""
-
-  # This flag is deprecated and is now available through the inspector interface
-  # as an argument to profiler's method `takeHeapSnapshot`.
-  v8_enable_raw_heap_snapshots = false
-
-  # Enable several snapshots side-by-side (e.g. default and for trusted code).
-  v8_use_multi_snapshots = false
 
   # Use external files for startup data blobs:
   # the JS builtins sources and the start snapshot.
@@ -77,7 +71,7 @@ declare_args() {
   v8_enable_webassembly = ""
 
   # Enable runtime call stats.
-  v8_enable_runtime_call_stats = true
+  v8_enable_runtime_call_stats = !is_on_release_branch
 
   # Add fuzzilli fuzzer support.
   v8_fuzzilli = false
@@ -89,6 +83,12 @@ declare_args() {
 
   cppgc_is_standalone = false
 
+  # Enable object names in cppgc for debug purposes.
+  cppgc_enable_object_names = false
+
+  # Enable young generation in cppgc.
+  cppgc_enable_young_generation = false
+
   # Enable advanced BigInt algorithms, costing about 10-30 KB binary size
   # depending on platform. Disabled on Android to save binary size.
   v8_advanced_bigint_algorithms = !is_android
@@ -98,13 +98,6 @@ if (v8_use_external_startup_data == "") {
   # If not specified as a gn arg, use external startup data by default if
   # we're not on ios.
   v8_use_external_startup_data = !is_ios
-}
-
-if (v8_use_multi_snapshots) {
-  # Silently disable multi snapshots if they're incompatible with the current
-  # build configuration. This allows us to set v8_use_multi_snapshots=true on
-  # all bots, and e.g. no-snapshot bots will automatically do the right thing.
-  v8_use_multi_snapshots = v8_use_external_startup_data && !build_with_chromium
 }
 
 if (v8_enable_backtrace == "") {

@@ -44,12 +44,18 @@ class MEDIA_GPU_EXPORT MailboxVideoFrameConverter : public VideoFrameConverter {
   // Creates a MailboxVideoFrameConverter instance. The callers will send
   // wrapped VideoFrames to ConvertFrame(), |unwrap_frame_cb| is the callback
   // used to get the original, unwrapped, VideoFrame. |gpu_task_runner| is the
-  // task runner of the GPU main thread. Returns nullptr if any argument is
-  // invalid.
+  // task runner of the GPU main thread. |enable_unsafe_webgpu| hints whether
+  // to create SharedImage of SHARED_IMAGE_USAGE_WEBGPU for VideoFrame. Returns
+  // nullptr if any argument is invalid.
   static std::unique_ptr<VideoFrameConverter> Create(
       UnwrapFrameCB unwrap_frame_cb,
       scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
-      GetCommandBufferStubCB get_stub_cb);
+      GetCommandBufferStubCB get_stub_cb,
+      bool enable_unsafe_webgpu);
+
+  MailboxVideoFrameConverter(const MailboxVideoFrameConverter&) = delete;
+  MailboxVideoFrameConverter& operator=(const MailboxVideoFrameConverter&) =
+      delete;
 
   // Enqueues |frame| to be converted to a gpu::Mailbox backed VideoFrame.
   // |frame| must wrap a DMA-buf backed VideoFrame that is retrieved via
@@ -72,7 +78,8 @@ class MEDIA_GPU_EXPORT MailboxVideoFrameConverter : public VideoFrameConverter {
   MailboxVideoFrameConverter(
       UnwrapFrameCB unwrap_frame_cb,
       scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
-      GetGpuChannelCB get_gpu_channel_cb);
+      GetGpuChannelCB get_gpu_channel_cb,
+      bool enable_unsafe_webgpu);
   // Destructor runs on the GPU main thread.
   ~MailboxVideoFrameConverter() override;
   void Destroy() override;
@@ -160,6 +167,8 @@ class MEDIA_GPU_EXPORT MailboxVideoFrameConverter : public VideoFrameConverter {
   base::queue<std::pair<scoped_refptr<VideoFrame>, UniqueID>>
       input_frame_queue_;
 
+  const bool enable_unsafe_webgpu_;
+
   // The weak pointer of this, bound to |parent_task_runner_|.
   // Used at the VideoFrame destruction callback.
   base::WeakPtr<MailboxVideoFrameConverter> parent_weak_this_;
@@ -169,8 +178,6 @@ class MEDIA_GPU_EXPORT MailboxVideoFrameConverter : public VideoFrameConverter {
   base::WeakPtrFactory<MailboxVideoFrameConverter> parent_weak_this_factory_{
       this};
   base::WeakPtrFactory<MailboxVideoFrameConverter> gpu_weak_this_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MailboxVideoFrameConverter);
 };
 
 }  // namespace media

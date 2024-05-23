@@ -5,8 +5,9 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_DOWNLOAD_SHELF_DOWNLOAD_MOJOM_TRAITS_H_
 #define CHROME_BROWSER_UI_WEBUI_DOWNLOAD_SHELF_DOWNLOAD_MOJOM_TRAITS_H_
 
+#include "base/notreached.h"
 #include "chrome/browser/ui/download/download_item_mode.h"
-#include "chrome/browser/ui/webui/download_shelf/download_shelf.mojom.h"
+#include "chrome/browser/ui/webui/download_shelf/download_shelf.mojom-shared.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_item.h"
 
@@ -163,6 +164,8 @@ struct EnumTraits<download_shelf::mojom::DownloadMode,
         return MojoDownloadMode::kMixedContentWarn;
       case DownloadMode::kDeepScanning:
         return MojoDownloadMode::kDeepScanning;
+      case DownloadMode::kIncognitoWarning:
+        return MojoDownloadMode::kIncognitoWarning;
     }
     NOTREACHED();
     return MojoDownloadMode::kNormal;
@@ -187,6 +190,9 @@ struct EnumTraits<download_shelf::mojom::DownloadMode,
         return true;
       case MojoDownloadMode::kDeepScanning:
         *out = DownloadMode::kDeepScanning;
+        return true;
+      case MojoDownloadMode::kIncognitoWarning:
+        *out = DownloadMode::kIncognitoWarning;
         return true;
     }
     NOTREACHED();

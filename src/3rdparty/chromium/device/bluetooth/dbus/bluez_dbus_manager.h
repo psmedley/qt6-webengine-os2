@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "device/bluetooth/bluetooth_export.h"
@@ -20,6 +19,10 @@ class Bus;
 class Response;
 class ErrorResponse;
 }  // namespace dbus
+
+namespace floss {
+class FlossManagerClient;
+}
 
 namespace bluez {
 
@@ -100,6 +103,9 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManager {
   // Gets the global instance. Initialize() must be called first.
   static BluezDBusManager* Get();
 
+  BluezDBusManager(const BluezDBusManager&) = delete;
+  BluezDBusManager& operator=(const BluezDBusManager&) = delete;
+
   // Returns various D-Bus bus instances, owned by BluezDBusManager.
   dbus::Bus* GetSystemBus();
 
@@ -139,6 +145,7 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManager {
 
   // See "Alternate D-Bus Client" note above.
   BluetoothAdapterClient* GetAlternateBluetoothAdapterClient();
+  BluetoothAdminPolicyClient* GetAlternateBluetoothAdminPolicyClient();
   BluetoothDeviceClient* GetAlternateBluetoothDeviceClient();
 
  private:
@@ -161,6 +168,9 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManager {
   void OnObjectManagerSupported(dbus::Response* response);
   void OnObjectManagerNotSupported(dbus::ErrorResponse* response);
 
+  void OnFlossObjectManagerSupported(dbus::Response* response);
+  void OnFlossObjectManagerNotSupported(dbus::ErrorResponse* response);
+
   // Initializes all currently stored DBusClients with the system bus and
   // performs additional setup.
   void InitializeClients();
@@ -172,6 +182,11 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManager {
 
   std::unique_ptr<BluetoothDBusClientBundle> client_bundle_;
 
+  // Needed to enable/disable Floss at D-Bus initialization. We treat this
+  // D-Bus client specially and not include it in client bundle since we only
+  // need to Init() it and nothing else.
+  std::unique_ptr<floss::FlossManagerClient> floss_manager_client_;
+
   base::OnceClosure object_manager_support_known_callback_;
 
   bool object_manager_support_known_;
@@ -180,12 +195,13 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManager {
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<BluezDBusManager> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BluezDBusManager);
 };
 
 class DEVICE_BLUETOOTH_EXPORT BluezDBusManagerSetter {
  public:
+  BluezDBusManagerSetter(const BluezDBusManagerSetter&) = delete;
+  BluezDBusManagerSetter& operator=(const BluezDBusManagerSetter&) = delete;
+
   ~BluezDBusManagerSetter();
 
   void SetBluetoothAdapterClient(
@@ -220,6 +236,8 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManagerSetter {
 
   void SetAlternateBluetoothAdapterClient(
       std::unique_ptr<BluetoothAdapterClient> client);
+  void SetAlternateBluetoothAdminPolicyClient(
+      std::unique_ptr<BluetoothAdminPolicyClient> client);
   void SetAlternateBluetoothDeviceClient(
       std::unique_ptr<BluetoothDeviceClient> client);
 
@@ -227,8 +245,6 @@ class DEVICE_BLUETOOTH_EXPORT BluezDBusManagerSetter {
   friend class BluezDBusManager;
 
   BluezDBusManagerSetter();
-
-  DISALLOW_COPY_AND_ASSIGN(BluezDBusManagerSetter);
 };
 
 }  // namespace bluez

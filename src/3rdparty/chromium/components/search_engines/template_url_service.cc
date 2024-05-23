@@ -15,12 +15,15 @@
 #include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
 #include "base/format_macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "base/rand_util.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/search_engines_pref_names.h"
@@ -39,7 +42,7 @@
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "url/gurl.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/search_engines/android/template_url_service_android.h"
 #endif
 
@@ -246,6 +249,9 @@ class TemplateURLService::Scoper {
     ++service_->outstanding_scoper_handles_;
   }
 
+  Scoper(const Scoper&) = delete;
+  Scoper& operator=(const Scoper&) = delete;
+
   // When a Scoper is destroyed, the handle count is updated. If the handle
   // count is at zero, notify the observers that the model has changed if
   // service is loaded and model was mutated.
@@ -267,9 +273,7 @@ class TemplateURLService::Scoper {
 
  private:
   std::unique_ptr<KeywordWebDataService::BatchModeScoper> batch_mode_scoper_;
-  TemplateURLService* service_;
-
-  DISALLOW_COPY_AND_ASSIGN(Scoper);
+  raw_ptr<TemplateURLService> service_;
 };
 
 // TemplateURLService ---------------------------------------------------------
@@ -317,7 +321,7 @@ void TemplateURLService::LogSearchTemplateURLEvent(
 // static
 void TemplateURLService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-#if defined(OS_IOS) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
   uint32_t flags = PrefRegistry::NO_REGISTRATION_FLAGS;
 #else
   uint32_t flags = user_prefs::PrefRegistrySyncable::SYNCABLE_PREF;
@@ -330,7 +334,7 @@ void TemplateURLService::RegisterProfilePrefs(
       prefs::kDefaultSearchProviderContextMenuAccessAllowed, true);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 base::android::ScopedJavaLocalRef<jobject> TemplateURLService::GetJavaObject() {
   if (!template_url_service_android_) {
     template_url_service_android_ =
@@ -651,6 +655,17 @@ void TemplateURLService::ResetTemplateURL(TemplateURL* url,
   Update(url, TemplateURL(data));
 }
 
+void TemplateURLService::SetIsActiveTemplateURL(TemplateURL* url,
+                                                bool is_active) {
+  DCHECK(url);
+
+  TemplateURLData data(url->data());
+  data.is_active = is_active ? TemplateURLData::ActiveStatus::kTrue
+                             : TemplateURLData::ActiveStatus::kFalse;
+
+  Update(url, TemplateURL(data));
+}
+
 TemplateURL* TemplateURLService::CreatePlayAPISearchEngine(
     const std::u16string& title,
     const std::u16string& keyword,
@@ -727,6 +742,9 @@ void TemplateURLService::SetUserSelectedDefaultSearchProvider(
   // engines can be made default only by the extension itself because they
   // aren't persisted.
   DCHECK(!url || !IsCreatedByExtension(url));
+  if (url) {
+    url->data_.is_active = TemplateURLData::ActiveStatus::kTrue;
+  }
   if (load_failed_) {
     // Skip the DefaultSearchManager, which will persist to user preferences.
     if ((default_search_provider_source_ == DefaultSearchManager::FROM_USER) ||
@@ -738,15 +756,16 @@ void TemplateURLService::SetUserSelectedDefaultSearchProvider(
   } else {
     // We rely on the DefaultSearchManager to call ApplyDefaultSearchChange if,
     // in fact, the effective DSE changes.
-    if (url)
+    if (url) {
       default_search_manager_.SetUserSelectedDefaultSearchEngine(url->data());
-    else
+    } else {
       default_search_manager_.ClearUserSelectedDefaultSearchEngine();
+    }
   }
 }
 
 const TemplateURL* TemplateURLService::GetDefaultSearchProvider() const {
-  return loaded_ ? default_search_provider_
+  return loaded_ ? default_search_provider_.get()
                  : initial_default_search_provider_.get();
 }
 
@@ -772,6 +791,19 @@ bool TemplateURLService::IsSearchResultsPageFromDefaultSearchProvider(
   const TemplateURL* default_provider = GetDefaultSearchProvider();
   return default_provider &&
       default_provider->IsSearchURL(url, search_terms_data());
+}
+
+bool TemplateURLService::IsSideSearchSupportedForDefaultSearchProvider() const {
+  const TemplateURL* default_provider = GetDefaultSearchProvider();
+  return default_provider && default_provider->IsSideSearchSupported();
+}
+
+GURL TemplateURLService::GenerateSideSearchURLForDefaultSearchProvider(
+    const GURL& search_url,
+    const std::string& version) const {
+  DCHECK(IsSideSearchSupportedForDefaultSearchProvider());
+  return GetDefaultSearchProvider()->GenerateSideSearchURL(search_url, version,
+                                                           search_terms_data());
 }
 
 bool TemplateURLService::IsExtensionControlledDefaultSearch() const {
@@ -1020,8 +1052,8 @@ absl::optional<syncer::ModelError> TemplateURLService::ProcessSyncChanges(
   // We've started syncing, so set our origin member to the base Sync value.
   // As we move through Sync Code, we may set this to increasingly specific
   // origins so we can tell what exactly caused a DSP change.
-  base::AutoReset<DefaultSearchChangeOrigin> change_origin(&dsp_change_origin_,
-      DSP_CHANGE_SYNC_UNINTENTIONAL);
+  base::AutoReset<DefaultSearchChangeOrigin> change_origin_unintentional(
+      &dsp_change_origin_, DSP_CHANGE_SYNC_UNINTENTIONAL);
 
   syncer::SyncChangeList new_changes;
   syncer::SyncError error;
@@ -1082,7 +1114,7 @@ absl::optional<syncer::ModelError> TemplateURLService::ProcessSyncChanges(
         LogSearchTemplateURLEvent(SYNC_UPDATE_CONVERTED_TO_ADD);
       }
 
-      base::AutoReset<DefaultSearchChangeOrigin> change_origin(
+      base::AutoReset<DefaultSearchChangeOrigin> change_origin_add(
           &dsp_change_origin_, DSP_CHANGE_SYNC_ADD);
       // Force the local ID to kInvalidTemplateURLID so we can add it.
       TemplateURLData data(turl->data());
@@ -1294,7 +1326,7 @@ std::string TemplateURLService::GetSessionToken() {
   }
 
   // Extend expiration time another 60 seconds.
-  token_expiration_time_ = current_time + base::TimeDelta::FromSeconds(60);
+  token_expiration_time_ = current_time + base::Seconds(60);
   return current_token_;
 }
 
@@ -1451,10 +1483,9 @@ TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
   if (reset_keyword || deduped) {
     if (reset_keyword)
       turl->ResetKeywordIfNecessary(search_terms_data, true);
-    syncer::SyncData sync_data = CreateSyncDataFromTemplateURL(*turl);
-    change_list->push_back(syncer::SyncChange(FROM_HERE,
-                                              syncer::SyncChange::ACTION_UPDATE,
-                                              sync_data));
+    syncer::SyncData updated_sync_data = CreateSyncDataFromTemplateURL(*turl);
+    change_list->push_back(syncer::SyncChange(
+        FROM_HERE, syncer::SyncChange::ACTION_UPDATE, updated_sync_data));
   } else if (turl->IsGoogleSearchURLWithReplaceableKeyword(search_terms_data)) {
     if (!existing_turl) {
       // We're adding a new TemplateURL that uses the Google base URL, so set
@@ -1522,6 +1553,8 @@ void TemplateURLService::Init(const Initializer* initializers,
       data.SetShortName(base::UTF8ToUTF16(initializers[i].content));
       data.SetKeyword(base::UTF8ToUTF16(initializers[i].keyword));
       data.SetURL(initializers[i].url);
+      // Set all to active by default for testing purposes.
+      data.is_active = TemplateURLData::ActiveStatus::kTrue;
       Add(std::make_unique<TemplateURL>(data));
 
       // Set the first provided identifier to be the default.
@@ -1977,6 +2010,7 @@ void TemplateURLService::UpdateProvidersCreatedByPolicy(
       new_data.GenerateSyncGUID();
     new_data.created_by_policy = true;
     new_data.safe_for_autoreplace = false;
+    new_data.is_active = TemplateURLData::ActiveStatus::kTrue;
     std::unique_ptr<TemplateURL> new_dse_ptr =
         std::make_unique<TemplateURL>(new_data);
     TemplateURL* new_dse = new_dse_ptr.get();
@@ -2016,7 +2050,14 @@ void TemplateURLService::MergeInSyncTemplateURL(
       keyword_to_turl_and_length_.equal_range(sync_turl->keyword());
   for (auto it = match_range.first; it != match_range.second; ++it) {
     TemplateURL* local_turl = it->second.first;
-    if (local_turl->type() == TemplateURL::NORMAL) {
+    // The conflict resolution code below sometimes resets the TemplateURL's
+    // GUID, which can trigger deleting any Policy-created engines. Avoid this
+    // use-after-free bug by excluding any Policy-created engines. Also exclude
+    // Play API created engines, as those also seem local-only and should not
+    // be merged into Synced engines. crbug.com/1414224.
+    if (local_turl->type() == TemplateURL::NORMAL &&
+        !local_turl->created_by_policy() &&
+        !local_turl->created_from_play_api()) {
       local_duplicates.push_back(local_turl);
     }
   }
@@ -2039,10 +2080,10 @@ void TemplateURLService::MergeInSyncTemplateURL(
     if (conflicting_turl == GetDefaultSearchProvider() ||
         conflicting_turl->IsBetterThanEngineWithConflictingKeyword(sync_turl)) {
       ResetTemplateURLGUID(conflicting_turl, sync_turl->sync_guid());
-      syncer::SyncData sync_data =
+      syncer::SyncData updated_sync_data =
           CreateSyncDataFromTemplateURL(*conflicting_turl);
       change_list->push_back(syncer::SyncChange(
-          FROM_HERE, syncer::SyncChange::ACTION_UPDATE, sync_data));
+          FROM_HERE, syncer::SyncChange::ACTION_UPDATE, updated_sync_data));
       // Note that in this case we do not add the Sync TemplateURL to the
       // local model, since we've effectively "merged" it in by updating the
       // local conflicting entry with its sync_guid.

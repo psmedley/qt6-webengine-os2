@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/memory/singleton.h"
 #include "base/no_destructor.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -23,7 +22,7 @@ namespace {
 
 // Don't start requesting updates to IP-based approximation geolocation until
 // this long after receiving the last one.
-constexpr base::TimeDelta kMinUpdatePeriod = base::TimeDelta::FromDays(1);
+constexpr base::TimeDelta kMinUpdatePeriod = base::Days(1);
 
 GeoLanguageProvider::Binder& GetBinderOverride() {
   static base::NoDestructor<GeoLanguageProvider::Binder> binder;
@@ -73,9 +72,10 @@ void GeoLanguageProvider::StartUp(PrefService* const prefs) {
 
   prefs_ = prefs;
 
-  const base::ListValue* const cached_languages_list =
+  const base::Value* const cached_languages_list =
       prefs_->GetList(kCachedGeoLanguagesPref);
-  for (const auto& language_value : cached_languages_list->GetList()) {
+  for (const auto& language_value :
+       cached_languages_list->GetListDeprecated()) {
     languages_.push_back(language_value.GetString());
   }
 
@@ -198,8 +198,8 @@ void GeoLanguageProvider::SetGeoLanguages(
   languages_ = languages;
 
   base::ListValue cache_list;
-  for (size_t i = 0; i < languages_.size(); ++i) {
-    cache_list.Set(i, std::make_unique<base::Value>(languages_[i]));
+  for (const std::string& language : languages_) {
+    cache_list.Append(language);
   }
   prefs_->Set(kCachedGeoLanguagesPref, cache_list);
 }

@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 #include "extensions/common/manifest_handlers/csp_info.h"
-#include "base/cxx17_backports.h"
+
 #include "base/strings/stringprintf.h"
+#include "base/test/scoped_feature_list.h"
 #include "components/version_info/channel.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_test.h"
@@ -28,7 +30,8 @@ const char kDefaultSandboxedPageCSP[] =
 const char kDefaultExtensionPagesCSP[] =
     "script-src 'self' blob: filesystem:; "
     "object-src 'self' blob: filesystem:;";
-const char kDefaultSecureCSP[] = "script-src 'self'; object-src 'self';";
+const char kDefaultSecureCSP[] =
+    "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';";
 
 }  // namespace
 
@@ -101,7 +104,7 @@ TEST_F(CSPInfoUnitTest, SandboxedPages) {
                GetInvalidManifestKeyError(keys::kSandboxedPagesCSP)),
       Testcase("sandboxed_pages_invalid_5.json",
                GetInvalidManifestKeyError(keys::kSandboxedPagesCSP))};
-  RunTestcases(testcases, base::size(testcases), EXPECT_TYPE_ERROR);
+  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_ERROR);
 }
 
 TEST_F(CSPInfoUnitTest, CSPStringKey) {
@@ -157,7 +160,29 @@ TEST_F(CSPInfoUnitTest, CSPDictionary_ExtensionPages) {
                    keys::kContentSecurityPolicy_ExtensionPagesPath,
                    "'unsafe-eval'", "worker-src")),
   };
-  RunTestcases(testcases, base::size(testcases), EXPECT_TYPE_ERROR);
+  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_ERROR);
+}
+
+TEST_F(CSPInfoUnitTest, AllowWasmInMV3) {
+  struct {
+    const char* file_name;
+    const char* csp;
+  } cases[] = {{"csp_dictionary_with_wasm.json",
+                "worker-src 'self' 'wasm-unsafe-eval'; default-src 'self'"},
+               {"csp_dictionary_with_unsafe_wasm.json",
+                "worker-src 'self' 'wasm-unsafe-eval'; default-src 'self'"},
+               {"csp_dictionary_empty_v3.json",
+                "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"},
+               {"csp_dictionary_valid_1.json", "default-src 'none'"},
+               {"csp_omitted_mv2.json", kDefaultExtensionPagesCSP}};
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(base::StringPrintf("Testing %s.", test_case.file_name));
+    scoped_refptr<Extension> extension =
+        LoadAndExpectSuccess(test_case.file_name);
+    ASSERT_TRUE(extension.get());
+    EXPECT_EQ(test_case.csp, CSPInfo::GetExtensionPagesCSP(extension.get()));
+  }
 }
 
 TEST_F(CSPInfoUnitTest, CSPDictionary_Sandbox) {
@@ -199,7 +224,7 @@ TEST_F(CSPInfoUnitTest, CSPDictionary_Sandbox) {
       {"unsandboxed_csp.json",
        GetInvalidManifestKeyError(
            keys::kContentSecurityPolicy_SandboxedPagesPath)}};
-  RunTestcases(testcases, base::size(testcases), EXPECT_TYPE_ERROR);
+  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_ERROR);
 }
 
 // Ensures that using a dictionary for the keys::kContentSecurityPolicy manifest

@@ -21,9 +21,8 @@
 namespace chromeos {
 namespace settings {
 
-AndroidAppsHandler::AndroidAppsHandler(
-    Profile* profile,
-    apps::AppServiceProxyChromeOs* app_service_proxy)
+AndroidAppsHandler::AndroidAppsHandler(Profile* profile,
+                                       apps::AppServiceProxy* app_service_proxy)
     : profile_(profile), app_service_proxy_(app_service_proxy) {}
 
 AndroidAppsHandler::~AndroidAppsHandler() {}
@@ -83,19 +82,19 @@ void AndroidAppsHandler::OnArcPlayStoreEnabledChanged(bool enabled) {
 std::unique_ptr<base::DictionaryValue>
 AndroidAppsHandler::BuildAndroidAppsInfo() {
   std::unique_ptr<base::DictionaryValue> info(new base::DictionaryValue);
-  info->SetBoolean("playStoreEnabled",
+  info->SetBoolKey("playStoreEnabled",
                    arc::IsArcPlayStoreEnabledForProfile(profile_));
   const ArcAppListPrefs* arc_apps_pref = ArcAppListPrefs::Get(profile_);
   // TODO(khmel): Inverstigate why in some browser tests
   // playStoreEnabled is true but arc_apps_pref is not set.
-  info->SetBoolean(
+  info->SetBoolKey(
       "settingsAppAvailable",
       arc_apps_pref && arc_apps_pref->IsRegistered(arc::kSettingsAppId));
   return info;
 }
 
 void AndroidAppsHandler::HandleRequestAndroidAppsInfo(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
   SendAndroidAppsInfo();
 }
@@ -105,10 +104,12 @@ void AndroidAppsHandler::SendAndroidAppsInfo() {
   FireWebUIListener("android-apps-info-update", *info);
 }
 
-void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue* args) {
-  CHECK_EQ(1U, args->GetSize());
+void AndroidAppsHandler::ShowAndroidAppsSettings(
+    const base::Value::List& args) {
+  CHECK_EQ(1U, args.size());
   bool activated_from_keyboard = false;
-  args->GetBoolean(0, &activated_from_keyboard);
+  if (args[0].is_bool())
+    activated_from_keyboard = args[0].GetBool();
   int flags = activated_from_keyboard ? ui::EF_NONE : ui::EF_LEFT_MOUSE_BUTTON;
 
   app_service_proxy_->Launch(

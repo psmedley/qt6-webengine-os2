@@ -13,8 +13,10 @@
 
 #include <string>
 
+#include "api/field_trials_view.h"
 #include "api/sequence_checker.h"
 #include "api/units/time_delta.h"
+#include "api/video_codecs/video_decoder.h"
 #include "modules/video_coding/encoded_frame.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/timestamp_map.h"
@@ -30,7 +32,9 @@ enum { kDecoderFrameMemoryLength = 10 };
 
 class VCMDecodedFrameCallback : public DecodedImageCallback {
  public:
-  VCMDecodedFrameCallback(VCMTiming* timing, Clock* clock);
+  VCMDecodedFrameCallback(VCMTiming* timing,
+                          Clock* clock,
+                          const FieldTrialsView& field_trials);
   ~VCMDecodedFrameCallback() override;
   void SetUserReceiveCallback(VCMReceiveCallback* receiveCallback);
   VCMReceiveCallback* UserReceiveCallback();
@@ -80,9 +84,9 @@ class VCMGenericDecoder {
   ~VCMGenericDecoder();
 
   /**
-   * Initialize the decoder with the information from the VideoCodec
+   * Initialize the decoder with the information from the `settings`
    */
-  int32_t InitDecode(const VideoCodec* settings, int32_t numberOfCores);
+  bool Configure(const VideoDecoder::Settings& settings);
 
   /**
    * Decode to a raw I420 frame,

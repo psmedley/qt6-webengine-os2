@@ -7,12 +7,12 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_parsing/autofill_scanner.h"
@@ -149,9 +149,23 @@ TEST_F(CreditCardFieldTest, ParseMiniumCreditCard) {
 }
 
 struct CreditCardFieldYearTestCase {
-  std::vector<SelectOption> options;
+  bool with_noise;
   ServerFieldType expected_type;
 };
+
+std::vector<SelectOption> MakeOptionVector(
+    const CreditCardFieldYearTestCase& test_case) {
+  std::vector<SelectOption> options;
+  if (test_case.expected_type == CREDIT_CARD_EXP_2_DIGIT_YEAR) {
+    options = Get2DigitYears();
+  } else {
+    options = Get4DigitYears();
+  }
+  if (test_case.with_noise) {
+    options = WithNoise(options);
+  }
+  return options;
+}
 
 class CreditCardFieldYearTest
     : public CreditCardFieldTestBase,
@@ -164,7 +178,7 @@ TEST_P(CreditCardFieldYearTest, ParseMinimumCreditCardWithExpiryDateOptions) {
   AddSelectOneFormFieldDataWithLength(
       "Random Label", "Random Label",
       GetParam().expected_type == CREDIT_CARD_EXP_2_DIGIT_YEAR ? 2 : 4,
-      GetParam().options, GetParam().expected_type);
+      MakeOptionVector(GetParam()), GetParam().expected_type);
 
   ClassifyAndVerify(ParseResult::PARSED);
 }
@@ -172,14 +186,11 @@ TEST_P(CreditCardFieldYearTest, ParseMinimumCreditCardWithExpiryDateOptions) {
 INSTANTIATE_TEST_SUITE_P(
     ,
     CreditCardFieldYearTest,
-    testing::Values(CreditCardFieldYearTestCase{Get2DigitYears(),
-                                                CREDIT_CARD_EXP_2_DIGIT_YEAR},
-                    CreditCardFieldYearTestCase{Get4DigitYears(),
-                                                CREDIT_CARD_EXP_4_DIGIT_YEAR},
-                    CreditCardFieldYearTestCase{WithNoise(Get2DigitYears()),
-                                                CREDIT_CARD_EXP_2_DIGIT_YEAR},
-                    CreditCardFieldYearTestCase{WithNoise(Get4DigitYears()),
-                                                CREDIT_CARD_EXP_4_DIGIT_YEAR}));
+    testing::Values(
+        CreditCardFieldYearTestCase{false, CREDIT_CARD_EXP_2_DIGIT_YEAR},
+        CreditCardFieldYearTestCase{false, CREDIT_CARD_EXP_4_DIGIT_YEAR},
+        CreditCardFieldYearTestCase{true, CREDIT_CARD_EXP_2_DIGIT_YEAR},
+        CreditCardFieldYearTestCase{true, CREDIT_CARD_EXP_4_DIGIT_YEAR}));
 
 TEST_F(CreditCardFieldTest, ParseFullCreditCard) {
   AddTextFormFieldData("name_on_card", "Name on Card", CREDIT_CARD_NAME_FULL);
@@ -504,53 +515,33 @@ TEST_F(CreditCardFieldTest, ParseNonConsecutiveCvc) {
 }
 
 TEST_F(CreditCardFieldTest, ParseCreditCardContextualNameNotCard) {
-  base::test::ScopedFeatureList enabled;
-  enabled.InitWithFeatures(
-      {features::kAutofillStrictContextualCardNameConditions}, {});
-
   AddTextFormFieldData("accNum", "Account ID", UNKNOWN_TYPE);
   AddTextFormFieldData("name", "Account Name", UNKNOWN_TYPE);
   AddTextFormFieldData("toAcctNum", "Move to Account ID", UNKNOWN_TYPE);
-
   ClassifyAndVerify(ParseResult::NOT_PARSED);
 }
 
 TEST_F(CreditCardFieldTest, ParseCreditCardContextualNameNotCardAcctMatch) {
-  base::test::ScopedFeatureList enabled;
-  enabled.InitWithFeatures(
-      {features::kAutofillStrictContextualCardNameConditions}, {});
-
   // TODO(crbug.com/1167977): This should be not parseable, but waiting before
   // changing kNameOnCardRe to use word boundaries.
   AddTextFormFieldData("acctNum", "Account ID", CREDIT_CARD_NUMBER);
   AddTextFormFieldData("acctName", "Account Name", CREDIT_CARD_NAME_FULL);
   AddTextFormFieldData("toAcctNum", "Move to Account ID", CREDIT_CARD_NUMBER);
-
   ClassifyAndVerify(ParseResult::PARSED);
 }
 
 TEST_F(CreditCardFieldTest, ParseCreditCardContextualNameWithExpiration) {
-  base::test::ScopedFeatureList enabled;
-  enabled.InitWithFeatures(
-      {features::kAutofillStrictContextualCardNameConditions}, {});
-
   AddTextFormFieldData("acctNum", "Account ID", CREDIT_CARD_NUMBER);
   AddTextFormFieldData("name", "Account Name", CREDIT_CARD_NAME_FULL);
   AddTextFormFieldData("ccmonth", "Exp Month", CREDIT_CARD_EXP_MONTH);
   AddTextFormFieldData("ccyear", "Exp Year", CREDIT_CARD_EXP_4_DIGIT_YEAR);
-
   ClassifyAndVerify(ParseResult::PARSED);
 }
 
 TEST_F(CreditCardFieldTest, ParseCreditCardContextualNameWithVerification) {
-  base::test::ScopedFeatureList enabled;
-  enabled.InitWithFeatures(
-      {features::kAutofillStrictContextualCardNameConditions}, {});
-
   AddTextFormFieldData("acctNum", "Account ID", CREDIT_CARD_NUMBER);
   AddTextFormFieldData("name", "Account Name", CREDIT_CARD_NAME_FULL);
   AddTextFormFieldData("cvv", "Verification", CREDIT_CARD_VERIFICATION_CODE);
-
   ClassifyAndVerify(ParseResult::PARSED);
 }
 

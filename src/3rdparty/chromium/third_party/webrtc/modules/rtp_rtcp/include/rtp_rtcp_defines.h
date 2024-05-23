@@ -103,6 +103,12 @@ enum RTCPPacketType : uint32_t {
   kRtcpXrTargetBitrate = 0x200000
 };
 
+enum class KeyFrameReqMethod : uint8_t {
+  kNone,     // Don't request keyframes.
+  kPliRtcp,  // Request keyframes through Picture Loss Indication.
+  kFirRtcp   // Request keyframes through Full Intra-frame Request.
+};
+
 enum RtxMode {
   kRtxOff = 0x0,
   kRtxRetransmitted = 0x1,     // Only send retransmissions over RTX.
@@ -228,8 +234,6 @@ struct RtpPacketSendInfo {
   RtpPacketSendInfo() = default;
 
   uint16_t transport_sequence_number = 0;
-  // TODO(bugs.webrtc.org/12713): Remove once downstream usage is gone.
-  uint32_t ssrc = 0;
   absl::optional<uint32_t> media_ssrc;
   uint16_t rtp_sequence_number = 0;  // Only valid if `media_ssrc` is set.
   uint32_t rtp_timestamp = 0;
@@ -478,14 +482,5 @@ class SendPacketObserver {
                             uint32_t ssrc) = 0;
 };
 
-// Interface for a class that can assign RTP sequence numbers for a packet
-// to be sent.
-class SequenceNumberAssigner {
- public:
-  SequenceNumberAssigner() = default;
-  virtual ~SequenceNumberAssigner() = default;
-
-  virtual void AssignSequenceNumber(RtpPacketToSend* packet) = 0;
-};
 }  // namespace webrtc
 #endif  // MODULES_RTP_RTCP_INCLUDE_RTP_RTCP_DEFINES_H_

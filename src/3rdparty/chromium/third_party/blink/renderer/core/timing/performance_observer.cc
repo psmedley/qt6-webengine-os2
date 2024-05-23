@@ -6,8 +6,10 @@
 
 #include <algorithm>
 
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-shared.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_performance_observer_callback.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_performance_observer_callback_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_performance_observer_init.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -21,7 +23,7 @@
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/timer.h"
@@ -213,6 +215,7 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
   if (filter_options_ & PerformanceEntry::kLongTask) {
     UseCounter::Count(GetExecutionContext(), WebFeature::kLongTaskObserver);
   }
+  requires_dropped_entries_ = true;
   if (is_registered_)
     performance_->UpdatePerformanceObserverFilterOptions();
   else
@@ -255,7 +258,7 @@ bool PerformanceObserver::HasPendingActivity() const {
   return is_registered_;
 }
 
-void PerformanceObserver::Deliver() {
+void PerformanceObserver::Deliver(absl::optional<int> dropped_entries_count) {
   if (!GetExecutionContext())
     return;
   DCHECK(!GetExecutionContext()->IsContextPaused());
@@ -267,7 +270,12 @@ void PerformanceObserver::Deliver() {
   performance_entries.swap(performance_entries_);
   PerformanceObserverEntryList* entry_list =
       MakeGarbageCollected<PerformanceObserverEntryList>(performance_entries);
-  callback_->InvokeAndReportException(this, entry_list, this);
+  auto* options = PerformanceObserverCallbackOptions::Create();
+  if (dropped_entries_count.has_value()) {
+    options->setDroppedEntriesCount(dropped_entries_count.value());
+  }
+  requires_dropped_entries_ = false;
+  callback_->InvokeAndReportException(this, entry_list, this, options);
 }
 
 void PerformanceObserver::ContextLifecycleStateChanged(

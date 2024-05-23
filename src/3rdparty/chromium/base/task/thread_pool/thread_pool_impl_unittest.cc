@@ -19,6 +19,7 @@
 #include "base/cfi_buildflags.h"
 #include "base/containers/span.h"
 #include "base/debug/stack_trace.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/system/sys_info.h"
@@ -28,6 +29,7 @@
 #include "base/task/thread_pool/test_task_factory.h"
 #include "base/task/thread_pool/test_utils.h"
 #include "base/task/thread_pool/worker_thread_observer.h"
+#include "base/task/updateable_sequenced_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/gtest_util.h"
 #include "base/test/scoped_feature_list.h"
@@ -39,22 +41,21 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
-#include "base/updateable_sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 #include <unistd.h>
 
 #include "base/debug/leak_annotations.h"
 #include "base/files/file_descriptor_watcher_posix.h"
 #include "base/files/file_util.h"
 #include "base/posix/eintr_wrapper.h"
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/com_init_util.h"
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace base {
 namespace internal {
@@ -76,15 +77,6 @@ struct GroupTypes {
   test::GroupType foreground_type;
   test::GroupType background_type;
 };
-
-#if DCHECK_IS_ON()
-// Returns true if I/O calls are allowed on the current thread.
-bool GetIOAllowed() {
-  const bool previous_value = ThreadRestrictions::SetIOAllowed(true);
-  ThreadRestrictions::SetIOAllowed(previous_value);
-  return previous_value;
-}
-#endif
 
 // Returns true if a task with |traits| could run at background thread priority
 // on this platform. Even if this returns true, it is possible that the task
@@ -129,11 +121,10 @@ void VerifyTaskEnvironment(const TaskTraits& traits, GroupTypes group_types) {
                                               : ThreadPriority::NORMAL,
             PlatformThread::GetCurrentThreadPriority());
 
-#if DCHECK_IS_ON()
-  // The #if above is required because GetIOAllowed() always returns true when
-  // !DCHECK_IS_ON(), even when |traits| don't allow file I/O.
-  EXPECT_EQ(traits.may_block(), GetIOAllowed());
-#endif
+  if (traits.may_block())
+    internal::AssertBlockingAllowed();
+  else
+    internal::AssertBlockingDisallowedForTesting();
 
 #if HAS_NATIVE_THREAD_POOL()
   // Native thread groups do not provide the ability to name threads.
@@ -308,7 +299,7 @@ class ThreadPoolImplTestBase : public testing::Test {
 
   void StartThreadPool(
       int max_num_foreground_threads = kMaxNumForegroundThreads,
-      TimeDelta reclaim_time = TimeDelta::FromSeconds(30)) {
+      TimeDelta reclaim_time = Seconds(30)) {
     SetupFeatures();
 
     ThreadPoolInstance::InitParams init_params(max_num_foreground_threads);
@@ -348,7 +339,7 @@ class ThreadPoolImplTestBase : public testing::Test {
   }
 
   base::test::ScopedFeatureList feature_list_;
-  WorkerThreadObserver* worker_thread_observer_ = nullptr;
+  raw_ptr<WorkerThreadObserver> worker_thread_observer_ = nullptr;
   bool did_tear_down_ = false;
 };
 
@@ -412,6 +403,50 @@ TEST_P(ThreadPoolImplTest_CoverAllSchedulingOptions, PostDelayedTaskWithDelay) {
                GetGroupTypes(), TimeTicks::Now() + TestTimeouts::tiny_timeout(),
                Unretained(&task_ran)),
       TestTimeouts::tiny_timeout());
+  task_ran.Wait();
+}
+
+namespace {
+
+scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunnerAndExecutionMode(
+    ThreadPoolImpl* thread_pool,
+    const TaskTraits& traits,
+    TaskSourceExecutionMode execution_mode,
+    SingleThreadTaskRunnerThreadMode default_single_thread_task_runner_mode =
+        SingleThreadTaskRunnerThreadMode::SHARED) {
+  switch (execution_mode) {
+    case TaskSourceExecutionMode::kSequenced:
+      return thread_pool->CreateSequencedTaskRunner(traits);
+    case TaskSourceExecutionMode::kSingleThread: {
+      return thread_pool->CreateSingleThreadTaskRunner(
+          traits, default_single_thread_task_runner_mode);
+    }
+    case TaskSourceExecutionMode::kParallel:
+    case TaskSourceExecutionMode::kJob:
+      ADD_FAILURE() << "Tests below don't cover these modes";
+      return nullptr;
+  }
+  ADD_FAILURE() << "Unknown ExecutionMode";
+  return nullptr;
+}
+
+}  // namespace
+
+TEST_P(ThreadPoolImplTest_CoverAllSchedulingOptions,
+       PostDelayedTaskAtViaTaskRunner) {
+  StartThreadPool();
+  TestWaitableEvent task_ran;
+  // Only runs for kSequenced and kSingleThread.
+  auto handle =
+      CreateSequencedTaskRunnerAndExecutionMode(thread_pool_.get(), GetTraits(),
+                                                GetExecutionMode())
+          ->PostCancelableDelayedTaskAt(
+              subtle::PostDelayedTaskPassKeyForTesting(), FROM_HERE,
+              BindOnce(&VerifyTimeAndTaskEnvironmentAndSignalEvent, GetTraits(),
+                       GetGroupTypes(),
+                       TimeTicks::Now() + TestTimeouts::tiny_timeout(),
+                       Unretained(&task_ran)),
+              TimeTicks::Now() + TestTimeouts::tiny_timeout());
   task_ran.Wait();
 }
 
@@ -838,7 +873,7 @@ TEST_P(ThreadPoolImplTest, SingleThreadRunsTasksInCurrentSequence) {
   task_ran.Wait();
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 TEST_P(ThreadPoolImplTest, COMSTATaskRunnersRunWithCOMSTA) {
   StartThreadPool();
   auto com_sta_task_runner = thread_pool_->CreateCOMSTATaskRunner(
@@ -854,7 +889,7 @@ TEST_P(ThreadPoolImplTest, COMSTATaskRunnersRunWithCOMSTA) {
                      Unretained(&task_ran)));
   task_ran.Wait();
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 TEST_P(ThreadPoolImplTest, DelayedTasksNotRunAfterShutdown) {
   StartThreadPool();
@@ -877,7 +912,7 @@ TEST_P(ThreadPoolImplTest, DelayedTasksNotRunAfterShutdown) {
   PlatformThread::Sleep(TestTimeouts::tiny_timeout() * 2);
 }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 
 TEST_P(ThreadPoolImplTest, FileDescriptorWatcherNoOpsAfterShutdown) {
   StartThreadPool();
@@ -922,7 +957,7 @@ TEST_P(ThreadPoolImplTest, FileDescriptorWatcherNoOpsAfterShutdown) {
   EXPECT_EQ(0, IGNORE_EINTR(close(pipes[0])));
   EXPECT_EQ(0, IGNORE_EINTR(close(pipes[1])));
 }
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 
 // Verify that tasks posted on the same sequence access the same values on
 // SequenceLocalStorage, and tasks on different sequences see different values.
@@ -983,11 +1018,11 @@ void VerifyHasStringsOnStack(const std::string& pool_str,
 
 }  // namespace
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 // Many POSIX bots flakily crash on |debug::StackTrace().ToString()|,
 // https://crbug.com/840429.
 #define MAYBE_IdentifiableStacks DISABLED_IdentifiableStacks
-#elif defined(OS_WIN) && \
+#elif BUILDFLAG(IS_WIN) && \
     (defined(ADDRESS_SANITIZER) || BUILDFLAG(CFI_CAST_CHECK))
 // Hangs on WinASan and WinCFI (grabbing StackTrace() too slow?),
 // https://crbug.com/845010#c7.
@@ -1047,7 +1082,7 @@ TEST_P(ThreadPoolImplTest, MAYBE_IdentifiableStacks) {
                                        "RunBackgroundDedicatedWorker",
                                        shutdown_behavior.second));
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     thread_pool_
         ->CreateCOMSTATaskRunner(traits,
                                  SingleThreadTaskRunnerThreadMode::SHARED)
@@ -1073,7 +1108,7 @@ TEST_P(ThreadPoolImplTest, MAYBE_IdentifiableStacks) {
         ->PostTask(FROM_HERE, BindOnce(&VerifyHasStringsOnStack,
                                        "RunBackgroundDedicatedCOMWorker",
                                        shutdown_behavior.second));
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
   }
 
   thread_pool_->FlushForTesting();
@@ -1101,13 +1136,13 @@ TEST_P(ThreadPoolImplTest, WorkerThreadObserver) {
   const int kExpectedNumDedicatedSingleThreadedWorkers = 4;
 
   const int kExpectedNumCOMSharedSingleThreadedWorkers =
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       kExpectedNumSharedSingleThreadedWorkers;
 #else
       0;
 #endif
   const int kExpectedNumCOMDedicatedSingleThreadedWorkers =
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       kExpectedNumDedicatedSingleThreadedWorkers;
 #else
       0;
@@ -1149,7 +1184,7 @@ TEST_P(ThreadPoolImplTest, WorkerThreadObserver) {
       {TaskPriority::USER_BLOCKING, MayBlock()},
       SingleThreadTaskRunnerThreadMode::DEDICATED));
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   task_runners.push_back(thread_pool_->CreateCOMSTATaskRunner(
       {TaskPriority::BEST_EFFORT}, SingleThreadTaskRunnerThreadMode::SHARED));
   task_runners.push_back(thread_pool_->CreateCOMSTATaskRunner(
@@ -1256,7 +1291,7 @@ class MustBeDestroyed {
   ~MustBeDestroyed() { *was_destroyed_ = true; }
 
  private:
-  bool* const was_destroyed_;
+  const raw_ptr<bool> was_destroyed_;
 };
 
 }  // namespace
@@ -1315,7 +1350,7 @@ struct TaskRunnerAndEvents {
 
   // An event that should be signaled before the task following the priority
   // update runs.
-  TestWaitableEvent* expected_previous_event;
+  raw_ptr<TestWaitableEvent> expected_previous_event;
 };
 
 // Create a series of sample task runners that will post tasks at various
@@ -1410,7 +1445,7 @@ void TestUpdatePrioritySequenceNotScheduled(ThreadPoolImplTest* test,
                     ? nullptr
                     :
 #endif
-                    task_runner_and_events->expected_previous_event),
+                    task_runner_and_events->expected_previous_event.get()),
             Unretained(&task_runner_and_events->task_ran)));
   }
 

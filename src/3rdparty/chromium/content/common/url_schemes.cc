@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/url_constants.h"
 #include "third_party/blink/public/common/scheme_registry.h"
 #include "url/url_util.h"
@@ -28,7 +29,6 @@ const char* const kDefaultSavableSchemes[] = {
   url::kHttpsScheme,
   url::kFileScheme,
   url::kFileSystemScheme,
-  url::kFtpScheme,
   kChromeDevToolsScheme,
   kChromeUIScheme,
   url::kDataScheme
@@ -51,7 +51,7 @@ std::vector<std::string>& GetMutableServiceWorkerSchemes() {
 
 }  // namespace
 
-void RegisterContentSchemes() {
+void RegisterContentSchemes(bool should_lock_registry) {
   // On Android and in tests, schemes may have been registered already.
   if (g_registered_url_schemes)
     return;
@@ -101,10 +101,18 @@ void RegisterContentSchemes() {
   for (auto& scheme : schemes.empty_document_schemes)
     url::AddEmptyDocumentScheme(scheme.c_str());
 
-#if defined(OS_ANDROID) || defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_ANDROID) || defined(TOOLKIT_QT)
   if (schemes.allow_non_standard_schemes_in_origins)
     url::EnableNonStandardSchemesForAndroidWebView();
 #endif
+
+  // This should only be registered if the
+  // kEnableServiceWorkerForChromeUntrusted feature is enabled but checking
+  // it here causes a crash when --no-sandbox is enabled. See crbug.com/1313812
+  // There are other render side checks and browser side checks that ensure
+  // service workers don't work for chrome-untrusted:// when the flag is not
+  // enabled.
+  schemes.service_worker_schemes.push_back(kChromeUIUntrustedScheme);
 
   // NOTE(juvaldma)(Chromium 67.0.3396.47)
   //
@@ -138,7 +146,8 @@ void RegisterContentSchemes() {
   // threadsafe so must be called when GURL isn't used on any other thread. This
   // is really easy to mess up, so we say that all calls to Add*Scheme in Chrome
   // must be inside this function.
-  url::LockSchemeRegistries();
+  if (should_lock_registry)
+    url::LockSchemeRegistries();
 
   // Combine the default savable schemes with the additional ones given.
   GetMutableSavableSchemes().assign(std::begin(kDefaultSavableSchemes),

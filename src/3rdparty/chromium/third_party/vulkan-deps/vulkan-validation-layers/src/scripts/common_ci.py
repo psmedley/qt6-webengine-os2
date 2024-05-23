@@ -1,8 +1,8 @@
 #!/usr/bin/python3 -i
 #
-# Copyright (c) 2015-2017, 2019-2021 The Khronos Group Inc.
-# Copyright (c) 2015-2017, 2019-2021 Valve Corporation
-# Copyright (c) 2015-2017, 2019-2021 LunarG, Inc.
+# Copyright (c) 2015-2017, 2019-2022 The Khronos Group Inc.
+# Copyright (c) 2015-2017, 2019-2022 Valve Corporation
+# Copyright (c) 2015-2017, 2019-2022 LunarG, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -65,31 +65,22 @@ def IsWindows(): return 'windows' == platform.system().lower()
 # Verify consistency of generated source code
 def CheckVVLCodegenConsistency():
     print("Check Generated Source Code Consistency")
-    gen_check_cmd = 'python3 scripts/generate_source.py --verify %s/Vulkan-Headers/registry' % EXTERNAL_DIR
+    gen_check_cmd = 'python3 scripts/generate_source.py --verify %s/Vulkan-Headers/registry %s/SPIRV-Headers/include/spirv/unified1/' % (EXTERNAL_DIR, EXTERNAL_DIR)
     RunShellCmd(gen_check_cmd)
 
 #
 # Prepare the Validation Layers for testing
-def BuildVVL(args):
+def BuildVVL(args, build_tests=False):
 
     print("Log CMake version")
     cmake_ver_cmd = 'cmake --version'
     RunShellCmd(cmake_ver_cmd)
 
-    GTEST_DIR = RepoRelative("external/googletest")
-    if not os.path.exists(GTEST_DIR):
-        print("Clone Testing Framework Source Code")
-        clone_gtest_cmd = f'git clone https://github.com/google/googletest.git {GTEST_DIR}'
-        RunShellCmd(clone_gtest_cmd)
-
-        print("Get Specified Testing Source")
-        gtest_checkout_cmd = 'git checkout tags/release-1.8.1'
-        RunShellCmd(gtest_checkout_cmd, GTEST_DIR)
-
     utils.make_dirs(VVL_BUILD_DIR)
     print("Run CMake for Validation Layers")
     cmake_cmd = f'cmake -DUPDATE_DEPS=ON -DCMAKE_BUILD_TYPE={args.configuration.capitalize()} {args.cmake} ..'
     if IsWindows(): cmake_cmd = cmake_cmd + f' -A {args.arch}'
+    if build_tests: cmake_cmd = cmake_cmd + ' -DBUILD_TESTS=ON'
     RunShellCmd(cmake_cmd, VVL_BUILD_DIR)
 
     print("Build Validation Layers and Tests")
@@ -130,33 +121,22 @@ def BuildLoader(args):
 #
 # Prepare Mock ICD for use with Layer Validation Tests
 def BuildMockICD(args):
-    if not os.path.exists(RepoRelative("%s/Vulkan-Tools" % EXTERNAL_DIR_NAME)):
+    VT_DIR = RepoRelative("%s/Vulkan-Tools" % EXTERNAL_DIR_NAME)
+    if not os.path.exists(VT_DIR):
         print("Clone Vulkan-Tools Repository")
         clone_tools_cmd = 'git clone https://github.com/KhronosGroup/Vulkan-Tools.git'
         RunShellCmd(clone_tools_cmd, EXTERNAL_DIR)
 
-    print("Run CMake for ICD")
     ICD_BUILD_DIR = RepoRelative("%s/Vulkan-Tools/%s" % (EXTERNAL_DIR_NAME,BUILD_DIR_NAME))
+
+    print("Running update_deps.py for ICD")
+    RunShellCmd(f'python3 scripts/update_deps.py --dir {EXTERNAL_DIR_NAME} --config {args.configuration} --arch {args.arch}', VT_DIR)
+
+    print("Run CMake for ICD")
     utils.make_dirs(ICD_BUILD_DIR)
     cmake_cmd = \
-        f'cmake -DCMAKE_BUILD_TYPE={args.configuration.capitalize()} -DBUILD_CUBE=NO -DBUILD_VULKANINFO=NO -DINSTALL_ICD=OFF -DVULKAN_HEADERS_INSTALL_DIR={EXTERNAL_DIR}/Vulkan-Headers/{BUILD_DIR_NAME}/install {args.cmake} ..'
+        f'cmake -DCMAKE_BUILD_TYPE={args.configuration.capitalize()} -DBUILD_CUBE=NO -DBUILD_VULKANINFO=NO -DINSTALL_ICD=OFF -C {VT_DIR}/{EXTERNAL_DIR_NAME}/helper.cmake {args.cmake} ..'
     RunShellCmd(cmake_cmd, ICD_BUILD_DIR)
-
-    VVL_REG_DIR = "%s/Vulkan-Headers/registry" % EXTERNAL_DIR
-    VT_SCRIPTS_DIR = "%s/Vulkan-Tools/scripts" % EXTERNAL_DIR
-
-    print ("Geneating ICD Source Code")
-    VT_ICD_DIR = "%s/Vulkan-Tools/icd/generated" % EXTERNAL_DIR
-    LVL_GEN_SCRIPT = RepoRelative("scripts/lvl_genvk.py")
-    typemap_cmd = 'python3 %s -registry %s/vk.xml vk_typemap_helper.h' % (LVL_GEN_SCRIPT, VVL_REG_DIR)
-    RunShellCmd(typemap_cmd, VT_ICD_DIR)
-
-    KVT_GEN_SCRIPT = "%s/Vulkan-Tools/scripts/kvt_genvk.py" % EXTERNAL_DIR
-    icd_cpp_cmd = 'python3 %s -registry %s/vk.xml mock_icd.cpp' % (KVT_GEN_SCRIPT, VVL_REG_DIR)
-    RunShellCmd(icd_cpp_cmd, VT_ICD_DIR)
-
-    icd_h_cmd = 'python3 %s -registry %s/vk.xml mock_icd.h' % (KVT_GEN_SCRIPT, VVL_REG_DIR)
-    RunShellCmd(icd_h_cmd, VT_ICD_DIR)
 
     print("Build Mock ICD")
     build_cmd = f'cmake --build . --config {args.configuration}'
@@ -194,6 +174,10 @@ def RunVVLTests(args):
     lvt_env['VK_ICD_FILENAMES'] = icd_filenames
 
     RunShellCmd(lvt_cmd, env=lvt_env)
+    print("Re-Running multithreaded tests with VK_LAYER_FINE_GRAINED_LOCKING=1:")
+    lvt_env['VK_LAYER_FINE_GRAINED_LOCKING'] = '1'
+    RunShellCmd(lvt_cmd + ' --gtest_filter=*Thread*', env=lvt_env)
+
 
 def GetArgParser():
     parser = argparse.ArgumentParser()

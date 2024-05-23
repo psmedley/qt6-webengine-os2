@@ -515,7 +515,7 @@ bool CXFA_FFField::OnSetFocus(CXFA_FFWidget* pOldWidget) {
   if (!GetNormalWidget())
     return false;
 
-  CFWL_MessageSetFocus msg(nullptr, GetNormalWidget());
+  CFWL_MessageSetFocus msg(GetNormalWidget());
   SendMessageToFWLWidget(&msg);
   GetLayoutItem()->SetStatusBits(XFA_WidgetStatus::kFocused);
   InvalidateRect();
@@ -525,7 +525,7 @@ bool CXFA_FFField::OnSetFocus(CXFA_FFWidget* pOldWidget) {
 
 bool CXFA_FFField::OnKillFocus(CXFA_FFWidget* pNewWidget) {
   if (GetNormalWidget()) {
-    CFWL_MessageKillFocus msg(nullptr, GetNormalWidget());
+    CFWL_MessageKillFocus msg(GetNormalWidget());
     SendMessageToFWLWidget(&msg);
     GetLayoutItem()->ClearStatusBits(XFA_WidgetStatus::kFocused);
     InvalidateRect();
@@ -539,17 +539,6 @@ bool CXFA_FFField::OnKeyDown(XFA_FWL_VKEYCODE dwKeyCode,
     return false;
 
   CFWL_MessageKey msg(GetNormalWidget(), CFWL_MessageKey::KeyCommand::kKeyDown,
-                      dwFlags, dwKeyCode);
-  SendMessageToFWLWidget(&msg);
-  return true;
-}
-
-bool CXFA_FFField::OnKeyUp(XFA_FWL_VKEYCODE dwKeyCode,
-                           Mask<XFA_FWL_KeyFlag> dwFlags) {
-  if (!GetNormalWidget() || !GetDoc()->GetXFADoc()->IsInteractive())
-    return false;
-
-  CFWL_MessageKey msg(GetNormalWidget(), CFWL_MessageKey::KeyCommand::kKeyUp,
                       dwFlags, dwKeyCode);
   SendMessageToFWLWidget(&msg);
   return true;

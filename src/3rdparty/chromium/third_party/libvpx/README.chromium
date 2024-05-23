@@ -6,9 +6,9 @@ License: BSD
 License File: source/libvpx/LICENSE
 Security Critical: yes
 
-Date: Friday July 30 2021
+Date: Thursday March 17 2022
 Branch: main
-Commit: 15a75b45304248f746634b43763c496322bf8968
+Commit: bf672f23a5336cb54dbcb2e4417142139f44cc3e
 
 Description:
 Contains the sources used to compile libvpx binaries used by Google Chrome and
@@ -34,11 +34,11 @@ Please follow these steps to update libvpx source code:
      cd third_party/libvpx
      ./generate_gni.sh
 
-  Amend the commit created by the first step:
+   Update 'Branch' in this file if necessary.
+
+3. Amend the commit created by the first step:
 
      git commit -a --amend
-
-3. Update 'Branch' in README.chromium if necessary.
 
 4. Upload the change to Gerrit:
 

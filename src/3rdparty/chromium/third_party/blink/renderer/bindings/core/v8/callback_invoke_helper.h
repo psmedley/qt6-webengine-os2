@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_value_or_script_wrappable_adapter.h"
+#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -29,15 +30,15 @@ enum class CallbackInvokeHelperMode {
 // functions and IDL callback interfaces.  This class implements the following
 // algorithms of Web IDL.
 //
-// https://heycam.github.io/webidl/#call-a-user-objects-operation
+// https://webidl.spec.whatwg.org/#call-a-user-objects-operation
 // 3.11. Callback interfaces
 // To call a user object's operation
 //
-// https://heycam.github.io/webidl/#invoke-a-callback-function
+// https://webidl.spec.whatwg.org/#invoke-a-callback-function
 // 3.12. Invoking callback functions
 // To invoke a callback function type value
 //
-// https://heycam.github.io/webidl/#construct-a-callback-function
+// https://webidl.spec.whatwg.org/#construct-a-callback-function
 // 3.12. Invoking callback functions
 // To construct a callback functions type value
 template <class CallbackBase,
@@ -94,6 +95,8 @@ class CallbackInvokeHelper final {
 
   ScriptState::Scope callback_relevant_context_scope_;
   v8::Context::BackupIncumbentScope backup_incumbent_scope_;
+  std::unique_ptr<scheduler::TaskAttributionTracker::TaskScope>
+      task_attribution_scope_;
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT

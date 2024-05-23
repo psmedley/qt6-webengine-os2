@@ -16,8 +16,9 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
+#include "base/test/scoped_run_loop_timeout.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -72,8 +73,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, DetachInUnloadHandler) {
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   EXPECT_EQ(
       " Site A ------------ proxies for B\n"
@@ -120,8 +121,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, NavigateInUnloadHandler) {
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   EXPECT_EQ(
       " Site A ------------ proxies for B\n"
@@ -178,7 +179,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(NavigateToURL(shell(), a_url));
 
   FrameTreeNode* child_node =
-      web_contents()->GetFrameTree()->root()->child_at(0);
+      web_contents()->GetPrimaryFrameTree().root()->child_at(0);
   GURL b_url(embedded_test_server()->GetURL(
       "b.com", "/render_frame_host/beforeunload.html"));
   EXPECT_TRUE(NavigateToURLFromRenderer(child_node, b_url));
@@ -245,8 +246,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   // Open a popup on b.com.  The b.com subframe on the main frame will use this
   // in its unload handler.
@@ -281,7 +282,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   }
 
   // The top frame's origin should be a.com, not c.com.
-  EXPECT_EQ(top_origin + "/", main_url.GetOrigin().spec());
+  EXPECT_EQ(top_origin + "/", main_url.DeprecatedGetOriginAsURL().spec());
 }
 
 // Verify that when the last active frame in a process is going away as part of
@@ -315,7 +316,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Disable the BackForwardCache to ensure the old process is going to be
   // released.
   DisableBackForwardCacheForTesting(web_contents(),
-                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
+                                    BackForwardCache::TEST_REQUIRES_NO_CACHING);
 
   GURL cross_site_url(embedded_test_server()->GetURL("b.com", "/title1.html"));
   EXPECT_TRUE(NavigateToURLFromRenderer(shell(), cross_site_url));
@@ -353,7 +354,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // the page a gesture to allow dialogs.
   web_contents->GetMainFrame()->DisableBeforeUnloadHangMonitorForTesting();
   web_contents->GetMainFrame()->ExecuteJavaScriptWithUserGestureForTests(
-      std::u16string());
+      std::u16string(), base::NullCallback());
 
   // Hang the first contents in a beforeunload dialog.
   BeforeUnloadBlockingDelegate test_delegate(web_contents);
@@ -365,7 +366,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Attempt to navigate the second tab to a.com.  This will attempt to reuse
   // the hung process.
-  base::TimeDelta kTimeout = base::TimeDelta::FromMilliseconds(100);
+  base::TimeDelta kTimeout = base::Milliseconds(100);
   NavigationRequest::SetCommitTimeoutForTesting(kTimeout);
   GURL hung_url(embedded_test_server()->GetURL("a.com", "/title3.html"));
   UnresponsiveRendererObserver unresponsive_renderer_observer(new_contents);
@@ -395,7 +396,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 //     |
 //     C3
 // TODO(crbug.com/1012185): Flaky timeouts on Linux and Mac.
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC)
 #define MAYBE_UnloadHandlerSubframes DISABLED_UnloadHandlerSubframes
 #else
 #define MAYBE_UnloadHandlerSubframes UnloadHandlerSubframes
@@ -408,7 +409,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Add a unload handler to every frames. It notifies the browser using the
   // DomAutomationController it has been executed.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   UnloadPrint(root, "A1");
   UnloadPrint(root->child_at(0), "B1");
   UnloadPrint(root->child_at(0)->child_at(0), "C1");
@@ -481,8 +482,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SlowUnloadHandlerInIframe) {
   EXPECT_TRUE(NavigateToURL(shell(), initial_url));
 
   // 2) Act as if there was an infinite unload handler in B.
-  RenderFrameHostImpl* rfh_b =
-      web_contents()->GetFrameTree()->root()->child_at(0)->current_frame_host();
+  RenderFrameHostImpl* rfh_b = web_contents()
+                                   ->GetPrimaryFrameTree()
+                                   .root()
+                                   ->child_at(0)
+                                   ->current_frame_host();
   rfh_b->DoNotDeleteForTesting();
 
   // With BackForwardCache, old document doesn't fire unload handlers as the
@@ -491,7 +495,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, SlowUnloadHandlerInIframe) {
                                     BackForwardCache::TEST_USES_UNLOAD_EVENT);
 
   // 3) Navigate and check the old document is deleted after some time.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   RenderFrameDeletedObserver deleted_observer(root->current_frame_host());
   EXPECT_TRUE(NavigateToURL(shell(), next_url));
   deleted_observer.WaitUntilDeleted();
@@ -513,7 +517,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, Unload_ABAB) {
   EXPECT_TRUE(NavigateToURL(shell(), initial_url));
 
   // 2) Add unload handler on every frame.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   UnloadPrint(root, "A1");
   UnloadPrint(root->child_at(0), "B1");
   UnloadPrint(root->child_at(0)->child_at(0), "A2");
@@ -608,7 +612,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, UnloadNestedPendingDeletion) {
   RenderFrameHostImpl* rfh_d = rfh_b->child_at(0)->current_frame_host();
   // Set an arbitrarily long timeout to ensure the subframe unload timer doesn't
   // fire before we call OnDetach().
-  rfh_d->SetSubframeUnloadTimeoutForTesting(base::TimeDelta::FromSeconds(30));
+  rfh_d->SetSubframeUnloadTimeoutForTesting(base::Seconds(30));
 
   RenderFrameDeletedObserver delete_d(rfh_d);
 
@@ -659,7 +663,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, PartialUnloadHandler) {
   // 1) Navigate to A1(B1(A2))
   EXPECT_TRUE(NavigateToURL(shell(), url_aba));
 
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   RenderFrameHostImpl* a1 = root->current_frame_host();
   RenderFrameHostImpl* b1 = a1->child_at(0)->current_frame_host();
   RenderFrameHostImpl* a2 = b1->child_at(0)->current_frame_host();
@@ -677,7 +681,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, PartialUnloadHandler) {
   a1->DisableUnloadTimerForTesting();
   // Set an arbitrarily long timeout to ensure the subframe unload timer doesn't
   // fire before we call OnDetach().
-  b1->SetSubframeUnloadTimeoutForTesting(base::TimeDelta::FromSeconds(30));
+  b1->SetSubframeUnloadTimeoutForTesting(base::Seconds(30));
 
   // Add unload handler on A2, but not on the other frames.
   UnloadPrint(a2->frame_tree_node(), "A2");
@@ -771,7 +775,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // 1) Navigate to 0(1,2,3(4),5(6),7(8),9(10,11),12(13,14));
   EXPECT_TRUE(NavigateToURL(shell(), url_1));
 
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   RenderFrameHostImpl* rfh_0 = root->current_frame_host();
   RenderFrameHostImpl* rfh_1 = rfh_0->child_at(0)->current_frame_host();
   RenderFrameHostImpl* rfh_2 = rfh_0->child_at(1)->current_frame_host();
@@ -841,7 +845,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // 1) Navigate to a(b(c))
   EXPECT_TRUE(NavigateToURL(shell(), initial_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   RenderFrameHostImpl* rfh_a = root->current_frame_host();
   RenderFrameHostImpl* rfh_b = rfh_a->child_at(0)->current_frame_host();
   RenderFrameHostImpl* rfh_c = rfh_b->child_at(0)->current_frame_host();
@@ -879,12 +883,18 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 // child frames. Start from A(B1(C(B2))) and delete B1 from A.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        DetachedIframeUnloadHandlerABCB) {
+  // This test takes longer to run, because multiple processes are waiting on
+  // each other's documents to execute unload handler before destroying their
+  // documents. https://crbug.com/1311985
+  base::test::ScopedRunLoopTimeout increase_timeout(
+      FROM_HERE, TestTimeouts::action_max_timeout());
+
   GURL initial_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b(c(b)))"));
 
   // 1) Navigate to a(b(c(b)))
   EXPECT_TRUE(NavigateToURL(shell(), initial_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   RenderFrameHostImpl* rfh_a = root->current_frame_host();
   RenderFrameHostImpl* rfh_b1 = rfh_a->child_at(0)->current_frame_host();
   RenderFrameHostImpl* rfh_c = rfh_b1->child_at(0)->current_frame_host();
@@ -931,7 +941,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // 1) Navigate to a(a(b)).
   EXPECT_TRUE(NavigateToURL(shell(), initial_url));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   RenderFrameHostImpl* rfh_a1 = root->current_frame_host();
   RenderFrameHostImpl* rfh_a2 = rfh_a1->child_at(0)->current_frame_host();
   RenderFrameHostImpl* rfh_b = rfh_a2->child_at(0)->current_frame_host();
@@ -970,7 +980,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   GURL main_url(embedded_test_server()->GetURL("a.com", "/empty.html"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
 
   // We will window.open() another URL on the same domain so they share a
   // renderer. This window has an unload handler that forces layout to occur.
@@ -1025,8 +1035,8 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_TRUE(NavigateToURL(shell(), page_url));
   RenderFrameHostImpl* node1 =
       static_cast<WebContentsImpl*>(shell()->web_contents())
-          ->GetFrameTree()
-          ->root()
+          ->GetPrimaryFrameTree()
+          .root()
           ->current_frame_host();
   RenderFrameHostImpl* node2 = node1->child_at(0)->current_frame_host();
   RenderFrameHostImpl* node3 = node2->child_at(0)->current_frame_host();
@@ -1119,8 +1129,8 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_TRUE(NavigateToURL(shell(), page_url));
   RenderFrameHostImpl* node1 =
       static_cast<WebContentsImpl*>(shell()->web_contents())
-          ->GetFrameTree()
-          ->root()
+          ->GetPrimaryFrameTree()
+          .root()
           ->current_frame_host();
   RenderFrameHostImpl* node2 = node1->child_at(0)->current_frame_host();
   RenderFrameHostImpl* node3 = node2->child_at(0)->current_frame_host();
@@ -1215,7 +1225,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FocusedFrameUnload) {
   EXPECT_EQ(B2->frame_tree_node(), frame_tree->GetFocusedFrame());
 
   // 2.2 Unload B2. Drop detach message to simulate a long unloading.
-  B2->SetSubframeUnloadTimeoutForTesting(base::TimeDelta::FromSeconds(30));
+  B2->SetSubframeUnloadTimeoutForTesting(base::Seconds(30));
 
   EXPECT_FALSE(B2->GetSuddenTerminationDisablerState(
       blink::mojom::SuddenTerminationDisablerType::kUnloadHandler));
@@ -1321,7 +1331,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // The test assumes the previous page gets deleted after navigation. Disable
   // back-forward cache to ensure that it doesn't get preserved in the cache.
   DisableBackForwardCacheForTesting(shell()->web_contents(),
-                                    BackForwardCache::TEST_ASSUMES_NO_CACHING);
+                                    BackForwardCache::TEST_REQUIRES_NO_CACHING);
   GURL A1_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
   GURL A3_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
@@ -1336,10 +1346,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   delete_B1.WaitUntilDeleted();
 }
 
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+// See crbug.com/1275848.
+#define MAYBE_NestedSubframeWithUnloadHandler \
+  DISABLED_NestedSubframeWithUnloadHandler
+#else
+#define MAYBE_NestedSubframeWithUnloadHandler NestedSubframeWithUnloadHandler
+#endif
 // After a same-origin iframe navigation, check that gradchild iframe are
 // properly deleted and their unload handler executed.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       NestedSubframeWithUnloadHandler) {
+                       MAYBE_NestedSubframeWithUnloadHandler) {
   GURL main_url = embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b(b,c))");
   GURL iframe_new_url = embedded_test_server()->GetURL("b.com", "/title1.html");
@@ -1451,7 +1468,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessSSLBrowserTest,
   // Increase Unload timeout to prevent the previous document from
   // being deleleted before it has finished running B2 unload handler.
   A1->DisableUnloadTimerForTesting();
-  B2->SetSubframeUnloadTimeoutForTesting(base::TimeDelta::FromSeconds(30));
+  B2->SetSubframeUnloadTimeoutForTesting(base::Seconds(30));
 
   // Add an unload handler to the subframe and try in that handler to preserve
   // state that we will try to recover later.
@@ -1490,6 +1507,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessSSLBrowserTest,
     // Observers must be reached.
     B2_deleted.WaitUntilDeleted();
     console_observer.Wait();
+
+    EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+    EXPECT_EQ(away_url, web_contents()->GetLastCommittedURL());
   }
 
   // Navigate back from A3 to A4(B5).
@@ -1499,7 +1519,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessSSLBrowserTest,
   // Temporary extra expectations to investigate:
   // https://bugs.chromium.org/p/chromium/issues/detail?id=1215493
   EXPECT_EQ(url, web_contents()->GetLastCommittedURL());
-  EXPECT_EQ(2u, web_contents()->GetAllFrames().size());
+  EXPECT_EQ(
+      2u, CollectAllRenderFrameHosts(web_contents()->GetPrimaryPage()).size());
 
   RenderFrameHostImpl* A4 = web_contents()->GetMainFrame();
   RenderFrameHostImpl* B5 = A4->child_at(0)->current_frame_host();
@@ -1552,8 +1573,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessSSLBrowserTest,
   // Increase Unload timeout to prevent the previous document from
   // being deleleted before it has finished running C3 unload handler.
   A1->DisableUnloadTimerForTesting();
-  B2->SetSubframeUnloadTimeoutForTesting(base::TimeDelta::FromSeconds(30));
-  C3->SetSubframeUnloadTimeoutForTesting(base::TimeDelta::FromSeconds(30));
+  B2->SetSubframeUnloadTimeoutForTesting(base::Seconds(30));
+  C3->SetSubframeUnloadTimeoutForTesting(base::Seconds(30));
 
   // Add an unload handler to the subframe and try in that handler to preserve
   // state that we will try to recover later.
@@ -1594,6 +1615,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessSSLBrowserTest,
     B2_deleted.WaitUntilDeleted();
     C3_deleted.WaitUntilDeleted();
     console_observer.Wait();
+
+    EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+    EXPECT_EQ(away_url, web_contents()->GetLastCommittedURL());
   }
 
   // Navigate back from A4 to A5(B6(C7))
@@ -1603,7 +1627,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessSSLBrowserTest,
   // Temporary extra expectations to investigate:
   // https://bugs.chromium.org/p/chromium/issues/detail?id=1215493
   EXPECT_EQ(url, web_contents()->GetLastCommittedURL());
-  EXPECT_EQ(3u, web_contents()->GetAllFrames().size());
+  EXPECT_EQ(
+      3u, CollectAllRenderFrameHosts(web_contents()->GetPrimaryPage()).size());
 
   RenderFrameHostImpl* A5 = web_contents()->GetMainFrame();
   RenderFrameHostImpl* B6 = A5->child_at(0)->current_frame_host();

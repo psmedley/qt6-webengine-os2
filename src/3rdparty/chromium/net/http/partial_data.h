@@ -7,7 +7,6 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_once_callback.h"
 #include "net/disk_cache/disk_cache.h"
@@ -32,6 +31,10 @@ class IOBuffer;
 class PartialData {
  public:
   PartialData();
+
+  PartialData(const PartialData&) = delete;
+  PartialData& operator=(const PartialData&) = delete;
+
   ~PartialData();
 
   // Performs initialization of the object by examining the request |headers|
@@ -159,8 +162,6 @@ class PartialData {
   bool initial_validation_;  // Only used for truncated entries.
   CompletionOnceCallback callback_;
   base::WeakPtrFactory<PartialData> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PartialData);
 };
 
 }  // namespace net

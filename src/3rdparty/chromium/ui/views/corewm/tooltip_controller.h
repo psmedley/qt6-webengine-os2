@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
 #include "ui/aura/client/cursor_client_observer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/events/event_handler.h"
@@ -50,6 +52,10 @@ class VIEWS_EXPORT TooltipController
  public:
   TooltipController(std::unique_ptr<Tooltip> tooltip,
                     wm::ActivationClient* activation_client);
+
+  TooltipController(const TooltipController&) = delete;
+  TooltipController& operator=(const TooltipController&) = delete;
+
   ~TooltipController() override;
 
   // Overridden from wm::TooltipClient.
@@ -57,6 +63,7 @@ class VIEWS_EXPORT TooltipController
   void UpdateTooltip(aura::Window* target) override;
   void UpdateTooltipFromKeyboard(const gfx::Rect& bounds,
                                  aura::Window* target) override;
+  bool IsTooltipSetFromKeyboard(aura::Window* target) override;
   void SetHideTooltipTimeout(aura::Window* target,
                              base::TimeDelta timeout) override;
   void SetTooltipsEnabled(bool enable) override;
@@ -130,7 +137,7 @@ class VIEWS_EXPORT TooltipController
   // The window on which we are currently listening for events. When there's a
   // keyboard-triggered visible tooltip, its value is set to the tooltip parent
   // window. Otherwise, it's following the cursor.
-  aura::Window* observed_window_ = nullptr;
+  raw_ptr<aura::Window> observed_window_ = nullptr;
 
   // This is the position our controller will use to position the tooltip. When
   // the tooltip is triggered by a keyboard action resulting in a view gaining
@@ -143,7 +150,7 @@ class VIEWS_EXPORT TooltipController
   // The tooltip should stay hidden after a mouse press event on the view until
   // the cursor moves to another view.
   std::u16string tooltip_text_at_mouse_press_;
-  aura::Window* tooltip_window_at_mouse_press_ = nullptr;
+  raw_ptr<aura::Window> tooltip_window_at_mouse_press_ = nullptr;
 
   // Location of the last events in |tooltip_window_|'s coordinates.
   gfx::Point last_mouse_loc_;
@@ -165,14 +172,12 @@ class VIEWS_EXPORT TooltipController
   // We want to hide tooltips whenever our client window loses focus. This will
   // ensure that no tooltip stays visible when the user navigated away from
   // our client.
-  wm::ActivationClient* activation_client_;
+  raw_ptr<wm::ActivationClient> activation_client_;
 
   // The TooltipStateManager is responsible for keeping track of the current
   // tooltip state (its text, position, id, etc.) and to modify it when asked
   // by the TooltipController or the show/hide timers.
   std::unique_ptr<TooltipStateManager> state_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(TooltipController);
 };
 
 }  // namespace corewm

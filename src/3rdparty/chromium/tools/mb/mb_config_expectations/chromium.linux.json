@@ -7,7 +7,8 @@
       "is_component_build": false,
       "is_debug": false,
       "symbol_level": 1,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "Cast Linux": {
@@ -17,7 +18,20 @@
       "is_component_build": false,
       "is_debug": false,
       "symbol_level": 1,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
+    }
+  },
+  "Cast Linux ARM64": {
+    "gn_args": {
+      "dcheck_always_on": false,
+      "is_chromecast": true,
+      "is_component_build": false,
+      "is_debug": false,
+      "symbol_level": 1,
+      "target_cpu": "arm64",
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "Cast Linux Debug": {
@@ -26,7 +40,8 @@
       "is_component_build": true,
       "is_debug": true,
       "symbol_level": 1,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "Deterministic Fuchsia (dbg)": {
@@ -44,20 +59,34 @@
       "is_component_build": false,
       "is_debug": false,
       "symbol_level": 1,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "Deterministic Linux (dbg)": {
     "goma": {
-      "is_component_build": true,
-      "is_debug": true,
-      "symbol_level": 1,
-      "use_goma": true
+      "gn_args": {
+        "is_component_build": true,
+        "is_debug": true,
+        "symbol_level": 1,
+        "use_goma": true
+      }
     },
     "local": {
-      "is_component_build": true,
-      "is_debug": true,
-      "symbol_level": 1
+      "gn_args": {
+        "is_component_build": true,
+        "is_debug": true,
+        "symbol_level": 1
+      }
+    },
+    "reclient": {
+      "gn_args": {
+        "is_component_build": true,
+        "is_debug": true,
+        "symbol_level": 1,
+        "use_rbe": true,
+        "use_remoteexec": true
+      }
     }
   },
   "Fuchsia ARM64": {
@@ -67,6 +96,7 @@
       "is_debug": false,
       "target_cpu": "arm64",
       "target_os": "fuchsia",
+      "test_host_cpu": "arm64",
       "use_goma": true
     }
   },
@@ -84,17 +114,36 @@
       "dcheck_always_on": false,
       "is_component_build": false,
       "is_debug": false,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "Linux Builder": {
     "gn_args": {
       "dcheck_always_on": false,
+      "devtools_skip_typecheck": false,
       "ffmpeg_branding": "Chrome",
       "is_component_build": false,
       "is_debug": false,
       "proprietary_codecs": true,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
+    }
+  },
+  "Linux Builder (Wayland)": {
+    "gn_args": {
+      "dcheck_always_on": false,
+      "ffmpeg_branding": "Chrome",
+      "is_component_build": false,
+      "is_debug": false,
+      "ozone_auto_platforms": false,
+      "ozone_platform": "wayland",
+      "ozone_platform_headless": true,
+      "ozone_platform_wayland": true,
+      "proprietary_codecs": true,
+      "use_bundled_weston": true,
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "Linux Builder (dbg)": {
@@ -104,18 +153,8 @@
       "is_debug": true,
       "proprietary_codecs": true,
       "symbol_level": 1,
-      "use_goma": true
-    }
-  },
-  "Linux Builder (dbg)(32)": {
-    "gn_args": {
-      "ffmpeg_branding": "Chrome",
-      "is_component_build": true,
-      "is_debug": true,
-      "proprietary_codecs": true,
-      "symbol_level": 1,
-      "target_cpu": "x86",
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "Network Service Linux": {
@@ -123,7 +162,8 @@
       "dcheck_always_on": false,
       "is_component_build": false,
       "is_debug": false,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "fuchsia-arm64-cast": {
@@ -155,7 +195,8 @@
       "is_debug": true,
       "symbol_level": 0,
       "target_os": "fuchsia",
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "linux-bfcache-rel": {
@@ -165,17 +206,8 @@
       "is_component_build": false,
       "is_debug": false,
       "proprietary_codecs": true,
-      "use_goma": true
-    }
-  },
-  "linux-bionic-rel": {
-    "gn_args": {
-      "dcheck_always_on": false,
-      "ffmpeg_branding": "Chrome",
-      "is_component_build": false,
-      "is_debug": false,
-      "proprietary_codecs": true,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "linux-extended-tracing-rel": {
@@ -184,7 +216,8 @@
       "extended_tracing_enabled": true,
       "is_component_build": false,
       "is_debug": false,
-      "use_goma": true
+      "use_rbe": true,
+      "use_remoteexec": true
     }
   },
   "linux-gcc-rel": {
@@ -194,40 +227,8 @@
       "is_component_build": false,
       "is_debug": false,
       "symbol_level": 1,
-      "target_cpu": "x86",
       "use_cxx11": true,
       "use_goma": false
-    }
-  },
-  "linux-ozone-rel": {
-    "gn_args": {
-      "dcheck_always_on": false,
-      "is_component_build": false,
-      "is_debug": false,
-      "ozone_platform": "headless",
-      "use_bundled_weston": true,
-      "use_goma": true,
-      "use_ozone": true
-    }
-  },
-  "linux-trusty-rel": {
-    "gn_args": {
-      "dcheck_always_on": false,
-      "ffmpeg_branding": "Chrome",
-      "is_component_build": false,
-      "is_debug": false,
-      "proprietary_codecs": true,
-      "use_goma": true
-    }
-  },
-  "linux-xenial-rel": {
-    "gn_args": {
-      "dcheck_always_on": false,
-      "ffmpeg_branding": "Chrome",
-      "is_component_build": false,
-      "is_debug": false,
-      "proprietary_codecs": true,
-      "use_goma": true
     }
   }
 }

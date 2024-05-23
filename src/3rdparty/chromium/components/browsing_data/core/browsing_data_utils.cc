@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/no_destructor.h"
@@ -18,6 +17,7 @@
 #include "components/browsing_data/core/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace browsing_data {
@@ -54,16 +54,16 @@ base::Time CalculateBeginDeleteTime(TimePeriod time_period) {
   base::Time delete_begin_time = base::Time::Now();
   switch (time_period) {
     case TimePeriod::LAST_HOUR:
-      diff = base::TimeDelta::FromHours(1);
+      diff = base::Hours(1);
       break;
     case TimePeriod::LAST_DAY:
-      diff = base::TimeDelta::FromHours(24);
+      diff = base::Hours(24);
       break;
     case TimePeriod::LAST_WEEK:
-      diff = base::TimeDelta::FromHours(7 * 24);
+      diff = base::Hours(7 * 24);
       break;
     case TimePeriod::FOUR_WEEKS:
-      diff = base::TimeDelta::FromHours(4 * 7 * 24);
+      diff = base::Hours(4 * 7 * 24);
       break;
     case TimePeriod::ALL_TIME:
     case TimePeriod::OLDER_THAN_30_DAYS:
@@ -75,7 +75,7 @@ base::Time CalculateBeginDeleteTime(TimePeriod time_period) {
 
 base::Time CalculateEndDeleteTime(TimePeriod time_period) {
   if (time_period == TimePeriod::OLDER_THAN_30_DAYS) {
-    return base::Time::Now() - base::TimeDelta::FromDays(30);
+    return base::Time::Now() - base::Days(30);
   }
   return base::Time::Max();
 }
@@ -363,7 +363,7 @@ bool GetDeletionPreferenceFromDataType(
   return false;
 }
 
-BrowsingDataType GetDataTypeFromDeletionPreference(
+absl::optional<BrowsingDataType> GetDataTypeFromDeletionPreference(
     const std::string& pref_name) {
   using DataTypeMap = base::flat_map<std::string, BrowsingDataType>;
   static base::NoDestructor<DataTypeMap> preference_to_datatype(
@@ -382,8 +382,10 @@ BrowsingDataType GetDataTypeFromDeletionPreference(
       });
 
   auto iter = preference_to_datatype->find(pref_name);
-  DCHECK(iter != preference_to_datatype->end());
-  return iter->second;
+  if (iter != preference_to_datatype->end()) {
+    return iter->second;
+  }
+  return absl::nullopt;
 }
 
 }  // namespace browsing_data

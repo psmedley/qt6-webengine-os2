@@ -27,12 +27,9 @@
 #ifndef BASE_MEMORY_SINGLETON_H_
 #define BASE_MEMORY_SINGLETON_H_
 
-#include "base/at_exit.h"
 #include "base/atomicops.h"
-#include "base/base_export.h"
 #include "base/check_op.h"
 #include "base/lazy_instance_helpers.h"
-#include "base/macros.h"
 #include "base/threading/thread_restrictions.h"
 
 namespace base {
@@ -153,12 +150,15 @@ subtle::Atomic32 StaticMemorySingletonTraits<Type>::dead_ = 0;
 //   class FooClass {
 //    public:
 //     static FooClass* GetInstance();  <-- See comment below on this.
+//
+//     FooClass(const FooClass&) = delete;
+//     FooClass& operator=(const FooClass&) = delete;
+//
 //     void Bar() { ... }
+//
 //    private:
 //     FooClass() { ... }
 //     friend struct base::DefaultSingletonTraits<FooClass>;
-//
-//     DISALLOW_COPY_AND_ASSIGN(FooClass);
 //   };
 //
 // In your source file:
@@ -231,7 +231,7 @@ class Singleton {
   static Type* get() {
 #if DCHECK_IS_ON()
     if (!Traits::kAllowedToAccessOnNonjoinableThread)
-      ThreadRestrictions::AssertSingletonAllowed();
+      internal::AssertSingletonAllowed();
 #endif
 
     return subtle::GetOrCreateLazyPointer(
@@ -244,7 +244,7 @@ class Singleton {
   static Type* GetIfExists() {
 #if DCHECK_IS_ON()
     if (!Traits::kAllowedToAccessOnNonjoinableThread)
-      ThreadRestrictions::AssertSingletonAllowed();
+      internal::AssertSingletonAllowed();
 #endif
 
     if (!subtle::NoBarrier_Load(&instance_))

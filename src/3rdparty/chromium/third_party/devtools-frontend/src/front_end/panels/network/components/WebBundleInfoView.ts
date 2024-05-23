@@ -10,7 +10,7 @@ import * as LitHtml from '../../../ui/lit-html/lit-html.js';
 import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
 import * as IconButton from '../../../ui/components/icon_button/icon_button.js';
 import * as DataGrid from '../../../ui/components/data_grid/data_grid.js';
-import {imageNameForResourceType} from '../utils/utils.js';
+import {imageNameForResourceType} from '../../../panels/utils/utils.js';
 import webBundleInfoViewStyles from './WebBundleInfoView.css.js';
 
 const {render, html} = LitHtml;
@@ -39,21 +39,21 @@ export class WebBundleInfoView extends UI.Widget.VBox {
 
 export class WebBundleInfoElement extends HTMLElement {
   static readonly litTagName = LitHtml.literal`devtools-web-bundle-info`;
-  private readonly shadow = this.attachShadow({mode: 'open'});
-  private webBundleInfo: Readonly<SDK.NetworkRequest.WebBundleInfo>;
-  private webBundleName: Readonly<string>;
+  readonly #shadow = this.attachShadow({mode: 'open'});
+  #webBundleInfo: Readonly<SDK.NetworkRequest.WebBundleInfo>;
+  #webBundleName: Readonly<string>;
   constructor(webBundleInfo: SDK.NetworkRequest.WebBundleInfo, webBundleName: string) {
     super();
-    this.webBundleInfo = webBundleInfo;
-    this.webBundleName = webBundleName;
+    this.#webBundleInfo = webBundleInfo;
+    this.#webBundleName = webBundleName;
   }
 
   connectedCallback(): void {
-    this.shadow.adoptedStyleSheets = [webBundleInfoViewStyles];
+    this.#shadow.adoptedStyleSheets = [webBundleInfoViewStyles];
   }
 
   render(): void {
-    const rows = this.webBundleInfo.resourceUrls?.map(url => {
+    const rows = this.#webBundleInfo.resourceUrls?.map(url => {
       const mimeType = Common.ResourceType.ResourceType.mimeFromURL(url) || null;
       const resourceType = Common.ResourceType.ResourceType.fromMimeTypeOverride(mimeType) ||
           Common.ResourceType.ResourceType.fromMimeType(mimeType);
@@ -82,7 +82,7 @@ export class WebBundleInfoElement extends HTMLElement {
         <${IconButton.Icon.Icon.litTagName} class="icon"
           .data=${{color: '', iconName: 'resourceWebBundle', width: '16px'} as IconButton.Icon.IconData}>
         </${IconButton.Icon.Icon.litTagName}>
-        <span>${this.webBundleName}</span>
+        <span>${this.#webBundleName}</span>
         <x-link href="https://web.dev/web-bundles/#explaining-web-bundles">
           <${IconButton.Icon.Icon.litTagName} class="icon"
             .data=${
@@ -108,7 +108,7 @@ export class WebBundleInfoElement extends HTMLElement {
         } as DataGrid.DataGrid.DataGridData}>
         </${DataGrid.DataGrid.DataGrid.litTagName}>
       </div>`,
-        this.shadow);
+        this.#shadow, {host: this});
   }
 }
 

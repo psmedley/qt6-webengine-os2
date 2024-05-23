@@ -4,8 +4,8 @@
 
 #include "media/base/offloading_video_encoder.h"
 
-#include "base/bind_post_task.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/bind_post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -30,13 +30,14 @@ OffloadingVideoEncoder::OffloadingVideoEncoder(
     std::unique_ptr<VideoEncoder> wrapped_encoder)
     : OffloadingVideoEncoder(std::move(wrapped_encoder),
                              base::ThreadPool::CreateSequencedTaskRunner(
-                                 {base::TaskPriority::USER_BLOCKING}),
+                                 {base::TaskPriority::USER_BLOCKING,
+                                  base::WithBaseSyncPrimitives()}),
                              base::SequencedTaskRunnerHandle::Get()) {}
 
 void OffloadingVideoEncoder::Initialize(VideoCodecProfile profile,
                                         const Options& options,
                                         OutputCB output_cb,
-                                        StatusCB done_cb) {
+                                        EncoderStatusCB done_cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   work_runner_->PostTask(
       FROM_HERE,
@@ -48,7 +49,7 @@ void OffloadingVideoEncoder::Initialize(VideoCodecProfile profile,
 
 void OffloadingVideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
                                     bool key_frame,
-                                    StatusCB done_cb) {
+                                    EncoderStatusCB done_cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   work_runner_->PostTask(
       FROM_HERE,
@@ -59,7 +60,7 @@ void OffloadingVideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
 
 void OffloadingVideoEncoder::ChangeOptions(const Options& options,
                                            OutputCB output_cb,
-                                           StatusCB done_cb) {
+                                           EncoderStatusCB done_cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   work_runner_->PostTask(
       FROM_HERE, base::BindOnce(&VideoEncoder::ChangeOptions,
@@ -68,7 +69,7 @@ void OffloadingVideoEncoder::ChangeOptions(const Options& options,
                                 WrapCallback(std::move(done_cb))));
 }
 
-void OffloadingVideoEncoder::Flush(StatusCB done_cb) {
+void OffloadingVideoEncoder::Flush(EncoderStatusCB done_cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   work_runner_->PostTask(
       FROM_HERE, base::BindOnce(&VideoEncoder::Flush,

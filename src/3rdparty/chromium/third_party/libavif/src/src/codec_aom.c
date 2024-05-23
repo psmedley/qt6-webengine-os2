@@ -43,10 +43,8 @@
 #endif
 
 // Speeds 7-9 were added to all intra mode in https://aomedia-review.googlesource.com/c/aom/+/140624.
-#if defined(AOM_EXT_PART_ABI_VERSION)
-#if AOM_ENCODER_ABI_VERSION >= (10 + AOM_CODEC_ABI_VERSION + AOM_EXT_PART_ABI_VERSION)
+#if AOM_ENCODER_ABI_VERSION >= (10 + AOM_CODEC_ABI_VERSION + /*AOM_EXT_PART_ABI_VERSION=*/1)
 #define ALL_INTRA_HAS_SPEEDS_7_TO_9 1
-#endif
 #endif
 #endif
 
@@ -179,6 +177,11 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
                 yuvFormat = AVIF_PIXEL_FORMAT_YUV444;
                 break;
             case AOM_IMG_FMT_NONE:
+#if defined(AOM_HAVE_IMG_FMT_NV12)
+            // Although the libaom encoder supports the NV12 image format as an input format, the
+            // libaom decoder does not support NV12 as an output format.
+            case AOM_IMG_FMT_NV12:
+#endif
             case AOM_IMG_FMT_YV12:
             case AOM_IMG_FMT_AOMYV12:
             case AOM_IMG_FMT_YV1216:
@@ -735,7 +738,8 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
     // do not "align" aomImage.w and aomImage.h. Unfortunately this exposes a bug in libaom
     // (https://crbug.com/aomedia/3113) if chroma is subsampled and image->width or image->height is
     // equal to 1. To work around this libaom bug, we allocate the aomImage.planes[] buffers and
-    // copy the image YUV data if image->width or image->height is equal to 1.
+    // copy the image YUV data if image->width or image->height is equal to 1. This bug has been
+    // fixed in libaom v3.1.3.
     //
     // Note: The exact condition for the bug is
     //   ((image->width == 1) && (chroma is subsampled horizontally)) ||
@@ -782,10 +786,11 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         aom_codec_control(&codec->internal->encoder, AV1E_SET_COLOR_RANGE, aomImage.range);
         monochromeRequested = AVIF_TRUE;
         if (aomImageAllocated) {
+            const uint32_t bytesPerRow = ((image->depth > 8) ? 2 : 1) * image->width;
             for (uint32_t j = 0; j < image->height; ++j) {
                 uint8_t * srcAlphaRow = &image->alphaPlane[j * image->alphaRowBytes];
                 uint8_t * dstAlphaRow = &aomImage.planes[0][j * aomImage.stride[0]];
-                memcpy(dstAlphaRow, srcAlphaRow, image->alphaRowBytes);
+                memcpy(dstAlphaRow, srcAlphaRow, bytesPerRow);
             }
         } else {
             aomImage.planes[0] = image->alphaPlane;

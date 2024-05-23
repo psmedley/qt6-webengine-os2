@@ -5,8 +5,18 @@
 import("//build/config/python.gni")
 
 # Used by linux-gcc-rel to ensure gcc doesn't choke on clang-only flags.
-executable("empty_main") {
-  sources = [ "empty_main.cc" ]
+if (!is_clang) {
+  executable("empty_main") {
+    sources = [ "empty_main.cc" ]
+
+    # The bot should only check that an empty file builds fine with gcc.
+    # There's no need to check that libc++ builds with a (possibly very old)
+    # version of gcc.
+    # No need to remove "//build/config/compiler:runtime_library" from configs
+    # (to remove its subconfig "//build/config/c++:runtime_library") since
+    # empty_main.cc does not include any headers.
+    no_default_deps = true
+  }
 }
 
 # Targets needed for isolate script to execute.
@@ -47,5 +57,11 @@ group("run_perf_test") {
 python_library("run_isolated_script_test") {
   testonly = true
   pydeps_file = "//testing/scripts/run_isolated_script_test.pydeps"
+  data = [ "//.vpython3" ]
+}
+
+python_library("wpt_android_lib") {
+  testonly = true
+  pydeps_file = "//testing/scripts/run_android_wpt.pydeps"
   data = [ "//.vpython3" ]
 }

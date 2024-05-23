@@ -10,9 +10,10 @@
 
 #include "base/callback_helpers.h"
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
+#include "base/timer/timer.h"
 #include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "components/viz/common/display/renderer_settings.h"
@@ -34,6 +35,10 @@ namespace mojom {
 class DelegatedInkPointRenderer;
 }  // namespace mojom
 }  // namespace gfx
+
+namespace gpu {
+class SharedImageRepresentationFactory;
+}
 
 namespace viz {
 
@@ -64,6 +69,9 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
       const RendererSettings& renderer_settings,
       const DebugRendererSettings* debug_settings);
   ~SkiaOutputSurfaceImpl() override;
+
+  SkiaOutputSurfaceImpl(const SkiaOutputSurfaceImpl&) = delete;
+  SkiaOutputSurfaceImpl& operator=(const SkiaOutputSurfaceImpl&) = delete;
 
   // OutputSurface implementation:
   gpu::SurfaceHandle GetSurfaceHandle() const override;
@@ -146,8 +154,9 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
   void PreserveChildSurfaceControls() override;
   gpu::SharedImageInterface* GetSharedImageInterface() override;
   gpu::SyncToken Flush() override;
+  bool EnsureMinNumberOfBuffers(int n) override;
 
-#if defined(OS_APPLE) || defined(USE_OZONE)
+#if BUILDFLAG(IS_APPLE) || defined(USE_OZONE)
   SkCanvas* BeginPaintRenderPassOverlay(
       const gfx::Size& size,
       ResourceFormat format,
@@ -165,7 +174,8 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
       ResourceFormat format,
       bool maybe_concurrent_reads,
       const absl::optional<gpu::VulkanYCbCrInfo>& ycbcr_info,
-      sk_sp<SkColorSpace> color_space) override;
+      sk_sp<SkColorSpace> color_space,
+      bool raw_draw_if_possible) override;
 
   void InitDelegatedInkPointRendererReceiver(
       mojo::PendingReceiver<gfx::mojom::DelegatedInkPointRenderer>
@@ -186,10 +196,11 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
                              bool* result);
   SkSurfaceCharacterization CreateSkSurfaceCharacterization(
       const gfx::Size& surface_size,
-      gfx::BufferFormat format,
+      SkColorType color_type,
       bool mipmap,
       sk_sp<SkColorSpace> color_space,
-      bool is_root_render_pass);
+      bool is_root_render_pass,
+      bool is_overlay);
   void DidSwapBuffersComplete(gpu::SwapBuffersCompleteParams params,
                               const gfx::Size& pixel_size,
                               gfx::GpuFenceHandle release_fence);
@@ -204,7 +215,12 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
                       bool make_current,
                       bool need_framebuffer);
 
-  void FlushGpuTasks(bool wait_for_finish);
+  enum class SyncMode {
+    kNoWait = 0,
+    kWaitForTasksStarted = 1,
+    kWaitForTasksFinished = 2,
+  };
+  void FlushGpuTasks(SyncMode sync_mode);
   GrBackendFormat GetGrBackendFormatForTexture(
       ResourceFormat resource_format,
       uint32_t gl_texture_target,
@@ -213,11 +229,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
 
   void RecreateRootRecorder();
 
-  // Note this can be negative.
-  int AvailableBuffersLowerBound() const;
-  bool ShouldCreateNewBufferForNextSwap() const;
-
-  OutputSurfaceClient* client_ = nullptr;
+  raw_ptr<OutputSurfaceClient> client_ = nullptr;
   bool needs_swap_size_notifications_ = false;
 
   // Images for current frame or render pass.
@@ -229,16 +241,15 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
   base::ObserverList<ContextLostObserver>::Unchecked observers_;
 
   uint64_t sync_fence_release_ = 0;
-  SkiaOutputSurfaceDependency* dependency_;
+  raw_ptr<SkiaOutputSurfaceDependency> dependency_;
   UpdateVSyncParametersCallback update_vsync_parameters_callback_;
   GpuVSyncCallback gpu_vsync_callback_;
   bool is_displayed_as_overlay_ = false;
   gpu::Mailbox last_swapped_mailbox_;
 
   gfx::Size size_;
-  gfx::ColorSpace color_space_;
   gfx::BufferFormat format_;
-  bool is_hdr_ = false;
+  int sample_count_ = 1;
   SkSurfaceCharacterization characterization_;
   absl::optional<SkDeferredDisplayListRecorder> root_recorder_;
 
@@ -273,7 +284,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
     explicit FrameBufferDamageTracker(size_t number_of_buffers);
     ~FrameBufferDamageTracker();
 
-    void ReallocatedFrameBuffers(const gfx::Size& frame_buffer_size);
+    void FrameBuffersChanged(const gfx::Size& frame_buffer_size);
     void SwappedWithDamage(const gfx::Rect& damage);
     void SkippedSwapWithDamage(const gfx::Rect& damage);
     gfx::Rect GetCurrentFrameBufferDamage() const;
@@ -281,13 +292,13 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
    private:
     gfx::Rect ComputeCurrentFrameBufferDamage() const;
 
-    const size_t number_of_buffers_;
+    size_t number_of_buffers_;
     gfx::Size frame_buffer_size_;
     // This deque should contains the incremental damage of the last N swapped
-    // frames where N is at most `capabilities_.number_of_buffers - 1`. Each
-    // rect represents from the incremental damage from the previous frame; note
-    // if there is no previous frame (eg first swap after a `Reshape`), the
-    // damage should be the full frame buffer.
+    // frames where N is at most `number_of_buffers_`. Each rect represents
+    // from the incremental damage from the previous frame; note if there is no
+    // previous frame (eg first swap after a `Reshape`), the damage should be
+    // the full frame buffer.
     base::circular_deque<gfx::Rect> damage_between_frames_;
     // Result of `GetCurrentFramebufferDamage` to optimize consecutive calls.
     mutable absl::optional<gfx::Rect> cached_current_damage_;
@@ -318,21 +329,28 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
   const RendererSettings renderer_settings_;
 
   // Points to the viz-global singleton.
-  const DebugRendererSettings* const debug_settings_;
+  const raw_ptr<const DebugRendererSettings> debug_settings_;
 
   // For testing cases we would need to setup a SkiaOutputSurface without
   // OverlayProcessor and Display. For those cases, we hold the gpu task
   // scheduler inside this class by having a unique_ptr.
   // TODO(weiliangc): After changing to proper initialization order for Android
   // WebView, remove this holder.
-  DisplayCompositorMemoryAndTaskController* display_compositor_controller_;
+  const raw_ptr<DisplayCompositorMemoryAndTaskController>
+      display_compositor_controller_;
 
   // |gpu_task_scheduler_| holds a gpu::SingleTaskSequence, and helps schedule
   // tasks on GPU as a single sequence. It is shared with OverlayProcessor so
   // compositing and overlay processing are in order. A gpu::SingleTaskSequence
   // in regular Viz is implemented by SchedulerSequence. In Android WebView
   // gpu::SingleTaskSequence is implemented on top of WebView's task queue.
-  gpu::GpuTaskSchedulerHelper* gpu_task_scheduler_;
+  const raw_ptr<gpu::GpuTaskSchedulerHelper> gpu_task_scheduler_;
+
+  // True if raw draw is being used.
+  const bool is_using_raw_draw_;
+
+  // True if raw draw is using MSAA output surface.
+  const bool is_raw_draw_using_msaa_;
 
   // The display transform relative to the hardware natural orientation,
   // applied to the frame content. The transform can be rotations in 90 degree
@@ -372,30 +390,17 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceImpl : public SkiaOutputSurface {
   // Track if the current buffer content is changed.
   bool current_buffer_modified_ = false;
 
-  // Variables used to track state for dynamic frame buffer allocation. When
-  // enabled, `capabilities_.number_of_buffers` should be interpreted as the
-  // maximum number of buffers to allocate.
-  //
-  // This class controls the allocation and release of frame buffers:
-  // * FinishPaintCurrentFrame may allocate a new buffer for the frame
-  // * SwapBuffers may release an unused buffer.
-  // * Reshape will reallocate the same number of buffers.
-  // This way, this class knows exactly the number of allocated (once all work
-  // posted to GPU thread are done).
-  int num_allocated_buffers_ = 0;
-  // For each SwapBuffers that has yet been matched with a
-  // DidSwapBuffersComplete, store whether that swap has damage to the main
-  // buffer. DidSwapBuffersComplete. This is used to compute a lower bound on
-  // the number of available buffers on the GPU thread.
-  base::circular_deque<bool> pending_swaps_;
-  // Consecutive number of swaps where there is an extra buffer allocated. Used
-  // as part of heuristic to decide when to release extra frame buffers.
-  int consecutive_frames_with_extra_buffer_ = 0;
+  // Last number sent to `SetNumberOfFrameBuffers` on the GPU.
+  int cached_number_of_buffers_ = 0;
+
+  // For accessing tile shared image backings from compositor thread.
+  std::unique_ptr<gpu::SharedImageRepresentationFactory>
+      representation_factory_;
+  // The refresh interval from presentation feedback.
+  base::TimeDelta refresh_interval_;
 
   base::WeakPtr<SkiaOutputSurfaceImpl> weak_ptr_;
   base::WeakPtrFactory<SkiaOutputSurfaceImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SkiaOutputSurfaceImpl);
 };
 
 }  // namespace viz

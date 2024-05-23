@@ -24,7 +24,7 @@
 RetainPtr<CFGAS_GEFont> CFGAS_GEFont::LoadFont(const wchar_t* pszFontFamily,
                                                uint32_t dwFontStyles,
                                                FX_CodePage wCodePage) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   auto pFont = pdfium::MakeRetain<CFGAS_GEFont>();
   if (!pFont->LoadFontInternal(pszFontFamily, dwFontStyles, wCodePage))
     return nullptr;
@@ -68,7 +68,7 @@ CFGAS_GEFont::CFGAS_GEFont() = default;
 
 CFGAS_GEFont::~CFGAS_GEFont() = default;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 bool CFGAS_GEFont::LoadFontInternal(const wchar_t* pszFontFamily,
                                     uint32_t dwFontStyles,
                                     FX_CodePage wCodePage) {
@@ -92,14 +92,13 @@ bool CFGAS_GEFont::LoadFontInternal(const wchar_t* pszFontFamily,
                      false);
   return m_pFont->GetFaceRec() && InitFont();
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 bool CFGAS_GEFont::LoadFontInternal(const RetainPtr<CPDF_Font>& pPDFFont) {
-  CFX_Font* pExternalFont = pPDFFont->GetFont();
-  if (m_pFont || !pExternalFont)
+  if (m_pFont)
     return false;
 
-  m_pFont = pExternalFont;
+  m_pFont = pPDFFont->GetFont();
   if (!InitFont())
     return false;
 
@@ -153,7 +152,7 @@ uint32_t CFGAS_GEFont::GetFontStyles() const {
   return dwStyles;
 }
 
-Optional<uint16_t> CFGAS_GEFont::GetCharWidth(wchar_t wUnicode) {
+absl::optional<uint16_t> CFGAS_GEFont::GetCharWidth(wchar_t wUnicode) {
   auto it = m_CharWidthMap.find(wUnicode);
   if (it != m_CharWidthMap.end())
     return it->second;
@@ -162,23 +161,23 @@ Optional<uint16_t> CFGAS_GEFont::GetCharWidth(wchar_t wUnicode) {
   int32_t glyph;
   std::tie(glyph, pFont) = GetGlyphIndexAndFont(wUnicode, true);
   if (!pFont || glyph == 0xffff) {
-    m_CharWidthMap[wUnicode] = pdfium::nullopt;
-    return pdfium::nullopt;
+    m_CharWidthMap[wUnicode] = absl::nullopt;
+    return absl::nullopt;
   }
   if (pFont != this)
     return pFont->GetCharWidth(wUnicode);
 
   int32_t width_from_cfx_font = m_pFont->GetGlyphWidth(glyph);
   if (width_from_cfx_font < 0) {
-    m_CharWidthMap[wUnicode] = pdfium::nullopt;
-    return pdfium::nullopt;
+    m_CharWidthMap[wUnicode] = absl::nullopt;
+    return absl::nullopt;
   }
   uint16_t width = static_cast<uint16_t>(width_from_cfx_font);
   m_CharWidthMap[wUnicode] = width;
   return width;
 }
 
-Optional<FX_RECT> CFGAS_GEFont::GetCharBBox(wchar_t wUnicode) {
+absl::optional<FX_RECT> CFGAS_GEFont::GetCharBBox(wchar_t wUnicode) {
   auto it = m_BBoxMap.find(wUnicode);
   if (it != m_BBoxMap.end())
     return it->second;
@@ -187,20 +186,16 @@ Optional<FX_RECT> CFGAS_GEFont::GetCharBBox(wchar_t wUnicode) {
   int32_t iGlyph;
   std::tie(iGlyph, pFont) = GetGlyphIndexAndFont(wUnicode, true);
   if (!pFont || iGlyph == 0xFFFF)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   if (pFont.Get() != this)
     return pFont->GetCharBBox(wUnicode);
 
-  Optional<FX_RECT> rtBBox = m_pFont->GetGlyphBBox(iGlyph);
+  absl::optional<FX_RECT> rtBBox = m_pFont->GetGlyphBBox(iGlyph);
   if (rtBBox.has_value())
     m_BBoxMap[wUnicode] = rtBBox.value();
 
   return rtBBox;
-}
-
-Optional<FX_RECT> CFGAS_GEFont::GetBBox() {
-  return m_pFont->GetBBox();
 }
 
 int32_t CFGAS_GEFont::GetGlyphIndex(wchar_t wUnicode) {
@@ -244,7 +239,7 @@ std::pair<int32_t, RetainPtr<CFGAS_GEFont>> CFGAS_GEFont::GetGlyphIndexAndFont(
   WideString wsFamily = GetFamilyName();
   RetainPtr<CFGAS_GEFont> pFont =
       pFontMgr->GetFontByUnicode(wUnicode, GetFontStyles(), wsFamily.c_str());
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   if (!pFont)
     pFont = pFontMgr->GetFontByUnicode(wUnicode, GetFontStyles(), nullptr);
 #endif

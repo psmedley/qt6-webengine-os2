@@ -1,8 +1,8 @@
 Name: TensorFlow Lite
 Short Name: tflite
 URL: https://github.com/tensorflow/tensorflow
-Version: 2.3.0
-Date: 2020/07/27
+Version: 551a50e768fc48db8e68356a575763278fa1b3b6
+Date: 2022/04/11
 License: Apache 2.0
 License File: LICENSE
 Security Critical: Yes

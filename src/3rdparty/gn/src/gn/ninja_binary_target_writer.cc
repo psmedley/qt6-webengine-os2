@@ -17,6 +17,7 @@
 #include "gn/ninja_utils.h"
 #include "gn/rsp_target_writer.h"
 #include "gn/settings.h"
+#include "gn/string_output_buffer.h"
 #include "gn/string_utils.h"
 #include "gn/substitution_writer.h"
 #include "gn/target.h"
@@ -57,12 +58,13 @@ void NinjaBinaryTargetWriter::Run() {
           target_->settings()->build_settings()->GetFullPath(SourceFile(
               target_->settings()->build_settings()->build_dir().value() +
               target_->label().name() + "_" + str_type + ".rsp")));
-      std::stringstream p_stream;
+      StringOutputBuffer storage;
+      std::ostream p_stream(&storage);
       const RspTargetWriter::Type& type = RspTargetWriter::strToType(str_type);
       RspTargetWriter p_writer(&writer, target_, type, p_stream);
       p_writer.Run();
       if (p_stream.tellp() != std::streampos(0))
-          WriteFileIfChanged(p_file, p_stream.str(), nullptr);
+        storage.WriteToFileIfChanged(p_file, nullptr);
     }
   }
 }
@@ -245,7 +247,7 @@ void NinjaBinaryTargetWriter::AddSourceSetFiles(
     for (const OutputFile& output : outputs) {
       SourceFile output_as_source =
           output.AsSourceFile(source_set->settings()->build_settings());
-      if (output_as_source.type() == SourceFile::SOURCE_O) {
+      if (output_as_source.IsObjectType()) {
         obj_files->push_back(output);
       }
     }
@@ -311,19 +313,24 @@ void NinjaBinaryTargetWriter::WriteCompilerBuildLine(
   out_ << std::endl;
 }
 
-void NinjaBinaryTargetWriter::WriteLinkerFlags(
+void NinjaBinaryTargetWriter::WriteCustomLinkerFlags(
     std::ostream& out,
-    const Tool* tool,
-    const SourceFile* optional_def_file) {
-  if (tool->AsC()) {
-    // First the ldflags from the target and its config.
-    RecursiveTargetConfigStringsToStream(target_, &ConfigValues::ldflags,
-                                       GetFlagOptions(), out);
-  }
+    const Tool* tool) {
 
-  // Followed by library search paths that have been recursively pushed
+  if (tool->AsC() || (tool->AsRust() && tool->AsRust()->MayLink())) {
+    // First the ldflags from the target and its config.
+    RecursiveTargetConfigStringsToStream(kRecursiveWriterKeepDuplicates,
+                                         target_, &ConfigValues::ldflags,
+                                         GetFlagOptions(), out);
+  }
+}
+
+void NinjaBinaryTargetWriter::WriteLibrarySearchPath(
+    std::ostream& out,
+    const Tool* tool) {
+  // Write library search paths that have been recursively pushed
   // through the dependency tree.
-  const OrderedSet<SourceDir> all_lib_dirs = target_->all_lib_dirs();
+  const UniqueVector<SourceDir>& all_lib_dirs = target_->all_lib_dirs();
   if (!all_lib_dirs.empty()) {
     // Since we're passing these on the command line to the linker and not
     // to Ninja, we need to do shell escaping.
@@ -350,6 +357,16 @@ void NinjaBinaryTargetWriter::WriteLinkerFlags(
                                      PathOutput::DIR_NO_LAST_SLASH);
     }
   }
+}
+
+void NinjaBinaryTargetWriter::WriteLinkerFlags(
+    std::ostream& out,
+    const Tool* tool,
+    const SourceFile* optional_def_file) {
+  // First any ldflags
+  WriteCustomLinkerFlags(out, tool);
+  // Then the library search path
+  WriteLibrarySearchPath(out, tool);
 
   if (optional_def_file) {
     out_ << " /DEF:";
@@ -359,15 +376,20 @@ void NinjaBinaryTargetWriter::WriteLinkerFlags(
 
 void NinjaBinaryTargetWriter::WriteLibs(std::ostream& out, const Tool* tool) {
   // Libraries that have been recursively pushed through the dependency tree.
+  // Since we're passing these on the command line to the linker and not
+  // to Ninja, we need to do shell escaping.
+  PathOutput lib_path_output(
+      path_output_.current_dir(), settings_->build_settings()->root_path_utf8(),
+      ESCAPE_NINJA_COMMAND);
   EscapeOptions lib_escape_opts;
   lib_escape_opts.mode = ESCAPE_NINJA_COMMAND;
-  const OrderedSet<LibFile> all_libs = target_->all_libs();
+  const UniqueVector<LibFile>& all_libs = target_->all_libs();
   for (size_t i = 0; i < all_libs.size(); i++) {
     const LibFile& lib_file = all_libs[i];
     const std::string& lib_value = lib_file.value();
     if (lib_file.is_source_file()) {
       out << " " << tool->linker_arg();
-      path_output_.WriteFile(out, lib_file.source_file());
+      lib_path_output.WriteFile(out, lib_file.source_file());
     } else {
       out << " " << tool->lib_switch();
       EscapeStringToStream(out, lib_value, lib_escape_opts);

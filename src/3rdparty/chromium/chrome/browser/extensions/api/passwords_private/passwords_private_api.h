@@ -314,6 +314,32 @@ class PasswordsPrivateRemoveInsecureCredentialFunction
   ResponseAction Run() override;
 };
 
+class PasswordsPrivateMuteInsecureCredentialFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.muteInsecureCredential",
+                             PASSWORDSPRIVATE_MUTEINSECURECREDENTIAL)
+
+ protected:
+  ~PasswordsPrivateMuteInsecureCredentialFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateUnmuteInsecureCredentialFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.unmuteInsecureCredential",
+                             PASSWORDSPRIVATE_UNMUTEINSECURECREDENTIAL)
+
+ protected:
+  ~PasswordsPrivateUnmuteInsecureCredentialFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
 class PasswordsPrivateStartPasswordCheckFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("passwordsPrivate.startPasswordCheck",
@@ -349,6 +375,42 @@ class PasswordsPrivateGetPasswordCheckStatusFunction
 
  protected:
   ~PasswordsPrivateGetPasswordCheckStatusFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateIsAccountStoreDefaultFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.isAccountStoreDefault",
+                             PASSWORDSPRIVATE_ISACCOUNTSTOREDEFAULT)
+
+ protected:
+  ~PasswordsPrivateIsAccountStoreDefaultFunction() override = default;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateGetUrlCollectionFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.getUrlCollection",
+                             PASSWORDSPRIVATE_GETURLCOLLECTION)
+
+ protected:
+  ~PasswordsPrivateGetUrlCollectionFunction() override = default;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateAddPasswordFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.addPassword",
+                             PASSWORDSPRIVATE_ADDPASSWORD)
+
+ protected:
+  ~PasswordsPrivateAddPasswordFunction() override = default;
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;

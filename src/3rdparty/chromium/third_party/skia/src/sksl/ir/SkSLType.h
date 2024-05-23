@@ -8,20 +8,18 @@
 #ifndef SKSL_TYPE
 #define SKSL_TYPE
 
-#include "include/core/SkStringView.h"
 #include "include/private/SkSLModifiers.h"
 #include "include/private/SkSLSymbol.h"
-#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/SkSLUtil.h"
 #include "src/sksl/spirv.h"
 #include <algorithm>
 #include <climits>
+#include <string_view>
 #include <vector>
 #include <memory>
 
 namespace SkSL {
 
-class BuiltinTypes;
 class Context;
 class SymbolTable;
 
@@ -58,21 +56,23 @@ struct CoercionCost {
  */
 class Type : public Symbol {
 public:
-    static constexpr Kind kSymbolKind = Kind::kType;
-    static constexpr int kMaxAbbrevLength = 3;
+    inline static constexpr Kind kSymbolKind = Kind::kType;
+    inline static constexpr int kMaxAbbrevLength = 3;
 
     struct Field {
-        Field(Modifiers modifiers, skstd::string_view name, const Type* type)
-        : fModifiers(modifiers)
+        Field(Position pos, Modifiers modifiers, std::string_view name, const Type* type)
+        : fPosition(pos)
+        , fModifiers(modifiers)
         , fName(name)
         , fType(std::move(type)) {}
 
-        String description() const {
-            return fType->displayName() + " " + fName + ";";
+        std::string description() const {
+            return fType->displayName() + " " + std::string(fName) + ";";
         }
 
+        Position fPosition;
         Modifiers fModifiers;
-        skstd::string_view fName;
+        std::string_view fName;
         const Type* fType;
     };
 
@@ -107,12 +107,16 @@ public:
     Type(const Type& other) = delete;
 
     /** Creates an array type. */
-    static constexpr int kUnsizedArray = -1;
-    static std::unique_ptr<Type> MakeArrayType(skstd::string_view name, const Type& componentType,
+    static std::unique_ptr<Type> MakeArrayType(std::string_view name, const Type& componentType,
                                                int columns);
 
     /** Converts a component type and a size (float, 10) into an array name ("float[10]"). */
-    String getArrayName(int arraySize) const;
+    std::string getArrayName(int arraySize) const;
+
+    /**
+     * Creates an alias which maps to another type.
+     */
+    static std::unique_ptr<Type> MakeAliasType(std::string_view name, const Type& targetType);
 
     /**
      * Create a generic type which maps to the listed types--e.g. $genType is a generic type which
@@ -125,7 +129,7 @@ public:
                                                  int8_t priority);
 
     /** Create a matrix type. */
-    static std::unique_ptr<Type> MakeMatrixType(const char* name, const char* abbrev,
+    static std::unique_ptr<Type> MakeMatrixType(std::string_view name, const char* abbrev,
                                                 const Type& componentType, int columns,
                                                 int8_t rows);
 
@@ -133,7 +137,7 @@ public:
     static std::unique_ptr<Type> MakeSamplerType(const char* name, const Type& textureType);
 
     /** Create a scalar type. */
-    static std::unique_ptr<Type> MakeScalarType(const char* name, const char* abbrev,
+    static std::unique_ptr<Type> MakeScalarType(std::string_view name, const char* abbrev,
                                                 Type::NumberKind numberKind, int8_t priority,
                                                 int8_t bitWidth);
 
@@ -144,8 +148,10 @@ public:
                                                  Type::TypeKind typeKind);
 
     /** Creates a struct type with the given fields. */
-    static std::unique_ptr<Type> MakeStructType(int offset, skstd::string_view name,
-                                                std::vector<Field> fields);
+    static std::unique_ptr<Type> MakeStructType(Position pos,
+                                                std::string_view name,
+                                                std::vector<Field> fields,
+                                                bool interfaceBlock = false);
 
     /** Create a texture type. */
     static std::unique_ptr<Type> MakeTextureType(const char* name, SpvDim_ dimensions,
@@ -153,7 +159,7 @@ public:
                                                  bool isMultisampled, bool isSampled);
 
     /** Create a vector type. */
-    static std::unique_ptr<Type> MakeVectorType(const char* name, const char* abbrev,
+    static std::unique_ptr<Type> MakeVectorType(std::string_view name, const char* abbrev,
                                                 const Type& componentType, int columns);
 
     template <typename T>
@@ -186,24 +192,33 @@ public:
         return !(this->isArray() || this->isStruct());
     }
 
-    String displayName() const {
-        return String(this->scalarTypeForLiteral().name());
+    std::string displayName() const {
+        return std::string(this->scalarTypeForLiteral().name());
     }
 
-    String description() const override {
+    std::string description() const override {
         return this->displayName();
     }
 
-    bool isPrivate() const {
-        return this->name().starts_with("$");
+    /** Returns true if the program supports this type. Strict ES2 programs can't use ES3 types. */
+    bool isAllowedInES2(const Context& context) const;
+
+    /** Returns true if this type is legal to use in a strict-ES2 program. */
+    virtual bool isAllowedInES2() const {
+        return true;
     }
 
-    bool operator==(const Type& other) const {
-        return this->name() == other.name();
+    /** Returns true if this type is either private, or contains a private field (recursively). */
+    virtual bool isPrivate() const;
+
+    /** If this is an alias, returns the underlying type, otherwise returns this. */
+    virtual const Type& resolve() const {
+        return *this;
     }
 
-    bool operator!=(const Type& other) const {
-        return this->name() != other.name();
+    /** Returns true if these types are equal after alias resolution. */
+    bool matches(const Type& other) const {
+        return this->resolve().name() == other.resolve().name();
     }
 
     /**
@@ -284,18 +299,16 @@ public:
 
     /**
      * Returns true if this is an "opaque type" (an external object which the shader references in
-     * some fashion), or void. https://www.khronos.org/opengl/wiki/Data_Type_(GLSL)#Opaque_types
+     * some fashion). https://www.khronos.org/opengl/wiki/Data_Type_(GLSL)#Opaque_types
      */
     bool isOpaque() const {
         switch (fTypeKind) {
             case TypeKind::kBlender:
             case TypeKind::kColorFilter:
-            case TypeKind::kOther:
             case TypeKind::kSampler:
             case TypeKind::kSeparateSampler:
             case TypeKind::kShader:
             case TypeKind::kTexture:
-            case TypeKind::kVoid:
                 return true;
             default:
                 return false;
@@ -381,41 +394,8 @@ public:
     /**
      * Returns the number of scalars needed to hold this type.
      */
-    size_t slotCount() const {
-        switch (this->typeKind()) {
-            case Type::TypeKind::kBlender:
-            case Type::TypeKind::kColorFilter:
-            case Type::TypeKind::kGeneric:
-            case Type::TypeKind::kOther:
-            case Type::TypeKind::kSampler:
-            case Type::TypeKind::kSeparateSampler:
-            case Type::TypeKind::kShader:
-            case Type::TypeKind::kTexture:
-            case Type::TypeKind::kVoid:
-                return 0;
-
-            case Type::TypeKind::kLiteral:
-            case Type::TypeKind::kScalar:
-                return 1;
-
-            case Type::TypeKind::kVector:
-                return this->columns();
-
-            case Type::TypeKind::kMatrix:
-                return this->columns() * this->rows();
-
-            case Type::TypeKind::kStruct: {
-                size_t slots = 0;
-                for (const Field& field : this->fields()) {
-                    slots += field.fType->slotCount();
-                }
-                return slots;
-            }
-            case Type::TypeKind::kArray:
-                SkASSERT(this->columns() > 0);
-                return this->columns() * this->componentType().slotCount();
-        }
-        SkUNREACHABLE;
+    virtual size_t slotCount() const {
+        return 0;
     }
 
     virtual const std::vector<Field>& fields() const {
@@ -476,6 +456,10 @@ public:
         return false;
     }
 
+    virtual bool isInterfaceBlock() const {
+        return false;
+    }
+
     // Is this type something that can be bound & sampled from an SkRuntimeEffect?
     // Includes types that represent stages of the Skia pipeline (colorFilter, shader, blender).
     bool isEffectChild() const {
@@ -509,6 +493,11 @@ public:
     bool isOrContainsArray() const;
 
     /**
+     * Returns true if this type is a struct that is too deeply nested.
+     */
+    bool isTooDeeplyNested() const;
+
+    /**
      * Returns the corresponding vector or matrix type with the specified number of columns and
      * rows.
      */
@@ -520,9 +509,9 @@ public:
      * don't make sense, e.g. `highp bool` or `mediump MyStruct`.
      */
     const Type* applyPrecisionQualifiers(const Context& context,
-                                         const Modifiers& modifiers,
+                                         Modifiers* modifiers,
                                          SymbolTable* symbols,
-                                         int offset) const;
+                                         Position pos) const;
 
     /**
      * Coerces the passed-in expression to this type. If the types are incompatible, reports an
@@ -534,16 +523,27 @@ public:
     /** Detects any IntLiterals in the expression which can't fit in this type. */
     bool checkForOutOfRangeLiteral(const Context& context, const Expression& expr) const;
 
+    /** Checks if `value` can fit in this type. The type must be scalar. */
+    bool checkForOutOfRangeLiteral(const Context& context, double value, Position pos) const;
+
+    /**
+     * Verifies that the expression is a valid constant array size for this type. Returns the array
+     * size, or zero if the expression isn't a valid literal value.
+     */
+    SKSL_INT convertArraySize(const Context& context, Position arrayPos,
+            std::unique_ptr<Expression> size) const;
+
 protected:
-    Type(skstd::string_view name, const char* abbrev, TypeKind kind, int offset = -1)
-        : INHERITED(offset, kSymbolKind, name)
+    Type(std::string_view name, const char* abbrev, TypeKind kind,
+            Position pos = Position())
+        : INHERITED(pos, kSymbolKind, name)
         , fTypeKind(kind) {
         SkASSERT(strlen(abbrev) <= kMaxAbbrevLength);
         strcpy(fAbbreviatedName, abbrev);
     }
 
 private:
-    friend class BuiltinTypes;
+    bool isTooDeeplyNested(int limit) const;
 
     using INHERITED = Symbol;
 

@@ -45,6 +45,8 @@ class ResourceFetcher;
 class ScriptElementBase;
 class Script;
 class ScriptResource;
+class ScriptWebBundle;
+class SpeculationRuleSet;
 class Modulator;
 
 class CORE_EXPORT ScriptLoader final : public GarbageCollected<ScriptLoader>,
@@ -69,6 +71,7 @@ class CORE_EXPORT ScriptLoader final : public GarbageCollected<ScriptLoader>,
     kModule,
     kImportMap,
     kSpeculationRules,
+    kWebBundle,
     kInvalid
   };
 
@@ -107,6 +110,7 @@ class CORE_EXPORT ScriptLoader final : public GarbageCollected<ScriptLoader>,
   void ChildrenChanged();
   void HandleSourceAttribute(const String& source_url);
   void HandleAsyncAttribute();
+  void Removed();
 
   void SetFetchDocWrittenScriptDeferIdle();
 
@@ -213,6 +217,13 @@ class CORE_EXPORT ScriptLoader final : public GarbageCollected<ScriptLoader>,
   // and thus to keep it on MemoryCache, even after script execution, as long
   // as ScriptLoader is alive. crbug.com/778799
   Member<Resource> resource_keep_alive_;
+
+  // This is created only for <script type=webbundle>, representing a webbundle
+  // mapping rule and its loader.
+  Member<ScriptWebBundle> script_web_bundle_;
+
+  // Speculation rule set registered by this script, if applicable.
+  Member<SpeculationRuleSet> speculation_rule_set_;
 };
 
 }  // namespace blink

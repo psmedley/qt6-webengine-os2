@@ -40,7 +40,6 @@
 //    * `absl::Span` has compiler-provided move and copy constructors and
 //      assignment. This is due to them being specified as `constexpr`, but that
 //      implies const in C++11.
-//    * `absl::Span` has no `element_type` typedef
 //    * A read-only `absl::Span<const T>` can be implicitly constructed from an
 //      initializer list.
 //    * `absl::Span` has no `bytes()`, `size_bytes()`, `as_bytes()`, or
@@ -170,6 +169,7 @@ class Span {
       typename std::enable_if<!std::is_const<T>::value, U>::type;
 
  public:
+  using element_type = T;
   using value_type = absl::remove_cv_t<T>;
   using pointer = T*;
   using const_pointer = const T*;
@@ -664,7 +664,8 @@ constexpr Span<T> MakeSpan(T* ptr, size_t size) noexcept {
 
 template <int&... ExplicitArgumentBarrier, typename T>
 Span<T> MakeSpan(T* begin, T* end) noexcept {
-  return ABSL_HARDENING_ASSERT(begin <= end), Span<T>(begin, end - begin);
+  return ABSL_HARDENING_ASSERT(begin <= end),
+         Span<T>(begin, static_cast<size_t>(end - begin));
 }
 
 template <int&... ExplicitArgumentBarrier, typename C>

@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
@@ -120,6 +120,9 @@ class PasswordEventObserver
   // The observer will only listen to events with the |event_name|.
   explicit PasswordEventObserver(const std::string& event_name);
 
+  PasswordEventObserver(const PasswordEventObserver&) = delete;
+  PasswordEventObserver& operator=(const PasswordEventObserver&) = delete;
+
   ~PasswordEventObserver() override;
 
   // Removes |event_args_| from |*this| and returns them.
@@ -134,8 +137,6 @@ class PasswordEventObserver
 
   // The arguments passed for the last observed event.
   base::Value event_args_;
-
-  DISALLOW_COPY_AND_ASSIGN(PasswordEventObserver);
 };
 
 PasswordEventObserver::PasswordEventObserver(const std::string& event_name)
@@ -169,11 +170,24 @@ password_manager::PasswordForm CreateSampleForm() {
   return form;
 }
 
+MATCHER_P(PasswordUiEntryDataEquals, expected, "") {
+  return testing::Value(expected.get().urls.link, arg.urls.link) &&
+         testing::Value(expected.get().username, arg.username) &&
+         testing::Value(expected.get().from_account_store,
+                        arg.from_account_store);
+}
+
 }  // namespace
 
 class PasswordsPrivateDelegateImplTest : public testing::Test {
  public:
   PasswordsPrivateDelegateImplTest();
+
+  PasswordsPrivateDelegateImplTest(const PasswordsPrivateDelegateImplTest&) =
+      delete;
+  PasswordsPrivateDelegateImplTest& operator=(
+      const PasswordsPrivateDelegateImplTest&) = delete;
+
   ~PasswordsPrivateDelegateImplTest() override;
 
   // Sets up a testing password store and fills it with |forms|.
@@ -188,17 +202,16 @@ class PasswordsPrivateDelegateImplTest : public testing::Test {
  protected:
   content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
-  extensions::TestEventRouter* event_router_ = nullptr;
+  raw_ptr<extensions::TestEventRouter> event_router_ = nullptr;
   scoped_refptr<TestPasswordStore> store_ =
       CreateAndUseTestPasswordStore(&profile_);
   scoped_refptr<TestPasswordStore> account_store_ =
       CreateAndUseTestAccountPasswordStore(&profile_);
-  ui::TestClipboard* test_clipboard_ =
+  raw_ptr<ui::TestClipboard> test_clipboard_ =
       ui::TestClipboard::CreateForCurrentThread();
 
  private:
   base::HistogramTester histogram_tester_;
-  DISALLOW_COPY_AND_ASSIGN(PasswordsPrivateDelegateImplTest);
 };
 
 PasswordsPrivateDelegateImplTest::PasswordsPrivateDelegateImplTest() {
@@ -326,6 +339,89 @@ TEST_F(PasswordsPrivateDelegateImplTest,
   EXPECT_EQ(first_frontend_id, second_frontend_id);
 }
 
+TEST_F(PasswordsPrivateDelegateImplTest, AddPassword) {
+  // This enables uses of TestWebContents.
+  content::RenderViewHostTestEnabler test_render_host_factories;
+  std::unique_ptr<content::WebContents> web_contents =
+      content::WebContentsTester::CreateTestWebContents(&profile_, nullptr);
+  auto* client =
+      MockPasswordManagerClient::CreateForWebContentsAndGet(web_contents.get());
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsOptedInForAccountStorage)
+      .WillByDefault(Return(false));
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+  // Spin the loop to allow PasswordStore tasks posted on the creation of
+  // |delegate| to be completed.
+  base::RunLoop().RunUntilIdle();
+
+  // Double check that the contents of the passwords list matches our
+  // expectation.
+  base::MockCallback<PasswordsPrivateDelegate::UiEntriesCallback> callback;
+  EXPECT_CALL(callback, Run(SizeIs(0)));
+  delegate.GetSavedPasswordsList(callback.Get());
+
+  EXPECT_TRUE(delegate.AddPassword("example1.com", u"username1", u"password1",
+                                   /*use_account_store=*/true,
+                                   web_contents.get()));
+  EXPECT_TRUE(delegate.AddPassword("http://example2.com/login?param=value",
+                                   /*username=*/u"", u"password2",
+                                   /*use_account_store=*/false,
+                                   web_contents.get()));
+  // Spin the loop to allow PasswordStore tasks posted when adding the
+  // password to be completed.
+  base::RunLoop().RunUntilIdle();
+
+  // Check that adding passwords got reflected in the passwords list.
+  api::passwords_private::PasswordUiEntry expected_entry1;
+  expected_entry1.urls.link = "https://example1.com/";
+  expected_entry1.username = "username1";
+  expected_entry1.from_account_store = true;
+  api::passwords_private::PasswordUiEntry expected_entry2;
+  expected_entry2.urls.link = "http://example2.com/login";
+  expected_entry2.username = "";
+  expected_entry2.from_account_store = false;
+  EXPECT_CALL(callback,
+              Run(testing::UnorderedElementsAre(
+                  PasswordUiEntryDataEquals(testing::ByRef(expected_entry1)),
+                  PasswordUiEntryDataEquals(testing::ByRef(expected_entry2)))));
+  delegate.GetSavedPasswordsList(callback.Get());
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest, AddPasswordUpdatesDefaultStore) {
+  // This enables uses of TestWebContents.
+  content::RenderViewHostTestEnabler test_render_host_factories;
+  std::unique_ptr<content::WebContents> web_contents =
+      content::WebContentsTester::CreateTestWebContents(&profile_, nullptr);
+  auto* client =
+      MockPasswordManagerClient::CreateForWebContentsAndGet(web_contents.get());
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+
+  // NOT update default store if not opted-in for account storage.
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsOptedInForAccountStorage)
+      .WillByDefault(Return(false));
+  EXPECT_CALL(*(client->GetPasswordFeatureManager()), SetDefaultPasswordStore)
+      .Times(0);
+  EXPECT_TRUE(delegate.AddPassword("example1.com", u"username1", u"password1",
+                                   /*use_account_store=*/false,
+                                   web_contents.get()));
+
+  // Updates the default store if opted-in and operation succeeded.
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsOptedInForAccountStorage)
+      .WillByDefault(Return(true));
+  EXPECT_CALL(*(client->GetPasswordFeatureManager()),
+              SetDefaultPasswordStore(
+                  password_manager::PasswordForm::Store::kAccountStore));
+  EXPECT_TRUE(delegate.AddPassword("example2.com", u"username2", u"password2",
+                                   /*use_account_store=*/true,
+                                   web_contents.get()));
+
+  // NOT update default store if opted-in, but operation failed.
+  EXPECT_CALL(*(client->GetPasswordFeatureManager()), SetDefaultPasswordStore)
+      .Times(0);
+  EXPECT_FALSE(delegate.AddPassword("", u"", u"",
+                                    /*use_account_store=*/false,
+                                    web_contents.get()));
+}
+
 TEST_F(PasswordsPrivateDelegateImplTest, ChangeSavedPassword) {
   password_manager::PasswordForm sample_form = CreateSampleForm();
   SetUpPasswordStore({sample_form});
@@ -337,34 +433,76 @@ TEST_F(PasswordsPrivateDelegateImplTest, ChangeSavedPassword) {
 
   // Double check that the contents of the passwords list matches our
   // expectation.
-  bool got_passwords = false;
-  delegate.GetSavedPasswordsList(base::BindLambdaForTesting(
-      [&](const PasswordsPrivateDelegate::UiEntries& password_list) {
-        got_passwords = true;
-        ASSERT_EQ(1u, password_list.size());
+  base::MockCallback<PasswordsPrivateDelegate::UiEntriesCallback> callback;
+  EXPECT_CALL(callback, Run(SizeIs(1)))
+      .WillOnce([&](const PasswordsPrivateDelegate::UiEntries& passwords) {
         EXPECT_EQ(sample_form.username_value,
-                  base::UTF8ToUTF16(password_list[0].username));
-      }));
-  EXPECT_TRUE(got_passwords);
+                  base::UTF8ToUTF16(passwords[0].username));
+      });
+  delegate.GetSavedPasswordsList(callback.Get());
   int sample_form_id = delegate.GetPasswordIdGeneratorForTesting().GenerateId(
       password_manager::CreateSortKey(sample_form));
 
-  EXPECT_TRUE(
-      delegate.ChangeSavedPassword({sample_form_id}, u"new_user", u"new_pass"));
+  api::passwords_private::ChangeSavedPasswordParams params;
+  params.password = "new_pass";
+  params.username = "new_user";
+  EXPECT_TRUE(delegate.ChangeSavedPassword({sample_form_id}, params));
 
   // Spin the loop to allow PasswordStore tasks posted when changing the
   // password to be completed.
   base::RunLoop().RunUntilIdle();
 
   // Check that the changing the password got reflected in the passwords list.
-  got_passwords = false;
-  delegate.GetSavedPasswordsList(base::BindLambdaForTesting(
-      [&](const PasswordsPrivateDelegate::UiEntries& password_list) {
-        got_passwords = true;
-        ASSERT_EQ(1u, password_list.size());
-        EXPECT_EQ("new_user", password_list[0].username);
-      }));
-  EXPECT_TRUE(got_passwords);
+  EXPECT_CALL(callback, Run(SizeIs(1)))
+      .WillOnce([](const PasswordsPrivateDelegate::UiEntries& passwords) {
+        EXPECT_EQ("new_user", passwords[0].username);
+        EXPECT_EQ("", passwords[0].password_note);
+      });
+  delegate.GetSavedPasswordsList(callback.Get());
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest, ChangeSavedPasswordWithNote) {
+  password_manager::PasswordForm sample_form = CreateSampleForm();
+  password_manager::PasswordNote note(u"example note", base::Time::Now());
+  sample_form.note = note;
+  SetUpPasswordStore({sample_form});
+
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+  // Spin the loop to allow PasswordStore tasks posted on the creation of
+  // |delegate| to be completed.
+  base::RunLoop().RunUntilIdle();
+
+  // Double check that the contents of the passwords list matches our
+  // expectation.
+  base::MockCallback<PasswordsPrivateDelegate::UiEntriesCallback> callback;
+  EXPECT_CALL(callback, Run(SizeIs(1)))
+      .WillOnce([&](const PasswordsPrivateDelegate::UiEntries& passwords) {
+        EXPECT_EQ(sample_form.username_value,
+                  base::UTF8ToUTF16(passwords[0].username));
+        EXPECT_EQ(sample_form.note.value,
+                  base::UTF8ToUTF16(passwords[0].password_note));
+      });
+  delegate.GetSavedPasswordsList(callback.Get());
+  int sample_form_id = delegate.GetPasswordIdGeneratorForTesting().GenerateId(
+      password_manager::CreateSortKey(sample_form));
+
+  api::passwords_private::ChangeSavedPasswordParams params;
+  params.password = "new_pass";
+  params.username = "new_user";
+  params.note = std::make_unique<std::string>("new note");
+  EXPECT_TRUE(delegate.ChangeSavedPassword({sample_form_id}, params));
+
+  // Spin the loop to allow PasswordStore tasks posted when changing the
+  // password to be completed.
+  base::RunLoop().RunUntilIdle();
+
+  // Check that the changing the password got reflected in the passwords
+  EXPECT_CALL(callback, Run(SizeIs(1)))
+      .WillOnce([](const PasswordsPrivateDelegate::UiEntries& passwords) {
+        EXPECT_EQ("new_user", passwords[0].username);
+        EXPECT_EQ("new note", passwords[0].password_note);
+      });
+  delegate.GetSavedPasswordsList(callback.Get());
 }
 
 // Checking callback result of RequestPlaintextPassword with reason Copy.
@@ -379,8 +517,10 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestCopyPasswordCallbackResult) {
   MockReauthCallback callback;
   delegate.set_os_reauth_call(callback.Get());
 
-  EXPECT_CALL(callback, Run(ReauthPurpose::COPY_PASSWORD))
-      .WillOnce(Return(true));
+  EXPECT_CALL(callback, Run(ReauthPurpose::COPY_PASSWORD, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(true); }));
 
   MockPlaintextPasswordCallback password_callback;
   EXPECT_CALL(password_callback, Run(Eq(std::u16string())));
@@ -450,8 +590,10 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestCopyPasswordCallbackResultFail) {
   MockReauthCallback callback;
   delegate.set_os_reauth_call(callback.Get());
 
-  EXPECT_CALL(callback, Run(ReauthPurpose::COPY_PASSWORD))
-      .WillOnce(Return(false));
+  EXPECT_CALL(callback, Run(ReauthPurpose::COPY_PASSWORD, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(false); }));
 
   base::Time before_call = test_clipboard_->GetLastModifiedTime();
 
@@ -482,8 +624,10 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestPassedReauthOnView) {
   MockReauthCallback callback;
   delegate.set_os_reauth_call(callback.Get());
 
-  EXPECT_CALL(callback, Run(ReauthPurpose::VIEW_PASSWORD))
-      .WillOnce(Return(true));
+  EXPECT_CALL(callback, Run(ReauthPurpose::VIEW_PASSWORD, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(true); }));
 
   MockPlaintextPasswordCallback password_callback;
   EXPECT_CALL(password_callback, Run(Eq(u"test")));
@@ -507,8 +651,10 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestFailedReauthOnView) {
   MockReauthCallback callback;
   delegate.set_os_reauth_call(callback.Get());
 
-  EXPECT_CALL(callback, Run(ReauthPurpose::VIEW_PASSWORD))
-      .WillOnce(Return(false));
+  EXPECT_CALL(callback, Run(ReauthPurpose::VIEW_PASSWORD, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(false); }));
 
   MockPlaintextPasswordCallback password_callback;
   EXPECT_CALL(password_callback, Run(Eq(absl::nullopt)));
@@ -535,11 +681,17 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestReauthOnExport) {
 
   EXPECT_CALL(mock_accepted, Run(std::string())).Times(2);
 
-  EXPECT_CALL(callback, Run(ReauthPurpose::EXPORT)).WillOnce(Return(true));
+  EXPECT_CALL(callback, Run(ReauthPurpose::EXPORT, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(true); }));
   delegate.ExportPasswords(mock_accepted.Get(), nullptr);
 
   // Export should ignore previous reauthentication results.
-  EXPECT_CALL(callback, Run(ReauthPurpose::EXPORT)).WillOnce(Return(true));
+  EXPECT_CALL(callback, Run(ReauthPurpose::EXPORT, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(true); }));
   delegate.ExportPasswords(mock_accepted.Get(), nullptr);
 }
 
@@ -558,7 +710,10 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestReauthFailedOnExport) {
   MockReauthCallback callback;
   delegate.set_os_reauth_call(callback.Get());
 
-  EXPECT_CALL(callback, Run(ReauthPurpose::EXPORT)).WillOnce(Return(false));
+  EXPECT_CALL(callback, Run(ReauthPurpose::EXPORT, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(false); }));
   delegate.ExportPasswords(mock_accepted.Get(), nullptr);
 }
 
@@ -575,8 +730,11 @@ TEST_F(PasswordsPrivateDelegateImplTest,
       PasswordsPrivateDelegate::PlaintextInsecurePasswordCallback>
       credential_callback;
 
-  EXPECT_CALL(reauth_callback, Run(ReauthPurpose::VIEW_PASSWORD))
-      .WillOnce(Return(false));
+  EXPECT_CALL(reauth_callback, Run(ReauthPurpose::VIEW_PASSWORD, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(false); }));
+
   EXPECT_CALL(credential_callback, Run(Eq(absl::nullopt)));
 
   delegate.GetPlaintextInsecurePassword(
@@ -610,8 +768,10 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestReauthOnGetPlaintextCompPassword) {
       credential_callback;
 
   absl::optional<api::passwords_private::InsecureCredential> opt_credential;
-  EXPECT_CALL(reauth_callback, Run(ReauthPurpose::VIEW_PASSWORD))
-      .WillOnce(Return(true));
+  EXPECT_CALL(reauth_callback, Run(ReauthPurpose::VIEW_PASSWORD, _))
+      .WillOnce(testing::WithArg<1>(
+          [&](password_manager::PasswordAccessAuthenticator::AuthResultCallback
+                  callback) { std::move(callback).Run(true); }));
   EXPECT_CALL(credential_callback, Run).WillOnce(MoveArg(&opt_credential));
 
   delegate.GetPlaintextInsecurePassword(
@@ -622,6 +782,76 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestReauthOnGetPlaintextCompPassword) {
   EXPECT_EQ(form.signon_realm, opt_credential->signon_realm);
   EXPECT_EQ(form.username_value, base::UTF8ToUTF16(opt_credential->username));
   EXPECT_EQ(form.password_value, base::UTF8ToUTF16(*opt_credential->password));
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest,
+       GetUrlCollectionValueWithSchemeWhenIpAddress) {
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+  const absl::optional<api::passwords_private::UrlCollection> urls =
+      delegate.GetUrlCollection("127.0.0.1");
+  EXPECT_TRUE(urls.has_value());
+  EXPECT_EQ("127.0.0.1", urls.value().shown);
+  EXPECT_EQ("http://127.0.0.1/", urls.value().origin);
+  EXPECT_EQ("http://127.0.0.1/", urls.value().link);
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest,
+       GetUrlCollectionValueWithSchemeWhenWebAddress) {
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+  const absl::optional<api::passwords_private::UrlCollection> urls =
+      delegate.GetUrlCollection("example.com/login");
+  EXPECT_TRUE(urls.has_value());
+  EXPECT_EQ("example.com", urls.value().shown);
+  EXPECT_EQ("https://example.com/", urls.value().origin);
+  EXPECT_EQ("https://example.com/login", urls.value().link);
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest,
+       GetUrlCollectionStrippedValueWhenFullUrl) {
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+  const absl::optional<api::passwords_private::UrlCollection> urls =
+      delegate.GetUrlCollection(
+          "http://username:password@example.com/login?param=value#ref");
+  EXPECT_TRUE(urls.has_value());
+  EXPECT_EQ("example.com", urls.value().shown);
+  EXPECT_EQ("http://example.com/", urls.value().origin);
+  EXPECT_EQ("http://example.com/login", urls.value().link);
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest,
+       GetUrlCollectionNoValueWhenUnsupportedScheme) {
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+  const absl::optional<api::passwords_private::UrlCollection> urls =
+      delegate.GetUrlCollection("scheme://unsupported");
+  EXPECT_FALSE(urls.has_value());
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest,
+       GetUrlCollectionNoValueWhenInvalidUrl) {
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+  const absl::optional<api::passwords_private::UrlCollection> urls =
+      delegate.GetUrlCollection("https://;/invalid");
+  EXPECT_FALSE(urls.has_value());
+}
+
+TEST_F(PasswordsPrivateDelegateImplTest, IsAccountStoreDefault) {
+  // This enables uses of TestWebContents.
+  content::RenderViewHostTestEnabler test_render_host_factories;
+  std::unique_ptr<content::WebContents> web_contents =
+      content::WebContentsTester::CreateTestWebContents(&profile_, nullptr);
+  auto* client =
+      MockPasswordManagerClient::CreateForWebContentsAndGet(web_contents.get());
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsOptedInForAccountStorage)
+      .WillByDefault(Return(true));
+  PasswordsPrivateDelegateImpl delegate(&profile_);
+
+  EXPECT_CALL(*(client->GetPasswordFeatureManager()), GetDefaultPasswordStore)
+      .WillOnce(Return(password_manager::PasswordForm::Store::kAccountStore));
+  EXPECT_TRUE(delegate.IsAccountStoreDefault(web_contents.get()));
+
+  EXPECT_CALL(*(client->GetPasswordFeatureManager()), GetDefaultPasswordStore)
+      .WillOnce(Return(password_manager::PasswordForm::Store::kProfileStore));
+  EXPECT_FALSE(delegate.IsAccountStoreDefault(web_contents.get()));
 }
 
 }  // namespace extensions

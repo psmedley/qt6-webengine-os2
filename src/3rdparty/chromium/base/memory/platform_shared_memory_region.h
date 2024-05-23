@@ -5,29 +5,14 @@
 #ifndef BASE_MEMORY_PLATFORM_SHARED_MEMORY_REGION_H_
 #define BASE_MEMORY_PLATFORM_SHARED_MEMORY_REGION_H_
 
-#include "base/compiler_specific.h"
+#include "base/base_export.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/platform_shared_memory_handle.h"
+#include "base/memory/platform_shared_memory_mapper.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 
-#if defined(OS_MAC)
-#include <mach/mach.h>
-#include "base/mac/scoped_mach_port.h"
-#elif defined(OS_FUCHSIA)
-#include <lib/zx/vmo.h>
-#elif defined(OS_WIN)
-#include "base/win/scoped_handle.h"
-#include "base/win/windows_types.h"
-#elif defined(OS_OS2)
-#include "base/os2/scoped_shmem_handle.h"
-#elif defined(OS_POSIX)
-#include <sys/types.h>
-#include "base/file_descriptor_posix.h"
-#include "base/files/scoped_file.h"
-#endif
-
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 namespace content {
 class SandboxIPCHandler;
 }
@@ -35,32 +20,6 @@ class SandboxIPCHandler;
 
 namespace base {
 namespace subtle {
-
-#if defined(OS_POSIX) && !defined(OS_MAC) && !defined(OS_ANDROID) && !defined(OS_OS2)
-// Helper structs to keep two descriptors on POSIX. It's needed to support
-// ConvertToReadOnly().
-struct BASE_EXPORT FDPair {
-  // The main shared memory descriptor that is used for mapping. May be either
-  // writable or read-only, depending on region's mode.
-  int fd;
-  // The read-only descriptor, valid only in kWritable mode. Replaces |fd| when
-  // a region is converted to read-only.
-  int readonly_fd;
-};
-
-struct BASE_EXPORT ScopedFDPair {
-  ScopedFDPair();
-  ScopedFDPair(ScopedFD in_fd, ScopedFD in_readonly_fd);
-  ScopedFDPair(ScopedFDPair&&);
-  ScopedFDPair& operator=(ScopedFDPair&&);
-  ~ScopedFDPair();
-
-  FDPair get() const;
-
-  ScopedFD fd;
-  ScopedFD readonly_fd;
-};
-#endif
 
 // Implementation class for shared memory regions.
 //
@@ -120,7 +79,7 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
     kMaxValue = GET_SHMEM_TEMP_DIR_FAILURE
   };
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Structure to limit access to executable region creation.
   struct ExecutableRegion {
    private:
@@ -140,27 +99,6 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   };
 #endif
 
-// Platform-specific shared memory type used by this class.
-#if defined(OS_MAC)
-  using PlatformHandle = mach_port_t;
-  using ScopedPlatformHandle = mac::ScopedMachSendRight;
-#elif defined(OS_FUCHSIA)
-  using PlatformHandle = zx::unowned_vmo;
-  using ScopedPlatformHandle = zx::vmo;
-#elif defined(OS_WIN)
-  using PlatformHandle = HANDLE;
-  using ScopedPlatformHandle = win::ScopedHandle;
-#elif defined(OS_ANDROID)
-  using PlatformHandle = int;
-  using ScopedPlatformHandle = ScopedFD;
-#elif defined(OS_OS2)
-  using PlatformHandle = SHMEM;
-  using ScopedPlatformHandle = os2::ScopedShmemHandle;
-#else
-  using PlatformHandle = FDPair;
-  using ScopedPlatformHandle = ScopedFDPair;
-#endif
-
   // The minimum alignment in bytes that any mapped address produced by Map()
   // and MapAt() is guaranteed to have.
   enum { kMapMinimumAlignment = 32 };
@@ -177,11 +115,12 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   // actual region size as allocated by the kernel.
   // Closes the |handle| and returns an invalid instance if passed parameters
   // are invalid.
-  static PlatformSharedMemoryRegion Take(ScopedPlatformHandle handle,
-                                         Mode mode,
-                                         size_t size,
-                                         const UnguessableToken& guid);
-#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MAC) && !defined(OS_OS2)
+  static PlatformSharedMemoryRegion Take(
+      ScopedPlatformSharedMemoryHandle handle,
+      Mode mode,
+      size_t size,
+      const UnguessableToken& guid);
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_OS2)
   // Specialized version of Take() for POSIX that takes only one file descriptor
   // instead of pair. Cannot be used with kWritable |mode|.
   static PlatformSharedMemoryRegion Take(ScopedFD handle,
@@ -197,6 +136,9 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   // Move operations are allowed.
   PlatformSharedMemoryRegion(PlatformSharedMemoryRegion&&);
   PlatformSharedMemoryRegion& operator=(PlatformSharedMemoryRegion&&);
+  PlatformSharedMemoryRegion(const PlatformSharedMemoryRegion&) = delete;
+  PlatformSharedMemoryRegion& operator=(const PlatformSharedMemoryRegion&) =
+      delete;
 
   // Destructor closes the platform handle. Does nothing if the handle is
   // invalid.
@@ -206,11 +148,11 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   // becomes invalid. It's the responsibility of the caller to close the
   // handle. If the current instance is invalid, ScopedPlatformHandle will also
   // be invalid.
-  ScopedPlatformHandle PassPlatformHandle() WARN_UNUSED_RESULT;
+  [[nodiscard]] ScopedPlatformSharedMemoryHandle PassPlatformHandle();
 
   // Returns the platform handle. The current instance keeps ownership of this
   // handle.
-  PlatformHandle GetPlatformHandle() const;
+  PlatformSharedMemoryHandle GetPlatformHandle() const;
 
   // Whether the platform handle is valid.
   bool IsValid() const;
@@ -227,13 +169,13 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   // kWritable mode, all other modes will CHECK-fail. The object will have
   // kReadOnly mode after this call on success.
   bool ConvertToReadOnly();
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // Same as above, but |mapped_addr| is used as a hint to avoid additional
   // mapping of the memory object.
   // |mapped_addr| must be mapped location of |memory_object_|. If the location
   // is unknown, |mapped_addr| should be |nullptr|.
   bool ConvertToReadOnly(void* mapped_addr);
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
   // Converts the region to unsafe. Returns whether the operation succeeded.
   // Makes the current instance invalid on failure. Can be called only in
@@ -249,7 +191,7 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   // and leaves output parameters in unspecified state otherwise. The mapped
   // address is guaranteed to have an alignment of at least
   // |kMapMinimumAlignment|.
-  bool MapAt(off_t offset,
+  bool MapAt(uint64_t offset,
              size_t size,
              void** memory,
              size_t* mapped_size) const;
@@ -267,33 +209,26 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
                            CheckPlatformHandlePermissionsCorrespondToMode);
   static PlatformSharedMemoryRegion Create(Mode mode,
                                            size_t size
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
                                            ,
                                            bool executable = false
 #endif
   );
 
   static bool CheckPlatformHandlePermissionsCorrespondToMode(
-      PlatformHandle handle,
+      PlatformSharedMemoryHandle handle,
       Mode mode,
       size_t size);
 
-  PlatformSharedMemoryRegion(ScopedPlatformHandle handle,
+  PlatformSharedMemoryRegion(ScopedPlatformSharedMemoryHandle handle,
                              Mode mode,
                              size_t size,
                              const UnguessableToken& guid);
 
-  bool MapAtInternal(off_t offset,
-                     size_t size,
-                     void** memory,
-                     size_t* mapped_size) const;
-
-  ScopedPlatformHandle handle_;
+  ScopedPlatformSharedMemoryHandle handle_;
   Mode mode_ = Mode::kReadOnly;
   size_t size_ = 0;
   UnguessableToken guid_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformSharedMemoryRegion);
 };
 
 }  // namespace subtle

@@ -135,15 +135,23 @@ class BLINK_COMMON_EXPORT Manifest {
   // See ManifestLaunchHandler for class comments.
   struct BLINK_COMMON_EXPORT LaunchHandler {
     using RouteTo = mojom::ManifestLaunchHandler_RouteTo;
-    using NavigateExistingClient =
-        mojom::ManifestLaunchHandler_NavigateExistingClient;
 
     bool operator==(const LaunchHandler& other) const;
     bool operator!=(const LaunchHandler& other) const;
 
     RouteTo route_to = RouteTo::kAuto;
-    NavigateExistingClient navigate_existing_client =
-        NavigateExistingClient::kAlways;
+  };
+
+  // Structure containing translations for the translatable manifest fields.
+  struct BLINK_COMMON_EXPORT TranslationItem {
+    TranslationItem();
+    ~TranslationItem();
+
+    bool operator==(const TranslationItem& other) const;
+
+    absl::optional<std::string> name;
+    absl::optional<std::string> short_name;
+    absl::optional<std::string> description;
   };
 };
 

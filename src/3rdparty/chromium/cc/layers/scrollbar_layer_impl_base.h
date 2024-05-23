@@ -6,6 +6,7 @@
 #define CC_LAYERS_SCROLLBAR_LAYER_IMPL_BASE_H_
 
 #include "base/containers/flat_set.h"
+#include "base/gtest_prod_util.h"
 #include "cc/cc_export.h"
 #include "cc/input/scrollbar.h"
 #include "cc/layers/layer.h"
@@ -42,7 +43,7 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
   }
 
   ScrollbarOrientation orientation() const { return orientation_; }
-  bool is_left_side_vertical_scrollbar() {
+  bool is_left_side_vertical_scrollbar() const {
     return is_left_side_vertical_scrollbar_;
   }
 

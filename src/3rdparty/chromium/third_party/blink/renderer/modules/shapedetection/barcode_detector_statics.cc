@@ -88,7 +88,7 @@ void BarcodeDetectorStatics::OnEnumerateSupportedFormats(
   results.ReserveInitialCapacity(results.size());
   for (const auto& format : formats)
     results.push_back(BarcodeDetector::BarcodeFormatToString(format));
-  if (IdentifiabilityStudySettings::Get()->IsWebFeatureAllowed(
+  if (IdentifiabilityStudySettings::Get()->ShouldSampleWebFeature(
           WebFeature::kBarcodeDetector_GetSupportedFormats)) {
     IdentifiableTokenBuilder builder;
     for (const auto& format_string : results)
@@ -96,7 +96,7 @@ void BarcodeDetectorStatics::OnEnumerateSupportedFormats(
 
     ExecutionContext* context = GetSupplementable();
     IdentifiabilityMetricBuilder(context->UkmSourceID())
-        .SetWebfeature(WebFeature::kBarcodeDetector_GetSupportedFormats,
+        .AddWebFeature(WebFeature::kBarcodeDetector_GetSupportedFormats,
                        builder.GetToken())
         .Record(context->UkmRecorder());
   }

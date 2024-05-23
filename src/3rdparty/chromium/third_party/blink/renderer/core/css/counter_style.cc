@@ -29,6 +29,7 @@
 
 #include "third_party/blink/renderer/core/css/counter_style.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/css/counter_style_map.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
@@ -49,6 +50,14 @@ namespace {
 // that would be longer than 60 codepoints. Since WTF::String may use UTF-16, we
 // limit string length at 120.
 const wtf_size_t kCounterLengthLimit = 120;
+
+const CounterStyle& GetDisc() {
+  const CounterStyle* disc =
+      CounterStyleMap::GetUACounterStyleMap()->FindCounterStyleAcrossScopes(
+          "disc");
+  DCHECK(disc);
+  return *disc;
+}
 
 bool HasSymbols(CounterStyleSystem system) {
   switch (system) {
@@ -417,7 +426,7 @@ String HebrewAlgorithmUnder1000(unsigned number) {
     if (unsigned ones = number % 10)
       letters.Append(static_cast<UChar>(1487 + ones));
   }
-  return letters.ToString();
+  return letters.ReleaseString();
 }
 
 String HebrewAlgorithm(unsigned number) {
@@ -477,7 +486,7 @@ String ArmenianAlgorithmUnder10000(unsigned number,
       letters.Append(static_cast<UChar>(0x0302));
   }
 
-  return letters.ToString();
+  return letters.ReleaseString();
 }
 
 String ArmenianAlgorithm(unsigned number, bool upper) {
@@ -844,15 +853,10 @@ String CounterStyle::GenerateRepresentation(int value) const {
 
   wtf_size_t initial_length = NumGraphemeClusters(initial_representation);
 
-  // TODO(crbug.com/687225): Spec requires us to further increment
-  // |initial_length| by the length of the negative sign, but no current
-  // implementation is doing that. For backward compatibility, we don't do that
-  // for now. See https://github.com/w3c/csswg-drafts/issues/5906 for details.
-  //
-  // if (NeedsNegativeSign(value)) {
-  //  initial_length += NumGraphemeClusters(negative_prefix_);
-  //  initial_length += NumGraphemeClusters(negative_suffix_);
-  // }
+  if (NeedsNegativeSign(value)) {
+    initial_length += NumGraphemeClusters(negative_prefix_);
+    initial_length += NumGraphemeClusters(negative_suffix_);
+  }
 
   wtf_size_t pad_copies =
       pad_length_ > initial_length ? pad_length_ - initial_length : 0;
@@ -865,7 +869,7 @@ String CounterStyle::GenerateRepresentation(int value) const {
   result.Append(initial_representation);
   if (NeedsNegativeSign(value))
     result.Append(negative_suffix_);
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 String CounterStyle::GenerateInitialRepresentation(int value) const {
@@ -931,7 +935,7 @@ String CounterStyle::IndexesToString(
   StringBuilder result;
   for (wtf_size_t index : symbol_indexes)
     result.Append(symbols_[index]);
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 void CounterStyle::TraverseAndMarkDirtyIfNeeded(
@@ -960,6 +964,83 @@ void CounterStyle::TraverseAndMarkDirtyIfNeeded(
       SetIsDirty();
       return;
     }
+  }
+}
+
+CounterStyleSpeakAs CounterStyle::EffectiveSpeakAs() const {
+  switch (speak_as_) {
+    case CounterStyleSpeakAs::kBullets:
+    case CounterStyleSpeakAs::kNumbers:
+    case CounterStyleSpeakAs::kWords:
+      return speak_as_;
+    case CounterStyleSpeakAs::kReference:
+      return GetSpeakAsStyle().EffectiveSpeakAs();
+    case CounterStyleSpeakAs::kAuto:
+      switch (system_) {
+        case CounterStyleSystem::kCyclic:
+          return CounterStyleSpeakAs::kBullets;
+        case CounterStyleSystem::kAlphabetic:
+          // Spec requires 'spell-out', which we don't support. Use 'words'
+          // instead as the best effort, and also to align with Firefox.
+          return CounterStyleSpeakAs::kWords;
+        case CounterStyleSystem::kFixed:
+        case CounterStyleSystem::kSymbolic:
+        case CounterStyleSystem::kNumeric:
+        case CounterStyleSystem::kAdditive:
+        case CounterStyleSystem::kHebrew:
+        case CounterStyleSystem::kLowerArmenian:
+        case CounterStyleSystem::kUpperArmenian:
+        case CounterStyleSystem::kSimpChineseInformal:
+        case CounterStyleSystem::kSimpChineseFormal:
+        case CounterStyleSystem::kTradChineseInformal:
+        case CounterStyleSystem::kTradChineseFormal:
+        case CounterStyleSystem::kKoreanHangulFormal:
+        case CounterStyleSystem::kKoreanHanjaInformal:
+        case CounterStyleSystem::kKoreanHanjaFormal:
+        case CounterStyleSystem::kEthiopicNumeric:
+          return CounterStyleSpeakAs::kNumbers;
+        case CounterStyleSystem::kUnresolvedExtends:
+          NOTREACHED();
+          return CounterStyleSpeakAs::kNumbers;
+      }
+  }
+}
+
+String CounterStyle::GenerateTextAlternative(int value) const {
+  if (!RuntimeEnabledFeatures::CSSAtRuleCounterStyleSpeakAsDescriptorEnabled())
+    return GenerateRepresentationWithPrefixAndSuffix(value);
+
+  String text_without_prefix_suffix =
+      GenerateTextAlternativeWithoutPrefixSuffix(value);
+
+  // 'bullets' requires "a UA-defined phrase or audio cue", so we cannot use
+  // custom prefix or suffix. Use the suffix of the predefined symbolic
+  // styles instead.
+  if (EffectiveSpeakAs() == CounterStyleSpeakAs::kBullets)
+    return text_without_prefix_suffix + " ";
+
+  return prefix_ + text_without_prefix_suffix + suffix_;
+}
+
+String CounterStyle::GenerateTextAlternativeWithoutPrefixSuffix(
+    int value) const {
+  if (speak_as_ == CounterStyleSpeakAs::kReference) {
+    return GetSpeakAsStyle().GenerateTextAlternativeWithoutPrefixSuffix(value);
+  }
+
+  switch (EffectiveSpeakAs()) {
+    case CounterStyleSpeakAs::kNumbers:
+      return GetDecimal().GenerateRepresentation(value);
+    case CounterStyleSpeakAs::kBullets:
+      if (IsPredefinedSymbolMarker())
+        return GenerateRepresentation(value);
+      return GetDisc().GenerateRepresentation(value);
+    case CounterStyleSpeakAs::kWords:
+      return GenerateRepresentation(value);
+    case CounterStyleSpeakAs::kAuto:
+    case CounterStyleSpeakAs::kReference:
+      NOTREACHED();
+      return String();
   }
 }
 

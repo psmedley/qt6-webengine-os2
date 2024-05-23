@@ -7,10 +7,11 @@
 
 #include "base/scoped_observation.h"
 #include "content/browser/prerender/prerender_host.h"
-#include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/public/browser/navigation_throttle.h"
 
 namespace content {
+
+class FrameTreeNode;
 
 // PrerenderSubframeNavigationThrottle defers cross-origin subframe loading
 // during the main frame is in a prerendered state.
@@ -41,7 +42,10 @@ class PrerenderSubframeNavigationThrottle : public NavigationThrottle,
   void DidFinishNavigation(NavigationHandle* nav_handle) override;
 
   ThrottleCheckResult WillStartOrRedirectRequest();
-  void DeferCrossOriginSubframeNavigation(FrameTreeNode* frame_tree_node);
+
+  // Called when this throttle defers a navigation. Observes the PrerenderHost
+  // so that the throttle can resume the navigation upon activation.
+  void DeferCrossOriginSubframeNavigation(const FrameTreeNode& frame_tree_node);
 
   bool is_deferred_ = false;
   const int prerender_root_ftn_id_;

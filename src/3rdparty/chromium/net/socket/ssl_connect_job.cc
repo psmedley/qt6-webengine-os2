@@ -14,21 +14,23 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
+#include "net/base/connection_endpoint_metadata.h"
 #include "net/base/features.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/base/trace_constants.h"
 #include "net/base/url_util.h"
 #include "net/cert/x509_util.h"
-#include "net/http/http_proxy_client_socket.h"
 #include "net/http/http_proxy_connect_job.h"
 #include "net/log/net_log_source_type.h"
+#include "net/log/net_log_values.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socks_connect_job.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/transport_connect_job.h"
+#include "net/socket/websocket_transport_connect_job.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
@@ -41,8 +43,7 @@ namespace net {
 namespace {
 
 // Timeout for the SSL handshake portion of the connect.
-constexpr base::TimeDelta kSSLHandshakeTimeout(
-    base::TimeDelta::FromSeconds(30));
+constexpr base::TimeDelta kSSLHandshakeTimeout(base::Seconds(30));
 
 }  // namespace
 
@@ -136,8 +137,7 @@ SSLConnectJob::SSLConnectJob(
       callback_(base::BindRepeating(&SSLConnectJob::OnIOComplete,
                                     base::Unretained(this))),
       ssl_negotiation_started_(false),
-      disable_legacy_crypto_with_fallback_(base::FeatureList::IsEnabled(
-          features::kTLSLegacyCryptoFallbackForMetrics)) {}
+      disable_legacy_crypto_with_fallback_(true) {}
 
 SSLConnectJob::~SSLConnectJob() {
   // In the case the job was canceled, need to delete nested job first to
@@ -276,9 +276,26 @@ int SSLConnectJob::DoTransportConnect() {
   DCHECK(!TimerIsRunning());
 
   next_state_ = STATE_TRANSPORT_CONNECT_COMPLETE;
-  nested_connect_job_ = TransportConnectJob::CreateTransportConnectJob(
-      params_->GetDirectConnectionParams(), priority(), socket_tag(),
-      common_connect_job_params(), this, &net_log());
+  if (!common_connect_job_params()->websocket_endpoint_lock_manager) {
+    // If this is an ECH retry, connect to the same server as before.
+    absl::optional<TransportConnectJob::EndpointResultOverride>
+        endpoint_result_override;
+    if (ech_retry_configs_) {
+      DCHECK(base::FeatureList::IsEnabled(features::kEncryptedClientHello));
+      DCHECK(endpoint_result_);
+      endpoint_result_override.emplace(*endpoint_result_, dns_aliases_);
+    }
+    nested_connect_job_ = std::make_unique<TransportConnectJob>(
+        priority(), socket_tag(), common_connect_job_params(),
+        params_->GetDirectConnectionParams(), this, &net_log(),
+        std::move(endpoint_result_override));
+  } else {
+    // TODO(https://crbug.com/1291352): Support ECH for WebSockets.
+    DCHECK(!ech_retry_configs_);
+    nested_connect_job_ = std::make_unique<WebSocketTransportConnectJob>(
+        priority(), socket_tag(), common_connect_job_params(),
+        params_->GetDirectConnectionParams(), this, &net_log());
+  }
   return nested_connect_job_->Connect();
 }
 
@@ -376,10 +393,30 @@ int SSLConnectJob::DoSSLConnect() {
   ssl_negotiation_started_ = true;
   connect_timing_.ssl_start = base::TimeTicks::Now();
 
+  // Save the `HostResolverEndpointResult`. `nested_connect_job_` is destroyed
+  // at the end of this function.
+  endpoint_result_ = nested_connect_job_->GetHostResolverEndpointResult();
+
   SSLConfig ssl_config = params_->ssl_config();
   ssl_config.network_isolation_key = params_->network_isolation_key();
   ssl_config.privacy_mode = params_->privacy_mode();
   ssl_config.disable_legacy_crypto = disable_legacy_crypto_with_fallback_;
+
+  if (base::FeatureList::IsEnabled(features::kEncryptedClientHello)) {
+    if (ech_retry_configs_) {
+      ssl_config.ech_config_list = *ech_retry_configs_;
+    } else if (endpoint_result_) {
+      ssl_config.ech_config_list = endpoint_result_->metadata.ech_config_list;
+    }
+    if (!ssl_config.ech_config_list.empty()) {
+      // Overriding the DNS lookup only works for direct connections. We
+      // currently do not support ECH with other connection types.
+      DCHECK_EQ(params_->GetConnectionType(), SSLSocketParams::DIRECT);
+      // TODO(https://crbug.com/1291352): Support ECH for WebSockets.
+      DCHECK(!common_connect_job_params()->websocket_endpoint_lock_manager);
+    }
+  }
+
   ssl_socket_ = client_socket_factory()->CreateSSLClientSocket(
       ssl_client_context(), std::move(nested_socket_), params_->host_and_port(),
       ssl_config);
@@ -396,21 +433,47 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
   }
 
   // Many servers which negotiate SHA-1 server signatures in TLS 1.2 actually
-  // support SHA-2 but preferentially sign SHA-1 if available. Likewise, some
-  // 3DES-negotiating servers support AES if 3DES is removed.
+  // support SHA-2 but preferentially sign SHA-1 if available.
   //
-  // To get more accurate metrics, initially connect with SHA-1 and 3DES
-  // disabled. If this fails, retry with them enabled. This keeps the legacy
-  // algorithms working for now, but they will only appear in metrics and
-  // DevTools if the site relies on them.
+  // To get more accurate metrics, initially connect with SHA-1 disabled. If
+  // this fails, retry with them enabled. This keeps the legacy algorithms
+  // working for now, but they will only appear in metrics and DevTools if the
+  // site relies on them.
   //
-  // See https://crbug.com/658905 and https://crbug.com/691888.
+  // See https://crbug.com/658905.
   if (disable_legacy_crypto_with_fallback_ &&
       (result == ERR_CONNECTION_CLOSED || result == ERR_CONNECTION_RESET ||
        result == ERR_SSL_PROTOCOL_ERROR ||
        result == ERR_SSL_VERSION_OR_CIPHER_MISMATCH)) {
     ResetStateForRestart();
     disable_legacy_crypto_with_fallback_ = false;
+    next_state_ = GetInitialState(params_->GetConnectionType());
+    return OK;
+  }
+
+  if (base::FeatureList::IsEnabled(features::kEncryptedClientHello) &&
+      !ech_retry_configs_ && result == ERR_ECH_NOT_NEGOTIATED) {
+    // We used ECH, and the server could not decrypt the ClientHello. However,
+    // it was able to handshake with the public name and send authenticated
+    // retry configs. If this is not the first time around, retry the connection
+    // with the new ECHConfigList, or with ECH disabled (empty retry configs),
+    // as directed.
+    //
+    // See
+    // https://www.ietf.org/archive/id/draft-ietf-tls-esni-13.html#section-6.1.6
+    DCHECK(endpoint_result_ &&
+           !endpoint_result_->metadata.ech_config_list.empty());
+    ech_retry_configs_ = ssl_socket_->GetECHRetryConfigs();
+    net_log().AddEvent(
+        NetLogEventType::SSL_CONNECT_JOB_RESTART_WITH_ECH_CONFIG_LIST, [&] {
+          base::Value dict(base::Value::Type::DICTIONARY);
+          dict.SetKey("bytes", NetLogBinaryValue(*ech_retry_configs_));
+          return dict;
+        });
+
+    // TODO(https://crbug.com/1091403): Add histograms for how often this
+    // happens.
+    ResetStateForRestart();
     next_state_ = GetInitialState(params_->GetConnectionType());
     return OK;
   }
@@ -422,8 +485,7 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
     base::TimeDelta connect_duration =
         connect_timing_.ssl_end - connect_timing_.ssl_start;
     UMA_HISTOGRAM_CUSTOM_TIMES("Net.SSL_Connection_Latency_2", connect_duration,
-                               base::TimeDelta::FromMilliseconds(1),
-                               base::TimeDelta::FromMinutes(1), 100);
+                               base::Milliseconds(1), base::Minutes(1), 100);
 
     SSLInfo ssl_info;
     bool has_ssl_info = ssl_socket_->GetSSLInfo(&ssl_info);
@@ -452,48 +514,38 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
     }
 
     // Classify whether the connection required the legacy crypto fallback.
-    if (base::FeatureList::IsEnabled(
-            features::kTLSLegacyCryptoFallbackForMetrics)) {
-      SSLLegacyCryptoFallback fallback = SSLLegacyCryptoFallback::kNoFallback;
-      if (!disable_legacy_crypto_with_fallback_) {
-        // Some servers, though they do not negotiate SHA-1, still fail the
-        // connection when SHA-1 is not offered. We believe these are servers
-        // which match the sent certificates against the ClientHello and then
-        // are configured with a SHA-1 certificate.
-        //
-        // SHA-1 certificate chains are no longer accepted, however servers may
-        // send extra unused certificates, most commonly a copy of the trust
-        // anchor.
-        bool sent_sha1_cert = ssl_info.unverified_cert &&
-                              x509_util::HasSHA1Signature(
-                                  ssl_info.unverified_cert->cert_buffer());
-        if (!sent_sha1_cert && ssl_info.unverified_cert) {
-          for (const auto& cert :
-               ssl_info.unverified_cert->intermediate_buffers()) {
-            if (x509_util::HasSHA1Signature(cert.get())) {
-              sent_sha1_cert = true;
-              break;
-            }
+    SSLLegacyCryptoFallback fallback = SSLLegacyCryptoFallback::kNoFallback;
+    if (!disable_legacy_crypto_with_fallback_) {
+      // Some servers, though they do not negotiate SHA-1, still fail the
+      // connection when SHA-1 is not offered. We believe these are servers
+      // which match the sent certificates against the ClientHello and then
+      // are configured with a SHA-1 certificate.
+      //
+      // SHA-1 certificate chains are no longer accepted, however servers may
+      // send extra unused certificates, most commonly a copy of the trust
+      // anchor.
+      bool sent_sha1_cert =
+          ssl_info.unverified_cert &&
+          x509_util::HasSHA1Signature(ssl_info.unverified_cert->cert_buffer());
+      if (!sent_sha1_cert && ssl_info.unverified_cert) {
+        for (const auto& cert :
+             ssl_info.unverified_cert->intermediate_buffers()) {
+          if (x509_util::HasSHA1Signature(cert.get())) {
+            sent_sha1_cert = true;
+            break;
           }
         }
-        if (cipher_suite == 0x000a /* TLS_RSA_WITH_3DES_EDE_CBC_SHA */) {
-          // TLS_RSA_WITH_3DES_EDE_CBC_SHA does not involve a peer signature.
-          DCHECK_EQ(0, ssl_info.peer_signature_algorithm);
-          fallback = sent_sha1_cert
-                         ? SSLLegacyCryptoFallback::kSentSHA1CertAndUsed3DES
-                         : SSLLegacyCryptoFallback::kUsed3DES;
-        } else if (ssl_info.peer_signature_algorithm ==
-                   SSL_SIGN_RSA_PKCS1_SHA1) {
-          fallback = sent_sha1_cert
-                         ? SSLLegacyCryptoFallback::kSentSHA1CertAndUsedSHA1
-                         : SSLLegacyCryptoFallback::kUsedSHA1;
-        } else {
-          fallback = sent_sha1_cert ? SSLLegacyCryptoFallback::kSentSHA1Cert
-                                    : SSLLegacyCryptoFallback::kUnknownReason;
-        }
       }
-      UMA_HISTOGRAM_ENUMERATION("Net.SSLLegacyCryptoFallback", fallback);
+      if (ssl_info.peer_signature_algorithm == SSL_SIGN_RSA_PKCS1_SHA1) {
+        fallback = sent_sha1_cert
+                       ? SSLLegacyCryptoFallback::kSentSHA1CertAndUsedSHA1
+                       : SSLLegacyCryptoFallback::kUsedSHA1;
+      } else {
+        fallback = sent_sha1_cert ? SSLLegacyCryptoFallback::kSentSHA1Cert
+                                  : SSLLegacyCryptoFallback::kUnknownReason;
+      }
     }
+    UMA_HISTOGRAM_ENUMERATION("Net.SSLLegacyCryptoFallback", fallback);
   }
 
   base::UmaHistogramSparse("Net.SSL_Connection_Error", std::abs(result));

@@ -6,16 +6,17 @@
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_PROMISE_RESOLVER_H_
 
 #include "base/dcheck_is_on.h"
-#include "base/macros.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/scoped_persistent.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/heap/self_keep_alive.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "v8/include/v8.h"
@@ -43,6 +44,10 @@ class CORE_EXPORT ScriptPromiseResolver
 
  public:
   explicit ScriptPromiseResolver(ScriptState*);
+
+  ScriptPromiseResolver(const ScriptPromiseResolver&) = delete;
+  ScriptPromiseResolver& operator=(const ScriptPromiseResolver&) = delete;
+
   ~ScriptPromiseResolver() override;
 
   void Dispose();
@@ -61,6 +66,30 @@ class CORE_EXPORT ScriptPromiseResolver
 
   void Resolve() { Resolve(ToV8UndefinedGenerator()); }
   void Reject() { Reject(ToV8UndefinedGenerator()); }
+
+  // Returns a callback that will run |callback| with the Entry realm
+  // and the Current realm set to the resolver's ScriptState. Note |callback|
+  // will only be run if the execution context and V8 context are capable
+  // to run. This situation occurs when the resolver's execution context
+  // or V8 context have started their destruction. See
+  // `IsInParallelAlgorithmRunnable` for details.
+  template <class ScriptPromiseResolver, typename... Args>
+  base::OnceCallback<void(Args...)> WrapCallbackInScriptScope(
+      base::OnceCallback<void(ScriptPromiseResolver*, Args...)> callback) {
+    return WTF::Bind(
+        [](ScriptPromiseResolver* resolver,
+           base::OnceCallback<void(ScriptPromiseResolver*, Args...)> callback,
+           Args... args) {
+          ScriptState* script_state = resolver->GetScriptState();
+          if (!IsInParallelAlgorithmRunnable(resolver->GetExecutionContext(),
+                                             script_state)) {
+            return;
+          }
+          ScriptState::Scope script_state_scope(script_state);
+          std::move(callback).Run(resolver, std::move(args)...);
+        },
+        WrapPersistent(this), std::move(callback));
+  }
 
   // Reject with a given exception.
   void Reject(ExceptionState&);
@@ -129,8 +158,8 @@ class CORE_EXPORT ScriptPromiseResolver
       v8::Isolate* isolate = script_state_->GetIsolate();
       v8::MicrotasksScope microtasks_scope(
           isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
-      value_.Set(isolate, ToV8(value, script_state_->GetContext()->Global(),
-                               script_state_->GetIsolate()));
+      value_.Reset(isolate, ToV8(value, script_state_->GetContext()->Global(),
+                                 script_state_->GetIsolate()));
     }
 
     if (GetExecutionContext()->IsContextPaused()) {
@@ -171,8 +200,6 @@ class CORE_EXPORT ScriptPromiseResolver
 
   base::debug::StackTrace create_stack_trace_{8};
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(ScriptPromiseResolver);
 };
 
 }  // namespace blink

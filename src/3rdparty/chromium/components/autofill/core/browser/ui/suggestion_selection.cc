@@ -12,11 +12,11 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/autofill_profile_comparator.h"
 #include "components/autofill/core/browser/geo/address_i18n.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/ui/suggestion.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_features.h"
@@ -61,10 +61,6 @@ constexpr size_t kMaxSuggestedProfilesCount = 50;
 // indices clicked by our users. The suggestions will also refine as they type.
 constexpr size_t kMaxUniqueSuggestionsCount = 10;
 
-// This is the maximum number of suggestions that will be displayed when the
-// kAutofillPruneSuggestions flag is enabled.
-constexpr size_t kMaxPrunedUniqueSuggestionsCount = 3;
-
 std::vector<Suggestion> GetPrefixMatchedSuggestions(
     const AutofillType& type,
     const std::u16string& raw_field_contents,
@@ -80,21 +76,18 @@ std::vector<Suggestion> GetPrefixMatchedSuggestions(
        i++) {
     AutofillProfile* profile = profiles[i];
 
-    if (profile->ShouldSkipFillingOrSuggesting(type.GetStorableType()))
-      continue;
-
       // Don't offer to fill the exact same value again. If detailed suggestions
       // with different secondary data is available, it would appear to offer
       // refilling the whole form with something else. E.g. the same name with a
       // work and a home address would appear twice but a click would be a noop.
       // TODO(fhorschig): Consider refilling form instead (at on least Android).
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     if (base::FeatureList::IsEnabled(features::kAutofillKeyboardAccessory) &&
         field_is_autofilled &&
         profile->GetRawInfo(type.GetStorableType()) == raw_field_contents) {
       continue;
     }
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
     std::u16string value =
         GetInfoInOneLine(profile, type, comparator.app_locale());
@@ -111,13 +104,13 @@ std::vector<Suggestion> GetPrefixMatchedSuggestions(
       if (type.group() == FieldTypeGroup::kPhoneHome) {
         bool format_phone;
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
         format_phone = base::FeatureList::IsEnabled(
             autofill::features::kAutofillUseMobileLabelDisambiguation);
 #else
         format_phone = base::FeatureList::IsEnabled(
             autofill::features::kAutofillUseImprovedLabelDisambiguation);
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
         if (format_phone) {
           // Formats, e.g., the US phone numbers 15084880800, 508 488 0800, and
@@ -131,7 +124,7 @@ std::vector<Suggestion> GetPrefixMatchedSuggestions(
         }
       }
 
-      suggestions.push_back(Suggestion(value));
+      suggestions.emplace_back(value);
       suggestions.back().backend_id = profile->guid();
       suggestions.back().match = prefix_matched_suggestion
                                      ? Suggestion::PREFIX_MATCH
@@ -159,18 +152,12 @@ std::vector<Suggestion> GetUniqueSuggestions(
     std::vector<AutofillProfile*>* unique_matched_profiles) {
   std::vector<Suggestion> unique_suggestions;
 
-  size_t max_num_suggestions =
-      base::FeatureList::IsEnabled(
-          autofill::features::kAutofillPruneSuggestions)
-          ? kMaxPrunedUniqueSuggestionsCount
-          : kMaxUniqueSuggestionsCount;
-
   // Limit number of unique profiles as having too many makes the
   // browser hang due to drawing calculations (and is also not
   // very useful for the user).
   ServerFieldTypeSet types(field_types.begin(), field_types.end());
   for (size_t i = 0; i < matched_profiles.size() &&
-                     unique_suggestions.size() < max_num_suggestions;
+                     unique_suggestions.size() < kMaxUniqueSuggestionsCount;
        ++i) {
     bool include = true;
     AutofillProfile* profile_a = matched_profiles[i];

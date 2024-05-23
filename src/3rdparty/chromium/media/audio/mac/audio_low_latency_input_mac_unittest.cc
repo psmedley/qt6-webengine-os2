@@ -10,7 +10,7 @@
 #include "base/environment.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
@@ -125,7 +125,7 @@ class MacAudioInputTest : public testing::Test {
   ~MacAudioInputTest() override { audio_manager_->Shutdown(); }
 
   bool InputDevicesAvailable() {
-#if defined(OS_MAC) && defined(ARCH_CPU_ARM64)
+#if BUILDFLAG(IS_MAC) && defined(ARCH_CPU_ARM64)
     // TODO(crbug.com/1128458): macOS on ARM64 says it has devices, but won't
     // let any of them be opened or listed.
     return false;

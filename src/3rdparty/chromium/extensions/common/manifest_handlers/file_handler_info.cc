@@ -106,8 +106,8 @@ bool LoadFileHandler(const std::string& handler_id,
     }
   }
 
-  if ((!mime_types || mime_types->GetList().empty()) &&
-      (!file_extensions || file_extensions->GetList().empty()) &&
+  if ((!mime_types || mime_types->GetListDeprecated().empty()) &&
+      (!file_extensions || file_extensions->GetListDeprecated().empty()) &&
       !handler.include_directories) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidFileHandlerNoTypeOrExtension,
@@ -116,7 +116,7 @@ bool LoadFileHandler(const std::string& handler_id,
   }
 
   if (mime_types) {
-    base::Value::ConstListView list_storage = mime_types->GetList();
+    base::Value::ConstListView list_storage = mime_types->GetListDeprecated();
     for (size_t i = 0; i < list_storage.size(); ++i) {
       if (!list_storage[i].is_string()) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
@@ -129,7 +129,8 @@ bool LoadFileHandler(const std::string& handler_id,
   }
 
   if (file_extensions) {
-    base::Value::ConstListView list_storage = file_extensions->GetList();
+    base::Value::ConstListView list_storage =
+        file_extensions->GetListDeprecated();
     for (size_t i = 0; i < list_storage.size(); ++i) {
       if (!list_storage[i].is_string()) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
@@ -159,17 +160,6 @@ bool LoadFileHandler(const std::string& handler_id,
 }
 
 bool FileHandlersParser::Parse(Extension* extension, std::u16string* error) {
-  // Don't load file handlers for hosted_apps unless they're also bookmark apps.
-  // This check can be removed when bookmark apps are migrated off hosted apps,
-  // and hosted_apps should be removed from the list of valid extension types
-  // for "file_handling" in extensions/common/api/_manifest_features.json.
-  if (extension->is_hosted_app() && !extension->from_bookmark()) {
-    extension->AddInstallWarning(
-        InstallWarning(errors::kInvalidFileHandlersHostedAppsNotSupported,
-                       keys::kFileHandlers));
-    return true;
-  }
-
   std::unique_ptr<FileHandlers> info(new FileHandlers);
   const base::Value* all_handlers = nullptr;
   if (!extension->manifest()->GetDictionary(keys::kFileHandlers,

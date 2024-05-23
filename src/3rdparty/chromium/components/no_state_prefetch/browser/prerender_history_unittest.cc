@@ -61,7 +61,7 @@ TEST(PrerenderHistoryTest, GetAsValue) {
   entry_value = history.CopyEntriesAsValue();
   ASSERT_TRUE(entry_value.get() != nullptr);
   ASSERT_TRUE(entry_value->is_list());
-  EXPECT_TRUE(entry_value->GetList().empty());
+  EXPECT_TRUE(entry_value->GetListDeprecated().empty());
 
   // Base time used for all events.  Each event is given a time 1 millisecond
   // after that of the previous one.
@@ -77,42 +77,42 @@ TEST(PrerenderHistoryTest, GetAsValue) {
   entry_value = history.CopyEntriesAsValue();
   ASSERT_TRUE(entry_value.get() != nullptr);
   ASSERT_TRUE(entry_value->is_list());
-  EXPECT_EQ(1u, entry_value->GetList().size());
-  EXPECT_TRUE(ListEntryMatches(entry_value->GetList(), 0u, kFirstUrl,
+  EXPECT_EQ(1u, entry_value->GetListDeprecated().size());
+  EXPECT_TRUE(ListEntryMatches(entry_value->GetListDeprecated(), 0u, kFirstUrl,
                                kFirstFinalStatus, kFirstOrigin, "0"));
 
   // Add a second entry and make sure both first and second appear.
   const char* const kSecondUrl = "http://www.beta.com/";
   const FinalStatus kSecondFinalStatus = FINAL_STATUS_DUPLICATE;
   const Origin kSecondOrigin = ORIGIN_OMNIBOX;
-  PrerenderHistory::Entry entry_second(
-      GURL(kSecondUrl), kSecondFinalStatus, kSecondOrigin,
-      epoch_start + base::TimeDelta::FromMilliseconds(1));
+  PrerenderHistory::Entry entry_second(GURL(kSecondUrl), kSecondFinalStatus,
+                                       kSecondOrigin,
+                                       epoch_start + base::Milliseconds(1));
   history.AddEntry(entry_second);
   entry_value = history.CopyEntriesAsValue();
   ASSERT_TRUE(entry_value.get() != nullptr);
   ASSERT_TRUE(entry_value->is_list());
-  EXPECT_EQ(2u, entry_value->GetList().size());
-  EXPECT_TRUE(ListEntryMatches(entry_value->GetList(), 0u, kSecondUrl,
+  EXPECT_EQ(2u, entry_value->GetListDeprecated().size());
+  EXPECT_TRUE(ListEntryMatches(entry_value->GetListDeprecated(), 0u, kSecondUrl,
                                kSecondFinalStatus, kSecondOrigin, "1"));
-  EXPECT_TRUE(ListEntryMatches(entry_value->GetList(), 1u, kFirstUrl,
+  EXPECT_TRUE(ListEntryMatches(entry_value->GetListDeprecated(), 1u, kFirstUrl,
                                kFirstFinalStatus, kFirstOrigin, "0"));
 
   // Add a third entry and make sure that the first one drops off.
   const char* const kThirdUrl = "http://www.gamma.com/";
   const FinalStatus kThirdFinalStatus = FINAL_STATUS_AUTH_NEEDED;
   const Origin kThirdOrigin = ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN;
-  PrerenderHistory::Entry entry_third(
-      GURL(kThirdUrl), kThirdFinalStatus, kThirdOrigin,
-      epoch_start + base::TimeDelta::FromMilliseconds(2));
+  PrerenderHistory::Entry entry_third(GURL(kThirdUrl), kThirdFinalStatus,
+                                      kThirdOrigin,
+                                      epoch_start + base::Milliseconds(2));
   history.AddEntry(entry_third);
   entry_value = history.CopyEntriesAsValue();
   ASSERT_TRUE(entry_value.get() != nullptr);
   ASSERT_TRUE(entry_value->is_list());
-  EXPECT_EQ(2u, entry_value->GetList().size());
-  EXPECT_TRUE(ListEntryMatches(entry_value->GetList(), 0u, kThirdUrl,
+  EXPECT_EQ(2u, entry_value->GetListDeprecated().size());
+  EXPECT_TRUE(ListEntryMatches(entry_value->GetListDeprecated(), 0u, kThirdUrl,
                                kThirdFinalStatus, kThirdOrigin, "2"));
-  EXPECT_TRUE(ListEntryMatches(entry_value->GetList(), 1u, kSecondUrl,
+  EXPECT_TRUE(ListEntryMatches(entry_value->GetListDeprecated(), 1u, kSecondUrl,
                                kSecondFinalStatus, kSecondOrigin, "1"));
 
   // Make sure clearing history acts as expected.
@@ -120,7 +120,7 @@ TEST(PrerenderHistoryTest, GetAsValue) {
   entry_value = history.CopyEntriesAsValue();
   ASSERT_TRUE(entry_value.get() != nullptr);
   ASSERT_TRUE(entry_value->is_list());
-  EXPECT_TRUE(entry_value->GetList().empty());
+  EXPECT_TRUE(entry_value->GetListDeprecated().empty());
 }
 
 }  // namespace

@@ -111,7 +111,7 @@ StatusOr<StreamPool::Ptr> Backend::BorrowStream(int device_ordinal) {
 }
 
 StatusOr<StreamPool::Ptr> Backend::BorrowStream(se::StreamExecutor* executor) {
-  tensorflow::mutex_lock l(mu_);
+  absl::MutexLock l(&mu_);
   if (!stream_pools_.contains(executor)) {
     stream_pools_.emplace(executor, absl::make_unique<StreamPool>());
   }
@@ -129,7 +129,7 @@ Backend::Backend(se::Platform* platform, Compiler* compiler,
       computation_placer_(computation_placer),
       stream_executors_(stream_executors.begin(), stream_executors.end()) {
   // Create a memory allocator for the valid stream executors.
-  memory_allocator_ = absl::make_unique<se::StreamExecutorMemoryAllocator>(
+  memory_allocator_ = std::make_shared<se::StreamExecutorMemoryAllocator>(
       platform, stream_executors_);
   CHECK(!stream_executors_.empty())
       << "Service found no devices for backend " << platform_->Name() << '.';

@@ -12,10 +12,12 @@
 #include "base/containers/contains.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "cc/base/math_util.h"
 #include "cc/base/region.h"
 #include "cc/base/simple_enclosed_region.h"
 #include "cc/benchmarks/benchmark_instrumentation.h"
@@ -61,7 +63,7 @@
 #include "ui/gfx/presentation_feedback.h"
 #include "ui/gfx/swap_result.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "ui/gfx/android/android_surface_control_compat.h"
 #endif
 namespace viz {
@@ -88,8 +90,12 @@ const DrawQuad::Material kNonSplittableMaterials[] = {
     DrawQuad::Material::kYuvVideoContent,
 };
 
-constexpr base::TimeDelta kAllowedDeltaFromFuture =
-    base::TimeDelta::FromMilliseconds(16);
+constexpr base::TimeDelta kAllowedDeltaFromFuture = base::Milliseconds(16);
+
+// A lower bounds for GetEstimatedDisplayDrawTime, influenced by
+// Compositing.Display.DrawToSwapUs.
+constexpr base::TimeDelta kMinEstimatedDisplayDrawTime =
+    base::Microseconds(250);
 
 // Assign each Display instance a starting value for the the display-trace id,
 // so that multiple Displays all don't start at 0, because that makes it
@@ -142,7 +148,7 @@ gfx::PresentationFeedback SanitizePresentationFeedback(
   if (difference.InMinutes() > 3) {
     UMA_HISTOGRAM_CUSTOM_TIMES(
         "Graphics.PresentationTimestamp.LargePresentationDelta", difference,
-        base::TimeDelta::FromMinutes(3), base::TimeDelta::FromHours(1), 50);
+        base::Minutes(3), base::Hours(1), 50);
   }
   return feedback;
 }
@@ -166,10 +172,11 @@ gfx::RectF GetOccludingRectForRRectF(const gfx::RRectF& bounds) {
   // Get a bounding rect that does not intersect with the rounding clip.
   // When a rect has rounded corner with radius r, then the largest rect that
   // can be inscribed inside it has an inset of |((2 - sqrt(2)) / 2) * radius|.
-  occluding_rect.Inset(std::max(top_left, lower_left) * 0.3f,
-                       std::max(top_left, top_right) * 0.3f,
-                       std::max(top_right, lower_right) * 0.3f,
-                       std::max(lower_right, lower_left) * 0.3f);
+  occluding_rect.Inset(
+      gfx::InsetsF::TLBR(std::max(top_left, top_right) * 0.3f,
+                         std::max(top_left, lower_left) * 0.3f,
+                         std::max(lower_right, lower_left) * 0.3f,
+                         std::max(top_right, lower_right) * 0.3f));
   return occluding_rect;
 }
 
@@ -252,10 +259,10 @@ bool ReduceComplexity(const cc::Region& region,
 }
 
 bool SupportsSetFrameRate(const OutputSurface* output_surface) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return output_surface->capabilities().supports_surfaceless &&
          gfx::SurfaceControl::SupportsSetFrameRate();
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   return output_surface->capabilities().supports_dc_layers &&
          features::ShouldUseSetPresentDuration();
 #else
@@ -281,34 +288,39 @@ void Display::PresentationGroupTiming::AddPresentationHelper(
 }
 
 void Display::PresentationGroupTiming::OnDraw(
-    base::TimeTicks draw_start_timestamp) {
+    base::TimeTicks frame_time,
+    base::TimeTicks draw_start_timestamp,
+    base::flat_set<base::PlatformThreadId> thread_ids) {
+  frame_time_ = frame_time;
   draw_start_timestamp_ = draw_start_timestamp;
+  thread_ids_ = std::move(thread_ids);
 }
 
-void Display::PresentationGroupTiming::OnSwap(gfx::SwapTimings timings) {
+void Display::PresentationGroupTiming::OnSwap(gfx::SwapTimings timings,
+                                              DisplaySchedulerBase* scheduler) {
   swap_timings_ = timings;
+
+  if (timings.swap_start.is_null() || frame_time_.is_inf())
+    return;
+
+  auto frame_latency = timings.swap_start - frame_time_;
+  if (frame_latency < base::Seconds(0)) {
+    LOG(ERROR) << "Frame latency is negative: "
+               << frame_latency.InMillisecondsF() << " ms";
+    return;
+  }
+  // Can be nullptr in unittests.
+  if (scheduler) {
+    scheduler->ReportFrameTime(frame_latency, std::move(thread_ids_));
+  }
 }
 
 void Display::PresentationGroupTiming::OnPresent(
-    const gfx::PresentationFeedback& feedback,
-    DisplaySchedulerBase* scheduler) {
+    const gfx::PresentationFeedback& feedback) {
   for (auto& presentation_helper : presentation_helpers_) {
     presentation_helper->DidPresent(draw_start_timestamp_, swap_timings_,
                                     feedback);
   }
-
-  if (feedback.ready_timestamp.is_null())
-    return;
-
-  auto gpu_latency = feedback.ready_timestamp - swap_timings_.swap_start;
-  // TODO(crbug.com/1157620): Move this check to SanitizePresentationFeedback
-  // to handle all incorrect feedback cases.
-  if (gpu_latency < base::TimeDelta::FromSeconds(0)) {
-    DLOG(ERROR) << "Gpu latency is negative : "
-                << gpu_latency.InMillisecondsF();
-    return;
-  }
-  scheduler->SetGpuLatency(gpu_latency);
 }
 
 Display::Display(
@@ -348,7 +360,7 @@ Display::~Display() {
   if (resource_provider_) {
     resource_provider_->SetAllowAccessToGPUThread(true);
   }
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // In certain cases, drivers hang when tearing down the display. Finishing
   // before teardown appears to address this. As we're during display teardown,
   // an additional finish should have minimal impact.
@@ -481,6 +493,13 @@ void Display::Resize(const gfx::Size& size) {
   damage_tracker_->DisplayResized();
 }
 
+void Display::InvalidateCurrentSurfaceId() {
+  current_surface_id_ = SurfaceId();
+  // Force a gc as the display may not be visible (gc occurs after drawing,
+  // which won't happen when display is hidden).
+  surface_manager_->GarbageCollectSurfaces();
+}
+
 void Display::DisableSwapUntilResize(
     base::OnceClosure no_pending_swaps_callback) {
   TRACE_EVENT0("viz", "Display::DisableSwapUntilResize");
@@ -506,7 +525,7 @@ void Display::DisableSwapUntilResize(
     std::move(no_pending_swaps_callback).Run();
 }
 
-void Display::SetColorMatrix(const skia::Matrix44& matrix) {
+void Display::SetColorMatrix(const SkM44& matrix) {
   if (output_surface_)
     output_surface_->set_color_matrix(matrix);
 
@@ -583,14 +602,27 @@ void Display::InitializeRenderer(bool enable_shared_images) {
       output_surface_->capabilities().only_invalidates_damage_rect &&
       !overlay_processor_->IsOverlaySupported();
 
+  SurfaceAggregator::ExtraPassForReadbackOption extra_pass_option =
+      SurfaceAggregator::ExtraPassForReadbackOption::kNone;
+  if (output_surface_->capabilities().root_is_vulkan_secondary_command_buffer) {
+    extra_pass_option =
+        base::FeatureList::IsEnabled(features::kWebViewVulkanIntermediateBuffer)
+            ? SurfaceAggregator::ExtraPassForReadbackOption::kAlwaysAddPass
+            : SurfaceAggregator::ExtraPassForReadbackOption::
+                  kAddPassForReadback;
+  }
   aggregator_ = std::make_unique<SurfaceAggregator>(
       surface_manager_, resource_provider_.get(), output_partial_list,
-      overlay_processor_->NeedsSurfaceDamageRectList());
+      overlay_processor_->NeedsSurfaceDamageRectList(), extra_pass_option);
 
   aggregator_->set_output_is_secure(output_is_secure_);
   aggregator_->SetDisplayColorSpaces(display_color_spaces_);
   aggregator_->SetMaxRenderTargetSize(
       output_surface_->capabilities().max_render_target_size);
+  // Do not move the |CopyOutputRequest| instances to the aggregated frame if
+  // the frame won't be drawn (as that would drop the copy request).
+  aggregator_->set_take_copy_requests(
+      !output_surface_->capabilities().skips_draw);
 }
 
 bool Display::IsRootFrameMissing() const {
@@ -627,6 +659,8 @@ void DebugDrawFrame(const AggregatedFrame& frame) {
     DBG_DRAW_TEXT_OPT("frame.root.material", DBG_OPT_GREEN,
                       display_rect.origin(),
                       base::NumberToString(static_cast<int>(quad->material)));
+    DBG_DRAW_TEXT_OPT("frame.root.display_rect", DBG_OPT_GREEN,
+                      display_rect.origin(), display_rect.ToString());
     DBG_DRAW_RECT("frame.root.quad", display_rect);
   }
 }
@@ -650,7 +684,7 @@ void VisualDebuggerSync(gfx::OverlayTransform current_display_transform,
 
 }  // namespace
 
-bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
+bool Display::DrawAndSwap(const DrawAndSwapParams& params) {
   TRACE_EVENT0("viz", "Display::DrawAndSwap");
   if (debug_settings_->show_aggregated_damage !=
       aggregator_->HasFrameAnnotator()) {
@@ -670,6 +704,15 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
   if (!output_surface_) {
     TRACE_EVENT_INSTANT0("viz", "No output surface", TRACE_EVENT_SCOPE_THREAD);
     return false;
+  }
+
+  if (params.max_pending_swaps >= 0 && skia_output_surface_ &&
+      skia_output_surface_->capabilities()
+          .supports_dynamic_frame_buffer_allocation) {
+    if (skia_output_surface_->EnsureMinNumberOfBuffers(
+            params.max_pending_swaps + 1)) {
+      renderer_->ReallocatedFrameBuffers();
+    }
   }
 
   gfx::OverlayTransform current_display_transform = gfx::OVERLAY_TRANSFORM_NONE;
@@ -717,10 +760,10 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
     // aggregated again so that the trail exists for a single frame.
     target_damage_bounding_rect.Union(
         renderer_->GetDelegatedInkTrailDamageRect());
-
     frame = aggregator_->Aggregate(
-        current_surface_id_, expected_display_time, current_display_transform,
-        target_damage_bounding_rect, ++swapped_trace_id_);
+        current_surface_id_, params.expected_display_time,
+        current_display_transform, target_damage_bounding_rect,
+        ++swapped_trace_id_);
 
     // Dump aggregated frame (will dump render passes and draw quads) if run
     // with: --vmodule=display=3
@@ -740,7 +783,8 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
 
   if (frame.delegated_ink_metadata) {
     TRACE_EVENT_INSTANT1(
-        "viz", "Delegated Ink Metadata was aggregated for DrawAndSwap.",
+        "delegated_ink_trails",
+        "Delegated Ink Metadata was aggregated for DrawAndSwap.",
         TRACE_EVENT_SCOPE_THREAD, "ink metadata",
         frame.delegated_ink_metadata->ToString());
     renderer_->SetDelegatedInkMetadata(std::move(frame.delegated_ink_metadata));
@@ -749,7 +793,7 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
   UMA_HISTOGRAM_ENUMERATION("Compositing.ColorGamut",
                             frame.content_color_usage);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   bool wide_color_enabled =
       display_color_spaces_.GetOutputColorSpace(
           frame.content_color_usage, true) != gfx::ColorSpace::CreateSRGB();
@@ -878,10 +922,21 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
   if (should_swap) {
     PresentationGroupTiming& presentation_group_timing =
         pending_presentation_group_timings_.emplace_back();
-    presentation_group_timing.OnDraw(draw_timer->Begin());
+
+    base::flat_set<base::PlatformThreadId> thread_ids;
+    for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
+      surface = surface_manager_->GetSurfaceForId(id_entry.first);
+      if (surface) {
+        base::flat_set<base::PlatformThreadId> surface_thread_ids =
+            surface->GetThreadIds();
+        thread_ids.insert(surface_thread_ids.begin(), surface_thread_ids.end());
+      }
+    }
+    presentation_group_timing.OnDraw(params.frame_time, draw_timer->Begin(),
+                                     std::move(thread_ids));
 
     for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
-      Surface* surface = surface_manager_->GetSurfaceForId(id_entry.first);
+      surface = surface_manager_->GetSurfaceForId(id_entry.first);
       if (surface) {
         std::unique_ptr<Surface::PresentationHelper> helper =
             surface->TakePresentationHelperForPresentNotification();
@@ -903,12 +958,18 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
     cc::benchmark_instrumentation::IssueDisplayRenderingStatsEvent();
     DirectRenderer::SwapFrameData swap_frame_data;
     swap_frame_data.latency_info = std::move(frame.latency_info);
+    swap_frame_data.choreographer_vsync_id = params.choreographer_vsync_id;
     if (frame.top_controls_visible_height.has_value()) {
       swap_frame_data.top_controls_visible_height_changed =
           last_top_controls_visible_height_ !=
           *frame.top_controls_visible_height;
       last_top_controls_visible_height_ = *frame.top_controls_visible_height;
     }
+
+#if BUILDFLAG(IS_MAC)
+    swap_frame_data.ca_layer_error_code =
+        overlay_processor_->GetCALayerErrorCode();
+#endif
 
     // We must notify scheduler and increase |pending_swaps_| before calling
     // SwapBuffers() as it can call DidReceiveSwapBuffersAck synchronously.
@@ -995,7 +1056,7 @@ void Display::DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
   base::TimeTicks draw_start_timestamp;
   for (auto& group_timing : pending_presentation_group_timings_) {
     if (!group_timing.HasSwapped()) {
-      group_timing.OnSwap(timings);
+      group_timing.OnSwap(timings, scheduler_.get());
       draw_start_timestamp = group_timing.draw_start_timestamp();
       break;
     }
@@ -1007,22 +1068,28 @@ void Display::DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
   // Check that the swap timings correspond with the timestamp from when
   // the swap was triggered. Note that not all output surfaces provide timing
   // information, hence the check for a valid swap_start.
+
+  base::TimeDelta draw_start_to_swap_end;
   if (!timings.swap_start.is_null()) {
     DCHECK_LE(draw_start_timestamp, timings.swap_start);
-    base::TimeDelta delta = timings.swap_start - draw_start_timestamp;
+    base::TimeDelta draw_start_to_swap_start =
+        timings.swap_start - draw_start_timestamp;
     UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-        "Compositing.Display.DrawToSwapUs", delta, kDrawToSwapMin,
-        kDrawToSwapMax, kDrawToSwapUsBuckets);
+        "Compositing.Display.DrawToSwapUs", draw_start_to_swap_start,
+        kDrawToSwapMin, kDrawToSwapMax, kDrawToSwapUsBuckets);
+    draw_start_to_swap_end = timings.swap_end - draw_start_timestamp;
   }
 
+  base::TimeDelta schedule_draw_to_gpu_start;
   if (!timings.viz_scheduled_draw.is_null()) {
     DCHECK(!timings.gpu_started_draw.is_null());
     DCHECK_LE(timings.viz_scheduled_draw, timings.gpu_started_draw);
-    base::TimeDelta delta =
+    schedule_draw_to_gpu_start =
         timings.gpu_started_draw - timings.viz_scheduled_draw;
     UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-        "Compositing.Display.VizScheduledDrawToGpuStartedDrawUs", delta,
-        kDrawToSwapMin, kDrawToSwapMax, kDrawToSwapUsBuckets);
+        "Compositing.Display.VizScheduledDrawToGpuStartedDrawUs",
+        schedule_draw_to_gpu_start, kDrawToSwapMin, kDrawToSwapMax,
+        kDrawToSwapUsBuckets);
   }
 
   if (!timings.gpu_task_ready.is_null()) {
@@ -1040,6 +1107,13 @@ void Display::DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
     UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
         "Compositing.Display.VizDependencyResolvedToGpuStartedDrawUs",
         scheduling_delta, kDrawToSwapMin, kDrawToSwapMax, kDrawToSwapUsBuckets);
+  }
+
+  if (!timings.swap_start.is_null()) {
+    draw_time_without_scheduling_waits_.InsertSample(
+        draw_start_to_swap_end - schedule_draw_to_gpu_start);
+    // These two values can be equal in unit tests.
+    DCHECK_GE(draw_start_to_swap_end, schedule_draw_to_gpu_start);
   }
 }
 
@@ -1088,7 +1162,7 @@ void Display::DidReceivePresentationFeedback(
     }
   }
 
-  presentation_group_timing.OnPresent(copy_feedback, scheduler_.get());
+  presentation_group_timing.OnPresent(copy_feedback);
   pending_presentation_group_timings_.pop_front();
 }
 
@@ -1117,7 +1191,23 @@ void Display::DidFinishFrame(const BeginFrameAck& ack) {
   frame_sequence_number_ = ack.frame_id.sequence_number;
 }
 
-const SurfaceId& Display::CurrentSurfaceId() {
+base::TimeDelta Display::GetEstimatedDisplayDrawTime(base::TimeDelta interval,
+                                                     double percentile) const {
+  base::TimeDelta default_estimate =
+      BeginFrameArgs::DefaultEstimatedDisplayDrawTime(interval);
+  if (draw_time_without_scheduling_waits_.sample_count() >= 60 &&
+      default_estimate > kMinEstimatedDisplayDrawTime) {
+    // We do not want the deadline adjustmens to exceed a default of 1/3 VSync,
+    // as we would not give other processes enough time to produce content. So
+    // this would make high latency situations worse.
+    return base::clamp(
+        draw_time_without_scheduling_waits_.Percentile(percentile),
+        kMinEstimatedDisplayDrawTime, default_estimate);
+  }
+  return default_estimate;
+}
+
+const SurfaceId& Display::CurrentSurfaceId() const {
   return current_surface_id_;
 }
 
@@ -1365,11 +1455,11 @@ void Display::SetPreferredFrameInterval(base::TimeDelta interval) {
     float interval_s = interval.InSecondsF();
     float frame_rate = interval_s == 0 ? 0 : (1 / interval_s);
     output_surface_->SetFrameRate(frame_rate);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     // On Android we want to return early because the |client_| callback hits
     // a platform API in the browser process.
     return;
-#endif  // OS_ANDROID
+#endif  // BUILDFLAG(IS_ANDROID)
   }
 
   client_->SetPreferredFrameInterval(interval);

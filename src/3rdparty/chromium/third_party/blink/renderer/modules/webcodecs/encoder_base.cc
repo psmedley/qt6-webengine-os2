@@ -11,7 +11,6 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/trace_event/common/trace_event_common.h"
 #include "base/trace_event/trace_event.h"
@@ -19,6 +18,7 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_encoder_init.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_config.h"
@@ -57,17 +57,19 @@ template <typename Traits>
 EncoderBase<Traits>::EncoderBase(ScriptState* script_state,
                                  const InitType* init,
                                  ExceptionState& exception_state)
-    : ExecutionContextLifecycleObserver(ExecutionContext::From(script_state)),
+    : ReclaimableCodec(ReclaimableCodec::CodecType::kEncoder,
+                       ExecutionContext::From(script_state)),
       state_(V8CodecState::Enum::kUnconfigured),
       script_state_(script_state),
       trace_counter_id_(g_sequence_num_for_counters2.GetNext()) {
-  logger_ = std::make_unique<CodecLogger>(GetExecutionContext(),
-                                          Thread::Current()->GetTaskRunner());
+  auto* context = ExecutionContext::From(script_state);
+  callback_runner_ = context->GetTaskRunner(TaskType::kInternalMediaRealTime);
+
+  logger_ = std::make_unique<CodecLogger<media::EncoderStatus>>(
+      GetExecutionContext(), callback_runner_);
 
   media::MediaLog* log = logger_->log();
-
-  log->SetProperty<media::MediaLogProperty::kFrameTitle>(
-      std::string(Traits::GetNameForDevTools()));
+  logger_->SendPlayerNameInformation(*context, Traits::GetName());
   log->SetProperty<media::MediaLogProperty::kFrameUrl>(
       GetExecutionContext()->Url().GetString().Ascii());
 
@@ -109,8 +111,7 @@ void EncoderBase<Traits>::configure(const ConfigType* config,
 
   Request* request = MakeGarbageCollected<Request>();
   request->reset_count = reset_count_;
-  if (media_encoder_ && active_config_ &&
-      state_.AsEnum() == V8CodecState::Enum::kConfigured &&
+  if (active_config_ && state_.AsEnum() == V8CodecState::Enum::kConfigured &&
       CanReconfigure(*active_config_, *parsed_config)) {
     request->type = Request::Type::kReconfigure;
   } else {
@@ -168,7 +169,6 @@ void EncoderBase<Traits>::close(ExceptionState& exception_state) {
   state_ = V8CodecState(V8CodecState::Enum::kClosed);
 
   ResetInternal();
-  media_encoder_.reset();
   output_callback_.Clear();
   error_callback_.Clear();
 }
@@ -201,11 +201,8 @@ void EncoderBase<Traits>::reset(ExceptionState& exception_state) {
 
   TRACE_EVENT0(kCategory3, GetTraceNames()->reset.c_str());
 
-  MarkCodecActive();
-
   state_ = V8CodecState(V8CodecState::Enum::kUnconfigured);
   ResetInternal();
-  media_encoder_.reset();
 }
 
 template <typename Traits>
@@ -221,7 +218,18 @@ void EncoderBase<Traits>::ResetInternal() {
       pending_req->input.Release()->close();
   }
   requested_encodes_ = 0;
-  stall_request_processing_ = false;
+  blocking_request_in_progress_ = false;
+
+  // Schedule deletion of |media_encoder_| for later.
+  // ResetInternal() might be called by an error reporting callback called by
+  // |media_encoder_|. If we delete it now, this thread might come back up
+  // the call stack and continu executing code belonging to deleted
+  // |media_encoder_|.
+  callback_runner_->DeleteSoon(FROM_HERE, std::move(media_encoder_));
+
+  // This codec isn't holding on to any resources, and doesn't need to be
+  // reclaimed.
+  ReleaseCodecPressure();
 }
 
 template <typename Traits>
@@ -240,7 +248,6 @@ void EncoderBase<Traits>::HandleError(DOMException* ex) {
 
   // Errors are permanent. Shut everything down.
   error_callback_.Clear();
-  media_encoder_.reset();
   output_callback_.Clear();
 
   // Prevent further logging.
@@ -261,7 +268,7 @@ void EncoderBase<Traits>::EnqueueRequest(Request* request) {
 
 template <typename Traits>
 void EncoderBase<Traits>::ProcessRequests() {
-  while (!requests_.empty() && !stall_request_processing_) {
+  while (!requests_.empty() && ReadyToProcessNextRequest()) {
     TraceQueueSizes();
 
     Request* request = requests_.TakeFirst();
@@ -288,6 +295,11 @@ void EncoderBase<Traits>::ProcessRequests() {
 }
 
 template <typename Traits>
+bool EncoderBase<Traits>::ReadyToProcessNextRequest() {
+  return !blocking_request_in_progress_;
+}
+
+template <typename Traits>
 void EncoderBase<Traits>::ProcessFlush(Request* request) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(state_, V8CodecState::Enum::kConfigured);
@@ -295,7 +307,7 @@ void EncoderBase<Traits>::ProcessFlush(Request* request) {
   DCHECK_EQ(request->type, Request::Type::kFlush);
 
   auto done_callback = [](EncoderBase<Traits>* self, Request* req,
-                          media::Status status) {
+                          media::EncoderStatus status) {
     DCHECK(req);
     DCHECK(req->resolver);
 
@@ -315,18 +327,18 @@ void EncoderBase<Traits>::ProcessFlush(Request* request) {
       req->resolver.Release()->Resolve();
     } else {
       self->HandleError(
-          self->logger_->MakeException("Flushing error.", status));
+          self->logger_->MakeException("Flushing error.", std::move(status)));
       req->resolver.Release()->Reject();
     }
     req->EndTracing();
 
-    self->stall_request_processing_ = false;
+    self->blocking_request_in_progress_ = false;
     self->ProcessRequests();
   };
 
   request->StartTracing();
 
-  stall_request_processing_ = true;
+  blocking_request_in_progress_ = true;
   media_encoder_->Flush(ConvertToBaseOnceCallback(
       CrossThreadBindOnce(done_callback, WrapCrossThreadWeakPersistent(this),
                           WrapCrossThreadPersistent(request))));
@@ -335,19 +347,20 @@ void EncoderBase<Traits>::ProcessFlush(Request* request) {
 template <typename Traits>
 void EncoderBase<Traits>::OnCodecReclaimed(DOMException* exception) {
   TRACE_EVENT0(kCategory3, GetTraceNames()->reclaimed.c_str());
+  DCHECK_EQ(state_.AsEnum(), V8CodecState::Enum::kConfigured);
   HandleError(exception);
 }
 
 template <typename Traits>
 void EncoderBase<Traits>::ContextDestroyed() {
   state_ = V8CodecState(V8CodecState::Enum::kClosed);
+  ResetInternal();
   logger_->Neuter();
-  media_encoder_.reset();
 }
 
 template <typename Traits>
 bool EncoderBase<Traits>::HasPendingActivity() const {
-  return stall_request_processing_ || !requests_.empty();
+  return blocking_request_in_progress_ || !requests_.empty();
 }
 
 template <typename Traits>

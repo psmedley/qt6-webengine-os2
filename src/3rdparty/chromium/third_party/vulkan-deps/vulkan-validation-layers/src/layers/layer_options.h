@@ -1,6 +1,7 @@
-/* Copyright (c) 2021 The Khronos Group Inc.
- * Copyright (c) 2021 Valve Corporation
- * Copyright (c) 2021 LunarG, Inc.
+/* Copyright (c) 2022 The Khronos Group Inc.
+ * Copyright (c) 2022 Valve Corporation
+ * Copyright (c) 2022 LunarG, Inc.
+ * Modifications Copyright (C) 2020 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +17,7 @@
  *
  * Author: Mark Lobodzinski <mark@lunarg.com>
  * Author: John Zulauf <jzulauf@lunarg.com>
+ * Author: Nadav Geva <nadav.geva@amd.com>
  */
 
 #include "chassis.h"
@@ -31,6 +33,7 @@ typedef struct {
     CHECK_DISABLED &disables;
     std::vector<uint32_t> &message_filter_list;
     int32_t *duplicate_message_limit;
+    bool *fine_grained_locking;
 } ConfigAndEnvSettings;
 
 static const layer_data::unordered_map<std::string, VkValidationFeatureDisableEXT> VkValFeatureDisableLookup = {
@@ -66,6 +69,8 @@ static const layer_data::unordered_map<std::string, ValidationCheckDisables> Val
 
 static const layer_data::unordered_map<std::string, ValidationCheckEnables> ValidationEnableLookup = {
     {"VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ARM", VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ARM},
+    {"VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_AMD", VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_AMD},
+    {"VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_IMG", VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_IMG},
     {"VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ALL", VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ALL},
 };
 
@@ -90,6 +95,8 @@ static const std::vector<std::string> EnableFlagNameHelper = {
     "VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT",  // gpu_validation_reserve_binding_slot,
     "VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT",                     // best_practices,
     "VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ARM",                         // vendor_specific_arm,
+    "VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_AMD",                         // vendor_specific_amd,
+    "VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_IMG",                         // vendor_specific_img,
     "VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT",                       // debug_printf,
     "VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION"              // sync_validation,
 };

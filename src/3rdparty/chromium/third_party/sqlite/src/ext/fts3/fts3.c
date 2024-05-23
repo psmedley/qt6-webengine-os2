@@ -308,17 +308,16 @@
   SQLITE_EXTENSION_INIT1
 #endif
 
+typedef struct Fts3HashWrapper Fts3HashWrapper;
+struct Fts3HashWrapper {
+  Fts3Hash hash;                  /* Hash table */
+  int nRef;                       /* Number of pointers to this object */
+};
+
 static int fts3EvalNext(Fts3Cursor *pCsr);
 static int fts3EvalStart(Fts3Cursor *pCsr);
 static int fts3TermSegReaderCursor(
     Fts3Cursor *, const char *, int, int, Fts3MultiSegReader **);
-
-#ifndef SQLITE_AMALGAMATION
-# if defined(SQLITE_DEBUG)
-int sqlite3Fts3Always(int b) { assert( b ); return b; }
-int sqlite3Fts3Never(int b)  { assert( !b ); return b; }
-# endif
-#endif
 
 /*
 ** This variable is set to false when running tests for which the on disk
@@ -1179,7 +1178,7 @@ static int fts3InitVtab(
   sqlite3_vtab **ppVTab,          /* Write the resulting vtab structure here */
   char **pzErr                    /* Write any error message here */
 ){
-  Fts3Hash *pHash = (Fts3Hash *)pAux;
+  Fts3Hash *pHash = &((Fts3HashWrapper*)pAux)->hash;
   Fts3Table *p = 0;               /* Pointer to allocated vtab */
   int rc = SQLITE_OK;             /* Return code */
   int i;                          /* Iterator variable */
@@ -2889,7 +2888,7 @@ static int fts3TermSelectMerge(
     **
     ** Similar padding is added in the fts3DoclistOrMerge() function.
     */
-    pTS->aaOutput[0] = sqlite3_malloc(nDoclist + FTS3_VARINT_MAX + 1);
+    pTS->aaOutput[0] = sqlite3_malloc64((i64)nDoclist + FTS3_VARINT_MAX + 1);
     pTS->anOutput[0] = nDoclist;
     if( pTS->aaOutput[0] ){
       memcpy(pTS->aaOutput[0], aDoclist, nDoclist);
@@ -4014,9 +4013,12 @@ static const sqlite3_module fts3Module = {
 ** allocated for the tokenizer hash table.
 */
 static void hashDestroy(void *p){
-  Fts3Hash *pHash = (Fts3Hash *)p;
-  sqlite3Fts3HashClear(pHash);
-  sqlite3_free(pHash);
+  Fts3HashWrapper *pHash = (Fts3HashWrapper *)p;
+  pHash->nRef--;
+  if( pHash->nRef<=0 ){
+    sqlite3Fts3HashClear(&pHash->hash);
+    sqlite3_free(pHash);
+  }
 }
 
 /*
@@ -4046,7 +4048,7 @@ void sqlite3Fts3IcuTokenizerModule(sqlite3_tokenizer_module const**ppModule);
 */
 int sqlite3Fts3Init(sqlite3 *db){
   int rc = SQLITE_OK;
-  Fts3Hash *pHash = 0;
+  Fts3HashWrapper *pHash = 0;
   const sqlite3_tokenizer_module *pSimple = 0;
   const sqlite3_tokenizer_module *pPorter = 0;
 #ifndef SQLITE_DISABLE_FTS3_UNICODE
@@ -4074,23 +4076,24 @@ int sqlite3Fts3Init(sqlite3 *db){
   sqlite3Fts3PorterTokenizerModule(&pPorter);
 
   /* Allocate and initialize the hash-table used to store tokenizers. */
-  pHash = sqlite3_malloc(sizeof(Fts3Hash));
+  pHash = sqlite3_malloc(sizeof(Fts3HashWrapper));
   if( !pHash ){
     rc = SQLITE_NOMEM;
   }else{
-    sqlite3Fts3HashInit(pHash, FTS3_HASH_STRING, 1);
+    sqlite3Fts3HashInit(&pHash->hash, FTS3_HASH_STRING, 1);
+    pHash->nRef = 0;
   }
 
   /* Load the built-in tokenizers into the hash table */
   if( rc==SQLITE_OK ){
-    if( sqlite3Fts3HashInsert(pHash, "simple", 7, (void *)pSimple)
-     || sqlite3Fts3HashInsert(pHash, "porter", 7, (void *)pPorter) 
+    if( sqlite3Fts3HashInsert(&pHash->hash, "simple", 7, (void *)pSimple)
+     || sqlite3Fts3HashInsert(&pHash->hash, "porter", 7, (void *)pPorter) 
 
 #ifndef SQLITE_DISABLE_FTS3_UNICODE
-     || sqlite3Fts3HashInsert(pHash, "unicode61", 10, (void *)pUnicode) 
+     || sqlite3Fts3HashInsert(&pHash->hash, "unicode61", 10, (void *)pUnicode) 
 #endif
 #ifdef SQLITE_ENABLE_ICU
-     || (pIcu && sqlite3Fts3HashInsert(pHash, "icu", 4, (void *)pIcu))
+     || (pIcu && sqlite3Fts3HashInsert(&pHash->hash, "icu", 4, (void *)pIcu))
 #endif
     ){
       rc = SQLITE_NOMEM;
@@ -4099,7 +4102,7 @@ int sqlite3Fts3Init(sqlite3 *db){
 
 #ifdef SQLITE_TEST
   if( rc==SQLITE_OK ){
-    rc = sqlite3Fts3ExprInitTestInterface(db, pHash);
+    rc = sqlite3Fts3ExprInitTestInterface(db, &pHash->hash);
   }
 #endif
 
@@ -4108,23 +4111,26 @@ int sqlite3Fts3Init(sqlite3 *db){
   ** module with sqlite.
   */
   if( SQLITE_OK==rc 
-   && SQLITE_OK==(rc = sqlite3Fts3InitHashTable(db, pHash, "fts3_tokenizer"))
+   && SQLITE_OK==(rc=sqlite3Fts3InitHashTable(db,&pHash->hash,"fts3_tokenizer"))
    && SQLITE_OK==(rc = sqlite3_overload_function(db, "snippet", -1))
    && SQLITE_OK==(rc = sqlite3_overload_function(db, "offsets", 1))
    && SQLITE_OK==(rc = sqlite3_overload_function(db, "matchinfo", 1))
    && SQLITE_OK==(rc = sqlite3_overload_function(db, "matchinfo", 2))
    && SQLITE_OK==(rc = sqlite3_overload_function(db, "optimize", 1))
   ){
+    pHash->nRef++;
     rc = sqlite3_create_module_v2(
         db, "fts3", &fts3Module, (void *)pHash, hashDestroy
     );
     if( rc==SQLITE_OK ){
+      pHash->nRef++;
       rc = sqlite3_create_module_v2(
-          db, "fts4", &fts3Module, (void *)pHash, 0
+          db, "fts4", &fts3Module, (void *)pHash, hashDestroy
       );
     }
     if( rc==SQLITE_OK ){
-      rc = sqlite3Fts3InitTok(db, (void *)pHash);
+      pHash->nRef++;
+      rc = sqlite3Fts3InitTok(db, (void *)pHash, hashDestroy);
     }
     return rc;
   }
@@ -4133,7 +4139,7 @@ int sqlite3Fts3Init(sqlite3 *db){
   /* An error has occurred. Delete the hash table and return the error code. */
   assert( rc!=SQLITE_OK );
   if( pHash ){
-    sqlite3Fts3HashClear(pHash);
+    sqlite3Fts3HashClear(&pHash->hash);
     sqlite3_free(pHash);
   }
   return rc;
@@ -4302,8 +4308,7 @@ static int fts3EvalDeferredPhrase(Fts3Cursor *pCsr, Fts3Phrase *pPhrase){
   char *aPoslist = 0;             /* Position list for deferred tokens */
   int nPoslist = 0;               /* Number of bytes in aPoslist */
   int iPrev = -1;                 /* Token number of previous deferred token */
-
-  assert( pPhrase->doclist.bFreeList==0 );
+  char *aFree = (pPhrase->doclist.bFreeList ? pPhrase->doclist.pList : 0);
 
   for(iToken=0; iToken<pPhrase->nToken; iToken++){
     Fts3PhraseToken *pToken = &pPhrase->aToken[iToken];
@@ -4317,6 +4322,7 @@ static int fts3EvalDeferredPhrase(Fts3Cursor *pCsr, Fts3Phrase *pPhrase){
 
       if( pList==0 ){
         sqlite3_free(aPoslist);
+        sqlite3_free(aFree);
         pPhrase->doclist.pList = 0;
         pPhrase->doclist.nList = 0;
         return SQLITE_OK;
@@ -4337,6 +4343,7 @@ static int fts3EvalDeferredPhrase(Fts3Cursor *pCsr, Fts3Phrase *pPhrase){
         nPoslist = (int)(aOut - aPoslist);
         if( nPoslist==0 ){
           sqlite3_free(aPoslist);
+          sqlite3_free(aFree);
           pPhrase->doclist.pList = 0;
           pPhrase->doclist.nList = 0;
           return SQLITE_OK;
@@ -4369,13 +4376,14 @@ static int fts3EvalDeferredPhrase(Fts3Cursor *pCsr, Fts3Phrase *pPhrase){
         nDistance = iPrev - nMaxUndeferred;
       }
 
-      aOut = (char *)sqlite3_malloc(nPoslist+8);
+      aOut = (char *)sqlite3Fts3MallocZero(nPoslist+FTS3_BUFFER_PADDING);
       if( !aOut ){
         sqlite3_free(aPoslist);
         return SQLITE_NOMEM;
       }
       
       pPhrase->doclist.pList = aOut;
+      assert( p1 && p2 );
       if( fts3PoslistPhraseMerge(&aOut, nDistance, 0, 1, &p1, &p2) ){
         pPhrase->doclist.bFreeList = 1;
         pPhrase->doclist.nList = (int)(aOut - pPhrase->doclist.pList);
@@ -4388,6 +4396,7 @@ static int fts3EvalDeferredPhrase(Fts3Cursor *pCsr, Fts3Phrase *pPhrase){
     }
   }
 
+  if( pPhrase->doclist.pList!=aFree ) sqlite3_free(aFree);
   return SQLITE_OK;
 }
 #endif /* SQLITE_DISABLE_FTS4_DEFERRED */
@@ -4480,7 +4489,7 @@ void sqlite3Fts3DoclistPrev(
 
   assert( nDoclist>0 );
   assert( *pbEof==0 );
-  assert( p || *piDocid==0 );
+  assert_fts3_nc( p || *piDocid==0 );
   assert( !p || (p>aDoclist && p<&aDoclist[nDoclist]) );
 
   if( p==0 ){
@@ -4736,7 +4745,7 @@ static int fts3EvalIncrPhraseNext(
       if( bEof==0 ){
         int nList = 0;
         int nByte = a[p->nToken-1].nList;
-        char *aDoclist = sqlite3_malloc(nByte+FTS3_BUFFER_PADDING);
+        char *aDoclist = sqlite3_malloc64((i64)nByte+FTS3_BUFFER_PADDING);
         if( !aDoclist ) return SQLITE_NOMEM;
         memcpy(aDoclist, a[p->nToken-1].pList, nByte+1);
         memset(&aDoclist[nByte], 0, FTS3_BUFFER_PADDING);
@@ -5344,8 +5353,8 @@ static void fts3EvalNextRow(
         Fts3Expr *pRight = pExpr->pRight;
         sqlite3_int64 iCmp = DOCID_CMP(pLeft->iDocid, pRight->iDocid);
 
-        assert( pLeft->bStart || pLeft->iDocid==pRight->iDocid );
-        assert( pRight->bStart || pLeft->iDocid==pRight->iDocid );
+        assert_fts3_nc( pLeft->bStart || pLeft->iDocid==pRight->iDocid );
+        assert_fts3_nc( pRight->bStart || pLeft->iDocid==pRight->iDocid );
 
         if( pRight->bEof || (pLeft->bEof==0 && iCmp<0) ){
           fts3EvalNextRow(pCsr, pLeft, pRc);
@@ -5562,11 +5571,10 @@ static int fts3EvalTestExpr(
 
       default: {
 #ifndef SQLITE_DISABLE_FTS4_DEFERRED
-        if( pCsr->pDeferred 
-         && (pExpr->iDocid==pCsr->iPrevId || pExpr->bDeferred)
-        ){
+        if( pCsr->pDeferred && (pExpr->bDeferred || (
+            pExpr->iDocid==pCsr->iPrevId && pExpr->pPhrase->doclist.pList
+        ))){
           Fts3Phrase *pPhrase = pExpr->pPhrase;
-          assert( pExpr->bDeferred || pPhrase->doclist.bFreeList==0 );
           if( pExpr->bDeferred ){
             fts3EvalInvalidatePoslist(pPhrase);
           }
@@ -5983,6 +5991,9 @@ int sqlite3Fts3EvalPhrasePoslist(
         if( bEofSave==0 && pNear->iDocid==iDocid ) break;
       }
       assert( rc!=SQLITE_OK || pPhrase->bIncr==0 );
+      if( rc==SQLITE_OK && pNear->bEof!=bEofSave ){
+        rc = FTS_CORRUPT_VTAB;
+      }
     }
     if( bTreeEof ){
       while( rc==SQLITE_OK && !pNear->bEof ){

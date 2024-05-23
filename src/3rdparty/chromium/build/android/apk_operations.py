@@ -125,36 +125,9 @@ def _GenerateBundleApks(info,
       optimize_for=optimize_for)
 
 
-def _InstallBundle(devices, apk_helper_instance, package_name,
-                   command_line_flags_file, modules, fake_modules):
-  # Path Chrome creates after validating fake modules. This needs to be cleared
-  # for pushed fake modules to be picked up.
-  SPLITCOMPAT_PATH = '/data/data/' + package_name + '/files/splitcompat'
-  # Chrome command line flag needed for fake modules to work.
-  FAKE_FEATURE_MODULE_INSTALL = '--fake-feature-module-install'
-
-  def ShouldWarnFakeFeatureModuleInstallFlag(device):
-    if command_line_flags_file:
-      changer = flag_changer.FlagChanger(device, command_line_flags_file)
-      return FAKE_FEATURE_MODULE_INSTALL not in changer.GetCurrentFlags()
-    return False
-
-  def ClearFakeModules(device):
-    if device.PathExists(SPLITCOMPAT_PATH, as_root=True):
-      device.RemovePath(
-          SPLITCOMPAT_PATH, force=True, recursive=True, as_root=True)
-      logging.info('Removed %s', SPLITCOMPAT_PATH)
-    else:
-      logging.info('Skipped removing nonexistent %s', SPLITCOMPAT_PATH)
+def _InstallBundle(devices, apk_helper_instance, modules, fake_modules):
 
   def Install(device):
-    ClearFakeModules(device)
-    if fake_modules and ShouldWarnFakeFeatureModuleInstallFlag(device):
-      # Print warning if command line is not set up for fake modules.
-      msg = ('Command line has no %s: Fake modules will be ignored.' %
-             FAKE_FEATURE_MODULE_INSTALL)
-      print(_Colorize(msg, colorama.Fore.YELLOW + colorama.Style.BRIGHT))
-
     device.Install(
         apk_helper_instance,
         permissions=[],
@@ -472,8 +445,8 @@ def _RunDiskUsage(devices, package_name):
       code_path = re.search(r'codePath=(.*)', package_output).group(1)
       lib_path = re.search(r'(?:legacyN|n)ativeLibrary(?:Dir|Path)=(.*)',
                            package_output).group(1)
-    except AttributeError:
-      raise Exception('Error parsing dumpsys output: ' + package_output)
+    except AttributeError as e:
+      raise Exception('Error parsing dumpsys output: ' + package_output) from e
 
     if code_path.startswith('/system'):
       logging.warning('Measurement of system image apks can be innacurate')
@@ -563,12 +536,12 @@ def _RunDiskUsage(devices, package_name):
     print('Total: %s KiB (%.1f MiB)' % (total, total / 1024.0))
 
 
-class _LogcatProcessor(object):
+class _LogcatProcessor:
   ParsedLine = collections.namedtuple(
       'ParsedLine',
       ['date', 'invokation_time', 'pid', 'tid', 'priority', 'tag', 'message'])
 
-  class NativeStackSymbolizer(object):
+  class NativeStackSymbolizer:
     """Buffers lines from native stacks and symbolizes them when done."""
     # E.g.: #06 pc 0x0000d519 /apex/com.android.runtime/lib/libart.so
     # E.g.: #01 pc 00180c8d  /data/data/.../lib/libbase.cr.so
@@ -584,7 +557,7 @@ class _LogcatProcessor(object):
       """Prints queued lines after sending them through stack.py."""
       crash_lines = self._crash_lines_buffer
       self._crash_lines_buffer = None
-      with tempfile.NamedTemporaryFile() as f:
+      with tempfile.NamedTemporaryFile(mode='w') as f:
         f.writelines(x[0].message + '\n' for x in crash_lines)
         f.flush()
         proc = self._stack_script_context.Popen(
@@ -647,11 +620,17 @@ class _LogcatProcessor(object):
                package_name,
                stack_script_context,
                deobfuscate=None,
-               verbose=False):
+               verbose=False,
+               exit_on_match=None):
     self._device = device
     self._package_name = package_name
     self._verbose = verbose
     self._deobfuscator = deobfuscate
+    if exit_on_match is not None:
+      self._exit_on_match = re.compile(exit_on_match)
+    else:
+      self._exit_on_match = None
+    self._found_exit_match = False
     self._native_stack_symbolizer = _LogcatProcessor.NativeStackSymbolizer(
         stack_script_context, self._PrintParsedLine)
     # Process ID for the app's main process (with no :name suffix).
@@ -674,7 +653,7 @@ class _LogcatProcessor(object):
     # Give preference to PID reported by "ps" over those found from
     # _start_pattern. There can be multiple "Start proc" messages from prior
     # runs of the app.
-    self._found_initial_pid = self._primary_pid != None
+    self._found_initial_pid = self._primary_pid is not None
     # Retrieve any additional patterns that are relevant for the User.
     self._user_defined_highlight = None
     user_regex = os.environ.get('CHROMIUM_LOGCAT_HIGHLIGHT')
@@ -700,10 +679,10 @@ class _LogcatProcessor(object):
   def _GetPidStyle(self, pid, dim=False):
     if pid == self._primary_pid:
       return colorama.Fore.WHITE
-    elif pid in self._my_pids:
+    if pid in self._my_pids:
       # TODO(wnwen): Use one separate persistent color per process, pop LRU
       return colorama.Fore.YELLOW
-    elif dim:
+    if dim:
       return colorama.Style.DIM
     return ''
 
@@ -712,7 +691,7 @@ class _LogcatProcessor(object):
     if dim:
       return ''
     style = colorama.Fore.BLACK
-    if priority == 'E' or priority == 'F':
+    if priority in ('E', 'F'):
       style += colorama.Back.RED
     elif priority == 'W':
       style += colorama.Back.YELLOW
@@ -758,6 +737,9 @@ class _LogcatProcessor(object):
         date, invokation_time, pid, tid, priority, tag, original_message)
 
   def _PrintParsedLine(self, parsed_line, dim=False):
+    if self._exit_on_match and self._exit_on_match.search(parsed_line.message):
+      self._found_exit_match = True
+
     tid_style = colorama.Style.NORMAL
     user_match = self._user_defined_highlight and (
         re.search(self._user_defined_highlight, parsed_line.tag)
@@ -793,6 +775,9 @@ class _LogcatProcessor(object):
         self._native_stack_symbolizer.AddLine(*args)
     self._initial_buffered_lines = None
     self.nonce = None
+
+  def FoundExitMatch(self):
+    return self._found_exit_match
 
   def ProcessLine(self, line):
     if not line or line.startswith('------'):
@@ -842,14 +827,24 @@ class _LogcatProcessor(object):
         self._initial_buffered_lines.append((log, not owned_pid))
 
 
-def _RunLogcat(device, package_name, stack_script_context, deobfuscate,
-               verbose):
-  logcat_processor = _LogcatProcessor(
-      device, package_name, stack_script_context, deobfuscate, verbose)
+def _RunLogcat(device,
+               package_name,
+               stack_script_context,
+               deobfuscate,
+               verbose,
+               exit_on_match=None):
+  logcat_processor = _LogcatProcessor(device,
+                                      package_name,
+                                      stack_script_context,
+                                      deobfuscate,
+                                      verbose,
+                                      exit_on_match=exit_on_match)
   device.RunShellCommand(['log', logcat_processor.nonce])
   for line in device.adb.Logcat(logcat_format='threadtime'):
     try:
       logcat_processor.ProcessLine(line)
+      if logcat_processor.FoundExitMatch():
+        return
     except:
       sys.stderr.write('Failed to process line: ' + line + '\n')
       # Skip stack trace for the common case of the adb server being
@@ -941,7 +936,7 @@ def _RunProfile(device, package_name, host_build_directory, pprof_out_path,
         """ % {'s': pprof_out_path}))
 
 
-class _StackScriptContext(object):
+class _StackScriptContext:
   """Maintains temporary files needed by stack.py."""
 
   def __init__(self,
@@ -1000,7 +995,7 @@ class _StackScriptContext(object):
     if input_file:
       cmd.append(input_file)
     logging.info('Running stack.py')
-    return subprocess.Popen(cmd, **kwargs)
+    return subprocess.Popen(cmd, universal_newlines=True, **kwargs)
 
 
 def _GenerateAvailableDevicesMessage(devices):
@@ -1063,7 +1058,7 @@ def _SaveDeviceCaches(devices, output_directory):
       logging.info('Wrote device cache: %s', cache_path)
 
 
-class _Command(object):
+class _Command:
   name = None
   description = None
   long_description = None
@@ -1095,7 +1090,7 @@ class _Command(object):
   def RegisterBundleGenerationInfo(self, bundle_generation_info):
     self.bundle_generation_info = bundle_generation_info
 
-  def _RegisterExtraArgs(self, subp):
+  def _RegisterExtraArgs(self, group):
     pass
 
   def RegisterArgs(self, parser):
@@ -1341,8 +1336,7 @@ class _InstallCommand(_Command):
       modules = list(
           set(self.args.module) - set(self.args.no_module) -
           set(self.args.fake))
-      _InstallBundle(self.devices, self.apk_helper, self.args.package_name,
-                     self.args.command_line_flags_file, modules, self.args.fake)
+      _InstallBundle(self.devices, self.apk_helper, modules, self.args.fake)
     else:
       _InstallApk(self.devices, self.apk_helper, self.install_dict)
 
@@ -1512,8 +1506,9 @@ To disable filtering, (but keep coloring), use --verbose.
         self.bundle_generation_info,
         quiet=True)
     try:
-      _RunLogcat(self.devices[0], self.args.package_name, stack_script_context,
-                 deobfuscate, bool(self.args.verbose_count))
+      _RunLogcat(self.devices[0],
+                 self.args.package_name, stack_script_context, deobfuscate,
+                 bool(self.args.verbose_count), self.args.exit_on_match)
     except KeyboardInterrupt:
       pass  # Don't show stack trace upon Ctrl-C
     finally:
@@ -1529,6 +1524,8 @@ To disable filtering, (but keep coloring), use --verbose.
       group.set_defaults(no_deobfuscate=False)
       group.add_argument('--proguard-mapping-path',
           help='Path to ProGuard map (enables deobfuscation)')
+    group.add_argument('--exit-on-match',
+                       help='Exits logcat when a message matches this regex.')
 
 
 class _PsCommand(_Command):
@@ -1659,7 +1656,7 @@ class _PrintCertsCommand(_Command):
       env['PATH'] = os.path.pathsep.join(
           [os.path.join(_JAVA_HOME, 'bin'),
            env.get('PATH')])
-      stdout = subprocess.check_output(cmd, env=env)
+      stdout = subprocess.check_output(cmd, env=env, universal_newlines=True)
       print(stdout)
       if self.args.full_cert:
         if 'v1 scheme (JAR signing): true' not in stdout:
@@ -1669,7 +1666,9 @@ class _PrintCertsCommand(_Command):
         cmd = [keytool, '-printcert', '-jarfile', self.apk_helper.path, '-rfc']
         # Redirect stderr to hide a keytool warning about using non-standard
         # keystore format.
-        full_output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        full_output = subprocess.check_output(cmd,
+                                              stderr=subprocess.STDOUT,
+                                              universal_newlines=True)
 
     if self.args.full_cert:
       m = re.search(
@@ -1789,9 +1788,11 @@ class _ManifestCommand(_Command):
   need_device_args = False
 
   def Run(self):
-    bundletool.RunBundleTool([
-        'dump', 'manifest', '--bundle', self.bundle_generation_info.bundle_path
-    ])
+    sys.stdout.write(
+        bundletool.RunBundleTool([
+            'dump', 'manifest', '--bundle',
+            self.bundle_generation_info.bundle_path
+        ]))
 
 
 class _StackCommand(_Command):

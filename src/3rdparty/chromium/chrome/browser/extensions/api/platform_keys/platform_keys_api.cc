@@ -55,6 +55,13 @@ const char kErrorInteractiveCallFromBackground[] =
 const char kTokenIdUser[] = "user";
 const char kTokenIdSystem[] = "system";
 
+// Skip checking for interactive calls coming from a non-interactive
+// context.
+// TODO(crbug.com/1303197): We should move the interactive tests to a
+// separate test suite. This is a temporary workaround to allow these
+// tests to run from the test extension's background page.
+bool g_skip_interactive_check_for_test = false;
+
 const struct NameValuePair {
   const char* const name;
   const int value;
@@ -88,8 +95,11 @@ crosapi::mojom::KeystoreService* GetKeystoreService(
 // extension. |context| is the browser context in which the extension is hosted.
 std::string ValidateCrosapi(int min_version, content::BrowserContext* context) {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  int version = chromeos::LacrosService::Get()->GetInterfaceVersion(
-      KeystoreService::Uuid_);
+  chromeos::LacrosService* service = chromeos::LacrosService::Get();
+  if (!service || !service->IsAvailable<crosapi::mojom::KeystoreService>())
+    return kUnsupportedByAsh;
+
+  int version = service->GetInterfaceVersion(KeystoreService::Uuid_);
   if (version < min_version)
     return kUnsupportedByAsh;
 
@@ -139,6 +149,11 @@ absl::optional<chromeos::platform_keys::TokenId> ApiIdToPlatformKeysTokenId(
 PlatformKeysInternalSelectClientCertificatesFunction::
     ~PlatformKeysInternalSelectClientCertificatesFunction() {}
 
+void PlatformKeysInternalSelectClientCertificatesFunction::
+    SetSkipInteractiveCheckForTest(bool skip_interactive_check) {
+  g_skip_interactive_check_for_test = skip_interactive_check;
+}
+
 ExtensionFunction::ResponseAction
 PlatformKeysInternalSelectClientCertificatesFunction::Run() {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
@@ -149,13 +164,8 @@ PlatformKeysInternalSelectClientCertificatesFunction::Run() {
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
   std::unique_ptr<api_pki::SelectClientCertificates::Params> params(
-      api_pki::SelectClientCertificates::Params::Create(*args_));
+      api_pki::SelectClientCertificates::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
-
-  chromeos::ExtensionPlatformKeysService* service =
-      chromeos::ExtensionPlatformKeysServiceFactory::GetForBrowserContext(
-          browser_context());
-  DCHECK(service);
 
   chromeos::platform_keys::ClientCertificateRequest request;
   request.certificate_authorities =
@@ -203,12 +213,18 @@ PlatformKeysInternalSelectClientCertificatesFunction::Run() {
 
     // Ensure that this function is called in a context that allows opening
     // dialogs.
-    if (!web_contents ||
-        !web_modal::WebContentsModalDialogManager::FromWebContents(
-            web_contents)) {
+    if ((!web_contents ||
+         !web_modal::WebContentsModalDialogManager::FromWebContents(
+             web_contents)) &&
+        !g_skip_interactive_check_for_test) {
       return RespondNow(Error(kErrorInteractiveCallFromBackground));
     }
   }
+
+  chromeos::ExtensionPlatformKeysService* service =
+      chromeos::ExtensionPlatformKeysServiceFactory::GetForBrowserContext(
+          browser_context());
+  DCHECK(service);
 
   service->SelectClientCertificates(
       request, std::move(client_certs), params->details.interactive,
@@ -274,7 +290,7 @@ PlatformKeysInternalGetPublicKeyFunction::
 ExtensionFunction::ResponseAction
 PlatformKeysInternalGetPublicKeyFunction::Run() {
   std::unique_ptr<api_pki::GetPublicKey::Params> params(
-      api_pki::GetPublicKey::Params::Create(*args_));
+      api_pki::GetPublicKey::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   std::string error = ValidateCrosapi(
@@ -332,7 +348,7 @@ PlatformKeysInternalGetPublicKeyBySpkiFunction::Run() {
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
   std::unique_ptr<api_pki::GetPublicKeyBySpki::Params> params(
-      api_pki::GetPublicKeyBySpki::Params::Create(*args_));
+      api_pki::GetPublicKeyBySpki::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const auto& public_key_spki_der = params->public_key_spki_der;
@@ -379,7 +395,7 @@ ExtensionFunction::ResponseAction PlatformKeysInternalSignFunction::Run() {
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
   std::unique_ptr<api_pki::Sign::Params> params(
-      api_pki::Sign::Params::Create(*args_));
+      api_pki::Sign::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   absl::optional<chromeos::platform_keys::TokenId> platform_keys_token_id;
@@ -471,7 +487,7 @@ PlatformKeysVerifyTLSServerCertificateFunction::Run() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   std::unique_ptr<api_pk::VerifyTLSServerCertificate::Params> params(
-      api_pk::VerifyTLSServerCertificate::Params::Create(*args_));
+      api_pk::VerifyTLSServerCertificate::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   VerifyTrustAPI::GetFactoryInstance()
@@ -500,7 +516,7 @@ void PlatformKeysVerifyTLSServerCertificateFunction::FinishedVerification(
   if (net::IsCertificateError(verify_result)) {
     // Only report errors, not internal informational statuses.
     const int masked_cert_status = cert_status & net::CERT_STATUS_ALL_ERRORS;
-    for (size_t i = 0; i < base::size(kCertStatusErrors); ++i) {
+    for (size_t i = 0; i < std::size(kCertStatusErrors); ++i) {
       if ((masked_cert_status & kCertStatusErrors[i].value) ==
           kCertStatusErrors[i].value) {
         result.debug_errors.push_back(kCertStatusErrors[i].name);

@@ -4,7 +4,6 @@
 
 #include <stdint.h>
 
-#include "base/cxx17_backports.h"
 #include "build/build_config.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/paint/paint_image.h"
@@ -20,7 +19,7 @@
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 namespace cc {
 namespace {
@@ -58,7 +57,7 @@ SkColor kCSSTestColors[] = {
     0x00000000   // transparent
 };
 
-const int kCSSTestColorsCount = base::size(kCSSTestColors);
+const int kCSSTestColorsCount = std::size(kCSSTestColors);
 
 using RenderPassOptions = uint32_t;
 const uint32_t kUseMasks = 1 << 0;
@@ -262,14 +261,16 @@ class LayerTreeHostBlendingPixelTest
 std::vector<RasterTestConfig> const kTestCases = {
     {viz::RendererType::kSoftware, TestRasterType::kBitmap},
 #if BUILDFLAG(ENABLE_GL_BACKEND_TESTS)
+#if BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
     {viz::RendererType::kGL, TestRasterType::kZeroCopy},
+#endif  // BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
     {viz::RendererType::kSkiaGL, TestRasterType::kGpu},
 #endif  // BUILDFLAG(ENABLE_GL_BACKEND_TESTS)
 #if BUILDFLAG(ENABLE_VULKAN_BACKEND_TESTS)
-    {viz::RendererType::kSkiaVk, TestRasterType::kOop},
+    {viz::RendererType::kSkiaVk, TestRasterType::kGpu},
 #endif  // BUILDFLAG(ENABLE_VULKAN_BACKEND_TESTS)
 #if BUILDFLAG(ENABLE_DAWN_BACKEND_TESTS)
-    {viz::RendererType::kSkiaDawn, TestRasterType::kOop},
+    {viz::RendererType::kSkiaDawn, TestRasterType::kGpu},
 #endif  // BUILDFLAG(ENABLE_DAWN_BACKEND_TESTS)
 };
 
@@ -463,4 +464,4 @@ TEST_P(LayerTreeHostBlendingPixelTest,
 }  // namespace
 }  // namespace cc
 
-#endif  // OS_ANDROID
+#endif  // BUILDFLAG(IS_ANDROID)

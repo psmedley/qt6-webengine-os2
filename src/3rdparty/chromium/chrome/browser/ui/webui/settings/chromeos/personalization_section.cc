@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/webui/settings/chromeos/ambient_mode_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/change_picture_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/os_settings_features_util.h"
+#include "chrome/browser/ui/webui/settings/chromeos/personalization_hub_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
 #include "chrome/browser/ui/webui/settings/chromeos/wallpaper_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
@@ -211,6 +212,12 @@ PersonalizationSection::PersonalizationSection(
   if (features::IsGuestModeActive())
     return;
 
+  if (ash::features::IsPersonalizationHubEnabled()) {
+    // Personalization search is handled by Personalization Hub when feature is
+    // on.
+    return;
+  }
+
   SearchTagRegistry::ScopedTagUpdater updater = registry()->StartUpdate();
   updater.AddSearchTags(GetPersonalizationSearchConcepts());
 
@@ -313,6 +320,9 @@ void PersonalizationSection::AddLoadTimeData(
        IDS_SETTINGS_PHOTO_DISCARD_ACCESSIBLE_TEXT},
       {"photoModeAccessibleText", IDS_SETTINGS_PHOTO_MODE_ACCESSIBLE_TEXT},
       {"videoModeAccessibleText", IDS_SETTINGS_VIDEO_MODE_ACCESSIBLE_TEXT},
+      {"personalizationHubTitle", IDS_OS_SETTINGS_OPEN_PERSONALIZATION_HUB},
+      {"personalizationHubSubtitle",
+       IDS_OS_SETTINGS_OPEN_PERSONALIZATION_HUB_SUBTITLE},
   };
   html_source->AddLocalizedStrings(kLocalizedStrings);
 
@@ -333,6 +343,8 @@ void PersonalizationSection::AddLoadTimeData(
           IDS_OS_SETTINGS_AMBIENT_MODE_ALBUMS_SUBPAGE_GOOGLE_PHOTOS_NO_ALBUM,
           base::UTF8ToUTF16(GetGooglePhotosURL().spec())));
   html_source->AddBoolean("isDarkModeAllowed", IsDarkModeAllowed());
+  html_source->AddBoolean("isPersonalizationHubEnabled",
+                          ash::features::IsPersonalizationHubEnabled());
 }
 
 void PersonalizationSection::AddHandlers(content::WebUI* web_ui) {
@@ -340,6 +352,10 @@ void PersonalizationSection::AddHandlers(content::WebUI* web_ui) {
       std::make_unique<chromeos::settings::WallpaperHandler>());
   web_ui->AddMessageHandler(
       std::make_unique<chromeos::settings::ChangePictureHandler>());
+  if (ash::features::IsPersonalizationHubEnabled()) {
+    web_ui->AddMessageHandler(
+        std::make_unique<chromeos::settings::PersonalizationHubHandler>());
+  }
 
   if (!profile()->IsGuestSession() &&
       chromeos::features::IsAmbientModeEnabled()) {

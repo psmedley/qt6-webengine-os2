@@ -11,10 +11,12 @@
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/json/json_reader.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/notreached.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -149,7 +151,7 @@ class GaiaOAuthClient::Core
   std::string http_method_override_header_;
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
-  GaiaOAuthClient::Delegate* delegate_;
+  raw_ptr<GaiaOAuthClient::Delegate> delegate_;
   std::unique_ptr<network::SimpleURLLoader> request_;
   RequestType request_type_;
 

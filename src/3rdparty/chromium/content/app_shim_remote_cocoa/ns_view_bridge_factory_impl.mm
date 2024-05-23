@@ -8,8 +8,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/no_destructor.h"
 #include "content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.h"
 #include "content/app_shim_remote_cocoa/render_widget_host_ns_view_host_helper.h"
 #include "content/app_shim_remote_cocoa/web_contents_ns_view_bridge.h"
@@ -46,6 +44,11 @@ class RenderWidgetHostNSViewBridgeOwner
         base::BindOnce(&RenderWidgetHostNSViewBridgeOwner::OnMojoDisconnect,
                        base::Unretained(this)));
   }
+
+  RenderWidgetHostNSViewBridgeOwner(const RenderWidgetHostNSViewBridgeOwner&) =
+      delete;
+  RenderWidgetHostNSViewBridgeOwner& operator=(
+      const RenderWidgetHostNSViewBridgeOwner&) = delete;
 
  private:
   void OnMojoDisconnect() { delete this; }
@@ -135,8 +138,6 @@ class RenderWidgetHostNSViewBridgeOwner
   std::unique_ptr<RenderWidgetHostNSViewBridge> bridge_;
   base::scoped_nsobject<NSAccessibilityRemoteUIElement>
       remote_accessibility_element_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostNSViewBridgeOwner);
 };
 }
 
@@ -152,10 +153,10 @@ void CreateRenderWidgetHostNSView(
 
   // Create a RenderWidgetHostNSViewBridgeOwner. The resulting object will be
   // destroyed when its underlying pipe is closed.
-  ignore_result(new RenderWidgetHostNSViewBridgeOwner(
+  std::ignore = new RenderWidgetHostNSViewBridgeOwner(
       std::move(host),
       mojo::PendingAssociatedReceiver<mojom::RenderWidgetHostNSView>(
-          std::move(view_receiver_handle))));
+          std::move(view_receiver_handle)));
 }
 
 void CreateWebContentsNSView(

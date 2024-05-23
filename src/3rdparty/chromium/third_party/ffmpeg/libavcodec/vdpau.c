@@ -21,12 +21,14 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include <limits.h>
 
 #include "avcodec.h"
 #include "decode.h"
 #include "internal.h"
-#include "h264dec.h"
+#include "mpegvideodec.h"
 #include "vc1.h"
 #include "vdpau.h"
 #include "vdpau_internal.h"
@@ -69,6 +71,9 @@ AVVDPAUContext *av_alloc_vdpaucontext(void)
     return av_vdpau_alloc_context();
 }
 
+#define MAKE_ACCESSORS(str, name, type, field) \
+    type av_##name##_get_##field(const str *s) { return s->field; } \
+    void av_##name##_set_##field(str *s, type v) { s->field = v; }
 MAKE_ACCESSORS(AVVDPAUContext, vdpau_hwaccel, AVVDPAU_Render2, render2)
 
 int av_vdpau_get_surface_parameters(AVCodecContext *avctx,

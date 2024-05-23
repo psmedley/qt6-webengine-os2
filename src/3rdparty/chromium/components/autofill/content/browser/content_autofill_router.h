@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/containers/flat_map.h"
+#include "base/memory/raw_ptr.h"
 #include "components/autofill/content/browser/form_forest.h"
 #include "components/autofill/core/browser/autofill_driver.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -144,10 +145,9 @@ class ContentAutofillRouter {
 
   // Deletes all forms and fields related to |driver| (and this driver only).
   // Must be called whenever |driver| is destroyed.
+  // As a simple performance optimization, if |driver| is a main frame, the
+  // whole router is reset to the initial state.
   void UnregisterDriver(ContentAutofillDriver* driver);
-
-  // Resets the object to the initial state.
-  void Reset();
 
   // Returns the ContentAutofillDriver* for which AskForValuesToFill() was
   // called last.
@@ -169,7 +169,8 @@ class ContentAutofillRouter {
   void SetFormToBeProbablySubmitted(ContentAutofillDriver* source_driver,
                                     const absl::optional<FormData>& form);
   void FormsSeen(ContentAutofillDriver* source_driver,
-                 const std::vector<FormData>& forms);
+                 const std::vector<FormData>& updated_forms,
+                 const std::vector<FormGlobalId>& removed_forms);
   void FormSubmitted(ContentAutofillDriver* source_driver,
                      const FormData& form,
                      bool known_success,
@@ -215,7 +216,7 @@ class ContentAutofillRouter {
                             const FormFieldData& field);
 
   // Routing of events called by the browser:
-  void FillOrPreviewForm(
+  std::vector<FieldGlobalId> FillOrPreviewForm(
       ContentAutofillDriver* source_driver,
       int query_id,
       mojom::RendererFormDataAction action,
@@ -259,15 +260,24 @@ class ContentAutofillRouter {
   void SetLastQueriedSource(ContentAutofillDriver* source);
   void SetLastQueriedTarget(ContentAutofillDriver* target);
 
+  // The URL of a main frame managed by the ContentAutofillRouter.
+  // TODO(crbug.com/1240247): Remove.
+  std::string MainUrlForDebugging() const;
+
+  // The frame managed by the ContentAutofillRouter that was last passed to
+  // an event.
+  // TODO(crbug.com/1240247): Remove.
+  content::GlobalRenderFrameHostId some_rfh_for_debugging_;
+
   // The forest of forms. See its documentation for the usage protocol.
   internal::FormForest form_forest_;
 
   // The driver that triggered the last AskForValuesToFill() call.
   // Update with SetLastQueriedSource().
-  ContentAutofillDriver* last_queried_source_ = nullptr;
+  raw_ptr<ContentAutofillDriver> last_queried_source_ = nullptr;
   // The driver to which the last AskForValuesToFill() call was routed.
   // Update with SetLastQueriedTarget().
-  ContentAutofillDriver* last_queried_target_ = nullptr;
+  raw_ptr<ContentAutofillDriver> last_queried_target_ = nullptr;
 
   // When the focus moves to a different frame, the order of the events
   // FocusNoLongerOnForm() and FocusOnFormField() may be reversed due to race

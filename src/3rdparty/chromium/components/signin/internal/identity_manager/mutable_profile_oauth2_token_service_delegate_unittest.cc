@@ -12,7 +12,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
@@ -392,15 +392,18 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest,
         MutableProfileOAuth2TokenServiceDelegate* delegate)
         : delegate_(delegate) {}
 
+    TokenServiceForceRevokeObserver(const TokenServiceForceRevokeObserver&) =
+        delete;
+    TokenServiceForceRevokeObserver& operator=(
+        const TokenServiceForceRevokeObserver&) = delete;
+
     void OnRefreshTokenRevoked(const CoreAccountId& account_id) override {
       revoke_all_credentials_called_ = true;
       delegate_->RevokeAllCredentials();
     }
 
-    MutableProfileOAuth2TokenServiceDelegate* delegate_;
+    raw_ptr<MutableProfileOAuth2TokenServiceDelegate> delegate_;
     bool revoke_all_credentials_called_ = false;
-
-    DISALLOW_COPY_AND_ASSIGN(TokenServiceForceRevokeObserver);
   };
 
   InitializeOAuth2ServiceDelegate(signin::AccountConsistencyMethod::kDisabled);
@@ -1099,10 +1102,10 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest, GaiaIdMigration) {
 
     ListPrefUpdate update(&pref_service_, prefs::kAccountInfo);
     update->ClearList();
-    auto dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", email);
-    dict->SetString("email", email);
-    dict->SetString("gaia", gaia_id);
+    base::Value dict(base::Value::Type::DICTIONARY);
+    dict.SetStringKey("account_id", email);
+    dict.SetStringKey("email", email);
+    dict.SetStringKey("gaia", gaia_id);
     update->Append(std::move(dict));
     account_tracker_service_.ResetForTesting();
 
@@ -1162,16 +1165,16 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest,
 
     ListPrefUpdate update(&pref_service_, prefs::kAccountInfo);
     update->ClearList();
-    auto dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", email1);
-    dict->SetString("email", email1);
-    dict->SetString("gaia", gaia_id1);
-    update->Append(std::move(dict));
-    dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", email2);
-    dict->SetString("email", email2);
-    dict->SetString("gaia", gaia_id2);
-    update->Append(std::move(dict));
+    base::Value account1(base::Value::Type::DICTIONARY);
+    account1.SetStringKey("account_id", email1);
+    account1.SetStringKey("email", email1);
+    account1.SetStringKey("gaia", gaia_id1);
+    update->Append(std::move(account1));
+    base::Value account2(base::Value::Type::DICTIONARY);
+    account2.SetStringKey("account_id", email2);
+    account2.SetStringKey("email", email2);
+    account2.SetStringKey("gaia", gaia_id2);
+    update->Append(std::move(account2));
     account_tracker_service_.ResetForTesting();
 
     AddAuthTokenManually("AccountId-" + email1, "refresh_token");
@@ -1248,6 +1251,10 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest, OnAuthErrorChanged) {
         MutableProfileOAuth2TokenServiceDelegate* delegate)
         : delegate_(delegate) {}
 
+    TokenServiceErrorObserver(const TokenServiceErrorObserver&) = delete;
+    TokenServiceErrorObserver& operator=(const TokenServiceErrorObserver&) =
+        delete;
+
     void OnAuthErrorChanged(const CoreAccountId& account_id,
                             const GoogleServiceAuthError& auth_error) override {
       error_changed_ = true;
@@ -1258,10 +1265,8 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest, OnAuthErrorChanged) {
                 delegate_->GetAuthError(account_id));
     }
 
-    MutableProfileOAuth2TokenServiceDelegate* delegate_;
+    raw_ptr<MutableProfileOAuth2TokenServiceDelegate> delegate_;
     bool error_changed_ = false;
-
-    DISALLOW_COPY_AND_ASSIGN(TokenServiceErrorObserver);
   };
 
   InitializeOAuth2ServiceDelegate(signin::AccountConsistencyMethod::kDisabled);
@@ -1322,6 +1327,10 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest,
         MutableProfileOAuth2TokenServiceDelegate* delegate)
         : delegate_(delegate) {}
 
+    TokenServiceErrorObserver(const TokenServiceErrorObserver&) = delete;
+    TokenServiceErrorObserver& operator=(const TokenServiceErrorObserver&) =
+        delete;
+
     void OnAuthErrorChanged(const CoreAccountId& account_id,
                             const GoogleServiceAuthError& auth_error) override {
       error_changed_ = true;
@@ -1347,11 +1356,9 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest,
                 delegate_->GetAuthError(account_id));
     }
 
-    MutableProfileOAuth2TokenServiceDelegate* delegate_;
+    raw_ptr<MutableProfileOAuth2TokenServiceDelegate> delegate_;
     bool error_changed_ = false;
     bool token_available_ = false;
-
-    DISALLOW_COPY_AND_ASSIGN(TokenServiceErrorObserver);
   };
 
   InitializeOAuth2ServiceDelegate(signin::AccountConsistencyMethod::kDisabled);

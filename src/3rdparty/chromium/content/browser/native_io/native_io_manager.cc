@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -16,6 +17,9 @@
 #include "base/threading/thread_checker.h"
 #include "base/types/pass_key.h"
 #include "build/build_config.h"
+#include "components/services/storage/public/cpp/buckets/bucket_info.h"
+#include "components/services/storage/public/cpp/buckets/constants.h"
+#include "components/services/storage/public/cpp/quota_error_or.h"
 #include "components/services/storage/public/mojom/quota_client.mojom.h"
 #include "content/browser/native_io/native_io_host.h"
 #include "content/browser/native_io/native_io_quota_client.h"
@@ -61,6 +65,11 @@ std::vector<blink::StorageKey> DoGetStorageKeys(
 }
 
 int64_t DoGetStorageKeyUsage(const base::FilePath& storage_key_root) {
+  // base::ComputeDirectorySize() spins on Windows when given an empty path.
+  // `storage_key_root` can be empty in Incognito.
+  if (storage_key_root.empty())
+    return 0;
+
   // Returns 0 if `storage_key_root` does not exist.
   return base::ComputeDirectorySize(storage_key_root);
 }
@@ -100,15 +109,15 @@ constexpr base::FilePath::CharType kNativeIODirectoryName[] =
 
 NativeIOManager::NativeIOManager(
     const base::FilePath& profile_root,
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     bool allow_set_length_ipc,
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
     scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy,
     scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy)
     : root_path_(GetNativeIORootPath(profile_root)),
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       allow_set_length_ipc_(allow_set_length_ipc),
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
       special_storage_policy_(std::move(special_storage_policy)),
       quota_manager_proxy_(std::move(quota_manager_proxy)),
       // Using a raw pointer is safe since NativeIOManager be owned by
@@ -135,35 +144,29 @@ void NativeIOManager::BindReceiver(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto it = hosts_.find(storage_key);
-  if (it == hosts_.end()) {
-    // This feature should only be exposed to potentially trustworthy origins
-    // (https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy).
-    // Notably this includes the https and chrome-extension schemes, among
-    // others.
-    if (!network::IsOriginPotentiallyTrustworthy(storage_key.origin())) {
-      std::move(bad_message_callback)
-          .Run("Called NativeIO from an insecure context");
-      return;
-    }
-
-    base::FilePath storage_key_root_path = RootPathForStorageKey(storage_key);
-    DCHECK(storage_key_root_path.empty() ||
-           root_path_.IsParent(storage_key_root_path))
-        << "Per-storage-key data should be in a sub-directory of NativeIO/ for "
-        << "non-incognito mode ";
-
-    bool insert_succeeded;
-    std::tie(it, insert_succeeded) = hosts_.emplace(
-        storage_key, std::make_unique<NativeIOHost>(
-                         storage_key, std::move(storage_key_root_path),
-#if defined(OS_MAC)
-                         allow_set_length_ipc_,
-#endif  // defined(OS_MAC)
-                         this));
-    DCHECK(insert_succeeded);
+  if (it != hosts_.end()) {
+    it->second->BindReceiver(std::move(receiver));
+    return;
   }
 
-  it->second->BindReceiver(std::move(receiver));
+  // This feature should only be exposed to potentially trustworthy origins
+  // (https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy).
+  // Notably this includes the https and chrome-extension schemes, among
+  // others.
+  if (!network::IsOriginPotentiallyTrustworthy(storage_key.origin())) {
+    std::move(bad_message_callback)
+        .Run("Called NativeIO from an insecure context");
+    return;
+  }
+
+  // Ensure that the default bucket for the storage key exists on access and
+  // bind receiver on retrieval.
+  quota_manager_proxy_->GetOrCreateBucket(
+      storage_key, storage::kDefaultBucketName,
+      base::SequencedTaskRunnerHandle::Get(),
+      base::BindOnce(&NativeIOManager::BindReceiverWithBucketInfo,
+                     weak_factory_.GetWeakPtr(), storage_key,
+                     std::move(receiver)));
 }
 
 void NativeIOManager::OnHostReceiverDisconnect(NativeIOHost* host,
@@ -181,6 +184,35 @@ void NativeIOManager::DidDeleteHostData(NativeIOHost* host,
   MaybeDeleteHost(host);
 }
 
+void NativeIOManager::BindReceiverWithBucketInfo(
+    const blink::StorageKey& storage_key,
+    mojo::PendingReceiver<blink::mojom::NativeIOHost> receiver,
+    storage::QuotaErrorOr<storage::BucketInfo> result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(result.ok());
+
+  auto it = hosts_.find(storage_key);
+  if (it == hosts_.end()) {
+    base::FilePath storage_key_root_path = RootPathForStorageKey(storage_key);
+    DCHECK(storage_key_root_path.empty() ||
+           root_path_.IsParent(storage_key_root_path))
+        << "Per-storage-key data should be in a sub-directory of NativeIO/ for "
+        << "non-incognito mode ";
+
+    bool insert_succeeded;
+    std::tie(it, insert_succeeded) = hosts_.emplace(
+        storage_key, std::make_unique<NativeIOHost>(
+                         storage_key, std::move(storage_key_root_path),
+#if BUILDFLAG(IS_MAC)
+                         allow_set_length_ipc_,
+#endif  // BUILDFLAG(IS_MAC)
+                         this));
+    DCHECK(insert_succeeded);
+  }
+
+  it->second->BindReceiver(std::move(receiver));
+}
+
 void NativeIOManager::MaybeDeleteHost(NativeIOHost* host) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(host != nullptr);
@@ -196,7 +228,7 @@ void NativeIOManager::MaybeDeleteHost(NativeIOHost* host) {
 
 void NativeIOManager::DeleteStorageKeyData(
     const blink::StorageKey& storage_key,
-    storage::mojom::QuotaClient::DeleteStorageKeyDataCallback callback) {
+    storage::mojom::QuotaClient::DeleteBucketDataCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(callback);
 
@@ -225,9 +257,9 @@ void NativeIOManager::DeleteStorageKeyData(
     std::tie(it, insert_succeeded) = hosts_.emplace(
         storage_key, std::make_unique<NativeIOHost>(
                          storage_key, std::move(storage_key_root_path),
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
                          allow_set_length_ipc_,
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
                          this));
     DCHECK(insert_succeeded);
   }
@@ -235,7 +267,7 @@ void NativeIOManager::DeleteStorageKeyData(
   // DeleteAllData() will call DidDeleteHostData() asynchronously, which may
   // delete this entry from `hosts_`.
   it->second->DeleteAllData(base::BindOnce(
-      [](storage::mojom::QuotaClient::DeleteStorageKeyDataCallback callback,
+      [](storage::mojom::QuotaClient::DeleteBucketDataCallback callback,
          base::File::Error error) {
         std::move(callback).Run((error == base::File::FILE_OK)
                                     ? blink::mojom::QuotaStatusCode::kOk
@@ -268,48 +300,10 @@ void NativeIOManager::GetStorageKeysForType(
       base::BindOnce(&DoGetStorageKeys, root_path_), std::move(callback));
 }
 
-void NativeIOManager::GetStorageKeysForHost(
-    blink::mojom::StorageType type,
-    const std::string& host,
-    storage::mojom::QuotaClient::GetStorageKeysForHostCallback callback) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK_EQ(type, blink::mojom::StorageType::kTemporary);
-  DCHECK(callback);
-
-  base::ThreadPool::PostTaskAndReplyWithResult(
-      FROM_HERE,
-      {
-          // Needed for file I/O.
-          base::MayBlock(),
-
-          // Reasonable compromise, given that the sitedata UI depends on this
-          // functionality.
-          base::TaskPriority::USER_VISIBLE,
-
-          // BLOCK_SHUTDOWN is definitely not appropriate. We might be able to
-          // move to CONTINUE_ON_SHUTDOWN after very careful analysis.
-          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
-      },
-      base::BindOnce(&DoGetStorageKeys, root_path_),
-      base::BindOnce(
-          [](const std::string& host,
-             storage::mojom::QuotaClient::GetStorageKeysForTypeCallback
-                 callback,
-             std::vector<blink::StorageKey> storage_keys) {
-            std::vector<blink::StorageKey> host_storage_keys;
-            for (blink::StorageKey& storage_key : storage_keys) {
-              if (host == storage_key.origin().host())
-                host_storage_keys.push_back(std::move(storage_key));
-            }
-            std::move(callback).Run(std::move(host_storage_keys));
-          },
-          host, std::move(callback)));
-}
-
 void NativeIOManager::GetStorageKeyUsage(
     const blink::StorageKey& storage_key,
     blink::mojom::StorageType type,
-    storage::mojom::QuotaClient::GetStorageKeyUsageCallback callback) {
+    storage::mojom::QuotaClient::GetBucketUsageCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(type, blink::mojom::StorageType::kTemporary);
   DCHECK(callback);

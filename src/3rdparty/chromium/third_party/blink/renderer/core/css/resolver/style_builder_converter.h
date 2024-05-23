@@ -27,6 +27,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_STYLE_BUILDER_CONVERTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_STYLE_BUILDER_CONVERTER_H_
 
+#include "base/memory/scoped_refptr.h"
+#include "base/notreached.h"
 #include "cc/input/scroll_snap_data.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/css/css_function_value.h"
@@ -38,6 +40,7 @@
 #include "third_party/blink/renderer/core/css/css_value_pair.h"
 #include "third_party/blink/renderer/core/css/css_variable_data.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
+#include "third_party/blink/renderer/core/style/basic_shapes.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/grid_area.h"
 #include "third_party/blink/renderer/core/style/grid_positions_resolver.h"
@@ -71,6 +74,7 @@ class StyleSVGResource;
 class TextSizeAdjust;
 class TranslateTransformOperation;
 class UnzoomedLength;
+struct ComputedGridTrackList;
 
 class StyleBuilderConverterBase {
   STATIC_ONLY(StyleBuilderConverterBase);
@@ -124,6 +128,9 @@ class StyleBuilderConverter {
   static scoped_refptr<FontVariationSettings> ConvertFontVariationSettings(
       const StyleResolverState&,
       const CSSValue&);
+  static scoped_refptr<FontPalette> ConvertFontPalette(
+      StyleResolverState& state,
+      const CSSValue& value);
   static FontDescription::Size ConvertFontSize(StyleResolverState&,
                                                const CSSValue&);
   static float ConvertFontSizeAdjust(StyleResolverState&, const CSSValue&);
@@ -225,17 +232,9 @@ class StyleBuilderConverter {
   static TransformOrigin ConvertTransformOrigin(StyleResolverState&,
                                                 const CSSValue&);
 
-  static void ConvertGridTrackList(
-      const CSSValue&,
-      GridTrackList&,
-      NamedGridLinesMap&,
-      OrderedNamedGridLines&,
-      Vector<GridTrackSize, 1>& auto_repeat_track_sizes,
-      NamedGridLinesMap&,
-      OrderedNamedGridLines&,
-      wtf_size_t& auto_repeat_insertion_point,
-      AutoRepeatType&,
-      StyleResolverState&);
+  static void ConvertGridTrackList(const CSSValue&,
+                                   ComputedGridTrackList&,
+                                   StyleResolverState&);
   static void CreateImplicitNamedGridLinesFromGridArea(
       const NamedGridAreaMap&,
       NamedGridLinesMap&,
@@ -259,6 +258,8 @@ class StyleBuilderConverter {
       const CSSValue&);
   static scoped_refptr<StylePath> ConvertPathOrNone(StyleResolverState&,
                                                     const CSSValue&);
+  static scoped_refptr<BasicShape> ConvertObjectViewBox(StyleResolverState&,
+                                                        const CSSValue&);
   static scoped_refptr<BasicShape> ConvertOffsetPath(StyleResolverState&,
                                                      const CSSValue&);
   static StyleOffsetRotation ConvertOffsetRotate(const CSSValue&);
@@ -278,8 +279,6 @@ class StyleBuilderConverter {
       const CSSValue&,
       bool is_animation_tainted);
 
-  static LengthSize ConvertIntrinsicSize(StyleResolverState&, const CSSValue&);
-
   static StyleAspectRatio ConvertAspectRatio(const StyleResolverState&,
                                              const CSSValue&);
 
@@ -296,11 +295,27 @@ class StyleBuilderConverter {
   static ScrollbarGutter ConvertScrollbarGutter(StyleResolverState& state,
                                                 const CSSValue& value);
 
-  static AtomicString ConvertContainerName(StyleResolverState&,
-                                           const CSSValue&);
+  static Vector<AtomicString> ConvertContainerName(StyleResolverState&,
+                                                   const CSSValue&);
+
+  static absl::optional<StyleIntrinsicLength> ConvertIntrinsicDimension(
+      const StyleResolverState&,
+      const CSSValue&);
 
   static void CountSystemColorComputeToSelfUsage(
       const StyleResolverState& state);
+
+  static AtomicString ConvertPageTransitionTag(StyleResolverState&,
+                                               const CSSValue&);
+
+  // Take a list value for a specified color-scheme, extract flags for known
+  // color-schemes and the 'only' modifier, and push the list items into a
+  // vector for storing the computed value on a ComputedStyle, if the passed in
+  // vector is non-null.
+  static ColorSchemeFlags ExtractColorSchemes(
+      const Document&,
+      const CSSValueList& scheme_list,
+      Vector<AtomicString>* color_schemes);
 };
 
 template <typename T>
@@ -356,8 +371,8 @@ T StyleBuilderConverter::ConvertLineWidth(StyleResolverState& state,
   double zoomed_result = state.StyleRef().EffectiveZoom() * result;
   if (zoomed_result > 0.0 && zoomed_result < 1.0)
     return 1.0;
-  return clampTo<T>(RoundForImpreciseConversion<T>(result),
-                    defaultMinimumForClamp<T>(), defaultMaximumForClamp<T>());
+  return ClampTo<T>(RoundForImpreciseConversion<T>(result),
+                    DefaultMinimumForClamp<T>(), DefaultMaximumForClamp<T>());
 }
 
 template <CSSValueID cssValueFor0, CSSValueID cssValueFor100>

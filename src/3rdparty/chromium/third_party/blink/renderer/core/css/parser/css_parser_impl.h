@@ -14,7 +14,7 @@
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenized_value.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -29,6 +29,7 @@ class StyleRuleBase;
 class StyleRuleCharset;
 class StyleRuleCounterStyle;
 class StyleRuleFontFace;
+class StyleRuleFontPaletteValues;
 class StyleRuleImport;
 class StyleRuleKeyframe;
 class StyleRuleKeyframes;
@@ -56,11 +57,12 @@ class CORE_EXPORT CSSParserImpl {
 
   enum AllowedRulesType {
     // As per css-syntax, css-cascade and css-namespaces, @charset rules
-    // must come first, followed by @import then @namespace.
-    // AllowImportRules actually means we allow @import and any rules thay
+    // must come first, followed by @layer, @import then @namespace.
+    // AllowImportRules actually means we allow @import and any rules that
     // may follow it, i.e. @namespace rules and regular rules.
     // AllowCharsetRules and AllowNamespaceRules behave similarly.
     kAllowCharsetRules,
+    kAllowLayerStatementRules,
     kAllowImportRules,
     kAllowNamespaceRules,
     kRegularRules,
@@ -134,6 +136,10 @@ class CORE_EXPORT CSSParserImpl {
       wtf_size_t offset,
       const CSSParserContext*);
 
+  // Consumes a value from the remaining tokens in the (possibly bounded)
+  // stream.
+  //
+  // See also CSSParserTokenStream::Boundary.
   static CSSTokenizedValue ConsumeValue(CSSParserTokenStream&);
 
   static bool RemoveImportantAnnotationIfPresent(CSSTokenizedValue&);
@@ -155,13 +161,15 @@ class CORE_EXPORT CSSParserImpl {
   StyleRuleBase* ConsumeQualifiedRule(CSSParserTokenStream&, AllowedRulesType);
 
   static StyleRuleCharset* ConsumeCharsetRule(CSSParserTokenStream&);
-  StyleRuleImport* ConsumeImportRule(AtomicString prelude_uri,
+  StyleRuleImport* ConsumeImportRule(const AtomicString& prelude_uri,
                                      CSSParserTokenStream&);
   StyleRuleNamespace* ConsumeNamespaceRule(CSSParserTokenStream&);
   StyleRuleMedia* ConsumeMediaRule(CSSParserTokenStream&);
   StyleRuleSupports* ConsumeSupportsRule(CSSParserTokenStream&);
   StyleRuleViewport* ConsumeViewportRule(CSSParserTokenStream&);
   StyleRuleFontFace* ConsumeFontFaceRule(CSSParserTokenStream&);
+  StyleRuleFontPaletteValues* ConsumeFontPaletteValuesRule(
+      CSSParserTokenStream&);
   StyleRuleKeyframes* ConsumeKeyframesRule(bool webkit_prefixed,
                                            CSSParserTokenStream&);
   StyleRulePage* ConsumePageRule(CSSParserTokenStream&);

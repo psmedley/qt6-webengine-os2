@@ -1,4 +1,3 @@
-# Lint as: python2, python3
 # Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,10 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Traversing Python modules and classes."""
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
 import enum
 import sys
@@ -101,7 +96,7 @@ def traverse(root, visit):
   is already in the stack.
 
   Traversing system modules can take a long time, it is advisable to pass a
-  `visit` callable which blacklists such modules.
+  `visit` callable which denylists such modules.
 
   Args:
     root: A python object with which to start the traversal.

@@ -144,6 +144,10 @@ class SigninMetricsTest : public ::testing::Test {
         return "SafetyCheck";
       case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
         return "Kaleidoscope";
+      case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
+        return "EnterpriseSignoutResignSheet";
+      case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
+        return "SigninInterceptFirstRunExperience";
       case AccessPoint::ACCESS_POINT_MAX:
         NOTREACHED();
         return "";

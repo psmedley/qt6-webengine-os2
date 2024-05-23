@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2015-2016 The Khronos Group Inc.
- * Copyright (c) 2015-2016 Valve Corporation
- * Copyright (c) 2015-2016 LunarG, Inc.
+ * Copyright (c) 2015-2021 The Khronos Group Inc.
+ * Copyright (c) 2015-2021 Valve Corporation
+ * Copyright (c) 2015-2021 LunarG, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,13 @@
  * limitations under the License.
  *
  * Author: Ian Elliott <ian@lunarg.com>
+ * Author: Charles Giessen <charles@lunarg.com>
  *
  */
 
-#ifndef WSI_H
-#define WSI_H
+#pragma once
 
-#include "vk_loader_platform.h"
-#include "loader.h"
+#include "loader_common.h"
 
 typedef struct {
     union {
@@ -57,6 +56,9 @@ typedef struct {
 #ifdef VK_USE_PLATFORM_SCREEN_QNX
         VkIcdSurfaceScreen screen_surf;
 #endif  // VK_USE_PLATFORM_SCREEN_QNX
+#ifdef VK_USE_PLATFORM_VI_NN
+        VkIcdSurfaceVi vi_surf;
+#endif  // VK_USE_PLATFORM_VI_NN
         VkIcdSurfaceDisplay display_surf;
         VkIcdSurfaceHeadless headless_surf;
     };
@@ -164,6 +166,10 @@ VKAPI_ATTR VkBool32 VKAPI_CALL terminator_GetPhysicalDeviceScreenPresentationSup
                                                                                         uint32_t queueFamilyIndex,
                                                                                         struct _screen_window *window);
 #endif  // VK_USE_PLATFORM_SCREEN_QNX
+#ifdef VK_USE_PLATFORM_VI_NN
+VKAPI_ATTR VkResult VKAPI_CALL terminator_CreateViSurfaceNN(VkInstance instance, const VkViSurfaceCreateInfoNN *pCreateInfo,
+                                                            const VkAllocationCallbacks *pAllocator, VkSurfaceKHR *pSurface);
+#endif  // VK_USE_PLATFORM_VI_NN
 VKAPI_ATTR VkResult VKAPI_CALL terminator_GetPhysicalDeviceDisplayPropertiesKHR(VkPhysicalDevice physicalDevice,
                                                                                 uint32_t *pPropertyCount,
                                                                                 VkDisplayPropertiesKHR *pProperties);
@@ -231,5 +237,3 @@ VKAPI_ATTR VkResult VKAPI_CALL terminator_GetPhysicalDeviceSurfaceFormats2KHR(Vk
                                                                               const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo,
                                                                               uint32_t *pSurfaceFormatCount,
                                                                               VkSurfaceFormat2KHR *pSurfaceFormats);
-
-#endif  // WSI_H

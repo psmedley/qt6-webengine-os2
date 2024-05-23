@@ -16,6 +16,7 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace gpu {
+class DXGISharedHandleManager;
 class SharedImageRepresentationFactoryRef;
 class SharedImageBatchAccessManager;
 class VaapiDependenciesFactory;
@@ -31,6 +32,10 @@ class GPU_GLES2_EXPORT SharedImageManager {
   // that holds the display context.
   explicit SharedImageManager(bool thread_safe = false,
                               bool display_context_on_another_thread = false);
+
+  SharedImageManager(const SharedImageManager&) = delete;
+  SharedImageManager& operator=(const SharedImageManager&) = delete;
+
   ~SharedImageManager();
 
   // Registers a SharedImageBacking with the manager and returns a
@@ -79,6 +84,15 @@ class GPU_GLES2_EXPORT SharedImageManager {
   std::unique_ptr<SharedImageRepresentationMemory> ProduceMemory(
       const Mailbox& mailbox,
       MemoryTypeTracker* ref);
+  std::unique_ptr<SharedImageRepresentationRaster> ProduceRaster(
+      const Mailbox& mailbox,
+      MemoryTypeTracker* ref);
+
+#if BUILDFLAG(IS_ANDROID)
+  std::unique_ptr<SharedImageRepresentationLegacyOverlay> ProduceLegacyOverlay(
+      const Mailbox& mailbox,
+      MemoryTypeTracker* ref);
+#endif
 
   // Called by SharedImageRepresentation in the destructor.
   void OnRepresentationDestroyed(const Mailbox& mailbox,
@@ -104,12 +118,19 @@ class GPU_GLES2_EXPORT SharedImageManager {
   scoped_refptr<gfx::NativePixmap> GetNativePixmap(const gpu::Mailbox& mailbox);
 
   SharedImageBatchAccessManager* batch_access_manager() const {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     return batch_access_manager_.get();
 #else
     return nullptr;
 #endif
   }
+
+#if BUILDFLAG(IS_WIN)
+  const scoped_refptr<DXGISharedHandleManager>& dxgi_shared_handle_manager()
+      const {
+    return dxgi_shared_handle_manager_;
+  }
+#endif
 
   bool BeginBatchReadAccess();
   bool EndBatchReadAccess();
@@ -123,13 +144,15 @@ class GPU_GLES2_EXPORT SharedImageManager {
 
   const bool display_context_on_another_thread_;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<SharedImageBatchAccessManager> batch_access_manager_;
 #endif
 
-  THREAD_CHECKER(thread_checker_);
+#if BUILDFLAG(IS_WIN)
+  scoped_refptr<DXGISharedHandleManager> dxgi_shared_handle_manager_;
+#endif
 
-  DISALLOW_COPY_AND_ASSIGN(SharedImageManager);
+  THREAD_CHECKER(thread_checker_);
 };
 
 }  // namespace gpu

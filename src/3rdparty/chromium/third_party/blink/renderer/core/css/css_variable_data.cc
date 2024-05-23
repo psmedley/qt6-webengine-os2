@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/css_variable_data.h"
 
+#include "base/containers/span.h"
 #include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
@@ -76,7 +77,7 @@ String CSSVariableData::Serialize() const {
       if (last.GetType() == kUrlToken)
         serialized_text.Append(')');
 
-      return serialized_text.ToString();
+      return serialized_text.ReleaseString();
     }
 
     return original_text_;
@@ -101,13 +102,58 @@ void CSSVariableData::ConsumeAndUpdateTokens(const CSSParserTokenRange& range) {
     has_font_units_ |= IsFontUnitToken(token);
     has_root_font_units_ |= IsRootFontUnitToken(token);
   }
-  String backing_string = string_builder.ToString();
+  String backing_string = string_builder.ReleaseString();
   backing_strings_.push_back(backing_string);
   if (backing_string.Is8Bit())
     UpdateTokens<LChar>(range, backing_string, tokens_);
   else
     UpdateTokens<UChar>(range, backing_string, tokens_);
 }
+
+#if EXPENSIVE_DCHECKS_ARE_ON()
+
+namespace {
+
+template <typename CharacterType>
+bool IsSubspan(base::span<const CharacterType> inner,
+               base::span<const CharacterType> outer) {
+  // Note that base::span uses CheckedContiguousIterator, which restricts
+  // which comparisons are allowed. Therefore we must avoid begin()/end() here.
+  return inner.data() >= outer.data() &&
+         (inner.data() + inner.size()) <= (outer.data() + outer.size());
+}
+
+bool TokenValueIsBacked(const CSSParserToken& token,
+                        const String& backing_string) {
+  StringView value = token.Value();
+  if (value.Is8Bit() != backing_string.Is8Bit())
+    return false;
+  return value.Is8Bit() ? IsSubspan(value.Span8(), backing_string.Span8())
+                        : IsSubspan(value.Span16(), backing_string.Span16());
+}
+
+bool TokenValueIsBacked(const CSSParserToken& token,
+                        const Vector<String>& backing_strings) {
+  DCHECK(token.HasStringBacking());
+  for (const String& backing_string : backing_strings) {
+    if (TokenValueIsBacked(token, backing_string)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+void CSSVariableData::VerifyStringBacking() const {
+  for (const CSSParserToken& token : tokens_) {
+    DCHECK(!token.HasStringBacking() ||
+           TokenValueIsBacked(token, backing_strings_))
+        << "Token value is not backed: " << token.Value().ToString();
+  }
+}
+
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 
 CSSVariableData::CSSVariableData(const CSSTokenizedValue& tokenized_value,
                                  bool is_animation_tainted,
@@ -119,8 +165,10 @@ CSSVariableData::CSSVariableData(const CSSTokenizedValue& tokenized_value,
       needs_variable_resolution_(needs_variable_resolution),
       base_url_(base_url.IsValid() ? base_url.GetString() : String()),
       charset_(charset) {
-  DCHECK(!tokenized_value.range.AtEnd());
   ConsumeAndUpdateTokens(tokenized_value.range);
+#if EXPENSIVE_DCHECKS_ARE_ON()
+  VerifyStringBacking();
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 }
 
 const CSSValue* CSSVariableData::ParseForSyntax(

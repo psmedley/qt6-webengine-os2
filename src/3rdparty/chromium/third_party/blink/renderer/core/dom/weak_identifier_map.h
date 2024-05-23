@@ -6,10 +6,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_WEAK_IDENTIFIER_MAP_H_
 
 #include <limits>
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
@@ -30,12 +30,13 @@ class WeakIdentifierMap final
   static IdentifierType Identifier(T* object) {
     IdentifierType result;
 
-    if (!Instance().object_to_identifier_.Contains(object)) {
+    auto it = Instance().object_to_identifier_.find(object);
+    if (it == Instance().object_to_identifier_.end()) {
       do {
         result = Next();
       } while (!LIKELY(Instance().Put(object, result)));
     } else {
-      result = Instance().object_to_identifier_.at(object);
+      result = it->value;
     }
     return result;
   }
@@ -45,9 +46,8 @@ class WeakIdentifierMap final
   }
 
   static T* Lookup(IdentifierType identifier) {
-    return Instance().identifier_to_object_.Contains(identifier)
-               ? Instance().identifier_to_object_.at(identifier)
-               : nullptr;
+    auto it = Instance().identifier_to_object_.find(identifier);
+    return it != Instance().identifier_to_object_.end() ? it->value : nullptr;
   }
 
   static void NotifyObjectDestroyed(T* object) {

@@ -9,7 +9,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/cxx17_backports.h"
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -143,7 +142,7 @@ TEST(URLMatcherFactoryTest, UpperCase) {
 
   // {"scheme": ["HTTP"]}
   auto scheme_list = std::make_unique<base::ListValue>();
-  scheme_list->AppendString("HTTP");
+  scheme_list->Append("HTTP");
   base::DictionaryValue invalid_condition5;
   invalid_condition5.Set(keys::kSchemesKey, std::move(scheme_list));
 
@@ -155,7 +154,7 @@ TEST(URLMatcherFactoryTest, UpperCase) {
     &invalid_condition5
   };
 
-  for (size_t i = 0; i < base::size(invalid_conditions); ++i) {
+  for (size_t i = 0; i < std::size(invalid_conditions); ++i) {
     error.clear();
     result = URLMatcherFactory::CreateFromURLFilterDictionary(
         matcher.condition_factory(), invalid_conditions[i], 1, &error);
@@ -236,7 +235,7 @@ void UrlConditionCaseTest::CheckCondition(
   base::DictionaryValue condition;
   if (use_list_of_strings_) {
     auto list = std::make_unique<base::ListValue>();
-    list->AppendString(value);
+    list->Append(value);
     condition.SetKey(condition_key_,
                      base::Value::FromUniquePtrValue(std::move(list)));
   } else {
@@ -337,7 +336,7 @@ TEST(URLMatcherFactoryTest, CaseSensitivity) {
                          kIsUrlCaseSensitive, kIsUrlLowerCaseEnforced, url),
   };
 
-  for (size_t i = 0; i < base::size(case_tests); ++i) {
+  for (size_t i = 0; i < std::size(case_tests); ++i) {
     SCOPED_TRACE(base::StringPrintf("Iteration: %" PRIuS, i));
     case_tests[i].Test();
   }

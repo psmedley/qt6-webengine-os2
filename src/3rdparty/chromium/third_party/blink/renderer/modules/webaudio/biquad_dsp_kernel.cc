@@ -160,7 +160,7 @@ void BiquadDSPKernel::UpdateTailTime(int coef_index) {
   double tail =
       biquad_.TailFrame(coef_index, kMaxTailTime * sample_rate) / sample_rate;
 
-  tail_time_ = clampTo(tail, 0.0, kMaxTailTime);
+  tail_time_ = ClampTo(tail, 0.0, kMaxTailTime);
 }
 
 void BiquadDSPKernel::Process(const float* source,
@@ -180,8 +180,9 @@ void BiquadDSPKernel::Process(const float* source,
   // for this block if necessary. We'll get them the next time around.
   {
     MutexTryLocker try_locker(process_lock_);
-    if (try_locker.Locked())
+    if (try_locker.Locked()) {
       UpdateCoefficientsIfNecessary(frames_to_process);
+    }
   }
 
   biquad_.Process(source, destination, frames_to_process);
@@ -206,8 +207,9 @@ void BiquadDSPKernel::GetFrequencyResponse(BiquadDSPKernel& kernel,
 
   // Convert from frequency in Hz to normalized frequency (0 -> 1),
   // with 1 equal to the Nyquist frequency.
-  for (int k = 0; k < n_frequencies; ++k)
+  for (int k = 0; k < n_frequencies; ++k) {
     frequency[k] = frequency_hz[k] / nyquist;
+  }
 
   kernel.biquad_.GetFrequencyResponse(n_frequencies, frequency.data(),
                                       mag_response, phase_response);

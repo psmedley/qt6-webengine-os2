@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/platform/fonts/font_test_utilities.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_test_info.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_view.h"
+#include "third_party/blink/renderer/platform/testing/font_test_base.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -47,7 +48,7 @@ scoped_refptr<const ShapeResultView> ShapeLine(ShapingLineBreaker* breaker,
 
 }  // namespace
 
-class ShapingLineBreakerTest : public testing::Test {
+class ShapingLineBreakerTest : public FontTestBase {
  protected:
   void SetUp() override {
     font_description.SetComputedSize(12.0);
@@ -57,13 +58,13 @@ class ShapingLineBreakerTest : public testing::Test {
   void SelectLucidaFont() {
     FontFamily lucida_family;
     // Windows 10
-    lucida_family.SetFamily("Lucida Grande");
+    lucida_family.SetFamily("Lucida Grande", FontFamily::Type::kFamilyName);
     // Windows 7
-    lucida_family.AppendFamily("Lucida Grande");
+    lucida_family.AppendFamily("Lucida Grande", FontFamily::Type::kFamilyName);
     // Linux
-    lucida_family.AppendFamily("Lucida Medium");
+    lucida_family.AppendFamily("Lucida Medium", FontFamily::Type::kFamilyName);
     // Mac
-    lucida_family.AppendFamily("Lucida Medium");
+    lucida_family.AppendFamily("Lucida Medium", FontFamily::Type::kFamilyName);
 
     font_description.SetFamily(lucida_family);
     font = Font(font_description);

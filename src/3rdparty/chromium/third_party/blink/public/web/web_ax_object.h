@@ -38,15 +38,12 @@
 #include "ui/accessibility/ax_enums.mojom-shared.h"
 #include "ui/accessibility/ax_mode.h"
 
-namespace skia {
-class Matrix44;
-}
-
 namespace gfx {
 class Point;
 class RectF;
 class Rect;
 class Size;
+class Transform;
 }
 
 namespace ui {
@@ -151,7 +148,6 @@ class WebAXObject {
   BLINK_EXPORT bool IsVisited() const;
 
   BLINK_EXPORT WebString AccessKey() const;
-  BLINK_EXPORT bool CanPress() const;
   BLINK_EXPORT bool CanSetValueAttribute() const;
   // Deprecated.
   BLINK_EXPORT void ColorValue(int& r, int& g, int& b) const;
@@ -347,7 +343,7 @@ class WebAXObject {
   // or similar, set |clips_children| to true.
   BLINK_EXPORT void GetRelativeBounds(WebAXObject& offset_container,
                                       gfx::RectF& bounds_in_container,
-                                      skia::Matrix44& container_transform,
+                                      gfx::Transform& container_transform,
                                       bool* clips_children = nullptr) const;
 
   // Retrieves a vector of all WebAXObjects in this document whose

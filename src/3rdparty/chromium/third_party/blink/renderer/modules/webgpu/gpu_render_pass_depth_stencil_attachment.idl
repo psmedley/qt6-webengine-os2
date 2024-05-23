@@ -5,14 +5,19 @@
 // https://gpuweb.github.io/gpuweb/
 
 dictionary GPURenderPassDepthStencilAttachment {
-    // view should be required, but we can't enforce that until the deprecated
-    // attachment property has been removed.
-    GPUTextureView view;
-    GPUTextureView attachment; // Deprecated
+    required GPUTextureView view;
 
-    required (GPULoadOp or float) depthLoadValue;
-    required GPUStoreOp depthStoreOp;
+    float depthClearValue = 0;
+    GPULoadOp depthLoadOp;
+    GPUStoreOp depthStoreOp;
+    boolean depthReadOnly = false;
 
-    required (GPULoadOp or GPUStencilValue) stencilLoadValue;
-    required GPUStoreOp stencilStoreOp;
+    GPUStencilValue stencilClearValue = 0;
+    GPULoadOp stencilLoadOp;
+    GPUStoreOp stencilStoreOp;
+    boolean stencilReadOnly = false;
+
+    // TODO(dawn:1269): Deprecated, prefer *LoadOp+*ClearValue instead.
+    (GPULoadOp or float) depthLoadValue;
+    (GPULoadOp or GPUStencilValue) stencilLoadValue;
 };

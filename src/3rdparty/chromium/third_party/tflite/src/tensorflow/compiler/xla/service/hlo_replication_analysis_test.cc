@@ -33,7 +33,7 @@ namespace {
 class HloReplicationAnalysisTest : public HloTestBase {};
 
 TEST_F(HloReplicationAnalysisTest, NoControlFlow) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule NoControlFlow
 
 sum {
@@ -100,7 +100,7 @@ ENTRY entry {
 }
 
 TEST_F(HloReplicationAnalysisTest, NoControlFlowSPMD) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule NoControlFlow
 
 sum {
@@ -185,7 +185,7 @@ ENTRY entry {
 }
 
 TEST_F(HloReplicationAnalysisTest, NestedCall) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule NestedCall
 
 fusion_computation {
@@ -237,7 +237,7 @@ ENTRY entry {
 }
 
 TEST_F(HloReplicationAnalysisTest, SimpleWhileLoop) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule SimpleWhileLoop
 
 cond {
@@ -283,7 +283,7 @@ ENTRY SimpleWhileLoop {
 
 TEST_F(HloReplicationAnalysisTest,
        WhileLoopParameterAliasingNonReplicatedOutput) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule WhileLoopParameterAliasingNonReplicatedOutput
 
 cond {
@@ -334,7 +334,7 @@ ENTRY WhileLoopParameterAliasingNonReplicatedOutput {
 }
 
 TEST_F(HloReplicationAnalysisTest, WhileLoopDifferentCondition) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule WhileLoopDifferentCondition
 
 cond {
@@ -375,7 +375,7 @@ ENTRY WhileLoopDifferentCondition {
 }
 
 TEST_F(HloReplicationAnalysisTest, SimpleConditional) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule SimpleConditional
 
 Negate {
@@ -437,7 +437,7 @@ ENTRY entry {
 }
 
 TEST_F(HloReplicationAnalysisTest, ConditionalWithDifferentPredicates) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule ConditionalWithDifferentPredicates
 
 Negate {
@@ -501,8 +501,38 @@ ENTRY entry {
       FindInstruction(module.get(), "conditional"), {1}));
 }
 
+TEST_F(HloReplicationAnalysisTest, X64SplitCombine) {
+  const std::string module_str = R"(
+HloModule SimpleTupleSelect
+
+ENTRY entry {
+  param = (f64[]) parameter(0)
+  gte = f64[] get-tuple-element(param), index=0
+  param-low = f32[] custom-call(gte), custom_call_target="X64SplitLow"
+  param-high = f32[] custom-call(gte), custom_call_target="X64SplitHigh"
+  ROOT result-combine = f64[] custom-call(param-low, param-high), custom_call_target="X64Combine"
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(module_str));
+  auto param = module->entry_computation()->parameter_instruction(0);
+  param->set_parameter_replicated_at_leaf_buffers(absl::Span<const bool>{true});
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloReplicationAnalysis> analysis,
+                          HloReplicationAnalysis::Run(
+                              module.get(), /*cross_partition_spmd=*/false));
+  EXPECT_TRUE(analysis->HloInstructionIsReplicatedAt(
+      FindInstruction(module.get(), "gte"), {}));
+  EXPECT_TRUE(analysis->HloInstructionIsReplicatedAt(
+      FindInstruction(module.get(), "param-low"), {}));
+  EXPECT_TRUE(analysis->HloInstructionIsReplicatedAt(
+      FindInstruction(module.get(), "param-high"), {}));
+  EXPECT_TRUE(analysis->HloInstructionIsReplicatedAt(
+      FindInstruction(module.get(), "result-combine"), {}));
+}
+
 TEST_F(HloReplicationAnalysisTest, SimpleTupleSelect) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule SimpleTupleSelect
 
 ENTRY entry {
@@ -529,7 +559,7 @@ ENTRY entry {
 }
 
 TEST_F(HloReplicationAnalysisTest, TupleSelectWithDifferentPredicates) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule TupleSelectWithDifferentPredicates
 
 ENTRY entry {
@@ -556,7 +586,7 @@ ENTRY entry {
 }
 
 TEST_F(HloReplicationAnalysisTest, CrossModuleAndReplicaAllReduce) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule CrossModuleAndReplicaAllReduce
 
 sum {
@@ -587,7 +617,7 @@ ENTRY entry {
 }
 
 TEST_F(HloReplicationAnalysisTest, GlobalIdAllGather) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule GlobalIdAllGather
 
 ENTRY entry {
@@ -598,15 +628,13 @@ ENTRY entry {
     use_global_device_ids=true, channel_id=2
   ag3 = f32[4] all-gather(param), replica_groups={{0,1,2,3}}, dimensions={0},
     use_global_device_ids=true, channel_id=3
-  ROOT tuple = (f32[], f32[], f32[]) tuple(ag1, ag2, ag3)
+  ROOT tuple = (f32[2], f32[2], f32[4]) tuple(ag1, ag2, ag3)
 }
 )";
 
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(
-                                           module_str, /*replica_count=*/2));
-  auto config = module->config();
-  config.set_num_partitions(2);
-  module->set_config(config);
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto module, ParseAndReturnVerifiedModule(module_str, /*replica_count=*/2,
+                                                /*num_partitions=*/2));
   TF_ASSERT_OK_AND_ASSIGN(
       std::unique_ptr<HloReplicationAnalysis> replica_analysis,
       HloReplicationAnalysis::Run(module.get(),

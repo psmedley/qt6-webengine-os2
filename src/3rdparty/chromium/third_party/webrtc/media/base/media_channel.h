@@ -28,6 +28,7 @@
 #include "api/rtp_parameters.h"
 #include "api/transport/data_channel_transport_interface.h"
 #include "api/transport/rtp/rtp_source.h"
+#include "api/units/time_delta.h"
 #include "api/video/video_content_type.h"
 #include "api/video/video_sink_interface.h"
 #include "api/video/video_source_interface.h"
@@ -37,7 +38,6 @@
 #include "common_video/include/quality_limitation_reason.h"
 #include "media/base/codec.h"
 #include "media/base/delayable.h"
-#include "media/base/media_config.h"
 #include "media/base/media_constants.h"
 #include "media/base/stream_params.h"
 #include "modules/audio_processing/include/audio_processing_statistics.h"
@@ -137,6 +137,8 @@ struct VideoOptions {
   // Force screencast to use a minimum bitrate. This flag comes from
   // the PeerConnection constraint 'googScreencastMinBitrate'. It is
   // copied to the encoder config by WebRtcVideoChannel.
+  // TODO(https://crbug.com/1315155): Remove the ability to set it in Chromium
+  // and delete this flag (it should default to 100 kbps).
   absl::optional<int> screencast_min_bitrate_kbps;
   // Set by screencast sources. Implies selection of encoding settings
   // suitable for screencast. Most likely not the right way to do
@@ -169,9 +171,8 @@ class MediaChannel {
     virtual ~NetworkInterface() {}
   };
 
-  MediaChannel(const MediaConfig& config,
-               webrtc::TaskQueueBase* network_thread);
-  explicit MediaChannel(webrtc::TaskQueueBase* network_thread);
+  explicit MediaChannel(webrtc::TaskQueueBase* network_thread,
+                        bool enable_dscp = false);
   virtual ~MediaChannel();
 
   virtual cricket::MediaType media_type() const = 0;
@@ -188,7 +189,7 @@ class MediaChannel {
   virtual void OnReadyToSend(bool ready) = 0;
   // Called when the network route used for sending packets changed.
   virtual void OnNetworkRouteChanged(
-      const std::string& transport_name,
+      absl::string_view transport_name,
       const rtc::NetworkRoute& network_route) = 0;
   // Creates a new outgoing media stream with SSRCs and CNAME as described
   // by sp.
@@ -209,11 +210,14 @@ class MediaChannel {
   // Resets any cached StreamParams for an unsignaled RecvStream, and removes
   // any existing unsignaled streams.
   virtual void ResetUnsignaledRecvStream() = 0;
-  // Informs the media channel when the transport's demuxer criteria is updated.
+  // This is currently a workaround because of the demuxer state being managed
+  // across two separate threads. Once the state is consistently managed on
+  // the same thread (network), this workaround can be removed.
+  // These two notifications inform the media channel when the transport's
+  // demuxer criteria is being updated.
   // * OnDemuxerCriteriaUpdatePending() happens on the same thread that the
   //   channel's streams are added and removed (worker thread).
-  // * OnDemuxerCriteriaUpdateComplete() happens on the thread where the demuxer
-  //   lives (network thread).
+  // * OnDemuxerCriteriaUpdateComplete() happens on the same thread.
   // Because the demuxer is updated asynchronously, there is a window of time
   // where packets are arriving to the channel for streams that have already
   // been removed on the worker thread. It is important NOT to treat these as
@@ -257,6 +261,10 @@ class MediaChannel {
   // worker_thread.
   void SetExtmapAllowMixed(bool extmap_allow_mixed);
   bool ExtmapAllowMixed() const;
+
+  // Returns `true` if a non-null NetworkInterface pointer is held.
+  // Must be called on the network thread.
+  bool HasNetworkInterface() const;
 
   virtual webrtc::RtpParameters GetRtpSendParameters(uint32_t ssrc) const = 0;
   virtual webrtc::RTCError SetRtpSendParameters(
@@ -374,6 +382,8 @@ struct MediaSenderInfo {
   uint64_t retransmitted_packets_sent = 0;
   // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-nackcount
   uint32_t nacks_rcvd = 0;
+  // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-targetbitrate
+  double target_bitrate = 0.0;
   int packets_lost = 0;
   float fraction_lost = 0.0f;
   int64_t rtt_ms = 0;
@@ -457,7 +467,6 @@ struct VoiceSenderInfo : public MediaSenderInfo {
   // https://w3c.github.io/webrtc-stats/#dom-rtcmediastreamtrackstats-totalaudioenergy
   double total_input_energy = 0.0;
   double total_input_duration = 0.0;
-  bool typing_noise_detected = false;
   webrtc::ANAStats ana_statistics;
   webrtc::AudioProcessingStats apm_statistics;
 };
@@ -531,6 +540,9 @@ struct VoiceReceiverInfo : public MediaReceiverInfo {
   uint32_t sender_reports_packets_sent = 0;
   uint64_t sender_reports_bytes_sent = 0;
   uint64_t sender_reports_reports_count = 0;
+  absl::optional<webrtc::TimeDelta> round_trip_time;
+  webrtc::TimeDelta total_round_trip_time = webrtc::TimeDelta::Zero();
+  int round_trip_time_measurements = 0;
 };
 
 struct VideoSenderInfo : public MediaSenderInfo {
@@ -543,7 +555,7 @@ struct VideoSenderInfo : public MediaSenderInfo {
   int send_frame_width = 0;
   int send_frame_height = 0;
   int frames = 0;
-  int framerate_input = 0;
+  double framerate_input = 0;
   int framerate_sent = 0;
   int aggregated_framerate_sent = 0;
   int nominal_bitrate = 0;
@@ -768,11 +780,9 @@ struct AudioRecvParameters : RtpParameters<AudioCodec> {};
 
 class VoiceMediaChannel : public MediaChannel, public Delayable {
  public:
-  explicit VoiceMediaChannel(webrtc::TaskQueueBase* network_thread)
-      : MediaChannel(network_thread) {}
-  VoiceMediaChannel(const MediaConfig& config,
-                    webrtc::TaskQueueBase* network_thread)
-      : MediaChannel(config, network_thread) {}
+  VoiceMediaChannel(webrtc::TaskQueueBase* network_thread,
+                    bool enable_dscp = false)
+      : MediaChannel(network_thread, enable_dscp) {}
   ~VoiceMediaChannel() override {}
 
   cricket::MediaType media_type() const override;
@@ -840,11 +850,9 @@ struct VideoRecvParameters : RtpParameters<VideoCodec> {};
 
 class VideoMediaChannel : public MediaChannel, public Delayable {
  public:
-  explicit VideoMediaChannel(webrtc::TaskQueueBase* network_thread)
-      : MediaChannel(network_thread) {}
-  VideoMediaChannel(const MediaConfig& config,
-                    webrtc::TaskQueueBase* network_thread)
-      : MediaChannel(config, network_thread) {}
+  explicit VideoMediaChannel(webrtc::TaskQueueBase* network_thread,
+                             bool enable_dscp = false)
+      : MediaChannel(network_thread, enable_dscp) {}
   ~VideoMediaChannel() override {}
 
   cricket::MediaType media_type() const override;

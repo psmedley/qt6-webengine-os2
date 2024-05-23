@@ -71,10 +71,11 @@ void av1_upscale_normative_and_extend_frame(const AV1_COMMON *cm,
                                             const YV12_BUFFER_CONFIG *src,
                                             YV12_BUFFER_CONFIG *dst);
 
-YV12_BUFFER_CONFIG *av1_scale_if_required(
+YV12_BUFFER_CONFIG *av1_realloc_and_scale_if_required(
     AV1_COMMON *cm, YV12_BUFFER_CONFIG *unscaled, YV12_BUFFER_CONFIG *scaled,
     const InterpFilter filter, const int phase, const bool use_optimized_scaler,
-    const bool for_psnr);
+    const bool for_psnr, const int border_in_pixels,
+    const bool alloc_y_buffer_8bit);
 
 void av1_resize_and_extend_frame_nonnormative(const YV12_BUFFER_CONFIG *src,
                                               YV12_BUFFER_CONFIG *dst, int bd,
@@ -101,7 +102,25 @@ static INLINE int av1_superres_scaled(const AV1_COMMON *cm) {
   // Note: for some corner cases (e.g. cm->width of 1), there may be no scaling
   // required even though cm->superres_scale_denominator != SCALE_NUMERATOR.
   // So, the following check is more accurate.
-  return !(cm->width == cm->superres_upscaled_width);
+  return (cm->width != cm->superres_upscaled_width);
+}
+
+// There's SIMD optimizations for 1/4, 1/2 and 3/4 downscaling.
+// SSSE3 also has optimizations for 2x upscaling.
+// Use non normative scalers for other scaling ratios.
+static INLINE bool av1_has_optimized_scaler(const int src_width,
+                                            const int src_height,
+                                            const int dst_width,
+                                            const int dst_height) {
+  const bool has_optimized_scaler =
+      (dst_width * 4 == src_width && dst_height * 4 == src_height) ||
+      (dst_width * 2 == src_width && dst_height * 2 == src_height) ||
+      (dst_width * 4 == src_width * 3 && dst_height * 4 == src_height * 3);
+#if HAVE_SSSE3
+  return has_optimized_scaler ||
+         (dst_width == src_width * 2 && dst_height == src_height * 2);
+#endif
+  return has_optimized_scaler;
 }
 
 #define UPSCALE_NORMATIVE_TAPS 8

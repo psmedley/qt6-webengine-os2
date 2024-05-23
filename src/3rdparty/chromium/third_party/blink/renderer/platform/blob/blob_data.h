@@ -39,7 +39,9 @@
 // required types without reference to the generator output headers.
 
 #include <memory>
+
 #include "base/gtest_prod_util.h"
+#include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/struct_ptr.h"
@@ -99,12 +101,12 @@ class PLATFORM_EXPORT BlobData {
  public:
   static constexpr int64_t kToEndOfFile = -1;
   enum class FileCompositionStatus {
-    SINGLE_UNKNOWN_SIZE_FILE,
-    NO_UNKNOWN_SIZE_FILES
+    kSingleUnknownSizeFile,
+    kNoUnknownSizeFiles
   };
 
   explicit BlobData(
-      FileCompositionStatus = FileCompositionStatus::NO_UNKNOWN_SIZE_FILES);
+      FileCompositionStatus = FileCompositionStatus::kNoUnknownSizeFiles);
   BlobData(const BlobData&) = delete;
   BlobData& operator=(const BlobData&) = delete;
   ~BlobData();
@@ -154,7 +156,7 @@ class PLATFORM_EXPORT BlobData {
   uint64_t length() const;
 
   bool IsSingleUnknownSizeFile() const {
-    return file_composition_ == FileCompositionStatus::SINGLE_UNKNOWN_SIZE_FILE;
+    return file_composition_ == FileCompositionStatus::kSingleUnknownSizeFile;
   }
 
  private:
@@ -231,7 +233,7 @@ class PLATFORM_EXPORT BlobDataHandle
                        absl::optional<base::Time>* snapshot_modification_time);
 
   void SetBlobRemoteForTesting(mojo::PendingRemote<mojom::blink::Blob> remote) {
-    MutexLocker locker(blob_remote_mutex_);
+    base::AutoLock locker(blob_remote_lock_);
     blob_remote_ = std::move(remote);
   }
 
@@ -253,11 +255,11 @@ class PLATFORM_EXPORT BlobDataHandle
   const bool is_single_unknown_size_file_;
   // This class is supposed to be thread safe. So to be able to use the mojo
   // Blob interface from multiple threads store a PendingRemote combined with
-  // a mutex, and make sure any access to the mojo interface is done protected
-  // by the mutex.
+  // a lock, and make sure any access to the mojo interface is done protected
+  // by the lock.
   mojo::PendingRemote<mojom::blink::Blob> blob_remote_
-      GUARDED_BY(blob_remote_mutex_);
-  Mutex blob_remote_mutex_;
+      GUARDED_BY(blob_remote_lock_);
+  base::Lock blob_remote_lock_;
 };
 
 }  // namespace blink

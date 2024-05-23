@@ -6,6 +6,7 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/renderer/render_frame.h"
 #include "crypto/sha2.h"
 #include "services/image_annotation/public/mojom/image_annotation.mojom.h"
@@ -113,7 +114,7 @@ std::string ContentPageAnnotatorDriver::GenerateSourceId(
   return std::string();
 }
 
-void ContentPageAnnotatorDriver::DidFinishDocumentLoad() {
+void ContentPageAnnotatorDriver::DidDispatchDOMContentLoadedEvent() {
   if (!render_frame()->IsMainFrame())
     return;
 
@@ -138,7 +139,7 @@ void ContentPageAnnotatorDriver::DidFinishDocumentLoad() {
       FROM_HERE,
       base::BindOnce(&ContentPageAnnotatorDriver::FindAndTrackImages,
                      weak_ptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kDomCrawlDelayMs));
+      base::Milliseconds(kDomCrawlDelayMs));
 }
 
 void ContentPageAnnotatorDriver::OnDestruct() {

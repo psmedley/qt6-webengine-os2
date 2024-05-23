@@ -456,8 +456,14 @@ uint64_t CompilationUnit::Start() {
 void CompilationUnit::ProcessFormStringIndex(
     uint64_t dieoffset, enum DwarfAttribute attr, enum DwarfForm form,
     uint64_t str_index) {
+  const size_t kStringOffsetsTableHeaderSize =
+      header_.version >= 5 ? (reader_->OffsetSize() == 8 ? 16 : 8) : 0;
+  const uint8_t* str_offsets_table_after_header = str_offsets_base_ ?
+      str_offsets_buffer_ + str_offsets_base_ :
+      str_offsets_buffer_ + kStringOffsetsTableHeaderSize;
   const uint8_t* offset_ptr =
-      str_offsets_buffer_ + str_offsets_base_ + str_index * reader_->OffsetSize();
+      str_offsets_table_after_header + str_index * reader_->OffsetSize();
+
   const uint64_t offset = reader_->ReadOffset(offset_ptr);
   if (offset >= string_buffer_length_) {
     return;
@@ -1787,7 +1793,7 @@ bool RangeListReader::ReadRanges(enum DwarfForm form, uint64_t data) {
     }
   } else if (form == DW_FORM_rnglistx) {
     offset_array_ = cu_info_->ranges_base_;
-    uint64_t index_offset = reader_->AddressSize() * data;
+    uint64_t index_offset = reader_->OffsetSize() * data;
     uint64_t range_list_offset =
         reader_->ReadOffset(cu_info_->buffer_ + offset_array_ + index_offset);
 

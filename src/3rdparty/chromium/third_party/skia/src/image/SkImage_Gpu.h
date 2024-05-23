@@ -10,9 +10,9 @@
 
 #include "include/private/SkSpinlock.h"
 #include "src/core/SkImagePriv.h"
-#include "src/gpu/GrGpuResourcePriv.h"
-#include "src/gpu/GrSurfaceProxyPriv.h"
-#include "src/gpu/GrSurfaceProxyView.h"
+#include "src/gpu/ganesh/GrGpuResourcePriv.h"
+#include "src/gpu/ganesh/GrSurfaceProxyPriv.h"
+#include "src/gpu/ganesh/GrSurfaceProxyView.h"
 #include "src/image/SkImage_GpuBase.h"
 
 class GrDirectContext;
@@ -41,12 +41,12 @@ public:
 
     bool onHasMipmaps() const override;
 
-    GrSemaphoresSubmitted onFlush(GrDirectContext*, const GrFlushInfo&) override;
+    GrSemaphoresSubmitted onFlush(GrDirectContext*, const GrFlushInfo&) const override;
 
     GrBackendTexture onGetBackendTexture(bool flushPendingGrContextIO,
                                          GrSurfaceOrigin* origin) const final;
 
-    bool onIsTextureBacked() const override { return true; }
+    bool isGaneshBacked() const override { return true; }
 
     size_t onTextureSize() const override;
 
@@ -60,7 +60,7 @@ public:
                                      RescaleGamma,
                                      RescaleMode,
                                      ReadPixelsCallback,
-                                     ReadPixelsContext) override;
+                                     ReadPixelsContext) const override;
 
     void onAsyncRescaleAndReadPixelsYUV420(SkYUVColorSpace,
                                            sk_sp<SkColorSpace>,
@@ -69,7 +69,7 @@ public:
                                            RescaleGamma,
                                            RescaleMode,
                                            ReadPixelsCallback,
-                                           ReadPixelsContext) override;
+                                           ReadPixelsContext) const override;
 
     void generatingSurfaceIsDeleted() override;
 
@@ -139,7 +139,7 @@ private:
     };
 
     mutable ProxyChooser fChooser;
-    GrSwizzle fSwizzle;
+    skgpu::Swizzle fSwizzle;
     GrSurfaceOrigin fOrigin;
 
     using INHERITED = SkImage_GpuBase;

@@ -11,7 +11,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/events_export.h"
 #include "ui/events/gestures/gesture_provider_aura.h"
@@ -19,12 +18,10 @@
 #include "ui/events/types/event_type.h"
 #include "ui/gfx/geometry/point.h"
 
-namespace aura {
-namespace test {
+namespace aura::test {
 FORWARD_DECLARE_TEST(GestureRecognizerTest,
                      DestroyGestureProviderAuraBeforeAck);
-}  // namespace test
-}  // namespace aura
+}  // namespace aura::test
 
 namespace ui {
 class GestureConsumer;
@@ -41,6 +38,10 @@ class EVENTS_EXPORT GestureRecognizerImpl : public GestureRecognizer,
   typedef std::map<int, GestureConsumer*> TouchIdToConsumerMap;
 
   GestureRecognizerImpl();
+
+  GestureRecognizerImpl(const GestureRecognizerImpl&) = delete;
+  GestureRecognizerImpl& operator=(const GestureRecognizerImpl&) = delete;
+
   ~GestureRecognizerImpl() override;
 
   std::vector<GestureEventHelper*>& helpers() { return helpers_; }
@@ -127,8 +128,6 @@ class EVENTS_EXPORT GestureRecognizerImpl : public GestureRecognizer,
   TouchIdToConsumerMap touch_id_target_;
 
   std::vector<GestureEventHelper*> helpers_;
-
-  DISALLOW_COPY_AND_ASSIGN(GestureRecognizerImpl);
 };
 
 }  // namespace ui

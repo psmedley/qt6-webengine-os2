@@ -61,8 +61,8 @@
 #include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node_data.h"
 #include "third_party/blink/renderer/core/svg_element_type_helpers.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/text/text_boundaries.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace blink {
 
@@ -399,7 +399,11 @@ bool IsEndOfEditableOrNonEditableContent(
 // the text node. It seems weird to return false in this case.
 bool HasRenderedNonAnonymousDescendantsWithHeight(
     const LayoutObject* layout_object) {
-  if (DisplayLockUtilities::NearestLockedInclusiveAncestor(*layout_object))
+  // If we're not painting the element then we conceptually don't have children
+  // with height. We should treat this as if we didn't have layout objects (i.e.
+  // we were display: none).
+  if (DisplayLockUtilities::LockedInclusiveAncestorPreventingPaint(
+          *layout_object))
     return false;
   if (auto* block_flow = DynamicTo<LayoutBlockFlow>(layout_object)) {
     // Returns false for empty content editable, e.g.
@@ -418,7 +422,12 @@ bool HasRenderedNonAnonymousDescendantsWithHeight(
   const LayoutObject* stop = layout_object->NextInPreOrderAfterChildren();
   // TODO(editing-dev): Avoid single-character parameter names.
   for (LayoutObject* o = layout_object->SlowFirstChild(); o && o != stop;
-       o = o->NextInPreOrder()) {
+       o = o->ChildPaintBlockedByDisplayLock()
+               ? o->NextInPreOrderAfterChildren()
+               : o->NextInPreOrder()) {
+    if (o->ChildPaintBlockedByDisplayLock())
+      continue;
+
     if (o->NonPseudoNode()) {
       if ((o->IsText() && To<LayoutText>(o)->HasNonCollapsedText()) ||
           (o->IsBox() && To<LayoutBox>(o)->PixelSnappedLogicalHeight()) ||
@@ -433,12 +442,11 @@ bool HasRenderedNonAnonymousDescendantsWithHeight(
 }
 
 PositionWithAffinity PositionForContentsPointRespectingEditingBoundary(
-    const IntPoint& contents_point,
+    const gfx::Point& contents_point,
     LocalFrame* frame) {
   HitTestRequest request = HitTestRequest::kMove | HitTestRequest::kReadOnly |
                            HitTestRequest::kActive |
-                           HitTestRequest::kIgnoreClipping |
-                           HitTestRequest::kRetargetForInert;
+                           HitTestRequest::kIgnoreClipping;
   HitTestLocation location(contents_point);
   HitTestResult result(request, location);
   frame->GetDocument()->GetLayoutView()->HitTest(location, result);
@@ -639,8 +647,15 @@ static PositionTemplate<Strategy> MostBackwardCaretPosition(
   // iterate backward from there, looking for a qualified position
   Node* const boundary = EnclosingVisualBoundary<Strategy>(start_node);
   // FIXME: PositionIterator should respect Before and After positions.
-  PositionIteratorAlgorithm<Strategy> last_visible(
-      AdjustPositionForBackwardIteration<Strategy>(position));
+  const PositionTemplate<Strategy>& adjusted_position =
+      AdjustPositionForBackwardIteration<Strategy>(position);
+#if DCHECK_IS_ON()
+  // Debug what causes bug 1248744
+  if (adjusted_position.IsNull())
+    position.ShowTreeForThis();
+  DCHECK(adjusted_position.IsNotNull()) << position;
+#endif
+  PositionIteratorAlgorithm<Strategy> last_visible(adjusted_position);
   const bool start_editable = HasEditableStyle(*start_node);
   Node* last_node = start_node;
   bool boundary_crossed = false;
@@ -680,7 +695,7 @@ static PositionTemplate<Strategy> MostBackwardCaretPosition(
         layout_object->Style()->Visibility() != EVisibility::kVisible)
       continue;
 
-    if (DisplayLockUtilities::NearestLockedExclusiveAncestor(*layout_object))
+    if (DisplayLockUtilities::LockedAncestorPreventingPaint(*layout_object))
       continue;
 
     if (!writing_mode.has_value()) {
@@ -767,7 +782,7 @@ bool HasInvisibleFirstLetter(const Node* node) {
   if (!first_letter || first_letter == remaining_text)
     return false;
   return first_letter->StyleRef().Visibility() != EVisibility::kVisible ||
-         DisplayLockUtilities::NearestLockedExclusiveAncestor(*first_letter);
+         DisplayLockUtilities::LockedAncestorPreventingPaint(*first_letter);
 }
 }  // namespace
 
@@ -839,7 +854,7 @@ PositionTemplate<Strategy> MostForwardCaretPosition(
         layout_object->Style()->Visibility() != EVisibility::kVisible)
       continue;
 
-    if (DisplayLockUtilities::NearestLockedExclusiveAncestor(*layout_object))
+    if (DisplayLockUtilities::LockedAncestorPreventingPaint(*layout_object))
       continue;
 
     if (!writing_mode.has_value()) {
@@ -943,7 +958,7 @@ static bool IsVisuallyEquivalentCandidateAlgorithm(
   if (layout_object->Style()->Visibility() != EVisibility::kVisible)
     return false;
 
-  if (DisplayLockUtilities::NearestLockedExclusiveAncestor(*layout_object))
+  if (DisplayLockUtilities::LockedAncestorPreventingPaint(*layout_object))
     return false;
 
   if (layout_object->IsBR()) {
@@ -1261,7 +1276,7 @@ PositionInFlatTree SkipWhitespace(const PositionInFlatTree& position) {
 }
 
 template <typename Strategy>
-static Vector<FloatQuad> ComputeTextBounds(
+static Vector<gfx::QuadF> ComputeTextBounds(
     const EphemeralRangeTemplate<Strategy>& range) {
   const PositionTemplate<Strategy>& start_position = range.StartPosition();
   const PositionTemplate<Strategy>& end_position = range.EndPosition();
@@ -1271,7 +1286,7 @@ static Vector<FloatQuad> ComputeTextBounds(
   DCHECK(end_container);
   DCHECK(!start_container->GetDocument().NeedsLayoutTreeUpdate());
 
-  Vector<FloatQuad> result;
+  Vector<gfx::QuadF> result;
   for (const Node& node : range.Nodes()) {
     LayoutObject* const layout_object = node.GetLayoutObject();
     if (!layout_object || !layout_object->IsText())
@@ -1288,27 +1303,27 @@ static Vector<FloatQuad> ComputeTextBounds(
 }
 
 template <typename Strategy>
-static FloatRect ComputeTextRectTemplate(
+static gfx::RectF ComputeTextRectTemplate(
     const EphemeralRangeTemplate<Strategy>& range) {
-  FloatRect result;
+  gfx::RectF result;
   for (auto rect : ComputeTextBounds<Strategy>(range))
-    result.Unite(rect.BoundingBox());
+    result.Union(rect.BoundingBox());
   return result;
 }
 
-IntRect ComputeTextRect(const EphemeralRange& range) {
-  return EnclosingIntRect(ComputeTextRectTemplate(range));
+gfx::Rect ComputeTextRect(const EphemeralRange& range) {
+  return gfx::ToEnclosingRect(ComputeTextRectTemplate(range));
 }
 
-IntRect ComputeTextRect(const EphemeralRangeInFlatTree& range) {
-  return EnclosingIntRect(ComputeTextRectTemplate(range));
+gfx::Rect ComputeTextRect(const EphemeralRangeInFlatTree& range) {
+  return gfx::ToEnclosingRect(ComputeTextRectTemplate(range));
 }
 
-FloatRect ComputeTextFloatRect(const EphemeralRange& range) {
+gfx::RectF ComputeTextRectF(const EphemeralRange& range) {
   return ComputeTextRectTemplate(range);
 }
 
-IntRect FirstRectForRange(const EphemeralRange& range) {
+gfx::Rect FirstRectForRange(const EphemeralRange& range) {
   DCHECK(!range.GetDocument().NeedsLayoutTreeUpdate());
   DocumentLifecycle::DisallowTransitionScope disallow_transition(
       range.GetDocument().Lifecycle());
@@ -1319,32 +1334,32 @@ IntRect FirstRectForRange(const EphemeralRange& range) {
   const PositionWithAffinity start_position(
       CreateVisiblePosition(range.StartPosition()).DeepEquivalent(),
       TextAffinity::kDownstream);
-  const IntRect start_caret_rect =
+  const gfx::Rect start_caret_rect =
       AbsoluteCaretBoundsOf(start_position, &extra_width_to_end_of_line);
   if (start_caret_rect.IsEmpty())
-    return IntRect();
+    return gfx::Rect();
 
   const PositionWithAffinity end_position(
       CreateVisiblePosition(range.EndPosition()).DeepEquivalent(),
       TextAffinity::kUpstream);
-  const IntRect end_caret_rect = AbsoluteCaretBoundsOf(end_position);
+  const gfx::Rect end_caret_rect = AbsoluteCaretBoundsOf(end_position);
   if (end_caret_rect.IsEmpty())
-    return IntRect();
+    return gfx::Rect();
 
-  if (start_caret_rect.Y() == end_caret_rect.Y()) {
+  if (start_caret_rect.y() == end_caret_rect.y()) {
     // start and end are on the same line
-    return IntRect(
-        std::min(start_caret_rect.X(), end_caret_rect.X()),
-        start_caret_rect.Y(), abs(end_caret_rect.X() - start_caret_rect.X()),
-        std::max(start_caret_rect.Height(), end_caret_rect.Height()));
+    return gfx::Rect(
+        std::min(start_caret_rect.x(), end_caret_rect.x()),
+        start_caret_rect.y(), abs(end_caret_rect.x() - start_caret_rect.x()),
+        std::max(start_caret_rect.height(), end_caret_rect.height()));
   }
 
   // start and end aren't on the same line, so go from start to the end of its
   // line
-  return IntRect(
-      start_caret_rect.X(), start_caret_rect.Y(),
-      (start_caret_rect.Width() + extra_width_to_end_of_line).ToInt(),
-      start_caret_rect.Height());
+  return gfx::Rect(
+      start_caret_rect.x(), start_caret_rect.y(),
+      (start_caret_rect.width() + extra_width_to_end_of_line).ToInt(),
+      start_caret_rect.height());
 }
 
 }  // namespace blink

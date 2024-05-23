@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -40,6 +39,10 @@ class DeviceManagerImpl : public mojom::UsbDeviceManager,
   DeviceManagerImpl();
   // Mostly be used for testing.
   explicit DeviceManagerImpl(std::unique_ptr<UsbService> usb_service);
+
+  DeviceManagerImpl(const DeviceManagerImpl&) = delete;
+  DeviceManagerImpl& operator=(const DeviceManagerImpl&) = delete;
+
   ~DeviceManagerImpl() override;
 
   void AddReceiver(mojo::PendingReceiver<mojom::UsbDeviceManager> receiver);
@@ -63,13 +66,13 @@ class DeviceManagerImpl : public mojom::UsbDeviceManager,
       mojo::PendingReceiver<mojom::UsbDevice> device_receiver,
       mojo::PendingRemote<mojom::UsbDeviceClient> device_client) override;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void RefreshDeviceInfo(const std::string& guid,
                          RefreshDeviceInfoCallback callback) override;
   void OnPermissionGrantedToRefresh(scoped_refptr<UsbDevice> device,
                                     RefreshDeviceInfoCallback callback,
                                     bool granted);
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   void CheckAccess(const std::string& guid,
@@ -118,8 +121,6 @@ class DeviceManagerImpl : public mojom::UsbDeviceManager,
   mojo::AssociatedRemoteSet<mojom::UsbDeviceManagerClient> clients_;
 
   base::WeakPtrFactory<DeviceManagerImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceManagerImpl);
 };
 
 }  // namespace usb

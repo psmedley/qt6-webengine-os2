@@ -4,7 +4,6 @@
 
 #include "weblayer/browser/persistence/browser_persister_file_utils.h"
 
-#include "base/cxx17_backports.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -22,7 +21,7 @@ namespace weblayer {
 namespace {
 
 bool RemoveBrowserPersistenceStorageOnBackgroundThread(
-    const base::FilePath& path,
+    const base::FilePath& database_dir,
     base::flat_set<std::string> ids) {
   DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   bool all_succeeded = true;
@@ -30,7 +29,7 @@ bool RemoveBrowserPersistenceStorageOnBackgroundThread(
     DCHECK(!id.empty());
     // Original persistence path.
     const base::FilePath persistence_path =
-        BuildBasePathForBrowserPersister(path, id);
+        BuildBasePathForBrowserPersister(database_dir, id);
     if (!base::DeleteFile(persistence_path))
       all_succeeded = false;
 
@@ -58,11 +57,11 @@ base::flat_set<std::string> GetBrowserPersistenceIdsOnBackgroundThread(
   for (base::FilePath name = iter.Next(); !name.empty(); name = iter.Next()) {
     // The name is base32 encoded, which is ascii.
     const std::string base_name = iter.GetInfo().GetName().MaybeAsASCII();
-    if (base_name.size() <= base::size(BrowserImpl::kPersistenceFilePrefix))
+    if (base_name.size() <= std::size(BrowserImpl::kPersistenceFilePrefix))
       continue;
 
     const std::string encoded_id_and_timestamp =
-        base_name.substr(base::size(BrowserImpl::kPersistenceFilePrefix) - 1);
+        base_name.substr(std::size(BrowserImpl::kPersistenceFilePrefix) - 1);
     const size_t separator_index = encoded_id_and_timestamp.find(
         base::FilePath(sessions::kTimestampSeparator).MaybeAsASCII());
     const std::string encoded_id =

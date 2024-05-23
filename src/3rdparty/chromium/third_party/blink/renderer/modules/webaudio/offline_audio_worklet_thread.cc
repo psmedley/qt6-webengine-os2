@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/webaudio/offline_audio_worklet_thread.h"
 
+#include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
@@ -27,14 +28,16 @@ OfflineAudioWorkletThread::OfflineAudioWorkletThread(
   // OfflineAudioWorkletThread always uses a NORMAL priority thread.
   params.thread_priority = base::ThreadPriority::NORMAL;
 
-  if (++s_ref_count_ == 1)
+  if (++s_ref_count_ == 1) {
     EnsureSharedBackingThread(params);
+  }
 }
 
 OfflineAudioWorkletThread::~OfflineAudioWorkletThread() {
   DCHECK(IsMainThread());
-  if (--s_ref_count_ == 0)
+  if (--s_ref_count_ == 0) {
     ClearSharedBackingThread();
+  }
 }
 
 WorkerBackingThread& OfflineAudioWorkletThread::GetWorkerBackingThread() {

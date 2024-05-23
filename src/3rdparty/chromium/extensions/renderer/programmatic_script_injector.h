@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/values.h"
 #include "extensions/common/mojom/css_origin.mojom-shared.h"
 #include "extensions/common/mojom/frame.mojom.h"
@@ -25,15 +24,22 @@ class ProgrammaticScriptInjector : public ScriptInjector {
   explicit ProgrammaticScriptInjector(
       mojom::ExecuteCodeParamsPtr params,
       mojom::LocalFrame::ExecuteCodeCallback callback);
+
+  ProgrammaticScriptInjector(const ProgrammaticScriptInjector&) = delete;
+  ProgrammaticScriptInjector& operator=(const ProgrammaticScriptInjector&) =
+      delete;
+
   ~ProgrammaticScriptInjector() override;
 
  private:
   // ScriptInjector implementation.
   mojom::InjectionType script_type() const override;
   bool IsUserGesture() const override;
+  mojom::ExecutionWorld GetExecutionWorld() const override;
   mojom::CSSOrigin GetCssOrigin() const override;
   mojom::CSSInjection::Operation GetCSSInjectionOperation() const override;
   bool ExpectsResults() const override;
+  bool ShouldWaitForPromise() const override;
   bool ShouldInjectJs(
       mojom::RunLocation run_location,
       const std::set<std::string>& executing_scripts) const override;
@@ -81,8 +87,6 @@ class ProgrammaticScriptInjector : public ScriptInjector {
 
   // Whether or not this script injection has finished.
   bool finished_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ProgrammaticScriptInjector);
 };
 
 }  // namespace extensions

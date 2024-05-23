@@ -15,11 +15,12 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
@@ -31,7 +32,6 @@
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/same_party_context.h"
 #include "net/disk_cache/disk_cache.h"
-#include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
@@ -52,74 +52,15 @@
 
 namespace net {
 
-//-----------------------------------------------------------------------------
-
-class TestURLRequestContext : public URLRequestContext {
- public:
-  TestURLRequestContext();
-  // Default constructor like TestURLRequestContext() but does not call
-  // Init() in case |delay_initialization| is true. This allows modifying the
-  // URLRequestContext before it is constructed completely. If
-  // |delay_initialization| is true, Init() needs be be called manually.
-  explicit TestURLRequestContext(bool delay_initialization);
-  ~TestURLRequestContext() override;
-
-  void Init();
-
-  ClientSocketFactory* client_socket_factory() {
-    return client_socket_factory_;
-  }
-  void set_client_socket_factory(ClientSocketFactory* factory) {
-    client_socket_factory_ = factory;
-  }
-
-  void set_http_network_session_params(
-      std::unique_ptr<HttpNetworkSessionParams> session_params) {
-    http_network_session_params_ = std::move(session_params);
-  }
-
-  void set_http_network_session_context(
-      std::unique_ptr<HttpNetworkSessionContext> session_context) {
-    http_network_session_context_ = std::move(session_context);
-  }
-
-  void SetCTPolicyEnforcer(
-      std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer) {
-    context_storage_.set_ct_policy_enforcer(std::move(ct_policy_enforcer));
-  }
-
-  void set_create_default_http_user_agent_settings(bool value) {
-    create_default_http_user_agent_settings_ = value;
-  }
-
-  // Like CreateRequest, but also updates |site_for_cookies| to give the request
-  // a 1st-party context.
-  std::unique_ptr<URLRequest> CreateFirstPartyRequest(
-      const GURL& url,
-      RequestPriority priority,
-      URLRequest::Delegate* delegate,
-      NetworkTrafficAnnotationTag traffic_annotation) const;
-
- private:
-  bool initialized_ = false;
-
-  // Optional parameters to override default values.  Note that values in the
-  // HttpNetworkSessionContext that point to other objects the
-  // TestURLRequestContext creates will be overwritten.
-  std::unique_ptr<HttpNetworkSessionParams> http_network_session_params_;
-  std::unique_ptr<HttpNetworkSessionContext> http_network_session_context_;
-
-  // Not owned:
-  ClientSocketFactory* client_socket_factory_ = nullptr;
-
-  bool create_default_http_user_agent_settings_ = true;
-
- protected:
-  URLRequestContextStorage context_storage_;
-};
+class URLRequestContextBuilder;
 
 //-----------------------------------------------------------------------------
 
+// Creates a URLRequestContextBuilder with some members configured for the
+// testing purpose.
+std::unique_ptr<URLRequestContextBuilder> CreateTestURLRequestContextBuilder();
+
+//-----------------------------------------------------------------------------
 // Used to return a dummy context, which lives on the message loop
 // given in the constructor.
 class TestURLRequestContextGetter : public URLRequestContextGetter {
@@ -131,10 +72,10 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
   // Use to pass a pre-initialized |context|.
   TestURLRequestContextGetter(
       const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner,
-      std::unique_ptr<TestURLRequestContext> context);
+      std::unique_ptr<URLRequestContext> context);
 
   // URLRequestContextGetter implementation.
-  TestURLRequestContext* GetURLRequestContext() override;
+  URLRequestContext* GetURLRequestContext() override;
   scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
       const override;
 
@@ -146,7 +87,7 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
 
  private:
   const scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-  std::unique_ptr<TestURLRequestContext> context_;
+  std::unique_ptr<URLRequestContext> context_;
   bool is_shut_down_ = false;
 };
 
@@ -372,7 +313,7 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
       net::CookieAccessResultList& maybe_included_cookies,
       net::CookieAccessResultList& excluded_cookies,
       bool allowed_from_caller) override;
-  bool OnForcePrivacyMode(
+  NetworkDelegate::PrivacySetting OnForcePrivacyMode(
       const GURL& url,
       const SiteForCookies& site_for_cookies,
       const absl::optional<url::Origin>& top_frame_origin,
@@ -459,7 +400,7 @@ class FilteringTestNetworkDelegate : public TestNetworkDelegate {
       net::CookieAccessResultList& excluded_cookies,
       bool allowed_from_caller) override;
 
-  bool OnForcePrivacyMode(
+  NetworkDelegate::PrivacySetting OnForcePrivacyMode(
       const GURL& url,
       const SiteForCookies& site_for_cookies,
       const absl::optional<url::Origin>& top_frame_origin,
@@ -489,6 +430,10 @@ class FilteringTestNetworkDelegate : public TestNetworkDelegate {
 
   void set_force_privacy_mode(bool enabled) { force_privacy_mode_ = enabled; }
 
+  void set_partitioned_state_allowed(bool allowed) {
+    partitioned_state_allowed_ = allowed;
+  }
+
  private:
   std::string cookie_name_filter_ = "";
   int set_cookie_called_count_ = 0;
@@ -500,6 +445,7 @@ class FilteringTestNetworkDelegate : public TestNetworkDelegate {
   bool block_get_cookies_by_name_ = false;
 
   bool force_privacy_mode_ = false;
+  bool partitioned_state_allowed_ = false;
 };
 
 // ----------------------------------------------------------------------------
@@ -533,7 +479,7 @@ class TestScopedURLInterceptor {
   GURL url_;
 
   // This is owned by the URLFilter.
-  TestRequestInterceptor* interceptor_ = nullptr;
+  raw_ptr<TestRequestInterceptor> interceptor_ = nullptr;
 };
 
 }  // namespace net

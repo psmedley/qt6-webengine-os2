@@ -47,8 +47,8 @@ class ProcessTrackerTest : public ::testing::Test {
 TEST_F(ProcessTrackerTest, PushProcess) {
   context.process_tracker->SetProcessMetadata(1, base::nullopt, "test",
                                               base::StringView());
-  auto pair_it = context.process_tracker->UpidsForPidForTesting(1);
-  ASSERT_EQ(pair_it.first->second, 1u);
+  auto opt_upid = context.process_tracker->UpidForPidForTesting(1);
+  ASSERT_EQ(opt_upid.value_or(-1), 1u);
 }
 
 TEST_F(ProcessTrackerTest, GetOrCreateNewProcess) {
@@ -68,9 +68,8 @@ TEST_F(ProcessTrackerTest, PushTwoProcessEntries_SamePidAndName) {
                                               base::StringView());
   context.process_tracker->SetProcessMetadata(1, base::nullopt, "test",
                                               base::StringView());
-  auto pair_it = context.process_tracker->UpidsForPidForTesting(1);
-  ASSERT_EQ(pair_it.first->second, 1u);
-  ASSERT_EQ(++pair_it.first, pair_it.second);
+  auto opt_upid = context.process_tracker->UpidForPidForTesting(1);
+  ASSERT_EQ(opt_upid.value_or(-1), 1u);
 }
 
 TEST_F(ProcessTrackerTest, PushTwoProcessEntries_DifferentPid) {
@@ -78,17 +77,17 @@ TEST_F(ProcessTrackerTest, PushTwoProcessEntries_DifferentPid) {
                                               base::StringView());
   context.process_tracker->SetProcessMetadata(3, base::nullopt, "test",
                                               base::StringView());
-  auto pair_it = context.process_tracker->UpidsForPidForTesting(1);
-  ASSERT_EQ(pair_it.first->second, 1u);
-  auto second_pair_it = context.process_tracker->UpidsForPidForTesting(3);
-  ASSERT_EQ(second_pair_it.first->second, 2u);
+  auto opt_upid = context.process_tracker->UpidForPidForTesting(1);
+  ASSERT_EQ(opt_upid.value_or(-1), 1u);
+  opt_upid = context.process_tracker->UpidForPidForTesting(3);
+  ASSERT_EQ(opt_upid.value_or(-1), 2u);
 }
 
 TEST_F(ProcessTrackerTest, AddProcessEntry_CorrectName) {
   context.process_tracker->SetProcessMetadata(1, base::nullopt, "test",
                                               base::StringView());
-  auto name =
-      context.storage->GetString(context.storage->process_table().name()[1]);
+  auto name = context.storage->process_table().name().GetString(1);
+
   ASSERT_EQ(name, "test");
 }
 
@@ -101,8 +100,8 @@ TEST_F(ProcessTrackerTest, UpdateThreadCreate) {
   auto tid_it = context.process_tracker->UtidsForTidForTesting(12);
   ASSERT_NE(tid_it.first, tid_it.second);
   ASSERT_EQ(context.storage->thread_table().upid()[1].value(), 1u);
-  auto pid_it = context.process_tracker->UpidsForPidForTesting(2);
-  ASSERT_NE(pid_it.first, pid_it.second);
+  auto opt_upid = context.process_tracker->UpidForPidForTesting(2);
+  ASSERT_TRUE(opt_upid.has_value());
   ASSERT_EQ(context.storage->process_table().row_count(), 2u);
 }
 
@@ -199,6 +198,67 @@ TEST_F(ProcessTrackerTest, EndThreadAfterProcessEnd) {
 
   // We expect three theads: the idle thread, 123 and 124.
   ASSERT_EQ(context.storage->thread_table().row_count(), 3u);
+}
+
+TEST_F(ProcessTrackerTest, UpdateTrustedPid) {
+  context.process_tracker->UpdateTrustedPid(/*trusted_pid=*/123, /*uuid=*/1001);
+  context.process_tracker->UpdateTrustedPid(/*trusted_pid=*/456, /*uuid=*/1002);
+
+  ASSERT_EQ(context.process_tracker->GetTrustedPid(1001).value(), 123u);
+  ASSERT_EQ(context.process_tracker->GetTrustedPid(1002).value(), 456u);
+
+  // PID reuse. Multiple track UUIDs map to the same trusted_pid.
+  context.process_tracker->UpdateTrustedPid(/*trusted_pid=*/123, /*uuid=*/1003);
+  ASSERT_EQ(context.process_tracker->GetTrustedPid(1001).value(), 123u);
+  ASSERT_EQ(context.process_tracker->GetTrustedPid(1003).value(), 123u);
+}
+
+TEST_F(ProcessTrackerTest, NamespacedProcessesAndThreads) {
+  context.process_tracker->UpdateNamespacedProcess(/*pid=*/1001,
+                                                   /*nspid=*/{1001, 190, 1});
+  context.process_tracker->UpdateNamespacedThread(/*pid=*/1001, /*tid=*/1002,
+                                                  /*nstid=*/{1002, 192, 2});
+  context.process_tracker->UpdateNamespacedThread(1001, 1003, {1003, 193, 3});
+
+  context.process_tracker->UpdateNamespacedProcess(/*pid=*/1023,
+                                                   /*nspid=*/{1023, 201, 21});
+  context.process_tracker->UpdateNamespacedThread(/*pid=*/1023, /*tid=*/1026,
+                                                  {1026, 196, 26});
+  context.process_tracker->UpdateNamespacedThread(/*pid=*/1023, /*tid=*/1027,
+                                                  {1027, 197, 27});
+
+  context.process_tracker->UpdateNamespacedProcess(/*pid=*/1024,
+                                                   /*nspid=*/{1024, 202, 22});
+  context.process_tracker->UpdateNamespacedThread(/*pid=*/1024, /*tid=*/1028,
+                                                  /*nstid=*/{1028, 198, 28});
+  context.process_tracker->UpdateNamespacedThread(/*pid=*/1024, /*tid=*/1029,
+                                                  /*nstid=*/{1029, 198, 29});
+
+  // Don't resolve if the process/thread isn't namespaced.
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(2001, 2002),
+            base::nullopt);
+
+  // Resolve from namespace-local PID to root-level PID.
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1001, 1).value(),
+            1001u);
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1023, 21).value(),
+            1023u);
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1024, 22).value(),
+            1024u);
+
+  // Resolve from namespace-local TID to root-level TID.
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1001, 2).value(),
+            1002u);
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1001, 3).value(),
+            1003u);
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1023, 26).value(),
+            1026u);
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1023, 27).value(),
+            1027u);
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1024, 28).value(),
+            1028u);
+  ASSERT_EQ(context.process_tracker->ResolveNamespacedTid(1024, 29).value(),
+            1029u);
 }
 
 }  // namespace

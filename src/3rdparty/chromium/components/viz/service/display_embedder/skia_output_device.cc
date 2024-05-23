@@ -112,15 +112,17 @@ SkiaOutputDevice::~SkiaOutputDevice() {
 }
 
 std::unique_ptr<SkiaOutputDevice::ScopedPaint>
-SkiaOutputDevice::BeginScopedPaint(bool allocate_frame_buffer) {
+SkiaOutputDevice::BeginScopedPaint() {
   std::vector<GrBackendSemaphore> end_semaphores;
-  SkSurface* sk_surface = BeginPaint(allocate_frame_buffer, &end_semaphores);
+  SkSurface* sk_surface = BeginPaint(&end_semaphores);
   if (!sk_surface) {
     return nullptr;
   }
   return std::make_unique<SkiaOutputDevice::ScopedPaint>(
       std::move(end_semaphores), this, sk_surface);
 }
+
+void SkiaOutputDevice::SetViewportSize(const gfx::Size& viewport_size) {}
 
 void SkiaOutputDevice::Submit(bool sync_cpu, base::OnceClosure callback) {
   gr_context_->submit(sync_cpu);
@@ -138,8 +140,9 @@ void SkiaOutputDevice::PostSubBuffer(const gfx::Rect& rect,
   NOTREACHED();
 }
 
-void SkiaOutputDevice::ReleaseOneFrameBuffer() {
+bool SkiaOutputDevice::EnsureMinNumberOfBuffers(size_t n) {
   NOTREACHED();
+  return false;
 }
 
 bool SkiaOutputDevice::SetDrawRectangle(const gfx::Rect& draw_rectangle) {
@@ -186,8 +189,7 @@ void SkiaOutputDevice::SetDependencyTimings(base::TimeTicks task_ready) {
 
 void SkiaOutputDevice::StartSwapBuffers(BufferPresentedCallback feedback) {
   DCHECK_LT(static_cast<int>(pending_swaps_.size()),
-            std::max(capabilities_.max_frames_pending,
-                     capabilities_.max_frames_pending_120hz.value_or(0)));
+            capabilities_.pending_swap_params.GetMax());
 
   pending_swaps_.emplace(++swap_id_, std::move(feedback), viz_scheduled_draw_,
                          gpu_started_draw_, gpu_task_ready_);
@@ -239,14 +241,14 @@ void SkiaOutputDevice::FinishSwapBuffers(
   if (!pending_swaps_.empty()) {
     auto iter = skipped_swap_info_.find(pending_swaps_.front().SwapId());
     if (iter != skipped_swap_info_.end()) {
-      OutputSurfaceFrame frame = std::move(iter->second);
-      gfx::Size frame_size = frame.size;
+      OutputSurfaceFrame output_frame = std::move(iter->second);
+      gfx::Size frame_size = output_frame.size;
       skipped_swap_info_.erase(iter);
       // Recursively call into FinishSwapBuffers until the head of the queue is
       // no longer a skipped swap.
       FinishSwapBuffers(
           gfx::SwapCompletionResult(gfx::SwapResult::SWAP_SKIPPED), frame_size,
-          std::move(frame));
+          std::move(output_frame));
     }
   }
 }

@@ -9,7 +9,9 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
+#include "base/time/time.h"
 #include "media/cast/constants.h"
 #include "media/cast/sender/sender_encoded_frame.h"
 #include "media/mojo/common/mojo_data_pipe_read_write.h"
@@ -54,25 +56,8 @@ void RemotingSender::SendFrame(uint32_t frame_size) {
 void RemotingSender::CancelInFlightData() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-// TODO(crbug.com/647423): The following code is something we want to do as an
-// optimization. However, as-is, it's not quite correct. We can only cancel
-// frames where no packets have actually hit the network yet. Said another
-// way, we can only cancel frames the receiver has definitely not seen any
-// part of (including kickstarting!).
-#if 0
-  if (latest_acked_frame_id_ < last_sent_frame_id_) {
-    std::vector<media::cast::FrameId> frames_to_cancel;
-    do {
-      ++latest_acked_frame_id_;
-      frames_to_cancel.push_back(latest_acked_frame_id_);
-    } while (latest_acked_frame_id_ < last_sent_frame_id_);
-    transport_->CancelSendingFrames(ssrc_, frames_to_cancel);
-  }
-#endif
-
   // Flag that all pending input operations should discard data.
   input_queue_discards_remaining_ = input_queue_.size();
-
   flow_restart_pending_ = true;
   VLOG(1) << "Now restarting because in-flight data was just canceled.";
 }
@@ -122,7 +107,7 @@ void RemotingSender::ReadFrame(uint32_t size) {
   } else {
     next_frame_data_.resize(size);
     data_pipe_reader_->Read(
-        reinterpret_cast<uint8_t*>(base::data(next_frame_data_)), size,
+        reinterpret_cast<uint8_t*>(std::data(next_frame_data_)), size,
         base::BindOnce(&RemotingSender::OnFrameRead, base::Unretained(this)));
   }
 }

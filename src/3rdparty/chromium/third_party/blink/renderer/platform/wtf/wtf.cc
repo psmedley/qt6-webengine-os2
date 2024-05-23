@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 #include "base/third_party/double_conversion/double-conversion/double-conversion.h"
+#include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 #include "third_party/blink/renderer/platform/wtf/dtoa.h"
@@ -46,15 +47,28 @@ namespace WTF {
 bool g_initialized;
 base::PlatformThreadId g_main_thread_identifier;
 
+#if BUILDFLAG(IS_ANDROID)
+// On Android going through libc (gettid) is faster than runtime-lib emulation.
 bool IsMainThread() {
   return CurrentThread() == g_main_thread_identifier;
 }
+#elif defined(COMPONENT_BUILD) && BUILDFLAG(IS_WIN)
+static thread_local bool g_is_main_thread = false;
+bool IsMainThread() {
+  return g_is_main_thread;
+}
+#else
+thread_local bool g_is_main_thread = false;
+#endif
 
 void Initialize() {
   // WTF, and Blink in general, cannot handle being re-initialized.
   // Make that explicit here.
   CHECK(!g_initialized);
   g_initialized = true;
+#if !BUILDFLAG(IS_ANDROID)
+  g_is_main_thread = true;
+#endif
   g_main_thread_identifier = CurrentThread();
 
   Threading::Initialize();

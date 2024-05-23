@@ -33,6 +33,8 @@ class BASE_EXPORT SysInfo {
   static int NumberOfProcessors();
 
   // Return the number of bytes of physical memory on the current machine.
+  // If low-end device mode is manually enabled via command line flag, this
+  // will return the lesser of the actual physical memory, or 512MB.
   static int64_t AmountOfPhysicalMemory();
 
   // Return the number of bytes of current available physical memory on the
@@ -66,7 +68,7 @@ class BASE_EXPORT SysInfo {
   // on failure.
   static int64_t AmountOfTotalDiskSpace(const FilePath& path);
 
-#if defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA)
   // Sets the total amount of disk space to report under the specified |path|.
   // If |bytes| is -ve then any existing entry for |path| is removed.
   static void SetAmountOfTotalDiskSpace(const FilePath& path, int64_t bytes);
@@ -175,7 +177,7 @@ class BASE_EXPORT SysInfo {
   static void CrashIfChromeOSNonTestImage();
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Returns the Android build's codename.
   static std::string GetAndroidBuildCodename();
 
@@ -187,16 +189,16 @@ class BASE_EXPORT SysInfo {
 
   static int DalvikHeapSizeMB();
   static int DalvikHeapGrowthLimitMB();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // Returns the iOS build number string which is normally an alphanumeric
   // string like 12E456. This build number can differentiate between different
   // versions of iOS that may have the same major/minor/bugfix version numbers.
   // For example, iOS beta releases have the same version number but different
   // build number strings.
   static std::string GetIOSBuildNumber();
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 
   // Returns true for low-end devices that may require extreme tradeoffs,
   // including user-visible changes, for acceptable performance.
@@ -207,7 +209,7 @@ class BASE_EXPORT SysInfo {
   //   true when memory <= 512MB on Android N and earlier.
   // This is not the same as "low-memory" and will be false on a large number of
   // <=1GB pre-O Android devices. See: |detectLowEndDevice| in SysUtils.java.
-  // On Desktop this returns true when memory <= 512MB.
+  // On Desktop this returns true when memory <= 2GB.
   static bool IsLowEndDevice();
 
  private:
@@ -219,8 +221,8 @@ class BASE_EXPORT SysInfo {
   static bool IsLowEndDeviceImpl();
   static HardwareInfo GetHardwareInfoSync();
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID) || \
-    defined(OS_AIX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
+    BUILDFLAG(IS_AIX)
   static int64_t AmountOfAvailablePhysicalMemory(
       const SystemMemoryInfoKB& meminfo);
 #endif

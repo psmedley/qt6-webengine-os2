@@ -4,6 +4,10 @@
 
 static_library("public") {
   sources = [
+    "autofill_assistant.cc",
+    "autofill_assistant.h",
+    "autofill_assistant_factory.h",
+    "external_script_controller.h",
     "runtime_manager.cc",
     "runtime_manager.h",
     "runtime_manager_impl.cc",
@@ -14,6 +18,7 @@ static_library("public") {
 
   deps = [
     "//base",
+    "//components/version_info:channel",
     "//content/public/browser",
   ]
 }
@@ -21,6 +26,8 @@ static_library("public") {
 static_library("unit_test_support") {
   testonly = true
   sources = [
+    "mock_autofill_assistant.cc",
+    "mock_autofill_assistant.h",
     "mock_runtime_manager.cc",
     "mock_runtime_manager.h",
   ]

@@ -210,20 +210,28 @@ ScriptPromise FileSystemSyncAccessHandle::truncate(
       base::checked_cast<int64_t>(size),
       WTF::Bind(
           [](ScriptPromiseResolver* resolver,
-             FileSystemSyncAccessHandle* access_handle, bool success) {
+             FileSystemSyncAccessHandle* access_handle,
+             base::File::Error file_error) {
             ScriptState* script_state = resolver->GetScriptState();
             if (!script_state->ContextIsValid())
               return;
             ScriptState::Scope scope(script_state);
 
             access_handle->ExitOperation();
-            if (!success) {
+            if (file_error == base::File::FILE_ERROR_NO_SPACE) {
+              resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
+                  script_state->GetIsolate(),
+                  DOMExceptionCode::kQuotaExceededError,
+                  "No space available for this operation"));
+              return;
+            }
+            if (file_error != base::File::FILE_OK) {
               resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
                   script_state->GetIsolate(),
                   DOMExceptionCode::kInvalidStateError, "truncate failed"));
               return;
             }
-            resolver->Resolve(success);
+            resolver->Resolve(true);
           },
           WrapPersistent(resolver), WrapPersistent(this)));
 
@@ -314,6 +322,14 @@ uint64_t FileSystemSyncAccessHandle::write(
   base::FileErrorOr<int> result =
       file_delegate()->Write(file_offset, {write_data, write_size});
   if (result.is_error()) {
+    base::File::Error file_error = result.error();
+    DCHECK_NE(file_error, base::File::FILE_OK);
+    if (file_error == base::File::FILE_ERROR_NO_SPACE) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kQuotaExceededError,
+          "No space available for this operation");
+      return 0;
+    }
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "Failed to write to the access handle");
     return 0;

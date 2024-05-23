@@ -19,10 +19,10 @@ to leave the histogram in its existing file in one of the metadata
 For best practices on writing histogram descriptions, see
 https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md
 
-Please send CLs to chromium-metrics-reviews@google.com rather than to specific
-individuals. These CLs will be automatically reassigned to a reviewer within
-about 5 minutes. This approach helps the metrics team to load-balance incoming
-reviews. Googlers can read more about this at go/gwsq-gerrit.
+Please send CLs to someone randomly chosen from the OWNERS file in this
+directory. If no OWNERS file exists, please consider signing up at
+go/reviewing-metrics (Googlers only). As a last resort you can send the CL to
+chromium-metrics-reviews@google.com.
 -->
 
 <histogram-configuration>
@@ -2393,7 +2393,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Apps.AppList.ZeroStateSearchResutRemovalDecision"
-    enum="AppListZeroStateResultRemovalConfirmation" expires_after="2019-12-31">
+    enum="AppListResultRemovalConfirmation" expires_after="2019-12-31">
   <obsolete>
     Removed June 2019, replaced by
     Apps.AppList.ZeroStateSearchResultRemovalDecision.
@@ -5849,42 +5849,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Blink.Binding.CreateV8ContextForMainFrame"
-    units="microseconds" expires_after="2019-04-16">
-  <obsolete>
-    Removed as of 04/2019 with the removal of field trial experiment settings.
-  </obsolete>
-  <owner>peria@chromium.org</owner>
-  <summary>
-    Time spent to create a v8::Context instance during a page loading in the
-    main-frame window.
-
-    Warning: This metric may include reports from clients with low-resolution
-    clocks (i.e. on Windows, ref. |TimeTicks::IsHighResolution()|). Such reports
-    will cause this metric to have an abnormal distribution. When considering
-    revising this histogram, see UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES for the
-    solution.
-  </summary>
-</histogram>
-
-<histogram name="Blink.Binding.CreateV8ContextForNonMainFrame"
-    units="microseconds" expires_after="2019-04-16">
-  <obsolete>
-    Removed as of 04/2019 with the removal of field trial experiment settings.
-  </obsolete>
-  <owner>peria@chromium.org</owner>
-  <summary>
-    Time spent to create a v8::Context instance during a page loading in a
-    non-main-frame window, e.g. iframe.
-
-    Warning: This metric may include reports from clients with low-resolution
-    clocks (i.e. on Windows, ref. |TimeTicks::IsHighResolution()|). Such reports
-    will cause this metric to have an abnormal distribution. When considering
-    revising this histogram, see UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES for the
-    solution.
-  </summary>
-</histogram>
-
 <histogram name="Blink.Binding.InitializeMainLocalWindowProxy"
     units="microseconds" expires_after="M80">
   <obsolete>
@@ -9117,6 +9081,28 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
+<histogram name="ChromeOS.PlatformKeysService.{Operation}.{KeyType}"
+    enum="BooleanSuccess" expires_after="2022-03-19">
+  <obsolete>
+    Removed in 2022/03 as part of https://crbug.com/1294874 and
+    https://crbug.com/1294873
+  </obsolete>
+  <owner>omorsi@google.com</owner>
+  <owner>mgawad@google.com</owner>
+  <summary>
+    Tracks the final result of performing {Operation} operation on an {KeyType}
+    key in PlatformKeysService.
+  </summary>
+  <token key="Operation">
+    <variant name="GenerateKey"/>
+    <variant name="SignKey"/>
+  </token>
+  <token key="KeyType">
+    <variant name="EC"/>
+    <variant name="RSA"/>
+  </token>
+</histogram>
+
 <histogram name="ChromeOS.PlatformVerification.ExpiryStatus"
     enum="ChromeOSPlatformVerificationExpiryStatus" expires_after="M80">
   <obsolete>
@@ -9542,24 +9528,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
     How often the layer compositor successfully submitted content to the display
     compositor, or what caused an abort. This is reported fairly late in the
     pipeline, during the final stages of submitting content.
-  </summary>
-</histogram>
-
-<histogram name="Compositing.Browser.GPUMemoryForTilingsInKb" units="Kb"
-    expires_after="M87">
-  <obsolete>
-    Removed September, 2020. Memory.GPU.PeakMemoryUsage.PageLoad can be used to
-    track overall GPU memory usage.
-  </obsolete>
-  <owner>pdr@chromium.org</owner>
-  <owner>paint-dev@chromium.org</owner>
-  <summary>
-    The GPU memory allocated for tilings (in a browser process), summed over all
-    picture layers. Emitted once per drawing. Nothing is recorded if there are
-    no picture layers.
-
-    Tilings are used for decomposition of the layer's entire contents at a
-    picture screenspace resolution to do threaded rasterization.
   </summary>
 </histogram>
 
@@ -12035,6 +12003,19 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   <summary>
     The amount of time (ms) for Chrome OS cryptohome to mount the encrypted home
     directory synchronously.
+  </summary>
+</histogram>
+
+<histogram name="Cryptohome.TimeToTakeTpmOwnership" units="ms"
+    expires_after="2022-03-20">
+  <obsolete>
+    Removed 04/2022 as it is not used since crrev.com/c/2637147 (02/2021)
+  </obsolete>
+  <owner>apronin@chromium.org</owner>
+  <owner>cros-hwsec+uma@chromium.org</owner>
+  <summary>
+    The amount of time (ms) for Chrome OS cryptohome daemon to take ownership of
+    the TPM.
   </summary>
 </histogram>
 
@@ -30983,25 +30964,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram base="true" name="Media.EME.addKey" enum="MediaKeyException"
-    expires_after="2018-01-04">
-  <obsolete>
-    Removed 02/2016 with removal of prefixed EME.
-  </obsolete>
-  <owner>xhwang@chromium.org</owner>
-  <owner>media-dev@chromium.org</owner>
-  <summary>addKey result</summary>
-</histogram>
-
-<histogram base="true" name="Media.EME.cancelKeyRequest"
-    enum="MediaKeyException" expires_after="2018-01-04">
-  <obsolete>
-    Removed 02/2016 with removal of prefixed EME.
-  </obsolete>
-  <owner>xhwang@chromium.org</owner>
-  <summary>cancelKeyRequest result.</summary>
-</histogram>
-
 <histogram name="Media.EME.CdmFileIO.ReadTime" units="ms" expires_after="M84">
   <obsolete>
     Removed 08/2019, replaced with Media.EME.CdmFileIO.TimeTo.ReadFile.
@@ -31016,36 +30978,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </obsolete>
   <owner>media-dev@chromium.org</owner>
   <summary>The actual time spent by the CDM writing a file.</summary>
-</histogram>
-
-<histogram base="true" name="Media.EME.generateKeyRequest"
-    enum="MediaKeyException" expires_after="2018-01-04">
-  <obsolete>
-    Removed 02/2016 with removal of prefixed EME.
-  </obsolete>
-  <owner>xhwang@chromium.org</owner>
-  <owner>media-dev@chromium.org</owner>
-  <summary>generateKeyRequest result.</summary>
-</histogram>
-
-<histogram base="true" name="Media.EME.KeyAdded" units="units"
-    expires_after="2018-01-04">
-  <obsolete>
-    Removed 02/2016 with removal of prefixed EME.
-  </obsolete>
-  <owner>xhwang@chromium.org</owner>
-  <owner>media-dev@chromium.org</owner>
-  <summary>KeyAdded event count.</summary>
-</histogram>
-
-<histogram base="true" name="Media.EME.KeyError" enum="MediaKeyError"
-    expires_after="2018-01-04">
-  <obsolete>
-    Removed 02/2016 with removal of prefixed EME.
-  </obsolete>
-  <owner>xhwang@chromium.org</owner>
-  <owner>media-dev@chromium.org</owner>
-  <summary>KeyError event count.</summary>
 </histogram>
 
 <histogram name="Media.EME.KeySystemSupport.Widevine"
@@ -31068,6 +31000,60 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   <owner>xhwang@chromium.org</owner>
   <owner>media-dev@chromium.org</owner>
   <summary>EME NeedKey event count.</summary>
+</histogram>
+
+<histogram name="Media.EME.{KeySystem}.addKey" enum="MediaKeyException"
+    expires_after="2018-01-04">
+  <obsolete>
+    Removed 02/2016 with removal of prefixed EME.
+  </obsolete>
+  <owner>xhwang@chromium.org</owner>
+  <owner>media-dev@chromium.org</owner>
+  <summary>addKey result</summary>
+  <token key="KeySystem" variants="KeySystem"/>
+</histogram>
+
+<histogram name="Media.EME.{KeySystem}.cancelKeyRequest"
+    enum="MediaKeyException" expires_after="2018-01-04">
+  <obsolete>
+    Removed 02/2016 with removal of prefixed EME.
+  </obsolete>
+  <owner>xhwang@chromium.org</owner>
+  <summary>cancelKeyRequest result.</summary>
+  <token key="KeySystem" variants="KeySystem"/>
+</histogram>
+
+<histogram name="Media.EME.{KeySystem}.generateKeyRequest"
+    enum="MediaKeyException" expires_after="2018-01-04">
+  <obsolete>
+    Removed 02/2016 with removal of prefixed EME.
+  </obsolete>
+  <owner>xhwang@chromium.org</owner>
+  <owner>media-dev@chromium.org</owner>
+  <summary>generateKeyRequest result.</summary>
+  <token key="KeySystem" variants="KeySystem"/>
+</histogram>
+
+<histogram name="Media.EME.{KeySystem}.KeyAdded" units="units"
+    expires_after="2018-01-04">
+  <obsolete>
+    Removed 02/2016 with removal of prefixed EME.
+  </obsolete>
+  <owner>xhwang@chromium.org</owner>
+  <owner>media-dev@chromium.org</owner>
+  <summary>KeyAdded event count.</summary>
+  <token key="KeySystem" variants="KeySystem"/>
+</histogram>
+
+<histogram name="Media.EME.{KeySystem}.KeyError" enum="MediaKeyError"
+    expires_after="2018-01-04">
+  <obsolete>
+    Removed 02/2016 with removal of prefixed EME.
+  </obsolete>
+  <owner>xhwang@chromium.org</owner>
+  <owner>media-dev@chromium.org</owner>
+  <summary>KeyError event count.</summary>
+  <token key="KeySystem" variants="KeySystem"/>
 </histogram>
 
 <histogram name="Media.Engagement.Clear" enum="MediaEngagementClearReason"
@@ -56203,6 +56189,53 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
+<histogram name="PerformanceManager.AgentsByTime" units="units"
+    expires_after="2020-12-04">
+  <obsolete>
+    Removed 2020-11.
+  </obsolete>
+  <owner>bokan@chromium.org</owner>
+  <owner>kouhei@chromium.org</owner>
+  <owner>platform-architecture-dev@chromium.org</owner>
+  <summary>
+    Tracks the total number of agents hosted by the browser by time. An entry in
+    bucket N corresponds to N agents being hosted across all live renderer
+    process for 1 second. Recorded on state changes and every 5 minutes.
+  </summary>
+</histogram>
+
+<histogram name="PerformanceManager.AgentsPerRendererByTime" units="units"
+    expires_after="2020-12-04">
+  <obsolete>
+    Removed 2020-11.
+  </obsolete>
+  <owner>bokan@chromium.org</owner>
+  <owner>kouhei@chromium.org</owner>
+  <owner>platform-architecture-dev@chromium.org</owner>
+  <summary>
+    Tracks the number of agents hosted per renderer by time. An entry in bucket
+    N corresponds to N agents being hosted by a renderer process for 1 second.
+    Recorded on state changes and every 5 minutes.
+  </summary>
+</histogram>
+
+<histogram name="PerformanceManager.AgentsUniqueByTime" units="units"
+    expires_after="2020-12-04">
+  <obsolete>
+    Removed 2020-11.
+  </obsolete>
+  <owner>bokan@chromium.org</owner>
+  <owner>kouhei@chromium.org</owner>
+  <owner>platform-architecture-dev@chromium.org</owner>
+  <summary>
+    Tracks the number of unique agents hosted by the browser by time. An entry
+    in bucket N corresponds to N unique agents being hosted across all live
+    renderer process for 1 second. Unique means that the agent count would
+    remain the same if they were in one process (i.e. they have different
+    protocol+site). Recorded on state changes and every 5 minutes.
+  </summary>
+</histogram>
+
 <histogram
     name="PerformanceManager.BrowsingInstancePluralityVisibilityState.ByPageTime"
     enum="BrowsingInstancePluralityVisibilityState" expires_after="2019-09-30">
@@ -56976,20 +57009,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
     produced by this code: while (*string) hash = (hash &lt;&lt; 5) + hash +
     *string++; Separately each warning is also collected (with its hash) via the
     crash reporter, but only its first occurrence in each boot session.
-  </summary>
-</histogram>
-
-<histogram name="Platform.MemoryBandwidth.ReadWrite" units="MB/s"
-    expires_after="M85">
-  <obsolete>
-    Removed 09/2020 due to lack of usage.
-  </obsolete>
-  <owner>hajimehoshi@chromium.org</owner>
-  <owner>kouhei@chromium.org</owner>
-  <owner>cast-analytics@google.com</owner>
-  <summary>
-    Peak memory bandwith (read and write) usage during the last sample interval.
-    The sample interval may vary from seconds to several minutes.
   </summary>
 </histogram>
 
@@ -57905,6 +57924,16 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
     http://crbug.com/338657 and http://crosbug.com/p/16009. Note that we log
     retries on all 7 FETs even though we've only ever seen failures of FET1.
   </summary>
+</histogram>
+
+<histogram name="Platform.U2F.LegacyCommand" enum="Cr50U2FCommands"
+    expires_after="2021-12-21">
+  <obsolete>
+    Removed 04/2022 as it is not used since crrev.com/c/1755785 (09/2019)
+  </obsolete>
+  <owner>cylai@chromium.org</owner>
+  <owner>cros-hwsec-userland-eng+uma@google.com</owner>
+  <summary>Records occurrences of legacy U2F commands sent to cr50.</summary>
 </histogram>
 
 <histogram name="PlatformFile.FlushTime" units="ms" expires_after="2016-07-22">
@@ -64112,18 +64141,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Renderer4.pixelCountOpaque" units="NormalizedPixels"
-    expires_after="2019-02-14">
-  <obsolete>
-    Removed at an unknown time. No longer used in code.
-  </obsolete>
-  <owner>wiltzius@chromium.org</owner>
-  <summary>
-    Number of pixels known to be opaque, recorded as 10 times the percentage of
-    the viewport that these pixels cover.
-  </summary>
-</histogram>
-
 <histogram name="Renderer4.pixelCountPainted" units="NormalizedPixels"
     expires_after="2019-02-14">
   <obsolete>
@@ -64134,18 +64151,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
     Number of pixels painted by WebKit into main memory, recorded as 10 times
     the percentage of the viewport that these pixels cover. This is collected
     once per commit from WebKit to the compositor.
-  </summary>
-</histogram>
-
-<histogram name="Renderer4.pixelCountTranslucent" units="NormalizedPixels"
-    expires_after="2019-02-14">
-  <obsolete>
-    Removed at an unknown time. No longer used in code.
-  </obsolete>
-  <owner>wiltzius@chromium.org</owner>
-  <summary>
-    Number of pixels not known to be opaque opaque, recorded as 10 times the
-    percentage of the viewport that these pixels cover.
   </summary>
 </histogram>
 
@@ -81999,7 +82004,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   <owner>zea@chromium.org</owner>
   <summary>
     Whether OAuth2 refresh token was available at the time when
-    ProfileSyncService was starting backend.
+    SyncServiceImpl was starting backend.
   </summary>
 </histogram>
 
@@ -82290,7 +82295,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </obsolete>
   <owner>zea@chromium.org</owner>
   <summary>
-    Time taken from the start of sync shutdown (in ProfileSyncService) until the
+    Time taken from the start of sync shutdown (in SyncServiceImpl) until the
     backend (SyncEngine) is fully destroyed.
   </summary>
 </histogram>
@@ -82342,7 +82347,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   <owner>jeremy@chromium.org</owner>
   <owner>zea@google.com</owner>
   <summary>
-    Time spent after ProfileSyncService *creation* but before SyncEngine
+    Time spent after SyncServiceImpl *creation* but before SyncEngine
     initialization.
   </summary>
 </histogram>
@@ -85730,35 +85735,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Uptime.LoginPromptSetupTimeAfterLogout" units="ms"
-    expires_after="M85">
-  <obsolete>
-    Removed 09/2020. No direct replacement.
-  </obsolete>
-  <owner>hajimehoshi@chromium.org</owner>
-  <owner>kouhei@chromium.org</owner>
-  <summary>
-    Measures the time elapsed on Chrome OS for setting up for a login after a
-    logout. More specifically, it is the time between when the Cryptohome is
-    unmounted (the last step in the logout process) and when the login prompt is
-    again visible after a logout.
-  </summary>
-</histogram>
-
-<histogram name="Uptime.Logout" units="ms" expires_after="M85">
-  <obsolete>
-    Removed 09/2020. No direct replacement.
-  </obsolete>
-  <owner>hajimehoshi@chromium.org</owner>
-  <owner>kouhei@chromium.org</owner>
-  <summary>
-    Measures the time elapsed on Chrome OS when performing a logout. More
-    specifically, it is the time between when a logout is initiated and when the
-    Cryptohome is unmounted, signaling the last step in the logout process. This
-    statistic is not collected when the logout is part of a restart or shutdown.
-  </summary>
-</histogram>
-
 <histogram name="Uptime.ProcessesTerminatedToXTerminatedAfterLogout" units="ms"
     expires_after="2018-06-06">
   <obsolete>
@@ -87009,6 +86985,19 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   <summary>
     Tracks whether the UMA-Uniformity-Trial-1-Percent field trial was not active
     and which factors contributed to it.
+  </summary>
+</histogram>
+
+<histogram name="Viewport.OverviewZoom" units="%" expires_after="M85">
+  <obsolete>
+    Expired in M85.
+  </obsolete>
+  <owner>bokan@chromium.org</owner>
+  <owner>input-dev@chromium.org</owner>
+  <summary>
+    The screen width as a percentage of viewport width (i.e. zoom at which we
+    can see the whole page). Only recorded on Android and for viewport meta tags
+    with constant width.
   </summary>
 </histogram>
 

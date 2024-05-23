@@ -33,6 +33,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: text;
 }
 
 .report-url,
@@ -85,6 +86,7 @@
   flex: auto;
   padding: 0 6px;
   white-space: pre;
+  user-select: text;
 }
 
 .report-field-value-is-flexed {

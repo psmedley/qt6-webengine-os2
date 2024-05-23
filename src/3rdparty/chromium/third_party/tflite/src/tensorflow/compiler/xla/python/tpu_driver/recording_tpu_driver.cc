@@ -24,7 +24,6 @@
 #include "tensorflow/compiler/xla/python/tpu_driver/tpu_driver.pb.h"
 #include "tensorflow/compiler/xla/python/tpu_driver/tpu_service.grpc.pb.h"
 #include "tensorflow/core/platform/file_system.h"
-#include "tensorflow/core/platform/stringpiece.h"
 #include "tensorflow/core/platform/threadpool.h"
 
 /*
@@ -127,8 +126,11 @@ class RecordingLoadedProgramHandle : public LoadedProgramHandle {
 class RecordingTpuDriver : public TpuDriver {
  public:
   explicit RecordingTpuDriver(std::unique_ptr<TpuDriver> driver,
-                              const std::string recording_path)
-      : driver_(std::move(driver)), recording_path_(recording_path) {
+                              const std::string recording_path,
+                              const bool flush)
+      : driver_(std::move(driver)),
+        recording_path_(recording_path),
+        flush_(flush) {
     auto file_status = tensorflow::Env::Default()->NewAppendableFile(
         recording_path_, &log_file_);
     if (!file_status.ok()) {
@@ -206,6 +208,9 @@ class RecordingTpuDriver : public TpuDriver {
 
     std::vector<BufferHandle*> unwrapped_children;
     std::vector<int64_t> child_ids;
+    const auto children_size = children.size();
+    unwrapped_children.reserve(children_size);
+    child_ids.reserve(children_size);
     for (auto child : children) {
       BufferHandle* unwrapped_child =
           static_cast<const RecordingBufferHandle*>(child)->handle_.get();
@@ -417,6 +422,9 @@ class RecordingTpuDriver : public TpuDriver {
 
     std::vector<BufferHandle*> unwrapped_inputs;
     std::vector<int64_t> input_ids;
+    const auto inputs_size = inputs.size();
+    unwrapped_inputs.reserve(inputs_size);
+    input_ids.reserve(inputs_size);
     for (auto input : inputs) {
       BufferHandle* unwrapped_input =
           static_cast<const RecordingBufferHandle*>(input)->handle_.get();
@@ -427,6 +435,9 @@ class RecordingTpuDriver : public TpuDriver {
 
     std::vector<BufferHandle*> unwrapped_outputs;
     std::vector<int64_t> output_ids;
+    const auto output_size = outputs.size();
+    unwrapped_outputs.reserve(output_size);
+    output_ids.reserve(output_size);
     for (auto output : outputs) {
       BufferHandle* unwrapped_output =
           static_cast<const RecordingBufferHandle*>(output)->handle_.get();
@@ -466,6 +477,7 @@ class RecordingTpuDriver : public TpuDriver {
  private:
   std::unique_ptr<TpuDriver> driver_;
   const std::string recording_path_;
+  const bool flush_;
 
   std::unique_ptr<tensorflow::WritableFile> log_file_;
 
@@ -492,12 +504,28 @@ class RecordingTpuDriver : public TpuDriver {
         return;
       }
 
-      tensorflow::StringPiece buffer_sp(buffer.data(), buffer.size());
+      absl::string_view buffer_sp(buffer.data(), buffer.size());
       auto data_status = log_file_->Append(buffer_sp);
       if (!data_status.ok()) {
         LOG(WARNING) << "Unable to write data to log file. File possibly "
                         "corrupt. Error: "
                      << data_status.ToString();
+      }
+
+      if (flush_) {
+        auto flush_status = log_file_->Flush();
+        if (!flush_status.ok()) {
+          LOG(WARNING) << "Unable to flush data to log file. File possibly "
+                          "corrupt. Error: "
+                       << flush_status.ToString();
+        }
+
+        auto sync_status = log_file_->Sync();
+        if (!sync_status.ok()) {
+          LOG(WARNING) << "Unable to sync log file. File possibly "
+                          "corrupt. Error: "
+                       << sync_status.ToString();
+        }
       }
     }
   }
@@ -521,6 +549,7 @@ xla::StatusOr<std::unique_ptr<TpuDriver>> RegisterRecordingTpuDriver(
 
   std::string file;
   std::string worker;
+  bool flush = false;
 
   for (const auto& config : configs) {
     std::vector<std::string> kv =
@@ -530,6 +559,11 @@ xla::StatusOr<std::unique_ptr<TpuDriver>> RegisterRecordingTpuDriver(
     }
     if (kv[0] == "worker") {
       worker = kv[1];
+    }
+    if (kv[0] == "flush") {
+      if (kv[1] == "true" || kv[1] == "1") {
+        flush = true;
+      }
     }
   }
 
@@ -541,7 +575,7 @@ xla::StatusOr<std::unique_ptr<TpuDriver>> RegisterRecordingTpuDriver(
   auto driver = driver_status.ConsumeValueOrDie();
 
   return std::unique_ptr<TpuDriver>(
-      new RecordingTpuDriver(std::move(driver), file));
+      new RecordingTpuDriver(std::move(driver), file, flush));
 }
 
 // To record a sequence of operations, set the worker configuration string to

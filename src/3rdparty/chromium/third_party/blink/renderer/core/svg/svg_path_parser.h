@@ -26,8 +26,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/svg/svg_path_data.h"
-#include "third_party/blink/renderer/platform/geometry/float_point.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "ui/gfx/geometry/point_f.h"
 
 namespace blink {
 
@@ -61,13 +60,13 @@ class SVGPathNormalizer {
   void EmitSegment(const PathSegmentData&);
 
  protected:
-  bool DecomposeArcToCubic(const FloatPoint& current_point,
+  bool DecomposeArcToCubic(const gfx::PointF& current_point,
                            const PathSegmentData&);
 
   SVGPathConsumer* consumer_;
-  FloatPoint control_point_;
-  FloatPoint current_point_;
-  FloatPoint sub_path_point_;
+  gfx::PointF control_point_;
+  gfx::PointF current_point_;
+  gfx::PointF sub_path_point_;
   SVGPathSegType last_command_;
 };
 
@@ -83,8 +82,8 @@ class SVGPathAbsolutizer {
 
  private:
   SVGPathConsumer* consumer_;
-  FloatPoint sub_path_point_;
-  FloatPoint current_point_;
+  gfx::PointF sub_path_point_;
+  gfx::PointF current_point_;
 };
 
 }  // namespace blink

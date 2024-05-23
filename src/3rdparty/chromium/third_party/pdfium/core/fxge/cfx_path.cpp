@@ -334,9 +334,9 @@ CFX_FloatRect CFX_Path::GetBoundingBoxForStrokePath(float line_width,
   CFX_FloatRect rect(100000.0f, 100000.0f, -100000.0f, -100000.0f);
   size_t iPoint = 0;
   float half_width = line_width;
-  int iStartPoint = 0;
-  int iEndPoint = 0;
-  int iMiddlePoint = 0;
+  size_t iStartPoint = 0;
+  size_t iEndPoint = 0;
+  size_t iMiddlePoint = 0;
   bool bJoin;
   while (iPoint < m_Points.size()) {
     if (m_Points[iPoint].IsTypeAndOpen(CFX_Path::Point::Type::kMove)) {
@@ -348,6 +348,10 @@ CFX_FloatRect CFX_Path::GetBoundingBoxForStrokePath(float line_width,
       bJoin = false;
     } else {
       if (m_Points[iPoint].IsTypeAndOpen(CFX_Path::Point::Type::kBezier)) {
+        // Callers are responsible for adding Beziers in sets of 3.
+        CHECK_LT(iPoint + 2, m_Points.size());
+        DCHECK_EQ(m_Points[iPoint + 1].m_Type, CFX_Path::Point::Type::kBezier);
+        DCHECK_EQ(m_Points[iPoint + 2].m_Type, CFX_Path::Point::Type::kBezier);
         rect.UpdateRect(m_Points[iPoint].m_Point);
         rect.UpdateRect(m_Points[iPoint + 1].m_Point);
         iPoint += 2;
@@ -364,15 +368,16 @@ CFX_FloatRect CFX_Path::GetBoundingBoxForStrokePath(float line_width,
         bJoin = true;
       }
     }
-
-    CFX_PointF start_pos = m_Points[iStartPoint].m_Point;
-    CFX_PointF end_pos = m_Points[iEndPoint].m_Point;
+    CHECK_LT(iStartPoint, m_Points.size());
+    CHECK_LT(iEndPoint, m_Points.size());
     if (bJoin) {
-      CFX_PointF mid_pos = m_Points[iMiddlePoint].m_Point;
-      UpdateLineJoinPoints(&rect, start_pos, mid_pos, end_pos, half_width,
-                           miter_limit);
+      CHECK_LT(iMiddlePoint, m_Points.size());
+      UpdateLineJoinPoints(
+          &rect, m_Points[iStartPoint].m_Point, m_Points[iMiddlePoint].m_Point,
+          m_Points[iEndPoint].m_Point, half_width, miter_limit);
     } else {
-      UpdateLineEndPoints(&rect, start_pos, end_pos, half_width);
+      UpdateLineEndPoints(&rect, m_Points[iStartPoint].m_Point,
+                          m_Points[iEndPoint].m_Point, half_width);
     }
     iPoint++;
   }
@@ -390,7 +395,8 @@ bool CFX_Path::IsRect() const {
   return IsRectImpl(m_Points);
 }
 
-Optional<CFX_FloatRect> CFX_Path::GetRect(const CFX_Matrix* matrix) const {
+absl::optional<CFX_FloatRect> CFX_Path::GetRect(
+    const CFX_Matrix* matrix) const {
   bool do_normalize = PathPointsNeedNormalization(m_Points);
   std::vector<Point> normalized;
   if (do_normalize)
@@ -399,13 +405,13 @@ Optional<CFX_FloatRect> CFX_Path::GetRect(const CFX_Matrix* matrix) const {
 
   if (!matrix) {
     if (!IsRectImpl(path_points))
-      return pdfium::nullopt;
+      return absl::nullopt;
 
     return CreateRectFromPoints(path_points[0].m_Point, path_points[2].m_Point);
   }
 
   if (!IsRectPreTransform(path_points))
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   CFX_PointF points[5];
   for (size_t i = 0; i < path_points.size(); ++i) {
@@ -414,11 +420,11 @@ Optional<CFX_FloatRect> CFX_Path::GetRect(const CFX_Matrix* matrix) const {
     if (i == 0)
       continue;
     if (XYBothNotEqual(points[i], points[i - 1]))
-      return pdfium::nullopt;
+      return absl::nullopt;
   }
 
   if (XYBothNotEqual(points[0], points[3]))
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   return CreateRectFromPoints(points[0], points[2]);
 }

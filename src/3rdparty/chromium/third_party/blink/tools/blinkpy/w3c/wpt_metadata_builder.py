@@ -179,7 +179,7 @@ class WPTMetadataBuilder(object):
 
         tests_for_metadata = self.get_tests_needing_metadata()
         _log.info("Found %d tests requiring metadata", len(tests_for_metadata))
-        for test_name, test_status_bitmap in tests_for_metadata.items():
+        for test_name, test_status_bitmap in sorted(tests_for_metadata.items()):
             filename, file_contents = self.get_metadata_filename_and_contents(
                 test_name, test_status_bitmap)
             if not filename or not file_contents:
@@ -477,7 +477,7 @@ class WPTMetadataBuilder(object):
         # A skipped test is a little special in that it doesn't happen along with
         # any other status. So we compare directly against SKIP_TEST and also
         # return right away.
-        if test_status_bitmap == SKIP_TEST:
+        if test_status_bitmap & SKIP_TEST:
             result += "  disabled: wpt_metadata_builder.py\n"
             return result
 

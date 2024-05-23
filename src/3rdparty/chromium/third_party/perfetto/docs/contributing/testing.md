@@ -120,9 +120,9 @@ TIP: Query diff tests are expected to only have a single query which produces
 output in the whole file (usually at the end). Calling
 `SELECT RUN_METRIC('metric file')` can trip up this check as this query
 generates some hidden output. To address this issue, if a query only has
-column is named `supress_query_output`, even if it has output, this will
+column is named `suppress_query_output`, even if it has output, this will
 be ignored (for example,
-`SELECT RUN_METRIC('metric file') as surpress_query_output`)
+`SELECT RUN_METRIC('metric file') as suppress_query_output`)
 
 UI pixel diff tests
 -----------------
@@ -142,7 +142,7 @@ googlers have access to, googlers can install gcloud
 
 ```
 ui/run-integrationtests --rebaseline
-tools/add_test_data test/data/ui-screenshots
+tools/test_data upload
 ```
 
 Once finished you can commit and upload as part of your CL to cause the CI to

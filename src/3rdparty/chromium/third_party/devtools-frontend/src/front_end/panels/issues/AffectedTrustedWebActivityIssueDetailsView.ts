@@ -7,8 +7,6 @@ import type * as Platform from '../../core/platform/platform.js';
 import * as IssuesManager from '../../models/issues_manager/issues_manager.js';
 
 import {AffectedResourcesView} from './AffectedResourcesView.js';
-import type {AggregatedIssue} from './IssueAggregator.js';
-import type {IssueView} from './IssueView.js';
 
 const UIStrings = {
   /**
@@ -35,18 +33,11 @@ const UIStrings = {
 const str_ = i18n.i18n.registerUIStrings('panels/issues/AffectedTrustedWebActivityIssueDetailsView.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 export class AffectedTrustedWebActivityIssueDetailsView extends AffectedResourcesView {
-  private issue: AggregatedIssue;
-
-  constructor(parentView: IssueView, issue: AggregatedIssue) {
-    super(parentView);
-    this.issue = issue;
-  }
-
   protected getResourceNameWithCount(count: number): Platform.UIString.LocalizedString {
     return i18nString(UIStrings.nResources, {n: count});
   }
 
-  private appendDetail(twaIssue: IssuesManager.TrustedWebActivityIssue.TrustedWebActivityIssue): void {
+  #appendDetail(twaIssue: IssuesManager.TrustedWebActivityIssue.TrustedWebActivityIssue): void {
     const element = document.createElement('tr');
     element.classList.add('affected-resource-row');
 
@@ -65,7 +56,7 @@ export class AffectedTrustedWebActivityIssueDetailsView extends AffectedResource
     this.affectedResources.appendChild(element);
   }
 
-  private appendDetails(twaIssues: Iterable<IssuesManager.TrustedWebActivityIssue.TrustedWebActivityIssue>): void {
+  #appendDetails(twaIssues: Iterable<IssuesManager.TrustedWebActivityIssue.TrustedWebActivityIssue>): void {
     const header = document.createElement('tr');
     if (this.issue.code() === IssuesManager.TrustedWebActivityIssue.httpViolationCode) {
       this.appendColumnTitle(header, i18nString(UIStrings.statusCode));
@@ -81,7 +72,7 @@ export class AffectedTrustedWebActivityIssueDetailsView extends AffectedResource
 
     let count = 0;
     for (const twaIssue of twaIssues) {
-      this.appendDetail(twaIssue);
+      this.#appendDetail(twaIssue);
       count++;
     }
     this.updateAffectedResourceCount(count);
@@ -89,6 +80,6 @@ export class AffectedTrustedWebActivityIssueDetailsView extends AffectedResource
 
   update(): void {
     this.clear();
-    this.appendDetails(this.issue.getTrustedWebActivityIssues());
+    this.#appendDetails(this.issue.getTrustedWebActivityIssues());
   }
 }

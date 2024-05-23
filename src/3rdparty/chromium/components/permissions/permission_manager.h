@@ -11,7 +11,7 @@
 #include "base/callback_forward.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/id_map.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -24,6 +24,8 @@
 
 namespace content {
 class BrowserContext;
+class RenderFrameHost;
+class RenderProcessHost;
 }
 
 namespace permissions {
@@ -40,6 +42,10 @@ class PermissionManager : public KeyedService,
                          ContentSettingsTypeHash>;
   PermissionManager(content::BrowserContext* browser_context,
                     PermissionContextMap permission_contexts);
+
+  PermissionManager(const PermissionManager&) = delete;
+  PermissionManager& operator=(const PermissionManager&) = delete;
+
   ~PermissionManager() override;
 
   // Converts from |url|'s actual origin to the "canonical origin" that should
@@ -92,6 +98,14 @@ class PermissionManager : public KeyedService,
                                        const GURL& requesting_origin,
                                        const GURL& embedding_origin);
 
+  // Returns the permission status for a given `permission` and displayed,
+  // top-level `origin`. This should be used only for displaying on the
+  // browser's native UI (PageInfo, Settings, etc.). This method does not take
+  // context specific restrictions (e.g. permission policy) into consideration.
+  PermissionResult GetPermissionStatusForDisplayOnSettingsUI(
+      ContentSettingsType permission,
+      const GURL& origin);
+
   // Returns the permission status for a given frame. This should be preferred
   // over GetPermissionStatus as additional checks can be performed when we know
   // the exact context the request is coming from.
@@ -110,6 +124,13 @@ class PermissionManager : public KeyedService,
   PermissionResult GetPermissionStatusForCurrentDocument(
       ContentSettingsType permission,
       content::RenderFrameHost* render_frame_host);
+
+  // Returns the status of the given `permission` for a worker on `origin`
+  // running in the renderer corresponding to `render_process_host`.
+  PermissionResult GetPermissionStatusForWorker(
+      ContentSettingsType permission,
+      content::RenderProcessHost* render_process_host,
+      const url::Origin& worker_origin);
 
   // content::PermissionControllerDelegate implementation.
   void RequestPermission(
@@ -138,11 +159,19 @@ class PermissionManager : public KeyedService,
       content::PermissionType permission,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin) override;
+  blink::mojom::PermissionStatus GetPermissionStatusForCurrentDocument(
+      content::PermissionType permission,
+      content::RenderFrameHost* render_frame_host) override;
+  blink::mojom::PermissionStatus GetPermissionStatusForWorker(
+      content::PermissionType permission,
+      content::RenderProcessHost* render_process_host,
+      const GURL& worker_origin) override;
   bool IsPermissionOverridableByDevTools(
       content::PermissionType permission,
       const absl::optional<url::Origin>& origin) override;
   SubscriptionId SubscribePermissionStatusChange(
       content::PermissionType permission,
+      content::RenderProcessHost* render_process_host,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
       base::RepeatingCallback<void(blink::mojom::PermissionStatus)> callback)
@@ -207,10 +236,13 @@ class PermissionManager : public KeyedService,
   // permissions::Observer:
   void OnPermissionChanged(const ContentSettingsPattern& primary_pattern,
                            const ContentSettingsPattern& secondary_pattern,
-                           ContentSettingsType content_type) override;
+                           ContentSettingsTypeSet content_type_set) override;
 
+  // Only one of |render_process_host| and |render_frame_host| should be set,
+  // or neither. RenderProcessHost will be inferred from |render_frame_host|.
   PermissionResult GetPermissionStatusHelper(
       ContentSettingsType permission,
+      content::RenderProcessHost* render_process_host,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
       const GURL& embedding_origin);
@@ -219,7 +251,7 @@ class PermissionManager : public KeyedService,
       const url::Origin& origin,
       ContentSettingsType permission);
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 
   PendingRequestsMap pending_requests_;
   PendingRequestLocalId::Generator request_local_id_generator_;
@@ -242,11 +274,6 @@ class PermissionManager : public KeyedService,
   url::Origin devtools_global_overrides_origin_;
 
   bool is_shutting_down_ = false;
-
-  // This is false when not processing a permission change and true otherwise
-  bool is_processing_permission_change_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PermissionManager);
 };
 
 }  // namespace permissions

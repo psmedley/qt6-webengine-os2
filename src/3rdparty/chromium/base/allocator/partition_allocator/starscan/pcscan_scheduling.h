@@ -8,14 +8,12 @@
 #include <atomic>
 #include <cstdint>
 
+#include "base/allocator/partition_allocator/partition_lock.h"
 #include "base/base_export.h"
-#include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/synchronization/lock.h"
 #include "base/time/time.h"
 
-namespace base {
-namespace internal {
+namespace partition_alloc::internal {
 
 class PCScanScheduler;
 
@@ -43,6 +41,13 @@ class BASE_EXPORT PCScanSchedulingBackend {
   PCScanSchedulingBackend(const PCScanSchedulingBackend&) = delete;
   PCScanSchedulingBackend& operator=(const PCScanSchedulingBackend&) = delete;
 
+  void DisableScheduling();
+  void EnableScheduling();
+
+  bool is_scheduling_enabled() const {
+    return scheduling_enabled_.load(std::memory_order_relaxed);
+  }
+
   inline QuarantineData& GetQuarantineData();
 
   // Invoked when the limit in PCScanScheduler is reached. Returning true
@@ -59,10 +64,15 @@ class BASE_EXPORT PCScanSchedulingBackend {
 
   // Invoked by PCScan to ask for a new timeout for a scheduled PCScan task.
   // Only invoked if scheduler requests a delayed scan at some point.
-  virtual TimeDelta UpdateDelayedSchedule();
+  virtual base::TimeDelta UpdateDelayedSchedule();
 
  protected:
+  inline bool SchedulingDisabled() const;
+
+  virtual bool NeedsToImmediatelyScan() = 0;
+
   PCScanScheduler& scheduler_;
+  std::atomic<bool> scheduling_enabled_{true};
 };
 
 // Scheduling backend that just considers a single hard limit.
@@ -74,6 +84,9 @@ class BASE_EXPORT LimitBackend final : public PCScanSchedulingBackend {
 
   bool LimitReached() final;
   void UpdateScheduleAfterScan(size_t, base::TimeDelta, size_t) final;
+
+ private:
+  bool NeedsToImmediatelyScan() final;
 };
 
 // Task based backend that is aware of a target mutator utilization that
@@ -86,14 +99,15 @@ class BASE_EXPORT LimitBackend final : public PCScanSchedulingBackend {
 class BASE_EXPORT MUAwareTaskBasedBackend final
     : public PCScanSchedulingBackend {
  public:
-  MUAwareTaskBasedBackend(PCScanScheduler&,
-                          base::RepeatingCallback<void(TimeDelta)>);
+  using ScheduleDelayedScanFunc = void (*)(int64_t delay_in_microseconds);
+
+  MUAwareTaskBasedBackend(PCScanScheduler&, ScheduleDelayedScanFunc);
   ~MUAwareTaskBasedBackend();
 
   bool LimitReached() final;
   size_t ScanStarted() final;
   void UpdateScheduleAfterScan(size_t, base::TimeDelta, size_t) final;
-  TimeDelta UpdateDelayedSchedule() final;
+  base::TimeDelta UpdateDelayedSchedule() final;
 
  private:
   // Limit triggering the scheduler. If `kTargetMutatorUtilizationPercent` is
@@ -108,10 +122,12 @@ class BASE_EXPORT MUAwareTaskBasedBackend final
   // memory management in scan.
   static constexpr double kTargetMutatorUtilizationPercent = 0.90;
 
-  // Callback to schedule a delayed scan.
-  const base::RepeatingCallback<void(TimeDelta)> schedule_delayed_scan_;
+  bool NeedsToImmediatelyScan() final;
 
-  base::Lock scheduler_lock_;
+  // Callback to schedule a delayed scan.
+  const ScheduleDelayedScanFunc schedule_delayed_scan_;
+
+  Lock scheduler_lock_;
   size_t hard_limit_ GUARDED_BY(scheduler_lock_){0};
   base::TimeTicks earliest_next_scan_time_ GUARDED_BY(scheduler_lock_);
 
@@ -178,7 +194,16 @@ bool PCScanScheduler::AccountFreed(size_t size) {
          backend_->LimitReached();
 }
 
-}  // namespace internal
-}  // namespace base
+}  // namespace partition_alloc::internal
+
+// TODO(crbug.com/1288247): Remove these when migration is complete.
+namespace base::internal {
+
+using ::partition_alloc::internal::LimitBackend;
+using ::partition_alloc::internal::MUAwareTaskBasedBackend;
+using ::partition_alloc::internal::PCScanScheduler;
+using ::partition_alloc::internal::QuarantineData;
+
+}  // namespace base::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_PCSCAN_SCHEDULING_H_

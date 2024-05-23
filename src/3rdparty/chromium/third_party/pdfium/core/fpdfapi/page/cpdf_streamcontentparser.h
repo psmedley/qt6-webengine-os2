@@ -14,9 +14,9 @@
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_contentmarks.h"
+#include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_number.h"
-#include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_fillrenderoptions.h"
@@ -61,7 +61,7 @@ class CPDF_StreamContentParser {
   }
   CPDF_AllStates* GetCurStates() const { return m_pCurStates.get(); }
   bool IsColored() const { return m_bColored; }
-  const float* GetType3Data() const { return m_Type3Data; }
+  pdfium::span<const float> GetType3Data() const { return m_Type3Data; }
   RetainPtr<CPDF_Font> FindFont(const ByteString& name);
 
   static ByteStringView FindKeyAbbreviationForTesting(ByteStringView abbr);
@@ -230,7 +230,6 @@ class CPDF_StreamContentParser {
   std::unique_ptr<CPDF_AllStates> m_pCurStates;
   std::stack<std::unique_ptr<CPDF_ContentMarks>> m_ContentMarksStack;
   std::vector<std::unique_ptr<CPDF_TextObject>> m_ClipTextList;
-  UnownedPtr<const CPDF_TextObject> m_pLastTextObject;
   std::vector<CFX_Path::Point> m_PathPoints;
   CFX_PointF m_PathStart;
   CFX_PointF m_PathCurrent;
@@ -239,7 +238,6 @@ class CPDF_StreamContentParser {
   ByteString m_LastImageName;
   RetainPtr<CPDF_Image> m_pLastImage;
   bool m_bColored = false;
-  bool m_bResourceMissing = false;
   std::vector<std::unique_ptr<CPDF_AllStates>> m_StateStack;
   float m_Type3Data[6] = {0.0f};
   ContentParam m_ParamBuf[kParamBufSize];

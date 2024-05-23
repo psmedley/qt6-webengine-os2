@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/dbus/bluez_dbus_client.h"
@@ -21,6 +20,10 @@ namespace bluez {
 class DEVICE_BLUETOOTH_EXPORT BluetoothDebugManagerClient
     : public BluezDBusClient {
  public:
+  BluetoothDebugManagerClient(const BluetoothDebugManagerClient&) = delete;
+  BluetoothDebugManagerClient& operator=(const BluetoothDebugManagerClient&) =
+      delete;
+
   ~BluetoothDebugManagerClient() override;
 
   // The ErrorCallback is used by debug manager methods to indicate failure.
@@ -47,9 +50,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDebugManagerClient
 
  protected:
   BluetoothDebugManagerClient();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BluetoothDebugManagerClient);
 };
 
 }  // namespace bluez

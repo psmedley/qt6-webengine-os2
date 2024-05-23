@@ -1,6 +1,6 @@
 package(
     default_visibility = ["//tensorflow:internal"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 py_library(
@@ -16,7 +16,7 @@ py_library(
                    "will not receive new features, and will be removed by " +
                    "early 2019. You should update all usage of " +
                    "`tf.distributions` to `tfp.distributions`."),
-    srcs_version = "PY2AND3",
+    srcs_version = "PY3",
     deps = [
         ":util",
         "//tensorflow/python:array_ops",
@@ -31,14 +31,13 @@ py_library(
         "//tensorflow/python:tensor_util",
         "//tensorflow/python:util",
         "//third_party/py/numpy",
-        "@six_archive//:six",
     ],
 )
 
 py_library(
     name = "util",
     srcs = ["util.py"],
-    srcs_version = "PY2AND3",
+    srcs_version = "PY3",
     deps = [
         "//tensorflow/python:array_ops",
         "//tensorflow/python:check_ops",
@@ -51,6 +50,5 @@ py_library(
         "//tensorflow/python:special_math_ops",
         "//tensorflow/python:tensor_util",
         "//third_party/py/numpy",
-        "@six_archive//:six",
     ],
 )

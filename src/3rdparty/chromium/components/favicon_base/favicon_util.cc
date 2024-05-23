@@ -23,10 +23,11 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_png_rep.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "base/mac/mac_util.h"
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
 namespace favicon_base {
 namespace {
@@ -153,7 +154,7 @@ std::vector<float> GetFaviconScales() {
   // store the favicons in both 100p for sync and 200p for display. cr/160503.
   std::vector<float> favicon_scales(1, kScale1x);
   for (size_t i = 0; i < resource_scale_factors.size(); ++i) {
-    if (resource_scale_factors[i] != ui::SCALE_FACTOR_100P)
+    if (resource_scale_factors[i] != ui::k100Percent)
       favicon_scales.push_back(
           ui::GetScaleForResourceScaleFactor(resource_scale_factors[i]));
   }
@@ -161,9 +162,9 @@ std::vector<float> GetFaviconScales() {
 }
 
 void SetFaviconColorSpace(gfx::Image* image) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   image->SetSourceColorSpace(base::mac::GetSystemColorSpace());
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 }
 
 gfx::Image SelectFaviconFramesFromPNGs(

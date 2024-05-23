@@ -10,6 +10,7 @@
 
 #include "base/callback.h"
 #include "base/containers/queue.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/indexed_db/indexed_db_storage_key_state_handle.h"
@@ -32,6 +33,12 @@ class CONTENT_EXPORT IndexedDBConnectionCoordinator {
   IndexedDBConnectionCoordinator(
       IndexedDBDatabase* db,
       TasksAvailableCallback tasks_available_callback);
+
+  IndexedDBConnectionCoordinator(const IndexedDBConnectionCoordinator&) =
+      delete;
+  IndexedDBConnectionCoordinator& operator=(
+      const IndexedDBConnectionCoordinator&) = delete;
+
   ~IndexedDBConnectionCoordinator();
 
   void ScheduleOpenConnection(
@@ -97,7 +104,7 @@ class CONTENT_EXPORT IndexedDBConnectionCoordinator {
   class OpenRequest;
   class DeleteRequest;
 
-  IndexedDBDatabase* db_;
+  raw_ptr<IndexedDBDatabase> db_;
 
   TasksAvailableCallback tasks_available_callback_;
 
@@ -105,8 +112,6 @@ class CONTENT_EXPORT IndexedDBConnectionCoordinator {
 
   // |weak_factory_| is used for all callback uses.
   base::WeakPtrFactory<IndexedDBConnectionCoordinator> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBConnectionCoordinator);
 };
 
 }  // namespace content

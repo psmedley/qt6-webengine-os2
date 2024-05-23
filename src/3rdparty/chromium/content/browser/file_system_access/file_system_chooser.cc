@@ -12,7 +12,6 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "content/browser/file_system_access/file_system_access_directory_handle_impl.h"
 #include "content/browser/file_system_access/file_system_access_error.h"
@@ -78,10 +77,10 @@ bool IsInvalidExtension(base::FilePath::StringType& extension) {
   auto extension16 = base::UTF8ToUTF16(component8);
 
   return !base::i18n::IsFilenameLegal(extension16) ||
-         FileSystemChooser::IsShellIntegratedExtension(GetLastExtension(extension));
+         FileSystemChooser::IsShellIntegratedExtension(extension);
 }
 
-// Converts the accepted mime types and extensions from |option| into a list
+// Converts the accepted mime types and extensions from `option` into a list
 // of just extensions to be passed to the file dialog implementation.
 // The returned list will start with all the explicit website provided
 // extensions in order, followed by (for each mime type) the preferred
@@ -96,7 +95,7 @@ bool GetFileTypesFromAcceptsOption(
 
   for (const std::string& extension_string : option.extensions) {
     base::FilePath::StringType extension;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     extension = base::UTF8ToWide(extension_string);
 #else
     extension = extension_string;
@@ -229,7 +228,7 @@ base::FilePath FileSystemChooser::Options::ResolveSuggestedNameExtension(
     }
   }
 
-  // Suggested extension not found in non-empty |accepts|.
+  // Suggested extension not found in non-empty `accepts`.
   file_types.include_all_files = true;
   return suggested_name;
 }

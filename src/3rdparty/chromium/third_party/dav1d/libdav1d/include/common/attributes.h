@@ -107,6 +107,18 @@
 #define NOINLINE __attribute__((noinline))
 #endif
 
+#ifdef _MSC_VER
+#define ALWAYS_INLINE __forceinline
+#else
+#define ALWAYS_INLINE __attribute__((always_inline)) inline
+#endif
+
+#if (defined(__ELF__) || defined(__MACH__) || (defined(_WIN32) && defined(__clang__))) && __has_attribute(visibility)
+#define EXTERN extern __attribute__((visibility("hidden")))
+#else
+#define EXTERN extern
+#endif
+
 #ifdef __clang__
 #define NO_SANITIZE(x) __attribute__((no_sanitize(x)))
 #else
@@ -176,6 +188,12 @@ static inline int clzll(const unsigned long long mask) {
 #else
 #define CHECK_OFFSET(type, field, name) \
     static_assert(name == offsetof(type, field), #field)
+#endif
+
+#ifdef _MSC_VER
+#define PACKED(...) __pragma(pack(push, 1)) __VA_ARGS__ __pragma(pack(pop))
+#else
+#define PACKED(...) __VA_ARGS__ __attribute__((__packed__))
 #endif
 
 #endif /* DAV1D_COMMON_ATTRIBUTES_H */

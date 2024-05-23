@@ -29,6 +29,7 @@ extern "C" {
 #define MIN_MV_IN_OUT 0.4
 
 #define VLOW_MOTION_THRESHOLD 950
+struct ThreadData;
 
 /*!
  * \brief The stucture of acummulated frame stats in the first pass.
@@ -37,7 +38,7 @@ extern "C" {
  * normalized to each MB. MV related stats (MVc, MVr, etc.) are normalized to
  * the frame width and height. See function normalize_firstpass_stats.
  */
-typedef struct {
+typedef struct FIRSTPASS_STATS {
   /*!
    * Frame number in display order, if stats are for a single frame.
    * No real meaning for a collection of frames.
@@ -175,17 +176,17 @@ typedef struct {
  */
 typedef struct {
   /*!
-   * An static buffer that will be used when no ext_stats_buf is assigned.
-   * The ext_stats_buf is assigned through av1_firstpass_info_init() when
-   * user already has an pre-existing firstpass stats that store in an
-   * external buffer. The ext_stats_buf is usually use in two pass mode.
-   * When using one pass mode, we generate "firstpass" stats and
-   * encode the video in the same pass. In this scenario, the stats will
-   * be pushed and popped from static_stats_buf.
+   * A static buffer that will be used when no ext_stats_buf is assigned. The
+   * ext_stats_buf is assigned through av1_firstpass_info_init() when the user
+   * already has a pre-existing firstpass stats that is stored in an external
+   * buffer. The ext_stats_buf is usually used in two pass mode. When using one
+   * pass mode, we generate "firstpass" stats and encode the video in the same
+   * pass. In this scenario, the stats will be pushed and popped from
+   * static_stats_buf.
    */
   FIRSTPASS_STATS static_stats_buf[FIRSTPASS_INFO_STATIC_BUF_SIZE];
   /*!
-   * A pointer point to first pass stats.
+   * A pointer to first pass stats.
    * Note that this buffer will be used as ring buffer.
    */
   FIRSTPASS_STATS *stats_buf;
@@ -300,7 +301,7 @@ const FIRSTPASS_STATS *av1_firstpass_info_peek(
 /*!\brief Count the future stats from the target in firstpass_info
  * Note that the target stats will be counted as well.
  * The target index is as follows.
- * (cur_index + offset_from_curr) % firstpass_info->stats_buf_size
+ * (cur_index + offset_from_cur) % firstpass_info->stats_buf_size
  *
  * \ingroup rate_control
  * \param[in]  firstpass_info    struct of firstpass_info.
@@ -361,7 +362,23 @@ typedef struct GF_GROUP {
   REFBUF_STATE refbuf_state[MAX_STATIC_GF_GROUP_LENGTH];
   int arf_index;  // the index in the gf group of ARF, if no arf, then -1
   int size;       // The total length of a GOP
-#if CONFIG_FRAME_PARALLEL_ENCODE
+
+  // The offset into lookahead_ctx for choosing
+  // source of frame parallel encodes.
+  int src_offset[MAX_STATIC_GF_GROUP_LENGTH];
+  // Stores the display order hint of each frame in the current GF_GROUP.
+  int display_idx[MAX_STATIC_GF_GROUP_LENGTH];
+
+  // The reference frame list maps the reference frame indexes to its
+  // buffer index in the decoded buffer. A value of -1 means the
+  // corresponding reference frame index doesn't point towards any
+  // previously decoded frame.
+  int8_t ref_frame_list[MAX_STATIC_GF_GROUP_LENGTH][REF_FRAMES];
+  // Update frame index
+  int update_ref_idx[MAX_STATIC_GF_GROUP_LENGTH];
+  // The map_idx of primary reference
+  int primary_ref_idx[MAX_STATIC_GF_GROUP_LENGTH];
+
   // Indicates the level of parallelism in frame parallel encodes.
   // 0 : frame is independently encoded (not part of parallel encodes).
   // 1 : frame is the first in encode order in a given parallel encode set.
@@ -372,20 +389,12 @@ typedef struct GF_GROUP {
   // 1 : frame is a non-reference frame.
   int is_frame_non_ref[MAX_STATIC_GF_GROUP_LENGTH];
 
-  // The offset into lookahead_ctx for choosing
-  // source of frame parallel encodes.
-  int src_offset[MAX_STATIC_GF_GROUP_LENGTH];
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
-  // Stores the display order hint of each frame in the current GF_GROUP.
-  int display_idx[MAX_STATIC_GF_GROUP_LENGTH];
   // Stores the display order hint of the frames not to be
   // refreshed by the current frame.
   int skip_frame_refresh[MAX_STATIC_GF_GROUP_LENGTH][REF_FRAMES];
   // Stores the display order hint of the frame to be excluded during reference
   // assignment.
   int skip_frame_as_ref[MAX_STATIC_GF_GROUP_LENGTH];
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   /*!\endcond */
 } GF_GROUP;
 /*!\cond */
@@ -539,10 +548,11 @@ static INLINE BLOCK_SIZE get_fp_block_size(int is_screen_content_type) {
   return (is_screen_content_type ? BLOCK_8X8 : BLOCK_16X16);
 }
 
-int av1_get_unit_rows_in_tile(TileInfo tile, const BLOCK_SIZE fp_block_size);
-int av1_get_unit_cols_in_tile(TileInfo tile, const BLOCK_SIZE fp_block_size);
+int av1_get_unit_rows_in_tile(const TileInfo *tile,
+                              const BLOCK_SIZE fp_block_size);
+int av1_get_unit_cols_in_tile(const TileInfo *tile,
+                              const BLOCK_SIZE fp_block_size);
 
-void av1_rc_get_first_pass_params(struct AV1_COMP *cpi);
 void av1_first_pass_row(struct AV1_COMP *cpi, struct ThreadData *td,
                         struct TileDataEnc *tile_data, const int mb_row,
                         const BLOCK_SIZE fp_block_size);
@@ -568,11 +578,12 @@ void av1_accumulate_stats(FIRSTPASS_STATS *section,
  * \param[in]    cpi            Top-level encoder structure
  * \param[in]    ts_duration    Duration of the frame / collection of frames
  *
- * \return Nothing is returned. Instead, the "TWO_PASS" structure inside "cpi"
+ * \remark Nothing is returned. Instead, the "TWO_PASS" structure inside "cpi"
  * is modified to store information computed in this function.
  */
 void av1_first_pass(struct AV1_COMP *cpi, const int64_t ts_duration);
 
+void av1_noop_first_pass_frame(struct AV1_COMP *cpi, const int64_t ts_duration);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

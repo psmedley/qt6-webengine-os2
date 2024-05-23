@@ -5,6 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_BACKING_FACTORY_GL_COMMON_H_
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_BACKING_FACTORY_GL_COMMON_H_
 
+#include "base/memory/raw_ptr.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "gpu/command_buffer/service/shared_image_backing_factory.h"
 #include "gpu/command_buffer/service/shared_image_backing_gl_common.h"
@@ -43,7 +44,7 @@ class GPU_GLES2_EXPORT SharedImageBackingFactoryGLCommon
 
     GLenum gl_format = 0;
     GLenum gl_type = 0;
-    const gles2::Texture::CompatibilitySwizzle* swizzle = nullptr;
+    raw_ptr<const gles2::Texture::CompatibilitySwizzle> swizzle = nullptr;
     GLenum adjusted_format = 0;
 
     // The internalformat portion of the format/type/internalformat triplet
@@ -76,10 +77,11 @@ class GPU_GLES2_EXPORT SharedImageBackingFactoryGLCommon
   bool texture_usage_angle_ = false;
   SharedImageBackingGLCommon::UnpackStateAttribs attribs_;
   GpuDriverBugWorkarounds workarounds_;
+  WebGPUAdapterName use_webgpu_adapter_ = WebGPUAdapterName::kDefault;
 
   // Used to notify the watchdog before a buffer allocation in case it takes
   // long.
-  gl::ProgressReporter* const progress_reporter_ = nullptr;
+  const raw_ptr<gl::ProgressReporter> progress_reporter_ = nullptr;
 };
 
 }  // namespace gpu

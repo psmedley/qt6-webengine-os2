@@ -9,7 +9,6 @@
 
 #include "base/files/file.h"
 #include "base/files/scoped_file.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "components/services/filesystem/public/mojom/directory.mojom.h"
 #include "components/services/filesystem/public/mojom/file.mojom.h"
@@ -33,17 +32,21 @@ class FileImpl : public mojom::File {
            base::File file,
            scoped_refptr<SharedTempDir> temp_dir,
            scoped_refptr<LockTable> lock_table);
+
+  FileImpl(const FileImpl&) = delete;
+  FileImpl& operator=(const FileImpl&) = delete;
+
   ~FileImpl() override;
 
   // Returns whether the underlying file handle is valid.
   bool IsValid() const;
 
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
   // Attempts to perform the native operating system's locking operations on
   // the internal mojom::File handle. Not supported on Fuchsia.
   base::File::Error RawLockFile();
   base::File::Error RawUnlockFile();
-#endif  // !OS_FUCHSIA
+#endif  // !BUILDFLAG(IS_FUCHSIA)
 
   const base::FilePath& path() const { return path_; }
 
@@ -78,8 +81,6 @@ class FileImpl : public mojom::File {
   base::FilePath path_;
   scoped_refptr<SharedTempDir> temp_dir_;
   scoped_refptr<LockTable> lock_table_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileImpl);
 };
 
 }  // namespace filesystem

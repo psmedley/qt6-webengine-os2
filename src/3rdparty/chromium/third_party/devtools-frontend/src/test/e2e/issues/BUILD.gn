@@ -6,14 +6,20 @@ import("../../../third_party/typescript/typescript.gni")
 
 node_ts_library("issues") {
   sources = [
+    "client-hint-issues_test.ts",
+    "cookie-attribute-exceeds-max-size-issues_test.ts",
     "cors-issues_test.ts",
     "cors-private-network-issues_test.ts",
     "csp-violations-tab_test.ts",
+    "deprecation-issues_test.ts",
+    "generic-issues_test.ts",
     "group-by-categories_test.ts",
+    "group-by-kind_test.ts",
     "heavy-ad-issues_test.ts",
     "hidden-issues-row_test.ts",
     "hide-issues-menu_test.ts",
     "issue-links_test.ts",
+    "issue-view-caching_test.ts",
     "issue-view-reparent_test.ts",
     "low-text-contrast-issues_test.ts",
     "navigator-user-agent-issues_test.ts",

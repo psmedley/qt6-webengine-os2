@@ -14,9 +14,9 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/supports_user_data.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "build/build_config.h"
 #include "chrome/browser/media/webrtc/webrtc_event_log_manager.h"
 #include "chrome/browser/media/webrtc/webrtc_log_uploader.h"
 #include "chrome/browser/media/webrtc/webrtc_rtp_dump_handler.h"
@@ -24,10 +24,10 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_process_host.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "content/public/browser/child_process_security_policy.h"
 #include "storage/browser/file_system/isolated_context.h"
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 using webrtc_event_logging::WebRtcEventLogManager;
 
@@ -187,6 +187,7 @@ void WebRtcLoggingController::StoreLog(const std::string& log_id,
       base::SequencedTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::BindOnce(std::move(stop_rtp_dump_callback_), true, true));
+      stop_rtp_dump_callback_.Reset();
     }
 
     rtp_dump_handler_->StopOngoingDumps(
@@ -216,7 +217,13 @@ void WebRtcLoggingController::StoreLogContinue(const std::string& log_id,
 void WebRtcLoggingController::StartRtpDump(RtpDumpType type,
                                            GenericDoneCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!stop_rtp_dump_callback_);
+
+  if (stop_rtp_dump_callback_) {
+    DCHECK(rtp_dump_handler_);
+    FireGenericDoneCallback(std::move(callback), false,
+                            "RTP dump already started.");
+    return;
+  }
 
   content::RenderProcessHost* host =
       content::RenderProcessHost::FromID(render_process_id_);
@@ -256,6 +263,7 @@ void WebRtcLoggingController::StopRtpDump(RtpDumpType type,
         base::BindOnce(std::move(stop_rtp_dump_callback_),
                        type == RTP_DUMP_INCOMING || type == RTP_DUMP_BOTH,
                        type == RTP_DUMP_OUTGOING || type == RTP_DUMP_BOTH));
+    stop_rtp_dump_callback_.Reset();
   }
 
   rtp_dump_handler_->StopDump(type, std::move(callback));
@@ -274,7 +282,7 @@ void WebRtcLoggingController::StartEventLogging(
         web_app_id, callback);
 }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 void WebRtcLoggingController::GetLogsDirectory(
     LogsDirectoryCallback callback,
     LogsDirectoryErrorCallback error_callback) {
@@ -320,7 +328,7 @@ void WebRtcLoggingController::GrantLogsDirectoryAccess(
       FROM_HERE,
       base::BindOnce(std::move(callback), file_system.id(), registered_name));
 }
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 void WebRtcLoggingController::OnRtpPacket(
     std::unique_ptr<uint8_t[]> packet_header,
@@ -356,7 +364,7 @@ void WebRtcLoggingController::OnStopped() {
     // and must not be invoked.
     DLOG(ERROR) << "OnStopped invoked in state "
                 << text_log_handler_->GetState();
-    mojo::ReportBadMessage("WRLHH: OnStopped invoked in unexpected state.");
+    receiver_.ReportBadMessage("WRLHH: OnStopped invoked in unexpected state.");
     return;
   }
   text_log_handler_->StopDone();
@@ -419,7 +427,6 @@ void WebRtcLoggingController::TriggerUpload(
     UploadDoneCallback callback,
     const base::FilePath& log_directory) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
   if (rtp_dump_handler_) {
     if (stop_rtp_dump_callback_) {
       base::SequencedTaskRunnerHandle::Get()->PostTask(

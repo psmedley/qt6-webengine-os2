@@ -23,7 +23,6 @@ source_set("api") {
     "storage/local_value_store_cache.h",
     "storage/session_storage_manager.cc",
     "storage/session_storage_manager.h",
-    "storage/settings_observer.h",
     "storage/settings_storage_quota_enforcer.cc",
     "storage/settings_storage_quota_enforcer.h",
     "storage/storage_api.cc",
@@ -34,6 +33,8 @@ source_set("api") {
     "storage/storage_frontend.h",
     "storage/value_store_cache.cc",
     "storage/value_store_cache.h",
+    "storage/value_store_util.cc",
+    "storage/value_store_util.h",
     "storage/weak_unlimited_settings_storage.cc",
     "storage/weak_unlimited_settings_storage.h",
   ]
@@ -67,10 +68,6 @@ source_set("api") {
   ]
 
   if (is_chromeos) {
-    sources += [
-      "clipboard/clipboard_api.cc",
-      "clipboard/clipboard_api.h",
-    ]
     deps += [
       "//chromeos/dbus/permission_broker",
       "//components/prefs:prefs",
@@ -101,17 +98,15 @@ source_set("api") {
 
     deps += [
       "//chromeos",
+      "//chromeos/ash/components/dbus/upstart",
       "//chromeos/dbus",
       "//chromeos/dbus/media_analytics",
       "//chromeos/dbus/media_analytics:media_perception_proto",
-      "//chromeos/dbus/upstart",
       "//chromeos/login/login_state",
       "//chromeos/services/media_perception/public/mojom",
       "//chromeos/services/media_perception/public/mojom:mojom_js_data_deps",
     ]
   }
-
-  allow_circular_includes_from = [ "//extensions/browser:browser_sources" ]
 }
 
 group("api_implementations") {
@@ -131,6 +126,7 @@ group("api_implementations") {
     "//extensions/browser/api/feedback_private",
     "//extensions/browser/api/file_handlers",
     "//extensions/browser/api/file_system",
+    "//extensions/browser/api/i18n",
     "//extensions/browser/api/idle",
     "//extensions/browser/api/management",
     "//extensions/browser/api/messaging",

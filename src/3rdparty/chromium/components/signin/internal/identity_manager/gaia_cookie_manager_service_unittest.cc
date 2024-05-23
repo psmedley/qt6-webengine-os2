@@ -12,11 +12,10 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
@@ -54,13 +53,13 @@ class MockObserver {
         &MockObserver::OnGaiaAccountsInCookieUpdated, base::Unretained(this)));
   }
 
+  MockObserver(const MockObserver&) = delete;
+  MockObserver& operator=(const MockObserver&) = delete;
+
   MOCK_METHOD3(OnGaiaAccountsInCookieUpdated,
                void(const std::vector<gaia::ListedAccount>&,
                     const std::vector<gaia::ListedAccount>&,
                     const GoogleServiceAuthError&));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockObserver);
 };
 
 // Counts number of InstrumentedGaiaCookieManagerService created.
@@ -111,15 +110,17 @@ class InstrumentedGaiaCookieManagerService : public GaiaCookieManagerService {
     total++;
   }
 
+  InstrumentedGaiaCookieManagerService(
+      const InstrumentedGaiaCookieManagerService&) = delete;
+  InstrumentedGaiaCookieManagerService& operator=(
+      const InstrumentedGaiaCookieManagerService&) = delete;
+
   ~InstrumentedGaiaCookieManagerService() override { total--; }
 
   MOCK_METHOD0(StartFetchingUbertoken, void());
   MOCK_METHOD0(StartFetchingListAccounts, void());
   MOCK_METHOD0(StartGaiaLogOut, void());
   MOCK_METHOD0(StartFetchingMergeSession, void());
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InstrumentedGaiaCookieManagerService);
 };
 
 class GaiaCookieManagerServiceTest : public testing::Test {
@@ -213,8 +214,7 @@ class GaiaCookieManagerServiceTest : public testing::Test {
 
   void Advance(scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner,
                base::TimeDelta advance_by) {
-    test_task_runner->FastForwardBy(advance_by +
-                                    base::TimeDelta::FromMilliseconds(1));
+    test_task_runner->FastForwardBy(advance_by + base::Milliseconds(1));
     test_task_runner->RunUntilIdle();
   }
 
@@ -1161,7 +1161,6 @@ TEST_F(GaiaCookieManagerServiceTest, RemoveLoggedOutAccountByGaiaId) {
                   _, /*signed_out_accounts=*/
                   ElementsAre(ListedAccountMatchesGaiaId(kTestGaiaId2)), _));
   EXPECT_CALL(helper, StartFetchingListAccounts()).Times(0);
-  base::HistogramTester histograms;
   helper.RemoveLoggedOutAccountByGaiaId(kTestGaiaId1);
 
   // Verify that ListAccounts wasn't triggered.
@@ -1171,10 +1170,6 @@ TEST_F(GaiaCookieManagerServiceTest, RemoveLoggedOutAccountByGaiaId) {
   ASSERT_TRUE(helper.ListAccounts(&signed_in_accounts, &signed_out_accounts));
   EXPECT_THAT(signed_out_accounts,
               ElementsAre(ListedAccountMatchesGaiaId(kTestGaiaId2)));
-
-  histograms.ExpectUniqueSample(
-      "Signin.RemoveLocalAccountOutcome",
-      GaiaCookieManagerService::RemoveLocalAccountOutcome::kSuccess, 1);
 }
 
 TEST_F(GaiaCookieManagerServiceTest,
@@ -1209,7 +1204,6 @@ TEST_F(GaiaCookieManagerServiceTest,
   // The removal should be ignored because the account list is stale.
   EXPECT_CALL(observer, OnGaiaAccountsInCookieUpdated(_, _, _)).Times(0);
   EXPECT_CALL(helper, StartFetchingListAccounts()).Times(0);
-  base::HistogramTester histograms;
   helper.RemoveLoggedOutAccountByGaiaId(kTestGaiaId1);
 
   // Verify that ListAccounts wasn't triggered again.
@@ -1218,10 +1212,6 @@ TEST_F(GaiaCookieManagerServiceTest,
   ASSERT_FALSE(helper.ListAccounts(&signed_in_accounts, &signed_out_accounts));
   EXPECT_THAT(signed_out_accounts,
               ElementsAre(ListedAccountMatchesGaiaId(kTestGaiaId1)));
-
-  histograms.ExpectUniqueSample(
-      "Signin.RemoveLocalAccountOutcome",
-      GaiaCookieManagerService::RemoveLocalAccountOutcome::kAccountsStale, 1);
 }
 
 TEST_F(GaiaCookieManagerServiceTest,
@@ -1253,7 +1243,6 @@ TEST_F(GaiaCookieManagerServiceTest,
   // The removal should be ignored because the Gaia ID is not listed/known.
   EXPECT_CALL(observer, OnGaiaAccountsInCookieUpdated(_, _, _)).Times(0);
   EXPECT_CALL(helper, StartFetchingListAccounts()).Times(0);
-  base::HistogramTester histograms;
   helper.RemoveLoggedOutAccountByGaiaId(kNonListedAccount);
 
   // Verify that ListAccounts wasn't triggered.
@@ -1263,10 +1252,4 @@ TEST_F(GaiaCookieManagerServiceTest,
   ASSERT_TRUE(helper.ListAccounts(&signed_in_accounts, &signed_out_accounts));
   EXPECT_THAT(signed_out_accounts,
               ElementsAre(ListedAccountMatchesGaiaId(kTestGaiaId1)));
-
-  histograms.ExpectUniqueSample(
-      "Signin.RemoveLocalAccountOutcome",
-      GaiaCookieManagerService::RemoveLocalAccountOutcome::
-          kSignedOutAccountMissing,
-      1);
 }

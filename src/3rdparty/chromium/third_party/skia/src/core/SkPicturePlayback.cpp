@@ -10,11 +10,13 @@
 #include "include/core/SkTextBlob.h"
 #include "include/core/SkTypes.h"
 #include "include/private/SkTDArray.h"
+#include "include/private/chromium/GrSlug.h"
 #include "src/core/SkCanvasPriv.h"
 #include "src/core/SkDrawShadowInfo.h"
 #include "src/core/SkFontPriv.h"
 #include "src/core/SkPaintPriv.h"
 #include "src/core/SkPictureData.h"
+#include "src/core/SkPictureFlat.h"
 #include "src/core/SkPicturePlayback.h"
 #include "src/core/SkPictureRecord.h"
 #include "src/core/SkReadBuffer.h"
@@ -601,6 +603,14 @@ void SkPicturePlayback::handleOp(SkReadBuffer* reader,
 
             canvas->drawTextBlob(blob, x, y, paint);
         } break;
+        case DRAW_SLUG: {
+#if SK_SUPPORT_GPU
+            const GrSlug* slug = fPictureData->getSlug(reader);
+            BREAK_ON_READ_ERROR(reader);
+
+            slug->draw(canvas);
+#endif
+        } break;
         case DRAW_VERTICES_OBJECT: {
             const SkPaint& paint = fPictureData->requiredPaint(reader);
             const SkVertices* vertices = fPictureData->getVertices(reader);
@@ -612,12 +622,6 @@ void SkPicturePlayback::handleOp(SkReadBuffer* reader,
             if (vertices) {  // TODO: read error if vertices == null?
                 canvas->drawVertices(vertices, bmode, paint);
             }
-        } break;
-        case MARK_CTM: {
-            SkString name;
-            reader->readString(&name);
-            BREAK_ON_READ_ERROR(reader);
-            canvas->markCTM(name.c_str());
         } break;
         case RESTORE:
             canvas->restore();
@@ -663,6 +667,10 @@ void SkPicturePlayback::handleOp(SkReadBuffer* reader,
             if (flatFlags & SAVELAYERREC_HAS_CLIPMATRIX_OBSOLETE) {
                 SkMatrix clipMatrix_ignored;
                 reader->readMatrix(&clipMatrix_ignored);
+            }
+            if (!reader->isVersionLT(SkPicturePriv::Version::kBackdropScaleFactor) &&
+                (flatFlags & SAVELAYERREC_HAS_BACKDROP_SCALE)) {
+                SkCanvasPriv::SetBackdropScaleFactor(&rec, reader->readScalar());
             }
             BREAK_ON_READ_ERROR(reader);
 

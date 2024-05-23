@@ -4,6 +4,7 @@
 
 import * as Common from '../common/common.js';
 import * as i18n from '../i18n/i18n.js';
+import type * as Platform from '../platform/platform.js';
 import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
 import type * as Protocol from '../../generated/protocol.js';
 
@@ -25,47 +26,44 @@ const str_ = i18n.i18n.registerUIStrings('core/sdk/ServiceWorkerCacheModel.ts', 
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements ProtocolProxyApi.StorageDispatcher {
-  private readonly cachesInternal: Map<string, Cache>;
   readonly cacheAgent: ProtocolProxyApi.CacheStorageApi;
-  private readonly storageAgent: ProtocolProxyApi.StorageApi;
-  private readonly securityOriginManager: SecurityOriginManager;
-  private readonly originsUpdated: Set<string>;
-  private readonly throttler: Common.Throttler.Throttler;
-  private enabled: boolean;
+  readonly #storageAgent: ProtocolProxyApi.StorageApi;
+  readonly #securityOriginManager: SecurityOriginManager;
+
+  readonly #cachesInternal = new Map<string, Cache>();
+  readonly #originsUpdated = new Set<string>();
+  readonly #throttler = new Common.Throttler.Throttler(2000);
+  #enabled = false;
+
+  // Used by tests to remove the Throttler timeout.
+  #scheduleAsSoonAsPossible = false;
 
   /**
-   * Invariant: This model can only be constructed on a ServiceWorker target.
+   * Invariant: This #model can only be constructed on a ServiceWorker target.
    */
   constructor(target: Target) {
     super(target);
     target.registerStorageDispatcher(this);
 
-    this.cachesInternal = new Map();
-
     this.cacheAgent = target.cacheStorageAgent();
-    this.storageAgent = target.storageAgent();
-    this.securityOriginManager = (target.model(SecurityOriginManager) as SecurityOriginManager);
-
-    this.originsUpdated = new Set();
-    this.throttler = new Common.Throttler.Throttler(2000);
-
-    this.enabled = false;
+    this.#storageAgent = target.storageAgent();
+    this.#securityOriginManager = (target.model(SecurityOriginManager) as SecurityOriginManager);
   }
 
   enable(): void {
-    if (this.enabled) {
+    if (this.#enabled) {
       return;
     }
 
-    this.securityOriginManager.addEventListener(
+    this.#securityOriginManager.addEventListener(
         SecurityOriginManagerEvents.SecurityOriginAdded, this.securityOriginAdded, this);
-    this.securityOriginManager.addEventListener(
+    this.#securityOriginManager.addEventListener(
         SecurityOriginManagerEvents.SecurityOriginRemoved, this.securityOriginRemoved, this);
 
-    for (const securityOrigin of this.securityOriginManager.securityOrigins()) {
+    for (const securityOrigin of this.#securityOriginManager.securityOrigins()) {
       this.addOrigin(securityOrigin);
     }
-    this.enabled = true;
+    this.#enabled = true;
   }
 
   clearForOrigin(origin: string): void {
@@ -74,13 +72,13 @@ export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements Pro
   }
 
   refreshCacheNames(): void {
-    for (const cache of this.cachesInternal.values()) {
+    for (const cache of this.#cachesInternal.values()) {
       this.cacheRemoved(cache);
     }
-    this.cachesInternal.clear();
-    const securityOrigins = this.securityOriginManager.securityOrigins();
+    this.#cachesInternal.clear();
+    const securityOrigins = this.#securityOriginManager.securityOrigins();
     for (const securityOrigin of securityOrigins) {
-      this.loadCacheNames(securityOrigin);
+      void this.loadCacheNames(securityOrigin);
     }
   }
 
@@ -90,7 +88,7 @@ export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements Pro
       console.error(`ServiceWorkerCacheAgent error deleting cache ${cache.toString()}: ${response.getError()}`);
       return;
     }
-    this.cachesInternal.delete(cache.cacheId);
+    this.#cachesInternal.delete(cache.cacheId);
     this.cacheRemoved(cache);
   }
 
@@ -106,52 +104,52 @@ export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements Pro
   loadCacheData(
       cache: Cache, skipCount: number, pageSize: number, pathFilter: string,
       callback: (arg0: Array<Protocol.CacheStorage.DataEntry>, arg1: number) => void): void {
-    this.requestEntries(cache, skipCount, pageSize, pathFilter, callback);
+    void this.requestEntries(cache, skipCount, pageSize, pathFilter, callback);
   }
 
   loadAllCacheData(
       cache: Cache, pathFilter: string,
       callback: (arg0: Array<Protocol.CacheStorage.DataEntry>, arg1: number) => void): void {
-    this.requestAllEntries(cache, pathFilter, callback);
+    void this.requestAllEntries(cache, pathFilter, callback);
   }
 
   caches(): Cache[] {
     const caches = new Array();
-    for (const cache of this.cachesInternal.values()) {
+    for (const cache of this.#cachesInternal.values()) {
       caches.push(cache);
     }
     return caches;
   }
 
   dispose(): void {
-    for (const cache of this.cachesInternal.values()) {
+    for (const cache of this.#cachesInternal.values()) {
       this.cacheRemoved(cache);
     }
-    this.cachesInternal.clear();
-    if (this.enabled) {
-      this.securityOriginManager.removeEventListener(
+    this.#cachesInternal.clear();
+    if (this.#enabled) {
+      this.#securityOriginManager.removeEventListener(
           SecurityOriginManagerEvents.SecurityOriginAdded, this.securityOriginAdded, this);
-      this.securityOriginManager.removeEventListener(
+      this.#securityOriginManager.removeEventListener(
           SecurityOriginManagerEvents.SecurityOriginRemoved, this.securityOriginRemoved, this);
     }
   }
 
   private addOrigin(securityOrigin: string): void {
-    this.loadCacheNames(securityOrigin);
+    void this.loadCacheNames(securityOrigin);
     if (this.isValidSecurityOrigin(securityOrigin)) {
-      this.storageAgent.invoke_trackCacheStorageForOrigin({origin: securityOrigin});
+      void this.#storageAgent.invoke_trackCacheStorageForOrigin({origin: securityOrigin});
     }
   }
 
   private removeOrigin(securityOrigin: string): void {
-    for (const [opaqueId, cache] of this.cachesInternal.entries()) {
+    for (const [opaqueId, cache] of this.#cachesInternal.entries()) {
       if (cache.securityOrigin === securityOrigin) {
-        this.cachesInternal.delete((opaqueId as string));
+        this.#cachesInternal.delete((opaqueId as string));
         this.cacheRemoved((cache as Cache));
       }
     }
     if (this.isValidSecurityOrigin(securityOrigin)) {
-      this.storageAgent.invoke_untrackCacheStorageForOrigin({origin: securityOrigin});
+      void this.#storageAgent.invoke_untrackCacheStorageForOrigin({origin: securityOrigin});
     }
   }
 
@@ -172,7 +170,7 @@ export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements Pro
     function deleteAndSaveOldCaches(this: ServiceWorkerCacheModel, cache: Cache): void {
       if (cache.securityOrigin === securityOrigin && !updatingCachesIds.has(cache.cacheId)) {
         oldCaches.set(cache.cacheId, cache);
-        this.cachesInternal.delete(cache.cacheId);
+        this.#cachesInternal.delete(cache.cacheId);
       }
     }
 
@@ -183,25 +181,23 @@ export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements Pro
     for (const cacheJson of cachesJson) {
       const cache = new Cache(this, cacheJson.securityOrigin, cacheJson.cacheName, cacheJson.cacheId);
       updatingCachesIds.add(cache.cacheId);
-      if (this.cachesInternal.has(cache.cacheId)) {
+      if (this.#cachesInternal.has(cache.cacheId)) {
         continue;
       }
       newCaches.set(cache.cacheId, cache);
-      this.cachesInternal.set(cache.cacheId, cache);
+      this.#cachesInternal.set(cache.cacheId, cache);
     }
-    this.cachesInternal.forEach(deleteAndSaveOldCaches, this);
+    this.#cachesInternal.forEach(deleteAndSaveOldCaches, this);
     newCaches.forEach(this.cacheAdded, this);
     oldCaches.forEach(this.cacheRemoved, this);
   }
 
-  private securityOriginAdded(event: Common.EventTarget.EventTargetEvent): void {
-    const securityOrigin = (event.data as string);
-    this.addOrigin(securityOrigin);
+  private securityOriginAdded(event: Common.EventTarget.EventTargetEvent<string>): void {
+    this.addOrigin(event.data);
   }
 
-  private securityOriginRemoved(event: Common.EventTarget.EventTargetEvent): void {
-    const securityOrigin = (event.data as string);
-    this.removeOrigin(securityOrigin);
+  private securityOriginRemoved(event: Common.EventTarget.EventTargetEvent<string>): void {
+    this.removeOrigin(event.data);
   }
 
   private cacheAdded(cache: Cache): void {
@@ -236,13 +232,13 @@ export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements Pro
   }
 
   cacheStorageListUpdated({origin}: Protocol.Storage.CacheStorageListUpdatedEvent): void {
-    this.originsUpdated.add(origin);
+    this.#originsUpdated.add(origin);
 
-    this.throttler.schedule(() => {
-      const promises = Array.from(this.originsUpdated, origin => this.loadCacheNames(origin));
-      this.originsUpdated.clear();
+    void this.#throttler.schedule(() => {
+      const promises = Array.from(this.#originsUpdated, origin => this.loadCacheNames(origin));
+      this.#originsUpdated.clear();
       return Promise.all(promises);
-    });
+    }, this.#scheduleAsSoonAsPossible);
   }
 
   cacheStorageContentUpdated({origin, cacheName}: Protocol.Storage.CacheStorageContentUpdatedEvent): void {
@@ -253,6 +249,13 @@ export class ServiceWorkerCacheModel extends SDKModel<EventTypes> implements Pro
   }
 
   indexedDBContentUpdated(_event: Protocol.Storage.IndexedDBContentUpdatedEvent): void {
+  }
+
+  interestGroupAccessed(_event: Protocol.Storage.InterestGroupAccessedEvent): void {
+  }
+
+  setThrottlerSchedulesAsSoonAsPossibleForTest(): void {
+    this.#scheduleAsSoonAsPossible = true;
   }
 }
 
@@ -281,7 +284,7 @@ export type EventTypes = {
 };
 
 export class Cache {
-  private readonly model: ServiceWorkerCacheModel;
+  readonly #model: ServiceWorkerCacheModel;
   securityOrigin: string;
   cacheName: string;
   cacheId: Protocol.CacheStorage.CacheId;
@@ -289,7 +292,7 @@ export class Cache {
   constructor(
       model: ServiceWorkerCacheModel, securityOrigin: string, cacheName: string,
       cacheId: Protocol.CacheStorage.CacheId) {
-    this.model = model;
+    this.#model = model;
     this.securityOrigin = securityOrigin;
     this.cacheName = cacheName;
     this.cacheId = cacheId;
@@ -303,9 +306,9 @@ export class Cache {
     return this.securityOrigin + this.cacheName;
   }
 
-  async requestCachedResponse(url: string, requestHeaders: NameValue[]):
+  async requestCachedResponse(url: Platform.DevToolsPath.UrlString, requestHeaders: NameValue[]):
       Promise<Protocol.CacheStorage.CachedResponse|null> {
-    const response = await this.model.cacheAgent.invoke_requestCachedResponse(
+    const response = await this.#model.cacheAgent.invoke_requestCachedResponse(
         {cacheId: this.cacheId, requestURL: url, requestHeaders});
     if (response.getError()) {
       return null;

@@ -1,7 +1,7 @@
 //---------------------------------------------------------------------------------
 //
 //  Little Color Management System
-//  Copyright (c) 1998-2020 Marti Maria Saguer
+//  Copyright (c) 1998-2022 Marti Maria Saguer
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the "Software"),
@@ -273,7 +273,7 @@ void FloatXFORM(_cmsTRANSFORM* p,
     strideIn = 0;
     strideOut = 0;
     memset(fIn, 0, sizeof(fIn));
-    memset(fOut, 0, sizeof(fIn));
+    memset(fOut, 0, sizeof(fOut));
 
     for (i = 0; i < LineCount; i++) {
 
@@ -284,7 +284,7 @@ void FloatXFORM(_cmsTRANSFORM* p,
 
             accum = p->FromInputFloat(p, fIn, accum, Stride->BytesPerPlaneIn);
 
-            // Any gamut chack to do?
+            // Any gamut check to do?
             if (p->GamutCheck != NULL) {
 
                 // Evaluate gamut marker.
@@ -447,7 +447,7 @@ void TransformOnePixelWithGamutCheck(_cmsTRANSFORM* p,
     p ->GamutCheck ->Eval16Fn(wIn, &wOutOfGamut, p ->GamutCheck ->Data);
     if (wOutOfGamut >= 1) {
 
-        cmsUInt16Number i;
+        cmsUInt32Number i;
         _cmsAlarmCodesChunkType* ContextAlarmCodes = (_cmsAlarmCodesChunkType*) _cmsContextGetClientChunk(p->ContextID, AlarmCodesContext);        
 
         for (i=0; i < p ->Lut->OutputChannels; i++) {
@@ -774,6 +774,12 @@ void CMSEXPORT _cmsGetTransformFormattersFloat(struct _cmstransform_struct *CMMc
      if (ToOutput)  *ToOutput  = CMMcargo ->ToOutputFloat;
 }
 
+// returns original flags
+cmsUInt32Number CMSEXPORT _cmsGetTransformFlags(struct _cmstransform_struct* CMMcargo)
+{
+    _cmsAssert(CMMcargo != NULL);
+    return CMMcargo->dwOriginalFlags;
+}
 
 // Allocate transform struct and set it to defaults. Ask the optimization plug-in about if those formats are proper
 // for separated transforms. If this is the case,
@@ -840,7 +846,7 @@ _cmsTRANSFORM* AllocEmptyTransform(cmsContext ContextID, cmsPipeline* lut,
        }
 
     // Check whatever this is a true floating point transform
-    if (_cmsFormatterIsFloat(*InputFormat) && _cmsFormatterIsFloat(*OutputFormat)) {
+    if (_cmsFormatterIsFloat(*OutputFormat)) {
 
         // Get formatter function always return a valid union, but the contents of this union may be NULL.
         p ->FromInputFloat = _cmsGetFormatter(ContextID, *InputFormat,  cmsFormatterInput, CMS_PACK_FLAGS_FLOAT).FmtFloat;
@@ -1073,6 +1079,15 @@ cmsHTRANSFORM CMSEXPORT cmsCreateExtendedTransform(cmsContext ContextID,
     if (!IsProperColorSpace(ExitColorSpace, OutputFormat)) {
         cmsSignalError(ContextID, cmsERROR_COLORSPACE_CHECK, "Wrong output color space on transform");
         return NULL;
+    }
+
+    // Check whatever the transform is 16 bits and involves linear RGB in first profile. If so, disable optimizations
+    if (EntryColorSpace == cmsSigRgbData && T_BYTES(InputFormat) == 2 && !(dwFlags & cmsFLAGS_NOOPTIMIZE))
+    {
+        cmsFloat64Number gamma = cmsDetectRGBProfileGamma(hProfiles[0], 0.1);
+
+        if (gamma > 0 && gamma < 1.6)
+            dwFlags |= cmsFLAGS_NOOPTIMIZE;
     }
 
     // Create a pipeline with all transformations

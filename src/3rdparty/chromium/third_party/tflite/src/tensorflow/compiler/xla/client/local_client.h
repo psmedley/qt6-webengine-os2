@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_XLA_CLIENT_LOCAL_CLIENT_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "absl/types/span.h"
@@ -64,10 +65,6 @@ class LocalExecutable {
 
   // Similar to RunAsync(), but allows for donating argument buffers to the
   // executable.
-  StatusOr<ExecutionOutput> RunAsync(
-      absl::Span<Shape const* const> argument_host_shapes,
-      std::vector<ExecutionInput> arguments, ExecutableRunOptions run_options);
-
   StatusOr<ExecutionOutput> RunAsync(std::vector<ExecutionInput> arguments,
                                      ExecutableRunOptions run_options);
 
@@ -78,6 +75,10 @@ class LocalExecutable {
   Executable* executable() const { return executable_.get(); }
 
  private:
+  StatusOr<ExecutionOutput> RunAsync(
+      absl::Span<Shape const* const> argument_host_shapes,
+      std::vector<ExecutionInput> arguments, ExecutableRunOptions run_options);
+
   // Validates that the given arguments and options satisfy various constraints
   // of the computation.
   //
@@ -145,6 +146,20 @@ class LocalClient : public Client {
       const absl::Span<const Shape* const> argument_layouts,
       const ExecutableBuildOptions& options);
 
+  // Same as Compile() above, but return AotCompilationResult objects (instead
+  // of LocalExecutable objects), which can be persisted to later load
+  // LocalExecutable(s) using the Load() method below.
+  StatusOr<std::vector<std::unique_ptr<AotCompilationResult>>>
+  CompileAheadOfTime(const XlaComputation& computation,
+                     const absl::Span<const Shape* const> argument_layouts,
+                     const ExecutableBuildOptions& options);
+
+  // Return a LocalExecutable object loaded from a serialized
+  // AotCompilationResult.
+  StatusOr<std::unique_ptr<LocalExecutable>> Load(
+      const std::string& serialized_aot_result,
+      const ExecutableBuildOptions& options);
+
   // Copy the literal data to the device with the given ordinal and return as a
   // ScopedShapedBuffer. If non-null the given memory allocator is used for
   // device memory allocation. If null, the default memory allocator for the
@@ -172,13 +187,13 @@ class LocalClient : public Client {
   // Client::TransferToInfeed.
   Status TransferToInfeedLocal(const LiteralSlice& literal, int device_ordinal);
 
-  // Transfer and return a value of the given shape from the outfeed of the
-  // given device.
+  // Transfer and return a value from the outfeed of the given device. The
+  // shape of the object to transfer is determined by `literal`'s shape.
   // TODO(b/69670845): Remove the 'Local' from the name when LocalClient does
   // not inherit from Client and there is no possibility of confusion with
   // Client::TransferFromOutfeed.
-  StatusOr<Literal> TransferFromOutfeedLocal(const Shape& shape,
-                                             int device_ordinal);
+  Status TransferFromOutfeedLocal(int device_ordinal,
+                                  MutableBorrowingLiteral literal);
 
   // Returns the device ordinal that corresponds to the given replica number.
   //

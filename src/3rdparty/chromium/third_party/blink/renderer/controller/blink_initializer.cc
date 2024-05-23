@@ -34,9 +34,11 @@
 #include <utility>
 
 #include "base/allocator/partition_allocator/page_allocator.h"
+#include "base/command_line.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/platform/interface_registry.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
@@ -54,29 +56,33 @@
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/disk_data_allocator.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 #include "v8/include/v8.h"
 
-#if defined(OS_ANDROID)
+#if defined(USE_BLINK_EXTENSIONS_CHROMEOS)
+#include "third_party/blink/renderer/extensions/chromeos/chromeos_extensions.h"
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
 #include "third_party/blink/renderer/controller/crash_memory_metrics_reporter_impl.h"
 #include "third_party/blink/renderer/controller/oom_intervention_impl.h"
 #endif
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "third_party/blink/renderer/controller/memory_usage_monitor_posix.h"
 #endif
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID) || \
-    defined(OS_MAC) || defined(OS_WIN)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
+    BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 #include "third_party/blink/renderer/controller/highest_pmf_reporter.h"
 #include "third_party/blink/renderer/controller/user_level_memory_pressure_signal_generator.h"
 #endif
 
 // #if expression should match the one in InitializeCommon
-#if !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) && defined(OS_WIN)
+#if !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) && BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
@@ -106,7 +112,7 @@ BlinkInitializer& GetBlinkInitializer() {
 
 void InitializeCommon(Platform* platform, mojo::BinderMap* binders) {
 // #if expression should match the one around #include <windows.h>
-#if !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) && defined(OS_WIN)
+#if !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) && BUILDFLAG(IS_WIN)
   // Reserve address space on 32 bit Windows, to make it likelier that large
   // array buffer allocations succeed.
   BOOL is_wow_64 = -1;
@@ -122,12 +128,16 @@ void InitializeCommon(Platform* platform, mojo::BinderMap* binders) {
     }
   }
 #endif  // !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) &&
-        // defined(OS_WIN)
+        // BUILDFLAG(IS_WIN)
 
   // BlinkInitializer::Initialize() must be called before InitializeMainThread
   GetBlinkInitializer().Initialize();
 
-  V8Initializer::InitializeMainThread(V8ContextSnapshot::GetReferenceTable());
+  std::string js_command_line_flag =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          blink::switches::kJavaScriptFlags);
+  V8Initializer::InitializeMainThread(V8ContextSnapshot::GetReferenceTable(),
+                                      js_command_line_flag);
 
   GetBlinkInitializer().RegisterInterfaces(*binders);
 
@@ -135,14 +145,18 @@ void InitializeCommon(Platform* platform, mojo::BinderMap* binders) {
   g_end_of_task_runner = new EndOfTaskRunner;
   Thread::Current()->AddTaskObserver(g_end_of_task_runner);
 
-#if defined(OS_ANDROID)
+#if defined(USE_BLINK_EXTENSIONS_CHROMEOS)
+  ChromeOSExtensions::Initialize();
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
   // Initialize CrashMemoryMetricsReporterImpl in order to assure that memory
   // allocation does not happen in OnOOMCallback.
   CrashMemoryMetricsReporterImpl::Instance();
 #endif
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID) || \
-    defined(OS_MAC) || defined(OS_WIN)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
+    BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
   // Initialize UserLevelMemoryPressureSignalGenerator so it starts monitoring.
   if (UserLevelMemoryPressureSignalGenerator::Enabled())
     UserLevelMemoryPressureSignalGenerator::Instance();
@@ -203,9 +217,9 @@ void BlinkInitializer::RegisterInterfaces(mojo::BinderMap& binders) {
   if (!main_thread->GetTaskRunner())
     return;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   binders.Add(ConvertToBaseRepeatingCallback(
-                  CrossThreadBindRepeating(&OomInterventionImpl::Bind)),
+                  CrossThreadBindRepeating(&OomInterventionImpl::BindReceiver)),
               main_thread->GetTaskRunner());
 
   binders.Add(ConvertToBaseRepeatingCallback(CrossThreadBindRepeating(
@@ -213,7 +227,7 @@ void BlinkInitializer::RegisterInterfaces(mojo::BinderMap& binders) {
               main_thread->GetTaskRunner());
 #endif
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   binders.Add(ConvertToBaseRepeatingCallback(
                   CrossThreadBindRepeating(&MemoryUsageMonitorPosix::Bind)),
               main_thread->GetTaskRunner());

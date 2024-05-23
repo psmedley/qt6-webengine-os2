@@ -23,7 +23,6 @@
 #include "core/fxge/dib/cfx_dibitmap.h"
 #include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/check.h"
-#include "third_party/base/ptr_util.h"
 #include "v8/include/cppgc/allocation.h"
 #include "v8/include/cppgc/heap.h"
 #include "xfa/fgas/font/cfgas_pdffontmgr.h"
@@ -90,8 +89,7 @@ void CXFA_FFDoc::Trace(cppgc::Visitor* visitor) const {
 }
 
 bool CXFA_FFDoc::BuildDoc(CFX_XMLDocument* pXML) {
-  if (!pXML)
-    return false;
+  DCHECK(pXML);
 
   CXFA_DocumentBuilder builder(m_pDocument);
   if (!builder.BuildDocument(pXML, XFA_PacketType::Xdp))
@@ -281,7 +279,8 @@ RetainPtr<CFX_DIBitmap> CXFA_FFDoc::GetPDFNamedImage(WideStringView wsName,
   if (count == 0)
     return nullptr;
 
-  CPDF_Object* pObject = name_tree->LookupValue(WideString(wsName));
+  RetainPtr<const CPDF_Object> pObject =
+      name_tree->LookupValue(WideString(wsName));
   if (!pObject) {
     for (size_t i = 0; i < count; ++i) {
       WideString wsTemp;
@@ -293,11 +292,12 @@ RetainPtr<CFX_DIBitmap> CXFA_FFDoc::GetPDFNamedImage(WideStringView wsName,
     }
   }
 
-  CPDF_Stream* pStream = ToStream(pObject);
+  RetainPtr<const CPDF_Stream> pStream = ToStream(pObject);
   if (!pStream)
     return nullptr;
 
-  auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pStream);
+  // TODO(tsepez): make CPDF_StreamAcc constructor take retained argument.
+  auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pStream.Get());
   pAcc->LoadAllDataFiltered();
 
   auto pImageFileRead =

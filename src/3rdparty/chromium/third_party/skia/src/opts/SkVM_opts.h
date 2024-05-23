@@ -6,6 +6,9 @@
 
 #include "include/private/SkVx.h"
 #include "src/core/SkVM.h"
+#if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
+    #include <immintrin.h>
+#endif
 
 template <int N>
 static inline skvx::Vec<N,int> gather32(const int* ptr, const skvx::Vec<N,int>& ix) {
@@ -25,32 +28,46 @@ static inline skvx::Vec<N,int> gather32(const int* ptr, const skvx::Vec<N,int>& 
 
 namespace SK_OPTS_NS {
 
+namespace SkVMInterpreterTypes {
+#if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
+    constexpr inline int K = 32;  // 1024-bit: 4 ymm or 2 zmm at a time
+#else
+    constexpr inline int K = 8;   // 256-bit: 2 xmm, 2 v-registers, etc.
+#endif
+    using I32 = skvx::Vec<K, int>;
+    using I16 = skvx::Vec<K, int16_t>;
+    using F32 = skvx::Vec<K, float>;
+    using U64 = skvx::Vec<K, uint64_t>;
+    using U32 = skvx::Vec<K, uint32_t>;
+    using U16 = skvx::Vec<K, uint16_t>;
+    using  U8 = skvx::Vec<K, uint8_t>;
+    union Slot {
+        F32   f32;
+        I32   i32;
+        U32   u32;
+        I16   i16;
+        U16   u16;
+    };
+}  // namespace SkVMInterpreterTypes
+
     inline void interpret_skvm(const skvm::InterpreterInstruction insts[], const int ninsts,
                                const int nregs, const int loop,
-                               const int strides[], const int nargs,
-                               int n, void* args[]) {
+                               const int strides[],
+                               skvm::TraceHook* traceHooks[], const int nTraceHooks,
+                               const int nargs, int n, void* args[]) {
         using namespace skvm;
 
+        using SkVMInterpreterTypes::K;
+        using SkVMInterpreterTypes::I32;
+        using SkVMInterpreterTypes::I16;
+        using SkVMInterpreterTypes::F32;
+        using SkVMInterpreterTypes::U64;
+        using SkVMInterpreterTypes::U32;
+        using SkVMInterpreterTypes::U16;
+        using SkVMInterpreterTypes::U8;
+        using SkVMInterpreterTypes::Slot;
+
         // We'll operate in SIMT style, knocking off K-size chunks from n while possible.
-    #if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
-        constexpr int K = 32;  // 1024-bit: 4 ymm or 2 zmm at a time
-    #else
-        constexpr int K = 8;   // 256-bit: 2 xmm, 2 v-registers, etc.
-    #endif
-        using I32 = skvx::Vec<K, int>;
-        using I16 = skvx::Vec<K, int16_t>;
-        using F32 = skvx::Vec<K, float>;
-        using U64 = skvx::Vec<K, uint64_t>;
-        using U32 = skvx::Vec<K, uint32_t>;
-        using U16 = skvx::Vec<K, uint16_t>;
-        using  U8 = skvx::Vec<K, uint8_t>;
-        union Slot {
-            F32   f32;
-            I32   i32;
-            U32   u32;
-            I16   i16;
-            U16   u16;
-        };
 
         Slot                     few_regs[16];
         std::unique_ptr<char[]> many_regs;
@@ -70,6 +87,17 @@ namespace SK_OPTS_NS {
             r = (Slot*)addr;
         }
 
+        const auto should_trace = [&](int stride, int immA, Reg x, Reg y) -> bool {
+            if (immA < 0 || immA >= nTraceHooks) {
+                return false;
+            }
+            // When stride == K, all lanes are used.
+            if (stride == K) {
+                return any(r[x].i32 & r[y].i32);
+            }
+            // When stride == 1, only the first lane is used; the rest are not meaningful.
+            return r[x].i32[0] & r[y].i32[0];
+        };
 
         // Step each argument pointer ahead by its stride a number of times.
         auto step_args = [&](int times) {
@@ -203,6 +231,41 @@ namespace SK_OPTS_NS {
                         }
                     #endif
                     break;
+
+                    CASE(Op::trace_line):
+                        if (should_trace(stride, immA, x, y)) {
+                            traceHooks[immA]->line(immB);
+                        }
+                        break;
+
+                    CASE(Op::trace_var):
+                        if (should_trace(stride, immA, x, y)) {
+                            for (int i = 0; i < K; ++i) {
+                                if (r[x].i32[i] & r[y].i32[i]) {
+                                    traceHooks[immA]->var(immB, r[z].i32[i]);
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+
+                    CASE(Op::trace_enter):
+                        if (should_trace(stride, immA, x, y)) {
+                            traceHooks[immA]->enter(immB);
+                        }
+                        break;
+
+                    CASE(Op::trace_exit):
+                        if (should_trace(stride, immA, x, y)) {
+                            traceHooks[immA]->exit(immB);
+                        }
+                        break;
+
+                    CASE(Op::trace_scope):
+                        if (should_trace(stride, immA, x, y)) {
+                            traceHooks[immA]->scope(immB);
+                        }
+                        break;
 
                     CASE(Op::index): {
                         const int iota[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,

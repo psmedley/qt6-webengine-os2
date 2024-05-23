@@ -7,11 +7,13 @@
 #include "base/allocator/partition_allocator/partition_alloc_check.h"
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
-#if defined(PA_HAS_SPINNING_MUTEX)
+#if BUILDFLAG(IS_POSIX)
+#include <pthread.h>
+#endif
 
 #if defined(PA_HAS_LINUX_KERNEL)
 #include <errno.h>
@@ -20,8 +22,76 @@
 #include <unistd.h>
 #endif  // defined(PA_HAS_LINUX_KERNEL)
 
-namespace base {
-namespace internal {
+#if !defined(PA_HAS_FAST_MUTEX)
+#include "base/threading/platform_thread.h"
+
+#if BUILDFLAG(IS_POSIX)
+#include <sched.h>
+
+#define PA_YIELD_THREAD sched_yield()
+
+#else  // Other OS
+
+#warning "Thread yield not supported on this OS."
+#define PA_YIELD_THREAD ((void)0)
+#endif
+
+#endif  // !defined(PA_HAS_FAST_MUTEX)
+
+namespace partition_alloc::internal {
+
+void SpinningMutex::Reinit() {
+#if !BUILDFLAG(IS_APPLE)
+  // On most platforms, no need to re-init the lock, can just unlock it.
+  Release();
+#else
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability"
+
+  if (LIKELY(os_unfair_lock_trylock)) {
+    unfair_lock_ = OS_UNFAIR_LOCK_INIT;
+    return;
+  }
+
+#pragma clang diagnostic pop
+
+  Release();
+#endif  // BUILDFLAG(IS_APPLE)
+}
+
+void SpinningMutex::AcquireSpinThenBlock() {
+  int tries = 0;
+  int backoff = 1;
+  do {
+    if (LIKELY(Try()))
+      return;
+    // Note: Per the intel optimization manual
+    // (https://software.intel.com/content/dam/develop/public/us/en/documents/64-ia-32-architectures-optimization-manual.pdf),
+    // the "pause" instruction is more costly on Skylake Client than on previous
+    // architectures. The latency is found to be 141 cycles
+    // there (from ~10 on previous ones, nice 14x).
+    //
+    // According to Agner Fog's instruction tables, the latency is still >100
+    // cycles on Ice Lake, and from other sources, seems to be high as well on
+    // Adler Lake. Separately, it is (from
+    // https://agner.org/optimize/instruction_tables.pdf) also high on AMD Zen 3
+    // (~65). So just assume that it's this way for most x86_64 architectures.
+    //
+    // Also, loop several times here, following the guidelines in section 2.3.4
+    // of the manual, "Pause latency in Skylake Client Microarchitecture".
+    for (int yields = 0; yields < backoff; yields++) {
+      PA_YIELD_PROCESSOR;
+      tries++;
+    }
+    constexpr int kMaxBackoff = 16;
+    backoff = std::min(kMaxBackoff, backoff << 1);
+  } while (tries < kSpinCount);
+
+  LockSlow();
+}
+
+#if defined(PA_HAS_FAST_MUTEX)
+
 #if defined(PA_HAS_LINUX_KERNEL)
 
 void SpinningMutex::FutexWait() {
@@ -74,14 +144,45 @@ void SpinningMutex::LockSlow() {
   }
 }
 
-#else
+#elif BUILDFLAG(IS_WIN)
 
 void SpinningMutex::LockSlow() {
   ::AcquireSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&lock_));
 }
 
-#endif
-}  // namespace internal
-}  // namespace base
+#elif BUILDFLAG(IS_POSIX)
 
-#endif  // defined(PA_HAS_SPINNING_MUTEX)
+void SpinningMutex::LockSlow() {
+  int retval = pthread_mutex_lock(&lock_);
+  PA_DCHECK(retval == 0);
+}
+
+#elif BUILDFLAG(IS_FUCHSIA)
+
+void SpinningMutex::LockSlow() {
+  sync_mutex_lock(&lock_);
+}
+
+#endif
+
+#else  // defined(PA_HAS_FAST_MUTEX)
+
+void SpinningMutex::LockSlowSpinLock() {
+  int yield_thread_count = 0;
+  do {
+    if (yield_thread_count < 10) {
+      PA_YIELD_THREAD;
+      yield_thread_count++;
+    } else {
+      // At this point, it's likely that the lock is held by a lower priority
+      // thread that is unavailable to finish its work because of higher
+      // priority threads spinning here. Sleeping should ensure that they make
+      // progress.
+      base::PlatformThread::Sleep(base::Milliseconds(1));
+    }
+  } while (!TrySpinLock());
+}
+
+#endif  // defined(PA_HAS_FAST_MUTEX)
+
+}  // namespace partition_alloc::internal

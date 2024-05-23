@@ -10,16 +10,16 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
-#include "base/task_runner.h"
+#include "base/task/task_runner.h"
 #include "base/time/time.h"
 #include "base/trace_event/memory_usage_estimator.h"
+#include "build/build_config.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/backend_cleanup_tracker.h"
 #include "net/disk_cache/simple/simple_entry_format.h"
@@ -29,7 +29,7 @@
 #include "net/disk_cache/simple/simple_synchronous_entry.h"
 #include "net/disk_cache/simple/simple_util.h"
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 #include <sys/stat.h>
 #include <sys/time.h>
 #endif
@@ -87,7 +87,7 @@ base::Time EntryMetadata::GetLastUsedTime() const {
     return base::Time();
 
   return base::Time::UnixEpoch() +
-      base::TimeDelta::FromSeconds(last_used_time_seconds_since_epoch_);
+         base::Seconds(last_used_time_seconds_since_epoch_);
 }
 
 void EntryMetadata::SetLastUsedTime(const base::Time& last_used_time) {
@@ -203,7 +203,7 @@ SimpleIndex::~SimpleIndex() {
 void SimpleIndex::Initialize(base::Time cache_mtime) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (app_status_listener_) {
     app_status_listener_->SetCallback(base::BindRepeating(
         &SimpleIndex::OnApplicationStateChange, AsWeakPtr()));
@@ -302,11 +302,6 @@ uint64_t SimpleIndex::GetCacheSizeBetween(base::Time initial_time,
       size += metadata.GetEntrySize();
   }
   return size;
-}
-
-size_t SimpleIndex::EstimateMemoryUsage() const {
-  return base::trace_event::EstimateMemoryUsage(entries_set_) +
-         base::trace_event::EstimateMemoryUsage(removed_entries_);
 }
 
 base::Time SimpleIndex::GetLastUsedTime(uint64_t entry_hash) {
@@ -525,8 +520,8 @@ void SimpleIndex::PostponeWritingToDisk() {
   const int delay = app_on_background_ ? kWriteToDiskOnBackgroundDelayMSecs
                                        : kWriteToDiskDelayMSecs;
   // If the timer is already active, Start() will just Reset it, postponing it.
-  write_to_disk_timer_.Start(
-      FROM_HERE, base::TimeDelta::FromMilliseconds(delay), write_to_disk_cb_);
+  write_to_disk_timer_.Start(FROM_HERE, base::Milliseconds(delay),
+                             write_to_disk_cb_);
 }
 
 bool SimpleIndex::UpdateEntryIteratorSize(
@@ -600,7 +595,7 @@ void SimpleIndex::MergeInitializingSet(
   to_run_when_initialized_.clear();
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void SimpleIndex::OnApplicationStateChange(
     base::android::ApplicationState state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -628,9 +623,8 @@ void SimpleIndex::WriteToDisk(IndexWriteToDiskReason reason) {
   if (cleanup_tracker_) {
     // Make anyone synchronizing with our cleanup wait for the index to be
     // written back.
-    after_write = base::BindOnce(
-        base::DoNothing::Once<scoped_refptr<BackendCleanupTracker>>(),
-        cleanup_tracker_);
+    after_write = base::BindOnce([](scoped_refptr<BackendCleanupTracker>) {},
+                                 cleanup_tracker_);
   }
 
   index_file_->WriteToDisk(cache_type_, reason, entries_set_, cache_size_,

@@ -13,6 +13,7 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "device/fido/appid_exclude_probe_task.h"
 #include "device/fido/authenticator_supported_options.h"
@@ -206,7 +207,7 @@ void FidoDeviceAuthenticator::DoGetAssertion(CtapGetAssertionRequest request,
 void FidoDeviceAuthenticator::GetNextAssertion(GetAssertionCallback callback) {
   RunOperation<CtapGetNextAssertionRequest, AuthenticatorGetAssertionResponse>(
       CtapGetNextAssertionRequest(), std::move(callback),
-      base::BindOnce(&ReadCTAPGetAssertionResponse),
+      base::BindOnce(&ReadCTAPGetAssertionResponse, device_->DeviceTransport()),
       GetAssertionTask::StringFixupPredicate);
 }
 
@@ -720,6 +721,29 @@ void FidoDeviceAuthenticator::DeleteCredential(
       /*string_fixup_predicate=*/nullptr);
 }
 
+bool FidoDeviceAuthenticator::SupportsUpdateUserInformation() const {
+  return device_->device_info() &&
+         device_->device_info()->SupportsAtLeast(Ctap2Version::kCtap2_1);
+}
+
+void FidoDeviceAuthenticator::UpdateUserInformation(
+    const pin::TokenResponse& pin_token,
+    const PublicKeyCredentialDescriptor& credential_id,
+    const PublicKeyCredentialUserEntity& updated_user,
+    UpdateUserInformationCallback callback) {
+  DCHECK(Options()->supports_credential_management ||
+         Options()->supports_credential_management_preview);
+  DCHECK(chosen_pin_uv_auth_protocol_ == pin_token.protocol());
+
+  RunOperation<CredentialManagementRequest, UpdateUserInformationResponse>(
+      CredentialManagementRequest::ForUpdateUserInformation(
+          GetCredentialManagementRequestVersion(*Options()), pin_token,
+          credential_id, updated_user),
+      std::move(callback),
+      base::BindOnce(&UpdateUserInformationResponse::Parse),
+      /*string_fixup_predicate=*/nullptr);
+}
+
 void FidoDeviceAuthenticator::GetModality(BioEnrollmentCallback callback) {
   RunOperation<BioEnrollmentRequest, BioEnrollmentResponse>(
       BioEnrollmentRequest::ForGetModality(
@@ -1083,24 +1107,6 @@ bool FidoDeviceAuthenticator::IsPaired() const {
 bool FidoDeviceAuthenticator::RequiresBlePairingPin() const {
   return device_->RequiresBlePairingPin();
 }
-
-#if defined(OS_WIN)
-bool FidoDeviceAuthenticator::IsWinNativeApiAuthenticator() const {
-  return false;
-}
-#endif  // defined(OS_WIN)
-
-#if defined(OS_MAC)
-bool FidoDeviceAuthenticator::IsTouchIdAuthenticator() const {
-  return false;
-}
-#endif  // defined(OS_MAC)
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-bool FidoDeviceAuthenticator::IsChromeOSAuthenticator() const {
-  return false;
-}
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 void FidoDeviceAuthenticator::SetTaskForTesting(
     std::unique_ptr<FidoTask> task) {

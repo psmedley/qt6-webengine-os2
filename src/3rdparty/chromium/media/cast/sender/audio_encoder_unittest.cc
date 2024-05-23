@@ -13,8 +13,8 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/cxx17_backports.h"
 #include "base/logging.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/audio_bus.h"
 #include "media/base/fake_single_thread_task_runner.h"
@@ -35,6 +35,11 @@ namespace {
 class TestEncodedAudioFrameReceiver {
  public:
   TestEncodedAudioFrameReceiver() : frames_received_(0) {}
+
+  TestEncodedAudioFrameReceiver(const TestEncodedAudioFrameReceiver&) = delete;
+  TestEncodedAudioFrameReceiver& operator=(
+      const TestEncodedAudioFrameReceiver&) = delete;
+
   virtual ~TestEncodedAudioFrameReceiver() = default;
 
   int frames_received() const { return frames_received_; }
@@ -78,8 +83,6 @@ class TestEncodedAudioFrameReceiver {
   int samples_per_frame_;
   base::TimeTicks lower_bound_;
   base::TimeTicks upper_bound_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestEncodedAudioFrameReceiver);
 };
 
 struct TestScenario {
@@ -115,6 +118,9 @@ class AudioEncoderTest : public ::testing::TestWithParam<TestScenario> {
                                             task_runner_, task_runner_);
   }
 
+  AudioEncoderTest(const AudioEncoderTest&) = delete;
+  AudioEncoderTest& operator=(const AudioEncoderTest&) = delete;
+
   virtual ~AudioEncoderTest() = default;
 
   void RunTestForCodec(Codec codec) {
@@ -127,8 +133,8 @@ class AudioEncoderTest : public ::testing::TestWithParam<TestScenario> {
 
     for (size_t i = 0; i < scenario.num_durations; ++i) {
       const bool simulate_missing_data = scenario.durations_in_ms[i] < 0;
-      const base::TimeDelta duration = base::TimeDelta::FromMilliseconds(
-          std::abs(scenario.durations_in_ms[i]));
+      const base::TimeDelta duration =
+          base::Milliseconds(std::abs(scenario.durations_in_ms[i]));
       receiver_->SetCaptureTimeBounds(
           testing_clock_.NowTicks() - frame_duration,
           testing_clock_.NowTicks() + duration);
@@ -172,8 +178,6 @@ class AudioEncoderTest : public ::testing::TestWithParam<TestScenario> {
   std::unique_ptr<TestEncodedAudioFrameReceiver> receiver_;
   std::unique_ptr<AudioEncoder> audio_encoder_;
   scoped_refptr<CastEnvironment> cast_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioEncoderTest);
 };
 
 TEST_P(AudioEncoderTest, EncodeOpus) {
@@ -184,7 +188,7 @@ TEST_P(AudioEncoderTest, EncodePcm16) {
   RunTestForCodec(CODEC_AUDIO_PCM16);
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 TEST_P(AudioEncoderTest, EncodeAac) {
   RunTestForCodec(CODEC_AUDIO_AAC);
 }
@@ -227,26 +231,26 @@ INSTANTIATE_TEST_SUITE_P(
     AudioEncoderTestScenarios,
     AudioEncoderTest,
     ::testing::Values(
-        TestScenario(kOneCall_3Millis, base::size(kOneCall_3Millis)),
-        TestScenario(kOneCall_10Millis, base::size(kOneCall_10Millis)),
-        TestScenario(kOneCall_13Millis, base::size(kOneCall_13Millis)),
-        TestScenario(kOneCall_20Millis, base::size(kOneCall_20Millis)),
-        TestScenario(kTwoCalls_3Millis, base::size(kTwoCalls_3Millis)),
-        TestScenario(kTwoCalls_10Millis, base::size(kTwoCalls_10Millis)),
-        TestScenario(kTwoCalls_Mixed1, base::size(kTwoCalls_Mixed1)),
-        TestScenario(kTwoCalls_Mixed2, base::size(kTwoCalls_Mixed2)),
-        TestScenario(kTwoCalls_Mixed3, base::size(kTwoCalls_Mixed3)),
-        TestScenario(kTwoCalls_Mixed4, base::size(kTwoCalls_Mixed4)),
-        TestScenario(kManyCalls_3Millis, base::size(kManyCalls_3Millis)),
-        TestScenario(kManyCalls_10Millis, base::size(kManyCalls_10Millis)),
-        TestScenario(kManyCalls_Mixed1, base::size(kManyCalls_Mixed1)),
-        TestScenario(kManyCalls_Mixed2, base::size(kManyCalls_Mixed2)),
-        TestScenario(kManyCalls_Mixed3, base::size(kManyCalls_Mixed3)),
-        TestScenario(kManyCalls_Mixed4, base::size(kManyCalls_Mixed4)),
-        TestScenario(kManyCalls_Mixed5, base::size(kManyCalls_Mixed5)),
-        TestScenario(kOneBigUnderrun, base::size(kOneBigUnderrun)),
-        TestScenario(kTwoBigUnderruns, base::size(kTwoBigUnderruns)),
-        TestScenario(kMixedUnderruns, base::size(kMixedUnderruns))));
+        TestScenario(kOneCall_3Millis, std::size(kOneCall_3Millis)),
+        TestScenario(kOneCall_10Millis, std::size(kOneCall_10Millis)),
+        TestScenario(kOneCall_13Millis, std::size(kOneCall_13Millis)),
+        TestScenario(kOneCall_20Millis, std::size(kOneCall_20Millis)),
+        TestScenario(kTwoCalls_3Millis, std::size(kTwoCalls_3Millis)),
+        TestScenario(kTwoCalls_10Millis, std::size(kTwoCalls_10Millis)),
+        TestScenario(kTwoCalls_Mixed1, std::size(kTwoCalls_Mixed1)),
+        TestScenario(kTwoCalls_Mixed2, std::size(kTwoCalls_Mixed2)),
+        TestScenario(kTwoCalls_Mixed3, std::size(kTwoCalls_Mixed3)),
+        TestScenario(kTwoCalls_Mixed4, std::size(kTwoCalls_Mixed4)),
+        TestScenario(kManyCalls_3Millis, std::size(kManyCalls_3Millis)),
+        TestScenario(kManyCalls_10Millis, std::size(kManyCalls_10Millis)),
+        TestScenario(kManyCalls_Mixed1, std::size(kManyCalls_Mixed1)),
+        TestScenario(kManyCalls_Mixed2, std::size(kManyCalls_Mixed2)),
+        TestScenario(kManyCalls_Mixed3, std::size(kManyCalls_Mixed3)),
+        TestScenario(kManyCalls_Mixed4, std::size(kManyCalls_Mixed4)),
+        TestScenario(kManyCalls_Mixed5, std::size(kManyCalls_Mixed5)),
+        TestScenario(kOneBigUnderrun, std::size(kOneBigUnderrun)),
+        TestScenario(kTwoBigUnderruns, std::size(kTwoBigUnderruns)),
+        TestScenario(kMixedUnderruns, std::size(kMixedUnderruns))));
 
 }  // namespace cast
 }  // namespace media

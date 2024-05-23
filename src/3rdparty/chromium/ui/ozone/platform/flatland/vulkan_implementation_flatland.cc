@@ -6,13 +6,13 @@
 
 #include <lib/zx/channel.h>
 #include <vulkan/vulkan.h>
+
 #include <memory>
+#include <tuple>
 
 #include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/fuchsia/fuchsia_logging.h"
-#include "base/macros.h"
-#include "base/native_library.h"
 #include "gpu/ipc/common/vulkan_ycbcr_info.h"
 #include "gpu/vulkan/fuchsia/vulkan_fuchsia_ext.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
@@ -31,25 +31,6 @@
 
 namespace ui {
 
-namespace {
-
-constexpr char kFuchsiaSwapchainLayerName[] =
-    "VK_LAYER_FUCHSIA_imagepipe_swapchain";
-
-bool CheckSwapchainAvailable() {
-  uint32_t num_instance_exts;
-  VkResult result = vkEnumerateInstanceExtensionProperties(
-      kFuchsiaSwapchainLayerName, &num_instance_exts, nullptr);
-  return result == VK_SUCCESS;
-}
-
-bool IsSwapchainEnabled() {
-  static bool is_swapchain_enabled = CheckSwapchainAvailable();
-  return is_swapchain_enabled;
-}
-
-}  // namespace
-
 VulkanImplementationFlatland::VulkanImplementationFlatland(
     FlatlandSurfaceFactory* flatland_surface_factory,
     FlatlandSysmemBufferManager* flatland_sysmem_buffer_manager,
@@ -62,33 +43,13 @@ VulkanImplementationFlatland::~VulkanImplementationFlatland() = default;
 bool VulkanImplementationFlatland::InitializeVulkanInstance(
     bool using_surface) {
   DCHECK(using_surface);
-  base::NativeLibraryLoadError error;
-  base::NativeLibrary handle =
-      base::LoadNativeLibrary(base::FilePath("libvulkan.so"), &error);
-  if (!handle) {
-    LOG(ERROR) << "Failed to load vulkan: " << error.ToString();
-    return false;
-  }
-
-  gpu::VulkanFunctionPointers* vulkan_function_pointers =
-      gpu::GetVulkanFunctionPointers();
-  vulkan_function_pointers->vulkan_loader_library = handle;
-
-  if (!vulkan_function_pointers->BindUnassociatedFunctionPointers())
-    return false;
 
   std::vector<const char*> required_extensions = {
       VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
   };
   std::vector<const char*> required_layers;
-
-  if (IsSwapchainEnabled()) {
-    required_layers.push_back(kFuchsiaSwapchainLayerName);
-    required_extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-    required_extensions.push_back(VK_FUCHSIA_IMAGEPIPE_SURFACE_EXTENSION_NAME);
-  };
-
-  return vulkan_instance_.Initialize(required_extensions, required_layers);
+  return vulkan_instance_.Initialize(base::FilePath("libvulkan.so"),
+                                     required_extensions, required_layers);
 }
 
 gpu::VulkanInstance* VulkanImplementationFlatland::GetVulkanInstance() {
@@ -97,10 +58,6 @@ gpu::VulkanInstance* VulkanImplementationFlatland::GetVulkanInstance() {
 
 std::unique_ptr<gpu::VulkanSurface>
 VulkanImplementationFlatland::CreateViewSurface(gfx::AcceleratedWidget window) {
-  if (!IsSwapchainEnabled()) {
-    LOG(FATAL) << "CreateViewSurface() called while swapchain extension isn't "
-                  "enabled.";
-  }
   NOTREACHED();
   return nullptr;
 }
@@ -126,9 +83,6 @@ VulkanImplementationFlatland::GetRequiredDeviceExtensions() {
       VK_KHR_MAINTENANCE1_EXTENSION_NAME,
       VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
   };
-
-  if (IsSwapchainEnabled())
-    result.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 
   return result;
 }
@@ -189,7 +143,7 @@ VkSemaphore VulkanImplementationFlatland::ImportSemaphoreHandle(
   }
 
   // Vulkan took ownership of the handle.
-  ignore_result(event.release());
+  std::ignore = event.release();
 
   return semaphore;
 }
@@ -271,6 +225,7 @@ VulkanImplementationFlatland::CreateImageFromGpuMemoryHandle(
     return nullptr;
   }
 
+  image->set_queue_family_index(VK_QUEUE_FAMILY_EXTERNAL);
   image->set_native_pixmap(collection->CreateNativePixmap(
       gmb_handle.native_pixmap_handle.buffer_index));
   return image;
@@ -301,11 +256,9 @@ VulkanImplementationFlatland::RegisterSysmemBufferCollection(
     gfx::Size size,
     size_t min_buffer_count,
     bool register_with_image_pipe) {
-  fuchsia::images::ImagePipe2Ptr image_pipe = nullptr;
   auto buffer_collection =
       flatland_sysmem_buffer_manager_->ImportFlatlandSysmemBufferCollection(
-          device, id, std::move(token), size, format, usage, min_buffer_count,
-          register_with_image_pipe);
+          device, id, std::move(token), size, format, usage, min_buffer_count);
   if (!buffer_collection)
     return nullptr;
 

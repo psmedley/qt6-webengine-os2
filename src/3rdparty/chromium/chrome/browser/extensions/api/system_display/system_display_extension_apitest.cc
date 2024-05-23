@@ -7,7 +7,6 @@
 
 #include "base/bind.h"
 #include "base/debug/leak_annotations.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -32,7 +31,7 @@ class SystemDisplayExtensionApiTest
     : public ExtensionApiTest,
       public testing::WithParamInterface<ContextType> {
  public:
-  SystemDisplayExtensionApiTest() = default;
+  SystemDisplayExtensionApiTest() : ExtensionApiTest(GetParam()) {}
   ~SystemDisplayExtensionApiTest() override = default;
   SystemDisplayExtensionApiTest(const SystemDisplayExtensionApiTest&) = delete;
   SystemDisplayExtensionApiTest& operator=(
@@ -61,7 +60,7 @@ class SystemDisplayExtensionApiTest
 };
 
 // TODO(crbug.com/1231357): MockScreen causes random failures on Windows.
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 
 INSTANTIATE_TEST_SUITE_P(PersistentBackground,
                          SystemDisplayExtensionApiTest,
@@ -71,13 +70,10 @@ INSTANTIATE_TEST_SUITE_P(ServiceWorker,
                          ::testing::Values(ContextType::kServiceWorker));
 
 IN_PROC_BROWSER_TEST_P(SystemDisplayExtensionApiTest, GetDisplayInfo) {
-  ASSERT_TRUE(RunExtensionTest(
-      "system_display/info", {},
-      {.load_as_service_worker = GetParam() == ContextType::kServiceWorker}))
-      << message_;
+  ASSERT_TRUE(RunExtensionTest("system_display/info")) << message_;
 }
 
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
 

@@ -1,7 +1,7 @@
 //---------------------------------------------------------------------------------
 //
 //  Little Color Management System
-//  Copyright (c) 1998-2020 Marti Maria Saguer
+//  Copyright (c) 1998-2022 Marti Maria Saguer
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the "Software"),
@@ -24,7 +24,7 @@
 //---------------------------------------------------------------------------------
 //
 // This is the plug-in header file. Normal LittleCMS clients should not use it.
-// It is provided for plug-in writters that may want to access the support
+// It is provided for plug-in writers that may want to access the support
 // functions to do low level operations. All plug-in related structures
 // are defined here. Including this file forces to include the standard API too.
 
@@ -286,7 +286,7 @@ typedef union {
 #define CMS_LERP_FLAGS_TRILINEAR          0x0100        // Hint only
 
 
-#define MAX_INPUT_DIMENSIONS 8
+#define MAX_INPUT_DIMENSIONS 15
 
 typedef struct _cms_interp_struc {  // Used on all interpolations. Supplied by lcms2 when calling the interpolation function
 
@@ -547,22 +547,28 @@ typedef struct {
 // the optimization  search. Or FALSE if it is unable to optimize and want to give a chance
 // to the rest of optimizers.
 
-typedef void     (* _cmsOPTeval16Fn)(CMSREGISTER const cmsUInt16Number In[],
-                                     CMSREGISTER cmsUInt16Number Out[],
-                                     CMSREGISTER const void* Data);
-
-
 typedef cmsBool  (* _cmsOPToptimizeFn)(cmsPipeline** Lut,
                                        cmsUInt32Number  Intent,
                                        cmsUInt32Number* InputFormat,
                                        cmsUInt32Number* OutputFormat,
                                        cmsUInt32Number* dwFlags);
 
+// Pipeline Evaluator (in 16 bits)
+typedef void (* _cmsPipelineEval16Fn)(CMSREGISTER const cmsUInt16Number In[],
+                                     CMSREGISTER cmsUInt16Number Out[],
+                                     const void* Data);
+
+// Pipeline Evaluator (in floating point)
+typedef void (* _cmsPipelineEvalFloatFn)(const cmsFloat32Number In[],
+                                         cmsFloat32Number Out[],
+                                         const void* Data);
+
+
 // This function may be used to set the optional evaluator and a block of private data. If private data is being used, an optional
 // duplicator and free functions should also be specified in order to duplicate the LUT construct. Use NULL to inhibit such functionality.
 
 CMSAPI void CMSEXPORT _cmsPipelineSetOptimizationParameters(cmsPipeline* Lut,
-                                               _cmsOPTeval16Fn Eval16,
+                                               _cmsPipelineEval16Fn Eval16,
                                                void* PrivateData,
                                                _cmsFreeUserDataFn FreePrivateDataFn,
                                                _cmsDupUserDataFn DupPrivateDataFn);
@@ -625,6 +631,9 @@ CMSAPI void * CMSEXPORT _cmsGetTransformUserData(struct _cmstransform_struct *CM
 // Retrieve formatters
 CMSAPI void   CMSEXPORT _cmsGetTransformFormatters16   (struct _cmstransform_struct *CMMcargo, cmsFormatter16* FromInput, cmsFormatter16* ToOutput);
 CMSAPI void   CMSEXPORT _cmsGetTransformFormattersFloat(struct _cmstransform_struct *CMMcargo, cmsFormatterFloat* FromInput, cmsFormatterFloat* ToOutput);
+
+// Retrieve original flags
+CMSAPI cmsUInt32Number CMSEXPORT _cmsGetTransformFlags(struct _cmstransform_struct* CMMcargo);
 
 typedef struct {
       cmsPluginBase     base;

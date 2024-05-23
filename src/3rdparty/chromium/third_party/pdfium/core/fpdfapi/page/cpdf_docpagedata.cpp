@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "build/build_config.h"
+#include "constants/font_encodings.h"
 #include "core/fpdfapi/font/cpdf_type1font.h"
 #include "core/fpdfapi/page/cpdf_form.h"
 #include "core/fpdfapi/page/cpdf_iccprofile.h"
@@ -62,7 +63,7 @@ void InsertWidthArrayImpl(std::vector<int> widths, CPDF_Array* pWidthArray) {
     pWidthArray1->AppendNew<CPDF_Number>(w);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 void InsertWidthArray(HDC hDC, int start, int end, CPDF_Array* pWidthArray) {
   std::vector<int> widths(end - start + 1);
   GetCharWidth(hDC, start, end, widths.data());
@@ -80,7 +81,7 @@ ByteString GetPSNameFromTT(HDC hDC) {
   }
   return result;
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 void InsertWidthArray1(CFX_Font* pFont,
                        CFX_UnicodeEncoding* pEncoding,
@@ -268,7 +269,7 @@ RetainPtr<CPDF_ColorSpace> CPDF_DocPageData::GetColorSpaceInternal(
 
   if (pCSObj->IsName()) {
     ByteString name = pCSObj->GetString();
-    RetainPtr<CPDF_ColorSpace> pCS = CPDF_ColorSpace::ColorspaceFromName(name);
+    RetainPtr<CPDF_ColorSpace> pCS = CPDF_ColorSpace::GetStockCSForName(name);
     if (!pCS && pResources) {
       const CPDF_Dictionary* pList = pResources->GetDictFor("ColorSpace");
       if (pList) {
@@ -460,7 +461,7 @@ RetainPtr<CPDF_Font> CPDF_DocPageData::AddStandardFont(
     const ByteString& fontName,
     const CPDF_FontEncoding* pEncoding) {
   ByteString mutable_name(fontName);
-  Optional<CFX_FontMapper::StandardFont> font_id =
+  absl::optional<CFX_FontMapper::StandardFont> font_id =
       CFX_FontMapper::GetStandardFontName(&mutable_name);
   if (!font_id.has_value())
     return nullptr;
@@ -492,7 +493,8 @@ RetainPtr<CPDF_Font> CPDF_DocPageData::AddFont(std::unique_ptr<CFX_Font> pFont,
     }
     if (charset == FX_Charset::kANSI || charset == FX_Charset::kDefault ||
         charset == FX_Charset::kSymbol) {
-      pBaseDict->SetNewFor<CPDF_Name>("Encoding", "WinAnsiEncoding");
+      pBaseDict->SetNewFor<CPDF_Name>("Encoding",
+                                      pdfium::font_encodings::kWinAnsiEncoding);
       for (int charcode = 128; charcode <= 255; charcode++) {
         int glyph_index = pEncoding->GlyphFromCharCode(charcode);
         int char_width = pFont->GetGlyphWidth(glyph_index);
@@ -549,7 +551,7 @@ RetainPtr<CPDF_Font> CPDF_DocPageData::AddFont(std::unique_ptr<CFX_Font> pFont,
   return GetFont(pBaseDict);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 RetainPtr<CPDF_Font> CPDF_DocPageData::AddWindowsFont(LOGFONTA* pLogFont) {
   pLogFont->lfHeight = -1000;
   pLogFont->lfWidth = 0;
@@ -597,7 +599,8 @@ RetainPtr<CPDF_Font> CPDF_DocPageData::AddWindowsFont(LOGFONTA* pLogFont) {
   if (!bCJK) {
     if (eCharset == FX_Charset::kANSI || eCharset == FX_Charset::kDefault ||
         eCharset == FX_Charset::kSymbol) {
-      pBaseDict->SetNewFor<CPDF_Name>("Encoding", "WinAnsiEncoding");
+      pBaseDict->SetNewFor<CPDF_Name>("Encoding",
+                                      pdfium::font_encodings::kWinAnsiEncoding);
     } else {
       CalculateEncodingDict(eCharset, pBaseDict);
     }
@@ -631,7 +634,7 @@ RetainPtr<CPDF_Font> CPDF_DocPageData::AddWindowsFont(LOGFONTA* pLogFont) {
   DeleteDC(hDC);
   return GetFont(pBaseDict);
 }
-#endif  //  defined(OS_WIN)
+#endif  //  BUILDFLAG(IS_WIN)
 
 size_t CPDF_DocPageData::CalculateEncodingDict(FX_Charset charset,
                                                CPDF_Dictionary* pBaseDict) {
@@ -645,14 +648,15 @@ size_t CPDF_DocPageData::CalculateEncodingDict(FX_Charset charset,
 
   CPDF_Dictionary* pEncodingDict =
       GetDocument()->NewIndirect<CPDF_Dictionary>();
-  pEncodingDict->SetNewFor<CPDF_Name>("BaseEncoding", "WinAnsiEncoding");
+  pEncodingDict->SetNewFor<CPDF_Name>("BaseEncoding",
+                                      pdfium::font_encodings::kWinAnsiEncoding);
 
   CPDF_Array* pArray = pEncodingDict->SetNewFor<CPDF_Array>("Differences");
   pArray->AppendNew<CPDF_Number>(128);
 
   const uint16_t* pUnicodes = kFX_CharsetUnicodes[i].m_pUnicodes;
   for (int j = 0; j < 128; j++) {
-    ByteString name = PDF_AdobeNameFromUnicode(pUnicodes[j]);
+    ByteString name = AdobeNameFromUnicode(pUnicodes[j]);
     pArray->AppendNew<CPDF_Name>(name.IsEmpty() ? ".notdef" : name);
   }
   pBaseDict->SetNewFor<CPDF_Reference>("Encoding", GetDocument(),

@@ -16,9 +16,6 @@ syntax = "proto2";
 
 package location.nearby.proto.connections;
 
-
-
-
 option optimize_for = LITE_RUNTIME;
 option java_package = "com.google.location.nearby.proto";
 option java_outer_classname = "ConnectionsEnums";
@@ -86,8 +83,36 @@ enum Medium {
 // LINT.ThenChange(
 //     //depot/google3/java/com/google/android/gmscore/integ/client/nearby/src/com/google/android/gms/nearby/connection/Medium.java,
 //     //depot/google3/java/com/google/android/gms/nearby/internal/connection/api.proto,
-//     //depot/google3/third_party/nearby_connections/proto/connections/offline_wire_formats.proto
+//     //depot/google3/third_party/nearby/connections/implementation/proto/offline_wire_formats.proto
 // )
+
+// The medium technologies used during the sharing.
+enum ConnectionTechnology {
+  CONNECTION_TECHNOLOGY_UNKNOWN_TECHNOLOGY = 0;
+  CONNECTION_TECHNOLOGY_BLE_GATT = 1;
+  CONNECTION_TECHNOLOGY_BLE_L2CAP = 2;
+  CONNECTION_TECHNOLOGY_HOTSPOT_DIRECT = 3;
+  CONNECTION_TECHNOLOGY_HOTSPOT_LOCALONLY = 4;
+  CONNECTION_TECHNOLOGY_HOTSPOT_SOFTAP = 5;
+  CONNECTION_TECHNOLOGY_WEBRTC_WIFI = 6;
+  CONNECTION_TECHNOLOGY_WEBRTC_MOBILE = 7;
+  CONNECTION_TECHNOLOGY_WEBRTC_ETHERNET = 8;
+  CONNECTION_TECHNOLOGY_WEBRTC_VPN = 9;
+  CONNECTION_TECHNOLOGY_WEBRTC_LOOPBACK = 10;
+  CONNECTION_TECHNOLOGY_WEBRTC_ADAPTER_TYPE_ANY = 11;
+}
+
+// The WiFi band or cellular band used during the sharing.
+enum ConnectionBand {
+  CONNECTION_BAND_UNKNOWN_BAND = 0;
+  CONNECTION_BAND_WIFI_BAND_2GHZ = 1;
+  CONNECTION_BAND_WIFI_BAND_5GHZ = 2;
+  CONNECTION_BAND_WIFI_BAND_6GHZ = 3;
+  CONNECTION_BAND_CELLULAR_BAND_2G = 4;
+  CONNECTION_BAND_CELLULAR_BAND_3G = 5;
+  CONNECTION_BAND_CELLULAR_BAND_4G = 6;
+  CONNECTION_BAND_CELLULAR_BAND_5G = 7;
+}
 
 // The result of a ConnectionRequest.
 enum ConnectionRequestResponse {
@@ -171,6 +196,20 @@ enum PayloadStatus {
 
   // The payload was canceled by the remote endpoint.
   REMOTE_CANCELLATION = 8;
+
+  // The connection not encrypted yet.
+  ENDPOINT_UNENCRYPTED = 9;
+}
+
+// The bandwidth of the mediums.
+enum Bandwidth {
+  BANDWIDTH_UNKNOWN = 0;
+  /** 2.4 GHz band */
+  BANDWIDTH_24_GHZ = 1;
+  /** 5 GHz band */
+  BANDWIDTH_5_GHZ = 2;
+  /** 6 GHz band */
+  BANDWIDTH_6_GHZ = 3;
 }
 
 // next_id: 19
@@ -314,4 +353,23 @@ enum BandwidthUpgradeErrorStage {
   WEB_RTC_SOCKET_CREATION = 33;
   // On the incoming side, listening for incoming WebRTC connections.
   WEB_RTC_LISTEN_INCOMING = 34;
+}
+
+// The device sources of the clearcut log.
+enum LogSource {
+  UNSPECIFIED_SOURCE = 0;
+
+  // Represents the devices in Nearby labs.
+  LAB_DEVICES = 1;
+  // Represents the devices tested by Nearby engs, in the long term can include
+  // any devices with newest feature flags.
+  INTERNAL_DEVICES = 2;
+  // Represents the devices testing our in-development features before they're
+  // released to the greater public.
+  BETA_TESTER_DEVICES = 3;
+  // Represents the OEM partners (like Samsung) that we're working with to
+  // verify functionality on their devices.
+  OEM_DEVICES = 4;
+  // Represents the device for debugging.
+  DEBUG_DEVICES = 5;
 }

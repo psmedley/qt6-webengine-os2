@@ -12,20 +12,23 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
-#include "base/cxx17_backports.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "net/base/completion_once_callback.h"
+#include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -35,6 +38,8 @@
 #include "net/test/test_with_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
+#include "net/url_request/url_request_test_util.h"
 #include "net/websockets/websocket_errors.h"
 #include "net/websockets/websocket_event_interface.h"
 #include "net/websockets/websocket_handshake_request_info.h"
@@ -114,6 +119,7 @@ using ::testing::InSequence;
 using ::testing::MockFunction;
 using ::testing::NotNull;
 using ::testing::Return;
+using ::testing::ReturnRef;
 using ::testing::SaveArg;
 using ::testing::StrictMock;
 
@@ -130,7 +136,7 @@ const char kBinaryBlob[] = {'\n',   '\r',    // BACKWARDS CRNL
                             '\b',            // backspace
                             '\'',            // single-quote, special in PHP
 };
-const size_t kBinaryBlobSize = base::size(kBinaryBlob);
+const size_t kBinaryBlobSize = std::size(kBinaryBlob);
 
 const int kVeryBigTimeoutMillis = 60 * 60 * 24 * 1000;
 
@@ -279,12 +285,18 @@ class FakeWebSocketStream : public WebSocketStream {
   // Returns the string passed to the constructor.
   std::string GetExtensions() const override { return extensions_; }
 
+  const NetLogWithSource& GetNetLogWithSource() const override {
+    return net_log_;
+  }
+
  private:
   // The string to return from GetSubProtocol().
   std::string protocol_;
 
   // The string to return from GetExtensions().
   std::string extensions_;
+
+  NetLogWithSource net_log_;
 };
 
 // To make the static initialisers easier to read, we use enums rather than
@@ -532,13 +544,13 @@ class ReadableFakeWebSocketStream : public FakeWebSocketStream {
              std::vector<std::unique_ptr<WebSocketFrame>> frames)
         : async(async), error(error), frames(std::move(frames)) {}
 
+    // Bad things will happen if we attempt to copy or assign |frames|.
+    Response(const Response&) = delete;
+    Response& operator=(const Response&) = delete;
+
     IsSync async;
     int error;
     std::vector<std::unique_ptr<WebSocketFrame>> frames;
-
-   private:
-    // Bad things will happen if we attempt to copy or assign |frames|.
-    DISALLOW_COPY_AND_ASSIGN(Response);
   };
   std::vector<std::unique_ptr<Response>> responses_;
 
@@ -646,7 +658,7 @@ class EchoeyFakeWebSocketStream : public FakeWebSocketStream {
   std::vector<std::unique_ptr<WebSocketFrame>> stored_frames_;
   CompletionOnceCallback read_callback_;
   // Owned by the caller of ReadFrames().
-  std::vector<std::unique_ptr<WebSocketFrame>>* read_frames_;
+  raw_ptr<std::vector<std::unique_ptr<WebSocketFrame>>> read_frames_;
   std::vector<scoped_refptr<IOBuffer>> buffers_;
   // True if we should close the connection.
   bool done_;
@@ -715,6 +727,7 @@ class MockWebSocketStream : public WebSocketStream {
   MOCK_METHOD0(Close, void());
   MOCK_CONST_METHOD0(GetSubProtocol, std::string());
   MOCK_CONST_METHOD0(GetExtensions, std::string());
+  MOCK_CONST_METHOD0(GetNetLogWithSource, NetLogWithSource&());
   MOCK_METHOD0(AsWebSocketStream, WebSocketStream*());
 };
 
@@ -729,22 +742,22 @@ class MockWebSocketStreamRequest : public WebSocketStreamRequest {
 
 struct WebSocketStreamCreationCallbackArgumentSaver {
   std::unique_ptr<WebSocketStreamRequest> Create(
-      const GURL& socket_url,
+      const GURL& new_socket_url,
       const std::vector<std::string>& requested_subprotocols,
-      const url::Origin& origin,
-      const SiteForCookies& site_for_cookies,
-      const IsolationInfo& isolation_info,
+      const url::Origin& new_origin,
+      const SiteForCookies& new_site_for_cookies,
+      const IsolationInfo& new_isolation_info,
       const HttpRequestHeaders& additional_headers,
-      URLRequestContext* url_request_context,
+      URLRequestContext* new_url_request_context,
       const NetLogWithSource& net_log,
       NetworkTrafficAnnotationTag traffic_annotation,
-      std::unique_ptr<WebSocketStream::ConnectDelegate> connect_delegate) {
-    this->socket_url = socket_url;
-    this->origin = origin;
-    this->site_for_cookies = site_for_cookies;
-    this->isolation_info = isolation_info;
-    this->url_request_context = url_request_context;
-    this->connect_delegate = std::move(connect_delegate);
+      std::unique_ptr<WebSocketStream::ConnectDelegate> new_connect_delegate) {
+    socket_url = new_socket_url;
+    origin = new_origin;
+    site_for_cookies = new_site_for_cookies;
+    isolation_info = new_isolation_info;
+    url_request_context = new_url_request_context;
+    connect_delegate = std::move(new_connect_delegate);
     return std::make_unique<MockWebSocketStreamRequest>();
   }
 
@@ -752,7 +765,7 @@ struct WebSocketStreamCreationCallbackArgumentSaver {
   url::Origin origin;
   SiteForCookies site_for_cookies;
   IsolationInfo isolation_info;
-  URLRequestContext* url_request_context;
+  raw_ptr<URLRequestContext> url_request_context;
   std::unique_ptr<WebSocketStream::ConnectDelegate> connect_delegate;
 };
 
@@ -785,7 +798,7 @@ class WebSocketChannelTest : public TestWithTaskEnvironment {
   // in |connect_data_|.
   void CreateChannelAndConnect() {
     channel_ = std::make_unique<WebSocketChannel>(
-        CreateEventInterface(), &connect_data_.url_request_context);
+        CreateEventInterface(), connect_data_.url_request_context.get());
     channel_->SendAddChannelRequestForTesting(
         connect_data_.socket_url, connect_data_.requested_subprotocols,
         connect_data_.origin, connect_data_.site_for_cookies,
@@ -802,7 +815,7 @@ class WebSocketChannelTest : public TestWithTaskEnvironment {
     connect_data_.argument_saver.connect_delegate->OnSuccess(
         std::move(stream_), std::make_unique<WebSocketHandshakeResponseInfo>(
                                 GURL(), nullptr, IPEndPoint(), base::Time()));
-    ignore_result(channel_->ReadFrames());
+    std::ignore = channel_->ReadFrames();
   }
 
   // Returns a WebSocketEventInterface to be passed to the WebSocketChannel.
@@ -824,7 +837,8 @@ class WebSocketChannelTest : public TestWithTaskEnvironment {
   // Grouped for readability.
   struct ConnectData {
     ConnectData()
-        : socket_url("ws://ws/"),
+        : url_request_context(CreateTestURLRequestContextBuilder()->Build()),
+          socket_url("ws://ws/"),
           origin(url::Origin::Create(GURL("http://ws"))),
           site_for_cookies(SiteForCookies::FromUrl(GURL("http://ws/"))) {
       this->isolation_info =
@@ -833,7 +847,7 @@ class WebSocketChannelTest : public TestWithTaskEnvironment {
     }
 
     // URLRequestContext object.
-    URLRequestContext url_request_context;
+    std::unique_ptr<URLRequestContext> url_request_context;
 
     // URL to (pretend to) connect to.
     GURL socket_url;
@@ -977,7 +991,8 @@ TEST_F(WebSocketChannelTest, EverythingIsPassedToTheCreatorFunction) {
   const WebSocketStreamCreationCallbackArgumentSaver& actual =
       connect_data_.argument_saver;
 
-  EXPECT_EQ(&connect_data_.url_request_context, actual.url_request_context);
+  EXPECT_EQ(connect_data_.url_request_context.get(),
+            actual.url_request_context);
 
   EXPECT_EQ(connect_data_.socket_url, actual.socket_url);
   EXPECT_EQ(connect_data_.origin.Serialize(), actual.origin.Serialize());
@@ -996,7 +1011,7 @@ TEST_F(WebSocketChannelEventInterfaceTest, ConnectSuccessReported) {
   connect_data_.argument_saver.connect_delegate->OnSuccess(
       std::move(stream_), std::make_unique<WebSocketHandshakeResponseInfo>(
                               GURL(), nullptr, IPEndPoint(), base::Time()));
-  ignore_result(channel_->ReadFrames());
+  std::ignore = channel_->ReadFrames();
 }
 
 TEST_F(WebSocketChannelEventInterfaceTest, ConnectFailureReported) {
@@ -1023,7 +1038,7 @@ TEST_F(WebSocketChannelEventInterfaceTest, ProtocolPassed) {
       std::make_unique<FakeWebSocketStream>("Bob", ""),
       std::make_unique<WebSocketHandshakeResponseInfo>(
           GURL(), nullptr, IPEndPoint(), base::Time()));
-  ignore_result(channel_->ReadFrames());
+  std::ignore = channel_->ReadFrames();
 }
 
 TEST_F(WebSocketChannelEventInterfaceTest, ExtensionsPassed) {
@@ -1036,7 +1051,7 @@ TEST_F(WebSocketChannelEventInterfaceTest, ExtensionsPassed) {
       std::make_unique<FakeWebSocketStream>("", "extension1, extension2"),
       std::make_unique<WebSocketHandshakeResponseInfo>(
           GURL(), nullptr, IPEndPoint(), base::Time()));
-  ignore_result(channel_->ReadFrames());
+  std::ignore = channel_->ReadFrames();
 }
 
 // The first frames from the server can arrive together with the handshake, in
@@ -1696,9 +1711,9 @@ TEST_F(WebSocketChannelEventInterfaceTest,
   // set an expectation on it. Instead the tests need to infer that the timeout
   // was fired by the behaviour of the WebSocketChannel object.
   channel_->SetClosingHandshakeTimeoutForTesting(
-      TimeDelta::FromMilliseconds(kVeryTinyTimeoutMillis));
+      base::Milliseconds(kVeryTinyTimeoutMillis));
   channel_->SetUnderlyingConnectionCloseTimeoutForTesting(
-      TimeDelta::FromMilliseconds(kVeryBigTimeoutMillis));
+      base::Milliseconds(kVeryBigTimeoutMillis));
   ASSERT_EQ(CHANNEL_ALIVE,
             channel_->StartClosingHandshake(kWebSocketNormalClosure, ""));
   checkpoint.Call(1);
@@ -1728,9 +1743,9 @@ TEST_F(WebSocketChannelEventInterfaceTest,
   }
   CreateChannelAndConnectSuccessfully();
   channel_->SetClosingHandshakeTimeoutForTesting(
-      TimeDelta::FromMilliseconds(kVeryBigTimeoutMillis));
+      base::Milliseconds(kVeryBigTimeoutMillis));
   channel_->SetUnderlyingConnectionCloseTimeoutForTesting(
-      TimeDelta::FromMilliseconds(kVeryTinyTimeoutMillis));
+      base::Milliseconds(kVeryTinyTimeoutMillis));
   checkpoint.Call(1);
   completion.WaitForResult();
 }
@@ -2021,12 +2036,15 @@ TEST_F(WebSocketChannelStreamTest, CloseFrameInvalidUtf8) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose,
        MASKED, CLOSE_DATA(PROTOCOL_ERROR, "Invalid UTF-8 in Close frame")}};
+  NetLogWithSource net_log_with_source;
 
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(ReturnFrames(&frames, &result_frame_data_))
       .WillRepeatedly(Return(ERR_IO_PENDING));
   EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
       .WillOnce(Return(OK));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, Close());
 
   CreateChannelAndConnectSuccessfully();
@@ -2372,10 +2390,13 @@ TEST_F(WebSocketChannelStreamTest, InvalidUtf8TextFrameNotSent) {
   static const InitFrame expected[] = {{FINAL_FRAME,
                                         WebSocketFrameHeader::kOpCodeClose,
                                         MASKED, CLOSE_DATA(GOING_AWAY, "")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillRepeatedly(Return(ERR_IO_PENDING));
   EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
       .WillOnce(Return(OK));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, Close()).Times(1);
 
   CreateChannelAndConnectSuccessfully();
@@ -2396,11 +2417,14 @@ TEST_F(WebSocketChannelReceiveUtf8Test, InvalidTextFrameRejected) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose, MASKED,
        CLOSE_DATA(PROTOCOL_ERROR, "Invalid UTF-8 in text frame")}};
+  NetLogWithSource net_log_with_source;
   {
     InSequence s;
     EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
         .WillOnce(ReturnFrames(&frames, &result_frame_data_))
         .WillRepeatedly(Return(ERR_IO_PENDING));
+    EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+        .WillOnce(ReturnRef(net_log_with_source));
     EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
         .WillOnce(Return(OK));
     EXPECT_CALL(*mock_stream_, Close()).Times(1);
@@ -2417,11 +2441,14 @@ TEST_F(WebSocketChannelReceiveUtf8Test, IncompleteCharacterReceived) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose, MASKED,
        CLOSE_DATA(PROTOCOL_ERROR, "Invalid UTF-8 in text frame")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(ReturnFrames(&frames, &result_frame_data_))
       .WillRepeatedly(Return(ERR_IO_PENDING));
   EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
       .WillOnce(Return(OK));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, Close()).Times(1);
 
   CreateChannelAndConnectSuccessfully();
@@ -2446,11 +2473,14 @@ TEST_F(WebSocketChannelReceiveUtf8Test, TricksyIncompleteCharacter) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose, MASKED,
        CLOSE_DATA(PROTOCOL_ERROR, "Invalid UTF-8 in text frame")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(ReturnFrames(&frames, &result_frame_data_))
       .WillRepeatedly(Return(ERR_IO_PENDING));
   EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
       .WillOnce(Return(OK));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, Close()).Times(1);
 
   CreateChannelAndConnectSuccessfully();
@@ -2479,11 +2509,14 @@ TEST_F(WebSocketChannelReceiveUtf8Test, SplitInvalidCharacterReceived) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose, MASKED,
        CLOSE_DATA(PROTOCOL_ERROR, "Invalid UTF-8 in text frame")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(ReturnFrames(&frames, &result_frame_data_))
       .WillRepeatedly(Return(ERR_IO_PENDING));
   EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
       .WillOnce(Return(OK));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, Close()).Times(1);
 
   CreateChannelAndConnectSuccessfully();
@@ -2500,11 +2533,14 @@ TEST_F(WebSocketChannelReceiveUtf8Test, InvalidReceivedIncontinuation) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose, MASKED,
        CLOSE_DATA(PROTOCOL_ERROR, "Invalid UTF-8 in text frame")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(ReturnFrames(&frames, &result_frame_data_))
       .WillRepeatedly(Return(ERR_IO_PENDING));
   EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
       .WillOnce(Return(OK));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, Close()).Times(1);
 
   CreateChannelAndConnectSuccessfully();
@@ -2646,9 +2682,12 @@ TEST_F(WebSocketChannelStreamTest, PingAfterCloseIsRejected) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose,
        MASKED,      CLOSE_DATA(NORMAL_CLOSURE, "OK")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(ReturnFrames(&frames, &result_frame_data_))
       .WillRepeatedly(Return(ERR_IO_PENDING));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   {
     // We only need to verify the relative order of WriteFrames() and
     // Close(). The current implementation calls WriteFrames() for the Close
@@ -2669,10 +2708,13 @@ TEST_F(WebSocketChannelStreamTest, ProtocolError) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose,
        MASKED,      CLOSE_DATA(PROTOCOL_ERROR, "WebSocket Protocol Error")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(Return(ERR_WS_PROTOCOL_ERROR));
   EXPECT_CALL(*mock_stream_, WriteFrames(EqualsFrames(expected), _))
       .WillOnce(Return(OK));
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, Close());
 
   CreateChannelAndConnectSuccessfully();
@@ -2687,13 +2729,13 @@ class WebSocketChannelStreamTimeoutTest : public WebSocketChannelStreamTest {
     set_stream(std::move(mock_stream_));
     CreateChannelAndConnect();
     channel_->SetClosingHandshakeTimeoutForTesting(
-        TimeDelta::FromMilliseconds(kVeryTinyTimeoutMillis));
+        base::Milliseconds(kVeryTinyTimeoutMillis));
     channel_->SetUnderlyingConnectionCloseTimeoutForTesting(
-        TimeDelta::FromMilliseconds(kVeryTinyTimeoutMillis));
+        base::Milliseconds(kVeryTinyTimeoutMillis));
     connect_data_.argument_saver.connect_delegate->OnSuccess(
         std::move(stream_), std::make_unique<WebSocketHandshakeResponseInfo>(
                                 GURL(), nullptr, IPEndPoint(), base::Time()));
-    ignore_result(channel_->ReadFrames());
+    std::ignore = channel_->ReadFrames();
   }
 };
 
@@ -2709,8 +2751,11 @@ TEST_F(WebSocketChannelStreamTimeoutTest, ServerInitiatedCloseTimesOut) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose,
        MASKED,      CLOSE_DATA(NORMAL_CLOSURE, "OK")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, GetSubProtocol()).Times(AnyNumber());
   EXPECT_CALL(*mock_stream_, GetExtensions()).Times(AnyNumber());
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillOnce(ReturnFrames(&frames, &result_frame_data_))
       .WillRepeatedly(Return(ERR_IO_PENDING));
@@ -2737,8 +2782,11 @@ TEST_F(WebSocketChannelStreamTimeoutTest, ClientInitiatedCloseTimesOut) {
   static const InitFrame expected[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose,
        MASKED,      CLOSE_DATA(NORMAL_CLOSURE, "OK")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, GetSubProtocol()).Times(AnyNumber());
   EXPECT_CALL(*mock_stream_, GetExtensions()).Times(AnyNumber());
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   EXPECT_CALL(*mock_stream_, ReadFrames(_, _))
       .WillRepeatedly(Return(ERR_IO_PENDING));
   TestClosure completion;
@@ -2766,8 +2814,11 @@ TEST_F(WebSocketChannelStreamTimeoutTest, ConnectionCloseTimesOut) {
   static const InitFrame frames[] = {
       {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose,
        NOT_MASKED,  CLOSE_DATA(NORMAL_CLOSURE, "OK")}};
+  NetLogWithSource net_log_with_source;
   EXPECT_CALL(*mock_stream_, GetSubProtocol()).Times(AnyNumber());
   EXPECT_CALL(*mock_stream_, GetExtensions()).Times(AnyNumber());
+  EXPECT_CALL(*mock_stream_, GetNetLogWithSource())
+      .WillOnce(ReturnRef(net_log_with_source));
   TestClosure completion;
   std::vector<std::unique_ptr<WebSocketFrame>>* read_frames = nullptr;
   CompletionOnceCallback read_callback;

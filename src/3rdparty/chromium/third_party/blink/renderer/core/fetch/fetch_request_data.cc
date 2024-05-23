@@ -16,7 +16,7 @@
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/data_pipe_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
@@ -56,11 +56,6 @@ bool IsExcludedHeaderForServiceWorkerFetchEvent(const String& header_name) {
   // Excluding Sec-Fetch-... headers as suggested in
   // https://crbug.com/949997#c4.
   if (header_name.StartsWithIgnoringASCIICase("sec-fetch-")) {
-    return true;
-  }
-
-  if (Platform::Current()->IsExcludedHeaderForServiceWorkerFetchEvent(
-          header_name)) {
     return true;
   }
 
@@ -215,7 +210,7 @@ FetchRequestData* FetchRequestData::CloneExceptBody() {
   request->mime_type_ = mime_type_;
   request->integrity_ = integrity_;
   request->priority_ = priority_;
-  request->importance_ = importance_;
+  request->fetch_priority_hint_ = fetch_priority_hint_;
   request->original_destination_ = original_destination_;
   request->keepalive_ = keepalive_;
   request->is_history_navigation_ = is_history_navigation_;
@@ -263,18 +258,7 @@ FetchRequestData* FetchRequestData::Pass(ScriptState* script_state) {
 FetchRequestData::~FetchRequestData() {}
 
 FetchRequestData::FetchRequestData(ExecutionContext* execution_context)
-    : method_(http_names::kGET),
-      header_list_(MakeGarbageCollected<FetchHeaderList>()),
-      destination_(network::mojom::RequestDestination::kEmpty),
-      referrer_string_(Referrer::ClientReferrerString()),
-      referrer_policy_(network::mojom::ReferrerPolicy::kDefault),
-      mode_(network::mojom::RequestMode::kNoCors),
-      credentials_(network::mojom::CredentialsMode::kOmit),
-      cache_mode_(mojom::FetchCacheMode::kDefault),
-      redirect_(network::mojom::RedirectMode::kFollow),
-      importance_(mojom::FetchImportanceMode::kImportanceAuto),
-      priority_(ResourceLoadPriority::kUnresolved),
-      keepalive_(false),
+    : referrer_string_(Referrer::ClientReferrerString()),
       url_loader_factory_(execution_context),
       execution_context_(execution_context) {}
 

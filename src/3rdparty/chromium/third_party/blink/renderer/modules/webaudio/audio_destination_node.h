@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_DESTINATION_NODE_H_
 
 #include <atomic>
+#include "base/notreached.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 
 namespace blink {
@@ -37,7 +38,7 @@ namespace blink {
 // of the context.
 class AudioDestinationHandler : public AudioHandler {
  public:
-  AudioDestinationHandler(AudioNode&);
+  explicit AudioDestinationHandler(AudioNode&);
   ~AudioDestinationHandler() override;
 
   // The method MUST NOT be invoked when rendering a graph because the
@@ -54,6 +55,11 @@ class AudioDestinationHandler : public AudioHandler {
   // AudioWorklet. This method ensures the switching of render thread and the
   // restart of the context.
   virtual void RestartRendering() = 0;
+
+  // The worklet thread change can happen when a context/destination is
+  // suspended. In that case, we prepare the worklet operation but do not start
+  // running.
+  virtual void PrepareTaskRunnerForWorklet() = 0;
 
   size_t CurrentSampleFrame() const {
     return current_sample_frame_.load(std::memory_order_acquire);
@@ -111,7 +117,7 @@ class AudioDestinationNode : public AudioNode {
   void ReportWillBeDestroyed() final;
 
  protected:
-  AudioDestinationNode(BaseAudioContext&);
+  explicit AudioDestinationNode(BaseAudioContext&);
 };
 
 }  // namespace blink

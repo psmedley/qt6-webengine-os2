@@ -15,7 +15,6 @@
 #include "vpx/vpx_encoder.h"
 #include "vpx/vpx_ext_ratectrl.h"
 #include "vpx_dsp/psnr.h"
-#include "vpx_ports/vpx_once.h"
 #include "vpx_ports/static_assert.h"
 #include "vpx_ports/system_state.h"
 #include "vpx_util/vpx_timestamp.h"
@@ -381,8 +380,8 @@ static vpx_codec_err_t validate_img(vpx_codec_alg_priv_t *ctx,
     case VPX_IMG_FMT_I440:
       if (ctx->cfg.g_profile != (unsigned int)PROFILE_1) {
         ERROR(
-            "Invalid image format. I422, I444, I440, NV12 images are "
-            "not supported in profile.");
+            "Invalid image format. I422, I444, I440 images are not supported "
+            "in profile.");
       }
       break;
     case VPX_IMG_FMT_I42216:
@@ -397,8 +396,8 @@ static vpx_codec_err_t validate_img(vpx_codec_alg_priv_t *ctx,
       break;
     default:
       ERROR(
-          "Invalid image format. Only YV12, I420, I422, I444 images are "
-          "supported.");
+          "Invalid image format. Only YV12, I420, I422, I444, I440, NV12 "
+          "images are supported.");
       break;
   }
 
@@ -523,8 +522,9 @@ static vpx_codec_err_t set_encoder_config(
   raw_target_rate =
       (unsigned int)((int64_t)oxcf->width * oxcf->height * oxcf->bit_depth * 3 *
                      oxcf->init_framerate / 1000);
-  // Cap target bitrate to raw rate
-  cfg->rc_target_bitrate = VPXMIN(raw_target_rate, cfg->rc_target_bitrate);
+  // Cap target bitrate to raw rate or 1000Mbps, whichever is less
+  cfg->rc_target_bitrate =
+      VPXMIN(VPXMIN(raw_target_rate, cfg->rc_target_bitrate), 1000000);
 
   // Convert target bandwidth from Kbit/s to Bit/s
   oxcf->target_bandwidth = 1000 * (int64_t)cfg->rc_target_bitrate;
@@ -1095,7 +1095,7 @@ static vpx_codec_err_t encoder_init(vpx_codec_ctx_t *ctx,
     }
 
     priv->extra_cfg = default_extra_cfg;
-    once(vp9_initialize_enc);
+    vp9_initialize_enc();
 
     res = validate_config(priv, &priv->cfg, &priv->extra_cfg);
 

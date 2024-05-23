@@ -136,7 +136,7 @@ TabsUpdateFunction::TabsUpdateFunction() : web_contents_(nullptr) {}
 
 ExtensionFunction::ResponseAction TabsUpdateFunction::Run() {
   std::unique_ptr<tabs::Update::Params> params(
-      tabs::Update::Params::Create(*args_));
+      tabs::Update::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   int tab_id = -1;

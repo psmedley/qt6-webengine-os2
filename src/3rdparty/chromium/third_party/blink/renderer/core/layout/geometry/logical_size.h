@@ -18,7 +18,7 @@ struct LogicalOffset;
 // LogicalSize is the size of rect (typically a fragment) in the logical
 // coordinate system.
 // For more information about physical and logical coordinate systems, see:
-// https://chromium.googlesource.com/chromium/src/+/master/third_party/blink/renderer/core/layout/README.md#coordinate-spaces
+// https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/layout/README.md#coordinate-spaces
 struct CORE_EXPORT LogicalSize {
   constexpr LogicalSize() = default;
   constexpr LogicalSize(LayoutUnit inline_size, LayoutUnit block_size)
@@ -43,10 +43,6 @@ struct CORE_EXPORT LogicalSize {
   constexpr bool IsEmpty() const {
     return inline_size == LayoutUnit() || block_size == LayoutUnit();
   }
-
-  void Transpose() { std::swap(inline_size, block_size); }
-
-  static LogicalSize AspectRatioFromFloatSize(const FloatSize&);
 };
 
 inline LogicalSize& operator-=(LogicalSize& a, const NGBoxStrut& b) {

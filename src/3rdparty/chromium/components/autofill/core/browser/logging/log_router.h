@@ -8,8 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/values.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -27,6 +25,10 @@ class LogReceiver;
 class LogRouter : public KeyedService {
  public:
   LogRouter();
+
+  LogRouter(const LogRouter&) = delete;
+  LogRouter& operator=(const LogRouter&) = delete;
+
   ~LogRouter() override;
 
   // Returns a JSON entry that can be fed into the logger.
@@ -51,8 +53,8 @@ class LogRouter : public KeyedService {
   // RegisterReceiver adds |receiver| to the right observer list, and returns
   // the logs accumulated so far. (It returns by value, not const ref, to
   // provide a snapshot as opposed to a link to |accumulated_logs_|.)
-  const std::vector<base::Value>& RegisterReceiver(LogReceiver* receiver)
-      WARN_UNUSED_RESULT;
+  [[nodiscard]] const std::vector<base::Value>& RegisterReceiver(
+      LogReceiver* receiver);
   // Remove |receiver| from the observers list.
   void UnregisterReceiver(LogReceiver* receiver);
 
@@ -65,8 +67,6 @@ class LogRouter : public KeyedService {
 
   // Logs accumulated since the first receiver was registered.
   std::vector<base::Value> accumulated_logs_;
-
-  DISALLOW_COPY_AND_ASSIGN(LogRouter);
 };
 
 }  // namespace autofill

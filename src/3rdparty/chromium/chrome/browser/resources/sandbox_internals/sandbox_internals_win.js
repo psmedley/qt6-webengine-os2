@@ -8,6 +8,14 @@ import {$} from 'chrome://resources/js/util.m.js';
 
 /**
  * @typedef {{
+ *   name: string,
+ *   enabled: boolean,
+ * }}
+ */
+let SandboxFeature;
+
+/**
+ * @typedef {{
  *   processId: number,
  *   processType: string,
  *   name: string,
@@ -28,10 +36,11 @@ let RendererHostProcess;
  * This may have additional fields displayed in the JSON output.
  * See //sandbox/win/src/sandbox_constants.cc for keys in policy.
  * @typedef {{
- *   processIds: !Array<number>,
+ *   processId: number,
  *   lockdownLevel: string,
  *   desiredIntegrityLevel: string,
- *   platformMitigations: string
+ *   platformMitigations: string,
+ *   componentFilters: string
  * }}
  */
 let PolicyDiagnostic;
@@ -40,7 +49,8 @@ let PolicyDiagnostic;
  * @typedef {{
  *   browser: !Array<!BrowserHostProcess>,
  *   renderer: !Array<!RendererHostProcess>,
- *   policies: !Array<!PolicyDiagnostic>
+ *   policies: !Array<!PolicyDiagnostic>,
+ *   features: !Array<!SandboxFeature>
  * }}
  */
 let SandboxDiagnostics;
@@ -84,8 +94,8 @@ class MitigationField {
    * @return {boolean}
    */
   isFieldSet(bytes) {
-    if (bytes.length != 4 && bytes.length != 8 && bytes.length != 16) {
-      throw ('Platform mitigations has unexpected size');
+    if (bytes.length !== 4 && bytes.length !== 8 && bytes.length !== 16) {
+      throw new Error('Platform mitigations has unexpected size');
     }
     const subfield = this.getFieldData(bytes);
     if (subfield == null || this.offset > subfield.length * 8) {
@@ -93,7 +103,7 @@ class MitigationField {
     }
     const idx = subfield.length - 1 - Math.floor(this.offset / 8);
     const ibit = this.offset % 8;
-    return (subfield[idx] & (this.mask << ibit)) == (this.value << ibit);
+    return (subfield[idx] & (this.mask << ibit)) === (this.value << ibit);
   }
 }
 
@@ -106,10 +116,10 @@ class PC0Field extends MitigationField {
    * @return {Uint8Array} chunk containing this field or null.
    */
   getFieldData(bytes) {
-    if (bytes.length == 4) {
+    if (bytes.length === 4) {
       // Win32 only 4 bytes of fields.
       return bytes;
-    } else if (bytes.length == 8) {
+    } else if (bytes.length === 8) {
       return bytes;
     } else {
       return bytes.slice(0, 8);
@@ -123,9 +133,9 @@ class PC0Field extends MitigationField {
 class PC1Field extends MitigationField {
   /** @override */
   getFieldData(bytes) {
-    if (bytes.length == 8) {
+    if (bytes.length === 8) {
       return bytes;
-    } else if (bytes.length == 16) {
+    } else if (bytes.length === 16) {
       return bytes.slice(0, 8);
     }
     return null;
@@ -138,9 +148,9 @@ class PC1Field extends MitigationField {
 class PC2Field extends MitigationField {
   /** @override */
   getFieldData(bytes) {
-    if (bytes.length == 8) {
+    if (bytes.length === 8) {
       return null;
-    } else if (bytes.length == 16) {
+    } else if (bytes.length === 16) {
       return bytes.slice(8, 16);
     }
     return null;
@@ -256,7 +266,7 @@ class DecodeMitigations {
    * @return {Uint8Array} bytes Decoded bytes.
    */
   parseHexString(str) {
-    assert((str.length % 2 == 0), 'str must have even length');
+    assert((str.length % 2 === 0), 'str must have even length');
     const bytes = new Uint8Array(str.length / 2);
     for (let idx = 0; idx < str.length / 2; idx++) {
       bytes[idx] = parseInt(str.slice(idx * 2, idx * 2 + 2), 16);
@@ -357,6 +367,20 @@ function addRow(args) {
 function makeTextEntry(textContent) {
   const col = document.createElement('td');
   col.textContent = textContent;
+  return col;
+}
+
+/**
+ * Makes a <td> containing formatted component filter flags.
+ * @param {PolicyDiagnostic} policy
+ * @return {Node}
+ */
+function makeComponentFilterEntry(policy) {
+  const fixed = document.createElement('div');
+  fixed.classList.add('mitigations');
+  fixed.innerText = policy.componentFilters;
+  const col = document.createElement('td');
+  col.appendChild(fixed);
   return col;
 }
 
@@ -471,13 +495,13 @@ function addRowForProcess(pid, type, name, sandbox, policy) {
       pid, type, name, sandbox, policy.lockdownLevel,
       policy.desiredIntegrityLevel
     ].map(makeTextEntry);
-    // Clickable mitigations item.
     entries.push(makeMitigationEntry(policy.platformMitigations));
+    entries.push(makeComponentFilterEntry(policy));
     entries.push(makeLowboxAcEntry(policy));
     addRow(entries);
   } else {
-    addRow(
-        [pid, type, name, 'Not Sandboxed', '', '', '', ''].map(makeTextEntry));
+    addRow([pid, type, name, 'Not Sandboxed', '', '', '', '', ''].map(
+        makeTextEntry));
   }
 }
 
@@ -487,15 +511,13 @@ function onGetSandboxDiagnostics(results) {
   /** @type {!Map<number,!PolicyDiagnostic>} */
   const policies = new Map();
   for (const policy of results.policies) {
-    // At present only one process per TargetPolicy object.
-    const pid = policy.processIds[0];
-    policies.set(pid, policy);
+    policies.set(policy.processId, policy);
   }
 
   // Titles.
   addRow([
     'Process', 'Type', 'Name', 'Sandbox', 'Lockdown', 'Integrity',
-    'Mitigations', 'Lowbox/AppContainer'
+    'Mitigations', 'Component Filter', 'Lowbox/AppContainer'
   ].map(makeTextEntry));
 
   // Browser Processes.
@@ -514,6 +536,7 @@ function onGetSandboxDiagnostics(results) {
 
   // Raw Diagnostics.
   $('raw-info').textContent =
+      'features: ' + JSON.stringify(results.features, null, 2) + '\n' +
       'policies: ' + JSON.stringify(results.policies, null, 2);
 }
 

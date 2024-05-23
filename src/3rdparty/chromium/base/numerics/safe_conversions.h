@@ -171,7 +171,9 @@ struct SaturateFastOp<
                             std::is_integral<Dst>::value &&
                             SaturateFastAsmOp<Dst, Src>::is_supported>::type> {
   static constexpr bool is_supported = true;
-  static constexpr Dst Do(Src value) { return SaturateFastAsmOp<Dst, Src>::Do(value); }
+  static constexpr Dst Do(Src value) {
+    return SaturateFastAsmOp<Dst, Src>::Do(value);
+  }
 };
 
 template <typename Dst, typename Src>
@@ -198,14 +200,13 @@ struct SaturateFastOp<
 // saturated_cast<> is analogous to static_cast<> for numeric types, except
 // that the specified numeric conversion will saturate by default rather than
 // overflow or underflow, and NaN assignment to an integral will return 0.
-// All boundary condition behaviors can be overriden with a custom handler.
+// All boundary condition behaviors can be overridden with a custom handler.
 template <typename Dst,
           template <typename> class SaturationHandler = SaturationDefaultLimits,
           typename Src>
 constexpr Dst saturated_cast(Src value) {
   using SrcType = typename UnderlyingType<Src>::type;
-  return !IsCompileTimeConstant(value) &&
-                 SaturateFastOp<Dst, SrcType>::is_supported &&
+  return !IsConstantEvaluated() && SaturateFastOp<Dst, SrcType>::is_supported &&
                  std::is_same<SaturationHandler<Dst>,
                               SaturationDefaultLimits<Dst>>::value
              ? SaturateFastOp<Dst, SrcType>::Do(static_cast<SrcType>(value))
@@ -306,21 +307,13 @@ class StrictNumeric {
   const T value_;
 };
 
-// Convience wrapper returns a StrictNumeric from the provided arithmetic type.
+// Convenience wrapper returns a StrictNumeric from the provided arithmetic
+// type.
 template <typename T>
 constexpr StrictNumeric<typename UnderlyingType<T>::type> MakeStrictNum(
     const T value) {
   return value;
 }
-
-#if !BASE_NUMERICS_DISABLE_OSTREAM_OPERATORS
-// Overload the ostream output operator to make logging work nicely.
-template <typename T>
-std::ostream& operator<<(std::ostream& os, const StrictNumeric<T>& value) {
-  os << static_cast<T>(value);
-  return os;
-}
-#endif
 
 #define BASE_NUMERIC_COMPARISON_OPERATORS(CLASS, NAME, OP)              \
   template <typename L, typename R,                                     \
@@ -343,14 +336,14 @@ BASE_NUMERIC_COMPARISON_OPERATORS(Strict, IsNotEqual, !=)
 using internal::as_signed;
 using internal::as_unsigned;
 using internal::checked_cast;
-using internal::strict_cast;
-using internal::saturated_cast;
-using internal::SafeUnsignedAbs;
-using internal::StrictNumeric;
-using internal::MakeStrictNum;
-using internal::IsValueInRangeForNumericType;
 using internal::IsTypeInRangeForNumericType;
+using internal::IsValueInRangeForNumericType;
 using internal::IsValueNegative;
+using internal::MakeStrictNum;
+using internal::SafeUnsignedAbs;
+using internal::saturated_cast;
+using internal::strict_cast;
+using internal::StrictNumeric;
 
 // Explicitly make a shorter size_t alias for convenience.
 using SizeT = StrictNumeric<size_t>;

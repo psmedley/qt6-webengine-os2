@@ -10,7 +10,6 @@
 #include <map>
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "components/domain_reliability/beacon.h"
@@ -84,6 +83,9 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
           upload_allowed_callback,
       std::unique_ptr<MockableTime> time);
 
+  DomainReliabilityMonitor(const DomainReliabilityMonitor&) = delete;
+  DomainReliabilityMonitor& operator=(const DomainReliabilityMonitor&) = delete;
+
   ~DomainReliabilityMonitor() override;
 
   // Shuts down the monitor prior to destruction. Currently, ensures that there
@@ -121,7 +123,7 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
   // as an always-true filter, indicating complete deletion.
   void ClearBrowsingData(
       DomainReliabilityClearMode mode,
-      const base::RepeatingCallback<bool(const GURL&)>& origin_filter);
+      const base::RepeatingCallback<bool(const url::Origin&)>& origin_filter);
 
   // Gets a Value containing data that can be formatted into a web page for
   // debugging purposes.
@@ -154,8 +156,6 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
   DomainReliabilityContextManager context_manager_;
 
   bool discard_uploads_set_;
-
-  DISALLOW_COPY_AND_ASSIGN(DomainReliabilityMonitor);
 };
 
 }  // namespace domain_reliability

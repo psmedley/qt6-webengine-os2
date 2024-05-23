@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 
 using ::testing::_;
 using ::testing::Mock;
@@ -140,52 +141,6 @@ TEST_F(DocumentAnimationsTest, UpdateAnimationsUpdatesAllTimelines) {
   // Verify that animations count is correctly updated on animation host.
   cc::AnimationHost* host = document->View()->GetCompositorAnimationHost();
   EXPECT_EQ(5u, host->MainThreadAnimationsCount());
-}
-
-TEST_F(DocumentAnimationsTest, AllowAnimationUpdatesScope) {
-  DocumentAnimations& document_animations = document->GetDocumentAnimations();
-  auto allowed = [&document_animations]() -> bool {
-    return document_animations.AnimationUpdatesAllowed();
-  };
-
-  using AllowAnimationUpdatesScope =
-      DocumentAnimations::AllowAnimationUpdatesScope;
-
-  // Implicitly disallowed by default:
-  EXPECT_FALSE(allowed());
-
-  {
-    AllowAnimationUpdatesScope scope(document_animations, true);
-    EXPECT_TRUE(allowed());
-
-    {
-      AllowAnimationUpdatesScope scope(document_animations, true);
-      EXPECT_TRUE(allowed());
-    }
-
-    {
-      // Disallow explicitly:
-      AllowAnimationUpdatesScope scope(document_animations, false);
-      EXPECT_FALSE(allowed());
-
-      {
-        // Allowing while explicitly disallowed has no effect:
-        AllowAnimationUpdatesScope scope(document_animations, true);
-        EXPECT_FALSE(allowed());
-      }
-
-      EXPECT_FALSE(allowed());
-    }
-
-    EXPECT_TRUE(allowed());
-  }
-
-  {
-    AllowAnimationUpdatesScope scope(document_animations, false);
-    EXPECT_FALSE(allowed());
-  }
-
-  EXPECT_FALSE(allowed());
 }
 
 }  // namespace blink

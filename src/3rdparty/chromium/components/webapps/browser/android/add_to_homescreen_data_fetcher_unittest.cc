@@ -10,8 +10,8 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
@@ -21,6 +21,7 @@
 #include "components/favicon/content/large_favicon_provider_getter.h"
 #include "components/favicon/core/large_favicon_provider.h"
 #include "components/favicon_base/favicon_types.h"
+#include "components/webapps/browser/installable/installable_logging.h"
 #include "components/webapps/browser/installable/installable_manager.h"
 #include "components/webapps/browser/installable/installable_metrics.h"
 #include "components/webapps/common/web_page_metadata.mojom.h"
@@ -38,7 +39,7 @@ namespace webapps {
 
 namespace {
 
-const char* kWebApplicationInfoTitle = "Meta Title";
+const char* kWebAppInstallInfoTitle = "Meta Title";
 const char* kDefaultManifestUrl = "https://www.example.com/manifest.json";
 const char* kDefaultIconUrl = "https://www.example.com/icon.png";
 const char* kDefaultManifestName = "Default Name";
@@ -56,6 +57,10 @@ class ObserverWaiter : public AddToHomescreenDataFetcher::Observer {
       : is_webapk_compatible_(false),
         title_available_(false),
         data_available_(false) {}
+
+  ObserverWaiter(const ObserverWaiter&) = delete;
+  ObserverWaiter& operator=(const ObserverWaiter&) = delete;
+
   ~ObserverWaiter() override {}
 
   // Waits till the OnDataAvailable() callback is called.
@@ -79,12 +84,15 @@ class ObserverWaiter : public AddToHomescreenDataFetcher::Observer {
     is_webapk_compatible_ = is_webapk_compatible;
   }
 
-  void OnDataAvailable(const ShortcutInfo& info,
-                       const SkBitmap& primary_icon) override {
+  void OnDataAvailable(
+      const ShortcutInfo& info,
+      const SkBitmap& primary_icon,
+      const InstallableStatusCode installable_status) override {
     // This should only be called once.
     EXPECT_FALSE(data_available_);
     EXPECT_TRUE(title_available_);
     data_available_ = true;
+    installable_status_ = installable_status;
     if (quit_closure_)
       quit_closure_.Run();
   }
@@ -92,15 +100,17 @@ class ObserverWaiter : public AddToHomescreenDataFetcher::Observer {
   std::u16string title() const { return title_; }
   bool is_webapk_compatible() const { return is_webapk_compatible_; }
   bool title_available() const { return title_available_; }
+  InstallableStatusCode installable_status() const {
+    return installable_status_;
+  }
 
  private:
   std::u16string title_;
   bool is_webapk_compatible_;
   bool title_available_;
   bool data_available_;
+  InstallableStatusCode installable_status_;
   base::RepeatingClosure quit_closure_;
-
-  DISALLOW_COPY_AND_ASSIGN(ObserverWaiter);
 };
 
 // Builds WebAPK compatible blink::Manifest.
@@ -207,6 +217,12 @@ class AddToHomescreenDataFetcherTest
     : public content::RenderViewHostTestHarness {
  public:
   AddToHomescreenDataFetcherTest() {}
+
+  AddToHomescreenDataFetcherTest(const AddToHomescreenDataFetcherTest&) =
+      delete;
+  AddToHomescreenDataFetcherTest& operator=(
+      const AddToHomescreenDataFetcherTest&) = delete;
+
   ~AddToHomescreenDataFetcherTest() override {}
 
   void SetUp() override {
@@ -241,11 +257,12 @@ class AddToHomescreenDataFetcherTest
                   const char* expected_user_title,
                   const char* expected_name,
                   blink::mojom::DisplayMode display_mode,
-                  bool is_webapk_compatible) {
+                  bool is_webapk_compatible,
+                  InstallableStatusCode status_code) {
     webapps::mojom::WebPageMetadataPtr web_page_metadata(
         webapps::mojom::WebPageMetadata::New());
     web_page_metadata->application_name =
-        base::ASCIIToUTF16(kWebApplicationInfoTitle);
+        base::ASCIIToUTF16(kWebAppInstallInfoTitle);
 
     fetcher->OnDidGetWebPageMetadata(
         mojo::AssociatedRemote<webapps::mojom::WebPageMetadataAgent>(),
@@ -262,15 +279,17 @@ class AddToHomescreenDataFetcherTest
     EXPECT_TRUE(base::EqualsASCII(fetcher->shortcut_info().user_title,
                                   expected_user_title));
     EXPECT_EQ(display_mode, fetcher->shortcut_info().display);
+    EXPECT_EQ(status_code, waiter.installable_status());
   }
 
   void RunFetcher(AddToHomescreenDataFetcher* fetcher,
                   ObserverWaiter& waiter,
                   const char* expected_title,
                   blink::mojom::DisplayMode display_mode,
-                  bool is_webapk_compatible) {
+                  bool is_webapk_compatible,
+                  InstallableStatusCode status_code) {
     RunFetcher(fetcher, waiter, expected_title, expected_title, display_mode,
-               is_webapk_compatible);
+               is_webapk_compatible, status_code);
   }
 
   void CheckHistograms(base::HistogramTester& histograms) {
@@ -312,10 +331,8 @@ class AddToHomescreenDataFetcherTest
     }
   };
 
-  TestInstallableManager* installable_manager_;
+  raw_ptr<TestInstallableManager> installable_manager_;
   NullLargeFaviconProvider null_large_favicon_provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(AddToHomescreenDataFetcherTest);
 };
 
 TEST_F(AddToHomescreenDataFetcherTest, EmptyManifest) {
@@ -323,8 +340,9 @@ TEST_F(AddToHomescreenDataFetcherTest, EmptyManifest) {
   base::HistogramTester histograms;
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
-  RunFetcher(fetcher.get(), waiter, kWebApplicationInfoTitle,
-             blink::mojom::DisplayMode::kBrowser, false);
+  RunFetcher(fetcher.get(), waiter, kWebAppInstallInfoTitle,
+             blink::mojom::DisplayMode::kBrowser, false,
+             InstallableStatusCode::NO_ACCEPTABLE_ICON);
   CheckHistograms(histograms);
 }
 
@@ -339,7 +357,8 @@ TEST_F(AddToHomescreenDataFetcherTest, NoIconManifest) {
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
   RunFetcher(fetcher.get(), waiter, kDefaultManifestShortName,
-             blink::mojom::DisplayMode::kStandalone, false);
+             blink::mojom::DisplayMode::kStandalone, false,
+             InstallableStatusCode::NO_ACCEPTABLE_ICON);
   CheckHistograms(histograms);
 
   EXPECT_TRUE(fetcher->shortcut_info().best_primary_icon_url.is_empty());
@@ -360,8 +379,9 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestFetchTimesOutPwa) {
   base::HistogramTester histograms;
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
-  RunFetcher(fetcher.get(), waiter, kWebApplicationInfoTitle,
-             blink::mojom::DisplayMode::kBrowser, false);
+  RunFetcher(fetcher.get(), waiter, kWebAppInstallInfoTitle,
+             blink::mojom::DisplayMode::kBrowser, false,
+             InstallableStatusCode::DATA_TIMED_OUT);
   CheckHistograms(histograms);
 
   EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
@@ -378,8 +398,9 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestFetchTimesOutNonPwa) {
   base::HistogramTester histograms;
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
-  RunFetcher(fetcher.get(), waiter, kWebApplicationInfoTitle,
-             blink::mojom::DisplayMode::kBrowser, false);
+  RunFetcher(fetcher.get(), waiter, kWebAppInstallInfoTitle,
+             blink::mojom::DisplayMode::kBrowser, false,
+             InstallableStatusCode::DATA_TIMED_OUT);
   CheckHistograms(histograms);
 
   EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
@@ -395,8 +416,9 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestFetchTimesOutUnknown) {
   base::HistogramTester histograms;
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
-  RunFetcher(fetcher.get(), waiter, kWebApplicationInfoTitle,
-             blink::mojom::DisplayMode::kBrowser, false);
+  RunFetcher(fetcher.get(), waiter, kWebAppInstallInfoTitle,
+             blink::mojom::DisplayMode::kBrowser, false,
+             InstallableStatusCode::DATA_TIMED_OUT);
   NavigateAndCommit(GURL("about:blank"));
   CheckHistograms(histograms);
 
@@ -419,7 +441,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ServiceWorkerCheckTimesOutPwa) {
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
   RunFetcher(fetcher.get(), waiter, kDefaultManifestShortName,
-             blink::mojom::DisplayMode::kStandalone, false);
+             blink::mojom::DisplayMode::kStandalone, false,
+             InstallableStatusCode::DATA_TIMED_OUT);
   CheckHistograms(histograms);
 
   EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
@@ -438,7 +461,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ServiceWorkerCheckTimesOutNonPwa) {
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
   RunFetcher(fetcher.get(), waiter, kDefaultManifestShortName,
-             blink::mojom::DisplayMode::kStandalone, false);
+             blink::mojom::DisplayMode::kStandalone, false,
+             InstallableStatusCode::DATA_TIMED_OUT);
   CheckHistograms(histograms);
 
   EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
@@ -457,7 +481,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ServiceWorkerCheckTimesOutUnknown) {
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
   RunFetcher(fetcher.get(), waiter, kDefaultManifestShortName,
-             blink::mojom::DisplayMode::kStandalone, false);
+             blink::mojom::DisplayMode::kStandalone, false,
+             InstallableStatusCode::DATA_TIMED_OUT);
 
   // Navigate to ensure the histograms are written.
   NavigateAndCommit(GURL("about:blank"));
@@ -476,8 +501,8 @@ TEST_F(AddToHomescreenDataFetcherTest, InstallableManifest) {
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
   RunFetcher(fetcher.get(), waiter, kDefaultManifestShortName,
-             kDefaultManifestName, blink::mojom::DisplayMode::kStandalone,
-             true);
+             kDefaultManifestName, blink::mojom::DisplayMode::kStandalone, true,
+             InstallableStatusCode::NO_ERROR_DETECTED);
 
   // There should always be a primary icon.
   EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
@@ -502,7 +527,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNameClobbersWebApplicationName) {
     ObserverWaiter waiter;
     std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
     RunFetcher(fetcher.get(), waiter, kDefaultManifestName,
-               blink::mojom::DisplayMode::kStandalone, false);
+               blink::mojom::DisplayMode::kStandalone, false,
+               InstallableStatusCode::NO_ACCEPTABLE_ICON);
 
     EXPECT_TRUE(fetcher->shortcut_info().best_primary_icon_url.is_empty());
     EXPECT_TRUE(base::EqualsASCII(fetcher->shortcut_info().short_name,
@@ -519,7 +545,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNameClobbersWebApplicationName) {
     ObserverWaiter waiter;
     std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
     RunFetcher(fetcher.get(), waiter, kDefaultManifestName,
-               blink::mojom::DisplayMode::kStandalone, false);
+               blink::mojom::DisplayMode::kStandalone, false,
+               InstallableStatusCode::NOT_OFFLINE_CAPABLE);
 
     EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
     EXPECT_EQ(fetcher->shortcut_info().best_primary_icon_url,
@@ -534,7 +561,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNameClobbersWebApplicationName) {
     ObserverWaiter waiter;
     std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
     RunFetcher(fetcher.get(), waiter, kDefaultManifestName,
-               blink::mojom::DisplayMode::kStandalone, false);
+               blink::mojom::DisplayMode::kStandalone, false,
+               InstallableStatusCode::DATA_TIMED_OUT);
 
     EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
     EXPECT_EQ(fetcher->shortcut_info().best_primary_icon_url,
@@ -550,7 +578,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNameClobbersWebApplicationName) {
     ObserverWaiter waiter;
     std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
     RunFetcher(fetcher.get(), waiter, kDefaultManifestName,
-               blink::mojom::DisplayMode::kStandalone, true);
+               blink::mojom::DisplayMode::kStandalone, true,
+               InstallableStatusCode::NO_ERROR_DETECTED);
 
     EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
     EXPECT_EQ(fetcher->shortcut_info().best_primary_icon_url,
@@ -564,7 +593,7 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNoNameNoShortName) {
   // Test that when the manifest does not provide either Manifest::short_name
   // nor Manifest::name that:
   //  - The page is not WebAPK compatible.
-  //  - WebApplicationInfo::title is used as the "name".
+  //  - WebAppInstallInfo::title is used as the "name".
   //  - We still use the icons from the manifest.
   blink::mojom::ManifestPtr manifest = BuildDefaultManifest();
   manifest->name = absl::nullopt;
@@ -574,13 +603,14 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNoNameNoShortName) {
   SetManifest(std::move(manifest));
   ObserverWaiter waiter;
   std::unique_ptr<AddToHomescreenDataFetcher> fetcher = BuildFetcher(&waiter);
-  RunFetcher(fetcher.get(), waiter, kWebApplicationInfoTitle,
-             blink::mojom::DisplayMode::kStandalone, false);
+  RunFetcher(fetcher.get(), waiter, kWebAppInstallInfoTitle,
+             blink::mojom::DisplayMode::kStandalone, false,
+             InstallableStatusCode::MANIFEST_MISSING_NAME_OR_SHORT_NAME);
 
   EXPECT_TRUE(base::EqualsASCII(fetcher->shortcut_info().name,
-                                kWebApplicationInfoTitle));
+                                kWebAppInstallInfoTitle));
   EXPECT_TRUE(base::EqualsASCII(fetcher->shortcut_info().short_name,
-                                kWebApplicationInfoTitle));
+                                kWebAppInstallInfoTitle));
   EXPECT_FALSE(fetcher->primary_icon().drawsNothing());
   EXPECT_EQ(fetcher->shortcut_info().best_primary_icon_url,
             GURL(kDefaultIconUrl));

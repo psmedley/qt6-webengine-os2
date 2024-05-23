@@ -10,6 +10,8 @@
 #ifndef EIGEN_CXX11_TENSOR_TENSOR_PADDING_H
 #define EIGEN_CXX11_TENSOR_TENSOR_PADDING_H
 
+#include "./InternalHeaderCheck.h"
+
 namespace Eigen {
 
 /** \class TensorPadding
@@ -28,7 +30,7 @@ struct traits<TensorPaddingOp<PaddingDimensions, XprType> > : public traits<XprT
   typedef typename XprTraits::StorageKind StorageKind;
   typedef typename XprTraits::Index Index;
   typedef typename XprType::Nested Nested;
-  typedef typename remove_reference<Nested>::type _Nested;
+  typedef typename remove_reference<Nested>::type Nested_;
   static const int NumDimensions = XprTraits::NumDimensions;
   static const int Layout = XprTraits::Layout;
   typedef typename XprTraits::PointerType PointerType;
@@ -116,7 +118,7 @@ struct TensorEvaluator<const TensorPaddingOp<PaddingDimensions, ArgType>, Device
       TensorBlock;
   //===--------------------------------------------------------------------===//
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
+  EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
       : m_impl(op.expression(), device), m_padding(op.padding()), m_paddingValue(op.padding_value()), m_device(device)
   {
     // The padding op doesn't change the rank of the tensor. Directly padding a scalar would lead
@@ -151,20 +153,20 @@ struct TensorEvaluator<const TensorPaddingOp<PaddingDimensions, ArgType>, Device
 
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Dimensions& dimensions() const { return m_dimensions; }
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(EvaluatorPointerType) {
+  EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(EvaluatorPointerType) {
     m_impl.evalSubExprsIfNeeded(NULL);
     return true;
   }
 
 #ifdef EIGEN_USE_THREADS
   template <typename EvalSubExprsCallback>
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void evalSubExprsIfNeededAsync(
+  EIGEN_STRONG_INLINE void evalSubExprsIfNeededAsync(
       EvaluatorPointerType, EvalSubExprsCallback done) {
     m_impl.evalSubExprsIfNeededAsync(nullptr, [done](bool) { done(true); });
   }
 #endif  // EIGEN_USE_THREADS
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void cleanup() {
+  EIGEN_STRONG_INLINE void cleanup() {
     m_impl.cleanup();
   }
 
@@ -510,35 +512,20 @@ struct TensorEvaluator<const TensorPaddingOp<PaddingDimensions, ArgType>, Device
 
   EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE bool isPaddingAtIndexForDim(
       Index index, int dim_index) const {
-#if defined(EIGEN_HAS_INDEX_LIST)
     return (!internal::index_pair_first_statically_eq<PaddingDimensions>(dim_index, 0) &&
             index < m_padding[dim_index].first) ||
         (!internal::index_pair_second_statically_eq<PaddingDimensions>(dim_index, 0) &&
          index >= m_dimensions[dim_index] - m_padding[dim_index].second);
-#else
-    return (index < m_padding[dim_index].first) ||
-           (index >= m_dimensions[dim_index] - m_padding[dim_index].second);
-#endif
   }
 
   EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE bool isLeftPaddingCompileTimeZero(
       int dim_index) const {
-#if defined(EIGEN_HAS_INDEX_LIST)
     return internal::index_pair_first_statically_eq<PaddingDimensions>(dim_index, 0);
-#else
-    EIGEN_UNUSED_VARIABLE(dim_index);
-    return false;
-#endif
   }
 
   EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE bool isRightPaddingCompileTimeZero(
       int dim_index) const {
-#if defined(EIGEN_HAS_INDEX_LIST)
     return internal::index_pair_second_statically_eq<PaddingDimensions>(dim_index, 0);
-#else
-    EIGEN_UNUSED_VARIABLE(dim_index);
-    return false;
-#endif
   }
 
 
@@ -564,7 +551,6 @@ struct TensorEvaluator<const TensorPaddingOp<PaddingDimensions, ArgType>, Device
 
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE PacketReturnType packetColMajor(Index index) const
   {
-    EIGEN_STATIC_ASSERT((PacketSize > 1), YOU_MADE_A_PROGRAMMING_MISTAKE)
     eigen_assert(index+PacketSize-1 < dimensions().TotalSize());
 
     const Index initialIndex = index;
@@ -622,7 +608,6 @@ struct TensorEvaluator<const TensorPaddingOp<PaddingDimensions, ArgType>, Device
 
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE PacketReturnType packetRowMajor(Index index) const
   {
-    EIGEN_STATIC_ASSERT((PacketSize > 1), YOU_MADE_A_PROGRAMMING_MISTAKE)
     eigen_assert(index+PacketSize-1 < dimensions().TotalSize());
 
     const Index initialIndex = index;

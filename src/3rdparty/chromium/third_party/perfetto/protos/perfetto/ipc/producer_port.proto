@@ -29,7 +29,7 @@ service ProducerPort {
   rpc InitializeConnection(InitializeConnectionRequest)
       returns (InitializeConnectionResponse) {}
 
-  // Advertises a data source.
+  // Advertises a new data source.
   rpc RegisterDataSource(RegisterDataSourceRequest)
       returns (RegisterDataSourceResponse) {}
 
@@ -92,6 +92,17 @@ service ProducerPort {
   // When the Sync() response is received, the producer is guaranteed that the
   // service has seen both data source registrations.
   rpc Sync(SyncRequest) returns (SyncResponse) {}
+
+  // ----------------------------------------------------
+  // All methods below have been introduced in Android T.
+  // ----------------------------------------------------
+
+  // Updates the data source descriptor for an already-registered data source.
+  // This can be used to update the list of features supported.
+  // Only the data source with a matching data_source_descriptor.id is updated.
+  // The data_source_descriptor.name cannot be changed.
+  rpc UpdateDataSource(UpdateDataSourceRequest)
+      returns (UpdateDataSourceResponse) {}
 }
 
 // Arguments for rpc InitializeConnection().
@@ -128,16 +139,11 @@ message InitializeConnectionRequest {
   // If provided, overrides the service's SMB scraping setting for the producer.
   optional ProducerSMBScrapingMode smb_scraping_mode = 4;
 
-  enum ProducerBuildFlags {
-    BUILD_FLAGS_UNSPECIFIED = 0;
-    BUILD_FLAGS_DCHECKS_ON = 1;
-    BUILD_FLAGS_DCHECKS_OFF = 2;
-  }
-
-  // If provided, reports the build flags of the producer. It's used merely for
-  // error reporting, to print a log message when a producer connects to a
-  // service that has mismatching build flags.
-  optional ProducerBuildFlags build_flags = 5;
+  // Was build_flags = BUILD_FLAGS_DCHECKS_ON|OFF. It was used to emit an error
+  // when DCHECKs level didn't match between service and producer (in turn that
+  // would crash the service when applying patches).
+  // Removed in v20 as part of b/197340286.
+  reserved 5;
 
   // ---------------------------------------------------
   // All fields below have been introduced in Android R.
@@ -191,6 +197,16 @@ message RegisterDataSourceResponse {
   // Only set in case of errors, when |data_source_id| == 0.
   optional string error = 1;
 };
+
+// Arguments for rpc UpdateDataSource().
+
+message UpdateDataSourceRequest {
+  // The new data_source_descriptor.{id, name} must match {id, name} of a
+  // data source previously registered via RegisterDataSource().
+  optional protos.DataSourceDescriptor data_source_descriptor = 1;
+}
+
+message UpdateDataSourceResponse {};
 
 // Arguments for rpc UnregisterDataSource().
 

@@ -5,8 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGPU_GPU_SWAP_CHAIN_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGPU_GPU_SWAP_CHAIN_H_
 
+#include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_canvas_compositing_alpha_mode.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgpu_swap_buffer_provider.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace cc {
 class Layer;
@@ -20,20 +22,24 @@ class GPUDevice;
 class GPUTexture;
 class StaticBitmapImage;
 
-class GPUSwapChain : public DawnObjectImpl,
-                     public WebGPUSwapBufferProvider::Client {
-  DEFINE_WRAPPERTYPEINFO();
-
+class GPUSwapChain final : public GarbageCollected<GPUSwapChain>,
+                           public DawnObjectBase,
+                           public WebGPUSwapBufferProvider::Client {
  public:
   explicit GPUSwapChain(GPUCanvasContext*,
                         GPUDevice*,
                         WGPUTextureUsage,
                         WGPUTextureFormat,
                         cc::PaintFlags::FilterQuality,
-                        IntSize);
-  ~GPUSwapChain() override;
+                        V8GPUCanvasCompositingAlphaMode::Enum,
+                        gfx::Size);
 
-  void Trace(Visitor* visitor) const override;
+  GPUSwapChain(const GPUSwapChain&) = delete;
+  GPUSwapChain& operator=(const GPUSwapChain&) = delete;
+
+  virtual ~GPUSwapChain();
+
+  void Trace(Visitor* visitor) const;
 
   void Neuter();
   cc::Layer* CcLayer();
@@ -55,25 +61,39 @@ class GPUSwapChain : public DawnObjectImpl,
 
   // Copies the back buffer to given shared image resource provider which must
   // be webgpu compatible. Returns true on success.
-  bool CopyToResourceProvider(CanvasResourceProvider*);
+  bool CopyToResourceProvider(CanvasResourceProvider*) const;
 
-  // gpu_swap_chain.idl
+  // Produces a snapshot of the current contents of the swap chain if possible.
+  // If that texture has already been sent to the compositor, will produce a
+  // snapshot of the just released texture associated to this gpu context.
+  // todo(crbug/1267243) Make snapshot always return the current frame.
+  scoped_refptr<StaticBitmapImage> Snapshot() const;
+
   GPUTexture* getCurrentTexture();
 
   // WebGPUSwapBufferProvider::Client implementation
   void OnTextureTransferred() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GPUSwapChain);
-
   scoped_refptr<WebGPUSwapBufferProvider> swap_buffers_;
 
+  Member<GPUDevice> device_;
   Member<GPUCanvasContext> context_;
-  WGPUTextureUsage usage_;
-  WGPUTextureFormat format_;
-  const IntSize size_;
+  const WGPUTextureUsage usage_;
+  const WGPUTextureFormat format_;
+  const V8GPUCanvasCompositingAlphaMode::Enum compositing_alpha_mode_;
+  const gfx::Size size_;
 
   Member<GPUTexture> texture_;
+  WGPURenderPipeline alpha_to_one_pipeline_ = nullptr;
+
+  scoped_refptr<StaticBitmapImage> SnapshotInternal(
+      const WGPUTexture& texture,
+      const gfx::Size& size) const;
+  bool CopyTextureToResourceProvider(
+      const WGPUTexture& texture,
+      const gfx::Size& size,
+      CanvasResourceProvider* resource_provider) const;
 };
 
 }  // namespace blink

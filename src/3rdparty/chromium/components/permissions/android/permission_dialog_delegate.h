@@ -6,6 +6,7 @@
 #define COMPONENTS_PERMISSIONS_ANDROID_PERMISSION_DIALOG_DELEGATE_H_
 
 #include "base/android/scoped_java_ref.h"
+#include "base/memory/raw_ptr.h"
 #include "content/public/browser/web_contents_observer.h"
 
 using base::android::JavaParamRef;
@@ -37,7 +38,7 @@ class PermissionDialogJavaDelegate {
 
  private:
   base::android::ScopedJavaGlobalRef<jobject> j_delegate_;
-  PermissionPromptAndroid* permission_prompt_;
+  raw_ptr<PermissionPromptAndroid> permission_prompt_;
 };
 
 // Delegate class for displaying a permission prompt as a modal dialog. Used as
@@ -54,6 +55,10 @@ class PermissionDialogDelegate : public content::WebContentsObserver {
       content::WebContents* web_contents,
       PermissionPromptAndroid* permission_prompt,
       std::unique_ptr<PermissionDialogJavaDelegate> java_delegate);
+
+  PermissionDialogDelegate(const PermissionDialogDelegate&) = delete;
+  PermissionDialogDelegate& operator=(const PermissionDialogDelegate&) = delete;
+
   // JNI methods.
   void Accept(JNIEnv* env, const JavaParamRef<jobject>& obj);
   void Cancel(JNIEnv* env, const JavaParamRef<jobject>& obj);
@@ -80,13 +85,11 @@ class PermissionDialogDelegate : public content::WebContentsObserver {
   // The PermissionPromptAndroid is deleted when either the dialog is resolved
   // or the tab is navigated/closed. We close the prompt on DidFinishNavigation
   // and WebContentsDestroyed, so it should always be safe to use this pointer.
-  PermissionPromptAndroid* permission_prompt_;
+  raw_ptr<PermissionPromptAndroid> permission_prompt_;
 
   // The PermissionDialogJavaDelegate abstracts away JNI connectivity from
   // native to Java in order to facilicate unit testing.
   std::unique_ptr<PermissionDialogJavaDelegate> java_delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(PermissionDialogDelegate);
 };
 
 }  // namespace permissions

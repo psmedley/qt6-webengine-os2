@@ -39,8 +39,6 @@ class COMPONENT_EXPORT(SODA_INSTALLER) SodaInstallerImplChromeOS
   std::vector<std::string> GetAvailableLanguages() const override;
 
  private:
-  friend class SodaInstallerImplChromeOSTest;
-
   // SodaInstaller:
   void InstallSoda(PrefService* global_prefs) override;
   // Here "uninstall" is used in the DLC sense of the term: Uninstallation will
@@ -56,8 +54,11 @@ class COMPONENT_EXPORT(SODA_INSTALLER) SodaInstallerImplChromeOS
 
   // These functions are the InstallCallbacks for DlcserviceClient::Install().
   void OnSodaInstalled(
+      const base::Time start_time,
       const chromeos::DlcserviceClient::InstallResult& install_result);
   void OnLanguageInstalled(
+      const LanguageCode language_code,
+      const base::Time start_time,
       const chromeos::DlcserviceClient::InstallResult& install_result);
 
   // These functions are the ProgressCallbacks for DlcserviceClient::Install().

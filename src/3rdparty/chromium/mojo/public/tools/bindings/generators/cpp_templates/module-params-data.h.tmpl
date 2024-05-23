@@ -9,7 +9,6 @@
 #ifndef {{header_guard}}
 #define {{header_guard}}
 
-#include "base/macros.h"
 #include "mojo/public/cpp/bindings/lib/bindings_internal.h"
 #include "mojo/public/cpp/bindings/lib/buffer.h"
 
@@ -18,12 +17,14 @@
 #pragma clang diagnostic ignored "-Wunused-private-field"
 #endif
 
+namespace mojo::internal {
+class ValidationContext;
+}
+
 {%- for namespace in namespaces_as_array %}
 namespace {{namespace}} {
 {%- endfor %}
 namespace internal {
-
-class ValidationContext;
 
 {#--- Interface parameter definitions #}
 {%- for interface in interfaces %}

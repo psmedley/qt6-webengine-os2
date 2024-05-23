@@ -10,19 +10,20 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_usb_control_transfer_parameters.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
+#include "third_party/blink/renderer/modules/webusb/usb.h"
 #include "third_party/blink/renderer/modules/webusb/usb_configuration.h"
 #include "third_party/blink/renderer/modules/webusb/usb_in_transfer_result.h"
 #include "third_party/blink/renderer/modules/webusb/usb_isochronous_in_transfer_result.h"
 #include "third_party/blink/renderer/modules/webusb/usb_isochronous_out_transfer_result.h"
 #include "third_party/blink/renderer/modules/webusb/usb_out_transfer_result.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -98,10 +99,12 @@ String ConvertTransferStatus(const UsbTransferStatus& status) {
 
 }  // namespace
 
-USBDevice::USBDevice(UsbDeviceInfoPtr device_info,
+USBDevice::USBDevice(USB* parent,
+                     UsbDeviceInfoPtr device_info,
                      mojo::PendingRemote<UsbDevice> device,
                      ExecutionContext* context)
     : ExecutionContextLifecycleObserver(context),
+      parent_(parent),
       device_info_(std::move(device_info)),
       device_(context),
       opened_(false),
@@ -113,6 +116,10 @@ USBDevice::USBDevice(UsbDeviceInfoPtr device_info,
     device_.set_disconnect_handler(
         WTF::Bind(&USBDevice::OnConnectionError, WrapWeakPersistent(this)));
   }
+
+  for (wtf_size_t i = 0; i < Info().configurations.size(); ++i)
+    configurations_.push_back(USBConfiguration::Create(this, i));
+
   wtf_size_t configuration_index =
       FindConfigurationIndex(Info().active_configuration);
   if (configuration_index != kNotFound)
@@ -132,23 +139,20 @@ bool USBDevice::IsInterfaceClaimed(wtf_size_t configuration_index,
          claimed_interfaces_[interface_index];
 }
 
-wtf_size_t USBDevice::SelectedAlternateInterface(
+wtf_size_t USBDevice::SelectedAlternateInterfaceIndex(
     wtf_size_t interface_index) const {
-  return selected_alternates_[interface_index];
+  return selected_alternate_indices_[interface_index];
 }
 
 USBConfiguration* USBDevice::configuration() const {
-  if (configuration_index_ != kNotFound)
-    return USBConfiguration::Create(this, configuration_index_);
-  return nullptr;
+  if (configuration_index_ == kNotFound)
+    return nullptr;
+  DCHECK_LT(configuration_index_, configurations_.size());
+  return configurations_[configuration_index_];
 }
 
 HeapVector<Member<USBConfiguration>> USBDevice::configurations() const {
-  wtf_size_t num_configurations = Info().configurations.size();
-  HeapVector<Member<USBConfiguration>> configurations(num_configurations);
-  for (wtf_size_t i = 0; i < num_configurations; ++i)
-    configurations[i] = USBConfiguration::Create(this, i);
-  return configurations;
+  return configurations_;
 }
 
 ScriptPromise USBDevice::open(ScriptState* script_state) {
@@ -180,6 +184,23 @@ ScriptPromise USBDevice::close(ScriptState* script_state) {
                                WrapPersistent(resolver)));
     }
   }
+  return promise;
+}
+
+ScriptPromise USBDevice::forget(ScriptState* script_state,
+                                ExceptionState& exception_state) {
+  if (!GetExecutionContext()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                      "Script context has shut down.");
+    return ScriptPromise();
+  }
+
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+  parent_->ForgetDevice(device_info_->guid,
+                        WTF::Bind(&USBDevice::AsyncForget, WrapPersistent(this),
+                                  WrapPersistent(resolver)));
+
   return promise;
 }
 
@@ -302,7 +323,7 @@ ScriptPromise USBDevice::selectAlternateInterface(ScriptState* script_state,
       device_->SetInterfaceAlternateSetting(
           interface_number, alternate_setting,
           WTF::Bind(&USBDevice::AsyncSelectAlternateInterface,
-                    WrapPersistent(this), interface_number, alternate_setting,
+                    WrapPersistent(this), interface_index, alternate_index,
                     WrapPersistent(resolver)));
     }
   }
@@ -540,8 +561,10 @@ void USBDevice::ContextDestroyed() {
 }
 
 void USBDevice::Trace(Visitor* visitor) const {
+  visitor->Trace(parent_);
   visitor->Trace(device_);
   visitor->Trace(device_requests_);
+  visitor->Trace(configurations_);
   ScriptWrappable::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
@@ -744,7 +767,7 @@ void USBDevice::SetEndpointsForInterface(wtf_size_t interface_index, bool set) {
   const auto& configuration = *Info().configurations[configuration_index_];
   const auto& interface = *configuration.interfaces[interface_index];
   const auto& alternate =
-      *interface.alternates[selected_alternates_[interface_index]];
+      *interface.alternates[selected_alternate_indices_[interface_index]];
   for (const auto& endpoint : alternate.endpoints) {
     uint8_t endpoint_number = endpoint->endpoint_number;
     if (endpoint_number == 0 || endpoint_number >= kEndpointsBitsNumber)
@@ -767,7 +790,7 @@ void USBDevice::AsyncOpen(ScriptPromiseResolver* resolver,
   switch (error) {
     case UsbOpenDeviceError::ALREADY_OPEN:
       NOTREACHED();
-      FALLTHROUGH;
+      [[fallthrough]];
     case UsbOpenDeviceError::OK:
       OnDeviceOpenedOrClosed(true /* opened */);
       resolver->Resolve();
@@ -788,11 +811,15 @@ void USBDevice::AsyncClose(ScriptPromiseResolver* resolver) {
   resolver->Resolve();
 }
 
+void USBDevice::AsyncForget(ScriptPromiseResolver* resolver) {
+  resolver->Resolve();
+}
+
 void USBDevice::OnDeviceOpenedOrClosed(bool opened) {
   opened_ = opened;
   if (!opened_) {
     claimed_interfaces_.Fill(false);
-    selected_alternates_.Fill(0);
+    selected_alternate_indices_.Fill(0);
     in_endpoints_.reset();
     out_endpoints_.reset();
   }
@@ -825,8 +852,8 @@ void USBDevice::OnConfigurationSelected(bool success,
     claimed_interfaces_.Fill(false);
     interface_state_change_in_progress_.resize(num_interfaces);
     interface_state_change_in_progress_.Fill(false);
-    selected_alternates_.resize(num_interfaces);
-    selected_alternates_.Fill(0);
+    selected_alternate_indices_.resize(num_interfaces);
+    selected_alternate_indices_.Fill(0);
     in_endpoints_.reset();
     out_endpoints_.reset();
   }
@@ -887,7 +914,7 @@ void USBDevice::OnInterfaceClaimedOrUnclaimed(bool claimed,
     claimed_interfaces_[interface_index] = true;
   } else {
     claimed_interfaces_[interface_index] = false;
-    selected_alternates_[interface_index] = 0;
+    selected_alternate_indices_[interface_index] = 0;
   }
   SetEndpointsForInterface(interface_index, claimed);
   interface_state_change_in_progress_[interface_index] = false;
@@ -901,7 +928,7 @@ void USBDevice::AsyncSelectAlternateInterface(wtf_size_t interface_index,
     return;
 
   if (success)
-    selected_alternates_[interface_index] = alternate_index;
+    selected_alternate_indices_[interface_index] = alternate_index;
   SetEndpointsForInterface(interface_index, success);
   interface_state_change_in_progress_[interface_index] = false;
 

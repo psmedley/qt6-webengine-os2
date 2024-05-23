@@ -32,6 +32,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_COMPOSITOR_ANIMATIONS_H_
 
 #include <memory>
+#include "base/time/time.h"
+#include "cc/animation/keyframe_model.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/animation/effect_model.h"
 #include "third_party/blink/renderer/core/animation/keyframe.h"
@@ -112,6 +114,7 @@ class CORE_EXPORT CompositorAnimations {
 
   static FailureReasons CheckCanStartAnimationOnCompositor(
       const Timing&,
+      const Timing::NormalizedTiming&,
       const Element&,
       const Animation*,
       const EffectModel&,
@@ -131,6 +134,7 @@ class CORE_EXPORT CompositorAnimations {
       absl::optional<double> start_time,
       base::TimeDelta time_offset,
       const Timing&,
+      const Timing::NormalizedTiming&,
       const Animation*,
       CompositorAnimation&,
       const EffectModel&,
@@ -159,6 +163,7 @@ class CORE_EXPORT CompositorAnimations {
   };
 
   static bool ConvertTimingForCompositor(const Timing&,
+                                         const Timing::NormalizedTiming&,
                                          base::TimeDelta time_offset,
                                          CompositorTiming& out,
                                          double animation_playback_rate);
@@ -166,11 +171,12 @@ class CORE_EXPORT CompositorAnimations {
   static void GetAnimationOnCompositor(
       const Element&,
       const Timing&,
+      const Timing::NormalizedTiming&,
       int group,
       absl::optional<double> start_time,
       base::TimeDelta time_offset,
       const KeyframeEffectModelBase&,
-      Vector<std::unique_ptr<CompositorKeyframeModel>>& animations,
+      Vector<std::unique_ptr<cc::KeyframeModel>>& animations,
       double animation_playback_rate);
 
   static CompositorElementIdNamespace CompositorElementNamespaceForProperty(
@@ -183,6 +189,7 @@ class CORE_EXPORT CompositorAnimations {
  private:
   static FailureReasons CheckCanStartEffectOnCompositor(
       const Timing&,
+      const Timing::NormalizedTiming&,
       const Element&,
       const Animation*,
       const EffectModel&,

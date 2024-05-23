@@ -116,7 +116,7 @@ TEST_F(TriggerThrottlerTest, TriggerQuotaResetsAfterOneDay) {
   // use up quota. We then advance the clock by a day and ensure quota is
   // available again.
   base::SimpleTestClock test_clock;
-  test_clock.SetNow(base::Time::Now() - base::TimeDelta::FromDays(10));
+  test_clock.SetNow(base::Time::Now() - base::Days(10));
   base::Time base_ts = test_clock.Now();
 
   SetTestClock(&test_clock);
@@ -139,8 +139,7 @@ TEST_F(TriggerThrottlerTest, TriggerQuotaResetsAfterOneDay) {
 
   // Move the clock forward by 1 day (and a bit) and try the trigger again,
   // quota should be available now.
-  test_clock.Advance(base::TimeDelta::FromDays(1) +
-                     base::TimeDelta::FromSeconds(1));
+  test_clock.Advance(base::Days(1) + base::Seconds(1));
   base::Time advanced_ts = test_clock.Now();
   EXPECT_TRUE(throttler()->TriggerCanFire(TriggerType::AD_SAMPLE));
 
@@ -181,17 +180,17 @@ TEST_F(TriggerThrottlerTest, TriggerQuotaPersistence) {
 
   // Check the pref directly, it should reflect the events for each trigger.
   PrefService* prefs = get_pref_service();
-  const base::DictionaryValue* event_dict =
+  const base::Value* event_dict =
       prefs->GetDictionary(prefs::kSafeBrowsingTriggerEventTimestamps);
 
   const std::string kAdSampleKey = "2";
   const base::Value* ad_sample_events = event_dict->FindKey(kAdSampleKey);
-  EXPECT_EQ(3u, ad_sample_events->GetList().size());
+  EXPECT_EQ(3u, ad_sample_events->GetListDeprecated().size());
 
   const std::string kSuspiciousSiteKey = "4";
   const base::Value* suspicious_site_events =
       event_dict->FindKey(kSuspiciousSiteKey);
-  EXPECT_EQ(2u, suspicious_site_events->GetList().size());
+  EXPECT_EQ(2u, suspicious_site_events->GetListDeprecated().size());
 
   // To simulate a new startup of the browser, we can create another throttler
   // using the same quota configuration and pref store. It should read the

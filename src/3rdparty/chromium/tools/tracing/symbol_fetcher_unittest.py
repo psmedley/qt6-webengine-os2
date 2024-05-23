@@ -128,7 +128,7 @@ class SymbolFetcherTestBase(unittest.TestCase):
 
 class MacAndLinuxTestCase(SymbolFetcherTestBase):
   def setUp(self):
-    super(MacAndLinuxTestCase, self).setUp()
+    super().setUp()
 
     cloud_storage.Get = mock.Mock()
     # Default: Cloud storage has |gcs_file|.zip file. We use |side_effect|
@@ -257,7 +257,7 @@ class MacAndLinuxTestCase(SymbolFetcherTestBase):
 
 class AndroidTestCase(SymbolFetcherTestBase):
   def setUp(self):
-    super(AndroidTestCase, self).setUp()
+    super().setUp()
 
     # Base directories for Android symbols.
     self.out = tempfile.mkdtemp(dir=self.breakpad_output_dir)
@@ -273,8 +273,7 @@ class AndroidTestCase(SymbolFetcherTestBase):
   def _setUpBasicRunDumpSyms(self):
     """Sets up symbol files to run the |RunDumpSyms| function.
 
-    Basic file setup used across all (non-error) Android tests that do not
-    specifically test the |_ConvertSymbolsToBreakpad| function.
+    Basic file setup used across all (non-error) Android tests.
     """
     extracted_files = []
     extracted_files.append(os.path.join(self.unstripped_dir, 'unstripped.so'))
@@ -380,7 +379,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
     match_arch_folder = 'x86_64'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))
@@ -396,12 +396,13 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                                           any_order=True)
     self._ensureRunDumpSymsAndRenameCalls(extract_files)
 
-  def testDifferentArchAndMatchingFolder(self):
+  def testCrossArchitecture(self):
     metadata = self._createMetadataExtractor(version_number='123',
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
     match_arch_folder = 'next-x86'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))
@@ -422,7 +423,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture=None,
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
     match_arch_folder = 'x86_64'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))
@@ -441,7 +443,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code=None)
+                                             version_code=None,
+                                             modules=None)
     match_arch_folder = 'x86_64'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))
@@ -460,7 +463,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code='328954')
+                                             version_code='328954',
+                                             modules=None)
     match_arch_folder = 'x86_64'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))
@@ -481,7 +485,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
 
     # Fails to fetch all 'version_codes.txt' files from GCS.
     symbol_fetcher._FetchGCSFile = mock.MagicMock(return_value=False)
@@ -501,7 +506,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
     # None of the 'version_codes.txt' files match the trace's version code.
     match_arch_folder = None  # No valid paths can be None.
     symbol_fetcher._FetchGCSFile = mock.Mock(
@@ -522,7 +528,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='armv7',
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
     match_arch_folder = 'next-arm_64'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))
@@ -532,7 +539,7 @@ class AndroidTestCase(SymbolFetcherTestBase):
 
     gcs_folder = ('android-B0urB0N/' + metadata.version_number + '/' +
                   match_arch_folder)
-    exception_msg = 'No symbol files could be found on GCS:' + gcs_folder
+    exception_msg = 'No symbol files could be found on GCS: ' + gcs_folder
     with self.assertRaises(Exception) as e:
       symbol_fetcher.GetTraceBreakpadSymbols(self.cloud_storage_bucket,
                                              metadata, self.breakpad_output_dir,
@@ -552,7 +559,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
     match_arch_folder = 'x86_64'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))
@@ -579,7 +587,8 @@ class AndroidTestCase(SymbolFetcherTestBase):
                                              os_name=OSName.ANDROID,
                                              architecture='x86_64',
                                              bitness='64',
-                                             version_code='358923')
+                                             version_code='358923',
+                                             modules=None)
     match_arch_folder = 'x86_64'
     symbol_fetcher._FetchGCSFile = mock.Mock(
         side_effect=self._mockVersionCodeFetcher(match_arch_folder, metadata))

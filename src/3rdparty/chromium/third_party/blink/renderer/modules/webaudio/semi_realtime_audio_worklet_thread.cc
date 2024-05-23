@@ -6,6 +6,7 @@
 
 #include "base/feature_list.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
@@ -36,14 +37,16 @@ SemiRealtimeAudioWorkletThread::SemiRealtimeAudioWorkletThread(
     params.thread_priority = base::ThreadPriority::NORMAL;
   }
 
-  if (++s_ref_count_ == 1)
+  if (++s_ref_count_ == 1) {
     EnsureSharedBackingThread(params);
+  }
 }
 
 SemiRealtimeAudioWorkletThread::~SemiRealtimeAudioWorkletThread() {
   DCHECK(IsMainThread());
-  if (--s_ref_count_ == 0)
+  if (--s_ref_count_ == 0) {
     ClearSharedBackingThread();
+  }
 }
 
 WorkerBackingThread& SemiRealtimeAudioWorkletThread::GetWorkerBackingThread() {

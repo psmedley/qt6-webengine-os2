@@ -28,120 +28,32 @@
 #include "media/media_buildflags.h"
 #include "third_party/widevine/cdm/buildflags.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/cdm/renderer/android_key_systems.h"
 #endif
 
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS) || BUILDFLAG(IS_WIN)
 #include "base/feature_list.h"
 #include "content/public/renderer/key_system_support.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_codecs.h"
 #if BUILDFLAG(ENABLE_WIDEVINE)
 #include "third_party/widevine/cdm/widevine_cdm_common.h"  // nogncheck
-// TODO(crbug.com/663554): Needed for WIDEVINE_CDM_MIN_GLIBC_VERSION.
-// component updated CDM on all desktop platforms and remove this.
-#include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR. // nogncheck
 #if BUILDFLAG(ENABLE_PLATFORM_HEVC) && BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/constants/ash_features.h"
 #endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC) && BUILDFLAG(IS_CHROMEOS_ASH)
-// The following must be after widevine_cdm_version.h.
-#if defined(WIDEVINE_CDM_MIN_GLIBC_VERSION)
-#include <gnu/libc-version.h>
-#include "base/version.h"
-#endif  // defined(WIDEVINE_CDM_MIN_GLIBC_VERSION)
 #endif  // BUILDFLAG(ENABLE_WIDEVINE)
-#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS) || BUILDFLAG(IS_WIN)
 
 using media::EmeFeatureSupport;
 using media::EmeSessionTypeSupport;
 using media::KeySystemProperties;
+using media::KeySystemPropertiesVector;
 using media::SupportedCodecs;
 
 namespace {
 
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-
-// External Clear Key (used for testing).
-void AddExternalClearKey(
-    std::vector<std::unique_ptr<KeySystemProperties>>* concrete_key_systems) {
-  // TODO(xhwang): Move these into an array so we can use a for loop to add
-  // supported key systems below.
-  static const char kExternalClearKeyKeySystem[] =
-      "org.chromium.externalclearkey";
-  static const char kExternalClearKeyDecryptOnlyKeySystem[] =
-      "org.chromium.externalclearkey.decryptonly";
-  static const char kExternalClearKeyMessageTypeTestKeySystem[] =
-      "org.chromium.externalclearkey.messagetypetest";
-  static const char kExternalClearKeyFileIOTestKeySystem[] =
-      "org.chromium.externalclearkey.fileiotest";
-  static const char kExternalClearKeyOutputProtectionTestKeySystem[] =
-      "org.chromium.externalclearkey.outputprotectiontest";
-  static const char kExternalClearKeyPlatformVerificationTestKeySystem[] =
-      "org.chromium.externalclearkey.platformverificationtest";
-  static const char kExternalClearKeyInitializeFailKeySystem[] =
-      "org.chromium.externalclearkey.initializefail";
-  static const char kExternalClearKeyCrashKeySystem[] =
-      "org.chromium.externalclearkey.crash";
-  static const char kExternalClearKeyVerifyCdmHostTestKeySystem[] =
-      "org.chromium.externalclearkey.verifycdmhosttest";
-  static const char kExternalClearKeyStorageIdTestKeySystem[] =
-      "org.chromium.externalclearkey.storageidtest";
-  static const char kExternalClearKeyDifferentGuidTestKeySystem[] =
-      "org.chromium.externalclearkey.differentguid";
-
-  // TODO(xhwang): Actually use |capability| to determine capabilities.
-  media::mojom::KeySystemCapabilityPtr capability;
-  if (!content::IsKeySystemSupported(kExternalClearKeyKeySystem, &capability)) {
-    DVLOG(1) << "External Clear Key not supported";
-    return;
-  }
-
-  concrete_key_systems->emplace_back(
-      new cdm::ExternalClearKeyProperties(kExternalClearKeyKeySystem));
-
-  // Add support of decrypt-only mode in ClearKeyCdm.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyDecryptOnlyKeySystem));
-
-  // A key system that triggers various types of messages in ClearKeyCdm.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyMessageTypeTestKeySystem));
-
-  // A key system that triggers the FileIO test in ClearKeyCdm.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyFileIOTestKeySystem));
-
-  // A key system that triggers the output protection test in ClearKeyCdm.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyOutputProtectionTestKeySystem));
-
-  // A key system that triggers the platform verification test in ClearKeyCdm.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyPlatformVerificationTestKeySystem));
-
-  // A key system that Chrome thinks is supported by ClearKeyCdm, but actually
-  // will be refused by ClearKeyCdm. This is to test the CDM initialization
-  // failure case.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyInitializeFailKeySystem));
-
-  // A key system that triggers a crash in ClearKeyCdm.
-  concrete_key_systems->emplace_back(
-      new cdm::ExternalClearKeyProperties(kExternalClearKeyCrashKeySystem));
-
-  // A key system that triggers the verify host files test in ClearKeyCdm.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyVerifyCdmHostTestKeySystem));
-
-  // A key system that fetches the Storage ID in ClearKeyCdm.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyStorageIdTestKeySystem));
-
-  // A key system that is registered with a different CDM GUID.
-  concrete_key_systems->emplace_back(new cdm::ExternalClearKeyProperties(
-      kExternalClearKeyDifferentGuidTestKeySystem));
-}
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS) || BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(ENABLE_WIDEVINE)
 SupportedCodecs GetVP9Codecs(
@@ -161,7 +73,7 @@ SupportedCodecs GetVP9Codecs(
         supported_vp9_codecs |= media::EME_CODEC_VP9_PROFILE2;
         break;
       default:
-        DVLOG(1) << "Unexpected " << GetCodecName(media::VideoCodec::kCodecVP9)
+        DVLOG(1) << "Unexpected " << GetCodecName(media::VideoCodec::kVP9)
                  << " profile: " << GetProfileName(profile);
         break;
     }
@@ -196,7 +108,7 @@ SupportedCodecs GetHevcCodecs(
         supported_hevc_codecs |= media::EME_CODEC_HEVC_PROFILE_MAIN10;
         break;
       default:
-        DVLOG(1) << "Unexpected " << GetCodecName(media::VideoCodec::kCodecHEVC)
+        DVLOG(1) << "Unexpected " << GetCodecName(media::VideoCodec::kHEVC)
                  << " profile: " << GetProfileName(profile);
         break;
     }
@@ -211,19 +123,25 @@ SupportedCodecs GetSupportedCodecs(const media::CdmCapability& capability) {
 
   for (const auto& codec : capability.audio_codecs) {
     switch (codec) {
-      case media::AudioCodec::kCodecOpus:
+      case media::AudioCodec::kOpus:
         supported_codecs |= media::EME_CODEC_OPUS;
         break;
-      case media::AudioCodec::kCodecVorbis:
+      case media::AudioCodec::kVorbis:
         supported_codecs |= media::EME_CODEC_VORBIS;
         break;
-      case media::AudioCodec::kCodecFLAC:
+      case media::AudioCodec::kFLAC:
         supported_codecs |= media::EME_CODEC_FLAC;
         break;
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-      case media::AudioCodec::kCodecAAC:
+      case media::AudioCodec::kAAC:
         supported_codecs |= media::EME_CODEC_AAC;
         break;
+#if BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
+      case media::AudioCodec::kDTS:
+        supported_codecs |= media::EME_CODEC_DTS;
+        supported_codecs |= media::EME_CODEC_DTSXP2;
+        break;
+#endif  // BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
       default:
         DVLOG(1) << "Unexpected supported codec: " << GetCodecName(codec);
@@ -235,23 +153,22 @@ SupportedCodecs GetSupportedCodecs(const media::CdmCapability& capability) {
   // with some video codecs.
   for (const auto& codec : capability.video_codecs) {
     switch (codec.first) {
-      case media::VideoCodec::kCodecVP8:
+      case media::VideoCodec::kVP8:
         supported_codecs |= media::EME_CODEC_VP8;
         break;
-      case media::VideoCodec::kCodecVP9:
+      case media::VideoCodec::kVP9:
         supported_codecs |= GetVP9Codecs(codec.second);
         break;
-        break;
-      case media::VideoCodec::kCodecAV1:
+      case media::VideoCodec::kAV1:
         supported_codecs |= media::EME_CODEC_AV1;
         break;
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-      case media::VideoCodec::kCodecH264:
+      case media::VideoCodec::kH264:
         supported_codecs |= media::EME_CODEC_AVC1;
         break;
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 #if BUILDFLAG(ENABLE_PLATFORM_HEVC)
-      case media::VideoCodec::kCodecHEVC:
+      case media::VideoCodec::kHEVC:
         supported_codecs |= GetHevcCodecs(codec.second);
         break;
 #endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC)
@@ -279,7 +196,7 @@ EmeSessionTypeSupport GetPersistentLicenseSupport(bool supported_by_the_cdm) {
   }
 
 // On ChromeOS, platform verification is similar to CDM host verification.
-#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION) || defined(OS_CHROMEOS)
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION) || BUILDFLAG(IS_CHROMEOS)
   bool cdm_host_verification_potentially_supported = true;
 #else
   bool cdm_host_verification_potentially_supported = false;
@@ -292,7 +209,7 @@ EmeSessionTypeSupport GetPersistentLicenseSupport(bool supported_by_the_cdm) {
     return EmeSessionTypeSupport::NOT_SUPPORTED;
   }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
   // On ChromeOS, platform verification (similar to CDM host verification)
   // requires identifier to be allowed.
   // TODO(jrummell): Currently the ChromeOS CDM does not require storage ID
@@ -306,24 +223,11 @@ EmeSessionTypeSupport GetPersistentLicenseSupport(bool supported_by_the_cdm) {
   // Storage ID not implemented, so no support for persistent license.
   DVLOG(2) << __func__ << ": Not supported without CDM storage ID.";
   return EmeSessionTypeSupport::NOT_SUPPORTED;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 }
 
-void AddWidevine(
-    std::vector<std::unique_ptr<KeySystemProperties>>* concrete_key_systems) {
-#if defined(WIDEVINE_CDM_MIN_GLIBC_VERSION)
-  base::Version glibc_version(gnu_get_libc_version());
-  DCHECK(glibc_version.IsValid());
-  if (glibc_version < base::Version(WIDEVINE_CDM_MIN_GLIBC_VERSION))
-    return;
-#endif  // defined(WIDEVINE_CDM_MIN_GLIBC_VERSION)
-
-  media::mojom::KeySystemCapabilityPtr capability;
-  if (!content::IsKeySystemSupported(kWidevineKeySystem, &capability)) {
-    DVLOG(1) << "Widevine CDM is not currently available.";
-    return;
-  }
-
+bool AddWidevine(const media::mojom::KeySystemCapabilityPtr& capability,
+                 KeySystemPropertiesVector* key_systems) {
   // Codecs and encryption schemes.
   SupportedCodecs codecs = media::EME_CODEC_NONE;
   SupportedCodecs hw_secure_codecs = media::EME_CODEC_NONE;
@@ -337,12 +241,14 @@ void AddWidevine(
     if (!base::Contains(capability->sw_secure_capability->session_types,
                         media::CdmSessionType::kTemporary)) {
       DVLOG(1) << "Temporary sessions must be supported.";
-      return;
+      return false;
     }
 
     cdm_supports_persistent_license =
         base::Contains(capability->sw_secure_capability->session_types,
                        media::CdmSessionType::kPersistentLicense);
+
+    DVLOG(2) << "Software secure Widevine supported";
   }
 
   if (capability->hw_secure_capability) {
@@ -353,13 +259,14 @@ void AddWidevine(
     if (!base::Contains(capability->hw_secure_capability->session_types,
                         media::CdmSessionType::kTemporary)) {
       DVLOG(1) << "Temporary sessions must be supported.";
-      return;
+      return false;
     }
 
     // TODO(b/186035558): With a single flag we can't distinguish persistent
     // session support between software and hardware CDMs. This should be
     // fixed so that if there is both a software and a hardware CDM, persistent
     // session support can be different between the versions.
+    DVLOG(2) << "Hardware secure Widevine supported";
   }
 
   // Robustness.
@@ -367,13 +274,13 @@ void AddWidevine(
   auto max_audio_robustness = Robustness::SW_SECURE_CRYPTO;
   auto max_video_robustness = Robustness::SW_SECURE_DECODE;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
   // On ChromeOS, we support HW_SECURE_ALL even without hardware secure codecs.
   // See WidevineKeySystemProperties::GetRobustnessConfigRule().
   max_audio_robustness = Robustness::HW_SECURE_ALL;
   max_video_robustness = Robustness::HW_SECURE_ALL;
 #else
-  if (base::FeatureList::IsEnabled(media::kHardwareSecureDecryption)) {
+  if (media::IsHardwareSecureDecryptionEnabled()) {
     max_audio_robustness = Robustness::HW_SECURE_CRYPTO;
     max_video_robustness = Robustness::HW_SECURE_ALL;
   }
@@ -385,34 +292,76 @@ void AddWidevine(
   // Others.
   auto persistent_state_support = EmeFeatureSupport::REQUESTABLE;
   auto distinctive_identifier_support = EmeFeatureSupport::NOT_SUPPORTED;
-#if defined(OS_CHROMEOS) || defined(OS_WIN)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
   distinctive_identifier_support = EmeFeatureSupport::REQUESTABLE;
 #endif
 
-  concrete_key_systems->emplace_back(new cdm::WidevineKeySystemProperties(
+  key_systems->emplace_back(new cdm::WidevineKeySystemProperties(
       codecs, encryption_schemes, hw_secure_codecs,
       hw_secure_encryption_schemes, max_audio_robustness, max_video_robustness,
       persistent_license_support, persistent_state_support,
       distinctive_identifier_support));
+  return true;
 }
 #endif  // BUILDFLAG(ENABLE_WIDEVINE)
-#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
+
+const char kExternalClearKeyKeySystem[] = "org.chromium.externalclearkey";
+
+void AddExternalClearKey(
+    const media::mojom::KeySystemCapabilityPtr& /*capability*/,
+    KeySystemPropertiesVector* key_systems) {
+  DVLOG(1) << __func__;
+
+  if (!base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting)) {
+    DLOG(ERROR) << "ExternalClearKey supported despite not enabled.";
+    return;
+  }
+
+  // TODO(xhwang): Actually use `capability` to determine capabilities.
+  key_systems->push_back(std::make_unique<cdm::ExternalClearKeyProperties>());
+}
+
+void OnKeySystemSupportUpdated(
+    media::GetSupportedKeySystemsCB cb,
+    content::KeySystemCapabilityPtrMap key_system_capabilities) {
+  KeySystemPropertiesVector key_systems;
+  for (const auto& entry : key_system_capabilities) {
+    const auto& key_system = entry.first;
+    const auto& capability = entry.second;
+#if BUILDFLAG(ENABLE_WIDEVINE)
+    if (key_system == kWidevineKeySystem) {
+      AddWidevine(capability, &key_systems);
+      continue;
+    }
+#endif  // BUILDFLAG(ENABLE_WIDEVINE)
+
+    if (key_system == kExternalClearKeyKeySystem) {
+      AddExternalClearKey(capability, &key_systems);
+      continue;
+    }
+
+    DLOG(ERROR) << "Unrecognized key system: " << key_system;
+  }
+
+  cb.Run(std::move(key_systems));
+}
+
+#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS) || BUILDFLAG(IS_WIN)
 
 }  // namespace
 
-void AddChromeKeySystems(
-    std::vector<std::unique_ptr<KeySystemProperties>>* key_systems_properties) {
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-  if (base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting))
-    AddExternalClearKey(key_systems_properties);
-
-#if BUILDFLAG(ENABLE_WIDEVINE)
-  AddWidevine(key_systems_properties);
-#endif  // BUILDFLAG(ENABLE_WIDEVINE)
-
-#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
-
-#if defined(OS_ANDROID)
-  cdm::AddAndroidWidevine(key_systems_properties);
-#endif  // defined(OS_ANDROID)
+void GetChromeKeySystems(media::GetSupportedKeySystemsCB cb) {
+#if BUILDFLAG(IS_ANDROID)
+  KeySystemPropertiesVector key_systems;
+  cdm::AddAndroidWidevine(&key_systems);
+  std::move(cb).Run(std::move(key_systems));
+  return;
+#elif BUILDFLAG(ENABLE_LIBRARY_CDMS) || BUILDFLAG(IS_WIN)
+  content::ObserveKeySystemSupportUpdate(
+      base::BindRepeating(&OnKeySystemSupportUpdated, std::move(cb)));
+  return;
+#else
+  std::move(cb).Run({});
+  return;
+#endif
 }

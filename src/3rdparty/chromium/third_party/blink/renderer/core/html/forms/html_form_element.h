@@ -30,6 +30,7 @@
 #include "third_party/blink/renderer/core/html/forms/radio_button_group_scope.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/loader/form_submission.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 
 namespace blink {
 
@@ -116,7 +117,7 @@ class CORE_EXPORT HTMLFormElement final : public HTMLElement {
   FormData* ConstructEntryList(HTMLFormControlElement* submit_button,
                                const WTF::TextEncoding& encoding);
 
-  unsigned UniqueRendererFormId() const { return unique_renderer_form_id_; }
+  uint64_t UniqueRendererFormId() const { return unique_renderer_form_id_; }
 
   void InvalidateListedElementsIncludingShadowTrees();
 
@@ -173,7 +174,7 @@ class CORE_EXPORT HTMLFormElement final : public HTMLElement {
   // Do not access image_elements_ directly. Use ImageElements() instead.
   HeapVector<Member<HTMLImageElement>> image_elements_;
 
-  unsigned unique_renderer_form_id_;
+  uint64_t unique_renderer_form_id_;
 
   bool is_submitting_ = false;
   bool in_user_js_submit_event_ = false;

@@ -13,7 +13,9 @@ android_library("java") {
     "java/src/org/chromium/components/messages/MessageDispatcher.java",
     "java/src/org/chromium/components/messages/MessageDispatcherBridge.java",
     "java/src/org/chromium/components/messages/MessageDispatcherProvider.java",
+    "java/src/org/chromium/components/messages/MessageSecondaryMenuItems.java",
     "java/src/org/chromium/components/messages/MessageWrapper.java",
+    "java/src/org/chromium/components/messages/MessagesMetrics.java",
   ]
   resources_package = "org.chromium.components.messages"
   annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
@@ -62,6 +64,8 @@ static_library("android") {
     "//content/public/browser",
     "//ui/android:android",
   ]
+
+  public_deps = [ "//skia" ]
 }
 
 static_library("test_support") {
@@ -74,6 +78,17 @@ static_library("test_support") {
   deps = [
     ":android",
     "//testing/gmock",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [ "message_dispatcher_bridge_unittest.cc" ]
+
+  deps = [
+    ":android",
+    "//base",
+    "//testing/gtest",
   ]
 }
 

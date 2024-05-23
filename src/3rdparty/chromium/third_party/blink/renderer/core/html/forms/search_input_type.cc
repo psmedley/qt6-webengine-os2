@@ -43,7 +43,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -84,7 +84,7 @@ void SearchInputType::HandleKeydownEvent(KeyboardEvent& event) {
     return;
   }
 
-  if (event.key() == "Escape") {
+  if (event.key() == "Escape" && GetElement().InnerEditorValue().length()) {
     GetElement().SetValueForUser("");
     GetElement().OnSearch();
     event.SetDefaultHandled();
@@ -110,7 +110,7 @@ void SearchInputType::StartSearchEventTimer() {
   // After typing the first key, we wait 500ms.
   // After the second key, 400ms, then 300, then 200 from then on.
   unsigned step = std::min(length, 4u) - 1;
-  base::TimeDelta timeout = base::TimeDelta::FromMilliseconds(500 - 100 * step);
+  base::TimeDelta timeout = base::Milliseconds(500 - 100 * step);
   search_event_timer_.StartOneShot(timeout, FROM_HERE);
 }
 

@@ -122,6 +122,7 @@ typedef struct V360Context {
     int in, out;
     int interp;
     int alpha;
+    int reset_rot;
     int width, height;
     char *in_forder;
     char *out_forder;
@@ -141,6 +142,7 @@ typedef struct V360Context {
     int fin_pad, fout_pad;
 
     float yaw, pitch, roll;
+    float h_offset, v_offset;
 
     int ih_flip, iv_flip;
     int h_flip, v_flip, d_flip;

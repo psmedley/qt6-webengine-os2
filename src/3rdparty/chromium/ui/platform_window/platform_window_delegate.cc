@@ -41,4 +41,11 @@ absl::optional<MenuType> PlatformWindowDelegate::GetMenuType() {
 void PlatformWindowDelegate::OnOcclusionStateChanged(
     PlatformWindowOcclusionState occlusion_state) {}
 
+absl::optional<OwnedWindowAnchor>
+PlatformWindowDelegate::GetOwnedWindowAnchorAndRectInPx() {
+  return absl::nullopt;
+}
+
+void PlatformWindowDelegate::SetFrameRateThrottleEnabled(bool enabled) {}
+
 }  // namespace ui

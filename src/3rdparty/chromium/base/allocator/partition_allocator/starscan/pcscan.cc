@@ -6,11 +6,29 @@
 
 #include "base/allocator/partition_allocator/starscan/pcscan_internal.h"
 
-namespace base {
-namespace internal {
+namespace partition_alloc::internal {
 
-void PCScan::Initialize(WantedWriteProtectionMode wpmode) {
-  PCScanInternal::Instance().Initialize(wpmode);
+void PCScan::Initialize(InitConfig config) {
+  PCScanInternal::Instance().Initialize(config);
+}
+
+bool PCScan::IsInitialized() {
+  return PCScanInternal::Instance().is_initialized();
+}
+
+void PCScan::Disable() {
+  auto& instance = PCScan::Instance();
+  instance.scheduler().scheduling_backend().DisableScheduling();
+}
+
+bool PCScan::IsEnabled() {
+  auto& instance = PCScan::Instance();
+  return instance.scheduler().scheduling_backend().is_scheduling_enabled();
+}
+
+void PCScan::Reenable() {
+  auto& instance = PCScan::Instance();
+  instance.scheduler().scheduling_backend().EnableScheduling();
 }
 
 void PCScan::RegisterScannableRoot(Root* root) {
@@ -33,8 +51,9 @@ void PCScan::PerformScanIfNeeded(InvocationMode invocation_mode) {
   PCScanInternal::Instance().PerformScanIfNeeded(invocation_mode);
 }
 
-void PCScan::PerformDelayedScan(TimeDelta delay) {
-  PCScanInternal::Instance().PerformDelayedScan(delay);
+void PCScan::PerformDelayedScan(int64_t delay_in_microseconds) {
+  PCScanInternal::Instance().PerformDelayedScan(
+      base::Microseconds(delay_in_microseconds));
 }
 
 void PCScan::JoinScan() {
@@ -76,15 +95,18 @@ void PCScan::UninitForTesting() {
   ReinitPCScanMetadataAllocatorForTesting();          // IN-TEST
 }
 
-void PCScan::ReinitForTesting(WantedWriteProtectionMode wpmode) {
-  PCScanInternal::Instance().ReinitForTesting(wpmode);  // IN-TEST
+void PCScan::ReinitForTesting(InitConfig config) {
+  PCScanInternal::Instance().ReinitForTesting(config);  // IN-TEST
 }
 
 void PCScan::FinishScanForTesting() {
   PCScanInternal::Instance().FinishScanForTesting();  // IN-TEST
 }
 
+void PCScan::RegisterStatsReporter(partition_alloc::StatsReporter* reporter) {
+  PCScanInternal::Instance().RegisterStatsReporter(reporter);
+}
+
 PCScan PCScan::instance_ CONSTINIT;
 
-}  // namespace internal
-}  // namespace base
+}  // namespace partition_alloc::internal

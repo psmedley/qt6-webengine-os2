@@ -5,8 +5,13 @@
 #include "media/capture/video/chromeos/video_capture_features_chromeos.h"
 
 namespace media {
+
 namespace switches {
+
 const char kForceControlFaceAe[] = "force-control-face-ae";
+const char kHdrNetOverride[] = "hdrnet-override";
+const char kAutoFramingOverride[] = "auto-framing-override";
+
 }  // namespace switches
 
 namespace features {
@@ -17,4 +22,5 @@ const base::Feature kDisableCameraFrameRotationAtSource{
     "DisableCameraFrameRotationAtSource", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace features
+
 }  // namespace media

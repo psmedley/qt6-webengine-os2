@@ -104,6 +104,7 @@ _EXTRA_PACKAGE_UNDER_TEST = ('org.chromium.chrome.test.pagecontroller.rules.'
 FEATURE_ANNOTATION = 'Feature'
 RENDER_TEST_FEATURE_ANNOTATION = 'RenderTest'
 WPR_ARCHIVE_FILE_PATH_ANNOTATION = 'WPRArchiveDirectory'
+WPR_ARCHIVE_NAME_ANNOTATION = 'WPRArchiveDirectory$ArchiveName'
 WPR_RECORD_REPLAY_TEST_FEATURE_ANNOTATION = 'WPRRecordReplayTest'
 
 _DEVICE_GOLD_DIR = 'skia_gold'
@@ -162,8 +163,7 @@ def _GetTargetPackageName(test_apk):
 class LocalDeviceInstrumentationTestRun(
     local_device_test_run.LocalDeviceTestRun):
   def __init__(self, env, test_instance):
-    super(LocalDeviceInstrumentationTestRun, self).__init__(
-        env, test_instance)
+    super().__init__(env, test_instance)
     self._chrome_proxy = None
     self._context_managers = collections.defaultdict(list)
     self._flag_changers = {}
@@ -198,8 +198,7 @@ class LocalDeviceInstrumentationTestRun(
           # manually invoke its __enter__ and __exit__ methods in setup and
           # teardown.
           system_app_context = system_app.ReplaceSystemApp(
-              dev, self._test_instance.replace_system_package.package,
-              self._test_instance.replace_system_package.replacement_apk)
+              dev, replacement_apk=self._test_instance.replace_system_package)
           # Pylint is not smart enough to realize that this field has
           # an __enter__ method, and will complain loudly.
           # pylint: disable=no-member
@@ -513,13 +512,21 @@ class LocalDeviceInstrumentationTestRun(
         # Feature flags won't work in instrumentation tests unless the activity
         # is restarted.
         # Tests with identical features are grouped to minimize restarts.
-        if 'Batch$SplitByFeature' in annotations:
+        # UnitTests that specify flags always use Features.JUnitProcessor, so
+        # they don't need to be split.
+        if batch_name != 'UnitTests':
           if 'Features$EnableFeatures' in annotations:
             batch_name += '|enabled:' + ','.join(
                 sorted(annotations['Features$EnableFeatures']['value']))
           if 'Features$DisableFeatures' in annotations:
             batch_name += '|disabled:' + ','.join(
                 sorted(annotations['Features$DisableFeatures']['value']))
+          if 'CommandLineFlags$Add' in annotations:
+            batch_name += '|cmd_line_add:' + ','.join(
+                sorted(annotations['CommandLineFlags$Add']['value']))
+          if 'CommandLineFlags$Remove' in annotations:
+            batch_name += '|cmd_line_remove:' + ','.join(
+                sorted(annotations['CommandLineFlags$Remove']['value']))
 
         if not batch_name in batched_tests:
           batched_tests[batch_name] = []
@@ -527,15 +534,27 @@ class LocalDeviceInstrumentationTestRun(
       else:
         other_tests.append(test)
 
+    def dict2list(d):
+      if isinstance(d, dict):
+        return sorted([(k, dict2list(v)) for k, v in d.items()])
+      if isinstance(d, list):
+        return [dict2list(v) for v in d]
+      if isinstance(d, tuple):
+        return tuple(dict2list(v) for v in d)
+      return d
+
     all_tests = []
-    for _, tests in list(batched_tests.items()):
-      tests.sort()  # Ensure a consistent ordering across external shards.
+    for _, btests in list(batched_tests.items()):
+      # Ensure a consistent ordering across external shards.
+      btests.sort(key=dict2list)
       all_tests.extend([
-          tests[i:i + _TEST_BATCH_MAX_GROUP_SIZE]
-          for i in range(0, len(tests), _TEST_BATCH_MAX_GROUP_SIZE)
+          btests[i:i + _TEST_BATCH_MAX_GROUP_SIZE]
+          for i in range(0, len(btests), _TEST_BATCH_MAX_GROUP_SIZE)
       ])
     all_tests.extend(other_tests)
-    return all_tests
+    # Sort all tests by hash.
+    # TODO(crbug.com/1257820): Add sorting logic back to _PartitionTests.
+    return self._SortTests(all_tests)
 
   #override
   def _GetUniqueTestName(self, test):
@@ -566,6 +585,16 @@ class LocalDeviceInstrumentationTestRun(
       coverage_device_file = os.path.join(coverage_directory, coverage_basename)
       coverage_device_file += '.exec'
       extras['coverageFile'] = coverage_device_file
+
+    if self._test_instance.enable_breakpad_dump:
+      # Use external storage directory so that the breakpad dump can be accessed
+      # by the test APK in addition to the apk_under_test.
+      breakpad_dump_directory = os.path.join(device.GetExternalStoragePath(),
+                                             'chromium_dumps')
+      if device.PathExists(breakpad_dump_directory):
+        device.RemovePath(breakpad_dump_directory, recursive=True)
+      flags_to_add.append('--breakpad-dump-location=' + breakpad_dump_directory)
+
     # Save screenshot if screenshot dir is specified (save locally) or if
     # a GS bucket is passed (save in cloud).
     screenshot_device_file = device_temp_file.DeviceTempFile(
@@ -645,10 +674,12 @@ class LocalDeviceInstrumentationTestRun(
                                wpr_archive_path,
                                os.path.exists(wpr_archive_path)))
 
+      file_name = _GetWPRArchiveFileName(
+          test) or self._GetUniqueTestName(test) + '.wprgo'
+
       # Some linux version does not like # in the name. Replaces it with __.
-      archive_path = os.path.join(
-          wpr_archive_path,
-          _ReplaceUncommonChars(self._GetUniqueTestName(test)) + '.wprgo')
+      archive_path = os.path.join(wpr_archive_path,
+                                  _ReplaceUncommonChars(file_name))
 
       if not os.path.exists(_WPR_GO_LINUX_X86_64_PATH):
         # If we got to this stage, then we should have
@@ -707,9 +738,14 @@ class LocalDeviceInstrumentationTestRun(
           try:
             if not os.path.exists(self._test_instance.coverage_directory):
               os.makedirs(self._test_instance.coverage_directory)
-            device.PullFile(coverage_device_file,
-                            self._test_instance.coverage_directory)
-            device.RemovePath(coverage_device_file, True)
+            # Retries add time to test execution.
+            if device.PathExists(coverage_device_file, retries=0):
+              device.PullFile(coverage_device_file,
+                              self._test_instance.coverage_directory)
+              device.RemovePath(coverage_device_file, True)
+            else:
+              logging.warning('Coverage file does not exist: %s',
+                              coverage_device_file)
           except (OSError, base_error.BaseError) as e:
             logging.warning('Failed to handle coverage data after tests: %s', e)
 
@@ -843,14 +879,14 @@ class LocalDeviceInstrumentationTestRun(
       logging.info('detected failure in %s. raw output:', test_display_name)
       for l in output:
         logging.info('  %s', l)
-      if (not self._env.skip_clear_data
-          and self._test_instance.package_info):
-        permissions = (
-            self._test_instance.apk_under_test.GetPermissions()
-            if self._test_instance.apk_under_test
-            else None)
-        device.ClearApplicationState(self._test_instance.package_info.package,
-                                     permissions=permissions)
+      if not self._env.skip_clear_data:
+        if self._test_instance.package_info:
+          permissions = (self._test_instance.apk_under_test.GetPermissions()
+                         if self._test_instance.apk_under_test else None)
+          device.ClearApplicationState(self._test_instance.package_info.package,
+                                       permissions=permissions)
+        if self._test_instance.enable_breakpad_dump:
+          device.RemovePath(breakpad_dump_directory, recursive=True)
     else:
       logging.debug('raw output from %s:', test_display_name)
       for l in output:
@@ -1031,8 +1067,8 @@ class LocalDeviceInstrumentationTestRun(
     if device.FileExists(trace_device_file.name):
       try:
         java_trace_json = device.ReadFile(trace_device_file.name)
-      except IOError:
-        raise Exception('error pulling trace file from device')
+      except IOError as e:
+        raise Exception('error pulling trace file from device') from e
       finally:
         trace_device_file.close()
 
@@ -1168,8 +1204,12 @@ class LocalDeviceInstrumentationTestRun(
           # All the key/value pairs in the JSON file are strings, so convert
           # to a bool.
           json_dict = json.load(infile)
-          fail_on_unsupported = json_dict.get('fail_on_unsupported_configs',
-                                              'false')
+          optional_dict = json_dict.get('optional_keys', {})
+          if 'optional_keys' in json_dict:
+            should_rewrite = True
+            del json_dict['optional_keys']
+          fail_on_unsupported = optional_dict.get('fail_on_unsupported_configs',
+                                                  'false')
           fail_on_unsupported = fail_on_unsupported.lower() == 'true'
           # Grab the full test name so we can associate the comparison with a
           # particular test, which is necessary if tests are batched together.
@@ -1189,7 +1229,8 @@ class LocalDeviceInstrumentationTestRun(
         # should_ignore_in_gold != should_hide_failure.
         should_hide_failure = running_on_unsupported
         if should_ignore_in_gold:
-          should_rewrite = True
+          # This is put in the regular keys dict instead of the optional one
+          # because ignore rules do not apply to optional keys.
           json_dict['ignore'] = '1'
         if should_rewrite:
           with open(json_path, 'w') as outfile:
@@ -1204,6 +1245,7 @@ class LocalDeviceInstrumentationTestRun(
               png_file=image_path,
               output_manager=self._env.output_manager,
               use_luci=use_luci,
+              optional_keys=optional_dict,
               force_dryrun=self._IsRetryWithoutPatch())
         except Exception as e:  # pylint: disable=broad-except
           _FailTestIfNecessary(results, full_test_name)
@@ -1342,16 +1384,21 @@ def _IsWPRRecordReplayTest(test):
   """Determines whether a test or a list of tests is a WPR RecordReplay Test."""
   if not isinstance(test, list):
     test = [test]
-  return any([
-      WPR_RECORD_REPLAY_TEST_FEATURE_ANNOTATION in t['annotations'].get(
-          FEATURE_ANNOTATION, {}).get('value', ()) for t in test
-  ])
+  return any(WPR_RECORD_REPLAY_TEST_FEATURE_ANNOTATION in t['annotations'].get(
+      FEATURE_ANNOTATION, {}).get('value', ()) for t in test)
 
 
 def _GetWPRArchivePath(test):
   """Retrieves the archive path from the WPRArchiveDirectory annotation."""
   return test['annotations'].get(WPR_ARCHIVE_FILE_PATH_ANNOTATION,
                                  {}).get('value', ())
+
+
+def _GetWPRArchiveFileName(test):
+  """Retrieves the WPRArchiveDirectory.ArchiveName annotation."""
+  value = test['annotations'].get(WPR_ARCHIVE_NAME_ANNOTATION,
+                                  {}).get('value', None)
+  return value[0] if value else None
 
 
 def _ReplaceUncommonChars(original):
@@ -1369,8 +1416,8 @@ def _IsRenderTest(test):
   """Determines if a test or list of tests has a RenderTest amongst them."""
   if not isinstance(test, list):
     test = [test]
-  return any([RENDER_TEST_FEATURE_ANNOTATION in t['annotations'].get(
-              FEATURE_ANNOTATION, {}).get('value', ()) for t in test])
+  return any(RENDER_TEST_FEATURE_ANNOTATION in t['annotations'].get(
+      FEATURE_ANNOTATION, {}).get('value', ()) for t in test)
 
 
 def _GenerateRenderTestHtml(image_name, failure_link, golden_link, diff_link):
@@ -1482,7 +1529,7 @@ def _MatchingTestInResults(results, full_test_name):
     True if one of the results in |results| has the same name as
     |full_test_name|, otherwise False.
   """
-  return any([r for r in results if r.GetName() == full_test_name])
+  return any(r for r in results if r.GetName() == full_test_name)
 
 
 def _ShouldReportNoMatchingResult(full_test_name):

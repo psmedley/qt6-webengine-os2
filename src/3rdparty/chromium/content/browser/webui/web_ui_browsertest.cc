@@ -9,6 +9,7 @@
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
@@ -19,7 +20,9 @@
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/browser/fenced_frame/fenced_frame.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/webui/content_web_ui_controller_factory.h"
 #include "content/browser/webui/web_ui_impl.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -33,7 +36,9 @@
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
+#include "content/public/test/fenced_frame_test_util.h"
 #include "content/public/test/scoped_web_ui_controller_factory_registration.h"
+#include "content/public/test/test_frame_navigation_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/web_ui_browsertest_util.h"
@@ -62,7 +67,7 @@ class WebUIImplBrowserTest : public ContentBrowserTest {
 };
 
 // TODO(crbug.com/154571): Shared workers are not available on Android.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 const char kLoadSharedWorkerScript[] = R"(
     new Promise((resolve) => {
       const sharedWorker = new SharedWorker($1);
@@ -72,7 +77,7 @@ const char kLoadSharedWorkerScript[] = R"(
       sharedWorker.port.postMessage('ping');
     });
   )";
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 const char kLoadDedicatedWorkerScript[] = R"(
     new Promise((resolve) => {
@@ -87,15 +92,15 @@ const char kLoadDedicatedWorkerScript[] = R"(
 class TestWebUIMessageHandler : public WebUIMessageHandler {
  public:
   void RegisterMessages() override {
-    web_ui()->RegisterMessageCallback(
+    web_ui()->RegisterDeprecatedMessageCallback(
         "messageRequiringGesture",
         base::BindRepeating(&TestWebUIMessageHandler::OnMessageRequiringGesture,
                             base::Unretained(this)));
-    web_ui()->RegisterMessageCallback(
+    web_ui()->RegisterDeprecatedMessageCallback(
         "notifyFinish",
         base::BindRepeating(&TestWebUIMessageHandler::OnNotifyFinish,
                             base::Unretained(this)));
-    web_ui()->RegisterMessageCallback(
+    web_ui()->RegisterDeprecatedMessageCallback(
         "sendMessage",
         base::BindRepeating(&TestWebUIMessageHandler::OnSendMessase,
                             base::Unretained(this)));
@@ -161,7 +166,7 @@ class WebUIRequiringGestureBrowserTest : public ContentBrowserTest {
     ASSERT_TRUE(NavigateToURL(web_contents(), GetWebUIURL(kChromeUIGpuHost)));
     test_handler_ = new TestWebUIMessageHandler();
     web_contents()->GetWebUI()->AddMessageHandler(
-        base::WrapUnique(test_handler_));
+        base::WrapUnique(test_handler_.get()));
   }
 
  protected:
@@ -186,7 +191,7 @@ class WebUIRequiringGestureBrowserTest : public ContentBrowserTest {
   base::SimpleTestTickClock clock_;
 
   // Owned by the WebUI associated with the WebContents.
-  TestWebUIMessageHandler* test_handler_ = nullptr;
+  raw_ptr<TestWebUIMessageHandler> test_handler_ = nullptr;
 };
 
 }  // namespace
@@ -347,7 +352,8 @@ IN_PROC_BROWSER_TEST_F(WebUIRequiringGestureBrowserTest,
   // renderer.
   main_rfh()->ExecuteJavaScriptWithUserGestureForTests(
       u"chrome.send('messageRequiringGesture');"
-      u"chrome.send('notifyFinish');");
+      u"chrome.send('notifyFinish');",
+      base::NullCallback());
   base::RunLoop run_loop;
   test_handler()->set_finish_closure(run_loop.QuitClosure());
   run_loop.Run();
@@ -386,12 +392,12 @@ IN_PROC_BROWSER_TEST_F(WebUIRequiringGestureBrowserTest,
   EXPECT_EQ(1, test_handler()->message_requiring_gesture_count());
 
   // Now+5 seconds should be allowed.
-  AdvanceClock(base::TimeDelta::FromSeconds(5));
+  AdvanceClock(base::Seconds(5));
   SendMessageAndWaitForFinish();
   EXPECT_EQ(2, test_handler()->message_requiring_gesture_count());
 
   // Anything after that should be disallowed though.
-  AdvanceClock(base::TimeDelta::FromMicroseconds(1));
+  AdvanceClock(base::Microseconds(1));
   SendMessageAndWaitForFinish();
   EXPECT_EQ(2, test_handler()->message_requiring_gesture_count());
 }
@@ -492,8 +498,8 @@ IN_PROC_BROWSER_TEST_F(WebUIRequestSchemesTest, DefaultSchemesCanBeRequested) {
 
   std::vector<std::string> requestable_schemes = {
       // WebSafe Schemes:
-      "feed", url::kHttpScheme, url::kHttpsScheme, url::kFtpScheme,
-      url::kDataScheme, url::kWsScheme, url::kWssScheme,
+      url::kHttpScheme, url::kHttpsScheme, url::kDataScheme, url::kWsScheme,
+      url::kWssScheme,
       // Default added as requestable schemes:
       url::kFileScheme, kChromeUIScheme};
 
@@ -532,10 +538,8 @@ IN_PROC_BROWSER_TEST_F(WebUIRequestSchemesTest,
   // not requestable.
   std::vector<std::string> requestable_schemes = {
       // WebSafe schemes:
-      "feed",
       url::kHttpScheme,
       url::kHttpsScheme,
-      url::kFtpScheme,
       url::kDataScheme,
       url::kWsScheme,
       url::kWssScheme,
@@ -644,7 +648,7 @@ class WebUIDedicatedWorkerTest : public WebUIWorkerTest,
 INSTANTIATE_TEST_SUITE_P(All, WebUIDedicatedWorkerTest, testing::Bool());
 
 // TODO(crbug.com/154571): Shared workers are not available on Android.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 // Verify that we can create SharedWorker with scheme "chrome://" under
 // WebUI page.
 IN_PROC_BROWSER_TEST_F(WebUIWorkerTest, CanCreateWebUISharedWorkerForWebUI) {
@@ -781,7 +785,7 @@ IN_PROC_BROWSER_TEST_F(WebUIWorkerTest,
   EXPECT_THAT(result.error, ::testing::StartsWith(expected_failure));
 }
 
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // Verify that we can create a Worker with scheme "chrome://" under WebUI page.
 IN_PROC_BROWSER_TEST_P(WebUIDedicatedWorkerTest,

@@ -16,8 +16,9 @@
 #include "cc/paint/paint_record.h"
 #include "cc/paint/paint_worklet_input.h"
 #include "cc/paint/skia_paint_image_generator.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace cc {
 namespace {
@@ -155,6 +156,10 @@ SkImageInfo PaintImage::GetSkImageInfo() const {
     return texture_backing_->GetSkImageInfo();
   } else if (cached_sk_image_) {
     return cached_sk_image_->imageInfo();
+  } else if (paint_worklet_input_) {
+    auto size = paint_worklet_input_->GetSize();
+    return SkImageInfo::MakeUnknown(static_cast<int>(size.width()),
+                                    static_cast<int>(size.height()));
   } else {
     return SkImageInfo::MakeUnknown();
   }
@@ -163,6 +168,12 @@ SkImageInfo PaintImage::GetSkImageInfo() const {
 gpu::Mailbox PaintImage::GetMailbox() const {
   DCHECK(texture_backing_);
   return texture_backing_->GetMailbox();
+}
+
+bool PaintImage::IsOpaque() const {
+  if (IsPaintWorklet())
+    return paint_worklet_input_->KnownToBeOpaque();
+  return GetSkImageInfo().isOpaque();
 }
 
 void PaintImage::CreateSkImage() {
@@ -277,14 +288,6 @@ PaintImage::ContentId PaintImage::GetContentIdForFrame(
   return content_id_;
 }
 
-SkColorType PaintImage::GetColorType() const {
-  return GetSkImageInfo().colorType();
-}
-
-SkAlphaType PaintImage::GetAlphaType() const {
-  return GetSkImageInfo().alphaType();
-}
-
 bool PaintImage::IsTextureBacked() const {
   if (texture_backing_)
     return true;
@@ -298,19 +301,10 @@ void PaintImage::FlushPendingSkiaOps() {
     texture_backing_->FlushPendingSkiaOps();
 }
 
-int PaintImage::width() const {
-  return paint_worklet_input_
-             ? static_cast<int>(paint_worklet_input_->GetSize().width())
-             : GetSkImageInfo().width();
-}
+gfx::ContentColorUsage PaintImage::GetContentColorUsage(bool* is_hlg) const {
+  if (is_hlg)
+    *is_hlg = false;
 
-int PaintImage::height() const {
-  return paint_worklet_input_
-             ? static_cast<int>(paint_worklet_input_->GetSize().height())
-             : GetSkImageInfo().height();
-}
-
-gfx::ContentColorUsage PaintImage::GetContentColorUsage() const {
   // Right now, JS paint worklets can only be in sRGB
   if (paint_worklet_input_)
     return gfx::ContentColorUsage::kSRGB;
@@ -322,10 +316,15 @@ gfx::ContentColorUsage PaintImage::GetContentColorUsage() const {
     return gfx::ContentColorUsage::kSRGB;
 
   skcms_TransferFunction fn;
-  if (!color_space->isNumericalTransferFn(&fn) &&
-      (skcms_TransferFunction_isPQish(&fn) ||
-       skcms_TransferFunction_isHLGish(&fn))) {
-    return gfx::ContentColorUsage::kHDR;
+  if (!color_space->isNumericalTransferFn(&fn)) {
+    if (skcms_TransferFunction_isPQish(&fn))
+      return gfx::ContentColorUsage::kHDR;
+
+    if (skcms_TransferFunction_isHLGish(&fn)) {
+      if (is_hlg)
+        *is_hlg = true;
+      return gfx::ContentColorUsage::kHDR;
+    }
   }
 
   // If it's not HDR and not SRGB, report it as WCG.

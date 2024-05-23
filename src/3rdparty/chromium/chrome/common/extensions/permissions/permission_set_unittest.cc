@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -689,7 +688,7 @@ TEST(PermissionsTest, IsPrivilegeIncrease) {
       {"sockets3", true},           // tcp:a.com:80 -> tcp:*:*
   };
 
-  for (size_t i = 0; i < base::size(kTests); ++i) {
+  for (size_t i = 0; i < std::size(kTests); ++i) {
     scoped_refptr<Extension> old_extension(
         LoadManifest("allow_silent_upgrade",
                      std::string(kTests[i].base_name) + "_old.json"));
@@ -794,6 +793,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermissionID::kTabCapture);
   skip.insert(APIPermissionID::kWebRequest);
   skip.insert(APIPermissionID::kWebRequestBlocking);
+  skip.insert(APIPermissionID::kDeclarativeNetRequestWithHostAccess);
 
   // This permission requires explicit user action (context menu handler)
   // so we won't prompt for it for now.
@@ -1672,7 +1672,7 @@ TEST(PermissionsTest, IsHostPrivilegeIncrease) {
        false},
   };
   const PermissionMessageProvider* provider = PermissionMessageProvider::Get();
-  for (size_t i = 0; i < base::size(test_cases); ++i) {
+  for (size_t i = 0; i < std::size(test_cases); ++i) {
     URLPatternSet explicit_hosts1;
     URLPatternSet explicit_hosts2;
     const auto& test_case = test_cases[i];
@@ -1772,8 +1772,8 @@ TEST(PermissionsTest, SyncFileSystemPermission) {
 }
 
 // Make sure that we don't crash when we're trying to show the permissions
-// even though chrome://thumb (and everything that's not chrome://favicon with
-// a chrome:// scheme) is not a valid permission.
+// even though everything with a chrome:// scheme except chrome://favicon is
+// not a valid permission.
 // More details here: crbug/246314.
 TEST(PermissionsTest, ChromeURLs) {
   URLPatternSet allowed_hosts;
@@ -1782,7 +1782,7 @@ TEST(PermissionsTest, ChromeURLs) {
   allowed_hosts.AddPattern(
       URLPattern(URLPattern::SCHEME_ALL, "chrome://favicon/"));
   allowed_hosts.AddPattern(
-      URLPattern(URLPattern::SCHEME_ALL, "chrome://thumb/"));
+      URLPattern(URLPattern::SCHEME_ALL, "chrome://not-favicon/"));
   PermissionSet permissions(APIPermissionSet(), ManifestPermissionSet(),
                             std::move(allowed_hosts), URLPatternSet());
   PermissionMessageProvider::Get()->GetPermissionMessages(

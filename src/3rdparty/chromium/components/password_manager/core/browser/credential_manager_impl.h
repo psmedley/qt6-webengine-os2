@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "components/password_manager/core/browser/credential_manager_password_form_manager.h"
 #include "components/password_manager/core/browser/credential_manager_pending_prevent_silent_access_task.h"
@@ -36,6 +37,8 @@ class CredentialManagerImpl
       public CredentialManagerPasswordFormManagerDelegate {
  public:
   explicit CredentialManagerImpl(PasswordManagerClient* client);
+  CredentialManagerImpl(const CredentialManagerImpl&) = delete;
+  CredentialManagerImpl& operator=(const CredentialManagerImpl&) = delete;
   ~CredentialManagerImpl() override;
 
   void Store(const CredentialInfo& credential, StoreCallback callback);
@@ -77,10 +80,7 @@ class CredentialManagerImpl
   // CredentialManagerPasswordFormManagerDelegate:
   void OnProvisionalSaveComplete() override;
 
-  PasswordManagerClient* client_;
-
-  // Set to false to disable automatic signing in.
-  BooleanPrefMember auto_signin_enabled_;
+  raw_ptr<PasswordManagerClient> client_;
 
   // Used to store or update a credential. Calls OnProvisionalSaveComplete
   // on this delegate.
@@ -96,8 +96,6 @@ class CredentialManagerImpl
 
   // Helper for making the requests on leak detection.
   LeakDetectionDelegate leak_delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(CredentialManagerImpl);
 };
 
 }  // namespace password_manager

@@ -54,7 +54,7 @@ AccessibilityBridge::AccessibilityBridge(
     fuchsia::accessibility::semantics::SemanticsManager* semantics_manager,
     FrameWindowTreeHost* window_tree_host,
     content::WebContents* web_contents,
-    base::OnceCallback<void(zx_status_t)> on_error_callback,
+    base::OnceCallback<bool(zx_status_t)> on_error_callback,
     inspect::Node inspect_node)
     : binding_(this),
       window_tree_host_(window_tree_host),
@@ -71,11 +71,14 @@ AccessibilityBridge::AccessibilityBridge(
     ZX_LOG(ERROR, status) << "SemanticTree disconnected";
     std::move(on_error_callback_).Run(ZX_ERR_INTERNAL);
   });
+
+  // Set up inspect node for semantic trees.
+  inspect_node_tree_dump_ = inspect_node_.CreateLazyNode(
+      kSemanticTreesInspectNodeName,
+      [this]() { return fpromise::make_ok_promise(FillInspectData()); });
 }
 
 inspect::Inspector AccessibilityBridge::FillInspectData() {
-  DCHECK(enable_semantic_updates_);
-
   inspect::Inspector inspector;
 
   // Add a node for each AXTree of which the accessibility bridge is aware.
@@ -310,10 +313,6 @@ void AccessibilityBridge::OnSemanticsModeChanged(
     // The first call to AccessibilityEventReceived after this call will be
     // the entire semantic tree.
     web_contents_->EnableWebContentsOnlyAccessibilityMode();
-    // Set up inspect node for semantic trees.
-    inspect_node_tree_dump_ = inspect_node_.CreateLazyNode(
-        kSemanticTreesInspectNodeName,
-        [this]() { return fit::make_ok_promise(FillInspectData()); });
   } else {
     // The SemanticsManager will clear all state in this case, which is
     // mirrored here.
@@ -327,7 +326,6 @@ void AccessibilityBridge::OnSemanticsModeChanged(
     tree_connections_.clear();
     frame_id_to_tree_id_.clear();
     InterruptPendingActions();
-    inspect_node_tree_dump_ = inspect::LazyNode();
   }
 
   // Notify the SemanticsManager that this request was handled.
@@ -792,8 +790,8 @@ AccessibilityBridge::EnsureAndGetUpdatedNode(const ui::AXTreeID& tree_id,
   float device_scale_factor =
       ax_node->id() == tree->root()->id() ? GetDeviceScaleFactor() : 0.0f;
   auto new_fuchsia_node =
-      AXNodeDataToSemanticNode(ax_node->data(), container->data(), tree_id,
-                               is_root, device_scale_factor, id_mapper_.get());
+      AXNodeDataToSemanticNode(*ax_node, *container, tree_id, is_root,
+                               device_scale_factor, id_mapper_.get());
 
   if (replace_existing && fuchsia_node) {
     *fuchsia_node = std::move(new_fuchsia_node);

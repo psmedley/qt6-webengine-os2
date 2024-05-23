@@ -14,6 +14,9 @@
 
 buildconfig = "//build/config/BUILDCONFIG.gn"
 
+# Use Python3 to run scripts. On Windows this will use python.exe or python.bat
+script_executable = "python3"
+
 default_args = {
   clang_use_chrome_plugins = false
 
@@ -27,6 +30,7 @@ default_args = {
   angle_enable_abseil = false
   angle_standalone = false
   angle_build_all = false
+  angle_has_rapidjson = false
   angle_vulkan_headers_dir = "//third_party/vulkan-deps/vulkan-headers/src"
   angle_vulkan_loader_dir = "//third_party/vulkan-deps/vulkan-loader/src"
   angle_vulkan_tools_dir = "//third_party/vulkan-deps/vulkan-tools/src"

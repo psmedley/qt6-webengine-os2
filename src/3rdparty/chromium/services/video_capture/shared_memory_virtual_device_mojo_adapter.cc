@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/check_op.h"
 #include "base/containers/contains.h"
 #include "media/base/bind_to_current_loop.h"
@@ -194,6 +195,10 @@ void SharedMemoryVirtualDeviceMojoAdapter::TakePhoto(
 
 void SharedMemoryVirtualDeviceMojoAdapter::ProcessFeedback(
     const media::VideoCaptureFeedback& feedback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+}
+
+void SharedMemoryVirtualDeviceMojoAdapter::RequestRefreshFrame() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 

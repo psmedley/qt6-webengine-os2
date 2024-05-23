@@ -16,10 +16,12 @@
 #include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/bind_post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/command_buffer/service/abstract_texture.h"
 #include "gpu/config/gpu_finch_features.h"
@@ -92,7 +94,7 @@ uint32_t NumRequiredMaxImages(TextureOwner::Mode mode) {
 class ImageReaderGLOwner::ScopedHardwareBufferImpl
     : public base::android::ScopedHardwareBufferFenceSync {
  public:
-  ScopedHardwareBufferImpl(base::WeakPtr<ImageReaderGLOwner> texture_owner,
+  ScopedHardwareBufferImpl(scoped_refptr<ImageReaderGLOwner> texture_owner,
                            AImage* image,
                            base::android::ScopedHardwareBufferHandle handle,
                            base::ScopedFD fence_fd)
@@ -101,23 +103,13 @@ class ImageReaderGLOwner::ScopedHardwareBufferImpl
                                                      base::ScopedFD(),
                                                      true /* is_video */),
         texture_owner_(std::move(texture_owner)),
-        image_(image),
-        task_runner_(base::ThreadTaskRunnerHandle::Get()) {
+        image_(image) {
     DCHECK(image_);
     texture_owner_->RegisterRefOnImageLocked(image_);
   }
 
   ~ScopedHardwareBufferImpl() override {
-    if (task_runner_->RunsTasksInCurrentSequence()) {
-      if (texture_owner_) {
-        texture_owner_->ReleaseRefOnImage(image_, std::move(read_fence_));
-      }
-    } else {
-      task_runner_->PostTask(
-          FROM_HERE,
-          base::BindOnce(&gpu::ImageReaderGLOwner::ReleaseRefOnImage,
-                         texture_owner_, image_, std::move(read_fence_)));
-    }
+    texture_owner_->ReleaseRefOnImage(image_, std::move(read_fence_));
   }
 
   void SetReadFence(base::ScopedFD fence_fd, bool has_context) final {
@@ -129,18 +121,19 @@ class ImageReaderGLOwner::ScopedHardwareBufferImpl
 
  private:
   base::ScopedFD read_fence_;
-  base::WeakPtr<ImageReaderGLOwner> texture_owner_;
-  AImage* image_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  scoped_refptr<ImageReaderGLOwner> texture_owner_;
+  raw_ptr<AImage> image_;
 };
 
 ImageReaderGLOwner::ImageReaderGLOwner(
     std::unique_ptr<gles2::AbstractTexture> texture,
     Mode mode,
-    scoped_refptr<SharedContextState> context_state)
+    scoped_refptr<SharedContextState> context_state,
+    scoped_refptr<RefCountedLock> drdc_lock)
     : TextureOwner(false /* binds_texture_on_image_update */,
                    std::move(texture),
                    std::move(context_state)),
+      RefCountedLockHelperDrDc(std::move(drdc_lock)),
       loader_(base::android::AndroidImageReader::GetInstance()),
       context_(gl::GLContext::GetCurrent()),
       surface_(gl::GLSurface::GetCurrent()) {
@@ -363,7 +356,7 @@ ImageReaderGLOwner::GetAHardwareBuffer() {
   base::AndroidHardwareBufferCompat::GetInstance().Release(buffer);
 
   return std::make_unique<ScopedHardwareBufferImpl>(
-      weak_factory_.GetWeakPtr(), current_image_ref_->image(),
+      this, current_image_ref_->image(),
       base::android::ScopedHardwareBufferHandle::Create(buffer),
       current_image_ref_->GetReadyFence());
 }
@@ -408,10 +401,17 @@ void ImageReaderGLOwner::ReleaseRefOnImage(AImage* image,
 void ImageReaderGLOwner::ReleaseRefOnImageLocked(AImage* image,
                                                  base::ScopedFD fence_fd) {
   lock_.AssertAcquired();
+
   // During cleanup on losing the texture, all images are synchronously released
   // and the |image_reader_| is destroyed.
   if (!image_reader_)
     return;
+
+  // Ensure that DrDc lock is held when |buffer_available_cb| can be triggered
+  // because we do not want any other thread to steal the free buffer slot which
+  // is meant to be used by |buffer_available_cb| and hence resulting in wrong
+  // FrameInfo for all future frames.
+  AssertAcquiredDrDcLock();
 
   auto it = image_refs_.find(image);
   DCHECK(it != image_refs_.end());
@@ -501,9 +501,12 @@ void ImageReaderGLOwner::RunWhenBufferIsAvailable(base::OnceClosure callback) {
     // queue to become full. In that case callback will not be able to render
     // and acquire updated image and hence will use FrameInfo of the previous
     // image which will result in wrong coded size for all future frames. To
-    // avoid, this no other threads should try to UpdateTexImage() when this
-    // callback is run. lock held by the caller (GetFrameInfo()) of this
-    // method ensures that this never happens.
+    // avoid this, no other thread should try to UpdateTexImage() when this
+    // callback is run. Hence drdc_lock should be held from all the places from
+    // where the callback could be run which is either OnGpu::GetFrameInfo() or
+    // ImageReaderGLOwner::ReleaseRefOnImageLocked() and
+    // OnGpu::GetFrameInfoImpl() should assume that the drdc_lock is always
+    // held.
     std::move(callback).Run();
   } else {
     base::AutoLock auto_lock(lock_);

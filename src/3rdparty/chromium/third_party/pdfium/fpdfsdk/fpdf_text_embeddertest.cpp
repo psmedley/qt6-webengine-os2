@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include <algorithm>
-#include <memory>
 #include <utility>
 #include <vector>
 
@@ -120,10 +119,10 @@ TEST_F(FPDFTextEmbedderTest, Text) {
       FPDFText_GetCharBox(textpage, 4, nullptr, nullptr, nullptr, nullptr));
 
   EXPECT_TRUE(FPDFText_GetCharBox(textpage, 4, &left, &right, &bottom, &top));
-  EXPECT_NEAR(41.071, left, 0.001);
-  EXPECT_NEAR(46.243, right, 0.001);
-  EXPECT_NEAR(49.844, bottom, 0.001);
-  EXPECT_NEAR(55.520, top, 0.001);
+  EXPECT_NEAR(41.120, left, 0.001);
+  EXPECT_NEAR(46.208, right, 0.001);
+  EXPECT_NEAR(49.892, bottom, 0.001);
+  EXPECT_NEAR(55.652, top, 0.001);
 
   FS_RECTF rect = {4.0f, 1.0f, 3.0f, 2.0f};
   EXPECT_FALSE(FPDFText_GetLooseCharBox(nullptr, 4, &rect));
@@ -172,10 +171,10 @@ TEST_F(FPDFTextEmbedderTest, Text) {
   bottom = 0.0;
   top = 0.0;
   EXPECT_TRUE(FPDFText_GetRect(textpage, 1, &left, &top, &right, &bottom));
-  EXPECT_NEAR(20.847, left, 0.001);
-  EXPECT_NEAR(135.167, right, 0.001);
-  EXPECT_NEAR(96.655, bottom, 0.001);
-  EXPECT_NEAR(111.648, top, 0.001);
+  EXPECT_NEAR(20.800, left, 0.001);
+  EXPECT_NEAR(135.040, right, 0.001);
+  EXPECT_NEAR(96.688, bottom, 0.001);
+  EXPECT_NEAR(111.600, top, 0.001);
 
   // Test out of range indicies set outputs to (0.0, 0.0, 0.0, 0.0).
   left = -1.0;
@@ -211,7 +210,7 @@ TEST_F(FPDFTextEmbedderTest, Text) {
   memset(buffer, 0xbd, sizeof(buffer));
   EXPECT_EQ(
       9, FPDFText_GetBoundedText(textpage, 41.0, 56.0, 82.0, 48.0, buffer, 9));
-  EXPECT_TRUE(check_unsigned_shorts(kHelloGoodbyeText + 4, buffer, 9));
+  EXPECT_TRUE(check_unsigned_shorts(kHelloGoodbyeText + 4, buffer, 8));
   EXPECT_EQ(0xbdbd, buffer[9]);
 
   memset(buffer, 0xbd, sizeof(buffer));
@@ -494,7 +493,7 @@ TEST_F(FPDFTextEmbedderTest, TextSearchConsecutive) {
 }
 
 // Fails on Windows. https://crbug.com/pdfium/1370
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_TextSearchLatinExtended DISABLED_TextSearchLatinExtended
 #else
 #define MAYBE_TextSearchLatinExtended TextSearchLatinExtended
@@ -624,10 +623,10 @@ TEST_F(FPDFTextEmbedderTest, WebLinks) {
   double top = 0.0;
   double bottom = 0.0;
   EXPECT_TRUE(FPDFLink_GetRect(pagelink, 0, 0, &left, &top, &right, &bottom));
-  EXPECT_NEAR(50.791, left, 0.001);
-  EXPECT_NEAR(187.963, right, 0.001);
-  EXPECT_NEAR(97.624, bottom, 0.001);
-  EXPECT_NEAR(108.736, top, 0.001);
+  EXPECT_NEAR(50.828, left, 0.001);
+  EXPECT_NEAR(187.904, right, 0.001);
+  EXPECT_NEAR(97.516, bottom, 0.001);
+  EXPECT_NEAR(108.700, top, 0.001);
 
   // Check that valid link with invalid rect index leaves parameters unchanged.
   left = -1.0;
@@ -1558,8 +1557,8 @@ TEST_F(FPDFTextEmbedderTest, GetMatrix) {
 
 TEST_F(FPDFTextEmbedderTest, CharBox) {
   // For a size 12 letter 'A'.
-  constexpr double kExpectedCharWidth = 8.436;
-  constexpr double kExpectedCharHeight = 6.77;
+  constexpr double kExpectedCharWidth = 8.460;
+  constexpr double kExpectedCharHeight = 6.600;
   constexpr float kExpectedLooseCharWidth = 8.664f;
   constexpr float kExpectedLooseCharHeight = 12.0f;
 
@@ -1599,7 +1598,7 @@ TEST_F(FPDFTextEmbedderTest, CharBox) {
     EXPECT_FLOAT_EQ(kExpectedLooseCharHeight, rect.top - rect.bottom);
     ASSERT_TRUE(FPDFText_GetLooseCharBox(text_page.get(), 8, &rect));
     EXPECT_FLOAT_EQ(kExpectedLooseCharWidth, rect.right - rect.left);
-    EXPECT_FLOAT_EQ(kExpectedLooseCharHeight, rect.top - rect.bottom);
+    EXPECT_NEAR(kExpectedLooseCharHeight, rect.top - rect.bottom, 0.00001);
   }
 
   UnloadPage(page);
@@ -1681,6 +1680,27 @@ TEST_F(FPDFTextEmbedderTest, BigtableTextExtraction) {
       EXPECT_EQ(static_cast<uint32_t>(kExpectedText[i]),
                 FPDFText_GetUnicode(text_page.get(), i));
     }
+  }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbedderTest, Bug1769) {
+  ASSERT_TRUE(OpenDocument("bug_1769.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+
+    unsigned short buffer[128] = {};
+    // TODO(crbug.com/pdfium/1769): Improve text extraction.
+    // The first instance of "world" is visible to the human eye and should be
+    // extracted as is. The second instance is not, so how it should be
+    // extracted is debatable.
+    ASSERT_EQ(10, FPDFText_GetText(textpage.get(), 0, 128, buffer));
+    EXPECT_TRUE(check_unsigned_shorts("wo d wo d", buffer, 10));
   }
 
   UnloadPage(page);

@@ -279,14 +279,6 @@ static const enum AVPixelFormat pix_fmts[] = {
     AV_PIX_FMT_NONE
 };
 
-static int query_formats(AVFilterContext *ctx)
-{
-    AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
-    if (!fmts_list)
-        return AVERROR(ENOMEM);
-    return ff_set_common_formats(ctx, fmts_list);
-}
-
 static inline float lerpf(float v0, float v1, float f)
 {
     return v0 + (v1 - v0) * f;
@@ -872,7 +864,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     av_frame_copy_props(out, in);
 
     td.out = out, td.in = in;
-    ctx->internal->execute(ctx, filter_slice, &td, NULL, FFMIN(s->height[1], ff_filter_get_nb_threads(ctx)));
+    ff_filter_execute(ctx, filter_slice, &td, NULL,
+                      FFMIN(s->height[1], ff_filter_get_nb_threads(ctx)));
 
     av_frame_free(&in);
     return ff_filter_frame(outlink, out);
@@ -896,7 +889,6 @@ static const AVFilterPad inputs[] = {
         .filter_frame = filter_frame,
         .config_props = config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad outputs[] = {
@@ -904,7 +896,6 @@ static const AVFilterPad outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 static av_cold void uninit(AVFilterContext *ctx)
@@ -926,9 +917,9 @@ const AVFilter ff_vf_pseudocolor = {
     .priv_size     = sizeof(PseudoColorContext),
     .priv_class    = &pseudocolor_class,
     .uninit        = uninit,
-    .query_formats = query_formats,
-    .inputs        = inputs,
-    .outputs       = outputs,
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    FILTER_PIXFMTS_ARRAY(pix_fmts),
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
     .process_command = process_command,
 };

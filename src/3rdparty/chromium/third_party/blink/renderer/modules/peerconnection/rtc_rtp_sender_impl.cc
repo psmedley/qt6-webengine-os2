@@ -15,6 +15,8 @@
 #include "third_party/blink/renderer/platform/peerconnection/rtc_stats.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_void_request.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 
@@ -63,7 +65,7 @@ void OnSetParametersCompleted(blink::RTCVoidRequest* request,
 RtpSenderState::RtpSenderState(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> signaling_task_runner,
-    scoped_refptr<webrtc::RtpSenderInterface> webrtc_sender,
+    rtc::scoped_refptr<webrtc::RtpSenderInterface> webrtc_sender,
     std::unique_ptr<blink::WebRtcMediaStreamTrackAdapterMap::AdapterRef>
         track_ref,
     std::vector<std::string> stream_ids)
@@ -141,7 +143,7 @@ RtpSenderState::signaling_task_runner() const {
   return signaling_task_runner_;
 }
 
-scoped_refptr<webrtc::RtpSenderInterface> RtpSenderState::webrtc_sender()
+rtc::scoped_refptr<webrtc::RtpSenderInterface> RtpSenderState::webrtc_sender()
     const {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   return webrtc_sender_;
@@ -313,7 +315,7 @@ class RTCRtpSenderImpl::RTCRtpSenderInternal
 
   bool RemoveFromPeerConnection(webrtc::PeerConnectionInterface* pc) {
     DCHECK(main_task_runner_->BelongsToCurrentThread());
-    if (!pc->RemoveTrack(webrtc_sender_.get()))
+    if (!pc->RemoveTrackOrError(webrtc_sender_).ok())
       return false;
     // TODO(hbos): Removing the track should null the sender's track, or we
     // should do |webrtc_sender_->SetTrack(null)| but that is not allowed on a
@@ -384,7 +386,7 @@ class RTCRtpSenderImpl::RTCRtpSenderInternal
       RTCStatsReportCallbackInternal callback,
       const Vector<webrtc::NonStandardGroupId>& exposed_group_ids) {
     native_peer_connection_->GetStats(
-        webrtc_sender_.get(),
+        rtc::scoped_refptr<webrtc::RtpSenderInterface>(webrtc_sender_.get()),
         CreateRTCStatsCollectorCallback(
             main_task_runner_, ConvertToBaseOnceCallback(std::move(callback)),
             exposed_group_ids));
@@ -425,7 +427,7 @@ class RTCRtpSenderImpl::RTCRtpSenderInternal
   // avoid race with set_state().
   const scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   const scoped_refptr<base::SingleThreadTaskRunner> signaling_task_runner_;
-  const scoped_refptr<webrtc::RtpSenderInterface> webrtc_sender_;
+  const rtc::scoped_refptr<webrtc::RtpSenderInterface> webrtc_sender_;
   std::unique_ptr<RTCEncodedAudioStreamTransformer> encoded_audio_transformer_;
   std::unique_ptr<RTCEncodedVideoStreamTransformer> encoded_video_transformer_;
   RtpSenderState state_;

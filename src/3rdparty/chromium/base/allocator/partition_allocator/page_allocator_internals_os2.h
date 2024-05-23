@@ -8,7 +8,7 @@
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator_internal.h"
 #include "base/logging.h"
-#include "base/notreached.h"
+#include "base/allocator/partition_allocator/partition_alloc_notreached.h"
 
 namespace base {
 
@@ -54,20 +54,20 @@ std::atomic<int32_t> s_allocPageErrorCode{NO_ERROR};
 
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   switch (accessibility) {
-    case PageRead:
+    case PageAccessibilityConfiguration::kRead:
       return PAG_READ;
-    case PageReadWrite:
-    case PageReadWriteTagged:
+    case PageAccessibilityConfiguration::kReadWrite:
+    case PageAccessibilityConfiguration::kReadWriteTagged:
       return PAG_READ | PAG_WRITE;
-    case PageReadExecute:
-    case PageReadExecuteProtected:
+    case PageAccessibilityConfiguration::kReadExecute:
+    case PageAccessibilityConfiguration::kReadExecuteProtected:
       return PAG_READ | PAG_EXECUTE;
-    case PageReadWriteExecute:
+    case PageAccessibilityConfiguration::kReadWriteExecute:
       return PAG_READ | PAG_WRITE | PAG_EXECUTE;
     default:
-      NOTREACHED();
-      FALLTHROUGH;
-    case PageInaccessible:
+      PA_NOTREACHED();
+      [[fallthrough]];
+    case PageAccessibilityConfiguration::kInaccessible:
       return 0;
   }
 }

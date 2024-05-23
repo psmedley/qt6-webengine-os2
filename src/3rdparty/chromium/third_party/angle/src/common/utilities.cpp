@@ -129,6 +129,7 @@ GLenum VariableComponentType(GLenum type)
         case GL_SAMPLER_2D_RECT_ANGLE:
         case GL_SAMPLER_3D:
         case GL_SAMPLER_CUBE:
+        case GL_SAMPLER_CUBE_MAP_ARRAY:
         case GL_SAMPLER_2D_ARRAY:
         case GL_SAMPLER_EXTERNAL_OES:
         case GL_SAMPLER_2D_MULTISAMPLE:
@@ -136,16 +137,19 @@ GLenum VariableComponentType(GLenum type)
         case GL_INT_SAMPLER_2D:
         case GL_INT_SAMPLER_3D:
         case GL_INT_SAMPLER_CUBE:
+        case GL_INT_SAMPLER_CUBE_MAP_ARRAY:
         case GL_INT_SAMPLER_2D_ARRAY:
         case GL_INT_SAMPLER_2D_MULTISAMPLE:
         case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
         case GL_UNSIGNED_INT_SAMPLER_2D:
         case GL_UNSIGNED_INT_SAMPLER_3D:
         case GL_UNSIGNED_INT_SAMPLER_CUBE:
+        case GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY:
         case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
         case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
         case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
         case GL_SAMPLER_2D_SHADOW:
+        case GL_SAMPLER_BUFFER:
         case GL_SAMPLER_CUBE_SHADOW:
         case GL_SAMPLER_2D_ARRAY_SHADOW:
         case GL_INT_VEC2:
@@ -259,7 +263,7 @@ std::string GetGLSLTypeString(GLenum type)
             return "mat4";
         default:
             UNREACHABLE();
-            return std::string();
+            return "";
     }
 }
 
@@ -1271,6 +1275,7 @@ bool IsExternalImageTarget(EGLenum target)
         case EGL_D3D11_TEXTURE_ANGLE:
         case EGL_LINUX_DMA_BUF_EXT:
         case EGL_METAL_TEXTURE_ANGLE:
+        case EGL_VULKAN_IMAGE_ANGLE:
             return true;
 
         default:

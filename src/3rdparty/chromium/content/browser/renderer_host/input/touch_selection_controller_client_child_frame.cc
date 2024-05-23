@@ -10,7 +10,6 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
 #include "content/public/browser/touch_selection_controller_client_manager.h"
-#include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/pointer/touch_editing_controller.h"
@@ -152,10 +151,6 @@ std::unique_ptr<ui::TouchHandleDrawable>
 TouchSelectionControllerClientChildFrame::CreateDrawable() {
   NOTREACHED();
   return nullptr;
-}
-
-const char* TouchSelectionControllerClientChildFrame::GetType() {
-  return "TouchSelectionControllerClientChildFrame";
 }
 
 bool TouchSelectionControllerClientChildFrame::IsCommandIdEnabled(

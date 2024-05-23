@@ -33,6 +33,7 @@
 #include "api/candidate.h"
 #include "api/crypto/crypto_options.h"
 #include "api/data_channel_interface.h"
+#include "api/field_trials_view.h"
 #include "api/ice_transport_interface.h"
 #include "api/jsep.h"
 #include "api/media_stream_interface.h"
@@ -52,7 +53,6 @@
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/transport/field_trial_based_config.h"
-#include "api/transport/webrtc_key_value_config.h"
 #include "api/uma_metrics.h"
 #include "api/video/video_rotation.h"
 #include "api/video_codecs/sdp_video_format.h"
@@ -95,6 +95,7 @@
 #include "pc/test/mock_peer_connection_observers.h"
 #include "pc/video_track_source.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/event.h"
 #include "rtc_base/fake_clock.h"
 #include "rtc_base/fake_mdns_responder.h"
 #include "rtc_base/fake_network.h"
@@ -111,14 +112,16 @@
 #include "rtc_base/socket_address.h"
 #include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/task_utils/pending_task_safety_flag.h"
+#include "rtc_base/task_utils/repeating_task.h"
 #include "rtc_base/task_utils/to_queued_task.h"
 #include "rtc_base/test_certificate_verifier.h"
 #include "rtc_base/thread.h"
+#include "rtc_base/thread_annotations.h"
 #include "rtc_base/time_utils.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "system_wrappers/include/metrics.h"
-#include "test/field_trial.h"
 #include "test/gmock.h"
+#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 
@@ -172,6 +175,24 @@ int FindFirstMediaStatsIndexByKind(
     const std::vector<const webrtc::RTCMediaStreamTrackStats*>&
         media_stats_vec);
 
+class TaskQueueMetronome : public webrtc::Metronome {
+ public:
+  TaskQueueMetronome(TaskQueueFactory* factory, TimeDelta tick_period);
+  ~TaskQueueMetronome() override;
+
+  // webrtc::Metronome implementation.
+  void AddListener(TickListener* listener) override;
+  void RemoveListener(TickListener* listener) override;
+  TimeDelta TickPeriod() const override;
+
+ private:
+  Mutex mutex_;
+  const TimeDelta tick_period_;
+  std::set<TickListener*> listeners_ RTC_GUARDED_BY(mutex_);
+  RepeatingTaskHandle tick_task_;
+  rtc::TaskQueue queue_;
+};
+
 class SignalingMessageReceiver {
  public:
   virtual void ReceiveSdpMessage(SdpType type, const std::string& msg) = 0;
@@ -214,32 +235,6 @@ class MockRtpReceiverObserver : public webrtc::RtpReceiverObserverInterface {
 class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
                                          public SignalingMessageReceiver {
  public:
-  // Different factory methods for convenience.
-  // TODO(deadbeef): Could use the pattern of:
-  //
-  // PeerConnectionIntegrationWrapper =
-  //     WrapperBuilder.WithConfig(...).WithOptions(...).build();
-  //
-  // To reduce some code duplication.
-  static PeerConnectionIntegrationWrapper* CreateWithDtlsIdentityStore(
-      const std::string& debug_name,
-      std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_generator,
-      rtc::Thread* network_thread,
-      rtc::Thread* worker_thread) {
-    PeerConnectionIntegrationWrapper* client(
-        new PeerConnectionIntegrationWrapper(debug_name));
-    webrtc::PeerConnectionDependencies dependencies(nullptr);
-    dependencies.cert_generator = std::move(cert_generator);
-    if (!client->Init(nullptr, nullptr, std::move(dependencies), network_thread,
-                      worker_thread, nullptr,
-                      /*reset_encoder_factory=*/false,
-                      /*reset_decoder_factory=*/false)) {
-      delete client;
-      return nullptr;
-    }
-    return client;
-  }
-
   webrtc::PeerConnectionFactoryInterface* pc_factory() const {
     return peer_connection_factory_.get();
   }
@@ -415,14 +410,31 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
 
   void CreateDataChannel(const std::string& label,
                          const webrtc::DataChannelInit* init) {
-    data_channel_ = pc()->CreateDataChannel(label, init);
-    ASSERT_TRUE(data_channel_.get() != nullptr);
-    data_observer_.reset(new MockDataChannelObserver(data_channel_));
+    auto data_channel_or_error = pc()->CreateDataChannelOrError(label, init);
+    ASSERT_TRUE(data_channel_or_error.ok());
+    data_channels_.push_back(data_channel_or_error.MoveValue());
+    ASSERT_TRUE(data_channels_.back().get() != nullptr);
+    data_observers_.push_back(
+        std::make_unique<MockDataChannelObserver>(data_channels_.back()));
   }
 
-  DataChannelInterface* data_channel() { return data_channel_; }
+  // Return the last observed data channel.
+  DataChannelInterface* data_channel() {
+    if (data_channels_.size() == 0) {
+      return nullptr;
+    }
+    return data_channels_.back();
+  }
+  // Return all data channels.
+  const std::vector<rtc::scoped_refptr<DataChannelInterface>>& data_channels() {
+    return data_channels_;
+  }
+
   const MockDataChannelObserver* data_observer() const {
-    return data_observer_.get();
+    if (data_observers_.size() == 0) {
+      return nullptr;
+    }
+    return data_observers_.back().get();
   }
 
   int audio_frames_received() const {
@@ -685,15 +697,15 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
     // Concealing more than 20% of samples during a renegotiation is
     // unacceptable.
     // Worst bots:
-    // linux_more_configs bot at conceal rate 0.516
-    // linux_x86_dbg bot at conceal rate 0.854
+    // Nondebug: Linux32 Release at conceal rate 0.606597 (CI run)
+    // Debug: linux_x86_dbg bot at conceal rate 0.854
     if (delta_samples > 0) {
 #if !defined(NDEBUG)
-      EXPECT_GT(0.95, 1.0 * delta_concealed / delta_samples)
+      EXPECT_LT(1.0 * delta_concealed / delta_samples, 0.95)
           << "Concealed " << delta_concealed << " of " << delta_samples
           << " samples";
 #else
-      EXPECT_GT(0.6, 1.0 * delta_concealed / delta_samples)
+      EXPECT_LT(1.0 * delta_concealed / delta_samples, 0.7)
           << "Concealed " << delta_concealed << " of " << delta_samples
           << " samples";
 #endif
@@ -711,6 +723,7 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
   }
 
  private:
+  // Constructor used by friend class PeerConnectionIntegrationBaseTest.
   explicit PeerConnectionIntegrationWrapper(const std::string& debug_name)
       : debug_name_(debug_name) {}
 
@@ -745,6 +758,8 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
     pc_factory_dependencies.task_queue_factory =
         webrtc::CreateDefaultTaskQueueFactory();
     pc_factory_dependencies.trials = std::make_unique<FieldTrialBasedConfig>();
+    pc_factory_dependencies.metronome = std::make_unique<TaskQueueMetronome>(
+        pc_factory_dependencies.task_queue_factory.get(), TimeDelta::Millis(8));
     cricket::MediaEngineDependencies media_deps;
     media_deps.task_queue_factory =
         pc_factory_dependencies.task_queue_factory.get();
@@ -799,6 +814,7 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
       const PeerConnectionInterface::RTCConfiguration* config,
       webrtc::PeerConnectionDependencies dependencies) {
     PeerConnectionInterface::RTCConfiguration modified_config;
+    modified_config.sdp_semantics = sdp_semantics_;
     // If `config` is null, this will result in a default configuration being
     // used.
     if (config) {
@@ -811,8 +827,11 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
     modified_config.set_cpu_adaptation(false);
 
     dependencies.observer = this;
-    return peer_connection_factory_->CreatePeerConnection(
-        modified_config, std::move(dependencies));
+    auto peer_connection_or_error =
+        peer_connection_factory_->CreatePeerConnectionOrError(
+            modified_config, std::move(dependencies));
+    return peer_connection_or_error.ok() ? peer_connection_or_error.MoveValue()
+                                         : nullptr;
   }
 
   void set_signaling_message_receiver(
@@ -1118,8 +1137,9 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
   void OnDataChannel(
       rtc::scoped_refptr<DataChannelInterface> data_channel) override {
     RTC_LOG(LS_INFO) << debug_name_ << ": OnDataChannel";
-    data_channel_ = data_channel;
-    data_observer_.reset(new MockDataChannelObserver(data_channel));
+    data_channels_.push_back(data_channel);
+    data_observers_.push_back(
+        std::make_unique<MockDataChannelObserver>(data_channel));
   }
 
   std::string debug_name_;
@@ -1162,8 +1182,9 @@ class PeerConnectionIntegrationWrapper : public webrtc::PeerConnectionObserver,
   std::function<void(cricket::SessionDescription*)> generated_sdp_munger_;
   std::function<void()> remote_offer_handler_;
   rtc::MockAsyncResolver* remote_async_resolver_ = nullptr;
-  rtc::scoped_refptr<DataChannelInterface> data_channel_;
-  std::unique_ptr<MockDataChannelObserver> data_observer_;
+  // All data channels either created or observed on this peerconnection
+  std::vector<rtc::scoped_refptr<DataChannelInterface>> data_channels_;
+  std::vector<std::unique_ptr<MockDataChannelObserver>> data_observers_;
 
   std::vector<std::unique_ptr<MockRtpReceiverObserver>> rtp_receiver_observers_;
 
@@ -1350,9 +1371,9 @@ class PeerConnectionIntegrationBaseTest : public ::testing::Test {
         fss_(new rtc::FirewallSocketServer(ss_.get())),
         network_thread_(new rtc::Thread(fss_.get())),
         worker_thread_(rtc::Thread::Create()),
-        field_trials_(field_trials.has_value()
-                          ? new test::ScopedFieldTrials(*field_trials)
-                          : nullptr) {
+        // TODO(bugs.webrtc.org/10335): Pass optional ScopedKeyValueConfig.
+        field_trials_(new test::ScopedKeyValueConfig(
+            field_trials.has_value() ? *field_trials : "")) {
     network_thread_->SetName("PCNetworkThread", this);
     worker_thread_->SetName("PCWorkerThread", this);
     RTC_CHECK(network_thread_->Start());
@@ -1573,12 +1594,14 @@ class PeerConnectionIntegrationBaseTest : public ::testing::Test {
       cricket::ProtocolType type = cricket::ProtocolType::PROTO_UDP,
       const std::string& common_name = "test turn server") {
     rtc::Thread* thread = network_thread();
+    rtc::SocketFactory* socket_factory = fss_.get();
     std::unique_ptr<cricket::TestTurnServer> turn_server =
         network_thread()->Invoke<std::unique_ptr<cricket::TestTurnServer>>(
-            RTC_FROM_HERE,
-            [thread, internal_address, external_address, type, common_name] {
+            RTC_FROM_HERE, [thread, socket_factory, internal_address,
+                            external_address, type, common_name] {
               return std::make_unique<cricket::TestTurnServer>(
-                  thread, internal_address, external_address, type,
+                  thread, socket_factory, internal_address, external_address,
+                  type,
                   /*ignore_bad_certs=*/true, common_name);
             });
     turn_servers_.push_back(std::move(turn_server));
@@ -1837,6 +1860,8 @@ class PeerConnectionIntegrationBaseTest : public ::testing::Test {
                               expected_cipher_suite);
   }
 
+  const FieldTrialsView& trials() const { return *field_trials_.get(); }
+
  protected:
   SdpSemantics sdp_semantics_;
 
@@ -1856,7 +1881,7 @@ class PeerConnectionIntegrationBaseTest : public ::testing::Test {
   std::vector<std::unique_ptr<cricket::TestTurnCustomizer>> turn_customizers_;
   std::unique_ptr<PeerConnectionIntegrationWrapper> caller_;
   std::unique_ptr<PeerConnectionIntegrationWrapper> callee_;
-  std::unique_ptr<test::ScopedFieldTrials> field_trials_;
+  std::unique_ptr<FieldTrialsView> field_trials_;
 };
 
 }  // namespace webrtc

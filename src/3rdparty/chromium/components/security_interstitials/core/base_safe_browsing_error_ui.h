@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_SECURITY_INTERSTITIALS_CORE_BASE_SAFE_BROWSING_ERROR_UI_H_
 #define COMPONENTS_SECURITY_INTERSTITIALS_CORE_BASE_SAFE_BROWSING_ERROR_UI_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/security_interstitials/core/controller_client.h"
@@ -93,6 +93,10 @@ class BaseSafeBrowsingErrorUI {
       const std::string& app_locale,
       const base::Time& time_triggered,
       ControllerClient* controller);
+
+  BaseSafeBrowsingErrorUI(const BaseSafeBrowsingErrorUI&) = delete;
+  BaseSafeBrowsingErrorUI& operator=(const BaseSafeBrowsingErrorUI&) = delete;
+
   virtual ~BaseSafeBrowsingErrorUI();
 
   bool is_main_frame_load_blocked() const {
@@ -197,9 +201,7 @@ class BaseSafeBrowsingErrorUI {
   const std::string app_locale_;
   const base::Time time_triggered_;
 
-  ControllerClient* controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(BaseSafeBrowsingErrorUI);
+  raw_ptr<ControllerClient> controller_;
 };
 
 }  // security_interstitials

@@ -63,7 +63,7 @@
 #include "third_party/blink/renderer/core/svg/svg_script_element.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 
@@ -279,6 +279,11 @@ void HTMLConstructionSite::FlushPendingText(FlushMode mode) {
     unsigned break_index =
         FindBreakIndexBetween(string, current_position, proposed_break_index);
     DCHECK_LE(break_index, string.length());
+    if (!break_index) {
+      // FindBreakIndexBetween returns 0 if it cannot find a breakpoint. In this
+      // case, just keep the entire string.
+      break_index = string.length();
+    }
     String substring =
         string.Substring(current_position, break_index - current_position);
     substring = AtomizeIfAllWhitespace(substring, pending_text.whitespace_mode);

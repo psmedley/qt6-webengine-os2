@@ -10,6 +10,7 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorFilter.h"
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontTypes.h"
 #include "include/core/SkPaint.h"
@@ -26,6 +27,7 @@
 #include "include/effects/SkGradientShader.h"
 #include "include/effects/SkLumaColorFilter.h"
 #include "include/effects/SkRuntimeEffect.h"
+#include "src/core/SkColorFilterPriv.h"
 #include "tools/Resources.h"
 #include "tools/ToolUtils.h"
 
@@ -193,9 +195,9 @@ DEF_SIMPLE_GM(AlternateLuma, canvas, 384,128) {
     SkASSERT(filter);
 
     SkAlphaType unpremul = kUnpremul_SkAlphaType;
-    paint.setColorFilter(SkColorFilters::WithWorkingFormat(std::move(filter),
-                                                           &SkNamedTransferFn::kLinear,
-                                                           &SkNamedGamut::kXYZ,
-                                                           &unpremul));
+    paint.setColorFilter(SkColorFilterPriv::WithWorkingFormat(std::move(filter),
+                                                              &SkNamedTransferFn::kLinear,
+                                                              &SkNamedGamut::kXYZ,
+                                                              &unpremul));
     canvas->drawImage(img, 0,0, SkSamplingOptions{}, &paint);
 }

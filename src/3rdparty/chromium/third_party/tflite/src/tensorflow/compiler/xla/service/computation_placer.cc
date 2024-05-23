@@ -23,6 +23,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/types/optional.h"
 #include "tensorflow/compiler/xla/literal.h"
+#include "tensorflow/compiler/xla/service/global_device_id.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/status.h"
 #include "tensorflow/compiler/xla/status_macros.h"
@@ -32,34 +33,56 @@ limitations under the License.
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/stream_executor_no_cuda.h"
+#include "tensorflow/stream_executor/cuda/cuda_platform_id.h"
+#include "tensorflow/stream_executor/host/host_platform_id.h"
+#include "tensorflow/stream_executor/rocm/rocm_platform_id.h"
 
 using absl::StrAppend;
 using absl::StrCat;
 
 namespace xla {
 
-StatusOr<int> DeviceAssignment::ReplicaIdForDeviceOrdinal(
-    int device_ordinal) const {
-  absl::optional<int> replica_id;
-  for (int64 r = 0; r < replica_count(); ++r) {
-    for (int64 c = 0; c < computation_count(); ++c) {
-      if ((*this)(r, c) == device_ordinal) {
-        if (replica_id.has_value()) {
+StatusOr<DeviceAssignment::LogicalID> DeviceAssignment::LogicalIdForDevice(
+    GlobalDeviceId device_id) const {
+  absl::optional<DeviceAssignment::LogicalID> logical_id;
+  for (int r = 0; r < replica_count(); ++r) {
+    for (int c = 0; c < computation_count(); ++c) {
+      if ((*this)(r, c) == device_id.value()) {
+        if (logical_id.has_value()) {
           return InternalError(
-              "Device ordinal %d appears twice in DeviceAssignment? %s",
-              device_ordinal, ToString());
+              "Device %d appears twice in DeviceAssignment: %s",
+              device_id.value(), ToString());
         }
-        replica_id = r;
+        logical_id.emplace(DeviceAssignment::LogicalID{r, c});
       }
     }
   }
-  if (!replica_id.has_value()) {
-    return InternalError(
-        "Device ordinal %d doesn't appear in DeviceAssignment %s",
-        device_ordinal, ToString());
+  if (logical_id.has_value()) {
+    return *logical_id;
+  } else {
+    return InternalError("Device %d doesn't appear in DeviceAssignment: %s",
+                         device_id.value(), ToString());
   }
-  return *replica_id;
+}
+
+StatusOr<int> DeviceAssignment::ReplicaIdForDevice(
+    GlobalDeviceId device_id) const {
+  TF_ASSIGN_OR_RETURN(const LogicalID logical_id,
+                      LogicalIdForDevice(device_id));
+  return logical_id.replica_id;
+}
+
+absl::flat_hash_map<GlobalDeviceId, DeviceAssignment::LogicalID>
+DeviceAssignment::GetDeviceToLogicalIdMap() const {
+  absl::flat_hash_map<GlobalDeviceId, DeviceAssignment::LogicalID>
+      device_to_logical_id;
+  for (int r = 0; r < replica_count(); ++r) {
+    for (int c = 0; c < computation_count(); ++c) {
+      GlobalDeviceId device_id((*this)(r, c));
+      device_to_logical_id[device_id] = DeviceAssignment::LogicalID{r, c};
+    }
+  }
+  return device_to_logical_id;
 }
 
 Status DeviceAssignment::Serialize(DeviceAssignmentProto* proto) const {
@@ -99,9 +122,9 @@ DeviceAssignment::Deserialize(const DeviceAssignmentProto& proto) {
   return std::move(assignment);
 }
 
-string DeviceAssignment::ToString() const {
-  string output = StrCat("Computations: ", computation_count(),
-                         " Replicas: ", replica_count(), "\n");
+std::string DeviceAssignment::ToString() const {
+  std::string output = StrCat("Computations: ", computation_count(),
+                              " Replicas: ", replica_count(), "\n");
   for (int computation = 0; computation < computation_count(); ++computation) {
     StrAppend(&output, "Computation ", computation, ": ");
     for (int replica = 0; replica < replica_count(); ++replica) {
@@ -138,8 +161,7 @@ StatusOr<DeviceAssignment> ComputationPlacer::AssignDevices(
 /* static */ void ComputationPlacer::RegisterComputationPlacer(
     se::Platform::Id platform_id,
     ComputationPlacerCreationFunction creation_function) {
-  tensorflow::mutex_lock lock(
-      ComputationPlacer::platform_computation_placer_mutex_);
+  absl::MutexLock lock(&ComputationPlacer::platform_computation_placer_mutex_);
   auto* computation_placers = GetPlatformComputationPlacers();
   CHECK(computation_placers->find(platform_id) == computation_placers->end());
   (*computation_placers)[platform_id].creation_function = creation_function;
@@ -147,8 +169,7 @@ StatusOr<DeviceAssignment> ComputationPlacer::AssignDevices(
 
 /* static */ StatusOr<ComputationPlacer*> ComputationPlacer::GetForPlatform(
     const se::Platform* platform) {
-  tensorflow::mutex_lock lock(
-      ComputationPlacer::platform_computation_placer_mutex_);
+  absl::MutexLock lock(&ComputationPlacer::platform_computation_placer_mutex_);
   auto* computation_placers = GetPlatformComputationPlacers();
 
   auto it = computation_placers->find(platform->id());
@@ -167,9 +188,8 @@ StatusOr<DeviceAssignment> ComputationPlacer::AssignDevices(
   return it->second.placer.get();
 }
 
-/* static */ tensorflow::mutex
-    ComputationPlacer::platform_computation_placer_mutex_(
-        tensorflow::LINKER_INITIALIZED);
+/* static */ absl::Mutex ComputationPlacer::platform_computation_placer_mutex_(
+    absl::kConstInit);
 
 /* static */ std::map<se::Platform::Id, ComputationPlacer::State>*
 ComputationPlacer::GetPlatformComputationPlacers() {

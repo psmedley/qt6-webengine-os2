@@ -21,8 +21,9 @@ class JSChecker(object):
         self.input_api.re, line_number, line, regex, message)
 
   def BindThisCheck(self, i, line):
-    return self.RegexCheck(i, line, r"(\.bind\(this)[^)]*\)",
-        "Prefer arrow (=>) functions over bind(this)");
+    """Checks for usages of bind(this) with inlined functions."""
+    return self.RegexCheck(i, line, r"\)(\.bind\(this)[^)]*\)",
+                           "Prefer arrow (=>) functions over bind(this)")
 
   def ChromeSendCheck(self, i, line):
     """Checks for a particular misuse of "chrome.send"."""
@@ -36,6 +37,10 @@ class JSChecker(object):
         '    // <include src="...">\n' +
         '    // <if expr="chromeos">\n' +
         "    // </if>\n")
+
+  def DebuggerCheck(self, i, line):
+    return self.RegexCheck(i, line, r"^\s*(debugger);",
+                           "Debugger statements should be removed")
 
   def EndJsDocCommentCheck(self, i, line):
     msg = "End JSDoc comments with */ instead of **/"
@@ -69,14 +74,34 @@ class JSChecker(object):
       affected_js_files_paths.append(f.AbsoluteLocalPath())
 
     from os import isatty as os_isatty
-    args = ["--color"] if os_isatty(self.input_api.sys.stdout.fileno()) else []
-    args += ["--format", format, "--ignore-pattern", "!.eslintrc.js"]
-    args += affected_js_files_paths
-
+    parameters = ["--color"] if os_isatty(
+        self.input_api.sys.stdout.fileno()) else []
+    parameters += ["--format", format, "--ignore-pattern", "!.eslintrc.js"]
     from . import eslint
-    output = eslint.Run(os_path=os_path, args=args)
 
-    return [self.output_api.PresubmitError(output)] if output else []
+    # When running git cl presubmit --all this presubmit may be asked to check
+    # ~1,100 files, leading to a command line that is about 92,000 characters.
+    # This goes past the Windows 8191 character cmd.exe limit and causes cryptic
+    # failures. To avoid these we break the command up into smaller pieces. The
+    # non-Windows limit is chosen so that the code that splits up commands will
+    # get some exercise on other platforms.
+    # Depending on how long the command is on Windows the error may be:
+    #     The command line is too long.
+    # Or it may be:
+    #     OSError: Execution failed with error: [WinError 206] The filename or
+    #     extension is too long.
+    # The latter error comes from CreateProcess hitting its 32768 character
+    # limit.
+    files_per_command = 25 if self.input_api.is_windows else 1000
+    results = []
+    for i in range(0, len(affected_js_files_paths), files_per_command):
+      args = parameters + affected_js_files_paths[i:i + files_per_command]
+
+      try:
+        output = eslint.Run(os_path=os_path, args=args)
+      except RuntimeError as err:
+        results.append(self.output_api.PresubmitError(str(err)))
+    return results
 
   def VariableNameCheck(self, i, line):
     """See the style guide. http://goo.gl/eQiXVW"""
@@ -108,11 +133,13 @@ class JSChecker(object):
     for f in affected_js_files:
       error_lines = []
 
-      for i, line in enumerate(f.NewContents(), start=1):
+      for i, line in f.ChangedContents():
         error_lines += [
             _f for _f in [
+                self.BindThisCheck(i, line),
                 self.ChromeSendCheck(i, line),
                 self.CommentIfAndIncludeCheck(i, line),
+                self.DebuggerCheck(i, line),
                 self.EndJsDocCommentCheck(i, line),
                 self.ExtraDotInGenericCheck(i, line),
                 self.InheritDocCheck(i, line),

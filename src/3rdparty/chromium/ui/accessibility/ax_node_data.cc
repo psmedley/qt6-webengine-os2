@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <set>
+#include <type_traits>
 #include <utility>
 
 #include "base/containers/cxx20_erase.h"
@@ -20,7 +21,7 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/accessibility/ax_tree_id.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace ui {
 
@@ -66,14 +67,24 @@ std::string ActionsBitfieldToString(uint64_t actions) {
   return str;
 }
 
-std::string IntVectorToString(const std::vector<int>& items) {
+template <typename ItemType, typename ItemToStringFunction>
+std::string VectorToString(const std::vector<ItemType>& items,
+                           ItemToStringFunction itemToStringFunction) {
   std::string str;
   for (size_t i = 0; i < items.size(); ++i) {
+    std::string item_str = itemToStringFunction(items[i]);
+    if (item_str.empty())
+      continue;
     if (i > 0)
       str += ",";
-    str += base::NumberToString(items[i]);
+    str += itemToStringFunction(items[i]);
   }
   return str;
+}
+
+std::string IntVectorToString(const std::vector<int32_t>& items) {
+  return VectorToString(
+      items, [](const int32_t item) { return base::NumberToString(item); });
 }
 
 // Predicate that returns true if the first value of a pair is |first|.
@@ -177,15 +188,15 @@ bool IsNodeIdIntAttribute(ax::mojom::IntAttribute attr) {
   return false;
 }
 
-// Return true if |attr| contains a vector of node ids that would need
+// Returns true if |attr| contains a vector of node ids that would need
 // to be mapped when renumbering the ids in a combined tree.
 bool IsNodeIdIntListAttribute(ax::mojom::IntListAttribute attr) {
   switch (attr) {
+    case ax::mojom::IntListAttribute::kIndirectChildIds:
     case ax::mojom::IntListAttribute::kControlsIds:
     case ax::mojom::IntListAttribute::kDetailsIds:
     case ax::mojom::IntListAttribute::kDescribedbyIds:
     case ax::mojom::IntListAttribute::kFlowtoIds:
-    case ax::mojom::IntListAttribute::kIndirectChildIds:
     case ax::mojom::IntListAttribute::kLabelledbyIds:
     case ax::mojom::IntListAttribute::kRadioGroupIds:
       return true;
@@ -198,16 +209,18 @@ bool IsNodeIdIntListAttribute(ax::mojom::IntListAttribute attr) {
     case ax::mojom::IntListAttribute::kMarkerTypes:
     case ax::mojom::IntListAttribute::kMarkerStarts:
     case ax::mojom::IntListAttribute::kMarkerEnds:
+    case ax::mojom::IntListAttribute::kHighlightTypes:
+    case ax::mojom::IntListAttribute::kCaretBounds:
     case ax::mojom::IntListAttribute::kCharacterOffsets:
-    case ax::mojom::IntListAttribute::kCachedLineStarts:
+    case ax::mojom::IntListAttribute::kLineStarts:
+    case ax::mojom::IntListAttribute::kLineEnds:
+    case ax::mojom::IntListAttribute::kSentenceStarts:
+    case ax::mojom::IntListAttribute::kSentenceEnds:
     case ax::mojom::IntListAttribute::kWordStarts:
     case ax::mojom::IntListAttribute::kWordEnds:
     case ax::mojom::IntListAttribute::kCustomActionIds:
       return false;
   }
-
-  NOTREACHED();
-  return false;
 }
 
 AXNodeData::AXNodeData() : role(ax::mojom::Role::kUnknown) {}
@@ -425,6 +438,13 @@ bool AXNodeData::GetStringListAttribute(
   return false;
 }
 
+bool AXNodeData::HasHtmlAttribute(const char* attribute) const {
+  std::string value;
+  if (!GetHtmlAttribute(attribute, &value))
+    return false;
+  return true;
+}
+
 bool AXNodeData::GetHtmlAttribute(const char* attribute,
                                   std::string* value) const {
   for (const std::pair<std::string, std::string>& html_attribute :
@@ -435,7 +455,6 @@ bool AXNodeData::GetHtmlAttribute(const char* attribute,
       return true;
     }
   }
-
   return false;
 }
 
@@ -579,6 +598,10 @@ AXTextAttributes AXNodeData::GetTextAttributes() const {
                     &text_attributes.font_weight);
   GetStringAttribute(ax::mojom::StringAttribute::kFontFamily,
                      &text_attributes.font_family);
+  GetIntListAttribute(ax::mojom::IntListAttribute::kMarkerTypes,
+                      &text_attributes.marker_types);
+  GetIntListAttribute(ax::mojom::IntListAttribute::kHighlightTypes,
+                      &text_attributes.highlight_types);
 
   return text_attributes;
 }
@@ -712,6 +735,7 @@ void AXNodeData::AddAction(ax::mojom::Action action_enum) {
     case ax::mojom::Action::kInternalInvalidateTree:
     case ax::mojom::Action::kLoadInlineTextBoxes:
     case ax::mojom::Action::kReplaceSelectedText:
+    case ax::mojom::Action::kRunScreenAi:
     case ax::mojom::Action::kScrollToMakeVisible:
     case ax::mojom::Action::kScrollToPoint:
     case ax::mojom::Action::kSetAccessibilityFocus:
@@ -1007,9 +1031,9 @@ bool AXNodeData::IsInvocable() const {
   // would be considered a toggle or expand-collapse element - these elements
   // are "clickable" but not "invocable". Similarly, if the action only involves
   // activating the control, such as when clicking a text field, the control is
-  // not considered "invocable".
-  return IsClickable() && !IsActivatable() && !SupportsExpandCollapse() &&
-         !SupportsToggle(role);
+  // not considered "invocable". However, all links are always invocable.
+  return IsLink(role) || (IsClickable() && !IsActivatable() &&
+                          !SupportsExpandCollapse() && !SupportsToggle(role));
 }
 
 bool AXNodeData::IsMenuButton() const {
@@ -1027,7 +1051,7 @@ bool AXNodeData::IsMenuButton() const {
 }
 
 bool AXNodeData::IsTextField() const {
-  return IsAtomicTextField() || IsNonAtomicTextField();
+  return IsAtomicTextField() || IsNonAtomicTextField() || IsSpinnerTextField();
 }
 
 bool AXNodeData::IsPasswordField() const {
@@ -1035,20 +1059,28 @@ bool AXNodeData::IsPasswordField() const {
 }
 
 bool AXNodeData::IsAtomicTextField() const {
-  // The ARIA spec suggests a textbox is a simple text field, like an <input> or
-  // <textarea> depending on aria-multiline. However there is nothing to stop
-  // an author from adding the textbox role to a non-contenteditable element,
-  // or from adding or removing non-plain-text nodes. If we treat the textbox
-  // role as atomic when contenteditable is not set, it can break accessibility
-  // by pruning interactive elements from the accessibility tree. Therefore,
-  // until we have a reliable means to identify truly atomic ARIA textboxes,
-  // treat them as non-atomic.
-  return ui::IsTextField(role) &&
+  // The ARIA spec suggests a textbox or a searchbox is a simple text field,
+  // like an <input> or <textarea> depending on aria-multiline. However there is
+  // nothing to stop an author from adding the textbox role to a
+  // non-contenteditable element, or from adding or removing non-plain-text
+  // nodes. If we treat the textbox role as atomic when contenteditable is not
+  // set, it can break accessibility by pruning interactive elements from the
+  // accessibility tree. Therefore, until we have a reliable means to identify
+  // truly atomic ARIA textboxes, we treat them as non-atomic in Blink.
+  return (ui::IsTextField(role) || IsSpinnerTextField()) &&
          !GetBoolAttribute(ax::mojom::BoolAttribute::kNonAtomicTextFieldRoot);
 }
 
 bool AXNodeData::IsNonAtomicTextField() const {
   return GetBoolAttribute(ax::mojom::BoolAttribute::kNonAtomicTextFieldRoot);
+}
+
+bool AXNodeData::IsSpinnerTextField() const {
+  // TODO(accessibility) Should an editable spin button be it's own role?
+  // This would allow this method to go away, by instead adding the editable
+  // spinbutton role to AXRoleProperties::IsTextField().
+  return role == ax::mojom::Role::kSpinButton &&
+         GetStringAttribute(ax::mojom::StringAttribute::kInputType) == "number";
 }
 
 bool AXNodeData::IsReadOnlyOrDisabled() const {
@@ -1405,9 +1437,6 @@ std::string AXNodeData::ToString() const {
           case ax::mojom::InvalidState::kTrue:
             result += " invalid_state=true";
             break;
-          case ax::mojom::InvalidState::kOther:
-            result += " invalid_state=other";
-            break;
           default:
             break;
         }
@@ -1668,17 +1697,19 @@ std::string AXNodeData::ToString() const {
            intlist_attribute : intlist_attributes) {
     const std::vector<int32_t>& values = intlist_attribute.second;
     switch (intlist_attribute.first) {
+      case ax::mojom::IntListAttribute::kNone:
+        break;
       case ax::mojom::IntListAttribute::kIndirectChildIds:
         result += " indirect_child_ids=" + IntVectorToString(values);
         break;
       case ax::mojom::IntListAttribute::kControlsIds:
         result += " controls_ids=" + IntVectorToString(values);
         break;
-      case ax::mojom::IntListAttribute::kDescribedbyIds:
-        result += " describedby_ids=" + IntVectorToString(values);
-        break;
       case ax::mojom::IntListAttribute::kDetailsIds:
         result += " details_ids=" + IntVectorToString(values);
+        break;
+      case ax::mojom::IntListAttribute::kDescribedbyIds:
+        result += " describedby_ids=" + IntVectorToString(values);
         break;
       case ax::mojom::IntListAttribute::kFlowtoIds:
         result += " flowto_ids=" + IntVectorToString(values);
@@ -1690,33 +1721,33 @@ std::string AXNodeData::ToString() const {
         result += " radio_group_ids=" + IntVectorToString(values);
         break;
       case ax::mojom::IntListAttribute::kMarkerTypes: {
-        std::string types_str;
-        for (size_t i = 0; i < values.size(); ++i) {
-          int32_t type = values[i];
+        std::string types_str = VectorToString(values, [](const int32_t type) {
+          std::string type_str;
           if (type == static_cast<int32_t>(ax::mojom::MarkerType::kNone))
-            continue;
-
-          if (i > 0)
-            types_str += ',';
+            return type_str;
 
           if (type & static_cast<int32_t>(ax::mojom::MarkerType::kSpelling))
-            types_str += "spelling&";
+            type_str += "spelling&";
           if (type & static_cast<int32_t>(ax::mojom::MarkerType::kGrammar))
-            types_str += "grammar&";
+            type_str += "grammar&";
+          if (type & static_cast<int32_t>(ax::mojom::MarkerType::kHighlight))
+            type_str += "highlight&";
           if (type & static_cast<int32_t>(ax::mojom::MarkerType::kTextMatch))
-            types_str += "text_match&";
+            type_str += "text_match&";
           if (type &
               static_cast<int32_t>(ax::mojom::MarkerType::kActiveSuggestion))
-            types_str += "active_suggestion&";
+            type_str += "active_suggestion&";
           if (type & static_cast<int32_t>(ax::mojom::MarkerType::kSuggestion))
-            types_str += "suggestion&";
+            type_str += "suggestion&";
 
-          if (!types_str.empty())
-            types_str = types_str.substr(0, types_str.size() - 1);
+          return type_str;
+        });
+
+        if (!types_str.empty()) {
+          types_str = types_str.substr(0, types_str.size() - 1);
+          result += " marker_types=" + types_str;
         }
 
-        if (!types_str.empty())
-          result += " marker_types=" + types_str;
         break;
       }
       case ax::mojom::IntListAttribute::kMarkerStarts:
@@ -1725,11 +1756,37 @@ std::string AXNodeData::ToString() const {
       case ax::mojom::IntListAttribute::kMarkerEnds:
         result += " marker_ends=" + IntVectorToString(values);
         break;
+      case ax::mojom::IntListAttribute::kHighlightTypes: {
+        std::string highlight_types_str =
+            VectorToString(values, [](const int32_t highlight_type) {
+              if (static_cast<ax::mojom::HighlightType>(highlight_type) ==
+                  ax::mojom::HighlightType::kNone)
+                return "";
+              return ui::ToString(
+                  static_cast<ax::mojom::HighlightType>(highlight_type));
+            });
+
+        if (!highlight_types_str.empty())
+          result += " highlight_types=" + highlight_types_str;
+        break;
+      }
+      case ax::mojom::IntListAttribute::kCaretBounds:
+        result += " caret_bounds=" + IntVectorToString(values);
+        break;
       case ax::mojom::IntListAttribute::kCharacterOffsets:
         result += " character_offsets=" + IntVectorToString(values);
         break;
-      case ax::mojom::IntListAttribute::kCachedLineStarts:
-        result += " cached_line_start_offsets=" + IntVectorToString(values);
+      case ax::mojom::IntListAttribute::kLineStarts:
+        result += " line_start_offsets=" + IntVectorToString(values);
+        break;
+      case ax::mojom::IntListAttribute::kLineEnds:
+        result += " line_end_offsets=" + IntVectorToString(values);
+        break;
+      case ax::mojom::IntListAttribute::kSentenceStarts:
+        result += " sentence_start_offsets=" + IntVectorToString(values);
+        break;
+      case ax::mojom::IntListAttribute::kSentenceEnds:
+        result += " sentence_end_offsets=" + IntVectorToString(values);
         break;
       case ax::mojom::IntListAttribute::kWordStarts:
         result += " word_starts=" + IntVectorToString(values);
@@ -1739,8 +1796,6 @@ std::string AXNodeData::ToString() const {
         break;
       case ax::mojom::IntListAttribute::kCustomActionIds:
         result += " custom_action_ids=" + IntVectorToString(values);
-        break;
-      case ax::mojom::IntListAttribute::kNone:
         break;
     }
   }
@@ -1757,6 +1812,11 @@ std::string AXNodeData::ToString() const {
       case ax::mojom::StringListAttribute::kNone:
         break;
     }
+  }
+
+  for (const std::pair<std::string, std::string>& string_pair :
+       html_attributes) {
+    result += " " + string_pair.first + "=" + string_pair.second;
   }
 
   if (actions)

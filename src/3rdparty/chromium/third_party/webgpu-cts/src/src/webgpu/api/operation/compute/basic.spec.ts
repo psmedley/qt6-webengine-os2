@@ -3,16 +3,16 @@ Basic command buffer compute tests.
 `;
 
 import { makeTestGroup } from '../../../../common/framework/test_group.js';
-import { DefaultLimits } from '../../../constants.js';
+import { kLimitInfo } from '../../../capability_info.js';
 import { GPUTest } from '../../../gpu_test.js';
 import { checkElementsEqualGenerated } from '../../../util/check_contents.js';
 
 export const g = makeTestGroup(GPUTest);
 
 const kMaxComputeWorkgroupSize = [
-  DefaultLimits.maxComputeWorkgroupSizeX,
-  DefaultLimits.maxComputeWorkgroupSizeY,
-  DefaultLimits.maxComputeWorkgroupSizeZ,
+  kLimitInfo.maxComputeWorkgroupSizeX.default,
+  kLimitInfo.maxComputeWorkgroupSizeY.default,
+  kLimitInfo.maxComputeWorkgroupSizeZ.default,
 ];
 
 g.test('memcpy').fn(async t => {
@@ -29,14 +29,14 @@ g.test('memcpy').fn(async t => {
     compute: {
       module: t.device.createShaderModule({
         code: `
-          [[block]] struct Data {
-              value : u32;
+          struct Data {
+              value : u32
           };
 
-          [[group(0), binding(0)]] var<storage, read> src : Data;
-          [[group(0), binding(1)]] var<storage, read_write> dst : Data;
+          @group(0) @binding(0) var<storage, read> src : Data;
+          @group(0) @binding(1) var<storage, read_write> dst : Data;
 
-          [[stage(compute), workgroup_size(1)]] fn main() {
+          @stage(compute) @workgroup_size(1) fn main() {
             dst.value = src.value;
             return;
           }
@@ -59,7 +59,7 @@ g.test('memcpy').fn(async t => {
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bg);
   pass.dispatch(1);
-  pass.endPass();
+  pass.end();
   t.device.queue.submit([encoder.finish()]);
 
   t.expectGPUBufferValuesEqual(dst, data);
@@ -76,7 +76,7 @@ g.test('large_dispatch')
         315,
         628,
         2179,
-        DefaultLimits.maxComputeWorkgroupsPerDimension,
+        kLimitInfo.maxComputeWorkgroupsPerDimension.default,
       ])
       // Test some reasonable workgroup sizes.
       .beginSubcases()
@@ -107,15 +107,15 @@ g.test('large_dispatch')
       compute: {
         module: t.device.createShaderModule({
           code: `
-            [[block]] struct OutputBuffer {
-              value : array<u32>;
+            struct OutputBuffer {
+              value : array<u32>
             };
 
-            [[group(0), binding(0)]] var<storage, read_write> dst : OutputBuffer;
+            @group(0) @binding(0) var<storage, read_write> dst : OutputBuffer;
 
-            [[stage(compute), workgroup_size(${wgSizes[0]}, ${wgSizes[1]}, ${wgSizes[2]})]]
+            @stage(compute) @workgroup_size(${wgSizes[0]}, ${wgSizes[1]}, ${wgSizes[2]})
             fn main(
-              [[builtin(global_invocation_id)]] GlobalInvocationID : vec3<u32>
+              @builtin(global_invocation_id) GlobalInvocationID : vec3<u32>
             ) {
               var xExtent : u32 = ${dims[0]}u * ${wgSizes[0]}u;
               var yExtent : u32 = ${dims[1]}u * ${wgSizes[1]}u;
@@ -149,7 +149,7 @@ g.test('large_dispatch')
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bg);
     pass.dispatch(dims[0], dims[1], dims[2]);
-    pass.endPass();
+    pass.end();
     t.device.queue.submit([encoder.finish()]);
 
     t.expectGPUBufferValuesPassCheck(dst, a => checkElementsEqualGenerated(a, i => val), {

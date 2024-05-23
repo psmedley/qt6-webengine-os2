@@ -90,22 +90,23 @@ class BuilderTest(LoggingTestCase):
 
     def test_fetch_results_with_weird_step_name(self):
         fetcher = TestResultsFetcher()
+        fetcher.builders.step_name_for_builder = lambda builder: None
         fetcher.web = MockWeb(
             urls={
                 'https://test-results.appspot.com/testfile?buildnumber=123&'
                 'callback=ADD_RESULTS&builder=builder&name=full_results.json':
-                'ADD_RESULTS(%s);' % (json.dumps(
+                b'ADD_RESULTS(' + json.dumps(
                     [{
                         "TestType": "blink_web_tests on Intel GPU (with patch)"
                     }, {
                         "TestType": "base_unittests (with patch)"
-                    }])),
+                    }]).encode('utf8', 'replace') + b');',
                 'https://test-results.appspot.com/data/layout_results/builder/123/'
                 'blink_web_tests%20on%20Intel%20GPU%20%28with%20patch%29/'
                 'layout-test-results/failing_results.json':
                 json.dumps({
                     'passed': True
-                }),
+                }).encode('utf8', 'replace')
             })
         results = fetcher.fetch_results(Build('builder', 123))
         self.assertEqual(
@@ -119,12 +120,13 @@ class BuilderTest(LoggingTestCase):
 
     def test_get_step_name(self):
         fetcher = TestResultsFetcher()
+        fetcher.builders.step_name_for_builder = lambda builder: None
         fetcher.web = MockWeb(
             urls={
                 'https://test-results.appspot.com/testfile?buildnumber=5&'
                 'callback=ADD_RESULTS&builder=foo&name=full_results.json':
-                'ADD_RESULTS(%s);' %
-                (json.dumps([{
+                b'ADD_RESULTS(' +
+                json.dumps([{
                     "TestType": "blink_web_tests (with patch)"
                 }, {
                     "TestType":
@@ -133,7 +135,7 @@ class BuilderTest(LoggingTestCase):
                     "TestType": "blink_web_tests (retry with patch)"
                 }, {
                     "TestType": "base_unittests (with patch)"
-                }]))
+                }]).encode('utf8', 'replace') + b');'
             })
         step_name = fetcher.get_layout_test_step_name(Build('foo', 5))
         self.assertEqual(step_name, 'blink_web_tests (with patch)')
@@ -141,18 +143,19 @@ class BuilderTest(LoggingTestCase):
 
     def test_get_step_name_for_wpt(self):
         fetcher = TestResultsFetcher()
+        fetcher.builders.step_name_for_builder = lambda builder: None
         fetcher.web = MockWeb(
             urls={
                 'https://test-results.appspot.com/testfile?buildnumber=5&'
                 'callback=ADD_RESULTS&builder=foo&name=full_results.json':
-                'ADD_RESULTS(%s);' %
+                b'ADD_RESULTS(' +
                 (json.dumps([{
                     "TestType": "wpt_tests_suite (with patch)"
                 }, {
                     "TestType": "wpt_tests_suite (retry with patch)"
                 }, {
                     "TestType": "base_unittests (with patch)"
-                }]))
+                }])).encode('utf8', 'replace') + b');'
             })
         step_name = fetcher.get_layout_test_step_name(Build('foo', 5))
         self.assertEqual(step_name, 'wpt_tests_suite (with patch)')
@@ -201,7 +204,7 @@ class BuilderTest(LoggingTestCase):
                 'name=full_results.json':
                 json.dumps({
                     'passed': True
-                }),
+                }).encode('utf8', 'replace'),
             })
         results = fetcher.fetch_webdriver_test_results(
             Build('bar-rel', 123), 'foo.chrome')

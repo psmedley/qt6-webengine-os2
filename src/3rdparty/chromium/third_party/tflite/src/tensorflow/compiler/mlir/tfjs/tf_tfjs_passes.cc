@@ -17,10 +17,12 @@ limitations under the License.
 
 #include <memory>
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/transforms/passes.h"
+#include "tensorflow/compiler/mlir/tensorflow/transforms/tf_saved_model_passes.h"
 #include "tensorflow/compiler/mlir/tfjs/transforms/passes.h"
 
 namespace tensorflow {
@@ -35,16 +37,16 @@ void AddTFToTFJSConversionPasses(mlir::OpPassManager* pm) {
   pm->addPass(mlir::tf_saved_model::CreateFreezeGlobalTensorsPass());
 
   // TFJS dialect passes.
-  pm->addPass(mlir::tfjs::CreateOptimizePass());
+  pm->addNestedPass<mlir::func::FuncOp>(mlir::tfjs::CreateOptimizePass());
 
   // Canonicalize, CSE etc.
-  pm->addNestedPass<mlir::FuncOp>(mlir::createCanonicalizerPass());
-  pm->addNestedPass<mlir::FuncOp>(mlir::createCSEPass());
+  pm->addNestedPass<mlir::func::FuncOp>(mlir::createCanonicalizerPass());
+  pm->addNestedPass<mlir::func::FuncOp>(mlir::createCSEPass());
 
   // raise to executor dialect in order to use GraphDef converter
-  pm->addNestedPass<mlir::FuncOp>(
+  pm->addNestedPass<mlir::func::FuncOp>(
       mlir::CreateFunctionalToExecutorDialectConversionPass());
-  pm->addNestedPass<mlir::FuncOp>(mlir::CreateBreakUpIslandsPass());
+  pm->addPass(mlir::CreateBreakUpIslandsPass());
 }
 
 }  // namespace tensorflow

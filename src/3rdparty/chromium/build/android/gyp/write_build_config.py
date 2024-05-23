@@ -243,11 +243,7 @@ by compiling sources, or providing them with a prebuilt jar.
 
 * `deps_info['public_deps_configs']`: List of paths to the `.build_config` files
 of *direct* dependencies of the current target which are exposed as part of the
-current target's public API. This should be a subset of
-deps_info['deps_configs'].
-
-* `deps_info['ignore_dependency_public_deps']`: If true, 'public_deps' will not
-be collected from the current target's direct deps.
+current target's public API.
 
 * `deps_info['unprocessed_jar_path']`:
 Path to the original .jar file for this target, before any kind of processing
@@ -567,24 +563,17 @@ This type corresponds to an Android app bundle (`.aab` file).
 --------------- END_MARKDOWN ---------------------------------------------------
 """
 
-from __future__ import print_function
-
 import collections
 import itertools
 import json
 import optparse
 import os
+import shutil
 import sys
 import xml.dom.minidom
 
 from util import build_utils
 from util import resource_utils
-
-# TODO(crbug.com/1174969): Remove this once Python2 is obsoleted.
-if sys.version_info.major == 2:
-  zip_longest = itertools.izip_longest
-else:
-  zip_longest = itertools.zip_longest
 
 
 # Types that should never be used as a dependency of another build config.
@@ -593,12 +582,13 @@ _ROOT_TYPES = ('android_apk', 'java_binary', 'java_annotation_processor',
 # Types that should not allow code deps to pass through.
 _RESOURCE_TYPES = ('android_assets', 'android_resources', 'system_java_library')
 
+# Cache of path -> JSON dict.
+_dep_config_cache = {}
+
 
 class OrderedSet(collections.OrderedDict):
-  # Value |parameter| is present to avoid presubmit warning due to different
-  # number of parameters from overridden method.
   @staticmethod
-  def fromkeys(iterable, value=None):
+  def fromkeys(iterable):
     out = OrderedSet()
     out.update(iterable)
     return out
@@ -630,7 +620,8 @@ def _ExtractMarkdownDocumentation(input_text):
 
   return result
 
-class AndroidManifest(object):
+
+class AndroidManifest:
   def __init__(self, path):
     self.path = path
     dom = xml.dom.minidom.parse(path)
@@ -660,12 +651,15 @@ class AndroidManifest(object):
     return self.manifest.getAttribute('package')
 
 
-dep_config_cache = {}
-def GetDepConfig(path):
-  if not path in dep_config_cache:
+def GetDepConfigRoot(path):
+  if not path in _dep_config_cache:
     with open(path) as jsonfile:
-      dep_config_cache[path] = json.load(jsonfile)['deps_info']
-  return dep_config_cache[path]
+      _dep_config_cache[path] = json.load(jsonfile)
+  return _dep_config_cache[path]
+
+
+def GetDepConfig(path):
+  return GetDepConfigRoot(path)['deps_info']
 
 
 def DepsOfType(wanted_type, configs):
@@ -677,13 +671,20 @@ def DepPathsOfType(wanted_type, config_paths):
 
 
 def GetAllDepsConfigsInOrder(deps_config_paths, filter_func=None):
-  def GetDeps(path):
-    config = GetDepConfig(path)
-    if filter_func and not filter_func(config):
-      return []
-    return config['deps_configs']
+  def apply_filter(paths):
+    if filter_func:
+      return [p for p in paths if filter_func(GetDepConfig(p))]
+    return paths
 
-  return build_utils.GetSortedTransitiveDependencies(deps_config_paths, GetDeps)
+  def discover(path):
+    config = GetDepConfig(path)
+    all_deps = config['deps_configs'] + config.get('public_deps_configs', [])
+    return apply_filter(all_deps)
+
+  deps_config_paths = apply_filter(deps_config_paths)
+  deps_config_paths = build_utils.GetSortedTransitiveDependencies(
+      deps_config_paths, discover)
+  return deps_config_paths
 
 
 def GetObjectByPath(obj, key_path):
@@ -701,7 +702,7 @@ def RemoveObjDups(obj, base, *key_path):
   target[:] = [x for x in target if x not in base_target]
 
 
-class Deps(object):
+class Deps:
   def __init__(self, direct_deps_config_paths):
     self._all_deps_config_paths = GetAllDepsConfigsInOrder(
         direct_deps_config_paths)
@@ -722,18 +723,6 @@ class Deps(object):
     if wanted_type is None:
       return self._direct_deps_configs
     return DepsOfType(wanted_type, self._direct_deps_configs)
-
-  def DirectAndChildPublicDeps(self, wanted_type=None):
-    """Returns direct dependencies and dependencies exported via public_deps of
-       direct dependencies.
-    """
-    dep_paths = set(self._direct_deps_config_paths)
-    for direct_dep in self._direct_deps_configs:
-      dep_paths.update(direct_dep.get('public_deps_configs', []))
-    deps_list = [GetDepConfig(p) for p in dep_paths]
-    if wanted_type is None:
-      return deps_list
-    return DepsOfType(wanted_type, deps_list)
 
   def AllConfigPaths(self):
     return self._all_deps_config_paths
@@ -758,7 +747,9 @@ class Deps(object):
         if config['is_prebuilt']:
           pass
         elif config['gradle_treat_as_prebuilt']:
-          helper(Deps(config['deps_configs']))
+          all_deps = config['deps_configs'] + config.get(
+              'public_deps_configs', [])
+          helper(Deps(all_deps))
         elif config not in ret:
           ret.append(config)
 
@@ -787,7 +778,7 @@ def _MergeAssets(all_assets):
     dest_map = uncompressed if disable_compression else compressed
     other_map = compressed if disable_compression else uncompressed
     outputs = entry.get('outputs', [])
-    for src, dest in zip_longest(entry['sources'], outputs):
+    for src, dest in itertools.zip_longest(entry['sources'], outputs):
       if not dest:
         dest = os.path.basename(src)
       # Merge so that each path shows up in only one of the lists, and that
@@ -806,22 +797,23 @@ def _MergeAssets(all_assets):
   return create_list(compressed), create_list(uncompressed), locale_paks
 
 
-def _ResolveGroups(config_paths):
+def _ResolveGroupsAndPublicDeps(config_paths):
   """Returns a list of configs with all groups inlined."""
-  ret = list(config_paths)
-  ret_set = set(config_paths)
-  while True:
-    group_paths = DepPathsOfType('group', ret)
-    if not group_paths:
-      return ret
-    for group_path in group_paths:
-      index = ret.index(group_path)
-      expanded_config_paths = []
-      for deps_config_path in GetDepConfig(group_path)['deps_configs']:
-        if not deps_config_path in ret_set:
-          expanded_config_paths.append(deps_config_path)
-      ret[index:index + 1] = expanded_config_paths
-      ret_set.update(expanded_config_paths)
+
+  def helper(config_path):
+    config = GetDepConfig(config_path)
+    if config['type'] == 'group':
+      # Groups combine public_deps with deps_configs, so no need to check
+      # public_config_paths separately.
+      return config['deps_configs']
+    if config['type'] == 'android_resources':
+      # android_resources targets do not support public_deps, but instead treat
+      # all resource deps as public deps.
+      return DepPathsOfType('android_resources', config['deps_configs'])
+
+    return config.get('public_deps_configs', [])
+
+  return build_utils.GetSortedTransitiveDependencies(config_paths, helper)
 
 
 def _DepsFromPaths(dep_paths,
@@ -863,6 +855,18 @@ def _DepsFromPaths(dep_paths,
   return _DepsFromPathsWithFilters(dep_paths, blocklist, allowlist)
 
 
+def _FilterConfigPaths(dep_paths, blocklist=None, allowlist=None):
+  if not blocklist and not allowlist:
+    return dep_paths
+  configs = [GetDepConfig(p) for p in dep_paths]
+  if blocklist:
+    configs = [c for c in configs if c['type'] not in blocklist]
+  if allowlist:
+    configs = [c for c in configs if c['type'] in allowlist]
+
+  return [c['path'] for c in configs]
+
+
 def _DepsFromPathsWithFilters(dep_paths, blocklist=None, allowlist=None):
   """Resolves all groups and trims dependency branches that we never want.
 
@@ -875,17 +879,17 @@ def _DepsFromPathsWithFilters(dep_paths, blocklist=None, allowlist=None):
   about (i.e. we wish to prune all other branches that do not start from one of
   these).
   """
-  group_paths = DepPathsOfType('group', dep_paths)
-  config_paths = dep_paths
-  if group_paths:
-    config_paths = _ResolveGroups(dep_paths) + group_paths
-  configs = [GetDepConfig(p) for p in config_paths]
-  if blocklist:
-    configs = [c for c in configs if c['type'] not in blocklist]
+  # Filter both before and after so that public_deps of blocked targets are not
+  # added.
+  allowlist_with_groups = None
   if allowlist:
-    configs = [c for c in configs if c['type'] in allowlist]
+    allowlist_with_groups = set(allowlist)
+    allowlist_with_groups.add('group')
+  dep_paths = _FilterConfigPaths(dep_paths, blocklist, allowlist_with_groups)
+  dep_paths = _ResolveGroupsAndPublicDeps(dep_paths)
+  dep_paths = _FilterConfigPaths(dep_paths, blocklist, allowlist)
 
-  return Deps([c['path'] for c in configs])
+  return Deps(dep_paths)
 
 
 def _ExtractSharedLibsFromRuntimeDeps(runtime_deps_file):
@@ -941,10 +945,23 @@ def _CompareClasspathPriority(dep):
   return 1 if dep.get('low_classpath_priority') else 0
 
 
+def _CopyBuildConfigsForDebugging(debug_dir):
+  shutil.rmtree(debug_dir, ignore_errors=True)
+  os.makedirs(debug_dir)
+  for src_path in _dep_config_cache:
+    dst_path = os.path.join(debug_dir, src_path)
+    assert dst_path.startswith(debug_dir), dst_path
+    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+    shutil.copy(src_path, dst_path)
+  print(f'Copied {len(_dep_config_cache)} .build_config.json into {debug_dir}')
+
+
 def main(argv):
   parser = optparse.OptionParser()
   build_utils.AddDepfileOption(parser)
   parser.add_option('--build-config', help='Path to build_config output.')
+  parser.add_option('--store-deps-for-debugging-to',
+                    help='Path to copy all transitive build config files to.')
   parser.add_option(
       '--type',
       help='Type of this target (e.g. android_library).')
@@ -996,11 +1013,6 @@ def main(argv):
   parser.add_option('--public-deps-configs',
                     help='GN list of config files of deps which are exposed as '
                     'part of the target\'s public API.')
-  parser.add_option(
-      '--ignore-dependency-public-deps',
-      action='store_true',
-      help='If true, \'public_deps\' will not be collected from the current '
-      'target\'s direct deps.')
   parser.add_option('--aar-path', help='Path to containing .aar file.')
   parser.add_option('--device-jar-path', help='Path to .jar for dexing.')
   parser.add_option('--host-jar-path', help='Path to .jar for java_binary.')
@@ -1154,6 +1166,18 @@ def main(argv):
       help='For bundles, the paths of all non-async module .build_configs '
       'for modules that are part of the bundle.')
 
+  parser.add_option(
+      '--add-view-trace-events',
+      action='store_true',
+      help=
+      'Specifies that trace events will be added with an additional bytecode '
+      'rewriting step.')
+  parser.add_option(
+      '--base-module-gen-dir',
+      help=
+      'Path to base module\'s target_gen_dir. Needed for bundles and modules '
+      'when --add-view-trace-events is set.')
+
   parser.add_option('--version-name', help='Version name for this APK.')
   parser.add_option('--version-code', help='Version code for this APK.')
 
@@ -1257,9 +1281,13 @@ def main(argv):
   }
 
   deps_configs_paths = build_utils.ParseGnList(options.deps_configs)
+  public_deps_configs_paths = build_utils.ParseGnList(
+      options.public_deps_configs)
+  deps_configs_paths += public_deps_configs_paths
   deps = _DepsFromPaths(deps_configs_paths,
                         options.type,
                         recursive_resource_deps=options.recursive_resource_deps)
+  public_deps = _DepsFromPaths(public_deps_configs_paths, options.type)
   processor_deps = _DepsFromPaths(
       build_utils.ParseGnList(options.annotation_processor_configs or ''),
       options.type, filter_root_targets=False)
@@ -1276,18 +1304,20 @@ def main(argv):
         allowlist=['java_library'])
     all_inputs.extend(recursive_java_deps.AllConfigPaths())
 
-  direct_deps = deps.Direct()
   system_library_deps = deps.Direct('system_java_library')
   all_deps = deps.All()
   all_library_deps = deps.All('java_library')
-  all_resources_deps = deps.All('android_resources')
 
   if options.type == 'java_library':
-    java_library_deps = _DepsFromPathsWithFilters(
-        deps_configs_paths, allowlist=['android_resources'])
-    # for java libraries, we only care about resources that are directly
-    # reachable without going through another java_library.
-    all_resources_deps = java_library_deps.All('android_resources')
+    # For Java libraries, restrict to resource targets that are direct deps, or
+    # are indirect via other resource targets.
+    # The indirect-through-other-targets ones are picked up because
+    # _ResolveGroupsAndPublicDeps() treats resource deps of resource targets as
+    # public_deps.
+    all_resources_deps = deps.Direct('android_resources')
+  else:
+    all_resources_deps = deps.All('android_resources')
+
   if options.type == 'android_resources' and options.recursive_resource_deps:
     # android_resources targets that want recursive resource deps also need to
     # collect package_names from all library deps. This ensures the R.java files
@@ -1309,8 +1339,8 @@ def main(argv):
 
   base_module_build_config = None
   if options.base_module_build_config:
-    with open(options.base_module_build_config, 'r') as f:
-      base_module_build_config = json.load(f)
+    base_module_build_config = GetDepConfigRoot(
+        options.base_module_build_config)
 
   # Initialize some common config.
   # Any value that needs to be queryable by dependents must go within deps_info.
@@ -1320,7 +1350,6 @@ def main(argv):
           'path': options.build_config,
           'type': options.type,
           'gn_target': options.gn_target,
-          'deps_configs': [d['path'] for d in direct_deps],
           'chromium_code': not options.non_chromium_code,
       },
       # Info needed only by generate_gradle.py.
@@ -1328,6 +1357,24 @@ def main(argv):
   }
   deps_info = config['deps_info']
   gradle = config['gradle']
+
+  # The paths we record as deps can differ from deps_config_paths:
+  # 1) Paths can be removed when blocked by _ROOT_TYPES / _RESOURCE_TYPES.
+  # 2) Paths can be added when promoted from group deps or public_deps of deps.
+  #    Deps are promoted from groups/public_deps in order to make the filtering
+  #    of 1) work through group() targets (which themselves are not resource
+  #    targets, but should be treated as such when depended on by a resource
+  #    target. A more involved filtering implementation could work to maintain
+  #    the semantics of 1) without the need to promote deps, but we've avoided
+  #    such an undertaking so far.
+  public_deps_set = set()
+  if public_deps_configs_paths:
+    deps_info['public_deps_configs'] = [d['path'] for d in public_deps.Direct()]
+    public_deps_set = set(deps_info['public_deps_configs'])
+
+  deps_info['deps_configs'] = [
+      d['path'] for d in deps.Direct() if d['path'] not in public_deps_set
+  ]
 
   if options.type == 'android_apk' and options.tested_apk_config:
     tested_apk_deps = Deps([options.tested_apk_config])
@@ -1356,21 +1403,24 @@ def main(argv):
     deps_info['java_sources_file'] = options.java_sources_file
 
   if is_java_target:
-    if options.bundled_srcjars:
-      gradle['bundled_srcjars'] = deps_info['bundled_srcjars']
-
-    gradle['dependent_android_projects'] = []
-    gradle['dependent_java_projects'] = []
-    gradle['dependent_prebuilt_jars'] = deps.GradlePrebuiltJarPaths()
-
     if options.main_class:
       deps_info['main_class'] = options.main_class
 
+    dependent_prebuilt_jars = deps.GradlePrebuiltJarPaths()
+    dependent_prebuilt_jars.sort()
+    if dependent_prebuilt_jars:
+      gradle['dependent_prebuilt_jars'] = dependent_prebuilt_jars
+
+    dependent_android_projects = []
+    dependent_java_projects = []
     for c in deps.GradleLibraryProjectDeps():
       if c['requires_android']:
-        gradle['dependent_android_projects'].append(c['path'])
+        dependent_android_projects.append(c['path'])
       else:
-        gradle['dependent_java_projects'].append(c['path'])
+        dependent_java_projects.append(c['path'])
+
+    gradle['dependent_android_projects'] = dependent_android_projects
+    gradle['dependent_java_projects'] = dependent_java_projects
 
   if options.r_text_path:
     deps_info['r_text_path'] = options.r_text_path
@@ -1378,14 +1428,16 @@ def main(argv):
   # TODO(tiborg): Remove creation of JNI info for type group and java_library
   # once we can generate the JNI registration based on APK / module targets as
   # opposed to groups and libraries.
-  if is_apk_or_module_target or options.type in (
-      'group', 'java_library', 'junit_binary'):
+  if is_apk_or_module_target or options.type in ('group', 'java_library',
+                                                 'junit_binary', 'dist_aar'):
     deps_info['jni'] = {}
     all_java_sources = [c['java_sources_file'] for c in all_library_deps
                         if 'java_sources_file' in c]
     if options.java_sources_file:
       all_java_sources.append(options.java_sources_file)
 
+  if is_apk_or_module_target or options.type in ('group', 'java_library',
+                                                 'junit_binary'):
     if options.apk_proto_resources:
       deps_info['proto_resources_path'] = options.apk_proto_resources
 
@@ -1435,9 +1487,6 @@ def main(argv):
     if options.unprocessed_jar_path:
       deps_info['unprocessed_jar_path'] = options.unprocessed_jar_path
       deps_info['interface_jar_path'] = options.interface_jar_path
-    if options.public_deps_configs:
-      deps_info['public_deps_configs'] = build_utils.ParseGnList(
-          options.public_deps_configs)
     if options.device_jar_path:
       deps_info['device_jar_path'] = options.device_jar_path
     if options.host_jar_path:
@@ -1538,22 +1587,6 @@ def main(argv):
       ]
       deps_info['dependency_r_txt_files'] = r_text_files
 
-    # For feature modules, remove any resources that already exist in the base
-    # module.
-    if base_module_build_config:
-      dependency_zips = [
-          c for c in dependency_zips
-          if c not in base_module_build_config['deps_info']['dependency_zips']
-      ]
-      dependency_zip_overlays = [
-          c for c in dependency_zip_overlays if c not in
-          base_module_build_config['deps_info']['dependency_zip_overlays']
-      ]
-      extra_package_names = [
-          c for c in extra_package_names if c not in
-          base_module_build_config['deps_info']['extra_package_names']
-      ]
-
     if options.type == 'android_apk' and options.tested_apk_config:
       config['deps_info']['arsc_package_name'] = (
           tested_apk_config['package_name'])
@@ -1566,17 +1599,23 @@ def main(argv):
     if options.res_size_info:
       config['deps_info']['res_size_info'] = options.res_size_info
 
+    # Safe to sort: Build checks that non-overlay resource have no overlap.
+    dependency_zips.sort()
     config['deps_info']['dependency_zips'] = dependency_zips
     config['deps_info']['dependency_zip_overlays'] = dependency_zip_overlays
+    # Order doesn't matter, so make stable.
+    extra_package_names.sort()
     config['deps_info']['extra_package_names'] = extra_package_names
 
   # These are .jars to add to javac classpath but not to runtime classpath.
   extra_classpath_jars = build_utils.ParseGnList(options.extra_classpath_jars)
   if extra_classpath_jars:
+    extra_classpath_jars.sort()
     deps_info['extra_classpath_jars'] = extra_classpath_jars
 
   mergeable_android_manifests = build_utils.ParseGnList(
       options.mergeable_android_manifests)
+  mergeable_android_manifests.sort()
   if mergeable_android_manifests:
     deps_info['mergeable_android_manifests'] = mergeable_android_manifests
 
@@ -1588,13 +1627,8 @@ def main(argv):
 
 
   if is_java_target:
-    if options.ignore_dependency_public_deps:
-      classpath_direct_deps = deps.Direct()
-      classpath_direct_library_deps = deps.Direct('java_library')
-    else:
-      classpath_direct_deps = deps.DirectAndChildPublicDeps()
-      classpath_direct_library_deps = deps.DirectAndChildPublicDeps(
-          'java_library')
+    classpath_direct_deps = deps.Direct()
+    classpath_direct_library_deps = deps.Direct('java_library')
 
     # The classpath used to compile this target when annotation processors are
     # present.
@@ -1808,7 +1842,7 @@ def main(argv):
   deps_info['extra_main_r_text_files'] = sorted(extra_main_r_text_files)
 
   if is_apk_or_module_target or options.type in ('group', 'java_library',
-                                                 'junit_binary'):
+                                                 'junit_binary', 'dist_aar'):
     deps_info['jni']['all_source'] = sorted(set(all_java_sources))
 
   system_jars = [c['unprocessed_jar_path'] for c in system_library_deps]
@@ -1937,8 +1971,8 @@ def main(argv):
     config['javac']['processor_classpath'] += [
         c['host_jar_path'] for c in processor_deps.All('java_library')
     ]
-    config['javac']['processor_classes'] = [
-        c['main_class'] for c in processor_deps.Direct()]
+    config['javac']['processor_classes'] = sorted(
+        c['main_class'] for c in processor_deps.Direct())
     deps_info['javac_full_classpath'] = list(javac_full_classpath)
     deps_info['javac_full_interface_classpath'] = list(
         javac_full_interface_classpath)
@@ -1956,9 +1990,23 @@ def main(argv):
     deps_info['javac_full_interface_classpath'] = list(
         javac_full_interface_classpath)
 
-  if options.type in ('android_apk', 'dist_jar', 'android_app_bundle_module',
-                      'android_app_bundle'):
+  if options.type in ('android_apk', 'android_app_bundle',
+                      'android_app_bundle_module', 'dist_aar', 'dist_jar'):
     deps_info['device_classpath'] = device_classpath
+    if options.add_view_trace_events:
+      trace_event_rewritten_device_classpath = []
+      for jar_path in device_classpath:
+        file_path = jar_path.replace('../', '')
+        file_path = file_path.replace('obj/', '')
+        file_path = file_path.replace('gen/', '')
+        file_path = file_path.replace('.jar', '.tracing_rewritten.jar')
+        rewritten_jar_path = os.path.join(options.base_module_gen_dir,
+                                          file_path)
+        trace_event_rewritten_device_classpath.append(rewritten_jar_path)
+
+      deps_info['trace_event_rewritten_device_classpath'] = (
+          trace_event_rewritten_device_classpath)
+
     if options.tested_apk_config:
       deps_info['device_classpath_extended'] = device_classpath_extended
 
@@ -1991,17 +2039,22 @@ def main(argv):
     if options.secondary_abi_shared_libraries_runtime_deps:
       secondary_abi_library_paths = _ExtractSharedLibsFromRuntimeDeps(
           options.secondary_abi_shared_libraries_runtime_deps)
+      secondary_abi_library_paths.sort()
       all_inputs.append(options.secondary_abi_shared_libraries_runtime_deps)
 
     native_library_placeholder_paths = build_utils.ParseGnList(
         options.native_lib_placeholders)
+    native_library_placeholder_paths.sort()
 
     secondary_native_library_placeholder_paths = build_utils.ParseGnList(
         options.secondary_native_lib_placeholders)
+    secondary_native_library_placeholder_paths.sort()
 
     loadable_modules = build_utils.ParseGnList(options.loadable_modules)
+    loadable_modules.sort()
     secondary_abi_loadable_modules = build_utils.ParseGnList(
         options.secondary_abi_loadable_modules)
+    secondary_abi_loadable_modules.sort()
 
     config['native'] = {
         'libraries':
@@ -2045,6 +2098,7 @@ def main(argv):
                                   if 'java_resources_jar' in d]
       java_resources_jars = [jar for jar in java_resources_jars
                              if jar not in tested_apk_resource_jars]
+    java_resources_jars.sort()
     config['java_resources_jars'] = java_resources_jars
 
   if options.java_resources_jar_path:
@@ -2055,12 +2109,18 @@ def main(argv):
   # are not duplicated on the feature module.
   if base_module_build_config:
     base = base_module_build_config
+    RemoveObjDups(config, base, 'deps_info', 'dependency_zips')
+    RemoveObjDups(config, base, 'deps_info', 'dependency_zip_overlays')
+    RemoveObjDups(config, base, 'deps_info', 'extra_package_names')
     RemoveObjDups(config, base, 'deps_info', 'device_classpath')
     RemoveObjDups(config, base, 'deps_info', 'javac_full_classpath')
     RemoveObjDups(config, base, 'deps_info', 'javac_full_interface_classpath')
     RemoveObjDups(config, base, 'deps_info', 'jni', 'all_source')
     RemoveObjDups(config, base, 'final_dex', 'all_dex_files')
     RemoveObjDups(config, base, 'extra_android_manifests')
+    if options.add_view_trace_events:
+      RemoveObjDups(config, base, 'deps_info',
+                    'trace_event_rewritten_device_classpath')
 
   if is_java_target:
     jar_to_target = {}
@@ -2076,15 +2136,20 @@ def main(argv):
 
     # Used by bytecode_processor to give better error message when missing
     # deps are found.
-    config['deps_info']['javac_full_classpath_targets'] = [
-        jar_to_target[x] for x in deps_info['javac_full_classpath']
-    ]
+    config['deps_info']['javac_full_classpath_targets'] = sorted(
+        jar_to_target[x] for x in deps_info['javac_full_classpath'])
 
   build_utils.WriteJson(config, options.build_config, only_if_changed=True)
 
   if options.depfile:
     build_utils.WriteDepfile(options.depfile, options.build_config,
                              sorted(set(all_inputs)))
+
+  if options.store_deps_for_debugging_to:
+    GetDepConfig(options.build_config)  # Add it to cache.
+    _CopyBuildConfigsForDebugging(options.store_deps_for_debugging_to)
+
+  return 0
 
 
 if __name__ == '__main__':

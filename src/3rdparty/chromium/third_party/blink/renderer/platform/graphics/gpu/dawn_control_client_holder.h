@@ -50,8 +50,7 @@ class PLATFORM_EXPORT DawnControlClientHolder
   void MarkContextLost();
   bool IsContextLost() const;
   std::unique_ptr<RecyclableCanvasResource> GetOrCreateCanvasResource(
-      const IntSize& size,
-      const CanvasResourceParams& params,
+      const SkImageInfo& info,
       bool is_origin_top_left);
 
  private:

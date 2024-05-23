@@ -67,6 +67,10 @@ namespace {
 class CastTrustStore {
  public:
   using AccessCallback = base::OnceCallback<void(net::TrustStore*)>;
+
+  CastTrustStore(const CastTrustStore&) = delete;
+  CastTrustStore& operator=(const CastTrustStore&) = delete;
+
   static void AccessInstance(AccessCallback callback) {
     CastTrustStore* instance = GetInstance();
     const base::AutoLock guard(instance->lock_);
@@ -101,15 +105,17 @@ class CastTrustStore {
   void AddDeveloperCertificates() {
     base::AutoLock guard(lock_);
     auto* command_line = base::CommandLine::ForCurrentProcess();
-    std::string cert_path = command_line->GetSwitchValueASCII(
+    std::string cert_path_arg = command_line->GetSwitchValueASCII(
         switches::kCastDeveloperCertificatePath);
-    if (!cert_path.empty()) {
-      base::FilePath path;
-      base::PathService::Get(base::DIR_CURRENT, &path);
-      path = path.Append(cert_path);
-      VLOG(1) << "Using cast developer certificate path=" << cert_path
-              << ", processed as: " << path;
-      if (!PopulateStoreWithCertsFromPath(&store_, path)) {
+    if (!cert_path_arg.empty()) {
+      base::FilePath cert_path(cert_path_arg);
+      if (!cert_path.IsAbsolute()) {
+        base::FilePath path;
+        base::PathService::Get(base::DIR_CURRENT, &path);
+        cert_path = path.Append(cert_path);
+      }
+      VLOG(1) << "Using cast developer certificate path " << cert_path;
+      if (!PopulateStoreWithCertsFromPath(&store_, cert_path)) {
         LOG(WARNING) << "No developer certs added to store, only official"
                         "Google root CA certificates will work.";
       }
@@ -122,9 +128,9 @@ class CastTrustStore {
   template <size_t N>
   void AddAnchor(const uint8_t (&data)[N]) {
     net::CertErrors errors;
-    scoped_refptr<net::ParsedCertificate> cert =
-        net::ParsedCertificate::CreateWithoutCopyingUnsafe(data, N, {},
-                                                           &errors);
+    scoped_refptr<net::ParsedCertificate> cert = net::ParsedCertificate::Create(
+        net::x509_util::CreateCryptoBufferFromStaticDataUnsafe(data), {},
+        &errors);
     CHECK(cert) << errors.ToDebugString();
     // Enforce pathlen constraints and policies defined on the root certificate.
     base::AutoLock guard(lock_);
@@ -133,7 +139,6 @@ class CastTrustStore {
 
   base::Lock lock_;
   net::TrustStoreInMemory store_ GUARDED_BY(lock_);
-  DISALLOW_COPY_AND_ASSIGN(CastTrustStore);
 };
 
 // Returns the OID for the Audio-Only Cast policy
@@ -201,7 +206,7 @@ bool GetCommonNameFromSubject(const net::der::Input& subject_tlv,
 
   for (const net::RelativeDistinguishedName& rdn : rdn_sequence) {
     for (const auto& atv : rdn) {
-      if (atv.type == net::TypeCommonNameOid()) {
+      if (atv.type == net::der::Input(net::kTypeCommonNameOid)) {
         return atv.ValueAsString(common_name);
       }
     }
@@ -247,7 +252,7 @@ void DetermineDeviceCertificatePolicy(
 // Checks properties on the target certificate.
 //
 //   * The Key Usage must include Digital Signature
-WARN_UNUSED_RESULT bool CheckTargetCertificate(
+[[nodiscard]] bool CheckTargetCertificate(
     const net::ParsedCertificate* cert,
     std::unique_ptr<CertVerificationContext>* context) {
   // Get the Key Usage extension.
@@ -365,7 +370,8 @@ CastCertError VerifyDeviceCertUsingCustomTrustStore(
   net::CertPathBuilder path_builder(
       target_cert.get(), trust_store, &path_builder_delegate, verification_time,
       net::KeyPurpose::CLIENT_AUTH, net::InitialExplicitPolicy::kFalse,
-      {net::AnyPolicy()}, net::InitialPolicyMappingInhibit::kFalse,
+      {net::der::Input(net::kAnyPolicyOid)},
+      net::InitialPolicyMappingInhibit::kFalse,
       net::InitialAnyPolicyInhibit::kFalse);
   path_builder.AddCertIssuerSource(&intermediate_cert_issuer_source);
   net::CertPathBuilder::Result result = path_builder.Run();

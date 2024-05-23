@@ -11,7 +11,6 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/cxx17_backports.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -20,14 +19,13 @@
 #include "base/no_destructor.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece_forward.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/sys_byteorder.h"
-#include "base/task/post_task.h"
+#include "base/task/task_runner_util.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
-#include "base/task_runner_util.h"
 #include "base/time/time.h"
 #include "ui/base/cursor/cursor_theme_manager.h"
 #include "ui/base/x/x11_util.h"
@@ -199,8 +197,7 @@ std::vector<std::string> GetBaseThemes(const base::FilePath& abspath) {
 }
 
 base::FilePath CanonicalizePath(base::FilePath path) {
-  std::vector<std::string> components;
-  path.GetComponents(&components);
+  std::vector<std::string> components = path.GetComponents();
   if (components[0] == "~") {
     path = base::GetHomeDir();
     for (size_t i = 1; i < components.size(); i++)
@@ -313,7 +310,7 @@ XCursorLoader::XCursorLoader(x11::Connection* connection)
   if (auto pf_reply = pf_cookie.Sync())
     pict_format_ = GetRenderARGBFormat(*pf_reply.reply);
 
-  for (uint16_t i = 0; i < base::size(cursor_names); i++)
+  for (uint16_t i = 0; i < std::size(cursor_names); i++)
     cursor_name_to_char_[cursor_names[i]] = i;
 }
 
@@ -383,8 +380,8 @@ scoped_refptr<X11Cursor> XCursorLoader::CreateCursor(
   auto* connection = x11::Connection::Get();
   x11::PutImageRequest put_image_request{
       .format = x11::ImageFormat::ZPixmap,
-      .drawable = static_cast<x11::Pixmap>(pixmap),
-      .gc = static_cast<x11::GraphicsContext>(gc),
+      .drawable = pixmap,
+      .gc = gc,
       .width = width,
       .height = height,
       .depth = 32,
@@ -589,9 +586,9 @@ std::vector<XCursorLoader::Image> ParseCursorFile(
     bitmap.allocN32Pixels(image.width, image.height);
     if (!ReadU32s(bitmap.getPixels(), bitmap.computeByteSize()))
       continue;
-    images.push_back(
-        XCursorLoader::Image{bitmap, gfx::Point(image.xhot, image.yhot),
-                             base::TimeDelta::FromMilliseconds(image.delay)});
+    images.push_back(XCursorLoader::Image{bitmap,
+                                          gfx::Point(image.xhot, image.yhot),
+                                          base::Milliseconds(image.delay)});
   }
   return images;
 }

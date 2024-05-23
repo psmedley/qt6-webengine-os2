@@ -13,7 +13,7 @@
 #include <unordered_set>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -117,7 +117,7 @@ class SocketResourceManager : public SocketResourceManagerInterface {
   }
 
  private:
-  ApiResourceManager<T>* manager_;
+  raw_ptr<ApiResourceManager<T>> manager_;
 };
 
 // Base class for socket API functions, with some helper functions.
@@ -515,6 +515,9 @@ class SocketSecureFunction : public SocketApiFunction {
   DECLARE_EXTENSION_FUNCTION("socket.secure", SOCKET_SECURE)
   SocketSecureFunction();
 
+  SocketSecureFunction(const SocketSecureFunction&) = delete;
+  SocketSecureFunction& operator=(const SocketSecureFunction&) = delete;
+
  protected:
   ~SocketSecureFunction() override;
 
@@ -531,8 +534,6 @@ class SocketSecureFunction : public SocketApiFunction {
       mojo::ScopedDataPipeProducerHandle send_pipe_handle);
 
   std::unique_ptr<api::socket::Secure::Params> params_;
-
-  DISALLOW_COPY_AND_ASSIGN(SocketSecureFunction);
 };
 
 }  // namespace extensions

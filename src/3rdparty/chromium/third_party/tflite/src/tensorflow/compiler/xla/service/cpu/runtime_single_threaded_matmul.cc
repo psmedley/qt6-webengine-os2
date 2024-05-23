@@ -15,16 +15,12 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/cpu/runtime_single_threaded_matmul.h"
 
+#include "absl/base/attributes.h"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
-#include "tensorflow/core/platform/dynamic_annotations.h"
-#include "tensorflow/core/platform/types.h"
 
 #if defined(TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL)
 #include "tensorflow/core/kernels/eigen_contraction_kernel.h"
 #endif
-
-using tensorflow::int32;
-using tensorflow::int64;
 
 namespace {
 
@@ -33,16 +29,17 @@ bool Is16BytesAligned(void* ptr) {
 }
 
 template <typename T, Eigen::AlignmentType Alignment>
-void MatMul(const void* run_options_ptr, T* out, T* lhs, T* rhs, int64 m,
-            int64 n, int64 k, int32 transpose_lhs, int32 transpose_rhs) {
-  int64 lhs_rows = m;
-  int64 lhs_cols = k;
+void MatMul(const void* run_options_ptr, T* out, T* lhs, T* rhs, int64_t m,
+            int64_t n, int64_t k, int32_t transpose_lhs,
+            int32_t transpose_rhs) {
+  int64_t lhs_rows = m;
+  int64_t lhs_cols = k;
   if (transpose_lhs) {
     std::swap(lhs_rows, lhs_cols);
   }
 
-  int64 rhs_rows = k;
-  int64 rhs_cols = n;
+  int64_t rhs_rows = k;
+  int64_t rhs_cols = n;
   if (transpose_rhs) {
     std::swap(rhs_rows, rhs_cols);
   }
@@ -67,8 +64,9 @@ void MatMul(const void* run_options_ptr, T* out, T* lhs, T* rhs, int64 m,
 
 template <typename T>
 void SingleThreadedMatMulDispatch(const void* run_options_ptr, T* out, T* lhs,
-                                  T* rhs, int64 m, int64 n, int64 k,
-                                  int32 transpose_lhs, int32 transpose_rhs) {
+                                  T* rhs, int64_t m, int64_t n, int64_t k,
+                                  int32_t transpose_lhs,
+                                  int32_t transpose_rhs) {
   bool all_buffers_16b_aligned =
       Is16BytesAligned(out) && Is16BytesAligned(lhs) && Is16BytesAligned(rhs);
 
@@ -83,59 +81,61 @@ void SingleThreadedMatMulDispatch(const void* run_options_ptr, T* out, T* lhs,
 
 }  // namespace
 
-TF_ATTRIBUTE_NO_SANITIZE_MEMORY void
+ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY void
 __xla_cpu_runtime_EigenSingleThreadedMatMulF16(
     const void* run_options_ptr, Eigen::half* out, Eigen::half* lhs,
-    Eigen::half* rhs, int64 m, int64 n, int64 k, int32 transpose_lhs,
-    int32 transpose_rhs) {
+    Eigen::half* rhs, int64_t m, int64_t n, int64_t k, int32_t transpose_lhs,
+    int32_t transpose_rhs) {
   SingleThreadedMatMulDispatch<Eigen::half>(run_options_ptr, out, lhs, rhs, m,
                                             n, k, transpose_lhs, transpose_rhs);
 }
 
-TF_ATTRIBUTE_NO_SANITIZE_MEMORY void
+ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY void
 __xla_cpu_runtime_EigenSingleThreadedMatMulF32(const void* run_options_ptr,
                                                float* out, float* lhs,
-                                               float* rhs, int64 m, int64 n,
-                                               int64 k, int32 transpose_lhs,
-                                               int32 transpose_rhs) {
+                                               float* rhs, int64_t m, int64_t n,
+                                               int64_t k, int32_t transpose_lhs,
+                                               int32_t transpose_rhs) {
   SingleThreadedMatMulDispatch<float>(run_options_ptr, out, lhs, rhs, m, n, k,
                                       transpose_lhs, transpose_rhs);
 }
 
-TF_ATTRIBUTE_NO_SANITIZE_MEMORY void
+ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY void
 __xla_cpu_runtime_EigenSingleThreadedMatMulF64(const void* run_options_ptr,
                                                double* out, double* lhs,
-                                               double* rhs, int64 m, int64 n,
-                                               int64 k, int32 transpose_lhs,
-                                               int32 transpose_rhs) {
+                                               double* rhs, int64_t m,
+                                               int64_t n, int64_t k,
+                                               int32_t transpose_lhs,
+                                               int32_t transpose_rhs) {
   SingleThreadedMatMulDispatch<double>(run_options_ptr, out, lhs, rhs, m, n, k,
                                        transpose_lhs, transpose_rhs);
 }
 
-TF_ATTRIBUTE_NO_SANITIZE_MEMORY void
+ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY void
 __xla_cpu_runtime_EigenSingleThreadedMatMulC64(
     const void* run_options_ptr, std::complex<float>* out,
-    std::complex<float>* lhs, std::complex<float>* rhs, int64 m, int64 n,
-    int64 k, int32 transpose_lhs, int32 transpose_rhs) {
+    std::complex<float>* lhs, std::complex<float>* rhs, int64_t m, int64_t n,
+    int64_t k, int32_t transpose_lhs, int32_t transpose_rhs) {
   SingleThreadedMatMulDispatch<std::complex<float>>(
       run_options_ptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
 }
 
-TF_ATTRIBUTE_NO_SANITIZE_MEMORY void
+ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY void
 __xla_cpu_runtime_EigenSingleThreadedMatMulC128(
     const void* run_options_ptr, std::complex<double>* out,
-    std::complex<double>* lhs, std::complex<double>* rhs, int64 m, int64 n,
-    int64 k, int32 transpose_lhs, int32 transpose_rhs) {
+    std::complex<double>* lhs, std::complex<double>* rhs, int64_t m, int64_t n,
+    int64_t k, int32_t transpose_lhs, int32_t transpose_rhs) {
   SingleThreadedMatMulDispatch<std::complex<double>>(
       run_options_ptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
 }
 
-TF_ATTRIBUTE_NO_SANITIZE_MEMORY void
+ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY void
 __xla_cpu_runtime_EigenSingleThreadedMatMulS32(const void* run_options_ptr,
-                                               int32* out, int32* lhs,
-                                               int32* rhs, int64 m, int64 n,
-                                               int64 k, int32 transpose_lhs,
-                                               int32 transpose_rhs) {
-  SingleThreadedMatMulDispatch<int32>(run_options_ptr, out, lhs, rhs, m, n, k,
-                                      transpose_lhs, transpose_rhs);
+                                               int32_t* out, int32_t* lhs,
+                                               int32_t* rhs, int64_t m,
+                                               int64_t n, int64_t k,
+                                               int32_t transpose_lhs,
+                                               int32_t transpose_rhs) {
+  SingleThreadedMatMulDispatch<int32_t>(run_options_ptr, out, lhs, rhs, m, n, k,
+                                        transpose_lhs, transpose_rhs);
 }

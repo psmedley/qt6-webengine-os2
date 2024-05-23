@@ -117,15 +117,14 @@ class CORE_EXPORT HTMLTextAreaElement final : public TextControlElement {
       const QualifiedName&,
       const AtomicString&,
       MutableCSSPropertyValueSet*) override;
-  bool TypeShouldForceLegacyLayout() const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   void AppendToFormData(FormData&) override;
   void ResetImpl() override;
   bool HasCustomFocusLogic() const override;
   bool MayTriggerVirtualKeyboard() const override;
   bool IsKeyboardFocusable() const override;
-  void UpdateFocusAppearanceWithOptions(SelectionBehaviorOnFocus,
-                                        const FocusOptions*) override;
+  void UpdateSelectionOnFocus(SelectionBehaviorOnFocus,
+                              const FocusOptions*) override;
 
   void AccessKeyAction(SimulatedClickCreationScope creation_scope) override;
 

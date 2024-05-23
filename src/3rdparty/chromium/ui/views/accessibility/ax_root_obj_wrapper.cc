@@ -8,6 +8,7 @@
 
 #include "base/containers/contains.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/platform/ax_unique_id.h"
@@ -19,7 +20,7 @@
 
 AXRootObjWrapper::AXRootObjWrapper(views::AXAuraObjCache::Delegate* delegate,
                                    views::AXAuraObjCache* cache)
-    : AXAuraObjWrapper(cache), delegate_(delegate) {}
+    : views::AXAuraObjWrapper(cache), delegate_(delegate) {}
 
 AXRootObjWrapper::~AXRootObjWrapper() = default;
 
@@ -44,7 +45,7 @@ void AXRootObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
   out_node_data->role = ax::mojom::Role::kClient;
 #else
   out_node_data->role = ax::mojom::Role::kDesktop;
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif
 
   display::Screen* screen = display::Screen::GetScreen();
   if (!screen)

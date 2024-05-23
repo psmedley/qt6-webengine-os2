@@ -6,8 +6,9 @@ import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import type * as ElementsComponents from './components/components.js';
 
+import type {StylePropertiesSection} from './StylePropertiesSection.js';
 import {StylePropertyTreeElement} from './StylePropertyTreeElement.js';
-import type {StylePropertiesSection, StylesSidebarPane} from './StylesSidebarPane.js';
+import type {StylesSidebarPane} from './StylesSidebarPane.js';
 
 type PropertySelectedEvent = ElementsComponents.StylePropertyEditor.PropertySelectedEvent;
 type PropertyDeselectedEvent = ElementsComponents.StylePropertyEditor.PropertyDeselectedEvent;
@@ -29,6 +30,8 @@ export class StyleEditorWidget extends UI.Widget.VBox {
   private pane?: StylesSidebarPane;
   private section?: StylePropertiesSection;
   private editorContainer: HTMLElement;
+
+  #triggerKey: string|undefined;
 
   constructor() {
     super(true);
@@ -71,6 +74,14 @@ export class StyleEditorWidget extends UI.Widget.VBox {
     this.editor?.addEventListener('propertydeselected', this.onPropertyDeselected);
   }
 
+  setTriggerKey(value: string): void {
+    this.#triggerKey = value;
+  }
+
+  getTriggerKey(): string|undefined {
+    return this.#triggerKey;
+  }
+
   unbindContext(): void {
     this.pane = undefined;
     this.section = undefined;
@@ -105,8 +116,8 @@ export class StyleEditorWidget extends UI.Widget.VBox {
   }
 
   static createTriggerButton(
-      pane: StylesSidebarPane, section: StylePropertiesSection, editorClass: {new(): Editor},
-      buttonTitle: string): HTMLElement {
+      pane: StylesSidebarPane, section: StylePropertiesSection, editorClass: {new(): Editor}, buttonTitle: string,
+      triggerKey: string): HTMLElement {
     const triggerButton = createButton(buttonTitle);
 
     triggerButton.onclick = async(event): Promise<void> => {
@@ -115,6 +126,7 @@ export class StyleEditorWidget extends UI.Widget.VBox {
       const widget = StyleEditorWidget.instance();
       widget.setEditor(editorClass);
       widget.bindContext(pane, section);
+      widget.setTriggerKey(triggerKey);
       await widget.render();
       const scrollerElement = triggerButton.enclosingNodeOrSelfWithClass('style-panes-wrapper');
       const onScroll = (): void => {
@@ -171,7 +183,7 @@ function getAuthoredStyles(
     section: StylePropertiesSection, editableProperties: Array<{propertyName: string}>): Map<string, string> {
   const authoredProperties = new Map();
   const editablePropertiesSet = new Set(editableProperties.map(prop => prop.propertyName));
-  for (const prop of section._style.leadingProperties()) {
+  for (const prop of section.style().leadingProperties()) {
     if (editablePropertiesSet.has(prop.name)) {
       authoredProperties.set(prop.name, prop.value);
     }

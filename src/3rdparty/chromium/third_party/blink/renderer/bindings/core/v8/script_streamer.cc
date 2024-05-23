@@ -7,7 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread_restrictions.h"
@@ -31,6 +30,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
@@ -45,6 +45,10 @@ namespace blink {
 class SourceStream : public v8::ScriptCompiler::ExternalSourceStream {
  public:
   SourceStream() = default;
+
+  SourceStream(const SourceStream&) = delete;
+  SourceStream& operator=(const SourceStream&) = delete;
+
   ~SourceStream() override = default;
 
   // Called by V8 on a background thread. Should block until we can return
@@ -265,11 +269,7 @@ class SourceStream : public v8::ScriptCompiler::ExternalSourceStream {
   CrossThreadWeakPersistent<ResponseBodyLoaderClient>
       response_body_loader_client_;
   scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(SourceStream);
 };
-
-size_t ScriptStreamer::small_script_threshold_ = 30 * 1024;
 
 std::tuple<ScriptStreamer*, ScriptStreamer::NotStreamingReason>
 ScriptStreamer::TakeFrom(ScriptResource* script_resource,
@@ -517,7 +517,7 @@ bool ScriptStreamer::HasEnoughDataForStreaming(size_t resource_buffer_size) {
     return resource_buffer_size >= kMaximumLengthOfBOM;
   } else {
     // Only stream larger scripts.
-    return resource_buffer_size >= small_script_threshold_;
+    return resource_buffer_size >= kSmallScriptThreshold;
   }
 }
 

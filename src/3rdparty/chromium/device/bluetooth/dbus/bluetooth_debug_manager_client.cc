@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/check.h"
-#include "base/macros.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_manager.h"
@@ -35,6 +34,11 @@ class BluetoothDebugManagerClientImpl : public BluetoothDebugManagerClient,
                                         public dbus::ObjectManager::Interface {
  public:
   BluetoothDebugManagerClientImpl() = default;
+
+  BluetoothDebugManagerClientImpl(const BluetoothDebugManagerClientImpl&) =
+      delete;
+  BluetoothDebugManagerClientImpl& operator=(
+      const BluetoothDebugManagerClientImpl&) = delete;
 
   ~BluetoothDebugManagerClientImpl() override = default;
 
@@ -122,8 +126,6 @@ class BluetoothDebugManagerClientImpl : public BluetoothDebugManagerClient,
   dbus::ObjectManager* object_manager_;
 
   base::WeakPtrFactory<BluetoothDebugManagerClientImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothDebugManagerClientImpl);
 };
 
 BluetoothDebugManagerClient::BluetoothDebugManagerClient() = default;

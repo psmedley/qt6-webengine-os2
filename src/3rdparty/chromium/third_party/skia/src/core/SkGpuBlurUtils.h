@@ -12,7 +12,7 @@
 
 #if SK_SUPPORT_GPU
 #include "include/core/SkRefCnt.h"
-#include "include/private/GrTypesPriv.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 
 class GrRecordingContext;
 namespace skgpu { namespace v1 { class SurfaceDrawContext; }}
@@ -60,7 +60,7 @@ std::unique_ptr<skgpu::v1::SurfaceDrawContext> GaussianBlur(
         float sigmaY,
         SkTileMode mode,
         SkBackingFit fit = SkBackingFit::kApprox);
-#endif
+#endif // SK_GPU_V1
 
 static const int kBlurRRectMaxDivisions = 6;
 
@@ -103,5 +103,6 @@ inline int LinearKernelWidth(int radius) { return radius + 1; }
 
 }  // namespace SkGpuBlurUtils
 
-#endif
+#endif // SK_SUPPORT_GPU
+
 #endif

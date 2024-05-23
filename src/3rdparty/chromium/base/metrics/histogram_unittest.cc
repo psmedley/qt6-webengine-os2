@@ -15,6 +15,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/bucket_ranges.h"
 #include "base/metrics/dummy_histogram.h"
 #include "base/metrics/histogram_macros.h"
@@ -54,6 +55,10 @@ class TestRecordHistogramChecker : public RecordHistogramChecker {
 // for histogram allocation. False will allocate histograms from the process
 // heap.
 class HistogramTest : public testing::TestWithParam<bool> {
+ public:
+  HistogramTest(const HistogramTest&) = delete;
+  HistogramTest& operator=(const HistogramTest&) = delete;
+
  protected:
   using CountAndBucketData = base::Histogram::CountAndBucketData;
 
@@ -113,10 +118,7 @@ class HistogramTest : public testing::TestWithParam<bool> {
 
   std::unique_ptr<StatisticsRecorder> statistics_recorder_;
   std::unique_ptr<char[]> allocator_memory_;
-  PersistentMemoryAllocator* allocator_ = nullptr;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(HistogramTest);
+  raw_ptr<PersistentMemoryAllocator> allocator_ = nullptr;
 };
 
 // Run all HistogramTest cases with both heap and persistent memory.
@@ -149,7 +151,7 @@ TEST_P(HistogramTest, BasicTest) {
   already_run = true;
 
   // Use standard macros (but with fixed samples)
-  LOCAL_HISTOGRAM_TIMES("Test2Histogram", TimeDelta::FromDays(1));
+  LOCAL_HISTOGRAM_TIMES("Test2Histogram", Days(1));
   LOCAL_HISTOGRAM_COUNTS("Test3Histogram", 30);
 
   LOCAL_HISTOGRAM_ENUMERATION("Test6Histogram", 129, 130);
@@ -930,7 +932,7 @@ TEST_P(HistogramTest, CheckGetCountAndBucketData) {
   EXPECT_EQ(1440, count_and_data_bucket.sum);
 
   const base::Value::ConstListView buckets_list =
-      count_and_data_bucket.buckets.GetList();
+      count_and_data_bucket.buckets.GetListDeprecated();
   ASSERT_EQ(2u, buckets_list.size());
 
   // Check the first bucket.

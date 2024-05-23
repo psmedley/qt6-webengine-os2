@@ -8,16 +8,7 @@ TODO: add tests to check that textureLoad operations stay in-bounds.
 import { makeTestGroup } from '../../../common/framework/test_group.js';
 import { assert } from '../../../common/util/util.js';
 import { GPUTest } from '../../gpu_test.js';
-import { align } from '../../util/math.js';
-import {
-  ScalarType,
-  kScalarTypeInfo,
-  kVectorContainerTypes,
-  kVectorContainerTypeInfo,
-  kMatrixContainerTypes,
-  kMatrixContainerTypeInfo,
-  kScalarTypes,
-} from '../types.js';
+import { generateTypes, supportedScalarTypes, supportsAtomics } from '../types.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -35,7 +26,9 @@ function runShaderTest(
   t: GPUTest,
   stage: GPUShaderStageFlags,
   testSource: string,
-  testBindings: GPUBindGroupEntry[]
+  layout: GPUPipelineLayout,
+  testBindings: GPUBindGroupEntry[],
+  dynamicOffsets?: number[]
 ): void {
   assert(stage === GPUShaderStage.COMPUTE, 'Only know how to deal with compute for now');
 
@@ -48,27 +41,28 @@ function runShaderTest(
   });
 
   const source = `
-    [[block]] struct Constants {
-      zero: u32;
+    struct Constants {
+      zero: u32
     };
-    [[group(1), binding(0)]] var<uniform> constants: Constants;
+    @group(1) @binding(0) var<uniform> constants: Constants;
 
-    [[block]] struct Result {
-      value: u32;
+    struct Result {
+      value: u32
     };
-    [[group(1), binding(1)]] var<storage, write> result: Result;
+    @group(1) @binding(1) var<storage, write> result: Result;
 
     ${testSource}
 
-    [[stage(compute), workgroup_size(1)]]
+    @stage(compute) @workgroup_size(1)
     fn main() {
-      ignore(constants.zero); // Ensure constants buffer is statically-accessed
+      _ = constants.zero; // Ensure constants buffer is statically-accessed
       result.value = runTest();
     }`;
 
   t.debug(source);
   const module = t.device.createShaderModule({ code: source });
   const pipeline = t.device.createComputePipeline({
+    layout,
     compute: { module, entryPoint: 'main' },
   });
 
@@ -88,10 +82,10 @@ function runShaderTest(
   const encoder = t.device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
-  pass.setBindGroup(0, testGroup);
+  pass.setBindGroup(0, testGroup, dynamicOffsets);
   pass.setBindGroup(1, group);
   pass.dispatch(1);
-  pass.endPass();
+  pass.end();
 
   t.queue.submit([encoder.finish()]);
 
@@ -110,110 +104,9 @@ function testFillArrayBuffer(
   new constructor(array, zeroByteStart, zeroByteCount / constructor.BYTES_PER_ELEMENT).fill(0);
 }
 
-const kArrayLength = 3;
-
 /**
  * Generate a bunch of indexable types (vec, mat, sized/unsized array) for testing.
  */
-function* generateIndexableTypes({
-  storageClass,
-  baseType,
-  atomic = false,
-}: {
-  /** Unsized array will only be generated for storageClass "storage". */
-  storageClass: string;
-  /** Base scalar type (i32/u32/f32/bool). */
-  baseType: ScalarType;
-  /** Whether to wrap the baseType in `atomic<>`. */
-  atomic?: boolean;
-}) {
-  const scalarInfo = kScalarTypeInfo[baseType];
-  if (atomic) assert(scalarInfo.supportsAtomics, 'type does not support atomics');
-  const scalarType = atomic ? `atomic<${baseType}>` : baseType;
-
-  // Don't generate vec2<atomic<i32>> etc.
-  if (!atomic) {
-    // Vector types
-    for (const vectorType of kVectorContainerTypes) {
-      yield {
-        type: `${vectorType}<${scalarType}>`,
-        _typeInfo: { elementBaseType: baseType, ...kVectorContainerTypeInfo[vectorType] },
-      };
-    }
-
-    // Matrices can only be f32.
-    if (baseType === 'f32') {
-      for (const matrixType of kMatrixContainerTypes) {
-        const matrixInfo = kMatrixContainerTypeInfo[matrixType];
-        yield {
-          type: `${matrixType}<${scalarType}>`,
-          _typeInfo: {
-            elementBaseType: `vec${matrixInfo.innerLength}<${scalarType}>`,
-            ...matrixInfo,
-          },
-        };
-      }
-    }
-  }
-
-  const arrayTypeInfo = {
-    elementBaseType: baseType,
-    arrayLength: kArrayLength,
-    layout: scalarInfo.layout
-      ? {
-          alignment: scalarInfo.layout.alignment,
-          size:
-            storageClass === 'uniform'
-              ? // Uniform storage class must have array elements aligned to 16.
-                kArrayLength *
-                arrayStride({
-                  ...scalarInfo.layout,
-                  alignment: 16,
-                })
-              : kArrayLength * arrayStride(scalarInfo.layout),
-        }
-      : undefined,
-  };
-
-  // Sized array
-  if (storageClass === 'uniform') {
-    yield { type: `[[stride(16)]] array<${scalarType},${kArrayLength}>`, _typeInfo: arrayTypeInfo };
-  } else {
-    yield { type: `array<${scalarType},${kArrayLength}>`, _typeInfo: arrayTypeInfo };
-  }
-  // Unsized array
-  if (storageClass === 'storage') {
-    yield { type: `array<${scalarType}>`, _typeInfo: arrayTypeInfo };
-  }
-}
-
-function arrayStride(elementLayout: { size: number; alignment: number }) {
-  return align(elementLayout.size, elementLayout.alignment);
-}
-
-/** Generates scalarTypes (i32/u32/f32/bool) that support the specified usage. */
-function* supportedScalarTypes(p: { atomic: boolean; storageClass: string }) {
-  for (const scalarType of kScalarTypes) {
-    const info = kScalarTypeInfo[scalarType];
-
-    // Test atomics only on supported scalar types.
-    if (p.atomic && !info.supportsAtomics) continue;
-
-    // Storage and uniform require host-sharable types.
-    const isHostShared = p.storageClass === 'storage' || p.storageClass === 'uniform';
-    if (isHostShared && info.layout === undefined) continue;
-
-    yield scalarType;
-  }
-}
-
-/** Atomic access requires atomic type and storage/workgroup memory. */
-function supportsAtomics(p: { storageClass: string; storageMode: string | undefined }) {
-  return (
-    (p.storageClass === 'storage' && p.storageMode === 'read_write') ||
-    p.storageClass === 'workgroup'
-  );
-}
 
 g.test('linear_memory')
   .desc(
@@ -233,11 +126,31 @@ g.test('linear_memory')
   .params(u =>
     u
       .combineWithParams([
-        { storageClass: 'storage', storageMode: 'read', access: 'read' },
-        { storageClass: 'storage', storageMode: 'write', access: 'write' },
-        { storageClass: 'storage', storageMode: 'read_write', access: 'read' },
-        { storageClass: 'storage', storageMode: 'read_write', access: 'write' },
-        { storageClass: 'uniform', access: 'read' },
+        { storageClass: 'storage', storageMode: 'read', access: 'read', dynamicOffset: false },
+        { storageClass: 'storage', storageMode: 'write', access: 'write', dynamicOffset: false },
+        {
+          storageClass: 'storage',
+          storageMode: 'read_write',
+          access: 'read',
+          dynamicOffset: false,
+        },
+        {
+          storageClass: 'storage',
+          storageMode: 'read_write',
+          access: 'write',
+          dynamicOffset: false,
+        },
+        { storageClass: 'storage', storageMode: 'read', access: 'read', dynamicOffset: true },
+        { storageClass: 'storage', storageMode: 'write', access: 'write', dynamicOffset: true },
+        { storageClass: 'storage', storageMode: 'read_write', access: 'read', dynamicOffset: true },
+        {
+          storageClass: 'storage',
+          storageMode: 'read_write',
+          access: 'write',
+          dynamicOffset: true,
+        },
+        { storageClass: 'uniform', access: 'read', dynamicOffset: false },
+        { storageClass: 'uniform', access: 'read', dynamicOffset: true },
         { storageClass: 'private', access: 'read' },
         { storageClass: 'private', access: 'write' },
         { storageClass: 'function', access: 'read' },
@@ -245,13 +158,31 @@ g.test('linear_memory')
         { storageClass: 'workgroup', access: 'read' },
         { storageClass: 'workgroup', access: 'write' },
       ] as const)
-      .expand('atomic', p => (supportsAtomics(p) ? [false, true] : [false]))
-      .expand('baseType', supportedScalarTypes)
+      .combineWithParams([
+        { containerType: 'array' },
+        { containerType: 'matrix' },
+        { containerType: 'vector' },
+      ] as const)
+      .expand('isAtomic', p => (supportsAtomics(p) ? [false, true] : [false]))
       .beginSubcases()
-      .expandWithParams(generateIndexableTypes)
+      .expand('baseType', supportedScalarTypes)
+      .expandWithParams(generateTypes)
   )
   .fn(async t => {
-    const { storageClass, storageMode, access, atomic, baseType, type, _typeInfo } = t.params;
+    const {
+      storageClass,
+      storageMode,
+      access,
+      dynamicOffset,
+      isAtomic,
+      containerType,
+      baseType,
+      type,
+      _kTypeInfo,
+    } = t.params;
+
+    assert(_kTypeInfo !== undefined, 'not an indexable type');
+    assert('arrayLength' in _kTypeInfo);
 
     let usesCanary = false;
     let globalSource = '';
@@ -265,24 +196,39 @@ g.test('linear_memory')
     // in the global scope or inside the test function itself.
     const structDecl = `
       struct S {
-        startCanary: array<u32, 10>;
-        data: ${type};
-        endCanary: array<u32, 10>;
+        startCanary: array<u32, 10>,
+        data: ${type},
+        endCanary: array<u32, 10>,
       };`;
 
+    const testGroupBGLEntires: GPUBindGroupLayoutEntry[] = [];
     switch (storageClass) {
       case 'uniform':
       case 'storage':
         {
-          assert(_typeInfo.layout !== undefined);
-          const layout = _typeInfo.layout;
+          assert(_kTypeInfo.layout !== undefined);
+          const layout = _kTypeInfo.layout;
           bufferBindingSize = layout.size;
           const qualifiers = storageClass === 'storage' ? `storage, ${storageMode}` : storageClass;
           globalSource += `
-          [[block]] struct TestData {
-            data: ${type};
+          struct TestData {
+            data: ${type},
           };
-          [[group(0), binding(0)]] var<${qualifiers}> s: TestData;`;
+          @group(0) @binding(0) var<${qualifiers}> s: TestData;`;
+
+          testGroupBGLEntires.push({
+            binding: 0,
+            visibility: GPUShaderStage.COMPUTE,
+            buffer: {
+              type:
+                storageClass === 'uniform'
+                  ? 'uniform'
+                  : storageMode === 'read'
+                  ? 'read-only-storage'
+                  : 'storage',
+              hasDynamicOffset: dynamicOffset,
+            },
+          });
         }
         break;
 
@@ -326,10 +272,10 @@ g.test('linear_memory')
         ? [
             // Exactly in bounds (should be OK)
             '0',
-            `${_typeInfo.arrayLength} - 1`,
+            `${_kTypeInfo.arrayLength} - 1`,
             // Exactly out of bounds
             '-1',
-            `${_typeInfo.arrayLength}`,
+            `${_kTypeInfo.arrayLength}`,
             // Far out of bounds
             '-1000000',
             '1000000',
@@ -339,9 +285,9 @@ g.test('linear_memory')
         : [
             // Exactly in bounds (should be OK)
             '0u',
-            `${_typeInfo.arrayLength}u - 1u`,
+            `${_kTypeInfo.arrayLength}u - 1u`,
             // Exactly out of bounds
-            `${_typeInfo.arrayLength}u`,
+            `${_kTypeInfo.arrayLength}u`,
             // Far out of bounds
             '1000000u',
             `${kMaxU32}u`,
@@ -358,22 +304,28 @@ g.test('linear_memory')
         // Produce the accesses to the variable.
         for (const indexToTest of indicesToTest) {
           const exprIndex = `(${indexToTest})${exprIndexAddon}`;
-          const exprZeroElement = `${_typeInfo.elementBaseType}()`;
+          const exprZeroElement = `${_kTypeInfo.elementBaseType}()`;
           const exprElement = `s.data[${exprIndex}]`;
 
           switch (access) {
             case 'read':
               {
-                const exprLoadElement = atomic ? `atomicLoad(&${exprElement})` : exprElement;
+                let exprLoadElement = isAtomic ? `atomicLoad(&${exprElement})` : exprElement;
+                if (storageClass === 'uniform' && containerType === 'array') {
+                  // Scalar types will be wrapped in a vec4 to satisfy array element size
+                  // requirements for the uniform address space, so we need an additional index
+                  // accessor expression.
+                  exprLoadElement += '[0]';
+                }
                 let condition = `${exprLoadElement} != ${exprZeroElement}`;
-                if ('innerLength' in _typeInfo) condition = `any(${condition})`;
+                if (containerType === 'matrix') condition = `any(${condition})`;
                 testFunctionSource += `
                   if (${condition}) { return ${nextErrorReturnValue()}; }`;
               }
               break;
 
             case 'write':
-              if (atomic) {
+              if (isAtomic) {
                 testFunctionSource += `
                   atomicStore(&s.data[${exprIndex}], ${exprZeroElement});`;
               } else {
@@ -411,10 +363,34 @@ g.test('linear_memory')
         return 0u;
       }`;
 
-    // Run it.
-    if (bufferBindingSize !== undefined) {
-      assert(baseType !== 'bool', 'case should have been filtered out');
+    const layout = t.device.createPipelineLayout({
+      bindGroupLayouts: [
+        t.device.createBindGroupLayout({
+          entries: testGroupBGLEntires,
+        }),
+        t.device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: {
+                type: 'uniform',
+              },
+            },
+            {
+              binding: 1,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: {
+                type: 'storage',
+              },
+            },
+          ],
+        }),
+      ],
+    });
 
+    // Run it.
+    if (bufferBindingSize !== undefined && baseType !== 'bool') {
       const expectedData = new ArrayBuffer(testBufferSize);
       const bufferBindingEnd = bufferBindingOffset + bufferBindingSize;
       testFillArrayBuffer(expectedData, baseType, {
@@ -432,12 +408,23 @@ g.test('linear_memory')
       );
 
       // Run the shader, accessing the buffer.
-      runShaderTest(t, GPUShaderStage.COMPUTE, testSource, [
-        {
-          binding: 0,
-          resource: { buffer: testBuffer, offset: bufferBindingOffset, size: bufferBindingSize },
-        },
-      ]);
+      runShaderTest(
+        t,
+        GPUShaderStage.COMPUTE,
+        testSource,
+        layout,
+        [
+          {
+            binding: 0,
+            resource: {
+              buffer: testBuffer,
+              offset: dynamicOffset ? 0 : bufferBindingOffset,
+              size: bufferBindingSize,
+            },
+          },
+        ],
+        dynamicOffset ? [bufferBindingOffset] : undefined
+      );
 
       // Check that content of the buffer outside of the allowed area didn't change.
       const expectedBytes = new Uint8Array(expectedData);
@@ -448,6 +435,6 @@ g.test('linear_memory')
         bufferBindingEnd
       );
     } else {
-      runShaderTest(t, GPUShaderStage.COMPUTE, testSource, []);
+      runShaderTest(t, GPUShaderStage.COMPUTE, testSource, layout, []);
     }
   });

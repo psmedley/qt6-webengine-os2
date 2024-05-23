@@ -14,18 +14,18 @@
 #include <iosfwd>
 
 #include "base/base_export.h"
-#include "base/macros.h"
+#include "base/threading/platform_thread_ref.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_types.h"
-#elif defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA)
 #include <zircon/types.h>
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 #include <mach/mach_types.h>
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
 #include <pthread.h>
 #include <unistd.h>
 #endif
@@ -33,61 +33,22 @@
 namespace base {
 
 // Used for logging. Always an integer value.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 typedef DWORD PlatformThreadId;
-#elif defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA)
 typedef zx_handle_t PlatformThreadId;
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 typedef mach_port_t PlatformThreadId;
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
 typedef pid_t PlatformThreadId;
 #endif
-
-// Used for thread checking and debugging.
-// Meant to be as fast as possible.
-// These are produced by PlatformThread::CurrentRef(), and used to later
-// check if we are on the same thread or not by using ==. These are safe
-// to copy between threads, but can't be copied to another process as they
-// have no meaning there. Also, the internal identifier can be re-used
-// after a thread dies, so a PlatformThreadRef cannot be reliably used
-// to distinguish a new thread from an old, dead thread.
-class PlatformThreadRef {
- public:
-#if defined(OS_WIN)
-  typedef DWORD RefType;
-#else  //  OS_POSIX
-  typedef pthread_t RefType;
-#endif
-  constexpr PlatformThreadRef() = default;
-
-  explicit constexpr PlatformThreadRef(RefType id) : id_(id) {}
-
-  bool operator==(PlatformThreadRef other) const {
-    return id_ == other.id_;
-  }
-
-  bool operator!=(PlatformThreadRef other) const { return id_ != other.id_; }
-
-  bool is_null() const {
-    return id_ == 0;
-  }
-
- private:
-  friend BASE_EXPORT std::ostream& operator<<(std::ostream& os,
-                                              const PlatformThreadRef& ref);
-
-  RefType id_ = 0;
-};
-
-BASE_EXPORT std::ostream& operator<<(std::ostream& os,
-                                     const PlatformThreadRef& ref);
 
 // Used to operate on threads.
 class PlatformThreadHandle {
  public:
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   typedef void* Handle;
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   typedef pthread_t Handle;
 #endif
 
@@ -145,6 +106,10 @@ class BASE_EXPORT PlatformThread {
     virtual ~Delegate() = default;
   };
 
+  PlatformThread() = delete;
+  PlatformThread(const PlatformThread&) = delete;
+  PlatformThread& operator=(const PlatformThread&) = delete;
+
   // Gets the current thread id, which may be useful for logging purposes.
   static PlatformThreadId CurrentId();
 
@@ -159,6 +124,12 @@ class BASE_EXPORT PlatformThread {
   static PlatformThreadHandle CurrentHandle();
 
   // Yield the current thread so another thread can be scheduled.
+  //
+  // Note: this is likely not the right call to make in most situations. If this
+  // is part of a spin loop, consider base::Lock, which likely has better tail
+  // latency. Yielding the thread has different effects depending on the
+  // platform, system load, etc., and can result in yielding the CPU for less
+  // than 1us, or many tens of ms.
   static void YieldCurrentThread();
 
   // Sleeps for the specified duration (real-time; ignores time overrides).
@@ -175,10 +146,10 @@ class BASE_EXPORT PlatformThread {
   // Gets the thread name, if previously set by SetName.
   static const char* GetName();
 
-  // Creates a new thread.  The |stack_size| parameter can be 0 to indicate
+  // Creates a new thread.  The `stack_size` parameter can be 0 to indicate
   // that the default stack size should be used.  Upon success,
-  // |*thread_handle| will be assigned a handle to the newly created thread,
-  // and |delegate|'s ThreadMain method will be executed on the newly created
+  // `*thread_handle` will be assigned a handle to the newly created thread,
+  // and `delegate`'s ThreadMain method will be executed on the newly created
   // thread.
   // NOTE: When you are done with the thread handle, you must call Join to
   // release system resources associated with the thread.  You must ensure that
@@ -191,7 +162,7 @@ class BASE_EXPORT PlatformThread {
   }
 
   // CreateWithPriority() does the same thing as Create() except the priority of
-  // the thread is set based on |priority|.
+  // the thread is set based on `priority`.
   static bool CreateWithPriority(size_t stack_size, Delegate* delegate,
                                  PlatformThreadHandle* thread_handle,
                                  ThreadPriority priority);
@@ -202,23 +173,23 @@ class BASE_EXPORT PlatformThread {
   static bool CreateNonJoinable(size_t stack_size, Delegate* delegate);
 
   // CreateNonJoinableWithPriority() does the same thing as CreateNonJoinable()
-  // except the priority of the thread is set based on |priority|.
+  // except the priority of the thread is set based on `priority`.
   static bool CreateNonJoinableWithPriority(size_t stack_size,
                                             Delegate* delegate,
                                             ThreadPriority priority);
 
   // Joins with a thread created via the Create function.  This function blocks
   // the caller until the designated thread exits.  This will invalidate
-  // |thread_handle|.
+  // `thread_handle`.
   static void Join(PlatformThreadHandle thread_handle);
 
   // Detaches and releases the thread handle. The thread is no longer joinable
-  // and |thread_handle| is invalidated after this call.
+  // and `thread_handle` is invalidated after this call.
   static void Detach(PlatformThreadHandle thread_handle);
 
-  // Returns true if SetCurrentThreadPriority() should be able to increase the
-  // priority of a thread to |priority|.
-  static bool CanIncreaseThreadPriority(ThreadPriority priority);
+  // Returns true if SetCurrentThreadPriority() should be able to change the
+  // priority of a thread in current process from `from` to `to`.
+  static bool CanChangeThreadPriority(ThreadPriority from, ThreadPriority to);
 
   // Toggles the current thread's priority at runtime.
   //
@@ -237,10 +208,10 @@ class BASE_EXPORT PlatformThread {
 
   static ThreadPriority GetCurrentThreadPriority();
 
-  // Returns a realtime period provided by |delegate|.
+  // Returns a realtime period provided by `delegate`.
   static TimeDelta GetRealtimePeriod(Delegate* delegate);
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Toggles a specific thread's priority at runtime. This can be used to
   // change the priority of a thread in a different process and will fail
   // if the calling process does not have proper permissions. The
@@ -267,7 +238,7 @@ class BASE_EXPORT PlatformThread {
   // explicitly set default size then returns 0.
   static size_t GetDefaultThreadStackSize();
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   // Initializes realtime threading based on kOptimizedRealtimeThreadingMac
   // feature status.
   static void InitializeOptimizedRealtimeThreadingFeature();
@@ -278,8 +249,6 @@ class BASE_EXPORT PlatformThread {
 
  private:
   static void SetCurrentThreadPriorityImpl(ThreadPriority priority);
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(PlatformThread);
 };
 
 namespace internal {

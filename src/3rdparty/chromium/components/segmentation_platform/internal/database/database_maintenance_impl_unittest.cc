@@ -13,12 +13,14 @@
 #include "base/test/gmock_callback_support.h"
 #include "base/test/simple_test_clock.h"
 #include "base/test/task_environment.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "components/segmentation_platform/internal/database/mock_signal_database.h"
 #include "components/segmentation_platform/internal/database/mock_signal_storage_config.h"
 #include "components/segmentation_platform/internal/database/signal_storage_config.h"
 #include "components/segmentation_platform/internal/database/test_segment_info_database.h"
+#include "components/segmentation_platform/internal/execution/default_model_manager.h"
 #include "components/segmentation_platform/internal/proto/aggregation.pb.h"
 #include "components/segmentation_platform/internal/proto/types.pb.h"
 #include "components/segmentation_platform/public/config.h"
@@ -55,16 +57,46 @@ struct SignalData {
   bool success;
 };
 
-std::unique_ptr<Config> CreateTestConfig() {
-  auto config = std::make_unique<Config>();
-  config->segmentation_key = kTestSegmentationKey;
-  config->segment_selection_ttl = base::TimeDelta::FromDays(28);
-  config->segment_ids = {
-      OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB,
-      OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE};
-  return config;
-}
 }  // namespace
+
+// Noop version. For database calls, just passes the calls to the DB.
+// TODO(shaktisahu): Move this class to its own file.
+class TestDefaultModelManager : public DefaultModelManager {
+ public:
+  TestDefaultModelManager()
+      : DefaultModelManager(nullptr, std::vector<OptimizationTarget>()) {}
+  ~TestDefaultModelManager() override = default;
+
+  void GetAllSegmentInfoFromDefaultModel(
+      const std::vector<OptimizationTarget>& segment_ids,
+      MultipleSegmentInfoCallback callback) override {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback),
+                                  DefaultModelManager::SegmentInfoList()));
+  }
+
+  void GetAllSegmentInfoFromBothModels(
+      const std::vector<OptimizationTarget>& segment_ids,
+      SegmentInfoDatabase* segment_database,
+      MultipleSegmentInfoCallback callback) override {
+    segment_database->GetSegmentInfoForSegments(
+        segment_ids,
+        base::BindOnce(
+            [](DefaultModelManager::MultipleSegmentInfoCallback callback,
+               std::unique_ptr<SegmentInfoDatabase::SegmentInfoList> db_list) {
+              DefaultModelManager::SegmentInfoList list;
+              for (auto& pair : *db_list) {
+                list.push_back(std::make_unique<
+                               DefaultModelManager::SegmentInfoWrapper>());
+                list.back()->segment_source =
+                    DefaultModelManager::SegmentSource::DATABASE;
+                list.back()->segment_info.Swap(&pair.second);
+              }
+              std::move(callback).Run(std::move(list));
+            },
+            std::move(callback)));
+  }
+};
 
 class DatabaseMaintenanceImplTest : public testing::Test {
  public:
@@ -72,13 +104,17 @@ class DatabaseMaintenanceImplTest : public testing::Test {
   ~DatabaseMaintenanceImplTest() override = default;
 
   void SetUp() override {
-    config_ = CreateTestConfig();
     segment_info_database_ = std::make_unique<test::TestSegmentInfoDatabase>();
     signal_database_ = std::make_unique<MockSignalDatabase>();
     signal_storage_config_ = std::make_unique<MockSignalStorageConfig>();
+    base::flat_set<OptimizationTarget> segment_ids = {
+        OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB,
+        OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE};
+    default_model_manager_ = std::make_unique<TestDefaultModelManager>();
     database_maintenance_ = std::make_unique<DatabaseMaintenanceImpl>(
-        config_.get(), &clock_, segment_info_database_.get(),
-        signal_database_.get(), signal_storage_config_.get());
+        segment_ids, &clock_, segment_info_database_.get(),
+        signal_database_.get(), signal_storage_config_.get(),
+        default_model_manager_.get());
 
     clock_.SetNow(base::Time::Now());
   }
@@ -120,6 +156,7 @@ class DatabaseMaintenanceImplTest : public testing::Test {
   std::unique_ptr<test::TestSegmentInfoDatabase> segment_info_database_;
   std::unique_ptr<MockSignalDatabase> signal_database_;
   std::unique_ptr<MockSignalStorageConfig> signal_storage_config_;
+  std::unique_ptr<TestDefaultModelManager> default_model_manager_;
 
   std::unique_ptr<DatabaseMaintenanceImpl> database_maintenance_;
 };
@@ -146,13 +183,13 @@ TEST_F(DatabaseMaintenanceImplTest, ExecuteMaintenanceTasks) {
   std::vector<SignalData> signal_datas = {
       {OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB,
        SignalType::HISTOGRAM_VALUE, "Foo", base::HashMetricName("Foo"), 44, 1,
-       Aggregation::COUNT, clock_.Now() - base::TimeDelta::FromDays(10), true},
+       Aggregation::COUNT, clock_.Now() - base::Days(10), true},
       {OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE,
        SignalType::HISTOGRAM_ENUM, "Bar", base::HashMetricName("Bar"), 33, 1,
-       Aggregation::COUNT, clock_.Now() - base::TimeDelta::FromDays(5), true},
+       Aggregation::COUNT, clock_.Now() - base::Days(5), true},
       {OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE,
        SignalType::USER_ACTION, "Failed", base::HashMetricName("Failed"), 22, 1,
-       Aggregation::COUNT, clock_.Now() - base::TimeDelta::FromDays(1), false},
+       Aggregation::COUNT, clock_.Now() - base::Days(1), false},
   };
 
   // Prepare test setup.
@@ -189,9 +226,8 @@ TEST_F(DatabaseMaintenanceImplTest, ExecuteMaintenanceTasks) {
     for (uint64_t days_ago = kLatestCompactionDaysAgo;
          days_ago <= kEarliestCompactionDaysAgo; ++days_ago) {
       EXPECT_CALL(*signal_database_,
-                  CompactSamplesForDay(
-                      sd.signal_type, sd.name_hash,
-                      clock_.Now() - base::TimeDelta::FromDays(days_ago), _))
+                  CompactSamplesForDay(sd.signal_type, sd.name_hash,
+                                       clock_.Now() - base::Days(days_ago), _))
           .WillOnce(RunOnceCallback<3>(/*success=*/sd.success));
     }
   }

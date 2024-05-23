@@ -27,8 +27,8 @@
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/dom/tag_collection.h"
 #include "third_party/blink/renderer/core/html/collection_type.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
@@ -112,11 +112,10 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
 
   template <typename T>
   T* Cached(CollectionType collection_type) {
-    auto key =
-        NamedNodeListKey(collection_type, CSSSelector::UniversalSelectorAtom());
-    return static_cast<T*>(atomic_name_caches_.Contains(key)
-                               ? atomic_name_caches_.at(key)
-                               : nullptr);
+    auto it = atomic_name_caches_.find(NamedNodeListKey(
+        collection_type, CSSSelector::UniversalSelectorAtom()));
+    return static_cast<T*>(it != atomic_name_caches_.end() ? &*it->value
+                                                           : nullptr);
   }
 
   TagCollectionNS* AddCache(ContainerNode& node,

@@ -35,7 +35,7 @@
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/modules/permissions/permission_utils.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
@@ -266,7 +266,7 @@ ScriptPromise ImageCapture::setOptions(ScriptState* script_state,
   settings->has_height = photo_settings->hasImageHeight();
   if (settings->has_height) {
     const double height = photo_settings->imageHeight();
-    if (photo_capabilities_ &&
+    if (photo_capabilities_ && photo_capabilities_->hasImageHeight() &&
         (height < photo_capabilities_->imageHeight()->min() ||
          height > photo_capabilities_->imageHeight()->max())) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -279,7 +279,7 @@ ScriptPromise ImageCapture::setOptions(ScriptState* script_state,
   settings->has_width = photo_settings->hasImageWidth();
   if (settings->has_width) {
     const double width = photo_settings->imageWidth();
-    if (photo_capabilities_ &&
+    if (photo_capabilities_ && photo_capabilities_->hasImageWidth() &&
         (width < photo_capabilities_->imageWidth()->min() ||
          width > photo_capabilities_->imageWidth()->max())) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -292,8 +292,9 @@ ScriptPromise ImageCapture::setOptions(ScriptState* script_state,
 
   settings->has_red_eye_reduction = photo_settings->hasRedEyeReduction();
   if (settings->has_red_eye_reduction) {
-    if (photo_capabilities_ &&
-        photo_capabilities_->redEyeReduction() != "controllable") {
+    if (photo_capabilities_ && photo_capabilities_->hasRedEyeReduction() &&
+        photo_capabilities_->redEyeReduction() !=
+            V8RedEyeReduction::Enum::kControllable) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError,
           "redEyeReduction is not controllable."));
@@ -305,8 +306,9 @@ ScriptPromise ImageCapture::setOptions(ScriptState* script_state,
   settings->has_fill_light_mode = photo_settings->hasFillLightMode();
   if (settings->has_fill_light_mode) {
     const String fill_light_mode = photo_settings->fillLightMode();
-    if (photo_capabilities_ && photo_capabilities_->fillLightMode().Find(
-                                   fill_light_mode) == kNotFound) {
+    if (photo_capabilities_ && photo_capabilities_->hasFillLightMode() &&
+        photo_capabilities_->fillLightMode().Find(fill_light_mode) ==
+            kNotFound) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError, "Unsupported fillLightMode"));
       return promise;
@@ -1180,11 +1182,13 @@ void ImageCapture::UpdateMediaTrackCapabilities(
 
 void ImageCapture::OnServiceConnectionError() {
   service_.reset();
-  for (ScriptPromiseResolver* resolver : service_requests_) {
+
+  HeapHashSet<Member<ScriptPromiseResolver>> resolvers;
+  resolvers.swap(service_requests_);
+  for (ScriptPromiseResolver* resolver : resolvers) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kNoServiceError));
   }
-  service_requests_.clear();
 }
 
 void ImageCapture::ResolveWithNothing(ScriptPromiseResolver* resolver) {

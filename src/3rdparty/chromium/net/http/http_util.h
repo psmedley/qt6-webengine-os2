@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
@@ -29,6 +28,8 @@
 #define HTTP_LWS " \t"
 
 namespace net {
+
+class HttpResponseHeaders;
 
 class NET_EXPORT HttpUtil {
  public:
@@ -95,11 +96,11 @@ class NET_EXPORT HttpUtil {
   // RFC 7231).
   static bool IsMethodIdempotent(base::StringPiece method);
 
-  // Returns true if it is safe to allow users and scripts to specify the header
-  // named |name|. Returns true for headers not in the list at
-  // https://fetch.spec.whatwg.org/#forbidden-header-name. Does not check header
-  // validity.
-  static bool IsSafeHeader(base::StringPiece name);
+  // Returns true if it is safe to allow users and scripts to specify a header
+  // with a given |name| and |value|.
+  // See https://fetch.spec.whatwg.org/#forbidden-request-header.
+  // Does not check header validity.
+  static bool IsSafeHeader(base::StringPiece name, base::StringPiece value);
 
   // Returns true if |name| is a valid HTTP header name.
   static bool IsValidHeaderName(base::StringPiece name);
@@ -148,8 +149,8 @@ class NET_EXPORT HttpUtil {
   // unescaped actually is a valid quoted string. Returns false for an empty
   // string, a string without quotes, a string with mismatched quotes, and
   // a string with unescaped embeded quotes.
-  static bool StrictUnquote(base::StringPiece str,
-                            std::string* out) WARN_UNUSED_RESULT;
+  [[nodiscard]] static bool StrictUnquote(base::StringPiece str,
+                                          std::string* out);
 
   // The reverse of Unquote() -- escapes and surrounds with "
   static std::string Quote(base::StringPiece str);
@@ -260,6 +261,12 @@ class NET_EXPORT HttpUtil {
   // 3.5 of RFC 2616.
   static bool ParseContentEncoding(const std::string& content_encoding,
                                    std::set<std::string>* used_encodings);
+
+  // Return true if `headers` contain multiple `field_name` fields with
+  // different values.
+  static bool HeadersContainMultipleCopiesOfField(
+      const HttpResponseHeaders& headers,
+      const std::string& field_name);
 
   // Used to iterate over the name/value pairs of HTTP headers.  To iterate
   // over the values in a multi-value header, use ValuesIterator.

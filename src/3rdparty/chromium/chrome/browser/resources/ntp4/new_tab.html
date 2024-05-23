@@ -45,6 +45,11 @@ document.getElementById('themecss').href = 'chrome://theme/css/new_tab_theme.css
     </div>
   </div>
 
+  <div id="deprecated-apps-link-container" hidden>
+    <img src="images/error_yellow900.svg">
+    <a is="action-link" id="deprecated-apps-link" href="#"></a>
+  </div>
+
   <div id="footer">
     <div id="footer-border"></div>
     <div id="footer-content">
@@ -78,7 +83,9 @@ document.getElementById('themecss').href = 'chrome://theme/css/new_tab_theme.css
   <div class="app-img-container" aria-hidden="true">
     <img class="invisible" alt="">
   </div>
-  <span class="title"></span>
+  <div class="app-title-container">
+    <span class="title"></span>
+  </div>
 </div>
 
 <!-- App Contents w/ Small Icon -->
@@ -89,7 +96,9 @@ document.getElementById('themecss').href = 'chrome://theme/css/new_tab_theme.css
     </div>
     <div class="color-stripe"></div>
   </div>
-  <span class="title"></span>
+  <div class="app-title-container">
+    <span class="title"></span>
+  </div>
 </div>
 
 </div>

@@ -39,6 +39,10 @@
 #include <unistd.h>
 #endif
 
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+#include <sys/system_properties.h>
+#endif
+
 namespace perfetto {
 namespace {
 #if defined(PERFETTO_SET_SOCKET_PERMISSIONS)
@@ -149,7 +153,7 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
   }
 
   if (background) {
-    base::Daemonize();
+    base::Daemonize([] { return 0; });
   }
 
   base::UnixTaskRunner task_runner;
@@ -195,8 +199,13 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
     return 1;
   }
 
+  // Advertise builtin producers only on in-tree builds. These producers serve
+  // only to dynamically start heapprofd and other services via sysprops, but
+  // that can only ever happen in in-tree builds.
+#if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
   BuiltinProducer builtin_producer(&task_runner, /*lazy_stop_delay_ms=*/30000);
   builtin_producer.ConnectInProcess(svc->service());
+#endif
 
   // Set the CPU limit and start the watchdog running. The memory limit will
   // be set inside the service code as it relies on the size of buffers.
@@ -215,6 +224,14 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
     PERFETTO_CHECK(base::WriteAll(notif_fd, "1", 1) == 1);
     PERFETTO_CHECK(base::CloseFile(notif_fd) == 0);
   }
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  // Notify init (perfetto.rc) that traced has been started. Used only by
+  // the perfetto_trace_on_boot init service.
+  if (__system_property_set("sys.trace.traced_started", "1") != 0) {
+    PERFETTO_PLOG("Failed to set property sys.trace.traced_started");
+  }
+#endif
 
   PERFETTO_ILOG("Started traced, listening on %s %s", GetProducerSocket(),
                 GetConsumerSocket());

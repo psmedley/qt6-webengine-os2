@@ -28,7 +28,7 @@ class WebEngineContentBrowserClient final
 
   // ContentBrowserClient overrides.
   std::unique_ptr<content::BrowserMainParts> CreateBrowserMainParts(
-      const content::MainFunctionParams& parameters) override;
+      content::MainFunctionParams parameters) override;
   std::unique_ptr<content::DevToolsManagerDelegate>
   CreateDevToolsManagerDelegate() override;
   std::string GetProduct() override;
@@ -46,6 +46,7 @@ class WebEngineContentBrowserClient final
   void RegisterNonNetworkSubresourceURLLoaderFactories(
       int render_process_id,
       int render_frame_id,
+      const absl::optional<url::Origin>& request_initiator_origin,
       NonNetworkURLLoaderFactoryMap* factories) override;
   bool ShouldEnableStrictSiteIsolation() override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,

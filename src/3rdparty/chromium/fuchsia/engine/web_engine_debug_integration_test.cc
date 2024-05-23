@@ -11,12 +11,11 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/fuchsia/file_utils.h"
-#include "base/macros.h"
 #include "base/test/task_environment.h"
+#include "base/test/test_future.h"
 #include "fuchsia/base/test/context_provider_test_connector.h"
 #include "fuchsia/base/test/fit_adapter.h"
 #include "fuchsia/base/test/frame_test_util.h"
-#include "fuchsia/base/test/result_receiver.h"
 #include "fuchsia/base/test/test_devtools_list_fetcher.h"
 #include "fuchsia/base/test/test_navigation_listener.h"
 #include "fuchsia/engine/test_debug_listener.h"
@@ -33,6 +32,10 @@ class WebEngineDebugIntegrationTest : public testing::Test {
  public:
   WebEngineDebugIntegrationTest()
       : dev_tools_listener_binding_(&dev_tools_listener_) {}
+
+  WebEngineDebugIntegrationTest(const WebEngineDebugIntegrationTest&) = delete;
+  WebEngineDebugIntegrationTest& operator=(
+      const WebEngineDebugIntegrationTest&) = delete;
 
   ~WebEngineDebugIntegrationTest() override = default;
 
@@ -113,8 +116,6 @@ class WebEngineDebugIntegrationTest : public testing::Test {
   base::OnceClosure on_url_fetch_complete_ack_;
 
   net::EmbeddedTestServer test_server_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebEngineDebugIntegrationTest);
 };
 
 enum class UserModeDebugging { kEnabled = 0, kDisabled = 1 };
@@ -132,6 +133,7 @@ struct TestContextAndFrame {
       return;
 
     fuchsia::web::CreateContextParams create_params;
+    create_params.set_features(fuchsia::web::ContextFeatureFlags::NETWORK);
     create_params.set_service_directory(std::move(directory));
     if (user_mode_debugging == UserModeDebugging::kEnabled)
       create_params.set_remote_debugging_port(0);
@@ -147,13 +149,15 @@ struct TestContextAndFrame {
       return;
     }
   }
+
+  TestContextAndFrame(const TestContextAndFrame&) = delete;
+  TestContextAndFrame& operator=(const TestContextAndFrame&) = delete;
+
   ~TestContextAndFrame() = default;
 
   fuchsia::web::ContextPtr context;
   fuchsia::web::FramePtr frame;
   fuchsia::web::NavigationControllerPtr controller;
-
-  DISALLOW_COPY_AND_ASSIGN(TestContextAndFrame);
 };
 
 // Test the Debug service is properly started and accessible.
@@ -169,13 +173,15 @@ TEST_F(WebEngineDebugIntegrationTest, DebugService) {
   base::Value devtools_list = cr_fuchsia::GetDevToolsListFromPort(
       *dev_tools_listener_.debug_ports().begin());
   ASSERT_TRUE(devtools_list.is_list());
-  EXPECT_EQ(devtools_list.GetList().size(), 1u);
+  EXPECT_EQ(devtools_list.GetListDeprecated().size(), 1u);
 
-  base::Value* devtools_url = devtools_list.GetList()[0].FindPath("url");
+  base::Value* devtools_url =
+      devtools_list.GetListDeprecated()[0].FindPath("url");
   ASSERT_TRUE(devtools_url->is_string());
   EXPECT_EQ(devtools_url->GetString(), url);
 
-  base::Value* devtools_title = devtools_list.GetList()[0].FindPath("title");
+  base::Value* devtools_title =
+      devtools_list.GetListDeprecated()[0].FindPath("title");
   ASSERT_TRUE(devtools_title->is_string());
   EXPECT_EQ(devtools_title->GetString(), "title 1");
 
@@ -197,13 +203,15 @@ TEST_F(WebEngineDebugIntegrationTest, MultipleDebugClients) {
 
   base::Value devtools_list1 = cr_fuchsia::GetDevToolsListFromPort(port1);
   ASSERT_TRUE(devtools_list1.is_list());
-  EXPECT_EQ(devtools_list1.GetList().size(), 1u);
+  EXPECT_EQ(devtools_list1.GetListDeprecated().size(), 1u);
 
-  base::Value* devtools_url1 = devtools_list1.GetList()[0].FindPath("url");
+  base::Value* devtools_url1 =
+      devtools_list1.GetListDeprecated()[0].FindPath("url");
   ASSERT_TRUE(devtools_url1->is_string());
   EXPECT_EQ(devtools_url1->GetString(), url1);
 
-  base::Value* devtools_title1 = devtools_list1.GetList()[0].FindPath("title");
+  base::Value* devtools_title1 =
+      devtools_list1.GetListDeprecated()[0].FindPath("title");
   ASSERT_TRUE(devtools_title1->is_string());
   EXPECT_EQ(devtools_title1->GetString(), "title 1");
 
@@ -232,13 +240,15 @@ TEST_F(WebEngineDebugIntegrationTest, MultipleDebugClients) {
 
   base::Value devtools_list2 = cr_fuchsia::GetDevToolsListFromPort(port2);
   ASSERT_TRUE(devtools_list2.is_list());
-  EXPECT_EQ(devtools_list2.GetList().size(), 1u);
+  EXPECT_EQ(devtools_list2.GetListDeprecated().size(), 1u);
 
-  base::Value* devtools_url2 = devtools_list2.GetList()[0].FindPath("url");
+  base::Value* devtools_url2 =
+      devtools_list2.GetListDeprecated()[0].FindPath("url");
   ASSERT_TRUE(devtools_url2->is_string());
   EXPECT_EQ(devtools_url2->GetString(), url2);
 
-  base::Value* devtools_title2 = devtools_list2.GetList()[0].FindPath("title");
+  base::Value* devtools_title2 =
+      devtools_list2.GetListDeprecated()[0].FindPath("title");
   ASSERT_TRUE(devtools_title2->is_string());
   EXPECT_EQ(devtools_title2->GetString(), "title 2");
 
@@ -263,29 +273,29 @@ TEST_F(WebEngineDebugIntegrationTest, DebugAndUserService) {
   dev_tools_listener_.RunUntilNumberOfPortsIs(1u);
 
   // Check we are getting the same port on both the debug and user APIs.
-  base::RunLoop run_loop;
-  cr_fuchsia::ResultReceiver<
-      fuchsia::web::Context_GetRemoteDebuggingPort_Result>
-      port_receiver(run_loop.QuitClosure());
+  base::test::TestFuture<fuchsia::web::Context_GetRemoteDebuggingPort_Result>
+      port_receiver;
   frame_data.context->GetRemoteDebuggingPort(
-      cr_fuchsia::CallbackToFitFunction(port_receiver.GetReceiveCallback()));
-  run_loop.Run();
+      cr_fuchsia::CallbackToFitFunction(port_receiver.GetCallback()));
+  ASSERT_TRUE(port_receiver.Wait());
 
-  ASSERT_TRUE(port_receiver->is_response());
-  uint16_t remote_debugging_port = port_receiver->response().port;
+  ASSERT_TRUE(port_receiver.Get().is_response());
+  uint16_t remote_debugging_port = port_receiver.Get().response().port;
   ASSERT_EQ(remote_debugging_port, *dev_tools_listener_.debug_ports().begin());
 
   // Test the debug information is correct.
   base::Value devtools_list =
       cr_fuchsia::GetDevToolsListFromPort(remote_debugging_port);
   ASSERT_TRUE(devtools_list.is_list());
-  EXPECT_EQ(devtools_list.GetList().size(), 1u);
+  EXPECT_EQ(devtools_list.GetListDeprecated().size(), 1u);
 
-  base::Value* devtools_url = devtools_list.GetList()[0].FindPath("url");
+  base::Value* devtools_url =
+      devtools_list.GetListDeprecated()[0].FindPath("url");
   ASSERT_TRUE(devtools_url->is_string());
   EXPECT_EQ(devtools_url->GetString(), url);
 
-  base::Value* devtools_title = devtools_list.GetList()[0].FindPath("title");
+  base::Value* devtools_title =
+      devtools_list.GetListDeprecated()[0].FindPath("title");
   ASSERT_TRUE(devtools_title->is_string());
   EXPECT_EQ(devtools_title->GetString(), "title 1");
 

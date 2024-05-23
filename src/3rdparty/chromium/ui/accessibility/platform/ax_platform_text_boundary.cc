@@ -4,6 +4,7 @@
 
 #include "ui/accessibility/platform/ax_platform_text_boundary.h"
 
+#include "build/build_config.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 
 namespace ui {
@@ -48,7 +49,7 @@ ax::mojom::TextBoundary FromAtkTextGranularity(AtkTextGranularity granularity) {
 #endif  // ATK_CHECK_VERSION(2, 10, 0)
 #endif  // BUILDFLAG(USE_ATK)
 
-#ifdef OS_WIN
+#if BUILDFLAG(IS_WIN)
 ax::mojom::TextBoundary FromIA2TextBoundary(IA2TextBoundaryType boundary) {
   switch (boundary) {
     case IA2_TEXT_BOUNDARY_CHAR:
@@ -73,7 +74,7 @@ ax::mojom::TextBoundary FromUIATextUnit(TextUnit unit) {
     case TextUnit_Character:
       return ax::mojom::TextBoundary::kCharacter;
     case TextUnit_Format:
-      return ax::mojom::TextBoundary::kFormat;
+      return ax::mojom::TextBoundary::kFormatStart;
     case TextUnit_Word:
       return ax::mojom::TextBoundary::kWordStart;
     case TextUnit_Line:
@@ -92,6 +93,6 @@ ax::mojom::TextBoundary FromUIATextUnit(TextUnit unit) {
       return ax::mojom::TextBoundary::kWebPage;
   }
 }
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace ui

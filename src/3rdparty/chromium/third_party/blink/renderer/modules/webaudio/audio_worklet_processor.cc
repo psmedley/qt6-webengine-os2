@@ -65,12 +65,13 @@ bool AudioWorkletProcessor::Process(
         ClonePortTopology(isolate, context, inputs, inputs_,
                           input_array_buffers_);
     DCHECK(inputs_cloned_successfully);
-    if (!inputs_cloned_successfully)
+    if (!inputs_cloned_successfully) {
       return false;
+    }
   }
   DCHECK(!inputs_.IsEmpty());
-  DCHECK(inputs_.NewLocal(isolate)->IsArray());
-  DCHECK_EQ(inputs_.NewLocal(isolate)->Length(), inputs.size());
+  DCHECK(inputs_.Get(isolate)->IsArray());
+  DCHECK_EQ(inputs_.Get(isolate)->Length(), inputs.size());
   DCHECK_EQ(input_array_buffers_.size(), inputs.size());
 
   // Copies |inputs| to the internal |input_array_buffers|.
@@ -83,16 +84,17 @@ bool AudioWorkletProcessor::Process(
         ClonePortTopology(isolate, context, outputs, outputs_,
                           output_array_buffers_);
     DCHECK(outputs_cloned_successfully);
-    if (!outputs_cloned_successfully)
+    if (!outputs_cloned_successfully) {
       return false;
+    }
   } else {
     // The reallocation was not needed, so the arrays need to be zeroed before
     // passing them to the author script.
     ZeroArrayBuffers(isolate, output_array_buffers_);
   }
   DCHECK(!outputs_.IsEmpty());
-  DCHECK(outputs_.NewLocal(isolate)->IsArray());
-  DCHECK_EQ(outputs_.NewLocal(isolate)->Length(), outputs.size());
+  DCHECK(outputs_.Get(isolate)->IsArray());
+  DCHECK_EQ(outputs_.Get(isolate)->Length(), outputs.size());
   DCHECK_EQ(output_array_buffers_.size(), outputs.size());
 
   // 3rd JS arg |params_|. Compare |param_value_map| and |params_|. Then
@@ -102,11 +104,12 @@ bool AudioWorkletProcessor::Process(
     bool params_cloned_successfully =
         CloneParamValueMapToObject(isolate, context, param_value_map, params_);
     DCHECK(params_cloned_successfully);
-    if (!params_cloned_successfully)
+    if (!params_cloned_successfully) {
       return false;
+    }
   }
   DCHECK(!params_.IsEmpty());
-  DCHECK(params_.NewLocal(isolate)->IsObject());
+  DCHECK(params_.Get(isolate)->IsObject());
 
   // Copies |param_value_map| to the internal |params_| object. This operation
   // could fail if the getter of parameterDescriptors is overridden by user code
@@ -125,11 +128,10 @@ bool AudioWorkletProcessor::Process(
         TRACE_DISABLED_BY_DEFAULT("audio-worklet"),
         "AudioWorkletProcessor::Process (author script execution)");
     if (!definition->ProcessFunction()
-                   ->Invoke(this,
-                            ScriptValue(isolate, inputs_.NewLocal(isolate)),
-                            ScriptValue(isolate, outputs_.NewLocal(isolate)),
-                            ScriptValue(isolate, params_.NewLocal(isolate)))
-                   .To(&result)) {
+             ->Invoke(this, ScriptValue(isolate, inputs_.Get(isolate)),
+                      ScriptValue(isolate, outputs_.Get(isolate)),
+                      ScriptValue(isolate, params_.Get(isolate)))
+             .To(&result)) {
       SetErrorState(AudioWorkletProcessorErrorState::kProcessError);
       return false;
     }
@@ -179,10 +181,11 @@ bool AudioWorkletProcessor::PortTopologyMatches(
     const TraceWrapperV8Reference<v8::Array>& audio_port_2) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("audio-worklet"),
                "AudioWorkletProcessor::Process (compare topology)");
-  if (audio_port_2.IsEmpty())
+  if (audio_port_2.IsEmpty()) {
     return false;
+  }
 
-  v8::Local<v8::Array> port_2_local = audio_port_2.NewLocal(isolate);
+  v8::Local<v8::Array> port_2_local = audio_port_2.Get(isolate);
   DCHECK(port_2_local->IsArray());
 
   // Two audio ports may have a different number of inputs or outputs. See
@@ -197,16 +200,18 @@ bool AudioWorkletProcessor::PortTopologyMatches(
   uint32_t bus_index_counter = 0;
   for (const auto& audio_bus_1 : audio_port_1) {
     if (!port_2_local->Get(context, bus_index_counter).ToLocal(&value) ||
-        !value->IsArray())
+        !value->IsArray()) {
       return false;
+    }
 
     // Compare the length of AudioBus1[i] from AudioPort1 and AudioBus2[i] from
     // AudioPort2.
     unsigned number_of_channels =
         audio_bus_1 ? audio_bus_1->NumberOfChannels() : 0;
     v8::Local<v8::Array> audio_bus_2 = value.As<v8::Array>();
-    if (number_of_channels != audio_bus_2->Length())
+    if (number_of_channels != audio_bus_2->Length()) {
       return false;
+    }
 
     // If the channel count of AudioBus1[i] and AudioBus2[i] matches, then
     // iterate all the channels in AudioBus1[i] and see if any AudioChannel
@@ -214,13 +219,15 @@ bool AudioWorkletProcessor::PortTopologyMatches(
     for (uint32_t channel_index = 0; channel_index < audio_bus_2->Length();
          ++channel_index) {
       if (!audio_bus_2->Get(context, channel_index).ToLocal(&value) ||
-          !value->IsFloat32Array())
+          !value->IsFloat32Array()) {
         return false;
+      }
       v8::Local<v8::Float32Array> float32_array = value.As<v8::Float32Array>();
 
       // If any array is transferred, we need to rebuild them.
-      if (float32_array->ByteLength() == 0)
+      if (float32_array->ByteLength() == 0) {
         return false;
+      }
     }
 
     bus_index_counter++;
@@ -236,22 +243,24 @@ bool AudioWorkletProcessor::FreezeAudioPort(
   v8::TryCatch try_catch(isolate);
 
   bool port_frozen;
-  if (!audio_port_array
-           ->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen)
-           .To(&port_frozen))
+  if (!audio_port_array->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen)
+           .To(&port_frozen)) {
     return false;
+  }
 
   v8::Local<v8::Value> bus_value;
   for (uint32_t bus_index = 0; bus_index < audio_port_array->Length();
        ++bus_index) {
     if (!audio_port_array->Get(context, bus_index).ToLocal(&bus_value) ||
-        !bus_value->IsObject())
+        !bus_value->IsObject()) {
       return false;
+    }
     bool bus_frozen;
     if (!bus_value.As<v8::Object>()
-             ->SetIntegrityLevel(context,v8::IntegrityLevel::kFrozen)
-             .To(&bus_frozen))
+             ->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen)
+             .To(&bus_frozen)) {
       return false;
+    }
   }
 
   return true;
@@ -297,10 +306,11 @@ bool AudioWorkletProcessor::ClonePortTopology(
       v8::Local<v8::Float32Array> float32_array =
           v8::Float32Array::New(array_buffer, 0, bus_length);
       bool new_channel_added;
-      if (!new_audio_bus->CreateDataProperty(context, channel_index,
-                                             float32_array)
-                        .To(&new_channel_added))
+      if (!new_audio_bus
+               ->CreateDataProperty(context, channel_index, float32_array)
+               .To(&new_channel_added)) {
         return false;
+      }
       new_array_buffers.back().UncheckedAppend(
           TraceWrapperV8Reference<v8::ArrayBuffer>(isolate, array_buffer));
     }
@@ -308,10 +318,11 @@ bool AudioWorkletProcessor::ClonePortTopology(
     bus_index++;
   }
 
-  if (!FreezeAudioPort(isolate, context, new_port_array))
+  if (!FreezeAudioPort(isolate, context, new_port_array)) {
     return false;
+  }
 
-  audio_port_2.Set(isolate, new_port_array);
+  audio_port_2.Reset(isolate, new_port_array);
   array_buffers.swap(new_array_buffers);
   return true;
 }
@@ -329,7 +340,7 @@ void AudioWorkletProcessor::CopyPortToArrayBuffers(
     for (uint32_t channel_index = 0; channel_index < number_of_channels;
          ++channel_index) {
       auto backing_store = array_buffers[bus_index][channel_index]
-                               .NewLocal(isolate)
+                               .Get(isolate)
                                ->GetBackingStore();
       memcpy(backing_store->Data(), audio_bus->Channel(channel_index)->Data(),
              bus_length * sizeof(float));
@@ -348,7 +359,7 @@ void AudioWorkletProcessor::CopyArrayBuffersToPort(
     for (uint32_t channel_index = 0;
          channel_index < audio_bus->NumberOfChannels(); ++channel_index) {
       auto backing_store = array_buffers[bus_index][channel_index]
-                               .NewLocal(isolate)
+                               .Get(isolate)
                                ->GetBackingStore();
       const size_t bus_length = audio_bus->length() * sizeof(float);
 
@@ -371,7 +382,7 @@ void AudioWorkletProcessor::ZeroArrayBuffers(
     for (uint32_t channel_index = 0;
          channel_index < array_buffers[bus_index].size(); ++channel_index) {
       auto backing_store = array_buffers[bus_index][channel_index]
-                               .NewLocal(isolate)
+                               .Get(isolate)
                                ->GetBackingStore();
       memset(backing_store->Data(), 0, backing_store->ByteLength());
     }
@@ -385,10 +396,11 @@ bool AudioWorkletProcessor::ParamValueMapMatchesToParamsObject(
     const TraceWrapperV8Reference<v8::Object>& params) {
   v8::TryCatch try_catch(isolate);
 
-  if (params.IsEmpty())
+  if (params.IsEmpty()) {
     return false;
+  }
 
-  v8::Local<v8::Object> params_object = params.NewLocal(isolate);
+  v8::Local<v8::Object> params_object = params.Get(isolate);
 
   for (const auto& entry : param_value_map) {
     const String param_name = entry.key.IsolatedCopy();
@@ -409,17 +421,19 @@ bool AudioWorkletProcessor::ParamValueMapMatchesToParamsObject(
     // The |param_name| should exist in the |param| object.
     v8::Local<v8::Value> param_array_value;
     if (!params_object->Get(context, v8_param_name)
-                      .ToLocal(&param_array_value) ||
-        !param_array_value->IsFloat32Array())
+             .ToLocal(&param_array_value) ||
+        !param_array_value->IsFloat32Array()) {
       return false;
+    }
 
     // If the detected array length doesn't match or any underlying array
     // buffer is transferred, we have to reallocate.
     v8::Local<v8::Float32Array> float32_array =
         param_array_value.As<v8::Float32Array>();
     if (float32_array->Length() != array_size ||
-        float32_array->Buffer()->ByteLength() == 0)
+        float32_array->Buffer()->ByteLength() == 0) {
       return false;
+    }
   }
 
   return true;
@@ -469,11 +483,12 @@ bool AudioWorkletProcessor::CloneParamValueMapToObject(
 
   bool object_frozen;
   if (!new_params_object
-          ->SetIntegrityLevel(context,v8::IntegrityLevel::kFrozen)
-          .To(&object_frozen))
+           ->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen)
+           .To(&object_frozen)) {
     return false;
+  }
 
-  params.Set(isolate, new_params_object);
+  params.Reset(isolate, new_params_object);
   return true;
 }
 
@@ -484,7 +499,7 @@ bool AudioWorkletProcessor::CopyParamValueMapToObject(
     TraceWrapperV8Reference<v8::Object>& params) {
   v8::TryCatch try_catch(isolate);
 
-  v8::Local<v8::Object> params_object = params.NewLocal(isolate);
+  v8::Local<v8::Object> params_object = params.Get(isolate);
 
   for (const auto& entry : param_value_map) {
     const String param_name = entry.key.IsolatedCopy();
@@ -504,8 +519,9 @@ bool AudioWorkletProcessor::CopyParamValueMapToObject(
     // The |float32_array| is neither 1 nor 128 frames, or the array buffer is
     // trasnferred/detached, do not proceed.
     if ((array_length != 1 && array_length != param_array->size()) ||
-        float32_array->Buffer()->ByteLength() == 0)
+        float32_array->Buffer()->ByteLength() == 0) {
       return false;
+    }
 
     memcpy(float32_array->Buffer()->GetBackingStore()->Data(),
            param_array->Data(), array_length * sizeof(float));

@@ -19,6 +19,7 @@ class RemoteAppsAdapter {
     this.callbackRouter_ =
         new chromeos.remoteApps.mojom.RemoteAppLaunchObserverCallbackRouter();
     factory.create(
+        chrome.runtime.id,
         this.remoteApps_.$.bindNewPipeAndPassReceiver(),
         this.callbackRouter_.$.bindNewPipeAndPassRemote());
   }
@@ -39,7 +40,7 @@ class RemoteAppsAdapter {
   /**
    * Adds an app to the launcher.
    * @param {string} name name of the added app
-   * @param {string} folderId Id of the parent folder. An empty string
+   * @param {string} folderId ID of the parent folder. An empty string
    *     indicates the app does not have a parent folder.
    * @param {string} iconUrl URL to an image representing the app's icon
    * @param {boolean} [add_to_front=false] true if the app should be added to
@@ -50,7 +51,17 @@ class RemoteAppsAdapter {
    */
   addApp(name, folderId, iconUrl, add_to_front = false) {
     return this.remoteApps_.addApp(
-        name, folderId, {url: iconUrl}, add_to_front);
+        chrome.runtime.id, name, folderId, {url: iconUrl}, add_to_front);
+  }
+
+  /**
+   * Deletes an app that was previously added by |addApp()|. If the app was in
+   * a folder and the folder would become empty, the folder is hidden.
+   * @param {string} appId ID of the app to delete.
+   * @return {!Promise<!{error: string}>} error if any.
+   */
+  deleteApp(appId) {
+    return this.remoteApps_.deleteApp(appId);
   }
 
   /**

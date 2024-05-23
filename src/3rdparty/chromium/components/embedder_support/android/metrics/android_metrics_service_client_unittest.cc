@@ -6,11 +6,10 @@
 
 #include <memory>
 
-#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -22,6 +21,7 @@
 #include "components/metrics/metrics_switches.h"
 #include "components/metrics/persistent_histograms.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/variations/service/variations_safe_mode_constants.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -40,11 +40,10 @@ class TestClient : public AndroidMetricsServiceClient {
         package_name_rate_per_mille_(1000),
         record_package_name_for_app_type_(true) {}
 
-  ~TestClient() override = default;
+  TestClient(const TestClient&) = delete;
+  TestClient& operator=(const TestClient&) = delete;
 
-  void Initialize(PrefService* pref_service) {
-    AndroidMetricsServiceClient::Initialize(base::FilePath(), pref_service);
-  }
+  ~TestClient() override = default;
 
   bool IsRecordingActive() {
     auto* service = GetMetricsService();
@@ -110,7 +109,6 @@ class TestClient : public AndroidMetricsServiceClient {
   int sampled_in_rate_per_mille_;
   int package_name_rate_per_mille_;
   bool record_package_name_for_app_type_;
-  DISALLOW_COPY_AND_ASSIGN(TestClient);
 };
 
 std::unique_ptr<TestingPrefServiceSimple> CreateTestPrefs() {
@@ -136,6 +134,11 @@ class AndroidMetricsServiceClientTest : public testing::Test {
     base::SetRecordActionTaskRunner(task_runner_);
   }
 
+  AndroidMetricsServiceClientTest(const AndroidMetricsServiceClientTest&) =
+      delete;
+  AndroidMetricsServiceClientTest& operator=(
+      const AndroidMetricsServiceClientTest&) = delete;
+
   const int64_t test_begin_time_;
 
   content::BrowserTaskEnvironment* task_environment() {
@@ -148,9 +151,18 @@ class AndroidMetricsServiceClientTest : public testing::Test {
  private:
   content::BrowserTaskEnvironment task_environment_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(AndroidMetricsServiceClientTest);
 };
+
+// Verify that the Extended Variations Safe Mode experiment is disabled on
+// Android embedders.
+TEST_F(AndroidMetricsServiceClientTest,
+       ExtendedVariationsSafeModeExperimentDisabled) {
+  auto prefs = CreateTestPrefs();
+  auto client = std::make_unique<TestClient>();
+  client->Initialize(prefs.get());
+  EXPECT_FALSE(
+      base::FieldTrialList::IsTrialActive(variations::kExtendedSafeModeTrial));
+}
 
 TEST_F(AndroidMetricsServiceClientTest, TestSetConsentTrueBeforeInit) {
   auto prefs = CreateTestPrefs();
@@ -330,8 +342,7 @@ TEST_F(AndroidMetricsServiceClientTest,
 }
 
 TEST_F(AndroidMetricsServiceClientTest, TestCanForceEnableMetrics) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      metrics::switches::kForceEnableMetricsReporting);
+  ForceEnableMetricsReportingForTesting();
 
   auto prefs = CreateTestPrefs();
   auto client = std::make_unique<TestClient>();
@@ -348,8 +359,7 @@ TEST_F(AndroidMetricsServiceClientTest, TestCanForceEnableMetrics) {
 
 TEST_F(AndroidMetricsServiceClientTest,
        TestCanForceEnableMetricsIfAlreadyEnabled) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      metrics::switches::kForceEnableMetricsReporting);
+  ForceEnableMetricsReportingForTesting();
 
   auto prefs = CreateTestPrefs();
   auto client = std::make_unique<TestClient>();
@@ -366,8 +376,7 @@ TEST_F(AndroidMetricsServiceClientTest,
 
 TEST_F(AndroidMetricsServiceClientTest,
        TestCannotForceEnableMetricsIfAppOptsOut) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      metrics::switches::kForceEnableMetricsReporting);
+  ForceEnableMetricsReportingForTesting();
 
   auto prefs = CreateTestPrefs();
   auto client = std::make_unique<TestClient>();

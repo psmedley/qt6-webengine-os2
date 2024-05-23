@@ -25,6 +25,7 @@ public:
 
     int count() const { return fArray.count(); }
     SkDrawable* const* begin() const { return fArray.begin(); }
+    SkDrawable* const* end() const { return fArray.end(); }
 
     void append(SkDrawable* drawable);
 
@@ -61,7 +62,6 @@ public:
     void willRestore() override {}
     void didRestore() override;
 
-    void onMarkCTM(const char*) override;
     void didConcat44(const SkM44&) override;
     void didSetM44(const SkM44&) override;
     void didScale(SkScalar, SkScalar) override;
@@ -73,6 +73,9 @@ public:
                         SkScalar x,
                         SkScalar y,
                         const SkPaint& paint) override;
+#if SK_SUPPORT_GPU
+    void onDrawSlug(const GrSlug* slug) override;
+#endif
     void onDrawGlyphRunList(const SkGlyphRunList& glyphRunList, const SkPaint& paint) override;
     void onDrawPatch(const SkPoint cubics[12], const SkColor colors[4],
                      const SkPoint texCoords[4], SkBlendMode,

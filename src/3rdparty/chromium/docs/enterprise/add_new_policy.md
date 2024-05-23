@@ -37,7 +37,7 @@ Usually you need a policy when
         sure you get the version and feature flags (such as dynamic_refresh and
         supported_on) right.
     -   Here are the most used attributes. Please note that, all attributes
-        below other than `supported_on`, `future_on' and
+        below other than `supported_on`, `future_on` and
         `default_for_enterprise_users` do not change the code behavior.
         -   `supported_on` and `future_on`: They control the platforms that the
             policy supports. `supported_on` is used for released platforms with
@@ -216,7 +216,7 @@ policy_templates.json instead of just being marked as no longer supported.
 In this case, please remember to add the deleted id to deleted_policy_ids.
 
 If you want to remove support for another reason, please reach out to someone in
-[ENTERPRISE_POLICY_OWNERS](https://cs.chromium.org/chromium/src/components/policy/resources/ENTERPRISE_POLICY_OWNERS)
+[ENTERPRISE_POLICY_OWNERS](https://cs.chromium.org/chromium/src/components/policyENTERPRISE_POLICY_OWNERS)
 to ensure this is okay. The general preference is to leave policies as
 deprecated, but still supported.
 

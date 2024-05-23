@@ -14,7 +14,8 @@ SecurityInterstitialTabHelper::~SecurityInterstitialTabHelper() {}
 
 void SecurityInterstitialTabHelper::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsSameDocument()) {
+  if (navigation_handle->IsSameDocument() ||
+      !navigation_handle->IsInPrimaryMainFrame()) {
     return;
   }
 
@@ -50,17 +51,22 @@ void SecurityInterstitialTabHelper::WebContentsDestroyed() {
 
 // static
 void SecurityInterstitialTabHelper::AssociateBlockingPage(
-    content::WebContents* web_contents,
-    int64_t navigation_id,
+    content::NavigationHandle* navigation_handle,
     std::unique_ptr<security_interstitials::SecurityInterstitialPage>
         blocking_page) {
-  // CreateForWebContents() creates a tab helper if it doesn't exist for
-  // |web_contents| yet.
+  // An interstitial should not be shown in a prerendered page or in a fenced
+  // frame. The prerender should just be canceled.
+  DCHECK(navigation_handle->IsInPrimaryMainFrame());
+
+  // CreateForWebContents() creates a tab helper if it doesn't yet exist for the
+  // WebContents provided by |navigation_handle|.
+  auto* web_contents = navigation_handle->GetWebContents();
   SecurityInterstitialTabHelper::CreateForWebContents(web_contents);
 
   SecurityInterstitialTabHelper* helper =
       SecurityInterstitialTabHelper::FromWebContents(web_contents);
-  helper->SetBlockingPage(navigation_id, std::move(blocking_page));
+  helper->SetBlockingPage(navigation_handle->GetNavigationId(),
+                          std::move(blocking_page));
 }
 
 // static
@@ -101,7 +107,10 @@ SecurityInterstitialTabHelper::
 
 SecurityInterstitialTabHelper::SecurityInterstitialTabHelper(
     content::WebContents* web_contents)
-    : WebContentsObserver(web_contents), receivers_(web_contents, this) {}
+    : WebContentsObserver(web_contents),
+      content::WebContentsUserData<SecurityInterstitialTabHelper>(
+          *web_contents),
+      receivers_(web_contents, this) {}
 
 void SecurityInterstitialTabHelper::SetBlockingPage(
     int64_t navigation_id,
@@ -192,6 +201,6 @@ void SecurityInterstitialTabHelper::OpenEnhancedProtectionSettings() {
                     CMD_OPEN_ENHANCED_PROTECTION_SETTINGS);
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(SecurityInterstitialTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(SecurityInterstitialTabHelper);
 
 }  //  namespace security_interstitials

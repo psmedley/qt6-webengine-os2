@@ -24,16 +24,12 @@
 extern "C" {
 #endif
 
-#define QINDEX_LOW_THR \
-  200  // Use low qindex variance partition thresholds when qindex is below this
-       // threshold
-#define QINDEX_HIGH_THR \
-  220  // Use high qindex variance partition thresholds when qindex is above
-       // this threshold
 #define QINDEX_LARGE_BLOCK_THR \
   100  // Use increased thresholds for midres for speed 9 when qindex is above
        // this threshold
 
+#define CALC_CHROMA_THRESH_FOR_ZEROMV_SKIP(thresh_exit_part) \
+  ((3 * (thresh_exit_part)) >> 2)
 /*!\brief Set the thresholds for variance based partition.
  *
  * Set the variance split thresholds for following the block sizes:
@@ -50,7 +46,7 @@ extern "C" {
  * \param[in]      q                  q index
  * \param[in]      content_lowsumdiff Low sumdiff flag for superblock
  *
- * \return Returns the set of thresholds in \c cpi->vbp_info.thresholds.
+ * \remark Returns the set of thresholds in \c cpi->vbp_info.thresholds.
  */
 void av1_set_variance_partition_thresholds(AV1_COMP *cpi, int q,
                                            int content_lowsumdiff);
@@ -88,6 +84,14 @@ void av1_set_variance_partition_thresholds(AV1_COMP *cpi, int q,
 int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
                                       ThreadData *td, MACROBLOCK *x, int mi_row,
                                       int mi_col);
+
+// Read out the block's temporal variance for 64x64 SB case.
+int av1_get_force_skip_low_temp_var_small_sb(const uint8_t *variance_low,
+                                             int mi_row, int mi_col,
+                                             BLOCK_SIZE bsize);
+// Read out the block's temporal variance for 128x128 SB case.
+int av1_get_force_skip_low_temp_var(const uint8_t *variance_low, int mi_row,
+                                    int mi_col, BLOCK_SIZE bsize);
 
 #ifdef __cplusplus
 }  // extern "C"

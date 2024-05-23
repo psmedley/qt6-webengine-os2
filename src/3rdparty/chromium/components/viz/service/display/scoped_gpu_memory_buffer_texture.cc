@@ -4,7 +4,6 @@
 
 #include "components/viz/service/display/scoped_gpu_memory_buffer_texture.h"
 
-#include "base/bits.h"
 #include "base/check.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/resources/resource_format.h"
@@ -44,9 +43,9 @@ ScopedGpuMemoryBufferTexture::ScopedGpuMemoryBufferTexture(
   gl->TexParameteri(target_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   gl->TexParameteri(target_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-  gl->TexStorage2DImageCHROMIUM(target_, TextureStorageFormat(format),
-                                GL_SCANOUT_CHROMIUM, size_.width(),
-                                size_.height());
+  gl->TexStorage2DImageCHROMIUM(
+      target_, TextureStorageFormat(format, caps.angle_rgbx_internal_format),
+      GL_SCANOUT_CHROMIUM, size_.width(), size_.height());
   if (color_space_.IsValid()) {
     gl->SetColorSpaceMetadataCHROMIUM(gl_id_, color_space_.AsGLColorSpace());
   }

@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "testwindow.h"
 #include "quickutil.h"
@@ -448,10 +423,10 @@ void tst_QQuickWebEngineView::transparentWebEngineViews()
         for (int i = 0; i < image.width(); i++)
             for (int j = 0; j < image.height(); j++)
                 colors.insert(image.pixel(i, j));
-        return colors.count() > 1;
+        return colors.size() > 1;
     });
 
-    QVERIFY(colors.count() > 1);
+    QVERIFY(colors.size() > 1);
     QVERIFY(colors.contains(qRgb(0, 0, 0)));     // black
     QVERIFY(colors.contains(qRgb(255, 0, 0)));   // red
     for (auto color : colors) {
@@ -463,7 +438,6 @@ void tst_QQuickWebEngineView::transparentWebEngineViews()
 void tst_QQuickWebEngineView::inputMethod()
 {
     m_window->show();
-    QTRY_VERIFY(qApp->focusObject());
     QQuickItem *input;
 
     QQuickWebEngineView *view = webEngineView();
@@ -471,18 +445,21 @@ void tst_QQuickWebEngineView::inputMethod()
     view->setUrl(urlFromTestPath("html/inputmethod.html"));
     QVERIFY(waitForLoadSucceeded(view));
 
+    QTRY_VERIFY(qobject_cast<QQuickItem *>(qApp->focusObject()));
     input = qobject_cast<QQuickItem *>(qApp->focusObject());
     QVERIFY(!input->flags().testFlag(QQuickItem::ItemAcceptsInputMethod));
     QVERIFY(!view->flags().testFlag(QQuickItem::ItemAcceptsInputMethod));
 
     runJavaScript("document.getElementById('inputField').focus();");
     QTRY_COMPARE(activeElementId(view), QStringLiteral("inputField"));
+    QTRY_VERIFY(qobject_cast<QQuickItem *>(qApp->focusObject()));
     input = qobject_cast<QQuickItem *>(qApp->focusObject());
     QTRY_VERIFY(input->flags().testFlag(QQuickItem::ItemAcceptsInputMethod));
     QVERIFY(view->flags().testFlag(QQuickItem::ItemAcceptsInputMethod));
 
     runJavaScript("document.getElementById('inputField').blur();");
     QTRY_VERIFY(activeElementId(view).isEmpty());
+    QTRY_VERIFY(qobject_cast<QQuickItem *>(qApp->focusObject()));
     input = qobject_cast<QQuickItem *>(qApp->focusObject());
     QTRY_VERIFY(!input->flags().testFlag(QQuickItem::ItemAcceptsInputMethod));
     QVERIFY(!view->flags().testFlag(QQuickItem::ItemAcceptsInputMethod));
@@ -622,12 +599,12 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
                   "  <input type='text' id='input1' />"
                   "</body></html>");
     QVERIFY(waitForLoadSucceeded(view));
-    QCOMPARE(testContext.infos.count(), 0);
+    QCOMPARE(testContext.infos.size(), 0);
 
     // Set focus on an input field.
     QPoint textInputCenter = elementCenter(view, "input1");
     QTest::mouseClick(view->window(), Qt::LeftButton, {}, textInputCenter);
-    QTRY_COMPARE(testContext.infos.count(), 2);
+    QTRY_COMPARE(testContext.infos.size(), 2);
     QCOMPARE(evaluateJavaScriptSync(view, "document.activeElement.id").toString(), QStringLiteral("input1"));
     foreach (const InputMethodInfo &info, testContext.infos) {
         QCOMPARE(info.cursorPosition, 0);
@@ -639,7 +616,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
 
     // Change content of an input field from JavaScript.
     evaluateJavaScriptSync(view, "document.getElementById('input1').value='QtWebEngine';");
-    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(testContext.infos.size(), 1);
     QCOMPARE(testContext.infos[0].cursorPosition, 11);
     QCOMPARE(testContext.infos[0].anchorPosition, 11);
     QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine"));
@@ -648,7 +625,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
 
     // Change content of an input field by key press.
     QTest::keyClick(view->window(), Qt::Key_Exclam);
-    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(testContext.infos.size(), 1);
     QCOMPARE(testContext.infos[0].cursorPosition, 12);
     QCOMPARE(testContext.infos[0].anchorPosition, 12);
     QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
@@ -657,7 +634,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
 
     // Change cursor position.
     QTest::keyClick(view->window(), Qt::Key_Left);
-    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(testContext.infos.size(), 1);
     QCOMPARE(testContext.infos[0].cursorPosition, 11);
     QCOMPARE(testContext.infos[0].anchorPosition, 11);
     QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
@@ -672,7 +649,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
         QInputMethodEvent event("", attributes);
         QGuiApplication::sendEvent(qApp->focusObject(), &event);
     }
-    QTRY_COMPARE(testContext.infos.count(), 2);
+    QTRY_COMPARE(testContext.infos.size(), 2);
 
     // As a first step, Chromium moves the cursor to the start of the selection.
     // We don't filter this in QtWebEngine because we don't know yet if this is part of a selection.
@@ -696,7 +673,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
         QInputMethodEvent event("", attributes);
         QGuiApplication::sendEvent(qApp->focusObject(), &event);
     }
-    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(testContext.infos.size(), 1);
     QCOMPARE(testContext.infos[0].cursorPosition, 0);
     QCOMPARE(testContext.infos[0].anchorPosition, 0);
     QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
@@ -709,7 +686,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
         QInputMethodEvent event("123", attributes);
         QGuiApplication::sendEvent(qApp->focusObject(), &event);
     }
-    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(testContext.infos.size(), 1);
     QCOMPARE(testContext.infos[0].cursorPosition, 3);
     QCOMPARE(testContext.infos[0].anchorPosition, 3);
     QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
@@ -723,7 +700,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
         QInputMethodEvent event("", attributes);
         QGuiApplication::sendEvent(qApp->focusObject(), &event);
     }
-    QTRY_COMPARE(testContext.infos.count(), 2);
+    QTRY_COMPARE(testContext.infos.size(), 2);
     foreach (const InputMethodInfo &info, testContext.infos) {
         QCOMPARE(info.cursorPosition, 0);
         QCOMPARE(info.anchorPosition, 0);
@@ -740,7 +717,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
         event.setCommitString(QStringLiteral("123"), 0, 0);
         QGuiApplication::sendEvent(qApp->focusObject(), &event);
     }
-    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(testContext.infos.size(), 1);
     QCOMPARE(testContext.infos[0].cursorPosition, 3);
     QCOMPARE(testContext.infos[0].anchorPosition, 3);
     QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("123QtWebEngine!"));
@@ -750,7 +727,7 @@ void tst_QQuickWebEngineView::inputContextQueryInput()
 
     // Focus out.
     QTest::keyPress(view->window(), Qt::Key_Tab);
-    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(testContext.infos.size(), 1);
     QTRY_COMPARE(evaluateJavaScriptSync(view, "document.activeElement.id").toString(), QStringLiteral(""));
     testContext.infos.clear();
 }
@@ -861,7 +838,7 @@ void tst_QQuickWebEngineView::printToPdf()
     QSignalSpy savePdfSpy(view, SIGNAL(pdfPrintingFinished(const QString&, bool)));
     QString path = tempDir.path() + "/print_success.pdf";
     view->printToPdf(path, QQuickWebEngineView::A4, QQuickWebEngineView::Portrait);
-    QTRY_VERIFY2(savePdfSpy.count() == 1, "Printing to PDF file failed without signal");
+    QTRY_VERIFY2(savePdfSpy.size() == 1, "Printing to PDF file failed without signal");
     QList<QVariant> successArguments = savePdfSpy.takeFirst();
     QVERIFY2(successArguments.at(0).toString() == path, "File path for first saved PDF does not match arguments");
     QVERIFY2(successArguments.at(1).toBool() == true, "Printing to PDF file failed though it should succeed");
@@ -872,7 +849,7 @@ void tst_QQuickWebEngineView::printToPdf()
     path = tempDir.path() + "/print_|fail.pdf";
 #endif // #if !defined(Q_OS_WIN)
     view->printToPdf(path, QQuickWebEngineView::A4, QQuickWebEngineView::Portrait);
-    QTRY_VERIFY2(savePdfSpy.count() == 1, "Printing to PDF file failed without signal");
+    QTRY_VERIFY2(savePdfSpy.size() == 1, "Printing to PDF file failed without signal");
     QList<QVariant> failedArguments = savePdfSpy.takeFirst();
     QVERIFY2(failedArguments.at(0).toString() == path, "File path for second saved PDF does not match arguments");
     QVERIFY2(failedArguments.at(1).toBool() == false, "Printing to PDF file succeeded though it should fail");

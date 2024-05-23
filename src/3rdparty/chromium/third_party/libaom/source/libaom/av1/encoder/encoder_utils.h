@@ -49,22 +49,26 @@ static AOM_INLINE void suppress_active_map(AV1_COMP *cpi) {
         seg_map[i] = AM_SEGMENT_ID_ACTIVE;
 }
 
-static AOM_INLINE void set_mb_mi(CommonModeInfoParams *mi_params, int width,
-                                 int height) {
+// Returns 'size' in the number of Mode Info (MI) units. 'size' is either the
+// width or height.
+static AOM_INLINE int size_in_mi(int size) {
   // Ensure that the decoded width and height are both multiples of
   // 8 luma pixels (note: this may only be a multiple of 4 chroma pixels if
   // subsampling is used).
   // This simplifies the implementation of various experiments,
   // eg. cdef, which operates on units of 8x8 luma pixels.
-  const int aligned_width = ALIGN_POWER_OF_TWO(width, 3);
-  const int aligned_height = ALIGN_POWER_OF_TWO(height, 3);
+  const int aligned_size = ALIGN_POWER_OF_TWO(size, 3);
+  return aligned_size >> MI_SIZE_LOG2;
+}
 
-  mi_params->mi_cols = aligned_width >> MI_SIZE_LOG2;
-  mi_params->mi_rows = aligned_height >> MI_SIZE_LOG2;
+static AOM_INLINE void set_mb_mi(CommonModeInfoParams *mi_params, int width,
+                                 int height) {
+  mi_params->mi_cols = size_in_mi(width);
+  mi_params->mi_rows = size_in_mi(height);
   mi_params->mi_stride = calc_mi_size(mi_params->mi_cols);
 
-  mi_params->mb_cols = (mi_params->mi_cols + 2) >> 2;
-  mi_params->mb_rows = (mi_params->mi_rows + 2) >> 2;
+  mi_params->mb_cols = ROUND_POWER_OF_TWO(mi_params->mi_cols, 2);
+  mi_params->mb_rows = ROUND_POWER_OF_TWO(mi_params->mi_rows, 2);
   mi_params->MBs = mi_params->mb_rows * mi_params->mb_cols;
 
   const int mi_alloc_size_1d = mi_size_wide[mi_params->mi_alloc_bsize];
@@ -86,15 +90,17 @@ static AOM_INLINE void enc_free_mi(CommonModeInfoParams *mi_params) {
 }
 
 static AOM_INLINE void enc_set_mb_mi(CommonModeInfoParams *mi_params, int width,
-                                     int height) {
-  const int is_4k_or_larger = AOMMIN(width, height) >= 2160;
-  mi_params->mi_alloc_bsize = is_4k_or_larger ? BLOCK_8X8 : BLOCK_4X4;
+                                     int height,
+                                     BLOCK_SIZE min_partition_size) {
+  mi_params->mi_alloc_bsize = min_partition_size;
 
   set_mb_mi(mi_params, width, height);
 }
 
 static AOM_INLINE void stat_stage_set_mb_mi(CommonModeInfoParams *mi_params,
-                                            int width, int height) {
+                                            int width, int height,
+                                            BLOCK_SIZE min_partition_size) {
+  (void)min_partition_size;
   mi_params->mi_alloc_bsize = BLOCK_16X16;
 
   set_mb_mi(mi_params, width, height);
@@ -619,26 +625,26 @@ static AOM_INLINE void highbd_set_var_fns(AV1_PRIMARY *const ppi) {
         HIGHBD_OBFP_WRAPPER_8(4, 16)
 #endif
 
-        HIGHBD_SDSFP_WRAPPER(128, 128, 8);
-        HIGHBD_SDSFP_WRAPPER(128, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(64, 128, 8);
-        HIGHBD_SDSFP_WRAPPER(64, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(64, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 8, 8);
-        HIGHBD_SDSFP_WRAPPER(8, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(8, 8, 8);
-        HIGHBD_SDSFP_WRAPPER(4, 8, 8);
+        HIGHBD_SDSFP_WRAPPER(128, 128, 8)
+        HIGHBD_SDSFP_WRAPPER(128, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(64, 128, 8)
+        HIGHBD_SDSFP_WRAPPER(64, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(64, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 8, 8)
+        HIGHBD_SDSFP_WRAPPER(8, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(8, 8, 8)
+        HIGHBD_SDSFP_WRAPPER(4, 8, 8)
 #if !CONFIG_REALTIME_ONLY
-        HIGHBD_SDSFP_WRAPPER(64, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 8, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(8, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(4, 16, 8);
+        HIGHBD_SDSFP_WRAPPER(64, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 8, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(8, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(4, 16, 8)
 #endif
         break;
 
@@ -719,27 +725,27 @@ static AOM_INLINE void highbd_set_var_fns(AV1_PRIMARY *const ppi) {
         HIGHBD_OBFP_WRAPPER(4, 16, 10)
 #endif
 
-        HIGHBD_SDSFP_WRAPPER(128, 128, 10);
-        HIGHBD_SDSFP_WRAPPER(128, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(64, 128, 10);
-        HIGHBD_SDSFP_WRAPPER(64, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(64, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 8, 10);
-        HIGHBD_SDSFP_WRAPPER(8, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(8, 8, 10);
-        HIGHBD_SDSFP_WRAPPER(4, 8, 10);
+        HIGHBD_SDSFP_WRAPPER(128, 128, 10)
+        HIGHBD_SDSFP_WRAPPER(128, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(64, 128, 10)
+        HIGHBD_SDSFP_WRAPPER(64, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(64, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 8, 10)
+        HIGHBD_SDSFP_WRAPPER(8, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(8, 8, 10)
+        HIGHBD_SDSFP_WRAPPER(4, 8, 10)
 
 #if !CONFIG_REALTIME_ONLY
-        HIGHBD_SDSFP_WRAPPER(64, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 8, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(8, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(4, 16, 10);
+        HIGHBD_SDSFP_WRAPPER(64, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 8, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(8, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(4, 16, 10)
 #endif
         break;
 
@@ -820,27 +826,27 @@ static AOM_INLINE void highbd_set_var_fns(AV1_PRIMARY *const ppi) {
         HIGHBD_OBFP_WRAPPER(4, 16, 12)
 #endif
 
-        HIGHBD_SDSFP_WRAPPER(128, 128, 12);
-        HIGHBD_SDSFP_WRAPPER(128, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(64, 128, 12);
-        HIGHBD_SDSFP_WRAPPER(64, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(64, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 8, 12);
-        HIGHBD_SDSFP_WRAPPER(8, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(8, 8, 12);
-        HIGHBD_SDSFP_WRAPPER(4, 8, 12);
+        HIGHBD_SDSFP_WRAPPER(128, 128, 12)
+        HIGHBD_SDSFP_WRAPPER(128, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(64, 128, 12)
+        HIGHBD_SDSFP_WRAPPER(64, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(64, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 8, 12)
+        HIGHBD_SDSFP_WRAPPER(8, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(8, 8, 12)
+        HIGHBD_SDSFP_WRAPPER(4, 8, 12)
 
 #if !CONFIG_REALTIME_ONLY
-        HIGHBD_SDSFP_WRAPPER(64, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 8, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(8, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(4, 16, 12);
+        HIGHBD_SDSFP_WRAPPER(64, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 8, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(8, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(4, 16, 12)
 #endif
         break;
 
@@ -869,6 +875,44 @@ static AOM_INLINE void copy_frame_prob_info(AV1_COMP *cpi) {
     av1_copy(frame_probs->switchable_interp_probs,
              default_switchable_interp_probs);
   }
+
+#if CONFIG_FPMT_TEST
+  if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
+    FrameProbInfo *const temp_frame_probs = &cpi->ppi->temp_frame_probs;
+    if (cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats) {
+      av1_copy(temp_frame_probs->tx_type_probs, default_tx_type_probs);
+    }
+    if (cpi->sf.inter_sf.prune_obmc_prob_thresh > 0 &&
+        cpi->sf.inter_sf.prune_obmc_prob_thresh < INT_MAX) {
+      av1_copy(temp_frame_probs->obmc_probs, default_obmc_probs);
+    }
+    if (cpi->sf.inter_sf.prune_warped_prob_thresh > 0) {
+      av1_copy(temp_frame_probs->warped_probs, default_warped_probs);
+    }
+    if (cpi->sf.interp_sf.adaptive_interp_filter_search == 2) {
+      av1_copy(temp_frame_probs->switchable_interp_probs,
+               default_switchable_interp_probs);
+    }
+
+    FrameProbInfo *const temp_frame_probs_simulation =
+        &cpi->ppi->temp_frame_probs_simulation;
+    if (cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats) {
+      av1_copy(temp_frame_probs_simulation->tx_type_probs,
+               default_tx_type_probs);
+    }
+    if (cpi->sf.inter_sf.prune_obmc_prob_thresh > 0 &&
+        cpi->sf.inter_sf.prune_obmc_prob_thresh < INT_MAX) {
+      av1_copy(temp_frame_probs_simulation->obmc_probs, default_obmc_probs);
+    }
+    if (cpi->sf.inter_sf.prune_warped_prob_thresh > 0) {
+      av1_copy(temp_frame_probs_simulation->warped_probs, default_warped_probs);
+    }
+    if (cpi->sf.interp_sf.adaptive_interp_filter_search == 2) {
+      av1_copy(temp_frame_probs_simulation->switchable_interp_probs,
+               default_switchable_interp_probs);
+    }
+  }
+#endif
 }
 
 static AOM_INLINE void restore_cdef_coding_context(CdefInfo *const dst,
@@ -930,6 +974,7 @@ static AOM_INLINE int combine_prior_with_tpl_boost(double min_factor,
 static AOM_INLINE void set_size_independent_vars(AV1_COMP *cpi) {
   int i;
   AV1_COMMON *const cm = &cpi->common;
+  FeatureFlags *const features = &cm->features;
   for (i = LAST_FRAME; i <= ALTREF_FRAME; ++i) {
     cm->global_motion[i] = default_warp_params;
   }
@@ -937,8 +982,9 @@ static AOM_INLINE void set_size_independent_vars(AV1_COMP *cpi) {
 
   av1_set_speed_features_framesize_independent(cpi, cpi->speed);
   av1_set_rd_speed_thresholds(cpi);
-  cm->features.interp_filter = SWITCHABLE;
-  cm->features.switchable_motion_mode = 1;
+  features->interp_filter = SWITCHABLE;
+  features->switchable_motion_mode = is_switchable_motion_mode_allowed(
+      features->allow_warped_motion, cpi->oxcf.motion_mode_cfg.enable_obmc);
 }
 
 static AOM_INLINE void release_scaled_references(AV1_COMP *cpi) {
@@ -957,12 +1003,34 @@ static AOM_INLINE void restore_all_coding_context(AV1_COMP *cpi) {
   if (!frame_is_intra_only(&cpi->common)) release_scaled_references(cpi);
 }
 
+static AOM_INLINE int reduce_num_ref_buffers(const AV1_COMP *cpi) {
+  const SequenceHeader *const seq_params = cpi->common.seq_params;
+  return is_one_pass_rt_params(cpi) &&
+         use_rtc_reference_structure_one_layer(cpi) &&
+         (seq_params->order_hint_info.enable_order_hint == 0) &&
+         cpi->rt_reduce_num_ref_buffers;
+}
+
 // Refresh reference frame buffers according to refresh_frame_flags.
 static AOM_INLINE void refresh_reference_frames(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
   // All buffers are refreshed for shown keyframes and S-frames.
+  // In case of RT, golden frame refreshes the 6th slot and other reference
+  // frames refresh slots 0 to 5. Slot 7 is not refreshed by any reference
+  // frame. Thus, only 7 buffers are refreshed for keyframes and S-frames
+  // instead of 8.
+  int num_ref_buffers = REF_FRAMES;
+  if (reduce_num_ref_buffers(cpi)) {
+    const int refresh_all_bufs =
+        (cpi->ppi->gf_group.refbuf_state[cpi->gf_frame_index] == REFBUF_RESET ||
+         frame_is_sframe(cm));
+    assert(IMPLIES(((cm->current_frame.refresh_frame_flags >> 7) & 1) == 1,
+                   refresh_all_bufs));
+    (void)refresh_all_bufs;
+    num_ref_buffers--;
+  }
 
-  for (int ref_frame = 0; ref_frame < REF_FRAMES; ref_frame++) {
+  for (int ref_frame = 0; ref_frame < num_ref_buffers; ref_frame++) {
     if (((cm->current_frame.refresh_frame_flags >> ref_frame) & 1) == 1) {
       assign_frame_buffer_p(&cm->ref_frame_map[ref_frame], cm->cur_frame);
     }
@@ -1006,6 +1074,26 @@ void av1_save_all_coding_context(AV1_COMP *cpi);
 #if DUMP_RECON_FRAMES == 1
 void av1_dump_filtered_recon_frames(AV1_COMP *cpi);
 #endif
+
+static AOM_INLINE int av1_get_enc_border_size(bool resize, bool all_intra,
+                                              BLOCK_SIZE sb_size) {
+  // For allintra encoding mode, inter-frame motion search is not applicable and
+  // the intraBC motion vectors are restricted within the tile boundaries. Hence
+  // a smaller frame border size (AOM_ENC_ALLINTRA_BORDER) is used in this case.
+  if (resize) {
+    return AOM_BORDER_IN_PIXELS;
+  }
+  if (all_intra) {
+    return AOM_ENC_ALLINTRA_BORDER;
+  }
+  return block_size_wide[sb_size] + 32;
+}
+
+static AOM_INLINE bool av1_is_resize_needed(const AV1EncoderConfig *oxcf) {
+  const ResizeCfg *resize_cfg = &oxcf->resize_cfg;
+  const SuperResCfg *superres_cfg = &oxcf->superres_cfg;
+  return resize_cfg->resize_mode || superres_cfg->superres_mode;
+}
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -7,26 +7,30 @@
 #include "ash/public/cpp/desk_template.h"
 #include "base/files/dir_reader_posix.h"
 #include "base/files/file_util.h"
+#include "base/guid.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/json/values_util.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/values.h"
+#include "components/app_restore/restore_data.h"
 #include "components/desks_storage/core/desk_model.h"
-#include "components/desks_storage/core/desk_template.h"
-#include "components/full_restore/restore_data.h"
+#include "components/desks_storage/core/desk_template_conversion.h"
+#include "components/desks_storage/core/desk_template_util.h"
 #include "components/sync/protocol/workspace_desk_specifics.pb.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/re2/src/re2/re2.h"
 #include "third_party/re2/src/re2/stringpiece.h"
 #include "url/gurl.h"
 
 namespace desks_storage {
 
 namespace {
+
+// Setting this to true allows us to add more than the maximum number of
+// templates. Used only for testing.
+bool g_disable_max_template_limit = false;
 
 // File extension for templates.
 constexpr char kFileExtension[] = ".template";
@@ -38,14 +42,7 @@ constexpr char kDeskTemplateUuidKey[] = "uuid";
 constexpr char kDeskTemplateTimeCreatedKey[] = "time_created";
 // Key used in base::Value generation for the restore data field.
 constexpr char kDeskTemplateRestoreDataKey[] = "restore_data";
-// Duplicate value format
-constexpr char kDuplicateNumberFormat[] = "(%d)";
-// Initial duplicate number value
-constexpr char kInitialDuplicateNumberValue[] = " (1)";
-// The maximum number of templates the local storage can hold.
 constexpr std::size_t kMaxTemplateCount = 6u;
-// Regex used in determining if duplicate name should be incremented.
-constexpr char kDuplicateNumberRegex[] = "\\(([0-9])+\\)$";
 
 // Converts ash::DeskTemplates to base::Value for serialization.
 base::Value ConvertDeskTemplateToValue(ash::DeskTemplate* desk_template) {
@@ -80,7 +77,8 @@ std::unique_ptr<ash::DeskTemplate> ConvertValueToDeskTemplate(
     return nullptr;
 
   std::unique_ptr<ash::DeskTemplate> desk_template =
-      std::make_unique<ash::DeskTemplate>(*uuid, *name, created_time.value());
+      std::make_unique<ash::DeskTemplate>(*uuid, ash::DeskTemplateSource::kUser,
+                                          *name, created_time.value());
 
   // Full Restore will only take in std::unique_ptr as it's constructor
   // parameter from base::Value.  We're not allowed to use the explicit
@@ -92,7 +90,7 @@ std::unique_ptr<ash::DeskTemplate> ConvertValueToDeskTemplate(
   DCHECK(restore_data_value_ptr);
 
   desk_template->set_desk_restore_data(
-      std::make_unique<full_restore::RestoreData>(
+      std::make_unique<app_restore::RestoreData>(
           std::move(restore_data_value_ptr)));
   return desk_template;
 }
@@ -166,27 +164,6 @@ base::FilePath GetFullyQualifiedPath(base::FilePath file_path,
   return base::FilePath(file_path.Append(base::FilePath(filename)));
 }
 
-// Returns a copy of a duplicated name to be stored.  This function works by
-// taking the name to be duplicated and adding a "(1)" to it.  If the name
-// already has "(1)" then the number inside of the parenthesis will be
-// incremented.
-std::u16string AppendDuplicateNumberToDuplicateName(
-    const std::u16string& duplicate_name_u16) {
-  std::string duplicate_name = base::UTF16ToUTF8(duplicate_name_u16);
-  int found_duplicate_number;
-
-  if (RE2::PartialMatch(duplicate_name, kDuplicateNumberRegex,
-                        &found_duplicate_number)) {
-    RE2::Replace(
-        &duplicate_name, kDuplicateNumberRegex,
-        base::StringPrintf(kDuplicateNumberFormat, found_duplicate_number + 1));
-  } else {
-    duplicate_name.append(kInitialDuplicateNumberValue);
-  }
-
-  return base::UTF8ToUTF16(duplicate_name);
-}
-
 }  // namespace
 
 LocalDeskDataManager::LocalDeskDataManager(const base::FilePath& path)
@@ -226,7 +203,7 @@ void LocalDeskDataManager::GetEntryByUUID(
                      base::Unretained(this), uuid, status.get(),
                      entry_ptr.get()),
       base::BindOnce(&LocalDeskDataManager::OnGetEntryByUuid,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(status),
+                     weak_ptr_factory_.GetWeakPtr(), uuid, std::move(status),
                      std::move(entry_ptr), std::move(callback)));
 }
 
@@ -272,12 +249,35 @@ void LocalDeskDataManager::DeleteAllEntries(
                      std::move(callback)));
 }
 
-std::size_t LocalDeskDataManager::GetTemplateCount() const {
-  return templates_.size();
+std::size_t LocalDeskDataManager::GetEntryCount() const {
+  return templates_.size() + policy_entries_.size();
 }
 
 std::size_t LocalDeskDataManager::GetMaxEntryCount() const {
-  return kMaxTemplateCount;
+  return kMaxTemplateCount + policy_entries_.size();
+}
+
+std::vector<base::GUID> LocalDeskDataManager::GetAllEntryUuids() const {
+  std::vector<base::GUID> keys;
+  for (const auto& it : templates_) {
+    DCHECK_EQ(it.first, it.second->uuid());
+    keys.emplace_back(it.first);
+  }
+  return keys;
+}
+
+bool LocalDeskDataManager::IsReady() const {
+  return cache_status_ == CacheStatus::kOk;
+}
+
+bool LocalDeskDataManager::IsSyncing() const {
+  // Local storage backend never syncs to server.
+  return false;
+}
+
+// static
+void LocalDeskDataManager::SetDisableMaxTemplateLimitForTesting(bool disabled) {
+  g_disable_max_template_limit = disabled;
 }
 
 void LocalDeskDataManager::EnsureCacheIsLoaded() {
@@ -320,6 +320,9 @@ void LocalDeskDataManager::GetAllEntriesTask(
     *status_ptr = DeskModel::GetAllEntriesStatus::kFailure;
     return;
   }
+
+  for (const auto& it : policy_entries_)
+    entries_ptr->push_back(it.get());
 
   for (auto& it : templates_) {
     DCHECK_EQ(it.first, it.second->uuid());
@@ -368,11 +371,20 @@ void LocalDeskDataManager::GetEntryByUuidTask(
 }
 
 void LocalDeskDataManager::OnGetEntryByUuid(
+    const std::string& uuid_str,
     std::unique_ptr<DeskModel::GetEntryByUuidStatus> status_ptr,
     std::unique_ptr<ash::DeskTemplate*> entry_ptr_ptr,
     DeskModel::GetEntryByUuidCallback callback) {
   if (*entry_ptr_ptr == nullptr) {
-    std::move(callback).Run(*status_ptr, std::unique_ptr<ash::DeskTemplate>());
+    std::unique_ptr<ash::DeskTemplate> policy_entry =
+        GetAdminDeskTemplateByUUID(uuid_str);
+
+    if (policy_entry) {
+      std::move(callback).Run(DeskModel::GetEntryByUuidStatus::kOk,
+                              std::move(policy_entry));
+    } else {
+      std::move(callback).Run(*status_ptr, nullptr);
+    }
   } else {
     std::move(callback).Run(*status_ptr, (*entry_ptr_ptr)->Clone());
   }
@@ -387,7 +399,7 @@ void LocalDeskDataManager::AddOrUpdateEntryTask(
     return;
   }
 
-  if (templates_.size() >= kMaxTemplateCount) {
+  if (!g_disable_max_template_limit && templates_.size() >= kMaxTemplateCount) {
     *status_ptr = DeskModel::AddOrUpdateEntryStatus::kHitMaximumLimit;
     return;
   }
@@ -404,7 +416,8 @@ void LocalDeskDataManager::AddOrUpdateEntryTask(
   // the current template will be named 5.
   while (HasTemplateWithName(new_entry->template_name())) {
     new_entry->set_template_name(
-        AppendDuplicateNumberToDuplicateName(new_entry->template_name()));
+        desk_template_util::AppendDuplicateNumberToDuplicateName(
+            new_entry->template_name()));
   }
 
   templates_[uuid] = std::move(new_entry);

@@ -39,8 +39,8 @@ namespace extensions {
 namespace {
 
 void AddStringsForIdentity(base::DictionaryValue* dict) {
-  dict->SetString("window-title",
-                  l10n_util::GetStringUTF16(IDS_EXTENSION_CONFIRM_PERMISSIONS));
+  dict->SetStringKey("window-title", l10n_util::GetStringUTF16(
+                                         IDS_EXTENSION_CONFIRM_PERMISSIONS));
 }
 
 #if BUILDFLAG(ENABLE_PDF)
@@ -67,7 +67,7 @@ ResourcesPrivateGetStringsFunction::~ResourcesPrivateGetStringsFunction() {}
 
 ExtensionFunction::ResponseAction ResourcesPrivateGetStringsFunction::Run() {
   std::unique_ptr<get_strings::Params> params(
-      get_strings::Params::Create(*args_));
+      get_strings::Params::Create(args()));
   auto dict = std::make_unique<base::DictionaryValue>();
 
   api::resources_private::Component component = params->component;

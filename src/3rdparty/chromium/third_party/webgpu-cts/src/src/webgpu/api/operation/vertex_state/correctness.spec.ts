@@ -32,7 +32,7 @@ type VertexBuffer<V, A> = V & {
 type VertexState<V, A> = VertexBuffer<V, A>[];
 
 type VertexLayoutState<V, A> = VertexState<
-  { stepMode: GPUInputStepMode; arrayStride: number } & V,
+  { stepMode: GPUVertexStepMode; arrayStride: number } & V,
   { format: GPUVertexFormat; offset: number } & A
 >;
 
@@ -77,7 +77,7 @@ class VertexStateTest extends GPUTest {
   // a negative number corresponding to the check number (in case you need to debug a failure).
   makeTestWGSL(
     buffers: VertexState<
-      { stepMode: GPUInputStepMode },
+      { stepMode: GPUVertexStepMode },
       {
         format: GPUVertexFormat;
         shaderBaseType: string;
@@ -126,9 +126,9 @@ class VertexStateTest extends GPUTest {
           storageType = 'storage, read';
         }
 
-        vsInputs += `  [[location(${i})]] attrib${i} : ${shaderType};\n`;
-        vsBindings += `[[block]] struct S${i} { data : array<vec4<${a.shaderBaseType}>, ${maxCount}>; };\n`;
-        vsBindings += `[[group(0), binding(${i})]] var<${storageType}> providedData${i} : S${i};\n`;
+        vsInputs += `  @location(${i}) attrib${i} : ${shaderType},\n`;
+        vsBindings += `struct S${i} { data : array<vec4<${a.shaderBaseType}>, ${maxCount}> };\n`;
+        vsBindings += `@group(0) @binding(${i}) var<${storageType}> providedData${i} : S${i};\n`;
 
         // Generate the all the checks for the attributes.
         for (let component = 0; component < shaderComponentCount; component++) {
@@ -157,8 +157,8 @@ class VertexStateTest extends GPUTest {
     return `
 struct Inputs {
 ${vsInputs}
-  [[builtin(vertex_index)]] vertexIndex: u32;
-  [[builtin(instance_index)]] instanceIndex: u32;
+  @builtin(vertex_index) vertexIndex: u32,
+  @builtin(instance_index) instanceIndex: u32,
 };
 
 ${vsBindings}
@@ -173,18 +173,6 @@ fn check(success : bool) {
 }
 
 fn floatsSimilar(a : f32, b : f32, tolerance : f32) -> bool {
-  if (isNan(a) && isNan(b)) {
-    return true;
-  }
-
-  if (isInf(a) && isInf(b) && sign(a) == sign(b)) {
-    return true;
-  }
-
-  if (isInf(a) || isInf(b)) {
-    return false;
-  }
-
   // TODO do we check for + and - 0?
   return abs(a - b) < tolerance;
 }
@@ -194,11 +182,11 @@ ${vsChecks}
 }
 
 struct VSOutputs {
-  [[location(0)]] result : i32;
-  [[builtin(position)]] position : vec4<f32>;
+  @location(0) @interpolate(flat) result : i32,
+  @builtin(position) position : vec4<f32>,
 };
 
-[[stage(vertex)]] fn vsMain(input : Inputs) -> VSOutputs {
+@stage(vertex) fn vsMain(input : Inputs) -> VSOutputs {
   doTest(input);
 
   // Place that point at pixel (vertexIndex, instanceIndex) in a framebuffer of size
@@ -213,7 +201,8 @@ struct VSOutputs {
   return output;
 }
 
-[[stage(fragment)]] fn fsMain([[location(0)]] result : i32) -> [[location(0)]] i32 {
+@stage(fragment) fn fsMain(@location(0) @interpolate(flat) result : i32)
+  -> @location(0) i32 {
   return result;
 }
     `;
@@ -221,7 +210,7 @@ struct VSOutputs {
 
   makeTestPipeline(
     buffers: VertexState<
-      { stepMode: GPUInputStepMode; arrayStride: number },
+      { stepMode: GPUVertexStepMode; arrayStride: number },
       {
         offset: number;
         format: GPUVertexFormat;
@@ -283,7 +272,8 @@ struct VSOutputs {
       colorAttachments: [
         {
           view: testTexture.createView(),
-          loadValue: [0, 0, 0, 0],
+          clearValue: [0, 0, 0, 0],
+          loadOp: 'clear',
           storeOp: 'store',
         },
       ],
@@ -295,7 +285,7 @@ struct VSOutputs {
       pass.setVertexBuffer(buffer.slot, buffer.buffer, buffer.vbOffset ?? 0);
     }
     pass.draw(vertexCount, instanceCount);
-    pass.endPass();
+    pass.end();
 
     this.device.queue.submit([encoder.finish()]);
 
@@ -306,7 +296,7 @@ struct VSOutputs {
   }
 
   // Generate TestData for the format with interesting test values.
-  // TODO cache the result on the fixture?
+  // MAINTENANCE_TODO cache the result on the fixture?
   // Note that the test data always starts with an interesting value, so that using the first
   // test value in a test is still meaningful.
   generateTestData(format: GPUVertexFormat): TestData {
@@ -747,7 +737,7 @@ g.test('buffers_with_varying_step_mode')
   )
   .fn(t => {
     const { stepModes } = t.params;
-    const state = (stepModes as GPUInputStepMode[]).map((stepMode, i) => ({
+    const state = (stepModes as GPUVertexStepMode[]).map((stepMode, i) => ({
       slot: i,
       arrayStride: 4,
       stepMode,
@@ -884,7 +874,7 @@ g.test('vertex_buffer_used_multiple_times_interleaved')
     const alignedFormatByteSize = align(formatByteSize, 4);
 
     // Create data for a single vertex buffer with many attributes, that will be split between
-    // many vertexbuffers set at different offsets.
+    // many vertex buffers set at different offsets.
 
     // In this test we want to test using the same vertex buffer for multiple different attributes.
     // For example if vbCount is 3, we will create a vertex buffer containing the following data:
@@ -971,7 +961,7 @@ g.test('max_buffers_and_attribs')
 
 g.test('array_stride_zero')
   .desc(
-    `Test that arrayStride 0 correctly uses the same data for all vertex/instances, while another test vertex buffer with arrayStrude != 0 gets different data.
+    `Test that arrayStride 0 correctly uses the same data for all vertex/instances, while another test vertex buffer with arrayStride != 0 gets different data.
   - Test for all formats
   - Test for both step modes`
   )

@@ -8,7 +8,6 @@
 #include <memory>
 #include <set>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
@@ -59,6 +58,11 @@ class NET_EXPORT_PRIVATE WebSocketTransportConnectJob : public ConnectJob {
       const scoped_refptr<TransportSocketParams>& params,
       Delegate* delegate,
       const NetLogWithSource* net_log);
+
+  WebSocketTransportConnectJob(const WebSocketTransportConnectJob&) = delete;
+  WebSocketTransportConnectJob& operator=(const WebSocketTransportConnectJob&) =
+      delete;
+
   ~WebSocketTransportConnectJob() override;
 
   // ConnectJob methods.
@@ -115,16 +119,10 @@ class NET_EXPORT_PRIVATE WebSocketTransportConnectJob : public ConnectJob {
   std::unique_ptr<WebSocketTransportConnectSubJob> ipv6_job_;
 
   base::OneShotTimer fallback_timer_;
-  TransportConnectJob::RaceResult race_result_;
-
-  bool had_ipv4_;
-  bool had_ipv6_;
 
   ResolveErrorInfo resolve_error_info_;
 
   base::WeakPtrFactory<WebSocketTransportConnectJob> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebSocketTransportConnectJob);
 };
 
 }  // namespace net

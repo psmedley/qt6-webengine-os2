@@ -941,7 +941,7 @@ angle::Result TextureStorage11::getMultisampledRenderTarget(const gl::Context *c
         GLenum internalFormat = mFormatInfo.internalFormat;
         std::unique_ptr<TextureStorage11_2DMultisample> texMS(
             GetAs<TextureStorage11_2DMultisample>(mRenderer->createTextureStorage2DMultisample(
-                internalFormat, width, height, level, samples, true, "")));
+                internalFormat, width, height, level, samples, true, mTextureLabel)));
 
         // make sure multisample object has the blitted information.
         gl::Rectangle area(0, 0, width, height);
@@ -1037,6 +1037,22 @@ TextureStorage11_2D::TextureStorage11_2D(Renderer11 *renderer,
 
     // The LevelZeroOnly hint should only be true if the zero max LOD workaround is active.
     ASSERT(!mUseLevelZeroTexture || mRenderer->getFeatures().zeroMaxLodWorkaround.enabled);
+}
+
+void TextureStorage11_2D::onLabelUpdate()
+{
+    if (mTexture.valid())
+    {
+        mTexture.setKHRDebugLabel(&mTextureLabel);
+    }
+    if (mLevelZeroTexture.valid())
+    {
+        mLevelZeroTexture.setKHRDebugLabel(&mTextureLabel);
+    }
+    if (mSwizzleTexture.valid())
+    {
+        mSwizzleTexture.setKHRDebugLabel(&mTextureLabel);
+    }
 }
 
 angle::Result TextureStorage11_2D::onDestroy(const gl::Context *context)
@@ -1270,11 +1286,11 @@ angle::Result TextureStorage11_2D::ensureTextureExists(const gl::Context *contex
 
         if (useLevelZeroTexture)
         {
-            outputTexture->setDebugName("TexStorage2D.Level0Texture");
+            outputTexture->setLabels("TexStorage2D.Level0Texture", &mTextureLabel);
         }
         else
         {
-            outputTexture->setDebugName("TexStorage2D.Texture");
+            outputTexture->setLabels("TexStorage2D.Texture", &mTextureLabel);
         }
     }
 
@@ -1380,7 +1396,7 @@ angle::Result TextureStorage11_2D::getRenderTarget(const gl::Context *context,
             d3d11::RenderTargetView rtv;
             ANGLE_TRY(
                 mRenderer->allocateResource(context11, rtvDesc, mLevelZeroTexture.get(), &rtv));
-            rtv.setDebugName("TexStorage2D.Level0RTV");
+            rtv.setLabels("TexStorage2D.Level0RTV", &mTextureLabel);
 
             mLevelZeroRenderTarget.reset(new TextureRenderTarget11(
                 std::move(rtv), mLevelZeroTexture, d3d11::SharedSRV(), d3d11::SharedSRV(),
@@ -1401,7 +1417,7 @@ angle::Result TextureStorage11_2D::getRenderTarget(const gl::Context *context,
 
         d3d11::RenderTargetView rtv;
         ANGLE_TRY(mRenderer->allocateResource(context11, rtvDesc, texture->get(), &rtv));
-        rtv.setDebugName("TexStorage2D.RTV");
+        rtv.setLabels("TexStorage2D.RTV", &mTextureLabel);
 
         mRenderTarget[level].reset(new TextureRenderTarget11(
             std::move(rtv), *texture, *srv, *blitSRV, mFormatInfo.internalFormat, getFormatSet(),
@@ -1421,7 +1437,7 @@ angle::Result TextureStorage11_2D::getRenderTarget(const gl::Context *context,
 
     d3d11::DepthStencilView dsv;
     ANGLE_TRY(mRenderer->allocateResource(context11, dsvDesc, texture->get(), &dsv));
-    dsv.setDebugName("TexStorage2D.DSV");
+    dsv.setLabels("TexStorage2D.DSV", &mTextureLabel);
 
     mRenderTarget[level].reset(new TextureRenderTarget11(
         std::move(dsv), *texture, *srv, mFormatInfo.internalFormat, getFormatSet(),
@@ -1471,7 +1487,7 @@ angle::Result TextureStorage11_2D::createSRVForSampler(const gl::Context *contex
 
     ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, srvTexture->get(),
                                           outSRV));
-    outSRV->setDebugName("TexStorage2D.SRV");
+    outSRV->setLabels("TexStorage2D.SRV", &mTextureLabel);
 
     return angle::Result::Continue;
 }
@@ -1490,7 +1506,7 @@ angle::Result TextureStorage11_2D::createSRVForImage(const gl::Context *context,
     srvDesc.Texture2D.MipLevels       = 1;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage2D.SRVForImage");
+    outSRV->setLabels("TexStorage2D.SRVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -1507,7 +1523,7 @@ angle::Result TextureStorage11_2D::createUAVForImage(const gl::Context *context,
     uavDesc.Texture2D.MipSlice = mTopLevel + level;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), uavDesc, texture.get(), outUAV));
-    outUAV->setDebugName("TexStorage2D.UAVForImage");
+    outUAV->setLabels("TexStorage2D.UAVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -1535,7 +1551,7 @@ angle::Result TextureStorage11_2D::getSwizzleTexture(const gl::Context *context,
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, format,
                                              &mSwizzleTexture));
-        mSwizzleTexture.setDebugName("TexStorage2D.SwizzleTexture");
+        mSwizzleTexture.setLabels("TexStorage2D.SwizzleTexture", &mTextureLabel);
     }
 
     *outTexture = &mSwizzleTexture;
@@ -1595,7 +1611,7 @@ angle::Result TextureStorage11_2D::ensureDropStencilTexture(const gl::Context *c
         d3d11::Format::Get(GL_DEPTH_COMPONENT32F, mRenderer->getRenderer11DeviceCaps());
     ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), dropDesc, format,
                                          &mDropStencilTexture));
-    mDropStencilTexture.setDebugName("TexStorage2D.DropStencil");
+    mDropStencilTexture.setLabels("TexStorage2D.DropStencil", &mTextureLabel);
 
     ANGLE_TRY(initDropStencilTexture(context, gl::ImageIndexIterator::Make2D(0, mMipLevels)));
 
@@ -1618,7 +1634,8 @@ TextureStorage11_External::TextureStorage11_External(
     egl::Stream *stream,
     const egl::Stream::GLTextureDescription &glDesc,
     const std::string &label)
-    : TextureStorage11(renderer, D3D11_BIND_SHADER_RESOURCE, 0, glDesc.internalFormat, label)
+    : TextureStorage11(renderer, D3D11_BIND_SHADER_RESOURCE, 0, glDesc.internalFormat, label),
+      mAssociatedImage(nullptr)
 {
     ASSERT(stream->getProducerType() == egl::Stream::ProducerType::D3D11Texture);
     auto *producer = static_cast<StreamProducerD3DTexture *>(stream->getImplementation());
@@ -1642,6 +1659,15 @@ angle::Result TextureStorage11_External::onDestroy(const gl::Context *context)
         // If the keyed mutex is released that will unbind it and cause the state cache to become
         // desynchronized.
         mRenderer->getStateManager()->invalidateBoundViews();
+    }
+
+    if (mAssociatedImage != nullptr)
+    {
+        mAssociatedImage->verifyAssociatedStorageValid(this);
+
+        // We must let the Images recover their data before we delete it from the
+        // TextureStorage.
+        ANGLE_TRY(mAssociatedImage->recoverFromAssociatedStorage(context));
     }
 
     return angle::Result::Continue;
@@ -1749,7 +1775,7 @@ angle::Result TextureStorage11_External::createSRVForSampler(const gl::Context *
 
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage2D.SRV");
+    outSRV->setLabels("TexStorage2D.SRV", &mTextureLabel);
 
     return angle::Result::Continue;
 }
@@ -1788,6 +1814,14 @@ angle::Result TextureStorage11_External::getSwizzleRenderTarget(
 {
     ANGLE_HR_UNREACHABLE(GetImplAs<Context11>(context));
     return angle::Result::Stop;
+}
+
+void TextureStorage11_External::onLabelUpdate()
+{
+    if (mTexture.valid())
+    {
+        mTexture.setKHRDebugLabel(&mTextureLabel);
+    }
 }
 
 TextureStorage11ImmutableBase::TextureStorage11ImmutableBase(Renderer11 *renderer,
@@ -1843,7 +1877,8 @@ TextureStorage11_EGLImage::TextureStorage11_EGLImage(Renderer11 *renderer,
       mImage(eglImage),
       mCurrentRenderTarget(0),
       mSwizzleTexture(),
-      mSwizzleRenderTargets(gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS)
+      mSwizzleRenderTargets(gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS),
+      mAssociatedImage(nullptr)
 {
     mCurrentRenderTarget = reinterpret_cast<uintptr_t>(renderTarget11);
 
@@ -1854,6 +1889,20 @@ TextureStorage11_EGLImage::TextureStorage11_EGLImage(Renderer11 *renderer,
 }
 
 TextureStorage11_EGLImage::~TextureStorage11_EGLImage() {}
+
+angle::Result TextureStorage11_EGLImage::onDestroy(const gl::Context *context)
+{
+    if (mAssociatedImage != nullptr)
+    {
+        mAssociatedImage->verifyAssociatedStorageValid(this);
+
+        // We must let the Images recover their data before we delete it from the
+        // TextureStorage.
+        ANGLE_TRY(mAssociatedImage->recoverFromAssociatedStorage(context));
+    }
+
+    return angle::Result::Continue;
+}
 
 angle::Result TextureStorage11_EGLImage::getSubresourceIndex(const gl::Context *context,
                                                              const gl::ImageIndex &index,
@@ -1971,7 +2020,7 @@ angle::Result TextureStorage11_EGLImage::getSwizzleTexture(const gl::Context *co
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, format,
                                              &mSwizzleTexture));
-        mSwizzleTexture.setDebugName("TexStorageEGLImage.SwizzleTexture");
+        mSwizzleTexture.setLabels("TexStorageEGLImage.SwizzleTexture", &mTextureLabel);
     }
 
     *outTexture = &mSwizzleTexture;
@@ -2043,7 +2092,7 @@ angle::Result TextureStorage11_EGLImage::createSRVForSampler(const gl::Context *
 
         ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(),
                                               outSRV));
-        outSRV->setDebugName("TexStorageEGLImage.SRV");
+        outSRV->setLabels("TexStorageEGLImage.SRV", &mTextureLabel);
     }
     else
     {
@@ -2064,6 +2113,50 @@ angle::Result TextureStorage11_EGLImage::getImageRenderTarget(const gl::Context 
     RenderTargetD3D *renderTargetD3D = nullptr;
     ANGLE_TRY(mImage->getRenderTarget(context, &renderTargetD3D));
     *outRT = GetAs<RenderTarget11>(renderTargetD3D);
+    return angle::Result::Continue;
+}
+
+void TextureStorage11_EGLImage::onLabelUpdate()
+{
+    if (mSwizzleTexture.valid())
+    {
+        mSwizzleTexture.setKHRDebugLabel(&mTextureLabel);
+    }
+}
+
+void TextureStorage11_EGLImage::associateImage(Image11 *image, const gl::ImageIndex &index)
+{
+    ASSERT(index.getLevelIndex() == 0);
+    mAssociatedImage = image;
+}
+
+void TextureStorage11_EGLImage::verifyAssociatedImageValid(const gl::ImageIndex &index,
+                                                           Image11 *expectedImage)
+{
+    ASSERT(index.getLevelIndex() == 0 && mAssociatedImage == expectedImage);
+}
+
+void TextureStorage11_EGLImage::disassociateImage(const gl::ImageIndex &index,
+                                                  Image11 *expectedImage)
+{
+    ASSERT(index.getLevelIndex() == 0);
+    ASSERT(mAssociatedImage == expectedImage);
+    mAssociatedImage = nullptr;
+}
+
+angle::Result TextureStorage11_EGLImage::releaseAssociatedImage(const gl::Context *context,
+                                                                const gl::ImageIndex &index,
+                                                                Image11 *incomingImage)
+{
+    ASSERT(index.getLevelIndex() == 0);
+
+    if (mAssociatedImage != nullptr && mAssociatedImage != incomingImage)
+    {
+        mAssociatedImage->verifyAssociatedStorageValid(this);
+
+        ANGLE_TRY(mAssociatedImage->recoverFromAssociatedStorage(context));
+    }
+
     return angle::Result::Continue;
 }
 
@@ -2389,7 +2482,7 @@ angle::Result TextureStorage11_Cube::ensureTextureExists(const gl::Context *cont
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, mFormatInfo,
                                              outputTexture));
-        outputTexture->setDebugName("TexStorageCube.Texture");
+        outputTexture->setLabels("TexStorageCube.Texture", &mTextureLabel);
     }
 
     return angle::Result::Continue;
@@ -2529,7 +2622,7 @@ angle::Result TextureStorage11_Cube::getRenderTarget(const gl::Context *context,
             blitSRV = srv.makeCopy();
         }
 
-        srv.setDebugName("TexStorageCube.RenderTargetSRV");
+        srv.setLabels("TexStorageCube.RenderTargetSRV", &mTextureLabel);
 
         if (mFormatInfo.rtvFormat != DXGI_FORMAT_UNKNOWN)
         {
@@ -2542,7 +2635,7 @@ angle::Result TextureStorage11_Cube::getRenderTarget(const gl::Context *context,
 
             d3d11::RenderTargetView rtv;
             ANGLE_TRY(mRenderer->allocateResource(context11, rtvDesc, texture->get(), &rtv));
-            rtv.setDebugName("TexStorageCube.RenderTargetRTV");
+            rtv.setLabels("TexStorageCube.RenderTargetRTV", &mTextureLabel);
 
             mRenderTarget[faceIndex][level].reset(new TextureRenderTarget11(
                 std::move(rtv), *texture, srv, blitSRV, mFormatInfo.internalFormat, getFormatSet(),
@@ -2560,7 +2653,7 @@ angle::Result TextureStorage11_Cube::getRenderTarget(const gl::Context *context,
 
             d3d11::DepthStencilView dsv;
             ANGLE_TRY(mRenderer->allocateResource(context11, dsvDesc, texture->get(), &dsv));
-            dsv.setDebugName("TexStorageCube.RenderTargetDSV");
+            dsv.setLabels("TexStorageCube.RenderTargetDSV", &mTextureLabel);
 
             mRenderTarget[faceIndex][level].reset(new TextureRenderTarget11(
                 std::move(dsv), *texture, srv, mFormatInfo.internalFormat, getFormatSet(),
@@ -2632,7 +2725,7 @@ angle::Result TextureStorage11_Cube::createSRVForSampler(const gl::Context *cont
 
     ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, srvTexture->get(),
                                           outSRV));
-    outSRV->setDebugName("TexStorageCube.SRV");
+    outSRV->setLabels("TexStorageCube.SRV", &mTextureLabel);
 
     return angle::Result::Continue;
 }
@@ -2653,7 +2746,7 @@ angle::Result TextureStorage11_Cube::createSRVForImage(const gl::Context *contex
     srvDesc.Texture2DArray.ArraySize       = gl::kCubeFaceCount;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorageCube.SRVForImage");
+    outSRV->setLabels("TexStorageCube.SRVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -2672,7 +2765,7 @@ angle::Result TextureStorage11_Cube::createUAVForImage(const gl::Context *contex
     uavDesc.Texture2DArray.ArraySize       = gl::kCubeFaceCount;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), uavDesc, texture.get(), outUAV));
-    outUAV->setDebugName("TexStorageCube.UAVForImage");
+    outUAV->setLabels("TexStorageCube.UAVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -2700,7 +2793,7 @@ angle::Result TextureStorage11_Cube::getSwizzleTexture(const gl::Context *contex
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, format,
                                              &mSwizzleTexture));
-        mSwizzleTexture.setDebugName("TexStorageCube.SwizzleTexture");
+        mSwizzleTexture.setLabels("TexStorageCube.SwizzleTexture", &mTextureLabel);
     }
 
     *outTexture = &mSwizzleTexture;
@@ -2762,7 +2855,7 @@ angle::Result TextureStorage11_Cube::ensureDropStencilTexture(const gl::Context 
         d3d11::Format::Get(GL_DEPTH_COMPONENT32F, mRenderer->getRenderer11DeviceCaps());
     ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), dropDesc, format,
                                          &mDropStencilTexture));
-    mDropStencilTexture.setDebugName("TexStorageCube.DropStencil");
+    mDropStencilTexture.setLabels("TexStorageCube.DropStencil", &mTextureLabel);
 
     ANGLE_TRY(initDropStencilTexture(context, gl::ImageIndexIterator::MakeCube(0, mMipLevels)));
 
@@ -2778,6 +2871,22 @@ angle::Result TextureStorage11_Cube::resolveTexture(const gl::Context *context)
         onStateChange(angle::SubjectMessage::ContentsChanged);
     }
     return angle::Result::Continue;
+}
+
+void TextureStorage11_Cube::onLabelUpdate()
+{
+    if (mTexture.valid())
+    {
+        mTexture.setKHRDebugLabel(&mTextureLabel);
+    }
+    if (mLevelZeroTexture.valid())
+    {
+        mLevelZeroTexture.setKHRDebugLabel(&mTextureLabel);
+    }
+    if (mSwizzleTexture.valid())
+    {
+        mSwizzleTexture.setKHRDebugLabel(&mTextureLabel);
+    }
 }
 
 TextureStorage11_3D::TextureStorage11_3D(Renderer11 *renderer,
@@ -2914,7 +3023,7 @@ angle::Result TextureStorage11_3D::getResource(const gl::Context *context,
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, mFormatInfo,
                                              &mTexture));
-        mTexture.setDebugName("TexStorage3D.Texture");
+        mTexture.setLabels("TexStorage3D.Texture", &mTextureLabel);
     }
 
     *outResource = &mTexture;
@@ -2938,7 +3047,7 @@ angle::Result TextureStorage11_3D::createSRVForSampler(const gl::Context *contex
 
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage3D.SRV");
+    outSRV->setLabels("TexStorage3D.SRV", &mTextureLabel);
 
     return angle::Result::Continue;
 }
@@ -2957,7 +3066,7 @@ angle::Result TextureStorage11_3D::createSRVForImage(const gl::Context *context,
     srvDesc.Texture3D.MipLevels       = 1;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage3D.SRVForImage");
+    outSRV->setLabels("TexStorage3D.SRVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -2976,7 +3085,7 @@ angle::Result TextureStorage11_3D::createUAVForImage(const gl::Context *context,
     uavDesc.Texture3D.WSize       = mTextureDepth;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), uavDesc, texture.get(), outUAV));
-    outUAV->setDebugName("TexStorage3D.UAVForImage");
+    outUAV->setLabels("TexStorage3D.UAVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -3044,7 +3153,7 @@ angle::Result TextureStorage11_3D::getRenderTarget(const gl::Context *context,
 
             d3d11::RenderTargetView rtv;
             ANGLE_TRY(mRenderer->allocateResource(context11, rtvDesc, texture->get(), &rtv));
-            rtv.setDebugName("TexStorage3D.RTV");
+            rtv.setLabels("TexStorage3D.RTV", &mTextureLabel);
 
             mLevelRenderTargets[mipLevel].reset(new TextureRenderTarget11(
                 std::move(rtv), *texture, *srv, *blitSRV, mFormatInfo.internalFormat,
@@ -3078,7 +3187,7 @@ angle::Result TextureStorage11_3D::getRenderTarget(const gl::Context *context,
 
         d3d11::RenderTargetView rtv;
         ANGLE_TRY(mRenderer->allocateResource(context11, rtvDesc, texture->get(), &rtv));
-        rtv.setDebugName("TexStorage3D.LayerRTV");
+        rtv.setLabels("TexStorage3D.LayerRTV", &mTextureLabel);
 
         mLevelLayerRenderTargets[key].reset(new TextureRenderTarget11(
             std::move(rtv), *texture, srv, blitSRV, mFormatInfo.internalFormat, getFormatSet(),
@@ -3112,7 +3221,7 @@ angle::Result TextureStorage11_3D::getSwizzleTexture(const gl::Context *context,
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, format,
                                              &mSwizzleTexture));
-        mSwizzleTexture.setDebugName("TexStorage3D.SwizzleTexture");
+        mSwizzleTexture.setLabels("TexStorage3D.SwizzleTexture", &mTextureLabel);
     }
 
     *outTexture = &mSwizzleTexture;
@@ -3142,11 +3251,23 @@ angle::Result TextureStorage11_3D::getSwizzleRenderTarget(const gl::Context *con
         ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), rtvDesc,
                                               mSwizzleTexture.get(),
                                               &mSwizzleRenderTargets[mipLevel]));
-        mSwizzleRenderTargets[mipLevel].setDebugName("TexStorage3D.SwizzleRTV");
+        mSwizzleRenderTargets[mipLevel].setLabels("TexStorage3D.SwizzleRTV", &mTextureLabel);
     }
 
     *outRTV = &mSwizzleRenderTargets[mipLevel];
     return angle::Result::Continue;
+}
+
+void TextureStorage11_3D::onLabelUpdate()
+{
+    if (mTexture.valid())
+    {
+        mTexture.setKHRDebugLabel(&mTextureLabel);
+    }
+    if (mSwizzleTexture.valid())
+    {
+        mSwizzleTexture.setKHRDebugLabel(&mTextureLabel);
+    }
 }
 
 TextureStorage11_2DArray::TextureStorage11_2DArray(Renderer11 *renderer,
@@ -3295,7 +3416,7 @@ angle::Result TextureStorage11_2DArray::getResource(const gl::Context *context,
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, mFormatInfo,
                                              &mTexture));
-        mTexture.setDebugName("TexStorage2DArray.Texture");
+        mTexture.setLabels("TexStorage2DArray.Texture", &mTextureLabel);
     }
 
     *outResource = &mTexture;
@@ -3319,7 +3440,7 @@ angle::Result TextureStorage11_2DArray::createSRVForSampler(const gl::Context *c
 
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage2DArray.SRV");
+    outSRV->setLabels("TexStorage2DArray.SRV", &mTextureLabel);
 
     return angle::Result::Continue;
 }
@@ -3340,7 +3461,7 @@ angle::Result TextureStorage11_2DArray::createSRVForImage(const gl::Context *con
     srvDesc.Texture2DArray.ArraySize       = mTextureDepth;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage2DArray.SRVForImage");
+    outSRV->setLabels("TexStorage2DArray.SRVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -3359,7 +3480,7 @@ angle::Result TextureStorage11_2DArray::createUAVForImage(const gl::Context *con
     uavDesc.Texture2DArray.ArraySize       = mTextureDepth;
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), uavDesc, texture.get(), outUAV));
-    outUAV->setDebugName("TexStorage2DArray.UAVForImage");
+    outUAV->setLabels("TexStorage2DArray.UAVForImage", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -3440,7 +3561,7 @@ angle::Result TextureStorage11_2DArray::getRenderTarget(const gl::Context *conte
             blitSRV = srv.makeCopy();
         }
 
-        srv.setDebugName("TexStorage2DArray.RenderTargetSRV");
+        srv.setLabels("TexStorage2DArray.RenderTargetSRV", &mTextureLabel);
 
         if (mFormatInfo.rtvFormat != DXGI_FORMAT_UNKNOWN)
         {
@@ -3454,7 +3575,7 @@ angle::Result TextureStorage11_2DArray::getRenderTarget(const gl::Context *conte
             d3d11::RenderTargetView rtv;
             ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), rtvDesc,
                                                   texture->get(), &rtv));
-            rtv.setDebugName("TexStorage2DArray.RenderTargetRTV");
+            rtv.setLabels("TexStorage2DArray.RenderTargetRTV", &mTextureLabel);
 
             mRenderTargets[key].reset(new TextureRenderTarget11(
                 std::move(rtv), *texture, srv, blitSRV, mFormatInfo.internalFormat, getFormatSet(),
@@ -3475,7 +3596,7 @@ angle::Result TextureStorage11_2DArray::getRenderTarget(const gl::Context *conte
             d3d11::DepthStencilView dsv;
             ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), dsvDesc,
                                                   texture->get(), &dsv));
-            dsv.setDebugName("TexStorage2DArray.RenderTargetDSV");
+            dsv.setLabels("TexStorage2DArray.RenderTargetDSV", &mTextureLabel);
 
             mRenderTargets[key].reset(new TextureRenderTarget11(
                 std::move(dsv), *texture, srv, mFormatInfo.internalFormat, getFormatSet(),
@@ -3510,7 +3631,7 @@ angle::Result TextureStorage11_2DArray::getSwizzleTexture(const gl::Context *con
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, format,
                                              &mSwizzleTexture));
-        mSwizzleTexture.setDebugName("TexStorage2DArray.SwizzleTexture");
+        mSwizzleTexture.setLabels("TexStorage2DArray.SwizzleTexture", &mTextureLabel);
     }
 
     *outTexture = &mSwizzleTexture;
@@ -3573,7 +3694,7 @@ angle::Result TextureStorage11_2DArray::ensureDropStencilTexture(const gl::Conte
         d3d11::Format::Get(GL_DEPTH_COMPONENT32F, mRenderer->getRenderer11DeviceCaps());
     ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), dropDesc, format,
                                          &mDropStencilTexture));
-    mDropStencilTexture.setDebugName("TexStorage2DArray.DropStencil");
+    mDropStencilTexture.setLabels("TexStorage2DArray.DropStencil", &mTextureLabel);
 
     std::vector<GLsizei> layerCounts(mMipLevels, mTextureDepth);
 
@@ -3582,6 +3703,18 @@ angle::Result TextureStorage11_2DArray::ensureDropStencilTexture(const gl::Conte
 
     *dropStencilOut = DropStencil::CREATED;
     return angle::Result::Continue;
+}
+
+void TextureStorage11_2DArray::onLabelUpdate()
+{
+    if (mTexture.valid())
+    {
+        mTexture.setKHRDebugLabel(&mTextureLabel);
+    }
+    if (mSwizzleTexture.valid())
+    {
+        mSwizzleTexture.setKHRDebugLabel(&mTextureLabel);
+    }
 }
 
 TextureStorage11_2DMultisample::TextureStorage11_2DMultisample(Renderer11 *renderer,
@@ -3668,7 +3801,7 @@ angle::Result TextureStorage11_2DMultisample::ensureTextureExists(const gl::Cont
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, mFormatInfo,
                                              &mTexture));
-        mTexture.setDebugName("TexStorage2DMS.Texture");
+        mTexture.setLabels("TexStorage2DMS.Texture", &mTextureLabel);
     }
 
     return angle::Result::Continue;
@@ -3767,7 +3900,7 @@ angle::Result TextureStorage11_2DMultisample::createSRVForSampler(const gl::Cont
 
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage2DMS.SRV");
+    outSRV->setLabels("TexStorage2DMS.SRV", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -3792,6 +3925,14 @@ angle::Result TextureStorage11_2DMultisample::ensureDropStencilTexture(const gl:
 {
     ANGLE_HR_UNREACHABLE(GetImplAs<Context11>(context));
     return angle::Result::Stop;
+}
+
+void TextureStorage11_2DMultisample::onLabelUpdate()
+{
+    if (mTexture.valid())
+    {
+        mTexture.setKHRDebugLabel(&mTextureLabel);
+    }
 }
 
 TextureStorage11_2DMultisampleArray::TextureStorage11_2DMultisampleArray(Renderer11 *renderer,
@@ -3877,7 +4018,7 @@ angle::Result TextureStorage11_2DMultisampleArray::ensureTextureExists(const gl:
 
         ANGLE_TRY(mRenderer->allocateTexture(GetImplAs<Context11>(context), desc, mFormatInfo,
                                              &mTexture));
-        mTexture.setDebugName("TexStorage2DMSArray.Texture");
+        mTexture.setLabels("TexStorage2DMSArray.Texture", &mTextureLabel);
     }
 
     return angle::Result::Continue;
@@ -3961,7 +4102,7 @@ angle::Result TextureStorage11_2DMultisampleArray::getRenderTarget(const gl::Con
             blitSRV = srv.makeCopy();
         }
 
-        srv.setDebugName("TexStorage2DMSArray.RenderTargetSRV");
+        srv.setLabels("TexStorage2DMSArray.RenderTargetSRV", &mTextureLabel);
 
         if (mFormatInfo.rtvFormat != DXGI_FORMAT_UNKNOWN)
         {
@@ -3974,7 +4115,7 @@ angle::Result TextureStorage11_2DMultisampleArray::getRenderTarget(const gl::Con
             d3d11::RenderTargetView rtv;
             ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), rtvDesc,
                                                   texture->get(), &rtv));
-            rtv.setDebugName("TexStorage2DMSArray.RenderTargetRTV");
+            rtv.setLabels("TexStorage2DMSArray.RenderTargetRTV", &mTextureLabel);
 
             mRenderTargets[key].reset(new TextureRenderTarget11(
                 std::move(rtv), *texture, srv, blitSRV, mFormatInfo.internalFormat, getFormatSet(),
@@ -3994,7 +4135,7 @@ angle::Result TextureStorage11_2DMultisampleArray::getRenderTarget(const gl::Con
             d3d11::DepthStencilView dsv;
             ANGLE_TRY(mRenderer->allocateResource(GetImplAs<Context11>(context), dsvDesc,
                                                   texture->get(), &dsv));
-            dsv.setDebugName("TexStorage2DMSArray.RenderTargetDSV");
+            dsv.setLabels("TexStorage2DMSArray.RenderTargetDSV", &mTextureLabel);
 
             mRenderTargets[key].reset(new TextureRenderTarget11(
                 std::move(dsv), *texture, srv, mFormatInfo.internalFormat, getFormatSet(),
@@ -4025,7 +4166,7 @@ angle::Result TextureStorage11_2DMultisampleArray::createSRVForSampler(
 
     ANGLE_TRY(
         mRenderer->allocateResource(GetImplAs<Context11>(context), srvDesc, texture.get(), outSRV));
-    outSRV->setDebugName("TexStorage2DMSArray.SRV");
+    outSRV->setLabels("TexStorage2DMSArray.SRV", &mTextureLabel);
     return angle::Result::Continue;
 }
 
@@ -4052,6 +4193,14 @@ angle::Result TextureStorage11_2DMultisampleArray::ensureDropStencilTexture(
 {
     ANGLE_HR_UNREACHABLE(GetImplAs<Context11>(context));
     return angle::Result::Stop;
+}
+
+void TextureStorage11_2DMultisampleArray::onLabelUpdate()
+{
+    if (mTexture.valid())
+    {
+        mTexture.setKHRDebugLabel(&mTextureLabel);
+    }
 }
 
 }  // namespace rx

@@ -18,7 +18,8 @@ source_set("common") {
     "//build:chromeos_buildflags",
     "//components/cloud_devices/common:common",
     "//printing",
-    "//printing/common:common",
+    "//printing/backend",
+    "//printing/common",
     "//printing/mojom",
   ]
   if (use_qt) {
@@ -49,5 +50,8 @@ mojom("mojo_interfaces") {
     assert(enable_print_preview)
     public_deps += [ "//ui/accessibility/mojom" ]
     enabled_features += [ "enable_tagged_pdf" ]
+  }
+  if (enable_print_content_analysis) {
+    enabled_features += [ "enable_print_content_analysis" ]
   }
 }

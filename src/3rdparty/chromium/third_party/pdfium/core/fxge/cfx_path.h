@@ -13,7 +13,7 @@
 
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/retain_ptr.h"
-#include "third_party/base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class CFX_Path {
  public:
@@ -42,12 +42,11 @@ class CFX_Path {
 
   void Clear();
 
-  Point::Type GetType(int index) const { return m_Points[index].m_Type; }
-  bool IsClosingFigure(int index) const {
+  Point::Type GetType(size_t index) const { return m_Points[index].m_Type; }
+  bool IsClosingFigure(size_t index) const {
     return m_Points[index].m_CloseFigure;
   }
-
-  CFX_PointF GetPoint(int index) const { return m_Points[index].m_Point; }
+  CFX_PointF GetPoint(size_t index) const { return m_Points[index].m_Point; }
   const std::vector<Point>& GetPoints() const { return m_Points; }
   std::vector<Point>& GetPoints() { return m_Points; }
 
@@ -57,7 +56,7 @@ class CFX_Path {
 
   void Transform(const CFX_Matrix& matrix);
   bool IsRect() const;
-  Optional<CFX_FloatRect> GetRect(const CFX_Matrix* matrix) const;
+  absl::optional<CFX_FloatRect> GetRect(const CFX_Matrix* matrix) const;
 
   void Append(const CFX_Path& src, const CFX_Matrix* matrix);
   void AppendFloatRect(const CFX_FloatRect& rect);

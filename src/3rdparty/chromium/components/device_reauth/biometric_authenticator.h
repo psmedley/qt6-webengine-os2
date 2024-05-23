@@ -35,6 +35,8 @@ enum class BiometricsAvailability {
 //
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
+//
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.device_reauth
 enum class BiometricAuthRequester {
   // The filling surface shown on the first tap on the field after page load.
   // This surface has replaced autofilling on Android.
@@ -53,7 +55,15 @@ enum class BiometricAuthRequester {
   // The dialog displayed via the Credential Management API.
   kAccountChooserDialog = 4,
 
-  kMaxValue = kAccountChooserDialog,
+  // The list displaying all compromised passwords. Reauth is triggered before
+  // starting automated password change.
+  kPasswordCheckAutoPwdChange = 5,
+
+  // The dialog displayed to access existing Incognito tabs if the Incognito
+  // lock setting in on and Chrome came to foreground.
+  kIncognitoReauthPage = 6,
+
+  kMaxValue = kIncognitoReauthPage,
 };
 
 // The result of the biometric authentication.
@@ -69,17 +79,22 @@ enum class BiometricAuthFinalResult {
   kCanceledByUser = 3,
   kFailed = 4,
 
-  // Recorded when the auth succeeds after Chrome cancelled it.
-  kSuccessButCanceled = 5,
+  // Deprecated in favour of kCanceledByChrome. Recorded when the auth succeeds
+  // after Chrome cancelled it.
+  // kSuccessButCanceled = 5,
 
-  // Recorded when the auth fails after Chrome cancelled it.
-  kFailedAndCanceled = 6,
+  // Deprecated in favour of kCanceledByChrome. Recorded when the auth fails
+  // after Chrome cancelled it.
+  // kFailedAndCanceled = 6,
 
   // Recorded if an authentication was requested within 60s of the previous
   // successful authentication.
   kAuthStillValid = 7,
 
-  kMaxValue = kAuthStillValid,
+  // Recorded when the authentication flow is cancelled by Chrome.
+  kCanceledByChrome = 8,
+
+  kMaxValue = kCanceledByChrome,
 };
 
 // This interface encapsulates operations related to biometric authentication.
@@ -95,7 +110,8 @@ class BiometricAuthenticator : public base::RefCounted<BiometricAuthenticator> {
 
   // Returns whether biometrics are available for a given device. Only if this
   // returns kAvailable, callers can expect Authenticate() to succeed.
-  virtual BiometricsAvailability CanAuthenticate() = 0;
+  virtual BiometricsAvailability CanAuthenticate(
+      BiometricAuthRequester requester) = 0;
 
   // Asks the user to authenticate. Invokes |callback| asynchronously when
   // the auth flow returns with the result.

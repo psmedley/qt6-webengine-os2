@@ -19,25 +19,17 @@ void NGFragmentPainter::PaintOutline(const PaintInfo& paint_info,
   const NGPhysicalBoxFragment& fragment = PhysicalFragment();
   DCHECK(NGOutlineUtils::HasPaintedOutline(style_to_use, fragment.GetNode()));
   Vector<PhysicalRect> outline_rects;
+  LayoutObject::OutlineInfo info;
   fragment.AddSelfOutlineRects(
       paint_offset, style_to_use.OutlineRectsShouldIncludeBlockVisualOverflow(),
-      &outline_rects);
+      &outline_rects, &info);
 
   if (outline_rects.IsEmpty())
     return;
 
-  const DisplayItemClient& display_item_client = GetDisplayItemClient();
-  if (DrawingRecorder::UseCachedDrawingIfPossible(
-          paint_info.context, display_item_client, paint_info.phase))
-    return;
-
-  IntRect visual_rect =
-      PixelSnappedIntRect(UnionRectEvenIfEmpty(outline_rects));
-  visual_rect.Inflate(style_to_use.OutlineOutsetExtent());
-  DrawingRecorder recorder(paint_info.context, display_item_client,
-                           paint_info.phase, visual_rect);
-  OutlinePainter::PaintOutlineRects(paint_info.context, outline_rects,
-                                    style_to_use);
+  OutlinePainter::PaintOutlineRects(paint_info, GetDisplayItemClient(),
+                                    outline_rects, info, style_to_use,
+                                    fragment.GetLayoutObject()->GetDocument());
 }
 
 void NGFragmentPainter::AddURLRectIfNeeded(const PaintInfo& paint_info,
@@ -59,8 +51,8 @@ void NGFragmentPainter::AddURLRectIfNeeded(const PaintInfo& paint_info,
     return;
 
   auto outline_rects = fragment.GetLayoutObject()->OutlineRects(
-      paint_offset, NGOutlineType::kIncludeBlockVisualOverflow);
-  IntRect rect = PixelSnappedIntRect(UnionRect(outline_rects));
+      nullptr, paint_offset, NGOutlineType::kIncludeBlockVisualOverflow);
+  gfx::Rect rect = ToPixelSnappedRect(UnionRect(outline_rects));
   if (rect.IsEmpty())
     return;
 

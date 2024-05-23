@@ -3,16 +3,19 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/mediarecorder/h264_encoder.h"
-#include "build/chromeos_buildflags.h"
 
 #include <utility>
 
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_frame.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
@@ -94,7 +97,7 @@ H264Encoder::H264Encoder(
     : Encoder(on_encoded_video_cb, bits_per_second, std::move(task_runner)),
       codec_profile_(codec_profile) {
   DCHECK(encoding_thread_);
-  DCHECK_EQ(codec_profile_.codec_id, VideoTrackRecorder::CodecId::H264);
+  DCHECK_EQ(codec_profile_.codec_id, VideoTrackRecorder::CodecId::kH264);
 }
 
 H264Encoder::~H264Encoder() {
@@ -118,7 +121,9 @@ void H264Encoder::EncodeOnEncodingTaskRunner(
 
   const gfx::Size frame_size = frame->visible_rect().size();
   if (!openh264_encoder_ || configured_size_ != frame_size) {
-    ConfigureEncoderOnEncodingTaskRunner(frame_size);
+    if (!ConfigureEncoderOnEncodingTaskRunner(frame_size)) {
+      return;
+    }
     first_frame_timestamp_ = capture_timestamp;
   }
 
@@ -172,13 +177,13 @@ void H264Encoder::EncodeOnEncodingTaskRunner(
                           capture_timestamp, is_key_frame));
 }
 
-void H264Encoder::ConfigureEncoderOnEncodingTaskRunner(const gfx::Size& size) {
+bool H264Encoder::ConfigureEncoderOnEncodingTaskRunner(const gfx::Size& size) {
   TRACE_EVENT0("media", "H264Encoder::ConfigureEncoderOnEncodingTaskRunner");
   DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
   ISVCEncoder* temp_encoder = nullptr;
   if (WelsCreateSVCEncoder(&temp_encoder) != 0) {
     NOTREACHED() << "Failed to create OpenH264 encoder";
-    return;
+    return false;
   }
   openh264_encoder_.reset(temp_encoder);
   configured_size_ = size;
@@ -210,7 +215,7 @@ void H264Encoder::ConfigureEncoderOnEncodingTaskRunner(const gfx::Size& size) {
     init_params.iRCMode = RC_OFF_MODE;
   }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   init_params.iMultipleThreadIdc = 0;
 #else
   // Threading model: Set to 1 due to https://crbug.com/583348.
@@ -248,12 +253,14 @@ void H264Encoder::ConfigureEncoderOnEncodingTaskRunner(const gfx::Size& size) {
       SM_FIXEDSLCNUM_SLICE;
 
   if (openh264_encoder_->InitializeExt(&init_params) != cmResultSuccess) {
-    NOTREACHED() << "Failed to initialize OpenH264 encoder";
-    return;
+    DLOG(WARNING) << "Failed to initialize OpenH264 encoder";
+    openh264_encoder_.reset();
+    return false;
   }
 
   int pixel_format = EVideoFormatType::videoFormatI420;
   openh264_encoder_->SetOption(ENCODER_OPTION_DATAFORMAT, &pixel_format);
+  return true;
 }
 
 SEncParamExt H264Encoder::GetEncoderOptionForTesting() {

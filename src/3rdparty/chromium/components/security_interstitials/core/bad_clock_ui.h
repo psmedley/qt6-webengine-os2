@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_SECURITY_INTERSTITIALS_CORE_BAD_CLOCK_UI_H_
 #define COMPONENTS_SECURITY_INTERSTITIALS_CORE_BAD_CLOCK_UI_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/security_interstitials/core/controller_client.h"
@@ -24,6 +24,10 @@ class BadClockUI {
              const base::Time& time_triggered,  // Time the error was triggered
              ssl_errors::ClockState clock_state,
              ControllerClient* controller_);
+
+  BadClockUI(const BadClockUI&) = delete;
+  BadClockUI& operator=(const BadClockUI&) = delete;
+
   ~BadClockUI();
 
   void PopulateStringsForHTML(base::Value* load_time_data);
@@ -36,10 +40,8 @@ class BadClockUI {
   const int cert_error_;
   const net::SSLInfo ssl_info_;
   const base::Time time_triggered_;
-  ControllerClient* controller_;
+  raw_ptr<ControllerClient> controller_;
   ssl_errors::ClockState clock_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(BadClockUI);
 };
 
 }  // security_interstitials

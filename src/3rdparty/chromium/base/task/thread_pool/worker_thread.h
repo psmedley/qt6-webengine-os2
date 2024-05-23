@@ -9,6 +9,7 @@
 
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/atomic_flag.h"
 #include "base/synchronization/waitable_event.h"
@@ -48,10 +49,10 @@ class BASE_EXPORT WorkerThread : public RefCountedThreadSafe<WorkerThread>,
     POOLED,
     SHARED,
     DEDICATED,
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     SHARED_COM,
     DEDICATED_COM,
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
   };
 
   // Delegate interface for WorkerThread. All methods are called from the
@@ -65,7 +66,7 @@ class BASE_EXPORT WorkerThread : public RefCountedThreadSafe<WorkerThread>,
     virtual ThreadLabel GetThreadLabel() const = 0;
 
     // Called by |worker|'s thread when it enters its main function.
-    virtual void OnMainEntry(const WorkerThread* worker) = 0;
+    virtual void OnMainEntry(WorkerThread* worker) = 0;
 
     // Called by |worker|'s thread to get a TaskSource from which to run a Task.
     virtual RegisteredTaskSource GetWork(WorkerThread* worker) = 0;
@@ -92,8 +93,7 @@ class BASE_EXPORT WorkerThread : public RefCountedThreadSafe<WorkerThread>,
     // TaskTracker after calling OnMainExit() on the Delegate.
     virtual void OnMainExit(WorkerThread* worker) {}
 
-    static constexpr TimeDelta kPurgeThreadCacheIdleDelay =
-        TimeDelta::FromSeconds(1);
+    static constexpr TimeDelta kPurgeThreadCacheIdleDelay = Seconds(1);
   };
 
   // Creates a WorkerThread that runs Tasks from TaskSources returned by
@@ -152,6 +152,11 @@ class BASE_EXPORT WorkerThread : public RefCountedThreadSafe<WorkerThread>,
   //   worker_ = nullptr;
   void Cleanup();
 
+  // Possibly updates the thread priority to the appropriate priority based on
+  // the priority hint, current shutdown state, and platform capabilities. Must
+  // be called on the thread managed by |this|.
+  void MaybeUpdateThreadPriority();
+
   // Informs this WorkerThread about periods during which it is not being
   // used. Thread-safe.
   void BeginUnusedPeriod();
@@ -187,12 +192,12 @@ class BASE_EXPORT WorkerThread : public RefCountedThreadSafe<WorkerThread>,
   void RunBackgroundSharedWorker();
   void RunDedicatedWorker();
   void RunBackgroundDedicatedWorker();
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   void RunSharedCOMWorker();
   void RunBackgroundSharedCOMWorker();
   void RunDedicatedCOMWorker();
   void RunBackgroundDedicatedCOMWorker();
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
   // The real main, invoked through :
   //     ThreadMain() -> RunLabeledWorker() -> RunWorker().
@@ -227,7 +232,7 @@ class BASE_EXPORT WorkerThread : public RefCountedThreadSafe<WorkerThread>,
 
   // Optional observer notified when a worker enters and exits its main
   // function. Set in Start() and never modified afterwards.
-  WorkerThreadObserver* worker_thread_observer_ = nullptr;
+  raw_ptr<WorkerThreadObserver> worker_thread_observer_ = nullptr;
 
   // Desired thread priority.
   const ThreadPriority priority_hint_;

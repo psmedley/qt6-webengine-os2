@@ -53,10 +53,6 @@ typedef struct PICK_MODE_CONTEXT {
 #if CONFIG_INTERNAL_STATS
   THR_MODES best_mode_index;
 #endif  // CONFIG_INTERNAL_STATS
-  int hybrid_pred_diff;
-  int comp_pred_diff;
-  int single_pred_diff;
-
   RD_STATS rd_stats;
 
   int rd_mode_is_ready;  // Flag to indicate whether rd pick mode decision has
@@ -79,12 +75,14 @@ typedef struct PC_TREE {
   PICK_MODE_CONTEXT *none;
   PICK_MODE_CONTEXT *horizontal[2];
   PICK_MODE_CONTEXT *vertical[2];
+#if !CONFIG_REALTIME_ONLY
   PICK_MODE_CONTEXT *horizontala[3];
   PICK_MODE_CONTEXT *horizontalb[3];
   PICK_MODE_CONTEXT *verticala[3];
   PICK_MODE_CONTEXT *verticalb[3];
   PICK_MODE_CONTEXT *horizontal4[4];
   PICK_MODE_CONTEXT *vertical4[4];
+#endif
   struct PC_TREE *split[4];
   int index;
 } PC_TREE;
@@ -102,8 +100,9 @@ typedef struct SIMPLE_MOTION_DATA_TREE {
   int sms_rect_valid;
 } SIMPLE_MOTION_DATA_TREE;
 
-void av1_setup_shared_coeff_buffer(struct aom_internal_error_info *error,
-                                   PC_TREE_SHARED_BUFFERS *shared_bufs);
+void av1_setup_shared_coeff_buffer(const SequenceHeader *const seq_params,
+                                   PC_TREE_SHARED_BUFFERS *shared_bufs,
+                                   struct aom_internal_error_info *error);
 void av1_free_shared_coeff_buffer(PC_TREE_SHARED_BUFFERS *shared_bufs);
 
 PC_TREE *av1_alloc_pc_tree_node(BLOCK_SIZE bsize);
@@ -113,6 +112,7 @@ void av1_free_pc_tree_recursive(PC_TREE *tree, int num_planes, int keep_best,
 PICK_MODE_CONTEXT *av1_alloc_pmc(const struct AV1_COMP *const cpi,
                                  BLOCK_SIZE bsize,
                                  PC_TREE_SHARED_BUFFERS *shared_bufs);
+void av1_reset_pmc(PICK_MODE_CONTEXT *ctx);
 void av1_free_pmc(PICK_MODE_CONTEXT *ctx, int num_planes);
 void av1_copy_tree_context(PICK_MODE_CONTEXT *dst_ctx,
                            PICK_MODE_CONTEXT *src_ctx);

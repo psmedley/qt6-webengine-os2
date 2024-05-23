@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_split.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/request_priority.h"
@@ -184,9 +185,6 @@ class MockDiskCache : public disk_cache::Backend {
   std::unique_ptr<Iterator> CreateIterator() override;
   void GetStats(base::StringPairs* stats) override;
   void OnExternalCacheHit(const std::string& key) override;
-  size_t DumpMemoryStats(
-      base::trace_event::ProcessMemoryDump* pmd,
-      const std::string& parent_absolute_name) const override;
   uint8_t GetEntryInMemoryData(const std::string& key) override;
   void SetEntryInMemoryData(const std::string& key, uint8_t data) override;
   int64_t MaxFileSize() const override;
@@ -392,7 +390,7 @@ class MockBlockingBackendFactory : public HttpCache::BackendFactory {
  private:
   int Result() { return fail_ ? ERR_FAILED : OK; }
 
-  std::unique_ptr<disk_cache::Backend>* backend_;
+  raw_ptr<std::unique_ptr<disk_cache::Backend>> backend_;
   CompletionOnceCallback callback_;
   bool block_;
   bool fail_;

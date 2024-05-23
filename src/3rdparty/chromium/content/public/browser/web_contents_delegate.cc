@@ -11,12 +11,10 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
-#include "components/viz/common/surfaces/surface_id.h"
 #include "content/public/browser/color_chooser.h"
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/security_style_explanations.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/url_constants.h"
@@ -34,7 +32,7 @@ WebContents* WebContentsDelegate::OpenURLFromTab(WebContents* source,
 }
 
 bool WebContentsDelegate::ShouldAllowRendererInitiatedCrossProcessNavigation(
-    bool is_main_frame_navigation) {
+    bool is_outermost_main_frame_navigation) {
   return true;
 }
 
@@ -87,7 +85,7 @@ void WebContentsDelegate::CanDownload(const GURL& url,
   std::move(callback).Run(true);
 }
 
-bool WebContentsDelegate::HandleContextMenu(RenderFrameHost* render_frame_host,
+bool WebContentsDelegate::HandleContextMenu(RenderFrameHost& render_frame_host,
                                             const ContextMenuParams& params) {
   return false;
 }
@@ -137,7 +135,7 @@ WebContents* WebContentsDelegate::CreateCustomWebContents(
     const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,
-    const StoragePartitionId& partition_id,
+    const StoragePartitionConfig& partition_config,
     SessionStorageNamespace* session_storage_namespace) {
   return nullptr;
 }
@@ -157,6 +155,12 @@ void WebContentsDelegate::CreateSmsPrompt(
 bool WebContentsDelegate::IsFullscreenForTabOrPending(
     const WebContents* web_contents) {
   return false;
+}
+
+bool WebContentsDelegate::CanEnterFullscreenModeForTab(
+    RenderFrameHost* requesting_frame,
+    const blink::mojom::FullscreenOptions& options) {
+  return true;
 }
 
 blink::mojom::DisplayMode WebContentsDelegate::GetDisplayMode(
@@ -181,14 +185,14 @@ void WebContentsDelegate::RequestKeyboardLock(WebContents* web_contents,
   web_contents->GotResponseToKeyboardLockRequest(false);
 }
 
-#if defined(OS_ANDROID) || defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC) || defined(TOOLKIT_QT)
 std::unique_ptr<ColorChooser> WebContentsDelegate::OpenColorChooser(
     WebContents* web_contents,
     SkColor color,
     const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
   return nullptr;
 }
-#endif
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
 
 std::unique_ptr<EyeDropper> WebContentsDelegate::OpenEyeDropper(
     RenderFrameHost* frame,
@@ -241,7 +245,7 @@ std::string WebContentsDelegate::GetTitleForMediaControls(
   return {};
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 bool WebContentsDelegate::ShouldBlockMediaRequest(const GURL& url) {
   return false;
 }
@@ -284,12 +288,6 @@ bool WebContentsDelegate::SaveFrame(const GURL& url,
   return false;
 }
 
-blink::SecurityStyle WebContentsDelegate::GetSecurityStyle(
-    WebContents* web_contents,
-    SecurityStyleExplanations* security_style_explanations) {
-  return blink::SecurityStyle::kUnknown;
-}
-
 bool WebContentsDelegate::ShouldAllowRunningInsecureContent(
     WebContents* web_contents,
     bool allowed_per_prefs,
@@ -328,9 +326,7 @@ bool WebContentsDelegate::OnlyExpandTopControlsAtPageTop() {
 }
 
 PictureInPictureResult WebContentsDelegate::EnterPictureInPicture(
-    WebContents* web_contents,
-    const viz::SurfaceId&,
-    const gfx::Size&) {
+    WebContents* web_contents) {
   return PictureInPictureResult::kNotSupported;
 }
 
@@ -342,7 +338,7 @@ bool WebContentsDelegate::IsBackForwardCacheSupported() {
   return false;
 }
 
-bool WebContentsDelegate::IsPrerender2Supported() {
+bool WebContentsDelegate::IsPrerender2Supported(WebContents& web_contents) {
   return false;
 }
 
@@ -376,6 +372,10 @@ WebContentsDelegate::GetInstalledWebappGeolocationContext() {
 
 base::WeakPtr<WebContentsDelegate> WebContentsDelegate::GetDelegateWeakPtr() {
   return nullptr;
+}
+
+bool WebContentsDelegate::IsPrivileged() {
+  return false;
 }
 
 }  // namespace content

@@ -45,7 +45,6 @@
 #ifndef QTWEBENGINE_BROWSER_EXTENSIONS_API_TABS_API_H_
 #define QTWEBENGINE_BROWSER_EXTENSIONS_API_TABS_API_H_
 
-#include "base/macros.h"
 #include "extensions/browser/extension_function.h"
 
 namespace extensions {

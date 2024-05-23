@@ -8,7 +8,6 @@ import("//testing/test.gni")
 cc_remove_configs = []
 cc_add_configs = [
   "//build/config:precompiled_headers",
-  "//build/config/compiler:noshadowing",
   "//build/config/compiler:wexit_time_destructors",
 ]
 
@@ -25,6 +24,9 @@ template("cc_component") {
     }
     configs -= cc_remove_configs
     configs += cc_add_configs
+
+    # TODO(crbug.com/1292951): Remove this line.
+    configs -= [ "//build/config/compiler:prevent_unsafe_narrowing" ]
   }
 }
 
@@ -39,6 +41,9 @@ template("cc_test_static_library") {
 
     # Not needed in test code.
     configs -= [ "//build/config/compiler:wexit_time_destructors" ]
+
+    # TODO(crbug.com/1292951): Remove this line.
+    configs -= [ "//build/config/compiler:prevent_unsafe_narrowing" ]
   }
 }
 
@@ -53,5 +58,8 @@ template("cc_test") {
 
     # Not needed in test code.
     configs -= [ "//build/config/compiler:wexit_time_destructors" ]
+
+    # TODO(crbug.com/1292951): Remove this line.
+    configs -= [ "//build/config/compiler:prevent_unsafe_narrowing" ]
   }
 }

@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-#include "base/stl_util.h"
+#include "base/gtest_prod_util.h"
 #include "cc/paint/image_analysis_state.h"
 #include "cc/paint/paint_export.h"
 #include "cc/paint/paint_flags.h"
@@ -145,9 +145,6 @@ class CC_PAINT_EXPORT PaintShader : public SkRefCnt {
     return image_;
   }
 
-  const gfx::SizeF* tile_scale() const {
-    return base::OptionalOrNullptr(tile_scale_);
-  }
   const sk_sp<PaintRecord>& paint_record() const { return record_; }
   bool GetRasterizationTileRect(const SkMatrix& ctm, SkRect* tile_rect) const {
     return GetClampedRasterizationTileRect(ctm, /*max_texture_size=*/0,

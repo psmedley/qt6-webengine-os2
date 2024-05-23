@@ -37,6 +37,7 @@ typedef struct {
   int aq_mode;
   int layering_mode;
   int output_obu;
+  int decode;
 } AppInput;
 
 typedef enum {
@@ -87,6 +88,9 @@ static const arg_def_t error_resilient_arg =
 static const arg_def_t output_obu_arg =
     ARG_DEF(NULL, "output-obu", 1,
             "Write OBUs when set to 1. Otherwise write IVF files.");
+static const arg_def_t test_decode_arg =
+    ARG_DEF(NULL, "test-decode", 1,
+            "Attempt to test decoding the output when set to 1. Default is 1.");
 
 #if CONFIG_AV1_HIGHBITDEPTH
 static const struct arg_enum_list bitdepth_enum[] = {
@@ -97,20 +101,33 @@ static const arg_def_t bitdepth_arg = ARG_DEF_ENUM(
     "d", "bit-depth", 1, "Bit depth for codec 8, 10 or 12. ", bitdepth_enum);
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
-static const arg_def_t *svc_args[] = {
-  &frames_arg,          &outputfile,     &width_arg,
-  &height_arg,          &timebase_arg,   &bitrate_arg,
-  &spatial_layers_arg,  &kf_dist_arg,    &scale_factors_arg,
-  &min_q_arg,           &max_q_arg,      &temporal_layers_arg,
-  &layering_mode_arg,   &threads_arg,    &aqmode_arg,
+static const arg_def_t *svc_args[] = { &frames_arg,
+                                       &outputfile,
+                                       &width_arg,
+                                       &height_arg,
+                                       &timebase_arg,
+                                       &bitrate_arg,
+                                       &spatial_layers_arg,
+                                       &kf_dist_arg,
+                                       &scale_factors_arg,
+                                       &min_q_arg,
+                                       &max_q_arg,
+                                       &temporal_layers_arg,
+                                       &layering_mode_arg,
+                                       &threads_arg,
+                                       &aqmode_arg,
 #if CONFIG_AV1_HIGHBITDEPTH
-  &bitdepth_arg,
+                                       &bitdepth_arg,
 #endif
-  &speed_arg,           &bitrates_arg,   &dropframe_thresh_arg,
-  &error_resilient_arg, &output_obu_arg, NULL
-};
+                                       &speed_arg,
+                                       &bitrates_arg,
+                                       &dropframe_thresh_arg,
+                                       &error_resilient_arg,
+                                       &output_obu_arg,
+                                       &test_decode_arg,
+                                       NULL };
 
-#define zero(Dest) memset(&(Dest), 0, sizeof(Dest));
+#define zero(Dest) memset(&(Dest), 0, sizeof(Dest))
 
 static const char *exec_name;
 
@@ -226,6 +243,7 @@ static aom_codec_err_t parse_layer_options_from_string(
     return AOM_CODEC_INVALID_PARAM;
 
   input_string = malloc(strlen(input));
+  if (!input_string) die("Failed to allocate input string.");
   memcpy(input_string, input, strlen(input));
   if (input_string == NULL) return AOM_CODEC_MEM_ERROR;
   token = strtok(input_string, delim);  // NOLINT
@@ -260,11 +278,16 @@ static void parse_command_line(int argc, const char **argv_,
   svc_params->number_temporal_layers = 1;
   app_input->layering_mode = 0;
   app_input->output_obu = 0;
+  app_input->decode = 1;
   enc_cfg->g_threads = 1;
   enc_cfg->rc_end_usage = AOM_CBR;
 
   // process command line options
   argv = argv_dup(argc - 1, argv_ + 1);
+  if (!argv) {
+    fprintf(stderr, "Error allocating argument list\n");
+    exit(EXIT_FAILURE);
+  }
   for (argi = argj = argv; (*argj = *argi); argi += arg.argv_step) {
     arg.argv_step = 1;
 
@@ -284,11 +307,8 @@ static void parse_command_line(int argc, const char **argv_,
       svc_params->number_temporal_layers = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &speed_arg, argi)) {
       app_input->speed = arg_parse_uint(&arg);
-      if (app_input->speed > 9) {
-        warn("Mapping speed %d to speed 9.\n", app_input->speed);
-      }
-      if (app_input->speed <= 6) {
-        die("Encoder speed setting should be in [7, 9].\n");
+      if (app_input->speed > 10) {
+        aom_tools_warn("Mapping speed %d to speed 10.\n", app_input->speed);
       }
     } else if (arg_match(&arg, &aqmode_arg, argi)) {
       app_input->aq_mode = arg_parse_uint(&arg);
@@ -340,6 +360,11 @@ static void parse_command_line(int argc, const char **argv_,
       if (app_input->output_obu != 0 && app_input->output_obu != 1)
         die("Invalid value for obu output flag (0, 1): %d.",
             app_input->output_obu);
+    } else if (arg_match(&arg, &test_decode_arg, argi)) {
+      app_input->decode = arg_parse_uint(&arg);
+      if (app_input->decode != 0 && app_input->decode != 1)
+        die("Invalid value for test decode flag (0, 1): %d.",
+            app_input->decode);
     } else {
       ++argj;
     }
@@ -559,11 +584,14 @@ static void printout_rate_control_summary(struct RateControlMetrics *rc,
 }
 
 // Layer pattern configuration.
-static void set_layer_pattern(int layering_mode, int superframe_cnt,
-                              aom_svc_layer_id_t *layer_id,
-                              aom_svc_ref_frame_config_t *ref_frame_config,
-                              int *use_svc_control, int spatial_layer_id,
-                              int is_key_frame, int ksvc_mode) {
+static void set_layer_pattern(
+    int layering_mode, int superframe_cnt, aom_svc_layer_id_t *layer_id,
+    aom_svc_ref_frame_config_t *ref_frame_config,
+    aom_svc_ref_frame_comp_pred_t *ref_frame_comp_pred, int *use_svc_control,
+    int spatial_layer_id, int is_key_frame, int ksvc_mode, int speed) {
+  // Setting this flag to 1 enables simplex example of
+  // RPS (Reference Picture Selection) for 1 layer.
+  int use_rps_example = 1;
   int i;
   int enable_longterm_temporal_ref = 1;
   int shift = (layering_mode == 8) ? 2 : 0;
@@ -571,7 +599,9 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
   layer_id->spatial_layer_id = spatial_layer_id;
   int lag_index = 0;
   int base_count = superframe_cnt >> 2;
-  ref_frame_config->use_comp_pred = 0;
+  ref_frame_comp_pred->use_comp_pred[0] = 0;  // GOLDEN_LAST
+  ref_frame_comp_pred->use_comp_pred[1] = 0;  // LAST2_LAST
+  ref_frame_comp_pred->use_comp_pred[2] = 0;  // ALTREF_LAST
   // Set the reference map buffer idx for the 7 references:
   // LAST_FRAME (0), LAST2_FRAME(1), LAST3_FRAME(2), GOLDEN_FRAME(3),
   // BWDREF_FRAME(4), ALTREF2_FRAME(5), ALTREF_FRAME(6).
@@ -580,18 +610,70 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
   for (i = 0; i < REF_FRAMES; i++) ref_frame_config->refresh[i] = 0;
 
   if (ksvc_mode) {
-    // Same pattern as case 9.
+    // Same pattern as case 9, but the reference strucutre will be constrained
+    // below.
     layering_mode = 9;
-    if (!is_key_frame)
-      // No inter-layer prediction on inter-frames.
-      ref_frame_config->reference[SVC_LAST_FRAME] = 1;
   }
   switch (layering_mode) {
     case 0:
-      // 1-layer: update LAST on every frame, reference LAST.
-      layer_id->temporal_layer_id = 0;
-      ref_frame_config->refresh[0] = 1;
-      ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+      if (use_rps_example == 0) {
+        // 1-layer: update LAST on every frame, reference LAST.
+        layer_id->temporal_layer_id = 0;
+        layer_id->spatial_layer_id = 0;
+        ref_frame_config->refresh[0] = 1;
+        ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+      } else {
+        // Pattern of 2 references (ALTREF and GOLDEN) trailing
+        // LAST by 4 and 8 frame, with some switching logic to
+        // sometimes only predict from longer-term reference.
+        // This is simple example to test RPS (reference picture selection)
+        // as method to handle network packet loss.
+        int last_idx = 0;
+        int last_idx_refresh = 0;
+        int gld_idx = 0;
+        int alt_ref_idx = 0;
+        int lag_alt = 4;
+        int lag_gld = 8;
+        layer_id->temporal_layer_id = 0;
+        layer_id->spatial_layer_id = 0;
+        int sh = 8;  // slots 0 - 7.
+        // Moving index slot for last: 0 - (sh - 1)
+        if (superframe_cnt > 1) last_idx = (superframe_cnt - 1) % sh;
+        // Moving index for refresh of last: one ahead for next frame.
+        last_idx_refresh = superframe_cnt % sh;
+        // Moving index for gld_ref, lag behind current by lag_gld
+        if (superframe_cnt > lag_gld) gld_idx = (superframe_cnt - lag_gld) % sh;
+        // Moving index for alt_ref, lag behind LAST by lag_alt frames.
+        if (superframe_cnt > lag_alt)
+          alt_ref_idx = (superframe_cnt - lag_alt) % sh;
+        // Set the ref_idx.
+        // Default all references to slot for last.
+        for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+          ref_frame_config->ref_idx[i] = last_idx;
+        // Set the ref_idx for the relevant references.
+        ref_frame_config->ref_idx[SVC_LAST_FRAME] = last_idx;
+        ref_frame_config->ref_idx[SVC_LAST2_FRAME] = last_idx_refresh;
+        ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = gld_idx;
+        ref_frame_config->ref_idx[SVC_ALTREF_FRAME] = alt_ref_idx;
+        // Refresh this slot, which will become LAST on next frame.
+        ref_frame_config->refresh[last_idx_refresh] = 1;
+        // Reference LAST, ALTREF, and GOLDEN
+        ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+        ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
+        ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
+        // Switch to only ALTREF for frames 200 to 250.
+        if (superframe_cnt >= 200 && superframe_cnt < 250) {
+          ref_frame_config->reference[SVC_LAST_FRAME] = 0;
+          ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
+          ref_frame_config->reference[SVC_GOLDEN_FRAME] = 0;
+        }
+        // Switch to only GOLDEN for frames 400 to 450.
+        if (superframe_cnt >= 400 && superframe_cnt < 450) {
+          ref_frame_config->reference[SVC_LAST_FRAME] = 0;
+          ref_frame_config->reference[SVC_ALTREF_FRAME] = 0;
+          ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
+        }
+      }
       break;
     case 1:
       // 2-temporal layer.
@@ -647,8 +729,12 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
 
       // Keep golden fixed at slot 3.
       ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 3;
-      // Cyclically refresh slots 4, 5, 6, 7, for lag altref.
-      lag_index = 4 + (base_count % 4);
+      // Cyclically refresh slots 5, 6, 7, for lag altref.
+      lag_index = 5;
+      if (base_count > 0) {
+        lag_index = 5 + (base_count % 3);
+        if (superframe_cnt % 4 != 0) lag_index = 5 + ((base_count + 1) % 3);
+      }
       // Set the altref slot to lag_index.
       ref_frame_config->ref_idx[SVC_ALTREF_FRAME] = lag_index;
       if (superframe_cnt % 4 == 0) {
@@ -682,6 +768,8 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
       // Every frame can reference GOLDEN AND ALTREF.
       ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
       ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
+      // Allow for compound prediction using LAST and ALTREF.
+      if (speed >= 7) ref_frame_comp_pred->use_comp_pred[2] = 1;
       break;
     case 4:
       // 3-temporal layer: but middle layer updates GF, so 2nd TL2 will
@@ -847,10 +935,6 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
           ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 3;
         }
       }
-      if (layer_id->spatial_layer_id > 0 && !ksvc_mode) {
-        // Reference GOLDEN.
-        ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
-      }
       break;
     case 8:
       // 3 spatial and 3 temporal layer.
@@ -980,9 +1064,20 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
           ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 4;
         }
       }
-      if (layer_id->spatial_layer_id > 0 && !ksvc_mode)
-        // Reference GOLDEN.
+      if (layer_id->spatial_layer_id > 0) {
+        // Always reference GOLDEN (inter-layer prediction).
         ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
+        if (ksvc_mode) {
+          // KSVC: only keep the inter-layer reference (GOLDEN) for
+          // superframes whose base is key.
+          if (!is_key_frame) ref_frame_config->reference[SVC_GOLDEN_FRAME] = 0;
+        }
+        if (is_key_frame && layer_id->spatial_layer_id > 1) {
+          // On superframes whose base is key: remove LAST to avoid prediction
+          // off layer two levels below.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 0;
+        }
+      }
       // For 3 spatial layer case 8 (where there is free buffer slot):
       // allow for top spatial layer to use additional temporal reference.
       // Additional reference is only updated on base temporal layer, every
@@ -990,7 +1085,7 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
       if (enable_longterm_temporal_ref && layer_id->spatial_layer_id == 2 &&
           layering_mode == 8) {
         ref_frame_config->ref_idx[SVC_ALTREF_FRAME] = REF_FRAMES - 1;
-        ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
+        if (!is_key_frame) ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
         if (base_count % 10 == 0 && layer_id->temporal_layer_id == 0)
           ref_frame_config->refresh[REF_FRAMES - 1] = 1;
       }
@@ -1075,6 +1170,7 @@ int main(int argc, const char **argv) {
   aom_svc_layer_id_t layer_id;
   aom_svc_params_t svc_params;
   aom_svc_ref_frame_config_t ref_frame_config;
+  aom_svc_ref_frame_comp_pred_t ref_frame_comp_pred;
 
 #if CONFIG_INTERNAL_STATS
   FILE *stats_file = fopen("opsnr.stt", "a");
@@ -1089,7 +1185,8 @@ int main(int argc, const char **argv) {
 
   struct RateControlMetrics rc;
   int64_t cx_time = 0;
-  int64_t cx_time_sl[3];  // max number of spatial layers.
+  int64_t cx_time_layer[AOM_MAX_LAYERS];  // max number of layers.
+  int frame_cnt_layer[AOM_MAX_LAYERS];
   double sum_bitrate = 0.0;
   double sum_bitrate2 = 0.0;
   double framerate = 30.0;
@@ -1154,7 +1251,7 @@ int main(int argc, const char **argv) {
   // Y4M reader has its own allocation.
   if (app_input.input_ctx.file_type != FILE_TYPE_Y4M) {
     if (!aom_img_alloc(&raw, AOM_IMG_FMT_I420, width, height, 32)) {
-      die("Failed to allocate image", width, height);
+      die("Failed to allocate image (%dx%d)", width, height);
     }
   }
 
@@ -1233,8 +1330,10 @@ int main(int argc, const char **argv) {
     die("Failed to initialize encoder");
 
 #if CONFIG_AV1_DECODER
-  if (aom_codec_dec_init(&decoder, get_aom_decoder_by_index(0), NULL, 0)) {
-    die("Failed to initialize decoder");
+  if (app_input.decode) {
+    if (aom_codec_dec_init(&decoder, get_aom_decoder_by_index(0), NULL, 0)) {
+      die("Failed to initialize decoder");
+    }
   }
 #endif
 
@@ -1242,6 +1341,10 @@ int main(int argc, const char **argv) {
   aom_codec_control(&codec, AV1E_SET_AQ_MODE, app_input.aq_mode ? 3 : 0);
   aom_codec_control(&codec, AV1E_SET_GF_CBR_BOOST_PCT, 0);
   aom_codec_control(&codec, AV1E_SET_ENABLE_CDEF, 1);
+  aom_codec_control(&codec, AV1E_SET_LOOPFILTER_CONTROL, 1);
+  aom_codec_control(&codec, AV1E_SET_ENABLE_WARPED_MOTION, 0);
+  aom_codec_control(&codec, AV1E_SET_ENABLE_OBMC, 0);
+  aom_codec_control(&codec, AV1E_SET_ENABLE_GLOBAL_MOTION, 0);
   aom_codec_control(&codec, AV1E_SET_ENABLE_ORDER_HINT, 0);
   aom_codec_control(&codec, AV1E_SET_ENABLE_TPL_MODEL, 0);
   aom_codec_control(&codec, AV1E_SET_DELTAQ_MODE, 0);
@@ -1285,29 +1388,37 @@ int main(int argc, const char **argv) {
                       max_intra_size_pct);
   }
 
-  for (unsigned int slx = 0; slx < ss_number_layers; slx++) cx_time_sl[slx] = 0;
+  for (unsigned int lx = 0; lx < ts_number_layers * ss_number_layers; lx++) {
+    cx_time_layer[lx] = 0;
+    frame_cnt_layer[lx] = 0;
+  }
+
   frame_avail = 1;
   while (frame_avail || got_data) {
     struct aom_usec_timer timer;
     frame_avail = read_frame(&(app_input.input_ctx), &raw);
-    int is_key_frame = (frame_cnt % cfg.kf_max_dist) == 0;
     // Loop over spatial layers.
     for (unsigned int slx = 0; slx < ss_number_layers; slx++) {
       aom_codec_iter_t iter = NULL;
       const aom_codec_cx_pkt_t *pkt;
       int layer = 0;
-
+      // Flag for superframe whose base is key.
+      int is_key_frame = (frame_cnt % cfg.kf_max_dist) == 0;
       // For flexible mode:
       if (app_input.layering_mode >= 0) {
         // Set the reference/update flags, layer_id, and reference_map
         // buffer index.
         set_layer_pattern(app_input.layering_mode, frame_cnt, &layer_id,
-                          &ref_frame_config, &use_svc_control, slx,
-                          is_key_frame, (app_input.layering_mode == 10));
+                          &ref_frame_config, &ref_frame_comp_pred,
+                          &use_svc_control, slx, is_key_frame,
+                          (app_input.layering_mode == 10), app_input.speed);
         aom_codec_control(&codec, AV1E_SET_SVC_LAYER_ID, &layer_id);
-        if (use_svc_control)
+        if (use_svc_control) {
           aom_codec_control(&codec, AV1E_SET_SVC_REF_FRAME_CONFIG,
                             &ref_frame_config);
+          aom_codec_control(&codec, AV1E_SET_SVC_REF_FRAME_COMP_PRED,
+                            &ref_frame_comp_pred);
+        }
       } else {
         // Only up to 3 temporal layers supported in fixed mode.
         // Only need to set spatial and temporal layer_id: reference
@@ -1355,7 +1466,8 @@ int main(int argc, const char **argv) {
         die_codec(&codec, "Failed to encode frame");
       aom_usec_timer_mark(&timer);
       cx_time += aom_usec_timer_elapsed(&timer);
-      cx_time_sl[slx] += aom_usec_timer_elapsed(&timer);
+      cx_time_layer[layer] += aom_usec_timer_elapsed(&timer);
+      frame_cnt_layer[layer] += 1;
 
       got_data = 0;
       while ((pkt = aom_codec_get_cx_data(&codec, &iter))) {
@@ -1430,9 +1542,11 @@ int main(int argc, const char **argv) {
             }
 
 #if CONFIG_AV1_DECODER
-            if (aom_codec_decode(&decoder, pkt->data.frame.buf,
-                                 (unsigned int)pkt->data.frame.sz, NULL))
-              die_codec(&decoder, "Failed to decode frame.");
+            if (app_input.decode) {
+              if (aom_codec_decode(&decoder, pkt->data.frame.buf,
+                                   (unsigned int)pkt->data.frame.sz, NULL))
+                die_codec(&decoder, "Failed to decode frame.");
+            }
 #endif
 
             break;
@@ -1440,12 +1554,14 @@ int main(int argc, const char **argv) {
         }
       }
 #if CONFIG_AV1_DECODER
-      // Don't look for mismatch on top spatial and top temporal layers as they
-      // are non reference frames.
-      if ((ss_number_layers > 1 || ts_number_layers > 1) &&
-          !(layer_id.temporal_layer_id > 0 &&
-            layer_id.temporal_layer_id == (int)ts_number_layers - 1)) {
-        test_decode(&codec, &decoder, frame_cnt, &mismatch_seen);
+      if (app_input.decode) {
+        // Don't look for mismatch on top spatial and top temporal layers as
+        // they are non reference frames.
+        if ((ss_number_layers > 1 || ts_number_layers > 1) &&
+            !(layer_id.temporal_layer_id > 0 &&
+              layer_id.temporal_layer_id == (int)ts_number_layers - 1)) {
+          test_decode(&codec, &decoder, frame_cnt, &mismatch_seen);
+        }
       }
 #endif
     }  // loop over spatial layers
@@ -1456,18 +1572,21 @@ int main(int argc, const char **argv) {
   close_input_file(&(app_input.input_ctx));
   printout_rate_control_summary(&rc, frame_cnt, ss_number_layers,
                                 ts_number_layers);
+
+  printf("\n");
+  for (unsigned int slx = 0; slx < ss_number_layers; slx++)
+    for (unsigned int tlx = 0; tlx < ts_number_layers; tlx++) {
+      int lx = slx * ts_number_layers + tlx;
+      printf("Per layer encoding time/FPS stats for encoder: %d %d %d %f %f \n",
+             slx, tlx, frame_cnt_layer[lx],
+             (float)cx_time_layer[lx] / (double)(frame_cnt_layer[lx] * 1000),
+             1000000 * (double)frame_cnt_layer[lx] / (double)cx_time_layer[lx]);
+    }
+
   printf("\n");
   printf("Frame cnt and encoding time/FPS stats for encoding: %d %f %f\n",
          frame_cnt, 1000 * (float)cx_time / (double)(frame_cnt * 1000000),
          1000000 * (double)frame_cnt / (double)cx_time);
-
-  if (ss_number_layers > 1) {
-    printf("Per spatial layer: \n");
-    for (unsigned int slx = 0; slx < ss_number_layers; slx++)
-      printf("Frame cnt and encoding time/FPS stats for encoding: %d %f %f\n",
-             frame_cnt, (float)cx_time_sl[slx] / (double)(frame_cnt * 1000),
-             1000000 * (double)frame_cnt / (double)cx_time_sl[slx]);
-  }
 
   if (aom_codec_destroy(&codec)) die_codec(&codec, "Failed to destroy codec");
 

@@ -8,6 +8,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
@@ -22,7 +23,7 @@
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
@@ -263,37 +264,6 @@ TEST_F(LayoutObjectTest, UseCountContainWithoutContentVisibility) {
       WebFeature::kCSSContainStrictWithoutContentVisibility));
 }
 
-TEST_F(LayoutObjectTest, UseCountContainingBlockFixedPosUnderFlattened3D) {
-  ScopedTransformInteropForTest disabled(false);
-  SetBodyInnerHTML(R"HTML(
-    <div style='transform-style: preserve-3d; opacity: 0.9'>
-      <div id=target style='position:fixed'></div>
-    </div>
-  )HTML");
-
-  LayoutObject* target = GetLayoutObjectByElementId("target");
-  EXPECT_EQ(target->View(), target->Container());
-
-  EXPECT_TRUE(GetDocument().IsUseCounted(
-      WebFeature::kTransformStyleContainingBlockComputedUsedMismatch));
-}
-
-TEST_F(LayoutObjectTest,
-       UseCountContainingBlockFixedPosUnderFlattened3DTransformInterop) {
-  ScopedTransformInteropForTest enabled(true);
-  SetBodyInnerHTML(R"HTML(
-    <div style='transform-style: preserve-3d; opacity: 0.9'>
-      <div id=target style='position:fixed'></div>
-    </div>
-  )HTML");
-
-  LayoutObject* target = GetLayoutObjectByElementId("target");
-  EXPECT_EQ(target->View(), target->GetDocument().GetLayoutView());
-
-  EXPECT_TRUE(GetDocument().IsUseCounted(
-      WebFeature::kTransformStyleContainingBlockComputedUsedMismatch));
-}
-
 // Containing block test.
 TEST_F(LayoutObjectTest, ContainingBlockLayoutViewShouldBeNull) {
   EXPECT_EQ(nullptr, GetLayoutView().ContainingBlock());
@@ -352,9 +322,7 @@ TEST_F(
   EXPECT_EQ(PhysicalOffset(2, 10), offset);
 }
 
-TEST_F(LayoutObjectTest, ContainingBlockFixedPosUnderFlattened3DWithInterop) {
-  ScopedTransformInteropForTest enabled(true);
-
+TEST_F(LayoutObjectTest, ContainingBlockFixedPosUnderFlattened3D) {
   SetBodyInnerHTML(R"HTML(
     <div id=container style='transform-style: preserve-3d; opacity: 0.9'>
       <div id=target style='position:fixed'></div>
@@ -456,7 +424,7 @@ TEST_F(
 
 TEST_F(LayoutObjectTest, PaintingLayerOfOverflowClipLayerUnderColumnSpanAll) {
   SetBodyInnerHTML(R"HTML(
-    <div id='columns' style='columns: 3'>
+    <div id='columns' style='position: relative; columns: 3'>
       <div style='column-span: all'>
         <div id='overflow-clip-layer' style='height: 100px; overflow:
     hidden'></div>
@@ -753,7 +721,6 @@ TEST_F(LayoutObjectTest, VisualRect) {
   class MockLayoutObject : public LayoutObject {
    public:
     MockLayoutObject() : LayoutObject(nullptr) {}
-    ~MockLayoutObject() override { SetBeingDestroyedForTesting(); }
     MOCK_CONST_METHOD0(VisualRectRespectsVisibility, bool());
 
    private:
@@ -762,24 +729,25 @@ TEST_F(LayoutObjectTest, VisualRect) {
     }
     const char* GetName() const final { return "MockLayoutObject"; }
     void UpdateLayout() final {}
-    FloatRect LocalBoundingBoxRectForAccessibility() const final {
-      return FloatRect();
+    gfx::RectF LocalBoundingBoxRectForAccessibility() const final {
+      return gfx::RectF();
     }
   };
 
-  MockLayoutObject mock_object;
+  MockLayoutObject* mock_object = MakeGarbageCollected<MockLayoutObject>();
   auto style = GetDocument().GetStyleResolver().CreateComputedStyle();
-  mock_object.SetStyle(style.get());
-  EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object.LocalVisualRect());
-  EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object.LocalVisualRect());
+  mock_object->SetStyle(style.get());
+  EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object->LocalVisualRect());
+  EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object->LocalVisualRect());
 
   style->SetVisibility(EVisibility::kHidden);
-  EXPECT_CALL(mock_object, VisualRectRespectsVisibility())
+  EXPECT_CALL(*mock_object, VisualRectRespectsVisibility())
       .WillOnce(Return(true));
-  EXPECT_TRUE(mock_object.LocalVisualRect().IsEmpty());
-  EXPECT_CALL(mock_object, VisualRectRespectsVisibility())
+  EXPECT_TRUE(mock_object->LocalVisualRect().IsEmpty());
+  EXPECT_CALL(*mock_object, VisualRectRespectsVisibility())
       .WillOnce(Return(false));
-  EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object.LocalVisualRect());
+  EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object->LocalVisualRect());
+  mock_object->SetDestroyedForTesting();
 }
 
 TEST_F(LayoutObjectTest, DisplayContentsInlineWrapper) {
@@ -1379,8 +1347,6 @@ TEST_F(LayoutObjectTest, ContainValueIsRelayoutBoundary) {
 }
 
 TEST_F(LayoutObjectTest, PerspectiveIsNotParent) {
-  ScopedTransformInteropForTest enabled(true);
-
   GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(R"HTML(
     <style>body { margin:0; }</style>
@@ -1403,8 +1369,6 @@ TEST_F(LayoutObjectTest, PerspectiveIsNotParent) {
 }
 
 TEST_F(LayoutObjectTest, PerspectiveWithAnonymousTable) {
-  ScopedTransformInteropForTest enabled(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>body { margin:0; }</style>
     <div id='ancestor' style='display: table; perspective: 100px; width: 100px; height: 100px;'>
@@ -1617,6 +1581,38 @@ TEST_F(LayoutObjectTest,
             target->LocalToAncestorRect(rect, nullptr, 0));
 }
 
+// crbug.com/1246619
+TEST_F(LayoutObjectTest, SetNeedsCollectInlinesForSvgText) {
+  SetBodyInnerHTML(R"HTML(
+    <div>
+    <svg xmlns="http://www.w3.org/2000/svg" id="ancestor">
+    <text id="text">Internet</text>
+    </svg></div>)HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* text = GetLayoutObjectByElementId("text");
+  if (text->IsNGSVGText()) {
+    text->SetNeedsCollectInlines();
+    EXPECT_TRUE(GetLayoutObjectByElementId("ancestor")->NeedsCollectInlines());
+  }
+}
+
+// crbug.com/1247686
+TEST_F(LayoutObjectTest, SetNeedsCollectInlinesForSvgInline) {
+  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
+    return;
+  SetBodyInnerHTML(R"HTML(
+    <div>
+    <svg xmlns="http://www.w3.org/2000/svg" id="ancestor">
+    <text id="text">Inter<a id="anchor">net</a></text>
+    </svg></div>)HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* anchor = GetLayoutObjectByElementId("anchor");
+  anchor->SetNeedsCollectInlines();
+  EXPECT_TRUE(GetLayoutObjectByElementId("text")->NeedsCollectInlines());
+}
+
 static const char* const kTransformsWith3D[] = {"transform: rotateX(20deg)",
                                                 "transform: translateZ(30px)"};
 static const char kTransformWithout3D[] =
@@ -1694,6 +1690,52 @@ TEST_F(LayoutObjectTestWithCompositing,
       GetDocument().IsUseCounted(WebFeature::kDifferentPerspectiveCBOrParent));
   GetDocument().ClearUseCounterForTesting(
       WebFeature::kDifferentPerspectiveCBOrParent);
+}
+
+TEST_F(LayoutObjectTest, HasTransformRelatedProperty) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .transform { transform: translateX(10px); }
+      .will-change { will-change: transform; }
+      .preserve-3d { transform-style: preserve-3d; }
+    </style>
+    <span id="span" class="transform will-change preserve-3d"></span>
+    <div id="div-transform" class="transform"></div>
+    <div id="div-will-change" class="will-change"></div>
+    <div id="div-preserve-3d" class="preserve-3d"></div>
+    <div id="div-none"></div>
+    <!-- overflow: visible to override the default overflow:hidden for and
+         enable preserve-3d -->
+    <svg id="svg" class="transform will-change preserve-3d"
+         style="overflow:visible">
+      <rect id="svg-rect" class="transform preserve-3d"/>
+      <rect id="svg-rect-will-change" class="will-change"/>
+      <rect id="svg-rect-preserve-3d" class="preserve-3d"/>
+      <text id="svg-text" class="transform preserve-3d"/>
+      <foreignObject id="foreign" class="transform preserve-3d"/>
+    </svg>
+  )HTML");
+
+  auto test = [&](const char* element_id, bool has_transform_related_property,
+                  bool has_transform, bool preserves_3d) {
+    SCOPED_TRACE(element_id);
+    const auto* object = GetLayoutObjectByElementId(element_id);
+    EXPECT_EQ(has_transform_related_property,
+              object->HasTransformRelatedProperty());
+    EXPECT_EQ(has_transform, object->HasTransform());
+    EXPECT_EQ(preserves_3d, object->Preserves3D());
+  };
+  test("span", false, false, false);
+  test("div-transform", true, true, false);
+  test("div-will-change", true, false, false);
+  test("div-preserve-3d", true, false, true);
+  test("div-none", false, false, false);
+  test("svg", true, true, true);
+  test("svg-rect", true, true, false);
+  test("svg-rect-will-change", true, false, false);
+  test("svg-rect-preserve-3d", false, false, false);
+  test("svg-text", true, true, false);
+  test("foreign", true, true, false);
 }
 
 }  // namespace blink

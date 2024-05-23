@@ -9,7 +9,8 @@
 #include "cc/input/snap_selection_strategy.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value_mappings.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -37,7 +38,7 @@ class CORE_EXPORT SnapCoordinator final
   SnapCoordinator(const SnapCoordinator&) = delete;
   SnapCoordinator& operator=(const SnapCoordinator&) = delete;
   ~SnapCoordinator();
-  void Trace(Visitor* visitor) const {}
+  void Trace(Visitor* visitor) const;
 
   void AddSnapContainer(LayoutBox& snap_container);
   void RemoveSnapContainer(LayoutBox& snap_container);
@@ -77,7 +78,7 @@ class CORE_EXPORT SnapCoordinator final
  private:
   friend class SnapCoordinatorTest;
 
-  HashSet<LayoutBox*> snap_containers_;
+  HeapHashSet<Member<LayoutBox>> snap_containers_;
   bool any_snap_container_data_needs_update_ = true;
 
   // Used for reporting to UMA when snapping on the initial layout affects the

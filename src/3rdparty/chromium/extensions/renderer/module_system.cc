@@ -6,12 +6,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
@@ -25,6 +22,15 @@
 #include "gin/converter.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_v8_features.h"
+#include "v8/include/v8-exception.h"
+#include "v8/include/v8-external.h"
+#include "v8/include/v8-function-callback.h"
+#include "v8/include/v8-function.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-message.h"
+#include "v8/include/v8-object.h"
+#include "v8/include/v8-primitive.h"
+#include "v8/include/v8-script.h"
 
 namespace extensions {
 
@@ -368,33 +374,16 @@ void ModuleSystem::OverrideNativeHandlerForTest(const std::string& name) {
 }
 
 // static
-void ModuleSystem::NativeLazyFieldGetter(
-    v8::Local<v8::Name> property,
-    const v8::PropertyCallbackInfo<v8::Value>& info) {
-  LazyFieldGetterInner(property.As<v8::String>(), info,
-                       &ModuleSystem::RequireNativeFromString);
-}
-
-// static
 void ModuleSystem::LazyFieldGetter(
     v8::Local<v8::Name> property,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  LazyFieldGetterInner(property.As<v8::String>(), info, &ModuleSystem::Require);
-}
-
-// static
-void ModuleSystem::LazyFieldGetterInner(
-    v8::Local<v8::String> property,
-    const v8::PropertyCallbackInfo<v8::Value>& info,
-    RequireFunction require_function) {
-  base::ElapsedTimer timer;
   CHECK(!info.Data().IsEmpty());
   CHECK(info.Data()->IsObject());
   v8::Isolate* isolate = info.GetIsolate();
   v8::HandleScope handle_scope(isolate);
   v8::Local<v8::Object> parameters = v8::Local<v8::Object>::Cast(info.Data());
   // This context should be the same as context()->v8_context().
-  v8::Local<v8::Context> context = parameters->CreationContext();
+  v8::Local<v8::Context> context = parameters->GetCreationContextChecked();
   v8::Local<v8::Object> global(context->Global());
   v8::Local<v8::Value> module_system_value;
   if (!GetPrivate(context, global, kModuleSystem, &module_system_value) ||
@@ -433,7 +422,7 @@ void ModuleSystem::LazyFieldGetterInner(
 
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::Value> module_value;
-  if (!(module_system->*require_function)(name).ToLocal(&module_value)) {
+  if (!module_system->Require(name).ToLocal(&module_value)) {
     module_system->HandleException(try_catch);
     return;
   }
@@ -493,23 +482,12 @@ void ModuleSystem::LazyFieldGetterInner(
     NOTREACHED();
   }
   info.GetReturnValue().Set(new_field);
-
-  UMA_HISTOGRAM_TIMES("Extensions.ApiBindingGenerationTime", timer.Elapsed());
 }
 
 void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
                                 const std::string& field,
                                 const std::string& module_name,
                                 const std::string& module_field) {
-  SetLazyField(
-      object, field, module_name, module_field, &ModuleSystem::LazyFieldGetter);
-}
-
-void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
-                                const std::string& field,
-                                const std::string& module_name,
-                                const std::string& module_field,
-                                v8::AccessorNameGetterCallback getter) {
   CHECK(field.size() < v8::String::kMaxLength);
   CHECK(module_name.size() < v8::String::kMaxLength);
   CHECK(module_field.size() < v8::String::kMaxLength);
@@ -524,20 +502,9 @@ void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
   SetPrivateProperty(context, parameters, kModuleField,
                      ToV8StringUnsafe(GetIsolate(), module_field.c_str()));
   auto maybe = object->SetAccessor(
-      context, ToV8StringUnsafe(GetIsolate(), field.c_str()), getter, NULL,
-      parameters);
+      context, ToV8StringUnsafe(GetIsolate(), field.c_str()),
+      &ModuleSystem::LazyFieldGetter, NULL, parameters);
   CHECK(v8_helpers::IsTrue(maybe));
-}
-
-void ModuleSystem::SetNativeLazyField(v8::Local<v8::Object> object,
-                                      const std::string& field,
-                                      const std::string& module_name,
-                                      const std::string& module_field) {
-  SetLazyField(object,
-               field,
-               module_name,
-               module_field,
-               &ModuleSystem::NativeLazyFieldGetter);
 }
 
 void ModuleSystem::OnNativeBindingCreated(
@@ -802,7 +769,7 @@ v8::Local<v8::Value> ModuleSystem::LoadModuleWithNativeAPIBridge(
   {
     v8::TryCatch try_catch(GetIsolate());
     try_catch.SetCaptureMessage(true);
-    context_->SafeCallFunction(func, base::size(args), args);
+    context_->SafeCallFunction(func, std::size(args), args);
     if (try_catch.HasCaught()) {
       HandleException(try_catch);
       return v8::Undefined(GetIsolate());

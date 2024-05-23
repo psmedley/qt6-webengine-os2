@@ -4,10 +4,12 @@
 
 #include "third_party/blink/renderer/core/paint/paint_property_tree_printer.h"
 
+#include "third_party/blink/renderer/core/document_transition/document_transition_supplement.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
@@ -48,9 +50,12 @@ class FrameViewPropertyTreePrinter
       if (LocalFrameView* child_view = child_local_frame->View())
         CollectNodes(*child_view);
     }
+    Traits::AddOtherProperties(frame_view, *this);
   }
 
   void CollectNodes(const LayoutObject& object) {
+    Traits::AddSharedElementTransitionProperties(object, *this);
+
     for (const auto* fragment = &object.FirstFragment(); fragment;
          fragment = fragment->NextFragment()) {
       if (const auto* properties = fragment->PaintProperties())
@@ -85,6 +90,12 @@ class PropertyTreePrinterTraits<TransformPaintPropertyNodeOrAlias> {
     printer.AddNode(properties.ScrollTranslation());
     printer.AddNode(properties.TransformIsolationNode());
   }
+  static void AddSharedElementTransitionProperties(
+      const LayoutObject& object,
+      PropertyTreePrinter<TransformPaintPropertyNodeOrAlias>& printer) {}
+  static void AddOtherProperties(
+      const FrameView& frame_view,
+      PropertyTreePrinter<TransformPaintPropertyNodeOrAlias>& printer) {}
 };
 
 template <>
@@ -106,6 +117,12 @@ class PropertyTreePrinterTraits<ClipPaintPropertyNodeOrAlias> {
     printer.AddNode(properties.OverflowClip());
     printer.AddNode(properties.ClipIsolationNode());
   }
+  static void AddSharedElementTransitionProperties(
+      const LayoutObject& object,
+      PropertyTreePrinter<ClipPaintPropertyNodeOrAlias>& printer) {}
+  static void AddOtherProperties(
+      const LocalFrameView& frame_view,
+      PropertyTreePrinter<ClipPaintPropertyNodeOrAlias>& printer) {}
 };
 
 template <>
@@ -128,6 +145,25 @@ class PropertyTreePrinterTraits<EffectPaintPropertyNodeOrAlias> {
     printer.AddNode(properties.ClipPathMask());
     printer.AddNode(properties.EffectIsolationNode());
   }
+
+  static void AddSharedElementTransitionProperties(
+      const LayoutObject& object,
+      PropertyTreePrinter<EffectPaintPropertyNodeOrAlias>& printer) {
+    auto* supplement =
+        DocumentTransitionSupplement::FromIfExists(object.GetDocument());
+    if (!supplement ||
+        !supplement->GetTransition()->IsTransitionParticipant(object)) {
+      return;
+    }
+
+    printer.AddNode(supplement->GetTransition()->GetEffect(object));
+  }
+
+  static void AddOtherProperties(
+      const LocalFrameView& frame_view,
+      PropertyTreePrinter<EffectPaintPropertyNodeOrAlias>& printer) {
+    printer.AddNode(&frame_view.GetFrame().Selection().CaretEffectNode());
+  }
 };
 
 template <>
@@ -144,6 +180,13 @@ class PropertyTreePrinterTraits<ScrollPaintPropertyNode> {
       PropertyTreePrinter<ScrollPaintPropertyNode>& printer) {
     printer.AddNode(properties.Scroll());
   }
+
+  static void AddSharedElementTransitionProperties(
+      const LayoutObject& object,
+      PropertyTreePrinter<ScrollPaintPropertyNode>& printer) {}
+  static void AddOtherProperties(
+      const LocalFrameView& frame_view,
+      PropertyTreePrinter<ScrollPaintPropertyNode>& printer) {}
 };
 
 template <typename PropertyTreeNode>
@@ -222,49 +265,49 @@ void UpdateDebugNames(const LayoutObject& object,
 
 }  // namespace blink
 
-CORE_EXPORT void showAllPropertyTrees(const blink::LocalFrameView& rootFrame) {
-  showTransformPropertyTree(rootFrame);
-  showClipPropertyTree(rootFrame);
-  showEffectPropertyTree(rootFrame);
-  showScrollPropertyTree(rootFrame);
+CORE_EXPORT void ShowAllPropertyTrees(const blink::LocalFrameView& rootFrame) {
+  ShowTransformPropertyTree(rootFrame);
+  ShowClipPropertyTree(rootFrame);
+  ShowEffectPropertyTree(rootFrame);
+  ShowScrollPropertyTree(rootFrame);
 }
 
-void showTransformPropertyTree(const blink::LocalFrameView& rootFrame) {
+void ShowTransformPropertyTree(const blink::LocalFrameView& rootFrame) {
   LOG(INFO) << "Transform tree:\n"
-            << transformPropertyTreeAsString(rootFrame).Utf8();
+            << TransformPropertyTreeAsString(rootFrame).Utf8();
 }
 
-void showClipPropertyTree(const blink::LocalFrameView& rootFrame) {
-  LOG(INFO) << "Clip tree:\n" << clipPropertyTreeAsString(rootFrame).Utf8();
+void ShowClipPropertyTree(const blink::LocalFrameView& rootFrame) {
+  LOG(INFO) << "Clip tree:\n" << ClipPropertyTreeAsString(rootFrame).Utf8();
 }
 
-void showEffectPropertyTree(const blink::LocalFrameView& rootFrame) {
-  LOG(INFO) << "Effect tree:\n" << effectPropertyTreeAsString(rootFrame).Utf8();
+void ShowEffectPropertyTree(const blink::LocalFrameView& rootFrame) {
+  LOG(INFO) << "Effect tree:\n" << EffectPropertyTreeAsString(rootFrame).Utf8();
 }
 
-void showScrollPropertyTree(const blink::LocalFrameView& rootFrame) {
-  LOG(INFO) << "Scroll tree:\n" << scrollPropertyTreeAsString(rootFrame).Utf8();
+void ShowScrollPropertyTree(const blink::LocalFrameView& rootFrame) {
+  LOG(INFO) << "Scroll tree:\n" << ScrollPropertyTreeAsString(rootFrame).Utf8();
 }
 
-String transformPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
+String TransformPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
   return blink::FrameViewPropertyTreePrinter<
              blink::TransformPaintPropertyNodeOrAlias>()
       .TreeAsString(rootFrame);
 }
 
-String clipPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
+String ClipPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
   return blink::FrameViewPropertyTreePrinter<
              blink::ClipPaintPropertyNodeOrAlias>()
       .TreeAsString(rootFrame);
 }
 
-String effectPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
+String EffectPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
   return blink::FrameViewPropertyTreePrinter<
              blink::EffectPaintPropertyNodeOrAlias>()
       .TreeAsString(rootFrame);
 }
 
-String scrollPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
+String ScrollPropertyTreeAsString(const blink::LocalFrameView& rootFrame) {
   return blink::FrameViewPropertyTreePrinter<blink::ScrollPaintPropertyNode>()
       .TreeAsString(rootFrame);
 }

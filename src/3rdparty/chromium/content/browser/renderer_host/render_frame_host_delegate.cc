@@ -28,10 +28,6 @@ bool RenderFrameHostDelegate::OnMessageReceived(
   return false;
 }
 
-const GURL& RenderFrameHostDelegate::GetMainFrameLastCommittedURL() {
-  return GURL::EmptyGURL();
-}
-
 bool RenderFrameHostDelegate::DidAddMessageToConsole(
     RenderFrameHostImpl* source_frame,
     blink::mojom::ConsoleMessageLevel log_level,
@@ -75,18 +71,16 @@ RenderFrameHostDelegate::GetGeolocationContext() {
   return nullptr;
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void RenderFrameHostDelegate::GetNFC(
     RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<device::mojom::NFC> receiver) {}
 #endif
 
-bool RenderFrameHostDelegate::CanEnterFullscreenMode() {
+bool RenderFrameHostDelegate::CanEnterFullscreenMode(
+    RenderFrameHostImpl* requesting_frame,
+    const blink::mojom::FullscreenOptions& options) {
   return true;
-}
-
-bool RenderFrameHostDelegate::HasEnteredFullscreenMode() {
-  return false;
 }
 
 void RenderFrameHostDelegate::FullscreenStateChanged(
@@ -95,8 +89,11 @@ void RenderFrameHostDelegate::FullscreenStateChanged(
     blink::mojom::FullscreenOptionsPtr options) {}
 
 bool RenderFrameHostDelegate::ShouldRouteMessageEvent(
-    RenderFrameHostImpl* target_rfh,
-    SiteInstance* source_site_instance) const {
+    RenderFrameHostImpl* target_rfh) const {
+  return false;
+}
+
+bool RenderFrameHostDelegate::IsInnerWebContentsForGuest() {
   return false;
 }
 
@@ -128,7 +125,7 @@ bool RenderFrameHostDelegate::ShouldAllowRunningInsecureContent(
   return false;
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 base::android::ScopedJavaLocalRef<jobject>
 RenderFrameHostDelegate::GetJavaRenderFrameHostDelegate() {
   return nullptr;
@@ -145,7 +142,8 @@ std::vector<FrameTreeNode*> RenderFrameHostDelegate::GetUnattachedOwnedNodes(
 }
 
 media::MediaMetricsProvider::RecordAggregateWatchTimeCallback
-RenderFrameHostDelegate::GetRecordAggregateWatchTimeCallback() {
+RenderFrameHostDelegate::GetRecordAggregateWatchTimeCallback(
+    const GURL& page_main_frame_last_committed_url) {
   return base::NullCallback();
 }
 
@@ -156,10 +154,6 @@ void RenderFrameHostDelegate::IsClipboardPasteContentAllowed(
     IsClipboardPasteContentAllowedCallback callback) {
   std::move(callback).Run(ClipboardPasteContentAllowed(true));
 }
-
-void RenderFrameHostDelegate::OnTextAutosizerPageInfoChanged(
-    RenderFrameHostImpl* source,
-    blink::mojom::TextAutosizerPageInfoPtr page_info) {}
 
 bool RenderFrameHostDelegate::HasSeenRecentScreenOrientationChange() {
   return false;
@@ -174,7 +168,7 @@ bool RenderFrameHostDelegate::IsBackForwardCacheSupported() {
 }
 
 RenderWidgetHostImpl* RenderFrameHostDelegate::CreateNewPopupWidget(
-    AgentSchedulingGroupHost& agent_scheduling_group,
+    base::SafeRef<SiteInstanceGroup> site_instance_group,
     int32_t route_id,
     mojo::PendingAssociatedReceiver<blink::mojom::PopupWidgetHost>
         blink_popup_widget_host,

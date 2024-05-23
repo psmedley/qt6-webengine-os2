@@ -11,12 +11,12 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/i18n/base_i18n_switches.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "build/chromeos_buildflags.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/threading/thread.h"
+#include "build/build_config.h"
 #include "components/network_session_configurator/common/network_switches.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
@@ -28,13 +28,15 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "media/base/media_switches.h"
-#include "media/webrtc/webrtc_switches.h"
+#include "media/webrtc/webrtc_features.h"
+#include "sandbox/policy/mojom/sandbox.mojom.h"
 #include "sandbox/policy/sandbox_type.h"
 #include "sandbox/policy/switches.h"
 #include "services/network/public/cpp/network_switches.h"
@@ -42,15 +44,15 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/gl/gl_switches.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "services/network/public/mojom/network_service.mojom.h"
 #endif
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "components/os_crypt/os_crypt_switches.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "media/capture/capture_switches.h"
 #endif
 
@@ -67,8 +69,8 @@ UtilityProcessHost::UtilityProcessHost()
     : UtilityProcessHost(nullptr /* client */) {}
 
 UtilityProcessHost::UtilityProcessHost(std::unique_ptr<Client> client)
-    : sandbox_type_(sandbox::policy::SandboxType::kUtility),
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+    : sandbox_type_(sandbox::mojom::Sandbox::kUtility),
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
       child_flags_(ChildProcessHost::CHILD_ALLOW_SELF),
 #else
       child_flags_(ChildProcessHost::CHILD_NORMAL),
@@ -76,17 +78,13 @@ UtilityProcessHost::UtilityProcessHost(std::unique_ptr<Client> client)
       started_(false),
       name_(u"utility process"),
       client_(std::move(client)) {
-  DCHECK_CURRENTLY_ON(base::FeatureList::IsEnabled(features::kProcessHostOnUI)
-                          ? BrowserThread::UI
-                          : BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   process_ = std::make_unique<BrowserChildProcessHostImpl>(
       PROCESS_TYPE_UTILITY, this, ChildProcessHost::IpcMode::kNormal);
 }
 
 UtilityProcessHost::~UtilityProcessHost() {
-  DCHECK_CURRENTLY_ON(base::FeatureList::IsEnabled(features::kProcessHostOnUI)
-                          ? BrowserThread::UI
-                          : BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (client_ && launch_state_ == LaunchState::kLaunchComplete)
     client_->OnProcessTerminatedNormally();
 }
@@ -95,8 +93,7 @@ base::WeakPtr<UtilityProcessHost> UtilityProcessHost::AsWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
-void UtilityProcessHost::SetSandboxType(
-    sandbox::policy::SandboxType sandbox_type) {
+void UtilityProcessHost::SetSandboxType(sandbox::mojom::Sandbox sandbox_type) {
   sandbox_type_ = sandbox_type;
 }
 
@@ -104,7 +101,7 @@ const ChildProcessData& UtilityProcessHost::GetData() {
   return process_->GetData();
 }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 void UtilityProcessHost::SetEnv(const base::EnvironmentMap& env) {
   env_ = env;
 }
@@ -114,6 +111,7 @@ bool UtilityProcessHost::Start() {
   return StartProcess();
 }
 
+#if BUILDFLAG(IS_CHROMECAST)
 void UtilityProcessHost::RunServiceDeprecated(
     const std::string& service_name,
     mojo::ScopedMessagePipeHandle service_pipe,
@@ -132,6 +130,7 @@ void UtilityProcessHost::RunServiceDeprecated(
     pending_run_service_callbacks_.push_back(std::move(callback));
   }
 }
+#endif
 
 void UtilityProcessHost::SetMetricsName(const std::string& metrics_name) {
   metrics_name_ = metrics_name;
@@ -174,7 +173,7 @@ bool UtilityProcessHost::StartProcess() {
     bool has_cmd_prefix =
         browser_command_line.HasSwitch(switches::kUtilityCmdPrefix);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     // readlink("/prof/self/exe") sometimes fails on Android at startup.
     // As a workaround skip calling it here, since the executable name is
     // not needed on Android anyway. See crbug.com/500854.
@@ -185,6 +184,10 @@ bool UtilityProcessHost::StartProcess() {
       process_->EnableWarmUpConnection();
     }
 #else
+#if BUILDFLAG(IS_MAC)
+    if (sandbox_type_ == sandbox::mojom::Sandbox::kServiceWithJit)
+      DCHECK_EQ(child_flags_, ChildProcessHost::CHILD_RENDERER);
+#endif  // BUILDFLAG(IS_MAC)
     int child_flags = child_flags_;
 
     // When running under gdb, forking /proc/self/exe ends up forking the gdb
@@ -209,14 +212,13 @@ bool UtilityProcessHost::StartProcess() {
                                 switches::kUtilityProcess);
     // Specify the type of utility process for debugging/profiling purposes.
     cmd_line->AppendSwitchASCII(switches::kUtilitySubType, metrics_name_);
-    BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(cmd_line.get());
     BrowserChildProcessHostImpl::CopyTraceStartupFlags(cmd_line.get());
     std::string locale = GetContentClient()->browser()->GetApplicationLocale();
     cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     cmd_line->AppendArg(switches::kPrefetchArgumentOther);
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
     sandbox::policy::SetCommandLineFlagsForSandboxType(cmd_line.get(),
                                                        sandbox_type_);
@@ -231,13 +233,10 @@ bool UtilityProcessHost::StartProcess() {
       network::switches::kLogNetLog,
       network::switches::kNetLogCaptureMode,
       sandbox::policy::switches::kNoSandbox,
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if defined(OS_LINUX) && !BUILDFLAG(IS_CHROMEOS_ASH) && \
-    !BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
       switches::kDisableDevShmUsage,
 #endif
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       sandbox::policy::switches::kEnableSandboxLogging,
       os_crypt::switches::kUseMockKeychain,
 #endif
@@ -249,7 +248,6 @@ bool UtilityProcessHost::StartProcess() {
       switches::kForceUIDirection,
       switches::kIgnoreCertificateErrors,
       switches::kLoggingLevel,
-      switches::kOverrideUseSoftwareGLForHeadless,
       switches::kOverrideUseSoftwareGLForTests,
       switches::kOverrideEnabledCdmInterfaceVersion,
       switches::kProxyServer,
@@ -265,7 +263,7 @@ bool UtilityProcessHost::StartProcess() {
       switches::kUseGL,
       switches::kV,
       switches::kVModule,
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
       switches::kEnableReachedCodeProfiler,
       switches::kReachedCodeSamplingIntervalUs,
 #endif
@@ -277,16 +275,15 @@ bool UtilityProcessHost::StartProcess() {
       switches::kFailAudioStreamCreation,
       switches::kMuteAudio,
       switches::kUseFileForFakeAudioCapture,
-      switches::kAgcStartupMinVolume,
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_FREEBSD) || \
-    defined(OS_SOLARIS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD) || \
+    BUILDFLAG(IS_SOLARIS)
       switches::kAlsaInputDevice,
       switches::kAlsaOutputDevice,
 #endif
 #if defined(USE_CRAS)
       switches::kUseCras,
 #endif
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       switches::kDisableHighResTimer,
       switches::kEnableExclusiveAudio,
       switches::kForceWaveAudio,
@@ -301,12 +298,12 @@ bool UtilityProcessHost::StartProcess() {
 #endif
       network::switches::kUseFirstPartySet,
       network::switches::kIpAddressSpaceOverrides,
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
       switches::kSchedulerBoostUrgent,
 #endif
     };
     cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
-                               base::size(kSwitchNames));
+                               std::size(kSwitchNames));
 
     network_session_configurator::CopyNetworkSwitches(browser_command_line,
                                                       cmd_line.get());
@@ -321,9 +318,8 @@ bool UtilityProcessHost::StartProcess() {
     for (const auto& extra_switch : extra_switches_)
       cmd_line->AppendSwitch(extra_switch);
 
-#if defined(OS_WIN)
-    if (base::FeatureList::IsEnabled(
-            media::kMediaFoundationD3D11VideoCapture)) {
+#if BUILDFLAG(IS_WIN)
+    if (media::IsMediaFoundationD3D11VideoCaptureEnabled()) {
       // MediaFoundationD3D11VideoCapture requires Gpu memory buffers,
       // which are unavailable if the GPU process isn't running.
       if (!GpuDataManagerImpl::GetInstance()->IsGpuCompositingDisabled()) {
@@ -345,18 +341,22 @@ bool UtilityProcessHost::StartProcess() {
 
 void UtilityProcessHost::OnProcessLaunched() {
   launch_state_ = LaunchState::kLaunchComplete;
+#if BUILDFLAG(IS_CHROMECAST)
   for (auto& callback : pending_run_service_callbacks_)
     std::move(callback).Run(process_->GetProcess().Pid());
   pending_run_service_callbacks_.clear();
+#endif
   if (client_)
     client_->OnProcessLaunched(process_->GetProcess());
 }
 
 void UtilityProcessHost::OnProcessLaunchFailed(int error_code) {
   launch_state_ = LaunchState::kLaunchFailed;
+#if BUILDFLAG(IS_CHROMECAST)
   for (auto& callback : pending_run_service_callbacks_)
     std::move(callback).Run(absl::nullopt);
   pending_run_service_callbacks_.clear();
+#endif
 }
 
 void UtilityProcessHost::OnProcessCrashed(int exit_code) {
@@ -366,15 +366,6 @@ void UtilityProcessHost::OnProcessCrashed(int exit_code) {
   // Take ownership of |client_| so the destructor doesn't notify it of
   // termination.
   auto client = std::move(client_);
-#if defined(OS_ANDROID)
-  // OnProcessCrashed() is always called on Android even in the case of normal
-  // process termination. |clean_exit| gives us a reliable indication of whether
-  // this was really a crash or just normal termination.
-  if (process_->GetTerminationInfo(true /* known_dead */).clean_exit) {
-    client->OnProcessTerminatedNormally();
-    return;
-  }
-#endif
   client->OnProcessCrashed();
 }
 

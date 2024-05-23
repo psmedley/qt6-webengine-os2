@@ -25,12 +25,12 @@
 
 #include <memory>
 
-#include "base/bits.h"
 #include "base/dcheck_is_on.h"
 #include "base/numerics/checked_math.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/wtf/atomic_operations.h"
 #include "third_party/blink/renderer/platform/wtf/conditional_destructor.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
@@ -343,8 +343,9 @@ class HashTableConstIterator final {
 #if DCHECK_IS_ON()
     // HashTable and collections that build on it do not support
     // modifications while there is an iterator in use. The exception is
-    // ListHashSet, which has its own iterators that tolerate modification
+    // LinkedHashSet, which has its own iterators that tolerate modification
     // of the underlying set.
+
     DCHECK_EQ(container_modifications_, container_->Modifications());
     DCHECK(!container_->AccessForbidden());
 #endif
@@ -608,7 +609,7 @@ struct HashTableAddResult final {
   STACK_ALLOCATED();
 
  public:
-  HashTableAddResult(const HashTableType* container,
+  HashTableAddResult([[maybe_unused]] const HashTableType* container,
                      ValueType* stored_value,
                      bool is_new_entry)
       : stored_value(stored_value),
@@ -619,7 +620,6 @@ struct HashTableAddResult final {
         container_modifications_(container->Modifications())
 #endif
   {
-    ALLOW_UNUSED_LOCAL(container);
     DCHECK(container);
   }
 
@@ -862,8 +862,9 @@ class HashTable final
   int64_t Modifications() const { return modifications_; }
   void RegisterModification() { modifications_++; }
   // HashTable and collections that build on it do not support modifications
-  // while there is an iterator in use. The exception is ListHashSet, which
-  // has its own iterators that tolerate modification of the underlying set.
+  // while there is an iterator in use. The exception is
+  // LinkedHashSet, which has its own iterators that tolerate modification
+  // of the underlying set.
   void CheckModifications(int64_t mods) const {
     DCHECK_EQ(mods, modifications_);
   }
@@ -1015,8 +1016,6 @@ class HashTable final
             typename Y,
             typename Z>
   friend struct WeakProcessingHashTableHelper;
-  template <typename T, size_t, typename U, typename V>
-  friend class ListHashSet;
 };
 
 template <typename Key,
@@ -1138,7 +1137,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
 
   UPDATE_ACCESS_COUNTS();
 
-  while (1) {
+  while (true) {
     const ValueType* entry = table + i;
 
     if (HashFunctions::safe_to_compare_to_empty_or_deleted) {
@@ -1193,7 +1192,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
 
   ValueType* deleted_entry = nullptr;
 
-  while (1) {
+  while (true) {
     ValueType* entry = table + i;
 
     if (IsEmptyBucket(*entry))
@@ -1249,7 +1248,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
 
   ValueType* deleted_entry = nullptr;
 
-  while (1) {
+  while (true) {
     ValueType* entry = table + i;
 
     if (IsEmptyBucket(*entry))
@@ -1318,7 +1317,7 @@ struct HashTableBucketInitializer<true> {
       memset(&bucket, 0, sizeof(bucket));
       return;
     }
-    AtomicMemzero(&bucket, sizeof(bucket));
+    AtomicMemzero<sizeof(bucket)>(&bucket);
   }
 };
 
@@ -1387,7 +1386,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
 
   ValueType* deleted_entry = nullptr;
   ValueType* entry;
-  while (1) {
+  while (true) {
     entry = table + i;
 
     if (IsEmptyBucket(*entry))
@@ -1832,7 +1831,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   Allocator::template BackingWriteBarrier(&table_);
 
   if (Traits::kEmptyValueIsZero) {
-    memset(original_table, 0, new_table_size * sizeof(ValueType));
+    AtomicMemzero(original_table, new_table_size * sizeof(ValueType));
   } else {
     for (unsigned i = 0; i < new_table_size; i++)
       InitializeBucket(original_table[i]);

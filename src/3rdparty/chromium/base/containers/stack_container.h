@@ -6,9 +6,10 @@
 #define BASE_CONTAINERS_STACK_CONTAINER_H_
 
 #include <stddef.h>
-
+#include <memory>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -34,7 +35,7 @@ namespace base {
 template<typename T, size_t stack_capacity>
 class StackAllocator : public std::allocator<T> {
  public:
-  typedef typename std::allocator_traits<std::allocator<T>>::pointer pointer;
+  typedef typename std::allocator<T>::pointer pointer;
   typedef typename std::allocator<T>::size_type size_type;
 
   // Backing store for the allocator. The container owner is responsible for
@@ -45,7 +46,9 @@ class StackAllocator : public std::allocator<T> {
     }
 
     // Casts the buffer in its right type.
+    NO_SANITIZE("cfi-unrelated-cast")
     T* stack_buffer() { return reinterpret_cast<T*>(stack_buffer_); }
+    NO_SANITIZE("cfi-unrelated-cast")
     const T* stack_buffer() const {
       return reinterpret_cast<const T*>(&stack_buffer_);
     }
@@ -118,6 +121,7 @@ class StackAllocator : public std::allocator<T> {
   }
 
  private:
+  // `source_` is not a raw_ptr<T> for performance reasons: on-stack pointee.
   Source* source_;
 };
 

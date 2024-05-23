@@ -7,7 +7,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/history/core/browser/download_database.h"
 #include "components/history/core/browser/history_types.h"
@@ -22,7 +23,7 @@
 #include "sql/init_status.h"
 #include "sql/meta_table.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/history/core/browser/android/android_cache_database.h"
 #include "components/history/core/browser/android/android_urls_database.h"
 #endif
@@ -43,7 +44,7 @@ namespace history {
 // as the storage interface. Logic for manipulating this storage layer should
 // be in HistoryBackend.cc.
 class HistoryDatabase : public DownloadDatabase,
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
                         public AndroidURLsDatabase,
                         public AndroidCacheDatabase,
 #endif
@@ -55,24 +56,14 @@ class HistoryDatabase : public DownloadDatabase,
                         public VisitAnnotationsDatabase,
                         public VisitSegmentDatabase {
  public:
-  // A simple class for scoping a history database transaction. This does not
-  // support rollback since the history database doesn't, either.
-  class TransactionScoper {
-   public:
-    explicit TransactionScoper(HistoryDatabase* db) : db_(db) {
-      db_->BeginTransaction();
-    }
-    ~TransactionScoper() { db_->CommitTransaction(); }
-
-   private:
-    HistoryDatabase* db_;
-  };
-
   // Must call Init() to complete construction. Although it can be created on
   // any thread, it must be destructed on the history thread for proper
   // database cleanup.
   HistoryDatabase(DownloadInterruptReason download_interrupt_reason_none,
                   DownloadInterruptReason download_interrupt_reason_crash);
+
+  HistoryDatabase(const HistoryDatabase&) = delete;
+  HistoryDatabase& operator=(const HistoryDatabase&) = delete;
 
   ~HistoryDatabase() override;
 
@@ -170,7 +161,7 @@ class HistoryDatabase : public DownloadDatabase,
   virtual void UpdateEarlyExpirationThreshold(base::Time threshold);
 
  private:
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // AndroidProviderBackend uses the `db_`.
   friend class AndroidProviderBackend;
   FRIEND_TEST_ALL_PREFIXES(AndroidURLsMigrationTest, MigrateToVersion22);
@@ -198,7 +189,7 @@ class HistoryDatabase : public DownloadDatabase,
   // may commit the transaction and start a new one if migration requires it.
   sql::InitStatus EnsureCurrentVersion();
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   // Converts the time epoch in the database from being 1970-based to being
   // 1601-based which corresponds to the change in Time.internal_value_.
   void MigrateTimeEpoch();
@@ -210,8 +201,6 @@ class HistoryDatabase : public DownloadDatabase,
   sql::MetaTable meta_table_;
 
   base::Time cached_early_expiration_threshold_;
-
-  DISALLOW_COPY_AND_ASSIGN(HistoryDatabase);
 };
 
 }  // namespace history

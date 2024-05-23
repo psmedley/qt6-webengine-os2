@@ -20,10 +20,7 @@ set(LANG_HEADER_PROCESSING_SCRIPT "${spirv-tools_SOURCE_DIR}/utils/generate_lang
 # Pull in grammar files that have migrated to SPIRV-Headers
 set(DEBUGINFO_GRAMMAR_JSON_FILE "${SPIRV_HEADER_INCLUDE_DIR}/spirv/unified1/extinst.debuginfo.grammar.json")
 set(CLDEBUGINFO100_GRAMMAR_JSON_FILE "${SPIRV_HEADER_INCLUDE_DIR}/spirv/unified1/extinst.opencl.debuginfo.100.grammar.json")
-
-# For now, assume the NonSemantic.Vulkan.DebugInfo grammar file is in the current directory.
-# It will later migrate to SPIRV-Headers.
-set(VKDEBUGINFO100_GRAMMAR_JSON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/extinst.nonsemantic.vulkan.debuginfo.100.grammar.json")
+set(VKDEBUGINFO100_GRAMMAR_JSON_FILE "${SPIRV_HEADER_INCLUDE_DIR}/spirv/unified1/extinst.nonsemantic.shader.debuginfo.100.grammar.json")
 
 # macro() definitions are used in the following because we need to append .inc
 # file paths into some global lists (*_CPP_DEPENDS). And those global lists are
@@ -154,11 +151,11 @@ spvtools_vendor_tables("spv-amd-gcn-shader" "spv-amd-gs" "")
 spvtools_vendor_tables("spv-amd-shader-ballot" "spv-amd-sb" "")
 spvtools_vendor_tables("debuginfo" "debuginfo" "")
 spvtools_vendor_tables("opencl.debuginfo.100" "cldi100" "CLDEBUG100_")
-spvtools_vendor_tables("nonsemantic.vulkan.debuginfo.100" "vkdi100" "VKDEBUG100_")
+spvtools_vendor_tables("nonsemantic.shader.debuginfo.100" "shdi100" "SHDEBUG100_")
 spvtools_vendor_tables("nonsemantic.clspvreflection" "clspvreflection" "")
 spvtools_extinst_lang_headers("DebugInfo" ${DEBUGINFO_GRAMMAR_JSON_FILE})
 spvtools_extinst_lang_headers("OpenCLDebugInfo100" ${CLDEBUGINFO100_GRAMMAR_JSON_FILE})
-spvtools_extinst_lang_headers("NonSemanticVulkanDebugInfo100" ${VKDEBUGINFO100_GRAMMAR_JSON_FILE})
+spvtools_extinst_lang_headers("NonSemanticShaderDebugInfo100" ${VKDEBUGINFO100_GRAMMAR_JSON_FILE})
 
 spvtools_vimsyntax("unified1" "1.0")
 add_custom_target(spirv-tools-vimsyntax DEPENDS ${VIMSYNTAX_FILE})
@@ -200,7 +197,7 @@ set(SPIRV_TOOLS_CHANGES_FILE
 add_custom_command(OUTPUT ${SPIRV_TOOLS_BUILD_VERSION_INC}
    COMMAND ${PYTHON_EXECUTABLE}
            ${SPIRV_TOOLS_BUILD_VERSION_INC_GENERATOR}
-           ${spirv-tools_SOURCE_DIR} ${SPIRV_TOOLS_BUILD_VERSION_INC}
+           ${SPIRV_TOOLS_CHANGES_FILE} ${SPIRV_TOOLS_BUILD_VERSION_INC}
    DEPENDS ${SPIRV_TOOLS_BUILD_VERSION_INC_GENERATOR}
            ${SPIRV_TOOLS_CHANGES_FILE}
    COMMENT "Update build-version.inc in the SPIRV-Tools build directory (if necessary).")
@@ -220,15 +217,18 @@ add_subdirectory(reduce)
 add_subdirectory(fuzz)
 add_subdirectory(link)
 add_subdirectory(lint)
+add_subdirectory(diff)
 
 set(SPIRV_SOURCES
   ${spirv-tools_SOURCE_DIR}/include/spirv-tools/libspirv.h
 
   ${CMAKE_CURRENT_SOURCE_DIR}/util/bitutils.h
   ${CMAKE_CURRENT_SOURCE_DIR}/util/bit_vector.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/util/hash_combine.h
   ${CMAKE_CURRENT_SOURCE_DIR}/util/hex_float.h
   ${CMAKE_CURRENT_SOURCE_DIR}/util/make_unique.h
   ${CMAKE_CURRENT_SOURCE_DIR}/util/parse_number.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/util/pooled_linked_list.h
   ${CMAKE_CURRENT_SOURCE_DIR}/util/small_vector.h
   ${CMAKE_CURRENT_SOURCE_DIR}/util/string_utils.h
   ${CMAKE_CURRENT_SOURCE_DIR}/util/timer.h
@@ -407,7 +407,7 @@ if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   find_library(LIBRT rt)
   if(LIBRT)
     foreach(target ${SPIRV_TOOLS_TARGETS})
-      target_link_libraries(${target} ${LIBRT})
+      target_link_libraries(${target} rt)
     endforeach()
   endif()
 endif()
@@ -431,8 +431,10 @@ if(ENABLE_SPIRV_TOOLS_INSTALL)
   # Special config file for root library compared to other libs.
   file(WRITE ${CMAKE_BINARY_DIR}/${SPIRV_TOOLS}Config.cmake
     "include(\${CMAKE_CURRENT_LIST_DIR}/${SPIRV_TOOLS}Target.cmake)\n"
-    "set(${SPIRV_TOOLS}_LIBRARIES ${SPIRV_TOOLS})\n"
-    "get_target_property(${SPIRV_TOOLS}_INCLUDE_DIRS ${SPIRV_TOOLS} INTERFACE_INCLUDE_DIRECTORIES)\n")
+    "if(TARGET ${SPIRV_TOOLS})\n"
+    "    set(${SPIRV_TOOLS}_LIBRARIES ${SPIRV_TOOLS})\n"
+    "    get_target_property(${SPIRV_TOOLS}_INCLUDE_DIRS ${SPIRV_TOOLS} INTERFACE_INCLUDE_DIRECTORIES)\n"
+    "endif()\n")
   install(FILES ${CMAKE_BINARY_DIR}/${SPIRV_TOOLS}Config.cmake DESTINATION ${PACKAGE_DIR})
 endif(ENABLE_SPIRV_TOOLS_INSTALL)
 

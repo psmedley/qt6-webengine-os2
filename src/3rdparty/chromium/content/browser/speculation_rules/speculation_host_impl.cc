@@ -4,16 +4,20 @@
 
 #include "content/browser/speculation_rules/speculation_host_impl.h"
 
+#include "content/browser/prerender/prerender_attributes.h"
 #include "content/browser/prerender/prerender_host_registry.h"
 #include "content/browser/renderer_host/render_frame_host_delegate.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
+#include "content/browser/speculation_rules/prefetch/prefetch_document_manager.h"
+#include "content/browser/speculation_rules/prefetch/prefetch_features.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/referrer.h"
 #include "mojo/public/cpp/bindings/message.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom.h"
-#include "url/origin.h"
 
 namespace content {
 
@@ -51,14 +55,15 @@ void SpeculationHostImpl::Bind(
     return;
   }
 
-  // DocumentServiceBase will destroy this on pipe closure or frame destruction.
+  // DocumentService will destroy this on pipe closure or frame destruction.
   new SpeculationHostImpl(frame_host, std::move(receiver));
 }
 
 SpeculationHostImpl::SpeculationHostImpl(
     RenderFrameHost* frame_host,
     mojo::PendingReceiver<blink::mojom::SpeculationHost> receiver)
-    : DocumentServiceBase(frame_host, std::move(receiver)) {
+    : DocumentService(frame_host, std::move(receiver)),
+      WebContentsObserver(WebContents::FromRenderFrameHost(frame_host)) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   delegate_ = GetContentClient()->browser()->CreateSpeculationHostDelegate(
@@ -99,6 +104,14 @@ void SpeculationHostImpl::UpdateSpeculationCandidates(
   if (render_frame_host()->GetParent())
     return;
 
+  if (base::FeatureList::IsEnabled(features::kPrefetchUseContentRefactor)) {
+    PrefetchDocumentManager* prefetch_document_manager =
+        PrefetchDocumentManager::GetOrCreateForCurrentDocument(
+            render_frame_host());
+
+    prefetch_document_manager->ProcessCandidates(candidates);
+  }
+
   // Let `delegate_` process the candidates that it is interested in.
   if (delegate_)
     delegate_->ProcessCandidates(candidates);
@@ -111,11 +124,14 @@ void SpeculationHostImpl::ProcessCandidatesForPrerender(
   if (!registry_ || candidates.empty())
     return;
   DCHECK(blink::features::IsPrerender2Enabled());
-  WebContentsDelegate* web_contents_delegate =
-      content::WebContents::FromRenderFrameHost(render_frame_host())
-          ->GetDelegate();
+
+  // TODO(https://crbug.com/1292422): Move this check into
+  // PrerenderHostRegistry::CreateAndStartHost().
+  WebContents* web_contents =
+      WebContents::FromRenderFrameHost(render_frame_host());
+  WebContentsDelegate* web_contents_delegate = web_contents->GetDelegate();
   if (!web_contents_delegate ||
-      !web_contents_delegate->IsPrerender2Supported()) {
+      !web_contents_delegate->IsPrerender2Supported(*web_contents)) {
     return;
   }
 
@@ -127,20 +143,15 @@ void SpeculationHostImpl::ProcessCandidatesForPrerender(
     GetContentClient()->browser()->LogWebFeatureForCurrentPage(
         rfhi, blink::mojom::WebFeature::kSpeculationRulesPrerender);
 
-    // TODO(crbug.com/1176054): Support cross-origin prerendering.
-    // TODO(crbug.com/1197133): Record the cancellation reason of no
-    // same-origin candidates via UMA.
-    if (!origin().IsSameOriginWith(url::Origin::Create(it->url)))
-      continue;
-
-    // TODO(https://crbug.com/1217903): Set up `attributes->size`.
-    auto attributes = blink::mojom::PrerenderAttributes::New();
-    attributes->url = it->url;
-    attributes->referrer = std::move(it->referrer);
-    attributes->trigger_type =
-        blink::mojom::PrerenderTriggerType::kSpeculationRule;
-    int prerender_host_id =
-        registry_->CreateAndStartHost(std::move(attributes), *rfhi);
+    int prerender_host_id = registry_->CreateAndStartHost(
+        PrerenderAttributes(
+            it->url, PrerenderTriggerType::kSpeculationRule,
+            /*embedder_histogram_suffix=*/"", Referrer(*(it->referrer)),
+            rfhi->GetLastCommittedOrigin(), rfhi->GetLastCommittedURL(),
+            rfhi->GetProcess()->GetID(), rfhi->GetFrameToken(),
+            rfhi->GetPageUkmSourceId(), ui::PAGE_TRANSITION_LINK,
+            /*url_match_predicate=*/absl::nullopt),
+        *web_contents);
     if (prerender_host_id != RenderFrameHost::kNoFrameTreeNodeId)
       started_prerender_host_ids_.insert(prerender_host_id);
   }

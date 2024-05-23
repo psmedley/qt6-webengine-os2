@@ -9,11 +9,13 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_pump.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
 #include "base/task/sequence_manager/lazy_now.h"
 #include "base/task/sequence_manager/sequence_manager_impl.h"
 #include "base/task/sequence_manager/sequenced_task_source.h"
 #include "base/trace_event/base_tracing.h"
+#include "build/build_config.h"
 
 namespace base {
 namespace sequence_manager {
@@ -93,18 +95,19 @@ void ThreadControllerImpl::ScheduleWork() {
   }
 }
 
-void ThreadControllerImpl::SetNextDelayedDoWork(LazyNow* lazy_now,
-                                                TimeTicks run_time) {
+void ThreadControllerImpl::SetNextDelayedDoWork(
+    LazyNow* lazy_now,
+    absl::optional<WakeUp> wake_up) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(associated_thread_->sequence_checker);
   DCHECK(sequence_);
-
-  if (main_sequence_only().next_delayed_do_work == run_time)
-    return;
+  DCHECK(!wake_up || !wake_up->is_immediate());
 
   // Cancel DoWork if it was scheduled and we set an "infinite" delay now.
-  if (run_time == TimeTicks::Max()) {
-    cancelable_delayed_do_work_closure_.Cancel();
-    main_sequence_only().next_delayed_do_work = TimeTicks::Max();
+  if (!wake_up) {
+    if (!main_sequence_only().next_delayed_do_work.is_max()) {
+      cancelable_delayed_do_work_closure_.Cancel();
+      main_sequence_only().next_delayed_do_work = TimeTicks::Max();
+    }
     return;
   }
 
@@ -113,12 +116,16 @@ void ThreadControllerImpl::SetNextDelayedDoWork(LazyNow* lazy_now,
     return;
   }
 
-  base::TimeDelta delay = std::max(TimeDelta(), run_time - lazy_now->Now());
+  if (main_sequence_only().next_delayed_do_work == wake_up->time)
+    return;
+
+  base::TimeDelta delay =
+      std::max(TimeDelta(), wake_up->time - lazy_now->Now());
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("sequence_manager"),
                "ThreadControllerImpl::SetNextDelayedDoWork::PostDelayedTask",
                "delay_ms", delay.InMillisecondsF());
 
-  main_sequence_only().next_delayed_do_work = run_time;
+  main_sequence_only().next_delayed_do_work = wake_up->time;
   // Reset also causes cancellation of the previous DoWork task.
   cancelable_delayed_do_work_closure_.Reset(delayed_do_work_closure_);
   task_runner_->PostDelayedTask(
@@ -129,8 +136,8 @@ bool ThreadControllerImpl::RunsTasksInCurrentSequence() {
   return task_runner_->RunsTasksInCurrentSequence();
 }
 
-const TickClock* ThreadControllerImpl::GetClock() {
-  return time_source_;
+void ThreadControllerImpl::SetTickClock(const TickClock* clock) {
+  time_source_ = clock;
 }
 
 void ThreadControllerImpl::SetDefaultTaskRunner(
@@ -177,8 +184,9 @@ void ThreadControllerImpl::DoWork(WorkType work_type) {
   WeakPtr<ThreadControllerImpl> weak_ptr = weak_factory_.GetWeakPtr();
   // TODO(scheduler-dev): Consider moving to a time based work batch instead.
   for (int i = 0; i < main_sequence_only().work_batch_size_; i++) {
-    Task* task = sequence_->SelectNextTask();
-    if (!task)
+    absl::optional<SequencedTaskSource::SelectedTask> selected_task =
+        sequence_->SelectNextTask();
+    if (!selected_task)
       break;
 
     // [OnTaskStarted(), OnTaskEnded()] must outscope all other tracing calls
@@ -192,14 +200,17 @@ void ThreadControllerImpl::DoWork(WorkType work_type) {
       // See https://crbug.com/681863 and https://crbug.com/874982
       TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "RunTask");
 
-      {
-        // Trace events should finish before we call DidRunTask to ensure that
-        // SequenceManager trace events do not interfere with them.
-        TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask", *task);
-        task_annotator_.RunTask("SequenceManager RunTask", task);
-        if (!weak_ptr)
-          return;
-      }
+      // Note: all arguments after task are just passed to a TRACE_EVENT for
+      // logging so lambda captures are safe as lambda is executed inline.
+      task_annotator_.RunTask(
+          "ThreadControllerImpl::RunTask", selected_task->task,
+          [&selected_task](perfetto::EventContext& ctx) {
+            if (selected_task->task_execution_trace_logger)
+              selected_task->task_execution_trace_logger.Run(
+                  ctx, selected_task->task);
+          });
+      if (!weak_ptr)
+        return;
 
       // This processes microtasks, hence all scoped operations above must end
       // after it.
@@ -225,10 +236,12 @@ void ThreadControllerImpl::DoWork(WorkType work_type) {
   work_deduplicator_.WillCheckForMoreWork();
 
   LazyNow lazy_now(time_source_);
-  TimeDelta delay_till_next_task = sequence_->DelayTillNextTask(&lazy_now);
+  sequence_->RemoveAllCanceledDelayedTasksFromFront(&lazy_now);
+  absl::optional<WakeUp> next_wake_up = sequence_->GetPendingWakeUp(&lazy_now);
   // The OnSystemIdle callback allows the TimeDomains to advance virtual time
-  // in which case we now have immediate word to do.
-  if (delay_till_next_task <= TimeDelta() || sequence_->OnSystemIdle()) {
+  // in which case we now have immediate work to do.
+  if ((next_wake_up && next_wake_up->is_immediate()) ||
+      sequence_->OnSystemIdle()) {
     // The next task needs to run immediately, post a continuation if
     // another thread didn't get there first.
     if (work_deduplicator_.DidCheckForMoreWork(
@@ -252,24 +265,25 @@ void ThreadControllerImpl::DoWork(WorkType work_type) {
   main_sequence_only().run_level_tracker.OnIdle();
 
   // Any future work?
-  if (delay_till_next_task == TimeDelta::Max()) {
+  if (!next_wake_up) {
     main_sequence_only().next_delayed_do_work = TimeTicks::Max();
     cancelable_delayed_do_work_closure_.Cancel();
     return;
   }
 
+  TimeTicks next_wake_up_time = next_wake_up->time;
   // Already requested next delay?
-  TimeTicks next_task_at = lazy_now.Now() + delay_till_next_task;
-  if (next_task_at == main_sequence_only().next_delayed_do_work)
+  if (next_wake_up_time == main_sequence_only().next_delayed_do_work)
     return;
 
   // Schedule a callback after |delay_till_next_task| and cancel any previous
   // callback.
-  main_sequence_only().next_delayed_do_work = next_task_at;
+  main_sequence_only().next_delayed_do_work = next_wake_up_time;
   cancelable_delayed_do_work_closure_.Reset(delayed_do_work_closure_);
+  // TODO(1153139): Use PostDelayedTaskAt().
   task_runner_->PostDelayedTask(FROM_HERE,
                                 cancelable_delayed_do_work_closure_.callback(),
-                                delay_till_next_task);
+                                next_wake_up_time - lazy_now.Now());
 }
 
 void ThreadControllerImpl::AddNestingObserver(
@@ -332,17 +346,17 @@ MessagePump* ThreadControllerImpl::GetBoundMessagePump() const {
   return nullptr;
 }
 
-#if defined(OS_IOS) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
 void ThreadControllerImpl::AttachToMessagePump() {
   NOTREACHED();
 }
-#endif  // OS_IOS || OS_ANDROID
+#endif  // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 void ThreadControllerImpl::DetachFromMessagePump() {
   NOTREACHED();
 }
-#endif  // OS_IOS
+#endif  // BUILDFLAG(IS_IOS)
 
 void ThreadControllerImpl::PrioritizeYieldingToNative(base::TimeTicks) {
   NOTREACHED();

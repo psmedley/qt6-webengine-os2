@@ -18,7 +18,6 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -90,12 +89,14 @@ bool ChrootToSafeEmptyDir() {
 
   int clone_flags = CLONE_FS | LINUX_SIGCHLD;
   void* tls = nullptr;
-#if defined(ARCH_CPU_X86_64) || defined(ARCH_CPU_ARM_FAMILY)
+#if (defined(ARCH_CPU_X86_64) || defined(ARCH_CPU_ARM_FAMILY)) && \
+    !defined(MEMORY_SANITIZER)
   // Use CLONE_VM | CLONE_VFORK as an optimization to avoid copying page tables.
   // Since clone writes to the new child's TLS before returning, we must set a
   // new TLS to avoid corrupting the current process's TLS. On ARCH_CPU_X86,
   // glibc performs syscalls by calling a function pointer in TLS, so we do not
   // attempt this optimization.
+  // TODO(crbug.com/1247458) Broken in MSan builds after LLVM f1bb30a4956f.
   clone_flags |= CLONE_VM | CLONE_VFORK | CLONE_SETTLS;
 
   // PTHREAD_STACK_MIN can be dynamic in glibc2.34+, so it is not possible to
@@ -234,7 +235,7 @@ bool Credentials::HasAnyCapability() {
 
   PCHECK(sys_capget(&hdr, data) == 0);
 
-  for (size_t i = 0; i < base::size(data); ++i) {
+  for (size_t i = 0; i < std::size(data); ++i) {
     if (data[i].effective || data[i].permitted || data[i].inheritable) {
       return true;
     }

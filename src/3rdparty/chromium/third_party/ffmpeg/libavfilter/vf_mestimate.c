@@ -67,25 +67,17 @@ static const AVOption mestimate_options[] = {
 
 AVFILTER_DEFINE_CLASS(mestimate);
 
-static int query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pix_fmts[] = {
-        AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
-        AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
-        AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P,
-        AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ440P,
-        AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ420P,
-        AV_PIX_FMT_YUVJ411P,
-        AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVA422P, AV_PIX_FMT_YUVA444P,
-        AV_PIX_FMT_GRAY8,
-        AV_PIX_FMT_NONE
-    };
-
-    AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
-    if (!fmts_list)
-        return AVERROR(ENOMEM);
-    return ff_set_common_formats(ctx, fmts_list);
-}
+static const enum AVPixelFormat pix_fmts[] = {
+    AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
+    AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
+    AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P,
+    AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ440P,
+    AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ420P,
+    AV_PIX_FMT_YUVJ411P,
+    AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVA422P, AV_PIX_FMT_YUVA444P,
+    AV_PIX_FMT_GRAY8,
+    AV_PIX_FMT_NONE
+};
 
 static int config_input(AVFilterLink *inlink)
 {
@@ -103,7 +95,7 @@ static int config_input(AVFilterLink *inlink)
         return AVERROR(EINVAL);
 
     for (i = 0; i < 3; i++) {
-        s->mv_table[i] = av_mallocz_array(s->b_count, sizeof(*s->mv_table[0]));
+        s->mv_table[i] = av_calloc(s->b_count, sizeof(*s->mv_table[0]));
         if (!s->mv_table[i])
             return AVERROR(ENOMEM);
     }
@@ -356,7 +348,6 @@ static const AVFilterPad mestimate_inputs[] = {
         .filter_frame  = filter_frame,
         .config_props  = config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad mestimate_outputs[] = {
@@ -364,7 +355,6 @@ static const AVFilterPad mestimate_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_mestimate = {
@@ -373,7 +363,8 @@ const AVFilter ff_vf_mestimate = {
     .priv_size     = sizeof(MEContext),
     .priv_class    = &mestimate_class,
     .uninit        = uninit,
-    .query_formats = query_formats,
-    .inputs        = mestimate_inputs,
-    .outputs       = mestimate_outputs,
+    .flags         = AVFILTER_FLAG_METADATA_ONLY,
+    FILTER_INPUTS(mestimate_inputs),
+    FILTER_OUTPUTS(mestimate_outputs),
+    FILTER_PIXFMTS_ARRAY(pix_fmts),
 };

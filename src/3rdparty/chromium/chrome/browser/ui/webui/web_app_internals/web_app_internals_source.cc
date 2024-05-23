@@ -4,22 +4,30 @@
 
 #include "chrome/browser/ui/webui/web_app_internals/web_app_internals_source.h"
 
+#include "base/files/file_enumerator.h"
+#include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/ranges/algorithm.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/task/task_runner.h"
+#include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/preinstalled_web_app_manager.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
+#include "chrome/browser/web_applications/web_app_install_manager.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
+#include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/prefs/pref_service.h"
 
-#if defined(OS_MAC)
-#include "chrome/browser/web_applications/components/app_shim_registry_mac.h"
+#if BUILDFLAG(IS_MAC)
+#include "chrome/browser/web_applications/app_shim_registry_mac.h"
 #endif
 
 namespace {
@@ -29,9 +37,11 @@ constexpr char kInstalledWebApps[] = "InstalledWebApps";
 constexpr char kPreinstalledWebAppConfigs[] = "PreinstalledWebAppConfigs";
 constexpr char kExternallyManagedWebAppPrefs[] = "ExternallyManagedWebAppPrefs";
 constexpr char kIconErrorLog[] = "IconErrorLog";
-#if defined(OS_MAC)
+constexpr char kInstallationProcessErrorLog[] = "InstallationProcessErrorLog";
+#if BUILDFLAG(IS_MAC)
 constexpr char kAppShimRegistryLocalStorage[] = "AppShimRegistryLocalStorage";
 #endif
+constexpr char kWebAppDirectoryDiskState[] = "WebAppDirectoryDiskState";
 
 constexpr char kNeedsRecordWebAppDebugInfo[] =
     "No debugging info available! Please enable: "
@@ -53,9 +63,11 @@ base::Value BuildIndexJson() {
   index.Append(kPreinstalledWebAppConfigs);
   index.Append(kExternallyManagedWebAppPrefs);
   index.Append(kIconErrorLog);
-#if defined(OS_MAC)
+  index.Append(kInstallationProcessErrorLog);
+#if BUILDFLAG(IS_MAC)
   index.Append(kAppShimRegistryLocalStorage);
 #endif
+  index.Append(kWebAppDirectoryDiskState);
 
   return root;
 }
@@ -71,13 +83,13 @@ base::Value BuildInstalledWebAppsJson(web_app::WebAppProvider& provider) {
        provider.registrar().GetAppsIncludingStubs()) {
     web_apps.push_back(&web_app);
   }
-  base::ranges::sort(web_apps, {}, &web_app::WebApp::name);
+  base::ranges::sort(web_apps, {}, &web_app::WebApp::untranslated_name);
 
   // Prefix with a ! so this appears at the top when serialized.
   base::Value& index = *installed_web_apps.SetKey(
       "!Index", base::Value(base::Value::Type::DICTIONARY));
   for (const web_app::WebApp* web_app : web_apps) {
-    const std::string& key = web_app->name();
+    const std::string& key = web_app->untranslated_name();
     base::Value* existing_entry = index.FindKey(key);
     if (!existing_entry) {
       index.SetStringKey(key, web_app->app_id());
@@ -194,7 +206,27 @@ base::Value BuildIconErrorLogJson(web_app::WebAppProvider& provider) {
   return root;
 }
 
-#if defined(OS_MAC)
+base::Value BuildInstallProcessErrorLogJson(web_app::WebAppProvider& provider) {
+  base::Value root(base::Value::Type::DICTIONARY);
+
+  const web_app::WebAppInstallManager::ErrorLog* error_log =
+      provider.install_manager().error_log();
+
+  if (!error_log) {
+    root.SetStringKey(kInstallationProcessErrorLog,
+                      kNeedsRecordWebAppDebugInfo);
+    return root;
+  }
+
+  base::Value& installation_process_error_log = *root.SetKey(
+      kInstallationProcessErrorLog, base::Value(base::Value::Type::LIST));
+  for (const base::Value& error : *error_log)
+    installation_process_error_log.Append(error.Clone());
+
+  return root;
+}
+
+#if BUILDFLAG(IS_MAC)
 base::Value BuildAppShimRegistryLocalStorageJson() {
   base::Value root(base::Value::Type::DICTIONARY);
   root.SetKey(kAppShimRegistryLocalStorage,
@@ -203,10 +235,48 @@ base::Value BuildAppShimRegistryLocalStorageJson() {
 }
 #endif
 
-base::Value BuildWebAppInternalsJson(Profile* profile) {
-  auto* provider = web_app::WebAppProvider::Get(profile);
-  if (!provider)
-    return base::Value("Web app system not enabled for profile.");
+void BuildDirectoryState(base::FilePath file_or_folder,
+                         base::Value::Dict* folder) {
+  base::File::Info info;
+  bool success = base::GetFileInfo(file_or_folder, &info);
+  if (!success) {
+    folder->Set(file_or_folder.AsUTF8Unsafe(), "Invalid file or folder");
+    return;
+  }
+  // The path of files is fully printed to allow easy copy-paste for developer
+  // reference.
+  if (!info.is_directory) {
+    folder->Set(file_or_folder.AsUTF8Unsafe(),
+                base::StrCat({base::NumberToString(info.size / 1024), "kb"}));
+    return;
+  }
+
+  base::Value::Dict contents;
+  base::FileEnumerator files(
+      file_or_folder, false,
+      base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES);
+  for (base::FilePath current = files.Next(); !current.empty();
+       current = files.Next()) {
+    BuildDirectoryState(current, &contents);
+  }
+  folder->Set(file_or_folder.BaseName().AsUTF8Unsafe(), std::move(contents));
+}
+
+base::Value BuildWebAppDiskStateJson(base::FilePath root_directory,
+                                     base::Value root) {
+  base::Value::Dict contents;
+  BuildDirectoryState(root_directory, &contents);
+
+  base::Value::Dict section;
+  section.Set(kWebAppDirectoryDiskState, std::move(contents));
+  root.Append(base::Value(std::move(section)));
+  return root;
+}
+
+void BuildWebAppInternalsJson(
+    Profile* profile,
+    base::OnceCallback<void(base::Value root)> callback) {
+  auto* provider = web_app::WebAppProvider::GetForLocalAppsUnchecked(profile);
 
   base::Value root(base::Value::Type::LIST);
   root.Append(BuildIndexJson());
@@ -214,11 +284,35 @@ base::Value BuildWebAppInternalsJson(Profile* profile) {
   root.Append(BuildPreinstalledWebAppConfigsJson(*provider));
   root.Append(BuildExternallyManagedWebAppPrefsJson(profile));
   root.Append(BuildIconErrorLogJson(*provider));
-#if defined(OS_MAC)
+  root.Append(BuildInstallProcessErrorLogJson(*provider));
+#if BUILDFLAG(IS_MAC)
   root.Append(BuildAppShimRegistryLocalStorageJson());
 #endif
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+      base::BindOnce(&BuildWebAppDiskStateJson,
+                     web_app::GetWebAppsRootDirectory(profile),
+                     std::move(root)),
+      std::move(callback));
+}
 
-  return root;
+void BuildResponse(Profile* profile,
+                   base::OnceCallback<void(base::Value root)> callback) {
+  auto* provider = web_app::WebAppProvider::GetForLocalAppsUnchecked(profile);
+  if (!provider) {
+    return std::move(callback).Run(
+        base::Value("Web app system not enabled for profile."));
+  }
+
+  provider->on_registry_ready().Post(
+      FROM_HERE,
+      base::BindOnce(&BuildWebAppInternalsJson, profile, std::move(callback)));
+}
+
+void ConvertValueToJsonData(content::URLDataSource::GotDataCallback callback,
+                            base::Value value) {
+  std::string data = value.DebugString();
+  std::move(callback).Run(base::RefCountedString::TakeString(&data));
 }
 
 }  // namespace
@@ -240,6 +334,6 @@ void WebAppInternalsSource::StartDataRequest(
     const GURL& url,
     const content::WebContents::Getter& wc_getter,
     content::URLDataSource::GotDataCallback callback) {
-  std::string data = ConvertToString(BuildWebAppInternalsJson(profile_));
-  std::move(callback).Run(base::RefCountedString::TakeString(&data));
+  BuildResponse(profile_,
+                base::BindOnce(&ConvertValueToJsonData, std::move(callback)));
 }

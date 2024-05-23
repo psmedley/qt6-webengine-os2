@@ -29,10 +29,11 @@
 #include "third_party/blink/renderer/core/svg/properties/svg_property_info.h"
 #include "third_party/blink/renderer/core/svg/svg_parsing_error.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
@@ -153,8 +154,8 @@ class CORE_EXPORT SVGElement : public Element {
   }
 
   const HeapHashSet<WeakMember<SVGElement>>& InstancesForElement() const;
-  void MapInstanceToElement(SVGElement*);
-  void RemoveInstanceMapping(SVGElement*);
+  void AddInstance(SVGElement*);
+  void RemoveInstance(SVGElement*);
 
   SVGElement* CorrespondingElement() const;
   void SetCorrespondingElement(SVGElement*);
@@ -284,6 +285,9 @@ class CORE_EXPORT SVGElement : public Element {
   void AccessKeyAction(SimulatedClickCreationScope creation_scope) override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SVGElementTest,
+                           BaseComputedStyleForSMILWithContainerQueries);
+
   bool IsSVGElement() const =
       delete;  // This will catch anyone doing an unnecessary check.
   bool IsStyledElement() const =

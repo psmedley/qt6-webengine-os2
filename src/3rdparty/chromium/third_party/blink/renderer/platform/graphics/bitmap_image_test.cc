@@ -34,13 +34,13 @@
 #include "base/feature_list.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_tick_clock.h"
+#include "base/time/time.h"
 #include "cc/paint/image_provider.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "cc/tiles/mipmap_util.h"
 #include "media/media_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
 #include "third_party/blink/renderer/platform/graphics/deferred_image_decoder.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
@@ -53,6 +53,7 @@
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImage.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace blink {
 namespace {
@@ -184,9 +185,9 @@ class BitmapImageTest : public testing::Test {
     CHECK(paint_image);
 
     SkBitmap bitmap;
-    SkImageInfo info = SkImageInfo::MakeN32Premul(image->Size().Width(),
-                                                  image->Size().Height());
-    bitmap.allocPixels(info, image->Size().Width() * 4);
+    SkImageInfo info = SkImageInfo::MakeN32Premul(image->Size().width(),
+                                                  image->Size().height());
+    bitmap.allocPixels(info, image->Size().width() * 4);
     bitmap.eraseColor(SK_AlphaTRANSPARENT);
     cc::SkiaPaintCanvas canvas(bitmap);
     canvas.drawImage(paint_image, 0u, 0u);
@@ -319,7 +320,7 @@ TEST_F(BitmapImageTest, correctDecodedDataSize) {
   LoadImage("anim_none.gif");
   image_->PaintImageForCurrentFrame();
   int frame_size =
-      static_cast<int>(image_->Size().Area() * sizeof(ImageFrame::PixelData));
+      static_cast<int>(image_->Size().Area64() * sizeof(ImageFrame::PixelData));
   EXPECT_EQ(frame_size, LastDecodedSizeChange());
 }
 
@@ -643,7 +644,7 @@ TEST_F(BitmapImageTestWithMockDecoder, ImageMetadataTracking) {
   EXPECT_EQ(image.repetition_count(), repetition_count_);
   for (size_t i = 0; i < image.GetFrameMetadata().size(); ++i) {
     const auto& data = image.GetFrameMetadata()[i];
-    EXPECT_EQ(data.duration, base::TimeDelta::FromMilliseconds(100));
+    EXPECT_EQ(data.duration, base::Milliseconds(100));
     if (i == frame_count_ - 1 && !last_frame_complete_)
       EXPECT_FALSE(data.complete);
     else
@@ -651,7 +652,7 @@ TEST_F(BitmapImageTestWithMockDecoder, ImageMetadataTracking) {
   }
 
   // Now the load is finished.
-  duration_ = base::TimeDelta::FromSeconds(1);
+  duration_ = base::Seconds(1);
   repetition_count_ = kAnimationLoopInfinite;
   frame_count_ = 6u;
   last_frame_complete_ = true;
@@ -665,9 +666,9 @@ TEST_F(BitmapImageTestWithMockDecoder, ImageMetadataTracking) {
   for (size_t i = 0; i < image.GetFrameMetadata().size(); ++i) {
     const auto& data = image.GetFrameMetadata()[i];
     if (i < 4u)
-      EXPECT_EQ(data.duration, base::TimeDelta::FromMilliseconds(100));
+      EXPECT_EQ(data.duration, base::Milliseconds(100));
     else
-      EXPECT_EQ(data.duration, base::TimeDelta::FromSeconds(1));
+      EXPECT_EQ(data.duration, base::Seconds(1));
     EXPECT_TRUE(data.complete);
   }
 }
@@ -830,13 +831,19 @@ TEST_F(BitmapHistogramTest, DecodedImageType) {
 #endif  // BUILDFLAG(ENABLE_AV1_DECODER)
 }
 
-TEST_F(BitmapHistogramTest, DecodedImageDensityKiBWeighted_JpegDensity) {
-  // Test a 64x64 image, which should be too small to report any metrics.
+TEST_F(BitmapHistogramTest, DecodedImageDensityKiBWeighted) {
   {
+    // Test images that don't report any density metrics.
     base::HistogramTester histogram_tester;
-    LoadImage("rgb-jpeg-red.jpg");
+    LoadImage("rgb-jpeg-red.jpg");           // 64x64
+    LoadImage("red-full-ranged-8bpc.avif");  // 3x3
+    LoadImage("animated-10color.gif");       // 100x100 but GIF is not reported.
     histogram_tester.ExpectTotalCount(
         "Blink.DecodedImage.JpegDensity.KiBWeighted", 0);
+    histogram_tester.ExpectTotalCount(
+        "Blink.DecodedImage.WebPDensity.KiBWeighted", 0);
+    histogram_tester.ExpectTotalCount(
+        "Blink.DecodedImage.AvifDensity.KiBWeighted", 0);
   }
 
   // 439x154, 23220 bytes --> 2.74 bpp, 23 KiB (rounded up)
@@ -848,6 +855,11 @@ TEST_F(BitmapHistogramTest, DecodedImageDensityKiBWeighted_JpegDensity) {
   ExpectImageRecordsSample("blue-wheel-srgb-color-profile.jpg",
                            "Blink.DecodedImage.JpegDensity.KiBWeighted", 578,
                            72);
+
+  // 800x800, 19436 bytes --> 0.24, 19 KiB
+  ExpectImageRecordsSample("webp-color-profile-lossy.webp",
+                           "Blink.DecodedImage.WebPDensity.KiBWeighted", 24,
+                           19);
 }
 
 }  // namespace blink

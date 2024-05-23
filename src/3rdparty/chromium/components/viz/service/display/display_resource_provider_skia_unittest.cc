@@ -27,6 +27,7 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "ui/gfx/geometry/rect.h"
 
 using testing::_;
@@ -59,14 +60,15 @@ class MockExternalUseClient : public ExternalUseClient {
   MOCK_METHOD1(ReleaseImageContexts,
                gpu::SyncToken(
                    std::vector<std::unique_ptr<ImageContext>> image_contexts));
-  MOCK_METHOD6(CreateImageContext,
-               std::unique_ptr<ImageContext>(
-                   const gpu::MailboxHolder&,
-                   const gfx::Size&,
-                   ResourceFormat,
-                   bool,
-                   const absl::optional<gpu::VulkanYCbCrInfo>& ycbcr_info,
-                   sk_sp<SkColorSpace>));
+  MOCK_METHOD7(
+      CreateImageContext,
+      std::unique_ptr<ImageContext>(const gpu::MailboxHolder&,
+                                    const gfx::Size&,
+                                    ResourceFormat,
+                                    bool,
+                                    const absl::optional<gpu::VulkanYCbCrInfo>&,
+                                    sk_sp<SkColorSpace>,
+                                    bool));
 };
 
 class DisplayResourceProviderSkiaTest : public testing::Test {
@@ -158,7 +160,7 @@ TEST_F(DisplayResourceProviderSkiaTest, LockForExternalUse) {
   auto* image_context = owned_image_context.get();
 
   gpu::MailboxHolder holder;
-  EXPECT_CALL(client_, CreateImageContext(_, _, _, _, _, _))
+  EXPECT_CALL(client_, CreateImageContext(_, _, _, _, _, _, _))
       .WillOnce(DoAll(SaveArg<0>(&holder),
                       Return(ByMove(std::move(owned_image_context)))));
 
@@ -238,7 +240,7 @@ TEST_F(DisplayResourceProviderSkiaTest, LockForExternalUseWebView) {
   auto* image_context = owned_image_context.get();
 
   gpu::MailboxHolder holder;
-  EXPECT_CALL(client_, CreateImageContext(_, _, _, _, _, _))
+  EXPECT_CALL(client_, CreateImageContext(_, _, _, _, _, _, _))
       .WillOnce(DoAll(SaveArg<0>(&holder),
                       Return(ByMove(std::move(owned_image_context)))));
 

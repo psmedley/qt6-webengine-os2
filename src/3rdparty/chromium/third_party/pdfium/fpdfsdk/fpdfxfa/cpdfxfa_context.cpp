@@ -112,7 +112,7 @@ CPDFXFA_Context::CPDFXFA_Context(CPDF_Document* pPDFDoc)
 }
 
 CPDFXFA_Context::~CPDFXFA_Context() {
-  m_nLoadStatus = FXFA_LOADSTATUS_CLOSING;
+  m_nLoadStatus = LoadStatus::kClosing;
   if (m_pFormFillEnv)
     m_pFormFillEnv->ClearAllFocusedAnnots();
 }
@@ -133,7 +133,7 @@ void CPDFXFA_Context::SetFormFillEnv(
 }
 
 bool CPDFXFA_Context::LoadXFADoc() {
-  m_nLoadStatus = FXFA_LOADSTATUS_LOADING;
+  m_nLoadStatus = LoadStatus::kLoading;
   m_XFAPageList.clear();
 
   CJS_Runtime* actual_runtime = GetCJSRuntime();  // Null if a stub.
@@ -191,7 +191,7 @@ bool CPDFXFA_Context::LoadXFADoc() {
 
   view_nuller.AbandonNullification();
   doc_nuller.AbandonNullification();
-  m_nLoadStatus = FXFA_LOADSTATUS_LOADED;
+  m_nLoadStatus = LoadStatus::kLoaded;
   return true;
 }
 
@@ -324,7 +324,7 @@ int32_t CPDFXFA_Context::MsgBox(const WideString& wsMessage,
                                 const WideString& wsTitle,
                                 uint32_t dwIconType,
                                 uint32_t dwButtonType) {
-  if (!m_pFormFillEnv || m_nLoadStatus != FXFA_LOADSTATUS_LOADED)
+  if (!m_pFormFillEnv || m_nLoadStatus != LoadStatus::kLoaded)
     return -1;
 
   int iconType =
@@ -345,8 +345,7 @@ WideString CPDFXFA_Context::Response(const WideString& wsQuestion,
   int nLength = 2048;
   std::vector<uint8_t, FxAllocAllocator<uint8_t>> pBuff(nLength);
   nLength = m_pFormFillEnv->JS_appResponse(wsQuestion, wsTitle, wsDefaultAnswer,
-                                           WideString(), bMark, pBuff.data(),
-                                           nLength);
+                                           WideString(), bMark, pBuff);
   if (nLength <= 0)
     return WideString();
 

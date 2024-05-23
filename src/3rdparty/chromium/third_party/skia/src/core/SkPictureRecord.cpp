@@ -19,6 +19,10 @@
 #include "src/image/SkImage_Base.h"
 #include "src/utils/SkPatchUtils.h"
 
+#if SK_SUPPORT_GPU
+#include "include/private/chromium/GrSlug.h"
+#endif
+
 #define HEAP_BLOCK_SIZE 4096
 
 enum {
@@ -61,16 +65,6 @@ void SkPictureRecord::recordSave() {
     size_t initialOffset = this->addDraw(SAVE, &size);
 
     this->validate(initialOffset, size);
-}
-
-void SkPictureRecord::onMarkCTM(const char* name) {
-    size_t nameLen = SkWriter32::WriteStringSize(name);
-    size_t size = sizeof(kUInt32Size) + nameLen; // op + name
-    size_t initialOffset = this->addDraw(MARK_CTM, &size);
-    fWriter.writeString(name);
-    this->validate(initialOffset, size);
-
-    this->INHERITED::onMarkCTM(name);
 }
 
 SkCanvas::SaveLayerStrategy SkPictureRecord::getSaveLayerStrategy(const SaveLayerRec& rec) {
@@ -129,6 +123,10 @@ void SkPictureRecord::recordSaveLayer(const SaveLayerRec& rec) {
         flatFlags |= SAVELAYERREC_HAS_FLAGS;
         size += sizeof(uint32_t);
     }
+    if (SkCanvasPriv::GetBackdropScaleFactor(rec) != 1.f) {
+        flatFlags |= SAVELAYERREC_HAS_BACKDROP_SCALE;
+        size += sizeof(SkScalar);
+    }
 
     const size_t initialOffset = this->addDraw(SAVE_LAYER_SAVELAYERREC, &size);
     this->addInt(flatFlags);
@@ -146,6 +144,9 @@ void SkPictureRecord::recordSaveLayer(const SaveLayerRec& rec) {
     }
     if (flatFlags & SAVELAYERREC_HAS_FLAGS) {
         this->addInt(rec.fSaveLayerFlags);
+    }
+    if (flatFlags & SAVELAYERREC_HAS_BACKDROP_SCALE) {
+        this->addScalar(SkCanvasPriv::GetBackdropScaleFactor(rec));
     }
     this->validate(initialOffset, size);
 }
@@ -578,6 +579,17 @@ void SkPictureRecord::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScala
     this->validate(initialOffset, size);
 }
 
+#if SK_SUPPORT_GPU
+void SkPictureRecord::onDrawSlug(const GrSlug* slug) {
+    // op + slug id
+    size_t size = 2 * kUInt32Size;
+    size_t initialOffset = this->addDraw(DRAW_SLUG, &size);
+
+    this->addSlug(slug);
+    this->validate(initialOffset, size);
+}
+#endif
+
 void SkPictureRecord::onDrawPicture(const SkPicture* picture, const SkMatrix* matrix,
                                     const SkPaint* paint) {
     // op + picture index
@@ -909,14 +921,7 @@ void SkPictureRecord::addRegion(const SkRegion& region) {
 }
 
 void SkPictureRecord::addSampling(const SkSamplingOptions& sampling) {
-    fWriter.writeBool(sampling.useCubic);
-    if (sampling.useCubic) {
-        fWriter.writeScalar(sampling.cubic.B);
-        fWriter.writeScalar(sampling.cubic.C);
-    } else {
-        fWriter.writeInt(static_cast<uint32_t>(sampling.filter));
-        fWriter.writeInt(static_cast<uint32_t>(sampling.mipmap));
-    }
+    fWriter.writeSampling(sampling);
 }
 
 void SkPictureRecord::addText(const void* text, size_t byteLength) {
@@ -928,6 +933,13 @@ void SkPictureRecord::addTextBlob(const SkTextBlob* blob) {
     // follow the convention of recording a 1-based index
     this->addInt(find_or_append(fTextBlobs, blob) + 1);
 }
+
+#if SK_SUPPORT_GPU
+void SkPictureRecord::addSlug(const GrSlug* slug) {
+    // follow the convention of recording a 1-based index
+    this->addInt(find_or_append(fSlugs, slug) + 1);
+}
+#endif
 
 void SkPictureRecord::addVertices(const SkVertices* vertices) {
     // follow the convention of recording a 1-based index

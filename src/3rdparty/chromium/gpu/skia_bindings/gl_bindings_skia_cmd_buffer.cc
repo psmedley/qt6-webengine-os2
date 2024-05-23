@@ -5,6 +5,7 @@
 #include "gpu/skia_bindings/gl_bindings_skia_cmd_buffer.h"
 
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
@@ -23,7 +24,7 @@ class ScopedCallingGLFromSkia {
   ~ScopedCallingGLFromSkia() { context_support_->DidCallGLFromSkia(); }
 
  private:
-  ContextSupport* context_support_;
+  raw_ptr<ContextSupport> context_support_;
 };
 
 template <typename R, typename... Args>
@@ -180,6 +181,8 @@ sk_sp<GrGLInterface> CreateGLES2InterfaceBindings(
       gles_bind(&GLES2Interface::GetBufferParameteriv, impl, context_support);
   functions->fGetError =
       gles_bind(&GLES2Interface::GetError, impl, context_support);
+  functions->fGetFloatv =
+      gles_bind(&GLES2Interface::GetFloatv, impl, context_support);
   functions->fGetIntegerv = get_integerv;
   functions->fGetInternalformativ =
       gles_bind(&GLES2Interface::GetInternalformativ, impl, context_support);
@@ -231,6 +234,8 @@ sk_sp<GrGLInterface> CreateGLES2InterfaceBindings(
       gles_bind(&GLES2Interface::ReadBuffer, impl, context_support);
   functions->fReadPixels =
       gles_bind(&GLES2Interface::ReadPixels, impl, context_support);
+  functions->fSamplerParameterf =
+      gles_bind(&GLES2Interface::SamplerParameterf, impl, context_support);
   functions->fSamplerParameteri =
       gles_bind(&GLES2Interface::SamplerParameteri, impl, context_support);
   functions->fSamplerParameteriv =

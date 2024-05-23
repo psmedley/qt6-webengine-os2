@@ -351,7 +351,7 @@ class F extends GPUTest {
       let currAttribute = 0;
       for (let i = 0; i < bufferCount; i++) {
         for (let j = 0; j < attributesPerBuffer; j++) {
-          layoutStr += `[[location(${currAttribute})]] a_${currAttribute} : ${typeInfo.wgslType};\n`;
+          layoutStr += `@location(${currAttribute}) a_${currAttribute} : ${typeInfo.wgslType},\n`;
           attributeNames.push(`a_${currAttribute}`);
           currAttribute++;
         }
@@ -370,10 +370,10 @@ class F extends GPUTest {
         ${typeInfo.validationFunc}
       }
 
-      [[stage(vertex)]] fn main(
-        [[builtin(vertex_index)]] VertexIndex : u32,
+      @stage(vertex) fn main(
+        @builtin(vertex_index) VertexIndex : u32,
         attributes : Attributes
-        ) -> [[builtin(position)]] vec4<f32> {
+        ) -> @builtin(position) vec4<f32> {
         var attributesInBounds = ${attributeNames
           .map(a => `validationFunc(attributes.${a})`)
           .join(' && ')};
@@ -434,7 +434,7 @@ class F extends GPUTest {
       fragment: {
         module: this.device.createShaderModule({
           code: `
-            [[stage(fragment)]] fn main() -> [[location(0)]] vec4<f32> {
+            @stage(fragment) fn main() -> @location(0) vec4<f32> {
               return vec4<f32>(1.0, 0.0, 0.0, 1.0);
             }`,
         }),
@@ -499,7 +499,8 @@ class F extends GPUTest {
         {
           view: colorAttachmentView,
           storeOp: 'store',
-          loadValue: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+          clearValue: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
         },
       ],
     });
@@ -508,7 +509,7 @@ class F extends GPUTest {
     // Run the draw variant
     drawCall.insertInto(pass, isIndexed, isIndirect);
 
-    pass.endPass();
+    pass.end();
     this.device.queue.submit([encoder.finish()]);
 
     // Validate we see green on the left pixel, showing that no failure case is detected
@@ -517,14 +518,6 @@ class F extends GPUTest {
       'rgba8unorm',
       { x: 0, y: 0 },
       { exp: new Uint8Array([0x00, 0xff, 0x00, 0xff]), layout: { mipLevel: 0 } }
-    );
-    // Validate wee see red on the right pixel, showing that at least one case succeed, prevent the test
-    // from unexpectly doing nothing and pass the validation
-    this.expectSinglePixelIn2DTexture(
-      colorAttachment,
-      'rgba8unorm',
-      { x: 1, y: 0 },
-      { exp: new Uint8Array([0xff, 0x00, 0x00, 0xff]), layout: { mipLevel: 0 } }
     );
   }
 }

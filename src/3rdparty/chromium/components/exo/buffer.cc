@@ -37,6 +37,11 @@
 #include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
+#if BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
+#include "base/files/scoped_file.h"
+#include "base/posix/eintr_wrapper.h"
+#endif  // BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
+
 namespace exo {
 namespace {
 
@@ -61,7 +66,12 @@ class Buffer::Texture : public viz::ContextLostObserver {
           gfx::GpuMemoryBuffer* gpu_memory_buffer,
           unsigned texture_target,
           unsigned query_type,
-          base::TimeDelta wait_for_release_time);
+          base::TimeDelta wait_for_release_time,
+          bool is_overlay_candidate);
+
+  Texture(const Texture&) = delete;
+  Texture& operator=(const Texture&) = delete;
+
   ~Texture() override;
 
   // Overridden from viz::ContextLostObserver:
@@ -117,8 +127,6 @@ class Buffer::Texture : public viz::ContextLostObserver {
   base::TimeTicks wait_for_release_time_;
   bool wait_for_release_pending_ = false;
   base::WeakPtrFactory<Texture> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Texture);
 };
 
 Buffer::Texture::Texture(
@@ -151,7 +159,8 @@ Buffer::Texture::Texture(
     gfx::GpuMemoryBuffer* gpu_memory_buffer,
     unsigned texture_target,
     unsigned query_type,
-    base::TimeDelta wait_for_release_delay)
+    base::TimeDelta wait_for_release_delay,
+    bool is_overlay_candidate)
     : gpu_memory_buffer_(gpu_memory_buffer),
       size_(gpu_memory_buffer->GetSize()),
       context_provider_(std::move(context_provider)),
@@ -159,10 +168,11 @@ Buffer::Texture::Texture(
       query_type_(query_type),
       wait_for_release_delay_(wait_for_release_delay) {
   gpu::SharedImageInterface* sii = context_provider_->SharedImageInterface();
-  const uint32_t usage = gpu::SHARED_IMAGE_USAGE_RASTER |
-                         gpu::SHARED_IMAGE_USAGE_DISPLAY |
-                         gpu::SHARED_IMAGE_USAGE_SCANOUT;
-
+  uint32_t usage =
+      gpu::SHARED_IMAGE_USAGE_RASTER | gpu::SHARED_IMAGE_USAGE_DISPLAY;
+  if (is_overlay_candidate) {
+    usage |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
+  }
   mailbox_ = sii->CreateSharedImage(
       gpu_memory_buffer_, gpu_memory_buffer_manager, gfx::ColorSpace(),
       kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType, usage);
@@ -395,8 +405,7 @@ Buffer::Buffer(std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer,
       use_zero_copy_(use_zero_copy),
       is_overlay_candidate_(is_overlay_candidate),
       y_invert_(y_invert),
-      wait_for_release_delay_(
-          base::TimeDelta::FromMilliseconds(kWaitForReleaseDelayMs)) {}
+      wait_for_release_delay_(base::Milliseconds(kWaitForReleaseDelayMs)) {}
 
 Buffer::~Buffer() {}
 
@@ -405,6 +414,7 @@ bool Buffer::ProduceTransferableResource(
     std::unique_ptr<gfx::GpuFence> acquire_fence,
     bool secure_output_only,
     viz::TransferableResource* resource,
+    ProtectedNativePixmapQueryDelegate* protected_native_pixmap_query,
     PerCommitExplicitReleaseCallback per_commit_explicit_release_callback) {
   TRACE_EVENT1("exo", "Buffer::ProduceTransferableResource", "buffer_id",
                static_cast<const void*>(gfx_buffer()));
@@ -448,7 +458,7 @@ bool Buffer::ProduceTransferableResource(
     contents_texture_ = std::make_unique<Texture>(
         context_provider, context_factory->GetGpuMemoryBufferManager(),
         gpu_memory_buffer_.get(), texture_target_, query_type_,
-        wait_for_release_delay_);
+        wait_for_release_delay_, is_overlay_candidate_);
   }
   Texture* contents_texture = contents_texture_.get();
 
@@ -460,6 +470,27 @@ bool Buffer::ProduceTransferableResource(
   // Cancel pending contents release callback.
   release_contents_callback_.Reset(
       base::BindOnce(&Buffer::ReleaseContents, base::Unretained(this)));
+
+#if BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
+  // Check if this buffer needs HW protection. This can only happen if we
+  // require a secure output.
+  if (secure_output_only &&
+      protected_buffer_state_ == ProtectedBufferState::UNKNOWN &&
+      gpu_memory_buffer_ && protected_native_pixmap_query) {
+    gfx::GpuMemoryBufferHandle gmb_handle = gpu_memory_buffer_->CloneHandle();
+    if (!gmb_handle.native_pixmap_handle.planes.empty()) {
+      base::ScopedFD pixmap_handle(HANDLE_EINTR(
+          dup(gmb_handle.native_pixmap_handle.planes[0].fd.get())));
+      if (pixmap_handle.is_valid()) {
+        protected_buffer_state_ = ProtectedBufferState::QUERYING;
+        protected_native_pixmap_query->IsProtectedNativePixmapHandle(
+            std::move(pixmap_handle),
+            base::BindOnce(&Buffer::OnIsProtectedNativePixmapHandle,
+                           AsWeakPtr()));
+      }
+    }
+  }
+#endif  // BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
 
   // Zero-copy means using the contents texture directly.
   if (use_zero_copy_) {
@@ -542,6 +573,19 @@ gfx::BufferFormat Buffer::GetFormat() const {
   return gpu_memory_buffer_->GetFormat();
 }
 
+SkColor4f Buffer::GetColor() const {
+  return SkColors::kBlack;
+}
+
+#if BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
+bool Buffer::NeedsHardwareProtection() {
+  // We don't indicate protection is needed in the UNKNOWN state because we have
+  // not seen a pixmap yet that could be protected.
+  return protected_buffer_state_ == ProtectedBufferState::PROTECTED ||
+         protected_buffer_state_ == ProtectedBufferState::QUERYING;
+}
+#endif  // BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
+
 ////////////////////////////////////////////////////////////////////////////////
 // Buffer, private:
 
@@ -600,7 +644,7 @@ void Buffer::MaybeRunPerCommitRelease(
   if (release_fence.is_null()) {
     std::move(buffer_release_callback).Run();
   } else {
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
     auto controller = base::FileDescriptorWatcher::WatchReadable(
         release_fence.owned_fd.get(),
         base::BindRepeating(&Buffer::FenceSignalled, AsWeakPtr(), commit_id));
@@ -619,6 +663,40 @@ void Buffer::FenceSignalled(uint64_t commit_id) {
   DCHECK(iter != buffer_releases_.end());
   std::move(iter->second.buffer_release_callback).Run();
   buffer_releases_.erase(iter);
+}
+
+#if BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
+void Buffer::OnIsProtectedNativePixmapHandle(bool is_protected) {
+  protected_buffer_state_ = is_protected ? ProtectedBufferState::PROTECTED
+                                         : ProtectedBufferState::UNPROTECTED;
+}
+#endif  // BUILDFLAG(USE_ARC_PROTECTED_MEDIA)
+
+SolidColorBuffer::SolidColorBuffer(const SkColor4f& color,
+                                   const gfx::Size& size)
+    : Buffer(nullptr), color_(color), size_(size) {}
+
+SolidColorBuffer::~SolidColorBuffer() = default;
+
+bool SolidColorBuffer::ProduceTransferableResource(
+    FrameSinkResourceManager* resource_manager,
+    std::unique_ptr<gfx::GpuFence> acquire_fence,
+    bool secure_output_only,
+    viz::TransferableResource* resource,
+    ProtectedNativePixmapQueryDelegate* protected_native_pixmap_query,
+    PerCommitExplicitReleaseCallback per_commit_explicit_release_callback) {
+  if (per_commit_explicit_release_callback)
+    std::move(per_commit_explicit_release_callback)
+        .Run(/*release_fence=*/gfx::GpuFenceHandle());
+  return false;
+}
+
+SkColor4f SolidColorBuffer::GetColor() const {
+  return color_;
+}
+
+gfx::Size SolidColorBuffer::GetSize() const {
+  return size_;
 }
 
 }  // namespace exo

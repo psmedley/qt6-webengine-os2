@@ -4,7 +4,7 @@
 
 #include "components/feature_engagement/public/feature_list.h"
 
-#include "base/cxx17_backports.h"
+#include "build/build_config.h"
 #include "components/feature_engagement/public/feature_constants.h"
 
 namespace feature_engagement {
@@ -15,12 +15,15 @@ namespace {
 // |kIPHDemoModeChoiceVariations| array.
 const base::Feature* const kAllFeatures[] = {
     &kIPHDummyFeature,  // Ensures non-empty array for all platforms.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     &kIPHAdaptiveButtonInTopToolbarCustomizationNewTabFeature,
     &kIPHAdaptiveButtonInTopToolbarCustomizationShareFeature,
     &kIPHAdaptiveButtonInTopToolbarCustomizationVoiceSearchFeature,
     &kIPHAddToHomescreenMessageFeature,
     &kIPHAddToHomescreenTextBubbleFeature,
+    &kIPHAutoDarkOptOutFeature,
+    &kIPHAutoDarkUserEducationMessageFeature,
+    &kIPHAutoDarkUserEducationMessageOptInFeature,
     &kIPHDataSaverDetailFeature,
     &kIPHDataSaverMilestonePromoFeature,
     &kIPHDataSaverPreviewFeature,
@@ -44,18 +47,32 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHDownloadInfoBarDownloadContinuingFeature,
     &kIPHDownloadInfoBarDownloadsAreFasterFeature,
     &kIPHEphemeralTabFeature,
+    &kIPHFeatureNotificationGuideDefaultBrowserNotificationShownFeature,
+    &kIPHFeatureNotificationGuideSignInNotificationShownFeature,
+    &kIPHFeatureNotificationGuideIncognitoTabNotificationShownFeature,
+    &kIPHFeatureNotificationGuideNTPSuggestionCardNotificationShownFeature,
+    &kIPHFeatureNotificationGuideVoiceSearchNotificationShownFeature,
+    &kIPHFeatureNotificationGuideDefaultBrowserPromoFeature,
+    &kIPHFeatureNotificationGuideSignInHelpBubbleFeature,
+    &kIPHFeatureNotificationGuideIncognitoTabHelpBubbleFeature,
+    &kIPHFeatureNotificationGuideVoiceSearchHelpBubbleFeature,
+    &kIPHFeatureNotificationGuideNTPSuggestionCardHelpBubbleFeature,
+    &kIPHFeatureNotificationGuideIncognitoTabUsedFeature,
+    &kIPHFeatureNotificationGuideVoiceSearchUsedFeature,
     &kIPHFeedCardMenuFeature,
-    &kIPHHomepagePromoCardFeature,
+    &kIPHGenericAlwaysTriggerHelpUiFeature,
     &kIPHIdentityDiscFeature,
+    &kIPHInstanceSwitcherFeature,
     &kIPHKeyboardAccessoryAddressFillingFeature,
     &kIPHKeyboardAccessoryBarSwipingFeature,
     &kIPHKeyboardAccessoryPasswordFillingFeature,
     &kIPHKeyboardAccessoryPaymentFillingFeature,
     &kIPHKeyboardAccessoryPaymentOfferFeature,
-    &kIPHKeyboardAccessoryPaymentVirtualCardFeature,
+    &kIPHLowUserEngagementDetectorFeature,
     &kIPHMicToolbarFeature,
     &kIPHNewTabPageHomeButtonFeature,
     &kIPHPageInfoFeature,
+    &kIPHPageInfoStoreInfoFeature,
     &kIPHPreviewsOmniboxUIFeature,
     &kIPHPwaInstallAvailableFeature,
     &kIPHQuietNotificationPromptsFeature,
@@ -63,6 +80,8 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHReadLaterAppMenuBookmarkThisPageFeature,
     &kIPHReadLaterAppMenuBookmarksFeature,
     &kIPHReadLaterBottomSheetFeature,
+    &kIPHShoppingListMenuItemFeature,
+    &kIPHShoppingListSaveFlowFeature,
     &kIPHTabGroupsQuicklyComparePagesFeature,
     &kIPHTabGroupsTapToSeeAnotherTabFeature,
     &kIPHTabGroupsYourTabsAreTogetherFeature,
@@ -74,17 +93,21 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHVideoTutorialNTPSearchFeature,
     &kIPHVideoTutorialNTPVoiceSearchFeature,
     &kIPHVideoTutorialNTPSummaryFeature,
+    &kIPHVideoTutorialTryNowFeature,
     &kIPHExploreSitesTileFeature,
     &kIPHFeedHeaderMenuFeature,
     &kIPHFeedSwipeRefresh,
     &kIPHShareScreenshotFeature,
+    &kIPHSharingHubLinkToggleFeature,
     &kIPHWebFeedFollowFeature,
     &kIPHWebFeedPostFollowDialogFeature,
     &kIPHSharedHighlightingBuilder,
+    &kIPHSharedHighlightingReceiverFeature,
     &kIPHStartSurfaceTabSwitcherHomeButton,
     &kIPHUpdatedConnectionSecurityIndicatorsFeature,
-#endif  // defined(OS_ANDROID)
-#if defined(OS_IOS)
+    &kIPHSharingHubWebnotesStylizeFeature,
+#endif  // BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_IOS)
     &kIPHBottomToolbarTipFeature,
     &kIPHLongPressToolbarTipFeature,
     &kIPHNewTabTipFeature,
@@ -93,24 +116,38 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHReadingListMessagesFeature,
     &kIPHBadgedTranslateManualTriggerFeature,
     &kIPHDiscoverFeedHeaderFeature,
-#endif  // defined(OS_IOS)
-#if defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) || \
-    defined(OS_CHROMEOS)
+    &kIPHDefaultSiteViewFeature,
+    &kIPHPasswordSuggestionsFeature,
+#endif  // BUILDFLAG(IS_IOS)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
     &kIPHDesktopTabGroupsNewGroupFeature,
-    &kIPHFocusModeFeature,
-    &kIPHGlobalMediaControlsFeature,
+    &kIPHFocusHelpBubbleScreenReaderPromoFeature,
+    &kIPHGMCCastStartStopFeature,
     &kIPHLiveCaptionFeature,
+    &kIPHTabAudioMutingFeature,
     &kIPHPasswordsAccountStorageFeature,
     &kIPHReadingListDiscoveryFeature,
     &kIPHReadingListEntryPointFeature,
+    &kIPHReadingListInSidePanelFeature,
     &kIPHReopenTabFeature,
+    &kIPHSideSearchFeature,
     &kIPHTabSearchFeature,
     &kIPHWebUITabStripFeature,
     &kIPHDesktopPwaInstallFeature,
     &kIPHProfileSwitchFeature,
     &kIPHUpdatedConnectionSecurityIndicatorsFeature,
-#endif  // defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) ||
-        // defined(OS_CHROMEOS)
+    &kIPHDesktopSharedHighlightingFeature,
+    &kIPHIntentChipFeature,
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) ||
+        // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
+    &kIPHAutofillVirtualCardSuggestionFeature,
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) ||
+        // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) ||
+        // BUILDFLAG(IS_FUCHSIA)
 };
 }  // namespace
 
@@ -118,7 +155,7 @@ const char kIPHDemoModeFeatureChoiceParam[] = "chosen_feature";
 
 std::vector<const base::Feature*> GetAllFeatures() {
   return std::vector<const base::Feature*>(
-      kAllFeatures, kAllFeatures + base::size(kAllFeatures));
+      kAllFeatures, kAllFeatures + std::size(kAllFeatures));
 }
 
 }  // namespace feature_engagement

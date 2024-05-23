@@ -24,7 +24,12 @@ limitations under the License.
 #include <stdio.h>
 #include <unistd.h>
 
+#include <functional>
+#include <string>
+#include <utility>
+
 #include "absl/algorithm/container.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
@@ -57,7 +62,7 @@ namespace xla {
 namespace tools {
 namespace {
 
-bool ReadLine(const char* prompt, string* line) {
+bool ReadLine(const char* prompt, std::string* line) {
 #if defined(PLATFORM_GOOGLE)
   return util::ReadLine(prompt, line);
 #else
@@ -70,11 +75,12 @@ bool ReadLine(const char* prompt, string* line) {
 // Command-line opts to this tool.  See main() for descriptions of these
 // fields.
 struct Options {
-  string hlo_snapshot;
-  string hlo_proto;
-  string hlo_text;
-  string platform;
-  string browser;
+  std::string hlo_snapshot;
+  std::string hlo_proto;
+  std::string hlo_module_proto;
+  std::string hlo_text;
+  std::string platform;
+  std::string browser;
 };
 
 const char* const kUsage = R"(
@@ -103,18 +109,19 @@ Usage:
 
 // Unless an explicit width is specified, we will render a neighborhood of
 // kDefaultWidth nodes around the requested instruction.
-constexpr int64 kDefaultWidth = 2;
+constexpr int64_t kDefaultWidth = 2;
 
 // When printing all paths between two nodes, we print out only this many nodes
 // by default, truncating the graph if there are more nodes than this in the
 // all-paths set.
-constexpr int64 kDefaultMaxNumNodesInAllPaths = 100;
+constexpr int64_t kDefaultMaxNumNodesInAllPaths = 100;
 
 using absl::EqualsIgnoreCase;
 
 HloRenderOptions hlo_render_options;
 
-HloInstruction* FindInstruction(const HloModule& module, string node_name) {
+HloInstruction* FindInstruction(const HloModule& module,
+                                std::string node_name) {
   if (absl::StartsWith(node_name, "%")) {
     node_name.erase(node_name.begin());
   }
@@ -133,7 +140,7 @@ HloInstruction* FindInstruction(const HloModule& module, string node_name) {
 }
 
 HloComputation* FindComputation(const HloModule& module,
-                                const string& comp_name) {
+                                const std::string& comp_name) {
   for (auto* computation : module.computations()) {
     if (EqualsIgnoreCase(computation->name(), comp_name)) {
       return computation;
@@ -181,7 +188,7 @@ void DoHelpCommand() {
 }
 
 // Turn metadata-printing on or off.
-void DoBackendConfigCommand(const std::vector<string>& tokens) {
+void DoBackendConfigCommand(const std::vector<std::string>& tokens) {
   if (tokens.size() == 2 && tokens[1] == "on") {
     hlo_render_options.show_backend_config = true;
   } else if (tokens.size() == 2 && tokens[1] == "off") {
@@ -196,7 +203,8 @@ void DoBackendConfigCommand(const std::vector<string>& tokens) {
 }
 
 // Turn fusion computation display on or off.
-void DoShowFusionSubcomputationsCommand(const std::vector<string>& tokens) {
+void DoShowFusionSubcomputationsCommand(
+    const std::vector<std::string>& tokens) {
   if (tokens.size() == 2 && tokens[1] == "on") {
     hlo_render_options.show_fusion_subcomputations = true;
   } else if (tokens.size() == 2 && tokens[1] == "off") {
@@ -213,7 +221,7 @@ void DoShowFusionSubcomputationsCommand(const std::vector<string>& tokens) {
 
 // List all computations in the module.
 void DoListComputationsCommand(const HloModule& module,
-                               const std::vector<string>& tokens) {
+                               const std::vector<std::string>& tokens) {
   if (tokens.size() > 2) {
     std::cout << R"(Illegal syntax; "list computations" takes no arguments.)";
     return;
@@ -224,7 +232,7 @@ void DoListComputationsCommand(const HloModule& module,
               << std::endl;
   }
   std::cout << "Subcomputations:" << std::endl;
-  std::vector<string> names;
+  std::vector<std::string> names;
   for (const auto& computation : module.computations()) {
     if (computation == module.entry_computation()) {
       continue;
@@ -234,9 +242,10 @@ void DoListComputationsCommand(const HloModule& module,
 }
 
 // List all instructions matching a pattern.
-void DoListCommand(const HloModule& module, const std::vector<string>& tokens) {
-  string pattern = "";
-  string type = "name";
+void DoListCommand(const HloModule& module,
+                   const std::vector<std::string>& tokens) {
+  std::string pattern = "";
+  std::string type = "name";
   if (tokens.size() == 2) {
     pattern = tokens[1];
   } else if (tokens.size() == 3) {
@@ -251,11 +260,12 @@ void DoListCommand(const HloModule& module, const std::vector<string>& tokens) {
   std::cout << "Query results:" << std::endl;
   for (const auto& computation : module.computations()) {
     for (const auto& instr : computation->instructions()) {
-      if ((type == "name" && instr->name().find(pattern) != string::npos) ||
+      if ((type == "name" &&
+           instr->name().find(pattern) != std::string::npos) ||
           (type == "op_name" &&
-           instr->metadata().op_name().find(pattern) != string::npos) ||
+           instr->metadata().op_name().find(pattern) != std::string::npos) ||
           (type == "op_type" &&
-           instr->metadata().op_type().find(pattern) != string::npos)) {
+           instr->metadata().op_type().find(pattern) != std::string::npos)) {
         std::cout << "  " << instr->name();
         std::cout << ", op_name '" << instr->metadata().op_name() << "'";
         std::cout << ", op_type '" << instr->metadata().op_type() << "'";
@@ -266,13 +276,14 @@ void DoListCommand(const HloModule& module, const std::vector<string>& tokens) {
 }
 
 // Print info about an instruction or computation.
-void DoInfoCommand(const HloModule& module, const std::vector<string>& tokens) {
+void DoInfoCommand(const HloModule& module,
+                   const std::vector<std::string>& tokens) {
   if (tokens.size() != 2) {
     std::cerr << "Illegal info query syntax. Use "
               << R"("info name".)";
     return;
   }
-  string node_name = tokens[1];
+  std::string node_name = tokens[1];
 
   const HloInstruction* instr = FindInstruction(module, node_name);
   const HloComputation* comp = FindComputation(module, node_name);
@@ -363,7 +374,7 @@ void DoInfoCommand(const HloModule& module, const std::vector<string>& tokens) {
 }
 
 void DoExtractCommand(const HloModule& module,
-                      absl::Span<const string> tokens) {
+                      absl::Span<const std::string> tokens) {
   if (tokens.size() > 3) {
     std::cerr << R"(Illegal input.  Enter e.g. "extract %fusion.1 2")"
               << std::endl;
@@ -371,7 +382,7 @@ void DoExtractCommand(const HloModule& module,
   }
 
   // Find the node with the given name.
-  string node_name = tokens[1];
+  std::string node_name = tokens[1];
   HloInstruction* instr = FindInstruction(module, node_name);
   if (!instr) {
     std::cerr << "Couldn't find HloInstruction named " << node_name << "."
@@ -379,7 +390,7 @@ void DoExtractCommand(const HloModule& module,
     return;
   }
 
-  int64 height = -1;
+  int64_t height = -1;
   if (tokens.size() == 3) {
     if (!absl::SimpleAtoi(tokens[2], &height)) {
       std::cerr << "Can't parse '" << tokens[2] << "' as an integer."
@@ -397,7 +408,7 @@ void DoExtractCommand(const HloModule& module,
 
 // Checks if there is a use-def path from `from` to `to`.
 bool ExistsPathFromTo(const HloInstruction* from, const HloInstruction* to) {
-  std::unordered_set<const HloInstruction*> visited;
+  absl::flat_hash_set<const HloInstruction*> visited;
   std::vector<const HloInstruction*> to_visit = {from};
   while (!to_visit.empty()) {
     auto* n = to_visit.back();
@@ -425,7 +436,7 @@ void OpenUrl(const Options& opts, absl::string_view url) {
     const char* browser_bin = opts.browser.empty() ? "/usr/bin/sensible-browser"
                                                    : opts.browser.c_str();
     tensorflow::SubProcess p;
-    p.SetProgram(browser_bin, {browser_bin, string(url)});
+    p.SetProgram(browser_bin, {browser_bin, std::string(url)});
     p.Start();
   } else {
     std::cerr << "\nExpected a URL, but got strange graph result (dumped "
@@ -440,10 +451,10 @@ void OpenUrl(const Options& opts, absl::string_view url) {
 // URL format doesn't work out of the box; it requires you to register a plugin.
 void RenderAndDisplayGraph(
     const Options& opts,
-    const std::function<StatusOr<string>(RenderedGraphFormat)>& renderer) {
-  StatusOr<string> url_result = renderer(RenderedGraphFormat::kUrl);
+    const std::function<StatusOr<std::string>(RenderedGraphFormat)>& renderer) {
+  StatusOr<std::string> url_result = renderer(RenderedGraphFormat::kUrl);
   if (url_result.ok()) {
-    string url = url_result.ValueOrDie();
+    std::string url = url_result.ValueOrDie();
     OpenUrl(opts, url);
     return;
   }
@@ -457,14 +468,14 @@ void RenderAndDisplayGraph(
   }
 
   auto* env = tensorflow::Env::Default();
-  StatusOr<string> html_result = renderer(RenderedGraphFormat::kHtml);
+  StatusOr<std::string> html_result = renderer(RenderedGraphFormat::kHtml);
   if (!html_result.ok()) {
     std::cerr << "Failed to render graph as HTML: " << html_result.status()
               << std::endl;
     return;
   }
 
-  std::vector<string> temp_dirs;
+  std::vector<std::string> temp_dirs;
   env->GetLocalTempDirectories(&temp_dirs);
   if (temp_dirs.empty()) {
     std::cerr << "Can't render graph as HTML because we can't find a suitable "
@@ -476,7 +487,7 @@ void RenderAndDisplayGraph(
   // Try to create a unique file inside of temp_dirs.front().  Notably, this
   // file's name must end with ".html", otherwise web browsers will treat it as
   // plain text, so we can't use Env::CreateUniqueFileName().
-  string temp_file_path = tensorflow::io::JoinPath(
+  std::string temp_file_path = tensorflow::io::JoinPath(
       temp_dirs.front(),
       absl::StrFormat("interactive_graphviz.%d.html", env->NowMicros()));
   auto status = tensorflow::WriteStringToFile(
@@ -494,7 +505,7 @@ void RenderAndDisplayGraph(
 }
 
 void DoAllPathsCommand(const Options& opts, const HloModule& module,
-                       const std::vector<string>& tokens) {
+                       const std::vector<std::string>& tokens) {
   if (tokens.size() > 4) {
     std::cerr << R"(Illegal input.  Enter e.g. "allpaths %add.4 %subtract.2" or
 "allpaths add.4 subtract.2 42.)"
@@ -502,7 +513,7 @@ void DoAllPathsCommand(const Options& opts, const HloModule& module,
     return;
   }
 
-  int64 max_nodes = kDefaultMaxNumNodesInAllPaths;
+  int64_t max_nodes = kDefaultMaxNumNodesInAllPaths;
   if (tokens.size() == 4 && !absl::SimpleAtoi(tokens[3], &max_nodes)) {
     std::cerr << "Can't parse '" << tokens[3] << "' as an integer."
               << std::endl;
@@ -541,8 +552,8 @@ void DoAllPathsCommand(const Options& opts, const HloModule& module,
 
 // Plot a given instruction neighborhood or computation with graphviz.
 void DoPlotCommand(const Options& opts, const HloModule& module,
-                   const std::vector<string>& tokens) {
-  string node_name = tokens[0];
+                   const std::vector<std::string>& tokens) {
+  std::string node_name = tokens[0];
 
   // Find the node with the given name.
   const HloInstruction* instr = FindInstruction(module, node_name);
@@ -553,7 +564,7 @@ void DoPlotCommand(const Options& opts, const HloModule& module,
     return;
   }
 
-  uint64 graph_width = kDefaultWidth;
+  uint64_t graph_width = kDefaultWidth;
   absl::flat_hash_set<const HloInstruction*> boundary;
   if (tokens.size() >= 2) {
     if (comp) {
@@ -582,7 +593,7 @@ void DoPlotCommand(const Options& opts, const HloModule& module,
     }
     // Get the boundary nodes.
     while (bound_index < tokens.size()) {
-      string bnode_name = tokens[bound_index];
+      std::string bnode_name = tokens[bound_index];
       const HloInstruction* binstr = FindInstruction(module, bnode_name);
       if (!binstr) {
         std::cerr << "Couldn't find HloInstruction named " << bnode_name << "."
@@ -619,14 +630,15 @@ void InteractiveDumpGraphs(const Options& opts, const HloModule& module) {
     std::cout << "\n\nLoaded module " << module.name() << "." << std::endl;
     DoHelpCommand();
   }
-  for (string line; ReadLine("\ncommand: ", &line);) {
+  for (std::string line; ReadLine("\ncommand: ", &line);) {
     if (line.empty()) {
       std::cout << R"(Enter e.g. "fusion.1 3" or "add.8".)" << std::endl
                 << R"(Enter "help" for help; ^D, "quit", or "exit" to exit.)"
                 << std::endl;
       continue;
     }
-    std::vector<string> tokens = absl::StrSplit(line, ' ', absl::SkipEmpty());
+    std::vector<std::string> tokens =
+        absl::StrSplit(line, ' ', absl::SkipEmpty());
     if (tokens[0] == "quit" || tokens[0] == "exit") {
       break;
     } else if (tokens[0] == "help") {
@@ -664,11 +676,14 @@ void CheckFlags(const Options& opts) {
   if (!opts.hlo_text.empty()) {
     ++nonempty_flags_amount;
   }
+  if (!opts.hlo_module_proto.empty()) {
+    ++nonempty_flags_amount;
+  }
   if (nonempty_flags_amount == 1) {
     return;
   }
   LOG(FATAL) << "Can only specify one and only one of '--hlo_proto', "
-                "'--hlo_snapshot', '--hlo_text' flags.";
+                "'--hlo_snapshot', '--hlo_text', '--hlo_module_proto' flags.";
 }
 
 void RealMain(const Options& opts) {
@@ -700,6 +715,10 @@ void RealMain(const Options& opts) {
   } else if (!opts.hlo_text.empty()) {
     module = HloRunner::ReadModuleFromHloTextFile(
                  opts.hlo_text, xla::GetDebugOptionsFromFlags())
+                 .ValueOrDie();
+  } else if (!opts.hlo_module_proto.empty()) {
+    module = HloRunner::ReadModuleFromModuleBinaryProtofile(
+                 opts.hlo_module_proto, xla::GetDebugOptionsFromFlags())
                  .ValueOrDie();
   }
 
@@ -739,6 +758,8 @@ int main(int argc, char** argv) {
                        "HloSnapshot proto to interactively dump to graphviz"),
       tensorflow::Flag("hlo_proto", &opts.hlo_proto,
                        "XLA hlo proto to interactively dump to graphviz"),
+      tensorflow::Flag("hlo_module_proto", &opts.hlo_module_proto,
+                       "XLA hlomodule proto to interactively dump to graphviz"),
       tensorflow::Flag("hlo_text", &opts.hlo_text,
                        "XLA hlo proto to interactively dump to graphviz"),
       tensorflow::Flag("platform", &opts.platform,
@@ -747,7 +768,7 @@ int main(int argc, char** argv) {
                        "Path to web browser used to display produced graphs."),
       tensorflow::Flag("help", &need_help, "Prints this help message"),
   };
-  xla::string usage = tensorflow::Flags::Usage(argv[0], flag_list);
+  std::string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   bool parse_ok = tensorflow::Flags::Parse(&argc, argv, flag_list);
   tensorflow::port::InitMain(argv[0], &argc, &argv);
   if (argc != 1 || !parse_ok || need_help) {

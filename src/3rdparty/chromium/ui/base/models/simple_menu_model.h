@@ -8,9 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/models/image_model.h"
@@ -77,6 +76,10 @@ class COMPONENT_EXPORT(UI_BASE) SimpleMenuModel : public MenuModel {
   // The Delegate can be NULL, though if it is items can't be checked or
   // disabled.
   explicit SimpleMenuModel(Delegate* delegate);
+
+  SimpleMenuModel(const SimpleMenuModel&) = delete;
+  SimpleMenuModel& operator=(const SimpleMenuModel&) = delete;
+
   ~SimpleMenuModel() override;
 
   // Methods for adding items to the model.
@@ -239,8 +242,8 @@ class COMPONENT_EXPORT(UI_BASE) SimpleMenuModel : public MenuModel {
     ImageModel minor_icon;
     ImageModel icon;
     int group_id = -1;
-    MenuModel* submenu = nullptr;
-    ButtonMenuItemModel* button_model = nullptr;
+    raw_ptr<MenuModel> submenu = nullptr;
+    raw_ptr<ButtonMenuItemModel> button_model = nullptr;
     MenuSeparatorType separator_type = NORMAL_SEPARATOR;
     bool enabled = true;
     bool visible = true;
@@ -265,11 +268,9 @@ class COMPONENT_EXPORT(UI_BASE) SimpleMenuModel : public MenuModel {
 
   ItemVector items_;
 
-  Delegate* delegate_;
+  raw_ptr<Delegate> delegate_;
 
   base::WeakPtrFactory<SimpleMenuModel> method_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SimpleMenuModel);
 };
 
 }  // namespace ui

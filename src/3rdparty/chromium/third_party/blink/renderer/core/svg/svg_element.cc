@@ -25,7 +25,6 @@
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 
 #include "base/auto_reset.h"
-#include "base/cxx17_backports.h"
 #include "third_party/blink/renderer/bindings/core/v8/js_event_handler_for_content_attribute.h"
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/effect_stack.h"
@@ -34,7 +33,6 @@
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
 #include "third_party/blink/renderer/core/animation/svg_interpolation_environment.h"
 #include "third_party/blink/renderer/core/animation/svg_interpolation_types_map.h"
-#include "third_party/blink/renderer/core/css/css_property_id_templates.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -64,7 +62,7 @@
 #include "third_party/blink/renderer/core/svg/svg_use_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/xml_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
 namespace blink {
@@ -307,7 +305,7 @@ AffineTransform SVGElement::LocalCoordinateSpaceTransform(CTMScope) const {
 
 bool SVGElement::HasTransform(
     ApplyMotionTransform apply_motion_transform) const {
-  return (GetLayoutObject() && GetLayoutObject()->StyleRef().HasTransform()) ||
+  return (GetLayoutObject() && GetLayoutObject()->HasTransform()) ||
          (apply_motion_transform == kIncludeMotionTransform &&
           HasSVGRareData());
 }
@@ -317,7 +315,7 @@ AffineTransform SVGElement::CalculateTransform(
   const LayoutObject* layout_object = GetLayoutObject();
 
   AffineTransform matrix;
-  if (layout_object && layout_object->StyleRef().HasTransform()) {
+  if (layout_object && layout_object->HasTransform()) {
     matrix = TransformHelper::ComputeTransform(
         *layout_object, ComputedStyle::kIncludeTransformOrigin);
   }
@@ -364,8 +362,12 @@ void SVGElement::RemovedFrom(ContainerNode& root_parent) {
   Element::RemovedFrom(root_parent);
 
   if (was_in_document) {
-    if (HasSVGRareData() && SvgRareData()->CorrespondingElement())
-      SvgRareData()->CorrespondingElement()->RemoveInstanceMapping(this);
+    if (SVGElement* corresponding_element =
+            HasSVGRareData() ? SvgRareData()->CorrespondingElement()
+                             : nullptr) {
+      corresponding_element->RemoveInstance(this);
+      SvgRareData()->SetCorrespondingElement(nullptr);
+    }
     RebuildAllIncomingReferences();
     RemoveAllIncomingReferences();
   }
@@ -451,7 +453,7 @@ CSSPropertyID SVGElement::CssPropertyIdForSVGAttributeName(
         &svg_names::kWordSpacingAttr,
         &svg_names::kWritingModeAttr,
     };
-    for (size_t i = 0; i < base::size(attr_names); i++) {
+    for (size_t i = 0; i < std::size(attr_names); i++) {
       CSSPropertyID property_id =
           CssPropertyID(execution_context, attr_names[i]->LocalName());
       DCHECK_GT(property_id, CSSPropertyID::kInvalid);
@@ -580,7 +582,7 @@ SVGElement* SVGElement::viewportElement() const {
   return nullptr;
 }
 
-void SVGElement::MapInstanceToElement(SVGElement* instance) {
+void SVGElement::AddInstance(SVGElement* instance) {
   DCHECK(instance);
   DCHECK(instance->InUseShadowTree());
 
@@ -591,7 +593,7 @@ void SVGElement::MapInstanceToElement(SVGElement* instance) {
   instances.insert(instance);
 }
 
-void SVGElement::RemoveInstanceMapping(SVGElement* instance) {
+void SVGElement::RemoveInstance(SVGElement* instance) {
   DCHECK(instance);
   // Called during instance->RemovedFrom() after removal from shadow tree
   DCHECK(!instance->isConnected());
@@ -746,7 +748,7 @@ AnimatedPropertyType SVGElement::AnimatedPropertyTypeForCSSAttribute(
         {svg_names::kVisibilityAttr, kAnimatedString},
         {svg_names::kWordSpacingAttr, kAnimatedLength},
     };
-    for (size_t i = 0; i < base::size(attr_to_types); i++)
+    for (size_t i = 0; i < std::size(attr_to_types); i++)
       css_property_map.Set(attr_to_types[i].attr, attr_to_types[i].prop_type);
   }
   auto it = css_property_map.find(attribute_name);

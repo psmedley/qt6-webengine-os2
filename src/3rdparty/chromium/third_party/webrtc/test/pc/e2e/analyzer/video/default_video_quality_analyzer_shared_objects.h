@@ -11,7 +11,9 @@
 #ifndef TEST_PC_E2E_ANALYZER_VIDEO_DEFAULT_VIDEO_QUALITY_ANALYZER_SHARED_OBJECTS_H_
 #define TEST_PC_E2E_ANALYZER_VIDEO_DEFAULT_VIDEO_QUALITY_ANALYZER_SHARED_OBJECTS_H_
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,14 +23,13 @@
 #include "api/units/timestamp.h"
 
 namespace webrtc {
-namespace webrtc_pc_e2e {
 
 // WebRTC will request a key frame after 3 seconds if no frames were received.
 // We assume max frame rate ~60 fps, so 270 frames will cover max freeze without
 // key frame request.
 constexpr size_t kDefaultMaxFramesInFlightPerStream = 270;
 
-class RateCounter {
+class SamplesRateCounter {
  public:
   void AddEvent(Timestamp event_time);
 
@@ -39,7 +40,7 @@ class RateCounter {
  private:
   Timestamp event_first_time_ = Timestamp::MinusInfinity();
   Timestamp event_last_time_ = Timestamp::MinusInfinity();
-  int64_t event_count_ = 0;
+  int64_t events_count_ = 0;
 };
 
 struct FrameCounters {
@@ -78,9 +79,19 @@ struct StreamCodecInfo {
   Timestamp switched_from_at = Timestamp::PlusInfinity();
 };
 
+// Represents phases where video frame can be dropped and such drop will be
+// detected by analyzer.
+enum class FrameDropPhase : int {
+  kBeforeEncoder,
+  kByEncoder,
+  kTransport,
+  kAfterDecoder,
+  // kLastValue must be the last value in this enumeration.
+  kLastValue
+};
+
 struct StreamStats {
-  explicit StreamStats(Timestamp stream_started_time)
-      : stream_started_time(stream_started_time) {}
+  explicit StreamStats(Timestamp stream_started_time);
 
   // The time when the first frame of this stream was captured.
   Timestamp stream_started_time;
@@ -95,7 +106,7 @@ struct StreamStats {
   SamplesStatsCounter total_delay_incl_transport_ms;
   // Time between frames out from renderer.
   SamplesStatsCounter time_between_rendered_frames_ms;
-  RateCounter encode_frame_rate;
+  SamplesRateCounter encode_frame_rate;
   SamplesStatsCounter encode_time_ms;
   SamplesStatsCounter decode_time_ms;
   // Time from last packet of frame is received until it's sent to the renderer.
@@ -115,8 +126,8 @@ struct StreamStats {
   SamplesStatsCounter target_encode_bitrate;
 
   int64_t total_encoded_images_payload = 0;
-  int64_t dropped_by_encoder = 0;
-  int64_t dropped_before_encoder = 0;
+  // Counters on which phase how many frames were dropped.
+  std::map<FrameDropPhase, int64_t> dropped_by_phase;
 
   // Vector of encoders used for this stream by sending client.
   std::vector<StreamCodecInfo> encoders;
@@ -146,17 +157,13 @@ struct AnalyzerStats {
 };
 
 struct StatsKey {
-  StatsKey(std::string stream_label, std::string sender, std::string receiver)
-      : stream_label(std::move(stream_label)),
-        sender(std::move(sender)),
-        receiver(std::move(receiver)) {}
+  StatsKey(std::string stream_label, std::string receiver)
+      : stream_label(std::move(stream_label)), receiver(std::move(receiver)) {}
 
   std::string ToString() const;
 
   // Label of video stream to which stats belongs to.
   std::string stream_label;
-  // Name of the peer which send this stream.
-  std::string sender;
   // Name of the peer on which stream was received.
   std::string receiver;
 };
@@ -165,7 +172,65 @@ struct StatsKey {
 bool operator<(const StatsKey& a, const StatsKey& b);
 bool operator==(const StatsKey& a, const StatsKey& b);
 
-}  // namespace webrtc_pc_e2e
+// Contains all metadata related to the video streams that were seen by the
+// video analyzer.
+class VideoStreamsInfo {
+ public:
+  std::set<StatsKey> GetStatsKeys() const;
+
+  // Returns all stream labels that are known to the video analyzer.
+  std::set<std::string> GetStreams() const;
+
+  // Returns set of the stream for specified `sender_name`. If sender didn't
+  // send any streams or `sender_name` isn't known to the video analyzer
+  // empty set will be returned.
+  std::set<std::string> GetStreams(absl::string_view sender_name) const;
+
+  // Returns sender name for specified `stream_label`. Returns `absl::nullopt`
+  // if provided `stream_label` isn't known to the video analyzer.
+  absl::optional<std::string> GetSender(absl::string_view stream_label) const;
+
+  // Returns set of the receivers for specified `stream_label`. If stream wasn't
+  // received by any peer or `stream_label` isn't known to the video analyzer
+  // empty set will be returned.
+  std::set<std::string> GetReceivers(absl::string_view stream_label) const;
+
+ protected:
+  friend class DefaultVideoQualityAnalyzer;
+  VideoStreamsInfo(
+      std::map<std::string, std::string> stream_to_sender,
+      std::map<std::string, std::set<std::string>> sender_to_streams,
+      std::map<std::string, std::set<std::string>> stream_to_receivers);
+
+ private:
+  std::map<std::string, std::string> stream_to_sender_;
+  std::map<std::string, std::set<std::string>> sender_to_streams_;
+  std::map<std::string, std::set<std::string>> stream_to_receivers_;
+};
+
+struct DefaultVideoQualityAnalyzerOptions {
+  // Tells DefaultVideoQualityAnalyzer if heavy metrics have to be computed.
+  bool compute_psnr = true;
+  bool compute_ssim = true;
+  // If true, weights the luma plane more than the chroma planes in the PSNR.
+  bool use_weighted_psnr = false;
+  // If true DefaultVideoQualityAnalyzer will try to adjust frames before
+  // computing PSNR and SSIM for them. In some cases picture may be shifted by
+  // a few pixels after the encode/decode step. Those difference is invisible
+  // for a human eye, but it affects the metrics. So the adjustment is used to
+  // get metrics that are closer to how human perceive the video. This feature
+  // significantly slows down the comparison, so turn it on only when it is
+  // needed.
+  bool adjust_cropping_before_comparing_frames = false;
+  // Amount of frames that are queued in the DefaultVideoQualityAnalyzer from
+  // the point they were captured to the point they were rendered on all
+  // receivers per stream.
+  size_t max_frames_in_flight_per_stream_count =
+      kDefaultMaxFramesInFlightPerStream;
+  // If true, the analyzer will expect peers to receive their own video streams.
+  bool enable_receive_own_stream = false;
+};
+
 }  // namespace webrtc
 
 #endif  // TEST_PC_E2E_ANALYZER_VIDEO_DEFAULT_VIDEO_QUALITY_ANALYZER_SHARED_OBJECTS_H_

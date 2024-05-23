@@ -10,7 +10,7 @@
 
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/ui/address_contact_form_label_formatter.h"
 #include "components/autofill/core/browser/ui/address_email_form_label_formatter.h"
 #include "components/autofill/core/browser/ui/address_form_label_formatter.h"
@@ -94,7 +94,7 @@ std::unique_ptr<LabelFormatter> LabelFormatter::Create(
     return nullptr;
   }
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   return std::make_unique<MobileLabelFormatter>(
       profiles, app_locale, focused_field_type, groups, field_types);
 #else
@@ -124,7 +124,7 @@ std::unique_ptr<LabelFormatter> LabelFormatter::Create(
     default:
       return nullptr;
   }
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 }
 
 }  // namespace autofill

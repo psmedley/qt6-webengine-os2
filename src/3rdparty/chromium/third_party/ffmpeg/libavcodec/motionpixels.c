@@ -26,6 +26,7 @@
 #include "avcodec.h"
 #include "get_bits.h"
 #include "bswapdsp.h"
+#include "codec_internal.h"
 #include "internal.h"
 
 #define MAX_HUFF_CODES 16
@@ -80,10 +81,10 @@ static av_cold int mp_decode_init(AVCodecContext *avctx)
 
     mp->avctx = avctx;
     ff_bswapdsp_init(&mp->bdsp);
-    mp->changes_map = av_mallocz_array(avctx->width, h4);
+    mp->changes_map = av_calloc(avctx->width, h4);
     mp->offset_bits_len = av_log2(avctx->width * avctx->height) + 1;
-    mp->vpt = av_mallocz_array(avctx->height, sizeof(YuvPixel));
-    mp->hpt = av_mallocz_array(h4 / 4, w4 / 4 * sizeof(YuvPixel));
+    mp->vpt = av_calloc(avctx->height, sizeof(*mp->vpt));
+    mp->hpt = av_calloc(h4 / 4, w4 / 4 * sizeof(*mp->hpt));
     if (!mp->changes_map || !mp->vpt || !mp->hpt)
         return AVERROR(ENOMEM);
     avctx->pix_fmt = AV_PIX_FMT_RGB555;
@@ -345,15 +346,15 @@ end:
     return buf_size;
 }
 
-const AVCodec ff_motionpixels_decoder = {
-    .name           = "motionpixels",
-    .long_name      = NULL_IF_CONFIG_SMALL("Motion Pixels video"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_MOTIONPIXELS,
+const FFCodec ff_motionpixels_decoder = {
+    .p.name         = "motionpixels",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Motion Pixels video"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_MOTIONPIXELS,
     .priv_data_size = sizeof(MotionPixelsContext),
     .init           = mp_decode_init,
     .close          = mp_decode_end,
     .decode         = mp_decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_INIT_THREADSAFE,
 };

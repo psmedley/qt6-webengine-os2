@@ -12,6 +12,7 @@
 #include "base/check_op.h"
 #include "base/containers/cxx20_erase.h"
 #include "base/i18n/rtl.h"
+#include "base/observer_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -266,7 +267,7 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
       }
     }
   } else {
-    Widget* widget = starting_widget ? starting_widget : widget_;
+    Widget* widget = starting_widget ? starting_widget : widget_.get();
     focus_traversable = widget->GetFocusTraversable();
   }
 
@@ -348,9 +349,9 @@ void FocusManager::SetFocusedViewWithReason(View* view,
   // Change this to DCHECK once it's resolved.
   CHECK(!view || ContainsView(view));
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
   // TODO(warx): There are some AccessiblePaneViewTest failed on macosx.
-  // crbug.com/650859. Remove !defined(OS_MAC) once that is fixed.
+  // crbug.com/650859. Remove !BUILDFLAG(IS_MAC) once that is fixed.
   //
   // If the widget isn't active store the focused view and then attempt to
   // activate the widget. If activation succeeds |view| will be focused.
@@ -390,9 +391,6 @@ void FocusManager::SetFocusedViewWithReason(View* view,
 
   for (FocusChangeListener& observer : focus_change_listeners_)
     observer.OnDidChangeFocus(old_focused_view, focused_view_);
-
-  if (delegate_)
-    delegate_->OnDidChangeFocus(old_focused_view, focused_view_);
 }
 
 void FocusManager::SetFocusedView(View* view) {
@@ -541,7 +539,7 @@ bool FocusManager::ProcessAccelerator(const ui::Accelerator& accelerator) {
   if (delegate_ && delegate_->ProcessAccelerator(accelerator))
     return true;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // On MacOS accelerators are processed when a bubble is opened without
   // manual redirection to bubble anchor widget. Including redirect on MacOS
   // breaks processing accelerators by the bubble itself.
@@ -606,7 +604,7 @@ bool FocusManager::IsFocusable(View* view) const {
   DCHECK(view);
 
 // |keyboard_accessible_| is only used on Mac.
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   return keyboard_accessible_ ? view->IsAccessibilityFocusable()
                               : view->IsFocusable();
 #else
@@ -637,14 +635,14 @@ bool FocusManager::RedirectAcceleratorToBubbleAnchorWidget(
 
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
-#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // Processing an accelerator can delete things. Because we
   // need these objects afterwards on Linux, save widget_ as weak pointer and
   // save the close_on_deactivate property value of widget_delegate in a
   // variable.
   base::WeakPtr<Widget> widget_weak_ptr = widget_->GetWeakPtr();
   const bool close_widget_on_deactivate =
-      widget_delegate->close_on_deactivate();
+      widget_delegate->ShouldCloseOnDeactivate();
 #endif
 
   // The parent view must be focused for it to process events.
@@ -654,7 +652,7 @@ bool FocusManager::RedirectAcceleratorToBubbleAnchorWidget(
 
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
-#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // Need to manually close the bubble widget on Linux. On Linux when the
   // bubble is shown, the main widget remains active. Because of that when
   // focus is set to the main widget to process accelerator, the main widget
@@ -673,7 +671,7 @@ bool FocusManager::IsArrowKeyTraversalEnabledForWidget() const {
 
   Widget* const widget = (focused_view_ && focused_view_->GetWidget())
                              ? focused_view_->GetWidget()
-                             : widget_;
+                             : widget_.get();
   return widget && widget->widget_delegate() &&
          widget->widget_delegate()->enable_arrow_key_traversal();
 }

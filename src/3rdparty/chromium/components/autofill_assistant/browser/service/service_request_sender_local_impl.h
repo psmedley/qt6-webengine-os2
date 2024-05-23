@@ -22,7 +22,9 @@ class ServiceRequestSenderLocalImpl : public ServiceRequestSender {
   // TODO(arbesser): Make this more flexible.
   void SendRequest(const GURL& url,
                    const std::string& request_body,
-                   ResponseCallback callback) override;
+                   ServiceRequestSender::AuthMode auth_mode,
+                   ResponseCallback callback,
+                   RpcType rpc_type) override;
 
  private:
   std::string response_;

@@ -26,16 +26,16 @@
 #include "include/core/SkTypes.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/gpu/GrConfig.h"
-#include "include/private/GrTypesPriv.h"
 #include "include/private/SkColorData.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/core/SkCanvasPriv.h"
 #include "src/core/SkMatrixProvider.h"
-#include "src/gpu/GrColor.h"
-#include "src/gpu/GrFragmentProcessor.h"
-#include "src/gpu/GrPaint.h"
-#include "src/gpu/SkGr.h"
-#include "src/gpu/ops/GrOp.h"
-#include "src/gpu/v1/SurfaceDrawContext_v1.h"
+#include "src/gpu/ganesh/GrColor.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
+#include "src/gpu/ganesh/GrPaint.h"
+#include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/ops/GrOp.h"
+#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 #include "tools/ToolUtils.h"
 #include "tools/gpu/TestOps.h"
 
@@ -43,14 +43,13 @@
 
 namespace skiagm {
 /**
- * This GM directly exercises Color, ModulateRGBA and ModulateAlpha.
+ * This GM directly exercises Color and ModulateRGBA.
  */
 class ColorProcessor : public GpuGM {
 public:
     enum class TestMode {
         kConstColor,
-        kModulateRGBA,
-        kModulateAlpha
+        kModulateRGBA
     };
 
     ColorProcessor(TestMode mode) : fMode(mode) {
@@ -62,7 +61,6 @@ protected:
         switch (fMode) {
             case TestMode::kConstColor:    return SkString("const_color_processor");
             case TestMode::kModulateRGBA:  return SkString("modulate_rgba");
-            case TestMode::kModulateAlpha: return SkString("modulate_alpha");
         }
         SkUNREACHABLE;
     }
@@ -115,7 +113,7 @@ protected:
                 std::unique_ptr<GrFragmentProcessor> baseFP;
                 if (paintType >= SK_ARRAY_COUNT(kPaintColors)) {
                     GrColorInfo colorInfo;
-                    GrFPArgs args(rContext, SkSimpleMatrixProvider(SkMatrix::I()), &colorInfo);
+                    GrFPArgs args(rContext, SkMatrixProvider(SkMatrix::I()), &colorInfo);
                     baseFP = as_SB(fShader)->asFragmentProcessor(args);
                 } else {
                     baseFP = GrFragmentProcessor::MakeColor(
@@ -132,11 +130,6 @@ protected:
 
                     case TestMode::kModulateRGBA:
                         colorFP = GrFragmentProcessor::ModulateRGBA(
-                                std::move(baseFP), SkPMColor4f::FromBytes_RGBA(kColors[procColor]));
-                        break;
-
-                    case TestMode::kModulateAlpha:
-                        colorFP = GrFragmentProcessor::ModulateAlpha(
                                 std::move(baseFP), SkPMColor4f::FromBytes_RGBA(kColors[procColor]));
                         break;
                 }
@@ -212,16 +205,15 @@ private:
     sk_sp<SkShader> fShader;
     TestMode        fMode;
 
-    static constexpr SkScalar       kPad = 10.f;
-    static constexpr SkScalar       kRectSize = 20.f;
-    static constexpr int            kWidth  = 820;
-    static constexpr int            kHeight = 500;
+    inline static constexpr SkScalar       kPad = 10.f;
+    inline static constexpr SkScalar       kRectSize = 20.f;
+    inline static constexpr int            kWidth  = 820;
+    inline static constexpr int            kHeight = 500;
 
     using INHERITED = GM;
 };
 
 DEF_GM(return new ColorProcessor{ColorProcessor::TestMode::kConstColor};)
 DEF_GM(return new ColorProcessor{ColorProcessor::TestMode::kModulateRGBA};)
-DEF_GM(return new ColorProcessor{ColorProcessor::TestMode::kModulateAlpha};)
 
 }  // namespace skiagm

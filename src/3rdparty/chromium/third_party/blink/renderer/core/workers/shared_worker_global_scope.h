@@ -37,11 +37,10 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
-class ApplicationCacheHostForWorker;
 class SharedWorkerThread;
 class WorkerClassicScriptLoader;
 
@@ -51,10 +50,10 @@ class CORE_EXPORT SharedWorkerGlobalScope final : public WorkerGlobalScope {
  public:
   SharedWorkerGlobalScope(
       std::unique_ptr<GlobalScopeCreationParams> creation_params,
+      bool is_constructor_origin_secure,
       SharedWorkerThread* thread,
       base::TimeTicks time_origin,
-      const SharedWorkerToken& token,
-      const base::UnguessableToken& appcache_host_id);
+      const SharedWorkerToken& token);
 
   ~SharedWorkerGlobalScope() override;
 
@@ -69,8 +68,7 @@ class CORE_EXPORT SharedWorkerGlobalScope final : public WorkerGlobalScope {
       network::mojom::ReferrerPolicy response_referrer_policy,
       network::mojom::IPAddressSpace response_address_space,
       Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp,
-      const Vector<String>* response_origin_trial_tokens,
-      int64_t appcache_id) override;
+      const Vector<String>* response_origin_trial_tokens) override;
   void FetchAndRunClassicScript(
       const KURL& script_url,
       std::unique_ptr<WorkerMainScriptLoadParameters>
@@ -93,8 +91,6 @@ class CORE_EXPORT SharedWorkerGlobalScope final : public WorkerGlobalScope {
 
   void Connect(MessagePortChannel channel);
 
-  void OnAppCacheSelected();
-
   void Trace(Visitor*) const override;
 
   // Returns the token that uniquely identifies this worker.
@@ -107,6 +103,22 @@ class CORE_EXPORT SharedWorkerGlobalScope final : public WorkerGlobalScope {
   }
 
  private:
+  // TODO(https://crbug.com/780031): Remove this indirection once
+  // `starter_secure_context` is simply passed through to `WorkerGlobalScope`.
+  struct ParsedCreationParams {
+    std::unique_ptr<GlobalScopeCreationParams> creation_params;
+    bool starter_secure_context = false;
+  };
+
+  static ParsedCreationParams ParseCreationParams(
+      std::unique_ptr<GlobalScopeCreationParams> creation_params,
+      bool is_constructor_origin_secure);
+
+  SharedWorkerGlobalScope(ParsedCreationParams parsed_creation_params,
+                          SharedWorkerThread* thread,
+                          base::TimeTicks time_origin,
+                          const SharedWorkerToken& token);
+
   void DidReceiveResponseForClassicScript(
       WorkerClassicScriptLoader* classic_script_loader);
   void DidFetchClassicScript(WorkerClassicScriptLoader* classic_script_loader,
@@ -115,7 +127,6 @@ class CORE_EXPORT SharedWorkerGlobalScope final : public WorkerGlobalScope {
   void ExceptionThrown(ErrorEvent*) override;
 
   const SharedWorkerToken token_;
-  Member<ApplicationCacheHostForWorker> appcache_host_;
 };
 
 template <>

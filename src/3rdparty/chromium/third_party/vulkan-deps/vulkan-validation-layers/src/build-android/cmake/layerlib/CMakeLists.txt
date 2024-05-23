@@ -51,7 +51,7 @@ add_library(layer_utils STATIC
         ${SRC_DIR}/layers/vk_layer_config.cpp
         ${SRC_DIR}/layers/vk_layer_extension_utils.cpp
         ${SRC_DIR}/layers/vk_layer_utils.cpp
-        ${SRC_DIR}/layers/vk_format_utils.cpp)
+        ${SRC_DIR}/layers/generated/vk_format_utils.cpp)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_clone}")
 
 # assume shaderc already built externally
@@ -63,10 +63,13 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_USE_PLATFORM_ANDROID_KHR \
                      -fvisibility=hidden")
 add_library(VkLayer_khronos_validation SHARED
         ${SRC_DIR}/layers/state_tracker.cpp
+        ${SRC_DIR}/layers/base_node.cpp
+        ${SRC_DIR}/layers/buffer_state.cpp
         ${SRC_DIR}/layers/cmd_buffer_state.cpp
         ${SRC_DIR}/layers/device_memory_state.cpp
         ${SRC_DIR}/layers/image_state.cpp
         ${SRC_DIR}/layers/pipeline_state.cpp
+        ${SRC_DIR}/layers/queue_state.cpp
         ${SRC_DIR}/layers/render_pass_state.cpp
         ${SRC_DIR}/layers/core_validation.cpp
         ${SRC_DIR}/layers/drawdispatch.cpp
@@ -76,6 +79,7 @@ add_library(VkLayer_khronos_validation SHARED
         ${SRC_DIR}/layers/shader_module.cpp
         ${SRC_DIR}/layers/shader_validation.cpp
         ${SRC_DIR}/layers/generated/spirv_validation_helper.cpp
+        ${SRC_DIR}/layers/generated/spirv_grammar_helper.cpp
         ${SRC_DIR}/layers/generated/command_validation.cpp
         ${SRC_DIR}/layers/gpu_validation.cpp
         ${SRC_DIR}/layers/gpu_utils.cpp

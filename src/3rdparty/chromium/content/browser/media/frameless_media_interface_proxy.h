@@ -7,11 +7,9 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
-#include "content/common/content_export.h"
 #include "media/media_buildflags.h"
 #include "media/mojo/buildflags.h"
 #include "media/mojo/mojom/interface_factory.mojom.h"
@@ -29,10 +27,15 @@ namespace content {
 // It is used in cases without a frame context, e.g. WebRTC's
 // RTCVideoDecoderFactory to create hardware video decoders using
 // MojoVideoDecoder, and WebCodecs audio/video decoding in workers.
-class CONTENT_EXPORT FramelessMediaInterfaceProxy final
+class FramelessMediaInterfaceProxy final
     : public media::mojom::InterfaceFactory {
  public:
   FramelessMediaInterfaceProxy();
+
+  FramelessMediaInterfaceProxy(const FramelessMediaInterfaceProxy&) = delete;
+  FramelessMediaInterfaceProxy& operator=(const FramelessMediaInterfaceProxy&) =
+      delete;
+
   ~FramelessMediaInterfaceProxy() final;
 
   void Add(mojo::PendingReceiver<media::mojom::InterfaceFactory> receiver);
@@ -41,7 +44,11 @@ class CONTENT_EXPORT FramelessMediaInterfaceProxy final
   void CreateAudioDecoder(
       mojo::PendingReceiver<media::mojom::AudioDecoder> receiver) final;
   void CreateVideoDecoder(
-      mojo::PendingReceiver<media::mojom::VideoDecoder> receiver) final;
+      mojo::PendingReceiver<media::mojom::VideoDecoder> receiver,
+      mojo::PendingRemote<media::stable::mojom::StableVideoDecoder>
+          dst_video_decoder) final;
+  void CreateAudioEncoder(
+      mojo::PendingReceiver<media::mojom::AudioEncoder> receiver) final;
   void CreateDefaultRenderer(
       const std::string& audio_device_id,
       mojo::PendingReceiver<media::mojom::Renderer> receiver) final;
@@ -50,7 +57,7 @@ class CONTENT_EXPORT FramelessMediaInterfaceProxy final
       const base::UnguessableToken& overlay_plane_id,
       mojo::PendingReceiver<media::mojom::Renderer> receiver) final;
 #endif
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void CreateMediaPlayerRenderer(
       mojo::PendingRemote<media::mojom::MediaPlayerRendererClientExtension>
           client_extension_remote,
@@ -62,15 +69,17 @@ class CONTENT_EXPORT FramelessMediaInterfaceProxy final
       mojo::PendingRemote<media::mojom::FlingingRendererClientExtension>
           client_extension,
       mojo::PendingReceiver<media::mojom::Renderer> receiver) final;
-#endif  // defined(OS_ANDROID)
-#if defined(OS_WIN)
+#endif  // BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_WIN)
   void CreateMediaFoundationRenderer(
+      mojo::PendingRemote<media::mojom::MediaLog> media_log_remote,
       mojo::PendingReceiver<media::mojom::Renderer> receiver,
       mojo::PendingReceiver<media::mojom::MediaFoundationRendererExtension>
-          renderer_extension_receiver) final;
-#endif  // defined(OS_WIN)
-  void CreateCdm(const std::string& key_system,
-                 const media::CdmConfig& cdm_config,
+          renderer_extension_receiver,
+      mojo::PendingRemote<media::mojom::MediaFoundationRendererClientExtension>
+          client_extension_remote) final;
+#endif  // BUILDFLAG(IS_WIN)
+  void CreateCdm(const media::CdmConfig& cdm_config,
                  CreateCdmCallback callback) final;
 
  private:
@@ -85,7 +94,6 @@ class CONTENT_EXPORT FramelessMediaInterfaceProxy final
   mojo::ReceiverSet<media::mojom::InterfaceFactory> receivers_;
 
   THREAD_CHECKER(thread_checker_);
-  DISALLOW_COPY_AND_ASSIGN(FramelessMediaInterfaceProxy);
 };
 
 }  // namespace content

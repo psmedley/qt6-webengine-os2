@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_GRID_H_
 
 #include <memory>
+
 #include "third_party/blink/renderer/core/layout/grid.h"
 #include "third_party/blink/renderer/core/layout/grid_layout_utils.h"
 #include "third_party/blink/renderer/core/layout/grid_track_sizing_algorithm.h"
@@ -34,6 +35,7 @@
 #include "third_party/blink/renderer/core/layout/ng/grid/layout_ng_grid_interface.h"
 #include "third_party/blink/renderer/core/layout/order_iterator.h"
 #include "third_party/blink/renderer/core/style/grid_positions_resolver.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 
 namespace blink {
 
@@ -57,6 +59,7 @@ class LayoutGrid final : public LayoutBlock, public LayoutNGGridInterface {
  public:
   explicit LayoutGrid(Element*);
   ~LayoutGrid() override;
+  void Trace(Visitor*) const override;
 
   static LayoutGrid* CreateAnonymous(Document*);
   const char* GetName() const override {
@@ -98,11 +101,13 @@ class LayoutGrid final : public LayoutBlock, public LayoutNGGridInterface {
 
   wtf_size_t AutoRepeatCountForDirection(
       GridTrackSizingDirection direction) const final {
+    NOT_DESTROYED();
     return base::checked_cast<wtf_size_t>(grid_->AutoRepeatTracks(direction));
   }
 
   wtf_size_t ExplicitGridStartForDirection(
       GridTrackSizingDirection direction) const final {
+    NOT_DESTROYED();
     return base::checked_cast<wtf_size_t>(grid_->ExplicitGridStart(direction));
   }
 
@@ -139,7 +144,7 @@ class LayoutGrid final : public LayoutBlock, public LayoutNGGridInterface {
   // Exposed for testing *ONLY*.
   Grid* InternalGrid() const {
     NOT_DESTROYED();
-    return grid_.get();
+    return grid_;
   }
 
  protected:
@@ -184,10 +189,10 @@ class LayoutGrid final : public LayoutBlock, public LayoutNGGridInterface {
       Grid&,
       GridTrackSizingDirection) const;
 
-  void PerformGridItemsPreLayout(const GridTrackSizingAlgorithm&) const;
+  void PerformGridItemsPreLayout(const GridTrackSizingAlgorithm*) const;
 
   void PlaceItemsOnGrid(
-      GridTrackSizingAlgorithm&,
+      GridTrackSizingAlgorithm*,
       absl::optional<LayoutUnit> available_logical_width) const;
   void PopulateExplicitGridAndOrderIterator(Grid&) const;
   std::unique_ptr<GridArea> CreateEmptyGridAreaAtSpecifiedPositionsOutsideGrid(
@@ -195,9 +200,12 @@ class LayoutGrid final : public LayoutBlock, public LayoutNGGridInterface {
       const LayoutBox&,
       GridTrackSizingDirection,
       const GridSpan& specified_positions) const;
-  void PlaceSpecifiedMajorAxisItemsOnGrid(Grid&,
-                                          const Vector<LayoutBox*>&) const;
-  void PlaceAutoMajorAxisItemsOnGrid(Grid&, const Vector<LayoutBox*>&) const;
+  void PlaceSpecifiedMajorAxisItemsOnGrid(
+      Grid&,
+      const HeapVector<Member<LayoutBox>>&) const;
+  void PlaceAutoMajorAxisItemsOnGrid(
+      Grid&,
+      const HeapVector<Member<LayoutBox>>&) const;
   void PlaceAutoMajorAxisItemOnGrid(
       Grid&,
       LayoutBox&,
@@ -208,7 +216,7 @@ class LayoutGrid final : public LayoutBlock, public LayoutNGGridInterface {
   absl::optional<LayoutUnit> OverrideIntrinsicContentLogicalSize(
       GridTrackSizingDirection) const;
 
-  void ComputeTrackSizesForIndefiniteSize(GridTrackSizingAlgorithm&,
+  void ComputeTrackSizesForIndefiniteSize(GridTrackSizingAlgorithm*,
                                           GridTrackSizingDirection) const;
   void ComputeTrackSizesForDefiniteSize(GridTrackSizingDirection,
                                         LayoutUnit free_space);
@@ -324,15 +332,15 @@ class LayoutGrid final : public LayoutBlock, public LayoutNGGridInterface {
   bool AspectRatioPrefersInline(const LayoutBox& child,
                                 bool block_flow_is_column_axis);
 
-  std::unique_ptr<Grid> grid_;
-  GridTrackSizingAlgorithm track_sizing_algorithm_;
+  Member<Grid> grid_;
+  Member<GridTrackSizingAlgorithm> track_sizing_algorithm_;
 
   Vector<LayoutUnit> row_positions_;
   Vector<LayoutUnit> column_positions_;
   ContentAlignmentData offset_between_columns_;
   ContentAlignmentData offset_between_rows_;
 
-  typedef HashMap<const LayoutBox*, absl::optional<wtf_size_t>>
+  typedef HeapHashMap<Member<const LayoutBox>, absl::optional<wtf_size_t>>
       OutOfFlowPositionsMap;
   OutOfFlowPositionsMap column_of_positioned_item_;
   OutOfFlowPositionsMap row_of_positioned_item_;

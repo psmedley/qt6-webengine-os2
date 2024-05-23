@@ -15,10 +15,10 @@
 #include "base/android/jni_android.h"
 #include "base/callback.h"
 #include "base/callback_list.h"
-#include "base/compiler_specific.h"
 #include "base/containers/queue.h"
+#include "base/gtest_prod_util.h"
 #include "base/i18n/rtl.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "base/time/time.h"
@@ -31,6 +31,7 @@
 #include "content/browser/renderer_host/text_input_manager.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_frame_host.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-forward.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/android/delegated_frame_host_android.h"
 #include "ui/android/view_android.h"
@@ -80,6 +81,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   RenderWidgetHostViewAndroid(RenderWidgetHostImpl* widget,
                               gfx::NativeView parent_native_view);
 
+  RenderWidgetHostViewAndroid(const RenderWidgetHostViewAndroid&) = delete;
+  RenderWidgetHostViewAndroid& operator=(const RenderWidgetHostViewAndroid&) =
+      delete;
+
   // Interface used to observe the destruction of a RenderWidgetHostViewAndroid.
   class DestructionObserver {
    public:
@@ -102,8 +107,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
       base::RepeatingCallback<SurfaceIdChangedCallbackType>;
   using SurfaceIdChangedCallbackList =
       base::RepeatingCallbackList<SurfaceIdChangedCallbackType>;
-  base::CallbackListSubscription SubscribeToSurfaceIdChanges(
-      const SurfaceIdChangedCallback& callback) WARN_UNUSED_RESULT;
+  [[nodiscard]] base::CallbackListSubscription SubscribeToSurfaceIdChanges(
+      const SurfaceIdChangedCallback& callback);
 
   // Called by DelegatedFrameHostClientAndroid
   void OnSurfaceIdChanged();
@@ -111,14 +116,14 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   // RenderWidgetHostView implementation.
   void InitAsChild(gfx::NativeView parent_view) override;
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                   const gfx::Rect& pos) override;
+                   const gfx::Rect& pos,
+                   const gfx::Rect& anchor_rect) override;
   void SetSize(const gfx::Size& size) override;
   void SetBounds(const gfx::Rect& rect) override;
   gfx::NativeView GetNativeView() override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   void Focus() override;
   bool HasFocus() override;
-  void Show() override;
   void Hide() override;
   bool IsShowing() override;
   gfx::Rect GetViewBounds() override;
@@ -138,10 +143,12 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
   void RenderProcessGone() override;
+  void ShowWithVisibility(PageVisibilityState page_visibility) final;
   void Destroy() override;
   void UpdateTooltipUnderCursor(const std::u16string& tooltip_text) override;
   void UpdateTooltipFromKeyboard(const std::u16string& tooltip_text,
                                  const gfx::Rect& bounds) override;
+  void ClearKeyboardTriggeredTooltip() override;
   void TransformPointToRootSurface(gfx::PointF* point) override;
   gfx::Rect GetBoundsInRootWindow() override;
   void ProcessAckedTouchEvent(
@@ -159,14 +166,13 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   blink::mojom::PointerLockResult ChangeMouseLock(
       bool request_unadjusted_movement) override;
   void UnlockMouse() override;
+  void ClearFallbackSurfaceForCommitPending() override;
   void ResetFallbackToFirstNavigationSurface() override;
   bool RequestRepaintForTesting() override;
   void SetIsInVR(bool is_in_vr) override;
   bool IsInVR() const override;
   void DidOverscroll(const ui::DidOverscrollParams& params) override;
   void DidStopFlinging() override;
-  void OnInterstitialPageAttached() override;
-  void OnInterstitialPageGoingAway() override;
   bool CanSynchronizeVisualProperties() override;
   std::unique_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget()
       override;
@@ -189,7 +195,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   WebContentsAccessibility* GetWebContentsAccessibility() override;
   viz::ScopedSurfaceIdAllocator DidUpdateVisualProperties(
       const cc::RenderFrameMetadata& metadata) override;
-  void GetScreenInfo(display::ScreenInfo* screen_info) override;
+  display::ScreenInfo GetScreenInfo() const override;
   std::vector<std::unique_ptr<ui::TouchEvent>> ExtractAndCancelActiveTouches()
       override;
   void TransferTouches(
@@ -289,15 +295,13 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void MoveCaret(const gfx::Point& point);
   void DismissTextHandles();
   void SetTextHandlesTemporarilyHidden(bool hide_handles);
-  void SelectWordAroundCaretAck(bool did_select,
-                                int start_adjust,
-                                int end_adjust);
+  void SelectAroundCaretAck(blink::mojom::SelectAroundCaretResultPtr result);
 
-  // TODO(ericrk): Ideally we'd reemove |root_scroll_offset| from this function
+  // TODO(ericrk): Ideally we'd remove |root_scroll_offset| from this function
   // once we have a reliable way to get it through RenderFrameMetadata.
   void FrameTokenChangedForSynchronousCompositor(
       uint32_t frame_token,
-      const gfx::ScrollOffset& root_scroll_offset);
+      const gfx::PointF& root_scroll_offset);
 
   void SetSynchronousCompositorClient(SynchronousCompositorClient* client);
 
@@ -341,7 +345,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void OnLocalSurfaceIdChanged(
       const cc::RenderFrameMetadata& metadata) override {}
   void OnRootScrollOffsetChanged(
-      const gfx::Vector2dF& root_scroll_offset) override;
+      const gfx::PointF& root_scroll_offset) override;
 
   void WasEvicted();
 
@@ -387,20 +391,25 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void SetNeedsBeginFrameForFlingProgress();
 
  protected:
+  ~RenderWidgetHostViewAndroid() override;
+
   // RenderWidgetHostViewBase:
   void UpdateBackgroundColor() override;
   bool HasFallbackSurface() const override;
   absl::optional<DisplayFeature> GetDisplayFeature() override;
   void SetDisplayFeatureForTesting(
       const DisplayFeature* display_feature) override;
+  void NotifyHostAndDelegateOnWasShown(
+      blink::mojom::RecordContentToVisibleTimeRequestPtr) final;
+  void RequestPresentationTimeFromHostOrDelegate(
+      blink::mojom::RecordContentToVisibleTimeRequestPtr) final;
+  void CancelPresentationTimeRequestForHostAndDelegate() final;
 
  private:
   friend class RenderWidgetHostViewAndroidTest;
   friend class RenderWidgetHostViewAndroidRotationTest;
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            GestureManagerListensToChildFrames);
-
-  ~RenderWidgetHostViewAndroid() override;
 
   bool ShouldReportAllRootScrolls();
 
@@ -492,10 +501,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   // Specifies whether touch selection handles are hidden due to text selection.
   bool handles_hidden_by_selection_ui_ = false;
 
-  ImeAdapterAndroid* ime_adapter_android_;
-  SelectionPopupController* selection_popup_controller_;
-  TextSuggestionHostAndroid* text_suggestion_host_;
-  GestureListenerManager* gesture_listener_manager_;
+  raw_ptr<ImeAdapterAndroid> ime_adapter_android_;
+  raw_ptr<SelectionPopupController> selection_popup_controller_;
+  raw_ptr<TextSuggestionHostAndroid> text_suggestion_host_;
+  raw_ptr<GestureListenerManager> gesture_listener_manager_;
 
   mutable ui::ViewAndroid view_;
 
@@ -538,8 +547,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   std::unique_ptr<SynchronousCompositorHost> sync_compositor_;
   uint32_t sync_compositor_last_frame_token_ = 0u;
 
-
-  SynchronousCompositorClient* synchronous_compositor_client_;
+  raw_ptr<SynchronousCompositorClient> synchronous_compositor_client_;
 
   bool observing_root_window_;
 
@@ -576,6 +584,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   // another before the first has displayed. This can occur on pages that have
   // long layout and rendering time.
   std::deque<std::pair<base::TimeTicks, viz::LocalSurfaceId>> rotation_metrics_;
+
   // If true, then content was displayed before the completion of the initial
   // navigation. After any content has been displayed, we need to allocate a new
   // surface for all subsequent navigations.
@@ -604,7 +613,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   // A cached copy of the most up to date RenderFrameMetadata.
   absl::optional<cc::RenderFrameMetadata> last_render_frame_metadata_;
 
-  WebContentsAccessibilityAndroid* web_contents_accessibility_ = nullptr;
+  raw_ptr<WebContentsAccessibilityAndroid> web_contents_accessibility_ =
+      nullptr;
 
   SurfaceIdChangedCallbackList surface_id_changed_callbacks_;
 
@@ -613,8 +623,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   bool is_surface_sync_throttling_ = false;
 
   base::WeakPtrFactory<RenderWidgetHostViewAndroid> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAndroid);
 };
 
 }  // namespace content

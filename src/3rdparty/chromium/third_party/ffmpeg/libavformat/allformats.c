@@ -19,7 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/thread.h"
+#include <stdatomic.h>
 #include "libavformat/internal.h"
 #include "avformat.h"
 
@@ -88,6 +88,7 @@ extern const AVInputFormat  ff_avs_demuxer;
 extern const AVInputFormat  ff_avs2_demuxer;
 extern const AVOutputFormat ff_avs2_muxer;
 extern const AVInputFormat  ff_avs3_demuxer;
+extern const AVOutputFormat ff_avs3_muxer;
 extern const AVInputFormat  ff_bethsoftvid_demuxer;
 extern const AVInputFormat  ff_bfi_demuxer;
 extern const AVInputFormat  ff_bintext_demuxer;
@@ -95,6 +96,7 @@ extern const AVInputFormat  ff_bink_demuxer;
 extern const AVInputFormat  ff_binka_demuxer;
 extern const AVInputFormat  ff_bit_demuxer;
 extern const AVOutputFormat ff_bit_muxer;
+extern const AVInputFormat  ff_bitpacked_demuxer;
 extern const AVInputFormat  ff_bmv_demuxer;
 extern const AVInputFormat  ff_bfstm_demuxer;
 extern const AVInputFormat  ff_brstm_demuxer;
@@ -122,6 +124,8 @@ extern const AVOutputFormat ff_daud_muxer;
 extern const AVInputFormat  ff_dcstr_demuxer;
 extern const AVInputFormat  ff_derf_demuxer;
 extern const AVInputFormat  ff_dfa_demuxer;
+extern const AVInputFormat  ff_dfpwm_demuxer;
+extern const AVOutputFormat ff_dfpwm_muxer;
 extern const AVInputFormat  ff_dhav_demuxer;
 extern const AVInputFormat  ff_dirac_demuxer;
 extern const AVOutputFormat ff_dirac_muxer;
@@ -211,6 +215,7 @@ extern const AVInputFormat  ff_image2pipe_demuxer;
 extern const AVOutputFormat ff_image2pipe_muxer;
 extern const AVInputFormat  ff_image2_alias_pix_demuxer;
 extern const AVInputFormat  ff_image2_brender_pix_demuxer;
+extern const AVInputFormat  ff_imf_demuxer;
 extern const AVInputFormat  ff_ingenient_demuxer;
 extern const AVInputFormat  ff_ipmovie_demuxer;
 extern const AVOutputFormat ff_ipod_muxer;
@@ -305,6 +310,7 @@ extern const AVInputFormat  ff_nut_demuxer;
 extern const AVOutputFormat ff_nut_muxer;
 extern const AVInputFormat  ff_nuv_demuxer;
 extern const AVInputFormat  ff_obu_demuxer;
+extern const AVOutputFormat ff_obu_muxer;
 extern const AVOutputFormat ff_oga_muxer;
 extern const AVInputFormat  ff_ogg_demuxer;
 extern const AVOutputFormat ff_ogg_muxer;
@@ -390,6 +396,7 @@ extern const AVOutputFormat ff_sbc_muxer;
 extern const AVInputFormat  ff_sbg_demuxer;
 extern const AVInputFormat  ff_scc_demuxer;
 extern const AVOutputFormat ff_scc_muxer;
+extern const AVInputFormat  ff_scd_demuxer;
 extern const AVInputFormat  ff_sdp_demuxer;
 extern const AVInputFormat  ff_sdr2_demuxer;
 extern const AVInputFormat  ff_sds_demuxer;
@@ -498,6 +505,7 @@ extern const AVInputFormat  ff_image_cri_pipe_demuxer;
 extern const AVInputFormat  ff_image_dds_pipe_demuxer;
 extern const AVInputFormat  ff_image_dpx_pipe_demuxer;
 extern const AVInputFormat  ff_image_exr_pipe_demuxer;
+extern const AVInputFormat  ff_image_gem_pipe_demuxer;
 extern const AVInputFormat  ff_image_gif_pipe_demuxer;
 extern const AVInputFormat  ff_image_j2k_pipe_demuxer;
 extern const AVInputFormat  ff_image_jpeg_pipe_demuxer;
@@ -533,18 +541,20 @@ extern const AVInputFormat  ff_vapoursynth_demuxer;
 #include "libavformat/muxer_list.c"
 #include "libavformat/demuxer_list.c"
 
-static const AVInputFormat * const *indev_list = NULL;
-static const AVOutputFormat * const *outdev_list = NULL;
+static atomic_uintptr_t indev_list_intptr  = ATOMIC_VAR_INIT(0);
+static atomic_uintptr_t outdev_list_intptr = ATOMIC_VAR_INIT(0);
 
 const AVOutputFormat *av_muxer_iterate(void **opaque)
 {
     static const uintptr_t size = sizeof(muxer_list)/sizeof(muxer_list[0]) - 1;
     uintptr_t i = (uintptr_t)*opaque;
     const AVOutputFormat *f = NULL;
+    uintptr_t tmp;
 
     if (i < size) {
         f = muxer_list[i];
-    } else if (outdev_list) {
+    } else if (tmp = atomic_load_explicit(&outdev_list_intptr, memory_order_relaxed)) {
+        const AVOutputFormat *const *outdev_list = (const AVOutputFormat *const *)tmp;
         f = outdev_list[i - size];
     }
 
@@ -558,10 +568,12 @@ const AVInputFormat *av_demuxer_iterate(void **opaque)
     static const uintptr_t size = sizeof(demuxer_list)/sizeof(demuxer_list[0]) - 1;
     uintptr_t i = (uintptr_t)*opaque;
     const AVInputFormat *f = NULL;
+    uintptr_t tmp;
 
     if (i < size) {
         f = demuxer_list[i];
-    } else if (indev_list) {
+    } else if (tmp = atomic_load_explicit(&indev_list_intptr, memory_order_relaxed)) {
+        const AVInputFormat *const *indev_list = (const AVInputFormat *const *)tmp;
         f = indev_list[i - size];
     }
 
@@ -570,12 +582,8 @@ const AVInputFormat *av_demuxer_iterate(void **opaque)
     return f;
 }
 
-static AVMutex avpriv_register_devices_mutex = AV_MUTEX_INITIALIZER;
-
 void avpriv_register_devices(const AVOutputFormat * const o[], const AVInputFormat * const i[])
 {
-    ff_mutex_lock(&avpriv_register_devices_mutex);
-    outdev_list = o;
-    indev_list = i;
-    ff_mutex_unlock(&avpriv_register_devices_mutex);
+    atomic_store_explicit(&outdev_list_intptr, (uintptr_t)o, memory_order_relaxed);
+    atomic_store_explicit(&indev_list_intptr,  (uintptr_t)i, memory_order_relaxed);
 }

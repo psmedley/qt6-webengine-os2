@@ -174,6 +174,13 @@ bool VibrationController::Vibrate(const VibrationPattern& pattern) {
   CollectHistogramMetrics(DomWindow());
 
   LocalFrame* frame = DomWindow()->GetFrame();
+  if (frame->IsInFencedFrameTree()) {
+    Intervention::GenerateReport(
+        frame, "NavigatorVibrate",
+        "Blocked call to navigator.vibrate inside a fenced frame.");
+    return false;
+  }
+
   if (!frame->GetPage()->IsPageVisible())
     return false;
 
@@ -255,8 +262,7 @@ void VibrationController::DidVibrate() {
     pattern_.EraseAt(0);
   }
 
-  timer_do_vibrate_.StartOneShot(base::TimeDelta::FromMilliseconds(interval),
-                                 FROM_HERE);
+  timer_do_vibrate_.StartOneShot(base::Milliseconds(interval), FROM_HERE);
 }
 
 void VibrationController::Cancel() {

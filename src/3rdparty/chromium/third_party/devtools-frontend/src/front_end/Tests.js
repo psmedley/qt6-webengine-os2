@@ -141,14 +141,29 @@
     this.domAutomationController_.send('[FAILED] ' + error);
   };
 
+  TestSuite.prototype.setupLegacyFilesForTest = async function() {
+    try {
+      await Promise.all([
+        self.runtime.loadLegacyModule('core/common/common-legacy.js'),
+        self.runtime.loadLegacyModule('core/sdk/sdk-legacy.js'),
+        self.runtime.loadLegacyModule('core/host/host-legacy.js'),
+        self.runtime.loadLegacyModule('ui/legacy/legacy-legacy.js'),
+        self.runtime.loadLegacyModule('models/workspace/workspace-legacy.js'),
+      ]);
+      this.reportOk_();
+    } catch (e) {
+      this.reportFailure_(e);
+    }
+  };
+
   /**
    * Run specified test on a fresh instance of the test suite.
    * @param {Array<string>} args method name followed by its parameters.
    */
-  TestSuite.prototype.dispatchOnTestSuite = function(args) {
+  TestSuite.prototype.dispatchOnTestSuite = async function(args) {
     const methodName = args.shift();
     try {
-      this[methodName].apply(this, args);
+      await this[methodName].apply(this, args);
       if (!this.controlTaken_) {
         this.reportOk_();
       }
@@ -224,7 +239,7 @@
         return;
       }
 
-      test.addSniffer(throttler, '_processCompletedForTests', checkState);
+      test.addSniffer(throttler, 'processCompletedForTests', checkState);
     }
 
     function onSchedule() {
@@ -383,7 +398,7 @@
     function testScriptPause() {
       // The script should be in infinite loop. Click "Pause" button to
       // pause it and wait for the result.
-      UI.panels.sources._togglePause();
+      UI.panels.sources.togglePause();
 
       this._waitForScriptPause(this.releaseControl.bind(this));
     }
@@ -772,7 +787,7 @@
   TestSuite.prototype.testForwardedKeysChanged = function() {
     this.takeControl();
 
-    this.addSniffer(self.UI.shortcutRegistry, '_registerBindings', () => {
+    this.addSniffer(self.UI.shortcutRegistry, 'registerBindings', () => {
       self.SDK.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent(
           {type: 'rawKeyDown', key: 'F1', windowsVirtualKeyCode: 112, nativeVirtualKeyCode: 112});
     });
@@ -888,9 +903,8 @@
 
     this.addSniffer(SDK.NetworkDispatcher.prototype, 'finishNetworkRequest', finishRequest);
 
-    // Allow more time for this test as it needs to reload the inspected page.
-    test.takeControl({slownessFactor: 10});
-    test.evaluateInConsole_('window.location.reload(true);', function(resultText) {});
+    test.takeControl();
+    test.evaluateInConsole_('await fetch("/");', function(resultText) {});
   };
 
   TestSuite.prototype.testEmulateNetworkConditions = function() {
@@ -1091,9 +1105,9 @@
 
     function onExecutionContexts() {
       const consoleView = Console.ConsoleView.instance();
-      const selector = consoleView._consoleContextSelector;
+      const selector = consoleView.consoleContextSelector;
       const values = [];
-      for (const item of selector._items) {
+      for (const item of selector.items) {
         values.push(selector.titleFor(item));
       }
       test.assertEquals('top', values[0]);
@@ -1217,7 +1231,7 @@
     const test = this;
     this.showPanel('timeline').then(function() {
       const timeline = UI.panels.timeline;
-      test._overrideMethod(timeline, '_recordingStarted', callback);
+      test._overrideMethod(timeline, 'recordingStarted', callback);
       timeline._toggleRecording();
     });
   };
@@ -1291,11 +1305,11 @@
 
   TestSuite.prototype.testInspectedElementIs = async function(nodeName) {
     this.takeControl();
-    await self.runtime.loadModulePromise('elements');
-    if (!Elements.ElementsPanel._firstInspectElementNodeNameForTest) {
-      await new Promise(f => this.addSniffer(Elements.ElementsPanel, '_firstInspectElementCompletedForTest', f));
+    await self.runtime.loadLegacyModule('panels/elements/elements-legacy.js');
+    if (!Elements.ElementsPanel.firstInspectElementNodeNameForTest) {
+      await new Promise(f => this.addSniffer(Elements.ElementsPanel, 'firstInspectElementCompletedForTest', f));
     }
-    this.assertEquals(nodeName, Elements.ElementsPanel._firstInspectElementNodeNameForTest);
+    this.assertEquals(nodeName, Elements.ElementsPanel.firstInspectElementNodeNameForTest);
     this.releaseControl();
   };
 
@@ -1333,8 +1347,8 @@
     const browserContextIds = [];
     const targetAgent = self.SDK.targetManager.mainTarget().targetAgent();
 
-    const target1 = await createIsolatedTarget(url);
-    const target2 = await createIsolatedTarget(url);
+    const target1 = await createIsolatedTarget(url, browserContextIds);
+    const target2 = await createIsolatedTarget(url, browserContextIds);
 
     const response = await targetAgent.invoke_getBrowserContexts();
     this.assertEquals(response.browserContextIds.length, 2);
@@ -1358,34 +1372,37 @@
     this.assertEquals(removedTargets.indexOf(target2) !== -1, true);
 
     this.releaseControl();
-
-    /**
-     * @param {string} url
-     * @return {!Promise<!SDK.Target>}
-     */
-    async function createIsolatedTarget(url) {
-      const {browserContextId} = await targetAgent.invoke_createBrowserContext();
-      browserContextIds.push(browserContextId);
-
-      const {targetId} = await targetAgent.invoke_createTarget({url: 'about:blank', browserContextId});
-      await targetAgent.invoke_attachToTarget({targetId, flatten: true});
-
-      const target = self.SDK.targetManager.targets().find(target => target.id() === targetId);
-      const pageAgent = target.pageAgent();
-      await pageAgent.invoke_enable();
-      await pageAgent.invoke_navigate({url});
-      return target;
-    }
-
-    async function disposeBrowserContext(browserContextId) {
-      const targetAgent = self.SDK.targetManager.mainTarget().targetAgent();
-      await targetAgent.invoke_disposeBrowserContext({browserContextId});
-    }
-
-    async function evalCode(target, code) {
-      return (await target.runtimeAgent().invoke_evaluate({expression: code})).result.value;
-    }
   };
+
+  /**
+   * @param {string} url
+   * @return {!Promise<!SDK.Target>}
+   */
+  async function createIsolatedTarget(url, opt_browserContextIds) {
+    const targetAgent = self.SDK.targetManager.mainTarget().targetAgent();
+    const {browserContextId} = await targetAgent.invoke_createBrowserContext();
+    if (opt_browserContextIds) {
+      opt_browserContextIds.push(browserContextId);
+    }
+
+    const {targetId} = await targetAgent.invoke_createTarget({url: 'about:blank', browserContextId});
+    await targetAgent.invoke_attachToTarget({targetId, flatten: true});
+
+    const target = self.SDK.targetManager.targets().find(target => target.id() === targetId);
+    const pageAgent = target.pageAgent();
+    await pageAgent.invoke_enable();
+    await pageAgent.invoke_navigate({url});
+    return target;
+  }
+
+  async function disposeBrowserContext(browserContextId) {
+    const targetAgent = self.SDK.targetManager.mainTarget().targetAgent();
+    await targetAgent.invoke_disposeBrowserContext({browserContextId});
+  }
+
+  async function evalCode(target, code) {
+    return (await target.runtimeAgent().invoke_evaluate({expression: code})).result.value;
+  }
 
   TestSuite.prototype.testInputDispatchEventsToOOPIF = async function() {
     this.takeControl();
@@ -1393,14 +1410,12 @@
     await new Promise(callback => this._waitForTargets(2, callback));
 
     async function takeLogs(target) {
-      const code = `
+      return await evalCode(target, `
         (function() {
           var result = window.logs.join(' ');
           window.logs = [];
           return result;
-        })()
-      `;
-      return (await target.runtimeAgent().invoke_evaluate({expression: code})).result.value;
+        })()`);
     }
 
     let parentFrameOutput;
@@ -1521,6 +1536,19 @@
     this.evaluateInConsole_(`new WebSocket('ws://127.0.0.1:${websocketPort}')`, () => {});
   };
 
+  TestSuite.prototype.testExtensionWebSocketOfflineNetworkConditions = async function(websocketPort) {
+    self.SDK.multitargetNetworkManager.setNetworkConditions(SDK.NetworkManager.OfflineConditions);
+
+    // TODO(crbug.com/1263900): Currently we don't send loadingFailed for web sockets.
+    // Update this once we do.
+    this.addSniffer(SDK.NetworkDispatcher.prototype, 'webSocketClosed', () => {
+      this.releaseControl();
+    });
+
+    this.takeControl();
+    this.evaluateInConsole_(`new WebSocket('ws://127.0.0.1:${websocketPort}/echo-with-no-extension')`, () => {});
+  };
+
   /**
    * Serializes array of uiSourceCodes to string.
    * @param {!Array.<!Workspace.UISourceCode>} uiSourceCodes
@@ -1532,6 +1560,30 @@
       names.push('"' + uiSourceCodes[i].url() + '"');
     }
     return names.join(',');
+  };
+
+  TestSuite.prototype.testSourceMapsFromExtension = function(extensionId) {
+    this.takeControl();
+    const debuggerModel = self.SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
+    debuggerModel.sourceMapManager().addEventListener(
+        SDK.SourceMapManager.Events.SourceMapAttached, this.releaseControl.bind(this));
+
+    this.evaluateInConsole_(
+        `console.log(1) //# sourceMappingURL=chrome-extension://${extensionId}/source.map`, () => {});
+  };
+
+  TestSuite.prototype.testSourceMapsFromDevtools = function() {
+    this.takeControl();
+    const debuggerModel = self.SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
+    debuggerModel.sourceMapManager().addEventListener(
+        SDK.SourceMapManager.Events.SourceMapWillAttach, this.releaseControl.bind(this));
+
+    this.evaluateInConsole_(
+        'console.log(1) //# sourceMappingURL=devtools://devtools/bundled/devtools_compatibility.js', () => {});
+  };
+
+  TestSuite.prototype.testDoesNotCrashOnSourceMapsFromUnknownScheme = function() {
+    this.evaluateInConsole_('console.log(1) //# sourceMappingURL=invalid-scheme://source.map', () => {});
   };
 
   /**
@@ -1560,9 +1612,9 @@
     function innerEvaluate() {
       self.UI.context.removeFlavorChangeListener(SDK.ExecutionContext, showConsoleAndEvaluate, this);
       const consoleView = Console.ConsoleView.instance();
-      consoleView._prompt._appendCommand(code);
+      consoleView.prompt.appendCommand(code);
 
-      this.addSniffer(Console.ConsoleView.prototype, '_consoleMessageAddedForTest', function(viewMessage) {
+      this.addSniffer(Console.ConsoleView.prototype, 'consoleMessageAddedForTest', function(viewMessage) {
         callback(viewMessage.toMessageElement().deepTextContent());
       }.bind(this));
     }
@@ -1619,7 +1671,7 @@
       if (test._scriptsAreParsed(expectedScripts)) {
         callback();
       } else {
-        test.addSniffer(UI.panels.sources.sourcesView(), '_addUISourceCode', waitForAllScripts);
+        test.addSniffer(UI.panels.sources.sourcesView(), 'addUISourceCode', waitForAllScripts);
       }
     }
 
@@ -1646,7 +1698,7 @@
       if (runtimeModel.executionContexts().length >= n) {
         callback.call(null);
       } else {
-        this.addSniffer(SDK.RuntimeModel.prototype, '_executionContextCreated', checkForExecutionContexts.bind(this));
+        this.addSniffer(SDK.RuntimeModel.prototype, 'executionContextCreated', checkForExecutionContexts.bind(this));
       }
     }
   };

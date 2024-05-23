@@ -128,7 +128,8 @@ bool LoadGtkImpl() {
 }
 
 gfx::Insets InsetsFromGtkBorder(const GtkBorder& border) {
-  return gfx::Insets(border.top, border.left, border.bottom, border.right);
+  return gfx::Insets::TLBR(border.top, border.left, border.bottom,
+                           border.right);
 }
 
 }  // namespace
@@ -287,12 +288,12 @@ void GtkRenderIcon(GtkStyleContext* context,
                    double x,
                    double y) {
   static void* render = DlSym(GetLibGtk(), "gtk_render_icon");
-  if (GtkCheckVersion(4)) {
-    DCHECK(texture);
+  if (texture) {
+    DCHECK(GtkCheckVersion(4));
     DlCast<void(GtkStyleContext*, cairo_t*, GdkTexture*, double, double)>(
         render)(context, cr, texture, x, y);
-  } else {
-    DCHECK(pixbuf);
+  } else if (pixbuf) {
+    DCHECK(!GtkCheckVersion(4));
     DlCast<void(GtkStyleContext*, cairo_t*, GdkPixbuf*, double, double)>(
         render)(context, cr, pixbuf, x, y);
   }
@@ -342,16 +343,18 @@ void GtkStyleContextGetStyle(GtkStyleContext* context, ...) {
 }
 
 DISABLE_CFI_ICALL
-ScopedGObject<GtkIconInfo> Gtk3IconThemeLookupByGicon(
+ScopedGObject<GtkIconInfo> Gtk3IconThemeLookupByGiconForScale(
     GtkIconTheme* theme,
     GIcon* icon,
     int size,
+    int scale,
     GtkIconLookupFlags flags) {
   DCHECK(!GtkCheckVersion(4));
-  static void* lookup = DlSym(GetLibGtk(), "gtk_icon_theme_lookup_by_gicon");
+  static void* lookup =
+      DlSym(GetLibGtk(), "gtk_icon_theme_lookup_by_gicon_for_scale");
   return TakeGObject(
-      DlCast<GtkIconInfo*(GtkIconTheme*, GIcon*, int, GtkIconLookupFlags)>(
-          lookup)(theme, icon, size, flags));
+      DlCast<GtkIconInfo*(GtkIconTheme*, GIcon*, int, int, GtkIconLookupFlags)>(
+          lookup)(theme, icon, size, scale, flags));
 }
 
 DISABLE_CFI_ICALL

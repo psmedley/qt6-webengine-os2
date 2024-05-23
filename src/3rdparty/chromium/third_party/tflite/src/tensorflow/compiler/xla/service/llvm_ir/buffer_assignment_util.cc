@@ -14,6 +14,9 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/compiler/xla/service/llvm_ir/buffer_assignment_util.h"
+
+#include <algorithm>
+
 #include "absl/strings/str_cat.h"
 
 namespace xla {
@@ -41,27 +44,36 @@ static const HloInstruction& InstrForConstantBufferAllocation(
   return *const_instr;
 }
 
-string SanitizeConstantName(const HloInstruction& instr) {
+std::string SanitizeConstantName(const HloInstruction& instr) {
   CHECK_EQ(instr.opcode(), HloOpcode::kConstant);
-  string instr_name = instr.name();
-  for (char& c : instr_name) {
-    // Having a hyphen or a dot in a global variable name can crash the LLVM PTX
-    // backend.
-    if (c == '.' || c == '-') {
-      c = '_';
-    }
-  }
+  return SanitizeConstantName(instr.name());
+}
+
+std::string SanitizeConstantName(absl::string_view name) {
+  std::string instr_name(name);
+  // Replace characters which would require the identifier to be quoted and
+  // would therefore crash the LLVM PTX backend.
+  std::replace_if(
+      instr_name.begin(), instr_name.end(),
+      [](char c) { return c == '.' || c == '-' || c == ';'; }, '_');
   return instr_name;
 }
 
-string ConstantBufferAllocationToGlobalName(
-    const BufferAllocation& allocation) {
-  const HloInstruction& instr = InstrForConstantBufferAllocation(allocation);
-  string instr_name = instr.name();
+std::string ConstantHloToGlobalName(const HloInstruction& instr) {
+  return ConstantNameToGlobalName(instr.name());
+}
+
+std::string ConstantNameToGlobalName(absl::string_view name) {
   // Check that names are sanitized and stored in the HLO instructions
   // before constant buffer allocation.
-  DCHECK_EQ(instr_name, SanitizeConstantName(instr));
-  return absl::StrCat("buffer_for_", instr_name);
+  DCHECK_EQ(name, SanitizeConstantName(name));
+  return absl::StrCat("buffer_for_", name);
+}
+
+std::string ConstantBufferAllocationToGlobalName(
+    const BufferAllocation& allocation) {
+  return ConstantNameToGlobalName(
+      SanitizeConstantName(InstrForConstantBufferAllocation(allocation)));
 }
 
 const Literal& LiteralForConstantAllocation(

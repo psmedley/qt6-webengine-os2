@@ -11,14 +11,14 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "components/services/storage/indexed_db/scopes/disjoint_range_lock_manager.h"
+#include "components/services/storage/indexed_db/locks/disjoint_range_lock_manager.h"
 #include "content/browser/indexed_db/fake_indexed_db_metadata_coding.h"
 #include "content/browser/indexed_db/indexed_db.h"
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
@@ -80,9 +80,7 @@ class IndexedDBDatabaseTest : public ::testing::Test {
                                     weak_factory_.GetWeakPtr(), false));
       return;
     }
-    IndexedDBDatabase::RunTasksResult result;
-    leveldb::Status status;
-    std::tie(result, status) = db_->RunTasks();
+    auto [result, status] = db_->RunTasks();
     switch (result) {
       case IndexedDBDatabase::RunTasksResult::kDone:
         return;
@@ -102,7 +100,7 @@ class IndexedDBDatabaseTest : public ::testing::Test {
   std::unique_ptr<IndexedDBFakeBackingStore> backing_store_;
   std::unique_ptr<MockIndexedDBFactory> factory_;
   std::unique_ptr<IndexedDBDatabase> db_;
-  FakeIndexedDBMetadataCoding* metadata_coding_ = nullptr;
+  raw_ptr<FakeIndexedDBMetadataCoding> metadata_coding_ = nullptr;
   bool error_called_ = false;
 
  private:
@@ -194,6 +192,9 @@ class MockCallbacks : public IndexedDBCallbacks {
                            mojo::NullAssociatedRemote(),
                            base::ThreadTaskRunnerHandle::Get()) {}
 
+  MockCallbacks(const MockCallbacks&) = delete;
+  MockCallbacks& operator=(const MockCallbacks&) = delete;
+
   void OnBlocked(int64_t existing_version) override { blocked_called_ = true; }
   void OnSuccess(int64_t result) override { success_called_ = true; }
   void OnError(const IndexedDBDatabaseError& error) override {
@@ -210,8 +211,6 @@ class MockCallbacks : public IndexedDBCallbacks {
   bool blocked_called_ = false;
   bool success_called_ = false;
   bool error_called_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(MockCallbacks);
 };
 
 }  // namespace
@@ -464,6 +463,11 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
         commit_success_(leveldb::Status::OK()),
         factory_(std::make_unique<MockIndexedDBFactory>()) {}
 
+  IndexedDBDatabaseOperationTest(const IndexedDBDatabaseOperationTest&) =
+      delete;
+  IndexedDBDatabaseOperationTest& operator=(
+      const IndexedDBDatabaseOperationTest&) = delete;
+
   void SetUp() override {
     backing_store_ = std::make_unique<IndexedDBFakeBackingStore>();
     std::unique_ptr<FakeIndexedDBMetadataCoding> metadata_coding =
@@ -519,9 +523,7 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
                          base::Unretained(this), false));
       return;
     }
-    IndexedDBDatabase::RunTasksResult result;
-    leveldb::Status status;
-    std::tie(result, status) = db_->RunTasks();
+    auto [result, status] = db_->RunTasks();
     switch (result) {
       case IndexedDBDatabase::RunTasksResult::kDone:
         return;
@@ -544,10 +546,10 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
  protected:
   std::unique_ptr<IndexedDBFakeBackingStore> backing_store_;
   std::unique_ptr<IndexedDBDatabase> db_;
-  FakeIndexedDBMetadataCoding* metadata_coding_ = nullptr;
+  raw_ptr<FakeIndexedDBMetadataCoding> metadata_coding_ = nullptr;
   scoped_refptr<MockIndexedDBCallbacks> request_;
   scoped_refptr<MockIndexedDBDatabaseCallbacks> callbacks_;
-  IndexedDBTransaction* transaction_ = nullptr;
+  raw_ptr<IndexedDBTransaction> transaction_ = nullptr;
   DisjointRangeLockManager lock_manager_;
   bool error_called_ = false;
 
@@ -555,8 +557,6 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
 
  private:
   std::unique_ptr<MockIndexedDBFactory> factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBDatabaseOperationTest);
 };
 
 TEST_F(IndexedDBDatabaseOperationTest, CreateObjectStore) {
@@ -604,8 +604,10 @@ class IndexedDBDatabaseOperationAbortTest
     commit_success_ = leveldb::Status::NotFound("Bummer.");
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBDatabaseOperationAbortTest);
+  IndexedDBDatabaseOperationAbortTest(
+      const IndexedDBDatabaseOperationAbortTest&) = delete;
+  IndexedDBDatabaseOperationAbortTest& operator=(
+      const IndexedDBDatabaseOperationAbortTest&) = delete;
 };
 
 TEST_F(IndexedDBDatabaseOperationAbortTest, CreateObjectStore) {

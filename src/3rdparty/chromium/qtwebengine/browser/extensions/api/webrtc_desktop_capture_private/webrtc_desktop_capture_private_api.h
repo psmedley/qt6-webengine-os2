@@ -47,7 +47,6 @@
 
 #include <map>
 
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/media_stream_request.h"
@@ -111,8 +110,6 @@ class DesktopCaptureRequestsRegistry {
       std::map<RequestId, WebrtcDesktopCapturePrivateChooseDesktopMediaFunction*>;
 
   RequestsMap requests_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopCaptureRequestsRegistry);
 };
 
 }  // namespace extensions

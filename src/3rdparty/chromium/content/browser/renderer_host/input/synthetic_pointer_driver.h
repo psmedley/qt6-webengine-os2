@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "content/common/content_export.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_pointer_action_params.h"
@@ -19,6 +18,10 @@ class SyntheticGestureTarget;
 class CONTENT_EXPORT SyntheticPointerDriver {
  public:
   SyntheticPointerDriver();
+
+  SyntheticPointerDriver(const SyntheticPointerDriver&) = delete;
+  SyntheticPointerDriver& operator=(const SyntheticPointerDriver&) = delete;
+
   virtual ~SyntheticPointerDriver();
 
   static std::unique_ptr<SyntheticPointerDriver> Create(
@@ -75,9 +78,6 @@ class CONTENT_EXPORT SyntheticPointerDriver {
 
  protected:
   bool from_devtools_debugger_ = false;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SyntheticPointerDriver);
 };
 
 }  // namespace content

@@ -14,6 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "cc/layers/surface_layer.h"
 #include "cc/layers/video_frame_provider.h"
 #include "media/base/media_util.h"
@@ -23,7 +24,6 @@
 #include "third_party/blink/renderer/modules/mediastream/video_renderer_algorithm_wrapper.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -45,7 +45,6 @@ class SurfaceId;
 namespace blink {
 class MediaStreamDescriptor;
 class WebMediaPlayerMS;
-struct WebMediaPlayerMSCompositorTraits;
 
 // This class is designed to handle the work load on compositor thread for
 // WebMediaPlayerMS. It will be instantiated on the main thread, but destroyed
@@ -57,9 +56,7 @@ struct WebMediaPlayerMSCompositorTraits;
 // Otherwise, WebMediaPlayerMSCompositor will simply store the most recent
 // frame, and submit it whenever asked by the compositor.
 class MODULES_EXPORT WebMediaPlayerMSCompositor
-    : public cc::VideoFrameProvider,
-      public WTF::ThreadSafeRefCounted<WebMediaPlayerMSCompositor,
-                                       WebMediaPlayerMSCompositorTraits> {
+    : public cc::VideoFrameProvider {
  public:
   using OnNewFramePresentedCB = base::OnceClosure;
 
@@ -70,6 +67,11 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
       std::unique_ptr<WebVideoFrameSubmitter> submitter,
       WebMediaPlayer::SurfaceLayerMode surface_layer_mode,
       const base::WeakPtr<WebMediaPlayerMS>& player);
+  ~WebMediaPlayerMSCompositor() override;
+
+  WebMediaPlayerMSCompositor(const WebMediaPlayerMSCompositor&) = delete;
+  WebMediaPlayerMSCompositor& operator=(const WebMediaPlayerMSCompositor&) =
+      delete;
 
   // Can be called from any thread.
   cc::UpdateSubmissionStateCB GetUpdateSubmissionStateCallback() {
@@ -111,10 +113,6 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
   void StopRendering();
   void ReplaceCurrentFrameWithACopy();
 
-  // Tell |video_frame_provider_client_| to stop using this instance in
-  // preparation for dtor.
-  void StopUsingProvider();
-
   // Sets a hook to be notified when a new frame is presented, to fulfill a
   // prending video.requestAnimationFrame() request.
   // Can be called from any thread.
@@ -136,10 +134,7 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
   void SetForceBeginFrames(bool enable);
 
  private:
-  friend class WTF::ThreadSafeRefCounted<WebMediaPlayerMSCompositor,
-                                         WebMediaPlayerMSCompositorTraits>;
   friend class WebMediaPlayerMSTest;
-  friend struct WebMediaPlayerMSCompositorTraits;
 
   // Struct used to keep information about frames pending in
   // |rendering_frame_buffer_|.
@@ -149,8 +144,6 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
     base::TimeTicks reference_time;
     bool is_copy;
   };
-
-  ~WebMediaPlayerMSCompositor() override;
 
   // Ran on the |video_frame_compositor_task_runner_| to initialize
   // |submitter_|
@@ -197,10 +190,13 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
 
   void StartRenderingInternal();
   void StopRenderingInternal();
-  void StopUsingProviderInternal();
-  void ReplaceCurrentFrameWithACopyInternal();
 
   void SetAlgorithmEnabledForTesting(bool algorithm_enabled);
+  void RecordFrameDisplayedStats(base::TimeTicks frame_displayed_time);
+  void RecordFrameDecodedStats(
+      absl::optional<base::TimeTicks> frame_received_time,
+      absl::optional<base::TimeDelta> frame_processing_time,
+      absl::optional<uint32_t> frame_rtp_timestamp);
 
   // Used for DCHECKs to ensure method calls executed in the correct thread,
   // which is renderer main thread in this class.
@@ -271,6 +267,15 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
   bool stopped_;
   bool render_started_;
 
+  absl::optional<base::TimeTicks> last_enqueued_frame_receive_time_;
+  absl::optional<base::TimeTicks> last_enqueued_frame_decoded_time_;
+  absl::optional<base::TimeTicks> last_presented_frame_display_time_;
+  absl::optional<uint32_t> last_enqueued_frame_rtp_timestamp_;
+  absl::optional<base::TimeTicks> current_frame_receive_time_;
+  absl::optional<uint32_t> last_presented_frame_rtp_timestamp_;
+  absl::optional<uint32_t> current_frame_rtp_timestamp_;
+  int frame_enqueued_since_last_vsync_ GUARDED_BY(current_frame_lock_) = 0;
+
   // Called when a new frame is enqueued, either in RenderWithoutAlgorithm() or
   // in RenderUsingAlgorithm(). Used to fulfill video.requestAnimationFrame()
   // requests.
@@ -288,15 +293,8 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
   // |dropped_frame_count_|, and |render_started_|.
   base::Lock current_frame_lock_;
 
+  base::WeakPtr<WebMediaPlayerMSCompositor> weak_this_;
   base::WeakPtrFactory<WebMediaPlayerMSCompositor> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerMSCompositor);
-};
-
-struct WebMediaPlayerMSCompositorTraits {
-  // Ensure destruction occurs on main thread so that "Web" and other resources
-  // are destroyed on the correct thread.
-  static void Destruct(const WebMediaPlayerMSCompositor* player);
 };
 
 }  // namespace blink

@@ -39,7 +39,9 @@ def TFJSDialect : Dialect {
     TF graphs to be deployed on TFJS.
   }];
 
-  let cppNamespace = "tfjs";
+  let cppNamespace = "::mlir::tfjs";
+
+  let emitAccessorPrefix = kEmitAccessorPrefix_Raw;
 }
 
 //===----------------------------------------------------------------------===//
@@ -47,7 +49,7 @@ def TFJSDialect : Dialect {
 //===----------------------------------------------------------------------===//
 
 // Base class for the operation in this dialect
-class TFJS_Op<string mnemonic, list<OpTrait> traits = []> :
+class TFJS_Op<string mnemonic, list<Trait> traits = []> :
     Op<TFJSDialect, mnemonic, traits>;
 
 def TFJS_PReluOp : TFJS_Op<"Prelu", [NoSideEffect, ResultsBroadcastableShape,

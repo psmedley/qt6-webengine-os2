@@ -6,49 +6,34 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_DISPLAY_ITEM_CLIENT_H_
 
 #include "base/dcheck_is_on.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/graphics/dom_node_id.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/paint_invalidation_reason.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace blink {
-
-enum class RasterEffectOutset : uint8_t {
-  kNone,
-  kHalfPixel,
-  kWholePixel,
-};
 
 // The class for objects that can be associated with display items. A
 // DisplayItemClient object should live at least longer than the document cycle
 // in which its display items are created during painting. After the document
 // cycle, a pointer/reference to DisplayItemClient should be no longer
 // dereferenced unless we can make sure the client is still alive.
-class PLATFORM_EXPORT DisplayItemClient {
+class PLATFORM_EXPORT DisplayItemClient : public GarbageCollectedMixin {
  public:
   DisplayItemClient()
       : paint_invalidation_reason_(
             static_cast<uint8_t>(PaintInvalidationReason::kJustCreated)),
-        marked_for_validation_(0) {
-#if DCHECK_IS_ON()
-    OnCreate();
-#endif
-  }
+        marked_for_validation_(0) {}
   DisplayItemClient(const DisplayItemClient&) = delete;
   DisplayItemClient& operator=(const DisplayItemClient&) = delete;
-  virtual ~DisplayItemClient() {
-#if DCHECK_IS_ON()
-    OnDestroy();
-#endif
-  }
+  virtual ~DisplayItemClient() = default;
 
-#if DCHECK_IS_ON()
-  // Tests if this DisplayItemClient object has been created and has not been
-  // deleted yet.
-  bool IsAlive() const;
-  String SafeDebugName(bool known_to_be_safe = false) const;
-#endif
+  DisplayItemClientId Id() const {
+    return reinterpret_cast<DisplayItemClientId>(this);
+  }
 
   virtual String DebugName() const = 0;
 
@@ -111,6 +96,7 @@ class PLATFORM_EXPORT DisplayItemClient {
   friend class ObjectPaintInvalidatorTest;
   friend class PaintChunker;
   friend class PaintController;
+  friend class PaintControllerCycleScope;
 
   void MarkForValidation() const { marked_for_validation_ = 1; }
   bool IsMarkedForValidation() const { return marked_for_validation_; }
@@ -119,11 +105,6 @@ class PLATFORM_EXPORT DisplayItemClient {
         static_cast<uint8_t>(PaintInvalidationReason::kNone);
     marked_for_validation_ = 0;
   }
-
-#if DCHECK_IS_ON()
-  void OnCreate();
-  void OnDestroy();
-#endif
 
   mutable uint8_t paint_invalidation_reason_ : 7;
   mutable uint8_t marked_for_validation_ : 1;

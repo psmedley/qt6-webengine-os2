@@ -14,6 +14,7 @@
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/dib/fx_dib.h"
+#include "third_party/base/span.h"
 
 class CFX_DIBBase;
 class CFX_DIBitmap;
@@ -45,13 +46,13 @@ class RenderDeviceDriverIface {
   virtual void RestoreState(bool bKeepSaved) = 0;
 
   virtual void SetBaseClip(const FX_RECT& rect);
-  virtual bool SetClip_PathFill(const CFX_Path* pPath,
+  virtual bool SetClip_PathFill(const CFX_Path& path,
                                 const CFX_Matrix* pObject2Device,
                                 const CFX_FillRenderOptions& fill_options) = 0;
-  virtual bool SetClip_PathStroke(const CFX_Path* pPath,
+  virtual bool SetClip_PathStroke(const CFX_Path& path,
                                   const CFX_Matrix* pObject2Device,
                                   const CFX_GraphStateData* pGraphState);
-  virtual bool DrawPath(const CFX_Path* pPath,
+  virtual bool DrawPath(const CFX_Path& path,
                         const CFX_Matrix* pObject2Device,
                         const CFX_GraphStateData* pGraphState,
                         uint32_t fill_color,
@@ -95,8 +96,7 @@ class RenderDeviceDriverIface {
                            BlendMode blend_type) = 0;
   virtual bool ContinueDIBits(CFX_ImageRenderer* handle,
                               PauseIndicatorIface* pPause);
-  virtual bool DrawDeviceText(int nChars,
-                              const TextCharPos* pCharPos,
+  virtual bool DrawDeviceText(pdfium::span<const TextCharPos> pCharPos,
                               CFX_Font* pFont,
                               const CFX_Matrix& mtObject2Device,
                               float font_size,

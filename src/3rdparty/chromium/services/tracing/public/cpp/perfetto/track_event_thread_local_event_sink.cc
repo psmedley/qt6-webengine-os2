@@ -8,6 +8,7 @@
 #include <atomic>
 
 #include "base/containers/contains.h"
+#include "base/hash/hash.h"
 #include "base/strings/pattern.h"
 #include "base/strings/strcat.h"
 #include "base/trace_event/common/trace_event_common.h"
@@ -147,6 +148,9 @@ class LazyLegacyEventInitializer {
   }
 
  private:
+  // `track_event_` and `legacy_event_` are not a raw_ptr<...> for performance
+  // reasons (based on analysis of sampling profiler data and
+  // tab_search:top100:2020).
   TrackEvent* track_event_;
   TrackEvent::LegacyEvent* legacy_event_ = nullptr;
 };
@@ -189,13 +193,19 @@ void TrackEventThreadLocalEventSink::ClearIncrementalState() {
   incremental_state_reset_id_.fetch_add(1u, std::memory_order_relaxed);
 }
 
+perfetto::TraceWriter::TracePacketHandle
+TrackEventThreadLocalEventSink::NewTracePacket(PacketType packet_type) {
+  last_packet_was_empty_ = packet_type == PacketType::kEmpty;
+  return trace_writer_->NewTracePacket();
+}
+
 void TrackEventThreadLocalEventSink::AddLegacyTraceEvent(
     base::trace_event::TraceEvent* trace_event,
     base::trace_event::TraceEventHandle* handle) {
   DCHECK(!pending_trace_packet_);
   UpdateIncrementalStateIfNeeded(trace_event);
 
-  auto trace_packet = trace_writer_->NewTracePacket();
+  auto trace_packet = NewTracePacket();
   PrepareTrackEvent(trace_event, handle, &trace_packet);
 
   WriteInternedDataIntoTracePacket(trace_packet.get());
@@ -211,7 +221,7 @@ TrackEventThreadLocalEventSink::AddTypedTraceEvent(
   DCHECK(!pending_trace_packet_);
   UpdateIncrementalStateIfNeeded(trace_event);
 
-  pending_trace_packet_ = trace_writer_->NewTracePacket();
+  pending_trace_packet_ = NewTracePacket();
 
   // Note: Since |track_event| is a protozero message under |trace_packet|, we
   // can't modify |trace_packet| further until we're done with |track_event|.
@@ -265,13 +275,28 @@ TrackEventThreadLocalEventSink::AddTracePacket() {
 
   DCHECK(!pending_trace_packet_);
 
-  perfetto::TraceWriter::TracePacketHandle packet =
-      trace_writer_->NewTracePacket();
+  perfetto::TraceWriter::TracePacketHandle packet = NewTracePacket();
   // base doesn't require accurate timestamps in these packets, so we just emit
   // the packet with the last timestamp we used.
   SetPacketTimestamp(&packet, last_timestamp_);
 
   return base::trace_event::TracePacketHandle(std::move(packet), this);
+}
+
+void TrackEventThreadLocalEventSink::AddEmptyPacket() {
+  // Only add a new empty packet if there's at least one non-empty packet in the
+  // current chunk. Otherwise, there's nothing to flush, so adding more empty
+  // packets serves no purpose.
+  if (last_packet_was_empty_)
+    return;
+
+  DCHECK(!base::tracing::GetThreadIsInTraceEventTLS()->Get());
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(true);
+
+  DCHECK(!pending_trace_packet_);
+  NewTracePacket(PacketType::kEmpty);
+
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(false);
 }
 
 void TrackEventThreadLocalEventSink::OnTracePacketCompleted() {
@@ -316,7 +341,7 @@ void TrackEventThreadLocalEventSink::UpdateIncrementalStateIfNeeded(
         perfetto::ThreadTrack::ForThread(trace_event->thread_id());
     if (!base::Contains(extra_emitted_track_descriptor_uuids_,
                         thread_track.uuid)) {
-      auto packet = trace_writer_->NewTracePacket();
+      auto packet = NewTracePacket();
       SetPacketTimestamp(&packet, last_timestamp_);
       TrackDescriptor* track_descriptor = packet->set_track_descriptor();
       // TODO(eseckler): Call thread_track.Serialize() here instead once the
@@ -341,7 +366,7 @@ void TrackEventThreadLocalEventSink::UpdateIncrementalStateIfNeeded(
           thread_track.uuid ^ kAbsoluteThreadTimeTrackUuidBit;
       if (!base::Contains(extra_emitted_track_descriptor_uuids_,
                           thread_time_track_uuid)) {
-        auto packet = trace_writer_->NewTracePacket();
+        auto packet = NewTracePacket();
         SetPacketTimestamp(&packet, last_timestamp_);
         TrackDescriptor* track_descriptor = packet->set_track_descriptor();
         // TODO(eseckler): Switch to client library support for CounterTrack
@@ -587,7 +612,11 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
       legacy_event.GetOrCreate()->set_pid_override(trace_event->process_id());
       legacy_event.GetOrCreate()->set_tid_override(-1);
     } else if (thread_id_ != trace_event->thread_id()) {
-      legacy_event.GetOrCreate()->set_tid_override(trace_event->thread_id());
+      // Some metadata events set thread_id to 0. We avoid setting tid_override
+      // to 0 to avoid clashes with the swapper thread in system traces
+      // (b/215725684).
+      if (trace_event->thread_id() != 0)
+        legacy_event.GetOrCreate()->set_tid_override(trace_event->thread_id());
     }
   }
 
@@ -597,29 +626,28 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
   uint32_t flow_flags =
       flags & (TRACE_EVENT_FLAG_FLOW_OUT | TRACE_EVENT_FLAG_FLOW_IN);
 
+  uint64_t id = trace_event->id();
+  if (id_flags && trace_event->scope() != trace_event_internal::kGlobalScope) {
+    // The scope string might be privacy filtered, so also hash it with the
+    // id.
+    id = base::HashInts(base::FastHash(trace_event->scope()), id);
+  }
+
   // Legacy flow events use bind_id as their (unscoped) identifier. There's no
   // need to also emit id in that case.
   if (!flow_flags) {
     switch (id_flags) {
       case TRACE_EVENT_FLAG_HAS_ID:
-        legacy_event.GetOrCreate()->set_unscoped_id(trace_event->id());
+        legacy_event.GetOrCreate()->set_unscoped_id(id);
         break;
       case TRACE_EVENT_FLAG_HAS_LOCAL_ID:
-        legacy_event.GetOrCreate()->set_local_id(trace_event->id());
+        legacy_event.GetOrCreate()->set_local_id(id);
         break;
       case TRACE_EVENT_FLAG_HAS_GLOBAL_ID:
-        legacy_event.GetOrCreate()->set_global_id(trace_event->id());
+        legacy_event.GetOrCreate()->set_global_id(id);
         break;
       default:
         break;
-    }
-  }
-
-  // TODO(ssid): Add scope field as enum and do not filter this field.
-  if (!privacy_filtering_enabled_) {
-    if (id_flags &&
-        trace_event->scope() != trace_event_internal::kGlobalScope) {
-      legacy_event.GetOrCreate()->set_id_scope(trace_event->scope());
     }
   }
 
@@ -692,7 +720,7 @@ void TrackEventThreadLocalEventSink::EmitThreadTrackDescriptor(
     base::trace_event::TraceEvent* trace_event,
     base::TimeTicks timestamp,
     const char* maybe_new_name) {
-  auto packet = trace_writer_->NewTracePacket();
+  auto packet = NewTracePacket();
   SetPacketTimestamp(&packet, timestamp);
 
   TrackDescriptor* track_descriptor = packet->set_track_descriptor();
@@ -737,7 +765,7 @@ void TrackEventThreadLocalEventSink::EmitCounterTrackDescriptor(
     uint64_t counter_track_uuid_bit,
     CounterDescriptor::BuiltinCounterType counter_type,
     uint64_t unit_multiplier) {
-  auto packet = trace_writer_->NewTracePacket();
+  auto packet = NewTracePacket();
   SetPacketTimestamp(&packet, timestamp);
 
   TrackDescriptor* track_descriptor = packet->set_track_descriptor();
@@ -782,7 +810,7 @@ void TrackEventThreadLocalEventSink::DoResetIncrementalState(
   {
     // Emit a new clock snapshot with this timestamp, and also set the
     // |incremental_state_cleared| flag and defaults.
-    auto packet = trace_writer_->NewTracePacket();
+    auto packet = NewTracePacket();
     packet->set_sequence_flags(TracePacket::SEQ_INCREMENTAL_STATE_CLEARED);
 
     TracePacketDefaults* tp_defaults = packet->set_trace_packet_defaults();

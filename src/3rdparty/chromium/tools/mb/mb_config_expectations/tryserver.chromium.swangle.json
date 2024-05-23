@@ -1,13 +1,12 @@
 {
   "linux-swangle-chromium-try-x64": {
     "gn_args": {
-      "blink_enable_generated_code_formatting": false,
       "dcheck_always_on": true,
       "ffmpeg_branding": "Chrome",
       "is_component_build": false,
       "is_debug": false,
       "proprietary_codecs": true,
-      "symbol_level": 1,
+      "symbol_level": 0,
       "use_goma": true
     }
   },
@@ -43,26 +42,24 @@
   },
   "mac-swangle-chromium-try-x64": {
     "gn_args": {
-      "blink_enable_generated_code_formatting": false,
       "dcheck_always_on": true,
       "ffmpeg_branding": "Chrome",
       "is_component_build": false,
       "is_debug": false,
       "proprietary_codecs": true,
-      "symbol_level": 1,
+      "symbol_level": 0,
       "use_goma": true
     }
   },
   "win-swangle-chromium-try-x86": {
     "gn_args": {
-      "blink_enable_generated_code_formatting": false,
       "dcheck_always_on": true,
       "enable_resource_allowlist_generation": true,
       "ffmpeg_branding": "Chrome",
       "is_component_build": false,
       "is_debug": false,
       "proprietary_codecs": true,
-      "symbol_level": 1,
+      "symbol_level": 0,
       "target_cpu": "x86",
       "use_goma": true
     }
@@ -83,7 +80,7 @@
       "dcheck_always_on": true,
       "is_component_build": true,
       "is_debug": false,
-      "symbol_level": 1,
+      "symbol_level": 0,
       "target_cpu": "x86",
       "use_goma": true
     }
@@ -104,7 +101,7 @@
       "dcheck_always_on": true,
       "is_component_build": true,
       "is_debug": false,
-      "symbol_level": 1,
+      "symbol_level": 0,
       "target_cpu": "x86",
       "use_goma": true
     }
@@ -125,7 +122,7 @@
       "dcheck_always_on": true,
       "is_component_build": true,
       "is_debug": false,
-      "symbol_level": 1,
+      "symbol_level": 0,
       "target_cpu": "x86",
       "use_goma": true
     }

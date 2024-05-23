@@ -179,7 +179,7 @@ class MediaStreamDevicesControllerTest : public WebRtcTestBase {
   void InitWithUrl(const GURL& url) {
     DCHECK(example_url_.is_empty());
     example_url_ = url;
-    ui_test_utils::NavigateToURL(browser(), example_url_);
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), example_url_));
     EXPECT_EQ(PageSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED,
               GetContentSettings()->GetMicrophoneCameraState());
   }
@@ -610,7 +610,7 @@ IN_PROC_BROWSER_TEST_F(MediaStreamDevicesControllerTest,
   std::unique_ptr<content::MediaStreamUI> video_stream_ui =
       dispatcher->GetMediaStreamCaptureIndicator()->RegisterMediaStream(
           GetWebContents(), video_devices);
-  video_stream_ui->OnStarted(base::OnceClosure(),
+  video_stream_ui->OnStarted(base::RepeatingClosure(),
                              content::MediaStreamUI::SourceCallback(),
                              /*label=*/std::string(), /*screen_capture_ids=*/{},
                              content::MediaStreamUI::StateChangeCallback());

@@ -155,8 +155,7 @@ static int ifv_read_header(AVFormatContext *s)
 
         st->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
         st->codecpar->codec_id = AV_CODEC_ID_PCM_S16LE;
-        st->codecpar->channels = 1;
-        st->codecpar->channel_layout = AV_CH_LAYOUT_MONO;
+        st->codecpar->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
         st->codecpar->sample_rate = ifv->sample_rate;
         ifv->audio_stream_index = st->index;
 
@@ -188,23 +187,26 @@ static int ifv_read_header(AVFormatContext *s)
 static int ifv_read_packet(AVFormatContext *s, AVPacket *pkt)
 {
     IFVContext *ifv = s->priv_data;
-    AVStream *st;
     AVIndexEntry *ev, *ea, *e_next;
     int ret;
 
     ev = ea = e_next = NULL;
 
     if (ifv->next_video_index < ifv->total_vframes) {
-        st = s->streams[ifv->video_stream_index];
-        if (ifv->next_video_index < st->internal->nb_index_entries)
-            e_next = ev = &st->internal->index_entries[ifv->next_video_index];
+        AVStream *const st  = s->streams[ifv->video_stream_index];
+        FFStream *const sti = ffstream(st);
+
+        if (ifv->next_video_index < sti->nb_index_entries)
+            e_next = ev = &sti->index_entries[ifv->next_video_index];
     }
 
     if (ifv->is_audio_present &&
         ifv->next_audio_index < ifv->total_aframes) {
-        st = s->streams[ifv->audio_stream_index];
-        if (ifv->next_audio_index < st->internal->nb_index_entries) {
-            ea = &st->internal->index_entries[ifv->next_audio_index];
+        AVStream *const st  = s->streams[ifv->audio_stream_index];
+        FFStream *const sti = ffstream(st);
+
+        if (ifv->next_audio_index < sti->nb_index_entries) {
+            ea = &sti->index_entries[ifv->next_audio_index];
             if (!ev || ea->timestamp < ev->timestamp)
                 e_next = ea;
         }

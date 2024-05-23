@@ -14,7 +14,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
-#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_rect_read_only.h"
@@ -25,11 +25,17 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_data_copy_to_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_crypto_key.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_dom_file_system.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_media_stream_track.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_frame.h"
+#include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
+#include "third_party/blink/renderer/modules/crypto/crypto_key.h"
 #include "third_party/blink/renderer/modules/crypto/crypto_result_impl.h"
 #include "third_party/blink/renderer/modules/filesystem/dom_file_system.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_track_impl.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_source.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_certificate.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_certificate_generator.h"
 #include "third_party/blink/renderer/modules/webcodecs/allow_shared_buffer_source_util.h"
@@ -37,6 +43,8 @@
 #include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame_transfer_list.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 using testing::ElementsAre;
@@ -182,7 +190,8 @@ TEST(V8ScriptValueSerializerForModulesTest, RoundTripRTCCertificate) {
 
   // Round trip test.
   v8::Local<v8::Value> wrapper =
-      ToV8(certificate, scope.GetContext()->Global(), scope.GetIsolate());
+      ToV8Traits<RTCCertificate>::ToV8(scope.GetScriptState(), certificate)
+          .ToLocalChecked();
   v8::Local<v8::Value> result = RoundTripForModules(wrapper, scope);
   ASSERT_TRUE(V8RTCCertificate::HasInstance(result, scope.GetIsolate()));
   RTCCertificate* new_certificate =
@@ -283,19 +292,17 @@ bool ConvertCryptoResult<bool>(v8::Isolate*, const ScriptValue& value) {
 }
 
 template <typename T>
-class WebCryptoResultAdapter : public ScriptFunction {
+class WebCryptoResultAdapter : public ScriptFunction::Callable {
  public:
-  WebCryptoResultAdapter(ScriptState* script_state,
-                         base::RepeatingCallback<void(T)> function)
-      : ScriptFunction(script_state), function_(std::move(function)) {}
+  explicit WebCryptoResultAdapter(base::RepeatingCallback<void(T)> function)
+      : function_(std::move(function)) {}
 
- private:
-  ScriptValue Call(ScriptValue value) final {
-    function_.Run(
-        ConvertCryptoResult<T>(GetScriptState()->GetIsolate(), value));
-    return ScriptValue::From(GetScriptState(), ToV8UndefinedGenerator());
+  ScriptValue Call(ScriptState* script_state, ScriptValue value) final {
+    function_.Run(ConvertCryptoResult<T>(script_state->GetIsolate(), value));
+    return ScriptValue::From(script_state, ToV8UndefinedGenerator());
   }
 
+ private:
   base::RepeatingCallback<void(T)> function_;
   template <typename U>
   friend WebCryptoResult ToWebCryptoResult(ScriptState*,
@@ -307,14 +314,17 @@ WebCryptoResult ToWebCryptoResult(ScriptState* script_state,
                                   base::RepeatingCallback<void(T)> function) {
   auto* result = MakeGarbageCollected<CryptoResultImpl>(script_state);
   result->Promise().Then(
-      (MakeGarbageCollected<WebCryptoResultAdapter<T>>(script_state,
-                                                       std::move(function)))
-          ->BindToV8Function(),
-      (MakeGarbageCollected<WebCryptoResultAdapter<DOMException*>>(
-           script_state, WTF::BindRepeating([](DOMException* exception) {
-             CHECK(false) << "crypto operation failed";
-           })))
-          ->BindToV8Function());
+      (MakeGarbageCollected<ScriptFunction>(
+           script_state, MakeGarbageCollected<WebCryptoResultAdapter<T>>(
+                             std::move(function))))
+          ->V8Function(),
+      (MakeGarbageCollected<ScriptFunction>(
+           script_state,
+           MakeGarbageCollected<WebCryptoResultAdapter<DOMException*>>(
+               WTF::BindRepeating([](DOMException* exception) {
+                 CHECK(false) << "crypto operation failed";
+               }))))
+          ->V8Function());
   return result->Result();
 }
 
@@ -1087,7 +1097,7 @@ TEST(V8ScriptValueSerializerForModulesTest, RoundTripAudioData) {
   const unsigned kChannels = 2;
   const unsigned kSampleRate = 8000;
   const unsigned kFrames = 500;
-  constexpr base::TimeDelta kTimestamp = base::TimeDelta::FromMilliseconds(314);
+  constexpr base::TimeDelta kTimestamp = base::Milliseconds(314);
 
   auto audio_bus = media::AudioBus::Create(kChannels, kFrames);
 
@@ -1118,8 +1128,7 @@ TEST(V8ScriptValueSerializerForModulesTest, RoundTripAudioData) {
   ASSERT_TRUE(V8AudioData::HasInstance(result, scope.GetIsolate()));
 
   AudioData* new_data = V8AudioData::ToImpl(result.As<v8::Object>());
-  EXPECT_EQ(base::TimeDelta::FromMicroseconds(new_data->timestamp()),
-            kTimestamp);
+  EXPECT_EQ(base::Microseconds(new_data->timestamp()), kTimestamp);
   EXPECT_EQ(new_data->numberOfChannels(), kChannels);
   EXPECT_EQ(new_data->numberOfFrames(), kFrames);
   EXPECT_EQ(new_data->sampleRate(), kSampleRate);
@@ -1158,7 +1167,7 @@ TEST(V8ScriptValueSerializerForModulesTest, ClosedAudioDataThrows) {
       media::ChannelLayout::CHANNEL_LAYOUT_STEREO,
       /*channel_count=*/2,
       /*sample_rate=*/8000,
-      /*frame_count=*/500, base::TimeDelta::FromMilliseconds(314));
+      /*frame_count=*/500, base::Milliseconds(314));
 
   // Create and close the frame.
   auto* audio_data = MakeGarbageCollected<AudioData>(std::move(audio_buffer));
@@ -1166,6 +1175,62 @@ TEST(V8ScriptValueSerializerForModulesTest, ClosedAudioDataThrows) {
 
   // Serializing the closed frame should throw an error.
   v8::Local<v8::Value> wrapper = ToV8(audio_data, scope.GetScriptState());
+  EXPECT_FALSE(V8ScriptValueSerializer(scope.GetScriptState())
+                   .Serialize(wrapper, exception_state));
+  EXPECT_TRUE(HadDOMExceptionInModulesTest(
+      "DataCloneError", scope.GetScriptState(), exception_state));
+}
+
+TEST(V8ScriptValueSerializerForModulesTest, TransferMediaStreamTrack) {
+  V8TestingScope scope;
+
+  std::unique_ptr<MockMediaStreamVideoSource> mock_source(
+      base::WrapUnique(new MockMediaStreamVideoSource()));
+  MediaStreamDevice device;
+  base::UnguessableToken token = base::UnguessableToken::Create();
+  device.set_session_id(token);
+  mock_source->SetDevice(device);
+  MediaStreamSource* source = MakeGarbageCollected<MediaStreamSource>(
+      "test_id", MediaStreamSource::StreamType::kTypeVideo, "test_name",
+      false /* remote */, std::move(mock_source));
+  MediaStreamComponent* component =
+      MakeGarbageCollected<MediaStreamComponent>(source);
+  MediaStreamTrack* blink_track = MakeGarbageCollected<MediaStreamTrackImpl>(
+      scope.GetExecutionContext(), component);
+
+  // Transfer the MediaStreamTrack and check if the label is correct.
+  Transferables transferables;
+  transferables.media_stream_tracks.push_back(blink_track);
+  v8::Local<v8::Value> wrapper = ToV8(blink_track, scope.GetScriptState());
+  v8::Local<v8::Value> result =
+      RoundTripForModules(wrapper, scope, &transferables);
+
+  ASSERT_TRUE(V8MediaStreamTrack::HasInstance(result, scope.GetIsolate()));
+
+  MediaStreamTrack* new_track =
+      V8MediaStreamTrack::ToImpl(result.As<v8::Object>());
+  EXPECT_EQ(new_track->label(), "dummy");
+}
+
+TEST(V8ScriptValueSerializerForModulesTest,
+     TransferMediaStreamTrackNoSessionIdThrows) {
+  V8TestingScope scope;
+  ExceptionState exception_state(scope.GetIsolate(),
+                                 ExceptionState::kExecutionContext, "Window",
+                                 "postMessage");
+
+  MediaStreamSource* source = MakeGarbageCollected<MediaStreamSource>(
+      "test_id", MediaStreamSource::StreamType::kTypeVideo, "test_name",
+      false /* remote */);
+  MediaStreamComponent* component =
+      MakeGarbageCollected<MediaStreamComponent>(source);
+  MediaStreamTrack* blink_track = MakeGarbageCollected<MediaStreamTrackImpl>(
+      scope.GetExecutionContext(), component);
+
+  // Transfer a MediaStreamTrack with no session id should throw an error.
+  Transferables transferables;
+  transferables.media_stream_tracks.push_back(blink_track);
+  v8::Local<v8::Value> wrapper = ToV8(blink_track, scope.GetScriptState());
   EXPECT_FALSE(V8ScriptValueSerializer(scope.GetScriptState())
                    .Serialize(wrapper, exception_state));
   EXPECT_TRUE(HadDOMExceptionInModulesTest(

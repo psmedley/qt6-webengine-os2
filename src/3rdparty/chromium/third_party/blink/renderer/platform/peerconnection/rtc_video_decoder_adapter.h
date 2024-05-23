@@ -13,8 +13,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/synchronization/lock.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
-#include "media/base/decode_status.h"
+#include "media/base/decoder_status.h"
 #include "media/base/status.h"
 #include "media/base/supported_video_decoder_config.h"
 #include "media/base/video_codecs.h"
@@ -24,6 +25,7 @@
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/webrtc/api/video_codecs/sdp_video_format.h"
+#include "third_party/webrtc/api/video_codecs/video_decoder.h"
 #include "third_party/webrtc/modules/video_coding/include/video_codec_interface.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -56,7 +58,7 @@ class PLATFORM_EXPORT RTCVideoDecoderAdapter : public webrtc::VideoDecoder {
  public:
   // Minimum resolution that we'll consider "not low resolution" for the purpose
   // of falling back to software.
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
   // Effectively opt-out CrOS, since it may cause tests to fail (b/179724180).
   static constexpr int32_t kMinResolution = 2 * 2;
 #else
@@ -83,8 +85,7 @@ class PLATFORM_EXPORT RTCVideoDecoderAdapter : public webrtc::VideoDecoder {
 
   // webrtc::VideoDecoder implementation.
   // Called on the DecodingThread.
-  int32_t InitDecode(const webrtc::VideoCodec* codec_settings,
-                     int32_t number_of_cores) override;
+  bool Configure(const Settings& _settings) override;
   // Called on the DecodingThread.
   int32_t RegisterDecodeCompleteCallback(
       webrtc::DecodedImageCallback* callback) override;
@@ -123,9 +124,9 @@ class PLATFORM_EXPORT RTCVideoDecoderAdapter : public webrtc::VideoDecoder {
   void InitializeOnMediaThread(const media::VideoDecoderConfig& config,
                                InitCB init_cb);
   static void OnInitializeDone(base::OnceCallback<void(bool)> cb,
-                               media::Status status);
+                               media::DecoderStatus status);
   void DecodeOnMediaThread();
-  void OnDecodeDone(media::Status status);
+  void OnDecodeDone(media::DecoderStatus status);
   void OnOutput(scoped_refptr<media::VideoFrame> frame);
 
   bool ShouldReinitializeForSettingHDRColorSpace(

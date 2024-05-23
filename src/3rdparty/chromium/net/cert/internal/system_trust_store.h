@@ -11,6 +11,7 @@
 #include "build/build_config.h"
 #include "net/base/net_export.h"
 #include "net/cert/internal/parsed_certificate.h"
+#include "net/net_buildflags.h"
 
 namespace net {
 
@@ -81,9 +82,17 @@ CreateSslSystemTrustStoreChromeRoot();
 // store integration is not supported.)
 NET_EXPORT std::unique_ptr<SystemTrustStore> CreateEmptySystemTrustStore();
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 // Initializes trust cache on a worker thread.
 NET_EXPORT void InitializeTrustStoreMacCache();
+#endif
+
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+class TrustStoreChrome;
+NET_EXPORT_PRIVATE std::unique_ptr<SystemTrustStore>
+CreateSystemTrustStoreChromeForTesting(
+    std::unique_ptr<TrustStoreChrome> trust_store_chrome,
+    std::unique_ptr<TrustStore> trust_store_system);
 #endif
 
 }  // namespace net

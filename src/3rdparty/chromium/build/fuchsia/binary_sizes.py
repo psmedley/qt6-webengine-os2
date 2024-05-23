@@ -1,12 +1,9 @@
-#!/usr/bin/env python2
+#!/usr/bin/env vpython3
 #
 # Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 '''Implements Chrome-Fuchsia package binary size checks.'''
-
-from __future__ import division
-from __future__ import print_function
 
 import argparse
 import collections
@@ -26,6 +23,8 @@ import uuid
 
 from common import GetHostToolPathFromPlatform, GetHostArchFromPlatform
 from common import SDK_ROOT, DIR_SOURCE_ROOT
+
+PACKAGES_SIZE_FILE = 'package_blobs.json'
 
 # Structure representing the compressed and uncompressed sizes for a Fuchsia
 # package.
@@ -182,6 +181,29 @@ def WriteGerritPluginSizeData(output_path, package_sizes):
     json.dump(sizes_data, sizes_file)
 
 
+def ReadPackageBlobsJson(json_path):
+  """Reads package blob info from json file.
+
+  Opens json file of blob info written by WritePackageBlobsJson,
+  and converts back into package blobs used in this script.
+  """
+  with open(json_path, 'rt') as json_file:
+    formatted_blob_info = json.load(json_file)
+
+  package_blobs = {}
+  for package in formatted_blob_info:
+    package_blobs[package] = {}
+    for blob_info in formatted_blob_info[package]:
+      blob = Blob(name=blob_info['path'],
+                  hash=blob_info['merkle'],
+                  uncompressed=blob_info['bytes'],
+                  compressed=blob_info['size'],
+                  is_counted=blob_info['is_counted'])
+      package_blobs[package][blob.name] = blob
+
+  return package_blobs
+
+
 def WritePackageBlobsJson(json_path, package_blobs):
   """Writes package blob information in human-readable JSON format.
 
@@ -200,8 +222,8 @@ def WritePackageBlobsJson(json_path, package_blobs):
     for blob_name in package_blobs[package]:
       blob = package_blobs[package][blob_name]
       blob_data.append({
-          'path': blob.name,
-          'merkle': blob.hash,
+          'path': str(blob.name),
+          'merkle': str(blob.hash),
           'bytes': blob.uncompressed,
           'size': blob.compressed,
           'is_counted': blob.is_counted
@@ -228,7 +250,7 @@ def GetCompressedSize(file_path):
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT)
     proc.wait()
-    compressor_output = proc.stdout.read()
+    compressor_output = proc.stdout.read().decode('utf-8')
     if proc.returncode != 0:
       print(compressor_output, file=sys.stderr)
       raise Exception('Error while running %s' % compressor_path)
@@ -539,8 +561,8 @@ def main():
                        test_completed, test_status, timestamp)
       with open(os.path.join(results_directory, 'perf_results.json'), 'w') as f:
         json.dump(sizes_histogram, f)
-      WritePackageBlobsJson(
-          os.path.join(results_directory, 'package_blobs.json'), package_blobs)
+      WritePackageBlobsJson(os.path.join(results_directory, PACKAGES_SIZE_FILE),
+                            package_blobs)
 
     if args.isolated_script_test_output:
       WriteTestResults(args.isolated_script_test_output, test_completed,

@@ -6,10 +6,10 @@
 #define DEVICE_BASE_SYNCHRONIZATION_ONE_WRITER_SEQLOCK_H_
 
 #include <atomic>
+#include <cstdint>
 
 #include "base/atomicops.h"
 #include "base/check.h"
-#include "base/macros.h"
 
 namespace device {
 
@@ -38,6 +38,10 @@ namespace device {
 class OneWriterSeqLock {
  public:
   OneWriterSeqLock();
+
+  OneWriterSeqLock(const OneWriterSeqLock&) = delete;
+  OneWriterSeqLock& operator=(const OneWriterSeqLock&) = delete;
+
   // Copies data from src into dest using atomic stores. This should be used by
   // writer of SeqLock. Data must be 4-byte aligned.
   static void AtomicWriterMemcpy(void* dest, const void* src, size_t size);
@@ -54,7 +58,6 @@ class OneWriterSeqLock {
 
  private:
   std::atomic<int32_t> sequence_;
-  DISALLOW_COPY_AND_ASSIGN(OneWriterSeqLock);
 };
 
 }  // namespace device

@@ -19,6 +19,10 @@ class MEDIA_GPU_EXPORT FormatSupportChecker {
  public:
   // |device| may be null, mostly for tests.
   explicit FormatSupportChecker(ComD3D11Device device);
+
+  FormatSupportChecker(const FormatSupportChecker&) = delete;
+  FormatSupportChecker& operator=(const FormatSupportChecker&) = delete;
+
   virtual ~FormatSupportChecker();
 
   // Set up the device to be able to check format support.
@@ -28,12 +32,13 @@ class MEDIA_GPU_EXPORT FormatSupportChecker {
   // Checks if the device's texture processing pipeline supports output textures
   virtual bool CheckOutputFormatSupport(DXGI_FORMAT format) const;
 
+  bool supports_tone_mapping() const { return supports_tone_mapping_; }
+
  private:
   ComD3D11Device device_;
   ComD3D11VideoProcessorEnumerator enumerator_;
   bool initialized_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(FormatSupportChecker);
+  bool supports_tone_mapping_ = false;
 };
 
 }  // namespace media

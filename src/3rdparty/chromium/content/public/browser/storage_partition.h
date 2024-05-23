@@ -10,6 +10,7 @@
 #include <set>
 
 #include "base/callback_forward.h"
+#include "base/observer_list_types.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/services/storage/public/mojom/cache_storage_control.mojom-forward.h"
@@ -48,9 +49,6 @@ namespace storage {
 class QuotaManager;
 class SpecialStoragePolicy;
 struct QuotaSettings;
-}
-
-namespace storage {
 class DatabaseTracker;
 }
 
@@ -60,26 +58,24 @@ class Origin;
 
 namespace content {
 
-class AppCacheService;
 class BackgroundSyncContext;
 class BrowserContext;
+class BrowsingTopicsSiteDataManager;
 class ContentIndexContext;
 class DedicatedWorkerService;
 class DevToolsBackgroundServicesContext;
 class DOMStorageContext;
-class FontAccessContext;
-class GeneratedCodeCacheContext;
 class FileSystemAccessEntryFactory;
+class GeneratedCodeCacheContext;
+class HostZoomLevelContext;
+class HostZoomMap;
+class InterestGroupManager;
+class NativeIOContext;
 class PlatformNotificationContext;
 class ServiceWorkerContext;
 class SharedWorkerService;
-class NativeIOContext;
-
-#if !defined(OS_ANDROID)
-class HostZoomLevelContext;
-class HostZoomMap;
 class ZoomLevelDelegate;
-#endif  // !defined(OS_ANDROID)
+class NavigationRequest;
 
 // Defines what persistent state a child process can access.
 //
@@ -134,13 +130,11 @@ class CONTENT_EXPORT StoragePartition {
 
   virtual mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
   CreateURLLoaderNetworkObserverForNavigationRequest(
-      int frame_tree_node_id) = 0;
+      NavigationRequest& navigation_request) = 0;
 
   virtual storage::QuotaManager* GetQuotaManager() = 0;
-  virtual AppCacheService* GetAppCacheService() = 0;
   virtual BackgroundSyncContext* GetBackgroundSyncContext() = 0;
   virtual storage::FileSystemContext* GetFileSystemContext() = 0;
-  virtual FontAccessContext* GetFontAccessContext() = 0;
   virtual storage::DatabaseTracker* GetDatabaseTracker() = 0;
   virtual DOMStorageContext* GetDOMStorageContext() = 0;
   virtual storage::mojom::LocalStorageControl* GetLocalStorageControl() = 0;
@@ -155,12 +149,12 @@ class CONTENT_EXPORT StoragePartition {
   GetDevToolsBackgroundServicesContext() = 0;
   virtual ContentIndexContext* GetContentIndexContext() = 0;
   virtual NativeIOContext* GetNativeIOContext() = 0;
-#if !defined(OS_ANDROID)
   virtual HostZoomMap* GetHostZoomMap() = 0;
   virtual HostZoomLevelContext* GetHostZoomLevelContext() = 0;
   virtual ZoomLevelDelegate* GetZoomLevelDelegate() = 0;
-#endif  // !defined(OS_ANDROID)
   virtual PlatformNotificationContext* GetPlatformNotificationContext() = 0;
+  virtual InterestGroupManager* GetInterestGroupManager() = 0;
+  virtual BrowsingTopicsSiteDataManager* GetBrowsingTopicsSiteDataManager() = 0;
 
   virtual leveldb_proto::ProtoDatabaseProvider* GetProtoDatabaseProvider() = 0;
   // Must be set before the first call to GetProtoDatabaseProvider(), or a new
@@ -170,7 +164,7 @@ class CONTENT_EXPORT StoragePartition {
           optional_proto_db_provider) = 0;
 
   enum : uint32_t {
-    REMOVE_DATA_MASK_APPCACHE = 1 << 0,
+    REMOVE_DATA_MASK_APPCACHE_DEPRECATED = 1 << 0,
     REMOVE_DATA_MASK_COOKIES = 1 << 1,
     REMOVE_DATA_MASK_FILE_SYSTEMS = 1 << 2,
     REMOVE_DATA_MASK_INDEXEDDB = 1 << 3,
@@ -179,6 +173,9 @@ class CONTENT_EXPORT StoragePartition {
     REMOVE_DATA_MASK_WEBSQL = 1 << 6,
     REMOVE_DATA_MASK_SERVICE_WORKERS = 1 << 7,
     REMOVE_DATA_MASK_CACHE_STORAGE = 1 << 8,
+    // TODO(crbug.com/1231162): Rename this to something like
+    // REMOVE_DATA_MASK_MEDIA_LICENSES once CDM data is moved off of the Plugin
+    // Private File System.
     REMOVE_DATA_MASK_PLUGIN_PRIVATE_DATA = 1 << 9,
     REMOVE_DATA_MASK_BACKGROUND_FETCH = 1 << 10,
     REMOVE_DATA_MASK_CONVERSIONS = 1 << 11,
@@ -186,6 +183,10 @@ class CONTENT_EXPORT StoragePartition {
     // Public explainer here:
     // https://github.com/WICG/turtledove/blob/main/FLEDGE.md
     REMOVE_DATA_MASK_INTEREST_GROUPS = 1 << 12,
+    REMOVE_DATA_MASK_AGGREGATION_SERVICE = 1 << 13,
+    // Shared storage data as part of the Shared Storage API.
+    // Public explainer: https://github.com/pythagoraskitty/shared-storage
+    REMOVE_DATA_MASK_SHARED_STORAGE = 1 << 14,
     REMOVE_DATA_MASK_ALL = 0xFFFFFFFF,
 
     // Corresponds to storage::kStorageTypeTemporary.
@@ -200,6 +201,8 @@ class CONTENT_EXPORT StoragePartition {
   // Starts an asynchronous task that does a best-effort clear the data
   // corresponding to the given |remove_mask| and |quota_storage_remove_mask|
   // inside this StoragePartition for the given |storage_origin|.
+  // |callback| is called when data deletion is done or at least the deletion is
+  // scheduled.
   // Note session dom storage is not cleared even if you specify
   // REMOVE_DATA_MASK_LOCAL_STORAGE.
   // No notification is dispatched upon completion.
@@ -211,7 +214,8 @@ class CONTENT_EXPORT StoragePartition {
   // is fixed.
   virtual void ClearDataForOrigin(uint32_t remove_mask,
                                   uint32_t quota_storage_remove_mask,
-                                  const GURL& storage_origin) = 0;
+                                  const GURL& storage_origin,
+                                  base::OnceClosure callback) = 0;
 
   // A callback type to check if a given origin matches a storage policy.
   // Can be passed empty/null where used, which means the origin will always
@@ -321,8 +325,6 @@ class CONTENT_EXPORT StoragePartition {
   // the function is called again with a new value or a nullptr.
   static void SetDefaultQuotaSettingsForTesting(
       const storage::QuotaSettings* settings);
-
-  static bool IsAppCacheEnabled();
 
  protected:
   virtual ~StoragePartition() {}

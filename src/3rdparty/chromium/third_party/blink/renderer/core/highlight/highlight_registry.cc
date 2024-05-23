@@ -5,10 +5,12 @@
 #include "third_party/blink/renderer/core/highlight/highlight_registry.h"
 
 #include "third_party/blink/renderer/core/dom/abstract_range.h"
+#include "third_party/blink/renderer/core/dom/static_range.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -43,8 +45,23 @@ void HighlightRegistry::ValidateHighlightMarkers() {
   if (!document)
     return;
 
+  // Markers are still valid if there were no changes in DOM or style and there
+  // were no calls to |HighlightRegistry::ScheduleRepaint|, so we can avoid
+  // rebuilding them.
+  if (dom_tree_version_for_validate_highlight_markers_ ==
+          document->DomTreeVersion() &&
+      style_version_for_validate_highlight_markers_ ==
+          document->StyleVersion() &&
+      !force_markers_validation_) {
+    return;
+  }
+
+  dom_tree_version_for_validate_highlight_markers_ = document->DomTreeVersion();
+  style_version_for_validate_highlight_markers_ = document->StyleVersion();
+  force_markers_validation_ = false;
+
   document->Markers().RemoveMarkersOfTypes(
-      DocumentMarker::MarkerTypes::Highlight());
+      DocumentMarker::MarkerTypes::CustomHighlight());
 
   for (const auto& highlight_registry_map_entry : highlights_) {
     const auto& highlight_name = highlight_registry_map_entry->highlight_name;
@@ -53,29 +70,26 @@ void HighlightRegistry::ValidateHighlightMarkers() {
       if (abstract_range->OwnerDocument() == document &&
           !abstract_range->collapsed()) {
         auto* static_range = DynamicTo<StaticRange>(*abstract_range);
-        if (static_range && (!static_range->IsValid() ||
-                             static_range->CrossesContainBoundary()))
+        if (static_range && !static_range->IsValid())
           continue;
 
         EphemeralRange eph_range(abstract_range);
-        document->Markers().AddHighlightMarker(eph_range, highlight_name,
-                                               highlight);
+        document->Markers().AddCustomHighlightMarker(eph_range, highlight_name,
+                                                     highlight);
       }
     }
   }
 }
 
-void HighlightRegistry::ScheduleRepaint() const {
+void HighlightRegistry::ScheduleRepaint() {
+  force_markers_validation_ = true;
   if (LocalFrameView* local_frame_view = frame_->View()) {
     local_frame_view->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
   }
 }
 
-HighlightRegistry* HighlightRegistry::setForBinding(
-    ScriptState* script_state,
-    AtomicString highlight_name,
-    Member<Highlight> highlight,
-    ExceptionState& exception_state) {
+void HighlightRegistry::SetForTesting(AtomicString highlight_name,
+                                      Highlight* highlight) {
   auto highlights_iterator = GetMapIterator(highlight_name);
   if (highlights_iterator != highlights_.end()) {
     highlights_iterator->Get()->highlight->DeregisterFrom(this);
@@ -88,6 +102,16 @@ HighlightRegistry* HighlightRegistry::setForBinding(
       highlight_name, highlight));
   highlight->RegisterIn(this);
   ScheduleRepaint();
+}
+
+HighlightRegistry* HighlightRegistry::setForBinding(
+    ScriptState* script_state,
+    AtomicString highlight_name,
+    Member<Highlight> highlight,
+    ExceptionState& exception_state) {
+  UseCounter::Count(ExecutionContext::From(script_state),
+                    WebFeature::kHighlightAPIRegisterHighlight);
+  SetForTesting(highlight_name, highlight);
   return this;
 }
 

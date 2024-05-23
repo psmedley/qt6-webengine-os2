@@ -63,6 +63,8 @@ from blinkpy.web_tests.port.factory import PortFactory
 from blinkpy.web_tests.servers import apache_http
 from blinkpy.web_tests.servers import pywebsocket
 from blinkpy.web_tests.servers import wptserve
+from blinkpy.web_tests.skia_gold import blink_skia_gold_properties as sgp
+from blinkpy.web_tests.skia_gold import blink_skia_gold_session_manager as sgsm
 
 _log = logging.getLogger(__name__)
 
@@ -135,15 +137,19 @@ class Port(object):
 
     CONTENT_SHELL_NAME = 'content_shell'
 
+    # Update the first line in third_party/blink/web_tests/TestExpectations and
+    # the documentation in docs/testing/web_test_expectations.md when this list
+    # changes.
     ALL_SYSTEMS = (
         ('mac10.12', 'x86'),
         ('mac10.13', 'x86'),
         ('mac10.14', 'x86'),
         ('mac10.15', 'x86'),
-        ('mac11.0', 'x86'),
-        ('mac-arm11.0', 'arm64'),
+        ('mac11', 'x86'),
+        ('mac11-arm64', 'arm64'),
+        ('mac12', 'x86_64'),
+        ('mac12-arm64', 'arm64'),
         ('win7', 'x86'),
-        ('win10.1909', 'x86'),
         ('win10.20h2', 'x86'),
         ('trusty', 'x86_64'),
         ('fuchsia', 'x86_64'),
@@ -151,10 +157,10 @@ class Port(object):
 
     CONFIGURATION_SPECIFIER_MACROS = {
         'mac': [
-            'mac10.12', 'mac10.13', 'mac10.14', 'mac10.15', 'mac11.0',
-            'mac-arm11.0'
+            'mac10.12', 'mac10.13', 'mac10.14', 'mac10.15', 'mac11',
+            'mac11-arm64', 'mac12', 'mac12-arm64'
         ],
-        'win': ['win7', 'win10.1909', 'win10.20h2'],
+        'win': ['win7', 'win10.20h2'],
         'linux': ['trusty'],
         'fuchsia': ['fuchsia'],
     }
@@ -250,10 +256,21 @@ class Port(object):
                                     self.default_configuration())
         if not hasattr(options, 'target') or not options.target:
             self.set_option_default('target', self._options.configuration)
+        if not hasattr(options, 'no_virtual_tests'):
+            self.set_option_default('no_virtual_tests', False)
         self._test_configuration = None
         self._results_directory = None
         self._virtual_test_suites = None
         self._used_expectation_files = None
+
+        self._skia_gold_temp_dir = None
+        self._skia_gold_session_manager = None
+        self._skia_gold_properties = None
+
+    def __del__(self):
+        if self._skia_gold_temp_dir:
+            self._filesystem.rmtree(self._skia_gold_temp_dir,
+                                    ignore_errors=True)
 
     def __str__(self):
         return 'Port{name=%s, version=%s, architecture=%s, test_configuration=%s}' % (
@@ -357,6 +374,8 @@ class Port(object):
                 '--run-web-tests',
                 '--ignore-certificate-errors-spki-list=' + WPT_FINGERPRINT +
                 ',' + SXG_FINGERPRINT + ',' + SXG_WPT_FINGERPRINT,
+                # Required for WebTransport tests.
+                '--origin-to-force-quic-on=web-platform.test:11000',
                 '--user-data-dir'
             ]
             if self.get_option('nocheck_sys_deps', False):
@@ -393,6 +412,31 @@ class Port(object):
             return 2 * timeout_ms
         return timeout_ms
 
+    def skia_gold_temp_dir(self):
+        return self._skia_gold_temp_dir
+
+    def skia_gold_properties(self):
+        if not self._skia_gold_properties:
+            self._skia_gold_properties = sgp.BlinkSkiaGoldProperties(
+                self._options)
+        return self._skia_gold_properties
+
+    def skia_gold_session_manager(self):
+        if not self._skia_gold_session_manager:
+            self._skia_gold_temp_dir = self._filesystem.mkdtemp()
+            self._skia_gold_session_manager = sgsm.BlinkSkiaGoldSessionManager(
+                str(self._skia_gold_temp_dir), self.skia_gold_properties())
+        return self._skia_gold_session_manager
+
+    def skia_gold_json_keys(self):
+        return {
+            'configuration': self._options.configuration.lower(),
+            'version': self._version,
+            'port': self.port_name,
+            'architecture': self._architecture,
+            'ignore': '1',
+        }
+
     @memoized
     def _build_has_dcheck_always_on(self):
         args_gn_file = self._build_path('args.gn')
@@ -408,7 +452,7 @@ class Port(object):
         """Returns the amount of time in seconds to wait before killing the process in driver.stop()."""
         # We want to wait for at least 3 seconds, but if we are really slow, we
         # want to be slow on cleanup as well (for things like ASAN, Valgrind, etc.)
-        return (3.0 * float(self.get_option('time_out_ms', '0')) /
+        return (3.0 * float(self.get_option('timeout_ms', '0')) /
                 self._default_timeout_ms())
 
     def default_batch_size(self):
@@ -533,6 +577,7 @@ class Port(object):
                     return False
                 return True
             except OSError as e:
+                _log.error('while trying to run: ' + httpd_path)
                 _log.error('httpd launch error: ' + repr(e))
         _log.error('No httpd found. Cannot run http tests.')
         return False
@@ -914,7 +959,8 @@ class Port(object):
         tests = self.real_tests(paths)
 
         if paths:
-            tests.extend(self._virtual_tests_matching_paths(paths))
+            if not self._options.no_virtual_tests:
+                tests.extend(self._virtual_tests_matching_paths(paths))
             if (any(wpt_path in path for wpt_path in self.WPT_DIRS
                     for path in paths)
                     # TODO(robertma): Remove this special case when external/wpt is moved to wpt.
@@ -932,7 +978,8 @@ class Port(object):
                 dirname = os.path.dirname(test) + '/'
                 tests_by_dir[dirname].append(test)
 
-            tests.extend(self._all_virtual_tests(tests_by_dir))
+            if not self._options.no_virtual_tests:
+                tests.extend(self._all_virtual_tests(tests_by_dir))
             tests.extend(wpt_tests)
         return tests
 
@@ -1212,11 +1259,13 @@ class Port(object):
         """Checks whether the given test is skipped for this port.
 
         Returns True if the test is skipped because the port runs smoke tests
-        only or because the test is marked as Skip in NeverFixTest (otherwise
+        only or because the test is marked as Skip in NeverFixTest or because
+        it is a virtual test not intended to run on this platform (otherwise
         the test is only marked as Skip indicating a temporary skip).
         """
         return self.skipped_due_to_smoke_tests(
-            test) or self.skipped_in_never_fix_tests(test)
+            test) or self.skipped_in_never_fix_tests(
+            test) or self.virtual_test_skipped_due_to_platform_config(test)
 
     @memoized
     def _tests_from_file(self, filename):
@@ -1268,6 +1317,17 @@ class Port(object):
     def path_to_never_fix_tests_file(self):
         return self._filesystem.join(self.web_tests_dir(), 'NeverFixTests')
 
+    def virtual_test_skipped_due_to_platform_config(self, test):
+        """Checks if the virtual test is skipped based on the platform config.
+
+        Returns True if the virtual test is not intend to run on this port, due
+        to the platform config in VirtualTestSuites; returns False otherwise.
+        """
+        suite = self._lookup_virtual_suite(test)
+        if suite is not None:
+            return self.operating_system() not in suite.platforms
+        return False
+
     def name(self):
         """Returns a name that uniquely identifies this particular type of port.
 
@@ -1296,11 +1356,16 @@ class Port(object):
 
         This exists because Windows has inconsistent behavior between the bots
         and local developer machines, such that determining which python3 name
-        to use is non-trivial. See https://crbug.com/155616.
+        to use is non-trivial. See https://crbug.com/1155616.
 
         Once blinkpy runs under python3, this can be removed in favour of
         callers using sys.executable.
         """
+        if six.PY3:
+            # Prefer sys.executable when the current script runs under python3.
+            # The current script might be running with vpython3 and in that case
+            # using the same executable will share the same virtualenv.
+            return sys.executable
         return 'python3'
 
     def get_option(self, name, default_value=None):
@@ -1449,7 +1514,6 @@ class Port(object):
             ]
             clean_env['DISPLAY'] = self.host.environ.get('DISPLAY', ':1')
         if self.host.platform.is_mac():
-            clean_env['DYLD_LIBRARY_PATH'] = self._build_path()
             variables_to_copy += [
                 'HOME',
             ]
@@ -1465,6 +1529,13 @@ class Port(object):
         for string_variable in self.get_option('additional_env_var', []):
             [name, value] = string_variable.split('=', 1)
             clean_env[name] = value
+
+        if self.host.platform.is_linux():
+            path_to_libs = self._filesystem.join(self.apache_server_root(), 'lib')
+            if clean_env.get('LD_LIBRARY_PATH'):
+                clean_env['LD_LIBRARY_PATH'] = path_to_libs + ':' + clean_env['LD_LIBRARY_PATH']
+            else:
+                clean_env['LD_LIBRARY_PATH'] = path_to_libs
 
         return clean_env
 
@@ -1645,9 +1716,7 @@ class Port(object):
     def _flag_specific_expectations_path(self):
         config_name = self.flag_specific_config_name()
         if config_name:
-            return self._filesystem.join(self.web_tests_dir(),
-                                         self.FLAG_EXPECTATIONS_PREFIX,
-                                         config_name)
+            return self.path_to_flag_specific_expectations_file(config_name)
 
     def _flag_specific_baseline_search_path(self):
         config_name = self.flag_specific_config_name()
@@ -1771,13 +1840,15 @@ class Port(object):
     def used_expectations_files(self):
         """Returns a list of paths to expectation files that are used."""
         if self._used_expectation_files is None:
-            self._used_expectation_files = self.default_expectations_files()
+            self._used_expectation_files = list(
+                self.default_expectations_files())
             flag_specific = self._flag_specific_expectations_path()
             if flag_specific:
                 self._used_expectation_files.append(flag_specific)
             for path in self.get_option('additional_expectations', []):
                 expanded_path = self._filesystem.expanduser(path)
-                self._used_expectation_files.append(expanded_path)
+                abs_path = self._filesystem.abspath(expanded_path)
+                self._used_expectation_files.append(abs_path)
         return self._used_expectation_files
 
     def extra_expectations_files(self):
@@ -1799,6 +1870,11 @@ class Port(object):
     def path_to_webdriver_expectations_file(self):
         return self._filesystem.join(self.web_tests_dir(),
                                      'WebDriverExpectations')
+
+    def path_to_flag_specific_expectations_file(self, flag_specific):
+        return self._filesystem.join(self.web_tests_dir(),
+                                     self.FLAG_EXPECTATIONS_PREFIX,
+                                     flag_specific)
 
     def repository_path(self):
         """Returns the repository path for the chromium code base."""
@@ -1848,7 +1924,8 @@ class Port(object):
                                      config_file_name)
 
     def _apache_version(self):
-        config = self._executive.run_command([self.path_to_apache(), '-v'])
+        env = self.setup_environ_for_server()
+        config = self._executive.run_command([self.path_to_apache(), '-v'], env=env)
         # Log version including patch level.
         _log.debug(
             'Found apache version %s',
@@ -1859,15 +1936,10 @@ class Port(object):
                       r'\1', config)
 
     def _apache_config_file_name_for_platform(self):
-        if self.host.platform.is_linux():
-            distribution = self.host.platform.linux_distribution()
-
-            custom_configurations = ['arch', 'debian', 'fedora', 'redhat']
-            if distribution in custom_configurations:
-                return '%s-httpd-%s.conf' % (distribution,
-                                             self._apache_version())
-
-        return 'apache2-httpd-' + self._apache_version() + '.conf'
+        # Keep the logic to use apache version even though we only have
+        # configuration file for 2.4 now, in case we will have newer version in
+        # future.
+        return 'apache2-httpd-' + self._apache_version() + '-php7.conf'
 
     def _path_to_driver(self, target=None):
         """Returns the full path to the test driver."""
@@ -2309,16 +2381,19 @@ class Port(object):
 
 
 class VirtualTestSuite(object):
-    def __init__(self, prefix=None, bases=None, args=None):
+    def __init__(self, prefix=None, platforms=None, bases=None, args=None):
         assert VALID_FILE_NAME_REGEX.match(prefix), \
             "Virtual test suite prefix '{}' contains invalid characters".format(prefix)
+        assert isinstance(platforms, list)
         assert isinstance(bases, list)
         assert args
         assert isinstance(args, list)
         self.full_prefix = 'virtual/' + prefix + '/'
+        self.platforms = [x.lower() for x in platforms]
         self.bases = bases
         self.args = args
 
     def __repr__(self):
-        return "VirtualTestSuite('%s', %s, %s)" % (self.full_prefix,
-                                                   self.bases, self.args)
+        return "VirtualTestSuite('%s', %s, %s, %s)" % (self.full_prefix,
+                                                       self.platforms,
+                                                       self.bases, self.args)

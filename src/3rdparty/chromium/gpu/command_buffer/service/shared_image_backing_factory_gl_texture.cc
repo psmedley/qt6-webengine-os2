@@ -141,9 +141,21 @@ bool SharedImageBackingFactoryGLTexture::IsSupported(
        (usage & SHARED_IMAGE_USAGE_RASTER))) {
     return false;
   }
+
+  // Linux and ChromeOS support WebGPU/Compat on GL. All other platforms
+  // do not support WebGPU on GL.
+  if (usage & SHARED_IMAGE_USAGE_WEBGPU) {
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || defined(USE_OZONE)
+    if (use_webgpu_adapter_ != WebGPUAdapterName::kCompat) {
+      return false;
+    }
+#else
+    return false;
+#endif
+  }
+
   // Needs interop factory
-  if ((usage & SHARED_IMAGE_USAGE_WEBGPU) ||
-      (usage & SHARED_IMAGE_USAGE_VIDEO_DECODE) ||
+  if ((usage & SHARED_IMAGE_USAGE_VIDEO_DECODE) ||
       (usage & SHARED_IMAGE_USAGE_SCANOUT)) {
     return false;
   }
@@ -226,6 +238,14 @@ SharedImageBackingFactoryGLTexture::CreateSharedImageInternal(
                         format_info.adjusted_format, format_info.gl_type,
                         pixel_data.data());
   }
+
+  if (gl::g_current_gl_driver->ext.b_GL_KHR_debug) {
+    const std::string label =
+        "SharedImage_GLTexture" + CreateLabelForSharedImageUsage(usage);
+    api->glObjectLabelFn(GL_TEXTURE, result->GetGLServiceId(), -1,
+                         label.c_str());
+  }
+
   result->SetCompatibilitySwizzle(format_info.swizzle);
   return std::move(result);
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2016 The PDFium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,7 +15,6 @@ import shutil
 import subprocess
 import sys
 
-# pylint: disable=relative-import
 import common
 import pngdiffer
 import suppressor
@@ -49,6 +48,9 @@ def TestOneFileParallel(this, test_case):
     result = this.GenerateAndTest(input_filename, source_dir)
     return (result, input_filename, source_dir)
   except KeyboardInterrupt:
+    # TODO(https://crbug.com/pdfium/1674): Re-enable this check after try bots
+    # can run with Python3.
+    # pylint: disable=raise-missing-from
     raise KeyboardInterruptError()
 
 
@@ -64,6 +66,9 @@ def RunSkiaWrapper(this, input_chunk):
       results.append((test_name, skia_success, input_filename))
     return results
   except KeyboardInterrupt:
+    # TODO(https://crbug.com/pdfium/1674): Re-enable this check after try bots
+    # can run with Python3.
+    # pylint: disable=raise-missing-from
     raise KeyboardInterruptError()
 
 
@@ -85,7 +90,6 @@ class TestRunner:
     self.test_type = dirname
     self.delete_output_on_success = False
     self.enforce_expected_images = False
-    self.oneshot_renderer = False
     self.skia_tester = None
 
   def GetSkiaGoldTester(self, process_name=None):
@@ -134,8 +138,7 @@ class TestRunner:
       raised_exception = self.TestText(input_filename, input_root,
                                        expected_txt_path, pdf_path)
     else:
-      use_ahem = 'use_ahem' in source_dir
-      raised_exception, results = self.TestPixel(pdf_path, use_ahem)
+      raised_exception, results = self.TestPixel(pdf_path, source_dir)
 
     if raised_exception is not None:
       print('FAILURE: {}; {}'.format(input_filename, raised_exception))
@@ -228,7 +231,7 @@ class TestRunner:
     try:
       with open(txt_path, "r") as txt_file:
         txt_data = txt_file.readlines()
-      if not len(txt_data):
+      if not txt_data:
         return None
       sys.stdout.write('Unexpected output:\n')
       for line in txt_data:
@@ -239,23 +242,26 @@ class TestRunner:
 
   # TODO(crbug.com/pdfium/1656): Remove when ready to fully switch over to
   # Skia Gold
-  def TestPixel(self, pdf_path, use_ahem):
+  def TestPixel(self, pdf_path, source_dir):
     cmd_to_run = [
         self.pdfium_test_path, '--send-events', '--png', '--md5',
         '--time=' + TEST_SEED_TIME
     ]
 
-    if self.oneshot_renderer:
-      cmd_to_run.append('--render-oneshot')
-
-    if use_ahem:
+    if 'use_ahem' in source_dir or 'use_symbolneu' in source_dir:
       cmd_to_run.append('--font-dir=%s' % self.font_dir)
+    else:
+      cmd_to_run.append('--font-dir=%s' % self.third_party_font_dir)
+      cmd_to_run.append('--croscore-font-names')
 
     if self.options.disable_javascript:
       cmd_to_run.append('--disable-javascript')
 
     if self.options.disable_xfa:
       cmd_to_run.append('--disable-xfa')
+
+    if self.options.render_oneshot:
+      cmd_to_run.append('--render-oneshot')
 
     if self.options.reverse_byte_order:
       cmd_to_run.append('--reverse-byte-order')
@@ -303,6 +309,12 @@ class TestRunner:
         action="store_true",
         dest="disable_xfa",
         help='Prevents processing XFA forms.')
+
+    parser.add_argument(
+        '--render-oneshot',
+        action="store_true",
+        dest="render_oneshot",
+        help='Sets whether to use the oneshot renderer.')
 
     parser.add_argument(
         '--run-skia-gold',
@@ -360,6 +372,7 @@ class TestRunner:
     self.fixup_path = finder.ScriptPath('fixup_pdf_template.py')
     self.text_diff_path = finder.ScriptPath('text_diff.py')
     self.font_dir = os.path.join(finder.TestingDir(), 'resources', 'fonts')
+    self.third_party_font_dir = finder.ThirdPartyFontsDir()
 
     self.source_dir = finder.TestingDir()
     if self.test_dir != 'corpus':
@@ -577,7 +590,3 @@ class TestRunner:
   def SetEnforceExpectedImages(self, new_value):
     """Set whether to enforce that each test case provide an expected image."""
     self.enforce_expected_images = new_value
-
-  def SetOneShotRenderer(self, new_value):
-    """Set whether to use the oneshot renderer. """
-    self.oneshot_renderer = new_value

@@ -105,7 +105,6 @@ export class ServiceWorkerUpdateCycleView {
         }
         state = state.previousState;
       }
-      /** @type {Array <ServiceWorkerUpdateRange>} */
       const ranges: Array<ServiceWorkerUpdateRange> = [];
       addNormalizedRanges(
           ranges, version.id, beginInstallTime, endInstallTime, beginActivateTime, endActivateTime, currentStatus);
@@ -133,7 +132,6 @@ export class ServiceWorkerUpdateCycleView {
 
   private createTimingTable(): void {
     this.tableElement.classList.add('service-worker-update-timing-table');
-    UI.Utils.appendStyle(this.tableElement, 'panels/application/serviceWorkerUpdateCycleView.css');
     const timeRanges = this.calculateServiceWorkerUpdateRanges();
     this.updateTimingTable(timeRanges);
   }
@@ -159,7 +157,6 @@ export class ServiceWorkerUpdateCycleView {
     this.selectedRowIndex = -1;
     this.removeRows();
     this.createTimingTableHead();
-    /** @type {!Array<ServiceWorkerUpdateRange>} */
     const timeRangeArray = timeRanges;
     if (timeRangeArray.length === 0) {
       return;

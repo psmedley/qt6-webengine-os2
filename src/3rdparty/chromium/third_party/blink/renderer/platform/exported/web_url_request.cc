@@ -315,14 +315,6 @@ void WebURLRequest::SetSkipServiceWorker(bool skip_service_worker) {
   resource_request_->SetSkipServiceWorker(skip_service_worker);
 }
 
-bool WebURLRequest::ShouldResetAppCache() const {
-  return resource_request_->ShouldResetAppCache();
-}
-
-void WebURLRequest::SetShouldResetAppCache(bool set_should_reset_app_cache) {
-  resource_request_->SetShouldResetAppCache(set_should_reset_app_cache);
-}
-
 network::mojom::RequestMode WebURLRequest::GetMode() const {
   return resource_request_->GetMode();
 }
@@ -363,14 +355,6 @@ void WebURLRequest::SetFetchIntegrity(const WebString& integrity) {
   return resource_request_->SetFetchIntegrity(integrity);
 }
 
-PreviewsState WebURLRequest::GetPreviewsState() const {
-  return resource_request_->GetPreviewsState();
-}
-
-void WebURLRequest::SetPreviewsState(PreviewsState previews_state) {
-  return resource_request_->SetPreviewsState(previews_state);
-}
-
 const scoped_refptr<WebURLRequestExtraData>&
 WebURLRequest::GetURLRequestExtraData() const {
   return resource_request_->GetURLRequestExtraData();
@@ -400,10 +384,6 @@ WebURLRequest::Priority WebURLRequest::GetPriority() const {
 
 void WebURLRequest::SetPriority(WebURLRequest::Priority priority) {
   resource_request_->SetPriority(static_cast<ResourceLoadPriority>(priority));
-}
-
-bool WebURLRequest::IsExternalRequest() const {
-  return resource_request_->IsExternalRequest();
 }
 
 network::mojom::CorsPreflightPolicy WebURLRequest::GetCorsPreflightPolicy()

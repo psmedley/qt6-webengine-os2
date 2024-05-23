@@ -13,7 +13,7 @@
 RenderDeviceDriverIface::~RenderDeviceDriverIface() = default;
 
 bool RenderDeviceDriverIface::SetClip_PathStroke(
-    const CFX_Path* pPath,
+    const CFX_Path& path,
     const CFX_Matrix* pObject2Device,
     const CFX_GraphStateData* pGraphState) {
   return false;
@@ -50,8 +50,7 @@ bool RenderDeviceDriverIface::ContinueDIBits(CFX_ImageRenderer* handle,
 }
 
 bool RenderDeviceDriverIface::DrawDeviceText(
-    int nChars,
-    const TextCharPos* pCharPos,
+    pdfium::span<const TextCharPos> pCharPos,
     CFX_Font* pFont,
     const CFX_Matrix& mtObject2Device,
     float font_size,

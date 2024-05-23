@@ -4,7 +4,6 @@
 
 #include "gpu/ipc/service/image_transport_surface.h"
 
-#include "base/macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/ipc/service/image_transport_surface_overlay_mac.h"
 #include "gpu/ipc/service/pass_through_image_transport_surface.h"
@@ -30,7 +29,6 @@ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
 #if defined(USE_EGL)
     case gl::kGLImplementationEGLGLES2:
     case gl::kGLImplementationEGLANGLE:
-    case gl::kGLImplementationSwiftShaderGL:
       return base::WrapRefCounted<gl::GLSurface>(
           new ImageTransportSurfaceOverlayMacEGL(delegate));
 #endif

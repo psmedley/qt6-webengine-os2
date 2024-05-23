@@ -13,7 +13,7 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
@@ -31,6 +31,12 @@ class ProfileOAuth2TokenServiceDelegateAndroid
  public:
   ProfileOAuth2TokenServiceDelegateAndroid(
       AccountTrackerService* account_tracker_service);
+
+  ProfileOAuth2TokenServiceDelegateAndroid(
+      const ProfileOAuth2TokenServiceDelegateAndroid&) = delete;
+  ProfileOAuth2TokenServiceDelegateAndroid& operator=(
+      const ProfileOAuth2TokenServiceDelegateAndroid&) = delete;
+
   ~ProfileOAuth2TokenServiceDelegateAndroid() override;
 
   // Returns a reference to the corresponding Java OAuth2TokenService object.
@@ -119,10 +125,8 @@ class ProfileOAuth2TokenServiceDelegateAndroid
   // Maps account_id to the last error for that account.
   std::map<CoreAccountId, GoogleServiceAuthError> errors_;
 
-  AccountTrackerService* account_tracker_service_;
+  raw_ptr<AccountTrackerService> account_tracker_service_;
   RefreshTokenLoadStatus fire_refresh_token_loaded_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProfileOAuth2TokenServiceDelegateAndroid);
 };
 
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_PROFILE_OAUTH2_TOKEN_SERVICE_DELEGATE_ANDROID_H_

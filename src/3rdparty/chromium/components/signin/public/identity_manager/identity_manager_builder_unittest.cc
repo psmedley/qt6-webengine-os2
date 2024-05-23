@@ -19,18 +19,15 @@
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "ash/components/account_manager/account_manager_factory.h"
-#include "components/account_manager_core/account_manager_facade_impl.h"
-#include "components/account_manager_core/chromeos/account_manager.h"
-#include "components/account_manager_core/chromeos/account_manager_mojo_service.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "components/account_manager_core/mock_account_manager_facade.h"
 #endif
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 #include "components/signin/public/identity_manager/ios/fake_device_accounts_provider.h"
 #endif
 
@@ -51,12 +48,6 @@ class IdentityManagerBuilderTest : public testing::Test {
     return &pref_service_;
   }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  ash::AccountManagerFactory* GetAccountManagerFactory() {
-    return &account_manager_factory_;
-  }
-#endif
-
  public:
   IdentityManagerBuilderTest(const IdentityManagerBuilderTest&) = delete;
   IdentityManagerBuilderTest& operator=(const IdentityManagerBuilderTest&) =
@@ -67,9 +58,6 @@ class IdentityManagerBuilderTest : public testing::Test {
   sync_preferences::TestingPrefServiceSyncable pref_service_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   TestSigninClient signin_client_;
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  ash::AccountManagerFactory account_manager_factory_;
-#endif
 };
 
 // Test that IdentityManagerBuilder properly set all required parameters to the
@@ -79,7 +67,7 @@ TEST_F(IdentityManagerBuilderTest, BuildIdentityManagerInitParameters) {
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath dest_path = temp_dir.GetPath();
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   SetUpMockAccountManagerFacade();
 #endif
 
@@ -93,29 +81,14 @@ TEST_F(IdentityManagerBuilderTest, BuildIdentityManagerInitParameters) {
   params.profile_path = dest_path;
   params.signin_client = GetSigninClient();
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   params.device_accounts_provider =
       std::make_unique<FakeDeviceAccountsProvider>();
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  auto* account_manager =
-      GetAccountManagerFactory()->GetAccountManager(dest_path.value());
-  account_manager->Initialize(
-      dest_path, GetSigninClient()->GetURLLoaderFactory(),
-      base::BindRepeating(
-          [](base::OnceClosure closure) -> void { std::move(closure).Run(); }));
-  params.account_manager = account_manager;
-
-  mojo::Remote<crosapi::mojom::AccountManager> remote;
-  GetAccountManagerFactory()
-      ->GetAccountManagerMojoService(dest_path.value())
-      ->BindReceiver(remote.BindNewPipeAndPassReceiver());
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   auto account_manager_facade =
-      std::make_unique<account_manager::AccountManagerFacadeImpl>(
-          std::move(remote),
-          /*remote_version=*/std::numeric_limits<uint32_t>::max());
-
+      std::make_unique<account_manager::MockAccountManagerFacade>();
   params.account_manager_facade = account_manager_facade.get();
   params.is_regular_profile = true;
 #endif
@@ -131,15 +104,16 @@ TEST_F(IdentityManagerBuilderTest, BuildIdentityManagerInitParameters) {
   EXPECT_NE(init_params.primary_account_mutator, nullptr);
   EXPECT_NE(init_params.accounts_cookie_mutator, nullptr);
   EXPECT_NE(init_params.diagnostics_provider, nullptr);
-#if defined(OS_IOS) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
   EXPECT_NE(init_params.device_accounts_synchronizer, nullptr);
   EXPECT_EQ(init_params.accounts_mutator, nullptr);
 #else
   EXPECT_EQ(init_params.device_accounts_synchronizer, nullptr);
   EXPECT_NE(init_params.accounts_mutator, nullptr);
 #endif
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  EXPECT_NE(init_params.ash_account_manager, nullptr);
+#if defined(IS_CHROMEOS)
+  EXPECT_NE(init_params.ash_account_manager_facade, nullptr);
+  EXPECT_TRUE(init_params.is_regular_profile);
 #endif
 }
 

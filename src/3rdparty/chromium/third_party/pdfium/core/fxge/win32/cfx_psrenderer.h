@@ -11,21 +11,25 @@
 #include <stdint.h>
 
 #include <memory>
+#include <sstream>
 #include <vector>
 
+#include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/fx_stream.h"
+#include "core/fxcrt/fx_string_wrappers.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_graphstatedata.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/span.h"
 
 class CFX_DIBBase;
-class CFX_GlyphCache;
 class CFX_Font;
+class CFX_GlyphCache;
+class CFX_PSFontTracker;
 class CFX_Path;
-class CPSFont;
 class TextCharPos;
 struct CFX_FillRenderOptions;
 struct FXDIB_ResampleOptions;
@@ -40,8 +44,7 @@ struct EncoderIface {
                          int pitch,
                          std::unique_ptr<uint8_t, FxFreeDeleter>* dest_buf,
                          uint32_t* dest_size);
-  bool (*pFlateEncodeFunc)(const uint8_t* src_buf,
-                           uint32_t src_size,
+  bool (*pFlateEncodeFunc)(pdfium::span<const uint8_t> src_span,
                            std::unique_ptr<uint8_t, FxFreeDeleter>* dest_buf,
                            uint32_t* dest_size);
   bool (*pJpegEncodeFunc)(const RetainPtr<CFX_DIBBase>& pSource,
@@ -55,25 +58,30 @@ struct EncoderIface {
 
 class CFX_PSRenderer {
  public:
-  explicit CFX_PSRenderer(const EncoderIface* pEncoderIface);
+  enum class RenderingLevel {
+    kLevel2,
+    kLevel3,
+    kLevel3Type42,
+  };
+
+  CFX_PSRenderer(CFX_PSFontTracker* font_tracker,
+                 const EncoderIface* encoder_iface);
   ~CFX_PSRenderer();
 
   void Init(const RetainPtr<IFX_RetainableWriteStream>& stream,
-            int pslevel,
+            RenderingLevel level,
             int width,
             int height);
-  void StartRendering();
-  void EndRendering();
   void SaveState();
   void RestoreState(bool bKeepSaved);
-  void SetClip_PathFill(const CFX_Path* pPath,
+  void SetClip_PathFill(const CFX_Path& path,
                         const CFX_Matrix* pObject2Device,
                         const CFX_FillRenderOptions& fill_options);
-  void SetClip_PathStroke(const CFX_Path* pPath,
+  void SetClip_PathStroke(const CFX_Path& path,
                           const CFX_Matrix* pObject2Device,
                           const CFX_GraphStateData* pGraphState);
   FX_RECT GetClipBox() { return m_ClipBox; }
-  bool DrawPath(const CFX_Path* pPath,
+  bool DrawPath(const CFX_Path& path,
                 const CFX_Matrix* pObject2Device,
                 const CFX_GraphStateData* pGraphState,
                 uint32_t fill_color,
@@ -101,8 +109,22 @@ class CFX_PSRenderer {
                 float font_size,
                 uint32_t color);
 
+  static absl::optional<ByteString> GenerateType42SfntDataForTesting(
+      const ByteString& psname,
+      pdfium::span<const uint8_t> font_data);
+
+  static ByteString GenerateType42FontDictionaryForTesting(
+      const ByteString& psname,
+      const FX_RECT& bbox,
+      size_t num_glyphs,
+      size_t glyphs_per_descendant_font);
+
  private:
-  void OutputPath(const CFX_Path* pPath, const CFX_Matrix* pObject2Device);
+  struct Glyph;
+
+  void StartRendering();
+  void EndRendering();
+  void OutputPath(const CFX_Path& path, const CFX_Matrix* pObject2Device);
   void SetGraphState(const CFX_GraphStateData* pGraphState);
   void SetColor(uint32_t color);
   void FindPSFontGlyph(CFX_GlyphCache* pGlyphCache,
@@ -110,6 +132,16 @@ class CFX_PSRenderer {
                        const TextCharPos& charpos,
                        int* ps_fontnum,
                        int* ps_glyphindex);
+  void DrawTextAsType3Font(int char_count,
+                           const TextCharPos* char_pos,
+                           CFX_Font* font,
+                           float font_size,
+                           fxcrt::ostringstream& buf);
+  bool DrawTextAsType42Font(int char_count,
+                            const TextCharPos* char_pos,
+                            CFX_Font* font,
+                            float font_size,
+                            fxcrt::ostringstream& buf);
   bool FaxCompressData(std::unique_ptr<uint8_t, FxFreeDeleter> src_buf,
                        int width,
                        int height,
@@ -120,20 +152,24 @@ class CFX_PSRenderer {
                       uint8_t** output_buf,
                       uint32_t* output_size,
                       const char** filter) const;
+  void WritePreambleString(ByteStringView str);
   void WritePSBinary(pdfium::span<const uint8_t> data);
-  void WriteStream(std::ostringstream& stream);
+  void WriteStream(fxcrt::ostringstream& stream);
   void WriteString(ByteStringView str);
 
   bool m_bInited = false;
   bool m_bGraphStateSet = false;
   bool m_bColorSet = false;
-  int m_PSLevel = 0;
+  absl::optional<RenderingLevel> m_Level;
   uint32_t m_LastColor = 0;
   FX_RECT m_ClipBox;
   CFX_GraphStateData m_CurGraphState;
+  UnownedPtr<CFX_PSFontTracker> const m_pFontTracker;
   UnownedPtr<const EncoderIface> const m_pEncoderIface;
   RetainPtr<IFX_RetainableWriteStream> m_pStream;
-  std::vector<std::unique_ptr<CPSFont>> m_PSFontList;
+  std::vector<std::unique_ptr<Glyph>> m_PSFontList;
+  fxcrt::ostringstream m_PreambleOutput;
+  fxcrt::ostringstream m_Output;
   std::vector<FX_RECT> m_ClipBoxStack;
 };
 

@@ -7,8 +7,11 @@
 #define THIRD_PARTY_LIBURLPATTERN_PATTERN_H_
 
 #include <string>
+#include <utility>
 #include <vector>
 #include "base/component_export.h"
+#include "third_party/abseil-cpp/absl/strings/string_view.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/liburlpattern/options.h"
 
 namespace liburlpattern {
@@ -83,6 +86,10 @@ struct COMPONENT_EXPORT(LIBURLPATTERN) Part {
        std::string suffix,
        Modifier modifier);
   Part() = default;
+
+  // Returns true if the `name` member is a custom name; e.g. for a `:foo`
+  // group.
+  bool HasCustomName() const;
 };
 
 COMPONENT_EXPORT(LIBURLPATTERN)
@@ -128,6 +135,24 @@ class COMPONENT_EXPORT(LIBURLPATTERN) Pattern {
 
   const std::vector<Part>& PartList() const { return part_list_; }
 
+  // Returns true if the pattern can match input strings using `DirectMatch()`.
+  bool CanDirectMatch() const;
+
+  // Attempts to match the pattern against the given `input` string directly
+  // without using a regular expression.  Only some patterns support this
+  // feature.  The caller must only call `DirectMatch()` if `CanDirectMatch()`
+  // returns true.
+  //
+  // `DirectMatch()` returns true if the pattern matches `input` and false
+  // otherwise.  If the `group_list_out` pointer is provided then the vector
+  // is populated with name:value pairs for matched pattern groups.  If a
+  // group had an optional modifier and it did not match any input characters
+  // then its `group_list_out` value will be std::nullopt.
+  bool DirectMatch(absl::string_view input,
+                   std::vector<std::pair<absl::string_view,
+                                         absl::optional<absl::string_view>>>*
+                       group_list_out) const;
+
  private:
   // Compute the expected size of the string that will be returned by
   // GenerateRegexString().
@@ -138,6 +163,10 @@ class COMPONENT_EXPORT(LIBURLPATTERN) Pattern {
   size_t DelimiterListLength() const;
   void AppendEndsWith(std::string& append_target) const;
   size_t EndsWithLength() const;
+
+  // Utility methods to help with direct matching.
+  bool IsOnlyFullWildcard() const;
+  bool IsOnlyFixedText() const;
 
   std::vector<Part> part_list_;
   Options options_;

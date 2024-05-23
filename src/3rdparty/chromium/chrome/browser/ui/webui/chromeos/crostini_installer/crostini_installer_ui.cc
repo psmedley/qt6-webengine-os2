@@ -30,7 +30,6 @@
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/chromeos/devicetype_utils.h"
 #include "ui/resources/grit/webui_generated_resources.h"
-#include "ui/resources/grit/webui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 #include "ui/webui/mojo_web_ui_controller.h"
@@ -61,8 +60,6 @@ void AddStringResources(content::WebUIDataSource* source) {
       {"startContainerError", IDS_CROSTINI_INSTALLER_START_CONTAINER_ERROR},
       {"configureContainerError",
        IDS_CROSTINI_INSTALLER_CONFIGURE_CONTAINER_ERROR},
-      {"fetchSshKeysError", IDS_CROSTINI_INSTALLER_FETCH_SSH_KEYS_ERROR},
-      {"mountContainerError", IDS_CROSTINI_INSTALLER_MOUNT_CONTAINER_ERROR},
       {"setupContainerError", IDS_CROSTINI_INSTALLER_SETUP_CONTAINER_ERROR},
       {"unknownError", IDS_CROSTINI_INSTALLER_UNKNOWN_ERROR},
 
@@ -76,8 +73,6 @@ void AddStringResources(content::WebUIDataSource* source) {
       {"configureContainerMessage",
        IDS_CROSTINI_INSTALLER_CONFIGURE_CONTAINER_MESSAGE},
       {"setupContainerMessage", IDS_CROSTINI_INSTALLER_SETUP_CONTAINER_MESSAGE},
-      {"fetchSshKeysMessage", IDS_CROSTINI_INSTALLER_FETCH_SSH_KEYS_MESSAGE},
-      {"mountContainerMessage", IDS_CROSTINI_INSTALLER_MOUNT_CONTAINER_MESSAGE},
       {"cancelingMessage", IDS_CROSTINI_INSTALLER_CANCELING},
 
       {"configureMessage", IDS_CROSTINI_INSTALLER_CONFIGURE_MESSAGE},
@@ -151,7 +146,8 @@ CrostiniInstallerUI::CrostiniInstallerUI(content::WebUI* web_ui)
   source->AddString("defaultContainerUsername",
                     crostini::DefaultContainerUserNameForProfile(profile));
 
-  source->AddResourcePath("app.js", IDR_CROSTINI_INSTALLER_APP_JS);
+  source->AddResourcePath("app.rollup.js",
+                          IDR_CROSTINI_INSTALLER_APP_ROLLUP_JS);
   source->AddResourcePath("browser_proxy.js",
                           IDR_CROSTINI_INSTALLER_BROWSER_PROXY_JS);
   source->AddResourcePath("crostini_installer.mojom-lite.js",
@@ -160,6 +156,7 @@ CrostiniInstallerUI::CrostiniInstallerUI(content::WebUI* web_ui)
                           IDR_CROSTINI_INSTALLER_TYPES_MOJO_LITE_JS);
   source->AddResourcePath("images/linux_illustration.png",
                           IDR_LINUX_ILLUSTRATION);
+  source->AddResourcePath("images/crostini_icon.svg", IDR_CROSTINI_ICON);
   source->SetDefaultResource(IDR_CROSTINI_INSTALLER_INDEX_HTML);
 
   content::WebUIDataSource::Add(profile, source);

@@ -20,6 +20,7 @@
 #include "p2p/base/port.h"
 #include "p2p/base/stun_request.h"
 #include "rtc_base/async_packet_socket.h"
+#include "rtc_base/task_utils/pending_task_safety_flag.h"
 
 namespace cricket {
 
@@ -34,17 +35,17 @@ class UDPPort : public Port {
   static std::unique_ptr<UDPPort> Create(
       rtc::Thread* thread,
       rtc::PacketSocketFactory* factory,
-      rtc::Network* network,
+      const rtc::Network* network,
       rtc::AsyncPacketSocket* socket,
       const std::string& username,
       const std::string& password,
-      const std::string& origin,
       bool emit_local_for_anyaddress,
-      absl::optional<int> stun_keepalive_interval) {
+      absl::optional<int> stun_keepalive_interval,
+      const webrtc::FieldTrialsView* field_trials = nullptr) {
     // Using `new` to access a non-public constructor.
-    auto port = absl::WrapUnique(new UDPPort(thread, factory, network, socket,
-                                             username, password, origin,
-                                             emit_local_for_anyaddress));
+    auto port = absl::WrapUnique(
+        new UDPPort(thread, factory, network, socket, username, password,
+                    emit_local_for_anyaddress, field_trials));
     port->set_stun_keepalive_delay(stun_keepalive_interval);
     if (!port->Init()) {
       return nullptr;
@@ -55,18 +56,18 @@ class UDPPort : public Port {
   static std::unique_ptr<UDPPort> Create(
       rtc::Thread* thread,
       rtc::PacketSocketFactory* factory,
-      rtc::Network* network,
+      const rtc::Network* network,
       uint16_t min_port,
       uint16_t max_port,
       const std::string& username,
       const std::string& password,
-      const std::string& origin,
       bool emit_local_for_anyaddress,
-      absl::optional<int> stun_keepalive_interval) {
+      absl::optional<int> stun_keepalive_interval,
+      const webrtc::FieldTrialsView* field_trials = nullptr) {
     // Using `new` to access a non-public constructor.
     auto port = absl::WrapUnique(
         new UDPPort(thread, factory, network, min_port, max_port, username,
-                    password, origin, emit_local_for_anyaddress));
+                    password, emit_local_for_anyaddress, field_trials));
     port->set_stun_keepalive_delay(stun_keepalive_interval);
     if (!port->Init()) {
       return nullptr;
@@ -113,29 +114,31 @@ class UDPPort : public Port {
     stun_keepalive_lifetime_ = lifetime;
   }
   // Returns true if there is a pending request with type `msg_type`.
-  bool HasPendingRequest(int msg_type) {
-    return requests_.HasRequest(msg_type);
+  bool HasPendingRequestForTest(int msg_type) {
+    return request_manager_.HasRequestForTest(msg_type);
   }
+
+  StunRequestManager& request_manager() { return request_manager_; }
 
  protected:
   UDPPort(rtc::Thread* thread,
           rtc::PacketSocketFactory* factory,
-          rtc::Network* network,
+          const rtc::Network* network,
           uint16_t min_port,
           uint16_t max_port,
           const std::string& username,
           const std::string& password,
-          const std::string& origin,
-          bool emit_local_for_anyaddress);
+          bool emit_local_for_anyaddress,
+          const webrtc::FieldTrialsView* field_trials);
 
   UDPPort(rtc::Thread* thread,
           rtc::PacketSocketFactory* factory,
-          rtc::Network* network,
+          const rtc::Network* network,
           rtc::AsyncPacketSocket* socket,
           const std::string& username,
           const std::string& password,
-          const std::string& origin,
-          bool emit_local_for_anyaddress);
+          bool emit_local_for_anyaddress,
+          const webrtc::FieldTrialsView* field_trials);
 
   bool Init();
 
@@ -178,14 +181,13 @@ class UDPPort : public Port {
 
  private:
   // A helper class which can be called repeatedly to resolve multiple
-  // addresses, as opposed to rtc::AsyncResolverInterface, which can only
+  // addresses, as opposed to rtc::AsyncDnsResolverInterface, which can only
   // resolve one address per instance.
-  class AddressResolver : public sigslot::has_slots<> {
+  class AddressResolver {
    public:
     explicit AddressResolver(
         rtc::PacketSocketFactory* factory,
         std::function<void(const rtc::SocketAddress&, int)> done_callback);
-    ~AddressResolver() override;
 
     void Resolve(const rtc::SocketAddress& address);
     bool GetResolvedAddress(const rtc::SocketAddress& input,
@@ -193,17 +195,18 @@ class UDPPort : public Port {
                             rtc::SocketAddress* output) const;
 
    private:
-    typedef std::map<rtc::SocketAddress, rtc::AsyncResolverInterface*>
+    typedef std::map<rtc::SocketAddress,
+                     std::unique_ptr<webrtc::AsyncDnsResolverInterface>>
         ResolverMap;
 
-    void OnResolveResult(rtc::AsyncResolverInterface* resolver);
-
     rtc::PacketSocketFactory* socket_factory_;
-    ResolverMap resolvers_;
     // The function is called when resolving the specified address is finished.
     // The first argument is the input address, the second argument is the error
     // or 0 if it succeeded.
     std::function<void(const rtc::SocketAddress&, int)> done_;
+    // Resolver may fire callbacks that refer to done_, so ensure
+    // that all resolvers are destroyed first.
+    ResolverMap resolvers_;
   };
 
   // DNS resolution of the STUN server.
@@ -243,7 +246,7 @@ class UDPPort : public Port {
   ServerAddresses server_addresses_;
   ServerAddresses bind_request_succeeded_servers_;
   ServerAddresses bind_request_failed_servers_;
-  StunRequestManager requests_;
+  StunRequestManager request_manager_;
   rtc::AsyncPacketSocket* socket_;
   int error_;
   int send_error_count_ = 0;
@@ -267,27 +270,27 @@ class StunPort : public UDPPort {
   static std::unique_ptr<StunPort> Create(
       rtc::Thread* thread,
       rtc::PacketSocketFactory* factory,
-      rtc::Network* network,
+      const rtc::Network* network,
       uint16_t min_port,
       uint16_t max_port,
       const std::string& username,
       const std::string& password,
       const ServerAddresses& servers,
-      const std::string& origin,
-      absl::optional<int> stun_keepalive_interval);
+      absl::optional<int> stun_keepalive_interval,
+      const webrtc::FieldTrialsView* field_trials);
 
   void PrepareAddress() override;
 
  protected:
   StunPort(rtc::Thread* thread,
            rtc::PacketSocketFactory* factory,
-           rtc::Network* network,
+           const rtc::Network* network,
            uint16_t min_port,
            uint16_t max_port,
            const std::string& username,
            const std::string& password,
            const ServerAddresses& servers,
-           const std::string& origin);
+           const webrtc::FieldTrialsView* field_trials);
 };
 
 }  // namespace cricket

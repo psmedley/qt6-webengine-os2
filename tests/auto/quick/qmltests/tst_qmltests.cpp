@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2021 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <httpserver.h>
 
@@ -130,11 +105,18 @@ public:
         return tempDir.isValid() ? tempDir.path() : QString();
     }
 
+    Q_INVOKABLE QUrl pathUrl(const QString &filename = QString())
+    {
+        Q_ASSERT(tempDir.isValid());
+        return filename.isEmpty() ? QUrl::fromLocalFile(tempDir.path())
+                                  : QUrl::fromLocalFile(tempDir.filePath(filename));
+    }
+
     Q_INVOKABLE void removeRecursive(const QString dirname)
     {
         QDir dir(dirname);
         QFileInfoList entries(dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot));
-        for (int i = 0; i < entries.count(); ++i) {
+        for (int i = 0; i < entries.size(); ++i) {
             if (entries[i].isDir())
                 removeRecursive(entries[i].filePath());
             else
@@ -142,6 +124,8 @@ public:
         }
         QDir().rmdir(dirname);
     }
+
+    Q_INVOKABLE void createDirectory(const QString dirname) { QDir(tempDir.path()).mkdir(dirname); }
 
 private:
     QTemporaryDir tempDir;
@@ -255,7 +239,7 @@ int main(int argc, char **argv)
     // Force to use English language for testing due to error message checks
     QLocale::setDefault(QLocale("en"));
 
-    static QByteArrayList params = {QByteArrayLiteral("--use-fake-device-for-media-stream")};
+    static QByteArrayList params = {QByteArrayLiteral("--webEngineArgs"),QByteArrayLiteral("--use-fake-device-for-media-stream")};
     QList<const char *> w_argv(argc);
     for (int i = 0; i < argc; ++i) w_argv[i] = argv[i];
     for (int i = 0; i < params.size(); ++i) w_argv.append(params[i].data());
@@ -278,8 +262,9 @@ int main(int argc, char **argv)
 
 #if QT_CONFIG(ssl)
     qmlRegisterSingletonType<HttpsServer>(
-            "Test.Shared", 1, 0, "HttpsServer",
-            [&](QQmlEngine *, QJSEngine *) { return new HttpsServer(":/resources/server.pem",":/resources/server.key"); });
+            "Test.Shared", 1, 0, "HttpsServer", [&](QQmlEngine *, QJSEngine *) {
+                return new HttpsServer(":/resources/server.pem", ":/resources/server.key");
+            });
 #endif
     Setup setup;
     int i = quick_test_main_with_setup(

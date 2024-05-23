@@ -99,6 +99,7 @@ jumbo_source_set("capture_device_specific") {
     "//media",
     "//media/capture/mojom:image_capture",
     "//media/capture/mojom:image_capture_types",
+    "//media/capture/mojom:video_capture",
     "//media/mojo/mojom",
     "//media/parsers",
     "//skia",
@@ -136,8 +137,6 @@ jumbo_component("capture_lib") {
     "video/video_frame_receiver.h",
     "video/video_frame_receiver_on_task_runner.cc",
     "video/video_frame_receiver_on_task_runner.h",
-    "video_capturer_source.cc",
-    "video_capturer_source.h",
   ]
 
   public_deps = [
@@ -254,7 +253,7 @@ jumbo_component("capture_lib") {
     ]
   }
 
-  if (is_linux || is_chromeos_lacros) {
+  if (is_linux || is_chromeos) {
     sources += [
       "video/linux/scoped_v4l2_device_fd.cc",
       "video/linux/scoped_v4l2_device_fd.h",
@@ -292,6 +291,8 @@ jumbo_component("capture_lib") {
       "video/chromeos/camera_hal_dispatcher_impl.h",
       "video/chromeos/camera_metadata_utils.cc",
       "video/chromeos/camera_metadata_utils.h",
+      "video/chromeos/camera_trace_utils.cc",
+      "video/chromeos/camera_trace_utils.h",
       "video/chromeos/capture_metadata_dispatcher.h",
       "video/chromeos/display_rotation_observer.cc",
       "video/chromeos/display_rotation_observer.h",
@@ -326,8 +327,8 @@ jumbo_component("capture_lib") {
     public_deps += [ "//media/capture/video/chromeos/public" ]
     deps += [
       "//ash/constants",
+      "//ash/webui/camera_app_ui:document_scanning",
       "//build/config/linux/libdrm",
-      "//chromeos/components/camera_app_ui:document_scanning",
       "//chromeos/components/sensors:sensors",
       "//chromeos/dbus/power",
       "//components/chromeos_camera:mojo_mjpeg_decode_accelerator",
@@ -478,6 +479,7 @@ test("capture_unittests") {
       "video/fuchsia/video_capture_device_factory_fuchsia_test.cc",
       "video/fuchsia/video_capture_device_fuchsia_test.cc",
     ]
+    use_cfv2 = false
     additional_manifest_fragments = [
       "//build/config/fuchsia/test/web_engine_required_capabilities.test-cmx",
     ]
@@ -488,6 +490,8 @@ test("capture_unittests") {
       "video/mac/pixel_buffer_pool_mac_unittest.mm",
       "video/mac/pixel_buffer_transferer_mac_unittest.mm",
       "video/mac/sample_buffer_transformer_mac_unittest.mm",
+      "video/mac/test/fake_av_capture_device_format.h",
+      "video/mac/test/fake_av_capture_device_format.mm",
       "video/mac/test/mock_video_capture_device_avfoundation_frame_receiver_mac.h",
       "video/mac/test/mock_video_capture_device_avfoundation_frame_receiver_mac.mm",
       "video/mac/test/pixel_buffer_test_utils_mac.cc",

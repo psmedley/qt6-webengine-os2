@@ -18,7 +18,7 @@
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -81,7 +81,8 @@ const CSSValue* StyleValueToCSSValue(
       }
       break;
     }
-    case CSSPropertyID::kContain: {
+    case CSSPropertyID::kContain:
+    case CSSPropertyID::kContainerType: {
       // level 1 only accepts single values, which are stored internally
       // as a single element list.
       const auto* value = style_value.ToCSSValue();
@@ -283,6 +284,14 @@ void StylePropertyMap::set(
 
   DCHECK(IsValidCSSPropertyID(property_id));
   const CSSProperty& property = CSSProperty::Get(property_id);
+
+  // Descriptors (like 'src') have CSSProperty instances, but are not
+  // valid properties in this context.
+  if (!property.IsProperty()) {
+    exception_state.ThrowTypeError("Invalid propertyName: " + property_name);
+    return;
+  }
+
   if (property.IsShorthand()) {
     if (values.size() != 1) {
       exception_state.ThrowTypeError("Invalid type for property");
@@ -368,6 +377,17 @@ void StylePropertyMap::append(
 
   CSSValueList* current_value = nullptr;
   if (const CSSValue* css_value = GetProperty(property_id)) {
+    if (!css_value->IsValueList()) {
+      // The standard doesn't seem to cover this explicitly
+      // (https://github.com/w3c/css-houdini-drafts/issues/823),
+      // but the only really reasonable solution seems to be
+      // to throw a TypeError.
+      //
+      // This covers e.g. system-wide CSS keywords, like inherit.
+      exception_state.ThrowTypeError(
+          "Cannot append to something that is not a list");
+      return;
+    }
     current_value = To<CSSValueList>(css_value)->Copy();
   } else {
     current_value = CssValueListForPropertyID(property_id);

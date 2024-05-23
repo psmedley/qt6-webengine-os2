@@ -14,6 +14,7 @@
 #include "base/base_export.h"
 #include "base/debug/activity_tracker.h"
 #include "base/memory/shared_memory_mapping.h"
+#include "build/build_config.h"
 
 namespace base {
 namespace debug {
@@ -70,6 +71,9 @@ class BASE_EXPORT ThreadActivityAnalyzer {
   ThreadActivityAnalyzer(PersistentMemoryAllocator* allocator,
                          PersistentMemoryAllocator::Reference reference);
 
+  ThreadActivityAnalyzer(const ThreadActivityAnalyzer&) = delete;
+  ThreadActivityAnalyzer& operator=(const ThreadActivityAnalyzer&) = delete;
+
   ~ThreadActivityAnalyzer();
 
   // Adds information from the global analyzer.
@@ -111,8 +115,6 @@ class BASE_EXPORT ThreadActivityAnalyzer {
   // A reference into a persistent memory allocator, used by the global
   // analyzer to know where this tracker came from.
   PersistentMemoryAllocator::Reference allocator_reference_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadActivityAnalyzer);
 };
 
 
@@ -136,18 +138,21 @@ class BASE_EXPORT GlobalActivityAnalyzer {
   explicit GlobalActivityAnalyzer(
       std::unique_ptr<PersistentMemoryAllocator> allocator);
 
+  GlobalActivityAnalyzer(const GlobalActivityAnalyzer&) = delete;
+  GlobalActivityAnalyzer& operator=(const GlobalActivityAnalyzer&) = delete;
+
   ~GlobalActivityAnalyzer();
 
   // Creates a global analyzer using a given persistent-memory |allocator|.
   static std::unique_ptr<GlobalActivityAnalyzer> CreateWithAllocator(
       std::unique_ptr<PersistentMemoryAllocator> allocator);
 
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
   // Creates a global analyzer using the contents of a file given in
   // |file_path|.
   static std::unique_ptr<GlobalActivityAnalyzer> CreateWithFile(
       const FilePath& file_path);
-#endif  // !defined(OS_NACL)
+#endif  // !BUILDFLAG(IS_NACL)
 
   // Like above but accesses an allocator in a mapped shared-memory segment.
   static std::unique_ptr<GlobalActivityAnalyzer> CreateWithSharedMemory(
@@ -247,8 +252,6 @@ class BASE_EXPORT GlobalActivityAnalyzer {
   // first/next iteration.
   AnalyzerMap::iterator analyzers_iterator_;
   int64_t analyzers_iterator_pid_;
-
-  DISALLOW_COPY_AND_ASSIGN(GlobalActivityAnalyzer);
 };
 
 }  // namespace debug

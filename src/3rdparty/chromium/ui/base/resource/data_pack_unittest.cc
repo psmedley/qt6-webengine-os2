@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
+#include <string>
 #include <utility>
 
 #include "base/files/file.h"
@@ -40,7 +42,7 @@ TEST(DataPackTest, LoadFromPath) {
       base::WriteFile(data_path, {kSamplePakContentsV4, kSamplePakSizeV4}));
 
   // Load the file through the data pack API.
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   ASSERT_TRUE(pack.LoadFromPath(data_path));
 
   base::StringPiece data;
@@ -75,7 +77,7 @@ TEST(DataPackTest, LoadFromPathCompressed) {
   ASSERT_TRUE(base::WriteFile(data_path, compressed));
 
   // Load the file through the data pack API.
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   ASSERT_TRUE(pack.LoadFromPath(data_path));
 
   base::StringPiece data;
@@ -111,7 +113,7 @@ TEST(DataPackTest, LoadFromFile) {
   ASSERT_TRUE(file.IsValid());
 
   // Load the file through the data pack API.
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   ASSERT_TRUE(pack.LoadFromFile(std::move(file)));
 
   base::StringPiece data;
@@ -150,7 +152,7 @@ TEST(DataPackTest, LoadFromFileRegion) {
   ASSERT_TRUE(file.IsValid());
 
   // Load the file through the data pack API.
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   base::MemoryMappedFile::Region region = {sizeof(kPadding), kSamplePakSizeV4};
   ASSERT_TRUE(pack.LoadFromFileRegion(std::move(file), region));
 
@@ -174,7 +176,7 @@ TEST(DataPackTest, LoadFromFileRegion) {
 }
 
 TEST(DataPackTest, LoadFromBufferV4) {
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
 
   ASSERT_TRUE(pack.LoadFromBuffer({kSamplePakContentsV4, kSamplePakSizeV4}));
 
@@ -198,7 +200,7 @@ TEST(DataPackTest, LoadFromBufferV4) {
 }
 
 TEST(DataPackTest, LoadFromBufferV5) {
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
 
   ASSERT_TRUE(pack.LoadFromBuffer(
       {kSampleCompressPakContentsV5, kSampleCompressPakSizeV5}));
@@ -234,7 +236,7 @@ TEST(DataPackTest, LoadFileWithTruncatedHeader) {
   ASSERT_TRUE(base::PathService::Get(UI_DIR_TEST_DATA, &data_path));
   data_path = data_path.AppendASCII("data_pack_unittest/truncated-header.pak");
 
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   ASSERT_FALSE(pack.LoadFromPath(data_path));
 }
 
@@ -258,7 +260,7 @@ TEST_P(DataPackTest, Write) {
   ASSERT_TRUE(DataPack::WritePack(file, resources, GetParam()));
 
   // Now try to read the data back in.
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   ASSERT_TRUE(pack.LoadFromPath(file));
   EXPECT_EQ(pack.GetTextEncodingType(), GetParam());
 
@@ -300,7 +302,7 @@ TEST_P(DataPackTest, WriteWithAliases) {
   ASSERT_TRUE(DataPack::WritePack(file, resources, GetParam()));
 
   // Now try to read the data back in.
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   ASSERT_TRUE(pack.LoadFromPath(file));
   EXPECT_EQ(pack.GetTextEncodingType(), GetParam());
 
@@ -333,7 +335,7 @@ TEST_P(DataPackTest, WriteWithAliases) {
   EXPECT_EQ(2U, pack.GetAliasTableSizeForTesting());
 }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 TEST(DataPackTest, ModifiedWhileUsed) {
   base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
@@ -348,7 +350,7 @@ TEST(DataPackTest, ModifiedWhileUsed) {
   ASSERT_TRUE(file.IsValid());
 
   // Load the file through the data pack API.
-  DataPack pack(SCALE_FACTOR_100P);
+  DataPack pack(k100Percent);
   ASSERT_TRUE(pack.LoadFromFile(std::move(file)));
 
   base::StringPiece data;

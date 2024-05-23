@@ -39,6 +39,7 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
+#include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -66,7 +67,7 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
@@ -99,7 +100,7 @@ HTMLFormElement::HTMLFormElement(Document& document)
       has_elements_associated_by_form_attribute_(false),
       did_finish_parsing_children_(false),
       is_in_reset_function_(false) {
-  static unsigned next_unique_renderer_form_id = 1;
+  static uint64_t next_unique_renderer_form_id = 1;
   unique_renderer_form_id_ = next_unique_renderer_form_id++;
 
   UseCounter::Count(document, WebFeature::kFormElement);
@@ -716,7 +717,8 @@ void HTMLFormElement::CollectListedElements(
       // prevent multiple forms from "owning" the same |listed_element| as shown
       // by their |elements_including_shadow_trees|. |elements| doesn't have
       // this problem because it can check |listed_element->Form()|.
-      if (in_shadow_tree && !HasFormInBetween(&root, &element)) {
+      if (in_shadow_tree && !HasFormInBetween(&root, &element) &&
+          !listed_element->Form()) {
         elements_including_shadow_trees->push_back(listed_element);
       } else if (listed_element->Form() == this) {
         elements.push_back(listed_element);
@@ -725,7 +727,7 @@ void HTMLFormElement::CollectListedElements(
       }
     }
     if (elements_including_shadow_trees && element.AuthorShadowRoot() &&
-        !HasFormInBetween(&root, &element)) {
+        !HasFormInBetween(in_shadow_tree ? &root : this, &element)) {
       const Node& shadow = *element.AuthorShadowRoot();
       CollectListedElements(shadow, elements, elements_including_shadow_trees,
                             /*in_shadow_tree=*/true);
@@ -871,18 +873,18 @@ Element* HTMLFormElement::ElementFromPastNamesMap(
     const AtomicString& past_name) {
   if (past_name.IsEmpty() || !past_names_map_)
     return nullptr;
-  Element* element = past_names_map_->DeprecatedAtOrEmptyValue(past_name);
+  auto it = past_names_map_->find(past_name);
+  Element* element = it != past_names_map_->end() ? it->value : nullptr;
 #if DCHECK_IS_ON()
   if (!element)
     return nullptr;
   SECURITY_DCHECK(To<HTMLElement>(element)->formOwner() == this);
   if (IsA<HTMLImageElement>(*element)) {
     SECURITY_DCHECK(ImageElements().Find(element) != kNotFound);
-  } else if (auto* html_image_element = DynamicTo<HTMLObjectElement>(element)) {
-    SECURITY_DCHECK(ListedElements().Find(html_image_element) != kNotFound);
   } else {
-    SECURITY_DCHECK(ListedElements().Find(
-                        To<HTMLFormControlElement>(element)) != kNotFound);
+    auto* listed_element = ListedElement::From(*element);
+    SECURITY_DCHECK(listed_element &&
+                    ListedElements().Find(listed_element) != kNotFound);
   }
 #endif
   return element;

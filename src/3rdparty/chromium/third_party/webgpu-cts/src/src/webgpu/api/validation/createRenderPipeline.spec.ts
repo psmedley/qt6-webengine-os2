@@ -29,6 +29,11 @@ import {
   kTextureFormats,
   kRenderableColorTextureFormats,
   kTextureFormatInfo,
+  kDepthStencilFormats,
+  kCompareFunctions,
+  kStencilOperations,
+  kBlendFactors,
+  kBlendOperations,
 } from '../../capability_info.js';
 import { kTexelRepresentationInfo } from '../../util/texture/texel_data.js';
 
@@ -79,7 +84,7 @@ class F extends ValidationTest {
     }
 
     return `
-    [[stage(fragment)]] fn main() -> [[location(0)]] ${outputType} {
+    @stage(fragment) fn main() -> @location(0) ${outputType} {
       return ${result};
     }`;
   }
@@ -91,6 +96,7 @@ class F extends ValidationTest {
       sampleCount?: number;
       depthStencil?: GPUDepthStencilState;
       fragmentShaderCode?: string;
+      noFragment?: boolean;
     } = {}
   ): GPURenderPipelineDescriptor {
     const defaultTargets: GPUColorTargetState[] = [{ format: 'rgba8unorm' }];
@@ -103,25 +109,28 @@ class F extends ValidationTest {
         kTextureFormatInfo[targets[0] ? targets[0].format : 'rgba8unorm'].sampleType,
         4
       ),
+      noFragment = false,
     } = options;
 
     return {
       vertex: {
         module: this.device.createShaderModule({
           code: `
-            [[stage(vertex)]] fn main() -> [[builtin(position)]] vec4<f32> {
+            @stage(vertex) fn main() -> @builtin(position) vec4<f32> {
               return vec4<f32>(0.0, 0.0, 0.0, 1.0);
             }`,
         }),
         entryPoint: 'main',
       },
-      fragment: {
-        module: this.device.createShaderModule({
-          code: fragmentShaderCode,
-        }),
-        entryPoint: 'main',
-        targets,
-      },
+      fragment: noFragment
+        ? undefined
+        : {
+            module: this.device.createShaderModule({
+              code: fragmentShaderCode,
+            }),
+            entryPoint: 'main',
+            targets,
+          },
       layout: this.getPipelineLayout(),
       primitive: { topology },
       multisample: { count: sampleCount },
@@ -156,13 +165,9 @@ class F extends ValidationTest {
         this.shouldReject('OperationError', this.device.createRenderPipelineAsync(descriptor));
       }
     } else {
-      if (_success) {
+      this.expectValidationError(() => {
         this.device.createRenderPipeline(descriptor);
-      } else {
-        this.expectValidationError(() => {
-          this.device.createRenderPipeline(descriptor);
-        });
-      }
+      }, !_success);
     }
   }
 }
@@ -170,6 +175,7 @@ class F extends ValidationTest {
 export const g = makeTestGroup(F);
 
 g.test('basic_use_of_createRenderPipeline')
+  .desc(`TODO: review and add description; shorten name`)
   .params(u => u.combine('isAsync', [false, true]))
   .fn(async t => {
     const { isAsync } = t.params;
@@ -178,7 +184,48 @@ g.test('basic_use_of_createRenderPipeline')
     t.doCreateRenderPipelineTest(isAsync, true, descriptor);
   });
 
-g.test('at_least_one_color_state_is_required')
+g.test('create_vertex_only_pipeline_with_without_depth_stencil_state')
+  .desc(
+    `Test creating vertex-only render pipeline. A vertex-only render pipeline have no fragment
+state (and thus have no color state), and can be create with or without depth stencil state.
+
+TODO: review and shorten name`
+  )
+  .params(u =>
+    u
+      .combine('isAsync', [false, true])
+      .beginSubcases()
+      .combine('depthStencilFormat', [
+        'depth24plus',
+        'depth24plus-stencil8',
+        'depth32float',
+        '',
+      ] as const)
+      .combine('haveColor', [false, true])
+  )
+  .fn(async t => {
+    const { isAsync, depthStencilFormat, haveColor } = t.params;
+
+    let depthStencilState: GPUDepthStencilState | undefined;
+    if (depthStencilFormat === '') {
+      depthStencilState = undefined;
+    } else {
+      depthStencilState = { format: depthStencilFormat };
+    }
+
+    // Having targets or not should have no effect in result, since it will not appear in the
+    // descriptor in vertex-only render pipeline
+    const descriptor = t.getDescriptor({
+      noFragment: true,
+      depthStencil: depthStencilState,
+      targets: haveColor ? [{ format: 'rgba8unorm' }] : [],
+    });
+
+    t.doCreateRenderPipelineTest(isAsync, true, descriptor);
+  });
+
+g.test('at_least_one_color_state_is_required_for_complete_pipeline')
+  .desc(`TODO: review and add description; shorten name`)
   .params(u => u.combine('isAsync', [false, true]))
   .fn(async t => {
     const { isAsync } = t.params;
@@ -199,6 +246,7 @@ g.test('at_least_one_color_state_is_required')
   });
 
 g.test('color_formats_must_be_renderable')
+  .desc(`TODO: review and add description; shorten name`)
   .params(u => u.combine('isAsync', [false, true]).combine('format', kTextureFormats))
   .fn(async t => {
     const { isAsync, format } = t.params;
@@ -210,7 +258,144 @@ g.test('color_formats_must_be_renderable')
     t.doCreateRenderPipelineTest(isAsync, info.renderable && info.color, descriptor);
   });
 
+g.test('depth_stencil_state,format')
+  .desc(`The texture format in depthStencilState must be a depth/stencil format`)
+  .params(u => u.combine('isAsync', [false, true]).combine('format', kTextureFormats))
+  .fn(async t => {
+    const { isAsync, format } = t.params;
+    const info = kTextureFormatInfo[format];
+    await t.selectDeviceOrSkipTestCase(info.feature);
+
+    const descriptor = t.getDescriptor({ depthStencil: { format } });
+
+    t.doCreateRenderPipelineTest(isAsync, info.depth || info.stencil, descriptor);
+  });
+
+g.test('depth_stencil_state,depth_aspect,depth_test')
+  .desc(
+    `Depth aspect must be contained in the format if depth test is enabled in depthStencilState.`
+  )
+  .params(u =>
+    u
+      .combine('isAsync', [false, true])
+      .combine('format', kDepthStencilFormats)
+      .combine('depthCompare', [undefined, ...kCompareFunctions])
+  )
+  .fn(async t => {
+    const { isAsync, format, depthCompare } = t.params;
+    const info = kTextureFormatInfo[format];
+    await t.selectDeviceOrSkipTestCase(info.feature);
+
+    const descriptor = t.getDescriptor({
+      depthStencil: { format, depthCompare },
+    });
+
+    const depthTestEnabled = depthCompare !== undefined && depthCompare !== 'always';
+    t.doCreateRenderPipelineTest(isAsync, !depthTestEnabled || info.depth, descriptor);
+  });
+
+g.test('depth_stencil_state,depth_aspect,depth_write')
+  .desc(
+    `Depth aspect must be contained in the format if depth write is enabled in depthStencilState.`
+  )
+  .params(u =>
+    u
+      .combine('isAsync', [false, true])
+      .combine('format', kDepthStencilFormats)
+      .combine('depthWriteEnabled', [false, true])
+  )
+  .fn(async t => {
+    const { isAsync, format, depthWriteEnabled } = t.params;
+    const info = kTextureFormatInfo[format];
+    await t.selectDeviceOrSkipTestCase(info.feature);
+
+    const descriptor = t.getDescriptor({
+      depthStencil: { format, depthWriteEnabled },
+    });
+    t.doCreateRenderPipelineTest(isAsync, !depthWriteEnabled || info.depth, descriptor);
+  });
+
+g.test('depth_stencil_state,stencil_aspect,stencil_test')
+  .desc(
+    `Stencil aspect must be contained in the format if stencil test is enabled in depthStencilState.`
+  )
+  .params(u =>
+    u
+      .combine('isAsync', [false, true])
+      .combine('format', kDepthStencilFormats)
+      .combine('face', ['front', 'back'] as const)
+      .combine('compare', [undefined, ...kCompareFunctions])
+  )
+  .fn(async t => {
+    const { isAsync, format, face, compare } = t.params;
+    const info = kTextureFormatInfo[format];
+    await t.selectDeviceOrSkipTestCase(info.feature);
+
+    let descriptor: GPURenderPipelineDescriptor;
+    if (face === 'front') {
+      descriptor = t.getDescriptor({ depthStencil: { format, stencilFront: { compare } } });
+    } else {
+      descriptor = t.getDescriptor({ depthStencil: { format, stencilBack: { compare } } });
+    }
+
+    const stencilTestEnabled = compare !== undefined && compare !== 'always';
+    t.doCreateRenderPipelineTest(isAsync, !stencilTestEnabled || info.stencil, descriptor);
+  });
+
+g.test('depth_stencil_state,stencil_aspect,stencil_write')
+  .desc(
+    `Stencil aspect must be contained in the format if stencil write is enabled in depthStencilState.`
+  )
+  .params(u =>
+    u
+      .combine('isAsync', [false, true])
+      .combine('format', kDepthStencilFormats)
+      .combine('faceAndOpType', [
+        'frontFailOp',
+        'frontDepthFailOp',
+        'frontPassOp',
+        'backFailOp',
+        'backDepthFailOp',
+        'backPassOp',
+      ] as const)
+      .combine('op', [undefined, ...kStencilOperations])
+  )
+  .fn(async t => {
+    const { isAsync, format, faceAndOpType, op } = t.params;
+    const info = kTextureFormatInfo[format];
+    await t.selectDeviceOrSkipTestCase(info.feature);
+
+    let depthStencil: GPUDepthStencilState;
+    switch (faceAndOpType) {
+      case 'frontFailOp':
+        depthStencil = { format, stencilFront: { failOp: op } };
+        break;
+      case 'frontDepthFailOp':
+        depthStencil = { format, stencilFront: { depthFailOp: op } };
+        break;
+      case 'frontPassOp':
+        depthStencil = { format, stencilFront: { passOp: op } };
+        break;
+      case 'backFailOp':
+        depthStencil = { format, stencilBack: { failOp: op } };
+        break;
+      case 'backDepthFailOp':
+        depthStencil = { format, stencilBack: { depthFailOp: op } };
+        break;
+      case 'backPassOp':
+        depthStencil = { format, stencilBack: { passOp: op } };
+        break;
+      default:
+        unreachable();
+    }
+    const descriptor = t.getDescriptor({ depthStencil });
+
+    const stencilWriteEnabled = op !== undefined && op !== 'keep';
+    t.doCreateRenderPipelineTest(isAsync, !stencilWriteEnabled || info.stencil, descriptor);
+  });
+
 g.test('sample_count_must_be_valid')
+  .desc(`TODO: review and add description; shorten name`)
   .params(u =>
     u.combine('isAsync', [false, true]).combineWithParams([
       { sampleCount: 0, _success: false },
@@ -236,7 +421,9 @@ g.test('pipeline_output_targets')
   - The scalar type (f32, i32, or u32) must match the sample type of the format.
   - The componentCount of the fragment output (e.g. f32, vec2, vec3, vec4) must not have fewer
     channels than that of the color attachment texture formats. Extra components are allowed and are discarded.
-  `
+
+  MAINTENANCE_TODO: update this test after the WebGPU SPEC ISSUE 50 "define what 'compatible' means
+  for render target formats" is resolved.`
   )
   .params(u =>
     u
@@ -256,9 +443,13 @@ g.test('pipeline_output_targets')
       fragmentShaderCode: t.getFragmentShaderCode(sampleType, componentCount),
     });
 
+    const sampleTypeSuccess =
+      info.sampleType === 'float' || info.sampleType === 'unfilterable-float'
+        ? sampleType === 'float'
+        : info.sampleType === sampleType;
+
     const _success =
-      info.sampleType === sampleType &&
-      componentCount >= kTexelRepresentationInfo[format].componentOrder.length;
+      sampleTypeSuccess && componentCount >= kTexelRepresentationInfo[format].componentOrder.length;
     t.doCreateRenderPipelineTest(isAsync, _success, descriptor);
   });
 
@@ -362,12 +553,9 @@ g.test('pipeline_output_targets,blend')
       fragmentShaderCode: t.getFragmentShaderCode(sampleType, componentCount),
     });
 
-    const blendingReadSrcAlpha =
-      colorSrcFactor.includes('src-alpha') ||
-      colorDstFactor.includes('src-alpha') ||
-      alphaSrcFactor !== 'zero' ||
-      alphaDstFactor.includes('src');
-    const meetsExtraBlendingRequirement = !blendingReadSrcAlpha || componentCount === 4;
+    const colorBlendReadsSrcAlpha =
+      colorSrcFactor.includes('src-alpha') || colorDstFactor.includes('src-alpha');
+    const meetsExtraBlendingRequirement = !colorBlendReadsSrcAlpha || componentCount === 4;
     const _success =
       info.sampleType === sampleType &&
       componentCount >= kTexelRepresentationInfo[format].componentOrder.length &&
@@ -375,16 +563,183 @@ g.test('pipeline_output_targets,blend')
     t.doCreateRenderPipelineTest(isAsync, _success, descriptor);
   });
 
+g.test('pipeline_output_targets,format_blendable')
+  .desc(
+    `
+Tests if blending is used, the target's format must be blendable (support "float" sample type).
+- For all the formats, test that blending can be enabled if and only if the format is blendable.`
+  )
+  .params(u =>
+    u.combine('isAsync', [false, true]).combine('format', kRenderableColorTextureFormats)
+  )
+  .fn(async t => {
+    const { isAsync, format } = t.params;
+    const info = kTextureFormatInfo[format];
+    await t.selectDeviceOrSkipTestCase(info.feature);
+
+    const _success = info.sampleType === 'float';
+
+    const blendComponent: GPUBlendComponent = {
+      srcFactor: 'src-alpha',
+      dstFactor: 'dst-alpha',
+      operation: 'add',
+    };
+    t.doCreateRenderPipelineTest(
+      isAsync,
+      _success,
+      t.getDescriptor({
+        targets: [
+          {
+            format,
+            blend: {
+              color: blendComponent,
+              alpha: blendComponent,
+            },
+          },
+        ],
+        fragmentShaderCode: t.getFragmentShaderCode('float', 4),
+      })
+    );
+  });
+
+g.test('pipeline_output_targets,blend_min_max')
+  .desc(
+    `
+  For the blend components on either GPUBlendState.color or GPUBlendState.alpha:
+  - Tests if the combination of 'srcFactor', 'dstFactor' and 'operation' is valid (if the blend
+    operation is "min" or "max", srcFactor and dstFactor must be "one").
+  `
+  )
+  .params(u =>
+    u
+      .combine('isAsync', [false, true])
+      .combine('component', ['color', 'alpha'] as const)
+      .beginSubcases()
+      .combine('srcFactor', kBlendFactors)
+      .combine('dstFactor', kBlendFactors)
+      .combine('operation', kBlendOperations)
+  )
+  .fn(async t => {
+    const { isAsync, component, srcFactor, dstFactor, operation } = t.params;
+
+    const defaultBlendComponent: GPUBlendComponent = {
+      srcFactor: 'src-alpha',
+      dstFactor: 'dst-alpha',
+      operation: 'add',
+    };
+    const blendComponentToTest = {
+      srcFactor,
+      dstFactor,
+      operation,
+    };
+    const fragmentShaderCode = t.getFragmentShaderCode('float', 4);
+    const format = 'rgba8unorm';
+
+    const descriptor = t.getDescriptor({
+      targets: [
+        {
+          format,
+          blend: {
+            color: component === 'color' ? blendComponentToTest : defaultBlendComponent,
+            alpha: component === 'alpha' ? blendComponentToTest : defaultBlendComponent,
+          },
+        },
+      ],
+      fragmentShaderCode,
+    });
+
+    if (operation === 'min' || operation === 'max') {
+      const _success = srcFactor === 'one' && dstFactor === 'one';
+      t.doCreateRenderPipelineTest(isAsync, _success, descriptor);
+    } else {
+      t.doCreateRenderPipelineTest(isAsync, true, descriptor);
+    }
+  });
+
 g.test('pipeline_layout,device_mismatch')
   .desc(
     'Tests createRenderPipeline(Async) cannot be called with a pipeline layout created from another device'
   )
   .paramsSubcasesOnly(u => u.combine('isAsync', [true, false]).combine('mismatched', [true, false]))
-  .unimplemented();
+  .fn(async t => {
+    const { isAsync, mismatched } = t.params;
+
+    if (mismatched) {
+      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
+    }
+
+    const device = mismatched ? t.mismatchedDevice : t.device;
+
+    const layout = device.createPipelineLayout({ bindGroupLayouts: [] });
+
+    const descriptor = {
+      layout,
+      vertex: {
+        module: t.device.createShaderModule({
+          code: `
+        @stage(vertex) fn main() -> @builtin(position) vec4<f32> {
+          return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+      `,
+        }),
+        entryPoint: 'main',
+      },
+      fragment: {
+        module: t.device.createShaderModule({ code: t.getFragmentShaderCode('float', 4) }),
+        entryPoint: 'main',
+        targets: [{ format: 'rgba8unorm' }] as const,
+      },
+    };
+
+    t.doCreateRenderPipelineTest(isAsync, !mismatched, descriptor);
+  });
 
 g.test('shader_module,device_mismatch')
   .desc(
     'Tests createRenderPipeline(Async) cannot be called with a shader module created from another device'
   )
-  .paramsSubcasesOnly(u => u.combine('isAsync', [true, false]).combine('mismatched', [true, false]))
+  .paramsSubcasesOnly(u =>
+    u.combine('isAsync', [true, false]).combineWithParams([
+      { vertex_mismatched: false, fragment_mismatched: false, _success: true },
+      { vertex_mismatched: true, fragment_mismatched: false, _success: false },
+      { vertex_mismatched: false, fragment_mismatched: true, _success: false },
+    ])
+  )
+  .fn(async t => {
+    const { isAsync, vertex_mismatched, fragment_mismatched, _success } = t.params;
+
+    if (vertex_mismatched || fragment_mismatched) {
+      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
+    }
+
+    const code = `
+      @stage(vertex) fn main() -> @builtin(position) vec4<f32> {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+      }
+    `;
+
+    const descriptor = {
+      vertex: {
+        module: vertex_mismatched
+          ? t.mismatchedDevice.createShaderModule({ code })
+          : t.device.createShaderModule({ code }),
+        entryPoint: 'main',
+      },
+      fragment: {
+        module: fragment_mismatched
+          ? t.mismatchedDevice.createShaderModule({ code: t.getFragmentShaderCode('float', 4) })
+          : t.device.createShaderModule({ code: t.getFragmentShaderCode('float', 4) }),
+        entryPoint: 'main',
+        targets: [{ format: 'rgba8unorm' }] as const,
+      },
+      layout: t.getPipelineLayout(),
+    };
+
+    t.doCreateRenderPipelineTest(isAsync, _success, descriptor);
+  });
+
+g.test('entry_point_name_must_match')
+  .desc(
+    'TODO: Test the matching of entrypoint names for vertex and fragment (see the equivalent test for createComputePipeline).'
+  )
   .unimplemented();

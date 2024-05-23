@@ -36,7 +36,7 @@ struct COMPONENT_EXPORT(CC_SHARED_MOJOM_TRAITS)
     return metadata.root_background_color;
   }
 
-  static absl::optional<gfx::Vector2dF> root_scroll_offset(
+  static const absl::optional<gfx::PointF>& root_scroll_offset(
       const cc::RenderFrameMetadata& metadata) {
     return metadata.root_scroll_offset;
   }
@@ -54,8 +54,8 @@ struct COMPONENT_EXPORT(CC_SHARED_MOJOM_TRAITS)
     return metadata.is_mobile_optimized;
   }
 
-  static absl::optional<cc::DelegatedInkBrowserMetadata> delegated_ink_metadata(
-      const cc::RenderFrameMetadata& metadata) {
+  static const absl::optional<cc::DelegatedInkBrowserMetadata>&
+  delegated_ink_metadata(const cc::RenderFrameMetadata& metadata) {
     return metadata.delegated_ink_metadata;
   }
 
@@ -96,7 +96,7 @@ struct COMPONENT_EXPORT(CC_SHARED_MOJOM_TRAITS)
     return metadata.new_vertical_scroll_direction;
   }
 
-#if defined(OS_ANDROID) || defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_ANDROID) || defined(TOOLKIT_QT)
   static float bottom_controls_height(const cc::RenderFrameMetadata& metadata) {
     return metadata.bottom_controls_height;
   }

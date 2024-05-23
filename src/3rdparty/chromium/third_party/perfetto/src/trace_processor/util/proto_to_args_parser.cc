@@ -79,9 +79,11 @@ base::Status ProtoToArgsParser::ParseMessage(
     const protozero::ConstBytes& cb,
     const std::string& type,
     const std::vector<uint16_t>* allowed_fields,
-    Delegate& delegate) {
+    Delegate& delegate,
+    int* unknown_extensions) {
   ScopedNestedKeyContext key_context(key_prefix_);
-  return ParseMessageInternal(key_context, cb, type, allowed_fields, delegate);
+  return ParseMessageInternal(key_context, cb, type, allowed_fields, delegate,
+                              unknown_extensions);
 }
 
 base::Status ProtoToArgsParser::ParseMessageInternal(
@@ -89,7 +91,8 @@ base::Status ProtoToArgsParser::ParseMessageInternal(
     const protozero::ConstBytes& cb,
     const std::string& type,
     const std::vector<uint16_t>* allowed_fields,
-    Delegate& delegate) {
+    Delegate& delegate,
+    int* unknown_extensions) {
   if (auto override_result =
           MaybeApplyOverrideForType(type, key_context, cb, delegate)) {
     return override_result.value();
@@ -104,11 +107,17 @@ base::Status ProtoToArgsParser::ParseMessageInternal(
 
   std::unordered_map<size_t, int> repeated_field_index;
 
+  bool empty_message = true;
+
   protozero::ProtoDecoder decoder(cb);
   for (protozero::Field f = decoder.ReadField(); f.valid();
        f = decoder.ReadField()) {
+    empty_message = false;
     auto field = descriptor.FindFieldByTag(f.id());
     if (!field) {
+      if (unknown_extensions != nullptr) {
+        (*unknown_extensions)++;
+      }
       // Unknown field, possibly an unknown extension.
       continue;
     }
@@ -124,11 +133,15 @@ base::Status ProtoToArgsParser::ParseMessageInternal(
       // reflected.
       continue;
     }
-    RETURN_IF_ERROR(
-        ParseField(*field, repeated_field_index[f.id()], f, delegate));
+    RETURN_IF_ERROR(ParseField(*field, repeated_field_index[f.id()], f,
+                               delegate, unknown_extensions));
     if (field->is_repeated()) {
       repeated_field_index[f.id()]++;
     }
+  }
+
+  if (empty_message) {
+    delegate.AddNull(key_prefix_);
   }
 
   return base::OkStatus();
@@ -138,7 +151,8 @@ base::Status ProtoToArgsParser::ParseField(
     const FieldDescriptor& field_descriptor,
     int repeated_field_number,
     protozero::Field field,
-    Delegate& delegate) {
+    Delegate& delegate,
+    int* unknown_extensions) {
   std::string prefix_part = field_descriptor.name();
   if (field_descriptor.is_repeated()) {
     std::string number = std::to_string(repeated_field_number);
@@ -169,7 +183,7 @@ base::Status ProtoToArgsParser::ParseField(
       protos::pbzero::FieldDescriptorProto::TYPE_MESSAGE) {
     return ParseMessageInternal(key_context, field.as_bytes(),
                                 field_descriptor.resolved_type_name(), nullptr,
-                                delegate);
+                                delegate, unknown_extensions);
   }
 
   return ParseSimpleField(field_descriptor, field, delegate);
@@ -214,7 +228,6 @@ base::Status ProtoToArgsParser::ParseSimpleField(
   switch (descriptor.type()) {
     case FieldDescriptorProto::TYPE_INT32:
     case FieldDescriptorProto::TYPE_SFIXED32:
-    case FieldDescriptorProto::TYPE_FIXED32:
       delegate.AddInteger(key_prefix_, field.as_int32());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_SINT32:
@@ -222,16 +235,17 @@ base::Status ProtoToArgsParser::ParseSimpleField(
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_INT64:
     case FieldDescriptorProto::TYPE_SFIXED64:
-    case FieldDescriptorProto::TYPE_FIXED64:
       delegate.AddInteger(key_prefix_, field.as_int64());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_SINT64:
       delegate.AddInteger(key_prefix_, field.as_sint64());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_UINT32:
+    case FieldDescriptorProto::TYPE_FIXED32:
       delegate.AddUnsignedInteger(key_prefix_, field.as_uint32());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_UINT64:
+    case FieldDescriptorProto::TYPE_FIXED64:
       delegate.AddUnsignedInteger(key_prefix_, field.as_uint64());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_BOOL:

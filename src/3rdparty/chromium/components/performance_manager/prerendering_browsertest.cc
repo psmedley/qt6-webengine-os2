@@ -58,7 +58,7 @@ class PerformanceManagerPrerenderingBrowserTest
     // and wait for the old RenderFrameHost to be deleted after we navigate away
     // from it.
     content::DisableBackForwardCacheForTesting(
-        web_contents(), content::BackForwardCache::TEST_ASSUMES_NO_CACHING);
+        web_contents(), content::BackForwardCache::TEST_REQUIRES_NO_CACHING);
   }
 
   void TearDownOnMainThread() override {
@@ -96,6 +96,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
     initial_main_frame_node = page_node->GetMainFrameNode();
     initial_navigation_id = page_node->GetNavigationID();
     EXPECT_EQ(page_node->GetMainFrameUrl(), kInitialUrl);
+    EXPECT_TRUE(initial_main_frame_node->IsCurrent());
   });
 
   // Start prerendering a document. Test that the prerendering frame tree is
@@ -109,6 +110,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
     ASSERT_EQ(page_node.get(), page_node2.get());
     EXPECT_EQ(page_node->GetMainFrameNodes().size(), 2U);
     EXPECT_EQ(page_node->GetMainFrameNode(), initial_main_frame_node);
+    EXPECT_TRUE(initial_main_frame_node->IsCurrent());
 
     // Find the prerendering MainFrameNode.
     for (const FrameNode* frame_node : page_node->GetMainFrameNodes()) {
@@ -119,6 +121,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
     }
     ASSERT_TRUE(prerender_main_frame_node);
     EXPECT_EQ(prerender_main_frame_node->GetURL(), kPrerenderingUrl);
+    EXPECT_FALSE(prerender_main_frame_node->IsCurrent());
 
     // The prerendering navigation should not be reflected in the PageNode.
     EXPECT_EQ(page_node->GetNavigationID(), initial_navigation_id);
@@ -129,16 +132,16 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
   // its main frame, and the original frame tree is gone.
   content::RenderFrameDeletedObserver deleted_observer(
       web_contents()->GetMainFrame());
-  content::TestNavigationManager navigation_manager(web_contents(),
-                                                    kPrerenderingUrl);
+  content::test::PrerenderHostObserver prerender_observer(*web_contents(),
+                                                          kPrerenderingUrl);
   prerender_helper_.NavigatePrimaryPage(kPrerenderingUrl);
-  navigation_manager.WaitForNavigationFinished();
-  ASSERT_TRUE(navigation_manager.was_prerendered_page_activation());
+  ASSERT_TRUE(prerender_observer.was_activated());
   deleted_observer.WaitUntilDeleted();
   RunInGraph([&](Graph*) {
     ASSERT_TRUE(page_node);
     EXPECT_EQ(page_node->GetMainFrameNodes().size(), 1U);
     EXPECT_EQ(page_node->GetMainFrameNode(), prerender_main_frame_node);
+    EXPECT_TRUE(prerender_main_frame_node->IsCurrent());
 
     // Now the PageNode should reflect the prerendering navigation.
     EXPECT_NE(page_node->GetNavigationID(), initial_navigation_id);
@@ -165,6 +168,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
     initial_main_frame_node = page_node->GetMainFrameNode();
     initial_navigation_id = page_node->GetNavigationID();
     EXPECT_EQ(page_node->GetMainFrameUrl(), kInitialUrl);
+    EXPECT_TRUE(initial_main_frame_node->IsCurrent());
   });
 
   // Start prerendering a document. Test that the prerendering frame tree is
@@ -178,6 +182,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
     ASSERT_EQ(page_node.get(), page_node2.get());
     EXPECT_EQ(page_node->GetMainFrameNodes().size(), 2U);
     EXPECT_EQ(page_node->GetMainFrameNode(), initial_main_frame_node);
+    EXPECT_TRUE(initial_main_frame_node->IsCurrent());
 
     // Find the prerendering MainFrameNode.
     for (const FrameNode* frame_node : page_node->GetMainFrameNodes()) {
@@ -188,6 +193,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
     }
     ASSERT_TRUE(prerender_main_frame_node);
     EXPECT_EQ(prerender_main_frame_node->GetURL(), kPrerenderingUrl);
+    EXPECT_FALSE(prerender_main_frame_node->IsCurrent());
 
     // The prerendering navigation should not be reflected in the PageNode.
     EXPECT_EQ(page_node->GetNavigationID(), initial_navigation_id);
@@ -205,6 +211,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
     EXPECT_EQ(page_node->GetMainFrameNodes().size(), 1U);
     EXPECT_EQ(page_node->GetMainFrameNode(), initial_main_frame_node);
     EXPECT_EQ(page_node->GetMainFrameUrl(), kFinalUrl);
+    EXPECT_TRUE(initial_main_frame_node->IsCurrent());
   });
 }
 

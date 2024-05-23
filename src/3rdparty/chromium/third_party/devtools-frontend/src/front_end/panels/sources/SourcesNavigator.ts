@@ -28,11 +28,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* eslint-disable rulesdir/no_underscored_properties */
-
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Persistence from '../../models/persistence/persistence.js';
 import * as Workspace from '../../models/workspace/workspace.js';
@@ -110,7 +109,7 @@ export class NetworkNavigatorView extends NavigatorView {
   private constructor() {
     super();
     SDK.TargetManager.TargetManager.instance().addEventListener(
-        SDK.TargetManager.Events.InspectedURLChanged, this._inspectedURLChanged, this);
+        SDK.TargetManager.Events.InspectedURLChanged, this.inspectedURLChanged, this);
 
     // Record the sources tool load time after the file navigator has loaded.
     Host.userMetrics.panelLoaded('sources', 'DevTools.Launch.Sources');
@@ -130,7 +129,7 @@ export class NetworkNavigatorView extends NavigatorView {
     return project.type() === Workspace.Workspace.projectTypes.Network;
   }
 
-  _inspectedURLChanged(event: Common.EventTarget.EventTargetEvent<SDK.Target.Target>): void {
+  private inspectedURLChanged(event: Common.EventTarget.EventTargetEvent<SDK.Target.Target>): void {
     const mainTarget = SDK.TargetManager.TargetManager.instance().mainTarget();
     if (event.data !== mainTarget) {
       return;
@@ -173,7 +172,7 @@ export class FilesNavigatorView extends NavigatorView {
   `);
 
     const toolbar = new UI.Toolbar.Toolbar('navigator-toolbar');
-    toolbar.appendItemsAtLocation('files-navigator-toolbar').then(() => {
+    void toolbar.appendItemsAtLocation('files-navigator-toolbar').then(() => {
       if (!toolbar.empty()) {
         this.contentElement.insertBefore(toolbar.element, this.contentElement.firstChild);
       }
@@ -196,14 +195,14 @@ export class FilesNavigatorView extends NavigatorView {
   handleContextMenu(event: Event): void {
     const contextMenu = new UI.ContextMenu.ContextMenu(event);
     contextMenu.defaultSection().appendAction('sources.add-folder-to-workspace', undefined, true);
-    contextMenu.show();
+    void contextMenu.show();
   }
 }
 
 let overridesNavigatorViewInstance: OverridesNavigatorView;
 
 export class OverridesNavigatorView extends NavigatorView {
-  _toolbar: UI.Toolbar.Toolbar;
+  private readonly toolbar: UI.Toolbar.Toolbar;
   private constructor() {
     super();
     const placeholder = new UI.EmptyWidget.EmptyWidget('');
@@ -215,15 +214,15 @@ export class OverridesNavigatorView extends NavigatorView {
             'https://developers.google.com/web/updates/2018/01/devtools#overrides', i18nString(UIStrings.learnMore))}
   `);
 
-    this._toolbar = new UI.Toolbar.Toolbar('navigator-toolbar');
+    this.toolbar = new UI.Toolbar.Toolbar('navigator-toolbar');
 
-    this.contentElement.insertBefore(this._toolbar.element, this.contentElement.firstChild);
+    this.contentElement.insertBefore(this.toolbar.element, this.contentElement.firstChild);
 
     Persistence.NetworkPersistenceManager.NetworkPersistenceManager.instance().addEventListener(
-        Persistence.NetworkPersistenceManager.Events.ProjectChanged, this._updateProjectAndUI, this);
-    this.workspace().addEventListener(Workspace.Workspace.Events.ProjectAdded, this._onProjectAddOrRemoved, this);
-    this.workspace().addEventListener(Workspace.Workspace.Events.ProjectRemoved, this._onProjectAddOrRemoved, this);
-    this._updateProjectAndUI();
+        Persistence.NetworkPersistenceManager.Events.ProjectChanged, this.updateProjectAndUI, this);
+    this.workspace().addEventListener(Workspace.Workspace.Events.ProjectAdded, this.onProjectAddOrRemoved, this);
+    this.workspace().addEventListener(Workspace.Workspace.Events.ProjectRemoved, this.onProjectAddOrRemoved, this);
+    this.updateProjectAndUI();
   }
 
   static instance(opts: {
@@ -237,49 +236,49 @@ export class OverridesNavigatorView extends NavigatorView {
     return overridesNavigatorViewInstance;
   }
 
-  _onProjectAddOrRemoved(event: Common.EventTarget.EventTargetEvent): void {
-    const project = (event.data as Workspace.Workspace.Project);
+  private onProjectAddOrRemoved(event: Common.EventTarget.EventTargetEvent<Workspace.Workspace.Project>): void {
+    const project = event.data;
     if (project && project.type() === Workspace.Workspace.projectTypes.FileSystem &&
         Persistence.FileSystemWorkspaceBinding.FileSystemWorkspaceBinding.fileSystemType(project) !== 'overrides') {
       return;
     }
-    this._updateUI();
+    this.updateUI();
   }
 
-  _updateProjectAndUI(): void {
+  private updateProjectAndUI(): void {
     this.reset();
     const project = Persistence.NetworkPersistenceManager.NetworkPersistenceManager.instance().project();
     if (project) {
       this.tryAddProject(project);
     }
-    this._updateUI();
+    this.updateUI();
   }
 
-  _updateUI(): void {
-    this._toolbar.removeToolbarItems();
+  private updateUI(): void {
+    this.toolbar.removeToolbarItems();
     const project = Persistence.NetworkPersistenceManager.NetworkPersistenceManager.instance().project();
     if (project) {
       const enableCheckbox = new UI.Toolbar.ToolbarSettingCheckbox(
           Common.Settings.Settings.instance().moduleSetting('persistenceNetworkOverridesEnabled'));
-      this._toolbar.appendToolbarItem(enableCheckbox);
+      this.toolbar.appendToolbarItem(enableCheckbox);
 
-      this._toolbar.appendToolbarItem(new UI.Toolbar.ToolbarSeparator(true));
+      this.toolbar.appendToolbarItem(new UI.Toolbar.ToolbarSeparator(true));
       const clearButton = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.clearConfiguration), 'largeicon-clear');
       clearButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, () => {
         project.remove();
       });
-      this._toolbar.appendToolbarItem(clearButton);
+      this.toolbar.appendToolbarItem(clearButton);
       return;
     }
     const title = i18nString(UIStrings.selectFolderForOverrides);
     const setupButton = new UI.Toolbar.ToolbarButton(title, 'largeicon-add', title);
     setupButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, _event => {
-      this._setupNewWorkspace();
+      void this.setupNewWorkspace();
     }, this);
-    this._toolbar.appendToolbarItem(setupButton);
+    this.toolbar.appendToolbarItem(setupButton);
   }
 
-  async _setupNewWorkspace(): Promise<void> {
+  private async setupNewWorkspace(): Promise<void> {
     const fileSystem =
         await Persistence.IsolatedFileSystemManager.IsolatedFileSystemManager.instance().addFileSystem('overrides');
     if (!fileSystem) {
@@ -340,7 +339,8 @@ export class SnippetsNavigatorView extends NavigatorView {
     const newButton = new UI.Toolbar.ToolbarButton(
         i18nString(UIStrings.newSnippet), 'largeicon-add', i18nString(UIStrings.newSnippet));
     newButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, _event => {
-      this.create(Snippets.ScriptSnippetFileSystem.findSnippetsProject(), '');
+      void this.create(
+          Snippets.ScriptSnippetFileSystem.findSnippetsProject(), '' as Platform.DevToolsPath.EncodedPathString);
     });
     toolbar.appendToolbarItem(newButton);
     this.contentElement.insertBefore(toolbar.element, this.contentElement.firstChild);
@@ -361,8 +361,9 @@ export class SnippetsNavigatorView extends NavigatorView {
     const contextMenu = new UI.ContextMenu.ContextMenu(event);
     contextMenu.headerSection().appendItem(
         i18nString(UIStrings.createNewSnippet),
-        () => this.create(Snippets.ScriptSnippetFileSystem.findSnippetsProject(), ''));
-    contextMenu.show();
+        () => this.create(
+            Snippets.ScriptSnippetFileSystem.findSnippetsProject(), '' as Platform.DevToolsPath.EncodedPathString));
+    void contextMenu.show();
   }
 
   handleFileContextMenu(event: Event, node: NavigatorUISourceCodeTreeNode): void {
@@ -373,15 +374,20 @@ export class SnippetsNavigatorView extends NavigatorView {
     contextMenu.editSection().appendItem(i18nString(UIStrings.rename), () => this.rename(node, false));
     contextMenu.editSection().appendItem(
         i18nString(UIStrings.remove), () => uiSourceCode.project().deleteFile(uiSourceCode));
-    contextMenu.saveSection().appendItem(i18nString(UIStrings.saveAs), this._handleSaveAs.bind(this, uiSourceCode));
-    contextMenu.show();
+    contextMenu.saveSection().appendItem(i18nString(UIStrings.saveAs), this.handleSaveAs.bind(this, uiSourceCode));
+    void contextMenu.show();
   }
 
-  async _handleSaveAs(uiSourceCode: Workspace.UISourceCode.UISourceCode): Promise<void> {
+  private async handleSaveAs(uiSourceCode: Workspace.UISourceCode.UISourceCode): Promise<void> {
     uiSourceCode.commitWorkingCopy();
     const {content} = await uiSourceCode.requestContent();
-    Workspace.FileManager.FileManager.instance().save(uiSourceCode.url(), content || '', true);
+    void Workspace.FileManager.FileManager.instance().save(
+        this.addJSExtension(uiSourceCode.url()), content || '', true);
     Workspace.FileManager.FileManager.instance().close(uiSourceCode.url());
+  }
+
+  private addJSExtension(url: Platform.DevToolsPath.UrlString): Platform.DevToolsPath.UrlString {
+    return Common.ParsedURL.ParsedURL.concatenate(url, '.js');
   }
 }
 
@@ -401,12 +407,12 @@ export class ActionDelegate implements UI.ActionRegistration.ActionDelegate {
   handleAction(context: UI.Context.Context, actionId: string): boolean {
     switch (actionId) {
       case 'sources.create-snippet':
-        Snippets.ScriptSnippetFileSystem.findSnippetsProject()
-            .createFile('', null, '')
+        void Snippets.ScriptSnippetFileSystem.findSnippetsProject()
+            .createFile(Platform.DevToolsPath.EmptyEncodedPathString, null, '')
             .then(uiSourceCode => Common.Revealer.reveal(uiSourceCode));
         return true;
       case 'sources.add-folder-to-workspace':
-        Persistence.IsolatedFileSystemManager.IsolatedFileSystemManager.instance().addFileSystem();
+        void Persistence.IsolatedFileSystemManager.IsolatedFileSystemManager.instance().addFileSystem();
         return true;
     }
     return false;

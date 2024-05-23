@@ -55,8 +55,9 @@
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -101,11 +102,14 @@ void FullscreenElementChanged(Document& document,
         true);
   }
 
-  if (document.GetFrame()) {
-    // SetIsInert recurses through subframes to propagate the inert bit as
-    // needed.
-    document.GetFrame()->SetIsInert(document.LocalOwner() &&
-                                    document.LocalOwner()->IsInert());
+  // Update IsInert() flags.
+  const StyleChangeReasonForTracing& reason =
+      StyleChangeReasonForTracing::Create(style_change_reason::kFullscreen);
+  if (old_element && new_element) {
+    old_element->SetNeedsStyleRecalc(kLocalStyleChange, reason);
+    new_element->SetNeedsStyleRecalc(kLocalStyleChange, reason);
+  } else if (Element* root = document.documentElement()) {
+    root->SetNeedsStyleRecalc(kLocalStyleChange, reason);
   }
 
   // Any element not contained by the fullscreen element is inert (see
@@ -276,7 +280,7 @@ bool AllowedToUseFullscreen(const Document& document,
       mojom::blink::PermissionsPolicyFeature::kFullscreen, report_on_failure);
 }
 
-bool AllowedToRequestFullscreen(Document& document, Element& element) {
+bool AllowedToRequestFullscreen(Document& document) {
   //  WebXR DOM Overlay integration, cf.
   //  https://immersive-web.github.io/dom-overlays/
   //
@@ -307,12 +311,6 @@ bool AllowedToRequestFullscreen(Document& document, Element& element) {
     return false;
   }
 
-  // If the element is already fullscreen, then it is allowed to repeat a
-  // request to fullscreen (possibly on another display) without requiring
-  // user activation.
-  if (element == Fullscreen::FullscreenElementFrom(document))
-    return true;
-
   // An algorithm is allowed to request fullscreen if one of the following is
   // true:
 
@@ -330,7 +328,9 @@ bool AllowedToRequestFullscreen(Document& document, Element& element) {
 
   // The algorithm is triggered by another event with transient affordances,
   // e.g. permission-gated events for user-generated screens changes.
-  if (document.GetFrame()->IsTransientAllowFullscreenActive()) {
+  if (RuntimeEnabledFeatures::WindowPlacementFullscreenOnScreensChangeEnabled(
+          document.GetExecutionContext()) &&
+      document.GetFrame()->IsTransientAllowFullscreenActive()) {
     UseCounter::Count(document, WebFeature::kFullscreenAllowedByScreensChange);
     return true;
   }
@@ -395,7 +395,7 @@ bool RequestFullscreenConditionsMet(Element& pending, Document& document) {
     return false;
 
   // This algorithm is allowed to request fullscreen.
-  if (!AllowedToRequestFullscreen(document, pending))
+  if (!AllowedToRequestFullscreen(document))
     return false;
 
   return true;

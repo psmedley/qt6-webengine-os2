@@ -42,6 +42,7 @@ class EventPool {
     // useful aspect of this total order is that two events returned by
     // ThenAllocateAndRecordEvent on the same stream can be compared to see
     // which was recorded earlier on that stream.
+    // Valid sequence numbers are > 0.
     inline bool operator<(const Handle& rhs) const {
       return sequence_number_ < rhs.sequence_number_;
     }
@@ -50,14 +51,14 @@ class EventPool {
     inline bool operator>=(const Handle& rhs) const { return !(*this < rhs); }
 
     se::Event* event() const { return event_.get(); }
-    uint64 sequence_number() const { return sequence_number_; }
+    uint64_t sequence_number() const { return sequence_number_; }
 
    private:
     friend class EventPool;
 
     EventPool* pool_ = nullptr;
     std::unique_ptr<se::Event> event_;
-    uint64 sequence_number_;
+    uint64_t sequence_number_;
   };
 
   // Initializes a new EventPool. If `allow_reuse` is true, then events will be
@@ -77,12 +78,17 @@ class EventPool {
   // cudaEventRecord.
   StatusOr<Handle> ThenAllocateAndRecordEvent(se::Stream* stream);
 
+  // Version of ThenAllocateAndRecordEvent split into two phases; this is
+  // sometimes helpful if we want to avoid failures by preallocating events.
+  StatusOr<Handle> AllocateEvent(se::StreamExecutor* executor);
+  void ThenRecordEvent(se::Stream* stream, EventPool::Handle& handle);
+
  private:
   const bool allow_reuse_;
 
   absl::Mutex mu_;
-  std::stack<std::unique_ptr<se::Event>> free_events_ TF_GUARDED_BY(mu_);
-  uint64 next_sequence_number_ TF_GUARDED_BY(mu_);
+  std::stack<std::unique_ptr<se::Event>> free_events_ ABSL_GUARDED_BY(mu_);
+  uint64_t next_sequence_number_ ABSL_GUARDED_BY(mu_);
 };
 
 }  // namespace xla

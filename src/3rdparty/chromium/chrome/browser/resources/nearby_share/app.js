@@ -2,26 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import './shared/nearby_onboarding_one_page.js';
+import './shared/nearby_onboarding_page.js';
+import './shared/nearby_visibility_page.js';
+import './nearby_confirmation_page.js';
+import './nearby_discovery_page.js';
+import 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
+
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {NearbyShareSettingsBehavior} from './shared/nearby_share_settings_behavior.js';
+import {CloseReason} from './shared/types.js';
+
 /**
  * @fileoverview The 'nearby-share' component is the entry point for the Nearby
  * Share flow. It is used as a standalone dialog via chrome://nearby and as part
  * of the ChromeOS share sheet.
  */
 
-import './shared/nearby_onboarding_page.m.js';
-import './shared/nearby_visibility_page.m.js';
-import './nearby_confirmation_page.js';
-import './nearby_discovery_page.js';
-
-import {CrViewManagerElement} from 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
-import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {NearbyShareSettingsBehavior} from './shared/nearby_share_settings_behavior.m.js';
-
 /** @enum {string} */
 const Page = {
   CONFIRMATION: 'confirmation',
   DISCOVERY: 'discovery',
   ONBOARDING: 'onboarding',
+  ONEPAGE_ONBOARDING: 'onboarding-one',
   VISIBILITY: 'visibility',
 };
 
@@ -94,6 +97,29 @@ Polymer({
   },
 
   /**
+   * Called whenever view changes.
+   * ChromeVox screen reader requires focus on #pageContainer to read
+   * dialog.
+   * @param {string} page
+   * @private
+   */
+  focusOnPageContainer_(page) {
+    this.$$(`nearby-${page}-page`)
+        .$$('nearby-page-template')
+        .$$('#pageContainer')
+        .focus();
+  },
+
+  /**
+   * Determines if the feature flag for One-page onboarding workflow is enabled.
+   * @return {boolean} whether the one-page onboarding is enabled
+   * @private
+   */
+  isOnePageOnboardingEnabled_() {
+    return loadTimeData.getBoolean('isOnePageOnboardingEnabled');
+  },
+
+  /**
    * Called when component is attached and all settings values have been
    * retrieved.
    */
@@ -106,15 +132,16 @@ Polymer({
         this.set('settings.enabled', true);
       }
       this.getViewManager_().switchView(Page.DISCOVERY);
-      // ChromeVox screen reader requires focus on #pageContainer to read
-      // dialog.
-      this.$$('nearby-discovery-page')
-          .$$('nearby-page-template')
-          .$$('#pageContainer')
-          .focus();
-    } else {
-      this.getViewManager_().switchView(Page.ONBOARDING);
+      this.focusOnPageContainer_(Page.DISCOVERY);
+
+      return;
     }
+
+    const onboardingPage = this.isOnePageOnboardingEnabled_() ?
+        Page.ONEPAGE_ONBOARDING :
+        Page.ONBOARDING;
+    this.getViewManager_().switchView(onboardingPage);
+    this.focusOnPageContainer_(onboardingPage);
   },
 
   /**
@@ -124,15 +151,18 @@ Polymer({
    */
   onChangePage_(event) {
     this.getViewManager_().switchView(event.detail.page);
+    this.focusOnPageContainer_(event.detail.page);
   },
 
   /**
    * Handler for the close event.
-   * @param {!Event} event
+   * @param {!CustomEvent<!{reason: CloseReason}>} event
    * @private
    */
   onClose_(event) {
-    chrome.send('close');
+    const reason =
+        event.detail.reason == null ? CloseReason.UNKNOWN : event.detail.reason;
+    chrome.send('close', [reason]);
   },
 
   /**
@@ -142,5 +172,6 @@ Polymer({
    */
   onOnboardingComplete_(event) {
     this.getViewManager_().switchView(Page.DISCOVERY);
+    this.focusOnPageContainer_(Page.DISCOVERY);
   },
 });

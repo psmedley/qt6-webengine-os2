@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import collections
 import copy
 import json
@@ -57,8 +53,8 @@ class ListTests(test.TestCase):
       data_structures.List([NotTrackable()])
 
   def testCallNotImplemented(self):
-    with self.assertRaisesRegexp(TypeError, "not callable"):
-      data_structures.List()(1.)
+    with self.assertRaisesRegex(TypeError, "not callable"):
+      data_structures.List()(1.)  # pylint: disable=not-callable
 
   def testNoPop(self):
     with self.assertRaises(AttributeError):
@@ -123,7 +119,7 @@ class ListTests(test.TestCase):
 
   def testIMul_zero(self):
     l = data_structures.List([])
-    with self.assertRaisesRegexp(ValueError, "List only supports append"):
+    with self.assertRaisesRegex(ValueError, "List only supports append"):
       l *= 0
 
   def testIMul(self):
@@ -186,7 +182,7 @@ class ListWrapperTest(test.TestCase):
     m.l = [1, 2]
     m.l.insert(0, 0)
     self.assertEqual(m.l, [0, 1, 2])
-    self.assertEqual(m.l._checkpoint_dependencies, [])
+    self.assertEqual(m.l._trackable_children(), {})
 
   def testFunctionCaching(self):
     @def_function.function
@@ -257,7 +253,7 @@ class ListWrapperTest(test.TestCase):
 
   def testNotHashable(self):
     with self.assertRaises(TypeError):
-      hash(data_structures.ListWrapper())
+      hash(data_structures.ListWrapper())  # pylint: disable=no-value-for-parameter
 
   def testDelItem(self):
     l = data_structures.ListWrapper([1, 2, 3, [4]])
@@ -276,7 +272,7 @@ class ListWrapperTest(test.TestCase):
     l[:] = 2, 8, 9, 0
     self.assertEqual(l, [2, 8, 9, 0])
     l._maybe_initialize_trackable()  # pylint: disable=protected-access
-    self.assertEqual(len(l._checkpoint_dependencies), 0)  # pylint: disable=protected-access
+    self.assertEqual(len(l._trackable_children()), 0)  # pylint: disable=protected-access
 
   def testSetSlice_cannotSaveIfTrackableModified(self):
     v1 = resource_variable_ops.ResourceVariable(1.)
@@ -305,14 +301,14 @@ class ListWrapperTest(test.TestCase):
   def testIMulPositive(self):
     v = variables.Variable(1.)
     l = data_structures.ListWrapper([1, 2, 3, 4, v])
-    self.assertEqual([("4", v)], l._checkpoint_dependencies)
+    self.assertDictEqual({"4": v}, l._trackable_children())
     root = util.Checkpoint(l=l)
     prefix = os.path.join(self.get_temp_dir(), "ckpt")
     path = root.save(prefix)
     v.assign(5.)
     l *= 2
     self.assertEqual(l, [1, 2, 3, 4, v, 1, 2, 3, 4, v])
-    self.assertEqual([("4", v), ("9", v)], l._checkpoint_dependencies)
+    self.assertDictEqual({"4": v, "9": v}, l._trackable_children())
     root.restore(path)
     self.assertAllClose(1., v.numpy())
 
@@ -328,8 +324,8 @@ class ListWrapperTest(test.TestCase):
 
   def assertUnableToSave(self, l, msg):
     l._maybe_initialize_trackable()  # pylint: disable=protected-access
-    with self.assertRaisesRegexp(ValueError, msg):
-      return l._checkpoint_dependencies  # pylint: disable=protected-access
+    with self.assertRaisesRegex(ValueError, msg):
+      return l._trackable_children()  # pylint: disable=protected-access
 
 
 class MappingTests(test.TestCase):
@@ -347,7 +343,7 @@ class MappingTests(test.TestCase):
       mapping["a"] = data_structures.List()
     self.assertIs(original, mapping["a"])
     with self.assertRaises(AttributeError):
-      del mapping["a"]
+      del mapping["a"]  # pylint: disable=unsupported-delete-operation
     mapping.update(b=data_structures.Mapping())
     with self.assertRaises(ValueError):
       mapping.update({"b": data_structures.Mapping()})
@@ -368,7 +364,7 @@ class MappingTests(test.TestCase):
     self.assertEqual({}, a.d)
     self.assertFalse({} != a.d)  # pylint: disable=g-explicit-bool-comparison
     self.assertNotEqual({1: 2}, a.d)
-    with self.assertRaisesRegexp(TypeError, "unhashable"):
+    with self.assertRaisesRegex(TypeError, "unhashable"):
       set([a.d])
 
   def testListShallowCopy(self):
@@ -611,8 +607,16 @@ class TupleTests(test.TestCase, parameterized.TestCase):
     self.assertIs(v, m.nt.x)
     self.assertIs(v, m.nt[0])
     self.assertIs(
-        v, m._checkpoint_dependencies[0].ref._checkpoint_dependencies[0].ref)
+        v, m._trackable_children()["nt"]._trackable_children()["x"])
     self.assertEqual(2, m.nt.y)
+
+  def testNamedTupleConflictingAttributes(self):
+    named = collections.namedtuple("Named", ("x", "weights"))
+    v = variables.Variable(2)
+    nt = named(x=v, weights=3)
+    m = module.Module()
+    m.nt = nt
+    self.assertEqual(3, m.nt.weights)
 
   def testNamedSubclassing(self):
     named = collections.namedtuple("Named", ("x", "y"))
@@ -633,10 +637,10 @@ class TupleTests(test.TestCase, parameterized.TestCase):
     m.nt = nt
     self.assertEqual(3, m.nt.y)
     self.assertIs(v, m.nt.x)
-    self.assertIs(
-        v, m._checkpoint_dependencies[0].ref._checkpoint_dependencies[0].ref)
-    self.assertEqual("x", m.nt._checkpoint_dependencies[0].name)
-    self.assertEqual("0", m.nt._checkpoint_dependencies[1].name)
+    self.assertIn(v,
+                  m._trackable_children()["nt"]._trackable_children().values())
+    self.assertIn("x", m.nt._trackable_children())
+    self.assertIn("0", m.nt._trackable_children())
     self.assertEqual(5, self.evaluate(m.nt.summed))
 
   def testUnnamedSubclassing(self):
@@ -651,8 +655,8 @@ class TupleTests(test.TestCase, parameterized.TestCase):
     unt = UnnamedSubclass([v, 2])
     m = module.Module()
     m.unt = unt
-    self.assertEqual("0", m.unt._checkpoint_dependencies[0].name)
-    self.assertLen(m.unt._checkpoint_dependencies, 1)
+    self.assertIn("0", m.unt._trackable_children())
+    self.assertLen(m.unt._trackable_children(), 1)
     self.assertEqual(4, self.evaluate(m.unt.summed))
     nest.assert_same_structure(
         [m.unt], nest.map_structure(lambda x: x, [m.unt]))
@@ -740,9 +744,9 @@ class TupleTests(test.TestCase, parameterized.TestCase):
   def testLoopAssignedModule(self):
     m = module.Module()
     m.s = (m,)
-    self.assertLen(m._checkpoint_dependencies, 1)
-    self.assertIs(m.s, m._checkpoint_dependencies[0].ref)
-    self.assertIs("s", m._checkpoint_dependencies[0].name)
+    self.assertLen(m._trackable_children(), 1)
+    self.assertIn("s", m._trackable_children())
+    self.assertIs(m.s, m._trackable_children()["s"])
     self.assertEqual((), m.trainable_variables)
 
 

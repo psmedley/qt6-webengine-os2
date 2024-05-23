@@ -31,7 +31,7 @@ void AppearanceHandler::RegisterMessages() {
                           base::Unretained(this)));
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
-#if defined(OS_LINUX) && !BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS_LACROS)
   web_ui()->RegisterMessageCallback(
       "useSystemTheme",
       base::BindRepeating(&AppearanceHandler::HandleUseSystemTheme,
@@ -39,15 +39,15 @@ void AppearanceHandler::RegisterMessages() {
 #endif
 }
 
-void AppearanceHandler::HandleUseDefaultTheme(const base::ListValue* args) {
+void AppearanceHandler::HandleUseDefaultTheme(const base::Value::List& args) {
   ThemeServiceFactory::GetForProfile(profile_)->UseDefaultTheme();
 }
 
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
-#if defined(OS_LINUX) && !BUILDFLAG(IS_CHROMEOS_LACROS)
-void AppearanceHandler::HandleUseSystemTheme(const base::ListValue* args) {
-  if (profile_->IsSupervised())
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS_LACROS)
+void AppearanceHandler::HandleUseSystemTheme(const base::Value::List& args) {
+  if (profile_->IsChild())
     NOTREACHED();
   else
     ThemeServiceFactory::GetForProfile(profile_)->UseSystemTheme();

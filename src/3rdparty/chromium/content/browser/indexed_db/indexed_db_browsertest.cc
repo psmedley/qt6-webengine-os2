@@ -19,11 +19,12 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/thread_test_helper.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_database.h"
 #include "components/services/storage/public/mojom/indexed_db_control.mojom-test-utils.h"
@@ -57,6 +58,7 @@
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/browser/quota/quota_settings.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/common/switches.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -74,6 +76,9 @@ class IndexedDBBrowserTest : public ContentBrowserTest,
                              public ::testing::WithParamInterface<const char*> {
  public:
   IndexedDBBrowserTest() = default;
+
+  IndexedDBBrowserTest(const IndexedDBBrowserTest&) = delete;
+  IndexedDBBrowserTest& operator=(const IndexedDBBrowserTest&) = delete;
 
   void SetUpOnMainThread() override {
     // Some tests need more space than the default used for browser tests.
@@ -280,8 +285,6 @@ class IndexedDBBrowserTest : public ContentBrowserTest,
 
  private:
   mojo::Remote<storage::mojom::MockFailureInjector> failure_injector_;
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTest) {
@@ -427,13 +430,15 @@ class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
  public:
   IndexedDBBrowserTestWithLowQuota() = default;
 
+  IndexedDBBrowserTestWithLowQuota(const IndexedDBBrowserTestWithLowQuota&) =
+      delete;
+  IndexedDBBrowserTestWithLowQuota& operator=(
+      const IndexedDBBrowserTestWithLowQuota&) = delete;
+
   void SetUpOnMainThread() override {
     const int kInitialQuotaKilobytes = 5000;
     SetQuota(kInitialQuotaKilobytes);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBBrowserTestWithLowQuota);
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithLowQuota, QuotaTest) {
@@ -448,12 +453,15 @@ class IndexedDBBrowserTestWithGCExposed : public IndexedDBBrowserTest {
  public:
   IndexedDBBrowserTestWithGCExposed() = default;
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
-  }
+  IndexedDBBrowserTestWithGCExposed(const IndexedDBBrowserTestWithGCExposed&) =
+      delete;
+  IndexedDBBrowserTestWithGCExposed& operator=(
+      const IndexedDBBrowserTestWithGCExposed&) = delete;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBBrowserTestWithGCExposed);
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitchASCII(blink::switches::kJavaScriptFlags,
+                                    "--expose-gc");
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed,
@@ -493,7 +501,7 @@ static void CopyLevelDBToProfile(
   ASSERT_TRUE(base::CopyDirectory(test_blob_data_dir, data_path, kRecursive));
   // For some reason touching files on Android fails with EPERM.
   // https://crbug.com/1045488
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // The modification time of the saved blobs is used for File objects, so these
   // need to manually be set (they are clobbered both by the above copy
   // operation and by git).
@@ -507,6 +515,12 @@ static void CopyLevelDBToProfile(
 class IndexedDBBrowserTestWithPreexistingLevelDB : public IndexedDBBrowserTest {
  public:
   IndexedDBBrowserTestWithPreexistingLevelDB() = default;
+
+  IndexedDBBrowserTestWithPreexistingLevelDB(
+      const IndexedDBBrowserTestWithPreexistingLevelDB&) = delete;
+  IndexedDBBrowserTestWithPreexistingLevelDB& operator=(
+      const IndexedDBBrowserTestWithPreexistingLevelDB&) = delete;
+
   void SetUpOnMainThread() override {
     base::RunLoop loop;
     auto control_test = GetControlTest();
@@ -524,9 +538,6 @@ class IndexedDBBrowserTestWithPreexistingLevelDB : public IndexedDBBrowserTest {
   virtual std::vector<BlobModificationTime> CustomModificationTimes() {
     return std::vector<BlobModificationTime>();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBBrowserTestWithPreexistingLevelDB);
 };
 
 class IndexedDBBrowserTestWithVersion0Schema : public
@@ -558,7 +569,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion3Schema, MigrationTest) {
   const GURL kTestUrl = GetTestUrl("indexeddb", "v3_migration_test.html");
   // For some reason setting empty file modification time on Android fails with
   // EPERM. https://crbug.com/1045488
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   SimpleTest(GURL(kTestUrl.spec() + "#ignoreTimes"));
 #else
   SimpleTest(kTestUrl);
@@ -720,7 +731,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, EmptyBlob) {
   // For some reason Android's futimes fails (EPERM) in this test. Do not assert
   // file times on Android, but do so on other platforms. crbug.com/467247
   // TODO(cmumford): Figure out why this is the case and fix if possible.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   SimpleTest(GURL(kTestUrl.spec() + "#ignoreTimes"));
 #else
   SimpleTest(kTestUrl);
@@ -787,7 +798,7 @@ std::unique_ptr<net::test_server::HttpResponse> ServePath(
   return std::move(http_response);
 }
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 void CorruptIndexedDBDatabase(const blink::StorageKey& storage_key,
                               const base::FilePath& idb_data_path) {
   int num_files = 0;
@@ -975,7 +986,7 @@ std::unique_ptr<net::test_server::HttpResponse> StaticFileRequestHandler(
 
 // See TODO in CorruptDBRequestHandler.  Windows does not support nested
 // message loops on the IO thread, so run this test on other platforms.
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 IN_PROC_BROWSER_TEST_P(IndexedDBBrowserTest, OperationOnCorruptedOpenDatabase) {
   ASSERT_TRUE(embedded_test_server()->Started() ||
               embedded_test_server()->InitializeAndListen());
@@ -1004,7 +1015,7 @@ INSTANTIATE_TEST_SUITE_P(IndexedDBBrowserTestInstantiation,
                                            "iterate",
                                            "failTransactionCommit",
                                            "clearObjectStore"));
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 
 // TODO: http://crbug.com/510520, flaky on all platforms
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest,
@@ -1233,7 +1244,6 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestBlobKeyCorruption, LifecycleTest) {
   SimpleTest(embedded_test_server()->GetURL(test_file));
   int64_t next_blob_number = GetNextBlobNumber(kTestStorageKey, 1);
 
-  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath first_blob =
       PathForBlob(kTestStorageKey, 1, next_blob_number - 1);
   base::FilePath corrupt_blob =

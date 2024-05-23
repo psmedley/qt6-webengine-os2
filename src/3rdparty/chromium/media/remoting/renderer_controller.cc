@@ -9,9 +9,10 @@
 #include "base/time/default_tick_clock.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "media/remoting/metrics.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "media/base/android/media_codec_util.h"
 #endif
 
@@ -26,7 +27,7 @@ namespace {
 
 // The duration to delay the start of media remoting to ensure all preconditions
 // are held stable before switching to media remoting.
-constexpr base::TimeDelta kDelayedStart = base::TimeDelta::FromSeconds(5);
+constexpr base::TimeDelta kDelayedStart = base::Seconds(5);
 
 constexpr int kPixelsPerSec4k = 3840 * 2160 * 30;  // 4k 30fps.
 constexpr int kPixelsPerSec2k = 1920 * 1080 * 30;  // 1080p 30fps.
@@ -108,8 +109,9 @@ RendererController::RendererController(
     mojo::PendingReceiver<mojom::RemotingSource> source_receiver,
     mojo::PendingRemote<mojom::Remoter> remoter)
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
-    : rpc_broker_(base::BindRepeating(&RendererController::SendMessageToSink,
-                                      base::Unretained(this))),
+    : rpc_messenger_([this](std::vector<uint8_t> message) {
+        SendMessageToSink(std::move(message));
+      }),
 #else
     :
 #endif
@@ -187,7 +189,7 @@ void RendererController::OnMessageFromSink(
     return;
   }
 
-  rpc_broker_.ProcessMessageFromRemote(std::move(rpc));
+  rpc_messenger_.ProcessMessageFromRemote(std::move(rpc));
 #endif
 }
 
@@ -213,10 +215,11 @@ void RendererController::OnRemotePlaybackDisabled(bool disabled) {
 }
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING_RPC)
-base::WeakPtr<RpcBroker> RendererController::GetRpcBroker() {
+openscreen::WeakPtr<openscreen::cast::RpcMessenger>
+RendererController::GetRpcMessenger() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  return rpc_broker_.GetWeakPtr();
+  return rpc_messenger_.GetWeakPtr();
 }
 #endif
 
@@ -312,7 +315,7 @@ void RendererController::OnDataSourceInitialized(
 }
 
 void RendererController::OnHlsManifestDetected() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   is_hls_ = true;
   UpdateRemotePlaybackAvailabilityMonitoringState();
 #else
@@ -325,7 +328,7 @@ void RendererController::UpdateRemotePlaybackAvailabilityMonitoringState() {
 // thus the source is supported when the URL is either http or https, video and
 // audio codecs are supported by the remote playback device; HLS is playable by
 // Chrome on Android (which is not detected by the pipeline metadata atm).
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   const bool is_media_supported = is_hls_ || IsRemotePlaybackSupported();
 #else
   const bool is_media_supported = IsAudioOrVideoSupported();
@@ -375,16 +378,16 @@ RemotingCompatibility RendererController::GetVideoCompatibility() const {
 
   bool compatible = false;
   switch (pipeline_metadata_.video_decoder_config.codec()) {
-    case VideoCodec::kCodecH264:
+    case VideoCodec::kH264:
       compatible = HasVideoCapability(RemotingSinkVideoCapability::CODEC_H264);
       break;
-    case VideoCodec::kCodecVP8:
+    case VideoCodec::kVP8:
       compatible = HasVideoCapability(RemotingSinkVideoCapability::CODEC_VP8);
       break;
-    case VideoCodec::kCodecVP9:
+    case VideoCodec::kVP9:
       compatible = HasVideoCapability(RemotingSinkVideoCapability::CODEC_VP9);
       break;
-    case VideoCodec::kCodecHEVC:
+    case VideoCodec::kHEVC:
       compatible = HasVideoCapability(RemotingSinkVideoCapability::CODEC_HEVC);
       break;
     default:
@@ -405,26 +408,28 @@ RemotingCompatibility RendererController::GetAudioCompatibility() const {
 
   bool compatible = false;
   switch (pipeline_metadata_.audio_decoder_config.codec()) {
-    case AudioCodec::kCodecAAC:
+    case AudioCodec::kAAC:
       compatible = HasAudioCapability(RemotingSinkAudioCapability::CODEC_AAC);
       break;
-    case AudioCodec::kCodecOpus:
+    case AudioCodec::kOpus:
       compatible = HasAudioCapability(RemotingSinkAudioCapability::CODEC_OPUS);
       break;
-    case AudioCodec::kCodecMP3:
-    case AudioCodec::kCodecPCM:
-    case AudioCodec::kCodecVorbis:
-    case AudioCodec::kCodecFLAC:
-    case AudioCodec::kCodecAMR_NB:
-    case AudioCodec::kCodecAMR_WB:
-    case AudioCodec::kCodecPCM_MULAW:
-    case AudioCodec::kCodecGSM_MS:
-    case AudioCodec::kCodecPCM_S16BE:
-    case AudioCodec::kCodecPCM_S24BE:
-    case AudioCodec::kCodecEAC3:
-    case AudioCodec::kCodecPCM_ALAW:
-    case AudioCodec::kCodecALAC:
-    case AudioCodec::kCodecAC3:
+    case AudioCodec::kMP3:
+    case AudioCodec::kPCM:
+    case AudioCodec::kVorbis:
+    case AudioCodec::kFLAC:
+    case AudioCodec::kAMR_NB:
+    case AudioCodec::kAMR_WB:
+    case AudioCodec::kPCM_MULAW:
+    case AudioCodec::kGSM_MS:
+    case AudioCodec::kPCM_S16BE:
+    case AudioCodec::kPCM_S24BE:
+    case AudioCodec::kEAC3:
+    case AudioCodec::kPCM_ALAW:
+    case AudioCodec::kALAC:
+    case AudioCodec::kAC3:
+    case AudioCodec::kDTS:
+    case AudioCodec::kDTSXP2:
       compatible =
           HasAudioCapability(RemotingSinkAudioCapability::CODEC_BASELINE_SET);
       break;
@@ -632,13 +637,12 @@ bool RendererController::SinkSupportsRemoting() const {
   return HasFeatureCapability(RemotingSinkFeature::RENDERING);
 }
 
-void RendererController::SendMessageToSink(
-    std::unique_ptr<std::vector<uint8_t>> message) {
+void RendererController::SendMessageToSink(std::vector<uint8_t> message) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  remoter_->SendMessageToSink(*message);
+  remoter_->SendMessageToSink(message);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 
 bool RendererController::IsAudioRemotePlaybackSupported() const {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -648,22 +652,24 @@ bool RendererController::IsAudioRemotePlaybackSupported() const {
     return false;
 
   switch (pipeline_metadata_.audio_decoder_config.codec()) {
-    case AudioCodec::kCodecAAC:
-    case AudioCodec::kCodecOpus:
-    case AudioCodec::kCodecMP3:
-    case AudioCodec::kCodecPCM:
-    case AudioCodec::kCodecVorbis:
-    case AudioCodec::kCodecFLAC:
-    case AudioCodec::kCodecAMR_NB:
-    case AudioCodec::kCodecAMR_WB:
-    case AudioCodec::kCodecPCM_MULAW:
-    case AudioCodec::kCodecGSM_MS:
-    case AudioCodec::kCodecPCM_S16BE:
-    case AudioCodec::kCodecPCM_S24BE:
-    case AudioCodec::kCodecEAC3:
-    case AudioCodec::kCodecPCM_ALAW:
-    case AudioCodec::kCodecALAC:
-    case AudioCodec::kCodecAC3:
+    case AudioCodec::kAAC:
+    case AudioCodec::kOpus:
+    case AudioCodec::kMP3:
+    case AudioCodec::kPCM:
+    case AudioCodec::kVorbis:
+    case AudioCodec::kFLAC:
+    case AudioCodec::kAMR_NB:
+    case AudioCodec::kAMR_WB:
+    case AudioCodec::kPCM_MULAW:
+    case AudioCodec::kGSM_MS:
+    case AudioCodec::kPCM_S16BE:
+    case AudioCodec::kPCM_S24BE:
+    case AudioCodec::kEAC3:
+    case AudioCodec::kPCM_ALAW:
+    case AudioCodec::kALAC:
+    case AudioCodec::kAC3:
+    case AudioCodec::kDTS:
+    case AudioCodec::kDTSXP2:
       return true;
     default:
       return false;
@@ -678,10 +684,10 @@ bool RendererController::IsVideoRemotePlaybackSupported() const {
     return false;
 
   switch (pipeline_metadata_.video_decoder_config.codec()) {
-    case VideoCodec::kCodecH264:
-    case VideoCodec::kCodecVP8:
-    case VideoCodec::kCodecVP9:
-    case VideoCodec::kCodecHEVC:
+    case VideoCodec::kH264:
+    case VideoCodec::kVP8:
+    case VideoCodec::kVP9:
+    case VideoCodec::kHEVC:
       return true;
     default:
       return false;
@@ -694,7 +700,7 @@ bool RendererController::IsRemotePlaybackSupported() const {
           (!has_audio() || IsAudioRemotePlaybackSupported()));
 }
 
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace remoting
 }  // namespace media

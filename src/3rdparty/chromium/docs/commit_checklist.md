@@ -209,8 +209,9 @@ You are expected to wait for all actively participating reviewers to CR+1 the
 change before submitting (CQ+2), even if your CL already has all required owners
 reviews. Other than preventing confusion and mistakes, this expectation exists
 because:
-1. Participating reviewers are [helping you write sustainable code](cr_respect),
-   and letting them sign off is respectful of their efforts.
+1. Participating reviewers are
+   [helping you write sustainable code][sustainable-code], and letting them sign
+   off is respectful of their efforts.
 1. The owners system is not perfect, and sometimes you will need an owner who
    *can* approve the whole change, but will delegate approval of pieces to
    other, more knowledgeable owners.
@@ -276,7 +277,7 @@ first and ask questions later. Gerrit can automatically generate revert CLs.
 
 After your CL is landed, you can use `git rebase-update` or `git cl archive` to
 clean up your local branches. These commands will automatically delete merged
-branches. Mark the associated crbug as "fixed".
+branches. Please mark the associated crbug as "fixed".
 
 [//]: # (the reference link section should be alphabetically sorted)
 [build-instructions]: https://chromium.googlesource.com/chromium/src.git/+/main/docs/#Checking-Out-and-Building
@@ -285,3 +286,4 @@ branches. Mark the associated crbug as "fixed".
 [simple-chrome]: https://chromium.googlesource.com/chromiumos/docs/+/HEAD/simple_chrome_workflow.md
 [uploading-a-change-for-review]: contributing.md#Uploading-a-change-for-review
 [respectful-changes]: cl_respect.md
+[sustainable-code]: cr_respect.md

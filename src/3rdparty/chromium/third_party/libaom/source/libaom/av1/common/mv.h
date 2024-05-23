@@ -23,13 +23,14 @@ extern "C" {
 #endif
 
 #define INVALID_MV 0x80008000
+#define INVALID_MV_ROW_COL -32768
 #define GET_MV_RAWPEL(x) (((x) + 3 + ((x) >= 0)) >> 3)
 #define GET_MV_SUBPEL(x) ((x)*8)
 
 #define MARK_MV_INVALID(mv)                \
   do {                                     \
     ((int_mv *)(mv))->as_int = INVALID_MV; \
-  } while (0);
+  } while (0)
 #define CHECK_MV_EQUAL(x, y) (((x).row == (y).row) && ((x).col == (y).col))
 
 // The motion vector in units of full pixel
@@ -138,7 +139,7 @@ static const int trans_model_params[TRANS_TYPES] = { 0, 2, 4, 6 };
 //  z .  y'  =   m4 m5 m1 *  y
 //       1]      m6 m7 1)    1]
 typedef struct {
-  int32_t wmmat[8];
+  int32_t wmmat[6];
   int16_t alpha, beta, gamma, delta;
   TransformationType wmtype;
   int8_t invalid;
@@ -146,8 +147,7 @@ typedef struct {
 
 /* clang-format off */
 static const WarpedMotionParams default_warp_params = {
-  { 0, 0, (1 << WARPEDMODEL_PREC_BITS), 0, 0, (1 << WARPEDMODEL_PREC_BITS), 0,
-    0 },
+  { 0, 0, (1 << WARPEDMODEL_PREC_BITS), 0, 0, (1 << WARPEDMODEL_PREC_BITS) },
   0, 0, 0, 0,
   IDENTITY,
   0,
@@ -282,6 +282,17 @@ static INLINE int_mv gm_get_motion_vector(const WarpedMotionParams *gm,
     // After the right shifts, there are 3 fractional bits of precision. If
     // allow_hp is false, the bottom bit is always zero (so we don't need a
     // call to convert_to_trans_prec here)
+    //
+    // Note: There is an AV1 specification bug here:
+    //
+    // gm->wmmat[0] is supposed to be the horizontal translation, and so should
+    // go into res.as_mv.col, and gm->wmmat[1] is supposed to be the vertical
+    // translation and so should go into res.as_mv.row
+    //
+    // However, in the spec, these assignments are accidentally reversed, and so
+    // we must keep this incorrect logic to match the spec.
+    //
+    // See also: https://crbug.com/aomedia/3328
     res.as_mv.row = gm->wmmat[0] >> GM_TRANS_ONLY_PREC_DIFF;
     res.as_mv.col = gm->wmmat[1] >> GM_TRANS_ONLY_PREC_DIFF;
     assert(IMPLIES(1 & (res.as_mv.row | res.as_mv.col), allow_hp));

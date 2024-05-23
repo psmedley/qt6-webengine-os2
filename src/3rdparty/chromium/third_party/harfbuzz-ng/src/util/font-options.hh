@@ -44,7 +44,6 @@ struct font_options_t : face_options_t
 {
   ~font_options_t ()
   {
-    g_free (font_file);
     free (variations);
     g_free (font_funcs);
     hb_font_destroy (font);
@@ -52,21 +51,22 @@ struct font_options_t : face_options_t
 
   void add_options (option_parser_t *parser);
 
-  hb_font_t *get_font () const;
+  void post_parse (GError **error);
 
+  hb_bool_t sub_font = false;
   hb_variation_t *variations = nullptr;
   unsigned int num_variations = 0;
   int x_ppem = 0;
   int y_ppem = 0;
   double ptem = 0.;
+  double slant = 0.;
   unsigned int subpixel_bits = SUBPIXEL_BITS;
   mutable double font_size_x = DEFAULT_FONT_SIZE;
   mutable double font_size_y = DEFAULT_FONT_SIZE;
   char *font_funcs = nullptr;
   int ft_load_flags = 2;
 
-  private:
-  mutable hb_font_t *font = nullptr;
+  hb_font_t *font = nullptr;
 };
 
 
@@ -75,20 +75,17 @@ static struct supported_font_funcs_t {
 	void (*func) (hb_font_t *);
 } supported_font_funcs[] =
 {
+  {"ot",	hb_ot_font_set_funcs},
 #ifdef HAVE_FREETYPE
   {"ft",	hb_ft_font_set_funcs},
 #endif
-  {"ot",	hb_ot_font_set_funcs},
 };
 
-hb_font_t *
-font_options_t::get_font () const
+
+void
+font_options_t::post_parse (GError **error)
 {
-  if (font)
-    return font;
-
-  auto *face = get_face ();
-
+  assert (!font);
   font = hb_font_create (face);
 
   if (font_size_x == FONT_SIZE_UPEM)
@@ -98,6 +95,8 @@ font_options_t::get_font () const
 
   hb_font_set_ppem (font, x_ppem, y_ppem);
   hb_font_set_ptem (font, ptem);
+
+  hb_font_set_synthetic_slant (font, slant);
 
   int scale_x = (int) scalbnf (font_size_x, subpixel_bits);
   int scale_y = (int) scalbnf (font_size_y, subpixel_bits);
@@ -127,12 +126,15 @@ font_options_t::get_font () const
 	  g_string_append_c (s, '/');
 	g_string_append (s, supported_font_funcs[i].name);
       }
+      g_string_append_c (s, '\n');
       char *p = g_string_free (s, FALSE);
-      fail (false, "Unknown font function implementation `%s'; supported values are: %s; default is %s",
-	    font_funcs,
-	    p,
-	    supported_font_funcs[0].name);
-      //free (p);
+      g_set_error (error, G_OPTION_ERROR, G_OPTION_ERROR_BAD_VALUE,
+		   "Unknown font function implementation `%s'; supported values are: %s; default is %s",
+		   font_funcs,
+		   p,
+		   supported_font_funcs[0].name);
+      free (p);
+      return;
     }
   }
   set_font_funcs (font);
@@ -140,7 +142,13 @@ font_options_t::get_font () const
   hb_ft_font_set_load_flags (font, ft_load_flags);
 #endif
 
-  return font;
+  if (sub_font)
+  {
+    hb_font_t *old_font = font;
+    font = hb_font_create_sub_font (old_font);
+    hb_font_set_scale (old_font, scale_x * 2, scale_y * 2);
+    hb_font_destroy (old_font);
+  }
 }
 
 
@@ -269,7 +277,11 @@ font_options_t::add_options (option_parser_t *parser)
 			      G_OPTION_ARG_CALLBACK,	(gpointer) &parse_font_ppem,	"Set x,y pixels per EM (default: 0; disabled)",	"1/2 integers"},
     {"font-ptem",	0, 0,
 			      G_OPTION_ARG_DOUBLE,	&this->ptem,			"Set font point-size (default: 0; disabled)",	"point-size"},
+    {"font-slant",	0, 0,
+			      G_OPTION_ARG_DOUBLE,	&this->slant,			"Set synthetic slant (default: 0)",		 "slant ratio; eg. 0.2"},
     {"font-funcs",	0, 0, G_OPTION_ARG_STRING,	&this->font_funcs,		text,						"impl"},
+    {"sub-font",	0, G_OPTION_FLAG_HIDDEN,
+			      G_OPTION_ARG_NONE,	&this->sub_font,		"Create a sub-font (default: false)",		"boolean"},
     {"ft-load-flags",	0, 0, G_OPTION_ARG_INT,		&this->ft_load_flags,		"Set FreeType load-flags (default: 2)",		"integer"},
     {nullptr}
   };
@@ -277,7 +289,8 @@ font_options_t::add_options (option_parser_t *parser)
 		     "font",
 		     "Font-instance options:",
 		     "Options for the font instance",
-		     this);
+		     this,
+		     false /* We add below. */);
 
   const gchar *variations_help = "Comma-separated list of font variations\n"
     "\n"
@@ -289,7 +302,7 @@ font_options_t::add_options (option_parser_t *parser)
     "    number. For example:\n"
     "\n"
     "      \"wght=500\"\n"
-    "      \"slnt=-7.5\"\n";
+    "      \"slnt=-7.5\"";
 
   GOptionEntry entries2[] =
   {

@@ -51,6 +51,11 @@ angle::Result CreateOrResizeTexture(const gl::Context *context,
     if (*textureOut)
     {
         ANGLE_TRY((*textureOut)->resize(contextMtl, width, height));
+        size_t resourceSize = EstimateTextureSizeInBytes(format, width, height, 1, samples, 1);
+        if (*textureOut)
+        {
+            (*textureOut)->setEstimatedByteSize(resourceSize);
+        }
     }
     else if (samples > 1)
     {
@@ -155,7 +160,7 @@ egl::Error SurfaceMtl::makeCurrent(const gl::Context *context)
 egl::Error SurfaceMtl::unMakeCurrent(const gl::Context *context)
 {
     ContextMtl *contextMtl = mtl::GetImpl(context);
-    contextMtl->flushCommandBufer();
+    contextMtl->flushCommandBuffer(mtl::WaitUntilScheduled);
 
     StopFrameCapture();
     return egl::NoError();
@@ -706,7 +711,7 @@ egl::Error OffscreenSurfaceMtl::bindTexImage(const gl::Context *context,
                                              EGLint buffer)
 {
     ContextMtl *contextMtl = mtl::GetImpl(context);
-    contextMtl->flushCommandBufer();
+    contextMtl->flushCommandBuffer(mtl::WaitUntilScheduled);
 
     // Initialize offscreen textures if needed:
     ANGLE_TO_EGL_TRY(ensureTexturesSizeCorrect(context));
@@ -724,7 +729,7 @@ egl::Error OffscreenSurfaceMtl::releaseTexImage(const gl::Context *context, EGLi
     }
 
     // NOTE(hqle): Should we finishCommandBuffer or flush is enough?
-    contextMtl->flushCommandBufer();
+    contextMtl->flushCommandBuffer(mtl::WaitUntilScheduled);
     return egl::NoError();
 }
 

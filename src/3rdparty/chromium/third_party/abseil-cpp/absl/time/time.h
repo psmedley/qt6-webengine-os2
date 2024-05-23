@@ -120,7 +120,7 @@ using EnableIfFloat =
 
 // Duration
 //
-// The `absl::Duration` class represents a signed, fixed-length span of time.
+// The `absl::Duration` class represents a signed, fixed-length amount of time.
 // A `Duration` is generated using a unit-specific factory function, or is
 // the result of subtracting one `absl::Time` from another. Durations behave
 // like unit-safe integers and they support all the natural integer-like
@@ -480,8 +480,9 @@ Duration Hours(T n) {
 // ToInt64Hours()
 //
 // Helper functions that convert a Duration to an integral count of the
-// indicated unit. These functions are shorthand for the `IDivDuration()`
-// function above; see its documentation for details about overflow, etc.
+// indicated unit. These return the same results as the `IDivDuration()`
+// function, though they usually do so more efficiently; see the
+// documentation of `IDivDuration()` for details about overflow, etc.
 //
 // Example:
 //

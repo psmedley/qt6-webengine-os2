@@ -7,10 +7,11 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "media/base/media_export.h"
 #include "media/base/pipeline.h"
 #include "media/base/renderer.h"
@@ -86,6 +87,10 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
                scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
                CreateRendererCB create_renderer_cb,
                MediaLog* media_log);
+
+  PipelineImpl(const PipelineImpl&) = delete;
+  PipelineImpl& operator=(const PipelineImpl&) = delete;
+
   ~PipelineImpl() override;
 
   // Pipeline implementation.
@@ -105,7 +110,8 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
   void SetVolume(float volume) override;
   void SetLatencyHint(absl::optional<base::TimeDelta> latency_hint) override;
   void SetPreservesPitch(bool preserves_pitch) override;
-  void SetAutoplayInitiated(bool autoplay_initiated) override;
+  void SetWasPlayedWithUserActivation(
+      bool was_played_with_user_activation) override;
   base::TimeDelta GetMediaTime() const override;
   Ranges<base::TimeDelta> GetBufferedTimeRanges() const override;
   base::TimeDelta GetMediaDuration() const override;
@@ -174,10 +180,10 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
   // Parameters passed in the constructor.
   const scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
   CreateRendererCB create_renderer_cb_;
-  MediaLog* const media_log_;
+  const raw_ptr<MediaLog> media_log_;
 
   // Pipeline client. Valid only while the pipeline is running.
-  Client* client_;
+  raw_ptr<Client> client_;
 
   // RendererWrapper instance that runs on the media thread.
   std::unique_ptr<RendererWrapper> renderer_wrapper_;
@@ -215,8 +221,6 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
 
   base::ThreadChecker thread_checker_;
   base::WeakPtrFactory<PipelineImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PipelineImpl);
 };
 
 }  // namespace media

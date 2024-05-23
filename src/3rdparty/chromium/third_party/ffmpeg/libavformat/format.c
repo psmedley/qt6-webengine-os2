@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include "libavutil/avstring.h"
 #include "libavutil/bprint.h"
 #include "libavutil/opt.h"
@@ -52,7 +54,7 @@ const AVOutputFormat *av_guess_format(const char *short_name, const char *filena
                                       const char *mime_type)
 {
     const AVOutputFormat *fmt = NULL;
-    AVOutputFormat *fmt_found = NULL;
+    const AVOutputFormat *fmt_found = NULL;
     void *i = 0;
     int score_max, score;
 
@@ -78,7 +80,7 @@ const AVOutputFormat *av_guess_format(const char *short_name, const char *filena
         }
         if (score > score_max) {
             score_max = score;
-            fmt_found = (AVOutputFormat*)fmt;
+            fmt_found = fmt;
         }
     }
     return fmt_found;
@@ -121,7 +123,7 @@ const AVInputFormat *av_find_input_format(const char *short_name)
     void *i = 0;
     while ((fmt = av_demuxer_iterate(&i)))
         if (av_match_name(short_name, fmt->name))
-            return (AVInputFormat*)fmt;
+            return fmt;
     return NULL;
 }
 
@@ -158,6 +160,8 @@ const AVInputFormat *av_probe_input_format3(const AVProbeData *pd,
     }
 
     while ((fmt1 = av_demuxer_iterate(&i))) {
+        if (fmt1->flags & AVFMT_EXPERIMENTAL)
+            continue;
         if (!is_opened == !(fmt1->flags & AVFMT_NOFILE) && strcmp(fmt1->name, "image2"))
             continue;
         score = 0;

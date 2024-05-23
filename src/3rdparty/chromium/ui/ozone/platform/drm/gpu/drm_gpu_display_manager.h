@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "ui/display/types/display_configuration_params.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/geometry/point.h"
@@ -37,11 +36,15 @@ class DrmGpuDisplayManager {
  public:
   DrmGpuDisplayManager(ScreenManager* screen_manager,
                        DrmDeviceManager* drm_device_manager);
+
+  DrmGpuDisplayManager(const DrmGpuDisplayManager&) = delete;
+  DrmGpuDisplayManager& operator=(const DrmGpuDisplayManager&) = delete;
+
   ~DrmGpuDisplayManager();
 
   // Sets a callback that will be notified when display configuration may have
-  // changed to clear the overlay configuration cache.
-  void SetClearOverlayCacheCallback(base::RepeatingClosure callback);
+  // changed, so we should update state for managing overlays.
+  void SetDisplaysConfiguredCallback(base::RepeatingClosure callback);
 
   // Returns a list of the connected displays. When this is called the list of
   // displays is refreshed.
@@ -66,7 +69,7 @@ class DrmGpuDisplayManager {
       int64_t display_id,
       const std::vector<display::GammaRampRGBEntry>& degamma_lut,
       const std::vector<display::GammaRampRGBEntry>& gamma_lut);
-  void SetPrivacyScreen(int64_t display_id, bool enabled);
+  bool SetPrivacyScreen(int64_t display_id, bool enabled);
 
   void SetColorSpace(int64_t crtc_id, const gfx::ColorSpace& color_space);
 
@@ -84,9 +87,7 @@ class DrmGpuDisplayManager {
 
   std::vector<std::unique_ptr<DrmDisplay>> displays_;
 
-  base::RepeatingClosure clear_overlay_cache_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(DrmGpuDisplayManager);
+  base::RepeatingClosure displays_configured_callback_;
 };
 
 }  // namespace ui

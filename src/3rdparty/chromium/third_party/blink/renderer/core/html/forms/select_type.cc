@@ -97,7 +97,7 @@ class MenuListSelectType final : public SelectType {
 
   void CreateShadowSubtree(ShadowRoot& root) override;
   Element& InnerElement() const override;
-  void ShowPopup() override;
+  void ShowPopup(PopupMenu::ShowEventType type) override;
   void HidePopup() override;
   void PopupDidHide() override;
   bool PopupIsVisible() const override;
@@ -247,7 +247,8 @@ bool MenuListSelectType::DefaultEventHandler(const Event& event) {
         // TODO(lanwei): Will check if we need to add
         // InputDeviceCapabilities here when select menu list gets
         // focus, see https://crbug.com/476530.
-        ShowPopup();
+        ShowPopup(mouse_event->FromTouch() ? PopupMenu::kTouch
+                                           : PopupMenu::kOther);
       }
     }
     return true;
@@ -291,7 +292,7 @@ bool MenuListSelectType::HandlePopupOpenKeyboardEvent() {
   // SelectOptionByPopup, which gets called after the user makes a selection
   // from the menu.
   SaveLastSelection();
-  ShowPopup();
+  ShowPopup(PopupMenu::kOther);
   return true;
 }
 
@@ -311,7 +312,7 @@ Element& MenuListSelectType::InnerElement() const {
   return *inner_element;
 }
 
-void MenuListSelectType::ShowPopup() {
+void MenuListSelectType::ShowPopup(PopupMenu::ShowEventType type) {
   if (PopupIsVisible())
     return;
   Document& document = select_->GetDocument();
@@ -332,7 +333,7 @@ void MenuListSelectType::ShowPopup() {
   SetPopupIsVisible(true);
   ObserveTreeMutation();
 
-  popup_->Show();
+  popup_->Show(type);
   if (AXObjectCache* cache = document.ExistingAXObjectCache())
     cache->DidShowMenuListPopup(select_->GetLayoutObject());
 }
@@ -442,6 +443,10 @@ void MenuListSelectType::DidRecalcStyle(const StyleRecalcChange change) {
   if (change.ReattachLayoutTree())
     return;
   UpdateTextStyle();
+  if (auto* layout_object = select_->GetLayoutObject()) {
+    // Invalidate paint to ensure that the focus ring is updated.
+    layout_object->SetShouldDoFullPaintInvalidation();
+  }
   if (PopupIsVisible())
     popup_->UpdateFromElement(PopupMenu::kByStyleChange);
 }
@@ -725,7 +730,7 @@ bool ListBoxSelectType::DefaultEventHandler(const Event& event) {
     // Convert to coords relative to the list box if needed.
     if (HTMLOptionElement* option = EventTargetOption(*mouse_event)) {
       if (!option->IsDisabledFormControl()) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
         const bool meta_or_ctrl = mouse_event->metaKey();
 #else
         const bool meta_or_ctrl = mouse_event->ctrlKey();
@@ -753,10 +758,12 @@ bool ListBoxSelectType::DefaultEventHandler(const Event& event) {
     if (auto* layout_object = select_->GetLayoutObject()) {
       layout_object->GetFrameView()->UpdateAllLifecyclePhasesExceptPaint(
           DocumentUpdateReason::kScroll);
-
+    }
+    // Lifecycle update could have detached the layout object.
+    if (auto* layout_object = select_->GetLayoutObject()) {
       if (Page* page = select_->GetDocument().GetPage()) {
         page->GetAutoscrollController().StartAutoscrollForSelection(
-            select_->GetLayoutObject());
+            layout_object);
       }
     }
     // Mousedown didn't happen in this element.
@@ -859,7 +866,7 @@ bool ListBoxSelectType::DefaultEventHandler(const Event& event) {
     }
 
     bool is_control_key = false;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     is_control_key = keyboard_event->metaKey();
 #else
     is_control_key = keyboard_event->ctrlKey();
@@ -1347,7 +1354,7 @@ Element& SelectType::InnerElement() const {
   return *select_;
 }
 
-void SelectType::ShowPopup() {
+void SelectType::ShowPopup(PopupMenu::ShowEventType) {
   NOTREACHED();
 }
 

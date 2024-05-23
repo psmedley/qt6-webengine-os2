@@ -21,6 +21,7 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/base/isolation_info.h"
+#include "services/network/public/mojom/client_security_state.mojom.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
@@ -43,7 +44,8 @@ class MockDedicatedWorker
     // ignored.
     auto coep_reporter = std::make_unique<CrossOriginEmbedderPolicyReporter>(
         RenderFrameHostImpl::FromID(render_frame_host_id)
-            ->GetStoragePartition(),
+            ->GetStoragePartition()
+            ->GetWeakPtr(),
         GURL(), absl::nullopt, absl::nullopt, base::UnguessableToken::Create(),
         net::NetworkIsolationKey());
 
@@ -52,8 +54,8 @@ class MockDedicatedWorker
             worker_process_id, render_frame_host_id,
             /*creator_worker_token=*/absl::nullopt, render_frame_host_id,
             blink::StorageKey(), net::IsolationInfo::CreateTransient(),
-            network::CrossOriginEmbedderPolicy(), coep_reporter->GetWeakPtr(),
-            coep_reporter->GetWeakPtr()),
+            network::mojom::ClientSecurityState::New(),
+            coep_reporter->GetWeakPtr(), coep_reporter->GetWeakPtr()),
         factory_.BindNewPipeAndPassReceiver());
 
     if (base::FeatureList::IsEnabled(blink::features::kPlzDedicatedWorker)) {
@@ -92,7 +94,9 @@ class MockDedicatedWorker
           pending_subresource_loader_factory_bundle,
       mojo::PendingReceiver<blink::mojom::SubresourceLoaderUpdater>
           subresource_loader_updater,
-      blink::mojom::ControllerServiceWorkerInfoPtr controller_info) override {}
+      blink::mojom::ControllerServiceWorkerInfoPtr controller_info,
+      mojo::PendingRemote<blink::mojom::BackForwardCacheControllerHost>
+          back_forward_cache_controller_host) override {}
   void OnScriptLoadStartFailed() override {}
 
  private:
@@ -245,12 +249,14 @@ TEST_P(DedicatedWorkerServiceImplTest, DedicatedWorkerServiceObserver) {
   observer.RunUntilWorkerEvent();
 
   // The service sent a OnWorkerStarted() notification.
-  ASSERT_EQ(observer.dedicated_worker_infos().size(), 1u);
-  const auto& dedicated_worker_info =
-      observer.dedicated_worker_infos().begin()->second;
-  EXPECT_EQ(dedicated_worker_info.worker_process_id, render_process_host_id);
-  EXPECT_EQ(dedicated_worker_info.ancestor_render_frame_host_id,
-            ancestor_render_frame_host_id);
+  {
+    ASSERT_EQ(observer.dedicated_worker_infos().size(), 1u);
+    const auto& dedicated_worker_info =
+        observer.dedicated_worker_infos().begin()->second;
+    EXPECT_EQ(dedicated_worker_info.worker_process_id, render_process_host_id);
+    EXPECT_EQ(dedicated_worker_info.ancestor_render_frame_host_id,
+              ancestor_render_frame_host_id);
+  }
 
   // Test EnumerateDedicatedWorkers().
   {

@@ -38,9 +38,9 @@ class CFX_FolderFontInfo : public SystemFontInfoIface {
                 int pitch_family,
                 const ByteString& face) override;
   void* GetFont(const ByteString& face) override;
-  uint32_t GetFontData(void* hFont,
-                       uint32_t table,
-                       pdfium::span<uint8_t> buffer) override;
+  size_t GetFontData(void* hFont,
+                     uint32_t table,
+                     pdfium::span<uint8_t> buffer) override;
   void DeleteFont(void* hFont) override;
   bool GetFaceName(void* hFont, ByteString* name) override;
   bool GetFontCharset(void* hFont, FX_Charset* charset) override;
@@ -69,7 +69,7 @@ class CFX_FolderFontInfo : public SystemFontInfoIface {
   void ScanFile(const ByteString& path);
   void ReportFace(const ByteString& path,
                   FILE* pFile,
-                  uint32_t filesize,
+                  FX_FILESIZE filesize,
                   uint32_t offset);
   void* GetSubstFont(const ByteString& face);
   void* FindFont(int weight,

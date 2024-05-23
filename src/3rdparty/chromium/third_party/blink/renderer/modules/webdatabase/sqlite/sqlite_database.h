@@ -28,7 +28,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBDATABASE_SQLITE_SQLITE_DATABASE_H_
 
 #include "base/dcheck_is_on.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -55,6 +54,10 @@ class SQLiteDatabase {
 
  public:
   SQLiteDatabase();
+
+  SQLiteDatabase(const SQLiteDatabase&) = delete;
+  SQLiteDatabase& operator=(const SQLiteDatabase&) = delete;
+
   ~SQLiteDatabase();
 
   bool Open(const String& filename);
@@ -71,7 +74,7 @@ class SQLiteDatabase {
   bool TransactionInProgress() const { return transaction_in_progress_; }
 
   int64_t LastInsertRowID();
-  int LastChanges();
+  int64_t LastChanges();
 
   void SetBusyTimeout(int ms);
 
@@ -130,28 +133,26 @@ class SQLiteDatabase {
 
   int PageSize();
 
-  sqlite3* db_;
-  int page_size_;
+  sqlite3* db_ = nullptr;
+  int page_size_ = -1;
 
-  bool transaction_in_progress_;
+  bool transaction_in_progress_ = false;
 
   Mutex authorizer_lock_;
 
   // The raw pointer usage is safe because the DatabaseAuthorizer is guaranteed
   // to outlive this instance. The DatabaseAuthorizer is owned by the same
   // Database that owns this instance.
-  DatabaseAuthorizer* authorizer_;
+  DatabaseAuthorizer* authorizer_ = nullptr;
 
-  base::PlatformThreadId opening_thread_;
+  base::PlatformThreadId opening_thread_ = 0;
 
   Mutex database_closing_mutex_;
 
   int open_error_;
   std::string open_error_message_;
 
-  int last_changes_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(SQLiteDatabase);
+  int64_t last_changes_count_ = 0;
 };
 
 }  // namespace blink

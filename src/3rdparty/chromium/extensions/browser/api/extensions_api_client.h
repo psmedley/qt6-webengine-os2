@@ -11,20 +11,17 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "extensions/browser/api/clipboard/clipboard_api.h"
 #include "extensions/browser/api/declarative_content/content_rules_registry.h"
-#include "extensions/browser/value_store/settings_namespace.h"
+#include "extensions/browser/api/storage/settings_namespace.h"
+#include "extensions/browser/api/storage/settings_observer.h"
 #include "extensions/common/api/clipboard.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_id.h"
 
 class GURL;
-
-namespace base {
-template <class T>
-class ObserverListThreadSafe;
-}
 
 namespace content {
 class BrowserContext;
@@ -34,6 +31,10 @@ class WebContents;
 namespace guest_view {
 class GuestViewManagerDelegate;
 }  // namespace guest_view
+
+namespace value_store {
+class ValueStoreFactory;
+}
 
 namespace extensions {
 
@@ -54,10 +55,8 @@ class MimeHandlerViewGuest;
 class MimeHandlerViewGuestDelegate;
 class NonNativeFileSystemDelegate;
 class RulesCacheDelegate;
-class SettingsObserver;
 class SupervisedUserExtensionsDelegate;
 class ValueStoreCache;
-class ValueStoreFactory;
 class VirtualKeyboardDelegate;
 struct WebRequestInfo;
 class WebViewGuest;
@@ -85,9 +84,8 @@ class ExtensionsAPIClient {
   // to |caches|. By default adds nothing.
   virtual void AddAdditionalValueStoreCaches(
       content::BrowserContext* context,
-      const scoped_refptr<ValueStoreFactory>& factory,
-      const scoped_refptr<base::ObserverListThreadSafe<SettingsObserver>>&
-          observers,
+      const scoped_refptr<value_store::ValueStoreFactory>& factory,
+      SettingsChangedCallback observer,
       std::map<settings_namespace::Namespace, ValueStoreCache*>* caches);
 
   // Attaches any extra web contents helpers (like ExtensionWebContentsObserver)
@@ -161,10 +159,10 @@ class ExtensionsAPIClient {
   virtual std::unique_ptr<DevicePermissionsPrompt>
   CreateDevicePermissionsPrompt(content::WebContents* web_contents) const;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // Returns true if device policy allows detaching a given USB device.
   virtual bool ShouldAllowDetachingUsb(int vid, int pid) const;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // Returns a delegate for some of VirtualKeyboardAPI's behavior.
   virtual std::unique_ptr<VirtualKeyboardDelegate>
@@ -206,15 +204,15 @@ class ExtensionsAPIClient {
   virtual MediaPerceptionAPIDelegate* GetMediaPerceptionAPIDelegate();
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // Saves image data on clipboard.
   virtual void SaveImageDataToClipboard(
-      const std::vector<char>& image_data,
+      std::vector<uint8_t> image_data,
       api::clipboard::ImageType type,
       AdditionalDataItemList additional_items,
       base::OnceClosure success_callback,
       base::OnceCallback<void(const std::string&)> error_callback);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   virtual AutomationInternalApiDelegate* GetAutomationInternalApiDelegate();
 

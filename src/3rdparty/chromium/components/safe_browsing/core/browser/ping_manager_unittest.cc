@@ -15,7 +15,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
-using base::TimeDelta;
 using safe_browsing::HitReport;
 using safe_browsing::ThreatSource;
 
@@ -34,7 +33,8 @@ class PingManagerTest : public testing::Test {
     }
 
     ping_manager_.reset(
-        new PingManager(safe_browsing::GetTestV4ProtocolConfig()));
+        new PingManager(safe_browsing::GetTestV4ProtocolConfig(), nullptr,
+                        nullptr, base::BindRepeating([]() { return false; })));
   }
 
   PingManager* ping_manager() { return ping_manager_.get(); }

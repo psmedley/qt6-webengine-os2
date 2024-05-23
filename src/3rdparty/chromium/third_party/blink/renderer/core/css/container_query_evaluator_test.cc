@@ -7,19 +7,23 @@
 #include "third_party/blink/renderer/core/css/container_query.h"
 #include "third_party/blink/renderer/core/css/css_container_rule.h"
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
+#include "third_party/blink/renderer/core/css/resolver/match_result.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
 class ContainerQueryEvaluatorTest : public PageTestBase,
-                                    private ScopedCSSContainerQueriesForTest {
+                                    private ScopedCSSContainerQueriesForTest,
+                                    private ScopedLayoutNGForTest {
  public:
-  ContainerQueryEvaluatorTest() : ScopedCSSContainerQueriesForTest(true) {}
+  ContainerQueryEvaluatorTest()
+      : ScopedCSSContainerQueriesForTest(true), ScopedLayoutNGForTest(true) {}
 
   ContainerQuery* ParseContainer(String query) {
     String rule = "@container " + query + " {}";
@@ -33,96 +37,147 @@ class ContainerQueryEvaluatorTest : public PageTestBase,
   bool Eval(String query,
             double width,
             double height,
+            unsigned container_type,
             PhysicalAxes contained_axes) {
+    auto style = ComputedStyle::Clone(GetDocument().ComputedStyleRef());
+    style->SetContainerType(container_type);
+
     ContainerQuery* container_query = ParseContainer(query);
     DCHECK(container_query);
     auto* evaluator = MakeGarbageCollected<ContainerQueryEvaluator>();
     evaluator->ContainerChanged(
+        GetDocument(), *style,
         PhysicalSize(LayoutUnit(width), LayoutUnit(height)), contained_axes);
     return evaluator->Eval(*container_query);
   }
 
-  bool ContainerChanged(ContainerQueryEvaluator* evaluator,
-                        PhysicalSize size,
-                        PhysicalAxes axes) {
-    return evaluator->ContainerChanged(size, axes) !=
-           ContainerQueryEvaluator::Change::kNone;
+  using Change = ContainerQueryEvaluator::Change;
+
+  Change ContainerChanged(ContainerQueryEvaluator* evaluator,
+                          PhysicalSize size,
+                          unsigned container_type,
+                          PhysicalAxes axes) {
+    auto style = ComputedStyle::Clone(GetDocument().ComputedStyleRef());
+    style->SetContainerType(container_type);
+
+    return evaluator->ContainerChanged(GetDocument(), *style, size, axes);
+  }
+
+  bool EvalAndAdd(ContainerQueryEvaluator* evaluator,
+                  const ContainerQuery& query,
+                  Change change = Change::kNearestContainer) {
+    MatchResult dummy_result;
+    return evaluator->EvalAndAdd(query, change, dummy_result);
   }
 
   const PhysicalAxes none{kPhysicalAxisNone};
   const PhysicalAxes both{kPhysicalAxisBoth};
   const PhysicalAxes horizontal{kPhysicalAxisHorizontal};
   const PhysicalAxes vertical{kPhysicalAxisVertical};
+
+  const unsigned type_none = kContainerTypeNone;
+  const unsigned type_size = kContainerTypeSize;
+  const unsigned type_inline_size = kContainerTypeInlineSize;
 };
 
 TEST_F(ContainerQueryEvaluatorTest, ContainmentMatch) {
   {
     String query = "(min-width: 100px)";
-    EXPECT_TRUE(Eval(query, 100.0, 100.0, horizontal));
-    EXPECT_TRUE(Eval(query, 100.0, 100.0, both));
-    EXPECT_FALSE(Eval(query, 100.0, 100.0, vertical));
-    EXPECT_FALSE(Eval(query, 100.0, 100.0, none));
-    EXPECT_FALSE(Eval(query, 99.0, 100.0, horizontal));
+    EXPECT_TRUE(Eval(query, 100.0, 100.0, type_size, horizontal));
+    EXPECT_TRUE(Eval(query, 100.0, 100.0, type_size, both));
+    EXPECT_TRUE(Eval(query, 100.0, 100.0, type_inline_size, horizontal));
+    EXPECT_TRUE(Eval(query, 100.0, 100.0, type_inline_size, both));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_size, vertical));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_size, none));
+    EXPECT_FALSE(Eval(query, 99.0, 100.0, type_size, horizontal));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_none, both));
   }
 
   {
     String query = "(min-height: 100px)";
-    EXPECT_TRUE(Eval(query, 100.0, 100.0, vertical));
-    EXPECT_TRUE(Eval(query, 100.0, 100.0, both));
-    EXPECT_FALSE(Eval(query, 100.0, 100.0, horizontal));
-    EXPECT_FALSE(Eval(query, 100.0, 100.0, none));
-    EXPECT_FALSE(Eval(query, 100.0, 99.0, vertical));
+    EXPECT_TRUE(Eval(query, 100.0, 100.0, type_size, vertical));
+    EXPECT_TRUE(Eval(query, 100.0, 100.0, type_size, both));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_size, horizontal));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_size, none));
+    EXPECT_FALSE(Eval(query, 100.0, 99.0, type_size, vertical));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_none, both));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_inline_size, both));
   }
 
   {
-    String query = "(min-width: 100px) and (min-height: 100px)";
-    EXPECT_TRUE(Eval(query, 100.0, 100.0, both));
-    EXPECT_FALSE(Eval(query, 100.0, 100.0, vertical));
-    EXPECT_FALSE(Eval(query, 100.0, 100.0, horizontal));
-    EXPECT_FALSE(Eval(query, 100.0, 100.0, none));
-    EXPECT_FALSE(Eval(query, 100.0, 99.0, both));
-    EXPECT_FALSE(Eval(query, 99.0, 100.0, both));
+    String query = "((min-width: 100px) and (min-height: 100px))";
+    EXPECT_TRUE(Eval(query, 100.0, 100.0, type_size, both));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_size, vertical));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_size, horizontal));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_size, none));
+    EXPECT_FALSE(Eval(query, 100.0, 99.0, type_size, both));
+    EXPECT_FALSE(Eval(query, 99.0, 100.0, type_size, both));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_none, both));
+    EXPECT_FALSE(Eval(query, 100.0, 100.0, type_inline_size, both));
   }
 }
 
 TEST_F(ContainerQueryEvaluatorTest, ContainerChanged) {
+  PhysicalSize size_50(LayoutUnit(50), LayoutUnit(50));
   PhysicalSize size_100(LayoutUnit(100), LayoutUnit(100));
   PhysicalSize size_200(LayoutUnit(200), LayoutUnit(200));
 
+  ContainerQuery* container_query_50 = ParseContainer("(min-width: 50px)");
   ContainerQuery* container_query_100 = ParseContainer("(min-width: 100px)");
   ContainerQuery* container_query_200 = ParseContainer("(min-width: 200px)");
+  ASSERT_TRUE(container_query_50);
   ASSERT_TRUE(container_query_100);
   ASSERT_TRUE(container_query_200);
 
+  // Note that the stored results of `ContainerQueryEvaluator` are cleared every
+  // time `ContainerChanged` is called.
+
   auto* evaluator = MakeGarbageCollected<ContainerQueryEvaluator>();
-  evaluator->ContainerChanged(size_100, horizontal);
-  ASSERT_TRUE(evaluator);
+  ContainerChanged(evaluator, size_100, type_size, horizontal);
 
-  EXPECT_TRUE(evaluator->EvalAndAdd(*container_query_100));
-  EXPECT_FALSE(evaluator->EvalAndAdd(*container_query_200));
+  EXPECT_TRUE(EvalAndAdd(evaluator, *container_query_100));
+  EXPECT_FALSE(EvalAndAdd(evaluator, *container_query_200));
 
-  EXPECT_FALSE(ContainerChanged(evaluator, size_100, horizontal));
-  EXPECT_TRUE(evaluator->EvalAndAdd(*container_query_100));
-  EXPECT_FALSE(evaluator->EvalAndAdd(*container_query_200));
+  EXPECT_EQ(Change::kNone,
+            ContainerChanged(evaluator, size_100, type_size, horizontal));
+  EXPECT_TRUE(EvalAndAdd(evaluator, *container_query_100));
+  EXPECT_FALSE(EvalAndAdd(evaluator, *container_query_200));
 
-  EXPECT_TRUE(ContainerChanged(evaluator, size_200, horizontal));
-  EXPECT_TRUE(evaluator->EvalAndAdd(*container_query_100));
-  EXPECT_TRUE(evaluator->EvalAndAdd(*container_query_200));
+  EXPECT_EQ(Change::kNearestContainer,
+            ContainerChanged(evaluator, size_200, type_size, horizontal));
+  EXPECT_TRUE(EvalAndAdd(evaluator, *container_query_100));
+  EXPECT_TRUE(EvalAndAdd(evaluator, *container_query_200));
 
-  EXPECT_FALSE(ContainerChanged(evaluator, size_200, horizontal));
-  EXPECT_TRUE(evaluator->EvalAndAdd(*container_query_100));
-  EXPECT_TRUE(evaluator->EvalAndAdd(*container_query_200));
+  EXPECT_EQ(Change::kNone,
+            ContainerChanged(evaluator, size_200, type_size, horizontal));
+  EXPECT_TRUE(EvalAndAdd(evaluator, *container_query_100));
+  EXPECT_TRUE(EvalAndAdd(evaluator, *container_query_200));
 
-  EXPECT_TRUE(ContainerChanged(evaluator, size_200, vertical));
-  EXPECT_FALSE(evaluator->EvalAndAdd(*container_query_100));
-  EXPECT_FALSE(evaluator->EvalAndAdd(*container_query_200));
+  EXPECT_EQ(Change::kNearestContainer,
+            ContainerChanged(evaluator, size_200, type_size, vertical));
+  EXPECT_FALSE(EvalAndAdd(evaluator, *container_query_100));
+  EXPECT_FALSE(EvalAndAdd(evaluator, *container_query_200));
+
+  EXPECT_EQ(Change::kNearestContainer,
+            ContainerChanged(evaluator, size_100, type_size, horizontal));
+  EXPECT_EQ(Change::kNone,
+            ContainerChanged(evaluator, size_200, type_size, horizontal));
+  EXPECT_TRUE(
+      EvalAndAdd(evaluator, *container_query_100, Change::kNearestContainer));
+  EXPECT_TRUE(EvalAndAdd(evaluator, *container_query_200,
+                         Change::kDescendantContainers));
+
+  // Both container_query_100/200 changed their evaluation. `ContainerChanged`
+  // should return the biggest `Change`.
+  EXPECT_EQ(Change::kDescendantContainers,
+            ContainerChanged(evaluator, size_50, type_size, horizontal));
 }
 
 TEST_F(ContainerQueryEvaluatorTest, SizeInvalidation) {
   SetBodyInnerHTML(R"HTML(
     <style>
       #container {
-        contain: size layout style;
+        container-type: size;
         width: 500px;
         height: 500px;
       }
@@ -188,29 +243,35 @@ TEST_F(ContainerQueryEvaluatorTest, DependentQueries) {
   ASSERT_TRUE(query_min_200px);
 
   auto* evaluator = MakeGarbageCollected<ContainerQueryEvaluator>();
-  evaluator->ContainerChanged(size_100, horizontal);
+  ContainerChanged(evaluator, size_100, type_size, horizontal);
 
-  evaluator->EvalAndAdd(*query_min_200px);
-  evaluator->EvalAndAdd(*query_max_300px);
+  EvalAndAdd(evaluator, *query_min_200px);
+  EvalAndAdd(evaluator, *query_max_300px);
   // Updating with the same size as we initially had should not invalidate
   // any query results.
-  EXPECT_FALSE(ContainerChanged(evaluator, size_100, horizontal));
+  EXPECT_EQ(Change::kNone,
+            ContainerChanged(evaluator, size_100, type_size, horizontal));
 
   // Makes no difference for either of (min-width: 200px), (max-width: 300px):
-  EXPECT_FALSE(ContainerChanged(evaluator, size_150, horizontal));
+  EXPECT_EQ(Change::kNone,
+            ContainerChanged(evaluator, size_150, type_size, horizontal));
 
   // (min-width: 200px) becomes true:
-  EXPECT_TRUE(ContainerChanged(evaluator, size_200, horizontal));
+  EXPECT_EQ(Change::kNearestContainer,
+            ContainerChanged(evaluator, size_200, type_size, horizontal));
 
-  evaluator->EvalAndAdd(*query_min_200px);
-  evaluator->EvalAndAdd(*query_max_300px);
-  EXPECT_FALSE(ContainerChanged(evaluator, size_200, horizontal));
+  EvalAndAdd(evaluator, *query_min_200px);
+  EvalAndAdd(evaluator, *query_max_300px);
+  EXPECT_EQ(Change::kNone,
+            ContainerChanged(evaluator, size_200, type_size, horizontal));
 
   // Makes no difference for either of (min-width: 200px), (max-width: 300px):
-  EXPECT_FALSE(ContainerChanged(evaluator, size_300, horizontal));
+  EXPECT_EQ(Change::kNone,
+            ContainerChanged(evaluator, size_300, type_size, horizontal));
 
   // (max-width: 300px) becomes false:
-  EXPECT_TRUE(ContainerChanged(evaluator, size_400, horizontal));
+  EXPECT_EQ(Change::kNearestContainer,
+            ContainerChanged(evaluator, size_400, type_size, horizontal));
 }
 
 TEST_F(ContainerQueryEvaluatorTest, EvaluatorDisplayNone) {
@@ -218,7 +279,7 @@ TEST_F(ContainerQueryEvaluatorTest, EvaluatorDisplayNone) {
     <style>
       main {
         display: block;
-        contain: size layout style;
+        container-type: size;
         width: 500px;
         height: 500px;
       }

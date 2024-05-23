@@ -9,7 +9,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "components/webauthn/core/browser/internal_authenticator.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -29,7 +28,7 @@ class RenderFrameHost;
 // Implementation of the public InternalAuthenticator interface.
 // This class is meant only for trusted and internal components of Chrome to
 // use.
-class InternalAuthenticatorImpl : public autofill::InternalAuthenticator,
+class InternalAuthenticatorImpl : public webauthn::InternalAuthenticator,
                                   public WebContentsObserver {
  public:
   explicit InternalAuthenticatorImpl(RenderFrameHost* render_frame_host);

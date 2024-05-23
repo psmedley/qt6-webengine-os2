@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_FINDER_FIND_TASK_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_FINDER_FIND_TASK_CONTROLLER_H_
 
+#include "base/time/time.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/position.h"
@@ -84,6 +85,8 @@ class CORE_EXPORT FindTaskController final
                   const WebString& search_text_,
                   mojom::blink::FindOptionsPtr options_);
 
+  int GetMatchYieldCheckInterval() const;
+
  private:
   void RequestFindTask(int identifier,
                        const WebString& search_text,
@@ -140,6 +143,8 @@ class CORE_EXPORT FindTaskController final
   // been searched and returned 0 results, we don't need to search that frame
   // again if the user is just adding to the search (making it more specific).
   WTF::String last_search_string_;
+
+  int match_yield_check_interval_;
 };
 
 }  // namespace blink

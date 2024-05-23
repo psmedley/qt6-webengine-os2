@@ -28,6 +28,10 @@ namespace {
 class FailingSSLClientSocket : public SSLClientSocket {
  public:
   FailingSSLClientSocket() = default;
+
+  FailingSSLClientSocket(const FailingSSLClientSocket&) = delete;
+  FailingSSLClientSocket& operator=(const FailingSSLClientSocket&) = delete;
+
   ~FailingSSLClientSocket() override = default;
 
   // Socket implementation:
@@ -98,10 +102,14 @@ class FailingSSLClientSocket : public SSLClientSocket {
     return 0;
   }
 
+  // SSLClientSocket implementation:
+  std::vector<uint8_t> GetECHRetryConfigs() override {
+    NOTREACHED();
+    return {};
+  }
+
  private:
   NetLogWithSource net_log_;
-
-  DISALLOW_COPY_AND_ASSIGN(FailingSSLClientSocket);
 };
 
 }  // namespace
@@ -140,21 +148,6 @@ std::unique_ptr<SSLClientSocket> FuzzedSocketFactory::CreateSSLClientSocket(
     const HostPortPair& host_and_port,
     const SSLConfig& ssl_config) {
   return std::make_unique<FailingSSLClientSocket>();
-}
-
-std::unique_ptr<ProxyClientSocket> FuzzedSocketFactory::CreateProxyClientSocket(
-    std::unique_ptr<StreamSocket> stream_socket,
-    const std::string& user_agent,
-    const HostPortPair& endpoint,
-    const ProxyServer& proxy_server,
-    HttpAuthController* http_auth_controller,
-    bool tunnel,
-    bool using_spdy,
-    NextProto negotiated_protocol,
-    ProxyDelegate* proxy_delegate,
-    const NetworkTrafficAnnotationTag& traffic_annotation) {
-  NOTIMPLEMENTED();
-  return nullptr;
 }
 
 }  // namespace net

@@ -29,11 +29,11 @@ component("policy") {
     ":sanitizer_buildflags",
     "//base",
     "//build:chromeos_buildflags",
+    "//ppapi/buildflags",
     "//printing/buildflags",
-    "//sandbox:common",
     "//sandbox/policy/mojom",
   ]
-  public_deps = []
+  public_deps = [ "//sandbox:common" ]
   if (is_linux || is_chromeos) {
     sources += [
       "linux/bpf_audio_policy_linux.cc",
@@ -54,12 +54,12 @@ component("policy") {
       "linux/bpf_network_policy_linux.h",
       "linux/bpf_ppapi_policy_linux.cc",
       "linux/bpf_ppapi_policy_linux.h",
-      "linux/bpf_print_backend_policy_linux.cc",
-      "linux/bpf_print_backend_policy_linux.h",
       "linux/bpf_print_compositor_policy_linux.cc",
       "linux/bpf_print_compositor_policy_linux.h",
       "linux/bpf_renderer_policy_linux.cc",
       "linux/bpf_renderer_policy_linux.h",
+      "linux/bpf_screen_ai_policy_linux.cc",
+      "linux/bpf_screen_ai_policy_linux.h",
       "linux/bpf_service_policy_linux.cc",
       "linux/bpf_service_policy_linux.h",
       "linux/bpf_speech_recognition_policy_linux.cc",
@@ -73,6 +73,12 @@ component("policy") {
       "linux/sandbox_seccomp_bpf_linux.cc",
       "linux/sandbox_seccomp_bpf_linux.h",
     ]
+    if (enable_oop_printing) {
+      sources += [
+        "linux/bpf_print_backend_policy_linux.cc",
+        "linux/bpf_print_backend_policy_linux.h",
+      ]
+    }
     configs += [
       "//media:media_config",
       "//media/audio:platform_config",
@@ -118,6 +124,8 @@ component("policy") {
   }
   if (is_win) {
     sources += [
+      "win/lpac_capability.cc",
+      "win/lpac_capability.h",
       "win/sandbox_diagnostics.cc",
       "win/sandbox_diagnostics.h",
       "win/sandbox_win.cc",
@@ -138,13 +146,13 @@ component("policy") {
     ]
 
     deps += [
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.buildinfo",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.camera3",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.fonts",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.intl",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.logger",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.mediacodec",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.memorypressure",
-      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.net",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.net.interfaces",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.sysmem",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.scenic",
@@ -173,7 +181,9 @@ source_set("tests") {
     ":policy",
     "//base",
     "//base/test:test_support",
+    "//ppapi/buildflags:buildflags",
     "//printing/buildflags",
+    "//sandbox/policy/mojom",
     "//testing/gtest",
   ]
 
@@ -182,11 +192,34 @@ source_set("tests") {
       "win/mf_cdm_sandbox_type_unittest.cc",
       "win/sandbox_win_unittest.cc",
     ]
-    deps += [ "//sandbox/win:sandbox" ]
+    deps += [
+      ":sandbox_test_utils",
+      "//sandbox/win:sandbox",
+    ]
     data = [
       "//base/test/data/pe_image/pe_image_test_32.dll",
       "//base/test/data/pe_image/pe_image_test_64.dll",
       "//base/test/data/pe_image/pe_image_test_arm64.dll",
+    ]
+  }
+}
+
+source_set("sandbox_test_utils") {
+  testonly = true
+
+  if (is_win) {
+    sources = [
+      "win/sandbox_policy_feature_test.cc",
+      "win/sandbox_policy_feature_test.h",
+      "win/sandbox_test_utils.cc",
+      "win/sandbox_test_utils.h",
+    ]
+
+    deps = [
+      ":policy",
+      "//base/test:test_support",
+      "//sandbox/win:sandbox",
+      "//testing/gtest",
     ]
   }
 }

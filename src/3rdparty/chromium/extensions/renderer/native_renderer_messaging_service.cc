@@ -26,6 +26,7 @@
 #include "extensions/renderer/api_activity_logger.h"
 #include "extensions/renderer/bindings/api_binding_util.h"
 #include "extensions/renderer/bindings/get_per_context_data.h"
+#include "extensions/renderer/extension_interaction_provider.h"
 #include "extensions/renderer/get_script_context.h"
 #include "extensions/renderer/ipc_message_sender.h"
 #include "extensions/renderer/message_target.h"
@@ -41,7 +42,9 @@
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_scoped_window_focus_allowed_indicator.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-local-handle.h"
+#include "v8/include/v8-persistent-handle.h"
 
 using blink::mojom::UserActivationNotificationType;
 
@@ -163,7 +166,8 @@ void NativeRendererMessagingService::DispatchOnDisconnect(
 gin::Handle<GinPort> NativeRendererMessagingService::Connect(
     ScriptContext* script_context,
     const MessageTarget& target,
-    const std::string& channel_name) {
+    const std::string& channel_name,
+    SerializationFormat format) {
   if (!ScriptContextIsValid(script_context))
     return gin::Handle<GinPort>();
 
@@ -173,32 +177,44 @@ gin::Handle<GinPort> NativeRendererMessagingService::Connect(
     return gin::Handle<GinPort>();
 
   bool is_opener = true;
-  gin::Handle<GinPort> port = CreatePort(
-      script_context, channel_name,
-      PortId(script_context->context_id(), data->next_port_id++, is_opener));
+  gin::Handle<GinPort> port =
+      CreatePort(script_context, channel_name,
+                 PortId(script_context->context_id(), data->next_port_id++,
+                        is_opener, format));
 
   bindings_system_->GetIPCMessageSender()->SendOpenMessageChannel(
       script_context, port->port_id(), target, channel_name);
   return port;
 }
 
-void NativeRendererMessagingService::SendOneTimeMessage(
+v8::Local<v8::Promise> NativeRendererMessagingService::SendOneTimeMessage(
     ScriptContext* script_context,
     const MessageTarget& target,
     const std::string& method_name,
     const Message& message,
+    binding::AsyncResponseType async_type,
     v8::Local<v8::Function> response_callback) {
   if (!ScriptContextIsValid(script_context))
-    return;
+    return v8::Local<v8::Promise>();
 
   MessagingPerContextData* data = GetPerContextData<MessagingPerContextData>(
       script_context->v8_context(), kCreateIfMissing);
 
   bool is_opener = true;
-  PortId port_id(script_context->context_id(), data->next_port_id++, is_opener);
 
-  one_time_message_handler_.SendMessage(
-      script_context, port_id, target, method_name, message, response_callback);
+  // TODO(crbug.com/248548): Instead of inferring the SerializationFormat from
+  // Message, it'd be better to have the clients pass it directly. This is
+  // because, in case of `kStructuredCloned` to `kJson` fallback, the format for
+  // the ports will also be `kJson`. This is inconsistent with what we do for
+  // ports for long-lived channels where the port's `SerializationFormat` is
+  // always the same as that passed by messaging clients and is independent of
+  // any fallback behavior.
+  PortId port_id(script_context->context_id(), data->next_port_id++, is_opener,
+                 message.format);
+
+  return one_time_message_handler_.SendMessage(script_context, port_id, target,
+                                               method_name, message, async_type,
+                                               response_callback);
 }
 
 void NativeRendererMessagingService::PostMessageToPort(
@@ -320,6 +336,37 @@ void NativeRendererMessagingService::DeliverMessageToScriptContext(
   if (!ContextHasMessagePort(script_context, target_port_id))
     return;
 
+  if (script_context->IsForServiceWorker()) {
+    DeliverMessageToWorker(message, target_port_id, script_context);
+  } else {
+    DeliverMessageToBackgroundPage(message, target_port_id, script_context);
+  }
+}
+
+void NativeRendererMessagingService::DeliverMessageToWorker(
+    const Message& message,
+    const PortId& target_port_id,
+    ScriptContext* script_context) {
+  // Note |scoped_extension_interaction| requires a HandleScope.
+  v8::Isolate* isolate = script_context->isolate();
+  v8::HandleScope handle_scope(isolate);
+  std::unique_ptr<InteractionProvider::Scope> scoped_extension_interaction;
+  if (message.user_gesture) {
+    // TODO(https://crbug.com/977629): Add logging for privilege level for
+    // sender and receiver and decide if want to allow unprivileged to
+    // privileged support.
+    scoped_extension_interaction =
+        ExtensionInteractionProvider::Scope::ForWorker(
+            script_context->v8_context());
+  }
+
+  DispatchOnMessageToListeners(script_context, message, target_port_id);
+}
+
+void NativeRendererMessagingService::DeliverMessageToBackgroundPage(
+    const Message& message,
+    const PortId& target_port_id,
+    ScriptContext* script_context) {
   std::unique_ptr<blink::WebScopedWindowFocusAllowedIndicator>
       allow_window_focus;
   if (message.user_gesture && script_context->web_frame()) {
@@ -400,6 +447,8 @@ void NativeRendererMessagingService::DispatchOnConnectToListeners(
     sender_builder.Set("origin", info.source_origin->Serialize());
   if (source->frame_id >= 0)
     sender_builder.Set("frameId", source->frame_id);
+  if (!source->document_id.empty())
+    sender_builder.Set("documentId", source->document_id);
 
   const Extension* extension = script_context->extension();
   if (extension) {

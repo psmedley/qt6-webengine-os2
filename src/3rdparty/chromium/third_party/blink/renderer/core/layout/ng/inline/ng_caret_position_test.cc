@@ -41,7 +41,7 @@ class NGCaretPositionTest : public NGLayoutTest {
     DCHECK(container_);
     context_ = To<LayoutBlockFlow>(container_->GetLayoutObject());
     DCHECK(context_);
-    DCHECK(context_->IsLayoutNGMixin());
+    DCHECK(context_->IsLayoutNGObject());
   }
 
   NGCaretPosition ComputeNGCaretPosition(unsigned offset,
@@ -56,7 +56,7 @@ class NGCaretPositionTest : public NGLayoutTest {
   }
 
   Persistent<Element> container_;
-  const LayoutBlockFlow* context_;
+  Persistent<const LayoutBlockFlow> context_;
 };
 
 #define TEST_CARET(caret, fragment_, type_, offset_)                         \

@@ -7,10 +7,8 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
@@ -194,6 +192,11 @@ class MultiThreadFileSystemOperationRunnerTest : public testing::Test {
   MultiThreadFileSystemOperationRunnerTest()
       : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
 
+  MultiThreadFileSystemOperationRunnerTest(
+      const MultiThreadFileSystemOperationRunnerTest&) = delete;
+  MultiThreadFileSystemOperationRunnerTest& operator=(
+      const MultiThreadFileSystemOperationRunnerTest&) = delete;
+
   void SetUp() override {
     ASSERT_TRUE(base_.CreateUniqueTempDir());
 
@@ -205,7 +208,7 @@ class MultiThreadFileSystemOperationRunnerTest : public testing::Test {
         base::MakeRefCounted<storage::MockSpecialStoragePolicy>(),
         /*quota_manager_proxy=*/nullptr,
         std::vector<std::unique_ptr<storage::FileSystemBackend>>(),
-        std::vector<storage::URLRequestAutoMountHandler>(), base_dir,
+        std::vector<storage::URLRequestAutoMountHandler>(), base_dir, base_dir,
         storage::CreateAllowFileAccessOptions());
 
     // Disallow IO on the main loop.
@@ -232,8 +235,6 @@ class MultiThreadFileSystemOperationRunnerTest : public testing::Test {
   content::BrowserTaskEnvironment task_environment_;
   absl::optional<base::ScopedDisallowBlocking> disallow_blocking_;
   scoped_refptr<FileSystemContext> file_system_context_;
-
-  DISALLOW_COPY_AND_ASSIGN(MultiThreadFileSystemOperationRunnerTest);
 };
 
 TEST_F(MultiThreadFileSystemOperationRunnerTest, OpenAndShutdown) {

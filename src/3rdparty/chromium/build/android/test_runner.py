@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 #
 # Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -242,12 +242,10 @@ def AddCommonOptions(parser):
 def ProcessCommonOptions(args):
   """Processes and handles all common options."""
   run_tests_helper.SetLogLevel(args.verbose_count, add_handler=False)
-  # pylint: disable=redefined-variable-type
   if args.verbose_count > 0:
     handler = logging_utils.ColorStreamHandler()
   else:
     handler = logging.StreamHandler(sys.stdout)
-  # pylint: enable=redefined-variable-type
   handler.setFormatter(run_tests_helper.CustomFormatter())
   logging.getLogger().addHandler(handler)
 
@@ -352,10 +350,6 @@ def AddGTestOptions(parser):
       '--app-data-file-dir',
       help='Host directory to which app data files will be'
            ' saved. Used with --app-data-file.')
-  parser.add_argument(
-      '--delete-stale-data',
-      dest='delete_stale_data', action='store_true',
-      help='Delete stale test data on the device.')
   parser.add_argument(
       '--enable-xml-result-parsing',
       action='store_true', help=argparse.SUPPRESS)
@@ -468,41 +462,28 @@ def AddInstrumentationTestOptions(parser):
       help='Directory in which to place all generated '
       'Jacoco coverage files.')
   parser.add_argument(
-      '--delete-stale-data',
-      action='store_true', dest='delete_stale_data',
-      help='Delete stale test data on the device.')
-  parser.add_argument(
       '--disable-dalvik-asserts',
       dest='set_asserts', action='store_false', default=True,
       help='Removes the dalvik.vm.enableassertions property')
   parser.add_argument(
-      '--enable-java-deobfuscation',
-      action='store_true',
-      help='Deobfuscate java stack traces in test output and logcat.')
+      '--proguard-mapping-path',
+      help='.mapping file to use to Deobfuscate java stack traces in test '
+      'output and logcat.')
   parser.add_argument(
       '-E', '--exclude-annotation',
       dest='exclude_annotation_str',
       help='Comma-separated list of annotations. Exclude tests with these '
            'annotations.')
-  def package_replacement(arg):
-    split_arg = arg.split(',')
-    if len(split_arg) != 2:
-      raise argparse.ArgumentError(
-          arg,
-          'Expected two comma-separated strings for --replace-system-package, '
-          'received %d' % len(split_arg))
-    PackageReplacement = collections.namedtuple('PackageReplacement',
-                                                ['package', 'replacement_apk'])
-    return PackageReplacement(package=split_arg[0],
-                              replacement_apk=_RealPath(split_arg[1]))
+  parser.add_argument(
+      '--enable-breakpad-dump',
+      action='store_true',
+      help='Stores any breakpad dumps till the end of the test.')
   parser.add_argument(
       '--replace-system-package',
-      type=package_replacement, default=None,
-      help='Specifies a system package to replace with a given APK for the '
-           'duration of the test. Given as a comma-separated pair of strings, '
-           'the first element being the package and the second the path to the '
-           'replacement APK. Only supports replacing one package. Example: '
-           '--replace-system-package com.example.app,path/to/some.apk')
+      type=_RealPath,
+      default=None,
+      help='Use this apk to temporarily replace a system package with the same '
+      'package name.')
   parser.add_argument(
       '--remove-system-package',
       default=[],
@@ -826,8 +807,43 @@ def RunTestsCommand(args, result_sink_client=None):
 
   if command == 'python':
     return _RunPythonTests(args)
-  else:
-    raise Exception('Unknown test type.')
+  raise Exception('Unknown test type.')
+
+
+def _SinkTestResult(test_result, test_file_name, result_sink_client):
+  """Upload test result to result_sink.
+
+  Args:
+    test_result: A BaseTestResult object
+    test_file_name: A string representing the file location of the test
+    result_sink_client: A ResultSinkClient object
+
+  Returns:
+    N/A
+  """
+  # Some tests put in non utf-8 char as part of the test
+  # which breaks uploads, so need to decode and re-encode.
+  log_decoded = test_result.GetLog()
+  if isinstance(log_decoded, bytes):
+    log_decoded = log_decoded.decode('utf-8', 'replace')
+  html_artifact = ''
+  https_artifacts = []
+  for link_name, link_url in sorted(test_result.GetLinks().items()):
+    if link_url.startswith('https:'):
+      https_artifacts.append('<li><a target="_blank" href=%s>%s</a></li>' %
+                             (link_url, link_name))
+    else:
+      logging.info('Skipping non-https link %r (%s) for test %s.', link_name,
+                   link_url, test_result.GetName())
+  if https_artifacts:
+    html_artifact += '<ul>%s</ul>' % '\n'.join(https_artifacts)
+  result_sink_client.Post(test_result.GetName(),
+                          test_result.GetType(),
+                          test_result.GetDuration(),
+                          log_decoded.encode('utf-8'),
+                          test_file_name,
+                          failure_reason=test_result.GetFailureReason(),
+                          html_artifact=html_artifact)
 
 
 _SUPPORTED_IN_PLATFORM_MODE = [
@@ -939,15 +955,7 @@ def RunTestsInPlatformMode(args, result_sink_client=None):
               match = re.search(r'^(.+\..+)#', r.GetName())
               test_file_name = test_class_to_file_name_dict.get(
                   match.group(1)) if match else None
-              # Some tests put in non utf-8 char as part of the test
-              # which breaks uploads, so need to decode and re-encode.
-              result_sink_client.Post(r.GetName(),
-                                      r.GetType(),
-                                      r.GetDuration(),
-                                      r.GetLog().decode(
-                                          'utf-8', 'replace').encode('utf-8'),
-                                      test_file_name,
-                                      failure_reason=r.GetFailureReason())
+              _SinkTestResult(r, test_file_name, result_sink_client)
 
   @contextlib.contextmanager
   def upload_logcats_file():
@@ -1060,7 +1068,7 @@ def RunTestsInPlatformMode(args, result_sink_client=None):
             test_name=args.command,
             cs_base_url='http://cs.chromium.org',
             local_output=True)
-        results_detail_file.write(result_html_string.encode('utf-8'))
+        results_detail_file.write(result_html_string)
         results_detail_file.flush()
       logging.critical('TEST RESULTS: %s', results_detail_file.Link())
 

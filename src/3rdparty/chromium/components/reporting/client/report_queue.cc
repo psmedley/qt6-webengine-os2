@@ -16,8 +16,8 @@
 #include "base/strings/strcat.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "components/reporting/proto/record.pb.h"
-#include "components/reporting/proto/record_constants.pb.h"
+#include "components/reporting/proto/synced/record.pb.h"
+#include "components/reporting/proto/synced/record_constants.pb.h"
 #include "components/reporting/util/status.h"
 #include "components/reporting/util/status_macros.h"
 #include "components/reporting/util/statusor.h"
@@ -26,7 +26,7 @@ namespace reporting {
 
 namespace {
 
-StatusOr<std::string> ValueToJson(const base::Value& record) {
+StatusOr<std::string> ValueToJson(const base::Value::Dict& record) {
   std::string json_record;
   if (!base::JSONWriter::Write(record, &json_record)) {
     return Status(error::INVALID_ARGUMENT,
@@ -56,7 +56,7 @@ void ReportQueue::Enqueue(base::StringPiece record,
   AddRecord(record, priority, std::move(callback));
 }
 
-void ReportQueue::Enqueue(const base::Value& record,
+void ReportQueue::Enqueue(const base::Value::Dict& record,
                           Priority priority,
                           ReportQueue::EnqueueCallback callback) const {
   ASSIGN_OR_ONCE_CALLBACK_AND_RETURN(std::string json_record, callback,

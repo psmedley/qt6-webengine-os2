@@ -38,6 +38,10 @@ jumbo_component("wifi") {
       "SystemConfiguration.framework",
     ]
   }
+
+  if (is_fuchsia) {
+    sources += [ "wifi_service_fuchsia.cc" ]
+  }
 }
 
 jumbo_static_library("test_support") {

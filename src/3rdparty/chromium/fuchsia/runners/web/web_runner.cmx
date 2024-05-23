@@ -1,10 +1,14 @@
 {
+  "program": {
+    "binary": "web_runner_exe"
+  },
   "sandbox": {
     "features": [
       "isolated-persistent-storage"
     ],
     "services": [
       "fuchsia.accessibility.semantics.SemanticsManager",
+      "fuchsia.buildinfo.Provider",
       "fuchsia.camera3.DeviceWatcher",
       "fuchsia.device.NameProvider",
       "fuchsia.feedback.ComponentDataRegister",
@@ -14,12 +18,12 @@
       "fuchsia.intl.PropertyProvider",
       "fuchsia.logger.LogSink",
       "fuchsia.media.Audio",
+      "fuchsia.media.AudioDeviceEnumerator",
       "fuchsia.media.ProfileProvider",
       "fuchsia.media.SessionAudioConsumerFactory",
       "fuchsia.media.drm.Widevine",
       "fuchsia.mediacodec.CodecFactory",
       "fuchsia.memorypressure.Provider",
-      "fuchsia.net.NameLookup",
       "fuchsia.net.interfaces.State",
       "fuchsia.net.name.Lookup",
       "fuchsia.posix.socket.Provider",
@@ -27,6 +31,8 @@
       "fuchsia.sys.Environment",
       "fuchsia.sys.Loader",
       "fuchsia.sysmem.Allocator",
+      "fuchsia.ui.composition.Allocator",
+      "fuchsia.ui.composition.Flatland",
       "fuchsia.ui.input3.Keyboard",
       "fuchsia.ui.scenic.Scenic",
       "fuchsia.vulkan.loader.Loader"

@@ -18,7 +18,7 @@
 
 #include "base/files/file.h"
 #include "base/files/memory_mapped_file.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
 #include "ui/base/resource/data_pack_export.h"
 #include "ui/base/resource/resource_handle.h"
@@ -34,6 +34,10 @@ enum ResourceScaleFactor : int;
 class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
  public:
   explicit DataPack(ResourceScaleFactor resource_scale_factor);
+
+  DataPack(const DataPack&) = delete;
+  DataPack& operator=(const DataPack&) = delete;
+
   ~DataPack() override;
 
   // Load a pack file from |path|, returning false on error. If the final
@@ -72,12 +76,11 @@ class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
       uint16_t resource_id) const override;
   TextEncodingType GetTextEncodingType() const override;
   ResourceScaleFactor GetResourceScaleFactor() const override;
-
 #if DCHECK_IS_ON()
   // Checks to see if any resource in this DataPack already exists in the list
   // of resources.
   void CheckForDuplicateResources(
-      const std::vector<std::unique_ptr<ResourceHandle>>& packs);
+      const std::vector<std::unique_ptr<ResourceHandle>>& packs) override;
 #endif
 
   // Return the size of the resource and alias tables. Should only be used for
@@ -102,9 +105,9 @@ class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
 
   std::unique_ptr<DataSource> data_source_;
 
-  const Entry* resource_table_;
+  raw_ptr<const Entry> resource_table_;
   size_t resource_count_;
-  const Alias* alias_table_;
+  raw_ptr<const Alias> alias_table_;
   size_t alias_count_;
 
   // Type of encoding for text resources.
@@ -113,8 +116,6 @@ class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
   // The scale of the image in this resource pack relative to images in the 1x
   // resource pak.
   ResourceScaleFactor resource_scale_factor_;
-
-  DISALLOW_COPY_AND_ASSIGN(DataPack);
 };
 
 }  // namespace ui

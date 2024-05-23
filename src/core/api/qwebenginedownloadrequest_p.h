@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QWEBENGINEDOWNLOADREQUEST_P_H
 #define QWEBENGINEDOWNLOADREQUEST_P_H
@@ -67,32 +31,35 @@ QT_BEGIN_NAMESPACE
 class Q_WEBENGINECORE_PRIVATE_EXPORT QWebEngineDownloadRequestPrivate
 {
 public:
-    QWebEngineDownloadRequestPrivate(QtWebEngineCore::ProfileAdapter *adapter, const QUrl &url);
+    QWebEngineDownloadRequestPrivate(QtWebEngineCore::ProfileAdapter *adapter);
     ~QWebEngineDownloadRequestPrivate();
 
     void update(const QtWebEngineCore::ProfileAdapterClient::DownloadItemInfo &info);
     void setFinished();
 
-    bool downloadFinished;
-    quint32 downloadId;
+    bool downloadFinished = false;
+    quint32 downloadId = -1;
     qint64 startTime;
-    QWebEngineDownloadRequest::DownloadState downloadState;
-    QWebEngineDownloadRequest::SavePageFormat savePageFormat;
-    QWebEngineDownloadRequest::DownloadInterruptReason interruptReason;
+    QWebEngineDownloadRequest::DownloadState downloadState =
+            QWebEngineDownloadRequest::DownloadCancelled;
+    QWebEngineDownloadRequest::SavePageFormat savePageFormat =
+            QWebEngineDownloadRequest::MimeHtmlSaveFormat;
+    QWebEngineDownloadRequest::DownloadInterruptReason interruptReason =
+            QWebEngineDownloadRequest::NoReason;
     QString downloadPath;
-    const QUrl downloadUrl;
+    QUrl downloadUrl;
     QString mimeType;
-    bool downloadPaused;
+    bool downloadPaused = false;
     QString suggestedFileName;
     QString downloadDirectory;
     QString downloadFileName;
-    bool isCustomFileName;
-    qint64 totalBytes;
-    qint64 receivedBytes;
-    bool isSavePageDownload;
+    bool isCustomFileName = false;
+    qint64 totalBytes = -1;
+    qint64 receivedBytes = 0;
+    bool isSavePageDownload = false;
     QWebEngineDownloadRequest *q_ptr;
     QPointer<QtWebEngineCore::ProfileAdapter> profileAdapter;
-    QtWebEngineCore::WebContentsAdapterClient *adapterClient;
+    QtWebEngineCore::WebContentsAdapterClient *adapterClient = nullptr;
     Q_DECLARE_PUBLIC(QWebEngineDownloadRequest)
 };
 

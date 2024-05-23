@@ -15,7 +15,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/values.h"
 #include "content/public/common/common_param_traits.h"
@@ -25,10 +24,10 @@
 #include "extensions/common/api/messaging/messaging_endpoint.h"
 #include "extensions/common/api/messaging/port_context.h"
 #include "extensions/common/api/messaging/port_id.h"
+#include "extensions/common/api/messaging/serialization_format.h"
 #include "extensions/common/common_param_traits.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/draggable_region.h"
-#include "extensions/common/event_filtering_info.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_guid.h"
 #include "extensions/common/extensions_client.h"
@@ -65,6 +64,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(extensions::mojom::RunLocation,
 
 IPC_ENUM_TRAITS_MAX_VALUE(extensions::MessagingEndpoint::Type,
                           extensions::MessagingEndpoint::Type::kLast)
+
+IPC_ENUM_TRAITS_MAX_VALUE(extensions::SerializationFormat,
+                          extensions::SerializationFormat::kLast)
 
 // Parameters structure for ExtensionHostMsg_AddAPIActionToActivityLog and
 // ExtensionHostMsg_AddEventToActivityLog.
@@ -135,27 +137,6 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::mojom::RequestParams)
   IPC_STRUCT_TRAITS_MEMBER(service_worker_version_id)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(extensions::mojom::DispatchEventParams)
-  // If this event is for a service worker, then this is the worker thread
-  // id. Otherwise, this is 0.
-  IPC_STRUCT_TRAITS_MEMBER(worker_thread_id)
-
-  // The id of the extension to dispatch the event to.
-  IPC_STRUCT_TRAITS_MEMBER(extension_id)
-
-  // The name of the event to dispatch.
-  IPC_STRUCT_TRAITS_MEMBER(event_name)
-
-  // The id of the event for use in the EventAck response message.
-  IPC_STRUCT_TRAITS_MEMBER(event_id)
-
-  // Whether or not the event is part of a user gesture.
-  IPC_STRUCT_TRAITS_MEMBER(is_user_gesture)
-
-  // Additional filtering info for the event.
-  IPC_STRUCT_TRAITS_MEMBER(filtering_info)
-IPC_STRUCT_TRAITS_END()
-
 // Struct containing information about the sender of connect() calls that
 // originate from a tab.
 IPC_STRUCT_BEGIN(ExtensionMsg_TabConnectionInfo)
@@ -165,6 +146,9 @@ IPC_STRUCT_BEGIN(ExtensionMsg_TabConnectionInfo)
   // The ID of the frame that initiated the connection.
   // 0 if main frame, positive otherwise. -1 if not initiated from a frame.
   IPC_STRUCT_MEMBER(int, frame_id)
+
+  // The unique ID of the document of the frame that initiated the connection.
+  IPC_STRUCT_MEMBER(std::string, document_id)
 IPC_STRUCT_END()
 
 // Struct containing information about the destination of tab.connect().
@@ -175,6 +159,9 @@ IPC_STRUCT_BEGIN(ExtensionMsg_TabTargetConnectionInfo)
   // Frame ID of the destination. -1 for all frames, 0 for main frame and
   // positive if the destination is a specific child frame.
   IPC_STRUCT_MEMBER(int, frame_id)
+
+  // The unique ID of the document of the target frame.
+  IPC_STRUCT_MEMBER(std::string, document_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(extensions::MessagingEndpoint)
@@ -255,6 +242,7 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(extensions::Message)
   IPC_STRUCT_TRAITS_MEMBER(data)
+  IPC_STRUCT_TRAITS_MEMBER(format)
   IPC_STRUCT_TRAITS_MEMBER(user_gesture)
 IPC_STRUCT_TRAITS_END()
 
@@ -262,14 +250,7 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::PortId)
   IPC_STRUCT_TRAITS_MEMBER(context_id)
   IPC_STRUCT_TRAITS_MEMBER(port_number)
   IPC_STRUCT_TRAITS_MEMBER(is_opener)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(extensions::EventFilteringInfo)
-  IPC_STRUCT_TRAITS_MEMBER(url)
-  IPC_STRUCT_TRAITS_MEMBER(service_type)
-  IPC_STRUCT_TRAITS_MEMBER(instance_id)
-  IPC_STRUCT_TRAITS_MEMBER(window_type)
-  IPC_STRUCT_TRAITS_MEMBER(window_exposed_by_default)
+  IPC_STRUCT_TRAITS_MEMBER(serialization_format)
 IPC_STRUCT_TRAITS_END()
 
 // Singly-included section for custom IPC traits.
@@ -298,17 +279,6 @@ IPC_STRUCT_TRAITS_MEMBER(value)
 IPC_STRUCT_TRAITS_END()
 
 // Messages sent from the browser to the renderer:
-
-// Sent to the renderer to dispatch an event to an extension.
-// Note: |event_args| is separate from the params to avoid having the message
-// take ownership.
-IPC_MESSAGE_CONTROL2(ExtensionMsg_DispatchEvent,
-                     extensions::mojom::DispatchEventParams /* params */,
-                     base::ListValue /* event_args */)
-
-// Tell the render view which browser window it's being attached to.
-IPC_MESSAGE_ROUTED1(ExtensionMsg_UpdateBrowserWindowId,
-                    int /* id of browser window */)
 
 // The browser's response to the ExtensionMsg_WakeEventPage IPC.
 IPC_MESSAGE_CONTROL2(ExtensionMsg_WakeEventPageResponse,
@@ -393,6 +363,13 @@ IPC_MESSAGE_CONTROL3(ExtensionHostMsg_CloseMessagePort,
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_PostMessage,
                      extensions::PortId /* port_id */,
                      extensions::Message)
+
+// Send a message to tell the browser that one of the listeners for a message
+// indicated they are intending to reply later. The handle is the value returned
+// by ExtensionHostMsg_OpenChannelTo*.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_ResponsePending,
+                     extensions::PortContext /* port_context */,
+                     extensions::PortId /*port_id */)
 
 // Used to get the extension message bundle.
 IPC_SYNC_MESSAGE_CONTROL1_1(
@@ -481,14 +458,15 @@ IPC_MESSAGE_CONTROL1(ExtensionHostMsg_RequestWorker,
                      extensions::mojom::RequestParams)
 
 // The browser sends this message in response to all service worker extension
-// api calls. The response data (if any) is one of the base::Value subclasses,
-// wrapped as the first element in a ListValue.
-IPC_MESSAGE_CONTROL5(ExtensionMsg_ResponseWorker,
-                     int /* thread_id */,
-                     int /* request_id */,
-                     bool /* success */,
-                     base::ListValue /* response wrapper (see comment above) */,
-                     std::string /* error */)
+// api calls. The response data (if any) is the first element in the Value::List
+// parameter.
+IPC_MESSAGE_CONTROL5(
+    ExtensionMsg_ResponseWorker,
+    int /* thread_id */,
+    int /* request_id */,
+    bool /* success */,
+    base::Value::List /* response wrapper (see comment above) */,
+    std::string /* error */)
 
 // Asks the browser to increment the pending activity count for
 // the worker with version id |service_worker_version_id|.

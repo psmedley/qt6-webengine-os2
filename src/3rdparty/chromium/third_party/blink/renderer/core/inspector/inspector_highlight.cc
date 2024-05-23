@@ -24,7 +24,7 @@
 #include "third_party/blink/renderer/core/inspector/dom_traversal_utils.h"
 #include "third_party/blink/renderer/core/inspector/inspector_dom_agent.h"
 #include "third_party/blink/renderer/core/inspector/node_content_visibility_state.h"
-#include "third_party/blink/renderer/core/inspector/protocol/Overlay.h"
+#include "third_party/blink/renderer/core/inspector/protocol/overlay.h"
 #include "third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/ng/flex/layout_ng_flexible_box.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/shapes/shape_outside_info.h"
@@ -40,12 +41,12 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/grid_positions_resolver.h"
-#include "third_party/blink/renderer/platform/geometry/float_point.h"
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/graphics/path.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
+#include "ui/gfx/geometry/point_f.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace blink {
 
@@ -69,7 +70,7 @@ class PathBuilder {
   }
 
  protected:
-  virtual FloatPoint TranslatePoint(const FloatPoint& point) { return point; }
+  virtual gfx::PointF TranslatePoint(const gfx::PointF& point) { return point; }
 
  private:
   static void AppendPathElement(void* path_builder,
@@ -79,20 +80,20 @@ class PathBuilder {
 
   void AppendPathElement(const PathElement*);
   void AppendPathCommandAndPoints(const char* command,
-                                  const FloatPoint points[],
+                                  const gfx::PointF points[],
                                   size_t length);
 
   std::unique_ptr<protocol::ListValue> path_;
 };
 
 void PathBuilder::AppendPathCommandAndPoints(const char* command,
-                                             const FloatPoint points[],
+                                             const gfx::PointF points[],
                                              size_t length) {
   path_->pushValue(protocol::StringValue::create(command));
   for (size_t i = 0; i < length; i++) {
-    FloatPoint point = TranslatePoint(points[i]);
-    path_->pushValue(protocol::FundamentalValue::create(point.X()));
-    path_->pushValue(protocol::FundamentalValue::create(point.Y()));
+    gfx::PointF point = TranslatePoint(points[i]);
+    path_->pushValue(protocol::FundamentalValue::create(point.x()));
+    path_->pushValue(protocol::FundamentalValue::create(point.y()));
   }
 }
 
@@ -142,12 +143,12 @@ class ShapePathBuilder : public PathBuilder {
   }
 
  protected:
-  FloatPoint TranslatePoint(const FloatPoint& point) override {
-    PhysicalOffset layout_object_point = PhysicalOffset::FromFloatPointRound(
+  gfx::PointF TranslatePoint(const gfx::PointF& point) override {
+    PhysicalOffset layout_object_point = PhysicalOffset::FromPointFRound(
         shape_outside_info_.ShapeToLayoutObjectPoint(point));
     // TODO(pfeldman): Is this kIgnoreTransforms correct?
-    return FloatPoint(view_->FrameToViewport(
-        RoundedIntPoint(layout_object_->LocalToAbsolutePoint(
+    return gfx::PointF(view_->FrameToViewport(
+        ToRoundedPoint(layout_object_->LocalToAbsolutePoint(
             layout_object_point, kIgnoreTransforms))));
   }
 
@@ -158,47 +159,47 @@ class ShapePathBuilder : public PathBuilder {
 };
 
 std::unique_ptr<protocol::Array<double>> BuildArrayForQuad(
-    const FloatQuad& quad) {
+    const gfx::QuadF& quad) {
   return std::make_unique<std::vector<double>, std::initializer_list<double>>(
-      {quad.P1().X(), quad.P1().Y(), quad.P2().X(), quad.P2().Y(),
-       quad.P3().X(), quad.P3().Y(), quad.P4().X(), quad.P4().Y()});
+      {quad.p1().x(), quad.p1().y(), quad.p2().x(), quad.p2().y(),
+       quad.p3().x(), quad.p3().y(), quad.p4().x(), quad.p4().y()});
 }
 
-Path QuadToPath(const FloatQuad& quad) {
+Path QuadToPath(const gfx::QuadF& quad) {
   Path quad_path;
-  quad_path.MoveTo(quad.P1());
-  quad_path.AddLineTo(quad.P2());
-  quad_path.AddLineTo(quad.P3());
-  quad_path.AddLineTo(quad.P4());
+  quad_path.MoveTo(quad.p1());
+  quad_path.AddLineTo(quad.p2());
+  quad_path.AddLineTo(quad.p3());
+  quad_path.AddLineTo(quad.p4());
   quad_path.CloseSubpath();
   return quad_path;
 }
 
-Path RowQuadToPath(const FloatQuad& quad, bool drawEndLine) {
+Path RowQuadToPath(const gfx::QuadF& quad, bool draw_end_line) {
   Path quad_path;
-  quad_path.MoveTo(quad.P1());
-  quad_path.AddLineTo(quad.P2());
-  if (drawEndLine) {
-    quad_path.MoveTo(quad.P3());
-    quad_path.AddLineTo(quad.P4());
+  quad_path.MoveTo(quad.p1());
+  quad_path.AddLineTo(quad.p2());
+  if (draw_end_line) {
+    quad_path.MoveTo(quad.p3());
+    quad_path.AddLineTo(quad.p4());
   }
   return quad_path;
 }
 
-Path ColumnQuadToPath(const FloatQuad& quad, bool drawEndLine) {
+Path ColumnQuadToPath(const gfx::QuadF& quad, bool draw_end_line) {
   Path quad_path;
-  quad_path.MoveTo(quad.P1());
-  quad_path.AddLineTo(quad.P4());
-  if (drawEndLine) {
-    quad_path.MoveTo(quad.P3());
-    quad_path.AddLineTo(quad.P2());
+  quad_path.MoveTo(quad.p1());
+  quad_path.AddLineTo(quad.p4());
+  if (draw_end_line) {
+    quad_path.MoveTo(quad.p3());
+    quad_path.AddLineTo(quad.p2());
   }
   return quad_path;
 }
 
-FloatPoint FramePointToViewport(const LocalFrameView* view,
-                                FloatPoint point_in_frame) {
-  FloatPoint point_in_root_frame = view->ConvertToRootFrame(point_in_frame);
+gfx::PointF FramePointToViewport(const LocalFrameView* view,
+                                 gfx::PointF point_in_frame) {
+  gfx::PointF point_in_root_frame = view->ConvertToRootFrame(point_in_frame);
   return view->GetPage()->GetVisualViewport().RootFrameToViewport(
       point_in_root_frame);
 }
@@ -212,16 +213,16 @@ float DeviceScaleFromFrameView(const LocalFrameView* frame_view) {
                    &frame_view->GetFrame(), 1.f);
 }
 
-void FrameQuadToViewport(const LocalFrameView* view, FloatQuad& quad) {
-  quad.SetP1(FramePointToViewport(view, quad.P1()));
-  quad.SetP2(FramePointToViewport(view, quad.P2()));
-  quad.SetP3(FramePointToViewport(view, quad.P3()));
-  quad.SetP4(FramePointToViewport(view, quad.P4()));
+void FrameQuadToViewport(const LocalFrameView* view, gfx::QuadF& quad) {
+  quad.set_p1(FramePointToViewport(view, quad.p1()));
+  quad.set_p2(FramePointToViewport(view, quad.p2()));
+  quad.set_p3(FramePointToViewport(view, quad.p3()));
+  quad.set_p4(FramePointToViewport(view, quad.p4()));
 }
 
 const ShapeOutsideInfo* ShapeOutsideInfoForNode(Node* node,
                                                 Shape::DisplayPaths* paths,
-                                                FloatQuad* bounds) {
+                                                gfx::QuadF* bounds) {
   LayoutObject* layout_object = node->GetLayoutObject();
   if (!layout_object || !layout_object->IsBox() ||
       !To<LayoutBox>(layout_object)->GetShapeOutsideInfo())
@@ -254,11 +255,11 @@ String ContrastAlgorithmToString(const ContrastAlgorithm& contrast_algorithm) {
   // values. These string values are sent to the overlay code that is expected
   // to handle them properly.
   switch (contrast_algorithm) {
-    case ContrastAlgorithm::AA:
+    case ContrastAlgorithm::kAa:
       return ContrastAlgorithmEnum::Aa;
-    case ContrastAlgorithm::AAA:
+    case ContrastAlgorithm::kAaa:
       return ContrastAlgorithmEnum::Aaa;
-    case ContrastAlgorithm::APCA:
+    case ContrastAlgorithm::kApca:
       return ContrastAlgorithmEnum::Apca;
   }
 }
@@ -365,9 +366,9 @@ std::unique_ptr<protocol::DictionaryValue> BuildElementInfo(Element* element) {
 
   DCHECK(element->GetDocument().Lifecycle().GetState() >=
          DocumentLifecycle::kLayoutClean);
-  FloatRect bounding_box = element->GetBoundingClientRectNoLifecycleUpdate();
-  element_info->setString("nodeWidth", String::Number(bounding_box.Width()));
-  element_info->setString("nodeHeight", String::Number(bounding_box.Height()));
+  gfx::RectF bounding_box = element->GetBoundingClientRectNoLifecycleUpdate();
+  element_info->setString("nodeWidth", String::Number(bounding_box.width()));
+  element_info->setString("nodeHeight", String::Number(bounding_box.height()));
 
   element_info->setBoolean("isKeyboardFocusable",
                            element->IsKeyboardFocusable());
@@ -537,6 +538,20 @@ BuildContainerQueryContainerHighlightConfigInfo(
   return container_config_info;
 }
 
+std::unique_ptr<protocol::DictionaryValue>
+BuildIsolationModeHighlightConfigInfo(
+    const InspectorIsolationModeHighlightConfig& config) {
+  std::unique_ptr<protocol::DictionaryValue> config_info =
+      protocol::DictionaryValue::create();
+
+  config_info->setString("resizerColor", config.resizer_color.Serialized());
+  config_info->setString("resizerHandleColor",
+                         config.resizer_handle_color.Serialized());
+  config_info->setString("maskColor", config.mask_color.Serialized());
+
+  return config_info;
+}
+
 // Swaps |left| and |top| of an offset.
 PhysicalOffset Transpose(PhysicalOffset& offset) {
   return PhysicalOffset(offset.top, offset.left);
@@ -594,16 +609,12 @@ PhysicalOffset LocalToAbsolutePoint(Node* node,
                                     float scale) {
   LayoutObject* layout_object = node->GetLayoutObject();
   PhysicalOffset abs_point = layout_object->LocalToAbsolutePoint(local);
-  FloatPoint abs_point_in_viewport = FramePointToViewport(
-      node->GetDocument().View(), FloatPoint(abs_point.left, abs_point.top));
+  gfx::PointF abs_point_in_viewport = FramePointToViewport(
+      node->GetDocument().View(), gfx::PointF(abs_point.left, abs_point.top));
   PhysicalOffset scaled_abs_point =
-      PhysicalOffset::FromFloatPointRound(abs_point_in_viewport);
+      PhysicalOffset::FromPointFRound(abs_point_in_viewport);
   scaled_abs_point.Scale(scale);
   return scaled_abs_point;
-}
-
-FloatQuad ToFloatQuad(const gfx::RectF& rect) {
-  return FloatRect(rect);
 }
 
 String SnapAlignToString(const cc::SnapAlignment& value) {
@@ -621,7 +632,7 @@ String SnapAlignToString(const cc::SnapAlignment& value) {
 
 std::unique_ptr<protocol::ListValue> BuildPathFromQuad(
     const blink::LocalFrameView* containing_view,
-    FloatQuad quad) {
+    gfx::QuadF quad) {
   FrameQuadToViewport(containing_view, quad);
   PathBuilder builder;
   builder.AppendPath(QuadToPath(quad),
@@ -878,7 +889,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildAreaNamePaths(
     PhysicalSize size(end_column - start_column - column_gap_offset,
                       end_row - start_row - row_gap_offset);
     PhysicalRect area_rect(position, size);
-    FloatQuad area_quad = layout_object->LocalRectToAbsoluteQuad(area_rect);
+    gfx::QuadF area_quad = layout_object->LocalRectToAbsoluteQuad(area_rect);
     FrameQuadToViewport(containing_view, area_quad);
     PathBuilder area_builder;
     area_builder.AppendPath(QuadToPath(area_quad), scale);
@@ -897,15 +908,16 @@ std::unique_ptr<protocol::ListValue> BuildGridLineNames(
     const Vector<LayoutUnit>& alt_axis_positions) {
   LayoutObject* layout_object = node->GetLayoutObject();
   auto* grid_interface = ToInterface<LayoutNGGridInterface>(layout_object);
+  const ComputedStyle& grid_container_style = layout_object->StyleRef();
   bool is_rtl = direction == kForColumns &&
-                !layout_object->StyleRef().IsLeftToRightDirection();
+                !grid_container_style.IsLeftToRightDirection();
 
   std::unique_ptr<protocol::ListValue> lines = protocol::ListValue::create();
 
   const NamedGridLinesMap& named_lines_map =
-      direction == kForColumns
-          ? layout_object->StyleRef().NamedGridColumnLines()
-          : layout_object->StyleRef().NamedGridRowLines();
+      (direction == kForColumns)
+          ? grid_container_style.GridTemplateColumns().named_grid_lines
+          : grid_container_style.GridTemplateRows().named_grid_lines;
   LayoutUnit gap = grid_interface->GridGap(direction);
   LayoutUnit alt_axis_pos = GetPositionForFirstTrack(
       layout_object, direction == kForRows ? kForColumns : kForRows,
@@ -945,15 +957,15 @@ std::unique_ptr<protocol::ListValue> BuildGridLineNames(
 int GetRotationAngle(LayoutObject* layout_object) {
   // Local vector has 135deg bearing to the Y axis.
   int local_vector_bearing = 135;
-  FloatPoint local_a(0, 0);
-  FloatPoint local_b(1, 1);
-  FloatPoint abs_a = layout_object->LocalToAbsoluteFloatPoint(local_a);
-  FloatPoint abs_b = layout_object->LocalToAbsoluteFloatPoint(local_b);
+  gfx::PointF local_a(0, 0);
+  gfx::PointF local_b(1, 1);
+  gfx::PointF abs_a = layout_object->LocalToAbsolutePoint(local_a);
+  gfx::PointF abs_b = layout_object->LocalToAbsolutePoint(local_b);
   // Compute bearing of the absolute vector against the Y axis.
-  double theta = atan2(abs_b.X() - abs_a.X(), abs_a.Y() - abs_b.Y());
+  double theta = atan2(abs_b.x() - abs_a.x(), abs_a.y() - abs_b.y());
   if (theta < 0.0)
     theta += kTwoPiDouble;
-  int bearing = std::round(rad2deg(theta));
+  int bearing = std::round(Rad2deg(theta));
   return bearing - local_vector_bearing;
 }
 
@@ -1029,12 +1041,18 @@ bool IsHorizontalFlex(LayoutObject* layout_flex) {
          layout_flex->StyleRef().ResolvedIsColumnFlexDirection();
 }
 
-Vector<Vector<std::pair<PhysicalRect, float>>> GetFlexLinesAndItems(
-    LayoutBox* layout_box,
-    bool is_horizontal,
-    bool is_reverse) {
-  Vector<Vector<std::pair<PhysicalRect, float>>> flex_lines;
+DevtoolsFlexInfo GetFlexLinesAndItems(LayoutBox* layout_box,
+                                      bool is_horizontal,
+                                      bool is_reverse) {
+  if (auto* layout_ng_flex = DynamicTo<LayoutNGFlexibleBox>(layout_box)) {
+    const DevtoolsFlexInfo* flex_info_from_layout =
+        layout_ng_flex->FlexLayoutData();
+    if (flex_info_from_layout)
+      return *flex_info_from_layout;
+  }
 
+  DevtoolsFlexInfo flex_info;
+  Vector<DevtoolsFlexInfo::Line>& flex_lines = flex_info.lines;
   // Flex containers can't get fragmented yet, but this may change in the
   // future.
   for (const auto& fragment : layout_box->PhysicalFragments()) {
@@ -1052,9 +1070,9 @@ Vector<Vector<std::pair<PhysicalRect, float>>> GetFlexLinesAndItems(
       const auto* box = To<LayoutBox>(object);
 
       LayoutUnit baseline =
-          NGBoxFragment(box->StyleRef().GetWritingDirection(),
+          NGBoxFragment(layout_box->StyleRef().GetWritingDirection(),
                         *To<NGPhysicalBoxFragment>(child_fragment))
-              .BaselineOrSynthesize();
+              .BaselineOrSynthesize(layout_box->StyleRef().GetFontBaseline());
       float adjusted_baseline = AdjustForAbsoluteZoom::AdjustFloat(
           baseline + box->MarginTop(), box->StyleRef());
 
@@ -1073,13 +1091,14 @@ Vector<Vector<std::pair<PhysicalRect, float>>> GetFlexLinesAndItems(
         flex_lines.emplace_back();
       }
 
-      flex_lines.back().push_back(std::make_pair(item_rect, adjusted_baseline));
+      flex_lines.back().items.push_back(
+          DevtoolsFlexInfo::Item(item_rect, LayoutUnit(adjusted_baseline)));
 
       progression = is_reverse ? item_start : item_end;
     }
   }
 
-  return flex_lines;
+  return flex_info;
 }
 
 std::unique_ptr<protocol::DictionaryValue> BuildFlexContainerInfo(
@@ -1104,33 +1123,33 @@ std::unique_ptr<protocol::DictionaryValue> BuildFlexContainerInfo(
   // Create the path for the flex container
   PathBuilder container_builder;
   PhysicalRect content_box = layout_box->PhysicalContentBoxRect();
-  FloatQuad content_quad = layout_object->LocalRectToAbsoluteQuad(content_box);
+  gfx::QuadF content_quad = layout_object->LocalRectToAbsoluteQuad(content_box);
   FrameQuadToViewport(containing_view, content_quad);
   container_builder.AppendPath(QuadToPath(content_quad), scale);
 
   // Gather all flex items, sorted by flex line.
-  Vector<Vector<std::pair<PhysicalRect, float>>> flex_lines =
+  DevtoolsFlexInfo flex_lines =
       GetFlexLinesAndItems(layout_box, is_horizontal, is_reverse);
 
   // We send a list of flex lines, each containing a list of flex items, with
   // their baselines, to the frontend.
   std::unique_ptr<protocol::ListValue> lines_info =
       protocol::ListValue::create();
-  for (auto line : flex_lines) {
+  for (auto line : flex_lines.lines) {
     std::unique_ptr<protocol::ListValue> items_info =
         protocol::ListValue::create();
-    for (auto item_data : line) {
+    for (auto item_data : line.items) {
       std::unique_ptr<protocol::DictionaryValue> item_info =
           protocol::DictionaryValue::create();
 
-      FloatQuad item_margin_quad =
-          layout_object->LocalRectToAbsoluteQuad(item_data.first);
+      gfx::QuadF item_margin_quad =
+          layout_object->LocalRectToAbsoluteQuad(item_data.rect);
       FrameQuadToViewport(containing_view, item_margin_quad);
       PathBuilder item_builder;
       item_builder.AppendPath(QuadToPath(item_margin_quad), scale);
 
       item_info->setValue("itemBorder", item_builder.Release());
-      item_info->setDouble("baseline", item_data.second);
+      item_info->setDouble("baseline", item_data.baseline);
 
       items_info->pushValue(std::move(item_info));
     }
@@ -1242,22 +1261,30 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
   // all the way to the left. In NG, this is not the case, and will stop sooner
   // if the tracks don't take up the full size of the grid.
   LayoutUnit rtl_offset;
-  if (layout_object->IsLayoutNGGrid())
-    rtl_offset = To<LayoutBox>(layout_object)->LogicalWidth() - columns.back();
+  if (layout_object->IsLayoutNGGrid()) {
+    const LayoutBox* layout_box = To<LayoutBox>(layout_object);
+    rtl_offset = layout_box->LogicalWidth() - columns.back() -
+                 layout_box->BorderAndPaddingLogicalRight();
+  }
 
   if (grid_highlight_config.show_track_sizes) {
     Element* element = DynamicTo<Element>(node);
     DCHECK(element);
     StyleResolver& style_resolver = element->GetDocument().GetStyleResolver();
+
     HeapHashMap<CSSPropertyName, Member<const CSSValue>> cascaded_values =
         style_resolver.CascadedValuesForElement(element, kPseudoIdNone);
+
+    auto FindCSSValue =
+        [&cascaded_values](CSSPropertyID id) -> const CSSValue* {
+      auto it = cascaded_values.find(CSSPropertyName(id));
+      return it != cascaded_values.end() ? it->value : nullptr;
+    };
     Vector<String> column_authored_values = GetAuthoredGridTrackSizes(
-        cascaded_values.DeprecatedAtOrEmptyValue(
-            CSSPropertyName(CSSPropertyID::kGridTemplateColumns)),
+        FindCSSValue(CSSPropertyID::kGridTemplateColumns),
         grid_interface->AutoRepeatCountForDirection(kForColumns));
     Vector<String> row_authored_values = GetAuthoredGridTrackSizes(
-        cascaded_values.DeprecatedAtOrEmptyValue(
-            CSSPropertyName(CSSPropertyID::kGridTemplateRows)),
+        FindCSSValue(CSSPropertyID::kGridTemplateRows),
         grid_interface->AutoRepeatCountForDirection(kForRows));
 
     grid_info->setValue(
@@ -1286,7 +1313,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
     if (i != rows.size() - 1)
       size.height -= row_gap;
     PhysicalRect row(position, size);
-    FloatQuad row_quad = layout_object->LocalRectToAbsoluteQuad(row);
+    gfx::QuadF row_quad = layout_object->LocalRectToAbsoluteQuad(row);
     FrameQuadToViewport(containing_view, row_quad);
     row_builder.AppendPath(
         RowQuadToPath(row_quad, i == rows.size() - 1 || row_gap > 0), scale);
@@ -1295,7 +1322,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
       PhysicalOffset gap_position(row_left, rows.at(i) - row_gap);
       PhysicalSize gap_size(row_width, row_gap);
       PhysicalRect gap(gap_position, gap_size);
-      FloatQuad gap_quad = layout_object->LocalRectToAbsoluteQuad(gap);
+      gfx::QuadF gap_quad = layout_object->LocalRectToAbsoluteQuad(gap);
       FrameQuadToViewport(containing_view, gap_quad);
       row_gap_builder.AppendPath(QuadToPath(gap_quad), scale);
     }
@@ -1318,7 +1345,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
     }
     PhysicalOffset position(line_left, column_top);
     PhysicalRect column(position, size);
-    FloatQuad column_quad = layout_object->LocalRectToAbsoluteQuad(column);
+    gfx::QuadF column_quad = layout_object->LocalRectToAbsoluteQuad(column);
     FrameQuadToViewport(containing_view, column_quad);
     bool draw_end_line = is_ltr ? i == columns.size() - 1 : i == 1;
     column_builder.AppendPath(
@@ -1334,7 +1361,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
       PhysicalOffset gap_position(gap_left, column_top);
       PhysicalSize gap_size(column_gap, column_height);
       PhysicalRect gap(gap_position, gap_size);
-      FloatQuad gap_quad = layout_object->LocalRectToAbsoluteQuad(gap);
+      gfx::QuadF gap_quad = layout_object->LocalRectToAbsoluteQuad(gap);
       FrameQuadToViewport(containing_view, gap_quad);
       column_gap_builder.AppendPath(QuadToPath(gap_quad), scale);
     }
@@ -1387,7 +1414,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
   PhysicalOffset grid_position(row_left, column_top);
   PhysicalSize grid_size(row_width, column_height);
   PhysicalRect grid_rect(grid_position, grid_size);
-  FloatQuad grid_quad = layout_object->LocalRectToAbsoluteQuad(grid_rect);
+  gfx::QuadF grid_quad = layout_object->LocalRectToAbsoluteQuad(grid_rect);
   FrameQuadToViewport(containing_view, grid_quad);
   grid_border_builder.AppendPath(QuadToPath(grid_quad), scale);
   grid_info->setValue("gridBorder", grid_border_builder.Release());
@@ -1418,7 +1445,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
                        isPrimary);
 }
 
-void CollectQuadsRecursive(Node* node, Vector<FloatQuad>& out_quads) {
+void CollectQuadsRecursive(Node* node, Vector<gfx::QuadF>& out_quads) {
   LayoutObject* layout_object = node->GetLayoutObject();
   // For inline elements, absoluteQuads will return a line box based on the
   // line-height and font metrics, which is technically incorrect as replaced
@@ -1440,13 +1467,13 @@ void CollectQuadsRecursive(Node* node, Vector<FloatQuad>& out_quads) {
   }
 }
 
-void CollectQuads(Node* node, Vector<FloatQuad>& out_quads) {
+void CollectQuads(Node* node, Vector<gfx::QuadF>& out_quads) {
   CollectQuadsRecursive(node, out_quads);
   LocalFrameView* containing_view =
       node->GetLayoutObject() ? node->GetLayoutObject()->GetFrameView()
                               : nullptr;
   if (containing_view) {
-    for (FloatQuad& quad : out_quads)
+    for (gfx::QuadF& quad : out_quads)
       FrameQuadToViewport(containing_view, quad);
   }
 }
@@ -1460,8 +1487,8 @@ std::unique_ptr<protocol::Array<double>> RectForPhysicalRect(
 // Returns |layout_object|'s bounding box in document coordinates.
 PhysicalRect RectInRootFrame(const LayoutObject* layout_object) {
   LocalFrameView* local_frame_view = layout_object->GetFrameView();
-  PhysicalRect rect_in_absolute = PhysicalRect::EnclosingRect(
-      layout_object->AbsoluteBoundingBoxFloatRect());
+  PhysicalRect rect_in_absolute =
+      PhysicalRect::EnclosingRect(layout_object->AbsoluteBoundingBoxRectF());
   return local_frame_view
              ? local_frame_view->ConvertToRootFrame(rect_in_absolute)
              : rect_in_absolute;
@@ -1487,14 +1514,14 @@ InspectorHighlightConfig::InspectorHighlightConfig()
       show_rulers(false),
       show_extension_lines(false),
       show_accessibility_info(true),
-      color_format(ColorFormat::HEX) {}
+      color_format(ColorFormat::kHex) {}
 
 InspectorHighlight::InspectorHighlight(float scale)
     : InspectorHighlightBase(scale),
       show_rulers_(false),
       show_extension_lines_(false),
       show_accessibility_info_(true),
-      color_format_(ColorFormat::HEX) {}
+      color_format_(ColorFormat::kHex) {}
 
 InspectorSourceOrderConfig::InspectorSourceOrderConfig() = default;
 
@@ -1523,17 +1550,17 @@ InspectorHighlightBase::InspectorHighlightBase(float scale)
 
 InspectorHighlightBase::InspectorHighlightBase(Node* node)
     : highlight_paths_(protocol::ListValue::create()), scale_(1.f) {
-  DCHECK(!DisplayLockUtilities::NearestLockedExclusiveAncestor(*node));
+  DCHECK(!DisplayLockUtilities::LockedAncestorPreventingPaint(*node));
   LocalFrameView* frame_view = node->GetDocument().View();
   if (frame_view)
     scale_ = DeviceScaleFromFrameView(frame_view);
 }
 
 bool InspectorHighlightBase::BuildNodeQuads(Node* node,
-                                            FloatQuad* content,
-                                            FloatQuad* padding,
-                                            FloatQuad* border,
-                                            FloatQuad* margin) {
+                                            gfx::QuadF* content,
+                                            gfx::QuadF* padding,
+                                            gfx::QuadF* border,
+                                            gfx::QuadF* margin) {
   LayoutObject* layout_object = node->GetLayoutObject();
   if (!layout_object)
     return false;
@@ -1615,7 +1642,7 @@ bool InspectorHighlightBase::BuildNodeQuads(Node* node,
   return true;
 }
 
-void InspectorHighlightBase::AppendQuad(const FloatQuad& quad,
+void InspectorHighlightBase::AppendQuad(const gfx::QuadF& quad,
                                         const Color& fill_color,
                                         const Color& outline_color,
                                         const String& name) {
@@ -1647,7 +1674,7 @@ InspectorSourceOrderHighlight::InspectorSourceOrderHighlight(
     int source_order_position)
     : InspectorHighlightBase(node),
       source_order_position_(source_order_position) {
-  FloatQuad content, padding, border, margin;
+  gfx::QuadF content, padding, border, margin;
   if (!BuildNodeQuads(node, &content, &padding, &border, &margin))
     return;
   AppendQuad(border, Color::kTransparent, outline_color, "border");
@@ -1813,7 +1840,7 @@ void InspectorHighlight::AppendEventTargetQuads(
     Node* event_target_node,
     const InspectorHighlightConfig& highlight_config) {
   if (event_target_node->GetLayoutObject()) {
-    FloatQuad border, unused;
+    gfx::QuadF border, unused;
     if (BuildNodeQuads(event_target_node, &unused, &unused, &border, &unused))
       AppendQuad(border, highlight_config.event_target);
   }
@@ -1823,7 +1850,7 @@ void InspectorHighlight::AppendPathsForShapeOutside(
     Node* node,
     const InspectorHighlightConfig& config) {
   Shape::DisplayPaths paths;
-  FloatQuad bounds_quad;
+  gfx::QuadF bounds_quad;
 
   const ShapeOutsideInfo* shape_outside_info =
       ShapeOutsideInfoForNode(node, &paths, &bounds_quad);
@@ -1853,7 +1880,7 @@ void InspectorHighlight::AppendNodeHighlight(
   if (!layout_object)
     return;
 
-  Vector<FloatQuad> svg_quads;
+  Vector<gfx::QuadF> svg_quads;
   if (BuildSVGQuads(node, svg_quads)) {
     for (wtf_size_t i = 0; i < svg_quads.size(); ++i) {
       AppendQuad(svg_quads[i], highlight_config.content,
@@ -1862,7 +1889,7 @@ void InspectorHighlight::AppendNodeHighlight(
     return;
   }
 
-  FloatQuad content, padding, border, margin;
+  gfx::QuadF content, padding, border, margin;
   if (!BuildNodeQuads(node, &content, &padding, &border, &margin))
     return;
   AppendQuad(content, highlight_config.content,
@@ -1922,13 +1949,16 @@ std::unique_ptr<protocol::DictionaryValue> InspectorHighlight::AsProtocolValue()
   object->setBoolean("showExtensionLines", show_extension_lines_);
   object->setBoolean("showAccessibilityInfo", show_accessibility_info_);
   switch (color_format_) {
-    case ColorFormat::RGB:
+    case ColorFormat::kRgb:
       object->setString("colorFormat", "rgb");
       break;
-    case ColorFormat::HSL:
+    case ColorFormat::kHsl:
       object->setString("colorFormat", "hsl");
       break;
-    case ColorFormat::HEX:
+    case ColorFormat::kHwb:
+      object->setString("colorFormat", "hwb");
+      break;
+    case ColorFormat::kHex:
       object->setString("colorFormat", "hex");
       break;
   }
@@ -1980,8 +2010,8 @@ bool InspectorHighlight::GetBoxModel(
   if (!layout_object || !view)
     return false;
 
-  FloatQuad content, padding, border, margin;
-  Vector<FloatQuad> svg_quads;
+  gfx::QuadF content, padding, border, margin;
+  Vector<gfx::QuadF> svg_quads;
   if (BuildSVGQuads(node, svg_quads)) {
     if (!svg_quads.size())
       return false;
@@ -1994,10 +2024,10 @@ bool InspectorHighlight::GetBoxModel(
   }
 
   if (use_absolute_zoom) {
-    AdjustForAbsoluteZoom::AdjustFloatQuad(content, *layout_object);
-    AdjustForAbsoluteZoom::AdjustFloatQuad(padding, *layout_object);
-    AdjustForAbsoluteZoom::AdjustFloatQuad(border, *layout_object);
-    AdjustForAbsoluteZoom::AdjustFloatQuad(margin, *layout_object);
+    AdjustForAbsoluteZoom::AdjustQuad(content, *layout_object);
+    AdjustForAbsoluteZoom::AdjustQuad(padding, *layout_object);
+    AdjustForAbsoluteZoom::AdjustQuad(border, *layout_object);
+    AdjustForAbsoluteZoom::AdjustQuad(margin, *layout_object);
   }
 
   float scale = PageScaleFromFrameView(view);
@@ -2006,7 +2036,7 @@ bool InspectorHighlight::GetBoxModel(
   border.Scale(scale, scale);
   margin.Scale(scale, scale);
 
-  IntRect bounding_box =
+  gfx::Rect bounding_box =
       view->ConvertToRootFrame(layout_object->AbsoluteBoundingBoxRect());
   auto* model_object = DynamicTo<LayoutBoxModelObject>(layout_object);
 
@@ -2020,16 +2050,16 @@ bool InspectorHighlight::GetBoxModel(
                                        model_object->PixelSnappedOffsetWidth(
                                            model_object->OffsetParent()),
                                        model_object)
-                                 : bounding_box.Width())
+                                 : bounding_box.width())
           .setHeight(model_object ? AdjustForAbsoluteZoom::AdjustInt(
                                         model_object->PixelSnappedOffsetHeight(
                                             model_object->OffsetParent()),
                                         model_object)
-                                  : bounding_box.Height())
+                                  : bounding_box.height())
           .build();
 
   Shape::DisplayPaths paths;
-  FloatQuad bounds_quad;
+  gfx::QuadF bounds_quad;
   protocol::ErrorSupport errors;
   if (const ShapeOutsideInfo* shape_outside_info =
           ShapeOutsideInfoForNode(node, &paths, &bounds_quad)) {
@@ -2053,7 +2083,7 @@ bool InspectorHighlight::GetBoxModel(
 }
 
 // static
-bool InspectorHighlight::BuildSVGQuads(Node* node, Vector<FloatQuad>& quads) {
+bool InspectorHighlight::BuildSVGQuads(Node* node, Vector<gfx::QuadF>& quads) {
   LayoutObject* layout_object = node->GetLayoutObject();
   if (!layout_object)
     return false;
@@ -2072,16 +2102,16 @@ bool InspectorHighlight::GetContentQuads(
   LocalFrameView* view = node->GetDocument().View();
   if (!layout_object || !view)
     return false;
-  Vector<FloatQuad> quads;
+  Vector<gfx::QuadF> quads;
   CollectQuads(node, quads);
   float scale = PageScaleFromFrameView(view);
-  for (FloatQuad& quad : quads) {
-    AdjustForAbsoluteZoom::AdjustFloatQuad(quad, *layout_object);
+  for (gfx::QuadF& quad : quads) {
+    AdjustForAbsoluteZoom::AdjustQuad(quad, *layout_object);
     quad.Scale(scale, scale);
   }
 
   *result = std::make_unique<protocol::Array<protocol::Array<double>>>();
-  for (FloatQuad& quad : quads)
+  for (gfx::QuadF& quad : quads)
     (*result)->emplace_back(BuildArrayForQuad(quad));
   return true;
 }
@@ -2089,7 +2119,7 @@ bool InspectorHighlight::GetContentQuads(
 std::unique_ptr<protocol::DictionaryValue> InspectorGridHighlight(
     Node* node,
     const InspectorGridHighlightConfig& config) {
-  if (DisplayLockUtilities::NearestLockedExclusiveAncestor(*node)) {
+  if (DisplayLockUtilities::LockedAncestorPreventingPaint(*node)) {
     // Skip if node is part of display locked tree.
     return nullptr;
   }
@@ -2111,7 +2141,7 @@ std::unique_ptr<protocol::DictionaryValue> InspectorGridHighlight(
 std::unique_ptr<protocol::DictionaryValue> InspectorFlexContainerHighlight(
     Node* node,
     const InspectorFlexContainerHighlightConfig& config) {
-  if (DisplayLockUtilities::NearestLockedExclusiveAncestor(*node)) {
+  if (DisplayLockUtilities::LockedAncestorPreventingPaint(*node)) {
     // Skip if node is part of display locked tree.
     return nullptr;
   }
@@ -2159,13 +2189,14 @@ std::unique_ptr<protocol::DictionaryValue> BuildSnapContainerInfo(Node* node) {
   if (!container_data)
     return nullptr;
 
-  FloatQuad snapport_quad =
-      layout_box->LocalToAbsoluteQuad(ToFloatQuad(container_data->rect()));
+  gfx::QuadF snapport_quad =
+      layout_box->LocalToAbsoluteQuad(gfx::QuadF(container_data->rect()));
   scroll_snap_info->setValue("snapport",
                              BuildPathFromQuad(containing_view, snapport_quad));
 
   auto padding_box = layout_box->PhysicalPaddingBoxRect();
-  FloatQuad padding_box_quad = layout_box->LocalRectToAbsoluteQuad(padding_box);
+  gfx::QuadF padding_box_quad =
+      layout_box->LocalRectToAbsoluteQuad(padding_box);
   scroll_snap_info->setValue(
       "paddingBox", BuildPathFromQuad(containing_view, padding_box_quad));
 
@@ -2176,7 +2207,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildSnapContainerInfo(Node* node) {
   snap_area_items.reserve(container_data->size());
   for (size_t i = 0; i < container_data->size(); i++) {
     cc::SnapAreaData data = container_data->at(i);
-    data.rect.Offset(-scroll_position.X(), -scroll_position.Y());
+    data.rect.Offset(-scroll_position.x(), -scroll_position.y());
     snap_area_items.push_back(std::move(data));
   }
 
@@ -2189,8 +2220,8 @@ std::unique_ptr<protocol::DictionaryValue> BuildSnapContainerInfo(Node* node) {
     std::unique_ptr<protocol::DictionaryValue> result_area =
         protocol::DictionaryValue::create();
 
-    FloatQuad area_quad =
-        layout_box->LocalToAbsoluteQuad(ToFloatQuad(data.rect));
+    gfx::QuadF area_quad =
+        layout_box->LocalToAbsoluteQuad(gfx::QuadF(data.rect));
     result_area->setValue("path",
                           BuildPathFromQuad(containing_view, area_quad));
 
@@ -2201,7 +2232,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildSnapContainerInfo(Node* node) {
       continue;
 
     auto* area_layout_box = area_node->GetLayoutBox();
-    FloatQuad area_box_quad = area_layout_box->LocalRectToAbsoluteQuad(
+    gfx::QuadF area_box_quad = area_layout_box->LocalRectToAbsoluteQuad(
         area_layout_box->PhysicalBorderBoxRect());
     result_area->setValue("borderBox",
                           BuildPathFromQuad(containing_view, area_box_quad));
@@ -2237,15 +2268,15 @@ std::unique_ptr<protocol::DictionaryValue> InspectorScrollSnapHighlight(
   return scroll_snap_info;
 }
 
-Vector<FloatQuad> GetContainerQueryingDescendantQuads(Element* container) {
-  Vector<FloatQuad> descendant_quads;
+Vector<gfx::QuadF> GetContainerQueryingDescendantQuads(Element* container) {
+  Vector<gfx::QuadF> descendant_quads;
   for (Element* descendant :
        InspectorDOMAgent::GetContainerQueryingDescendants(container)) {
     LayoutBox* layout_box = descendant->GetLayoutBox();
     if (!layout_box)
       continue;
     auto content_box = layout_box->PhysicalContentBoxRect();
-    FloatQuad content_quad = layout_box->LocalRectToAbsoluteQuad(content_box);
+    gfx::QuadF content_quad = layout_box->LocalRectToAbsoluteQuad(content_box);
     descendant_quads.push_back(content_quad);
   }
 
@@ -2273,7 +2304,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildContainerQueryContainerInfo(
 
   PathBuilder container_builder;
   auto content_box = layout_box->PhysicalContentBoxRect();
-  FloatQuad content_quad = layout_box->LocalRectToAbsoluteQuad(content_box);
+  gfx::QuadF content_quad = layout_box->LocalRectToAbsoluteQuad(content_box);
   FrameQuadToViewport(containing_view, content_quad);
   container_builder.AppendPath(QuadToPath(content_quad), scale);
   container_query_container_info->setValue("containerBorder",
@@ -2307,6 +2338,75 @@ std::unique_ptr<protocol::DictionaryValue> BuildContainerQueryContainerInfo(
   return container_query_container_info;
 }
 
+std::unique_ptr<protocol::DictionaryValue> BuildIsolatedElementInfo(
+    Element& element,
+    const InspectorIsolationModeHighlightConfig& config,
+    float scale) {
+  LayoutBox* layout_box = element.GetLayoutBox();
+  if (!layout_box)
+    return nullptr;
+
+  LocalFrameView* containing_view = element.GetDocument().View();
+  if (!containing_view)
+    return nullptr;
+
+  auto isolated_element_info = protocol::DictionaryValue::create();
+
+  auto element_box = layout_box->PhysicalContentBoxRect();
+  gfx::QuadF element_box_quad =
+      layout_box->LocalRectToAbsoluteQuad(element_box);
+  FrameQuadToViewport(containing_view, element_box_quad);
+  isolated_element_info->setDouble("currentX", element_box_quad.p1().x());
+  isolated_element_info->setDouble("currentY", element_box_quad.p1().y());
+
+  // Isolation mode's resizer size should be consistent with
+  // Device Mode's resizer size, which is 20px.
+  const LayoutUnit resizer_size(20 / scale);
+  PhysicalRect width_resizer_box(
+      layout_box->ContentLeft() + layout_box->ContentWidth(),
+      layout_box->ContentTop(), resizer_size, layout_box->ContentHeight());
+  isolated_element_info->setValue(
+      "widthResizerBorder",
+      BuildPathFromQuad(containing_view, layout_box->LocalRectToAbsoluteQuad(
+                                             width_resizer_box)));
+  PhysicalRect height_resizer_box(
+      layout_box->ContentLeft(),
+      layout_box->ContentTop() + layout_box->ContentHeight(),
+      layout_box->ContentWidth(), resizer_size);
+  isolated_element_info->setValue(
+      "heightResizerBorder",
+      BuildPathFromQuad(containing_view, layout_box->LocalRectToAbsoluteQuad(
+                                             height_resizer_box)));
+
+  PhysicalRect bidirection_resizer_box(
+      layout_box->ContentLeft() + layout_box->ContentWidth(),
+      layout_box->ContentTop() + layout_box->ContentHeight(), resizer_size,
+      resizer_size);
+  isolated_element_info->setValue(
+      "bidirectionResizerBorder",
+      BuildPathFromQuad(containing_view, layout_box->LocalRectToAbsoluteQuad(
+                                             bidirection_resizer_box)));
+
+  CSSComputedStyleDeclaration* style =
+      MakeGarbageCollected<CSSComputedStyleDeclaration>(&element, true);
+  const CSSValue* width = style->GetPropertyCSSValue(CSSPropertyID::kWidth);
+  if (width && width->IsNumericLiteralValue()) {
+    isolated_element_info->setDouble(
+        "currentWidth", To<CSSNumericLiteralValue>(width)->DoubleValue());
+  }
+  const CSSValue* height = style->GetPropertyCSSValue(CSSPropertyID::kHeight);
+  if (height && height->IsNumericLiteralValue()) {
+    isolated_element_info->setDouble(
+        "currentHeight", To<CSSNumericLiteralValue>(height)->DoubleValue());
+  }
+
+  isolated_element_info->setValue(
+      "isolationModeHighlightConfig",
+      BuildIsolationModeHighlightConfigInfo(config));
+
+  return isolated_element_info;
+}
+
 std::unique_ptr<protocol::DictionaryValue> InspectorContainerQueryHighlight(
     Node* node,
     const InspectorContainerQueryContainerHighlightConfig& config) {
@@ -2322,6 +2422,24 @@ std::unique_ptr<protocol::DictionaryValue> InspectorContainerQueryHighlight(
     return nullptr;
 
   return container_query_container_info;
+}
+
+std::unique_ptr<protocol::DictionaryValue> InspectorIsolatedElementHighlight(
+    Element* element,
+    const InspectorIsolationModeHighlightConfig& config) {
+  LocalFrameView* frame_view = element->GetDocument().View();
+  if (!frame_view)
+    return nullptr;
+
+  std::unique_ptr<protocol::DictionaryValue> isolated_element_info =
+      BuildIsolatedElementInfo(*element, config,
+                               DeviceScaleFromFrameView(frame_view));
+
+  if (!isolated_element_info)
+    return nullptr;
+
+  isolated_element_info->setInteger("highlightIndex", config.highlight_index);
+  return isolated_element_info;
 }
 
 // static
@@ -2340,7 +2458,7 @@ InspectorHighlightConfig InspectorHighlight::DefaultConfig() {
   config.show_rulers = true;
   config.show_extension_lines = true;
   config.css_grid = Color::kTransparent;
-  config.color_format = ColorFormat::HEX;
+  config.color_format = ColorFormat::kHex;
   config.grid_highlight_config = std::make_unique<InspectorGridHighlightConfig>(
       InspectorHighlight::DefaultGridConfig());
   config.flex_container_highlight_config =

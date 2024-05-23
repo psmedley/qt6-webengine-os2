@@ -46,8 +46,11 @@ content::WebUIDataSource* CreatePolicyUIHtmlSource() {
      IDS_POLICY_LABEL_MACHINE_ENROLLMENT_DEVICE_ID},
     {"labelIsOffHoursActive", IDS_POLICY_LABEL_IS_OFFHOURS_ACTIVE},
     {"labelPoliciesPush", IDS_POLICY_LABEL_PUSH_POLICIES},
+    {"labelPrecedence", IDS_POLICY_LABEL_PRECEDENCE},
     {"labelRefreshInterval", IDS_POLICY_LABEL_REFRESH_INTERVAL},
     {"labelStatus", IDS_POLICY_LABEL_STATUS},
+    {"labelTimeSinceLastFetchAttempt",
+     IDS_POLICY_LABEL_TIME_SINCE_LAST_FETCH_ATTEMPT},
     {"labelTimeSinceLastRefresh", IDS_POLICY_LABEL_TIME_SINCE_LAST_REFRESH},
     {"labelUsername", IDS_POLICY_LABEL_USERNAME},
     {"labelManagedBy", IDS_POLICY_LABEL_MANAGED_BY},
@@ -68,7 +71,7 @@ content::WebUIDataSource* CreatePolicyUIHtmlSource() {
     {"status", IDS_POLICY_STATUS},
     {"statusDevice", IDS_POLICY_STATUS_DEVICE},
     {"statusMachine", IDS_POLICY_STATUS_MACHINE},
-#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
     {"statusUpdater", IDS_POLICY_STATUS_UPDATER},
 #endif
     {"statusUser", IDS_POLICY_STATUS_USER},

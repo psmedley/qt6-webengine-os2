@@ -5,8 +5,11 @@
 #ifndef BASE_MEMORY_UNSAFE_SHARED_MEMORY_POOL_H_
 #define BASE_MEMORY_UNSAFE_SHARED_MEMORY_POOL_H_
 
+#include <memory>
+#include <utility>
 #include <vector>
 
+#include "base/base_export.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/synchronization/lock.h"

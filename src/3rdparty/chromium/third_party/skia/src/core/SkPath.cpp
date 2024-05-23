@@ -398,6 +398,56 @@ bool SkPath::isLine(SkPoint line[2]) const {
     return false;
 }
 
+bool SkPath::isEmpty() const {
+    SkDEBUGCODE(this->validate();)
+    return 0 == fPathRef->countVerbs();
+}
+
+bool SkPath::isFinite() const {
+    SkDEBUGCODE(this->validate();)
+    return fPathRef->isFinite();
+}
+
+bool SkPath::isConvex() const {
+    return SkPathConvexity::kConvex == this->getConvexity();
+}
+
+const SkRect& SkPath::getBounds() const {
+    return fPathRef->getBounds();
+}
+
+uint32_t SkPath::getSegmentMasks() const {
+    return fPathRef->getSegmentMasks();
+}
+
+bool SkPath::isValid() const {
+    return this->isValidImpl() && fPathRef->isValid();
+}
+
+bool SkPath::hasComputedBounds() const {
+    SkDEBUGCODE(this->validate();)
+    return fPathRef->hasComputedBounds();
+}
+
+void SkPath::setBounds(const SkRect& rect) {
+    SkPathRef::Editor ed(&fPathRef);
+    ed.setBounds(rect);
+}
+
+SkPathConvexity SkPath::getConvexityOrUnknown() const {
+    return (SkPathConvexity)fConvexity.load(std::memory_order_relaxed);
+}
+
+#ifdef SK_DEBUG
+void SkPath::validate() const {
+    SkASSERT(this->isValidImpl());
+}
+
+void SkPath::validateRef() const {
+    // This will SkASSERT if not valid.
+    fPathRef->validate();
+}
+#endif
 /*
  Determines if path is a rect by keeping track of changes in direction
  and looking for a loop either clockwise or counterclockwise.
@@ -1402,8 +1452,8 @@ SkPath& SkPath::addPath(const SkPath& srcPath, const SkMatrix& matrix, AddPathMo
     SkMatrixPriv::MapPtsProc mapPtsProc = SkMatrixPriv::GetMapPtsProc(matrix);
     bool firstVerb = true;
     for (auto [verb, pts, w] : SkPathPriv::Iterate(*src)) {
+        SkPoint mappedPts[3];
         switch (verb) {
-            SkPoint mappedPts[3];
             case SkPathVerb::kMove:
                 mapPtsProc(matrix, mappedPts, &pts[0], 1);
                 if (firstVerb && mode == kExtend_AddPathMode && !isEmpty()) {

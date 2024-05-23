@@ -13,10 +13,26 @@ luci.notifier(
 )
 
 luci.notifier(
+    name = "chrome-lacros-engprod-alerts",
+    on_status_change = True,
+    notify_emails = [
+        "chrome-lacros-engprod-alerts@google.com",
+    ],
+)
+
+luci.notifier(
     name = "chrome-memory-safety",
     on_status_change = True,
     notify_emails = [
         "chrome-memory-safety+bots@google.com",
+    ],
+)
+
+luci.notifier(
+    name = "chrome-rust-experiments",
+    on_status_change = True,
+    notify_emails = [
+        "chrome-rust-experiments+bots@google.com",
     ],
 )
 
@@ -50,14 +66,13 @@ luci.notifier(
     name = "cr-fuchsia",
     on_status_change = True,
     notify_emails = [
-        "cr-fuchsia+bot@chromium.org",
         "chrome-fuchsia-gardener@grotations.appspotmail.com",
     ],
 )
 
 luci.notifier(
     name = "cronet",
-    on_status_change = True,
+    on_occurrence = ["FAILURE", "INFRA_FAILURE"],
     notify_emails = [
         "cronet-sheriff@grotations.appspotmail.com",
     ],
@@ -228,9 +243,25 @@ luci.notifier(
     on_new_status = ["FAILURE"],
 )
 
+luci.notifier(
+    name = "headless-owners",
+    notify_emails = [
+        "headless-owners@chromium.org",
+    ],
+    on_new_status = ["FAILURE"],
+)
+
 tree_closure_notifier(
     name = "chromium.linux",
     notify_emails = [
         "thomasanderson@chromium.org",
     ],
+)
+
+luci.notifier(
+    name = "v8-sandbox-fyi-bots",
+    notify_emails = [
+        "saelo+fyi-bots@chromium.org",
+    ],
+    on_new_status = ["FAILURE"],
 )

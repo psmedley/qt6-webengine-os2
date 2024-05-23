@@ -7,8 +7,6 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "chrome/browser/ash/base/locale_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 
@@ -53,7 +51,12 @@ class TermsOfServiceScreenHandler : public BaseScreenHandler,
  public:
   using TView = TermsOfServiceScreenView;
 
-  explicit TermsOfServiceScreenHandler(JSCallsContainer* js_calls_container);
+  TermsOfServiceScreenHandler();
+
+  TermsOfServiceScreenHandler(const TermsOfServiceScreenHandler&) = delete;
+  TermsOfServiceScreenHandler& operator=(const TermsOfServiceScreenHandler&) =
+      delete;
+
   ~TermsOfServiceScreenHandler() override;
 
   // BaseScreenHandler:
@@ -70,7 +73,7 @@ class TermsOfServiceScreenHandler : public BaseScreenHandler,
 
  private:
   // BaseScreenHandler:
-  void Initialize() override;
+  void InitializeDeprecated() override;
 
   // Update the UI to show an error message or the Terms of Service, depending
   // on whether the download of the Terms of Service was successful. Does
@@ -90,8 +93,6 @@ class TermsOfServiceScreenHandler : public BaseScreenHandler,
 
   // Set to the Terms of Service when the download is successful.
   std::string terms_of_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(TermsOfServiceScreenHandler);
 };
 
 }  // namespace chromeos

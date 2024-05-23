@@ -11,7 +11,12 @@ declare_args() {
   # At that point, this flag will be folded together with "use_rbe".
   # TODO(crbug.com/1139220): Remove the flag once we are confident.
   devtools_use_rbe = false
+
+  devtools_skip_typecheck = build_with_chromium && !is_official_build
 }
+
+assert(!devtools_skip_typecheck || !is_official_build,
+       "Official build should not skip typecheck")
 
 # Defines a target that compiles .ts files using TypeScript.
 # A temporary tsconfig.json is generated which uses the
@@ -58,8 +63,6 @@ template("ts_library") {
       devtools_location_prepend + "front_end/global_typings/global_defs.d.ts",
       devtools_location_prepend +
           "front_end/global_typings/request_idle_callback.d.ts",
-      devtools_location_prepend +
-          "front_end/global_typings/intl_display_names.d.ts",
       devtools_location_prepend + "node_modules/@types/filesystem/index.d.ts",
     ]
 
@@ -116,6 +119,13 @@ template("ts_library") {
 
     if (_test_only) {
       args += [ "--test-only" ]
+      inputs += [
+        devtools_location_prepend + "node_modules/@types/chai/index.d.ts",
+        devtools_location_prepend + "node_modules/@types/mocha/index.d.ts",
+        devtools_location_prepend + "node_modules/@types/sinon/index.d.ts",
+        devtools_location_prepend +
+            "node_modules/@types/karma-chai-sinon/index.d.ts",
+      ]
     }
 
     if (_no_emit) {
@@ -128,6 +138,10 @@ template("ts_library") {
 
     if (defined(invoker.module)) {
       args += [ "--module=" + invoker.module ]
+    }
+
+    if (defined(invoker.reset_timestamps) && invoker.reset_timestamps) {
+      args += [ "--reset_timestamps" ]
     }
 
     if (defined(invoker.is_web_worker) && invoker.is_web_worker) {
@@ -144,6 +158,16 @@ template("ts_library") {
           "--rewrapper-cfg=${rbe_cc_cfg_file}",
           "--rewrapper-exec-root=${rbe_exec_root}",
         ]
+      }
+    }
+
+    if (devtools_skip_typecheck) {
+      args += [ "--use-esbuild" ]
+      _esbuild = devtools_location_prepend + "third_party/esbuild/esbuild"
+      if (host_os == "win") {
+        inputs += [ _esbuild + ".exe" ]
+      } else {
+        inputs += [ _esbuild ]
       }
     }
 
@@ -178,7 +202,9 @@ template("ts_library") {
                  "Incorrect extension on '$src' with extension '$_extension'")
         }
 
-        output_files += [ "$target_gen_dir/$_fileName.d.ts" ]
+        if (!devtools_skip_typecheck) {
+          output_files += [ "$target_gen_dir/$_fileName.d.ts" ]
+        }
       }
     }
 
@@ -197,12 +223,10 @@ template("node_ts_library") {
   ts_library(target_name) {
     module = "commonjs"
     testonly = true
+    reset_timestamps = true
 
-    inputs = [
-      devtools_location_prepend + "node_modules/@types/node/index.d.ts",
-      devtools_location_prepend + "node_modules/@types/chai/index.d.ts",
-      devtools_location_prepend + "node_modules/@types/mocha/index.d.ts",
-    ]
+    inputs =
+        [ devtools_location_prepend + "node_modules/@types/node/index.d.ts" ]
 
     forward_variables_from(invoker,
                            [

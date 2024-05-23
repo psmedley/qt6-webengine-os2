@@ -7,18 +7,22 @@
 #include <tuple>
 #include <vector>
 
+#include "base/check.h"
 #include "base/lazy_instance.h"
+#include "base/no_destructor.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/guest_view/extensions_guest_view_messages.h"
+#include "extensions/common/mojom/guest_view.mojom.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/grit/extensions_renderer_resources.h"
+#include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/injection_host.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/scripts_run_info.h"
+#include "ipc/ipc_sync_channel.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_script_source.h"
@@ -90,6 +94,17 @@ bool ShouldInjectScripts(const UserScript::FileList& scripts,
   return false;
 }
 
+mojom::GuestView* GetGuestView() {
+  static base::NoDestructor<mojo::AssociatedRemote<mojom::GuestView>>
+      guest_view;
+  if (!*guest_view) {
+    content::RenderThread::Get()->GetChannel()->GetRemoteAssociatedInterface(
+        guest_view.get());
+  }
+
+  return guest_view->get();
+}
+
 }  // namespace
 
 UserScriptInjector::UserScriptInjector(const UserScript* script,
@@ -128,7 +143,15 @@ bool UserScriptInjector::IsUserGesture() const {
   return false;
 }
 
+mojom::ExecutionWorld UserScriptInjector::GetExecutionWorld() const {
+  return script_->execution_world();
+}
+
 bool UserScriptInjector::ExpectsResults() const {
+  return false;
+}
+
+bool UserScriptInjector::ShouldWaitForPromise() const {
   return false;
 }
 
@@ -170,8 +193,8 @@ PermissionsData::PageAccess UserScriptInjector::CanExecuteOnFrame(
 
   if (script_->consumer_instance_type() ==
           UserScript::ConsumerInstanceType::WEBVIEW) {
-    int routing_id = content::RenderView::FromWebView(web_frame->Top()->View())
-                         ->GetRoutingID();
+    int routing_id =
+        content::RenderFrame::FromWebFrame(web_frame)->GetRoutingID();
 
     RoutingInfoKey key(routing_id, script_->id());
 
@@ -182,13 +205,15 @@ PermissionsData::PageAccess UserScriptInjector::CanExecuteOnFrame(
     if (iter != map.end()) {
       allowed = iter->second;
     } else {
-      // Send a SYNC IPC message to the browser to check if this is allowed.
+      // Perform a sync mojo call to the browser to check if this is allowed.
       // This is not ideal, but is mitigated by the fact that this is only done
       // for webviews, and then only once per host.
       // TODO(hanxi): Find a more efficient way to do this.
-      content::RenderThread::Get()->Send(
-          new ExtensionsGuestViewHostMsg_CanExecuteContentScriptSync(
-              routing_id, script_->id(), &allowed));
+      auto* guest_view = GetGuestView();
+      if (guest_view) {
+        guest_view->CanExecuteContentScript(routing_id, script_->id(),
+                                            &allowed);
+      }
       map.insert(std::pair<RoutingInfoKey, bool>(key, allowed));
     }
 

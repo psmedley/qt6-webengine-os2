@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -41,12 +41,6 @@
 #include "net/socket/stream_socket.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-namespace base {
-namespace trace_event {
-class ProcessMemoryDump;
-}
-}  // namespace base
-
 namespace net {
 
 struct CommonConnectJobParams;
@@ -57,8 +51,8 @@ struct NetworkTrafficAnnotationTag;
 // TransportClientSocketPool establishes network connections through using
 // ConnectJobs, and maintains a list of idle persistent sockets available for
 // reuse. It restricts the number of sockets open at a time, both globally, and
-// for each unique GroupId, which rougly corresponds to origin and privacy mode
-// setting. TransportClientSocketPools is designed to work with HTTP reuse
+// for each unique GroupId, which roughly corresponds to origin and privacy mode
+// setting. TransportClientSocketPool is designed to work with HTTP reuse
 // semantics, handling each request serially, before reusable sockets are
 // returned to the socket pool.
 //
@@ -107,6 +101,9 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
         const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
         const NetLogWithSource& net_log);
 
+    Request(const Request&) = delete;
+    Request& operator=(const Request&) = delete;
+
     ~Request();
 
     ClientSocketHandle* handle() const { return handle_; }
@@ -136,7 +133,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
     ConnectJob* ReleaseJob();
 
    private:
-    ClientSocketHandle* const handle_;
+    const raw_ptr<ClientSocketHandle> handle_;
     CompletionOnceCallback callback_;
     const ProxyAuthCallback proxy_auth_callback_;
     RequestPriority priority_;
@@ -146,9 +143,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
     const absl::optional<NetworkTrafficAnnotationTag> proxy_annotation_tag_;
     const NetLogWithSource net_log_;
     const SocketTag socket_tag_;
-    ConnectJob* job_;
-
-    DISALLOW_COPY_AND_ASSIGN(Request);
+    raw_ptr<ConnectJob> job_;
   };
 
   TransportClientSocketPool(
@@ -157,7 +152,12 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
       base::TimeDelta unused_idle_socket_timeout,
       const ProxyServer& proxy_server,
       bool is_for_websockets,
-      const CommonConnectJobParams* common_connect_job_params);
+      const CommonConnectJobParams* common_connect_job_params,
+      bool cleanup_on_ip_address_change = true);
+
+  TransportClientSocketPool(const TransportClientSocketPool&) = delete;
+  TransportClientSocketPool& operator=(const TransportClientSocketPool&) =
+      delete;
 
   // Creates a socket pool with an alternative ConnectJobFactory, for use in
   // testing.
@@ -223,9 +223,6 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
                          const ClientSocketHandle* handle) const override;
   base::Value GetInfoAsValue(const std::string& name,
                              const std::string& type) const override;
-  void DumpMemoryStats(
-      base::trace_event::ProcessMemoryDump* pmd,
-      const std::string& parent_dump_absolute_name) const override;
 
   bool RequestInGroupWithHandleHasJobForTesting(
       const GroupId& group_id,
@@ -268,25 +265,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
 
  private:
   // Entry for a persistent socket which became idle at time |start_time|.
-  struct IdleSocket {
-    IdleSocket() : socket(nullptr) {}
-
-    // An idle socket can't be used if it is disconnected or has been used
-    // before and has received data unexpectedly (hence no longer idle).  The
-    // unread data would be mistaken for the beginning of the next response if
-    // we were to use the socket for a new request.
-    //
-    // Note that a socket that has never been used before (like a preconnected
-    // socket) may be used even with unread data.  This may be, e.g., a SPDY
-    // SETTINGS frame.
-    //
-    // If the socket is not usable, |net_log_reason_utf8| is set to a string
-    // indicating why the socket is not usable.
-    bool IsUsable(const char** net_log_reason_utf8) const;
-
-    StreamSocket* socket;
-    base::TimeTicks start_time;
-  };
+  struct IdleSocket;
 
   using RequestQueue = PriorityQueue<std::unique_ptr<Request>>;
 
@@ -541,7 +520,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
     void SanityCheck() const;
 
     const GroupId group_id_;
-    TransportClientSocketPool* const client_socket_pool_;
+    const raw_ptr<TransportClientSocketPool> client_socket_pool_;
 
     // Total number of ConnectJobs that have never been assigned to a Request.
     // Since jobs use late binding to requests, which ConnectJobs have or have
@@ -600,6 +579,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
       const ProxyServer& proxy_server,
       bool is_for_websockets,
       const CommonConnectJobParams* common_connect_job_params,
+      bool cleanup_on_ip_address_change,
       std::unique_ptr<ConnectJobFactory> connect_job_factory,
       SSLClientContext* ssl_client_context,
       bool connect_backup_jobs_enabled);
@@ -607,7 +587,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
   base::TimeDelta ConnectRetryInterval() const {
     // TODO(mbelshe): Make this tuned dynamically based on measured RTT.
     //                For now, just use the max retry interval.
-    return base::TimeDelta::FromMilliseconds(kMaxConnectRetryIntervalMs);
+    return base::Milliseconds(kMaxConnectRetryIntervalMs);
   }
 
   // TODO(mmenke): de-inline these.
@@ -703,6 +683,10 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
   // |request|.
   int RequestSocketInternal(const GroupId& group_id, const Request& request);
 
+  // Wrapper around RequestSocketInternal that adds a reentrancy guard.
+  int CheckedRequestSocketInternal(const GroupId& group_id,
+                                   const Request& request);
+
   // Assigns an idle socket for the group to the request.
   // Returns |true| if an idle socket is available, false otherwise.
   bool AssignIdleSocketToRequest(const Request& request, Group* group);
@@ -791,6 +775,8 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
 
   const ProxyServer proxy_server_;
 
+  const bool cleanup_on_ip_address_change_;
+
   // TODO(vandebo) Remove when backup jobs move to TransportClientSocketPool
   bool connect_backup_jobs_enabled_;
 
@@ -798,11 +784,14 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
   // their idle sockets when it stalls.  Must be empty on destruction.
   std::set<HigherLayeredPool*> higher_pools_;
 
-  SSLClientContext* const ssl_client_context_;
+  const raw_ptr<SSLClientContext> ssl_client_context_;
+
+#if DCHECK_IS_ON()
+  // Reentrancy guard for RequestSocketInternal().
+  bool request_in_process_ = false;
+#endif  // DCHECK_IS_ON()
 
   base::WeakPtrFactory<TransportClientSocketPool> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(TransportClientSocketPool);
 };
 
 }  // namespace net

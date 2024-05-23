@@ -54,31 +54,22 @@ class FlagsContinuation final {
     return FlagsContinuation(kFlags_branch, condition, true_block, false_block);
   }
 
-  static FlagsContinuation ForBranchAndPoison(FlagsCondition condition,
-                                              BasicBlock* true_block,
-                                              BasicBlock* false_block) {
-    return FlagsContinuation(kFlags_branch_and_poison, condition, true_block,
-                             false_block);
-  }
-
   // Creates a new flags continuation for an eager deoptimization exit.
-  static FlagsContinuation ForDeoptimize(
-      FlagsCondition condition, DeoptimizeKind kind, DeoptimizeReason reason,
-      NodeId node_id, FeedbackSource const& feedback, Node* frame_state,
-      InstructionOperand* extra_args = nullptr, int extra_args_count = 0) {
-    return FlagsContinuation(kFlags_deoptimize, condition, kind, reason,
-                             node_id, feedback, frame_state, extra_args,
-                             extra_args_count);
+  static FlagsContinuation ForDeoptimize(FlagsCondition condition,
+                                         DeoptimizeReason reason,
+                                         NodeId node_id,
+                                         FeedbackSource const& feedback,
+                                         FrameState frame_state) {
+    return FlagsContinuation(kFlags_deoptimize, condition, reason, node_id,
+                             feedback, frame_state);
   }
-
-  // Creates a new flags continuation for an eager deoptimization exit.
-  static FlagsContinuation ForDeoptimizeAndPoison(
-      FlagsCondition condition, DeoptimizeKind kind, DeoptimizeReason reason,
-      NodeId node_id, FeedbackSource const& feedback, Node* frame_state,
-      InstructionOperand* extra_args = nullptr, int extra_args_count = 0) {
-    return FlagsContinuation(kFlags_deoptimize_and_poison, condition, kind,
-                             reason, node_id, feedback, frame_state, extra_args,
-                             extra_args_count);
+  static FlagsContinuation ForDeoptimizeForTesting(
+      FlagsCondition condition, DeoptimizeReason reason, NodeId node_id,
+      FeedbackSource const& feedback, Node* frame_state) {
+    // test-instruction-scheduler.cc passes a dummy Node* as frame_state.
+    // Contents don't matter as long as it's not nullptr.
+    return FlagsContinuation(kFlags_deoptimize, condition, reason, node_id,
+                             feedback, frame_state);
   }
 
   // Creates a new flags continuation for a boolean value.
@@ -98,26 +89,14 @@ class FlagsContinuation final {
   }
 
   bool IsNone() const { return mode_ == kFlags_none; }
-  bool IsBranch() const {
-    return mode_ == kFlags_branch || mode_ == kFlags_branch_and_poison;
-  }
-  bool IsDeoptimize() const {
-    return mode_ == kFlags_deoptimize || mode_ == kFlags_deoptimize_and_poison;
-  }
-  bool IsPoisoned() const {
-    return mode_ == kFlags_branch_and_poison ||
-           mode_ == kFlags_deoptimize_and_poison;
-  }
+  bool IsBranch() const { return mode_ == kFlags_branch; }
+  bool IsDeoptimize() const { return mode_ == kFlags_deoptimize; }
   bool IsSet() const { return mode_ == kFlags_set; }
   bool IsTrap() const { return mode_ == kFlags_trap; }
   bool IsSelect() const { return mode_ == kFlags_select; }
   FlagsCondition condition() const {
     DCHECK(!IsNone());
     return condition_;
-  }
-  DeoptimizeKind kind() const {
-    DCHECK(IsDeoptimize());
-    return kind_;
   }
   DeoptimizeReason reason() const {
     DCHECK(IsDeoptimize());
@@ -134,18 +113,6 @@ class FlagsContinuation final {
   Node* frame_state() const {
     DCHECK(IsDeoptimize());
     return frame_state_or_result_;
-  }
-  bool has_extra_args() const {
-    DCHECK(IsDeoptimize());
-    return extra_args_ != nullptr;
-  }
-  const InstructionOperand* extra_args() const {
-    DCHECK(has_extra_args());
-    return extra_args_;
-  }
-  int extra_args_count() const {
-    DCHECK(has_extra_args());
-    return extra_args_count_;
   }
   Node* result() const {
     DCHECK(IsSet() || IsSelect());
@@ -226,26 +193,21 @@ class FlagsContinuation final {
         condition_(condition),
         true_block_(true_block),
         false_block_(false_block) {
-    DCHECK(mode == kFlags_branch || mode == kFlags_branch_and_poison);
+    DCHECK(mode == kFlags_branch);
     DCHECK_NOT_NULL(true_block);
     DCHECK_NOT_NULL(false_block);
   }
 
   FlagsContinuation(FlagsMode mode, FlagsCondition condition,
-                    DeoptimizeKind kind, DeoptimizeReason reason,
-                    NodeId node_id, FeedbackSource const& feedback,
-                    Node* frame_state, InstructionOperand* extra_args,
-                    int extra_args_count)
+                    DeoptimizeReason reason, NodeId node_id,
+                    FeedbackSource const& feedback, Node* frame_state)
       : mode_(mode),
         condition_(condition),
-        kind_(kind),
         reason_(reason),
         node_id_(node_id),
         feedback_(feedback),
-        frame_state_or_result_(frame_state),
-        extra_args_(extra_args),
-        extra_args_count_(extra_args_count) {
-    DCHECK(mode == kFlags_deoptimize || mode == kFlags_deoptimize_and_poison);
+        frame_state_or_result_(frame_state) {
+    DCHECK(mode == kFlags_deoptimize);
     DCHECK_NOT_NULL(frame_state);
   }
 
@@ -278,14 +240,11 @@ class FlagsContinuation final {
 
   FlagsMode const mode_;
   FlagsCondition condition_;
-  DeoptimizeKind kind_;             // Only valid if mode_ == kFlags_deoptimize*
   DeoptimizeReason reason_;         // Only valid if mode_ == kFlags_deoptimize*
   NodeId node_id_;                  // Only valid if mode_ == kFlags_deoptimize*
   FeedbackSource feedback_;         // Only valid if mode_ == kFlags_deoptimize*
   Node* frame_state_or_result_;     // Only valid if mode_ == kFlags_deoptimize*
                                     // or mode_ == kFlags_set.
-  InstructionOperand* extra_args_;  // Only valid if mode_ == kFlags_deoptimize*
-  int extra_args_count_;            // Only valid if mode_ == kFlags_deoptimize*
   BasicBlock* true_block_;          // Only valid if mode_ == kFlags_branch*.
   BasicBlock* false_block_;         // Only valid if mode_ == kFlags_branch*.
   TrapId trap_id_;                  // Only valid if mode_ == kFlags_trap.
@@ -338,8 +297,6 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
                                                : kDisableScheduling,
       EnableRootsRelativeAddressing enable_roots_relative_addressing =
           kDisableRootsRelativeAddressing,
-      PoisoningMitigationLevel poisoning_level =
-          PoisoningMitigationLevel::kDontPoison,
       EnableTraceTurboJson trace_turbo = kDisableTraceTurboJson);
 
   // Visit code for the entire graph with the included schedule.
@@ -443,8 +400,6 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
 
   static MachineOperatorBuilder::AlignmentRequirements AlignmentRequirements();
 
-  bool NeedsPoisoning(IsSafetyCheck safety_check) const;
-
   // ===========================================================================
   // ============ Architecture-independent graph covering methods. =============
   // ===========================================================================
@@ -527,8 +482,8 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   }
 
   void AppendDeoptimizeArguments(InstructionOperandVector* args,
-                                 DeoptimizeKind kind, DeoptimizeReason reason,
-                                 NodeId node_id, FeedbackSource const& feedback,
+                                 DeoptimizeReason reason, NodeId node_id,
+                                 FeedbackSource const& feedback,
                                  FrameState frame_state);
 
   void EmitTableSwitch(const SwitchInfo& sw,
@@ -663,9 +618,8 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   void VisitGoto(BasicBlock* target);
   void VisitBranch(Node* input, BasicBlock* tbranch, BasicBlock* fbranch);
   void VisitSwitch(Node* node, const SwitchInfo& sw);
-  void VisitDeoptimize(DeoptimizeKind kind, DeoptimizeReason reason,
-                       NodeId node_id, FeedbackSource const& feedback,
-                       FrameState frame_state);
+  void VisitDeoptimize(DeoptimizeReason reason, NodeId node_id,
+                       FeedbackSource const& feedback, FrameState frame_state);
   void VisitSelect(Node* node);
   void VisitReturn(Node* ret);
   void VisitThrow(Node* node);
@@ -677,8 +631,6 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   void VisitStackPointerGreaterThan(Node* node, FlagsContinuation* cont);
 
   void VisitWordCompareZero(Node* user, Node* value, FlagsContinuation* cont);
-
-  void EmitWordPoisonOnSpeculation(Node* node);
 
   void EmitPrepareArguments(ZoneVector<compiler::PushParameter>* arguments,
                             const CallDescriptor* call_descriptor, Node* node);
@@ -795,7 +747,6 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
                    FrameStateInput::Equal>
       state_values_cache_;
 
-  PoisoningMitigationLevel poisoning_level_;
   Frame* frame_;
   bool instruction_selection_failed_;
   ZoneVector<std::pair<int, int>> instr_origins_;

@@ -6,10 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FRAGMENT_DATA_H_
 
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/ref_counted_property_tree_state.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
@@ -18,15 +22,18 @@ class PaintLayer;
 
 // Represents the data for a particular fragment of a LayoutObject.
 // See README.md.
-class CORE_EXPORT FragmentData {
-  USING_FAST_MALLOC(FragmentData);
-
+class CORE_EXPORT FragmentData final : public GarbageCollected<FragmentData> {
  public:
   FragmentData* NextFragment() const {
-    return rare_data_ ? rare_data_->next_fragment_.get() : nullptr;
+    return rare_data_ ? rare_data_->next_fragment_ : nullptr;
   }
   FragmentData& EnsureNextFragment();
-  void ClearNextFragment() { DestroyTail(); }
+
+  // We could let the compiler generate code to automatically clear the
+  // next_fragment_ chain, but the code would cause stack overflow in some
+  // cases (e.g. fast/multicol/infinitely-tall-content-in-outer-crash.html).
+  // This function crear the next_fragment_ chain non-recursively.
+  void ClearNextFragment();
 
   FragmentData& LastFragment();
   const FragmentData& LastFragment() const;
@@ -47,10 +54,8 @@ class CORE_EXPORT FragmentData {
 
   // The PaintLayer associated with this LayoutBoxModelObject. This can be null
   // depending on the return value of LayoutBoxModelObject::LayerTypeRequired().
-  PaintLayer* Layer() const {
-    return rare_data_ ? rare_data_->layer.get() : nullptr;
-  }
-  void SetLayer(std::unique_ptr<PaintLayer>);
+  PaintLayer* Layer() const { return rare_data_ ? rare_data_->layer : nullptr; }
+  void SetLayer(PaintLayer*);
 
   // A fragment ID unique within the LayoutObject. In NG block fragmentation,
   // this is the fragmentainer index. In legacy block fragmentation, it's the
@@ -97,7 +102,7 @@ class CORE_EXPORT FragmentData {
   }
   void InvalidateClipPathCache();
 
-  absl::optional<IntRect> ClipPathBoundingBox() const {
+  absl::optional<gfx::RectF> ClipPathBoundingBox() const {
     DCHECK(IsClipPathCacheValid());
     return rare_data_ ? rare_data_->clip_path_bounding_box : absl::nullopt;
   }
@@ -105,7 +110,7 @@ class CORE_EXPORT FragmentData {
     DCHECK(IsClipPathCacheValid());
     return rare_data_ ? rare_data_->clip_path_path.get() : nullptr;
   }
-  void SetClipPathCache(const IntRect& bounding_box,
+  void SetClipPathCache(const gfx::RectF& bounding_box,
                         scoped_refptr<const RefCountedPath>);
   void ClearClipPathCache() {
     if (rare_data_) {
@@ -212,35 +217,29 @@ class CORE_EXPORT FragmentData {
 
   // Map a rect from |this|'s local border box space to |fragment|'s local
   // border box space. Both fragments must have local border box properties.
-  void MapRectToFragment(const FragmentData& fragment, IntRect&) const;
+  void MapRectToFragment(const FragmentData& fragment, gfx::Rect&) const;
 
-  ~FragmentData() {
-    if (NextFragment())
-      DestroyTail();
-  }
+  ~FragmentData() = default;
+  void Trace(Visitor* visitor) const { visitor->Trace(rare_data_); }
 
  private:
   friend class FragmentDataTest;
 
-  // We could let the compiler generate code to automatically destroy the
-  // next_fragment_ chain, but the code would cause stack overflow in some
-  // cases (e.g. fast/multicol/infinitely-tall-content-in-outer-crash.html).
-  // This function destroy the next_fragment_ chain non-recursively.
-  void DestroyTail();
-
   // Contains rare data that that is not needed on all fragments.
-  struct CORE_EXPORT RareData {
-    USING_FAST_MALLOC(RareData);
-
+  struct CORE_EXPORT RareData final : public GarbageCollected<RareData> {
    public:
     RareData();
     RareData(const RareData&) = delete;
     RareData& operator=(const RareData&) = delete;
     ~RareData();
 
+    void SetLayer(PaintLayer*);
+
+    void Trace(Visitor* visitor) const;
+
     // The following data fields are not fragment specific. Placed here just to
     // avoid separate data structure for them.
-    std::unique_ptr<PaintLayer> layer;
+    Member<PaintLayer> layer;
     UniqueObjectId unique_id;
 
     // Fragment specific data.
@@ -249,11 +248,11 @@ class CORE_EXPORT FragmentData {
     std::unique_ptr<ObjectPaintProperties> paint_properties;
     std::unique_ptr<RefCountedPropertyTreeState> local_border_box_properties;
     bool is_clip_path_cache_valid = false;
-    absl::optional<IntRect> clip_path_bounding_box;
+    absl::optional<gfx::RectF> clip_path_bounding_box;
     scoped_refptr<const RefCountedPath> clip_path_path;
     CullRect cull_rect_;
     CullRect contents_cull_rect_;
-    std::unique_ptr<FragmentData> next_fragment_;
+    Member<FragmentData> next_fragment_;
 
 #if DCHECK_IS_ON()
     // Legacy block fragmentation sets the flow thread offset for each
@@ -268,7 +267,7 @@ class CORE_EXPORT FragmentData {
   RareData& EnsureRareData();
 
   PhysicalOffset paint_offset_;
-  std::unique_ptr<RareData> rare_data_;
+  Member<RareData> rare_data_;
 };
 
 }  // namespace blink

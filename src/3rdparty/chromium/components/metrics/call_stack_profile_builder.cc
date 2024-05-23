@@ -150,7 +150,7 @@ void CallStackProfileBuilder::OnSampleCompleted(
 
     // Write CallStackProfile::Location protobuf message.
     uintptr_t instruction_pointer = frame.instruction_pointer;
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 #if !TARGET_IPHONE_SIMULATOR
     // Some iOS devices enable pointer authentication, which uses the
     // higher-order bits of pointers to store a signature. Strip that signature
@@ -159,12 +159,15 @@ void CallStackProfileBuilder::OnSampleCompleted(
     // available.
     instruction_pointer &= 0xFFFFFFFFF;
 #endif  // !TARGET_IPHONE_SIMULATOR
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 
     ptrdiff_t module_offset =
         reinterpret_cast<const char*>(instruction_pointer) -
         reinterpret_cast<const char*>(frame.module->GetBaseAddress());
-    DCHECK_GE(module_offset, 0);
+    // Temporarily disable this DCHECK as there's likely bug in ModuleCache 
+    // that causes this to fail. This results in bad telemetry data but no 
+    // functional effect. https://crbug.com/1240645.
+    // DCHECK_GE(module_offset, 0);
     location->set_address(static_cast<uint64_t>(module_offset));
     location->set_module_id_index(module_loc->second);
   }

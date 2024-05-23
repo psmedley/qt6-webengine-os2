@@ -8,15 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/values.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "net/cookies/canonical_cookie.h"
-
-namespace base {
-class Value;
-class DictionaryValue;
-}
 
 namespace signin_metrics {
 enum class AccessPoint;
@@ -28,6 +23,10 @@ extern const char kSignInPromoQueryKeyShowAccountManagement[];
 class InlineLoginHandler : public content::WebUIMessageHandler {
  public:
   InlineLoginHandler();
+
+  InlineLoginHandler(const InlineLoginHandler&) = delete;
+  InlineLoginHandler& operator=(const InlineLoginHandler&) = delete;
+
   ~InlineLoginHandler() override;
 
   // content::WebUIMessageHandler overrides:
@@ -41,6 +40,26 @@ class InlineLoginHandler : public content::WebUIMessageHandler {
     kDefaultAuthMode = 0,
     kOfflineAuthMode = 1,
     kDesktopAuthMode = 2
+  };
+
+  // Parameters passed to `CompleteLogin` method.
+  struct CompleteLoginParams {
+    CompleteLoginParams();
+    CompleteLoginParams(const CompleteLoginParams&);
+    CompleteLoginParams& operator=(const CompleteLoginParams&);
+    ~CompleteLoginParams();
+
+    std::string email;
+    std::string password;
+    std::string gaia_id;
+    std::string auth_code;
+    bool skip_for_now = false;
+    bool trusted_value = false;
+    bool trusted_found = false;
+    bool choose_what_to_sync = false;
+    // Whether the account should be available in ARC after addition. Used only
+    // on Chrome OS.
+    bool is_available_in_arc = false;
   };
 
   // Closes the dialog by calling the |inline.login.closeDialog| Javascript
@@ -76,20 +95,10 @@ class InlineLoginHandler : public content::WebUIMessageHandler {
   // Handles the web ui message sent when the window is closed from javascript.
   virtual void HandleDialogClose(const base::ListValue* args);
 
-  virtual void SetExtraInitParams(base::DictionaryValue& params) {}
-  virtual void CompleteLogin(const std::string& email,
-                             const std::string& password,
-                             const std::string& gaia_id,
-                             const std::string& auth_code,
-                             bool skip_for_now,
-                             bool trusted,
-                             bool trusted_found,
-                             bool choose_what_to_sync,
-                             base::Value edu_login_params) = 0;
+  virtual void SetExtraInitParams(base::Value::Dict& params) {}
+  virtual void CompleteLogin(const CompleteLoginParams& params) = 0;
 
   base::WeakPtrFactory<InlineLoginHandler> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(InlineLoginHandler);
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_SIGNIN_INLINE_LOGIN_HANDLER_H_

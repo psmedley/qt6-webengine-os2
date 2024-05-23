@@ -5,6 +5,7 @@
 import * as Common from '../common/common.js';
 import * as Host from '../host/host.js';
 import * as i18n from '../i18n/i18n.js';
+import type * as Platform from '../platform/platform.js';
 import type * as Protocol from '../../generated/protocol.js';
 
 import {FrameManager} from './FrameManager.js';
@@ -32,18 +33,18 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 export type PageResourceLoadInitiator = {
   target: null,
   frameId: Protocol.Page.FrameId,
-  initiatorUrl: string|null,
+  initiatorUrl: Platform.DevToolsPath.UrlString|null,
 }|{
   target: Target,
   frameId: Protocol.Page.FrameId | null,
-  initiatorUrl: string | null,
+  initiatorUrl: Platform.DevToolsPath.UrlString | null,
 };
 
 export interface PageResource {
   success: boolean|null;
   errorMessage?: string;
   initiator: PageResourceLoadInitiator;
-  url: string;
+  url: Platform.DevToolsPath.UrlString;
   size: number|null;
 }
 
@@ -60,16 +61,16 @@ interface LoadQueueEntry {
  * resources were loaded, and whether there was a load error.
  */
 export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<EventTypes> {
-  private currentlyLoading: number;
-  private readonly maxConcurrentLoads: number;
-  private readonly pageResources: Map<string, PageResource>;
-  private queuedLoads: LoadQueueEntry[];
-  private readonly loadOverride: ((arg0: string) => Promise<{
-                                    success: boolean,
-                                    content: string,
-                                    errorDescription: Host.ResourceLoader.LoadErrorDescription,
-                                  }>)|null;
-  private readonly loadTimeout: number;
+  #currentlyLoading: number;
+  readonly #maxConcurrentLoads: number;
+  readonly #pageResources: Map<string, PageResource>;
+  #queuedLoads: LoadQueueEntry[];
+  readonly #loadOverride: ((arg0: string) => Promise<{
+                             success: boolean,
+                             content: string,
+                             errorDescription: Host.ResourceLoader.LoadErrorDescription,
+                           }>)|null;
+  readonly #loadTimeout: number;
   constructor(
       loadOverride: ((arg0: string) => Promise<{
                        success: boolean,
@@ -78,14 +79,14 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
                      }>)|null,
       maxConcurrentLoads: number, loadTimeout: number) {
     super();
-    this.currentlyLoading = 0;
-    this.maxConcurrentLoads = maxConcurrentLoads;
-    this.pageResources = new Map();
-    this.queuedLoads = [];
+    this.#currentlyLoading = 0;
+    this.#maxConcurrentLoads = maxConcurrentLoads;
+    this.#pageResources = new Map();
+    this.#queuedLoads = [];
     TargetManager.instance().addModelListener(
         ResourceTreeModel, ResourceTreeModelEvents.MainFrameNavigated, this.onMainFrameNavigated, this);
-    this.loadOverride = loadOverride;
-    this.loadTimeout = loadTimeout;
+    this.#loadOverride = loadOverride;
+    this.#loadTimeout = loadTimeout;
   }
 
   static instance({forceNew, loadOverride, maxConcurrentLoads, loadTimeout}: {
@@ -115,16 +116,16 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
     if (!mainFrame.isTopFrame()) {
       return;
     }
-    for (const {reject} of this.queuedLoads) {
+    for (const {reject} of this.#queuedLoads) {
       reject(new Error(i18nString(UIStrings.loadCanceledDueToReloadOf)));
     }
-    this.queuedLoads = [];
-    this.pageResources.clear();
+    this.#queuedLoads = [];
+    this.#pageResources.clear();
     this.dispatchEventToListeners(Events.Update);
   }
 
   getResourcesLoaded(): Map<string, PageResource> {
-    return this.pageResources;
+    return this.#pageResources;
   }
 
   /**
@@ -137,25 +138,25 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
     queued: number,
     resources: number,
   } {
-    return {loading: this.currentlyLoading, queued: this.queuedLoads.length, resources: this.pageResources.size};
+    return {loading: this.#currentlyLoading, queued: this.#queuedLoads.length, resources: this.#pageResources.size};
   }
 
   private async acquireLoadSlot(): Promise<void> {
-    this.currentlyLoading++;
-    if (this.currentlyLoading > this.maxConcurrentLoads) {
+    this.#currentlyLoading++;
+    if (this.#currentlyLoading > this.#maxConcurrentLoads) {
       const entry: LoadQueueEntry = {resolve: (): void => {}, reject: (): void => {}};
       const waitForCapacity = new Promise<void>((resolve, reject) => {
         entry.resolve = resolve;
         entry.reject = reject;
       });
-      this.queuedLoads.push(entry);
+      this.#queuedLoads.push(entry);
       await waitForCapacity;
     }
   }
 
   private releaseLoadSlot(): void {
-    this.currentlyLoading--;
-    const entry = this.queuedLoads.shift();
+    this.#currentlyLoading--;
+    const entry = this.#queuedLoads.shift();
     if (entry) {
       entry.resolve();
     }
@@ -163,11 +164,12 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
 
   static async withTimeout<T>(promise: Promise<T>, timeout: number): Promise<T> {
     const timeoutPromise = new Promise<T>(
-        (_, reject) => setTimeout(reject, timeout, new Error(i18nString(UIStrings.loadCanceledDueToLoadTimeout))));
+        (_, reject) =>
+            window.setTimeout(reject, timeout, new Error(i18nString(UIStrings.loadCanceledDueToLoadTimeout))));
     return Promise.race([promise, timeoutPromise]);
   }
 
-  static makeKey(url: string, initiator: PageResourceLoadInitiator): string {
+  static makeKey(url: Platform.DevToolsPath.UrlString, initiator: PageResourceLoadInitiator): string {
     if (initiator.frameId) {
       return `${url}-${initiator.frameId}`;
     }
@@ -177,17 +179,17 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
     throw new Error('Invalid initiator');
   }
 
-  async loadResource(url: string, initiator: PageResourceLoadInitiator): Promise<{
+  async loadResource(url: Platform.DevToolsPath.UrlString, initiator: PageResourceLoadInitiator): Promise<{
     content: string,
   }> {
     const key = PageResourceLoader.makeKey(url, initiator);
     const pageResource: PageResource = {success: null, size: null, errorMessage: undefined, url, initiator};
-    this.pageResources.set(key, pageResource);
+    this.#pageResources.set(key, pageResource);
     this.dispatchEventToListeners(Events.Update);
     try {
       await this.acquireLoadSlot();
       const resultPromise = this.dispatchLoad(url, initiator);
-      const result = await PageResourceLoader.withTimeout(resultPromise, this.loadTimeout);
+      const result = await PageResourceLoader.withTimeout(resultPromise, this.#loadTimeout);
       pageResource.errorMessage = result.errorDescription.message;
       pageResource.success = result.success;
       if (result.success) {
@@ -209,17 +211,18 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
     }
   }
 
-  private async dispatchLoad(url: string, initiator: PageResourceLoadInitiator): Promise<{
+  private async dispatchLoad(url: Platform.DevToolsPath.UrlString, initiator: PageResourceLoadInitiator): Promise<{
     success: boolean,
     content: string,
     errorDescription: Host.ResourceLoader.LoadErrorDescription,
   }> {
     let failureReason: string|null = null;
-    if (this.loadOverride) {
-      return this.loadOverride(url);
+    if (this.#loadOverride) {
+      return this.#loadOverride(url);
     }
     const parsedURL = new Common.ParsedURL.ParsedURL(url);
-    const eligibleForLoadFromTarget = getLoadThroughTargetSetting().get() && parsedURL && parsedURL.isHttpOrHttps();
+    const eligibleForLoadFromTarget = getLoadThroughTargetSetting().get() && parsedURL && parsedURL.scheme !== 'file' &&
+        parsedURL.scheme !== 'data' && parsedURL.scheme !== 'devtools';
     Host.userMetrics.developerResourceScheme(this.getDeveloperResourceScheme(parsedURL));
     if (eligibleForLoadFromTarget) {
       try {
@@ -228,7 +231,7 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
           const result = await this.loadFromTarget(initiator.target, initiator.frameId, url);
           return result;
         }
-        const frame = FrameManager.instance().getFrame(initiator.frameId || '');
+        const frame = FrameManager.instance().getFrame(initiator.frameId);
         if (frame) {
           Host.userMetrics.developerResourceLoaded(Host.UserMetrics.DeveloperResourceLoaded.LoadThroughPageViaFrame);
           const result = await this.loadFromTarget(frame.resourceTreeModel().target(), initiator.frameId, url);
@@ -283,7 +286,8 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
     return Host.UserMetrics.DeveloperResourceScheme.SchemeOther;
   }
 
-  private async loadFromTarget(target: Target, frameId: string|null, url: string): Promise<{
+  private async loadFromTarget(
+      target: Target, frameId: Protocol.Page.FrameId|null, url: Platform.DevToolsPath.UrlString): Promise<{
     success: boolean,
     content: string,
     errorDescription: {
@@ -297,7 +301,7 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
     const networkManager = (target.model(NetworkManager) as NetworkManager);
     const ioModel = (target.model(IOModel) as IOModel);
     const resource =
-        await networkManager.loadNetworkResource(frameId || '', url, {disableCache: true, includeCredentials: true});
+        await networkManager.loadNetworkResource(frameId, url, {disableCache: true, includeCredentials: true});
     try {
       const content = resource.stream ? await ioModel.readToString(resource.stream) : '';
       return {
@@ -315,7 +319,7 @@ export class PageResourceLoader extends Common.ObjectWrapper.ObjectWrapper<Event
       };
     } finally {
       if (resource.stream) {
-        ioModel.close(resource.stream);
+        void ioModel.close(resource.stream);
       }
     }
   }

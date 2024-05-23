@@ -11,13 +11,13 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/document_service_base.h"
+#include "content/public/browser/document_service.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -35,7 +35,7 @@ namespace content {
 class ClipboardHostImplTest;
 
 class CONTENT_EXPORT ClipboardHostImpl
-    : public DocumentServiceBase<blink::mojom::ClipboardHost> {
+    : public DocumentService<blink::mojom::ClipboardHost> {
  public:
   ~ClipboardHostImpl() override;
 
@@ -169,8 +169,6 @@ class CONTENT_EXPORT ClipboardHostImpl
                ReadRtfCallback callback) override;
   void ReadPng(ui::ClipboardBuffer clipboard_buffer,
                ReadPngCallback callback) override;
-  void ReadImage(ui::ClipboardBuffer clipboard_buffer,
-                 ReadImageCallback callback) override;
   void ReadFiles(ui::ClipboardBuffer clipboard_buffer,
                  ReadFilesCallback callback) override;
   void ReadCustomData(ui::ClipboardBuffer clipboard_buffer,
@@ -193,7 +191,7 @@ class CONTENT_EXPORT ClipboardHostImpl
                      const std::u16string& title) override;
   void WriteImage(const SkBitmap& unsafe_bitmap) override;
   void CommitWrite() override;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   void WriteStringToFindPboard(const std::u16string& text) override;
 #endif
 
@@ -218,12 +216,12 @@ class CONTENT_EXPORT ClipboardHostImpl
       IsClipboardPasteContentAllowedCallback callback,
       bool is_allowed);
 
+  using CopyAllowedCallback = base::OnceCallback<void()>;
+  void CopyIfAllowed(size_t data_size_in_bytes, CopyAllowedCallback callback);
+
   void OnReadPng(ui::ClipboardBuffer clipboard_buffer,
                  ReadPngCallback callback,
                  const std::vector<uint8_t>& data);
-  void OnReadImage(ui::ClipboardBuffer clipboard_buffer,
-                   ReadImageCallback callback,
-                   const SkBitmap& bitmap);
 
   std::unique_ptr<ui::DataTransferEndpoint> CreateDataEndpoint();
 

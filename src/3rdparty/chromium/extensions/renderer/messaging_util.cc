@@ -12,7 +12,9 @@
 #include "base/strings/stringprintf.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/common/api/messaging/message.h"
+#include "extensions/common/api/messaging/serialization_format.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/renderer/get_script_context.h"
@@ -20,6 +22,11 @@
 #include "gin/converter.h"
 #include "gin/dictionary.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-exception.h"
+#include "v8/include/v8-json.h"
+#include "v8/include/v8-object.h"
+#include "v8/include/v8-primitive.h"
 
 namespace extensions {
 namespace messaging_util {
@@ -31,62 +38,6 @@ constexpr char kExtensionIdRequiredErrorTemplate[] =
     "Extension ID (string) for its first argument.";
 
 constexpr char kErrorCouldNotSerialize[] = "Could not serialize message.";
-
-}  // namespace
-
-const char kSendMessageChannel[] = "chrome.runtime.sendMessage";
-const char kSendRequestChannel[] = "chrome.extension.sendRequest";
-
-const char kOnMessageEvent[] = "runtime.onMessage";
-const char kOnMessageExternalEvent[] = "runtime.onMessageExternal";
-const char kOnRequestEvent[] = "extension.onRequest";
-const char kOnRequestExternalEvent[] = "extension.onRequestExternal";
-const char kOnConnectEvent[] = "runtime.onConnect";
-const char kOnConnectExternalEvent[] = "runtime.onConnectExternal";
-const char kOnConnectNativeEvent[] = "runtime.onConnectNative";
-
-const int kNoFrameId = -1;
-
-std::unique_ptr<Message> MessageFromV8(v8::Local<v8::Context> context,
-                                       v8::Local<v8::Value> value,
-                                       std::string* error_out) {
-  DCHECK(!value.IsEmpty());
-  v8::Isolate* isolate = context->GetIsolate();
-  v8::Context::Scope context_scope(context);
-
-  // TODO(devlin): For some reason, we don't use the signature for
-  // Port.postMessage when evaluating the parameters. We probably should, but
-  // we don't know how many extensions that may break. It would be good to
-  // investigate, and, ideally, use the signature.
-
-  if (value->IsUndefined()) {
-    // JSON.stringify won't serialized undefined (it returns undefined), but it
-    // will serialized null. We've always converted undefined to null in JS
-    // bindings, so preserve this behavior for now.
-    value = v8::Null(isolate);
-  }
-
-  bool success = false;
-  v8::Local<v8::String> stringified;
-  {
-    v8::TryCatch try_catch(isolate);
-    success = v8::JSON::Stringify(context, value).ToLocal(&stringified);
-  }
-
-  if (!success) {
-    *error_out = kErrorCouldNotSerialize;
-    return nullptr;
-  }
-
-  ScriptContext* script_context = GetScriptContextFromV8Context(context);
-  blink::WebLocalFrame* web_frame =
-      script_context ? script_context->web_frame() : nullptr;
-  bool privileged_context =
-      script_context && script_context->context_type() ==
-                            extensions::Feature::BLESSED_EXTENSION_CONTEXT;
-  return MessageFromJSONString(isolate, stringified, error_out, web_frame,
-                               privileged_context);
-}
 
 std::unique_ptr<Message> MessageFromJSONString(v8::Isolate* isolate,
                                                v8::Local<v8::String> json,
@@ -130,12 +81,74 @@ std::unique_ptr<Message> MessageFromJSONString(v8::Isolate* isolate,
   bool has_unrestricted_user_activation =
       web_frame && web_frame->HasTransientUserActivation() &&
       !web_frame->LastActivationWasRestricted();
-  return std::make_unique<Message>(message, has_unrestricted_user_activation,
+  return std::make_unique<Message>(message, SerializationFormat::kJson,
+                                   has_unrestricted_user_activation,
                                    privileged_context);
+}
+
+}  // namespace
+
+const char kSendMessageChannel[] = "chrome.runtime.sendMessage";
+const char kSendRequestChannel[] = "chrome.extension.sendRequest";
+
+const char kOnMessageEvent[] = "runtime.onMessage";
+const char kOnMessageExternalEvent[] = "runtime.onMessageExternal";
+const char kOnRequestEvent[] = "extension.onRequest";
+const char kOnRequestExternalEvent[] = "extension.onRequestExternal";
+const char kOnConnectEvent[] = "runtime.onConnect";
+const char kOnConnectExternalEvent[] = "runtime.onConnectExternal";
+const char kOnConnectNativeEvent[] = "runtime.onConnectNative";
+
+const int kNoFrameId = -1;
+
+std::unique_ptr<Message> MessageFromV8(v8::Local<v8::Context> context,
+                                       v8::Local<v8::Value> value,
+                                       SerializationFormat format,
+                                       std::string* error_out) {
+  // TODO(crbug.com/248548): Incorporate `format` while serializing the message.
+  DCHECK(!value.IsEmpty());
+  v8::Isolate* isolate = context->GetIsolate();
+  v8::Context::Scope context_scope(context);
+
+  // TODO(devlin): For some reason, we don't use the signature for
+  // Port.postMessage when evaluating the parameters. We probably should, but
+  // we don't know how many extensions that may break. It would be good to
+  // investigate, and, ideally, use the signature.
+
+  if (value->IsUndefined()) {
+    // JSON.stringify won't serialized undefined (it returns undefined), but it
+    // will serialized null. We've always converted undefined to null in JS
+    // bindings, so preserve this behavior for now.
+    value = v8::Null(isolate);
+  }
+
+  bool success = false;
+  v8::Local<v8::String> stringified;
+  {
+    v8::TryCatch try_catch(isolate);
+    success = v8::JSON::Stringify(context, value).ToLocal(&stringified);
+  }
+
+  if (!success) {
+    *error_out = kErrorCouldNotSerialize;
+    return nullptr;
+  }
+
+  ScriptContext* script_context = GetScriptContextFromV8Context(context);
+  blink::WebLocalFrame* web_frame =
+      script_context ? script_context->web_frame() : nullptr;
+  bool privileged_context =
+      script_context && script_context->context_type() ==
+                            extensions::Feature::BLESSED_EXTENSION_CONTEXT;
+  return MessageFromJSONString(isolate, stringified, error_out, web_frame,
+                               privileged_context);
 }
 
 v8::Local<v8::Value> MessageToV8(v8::Local<v8::Context> context,
                                  const Message& message) {
+  // TODO(crbug.com/248548): Incorporate `message.format` while deserializing
+  // the message.
+
   v8::Isolate* isolate = context->GetIsolate();
   v8::Context::Scope context_scope(context);
 
@@ -157,6 +170,19 @@ int ExtractIntegerId(v8::Local<v8::Value> value) {
   // Account for -0, which is a valid integer, but is stored as a number in v8.
   DCHECK(value->IsNumber() && value.As<v8::Number>()->Value() == 0.0);
   return 0;
+}
+
+SerializationFormat GetSerializationFormat(
+    const ScriptContext& script_context) {
+  if (!base::FeatureList::IsEnabled(
+          extensions_features::kStructuredCloningForMV3Messaging)) {
+    return SerializationFormat::kJson;
+  }
+
+  const Extension* extension = script_context.extension();
+  return extension && extension->manifest_version() >= 3
+             ? SerializationFormat::kStructuredCloned
+             : SerializationFormat::kJson;
 }
 
 MessageOptions ParseMessageOptions(v8::Local<v8::Context> context,
@@ -192,6 +218,15 @@ MessageOptions ParseMessageOptions(v8::Local<v8::Context> context,
       // NOTE(devlin): JS bindings coerce any negative value to -1. For
       // backwards compatibility, we do the same here.
       options.frame_id = frame_id < 0 ? -1 : frame_id;
+    }
+
+    v8::Local<v8::Value> v8_document_id;
+    success = options_dict.Get("documentId", &v8_document_id);
+    DCHECK(success);
+
+    if (!v8_document_id->IsUndefined()) {
+      DCHECK(v8_document_id->IsString());
+      options.document_id = gin::V8ToString(isolate, v8_document_id);
     }
   }
 

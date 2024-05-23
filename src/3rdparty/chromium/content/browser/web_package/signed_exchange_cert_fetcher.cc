@@ -11,6 +11,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/data_url_loader_factory.h"
 #include "content/browser/loader/single_request_url_loader_factory.h"
@@ -235,7 +236,8 @@ void SignedExchangeCertFetcher::OnReceiveEarlyHints(
     network::mojom::EarlyHintsPtr early_hints) {}
 
 void SignedExchangeCertFetcher::OnReceiveResponse(
-    network::mojom::URLResponseHeadPtr head) {
+    network::mojom::URLResponseHeadPtr head,
+    mojo::ScopedDataPipeConsumerHandle body) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeCertFetcher::OnReceiveResponse");
   if (devtools_proxy_) {
@@ -284,6 +286,8 @@ void SignedExchangeCertFetcher::OnReceiveResponse(
 
   UMA_HISTOGRAM_BOOLEAN("SignedExchange.CertificateFetch.CacheHit",
                         head->was_fetched_via_cache);
+  if (body)
+    OnStartLoadingResponseBody(std::move(body));
 }
 
 void SignedExchangeCertFetcher::OnReceiveRedirect(

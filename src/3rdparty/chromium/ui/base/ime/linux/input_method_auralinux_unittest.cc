@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,6 +15,7 @@
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/base/ime/linux/fake_input_method_context.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
+#include "ui/base/ime/virtual_keyboard_controller_stub.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/dom_code.h"
@@ -66,6 +66,11 @@ class LinuxInputMethodContextForTesting : public LinuxInputMethodContext {
         eat_key_(false),
         focused_(false) {}
 
+  LinuxInputMethodContextForTesting(const LinuxInputMethodContextForTesting&) =
+      delete;
+  LinuxInputMethodContextForTesting& operator=(
+      const LinuxInputMethodContextForTesting&) = delete;
+
   void SetSyncMode(bool is_sync_mode) { is_sync_mode_ = is_sync_mode; }
   void SetEatKey(bool eat_key) { eat_key_ = eat_key; }
 
@@ -80,6 +85,14 @@ class LinuxInputMethodContextForTesting : public LinuxInputMethodContext {
   void AddCompositionStartAction() { actions_.push_back(u"S"); }
 
   void AddCompositionEndAction() { actions_.push_back(u"E"); }
+
+  VirtualKeyboardController* GetVirtualKeyboardController() override {
+    return &virtual_keyboard_controller_;
+  }
+
+  TextInputType input_type() const { return input_type_; }
+  int input_flags() const { return input_flags_; }
+  bool should_do_learning() const { return should_do_learning_; }
 
  protected:
   bool DispatchKeyEvent(const ui::KeyEvent& key_event) override {
@@ -148,15 +161,25 @@ class LinuxInputMethodContextForTesting : public LinuxInputMethodContext {
     TestResult::GetInstance()->RecordAction(base::ASCIIToUTF16(re.str()));
   }
 
+  void SetContentType(TextInputType input_type,
+                      int input_flags,
+                      bool should_do_learning) override {
+    input_type_ = input_type;
+    input_flags_ = input_flags;
+    should_do_learning_ = should_do_learning;
+  }
+
  private:
   LinuxInputMethodContextDelegate* delegate_;
+  VirtualKeyboardControllerStub virtual_keyboard_controller_;
   std::vector<std::u16string> actions_;
   bool is_sync_mode_;
   bool eat_key_;
   bool focused_;
   gfx::Rect cursor_position_;
-
-  DISALLOW_COPY_AND_ASSIGN(LinuxInputMethodContextForTesting);
+  TextInputType input_type_;
+  int input_flags_;
+  bool should_do_learning_;
 };
 
 class LinuxInputMethodContextFactoryForTesting
@@ -164,20 +187,27 @@ class LinuxInputMethodContextFactoryForTesting
  public:
   LinuxInputMethodContextFactoryForTesting() {}
 
+  LinuxInputMethodContextFactoryForTesting(
+      const LinuxInputMethodContextFactoryForTesting&) = delete;
+  LinuxInputMethodContextFactoryForTesting& operator=(
+      const LinuxInputMethodContextFactoryForTesting&) = delete;
+
   std::unique_ptr<LinuxInputMethodContext> CreateInputMethodContext(
       LinuxInputMethodContextDelegate* delegate,
       bool is_simple) const override {
     return std::unique_ptr<ui::LinuxInputMethodContext>(
         new LinuxInputMethodContextForTesting(delegate));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(LinuxInputMethodContextFactoryForTesting);
 };
 
 class InputMethodDelegateForTesting : public internal::InputMethodDelegate {
  public:
   InputMethodDelegateForTesting() {}
+
+  InputMethodDelegateForTesting(const InputMethodDelegateForTesting&) = delete;
+  InputMethodDelegateForTesting& operator=(
+      const InputMethodDelegateForTesting&) = delete;
+
   ~InputMethodDelegateForTesting() override {}
 
   ui::EventDispatchDetails DispatchKeyEventPostIME(
@@ -199,9 +229,6 @@ class InputMethodDelegateForTesting : public internal::InputMethodDelegate {
     TestResult::GetInstance()->RecordAction(base::ASCIIToUTF16(action));
     return ui::EventDispatchDetails();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InputMethodDelegateForTesting);
 };
 
 class TextInputClientForTesting : public DummyTextInputClient {
@@ -278,6 +305,10 @@ class TextInputClientForTesting : public DummyTextInputClient {
 };
 
 class InputMethodAuraLinuxTest : public testing::Test {
+ public:
+  InputMethodAuraLinuxTest(const InputMethodAuraLinuxTest&) = delete;
+  InputMethodAuraLinuxTest& operator=(const InputMethodAuraLinuxTest&) = delete;
+
  protected:
   InputMethodAuraLinuxTest()
       : factory_(nullptr),
@@ -327,8 +358,6 @@ class InputMethodAuraLinuxTest : public testing::Test {
   LinuxInputMethodContextForTesting* context_;
   LinuxInputMethodContextForTesting* context_simple_;
   TestResult* test_result_;
-
-  DISALLOW_COPY_AND_ASSIGN(InputMethodAuraLinuxTest);
 };
 
 TEST_F(InputMethodAuraLinuxTest, BasicSyncModeTest) {
@@ -919,6 +948,30 @@ TEST_F(InputMethodAuraLinuxTest, SurroundingText_PartialText) {
   test_result_->ExpectAction("selectionrangestart:7");
   test_result_->ExpectAction("selectionrangeend:9");
   test_result_->Verify();
+}
+
+TEST_F(InputMethodAuraLinuxTest, GetVirtualKeyboardController) {
+  EXPECT_EQ(input_method_auralinux_->GetVirtualKeyboardController(),
+            context_->GetVirtualKeyboardController());
+}
+
+TEST_F(InputMethodAuraLinuxTest, SetContentTypeWithUpdateFocus) {
+  auto client1 =
+      std::make_unique<TextInputClientForTesting>(TEXT_INPUT_TYPE_TEXT);
+  auto client2 =
+      std::make_unique<TextInputClientForTesting>(TEXT_INPUT_TYPE_URL);
+
+  input_method_auralinux_->SetFocusedTextInputClient(client1.get());
+
+  EXPECT_EQ(TEXT_INPUT_TYPE_TEXT, context_->input_type());
+
+  input_method_auralinux_->SetFocusedTextInputClient(client2.get());
+
+  EXPECT_EQ(TEXT_INPUT_TYPE_URL, context_->input_type());
+
+  input_method_auralinux_->SetFocusedTextInputClient(client1.get());
+
+  EXPECT_EQ(TEXT_INPUT_TYPE_TEXT, context_->input_type());
 }
 
 }  // namespace

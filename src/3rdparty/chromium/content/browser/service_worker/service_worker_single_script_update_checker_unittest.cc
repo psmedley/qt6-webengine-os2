@@ -68,6 +68,12 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
     browser_context_->GetDefaultStoragePartition();
     base::RunLoop().RunUntilIdle();
   }
+
+  ServiceWorkerSingleScriptUpdateCheckerTest(
+      const ServiceWorkerSingleScriptUpdateCheckerTest&) = delete;
+  ServiceWorkerSingleScriptUpdateCheckerTest& operator=(
+      const ServiceWorkerSingleScriptUpdateCheckerTest&) = delete;
+
   ~ServiceWorkerSingleScriptUpdateCheckerTest() override = default;
 
   size_t TotalBytes(const std::vector<std::string>& data_chunks) {
@@ -186,9 +192,6 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
  protected:
   BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestBrowserContext> browser_context_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerSingleScriptUpdateCheckerTest);
 };
 
 TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, Identical_SingleRead) {
@@ -474,7 +477,8 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
   head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
       net::HttpUtil::AssembleRawHeaders(kSuccessHeader));
   head->headers->GetMimeType(&head->mime_type);
-  client->OnReceiveResponse(std::move(head));
+  client->OnReceiveResponse(std::move(head),
+                            mojo::ScopedDataPipeConsumerHandle());
 
   // Simulate sending the response body. The buffer size for the data pipe
   // should be larger than the body to send the whole body in one chunk.
@@ -774,7 +778,8 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
     head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         net::HttpUtil::AssembleRawHeaders(kSuccessHeader));
     head->headers->GetMimeType(&head->mime_type);
-    request->client->OnReceiveResponse(std::move(head));
+    request->client->OnReceiveResponse(std::move(head),
+                                       mojo::ScopedDataPipeConsumerHandle());
 
     MojoCreateDataPipeOptions options;
     options.struct_size = sizeof(MojoCreateDataPipeOptions);
@@ -1089,7 +1094,7 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, MoreThan24Hours) {
           kScriptURL, kScriptURL, GURL(kScope), false /* force_bypass_cache */,
           blink::mojom::ScriptType::kClassic,
           blink::mojom::ServiceWorkerUpdateViaCache::kAll,
-          base::TimeDelta::FromDays(1) + base::TimeDelta::FromHours(1),
+          base::Days(1) + base::Hours(1),
           std::make_unique<MockServiceWorkerResourceReader>(),
           std::make_unique<MockServiceWorkerResourceReader>(),
           std::make_unique<MockServiceWorkerResourceWriter>(),
@@ -1104,7 +1109,7 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, MoreThan24Hours) {
       kImportedScriptURL, kScriptURL, GURL(kScope),
       false /* force_bypass_cache */, blink::mojom::ScriptType::kClassic,
       blink::mojom::ServiceWorkerUpdateViaCache::kAll,
-      base::TimeDelta::FromDays(1) + base::TimeDelta::FromHours(1),
+      base::Days(1) + base::Hours(1),
       std::make_unique<MockServiceWorkerResourceReader>(),
       std::make_unique<MockServiceWorkerResourceReader>(),
       std::make_unique<MockServiceWorkerResourceWriter>(), loader_factory.get(),

@@ -4,20 +4,30 @@
 
 #include "gpu/command_buffer/service/shared_image_backing_d3d.h"
 
+#include <d3d11_3.h>
+
+#include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/shared_image_trace_utils.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
+#include "gpu/command_buffer/service/dxgi_shared_handle_manager.h"
 #include "gpu/command_buffer/service/shared_image_representation_d3d.h"
+#include "gpu/command_buffer/service/shared_image_representation_skia_gl.h"
+#include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
+#include "third_party/libyuv/include/libyuv/planar_functions.h"
+#include "ui/gfx/buffer_format_util.h"
+#include "ui/gl/gl_image_shared_memory.h"
+#include "ui/gl/trace_util.h"
+
 #if BUILDFLAG(USE_DAWN) && BUILDFLAG(DAWN_ENABLE_BACKEND_OPENGLES)
 #include "gpu/command_buffer/service/shared_image_representation_dawn_egl_image.h"
 #endif
-#include "gpu/command_buffer/service/shared_image_representation_skia_gl.h"
-#include "ui/gfx/buffer_format_util.h"
-#include "ui/gl/trace_util.h"
 
 namespace gpu {
 
@@ -104,13 +114,15 @@ class ScopedRestoreTexture {
     prev_binding_ = binding;
   }
 
+  ScopedRestoreTexture(const ScopedRestoreTexture&) = delete;
+  ScopedRestoreTexture& operator=(const ScopedRestoreTexture&) = delete;
+
   ~ScopedRestoreTexture() { api_->glBindTextureFn(target_, prev_binding_); }
 
  private:
-  gl::GLApi* const api_;
+  const raw_ptr<gl::GLApi> api_;
   const GLenum target_;
   GLuint prev_binding_ = 0;
-  DISALLOW_COPY_AND_ASSIGN(ScopedRestoreTexture);
 };
 
 scoped_refptr<gles2::TexturePassthrough> CreateGLTexture(
@@ -128,6 +140,15 @@ scoped_refptr<gles2::TexturePassthrough> CreateGLTexture(
   GLuint service_id = 0;
   api->glGenTexturesFn(1, &service_id);
   api->glBindTextureFn(texture_target, service_id);
+
+  // These need to be set for the texture to be considered mipmap complete.
+  api->glTexParameteriFn(texture_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  api->glTexParameteriFn(texture_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  // These are not strictly required but guard against some checks if NPOT
+  // texture support is disabled.
+  api->glTexParameteriFn(texture_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  api->glTexParameteriFn(texture_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
   // The GL internal format can differ from the underlying swap chain or texture
   // format e.g. RGBA or RGB instead of BGRA or RED/RG for NV12 texture planes.
@@ -160,78 +181,18 @@ scoped_refptr<gles2::TexturePassthrough> CreateGLTexture(
   return texture;
 }
 
-}  // anonymous namespace
-
-SharedImageBackingD3D::SharedState::SharedState(
-    base::win::ScopedHandle shared_handle,
-    Microsoft::WRL::ComPtr<IDXGIKeyedMutex> dxgi_keyed_mutex)
-    : shared_handle_(std::move(shared_handle)),
-      dxgi_keyed_mutex_(std::move(dxgi_keyed_mutex)) {}
-
-SharedImageBackingD3D::SharedState::~SharedState() {
-  DCHECK(!acquired_for_d3d12_);
-  DCHECK_EQ(acquired_for_d3d11_count_, 0);
-  shared_handle_.Close();
+void CopyPlane(const uint8_t* source_memory,
+               size_t source_stride,
+               uint8_t* dest_memory,
+               size_t dest_stride,
+               viz::ResourceFormat format,
+               const gfx::Size& size) {
+  int row_bytes = size.width() * viz::BitsPerPixel(format) / 8;
+  libyuv::CopyPlane(source_memory, source_stride, dest_memory, dest_stride,
+                    row_bytes, size.height());
 }
 
-bool SharedImageBackingD3D::SharedState::BeginAccessD3D12() {
-  if (!dxgi_keyed_mutex_) {
-    DLOG(ERROR) << "D3D12 access not supported without keyed mutex";
-    return false;
-  }
-  if (acquired_for_d3d12_ || acquired_for_d3d11_count_ > 0) {
-    DLOG(ERROR) << "Recursive BeginAccess not supported";
-    return false;
-  }
-  acquired_for_d3d12_ = true;
-  return true;
-}
-
-void SharedImageBackingD3D::SharedState::EndAccessD3D12() {
-  acquired_for_d3d12_ = false;
-}
-
-bool SharedImageBackingD3D::SharedState::BeginAccessD3D11() {
-  // Nop for shared images that are created without keyed mutex (D3D11 only).
-  if (!dxgi_keyed_mutex_)
-    return true;
-
-  if (acquired_for_d3d12_) {
-    DLOG(ERROR) << "Recursive BeginAccess not supported";
-    return false;
-  }
-  if (acquired_for_d3d11_count_ > 0) {
-    acquired_for_d3d11_count_++;
-    return true;
-  }
-  const HRESULT hr =
-      dxgi_keyed_mutex_->AcquireSync(kDXGIKeyedMutexAcquireKey, INFINITE);
-  if (FAILED(hr)) {
-    DLOG(ERROR) << "Unable to acquire the keyed mutex " << std::hex << hr;
-    return false;
-  }
-  acquired_for_d3d11_count_++;
-  return true;
-}
-
-void SharedImageBackingD3D::SharedState::EndAccessD3D11() {
-  // Nop for shared images that are created without keyed mutex (D3D11 only).
-  if (!dxgi_keyed_mutex_)
-    return;
-
-  DCHECK_GT(acquired_for_d3d11_count_, 0);
-  acquired_for_d3d11_count_--;
-  if (acquired_for_d3d11_count_ == 0) {
-    const HRESULT hr =
-        dxgi_keyed_mutex_->ReleaseSync(kDXGIKeyedMutexAcquireKey);
-    if (FAILED(hr))
-      DLOG(ERROR) << "Unable to release the keyed mutex " << std::hex << hr;
-  }
-}
-
-HANDLE SharedImageBackingD3D::SharedState::GetSharedHandle() const {
-  return shared_handle_.Get();
-}
+}  // namespace
 
 // static
 std::unique_ptr<SharedImageBackingD3D>
@@ -245,7 +206,7 @@ SharedImageBackingD3D::CreateFromSwapChainBuffer(
     uint32_t usage,
     Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture,
     Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain,
-    size_t buffer_index) {
+    bool is_back_buffer) {
   auto gl_texture =
       CreateGLTexture(format, size, color_space, d3d11_texture, swap_chain);
   if (!gl_texture) {
@@ -254,13 +215,14 @@ SharedImageBackingD3D::CreateFromSwapChainBuffer(
   }
   return base::WrapUnique(new SharedImageBackingD3D(
       mailbox, format, size, color_space, surface_origin, alpha_type, usage,
-      std::move(d3d11_texture), std::move(gl_texture), std::move(swap_chain),
-      buffer_index));
+      std::move(d3d11_texture), std::move(gl_texture),
+      /*dxgi_shared_handle_state=*/{}, /*shared_memory_handle=*/{},
+      std::move(swap_chain), is_back_buffer));
 }
 
 // static
 std::unique_ptr<SharedImageBackingD3D>
-SharedImageBackingD3D::CreateFromSharedHandle(
+SharedImageBackingD3D::CreateFromDXGISharedHandle(
     const Mailbox& mailbox,
     viz::ResourceFormat format,
     const gfx::Size& size,
@@ -269,18 +231,13 @@ SharedImageBackingD3D::CreateFromSharedHandle(
     SkAlphaType alpha_type,
     uint32_t usage,
     Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture,
-    base::win::ScopedHandle shared_handle) {
-  DCHECK(shared_handle.IsValid());
+    scoped_refptr<DXGISharedHandleState> dxgi_shared_handle_state) {
+  DCHECK(dxgi_shared_handle_state);
 
   const bool has_webgpu_usage = !!(usage & SHARED_IMAGE_USAGE_WEBGPU);
   // Keyed mutexes are required for Dawn interop but are not used for XR
   // composition where fences are used instead.
-  Microsoft::WRL::ComPtr<IDXGIKeyedMutex> dxgi_keyed_mutex;
-  d3d11_texture.As(&dxgi_keyed_mutex);
-  DCHECK(!has_webgpu_usage || dxgi_keyed_mutex);
-
-  auto shared_state = base::MakeRefCounted<SharedState>(
-      std::move(shared_handle), std::move(dxgi_keyed_mutex));
+  DCHECK(!has_webgpu_usage || dxgi_shared_handle_state->has_keyed_mutex());
 
   // Do not cache a GL texture in the backing if it could be owned by WebGPU
   // since there's no GL context to MakeCurrent in the destructor.
@@ -294,10 +251,11 @@ SharedImageBackingD3D::CreateFromSharedHandle(
       return nullptr;
     }
   }
-  return base::WrapUnique(new SharedImageBackingD3D(
+  auto backing = base::WrapUnique(new SharedImageBackingD3D(
       mailbox, format, size, color_space, surface_origin, alpha_type, usage,
-      std::move(d3d11_texture), std::move(gl_texture), /*swap_chain=*/nullptr,
-      /*buffer_index=*/0, std::move(shared_state)));
+      std::move(d3d11_texture), std::move(gl_texture),
+      std::move(dxgi_shared_handle_state)));
+  return backing;
 }
 
 std::unique_ptr<SharedImageBackingD3D>
@@ -325,20 +283,16 @@ SharedImageBackingD3D::CreateFromVideoTexture(
     uint32_t usage,
     Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture,
     unsigned array_slice,
-    base::win::ScopedHandle shared_handle) {
+    scoped_refptr<DXGISharedHandleState> dxgi_shared_handle_state) {
   DCHECK(d3d11_texture);
   DCHECK(SupportsVideoFormat(dxgi_format));
   DCHECK_EQ(mailboxes.size(), NumPlanes(dxgi_format));
 
   // Shared handle and keyed mutex are required for Dawn interop.
-  Microsoft::WRL::ComPtr<IDXGIKeyedMutex> dxgi_keyed_mutex;
-  d3d11_texture.As(&dxgi_keyed_mutex);
-  DCHECK(!(usage & gpu::SHARED_IMAGE_USAGE_WEBGPU) ||
-         (shared_handle.IsValid() && dxgi_keyed_mutex));
-
-  // Share the same keyed mutex state for all the plane backings.
-  auto shared_state = base::MakeRefCounted<SharedState>(
-      std::move(shared_handle), std::move(dxgi_keyed_mutex));
+  const bool has_webgpu_usage = usage & gpu::SHARED_IMAGE_USAGE_WEBGPU;
+  const bool has_keyed_mutex =
+      dxgi_shared_handle_state && dxgi_shared_handle_state->has_keyed_mutex();
+  DCHECK(!has_webgpu_usage || has_keyed_mutex);
 
   std::vector<std::unique_ptr<SharedImageBacking>> shared_images(
       NumPlanes(dxgi_format));
@@ -367,12 +321,36 @@ SharedImageBackingD3D::CreateFromVideoTexture(
     shared_images[plane_index] = base::WrapUnique(new SharedImageBackingD3D(
         mailbox, plane_format, plane_size, kInvalidColorSpace,
         kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType, usage, d3d11_texture,
-        std::move(gl_texture), /*swap_chain=*/nullptr, /*buffer_index=*/0,
-        shared_state));
+        std::move(gl_texture), dxgi_shared_handle_state));
     shared_images[plane_index]->SetCleared();
   }
 
   return shared_images;
+}
+
+// static
+std::unique_ptr<SharedImageBackingD3D>
+SharedImageBackingD3D::CreateFromSharedMemoryHandle(
+    const Mailbox& mailbox,
+    viz::ResourceFormat format,
+    const gfx::Size& size,
+    const gfx::ColorSpace& color_space,
+    GrSurfaceOrigin surface_origin,
+    SkAlphaType alpha_type,
+    uint32_t usage,
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture,
+    gfx::GpuMemoryBufferHandle shared_memory_handle) {
+  DCHECK_EQ(shared_memory_handle.type, gfx::SHARED_MEMORY_BUFFER);
+  auto gl_texture = CreateGLTexture(format, size, color_space, d3d11_texture);
+  if (!gl_texture) {
+    DLOG(ERROR) << "Failed to create GL texture";
+    return nullptr;
+  }
+  auto backing = base::WrapUnique(new SharedImageBackingD3D(
+      mailbox, format, size, color_space, surface_origin, alpha_type, usage,
+      std::move(d3d11_texture), std::move(gl_texture),
+      /*dxgi_shared_handle_state=*/{}, std::move(shared_memory_handle)));
+  return backing;
 }
 
 SharedImageBackingD3D::SharedImageBackingD3D(
@@ -385,9 +363,10 @@ SharedImageBackingD3D::SharedImageBackingD3D(
     uint32_t usage,
     Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture,
     scoped_refptr<gles2::TexturePassthrough> gl_texture,
+    scoped_refptr<DXGISharedHandleState> dxgi_shared_handle_state,
+    gfx::GpuMemoryBufferHandle shared_memory_handle,
     Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain,
-    size_t buffer_index,
-    scoped_refptr<SharedState> shared_state)
+    bool is_back_buffer)
     : ClearTrackingSharedImageBacking(
           mailbox,
           format,
@@ -402,9 +381,10 @@ SharedImageBackingD3D::SharedImageBackingD3D(
           false /* is_thread_safe */),
       d3d11_texture_(std::move(d3d11_texture)),
       gl_texture_(std::move(gl_texture)),
+      dxgi_shared_handle_state_(std::move(dxgi_shared_handle_state)),
+      shared_memory_handle_(std::move(shared_memory_handle)),
       swap_chain_(std::move(swap_chain)),
-      buffer_index_(buffer_index),
-      shared_state_(std::move(shared_state)) {
+      is_back_buffer_(is_back_buffer) {
   const bool has_webgpu_usage = !!(usage & SHARED_IMAGE_USAGE_WEBGPU);
   DCHECK(has_webgpu_usage || gl_texture_);
 }
@@ -412,19 +392,185 @@ SharedImageBackingD3D::SharedImageBackingD3D(
 SharedImageBackingD3D::~SharedImageBackingD3D() {
   if (!have_context())
     gl_texture_->MarkContextLost();
-  gl_texture_ = nullptr;
-  shared_state_ = nullptr;
+  gl_texture_.reset();
+  dxgi_shared_handle_state_.reset();
   swap_chain_.Reset();
   d3d11_texture_.Reset();
-
 #if BUILDFLAG(USE_DAWN)
-  external_image_ = nullptr;
+  dawn_external_images_.clear();
 #endif  // BUILDFLAG(USE_DAWN)
 }
 
+ID3D11Texture2D* SharedImageBackingD3D::GetOrCreateStagingTexture() {
+  if (!staging_texture_) {
+    Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device;
+    DCHECK(d3d11_texture_);
+    d3d11_texture_->GetDevice(&d3d11_device);
+
+    D3D11_TEXTURE2D_DESC texture_desc;
+    d3d11_texture_->GetDesc(&texture_desc);
+
+    D3D11_TEXTURE2D_DESC staging_desc = {};
+    staging_desc.Width = texture_desc.Width;
+    staging_desc.Height = texture_desc.Height;
+    staging_desc.Format = texture_desc.Format;
+    staging_desc.MipLevels = 1;
+    staging_desc.ArraySize = 1;
+    staging_desc.SampleDesc.Count = 1;
+    staging_desc.Usage = D3D11_USAGE_STAGING;
+    staging_desc.CPUAccessFlags =
+        D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+
+    HRESULT hr = d3d11_device->CreateTexture2D(&staging_desc, nullptr,
+                                               &staging_texture_);
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to create staging texture. hr=" << std::hex << hr;
+      return nullptr;
+    }
+
+    constexpr char kStagingTextureLabel[] = "SharedImageD3D_StagingTexture";
+    // Add debug label to the long lived texture.
+    staging_texture_->SetPrivateData(WKPDID_D3DDebugObjectName,
+                                     strlen(kStagingTextureLabel),
+                                     kStagingTextureLabel);
+  }
+  return staging_texture_.Get();
+}
+
 void SharedImageBackingD3D::Update(std::unique_ptr<gfx::GpuFence> in_fence) {
-  DLOG(ERROR) << "SharedImageBackingD3D::Update : Trying to update "
-                 "Shared Images associated with swap chain.";
+  DCHECK(!in_fence);
+  if (!shared_memory_handle_.is_null())
+    needs_upload_to_gpu_ = true;
+}
+
+bool SharedImageBackingD3D::UploadToGpuIfNeeded() {
+  if (!needs_upload_to_gpu_)
+    return true;
+
+  gpu::SharedMemoryRegionWrapper mapped_shared_memory;
+  mapped_shared_memory.Initialize(shared_memory_handle_, size(), format());
+
+  if (!mapped_shared_memory.IsValid()) {
+    DLOG(ERROR) << "Failed to map shared memory";
+    return false;
+  }
+
+  const uint8_t* source_memory = mapped_shared_memory.GetMemory();
+  const size_t source_stride = mapped_shared_memory.GetStride();
+
+  Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device;
+  DCHECK(d3d11_texture_);
+  d3d11_texture_->GetDevice(&d3d11_device);
+
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> device_context;
+  d3d11_device->GetImmediateContext(&device_context);
+
+  D3D11_TEXTURE2D_DESC texture_desc;
+  d3d11_texture_->GetDesc(&texture_desc);
+
+  if (texture_desc.CPUAccessFlags & D3D11_CPU_ACCESS_WRITE) {
+    Microsoft::WRL::ComPtr<ID3D11Device3> device3;
+    HRESULT hr = d3d11_device.As(&device3);
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to retrieve ID3D11Device3. hr=" << std::hex << hr;
+      return false;
+    }
+    hr = device_context->Map(d3d11_texture_.Get(), 0, D3D11_MAP_WRITE, 0,
+                             nullptr);
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to map texture for write. hr = " << std::hex << hr;
+      return false;
+    }
+    device3->WriteToSubresource(d3d11_texture_.Get(), 0, nullptr, source_memory,
+                                source_stride, 0);
+    device_context->Unmap(d3d11_texture_.Get(), 0);
+  } else {
+    ID3D11Texture2D* staging_texture = GetOrCreateStagingTexture();
+    if (!staging_texture)
+      return false;
+    D3D11_MAPPED_SUBRESOURCE mapped_resource = {};
+    HRESULT hr = device_context->Map(staging_texture, 0, D3D11_MAP_WRITE, 0,
+                                     &mapped_resource);
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to map texture for write. hr=" << std::hex << hr;
+      return false;
+    }
+    uint8_t* dest_memory = static_cast<uint8_t*>(mapped_resource.pData);
+    const size_t dest_stride = mapped_resource.RowPitch;
+    CopyPlane(source_memory, source_stride, dest_memory, dest_stride, format(),
+              size());
+    device_context->Unmap(staging_texture, 0);
+    device_context->CopySubresourceRegion(d3d11_texture_.Get(), 0, 0, 0, 0,
+                                          staging_texture, 0, nullptr);
+  }
+  needs_upload_to_gpu_ = false;
+  return true;
+}
+
+bool SharedImageBackingD3D::CopyToGpuMemoryBuffer() {
+  if (shared_memory_handle_.is_null()) {
+    DLOG(ERROR)
+        << "Called CopyToGpuMemoryBuffer for backing without shared memory GMB";
+    return false;
+  }
+
+  gpu::SharedMemoryRegionWrapper mapped_shared_memory;
+  mapped_shared_memory.Initialize(shared_memory_handle_, size(), format());
+
+  if (!mapped_shared_memory.IsValid()) {
+    DLOG(ERROR) << "Failed to map shared memory";
+    return false;
+  }
+
+  uint8_t* dest_memory = mapped_shared_memory.GetMemory();
+  const size_t dest_stride = mapped_shared_memory.GetStride();
+
+  Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device;
+  DCHECK(d3d11_texture_);
+  d3d11_texture_->GetDevice(&d3d11_device);
+
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> device_context;
+  d3d11_device->GetImmediateContext(&device_context);
+
+  D3D11_TEXTURE2D_DESC texture_desc;
+  d3d11_texture_->GetDesc(&texture_desc);
+
+  if (texture_desc.CPUAccessFlags & D3D11_CPU_ACCESS_READ) {
+    Microsoft::WRL::ComPtr<ID3D11Device3> device3;
+    HRESULT hr = d3d11_device.As(&device3);
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to retrieve ID3D11Device3. hr=" << std::hex << hr;
+      return false;
+    }
+    hr = device_context->Map(d3d11_texture_.Get(), 0, D3D11_MAP_READ, 0,
+                             nullptr);
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to map texture for read. hr=" << std::hex << hr;
+      return false;
+    }
+    device3->ReadFromSubresource(dest_memory, dest_stride, 0,
+                                 d3d11_texture_.Get(), 0, nullptr);
+    device_context->Unmap(d3d11_texture_.Get(), 0);
+  } else {
+    ID3D11Texture2D* staging_texture = GetOrCreateStagingTexture();
+    if (!staging_texture)
+      return false;
+    device_context->CopySubresourceRegion(staging_texture, 0, 0, 0, 0,
+                                          d3d11_texture_.Get(), 0, nullptr);
+    D3D11_MAPPED_SUBRESOURCE mapped_resource = {};
+    HRESULT hr = device_context->Map(staging_texture, 0, D3D11_MAP_READ, 0,
+                                     &mapped_resource);
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to map texture for read. hr=" << std::hex << hr;
+      return false;
+    }
+    const uint8_t* source_memory = static_cast<uint8_t*>(mapped_resource.pData);
+    const size_t source_stride = mapped_resource.RowPitch;
+    CopyPlane(source_memory, source_stride, dest_memory, dest_stride, format(),
+              size());
+    device_context->Unmap(staging_texture, 0);
+  }
+  return true;
 }
 
 bool SharedImageBackingD3D::ProduceLegacyMailbox(
@@ -433,12 +579,22 @@ bool SharedImageBackingD3D::ProduceLegacyMailbox(
   return true;
 }
 
-uint32_t SharedImageBackingD3D::GetAllowedDawnUsages() const {
+WGPUTextureUsageFlags SharedImageBackingD3D::GetAllowedDawnUsages(
+    const WGPUTextureFormat wgpu_format) const {
   // TODO(crbug.com/2709243): Figure out other SI flags, if any.
   DCHECK(usage() & gpu::SHARED_IMAGE_USAGE_WEBGPU);
-  return static_cast<uint32_t>(
+  const WGPUTextureUsageFlags kBasicUsage =
       WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst |
-      WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment);
+      WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+  switch (wgpu_format) {
+    case WGPUTextureFormat_BGRA8Unorm:
+      return kBasicUsage;
+    case WGPUTextureFormat_RGBA8Unorm:
+    case WGPUTextureFormat_RGBA16Float:
+      return kBasicUsage | WGPUTextureUsage_StorageBinding;
+    default:
+      return WGPUTextureUsage_None;
+  }
 }
 
 std::unique_ptr<SharedImageRepresentationDawn>
@@ -447,58 +603,77 @@ SharedImageBackingD3D::ProduceDawn(SharedImageManager* manager,
                                    WGPUDevice device,
                                    WGPUBackendType backend_type) {
 #if BUILDFLAG(USE_DAWN)
+#if BUILDFLAG(DAWN_ENABLE_BACKEND_OPENGLES)
+  if (backend_type == WGPUBackendType_OpenGLES) {
+    return std::make_unique<SharedImageRepresentationDawnEGLImage>(
+        ProduceGLTexturePassthrough(manager, tracker), manager, this, tracker,
+        device);
+  }
+#endif
   const viz::ResourceFormat viz_resource_format = format();
   const WGPUTextureFormat wgpu_format = viz::ToWGPUFormat(viz_resource_format);
   if (wgpu_format == WGPUTextureFormat_Undefined) {
     DLOG(ERROR) << "Unsupported viz format found: " << viz_resource_format;
     return nullptr;
   }
+  const WGPUTextureUsageFlags usage = GetAllowedDawnUsages(wgpu_format);
+  if (usage == WGPUTextureUsage_None) {
+    DLOG(ERROR) << "WGPUTextureUsage is unknown for viz format: "
+                << viz_resource_format;
+    return nullptr;
+  }
 
   WGPUTextureDescriptor texture_descriptor = {};
-  texture_descriptor.nextInChain = nullptr;
   texture_descriptor.format = wgpu_format;
-  texture_descriptor.usage = GetAllowedDawnUsages();
+  texture_descriptor.usage = static_cast<uint32_t>(usage);
   texture_descriptor.dimension = WGPUTextureDimension_2D;
   texture_descriptor.size = {static_cast<uint32_t>(size().width()),
                              static_cast<uint32_t>(size().height()), 1};
   texture_descriptor.mipLevelCount = 1;
   texture_descriptor.sampleCount = 1;
 
-#if BUILDFLAG(DAWN_ENABLE_BACKEND_OPENGLES)
-  if (backend_type == WGPUBackendType_OpenGLES) {
-    // EGLImage textures do not support sampling, at the moment.
-    texture_descriptor.usage &= ~WGPUTextureUsage_TextureBinding;
-    EGLImage egl_image =
-        static_cast<gl::GLImageD3D*>(GetGLImage())->egl_image();
-    if (!egl_image) {
-      DLOG(ERROR) << "Failed to create EGLImage";
-      return nullptr;
-    }
-    return std::make_unique<SharedImageRepresentationDawnEGLImage>(
-        manager, this, tracker, device, egl_image, texture_descriptor);
-  }
-#endif
+  // We need to have internal usages of CopySrc for copies and
+  // RenderAttachment for clears.
+  WGPUDawnTextureInternalUsageDescriptor internalDesc = {};
+  internalDesc.chain.sType = WGPUSType_DawnTextureInternalUsageDescriptor;
+  internalDesc.internalUsage =
+      WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment;
+  texture_descriptor.nextInChain =
+      reinterpret_cast<WGPUChainedStruct*>(&internalDesc);
+
+  // Evict invalid external images e.g. due to their device being destroyed.
+  base::EraseIf(dawn_external_images_,
+                [](const auto& kv) { return !kv.second->IsValid(); });
 
   // Persistently open the shared handle by caching it on this backing.
-  if (!external_image_) {
-    DCHECK(base::win::HandleTraits::IsHandleValid(GetSharedHandle()));
+  auto it = dawn_external_images_.find(device);
+  dawn::native::d3d12::ExternalImageDXGI* external_image_ptr = nullptr;
+  if (it == dawn_external_images_.end()) {
+    DCHECK(dxgi_shared_handle_state_);
+    const HANDLE shared_handle = dxgi_shared_handle_state_->GetSharedHandle();
+    DCHECK(base::win::HandleTraits::IsHandleValid(shared_handle));
 
-    dawn_native::d3d12::ExternalImageDescriptorDXGISharedHandle
+    dawn::native::d3d12::ExternalImageDescriptorDXGISharedHandle
         externalImageDesc;
     externalImageDesc.cTextureDescriptor = &texture_descriptor;
-    externalImageDesc.sharedHandle = GetSharedHandle();
+    externalImageDesc.sharedHandle = shared_handle;
 
-    external_image_ = dawn_native::d3d12::ExternalImageDXGI::Create(
-        device, &externalImageDesc);
-
-    if (!external_image_) {
+    std::unique_ptr<dawn::native::d3d12::ExternalImageDXGI> external_image =
+        dawn::native::d3d12::ExternalImageDXGI::Create(device,
+                                                       &externalImageDesc);
+    if (!external_image) {
       DLOG(ERROR) << "Failed to create external image";
       return nullptr;
     }
+    external_image_ptr = external_image.get();
+    dawn_external_images_.emplace(device, std::move(external_image));
+  } else {
+    external_image_ptr = it->second.get();
   }
-
+  DCHECK(external_image_ptr);
+  DCHECK(external_image_ptr->IsValid());
   return std::make_unique<SharedImageRepresentationDawnD3D>(
-      manager, this, tracker, device, external_image_.get());
+      manager, this, tracker, device, external_image_ptr);
 #else
   return nullptr;
 #endif  // BUILDFLAG(USE_DAWN)
@@ -524,23 +699,27 @@ void SharedImageBackingD3D::OnMemoryDump(
 }
 
 bool SharedImageBackingD3D::BeginAccessD3D12() {
-  return shared_state_->BeginAccessD3D12();
+  if (dxgi_shared_handle_state_)
+    return dxgi_shared_handle_state_->BeginAccessD3D12();
+  // D3D12 access is only allowed with shared handle and keyed mutex.
+  return false;
 }
 
 void SharedImageBackingD3D::EndAccessD3D12() {
-  shared_state_->EndAccessD3D12();
+  if (dxgi_shared_handle_state_)
+    dxgi_shared_handle_state_->EndAccessD3D12();
 }
 
 bool SharedImageBackingD3D::BeginAccessD3D11() {
-  return shared_state_->BeginAccessD3D11();
+  if (dxgi_shared_handle_state_)
+    return dxgi_shared_handle_state_->BeginAccessD3D11();
+  // D3D11 access is allowed without shared handle and keyed mutex.
+  return true;
 }
 
 void SharedImageBackingD3D::EndAccessD3D11() {
-  shared_state_->EndAccessD3D11();
-}
-
-HANDLE SharedImageBackingD3D::GetSharedHandle() const {
-  return shared_state_->GetSharedHandle();
+  if (dxgi_shared_handle_state_)
+    dxgi_shared_handle_state_->EndAccessD3D11();
 }
 
 gl::GLImage* SharedImageBackingD3D::GetGLImage() const {
@@ -549,8 +728,8 @@ gl::GLImage* SharedImageBackingD3D::GetGLImage() const {
 
 bool SharedImageBackingD3D::PresentSwapChain() {
   TRACE_EVENT0("gpu", "SharedImageBackingD3D::PresentSwapChain");
-  if (buffer_index_ != 0) {
-    DLOG(ERROR) << "Swap chain backing does not correspond to back buffer";
+  if (!swap_chain_ || !is_back_buffer_) {
+    DLOG(ERROR) << "Backing does not correspond to back buffer of swap chain";
     return false;
   }
 
@@ -587,6 +766,10 @@ std::unique_ptr<SharedImageRepresentationGLTexturePassthrough>
 SharedImageBackingD3D::ProduceGLTexturePassthrough(SharedImageManager* manager,
                                                    MemoryTypeTracker* tracker) {
   TRACE_EVENT0("gpu", "SharedImageBackingD3D::ProduceGLTexturePassthrough");
+  if (!UploadToGpuIfNeeded()) {
+    DLOG(ERROR) << "UploadToGpuIfNeeded failed";
+    return nullptr;
+  }
   // Lazily create a GL texture if it wasn't provided on initialization.
   auto gl_texture = gl_texture_;
   if (!gl_texture) {
@@ -615,8 +798,22 @@ std::unique_ptr<SharedImageRepresentationOverlay>
 SharedImageBackingD3D::ProduceOverlay(SharedImageManager* manager,
                                       MemoryTypeTracker* tracker) {
   TRACE_EVENT0("gpu", "SharedImageBackingD3D::ProduceOverlay");
-  return std::make_unique<SharedImageRepresentationOverlayD3D>(manager, this,
-                                                               tracker);
+  // Prefer GLImageMemory for shared memory case so that we don't upload to a
+  // texture if it ends up in an overlay.
+  if (!shared_memory_handle_.is_null()) {
+    auto gl_image = base::MakeRefCounted<gl::GLImageSharedMemory>(size());
+    if (!gl_image->Initialize(
+            shared_memory_handle_.region, shared_memory_handle_.id,
+            viz::BufferFormat(format()), shared_memory_handle_.offset,
+            shared_memory_handle_.stride)) {
+      DLOG(ERROR) << "Failed to initialize GLImageSharedMemory";
+      return nullptr;
+    }
+    return std::make_unique<SharedImageRepresentationOverlayD3D>(
+        manager, this, tracker, std::move(gl_image));
+  }
+  return std::make_unique<SharedImageRepresentationOverlayD3D>(
+      manager, this, tracker, GetGLImage());
 }
 
 }  // namespace gpu

@@ -16,7 +16,7 @@ namespace net {
 
 namespace {
 
-constexpr base::TimeDelta kAgeOneWeek = base::TimeDelta::FromDays(7);
+constexpr base::TimeDelta kAgeOneWeek = base::Days(7);
 
 std::string GetFilePath(base::StringPiece file_name) {
   return std::string("net/data/crl_unittest/") + std::string(file_name);
@@ -162,7 +162,8 @@ TEST_P(CheckCRLTest, FromFile) {
   ParsedDistributionPoint* cert_dp = &fake_cert_dp;
   std::vector<ParsedDistributionPoint> distribution_points;
   ParsedExtension crl_dp_extension;
-  if (cert->GetExtension(CrlDistributionPointsOid(), &crl_dp_extension)) {
+  if (cert->GetExtension(der::Input(kCrlDistributionPointsOid),
+                         &crl_dp_extension)) {
     ASSERT_TRUE(ParseCrlDistributionPoints(crl_dp_extension.value,
                                            &distribution_points));
     ASSERT_LE(distribution_points.size(), 1U);
@@ -172,8 +173,7 @@ TEST_P(CheckCRLTest, FromFile) {
   ASSERT_TRUE(cert_dp);
 
   // Mar 9 00:00:00 2017 GMT
-  base::Time kVerifyTime =
-      base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(1489017600);
+  base::Time kVerifyTime = base::Time::UnixEpoch() + base::Seconds(1489017600);
 
   CRLRevocationStatus expected_revocation_status = CRLRevocationStatus::UNKNOWN;
   if (base::StartsWith(file_name, "good"))

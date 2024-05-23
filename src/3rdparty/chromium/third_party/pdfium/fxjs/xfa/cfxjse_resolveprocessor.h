@@ -8,10 +8,9 @@
 #define FXJS_XFA_CFXJSE_RESOLVEPROCESSOR_H_
 
 #include <memory>
-#include <vector>
 
-#include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/widestring.h"
 #include "fxjs/xfa/cfxjse_engine.h"
 #include "v8/include/cppgc/macros.h"
 #include "xfa/fxfa/fxfa_basic.h"

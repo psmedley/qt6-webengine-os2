@@ -83,7 +83,7 @@ int64_t CurrentWallclockMicroseconds() {
 }
 
 // Time between resampling the un-granular clock for this API.
-constexpr TimeDelta kMaxTimeToAvoidDrift = TimeDelta::FromSeconds(60);
+constexpr TimeDelta kMaxTimeToAvoidDrift = Seconds(60);
 
 int64_t g_initial_time = 0;
 TimeTicks g_initial_ticks;
@@ -210,14 +210,14 @@ Time TimeNowIgnoringOverride() {
       continue;
     }
 
-    return Time() + elapsed + TimeDelta::FromMicroseconds(g_initial_time);
+    return Time() + elapsed + Microseconds(g_initial_time);
   }
 }
 
 Time TimeNowFromSystemTimeIgnoringOverride() {
   // Force resync.
   InitializeClock();
-  return Time() + TimeDelta::FromMicroseconds(g_initial_time);
+  return Time() + Microseconds(g_initial_time);
 }
 }  // namespace subtle
 
@@ -465,8 +465,8 @@ TimeTicks RolloverProtectedNow() {
   }
 
   return TimeTicks() +
-         TimeDelta::FromMilliseconds(
-             now + (static_cast<uint64_t>(state.as_values.rollovers) << 32));
+         Milliseconds(now +
+                      (static_cast<uint64_t>(state.as_values.rollovers) << 32));
 }
 
 // Discussion of tick counter options on Windows:
@@ -522,17 +522,16 @@ TimeDelta QPCValueToTimeDelta(LONGLONG qpc_value) {
   // If the QPC Value is below the overflow threshold, we proceed with
   // simple multiply and divide.
   if (qpc_value < Time::kQPCOverflowThreshold) {
-    return TimeDelta::FromMicroseconds(
-        qpc_value * Time::kMicrosecondsPerSecond / g_qpc_ticks_per_second);
+    return Microseconds(qpc_value * Time::kMicrosecondsPerSecond /
+                        g_qpc_ticks_per_second);
   }
   // Otherwise, calculate microseconds in a round about manner to avoid
   // overflow and precision issues.
   int64_t whole_seconds = qpc_value / g_qpc_ticks_per_second;
   int64_t leftover_ticks = qpc_value - (whole_seconds * g_qpc_ticks_per_second);
-  return TimeDelta::FromMicroseconds(
-      (whole_seconds * Time::kMicrosecondsPerSecond) +
-      ((leftover_ticks * Time::kMicrosecondsPerSecond) /
-       g_qpc_ticks_per_second));
+  return Microseconds((whole_seconds * Time::kMicrosecondsPerSecond) +
+                      ((leftover_ticks * Time::kMicrosecondsPerSecond) /
+                       g_qpc_ticks_per_second));
 }
 
 TimeTicks QPCNow() {
@@ -672,7 +671,7 @@ ThreadTicks ThreadTicks::GetForThread(
   ::QueryThreadCycleTime(thread_handle.platform_handle(), &thread_cycle_time);
 
   // Get the frequency of the TSC.
-  const double tsc_ticks_per_second = TSCTicksPerSecond();
+  const double tsc_ticks_per_second = time_internal::TSCTicksPerSecond();
   if (tsc_ticks_per_second == 0)
     return ThreadTicks();
 
@@ -687,21 +686,62 @@ ThreadTicks ThreadTicks::GetForThread(
 
 // static
 bool ThreadTicks::IsSupportedWin() {
-  static bool is_supported = CPU().has_non_stop_time_stamp_counter();
-  return is_supported;
+#if defined(ARCH_CPU_ARM64)
+  // The Arm implementation does not use QueryThreadCycleTime and therefore does
+  // not care about the time stamp counter.
+  return true;
+#else
+  return time_internal::HasConstantRateTSC();
+#endif
 }
 
 // static
 void ThreadTicks::WaitUntilInitializedWin() {
 #if !defined(ARCH_CPU_ARM64)
-  while (TSCTicksPerSecond() == 0)
+  while (time_internal::TSCTicksPerSecond() == 0)
     ::Sleep(10);
 #endif
 }
 
+// static
+TimeTicks TimeTicks::FromQPCValue(LONGLONG qpc_value) {
+  return TimeTicks() + QPCValueToTimeDelta(qpc_value);
+}
+
+// TimeDelta ------------------------------------------------------------------
+
+// static
+TimeDelta TimeDelta::FromQPCValue(LONGLONG qpc_value) {
+  return QPCValueToTimeDelta(qpc_value);
+}
+
+// static
+TimeDelta TimeDelta::FromFileTime(FILETIME ft) {
+  return Microseconds(FileTimeToMicroseconds(ft));
+}
+
+// static
+TimeDelta TimeDelta::FromWinrtDateTime(ABI::Windows::Foundation::DateTime dt) {
+  // UniversalTime is 100 ns intervals since January 1, 1601 (UTC)
+  return Microseconds(dt.UniversalTime / 10);
+}
+
+ABI::Windows::Foundation::DateTime TimeDelta::ToWinrtDateTime() const {
+  ABI::Windows::Foundation::DateTime date_time;
+  date_time.UniversalTime = InMicroseconds() * 10;
+  return date_time;
+}
+
 #if !defined(ARCH_CPU_ARM64)
-double ThreadTicks::TSCTicksPerSecond() {
-  DCHECK(IsSupported());
+namespace time_internal {
+
+bool HasConstantRateTSC() {
+  static bool is_supported = CPU().has_non_stop_time_stamp_counter();
+  return is_supported;
+}
+
+double TSCTicksPerSecond() {
+  DCHECK(HasConstantRateTSC());
   // The value returned by QueryPerformanceFrequency() cannot be used as the TSC
   // frequency, because there is no guarantee that the TSC frequency is equal to
   // the performance counter frequency.
@@ -757,35 +797,8 @@ double ThreadTicks::TSCTicksPerSecond() {
 
   return tsc_ticks_per_second;
 }
+
+}  // namespace time_internal
 #endif  // defined(ARCH_CPU_ARM64)
-
-// static
-TimeTicks TimeTicks::FromQPCValue(LONGLONG qpc_value) {
-  return TimeTicks() + QPCValueToTimeDelta(qpc_value);
-}
-
-// TimeDelta ------------------------------------------------------------------
-
-// static
-TimeDelta TimeDelta::FromQPCValue(LONGLONG qpc_value) {
-  return QPCValueToTimeDelta(qpc_value);
-}
-
-// static
-TimeDelta TimeDelta::FromFileTime(FILETIME ft) {
-  return TimeDelta::FromMicroseconds(FileTimeToMicroseconds(ft));
-}
-
-// static
-TimeDelta TimeDelta::FromWinrtDateTime(ABI::Windows::Foundation::DateTime dt) {
-  // UniversalTime is 100 ns intervals since January 1, 1601 (UTC)
-  return TimeDelta::FromMicroseconds(dt.UniversalTime / 10);
-}
-
-ABI::Windows::Foundation::DateTime TimeDelta::ToWinrtDateTime() const {
-  ABI::Windows::Foundation::DateTime date_time;
-  date_time.UniversalTime = InMicroseconds() * 10;
-  return date_time;
-}
 
 }  // namespace base

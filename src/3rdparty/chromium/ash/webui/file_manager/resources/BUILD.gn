@@ -2,12 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//chrome/browser/resources/tools/optimize_webui.gni")
 import("//chrome/common/features.gni")
 import("//third_party/closure_compiler/compile_js.gni")
 import("//tools/grit/grit_rule.gni")
 import("//tools/grit/preprocess_if_expr.gni")
 import("//ui/webui/resources/tools/generate_grd.gni")
+
+assert(is_chromeos_ash)
 
 preprocess_folder = "$target_gen_dir/preprocessed"
 mojom_webui_folder = "$root_gen_dir/mojom-webui/ash/webui/file_manager/mojom"
@@ -36,7 +39,12 @@ js_library("main_js") {
     "main.js",
     "script_loader.js",
   ]
-  deps = [ "//ash/webui/file_manager/mojom:mojom_webui_js" ]
+  deps = [
+    "//ash/webui/file_manager/mojom:mojom_webui_js",
+    "//ui/file_manager/file_manager/common/js:glitch",
+  ]
+
+  externs_list = [ "$externs_path/chrome_extensions.js" ]
 }
 
 files_app_path =
@@ -53,7 +61,7 @@ js_type_check("closure_compile") {
                     "js_module_root=" + rebase_path(".", root_build_dir),
                     "js_module_root=" +
                         rebase_path(mojom_webui_folder, root_build_dir),
-                    "browser_resolver_prefix_replacements=\"chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/=../../ui/file_manager/file_manager/\"",
+                    "browser_resolver_prefix_replacements=\"chrome://file-manager/=../../ui/file_manager/file_manager/\"",
                   ]
 }
 
@@ -122,8 +130,7 @@ optimize_webui("build") {
 
   excludes = [ "chrome://resources/mojo/mojo/public/js/bindings.js" ]
 
-  external_paths =
-      [ "chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj|$files_app_path" ]
+  external_paths = [ "chrome://file-manager|$files_app_path" ]
 
   deps = [
     ":preprocess",

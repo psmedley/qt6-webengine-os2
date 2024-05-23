@@ -32,7 +32,7 @@ class CONTENT_EXPORT ComputePressureHost
     : public blink::mojom::ComputePressureHost {
  public:
   static constexpr base::TimeDelta kDefaultVisibleObserverRateLimit =
-      base::TimeDelta::FromSeconds(1);
+      base::Seconds(1);
 
   // `did_connection_change` is called on changes to the mojo connections
   // handled by this host are changed. The callback will not be Run() after
@@ -70,7 +70,7 @@ class CONTENT_EXPORT ComputePressureHost
       GlobalRenderFrameHostId frame_id,
       mojo::PendingReceiver<blink::mojom::ComputePressureHost> receiver);
 
-  // blink.mojom.ComputePressureManager implementation.
+  // blink::mojom::ComputePressureHost implementation.
   void AddObserver(
       mojo::PendingRemote<blink::mojom::ComputePressureObserver> observer,
       blink::mojom::ComputePressureQuantizationPtr quantization,
@@ -124,14 +124,14 @@ class CONTENT_EXPORT ComputePressureHost
       GUARDED_BY_CONTEXT(sequence_checker_);
 
   // Implements the quantizing scheme used for all the origin's observers.
-  ComputePressureQuantizer quantizer_;
+  ComputePressureQuantizer quantizer_ GUARDED_BY_CONTEXT(sequence_checker_);
 
   // The (quantized) sample that was last reported to this origin's observers.
   //
   // Stored to avoid sending updates when the underlying compute pressure state
   // changes, but quantization produces the same values that were reported in
   // the last update.
-  ComputePressureSample last_report_sample_
+  blink::mojom::ComputePressureState last_report_state_
       GUARDED_BY_CONTEXT(sequence_checker_);
 
   // The last time the origin's observers received an update.

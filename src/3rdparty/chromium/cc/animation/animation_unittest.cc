@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "cc/animation/animation_delegate.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_id_provider.h"
@@ -15,6 +16,7 @@
 #include "cc/animation/keyframe_effect.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/animation_timelines_test_common.h"
+#include "cc/trees/property_tree.h"
 
 namespace cc {
 namespace {
@@ -38,7 +40,7 @@ TEST_F(AnimationTest, AttachDetachLayerIfTimelineAttached) {
   EXPECT_TRUE(timeline_->needs_push_properties());
   EXPECT_FALSE(animation_->keyframe_effect()->needs_push_properties());
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
 
   EXPECT_FALSE(GetImplKeyframeEffectForLayerId(element_id_));
 
@@ -59,7 +61,7 @@ TEST_F(AnimationTest, AttachDetachLayerIfTimelineAttached) {
   EXPECT_EQ(animation_->keyframe_effect()->element_id(), element_id_);
   CheckKeyframeEffectTimelineNeedsPushProperties(true);
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
 
   EXPECT_EQ(animation_impl_->keyframe_effect(),
             GetImplKeyframeEffectForLayerId(element_id_));
@@ -73,7 +75,7 @@ TEST_F(AnimationTest, AttachDetachLayerIfTimelineAttached) {
   EXPECT_FALSE(animation_->keyframe_effect()->element_id());
   CheckKeyframeEffectTimelineNeedsPushProperties(true);
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
 
   EXPECT_FALSE(GetImplKeyframeEffectForLayerId(element_id_));
   EXPECT_FALSE(animation_impl_->element_animations());
@@ -86,7 +88,7 @@ TEST_F(AnimationTest, AttachDetachLayerIfTimelineAttached) {
   EXPECT_FALSE(animation_->keyframe_effect()->element_id());
   EXPECT_TRUE(timeline_->needs_push_properties());
   EXPECT_FALSE(animation_->keyframe_effect()->needs_push_properties());
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
   CheckKeyframeEffectTimelineNeedsPushProperties(false);
 }
 
@@ -121,6 +123,95 @@ TEST_F(AnimationTest, AttachDetachTimelineIfLayerAttached) {
   EXPECT_TRUE(animation_->keyframe_effect()->needs_push_properties());
 }
 
+TEST_F(AnimationTest, HaveInvalidationAndNativePropertyAnimations) {
+  client_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+  client_impl_.RegisterElementId(element_id_, ElementListType::PENDING);
+  client_impl_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+
+  host_->AddAnimationTimeline(timeline_);
+
+  timeline_->AttachAnimation(animation_);
+  animation_->AttachElement(element_id_);
+  CheckKeyframeEffectTimelineNeedsPushProperties(true);
+
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
+  CheckKeyframeEffectTimelineNeedsPushProperties(false);
+
+  const float start_value = .7f;
+  const float end_value = .3f;
+
+  const float start_opacity = .7f;
+  const float end_opacity = .3f;
+  const double duration = 1.;
+
+  AddAnimatedCustomPropertyToAnimation(animation_.get(), duration, start_value,
+                                       end_value);
+  AddOpacityTransitionToAnimation(animation_.get(), duration, start_opacity,
+                                  end_opacity, false);
+  CheckKeyframeEffectTimelineNeedsPushProperties(true);
+
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
+  CheckKeyframeEffectTimelineNeedsPushProperties(false);
+  EXPECT_TRUE(host_->HasInvalidationAnimation());
+  EXPECT_TRUE(host_->HasNativePropertyAnimation());
+}
+
+TEST_F(AnimationTest, HasInvalidationAnimation) {
+  client_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+  client_impl_.RegisterElementId(element_id_, ElementListType::PENDING);
+  client_impl_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+
+  host_->AddAnimationTimeline(timeline_);
+
+  timeline_->AttachAnimation(animation_);
+  animation_->AttachElement(element_id_);
+  CheckKeyframeEffectTimelineNeedsPushProperties(true);
+
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
+  CheckKeyframeEffectTimelineNeedsPushProperties(false);
+
+  const float start_value = .7f;
+  const float end_value = .3f;
+  const double duration = 1.;
+
+  AddAnimatedCustomPropertyToAnimation(animation_.get(), duration, start_value,
+                                       end_value);
+  CheckKeyframeEffectTimelineNeedsPushProperties(true);
+
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
+  CheckKeyframeEffectTimelineNeedsPushProperties(false);
+  EXPECT_TRUE(host_->HasInvalidationAnimation());
+  EXPECT_FALSE(host_->HasNativePropertyAnimation());
+}
+
+TEST_F(AnimationTest, HasNativePropertyAnimation) {
+  client_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+  client_impl_.RegisterElementId(element_id_, ElementListType::PENDING);
+  client_impl_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+
+  host_->AddAnimationTimeline(timeline_);
+
+  timeline_->AttachAnimation(animation_);
+  animation_->AttachElement(element_id_);
+  CheckKeyframeEffectTimelineNeedsPushProperties(true);
+
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
+  CheckKeyframeEffectTimelineNeedsPushProperties(false);
+
+  const float start_opacity = .7f;
+  const float end_opacity = .3f;
+  const double duration = 1.;
+
+  AddOpacityTransitionToAnimation(animation_.get(), duration, start_opacity,
+                                  end_opacity, false);
+  CheckKeyframeEffectTimelineNeedsPushProperties(true);
+
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
+  CheckKeyframeEffectTimelineNeedsPushProperties(false);
+  EXPECT_FALSE(host_->HasInvalidationAnimation());
+  EXPECT_TRUE(host_->HasNativePropertyAnimation());
+}
+
 TEST_F(AnimationTest, PropertiesMutate) {
   client_.RegisterElementId(element_id_, ElementListType::ACTIVE);
   client_impl_.RegisterElementId(element_id_, ElementListType::PENDING);
@@ -132,7 +223,7 @@ TEST_F(AnimationTest, PropertiesMutate) {
   animation_->AttachElement(element_id_);
   CheckKeyframeEffectTimelineNeedsPushProperties(true);
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
   CheckKeyframeEffectTimelineNeedsPushProperties(false);
 
   const float start_opacity = .7f;
@@ -160,7 +251,7 @@ TEST_F(AnimationTest, PropertiesMutate) {
                                        end_invert);
   CheckKeyframeEffectTimelineNeedsPushProperties(true);
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
   CheckKeyframeEffectTimelineNeedsPushProperties(false);
 
   EXPECT_FALSE(client_.IsPropertyMutated(element_id_, ElementListType::ACTIVE,
@@ -184,11 +275,11 @@ TEST_F(AnimationTest, PropertiesMutate) {
   host_impl_->ActivateAnimations(nullptr);
 
   base::TimeTicks time;
-  time += base::TimeDelta::FromSecondsD(0.1);
+  time += base::Seconds(0.1);
   TickAnimationsTransferEvents(time, 4u);
   CheckKeyframeEffectTimelineNeedsPushProperties(false);
 
-  time += base::TimeDelta::FromSecondsD(duration);
+  time += base::Seconds(duration);
   TickAnimationsTransferEvents(time, 4u);
   CheckKeyframeEffectTimelineNeedsPushProperties(true);
 
@@ -261,7 +352,7 @@ TEST_F(AnimationTest, AttachTwoAnimationsToOneLayer) {
   AddAnimatedTransformToAnimation(animation2.get(), duration, transform_x,
                                   transform_y);
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
   host_impl_->ActivateAnimations(nullptr);
 
   EXPECT_FALSE(delegate1.started());
@@ -271,7 +362,7 @@ TEST_F(AnimationTest, AttachTwoAnimationsToOneLayer) {
   EXPECT_FALSE(delegate2.finished());
 
   base::TimeTicks time;
-  time += base::TimeDelta::FromSecondsD(0.1);
+  time += base::Seconds(0.1);
   TickAnimationsTransferEvents(time, 2u);
 
   EXPECT_TRUE(delegate1.started());
@@ -283,7 +374,7 @@ TEST_F(AnimationTest, AttachTwoAnimationsToOneLayer) {
   EXPECT_FALSE(animation1->keyframe_effect()->needs_push_properties());
   EXPECT_FALSE(animation2->keyframe_effect()->needs_push_properties());
 
-  time += base::TimeDelta::FromSecondsD(duration);
+  time += base::Seconds(duration);
   TickAnimationsTransferEvents(time, 2u);
 
   EXPECT_TRUE(delegate1.finished());
@@ -343,7 +434,7 @@ TEST_F(AnimationTest, AddRemoveAnimationToNonAttachedAnimation) {
                   ->HasAnyAnimationTargetingProperty(TargetProperty::OPACITY));
   EXPECT_TRUE(animation_->keyframe_effect()->needs_push_properties());
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
 
   EXPECT_FALSE(client_.IsPropertyMutated(element_id_, ElementListType::ACTIVE,
                                          TargetProperty::OPACITY));
@@ -358,10 +449,10 @@ TEST_F(AnimationTest, AddRemoveAnimationToNonAttachedAnimation) {
   host_impl_->ActivateAnimations(nullptr);
 
   base::TimeTicks time;
-  time += base::TimeDelta::FromSecondsD(0.1);
+  time += base::Seconds(0.1);
   TickAnimationsTransferEvents(time, 1u);
 
-  time += base::TimeDelta::FromSecondsD(duration);
+  time += base::Seconds(duration);
   TickAnimationsTransferEvents(time, 1u);
 
   client_.ExpectOpacityPropertyMutated(element_id_, ElementListType::ACTIVE,
@@ -392,8 +483,7 @@ TEST_F(AnimationTest, AddRemoveAnimationCausesSetNeedsCommit) {
   EXPECT_TRUE(client_.mutators_need_commit());
   client_.set_mutators_need_commit(false);
 
-  animation_->PauseKeyframeModel(keyframe_model_id,
-                                 base::TimeDelta::FromSeconds(1));
+  animation_->PauseKeyframeModel(keyframe_model_id, base::Seconds(1));
   EXPECT_TRUE(client_.mutators_need_commit());
   client_.set_mutators_need_commit(false);
 
@@ -409,7 +499,7 @@ TEST_F(AnimationTest, SwitchToLayer) {
   timeline_->AttachAnimation(animation_);
   animation_->AttachElement(element_id_);
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
 
   timeline_impl_ = host_impl_->GetTimelineById(timeline_id_);
   EXPECT_TRUE(timeline_impl_);
@@ -431,7 +521,7 @@ TEST_F(AnimationTest, SwitchToLayer) {
   EXPECT_EQ(animation_impl_->keyframe_effect()->element_id(), element_id_);
   CheckKeyframeEffectTimelineNeedsPushProperties(false);
 
-  const ElementId new_element_id(NextTestLayerId());
+  const ElementId new_element_id(element_id_.GetStableId() + 1);
   animation_->DetachElement();
   animation_->AttachElement(new_element_id);
 
@@ -441,7 +531,7 @@ TEST_F(AnimationTest, SwitchToLayer) {
   EXPECT_EQ(animation_->keyframe_effect()->element_id(), new_element_id);
   CheckKeyframeEffectTimelineNeedsPushProperties(true);
 
-  host_->PushPropertiesTo(host_impl_);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
 
   EXPECT_EQ(animation_impl_->keyframe_effect(),
             GetImplKeyframeEffectForLayerId(new_element_id));

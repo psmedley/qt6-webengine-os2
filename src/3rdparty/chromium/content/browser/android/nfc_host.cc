@@ -36,16 +36,26 @@ NFCHost::~NFCHost() {
 void NFCHost::GetNFC(RenderFrameHost* render_frame_host,
                      mojo::PendingReceiver<device::mojom::NFC> receiver) {
   // https://w3c.github.io/web-nfc/#security-policies
-  // WebNFC API must be only accessible from top level browsing context.
+  // WebNFC API must be only accessible from the outermost frame and restrict
+  // from the prerendered page. Well-behaved renderer can't trigger this method
+  // since mojo capabiliy control blocks during prerendering and permission
+  // request of WebNFC from fenced frames is denied.
   if (render_frame_host->GetParent()) {
-    mojo::ReportBadMessage(
-        "WebNFC is only allowed in a top-level browsing context.");
+    mojo::ReportBadMessage("WebNFC is not allowed in an iframe.");
+    return;
+  }
+  if (render_frame_host->GetLifecycleState() ==
+      RenderFrameHost::LifecycleState::kPrerendering) {
+    mojo::ReportBadMessage("WebNFC is not allowed in a prerendered page.");
+    return;
+  }
+  if (render_frame_host->IsNestedWithinFencedFrame()) {
+    mojo::ReportBadMessage("WebNFC is not allowed within in a fenced frame.");
     return;
   }
 
-  GURL origin_url = render_frame_host->GetLastCommittedOrigin().GetURL();
-  if (permission_controller_->GetPermissionStatusForFrame(
-          PermissionType::NFC, render_frame_host, origin_url) !=
+  if (permission_controller_->GetPermissionStatusForCurrentDocument(
+          PermissionType::NFC, render_frame_host) !=
       blink::mojom::PermissionStatus::GRANTED) {
     return;
   }
@@ -53,8 +63,11 @@ void NFCHost::GetNFC(RenderFrameHost* render_frame_host,
   if (!subscription_id_) {
     // base::Unretained() is safe here because the subscription is canceled when
     // this object is destroyed.
+    // TODO(crbug.com/1271543) : Move `SubscribePermissionStatusChange` to
+    // `PermissionController`.
     subscription_id_ = permission_controller_->SubscribePermissionStatusChange(
-        PermissionType::NFC, render_frame_host, origin_url,
+        PermissionType::NFC, /*render_process_host=*/nullptr, render_frame_host,
+        render_frame_host->GetMainFrame()->GetLastCommittedOrigin().GetURL(),
         base::BindRepeating(&NFCHost::OnPermissionStatusChange,
                             base::Unretained(this)));
   }
@@ -78,7 +91,7 @@ void NFCHost::GetNFC(RenderFrameHost* render_frame_host,
 void NFCHost::RenderFrameHostChanged(RenderFrameHost* old_host,
                                      RenderFrameHost* new_host) {
   // If the main frame has been replaced then close an old NFC connection.
-  if (!new_host->GetParent())
+  if (new_host->IsInPrimaryMainFrame())
     Close();
 }
 

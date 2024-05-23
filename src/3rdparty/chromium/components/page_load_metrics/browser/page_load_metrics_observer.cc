@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include "net/base/load_timing_info.h"
+
 namespace {
 
 int BucketWithOffsetAndUnit(int num, int offset, int unit) {
@@ -80,11 +82,26 @@ FailedProvisionalLoadInfo::FailedProvisionalLoadInfo(base::TimeDelta interval,
 
 FailedProvisionalLoadInfo::~FailedProvisionalLoadInfo() {}
 
+const char* PageLoadMetricsObserver::GetObserverName() const {
+  return nullptr;
+}
+
+base::WeakPtr<PageLoadMetricsObserver> PageLoadMetricsObserver::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
+}
+
 PageLoadMetricsObserver::ObservePolicy PageLoadMetricsObserver::OnStart(
     content::NavigationHandle* navigation_handle,
     const GURL& currently_committed_url,
     bool started_in_foreground) {
   return CONTINUE_OBSERVING;
+}
+
+PageLoadMetricsObserver::ObservePolicy
+PageLoadMetricsObserver::OnFencedFramesStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  return STOP_OBSERVING;
 }
 
 PageLoadMetricsObserver::ObservePolicy
@@ -100,8 +117,7 @@ PageLoadMetricsObserver::ObservePolicy PageLoadMetricsObserver::OnRedirect(
 }
 
 PageLoadMetricsObserver::ObservePolicy PageLoadMetricsObserver::OnCommit(
-    content::NavigationHandle* navigation_handle,
-    ukm::SourceId source_id) {
+    content::NavigationHandle* navigation_handle) {
   return CONTINUE_OBSERVING;
 }
 
@@ -140,6 +156,9 @@ bool PageLoadMetricsObserver::IsStandardWebPageMimeType(
     const std::string& mime_type) {
   return mime_type == "text/html" || mime_type == "application/xhtml+xml";
 }
+
+PageLoadMetricsObserver::PageLoadMetricsObserver() = default;
+PageLoadMetricsObserver::~PageLoadMetricsObserver() = default;
 
 const PageLoadMetricsObserverDelegate& PageLoadMetricsObserver::GetDelegate()
     const {

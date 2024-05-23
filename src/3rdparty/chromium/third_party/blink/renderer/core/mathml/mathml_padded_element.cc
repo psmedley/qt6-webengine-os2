@@ -87,11 +87,10 @@ void MathMLPaddedElement::CollectStyleForPresentationAttribute(
 LayoutObject* MathMLPaddedElement::CreateLayoutObject(
     const ComputedStyle& style,
     LegacyLayout legacy) {
-  DCHECK(!style.IsDisplayMathType() || legacy != LegacyLayout::kForce);
   if (!RuntimeEnabledFeatures::MathMLCoreEnabled() ||
-      !style.IsDisplayMathType())
+      !style.IsDisplayMathType() || legacy == LegacyLayout::kForce)
     return MathMLElement::CreateLayoutObject(style, legacy);
-  return new LayoutNGMathMLBlockWithAnonymousMrow(this);
+  return MakeGarbageCollected<LayoutNGMathMLBlockWithAnonymousMrow>(this);
 }
 
 }  // namespace blink

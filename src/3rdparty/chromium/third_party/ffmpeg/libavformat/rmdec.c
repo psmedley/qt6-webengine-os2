@@ -122,6 +122,7 @@ void ff_rm_free_rmstream (RMStream *rms)
 static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
                                      AVStream *st, RMStream *ast, int read_all)
 {
+    FFStream *const sti = ffstream(st);
     char buf[256];
     uint32_t version;
     int ret;
@@ -147,8 +148,7 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
         if (bytes_per_minute)
             st->codecpar->bit_rate = 8LL * bytes_per_minute / 60;
         st->codecpar->sample_rate = 8000;
-        st->codecpar->channels = 1;
-        st->codecpar->channel_layout = AV_CH_LAYOUT_MONO;
+        st->codecpar->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
         st->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
         st->codecpar->codec_id = AV_CODEC_ID_RA_144;
         ast->deint_id = DEINT_ID_INT0;
@@ -184,7 +184,7 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
         }
         st->codecpar->sample_rate = avio_rb16(pb);
         avio_rb32(pb);
-        st->codecpar->channels = avio_rb16(pb);
+        st->codecpar->ch_layout.nb_channels = avio_rb16(pb);
         if (version == 5) {
             ast->deint_id = avio_rl32(pb);
             avio_read(pb, buf, 4);
@@ -202,7 +202,7 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
 
         switch (st->codecpar->codec_id) {
         case AV_CODEC_ID_AC3:
-            st->internal->need_parsing = AVSTREAM_PARSE_FULL;
+            sti->need_parsing = AVSTREAM_PARSE_FULL;
             break;
         case AV_CODEC_ID_RA_288:
             st->codecpar->extradata_size= 0;
@@ -211,7 +211,7 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
             st->codecpar->block_align = coded_framesize;
             break;
         case AV_CODEC_ID_COOK:
-            st->internal->need_parsing = AVSTREAM_PARSE_HEADERS;
+            sti->need_parsing = AVSTREAM_PARSE_HEADERS;
         case AV_CODEC_ID_ATRAC3:
         case AV_CODEC_ID_SIPR:
             if (read_all) {
@@ -235,7 +235,7 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
                     return -1;
                 }
                 st->codecpar->block_align = ff_sipr_subpk_size[flavor];
-                st->internal->need_parsing = AVSTREAM_PARSE_FULL_RAW;
+                sti->need_parsing = AVSTREAM_PARSE_FULL_RAW;
             } else {
                 if(sub_packet_size <= 0){
                     av_log(s, AV_LOG_ERROR, "sub_packet_size is invalid\n");
@@ -267,9 +267,9 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
         case DEINT_ID_INT4:
             if (ast->coded_framesize > ast->audio_framesize ||
                 sub_packet_h <= 1 ||
-                ast->coded_framesize * sub_packet_h > (2 + (sub_packet_h & 1)) * ast->audio_framesize)
+                ast->coded_framesize * (uint64_t)sub_packet_h > (2 + (sub_packet_h & 1)) * ast->audio_framesize)
                 return AVERROR_INVALIDDATA;
-            if (ast->coded_framesize * sub_packet_h != 2*ast->audio_framesize) {
+            if (ast->coded_framesize * (uint64_t)sub_packet_h != 2*ast->audio_framesize) {
                 avpriv_request_sample(s, "mismatching interleaver parameters");
                 return AVERROR_INVALIDDATA;
             }
@@ -324,6 +324,11 @@ int ff_rm_read_mdpr_codecdata(AVFormatContext *s, AVIOContext *pb,
         return AVERROR_INVALIDDATA;
     if (codec_data_size == 0)
         return 0;
+
+    // Duplicate tags
+    if (   st->codecpar->codec_type != AVMEDIA_TYPE_UNKNOWN
+        && st->codecpar->codec_type != AVMEDIA_TYPE_DATA)
+        return AVERROR_INVALIDDATA;
 
     avpriv_set_pts_info(st, 64, 1, 1000);
     codec_pos = avio_tell(pb);
@@ -388,7 +393,7 @@ int ff_rm_read_mdpr_codecdata(AVFormatContext *s, AVIOContext *pb,
         avio_skip(pb, 2); // looks like bits per sample
         avio_skip(pb, 4); // always zero?
         st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-        st->internal->need_parsing = AVSTREAM_PARSE_TIMESTAMPS;
+        ffstream(st)->need_parsing = AVSTREAM_PARSE_TIMESTAMPS;
         fps = avio_rb32(pb);
 
         if ((ret = rm_read_extradata(s, pb, st->codecpar, codec_data_size - (avio_tell(pb) - codec_pos))) < 0)

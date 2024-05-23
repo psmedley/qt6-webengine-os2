@@ -7,13 +7,13 @@
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/accessibility/live_caption_controller.h"
 #include "chrome/browser/accessibility/live_caption_controller_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/caption_bubble_controller.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/live_caption/caption_bubble_controller.h"
+#include "components/live_caption/live_caption_controller.h"
 #include "components/live_caption/pref_names.h"
 #include "components/soda/soda_installer.h"
 #include "components/sync_preferences/pref_service_syncable.h"
@@ -30,8 +30,7 @@
 namespace {
 // Chrome OS requires an additional feature flag to enable Live Caption.
 std::vector<base::Feature> RequiredFeatureFlags() {
-  std::vector<base::Feature> features = {media::kLiveCaption,
-                                         media::kUseSodaForLiveCaption};
+  std::vector<base::Feature> features = {media::kLiveCaption};
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   features.push_back(ash::features::kOnDeviceSpeechRecognition);
 #endif
@@ -126,8 +125,11 @@ class LiveCaptionSpeechRecognitionHostTest : public InProcessBrowserTest {
   void SetLiveCaptionEnabled(bool enabled) {
     browser()->profile()->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled,
                                                  enabled);
-    if (enabled)
+    if (enabled) {
+      speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting(
+          speech::LanguageCode::kEnUs);
       speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting();
+    }
   }
 
   bool HasBubbleController() {
@@ -170,7 +172,8 @@ IN_PROC_BROWSER_TEST_F(LiveCaptionSpeechRecognitionHostTest,
   base::RunLoop().RunUntilIdle();
   ExpectIsWidgetVisible(true);
 
-  ui_test_utils::NavigateToURL(browser(), GURL("http://www.google.com"));
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), GURL("http://www.google.com")));
   content::WaitForLoadStop(
       browser()->tab_strip_model()->GetActiveWebContents());
   content::RenderFrameHost* new_frame_host =
@@ -229,7 +232,7 @@ IN_PROC_BROWSER_TEST_F(LiveCaptionSpeechRecognitionHostTest,
   OnSpeechRecognitionError(frame_host);
 }
 
-#if defined(OS_MAC) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(LiveCaptionSpeechRecognitionHostTest,
                        MediaEffectivelyFullscreenChanged) {
   content::WebContents* web_contents =

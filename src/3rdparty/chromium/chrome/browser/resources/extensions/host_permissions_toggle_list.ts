@@ -10,19 +10,27 @@ import './toggle_row.js';
 import './shared_style.js';
 import './strings.m.js';
 
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {getTemplate} from './host_permissions_toggle_list.html.js';
 
 import {ItemDelegate} from './item.js';
 import {UserAction} from './item_util.js';
 import {ExtensionsToggleRowElement} from './toggle_row.js';
 
-class ExtensionsHostPermissionsToggleListElement extends PolymerElement {
+export interface ExtensionsHostPermissionsToggleListElement {
+  $: {
+    allHostsToggle: ExtensionsToggleRowElement,
+    linkIconButton: HTMLAnchorElement,
+  };
+}
+
+export class ExtensionsHostPermissionsToggleListElement extends PolymerElement {
   static get is() {
     return 'extensions-host-permissions-toggle-list';
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -39,7 +47,7 @@ class ExtensionsHostPermissionsToggleListElement extends PolymerElement {
   }
 
   permissions: chrome.developerPrivate.RuntimeHostPermissions;
-  private itemId: string;
+  itemId: string;
   delegate: ItemDelegate;
 
   /**
@@ -103,6 +111,13 @@ class ExtensionsHostPermissionsToggleListElement extends PolymerElement {
 
   private onLearnMoreClick_() {
     this.delegate.recordUserAction(UserAction.LEARN_MORE);
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'extensions-host-permissions-toggle-list':
+        ExtensionsHostPermissionsToggleListElement;
   }
 }
 

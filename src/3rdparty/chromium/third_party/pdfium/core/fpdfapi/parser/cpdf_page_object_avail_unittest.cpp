@@ -5,7 +5,6 @@
 #include "core/fpdfapi/parser/cpdf_page_object_avail.h"
 
 #include <map>
-#include <memory>
 #include <utility>
 
 #include "core/fpdfapi/parser/cpdf_array.h"
@@ -95,7 +94,7 @@ class TestHolder final : public CPDF_IndirectObjectHolder {
 
 }  // namespace
 
-TEST(CPDF_PageObjectAvailTest, ExcludePages) {
+TEST(PageObjectAvailTest, ExcludePages) {
   TestHolder holder;
   holder.AddObject(1, pdfium::MakeRetain<CPDF_Dictionary>(),
                    TestHolder::ObjectState::Available);

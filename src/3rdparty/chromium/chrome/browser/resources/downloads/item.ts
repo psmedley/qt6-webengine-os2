@@ -17,25 +17,27 @@ import 'chrome://resources/polymer/v3_0/paper-progress/paper-progress.js';
 import 'chrome://resources/polymer/v3_0/paper-styles/color.js';
 
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
-import {assert} from 'chrome://resources/js/assert.m.js';
+import {assert} from 'chrome://resources/js/assert_ts.js';
 import {FocusRowBehavior} from 'chrome://resources/js/cr/ui/focus_row_behavior.m.js';
 import {focusWithoutInk} from 'chrome://resources/js/cr/ui/focus_without_ink.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {HTMLEscape} from 'chrome://resources/js/util.m.js';
-import {beforeNextRender, html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {beforeNextRender, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BrowserProxy} from './browser_proxy.js';
 import {DangerType, States} from './constants.js';
 import {MojomData} from './data.js';
 import {PageHandlerInterface} from './downloads.mojom-webui.js';
-import {IconLoader} from './icon_loader.js';
+import {IconLoaderImpl} from './icon_loader.js';
+import {getTemplate} from './item.html.js';
 
 export interface DownloadsItemElement {
   $: {
     'controlled-by': HTMLElement,
     'file-icon': HTMLImageElement,
-    'url': HTMLAnchorElement,
+    'file-link': HTMLAnchorElement,
     'remove': HTMLElement,
+    'url': HTMLAnchorElement,
   };
 }
 
@@ -46,6 +48,10 @@ const DownloadsItemElementBase =
 export class DownloadsItemElement extends DownloadsItemElementBase {
   static get is() {
     return 'downloads-item';
+  }
+
+  static get template() {
+    return getTemplate();
   }
 
   static get properties() {
@@ -84,8 +90,20 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
         value: true,
       },
 
+      isDownloadItemSafe_: {
+        computed: 'computeIsDownloadItemSafe_(data.state)',
+        type: Boolean,
+        value: false
+      },
+
       isDangerous_: {
         computed: 'computeIsDangerous_(data.state)',
+        type: Boolean,
+        value: false,
+      },
+
+      shouldShowIncognitoWarning_: {
+        computed: 'computeShouldShowIncognitoWarning_(data.state)',
         type: Boolean,
         value: false,
       },
@@ -145,6 +163,8 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
   private controlledBy_: string;
   private isActive_: boolean;
   private isDangerous_: boolean;
+  private isDownloadItemSafe_: boolean;
+  private shouldShowIncognitoWarning_: boolean;
   private isInProgress_: boolean;
   private pauseOrResumeText_: string;
   private showCancel_: boolean;
@@ -161,7 +181,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
   }
 
   /** @override */
-  ready() {
+  override ready() {
     super.ready();
 
     this.setAttribute('role', 'row');
@@ -242,7 +262,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
     if (this.data.hideDate) {
       return '';
     }
-    return assert(this.data.sinceString || this.data.dateString);
+    return this.data.sinceString || this.data.dateString;
   }
 
   private computeDescriptionVisible_(): boolean {
@@ -262,11 +282,13 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
         }
         break;
 
+      case States.INCOGNITO_WARNING:
+        return loadTimeData.getString('incognitoDownloadsWarningDesc');
+
       case States.MIXED_CONTENT:
         return loadTimeData.getString('mixedContentDownloadDesc');
 
       case States.DANGEROUS:
-        const fileName = data.fileName;
         switch (data.dangerType) {
           case DangerType.DANGEROUS_FILE:
             return loadTimeData.getString('dangerFileDesc');
@@ -316,7 +338,8 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       const dangerType = this.data.dangerType as DangerType;
       if ((loadTimeData.getBoolean('requestsApVerdicts') &&
            dangerType === DangerType.UNCOMMON_CONTENT) ||
-          dangerType === DangerType.SENSITIVE_CONTENT_WARNING) {
+          dangerType === DangerType.SENSITIVE_CONTENT_WARNING ||
+          this.data.state === States.INCOGNITO_WARNING) {
         return 'cr:warning';
       }
 
@@ -347,7 +370,8 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       const dangerType = this.data.dangerType as DangerType;
       if ((loadTimeData.getBoolean('requestsApVerdicts') &&
            dangerType === DangerType.UNCOMMON_CONTENT) ||
-          dangerType === DangerType.SENSITIVE_CONTENT_WARNING) {
+          dangerType === DangerType.SENSITIVE_CONTENT_WARNING ||
+          this.data.state === States.INCOGNITO_WARNING) {
         return 'yellow';
       }
 
@@ -498,10 +522,12 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       this.useFileIcon_ = false;
     } else if (this.data.state === States.ASYNC_SCANNING) {
       this.useFileIcon_ = false;
+    } else if (this.data.state === States.INCOGNITO_WARNING) {
+      this.useFileIcon_ = false;
     } else {
-      this.$.url.href = assert(this.data.url);
+      this.$.url.href = this.data.url;
       const path = this.data.filePath;
-      IconLoader.getInstance()
+      IconLoaderImpl.getInstance()
           .loadIcon(this.$['file-icon'], path)
           .then(success => {
             if (path === this.data.filePath &&
@@ -510,6 +536,16 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
             }
           });
     }
+  }
+
+  private computeShouldShowIncognitoWarning_(): boolean {
+    return this.data.state === States.INCOGNITO_WARNING &&
+        this.data.shouldShowIncognitoWarning;
+  }
+
+  private computeIsDownloadItemSafe_(): boolean {
+    return !this.computeIsDangerous_() &&
+        !this.computeShouldShowIncognitoWarning_();
   }
 
   private onCancelTap_() {
@@ -575,6 +611,10 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
     this.mojoHandler_!.saveDangerousRequiringGesture(this.data.id);
   }
 
+  private onIncognitoWarningAccepted_() {
+    this.mojoHandler_!.acceptIncognitoWarning(this.data.id);
+  }
+
   private onShowTap_() {
     this.mojoHandler_!.show(this.data.id);
   }
@@ -591,9 +631,11 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       }
     });
   }
+}
 
-  static get template() {
-    return html`{__html_template__}`;
+declare global {
+  interface HTMLElementTagNameMap {
+    'downloads-item': DownloadsItemElement;
   }
 }
 

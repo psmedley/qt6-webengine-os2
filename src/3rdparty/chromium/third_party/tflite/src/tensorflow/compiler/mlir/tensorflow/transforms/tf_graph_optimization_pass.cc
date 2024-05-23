@@ -17,9 +17,9 @@ limitations under the License.
 
 #include "llvm/Support/CommandLine.h"
 #include "mlir/IR/Builders.h"  // from @llvm-project
-#include "mlir/IR/Identifier.h"  // from @llvm-project
 #include "mlir/IR/Location.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/export_graphdef.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/import_model.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/mlir_roundtrip_flags.h"
@@ -35,7 +35,7 @@ limitations under the License.
 #define DEBUG_TYPE "run-tf-graph-optimization"
 
 namespace tensorflow {
-
+namespace {
 // Creates a pass to convert MLIR to Graph, run user-specified Graph
 // Optimization Passes and convert back to MLIR.
 // Constraints: This pass expects that all operations in the MLIR module either
@@ -43,7 +43,13 @@ namespace tensorflow {
 class GraphOptPass
     : public mlir::PassWrapper<GraphOptPass,
                                mlir::OperationPass<mlir::ModuleOp>> {
+  void getDependentDialects(mlir::DialectRegistry& registry) const override {
+    mlir::RegisterAllTensorFlowDialects(registry);
+  }
+
  public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(GraphOptPass)
+
   explicit GraphOptPass(std::vector<tensorflow::GraphOptimizationPass*> passes)
       : passes_(std::move(passes)) {}
 
@@ -53,6 +59,7 @@ class GraphOptPass
   // The passes to run on the module.
   std::vector<GraphOptimizationPass*> passes_;
 };
+}  // anonymous namespace
 
 void GraphOptPass::runOnOperation() {
   mlir::ModuleOp module_in = getOperation();
@@ -152,6 +159,14 @@ class GraphOptByNamePass : public GraphOptPass {
   explicit GraphOptByNamePass(const std::vector<std::string>& pass_names)
       : GraphOptPass(FindRegisteredPassesByName(pass_names)) {}
 
+  llvm::StringRef getArgument() const final {
+    return "run-tf-graph-optimization";
+  }
+
+  llvm::StringRef getDescription() const final {
+    return "runs passes registered as tensorflow::GraphOptimizationPass";
+  }
+
  private:
   void runOnOperation() override {
     // Verify all passes requested were registered/found.
@@ -180,5 +195,8 @@ tensorflow::CreateTensorFlowGraphOptimizationPass(
   return std::make_unique<GraphOptByNamePass>(pass_names);
 }
 
-static mlir::PassRegistration<tensorflow::GraphOptByNamePass> pass(
-    DEBUG_TYPE, "runs passes registered as tensorflow::GraphOptimizationPass");
+void tensorflow::RegisterGraphOptimizationPasses() {
+  ::mlir::registerPass([]() -> std::unique_ptr<::mlir::Pass> {
+    return std::make_unique<GraphOptByNamePass>();
+  });
+}

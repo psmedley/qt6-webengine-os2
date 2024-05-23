@@ -25,6 +25,7 @@ limitations under the License.
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
+#include "tensorflow/core/platform/refcount.h"
 #include "tensorflow/core/platform/types.h"
 
 namespace tensorflow {
@@ -97,6 +98,15 @@ void LocalRendezvous::ItemQueue::push_back(Item* item) {
 }
 
 LocalRendezvous::~LocalRendezvous() {
+  // Before destroying this rendezvous instance, make sure all the done-callback
+  // calls have finished and the tensors have been released from the queue.
+  {
+    mutex_lock l(mu_);
+    while (pending_callback_counter_ != 0) {
+      pending_callback_cond_var_.wait_for(l, std::chrono::milliseconds(50));
+    }
+  }
+
   if (!table_.empty()) {
     StartAbort(errors::Cancelled("LocalRendezvous deleted"));
   }
@@ -154,13 +164,29 @@ Status LocalRendezvous::Send(const Rendezvous::ParsedKey& key,
   } else {
     queue->head = item->next;
   }
-  mu_.unlock();
 
-  // Notify the waiter by invoking its done closure, outside the
-  // lock.
+  // Make sure the ref-count of the rendezvous won't reach 0 while the
+  // done_callback is running, which would otherwise become deadlock:
+  // the done_callback waits for the Unref() to return, while the destructor
+  // wiats for the pending_callback_counter to reach 0.
+  core::RefCountPtr<const Rendezvous> rc_owner_ref;
+  if (rc_owner_) {
+    rc_owner_ref.reset(rc_owner_);
+    rc_owner_->Ref();
+  }
+  pending_callback_counter_++;
+  // Invoke the done-callback, without holding the lock.
+  mu_.unlock();
   DCHECK_EQ(item->type, Item::kRecv);
   (*item->recv_state.waiter)(Status::OK(), send_args, item->args, val, is_dead);
   delete item;
+  {
+    mutex_lock l(mu_);
+    pending_callback_counter_--;
+    if (pending_callback_counter_ == 0) {
+      pending_callback_cond_var_.notify_all();
+    }
+  }
   return Status::OK();
 }
 
@@ -187,6 +213,20 @@ void LocalRendezvous::RecvAsync(const Rendezvous::ParsedKey& key,
     CancellationToken token = CancellationManager::kInvalidToken;
     bool already_cancelled = false;
     if (cm != nullptr) {
+      // Increment the refcount when cancellation manager is present, to make
+      // sure the rendezvous outlives the recv and its cancel callbacks.
+      // This refcount is dropped in exactly one of the following cases:
+      // (1) Recv registers cancellation callback to cm, and then cm is
+      //     cancelled, unref in the cancellation callback;
+      // (2) Recv registers cancellation callback to cm, but cm is already
+      //     cancelled, unref in the already_cancelled check;
+      // (3) Recv is successful, and item done callback finishes deregistering
+      //     the cancellation callback, unref in the item done callback;
+      // (4) Recv is successful, but the item done callback fails to deregister
+      //     the cancellation callback because cm already StartCancel, in this
+      //     case the cancellation callback will be invoked by the cm anyway,
+      //     unref in the cancellation callback.
+      if (rc_owner_) rc_owner_->Ref();
       token = cm->get_cancellation_token();
       already_cancelled = !cm->RegisterCallback(token, [this, token, key_hash] {
         Item* item = nullptr;
@@ -230,10 +270,14 @@ void LocalRendezvous::RecvAsync(const Rendezvous::ParsedKey& key,
               Rendezvous::Args(), item->args, Tensor(), /*is_dead=*/false);
           delete item;
         }
+        // Unref case (1) and (4)
+        if (rc_owner_) rc_owner_->Unref();
       });
     }
     if (already_cancelled) {
       mu_.unlock();
+      // Unref case (2)
+      if (rc_owner_) rc_owner_->Unref();
       done(StatusGroup::MakeDerived(
                errors::Cancelled("RecvAsync is cancelled.")),
            Rendezvous::Args(), recv_args, Tensor(), /*is_dead=*/false);
@@ -250,10 +294,17 @@ void LocalRendezvous::RecvAsync(const Rendezvous::ParsedKey& key,
       // cancellation manager may no longer be live after `done` is called.
       queue->push_back(new Item(
           recv_args,
-          [cm, token, done = std::move(done)](
+          [this, cm, token, done = std::move(done)](
               const Status& s, const Rendezvous::Args& send_args,
               const Rendezvous::Args& recv_args, const Tensor& v, bool dead) {
-            cm->TryDeregisterCallback(token);
+            // TryDeregisterCallback returns true when the cancellation callback
+            // is successfully deregistered. If it fails because the CM already
+            // StartAbort, Unref will happen inside the cancellation callback
+            // when called by the CM.
+            if (cm->TryDeregisterCallback(token)) {
+              // Unref case (3)
+              if (this->rc_owner_) this->rc_owner_->Unref();
+            }
             done(s, send_args, recv_args, v, dead);
           },
           token));
@@ -277,13 +328,30 @@ void LocalRendezvous::RecvAsync(const Rendezvous::ParsedKey& key,
   } else {
     queue->head = item->next;
   }
-  mu_.unlock();
 
-  // Invoke done() without holding the table lock.
+  // Make sure the ref-count of the rendezvous won't reach 0 while the
+  // done_callback is running, which would otherwise become deadlock:
+  // the done_callback waits for the Unref() to return, while the destructor
+  // wiats for the pending_callback_counter to reach 0.
+  core::RefCountPtr<const Rendezvous> rc_owner_ref;
+  if (rc_owner_) {
+    rc_owner_ref.reset(rc_owner_);
+    rc_owner_->Ref();
+  }
+  pending_callback_counter_++;
+  // Invoke the done-callback, without holding the lock.
+  mu_.unlock();
   DCHECK_EQ(item->type, Item::kSend);
   done(Status::OK(), item->args, recv_args, *item->send_state.value,
        item->send_state.is_dead);
   delete item;
+  {
+    mutex_lock l(mu_);
+    pending_callback_counter_--;
+    if (pending_callback_counter_ == 0) {
+      pending_callback_cond_var_.notify_all();
+    }
+  }
 }
 
 void LocalRendezvous::StartAbort(const Status& status) {
@@ -306,6 +374,13 @@ void LocalRendezvous::StartAbort(const Status& status) {
       delete to_delete;
     }
   }
+}
+
+Status LocalRendezvous::status() {
+  mu_.lock();
+  Status s = status_;
+  mu_.unlock();
+  return s;
 }
 
 }  // namespace tensorflow

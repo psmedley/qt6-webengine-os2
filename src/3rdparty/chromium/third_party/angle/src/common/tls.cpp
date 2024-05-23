@@ -36,7 +36,7 @@ static vector<DWORD> freeTlsIndices;
 
 bool gUseAndroidOpenGLTlsSlot = false;
 
-TLSIndex CreateTLSIndex()
+TLSIndex CreateTLSIndex(PthreadKeyDestructor destructor)
 {
     TLSIndex index;
 
@@ -62,15 +62,14 @@ TLSIndex CreateTLSIndex()
         index = TLS_INVALID_INDEX;
     }
 #elif defined(ANGLE_PLATFORM_POSIX)
-    // Create global pool key
-    if ((pthread_key_create(&index, nullptr)) != 0)
+    // Create pthread key
+    if ((pthread_key_create(&index, destructor)) != 0)
     {
         index = TLS_INVALID_INDEX;
     }
 #endif
 
-    ASSERT(index != TLS_INVALID_INDEX &&
-           "CreateTLSIndex(): Unable to allocate Thread Local Storage");
+    ASSERT(index != TLS_INVALID_INDEX && "CreateTLSIndex: Unable to allocate Thread Local Storage");
     return index;
 }
 

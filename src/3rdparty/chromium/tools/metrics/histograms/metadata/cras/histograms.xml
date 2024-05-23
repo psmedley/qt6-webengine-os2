@@ -11,17 +11,51 @@ along with a detailed description for each histogram.
 For best practices on writing histogram descriptions, see
 https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md
 
-Please send CLs to chromium-metrics-reviews@google.com rather than to specific
-individuals. These CLs will be automatically reassigned to a reviewer within
-about 5 minutes. This approach helps the metrics team to load-balance incoming
-reviews. Googlers can read more about this at go/gwsq-gerrit.
+Please follow the instructions in the OWNERS file in this directory to find a
+reviewer. If no OWNERS file exists, please consider signing up at
+go/reviewing-metrics (Googlers only), as all subdirectories are expected to
+have an OWNERS file. As a last resort you can send the CL to
+chromium-metrics-reviews@google.com.
 -->
 
 <histogram-configuration>
 
 <histograms>
 
-<histogram name="Cras.Busyloop" units="units" expires_after="2021-12-01">
+<histogram name="Cras.A2dp100msFailureOverStream" units="units"
+    expires_after="2022-08-21">
+  <owner>hychao@chromium.org</owner>
+  <owner>chromeos-audio@google.com</owner>
+  <summary>
+    For each of bluetooth A2DP stream period, track the sum of all period
+    lengths of consecutive packet write failures observerd by CRAS that is
+    longer than 100ms.
+  </summary>
+</histogram>
+
+<histogram name="Cras.A2dp20msFailureOverStream" units="units"
+    expires_after="2022-09-20">
+  <owner>hychao@chromium.org</owner>
+  <owner>chromeos-audio@google.com</owner>
+  <summary>
+    For each of bluetooth A2DP stream period, track the sum of all period
+    lengths of consecutive packet write failures observerd by CRAS that is
+    longer than 20ms.
+  </summary>
+</histogram>
+
+<histogram name="Cras.A2dpExitCode" enum="CrasA2dpExitCode"
+    expires_after="2022-09-20">
+  <owner>hychao@chromium.org</owner>
+  <owner>chromeos-audio@google.com</owner>
+  <summary>
+    Track all different paths causing bluetooth A2DP drop from audio output
+    settings. Collect this metrics to help investigate possible issues and
+    monitor the trend to catch regressions.
+  </summary>
+</histogram>
+
+<histogram name="Cras.Busyloop" units="units" expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.TimePeriod" -->
 
@@ -37,7 +71,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.BusyloopLength" units="units" expires_after="2021-12-01">
+<histogram name="Cras.BusyloopLength" units="units" expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -46,7 +80,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.DeviceGain" units="level" expires_after="2021-12-01">
+<histogram name="Cras.DeviceGain" units="level" expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.DeviceType" -->
 
@@ -59,21 +93,77 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.DeviceNoiseCancellationEnabled" units="BooleanEnabled"
-    expires_after="2021-12-01">
+<histogram name="Cras.DeviceNoiseCancellationStatus"
+    enum="CrasNoiseCancellationStatus" expires_after="2022-12-01">
 <!-- Name completed by histogram_suffixes
      name="Cras.DeviceType" -->
 
   <owner>johnylin@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
-    Record whether Noise Cancellation is enabled or disabled for the supported
-    device. It is recorded when the device is opened.
+    Record the staus of Noise Cancellation (blocked/disabled/enabled) for the
+    supported device. It is recorded when the device is opened.
   </summary>
 </histogram>
 
+<histogram
+    name="Cras.DeviceRuntime{Direction}{Device}{HostCapability}{PeripheralCapability}"
+    units="seconds" expires_after="2022-12-01">
+  <owner>jrwu@google.com</owner>
+  <owner>chromeos-audio@google.com</owner>
+  <summary>
+    The runtime of {Direction} device {Device} in CRAS(ChromeOS audio server).
+    The runtime is the duration between opening and closing a device. The value
+    is recorded when the device is closed. For certain devices, more detailed
+    host/peripheral-capabilities are recorded. The aggregated runtime for each
+    level is accessible up to &quot;Cras.DeviceRuntime&quot;.
+  </summary>
+  <token key="Direction">
+    <variant name="" summary="aggregated across all breakdowns"/>
+    <variant name=".Input"/>
+    <variant name=".Output"/>
+  </token>
+  <token key="Device">
+    <variant name="" summary="aggregated across all breakdowns"/>
+    <variant name=".A2DP"/>
+    <variant name=".AbnormalFallback"/>
+    <variant name=".AlsaLoopback"/>
+    <variant name=".Bluetooth"/>
+    <variant name=".FrontMic"/>
+    <variant name=".Haptic"/>
+    <variant name=".HDMI"/>
+    <variant name=".Headphone"/>
+    <variant name=".HFP"/>
+    <variant name=".Hotword"/>
+    <variant name=".InternalMic"/>
+    <variant name=".InternalSpeaker"/>
+    <variant name=".InvalidType"/>
+    <variant name=".KeyboardMic"/>
+    <variant name=".Lineout"/>
+    <variant name=".Mic"/>
+    <variant name=".NoDevice"/>
+    <variant name=".NormalFallback"/>
+    <variant name=".PostDspLoopback"/>
+    <variant name=".PostMixLoopback"/>
+    <variant name=".RearMic"/>
+    <variant name=".SilentHotword"/>
+    <variant name=".Unknown"/>
+    <variant name=".USB"/>
+  </token>
+  <token key="HostCapability">
+    <variant name="" summary="aggregated across all breakdowns"/>
+    <variant name=".NonOffloading"/>
+    <variant name=".Offloading"/>
+  </token>
+  <token key="PeripheralCapability">
+    <variant name="" summary="aggregated across all breakdowns"/>
+    <variant name=".NarrowBandMic"/>
+    <variant name=".WideBandMic"/>
+  </token>
+</histogram>
+
 <histogram name="Cras.DeviceTypeInput" enum="CrasDeviceType"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -84,7 +174,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.DeviceTypeOutput" enum="CrasDeviceType"
-    expires_after="2022-01-30">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -94,7 +184,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.DeviceVolume" units="level" expires_after="2022-01-30">
+<histogram name="Cras.DeviceVolume" units="level" expires_after="2022-05-01">
 <!-- Name completed by histogram_suffixes
      name="Cras.DeviceType" -->
 
@@ -106,7 +196,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.FetchDelayMilliSeconds" units="ms"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.ClientType" and
      name="Cras.StreamType" -->
@@ -122,7 +212,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HfpBatteryIndicatorSupported"
-    enum="CrasHfpBatteryIndicator" expires_after="2021-12-01">
+    enum="CrasHfpBatteryIndicator" expires_after="2022-12-01">
   <owner>enshuo@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -131,7 +221,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HfpBatteryReport" enum="CrasHfpBatteryIndicator"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>enshuo@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -143,7 +233,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HfpScoConnectionError" enum="CrasHfpScoError"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>enshuo@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -153,7 +243,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HfpWidebandSpeechPacketLoss" units="units"
-    expires_after="2022-01-30">
+    expires_after="2022-09-20">
   <owner>enshuo@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -164,7 +254,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HfpWidebandSpeechSupported" units="BooleanSupported"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -174,7 +264,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HighestDeviceDelayInput" units="units"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -187,7 +277,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HighestDeviceDelayOutput" units="units"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -200,7 +290,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HighestInputHardwareLevel" units="frames"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -211,7 +301,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.HighestOutputHardwareLevel" units="frames"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -222,7 +312,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceA2DPRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -233,7 +323,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceAbnormalFallbackRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -244,7 +334,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceBluetoothNarrowBandMicRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -255,7 +345,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceBluetoothRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -267,7 +357,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceBluetoothWideBandMicRuntime" units="seconds"
-    expires_after="2022-01-30">
+    expires_after="2022-09-20">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -278,7 +368,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceFrontMicRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -289,7 +379,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceHFPRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -300,7 +390,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceHotwordRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-05-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -311,7 +401,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceHSPRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -322,7 +412,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceInternalMicRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -333,7 +423,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceKeyboardMicRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -344,7 +434,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceMicRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -355,7 +445,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceNormalFallbackRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -366,7 +456,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDevicePostDspLoopbackRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -377,7 +467,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDevicePostMixLoopbackRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -388,7 +478,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceRearMicRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -399,7 +489,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceSilentHotwordRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -410,7 +500,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceUnknownRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -421,7 +511,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.InputDeviceUSBRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -431,25 +521,8 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.InputStreamRuntime" units="seconds" expires_after="M90">
-  <obsolete>
-    Replaced by Cras.StreamRuntime in M90.
-  </obsolete>
-<!-- Name completed by histogram_suffixes
-     name="Cras.ClientType" and
-     name="Cras.StreamType" -->
-
-  <owner>yuhsuan@chromium.org</owner>
-  <owner>chromeos-audio@google.com</owner>
-  <summary>
-    The runtime of input stream in CRAS(ChromeOS audio server). The runtime is
-    the duration between creating and destroying a stream. The value is recorded
-    when the stream is destroyed.
-  </summary>
-</histogram>
-
 <histogram name="Cras.kHfpWidebandSpeechSelectedCodec" enum="CrasHfpCodec"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -459,7 +532,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackFirstTimeInput" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -473,7 +546,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackFirstTimeOutput" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -487,7 +560,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackFrequencyAfterReschedulingInput"
-    units="count" expires_after="2021-12-01">
+    units="count" expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -498,7 +571,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackFrequencyAfterReschedulingOutput"
-    units="count" expires_after="2021-12-01">
+    units="count" expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -510,7 +583,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackFrequencyInput" units="count"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -521,7 +594,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackFrequencyOutput" units="count"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -532,7 +605,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackSecondTimeInput" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -543,7 +616,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.MissedCallbackSecondTimeOutput" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -554,7 +627,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceA2DPRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -565,7 +638,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceAbnormalFallbackRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -576,7 +649,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceBluetoothRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -588,7 +661,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceHapticRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -599,7 +672,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceHDMIRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -610,7 +683,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceHeadphoneRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -621,7 +694,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceHFPRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -632,7 +705,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceHSPRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -643,7 +716,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceInternalSpeakerRuntime" units="seconds"
-    expires_after="2022-01-30">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -654,7 +727,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceLineoutRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -665,7 +738,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceNormalFallbackRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -676,7 +749,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceUnknownRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -687,7 +760,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.OutputDeviceUSBRuntime" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -697,25 +770,8 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.OutputStreamRuntime" units="seconds" expires_after="M90">
-  <obsolete>
-    Replaced by Cras.StreamRuntime in M90.
-  </obsolete>
-<!-- Name completed by histogram_suffixes
-     name="Cras.ClientType" and
-     name="Cras.StreamType" -->
-
-  <owner>yuhsuan@chromium.org</owner>
-  <owner>chromeos-audio@google.com</owner>
-  <summary>
-    The runtime of output stream in CRAS(ChromeOS audio server). The runtime is
-    the duration between creating and destroying a stream. The value is recorded
-    when the stream is destroyed.
-  </summary>
-</histogram>
-
 <histogram name="Cras.RtcDevicePair" enum="CrasDevicePair"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -725,7 +781,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.RtcRuntime.{InDevice}.{OutDevice}" units="seconds"
-    expires_after="2021-12-01">
+    expires_after="2022-12-01">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -787,8 +843,22 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </token>
 </histogram>
 
+<histogram name="Cras.SetAecRefDeviceType" enum="CrasDeviceType"
+    expires_after="2023-01-03">
+  <owner>hychao@chromium.org</owner>
+  <owner>chromeos-audio@google.com</owner>
+  <summary>
+    It is used to log the call to InputStream::SetOutputDeviceForAec() which
+    results different types of audio device being set as AEC referefence in
+    CRAS(Chrome OS audio server). Based on this metrics we can analyze the user
+    behavior in voice communication app. Note that CRAS_METRICS_DEVICE_NO_DEVICE
+    is tracking the case when the call sets a NULL device meaning to leave AEC
+    reference on system default.
+  </summary>
+</histogram>
+
 <histogram name="Cras.StreamCallbackThreshold" units="frames"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.Direction" and
      name="Cras.ClientType" -->
@@ -803,7 +873,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.StreamClientTypeInput" enum="CrasClientType"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -813,7 +883,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.StreamClientTypeOutput" enum="CrasClientType"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -822,7 +892,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.StreamEffects" units="value" expires_after="2021-12-01">
+<histogram name="Cras.StreamEffects" units="value" expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.Direction" and
      name="Cras.ClientType" -->
@@ -835,7 +905,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.StreamFlags" units="value" expires_after="2021-12-01">
+<histogram name="Cras.StreamFlags" units="value" expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.Direction" and
      name="Cras.ClientType" -->
@@ -848,7 +918,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.StreamRuntime" units="seconds" expires_after="2021-12-01">
+<histogram name="Cras.StreamRuntime" units="seconds" expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.Direction" and
      name="Cras.ClientType" and
@@ -864,7 +934,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.StreamSamplingFormat" enum="AlsaSampleFormatType"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.Direction" and
      name="Cras.ClientType" -->
@@ -878,7 +948,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.StreamSamplingRate" units="bps"
-    expires_after="2021-12-01">
+    expires_after="2022-09-20">
 <!-- Name completed by histogram_suffixes
      name="Cras.Direction" and
      name="Cras.ClientType" -->
@@ -891,26 +961,8 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="Cras.StreamTimeoutMilliSeconds" units="ms" expires_after="M90">
-  <obsolete>
-    Replaced by Cras.FetchDelayMilliSeconds in M90.
-  </obsolete>
-<!-- Name completed by histogram_suffixes
-     name="Cras.ClientType" and
-     name="Cras.StreamType" -->
-
-  <owner>hychao@chromium.org</owner>
-  <owner>chromeos-audio@google.com</owner>
-  <summary>
-    The longest additional time CRAS(Chrome OS audio server) ever waits for a
-    stream exceeding the timeout threshold. This value is recorded per stream
-    when it gets removed and used to investigate the audio glitch/skip problem
-    on Chrome OS.
-  </summary>
-</histogram>
-
 <histogram name="Cras.UnderrunsPerDevice" units="count"
-    expires_after="2022-01-30">
+    expires_after="2022-10-09">
   <owner>yuhsuan@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -921,7 +973,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.WebRTC.Audio.ApmCaptureInputLevelAverageRms"
-    units="dBFS (negated)" expires_after="2021-12-31">
+    units="dBFS (negated)" expires_after="2022-09-20">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -935,7 +987,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.WebRTC.Audio.ApmCaptureInputLevelPeakRms"
-    units="dBFS (negated)" expires_after="2021-12-31">
+    units="dBFS (negated)" expires_after="2022-09-20">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -949,7 +1001,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.WebRTC.Audio.ApmCaptureOutputLevelAverageRms"
-    units="dBFS (negated)" expires_after="2021-12-31">
+    units="dBFS (negated)" expires_after="2022-05-01">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>
@@ -962,7 +1014,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Cras.WebRTC.Audio.ApmCaptureOutputLevelPeakRms"
-    units="dBFS (negated)" expires_after="2021-12-31">
+    units="dBFS (negated)" expires_after="2022-05-01">
   <owner>hychao@chromium.org</owner>
   <owner>chromeos-audio@google.com</owner>
   <summary>

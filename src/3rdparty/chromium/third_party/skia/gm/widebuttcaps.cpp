@@ -12,11 +12,11 @@
 #include "include/gpu/GrContextOptions.h"
 #include "include/gpu/GrDirectContext.h"
 #include "include/utils/SkRandom.h"
-#include "src/gpu/GrCaps.h"
-#include "src/gpu/GrDirectContextPriv.h"
-#include "src/gpu/GrDrawingManager.h"
-#include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/tessellate/GrTessellationPathRenderer.h"
+#include "src/gpu/ganesh/GrCaps.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrDrawingManager.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/ops/TessellationPathRenderer.h"
 
 static constexpr float kStrokeWidth = 100;
 static constexpr int kTestWidth = 120 * 4;
@@ -107,7 +107,7 @@ class WideButtCaps_tess_segs_5 : public skiagm::GM {
     //
     // - >=4 because the tessellator code will just assume we have enough to combine a miter join
     //   and line in a single patch. (Requires 4 segments. Spec required minimum is 64.)
-    static constexpr int kMaxTessellationSegmentsOverride = 5;
+    inline static constexpr int kMaxTessellationSegmentsOverride = 5;
 
     void modifyGrContextOptions(GrContextOptions* options) override {
         options->fMaxTessellationSegmentsOverride = kMaxTessellationSegmentsOverride;
@@ -125,13 +125,13 @@ class WideButtCaps_tess_segs_5 : public skiagm::GM {
         }
 
         if (!dContext->priv().caps()->shaderCaps()->tessellationSupport() ||
-            !GrTessellationPathRenderer::IsSupported(*dContext->priv().caps())) {
+            !skgpu::v1::TessellationPathRenderer::IsSupported(*dContext->priv().caps())) {
             errorMsg->set("Tessellation not supported.");
             return DrawResult::kSkip;
         }
         auto opts = dContext->priv().drawingManager()->testingOnly_getOptionsForPathRendererChain();
         if (!(opts.fGpuPathRenderers & GpuPathRenderers::kTessellation)) {
-            errorMsg->set("GrTessellationPathRenderer disabled.");
+            errorMsg->set("TessellationPathRenderer disabled.");
             return DrawResult::kSkip;
         }
         if (dContext->priv().caps()->shaderCaps()->maxTessellationSegments() !=

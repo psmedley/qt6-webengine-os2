@@ -16,7 +16,6 @@
 #include "core/fxge/cfx_graphstatedata.h"
 #include "fxjs/gc/heap.h"
 #include "v8/include/cppgc/garbage-collected.h"
-#include "v8/include/cppgc/prefinalizer.h"
 #include "v8/include/cppgc/visitor.h"
 #include "xfa/fwl/cfwl_app.h"
 #include "xfa/fwl/cfwl_messagemouse.h"
@@ -65,8 +64,6 @@ void XFA_RectWithoutMargin(CFX_RectF* rt, const CXFA_Margin* margin);
 
 class CXFA_FFWidget : public cppgc::GarbageCollected<CXFA_FFWidget>,
                       public CFWL_Widget::AdapterIface {
-  CPPGC_USING_PRE_FINALIZER(CXFA_FFWidget, PreFinalize);
-
  public:
   enum FocusOption { kDoNotDrawFocus = 0, kDrawFocus };
   enum HighlightOption { kNoHighlight = 0, kHighlight };
@@ -88,7 +85,6 @@ class CXFA_FFWidget : public cppgc::GarbageCollected<CXFA_FFWidget>,
   CONSTRUCT_VIA_MAKE_GARBAGE_COLLECTED;
   ~CXFA_FFWidget() override;
 
-  virtual void PreFinalize();
   void Trace(cppgc::Visitor* visitor) const override;
 
   // CFWL_Widget::AdapterIface:
@@ -136,8 +132,6 @@ class CXFA_FFWidget : public cppgc::GarbageCollected<CXFA_FFWidget>,
   virtual bool OnKillFocus(CXFA_FFWidget* pNewWidget) WARN_UNUSED_RESULT;
   virtual bool OnKeyDown(XFA_FWL_VKEYCODE dwKeyCode,
                          Mask<XFA_FWL_KeyFlag> dwFlags) WARN_UNUSED_RESULT;
-  virtual bool OnKeyUp(XFA_FWL_VKEYCODE dwKeyCode,
-                       Mask<XFA_FWL_KeyFlag> dwFlags) WARN_UNUSED_RESULT;
   virtual bool OnChar(uint32_t dwChar,
                       Mask<XFA_FWL_KeyFlag> dwFlags) WARN_UNUSED_RESULT;
 
@@ -152,8 +146,8 @@ class CXFA_FFWidget : public cppgc::GarbageCollected<CXFA_FFWidget>,
   virtual bool CanDeSelect();
   virtual bool Undo();
   virtual bool Redo();
-  virtual Optional<WideString> Copy();
-  virtual Optional<WideString> Cut();
+  virtual absl::optional<WideString> Copy();
+  virtual absl::optional<WideString> Cut();
   virtual bool Paste(const WideString& wsPaste);
   virtual void SelectAll();
   virtual void Delete();

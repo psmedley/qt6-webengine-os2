@@ -5,7 +5,6 @@
 #ifndef EXTENSIONS_BROWSER_URL_LOADER_FACTORY_MANAGER_H_
 #define EXTENSIONS_BROWSER_URL_LOADER_FACTORY_MANAGER_H_
 
-#include "base/macros.h"
 #include "base/types/pass_key.h"
 #include "content/public/browser/navigation_handle.h"
 #include "extensions/common/extension.h"
@@ -27,7 +26,7 @@ namespace extensions {
 class ContentScriptTracker;
 
 // This class manages URLLoaderFactory objects that handle network requests that
-// require extension-specific permissions (related to relaxed CORS).
+// require extension-specific permissions (related to relaxed CORB and CORS).
 //
 // See also https://crbug.com/846346 for motivation for having separate
 // URLLoaderFactory objects for content scripts.
@@ -35,6 +34,8 @@ class URLLoaderFactoryManager {
  public:
   // Only static methods.
   URLLoaderFactoryManager() = delete;
+  URLLoaderFactoryManager(const URLLoaderFactoryManager&) = delete;
+  URLLoaderFactoryManager& operator=(const URLLoaderFactoryManager&) = delete;
 
   // Invoked when `navigation` is ready to commit with the set of `extensions`
   // asked to inject content script into the target frame using
@@ -88,18 +89,14 @@ class URLLoaderFactoryManager {
   //                                 |           |             |
   // URLLoaderFactoryParams:         |           |             |
   // - request_initiator_origin_lock |    web    |  extension  |     web
-  // - overridden properties?:       |           |             |
-  //    is_corb_enabled              |    always secure-default = true/enabled
-  //    ignore_isolated_world_origin | sec-default=true/ignore | if needed (app)
-  //    unsafe_non_webby_initiator   |   false   |    true     |    false
+  // - overridden properties?        |    no     |     yes     |  if needed
+  //    - is_corb_enabled            | secure-   |  ext-based  | ext-based for
+  //    - ..._access_patterns        |  -default |             | platform apps
   static void OverrideURLLoaderFactoryParams(
       content::BrowserContext* browser_context,
       const url::Origin& origin,
       bool is_for_isolated_world,
       network::mojom::URLLoaderFactoryParams* factory_params);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(URLLoaderFactoryManager);
 };
 
 }  // namespace extensions

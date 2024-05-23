@@ -6,7 +6,6 @@
 #define MEDIA_BASE_RENDERER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "media/base/buffering_state.h"
@@ -24,6 +23,9 @@ class RendererClient;
 class MEDIA_EXPORT Renderer {
  public:
   Renderer();
+
+  Renderer(const Renderer&) = delete;
+  Renderer& operator=(const Renderer&) = delete;
 
   // Stops rendering and fires any pending callbacks.
   virtual ~Renderer();
@@ -55,8 +57,10 @@ class MEDIA_EXPORT Renderer {
   // different than 1.0.
   virtual void SetPreservesPitch(bool preserves_pitch);
 
-  // Sets a flag indicating whether the audio stream was initiated by autoplay.
-  virtual void SetAutoplayInitiated(bool autoplay_initiated);
+  // Sets a flag indicating whether the audio stream was played with user
+  // activation.
+  virtual void SetWasPlayedWithUserActivation(
+      bool was_played_with_user_activation);
 
   // The following functions must be called after Initialize().
 
@@ -88,9 +92,6 @@ class MEDIA_EXPORT Renderer {
   virtual void OnEnabledAudioTracksChanged(
       const std::vector<DemuxerStream*>& enabled_tracks,
       base::OnceClosure change_completed_cb);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Renderer);
 };
 
 }  // namespace media

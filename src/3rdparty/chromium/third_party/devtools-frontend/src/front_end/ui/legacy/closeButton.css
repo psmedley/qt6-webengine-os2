@@ -7,7 +7,6 @@
 .close-button {
   width: 14px;
   height: 14px;
-  cursor: default;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -42,4 +41,10 @@
 
 .close-button:active .active-icon {
   display: block;
+}
+
+@media (forced-colors: active) and (prefers-color-scheme: dark) {
+  .close-button {
+    filter: brightness(100);
+  }
 }

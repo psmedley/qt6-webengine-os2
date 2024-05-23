@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "build/build_config.h"
 #include "printing/backend/cups_connection.h"
 #include "printing/backend/cups_ipp_constants.h"
 #include "printing/backend/cups_printer.h"
@@ -24,19 +25,20 @@
 #include "printing/units.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 #include "base/callback.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "printing/backend/ipp_handler_map.h"
+#include "printing/backend/ipp_handlers.h"
 #include "printing/printing_features.h"
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 namespace printing {
 
-#if defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 constexpr int kPinMinimumLength = 4;
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 namespace {
 
@@ -256,7 +258,7 @@ bool CollateDefault(const CupsOptionProvider& printer) {
   return name && !base::StringPiece(name).compare(kCollated);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
 bool PinSupported(const CupsOptionProvider& printer) {
   ipp_attribute_t* attr = printer.GetSupportedOptionValues(kIppPin);
   if (!attr)
@@ -304,14 +306,26 @@ size_t AddAttributes(const CupsOptionProvider& printer,
   return attr_count;
 }
 
+// Adds the "Input Tray" option to Advanced Attributes.
+size_t AddInputTray(const CupsOptionProvider& printer,
+                    AdvancedCapabilities* caps) {
+  size_t previous_size = caps->size();
+  // b/151324273: CUPS doesn't implement media-source in media-col-database like
+  // it should according to the IPP specs. However, it does implement a naked
+  // media-source attribute which we can use until the proper changes can be
+  // made to media-col-database.
+  KeywordHandler(printer, "media-source", caps);
+  return caps->size() - previous_size;
+
 void ExtractAdvancedCapabilities(const CupsOptionProvider& printer,
                                  PrinterSemanticCapsAndDefaults* printer_info) {
   AdvancedCapabilities* options = &printer_info->advanced_capabilities;
-  size_t attr_count = AddAttributes(printer, kIppJobAttributes, options);
+  size_t attr_count = AddInputTray(printer, options);
+  attr_count += AddAttributes(printer, kIppJobAttributes, options);
   attr_count += AddAttributes(printer, kIppDocumentAttributes, options);
   base::UmaHistogramCounts1000("Printing.CUPS.IppAttributesCount", attr_count);
 }
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 }  // namespace
 
@@ -334,10 +348,10 @@ void CapsAndDefaultsFromPrinter(const CupsOptionProvider& printer,
   printer_info->default_paper = DefaultPaper(printer);
   printer_info->papers = SupportedPapers(printer);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   printer_info->pin_supported = PinSupported(printer);
   ExtractAdvancedCapabilities(printer, printer_info);
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
   ExtractCopies(printer, printer_info);
   ExtractColor(printer, printer_info);

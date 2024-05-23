@@ -44,8 +44,10 @@ callback ScrollStateCallback = void (ScrollState scrollState);
     [Affects=Nothing] sequence<DOMString> getAttributeNames();
     [Affects=Nothing] DOMString? getAttribute(DOMString name);
     [Affects=Nothing] DOMString? getAttributeNS(DOMString? namespaceURI, DOMString localName);
-    [RaisesException, CEReactions] void setAttribute(DOMString name, TrustedString value);
-    [RaisesException, CEReactions] void setAttributeNS(DOMString? namespaceURI, DOMString name, TrustedString value);
+    [RaisesException, CEReactions] void setAttribute(DOMString name, DOMString value);
+    [RaisesException, CEReactions] void setAttribute(DOMString name, TrustedType value);
+    [RaisesException, CEReactions] void setAttributeNS(DOMString? namespaceURI, DOMString name, DOMString value);
+    [RaisesException, CEReactions] void setAttributeNS(DOMString? namespaceURI, DOMString name, TrustedType value);
     [CEReactions] void removeAttribute(DOMString name);
     [CEReactions] void removeAttributeNS(DOMString? namespaceURI, DOMString localName);
     [RaisesException, CEReactions] boolean toggleAttribute(DOMString qualifiedName, optional boolean force);
@@ -57,8 +59,6 @@ callback ScrollStateCallback = void (ScrollState scrollState);
     [RaisesException, CEReactions] Attr? setAttributeNode(Attr attr);
     [RaisesException, CEReactions] Attr? setAttributeNodeNS(Attr attr);
     [RaisesException, CEReactions] Attr removeAttributeNode(Attr attr);
-
-    [RuntimeEnabled=EditContext] attribute EditContext? editContext;
 
     [RaisesException, MeasureAs=ElementAttachShadow] ShadowRoot attachShadow(ShadowRootInit shadowRootInitDict);
     [PerWorldBindings, ImplementedAs=OpenShadowRoot] readonly attribute ShadowRoot? shadowRoot;
@@ -99,7 +99,7 @@ callback ScrollStateCallback = void (ScrollState scrollState);
     [CEReactions, RaisesException] void insertAdjacentHTML(DOMString position, HTMLString text);
 
     // Declarative Shadow DOM getInnerHTML() function.
-    [Affects=Nothing, RuntimeEnabled=DeclarativeShadowDOM, MeasureAs=ElementGetInnerHTML] HTMLString getInnerHTML(optional GetInnerHTMLOptions options = {});
+    [Affects=Nothing, MeasureAs=ElementGetInnerHTML] HTMLString getInnerHTML(optional GetInnerHTMLOptions options = {});
 
     // Pointer Lock
     // https://w3c.github.io/pointerlock/#extensions-to-the-element-interface
@@ -136,6 +136,12 @@ callback ScrollStateCallback = void (ScrollState scrollState);
     // Non-standard API
     [MeasureAs=ElementScrollIntoViewIfNeeded] void scrollIntoViewIfNeeded(optional boolean centerIfNeeded);
 
+    // The Popup API
+    [MeasureAs=ElementShowPopup,RuntimeEnabled=HTMLPopupAttribute] void showPopup();
+    [MeasureAs=ElementHidePopup,RuntimeEnabled=HTMLPopupAttribute] void hidePopup();
+    [Unscopable,CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute DOMString popup;
+    [CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute boolean initiallyOpen;
+
     // Experimental accessibility API
     [RuntimeEnabled=ComputedAccessibilityInfo] readonly attribute DOMString? computedRole;
     [RuntimeEnabled=ComputedAccessibilityInfo] readonly attribute DOMString? computedName;
@@ -148,7 +154,6 @@ callback ScrollStateCallback = void (ScrollState scrollState);
     attribute EventHandler onbeforecut;
     attribute EventHandler onbeforepaste;
     attribute EventHandler onsearch;
-    [RuntimeEnabled=BeforeMatchEvent] attribute EventHandler onbeforematch;
 
     // Element Timing
     [CEReactions, Reflect=elementtiming] attribute DOMString elementTiming;

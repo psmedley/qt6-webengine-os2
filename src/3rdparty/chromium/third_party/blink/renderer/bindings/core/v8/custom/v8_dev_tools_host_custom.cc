@@ -37,20 +37,23 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_document.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_mouse_event.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_string_resource.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/inspector/dev_tools_host.h"
 #include "third_party/blink/renderer/core/inspector/inspector_frontend_client.h"
+#include "third_party/blink/renderer/platform/bindings/v8_binding_macros.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 void V8DevToolsHost::PlatformMethodCustom(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   V8SetReturnValue(info, V8AtomicString(info.GetIsolate(), "mac"));
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   V8SetReturnValue(info, V8AtomicString(info.GetIsolate(), "windows"));
 #else  // Unix-like systems
   V8SetReturnValue(info, V8AtomicString(info.GetIsolate(), "linux"));
@@ -62,8 +65,13 @@ static bool PopulateContextMenuItems(v8::Isolate* isolate,
                                      std::vector<MenuItemInfo>& items) {
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   for (uint32_t i = 0; i < item_array->Length(); ++i) {
-    v8::Local<v8::Object> item =
-        item_array->Get(context, i).ToLocalChecked().As<v8::Object>();
+    v8::Local<v8::Value> item_value =
+        item_array->Get(context, i).ToLocalChecked();
+    if (!item_value->IsObject()) {
+      return false;
+    }
+    v8::Local<v8::Object> item = item_value.As<v8::Object>();
+
     v8::Local<v8::Value> type;
     v8::Local<v8::Value> id;
     v8::Local<v8::Value> label;

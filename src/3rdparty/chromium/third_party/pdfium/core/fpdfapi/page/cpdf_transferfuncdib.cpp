@@ -6,11 +6,10 @@
 
 #include "core/fpdfapi/page/cpdf_transferfuncdib.h"
 
-#include <vector>
-
 #include "build/build_config.h"
 #include "core/fpdfapi/page/cpdf_transferfunc.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
+#include "core/fxge/calculate_pitch.h"
 #include "third_party/base/check.h"
 #include "third_party/base/compiler_specific.h"
 
@@ -25,7 +24,7 @@ CPDF_TransferFuncDIB::CPDF_TransferFuncDIB(
   m_Width = pSrc->GetWidth();
   m_Height = pSrc->GetHeight();
   m_Format = GetDestFormat();
-  m_Pitch = (m_Width * GetBppFromFormat(m_Format) + 31) / 32 * 4;
+  m_Pitch = fxge::CalculatePitch32OrDie(GetBppFromFormat(m_Format), m_Width);
   m_Scanline.resize(m_Pitch);
   DCHECK(m_palette.empty());
 }
@@ -43,8 +42,8 @@ FXDIB_Format CPDF_TransferFuncDIB::GetDestFormat() const {
 }
 
 void CPDF_TransferFuncDIB::TranslateScanline(
-    const uint8_t* src_buf,
-    std::vector<uint8_t, FxAllocAllocator<uint8_t>>* dest_buf) const {
+    pdfium::span<const uint8_t> src_span) const {
+  const uint8_t* src_buf = src_span.data();
   bool bSkip = false;
   switch (m_pSrc->GetFormat()) {
     case FXDIB_Format::k1bppRgb: {
@@ -57,15 +56,15 @@ void CPDF_TransferFuncDIB::TranslateScanline(
       int index = 0;
       for (int i = 0; i < m_Width; i++) {
         if (src_buf[i / 8] & (1 << (7 - i % 8))) {
-          (*dest_buf)[index++] = b1;
-          (*dest_buf)[index++] = g1;
-          (*dest_buf)[index++] = r1;
+          m_Scanline[index++] = b1;
+          m_Scanline[index++] = g1;
+          m_Scanline[index++] = r1;
         } else {
-          (*dest_buf)[index++] = b0;
-          (*dest_buf)[index++] = g0;
-          (*dest_buf)[index++] = r0;
+          m_Scanline[index++] = b0;
+          m_Scanline[index++] = g0;
+          m_Scanline[index++] = r0;
         }
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
         index++;
 #endif
       }
@@ -77,9 +76,9 @@ void CPDF_TransferFuncDIB::TranslateScanline(
       int index = 0;
       for (int i = 0; i < m_Width; i++) {
         if (src_buf[i / 8] & (1 << (7 - i % 8)))
-          (*dest_buf)[index++] = m1;
+          m_Scanline[index++] = m1;
         else
-          (*dest_buf)[index++] = m0;
+          m_Scanline[index++] = m0;
       }
       break;
     }
@@ -89,17 +88,17 @@ void CPDF_TransferFuncDIB::TranslateScanline(
       for (int i = 0; i < m_Width; i++) {
         if (m_pSrc->HasPalette()) {
           FX_ARGB src_argb = src_palette[*src_buf];
-          (*dest_buf)[index++] = m_RampB[FXARGB_R(src_argb)];
-          (*dest_buf)[index++] = m_RampG[FXARGB_G(src_argb)];
-          (*dest_buf)[index++] = m_RampR[FXARGB_B(src_argb)];
+          m_Scanline[index++] = m_RampB[FXARGB_R(src_argb)];
+          m_Scanline[index++] = m_RampG[FXARGB_G(src_argb)];
+          m_Scanline[index++] = m_RampR[FXARGB_B(src_argb)];
         } else {
           uint32_t src_byte = *src_buf;
-          (*dest_buf)[index++] = m_RampB[src_byte];
-          (*dest_buf)[index++] = m_RampG[src_byte];
-          (*dest_buf)[index++] = m_RampR[src_byte];
+          m_Scanline[index++] = m_RampB[src_byte];
+          m_Scanline[index++] = m_RampG[src_byte];
+          m_Scanline[index++] = m_RampR[src_byte];
         }
         src_buf++;
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
         index++;
 #endif
       }
@@ -108,16 +107,16 @@ void CPDF_TransferFuncDIB::TranslateScanline(
     case FXDIB_Format::k8bppMask: {
       int index = 0;
       for (int i = 0; i < m_Width; i++)
-        (*dest_buf)[index++] = m_RampR[*(src_buf++)];
+        m_Scanline[index++] = m_RampR[*(src_buf++)];
       break;
     }
     case FXDIB_Format::kRgb: {
       int index = 0;
       for (int i = 0; i < m_Width; i++) {
-        (*dest_buf)[index++] = m_RampB[*(src_buf++)];
-        (*dest_buf)[index++] = m_RampG[*(src_buf++)];
-        (*dest_buf)[index++] = m_RampR[*(src_buf++)];
-#if defined(OS_APPLE)
+        m_Scanline[index++] = m_RampB[*(src_buf++)];
+        m_Scanline[index++] = m_RampG[*(src_buf++)];
+        m_Scanline[index++] = m_RampR[*(src_buf++)];
+#if BUILDFLAG(IS_APPLE)
         index++;
 #endif
       }
@@ -129,12 +128,12 @@ void CPDF_TransferFuncDIB::TranslateScanline(
     case FXDIB_Format::kArgb: {
       int index = 0;
       for (int i = 0; i < m_Width; i++) {
-        (*dest_buf)[index++] = m_RampB[*(src_buf++)];
-        (*dest_buf)[index++] = m_RampG[*(src_buf++)];
-        (*dest_buf)[index++] = m_RampR[*(src_buf++)];
+        m_Scanline[index++] = m_RampB[*(src_buf++)];
+        m_Scanline[index++] = m_RampG[*(src_buf++)];
+        m_Scanline[index++] = m_RampR[*(src_buf++)];
         if (!bSkip) {
-          (*dest_buf)[index++] = *src_buf;
-#if defined(OS_APPLE)
+          m_Scanline[index++] = *src_buf;
+#if BUILDFLAG(IS_APPLE)
         } else {
           index++;
 #endif
@@ -148,7 +147,7 @@ void CPDF_TransferFuncDIB::TranslateScanline(
   }
 }
 
-const uint8_t* CPDF_TransferFuncDIB::GetScanline(int line) const {
-  TranslateScanline(m_pSrc->GetScanline(line), &m_Scanline);
-  return m_Scanline.data();
+pdfium::span<const uint8_t> CPDF_TransferFuncDIB::GetScanline(int line) const {
+  TranslateScanline(m_pSrc->GetScanline(line));
+  return m_Scanline;
 }

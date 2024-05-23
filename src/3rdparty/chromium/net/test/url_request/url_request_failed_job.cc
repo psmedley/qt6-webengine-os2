@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
-#include "base/cxx17_backports.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/base/url_util.h"
@@ -31,13 +30,17 @@ const char* kFailurePhase[]{
     "readasync",  // READ_ASYNC
 };
 
-static_assert(base::size(kFailurePhase) ==
+static_assert(std::size(kFailurePhase) ==
                   URLRequestFailedJob::FailurePhase::MAX_FAILURE_PHASE,
               "kFailurePhase must match FailurePhase enum");
 
 class MockJobInterceptor : public URLRequestInterceptor {
  public:
   MockJobInterceptor() = default;
+
+  MockJobInterceptor(const MockJobInterceptor&) = delete;
+  MockJobInterceptor& operator=(const MockJobInterceptor&) = delete;
+
   ~MockJobInterceptor() override = default;
 
   // URLRequestJobFactory::ProtocolHandler implementation:
@@ -46,7 +49,7 @@ class MockJobInterceptor : public URLRequestInterceptor {
     int net_error = OK;
     URLRequestFailedJob::FailurePhase phase =
         URLRequestFailedJob::FailurePhase::MAX_FAILURE_PHASE;
-    for (size_t i = 0; i < base::size(kFailurePhase); i++) {
+    for (size_t i = 0; i < std::size(kFailurePhase); i++) {
       std::string phase_error_string;
       if (GetValueForKeyInQuery(request->url(), kFailurePhase[i],
                                 &phase_error_string)) {
@@ -58,9 +61,6 @@ class MockJobInterceptor : public URLRequestInterceptor {
     }
     return std::make_unique<URLRequestFailedJob>(request, phase, net_error);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockJobInterceptor);
 };
 
 GURL GetMockUrl(const std::string& scheme,

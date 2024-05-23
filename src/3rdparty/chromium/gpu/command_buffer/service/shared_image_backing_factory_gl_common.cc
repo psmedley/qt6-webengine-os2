@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <list>
 
-#include "base/containers/contains.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/service/service_utils.h"
@@ -30,6 +29,7 @@ SharedImageBackingFactoryGLCommon::SharedImageBackingFactoryGLCommon(
     : use_passthrough_(gpu_preferences.use_passthrough_cmd_decoder &&
                        gles2::PassthroughCommandDecoderSupported()),
       workarounds_(workarounds),
+      use_webgpu_adapter_(gpu_preferences.use_webgpu_adapter),
       progress_reporter_(progress_reporter) {
   gl::GLApi* api = gl::g_current_gl_context;
   api->glGetIntegervFn(GL_MAX_TEXTURE_SIZE, &max_texture_size_);
@@ -92,7 +92,8 @@ SharedImageBackingFactoryGLCommon::SharedImageBackingFactoryGLCommon(
     if (!info.enabled)
       continue;
     if (enable_texture_storage && !info.is_compressed) {
-      GLuint storage_internal_format = viz::TextureStorageFormat(format);
+      GLuint storage_internal_format = viz::TextureStorageFormat(
+          format, feature_info->feature_flags().angle_rgbx_internal_format);
       if (validators->texture_internal_format_storage.IsValid(
               storage_internal_format)) {
         info.supports_storage = true;
@@ -119,7 +120,8 @@ bool SharedImageBackingFactoryGLCommon::CanCreateSharedImage(
 
   if (size.width() < 1 || size.height() < 1 ||
       size.width() > max_texture_size_ || size.height() > max_texture_size_) {
-    LOG(ERROR) << "CreateSharedImage: invalid size";
+    LOG(ERROR) << "CreateSharedImage: invalid size: " << size.ToString()
+               << ", max_texture_size_=" << max_texture_size_;
     return false;
   }
 

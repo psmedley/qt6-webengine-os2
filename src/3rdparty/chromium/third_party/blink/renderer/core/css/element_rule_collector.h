@@ -23,13 +23,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_ELEMENT_RULE_COLLECTOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_ELEMENT_RULE_COLLECTOR_H_
 
+#include "base/auto_reset.h"
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_rule_list.h"
 #include "third_party/blink/renderer/core/css/resolver/element_resolve_context.h"
 #include "third_party/blink/renderer/core/css/resolver/match_request.h"
 #include "third_party/blink/renderer/core/css/resolver/match_result.h"
 #include "third_party/blink/renderer/core/css/selector_checker.h"
-#include "third_party/blink/renderer/core/css/style_recalc.h"
+#include "third_party/blink/renderer/core/css/style_recalc_context.h"
 #include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
@@ -38,6 +40,8 @@
 namespace blink {
 
 class CSSStyleSheet;
+class Element;
+class HTMLSlotElement;
 class PartNames;
 class RuleData;
 class SelectorFilter;
@@ -48,9 +52,11 @@ class MatchedRule {
 
  public:
   MatchedRule(const RuleData* rule_data,
+              unsigned layer_order,
               unsigned style_sheet_index,
               const CSSStyleSheet* parent_style_sheet)
       : rule_data_(rule_data),
+        layer_order_(layer_order),
         parent_style_sheet_(parent_style_sheet) {
     DCHECK(rule_data_);
     static const unsigned kBitsForPositionInRuleData = 18;
@@ -62,6 +68,7 @@ class MatchedRule {
   const RuleData* GetRuleData() const { return rule_data_; }
   uint64_t GetPosition() const { return position_; }
   unsigned Specificity() const { return GetRuleData()->Specificity(); }
+  unsigned LayerOrder() const { return layer_order_; }
   const CSSStyleSheet* ParentStyleSheet() const { return parent_style_sheet_; }
   void Trace(Visitor* visitor) const {
     visitor->Trace(parent_style_sheet_);
@@ -70,6 +77,7 @@ class MatchedRule {
 
  private:
   Member<const RuleData> rule_data_;
+  unsigned layer_order_;
   uint64_t position_;
   Member<const CSSStyleSheet> parent_style_sheet_;
 };
@@ -118,30 +126,59 @@ class CORE_EXPORT ElementRuleCollector {
   StyleRuleList* MatchedStyleRuleList();
   RuleIndexList* MatchedCSSRuleList();
 
-  void CollectMatchingRules(const MatchRequest&,
-                            bool matching_tree_boundary_rules = false);
+  void CollectMatchingRules(const MatchRequest&);
   void CollectMatchingShadowHostRules(const MatchRequest&);
+  void CollectMatchingSlottedRules(const MatchRequest&);
   void CollectMatchingPartPseudoRules(const MatchRequest&,
                                       PartNames&,
                                       bool for_shadow_pseudo);
-  void SortAndTransferMatchedRules();
+  void SortAndTransferMatchedRules(bool is_vtt_embedded_style = false);
   void ClearMatchedRules();
   void AddElementStyleProperties(const CSSPropertyValueSet*,
-                                 bool is_cacheable = true);
+                                 bool is_cacheable = true,
+                                 bool is_inline_style = false);
   void FinishAddingUARules() { result_.FinishAddingUARules(); }
   void FinishAddingUserRules() {
     result_.FinishAddingUserRules();
+  }
+  void FinishAddingPresentationalHints() {
+    result_.FinishAddingPresentationalHints();
   }
   void FinishAddingAuthorRulesForTreeScope(const TreeScope& tree_scope) {
     result_.FinishAddingAuthorRulesForTreeScope(tree_scope);
   }
   void SetIncludeEmptyRules(bool include) { include_empty_rules_ = include; }
   bool IncludeEmptyRules() const { return include_empty_rules_; }
-  bool IsCollectingForPseudoElement() const {
-    return pseudo_style_request_.pseudo_id != kPseudoIdNone;
-  }
+
+  // Return the pseudo id if the style request is for rules associated with a
+  // pseudo element, or kPseudoNone if not.
+  PseudoId GetPseudoId() const { return pseudo_style_request_.pseudo_id; }
 
   void AddMatchedRulesToTracker(StyleRuleUsageTracker*) const;
+
+  // Temporarily swap the StyleRecalcContext with one which points to the
+  // closest query container for matching ::slotted rules for a given slot.
+  class SlottedRulesScope {
+   public:
+    SlottedRulesScope(ElementRuleCollector& collector, HTMLSlotElement& slot)
+        : context_(&collector.style_recalc_context_,
+                   collector.style_recalc_context_.ForSlottedRules(slot)) {}
+
+   private:
+    base::AutoReset<StyleRecalcContext> context_;
+  };
+
+  // Temporarily swap the StyleRecalcContext with one which points to the
+  // closest query container for matching ::part rules for a given host.
+  class PartRulesScope {
+   public:
+    PartRulesScope(ElementRuleCollector& collector, Element& host)
+        : context_(&collector.style_recalc_context_,
+                   collector.style_recalc_context_.ForPartRules(host)) {}
+
+   private:
+    base::AutoReset<StyleRecalcContext> context_;
+  };
 
  private:
   struct PartRequest {
@@ -161,6 +198,7 @@ class CORE_EXPORT ElementRuleCollector {
              const SelectorChecker::SelectorCheckingContext&,
              MatchResult&);
   void DidMatchRule(const RuleData*,
+                    unsigned layer_order,
                     const SelectorChecker::MatchResult&,
                     const MatchRequest&);
 

@@ -8,11 +8,10 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 
 #include "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "device/bluetooth/bluetooth_device.h"
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 #import <IOBluetooth/IOBluetooth.h>
 #endif
 
@@ -32,6 +31,11 @@ class BluetoothLowEnergyDiscoveryManagerMac {
    protected:
     virtual ~Observer() {}
   };
+
+  BluetoothLowEnergyDiscoveryManagerMac(
+      const BluetoothLowEnergyDiscoveryManagerMac&) = delete;
+  BluetoothLowEnergyDiscoveryManagerMac& operator=(
+      const BluetoothLowEnergyDiscoveryManagerMac&) = delete;
 
   virtual ~BluetoothLowEnergyDiscoveryManagerMac();
 
@@ -85,8 +89,6 @@ class BluetoothLowEnergyDiscoveryManagerMac {
 
   // List of service UUIDs to scan.
   BluetoothDevice::UUIDList services_uuids_;
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothLowEnergyDiscoveryManagerMac);
 };
 
 }  // namespace device

@@ -15,13 +15,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "printing/mojom/print.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
 class DictionaryValue;
-}
+class Value;
+}  // namespace base
 
 // This is the interface for platform-specific code for a print backend
 namespace printing {
@@ -56,7 +57,7 @@ struct COMPONENT_EXPORT(PRINT_BACKEND) PrinterBasicInfo {
 
 using PrinterList = std::vector<PrinterBasicInfo>;
 
-#if defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 struct COMPONENT_EXPORT(PRINT_BACKEND) AdvancedCapabilityValue {
   AdvancedCapabilityValue();
@@ -107,7 +108,42 @@ struct COMPONENT_EXPORT(PRINT_BACKEND) AdvancedCapability {
 
 using AdvancedCapabilities = std::vector<AdvancedCapability>;
 
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+
+#if BUILDFLAG(IS_WIN)
+
+struct COMPONENT_EXPORT(PRINT_BACKEND) PageOutputQualityAttribute {
+  PageOutputQualityAttribute();
+  PageOutputQualityAttribute(const std::string& display_name,
+                             const std::string& name);
+  ~PageOutputQualityAttribute();
+
+  bool operator==(const PageOutputQualityAttribute& other) const;
+
+  // Localized name of the page output quality attribute.
+  std::string display_name;
+
+  // Internal ID of the page output quality attribute.
+  std::string name;
+};
+using PageOutputQualityAttributes = std::vector<PageOutputQualityAttribute>;
+
+struct COMPONENT_EXPORT(PRINT_BACKEND) PageOutputQuality {
+  PageOutputQuality();
+  PageOutputQuality(PageOutputQualityAttributes qualities,
+                    absl::optional<std::string> default_quality);
+  PageOutputQuality(const PageOutputQuality& other);
+  ~PageOutputQuality();
+
+  // All options of page output quality.
+  PageOutputQualityAttributes qualities;
+
+  // Default option of page output quality.
+  // TODO(crbug.com/1291257): Need populate this option in the next CLs.
+  absl::optional<std::string> default_quality;
+};
+
+#endif  // BUILDFLAG(IS_WIN)
 
 struct COMPONENT_EXPORT(PRINT_BACKEND) PrinterSemanticCapsAndDefaults {
   PrinterSemanticCapsAndDefaults();
@@ -145,11 +181,15 @@ struct COMPONENT_EXPORT(PRINT_BACKEND) PrinterSemanticCapsAndDefaults {
   std::vector<gfx::Size> dpis;
   gfx::Size default_dpi;
 
-#if defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   bool pin_supported = false;
   AdvancedCapabilities advanced_capabilities;
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 };
+
+#if BUILDFLAG(IS_WIN)
+  absl::optional<PageOutputQuality> page_output_quality;
+#endif  // BUILDFLAG(IS_WIN)
 
 struct COMPONENT_EXPORT(PRINT_BACKEND) PrinterCapsAndDefaults {
   PrinterCapsAndDefaults();
@@ -215,17 +255,25 @@ class COMPONENT_EXPORT(PRINT_BACKEND) PrintBackend
   // Returns true if printer_name points to a valid printer.
   virtual bool IsValidPrinter(const std::string& printer_name) = 0;
 
+#if BUILDFLAG(IS_WIN)
+
+  // This method uses the XPS API to get the printer capabilities.
+  mojom::ResultCode GetXmlPrinterCapabilitiesForXpsDriver(
+      const std::string& printer_name,
+      std::string& capabilities);
+
+  // Since parsing XML data to `PrinterSemanticCapsAndDefaults` can not be done
+  // in the print_backend level, parse base::Value into
+  // `PrinterSemanticCapsAndDefaults` data structure instead. Parsing XML data
+  // to base::Value will be processed by data_decoder service.
+  mojom::ResultCode ParseValueForXpsPrinterCapabilities(
+      const base::Value& value,
+      PrinterSemanticCapsAndDefaults* printer_info);
+
+#endif  // BUILDFLAG(IS_WIN)
+
   // Allocates a print backend.
   static scoped_refptr<PrintBackend> CreateInstance(const std::string& locale);
-
-#if defined(USE_CUPS)
-  // TODO(crbug.com/1062136): Remove this static function when Cloud Print is
-  // supposed to stop working. Follow up after Jan 1, 2021.
-  // Similar to CreateInstance(), but ensures that the CUPS PPD backend is used
-  // instead of the CUPS IPP backend.
-  static scoped_refptr<PrintBackend> CreateInstanceForCloudPrint(
-      const base::DictionaryValue* print_backend_settings);
-#endif  // defined(USE_CUPS)
 
   // Test method to override the print backend for testing.  Caller should
   // retain ownership.
@@ -233,19 +281,14 @@ class COMPONENT_EXPORT(PRINT_BACKEND) PrintBackend
 
  protected:
   friend class base::RefCountedThreadSafe<PrintBackend>;
-  explicit PrintBackend(const std::string& locale);
+
+  PrintBackend();
   virtual ~PrintBackend();
 
   // Provide the actual backend for CreateInstance().
   static scoped_refptr<PrintBackend> CreateInstanceImpl(
       const base::DictionaryValue* print_backend_settings,
-      const std::string& locale,
-      bool for_cloud_print);
-
-  const std::string& locale() const { return locale_; }
-
- private:
-  const std::string locale_;
+      const std::string& locale);
 };
 
 }  // namespace printing

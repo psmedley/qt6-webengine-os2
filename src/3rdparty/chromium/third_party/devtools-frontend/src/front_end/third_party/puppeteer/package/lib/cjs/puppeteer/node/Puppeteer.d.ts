@@ -13,15 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { Browser } from '../common/Browser.js';
-import { BrowserConnectOptions } from '../common/BrowserConnector.js';
-import { Product } from '../common/Product.js';
-import { CommonPuppeteerSettings, ConnectOptions , Puppeteer} from '../common/Puppeteer.js';
-
+import { Puppeteer, CommonPuppeteerSettings, ConnectOptions } from '../common/Puppeteer.js';
 import { BrowserFetcher, BrowserFetcherOptions } from './BrowserFetcher.js';
+import { LaunchOptions, BrowserLaunchArgumentOptions } from './LaunchOptions.js';
+import { BrowserConnectOptions } from '../common/BrowserConnector.js';
+import { Browser } from '../common/Browser.js';
 import { ProductLauncher } from './Launcher.js';
-import { BrowserLaunchArgumentOptions , LaunchOptions} from './LaunchOptions.js';
-
+import { Product } from '../common/Product.js';
 /**
  * Extends the main {@link Puppeteer} class with Node specific behaviour for fetching and
  * downloading browsers.
@@ -58,8 +56,8 @@ import { BrowserLaunchArgumentOptions , LaunchOptions} from './LaunchOptions.js'
  * @public
  */
 export declare class PuppeteerNode extends Puppeteer {
-    private _lazyLauncher;
-    private _projectRoot;
+    private _lazyLauncher?;
+    private _projectRoot?;
     private __productName?;
     /**
      * @internal
@@ -69,7 +67,7 @@ export declare class PuppeteerNode extends Puppeteer {
      * @internal
      */
     constructor(settings: {
-        projectRoot: string;
+        projectRoot?: string;
         preferredRevision: string;
         productName?: Product;
     } & CommonPuppeteerSettings);
@@ -85,8 +83,8 @@ export declare class PuppeteerNode extends Puppeteer {
     /**
      * @internal
      */
-    get _productName(): Product;
-    set _productName(name: Product);
+    get _productName(): Product | undefined;
+    set _productName(name: Product | undefined);
     /**
      * Launches puppeteer and launches a browser instance with given arguments
      * and options when specified.
@@ -126,7 +124,7 @@ export declare class PuppeteerNode extends Puppeteer {
      * The browser binary might not be there if the download was skipped with
      * the `PUPPETEER_SKIP_DOWNLOAD` environment variable.
      */
-    executablePath(): string;
+    executablePath(channel?: string): string;
     /**
      * @internal
      */

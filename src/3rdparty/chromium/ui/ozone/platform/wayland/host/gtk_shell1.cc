@@ -17,26 +17,28 @@ namespace {
 // gtk_shell1 exposes request_focus() since version 3.  Below that, it is not
 // interesting for us, although it provides some shell integration that might be
 // useful.
-constexpr uint32_t kMinGtkShell1Version = 3;
-constexpr uint32_t kMaxGtkShell1Version = 4;
+constexpr uint32_t kMinVersion = 3;
+constexpr uint32_t kMaxVersion = 4;
 }  // namespace
 
 // static
-void GtkShell1::Register(WaylandConnection* connection) {
-  connection->RegisterGlobalObjectFactory("gtk_shell1",
-                                          &GtkShell1::Instantiate);
-}
+constexpr char GtkShell1::kInterfaceName[];
 
 // static
 void GtkShell1::Instantiate(WaylandConnection* connection,
                             wl_registry* registry,
                             uint32_t name,
+                            const std::string& interface,
                             uint32_t version) {
-  if (connection->gtk_shell1_ || version < kMinGtkShell1Version)
-    return;
+  DCHECK_EQ(interface, kInterfaceName);
 
-  auto gtk_shell1 = wl::Bind<::gtk_shell1>(
-      registry, name, std::min(version, kMaxGtkShell1Version));
+  if (connection->gtk_shell1_ ||
+      !wl::CanBind(interface, version, kMinVersion, kMaxVersion)) {
+    return;
+  }
+
+  auto gtk_shell1 =
+      wl::Bind<::gtk_shell1>(registry, name, std::min(version, kMaxVersion));
   if (!gtk_shell1) {
     LOG(ERROR) << "Failed to bind gtk_shell1";
     return;

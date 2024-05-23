@@ -8,9 +8,11 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/cbor/reader.h"
 #include "components/cbor/values.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
@@ -133,9 +135,9 @@ class FidoMakeCredentialHandlerTest : public ::testing::Test {
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   std::unique_ptr<test::FakeFidoDiscoveryFactory> fake_discovery_factory_ =
       std::make_unique<test::FakeFidoDiscoveryFactory>();
-  test::FakeFidoDiscovery* discovery_;
-  test::FakeFidoDiscovery* nfc_discovery_;
-  test::FakeFidoDiscovery* platform_discovery_;
+  raw_ptr<test::FakeFidoDiscovery> discovery_;
+  raw_ptr<test::FakeFidoDiscovery> nfc_discovery_;
+  raw_ptr<test::FakeFidoDiscovery> platform_discovery_;
   scoped_refptr<::testing::NiceMock<MockBluetoothAdapter>> mock_adapter_;
   std::unique_ptr<MockFidoDevice> pending_mock_platform_device_;
   TestMakeCredentialRequestCallback cb_;
@@ -262,7 +264,7 @@ TEST_F(FidoMakeCredentialHandlerTest, CrossPlatformAttachment) {
   // kCloudAssistedBluetoothLowEnergy not yet supported for MakeCredential.
   ExpectAllowedTransportsForRequestAre(request_handler.get(), {
     FidoTransportProtocol::kNearFieldCommunication,
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
         // CrOS tries to instantiate a platform authenticator for cross-platform
         // requests if enabled via enterprise policy.
         FidoTransportProtocol::kInternal,
@@ -394,8 +396,8 @@ ACTION_P(Reply, reply) {
       base::BindOnce(
           [](base::OnceCallback<void(absl::optional<std::vector<uint8_t>>)>
                  callback,
-             std::vector<uint8_t> reply) {
-            std::move(callback).Run(std::move(reply));
+             std::vector<uint8_t> reply_bytes) {
+            std::move(callback).Run(std::move(reply_bytes));
           },
           std::move(arg1), std::vector<uint8_t>(reply.begin(), reply.end())));
 }
@@ -531,7 +533,7 @@ TEST_F(FidoMakeCredentialHandlerTest,
 
   auto device = MockFidoDevice::MakeCtapWithGetInfoExpectation(
       test_data::kTestGetInfoResponsePlatformDevice);
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // CrOS will dispatch to a platform authenticator and one can be
   // instantiated in such cases if enabled via enterprise policy.
   device->ExpectCtap2CommandAndRespondWithError(
@@ -541,7 +543,7 @@ TEST_F(FidoMakeCredentialHandlerTest,
   discovery()->AddDevice(std::move(device));
 
   task_environment_.FastForwardUntilNoTasksRemain();
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   EXPECT_TRUE(callback().was_called());
 #else
   EXPECT_FALSE(callback().was_called());

@@ -9,7 +9,7 @@
 #include <limits>
 #include <memory>
 
-#include "base/cxx17_backports.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/checked_math.h"
 #include "base/numerics/safe_conversions.h"
@@ -44,9 +44,9 @@ struct TrackRunInfo {
   int64_t sample_start_offset;
 
   bool is_audio;
-  const AudioSampleEntry* audio_description;
-  const VideoSampleEntry* video_description;
-  const SampleGroupDescription* track_sample_encryption_group;
+  raw_ptr<const AudioSampleEntry> audio_description;
+  raw_ptr<const VideoSampleEntry> video_description;
+  raw_ptr<const SampleGroupDescription> track_sample_encryption_group;
 
   // Stores sample encryption entries, which is populated from 'senc' box if it
   // is available, otherwise will try to load from cenc auxiliary information.
@@ -115,7 +115,7 @@ base::TimeDelta TimeDeltaFromRational(int64_t numer, int64_t denom) {
 
   const int64_t total_microseconds =
       base::Time::kMicrosecondsPerSecond * result_seconds + result_microseconds;
-  return base::TimeDelta::FromMicroseconds(total_microseconds);
+  return base::Microseconds(total_microseconds);
 }
 
 DecodeTimestamp DecodeTimestampFromRational(int64_t numer, int64_t denom) {
@@ -750,7 +750,7 @@ std::unique_ptr<DecryptConfig> TrackRunIterator::GetDecryptConfig() {
     if (ApplyConstantIv(sample_idx, &sample_encryption_entry)) {
       std::string iv(reinterpret_cast<const char*>(
                          sample_encryption_entry.initialization_vector),
-                     base::size(sample_encryption_entry.initialization_vector));
+                     std::size(sample_encryption_entry.initialization_vector));
       switch (run_itr_->encryption_scheme) {
         case EncryptionScheme::kUnencrypted:
           return nullptr;
@@ -772,7 +772,7 @@ std::unique_ptr<DecryptConfig> TrackRunIterator::GetDecryptConfig() {
       run_itr_->sample_encryption_entries[sample_idx];
   std::string iv(reinterpret_cast<const char*>(
                      sample_encryption_entry.initialization_vector),
-                 base::size(sample_encryption_entry.initialization_vector));
+                 std::size(sample_encryption_entry.initialization_vector));
 
   size_t total_size = 0;
   if (!sample_encryption_entry.subsamples.empty() &&

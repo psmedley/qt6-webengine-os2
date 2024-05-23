@@ -4,6 +4,7 @@
 
 #include "fuchsia/engine/browser/web_engine_browser_main_parts.h"
 
+#include <fuchsia/ui/scenic/cpp/fidl.h>
 #include <fuchsia/web/cpp/fidl.h>
 #include <lib/sys/cpp/component_context.h>
 #include <lib/sys/cpp/outgoing_directory.h>
@@ -11,8 +12,10 @@
 #include <utility>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/files/important_file_writer_cleaner.h"
 #include "base/fuchsia/file_utils.h"
 #include "base/fuchsia/fuchsia_logging.h"
@@ -21,12 +24,17 @@
 #include "base/fuchsia/process_context.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/histogram_fetcher.h"
+#include "content/public/browser/network_quality_observer_factory.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/main_function_params.h"
@@ -34,13 +42,17 @@
 #include "fuchsia/base/inspect.h"
 #include "fuchsia/base/legacymetrics_client.h"
 #include "fuchsia/engine/browser/context_impl.h"
-#include "fuchsia/engine/browser/media_resource_provider_service.h"
 #include "fuchsia/engine/browser/web_engine_browser_context.h"
 #include "fuchsia/engine/browser/web_engine_devtools_controller.h"
+#include "fuchsia/engine/browser/web_engine_memory_inspector.h"
 #include "fuchsia/engine/common/cast_streaming.h"
 #include "fuchsia/engine/switches.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
+#include "media/fuchsia/cdm/service/fuchsia_cdm_manager.h"
+#include "net/http/http_util.h"
+#include "services/network/public/cpp/network_quality_tracker.h"
 #include "services/network/public/mojom/network_context.mojom.h"
+#include "third_party/widevine/cdm/widevine_cdm_common.h"
 #include "ui/aura/screen_ozone.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/switches.h"
@@ -52,11 +64,10 @@ namespace {
 base::NoDestructor<fidl::InterfaceRequest<fuchsia::web::Context>>
     g_test_request;
 
-constexpr base::TimeDelta kMetricsReportingInterval =
-    base::TimeDelta::FromMinutes(1);
+constexpr base::TimeDelta kMetricsReportingInterval = base::Minutes(1);
 
 constexpr base::TimeDelta kChildProcessHistogramFetchTimeout =
-    base::TimeDelta::FromSeconds(10);
+    base::Seconds(10);
 
 // Merge child process' histogram deltas into the browser process' histograms.
 void FetchHistogramsFromChildProcesses(
@@ -69,37 +80,93 @@ void FetchHistogramsFromChildProcesses(
       kChildProcessHistogramFetchTimeout);
 }
 
-// Implements the fuchsia.web.FrameHost protocol using a ContextImpl with
-// incognito browser context.
-class FrameHostImpl final : public fuchsia::web::FrameHost {
- public:
-  explicit FrameHostImpl(inspect::Node inspect_node,
-                         WebEngineDevToolsController* devtools_controller)
-      : context_(WebEngineBrowserContext::CreateIncognito(),
-                 std::move(inspect_node),
-                 devtools_controller) {}
-  ~FrameHostImpl() override = default;
+template <typename KeySystemInterface>
+fidl::InterfaceHandle<fuchsia::media::drm::KeySystem> ConnectToKeySystem() {
+  static_assert(
+      (std::is_same<KeySystemInterface, fuchsia::media::drm::Widevine>::value ||
+       std::is_same<KeySystemInterface, fuchsia::media::drm::PlayReady>::value),
+      "KeySystemInterface must be either fuchsia::media::drm::Widevine or "
+      "fuchsia::media::drm::PlayReady");
 
-  FrameHostImpl(const FrameHostImpl&) = delete;
-  FrameHostImpl& operator=(const FrameHostImpl&) = delete;
+  fidl::InterfaceHandle<fuchsia::media::drm::KeySystem> key_system;
+  base::ComponentContextForProcess()->svc()->Connect(key_system.NewRequest(),
+                                                     KeySystemInterface::Name_);
+  return key_system;
+}
 
-  // fuchsia.web.FrameHost implementation.
-  void CreateFrameWithParams(
-      fuchsia::web::CreateFrameParams params,
-      fidl::InterfaceRequest<fuchsia::web::Frame> request) override {
-    context_.CreateFrameWithParams(std::move(params), std::move(request));
+std::unique_ptr<media::FuchsiaCdmManager> CreateCdmManager() {
+  media::FuchsiaCdmManager::CreateKeySystemCallbackMap
+      create_key_system_callbacks;
+
+  const auto* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableWidevine)) {
+    create_key_system_callbacks.emplace(
+        kWidevineKeySystem,
+        base::BindRepeating(
+            &ConnectToKeySystem<fuchsia::media::drm::Widevine>));
   }
 
- private:
-  ContextImpl context_;
-};
+  std::string playready_key_system =
+      command_line->GetSwitchValueASCII(switches::kPlayreadyKeySystem);
+  if (!playready_key_system.empty()) {
+    create_key_system_callbacks.emplace(
+        playready_key_system,
+        base::BindRepeating(
+            &ConnectToKeySystem<fuchsia::media::drm::PlayReady>));
+  }
+
+  std::string cdm_data_directory =
+      command_line->GetSwitchValueASCII(switches::kCdmDataDirectory);
+
+  absl::optional<uint64_t> cdm_data_quota_bytes;
+  if (command_line->HasSwitch(switches::kCdmDataQuotaBytes)) {
+    uint64_t value = 0;
+    CHECK(base::StringToUint64(
+        command_line->GetSwitchValueASCII(switches::kCdmDataQuotaBytes),
+        &value));
+    cdm_data_quota_bytes = value;
+  }
+
+  return std::make_unique<media::FuchsiaCdmManager>(
+      std::move(create_key_system_callbacks),
+      base::FilePath(cdm_data_directory), cdm_data_quota_bytes);
+}
+
+// Checks the supported ozone platform with Scenic if no arg is specified
+// already.
+void MaybeSetOzonePlatformArg(base::CommandLine* launch_args) {
+  if (launch_args->HasSwitch(switches::kOzonePlatform))
+    return;
+
+// TODO(crbug.com/1309100): Emulator on ARM hangs at the Scenic call because
+// there is no GPU emulation. We should add HEADLESS to those test
+// configurations and remove this.
+#if !defined(ARCH_CPU_ARM64)
+  fuchsia::ui::scenic::ScenicSyncPtr scenic;
+  zx_status_t status =
+      base::ComponentContextForProcess()->svc()->Connect(scenic.NewRequest());
+  ZX_CHECK(status == ZX_OK, status) << "Couldn't connect to Scenic.";
+
+  bool scenic_uses_flatland = false;
+  status = scenic->UsesFlatland(&scenic_uses_flatland);
+  ZX_CHECK(status == ZX_OK, status) << "UsesFlatland()";
+  launch_args->AppendSwitchNative(switches::kOzonePlatform,
+                                  scenic_uses_flatland ? "flatland" : "scenic");
+#endif
+}
 
 }  // namespace
 
+void FrameHostImpl::CreateFrameWithParams(
+    fuchsia::web::CreateFrameParams params,
+    fidl::InterfaceRequest<fuchsia::web::Frame> request) {
+  context_.CreateFrameWithParams(std::move(params), std::move(request));
+}
+
 WebEngineBrowserMainParts::WebEngineBrowserMainParts(
     content::ContentBrowserClient* browser_client,
-    const content::MainFunctionParams& parameters)
-    : browser_client_(browser_client), parameters_(parameters) {}
+    content::MainFunctionParams parameters)
+    : browser_client_(browser_client), parameters_(std::move(parameters)) {}
 
 WebEngineBrowserMainParts::~WebEngineBrowserMainParts() {
   display::Screen::SetScreenInstance(nullptr);
@@ -114,6 +181,11 @@ WebEngineBrowserMainParts::browser_contexts() const {
   return contexts;
 }
 
+int WebEngineBrowserMainParts::PreEarlyInitialization() {
+  MaybeSetOzonePlatformArg(base::CommandLine::ForCurrentProcess());
+  return content::BrowserMainParts::PreEarlyInitialization();
+}
+
 void WebEngineBrowserMainParts::PostEarlyInitialization() {
   base::ImportantFileWriterCleaner::GetInstance().Initialize();
 }
@@ -126,6 +198,10 @@ int WebEngineBrowserMainParts::PreMainMessageLoopRun() {
   component_inspector_ = std::make_unique<sys::ComponentInspector>(
       base::ComponentContextForProcess());
   cr_fuchsia::PublishVersionInfoToInspect(component_inspector_.get());
+
+  // Add a node providing memory details for this whole web instance.
+  memory_inspector_ =
+      std::make_unique<WebEngineMemoryInspector>(component_inspector_->root());
 
   const auto* command_line = base::CommandLine::ForCurrentProcess();
 
@@ -176,14 +252,15 @@ int WebEngineBrowserMainParts::PreMainMessageLoopRun() {
                           base::Unretained(this)));
 
   // Configure Ozone with an Aura implementation of the Screen abstraction.
-  screen_ = std::make_unique<aura::ScreenOzone>();
+  std::unique_ptr<aura::ScreenOzone> screen_ozone =
+      std::make_unique<aura::ScreenOzone>();
+  screen_ozone.get()->Initialize();
+  screen_ = std::move(screen_ozone);
   display::Screen::SetScreenInstance(screen_.get());
 
-  // Create the MediaResourceProviderService at startup rather than on-demand,
-  // to allow it to perform potentially expensive startup work in the
-  // background.
-  media_resource_provider_service_ =
-      std::make_unique<MediaResourceProviderService>();
+  // Create the FuchsiaCdmManager at startup rather than on-demand, to allow it
+  // to perform potentially expensive startup work in the background.
+  cdm_manager_ = CreateCdmManager();
 
   // Disable RenderFrameHost's Javascript injection restrictions so that the
   // Context and Frames can implement their own JS injection policy at a higher
@@ -201,6 +278,16 @@ int WebEngineBrowserMainParts::PreMainMessageLoopRun() {
       fidl::InterfaceRequestHandler<fuchsia::web::FrameHost>(fit::bind_member(
           this, &WebEngineBrowserMainParts::HandleFrameHostRequest)));
 
+  // TODO(crbug.com/1315601): Create a base::ProcessLifecycle instance here, to
+  // trigger graceful shutdown on component stop, when migrated to CFv2.
+
+  // Manage network-quality signals and send them to renderers. Provides input
+  // for networking-related Client Hints.
+  network_quality_tracker_ = std::make_unique<network::NetworkQualityTracker>(
+      base::BindRepeating(&content::GetNetworkService));
+  network_quality_observer_ =
+      content::CreateNetworkQualityObserver(network_quality_tracker_.get());
+
   // Now that all services have been published, it is safe to start processing
   // requests to the service directory.
   base::ComponentContextForProcess()->outgoing()->ServeFromStartupInfo();
@@ -213,11 +300,7 @@ int WebEngineBrowserMainParts::PreMainMessageLoopRun() {
   // In browser tests |ui_task| runs the "body" of each test.
   if (parameters_.ui_task) {
     // Since the main loop won't run, there is nothing to quit.
-    quit_closure_ = base::DoNothing::Once();
-
-    std::move(*parameters_.ui_task).Run();
-    delete parameters_.ui_task;
-    run_message_loop_ = false;
+    quit_closure_ = base::DoNothing();
   }
 
   return content::RESULT_CODE_NORMAL_EXIT;
@@ -225,10 +308,7 @@ int WebEngineBrowserMainParts::PreMainMessageLoopRun() {
 
 void WebEngineBrowserMainParts::WillRunMainMessageLoop(
     std::unique_ptr<base::RunLoop>& run_loop) {
-  if (run_message_loop_)
-    quit_closure_ = run_loop->QuitClosure();
-  else
-    run_loop.reset();
+  quit_closure_ = run_loop->QuitClosure();
 }
 
 void WebEngineBrowserMainParts::PostMainMessageLoopRun() {
@@ -252,8 +332,18 @@ void WebEngineBrowserMainParts::SetContextRequestForTest(
 }
 
 ContextImpl* WebEngineBrowserMainParts::context_for_test() const {
-  DCHECK_EQ(context_bindings_.size(), 1u);
+  if (context_bindings_.size() == 0)
+    return nullptr;
   return context_bindings_.bindings().front()->impl().get();
+}
+
+std::vector<FrameHostImpl*> WebEngineBrowserMainParts::frame_hosts_for_test()
+    const {
+  std::vector<FrameHostImpl*> frame_host_impls;
+  for (auto& binding : frame_host_bindings_.bindings()) {
+    frame_host_impls.push_back(binding->impl().get());
+  }
+  return frame_host_impls;
 }
 
 void WebEngineBrowserMainParts::HandleContextRequest(
@@ -267,10 +357,12 @@ void WebEngineBrowserMainParts::HandleContextRequest(
   // configured as requested via the command-line.
   std::unique_ptr<WebEngineBrowserContext> browser_context;
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kIncognito)) {
-    browser_context = WebEngineBrowserContext::CreateIncognito();
+    browser_context = WebEngineBrowserContext::CreateIncognito(
+        network_quality_tracker_.get());
   } else {
     browser_context = WebEngineBrowserContext::CreatePersistent(
-        base::FilePath(base::kPersistedDataDirectoryPath));
+        base::FilePath(base::kPersistedDataDirectoryPath),
+        network_quality_tracker_.get());
   }
 
   auto inspect_node_name =
@@ -294,7 +386,7 @@ void WebEngineBrowserMainParts::HandleContextRequest(
       [this](zx_status_t status) {
         ZX_LOG_IF(ERROR, status != ZX_ERR_PEER_CLOSED, status)
             << " Context disconnected.";
-        std::move(quit_closure_).Run();
+        BeginGracefulShutdown();
       });
 }
 
@@ -305,7 +397,7 @@ void WebEngineBrowserMainParts::HandleFrameHostRequest(
   frame_host_bindings_.AddBinding(
       std::make_unique<FrameHostImpl>(
           component_inspector_->root().CreateChild(inspect_node_name),
-          devtools_controller_.get()),
+          devtools_controller_.get(), network_quality_tracker_.get()),
       std::move(request));
 }
 
@@ -316,11 +408,17 @@ void WebEngineBrowserMainParts::OnIntlProfileChanged(
       base::FuchsiaIntlProfileWatcher::GetPrimaryLocaleIdFromProfile(profile);
   base::i18n::SetICUDefaultLocale(primary_locale);
 
-  // Reload locale-specific resources.
-  std::string loaded_locale =
-      ui::ResourceBundle::GetSharedInstance().ReloadLocaleResources(
-          base::i18n::GetConfiguredLocale());
-  VLOG(1) << "Reloaded locale resources: " << loaded_locale;
+  {
+    // Reloading locale-specific resources requires synchronous blocking.
+    // Locale changes should not be frequent enough for this to cause jank.
+    base::ScopedAllowBlocking allow_blocking;
+
+    std::string loaded_locale =
+        ui::ResourceBundle::GetSharedInstance().ReloadLocaleResources(
+            base::i18n::GetConfiguredLocale());
+
+    VLOG(1) << "Reloaded locale resources: " << loaded_locale;
+  }
 
   // Reconfigure each web.Context's NetworkContext with the new setting.
   for (auto& binding : context_bindings_.bindings()) {
@@ -332,4 +430,9 @@ void WebEngineBrowserMainParts::OnIntlProfileChanged(
         ->GetNetworkContext()
         ->SetAcceptLanguage(accept_language);
   }
+}
+
+void WebEngineBrowserMainParts::BeginGracefulShutdown() {
+  if (quit_closure_)
+    std::move(quit_closure_).Run();
 }

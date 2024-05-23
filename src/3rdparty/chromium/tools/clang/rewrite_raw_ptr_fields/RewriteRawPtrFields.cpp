@@ -484,6 +484,16 @@ AST_POLYMORPHIC_MATCHER(isInMacroLocation,
   return Node.getBeginLoc().isMacroID();
 }
 
+static bool IsAnnotated(const clang::Decl* decl,
+                        const std::string& expected_annotation) {
+  clang::AnnotateAttr* attr = decl->getAttr<clang::AnnotateAttr>();
+  return attr && (attr->getAnnotation() == expected_annotation);
+}
+
+AST_MATCHER(clang::Decl, IsExclusionAnnotated) {
+  return IsAnnotated(&Node, "raw_ptr_exclusion");
+}
+
 // If |field_decl| declares a field in an implicit template specialization, then
 // finds and returns the corresponding FieldDecl from the template definition.
 // Otherwise, just returns the original |field_decl| argument.
@@ -709,6 +719,9 @@ AST_MATCHER(clang::FieldDecl, overlapsOtherDeclsWithinRecordDecl) {
       Finder->getASTContext().getSourceManager();
 
   const clang::RecordDecl* record_decl = self.getParent();
+  if (!record_decl)
+    return false;
+
   clang::SourceRange self_range(self.getBeginLoc(), self.getEndLoc());
 
   auto is_overlapping_sibling = [&](const clang::Decl* other_decl) {
@@ -780,8 +793,8 @@ AST_MATCHER_P2(clang::InitListExpr,
 
   bool is_matching = false;
   clang::ast_matchers::internal::BoundNodesTreeBuilder result;
-  const std::vector<const clang::FieldDecl*> field_decls(
-      record_decl->field_begin(), record_decl->field_end());
+  const llvm::SmallVector<const clang::FieldDecl*> field_decls(
+      record_decl->fields());
   for (unsigned i = 0; i < init_list_expr.getNumInits(); i++) {
     const clang::Expr* expr = init_list_expr.getInit(i);
 
@@ -1029,6 +1042,7 @@ int main(int argc, const char* argv[]) {
                              isInThirdPartyLocation(), isInGeneratedLocation(),
                              isInLocationListedInFilterFile(&paths_to_exclude),
                              isFieldDeclListedInFilterFile(&fields_to_exclude),
+                             IsExclusionAnnotated(),
                              implicit_field_decl_matcher))))
           .bind("affectedFieldDecl");
   FieldDeclRewriter field_decl_rewriter(&output_helper);
@@ -1112,9 +1126,11 @@ int main(int argc, const char* argv[]) {
   //
   // See also testcases in tests/affected-expr-original.cc
   auto templated_function_arg_matcher = forEachArgumentWithParam(
-      affected_expr_matcher, parmVarDecl(hasType(qualType(allOf(
-                                 findAll(qualType(substTemplateTypeParmType())),
-                                 unless(referenceType()))))));
+      affected_expr_matcher,
+      parmVarDecl(allOf(
+          hasType(qualType(allOf(findAll(qualType(substTemplateTypeParmType())),
+                                 unless(referenceType())))),
+          unless(hasAncestor(functionDecl(hasName("Unretained")))))));
   match_finder.addMatcher(callExpr(templated_function_arg_matcher),
                           &affected_expr_rewriter);
   // TODO(lukasza): It is unclear why |traverse| below is needed.  Maybe it can
@@ -1254,37 +1270,6 @@ int main(int argc, const char* argv[]) {
                     hasType(typeWithEmbeddedFieldDecl(field_decl_matcher))));
   FilteredExprWriter global_destructor_writer(&output_helper, "global-scope");
   match_finder.addMatcher(global_destructor_matcher, &global_destructor_writer);
-
-  // Matches CXXRecordDecls with a deleted operator new - e.g.
-  // StructWithNoOperatorNew below:
-  //     struct StructWithNoOperatorNew {
-  //       void* operator new(size_t) = delete;
-  //     };
-  auto record_with_deleted_allocation_operator_type_matcher = cxxRecordDecl(
-      hasMethod(allOf(hasOverloadedOperatorName("new"), isDeleted())));
-  // Matches rewritable fields inside structs with no operator new.  See the
-  // testcase in tests/gen-deleted-operator-new-test.cc
-  auto field_in_record_with_deleted_operator_new_matcher = fieldDecl(
-      allOf(field_decl_matcher,
-            hasParent(record_with_deleted_allocation_operator_type_matcher)));
-  FilteredExprWriter field_in_record_with_deleted_operator_new_writer(
-      &output_helper, "embedder-has-no-operator-new");
-  match_finder.addMatcher(field_in_record_with_deleted_operator_new_matcher,
-                          &field_in_record_with_deleted_operator_new_writer);
-  // Matches rewritable fields that contain a pointer, pointing to a pointee
-  // with no operator new.  See the testcase in
-  // tests/gen-deleted-operator-new-test.cc
-  auto field_pointing_to_record_with_deleted_operator_new_matcher =
-      fieldDecl(allOf(
-          field_decl_matcher,
-          hasType(pointerType(
-              pointee(hasUnqualifiedDesugaredType(recordType(hasDeclaration(
-                  record_with_deleted_allocation_operator_type_matcher))))))));
-  FilteredExprWriter field_pointing_to_record_with_deleted_operator_new_writer(
-      &output_helper, "pointee-has-no-operator-new");
-  match_finder.addMatcher(
-      field_pointing_to_record_with_deleted_operator_new_matcher,
-      &field_pointing_to_record_with_deleted_operator_new_writer);
 
   // Matches fields in unions (both directly rewritable fields as well as union
   // fields that embed a struct that contains a rewritable field).  See also the

@@ -13,6 +13,8 @@
 #include "src/core/SkBlenderBase.h"
 #include "src/shaders/SkShaderBase.h"
 
+class SkShaderCodeDictionary;
+
 class SkShader_Blend final : public SkShaderBase {
 public:
     SkShader_Blend(SkBlendMode mode, sk_sp<SkShader> dst, sk_sp<SkShader> src)
@@ -22,15 +24,16 @@ public:
         , fMode(mode)
     {}
 
-    SkShader_Blend(sk_sp<SkBlender> blender, sk_sp<SkShader> dst, sk_sp<SkShader> src)
-        : fDst(std::move(dst))
-        , fSrc(std::move(src))
-        , fBlender(std::move(blender))
-        , fMode((SkBlendMode)kCustom_SkBlendMode)
-    {}
+    SkShader_Blend(sk_sp<SkBlender> blender, sk_sp<SkShader> dst, sk_sp<SkShader> src);
 
 #if SK_SUPPORT_GPU
     std::unique_ptr<GrFragmentProcessor> asFragmentProcessor(const GrFPArgs&) const override;
+#endif
+
+#ifdef SK_ENABLE_SKSL
+    void addToKey(const SkKeyContext&,
+                  SkPaintParamsKeyBuilder*,
+                  SkPipelineDataGatherer*) const override;
 #endif
 
 protected:
@@ -47,7 +50,7 @@ private:
     sk_sp<SkShader>     fDst;
     sk_sp<SkShader>     fSrc;
     sk_sp<SkBlender>    fBlender;   // if null, use fMode
-    const SkBlendMode   fMode;      // only use if fBlender is null
+    SkBlendMode         fMode;      // only use if fBlender is null
 
     using INHERITED = SkShaderBase;
 };

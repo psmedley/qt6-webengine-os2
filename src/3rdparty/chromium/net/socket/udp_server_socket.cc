@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "build/build_config.h"
 #include "net/base/net_errors.h"
 
 namespace net {
@@ -138,7 +139,7 @@ void UDPServerSocket::DetachFromThread() {
 }
 
 void UDPServerSocket::UseNonBlockingIO() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   socket_.UseNonBlockingIO();
 #endif
 }

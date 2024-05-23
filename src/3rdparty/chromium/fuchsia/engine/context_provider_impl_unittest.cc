@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/base_paths_fuchsia.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/callback.h"
@@ -67,8 +66,7 @@ MULTIPROCESS_TEST_MAIN(SpawnContextServer) {
 
   LOG(INFO) << "SpawnContextServer test component started.";
 
-  base::FilePath data_dir;
-  CHECK(base::PathService::Get(base::DIR_APP_DATA, &data_dir));
+  base::FilePath data_dir(base::kPersistedDataDirectoryPath);
   if (base::PathExists(data_dir.AppendASCII(kTestDataFileIn))) {
     auto out_file = data_dir.AppendASCII(kTestDataFileOut);
     CHECK_EQ(base::WriteFile(out_file, nullptr, 0), 0);
@@ -168,9 +166,9 @@ class FakeSysLauncher final : public fuchsia::sys::testing::Launcher_TestBase {
     // Bind /tmp in the new Component's flat namespace, to allow it to see
     // the GTest flagfile, if any.
     fuchsia::io::DirectoryHandle tmp_directory;
-    zx_status_t status =
-        fdio_open("/tmp", fuchsia::io::OPEN_RIGHT_READABLE,
-                  tmp_directory.NewRequest().TakeChannel().release());
+    zx_status_t status = fdio_open(
+        "/tmp", static_cast<uint32_t>(fuchsia::io::OpenFlags::RIGHT_READABLE),
+        tmp_directory.NewRequest().TakeChannel().release());
     ZX_CHECK(status == ZX_OK, status) << "fdio_open(/tmp)";
     launch_info.flat_namespace->paths.push_back("/tmp");
     launch_info.flat_namespace->directories.push_back(
@@ -320,6 +318,9 @@ class ContextProviderImplTest : public base::MultiProcessTest {
     bindings_.AddBinding(provider_.get(), provider_ptr_.NewRequest());
   }
 
+  ContextProviderImplTest(const ContextProviderImplTest&) = delete;
+  ContextProviderImplTest& operator=(const ContextProviderImplTest&) = delete;
+
   ~ContextProviderImplTest() override {
     provider_ptr_.Unbind();
     base::RunLoop().RunUntilIdle();
@@ -351,7 +352,8 @@ class ContextProviderImplTest : public base::MultiProcessTest {
     CapturingNavigationStateObserver change_listener(run_loop.QuitClosure());
     fidl::Binding<fuchsia::web::NavigationEventListener>
         change_listener_binding(&change_listener);
-    frame_ptr->SetNavigationEventListener(change_listener_binding.NewBinding());
+    frame_ptr->SetNavigationEventListener2(change_listener_binding.NewBinding(),
+                                           /*flags=*/{});
     run_loop.Run();
 
     ASSERT_TRUE(change_listener.captured_state()->has_url());
@@ -416,8 +418,6 @@ class ContextProviderImplTest : public base::MultiProcessTest {
     base::OnceClosure on_change_cb_;
     fuchsia::web::NavigationState captured_state_;
   };
-
-  DISALLOW_COPY_AND_ASSIGN(ContextProviderImplTest);
 };
 
 TEST_F(ContextProviderImplTest, CanCreateContext) {
@@ -730,12 +730,12 @@ TEST_F(ContextProviderImplTest, WithGoogleApiKeyValue) {
   base::RunLoop loop;
   provider_->set_config_for_test(std::move(config_dict));
   fake_environment_.fake_launcher().set_create_component_callback(
-      base::BindLambdaForTesting([&loop, kDummyApiKey](
-                                     const base::CommandLine& command) {
-        loop.Quit();
-        EXPECT_EQ(command.GetSwitchValueASCII(switches::kGoogleApiKey),
-                  kDummyApiKey);
-      }));
+      base::BindLambdaForTesting(
+          [&loop, kDummyApiKey](const base::CommandLine& command) {
+            loop.Quit();
+            EXPECT_EQ(command.GetSwitchValueASCII(switches::kGoogleApiKey),
+                      kDummyApiKey);
+          }));
 
   fuchsia::web::ContextPtr context;
   context.set_error_handler([&loop](zx_status_t status) {

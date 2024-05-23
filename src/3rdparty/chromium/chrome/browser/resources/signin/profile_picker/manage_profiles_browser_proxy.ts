@@ -17,7 +17,9 @@ export type ProfileState = {
   userName: string,
   isManaged: boolean,
   avatarIcon: string,
+  // <if expr="chromeos_lacros">
   isPrimaryLacrosProfile: boolean,
+  // </if>
 };
 
 /**
@@ -46,6 +48,19 @@ export type UserThemeChoice = {
   colorId: number,
   color?: number,
 };
+
+// <if expr="chromeos_lacros">
+/**
+ * This is a data structure sent from C++ to JS, representing accounts present
+ * in the ChromeOS system, but not in any Lacros profile.
+ */
+export type AvailableAccount = {
+  gaiaId: string,
+  name: string,
+  email: string,
+  accountImageUrl: string,
+};
+// </if>
 
 export interface ManageProfilesBrowserProxy {
   /**
@@ -100,9 +115,10 @@ export interface ManageProfilesBrowserProxy {
 
   /**
    * Loads Google sign in page (and silently creates a profile with the
-   * specified color, if specified).
+   * specified color and account, if specified).
    */
-  loadSignInProfileCreationFlow(profileColor: number|null): void;
+  loadSignInProfileCreationFlow(profileColor: number|null, gaiaId: string):
+      void;
 
   /**
    * Retrieves custom avatar list for the select avatar dialog.
@@ -139,6 +155,16 @@ export interface ManageProfilesBrowserProxy {
    * flow.
    */
   cancelProfileSwitch(): void;
+
+  // <if expr="chromeos_lacros">
+  /** Gets the available accounts, through WebUIListener. */
+  getAvailableAccounts(): void;
+
+  /**
+   * Opens Ash Account settings page in a new window.
+   */
+  openAshAccountSettingsPage(): void;
+  // </if>
 }
 
 /** @implements {ManageProfilesBrowserProxy} */
@@ -179,8 +205,8 @@ export class ManageProfilesBrowserProxyImpl {
     chrome.send('getProfileStatistics', [profilePath]);
   }
 
-  loadSignInProfileCreationFlow(profileColor: number|null) {
-    chrome.send('loadSignInProfileCreationFlow', [profileColor]);
+  loadSignInProfileCreationFlow(profileColor: number|null, gaiaId: string) {
+    chrome.send('loadSignInProfileCreationFlow', [profileColor, gaiaId]);
   }
 
   getAvailableIcons() {
@@ -214,6 +240,16 @@ export class ManageProfilesBrowserProxyImpl {
   cancelProfileSwitch() {
     chrome.send('cancelProfileSwitch');
   }
+
+  // <if expr="chromeos_lacros">
+  getAvailableAccounts() {
+    chrome.send('getAvailableAccounts');
+  }
+
+  openAshAccountSettingsPage() {
+    chrome.send('openAshAccountSettingsPage');
+  }
+  // </if>
 
   static getInstance(): ManageProfilesBrowserProxy {
     return instance || (instance = new ManageProfilesBrowserProxyImpl());

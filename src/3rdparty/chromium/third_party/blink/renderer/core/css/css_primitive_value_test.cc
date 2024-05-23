@@ -33,19 +33,25 @@ CSSNumericLiteralValue* Create(UnitValue v) {
 }
 
 CSSPrimitiveValue* CreateAddition(UnitValue a, UnitValue b) {
-  return CSSMathFunctionValue::Create(CSSMathExpressionBinaryOperation::Create(
-      CSSMathExpressionNumericLiteral::Create(Create(a)),
-      CSSMathExpressionNumericLiteral::Create(Create(b)),
-      CSSMathOperator::kAdd));
+  return CSSMathFunctionValue::Create(
+      CSSMathExpressionOperation::CreateArithmeticOperation(
+          CSSMathExpressionNumericLiteral::Create(Create(a)),
+          CSSMathExpressionNumericLiteral::Create(Create(b)),
+          CSSMathOperator::kAdd));
 }
 
 CSSPrimitiveValue* CreateNonNegativeSubtraction(UnitValue a, UnitValue b) {
   return CSSMathFunctionValue::Create(
-      CSSMathExpressionBinaryOperation::Create(
+      CSSMathExpressionOperation::CreateArithmeticOperation(
           CSSMathExpressionNumericLiteral::Create(Create(a)),
           CSSMathExpressionNumericLiteral::Create(Create(b)),
           CSSMathOperator::kSubtract),
-      kValueRangeNonNegative);
+      CSSPrimitiveValue::ValueRange::kNonNegative);
+}
+
+UnitType ToCanonicalUnit(CSSPrimitiveValue::UnitType unit) {
+  return CSSPrimitiveValue::CanonicalUnitTypeForCategory(
+      CSSPrimitiveValue::UnitTypeToUnitCategory(unit));
 }
 
 TEST_F(CSSPrimitiveValueTest, IsTime) {
@@ -200,6 +206,14 @@ TEST_F(CSSPrimitiveValueTest, GetDoubleValueClampNegativeInfinity) {
   CSSPrimitiveValue* value =
       Create({-std::numeric_limits<double>::infinity(), UnitType::kPixels});
   EXPECT_EQ(std::numeric_limits<double>::lowest(), value->GetDoubleValue());
+}
+
+TEST_F(CSSPrimitiveValueTest, TestCanonicalizingNumberUnitCategory) {
+  UnitType canonicalized_from_num = ToCanonicalUnit(UnitType::kNumber);
+  EXPECT_EQ(canonicalized_from_num, UnitType::kNumber);
+
+  UnitType canonicalized_from_int = ToCanonicalUnit(UnitType::kInteger);
+  EXPECT_EQ(canonicalized_from_int, UnitType::kNumber);
 }
 }  // namespace
 }  // namespace blink

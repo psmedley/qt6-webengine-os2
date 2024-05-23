@@ -65,15 +65,6 @@ FXDIB_Format XFA_GetDIBFormat(FXCODEC_IMAGE_TYPE type,
   return dibFormat;
 }
 
-bool IsFXCodecErrorStatus(FXCODEC_STATUS status) {
-  return (status == FXCODEC_STATUS_ERROR ||
-          status == FXCODEC_STATUS_ERR_MEMORY ||
-          status == FXCODEC_STATUS_ERR_READ ||
-          status == FXCODEC_STATUS_ERR_FLUSH ||
-          status == FXCODEC_STATUS_ERR_FORMAT ||
-          status == FXCODEC_STATUS_ERR_PARAMS);
-}
-
 }  // namespace
 
 void XFA_DrawImage(CFGAS_GEGraphics* pGS,
@@ -136,7 +127,7 @@ void XFA_DrawImage(CFGAS_GEGraphics* pGS,
   CFX_RenderDevice::StateRestorer restorer(pRenderDevice);
   CFX_Path path;
   path.AppendRect(rtImage.left, rtImage.bottom(), rtImage.right(), rtImage.top);
-  pRenderDevice->SetClip_PathFill(&path, &matrix,
+  pRenderDevice->SetClip_PathFill(path, &matrix,
                                   CFX_FillRenderOptions::WindingOptions());
 
   CFX_Matrix mtImage(1, 0, 0, -1, 0, 1);
@@ -162,11 +153,11 @@ RetainPtr<CFX_DIBitmap> XFA_LoadImageFromBuffer(
   CFX_DIBAttribute dibAttr;
   pProgressiveDecoder->LoadImageInfo(pImageFileRead, type, &dibAttr, false);
   switch (dibAttr.m_wDPIUnit) {
-    case FXCODEC_RESUNIT_CENTIMETER:
+    case CFX_DIBAttribute::kResUnitCentimeter:
       dibAttr.m_nXDPI = static_cast<int32_t>(dibAttr.m_nXDPI * 2.54f);
       dibAttr.m_nYDPI = static_cast<int32_t>(dibAttr.m_nYDPI * 2.54f);
       break;
-    case FXCODEC_RESUNIT_METER:
+    case CFX_DIBAttribute::kResUnitMeter:
       dibAttr.m_nXDPI =
           static_cast<int32_t>(dibAttr.m_nXDPI / (float)100 * 2.54f);
       dibAttr.m_nYDPI =
@@ -194,17 +185,17 @@ RetainPtr<CFX_DIBitmap> XFA_LoadImageFromBuffer(
   size_t nFrames;
   FXCODEC_STATUS status;
   std::tie(status, nFrames) = pProgressiveDecoder->GetFrames();
-  if (status != FXCODEC_STATUS_DECODE_READY || nFrames == 0)
+  if (status != FXCODEC_STATUS::kDecodeReady || nFrames == 0)
     return nullptr;
 
   status = pProgressiveDecoder->StartDecode(pBitmap, 0, 0, pBitmap->GetWidth(),
                                             pBitmap->GetHeight());
-  if (IsFXCodecErrorStatus(status))
+  if (status == FXCODEC_STATUS::kError)
     return nullptr;
 
-  while (status == FXCODEC_STATUS_DECODE_TOBECONTINUE) {
+  while (status == FXCODEC_STATUS::kDecodeToBeContinued) {
     status = pProgressiveDecoder->ContinueDecode();
-    if (IsFXCodecErrorStatus(status))
+    if (status == FXCODEC_STATUS::kError)
       return nullptr;
   }
 
@@ -230,8 +221,6 @@ CXFA_FFWidget* CXFA_FFWidget::FromLayoutItem(CXFA_LayoutItem* pLayoutItem) {
 CXFA_FFWidget::CXFA_FFWidget(CXFA_Node* node) : m_pNode(node) {}
 
 CXFA_FFWidget::~CXFA_FFWidget() = default;
-
-void CXFA_FFWidget::PreFinalize() {}
 
 void CXFA_FFWidget::Trace(cppgc::Visitor* visitor) const {
   visitor->Trace(m_pLayoutItem);
@@ -466,11 +455,6 @@ bool CXFA_FFWidget::OnKeyDown(XFA_FWL_VKEYCODE dwKeyCode,
   return false;
 }
 
-bool CXFA_FFWidget::OnKeyUp(XFA_FWL_VKEYCODE dwKeyCode,
-                            Mask<XFA_FWL_KeyFlag> dwFlags) {
-  return false;
-}
-
 bool CXFA_FFWidget::OnChar(uint32_t dwChar, Mask<XFA_FWL_KeyFlag> dwFlags) {
   return false;
 }
@@ -519,12 +503,12 @@ bool CXFA_FFWidget::Redo() {
   return false;
 }
 
-Optional<WideString> CXFA_FFWidget::Copy() {
-  return pdfium::nullopt;
+absl::optional<WideString> CXFA_FFWidget::Copy() {
+  return absl::nullopt;
 }
 
-Optional<WideString> CXFA_FFWidget::Cut() {
-  return pdfium::nullopt;
+absl::optional<WideString> CXFA_FFWidget::Cut() {
+  return absl::nullopt;
 }
 
 bool CXFA_FFWidget::Paste(const WideString& wsPaste) {

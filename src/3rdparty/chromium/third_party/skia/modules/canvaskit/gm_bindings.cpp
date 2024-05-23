@@ -26,6 +26,7 @@
 #include "src/core/SkFontMgrPriv.h"
 #include "src/core/SkMD5.h"
 #include "tests/Test.h"
+#include "tests/TestHarness.h"
 #include "tools/HashAndEncode.h"
 #include "tools/ResourceFactory.h"
 #include "tools/flags/CommandLineFlags.h"
@@ -73,7 +74,7 @@ static sk_sp<GrDirectContext> MakeGrContext(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE cont
     // setup GrDirectContext
     auto interface = GrGLMakeNativeInterface();
     // setup contexts
-    sk_sp<GrDirectContext> dContext(GrDirectContext::MakeGL(interface));
+    sk_sp<GrDirectContext> dContext((GrDirectContext::MakeGL(interface)));
     return dContext;
 }
 
@@ -204,21 +205,21 @@ static JSArray ListTests() {
     SkDebugf("Listing Tests\n");
     JSArray tests = emscripten::val::array();
     for (auto test : skiatest::TestRegistry::Range()) {
-        SkDebugf("test %s\n", test.name);
-        tests.call<void>("push", std::string(test.name));
+        SkDebugf("test %s\n", test.fName);
+        tests.call<void>("push", std::string(test.fName));
     }
     return tests;
 }
 
 static skiatest::Test getTestWithName(std::string name, bool* ok) {
     for (auto test : skiatest::TestRegistry::Range()) {
-        if (name == test.name) {
+        if (name == test.fName) {
           *ok = true;
           return test;
         }
     }
     *ok = false;
-    return skiatest::Test(nullptr, false, nullptr);
+    return skiatest::Test(nullptr, /*gpu*/ false, /*graphite*/ false, nullptr);
 }
 
 // Based on DM.cpp:run_test
@@ -249,7 +250,7 @@ static JSObject RunTest(std::string name) {
         return result;
     }
     GrContextOptions grOpts;
-    if (test.needsGpu) {
+    if (test.fNeedsGpu) {
         result.set("result", "passed"); // default to passing - the reporter will mark failed.
         WasmReporter reporter(name, result);
         test.modifyGrContextOptions(&grOpts);
@@ -346,6 +347,10 @@ GLTestContext *CreatePlatformGLTestContext(GrGLStandard forcedGpuAPI,
 void Init() {
     // Use the portable fonts.
     gSkFontMgr_DefaultFactory = &ToolUtils::MakePortableFontMgr;
+}
+
+TestHarness CurrentTestHarness() {
+    return TestHarness::kWasmGMTests;
 }
 
 EMSCRIPTEN_BINDINGS(GMs) {

@@ -5,6 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_REPRESENTATION_D3D_H_
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_REPRESENTATION_D3D_H_
 
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/shared_image_backing_factory.h"
 #include "gpu/command_buffer/service/shared_image_manager.h"
@@ -15,7 +16,7 @@
 // Usage of BUILDFLAG(USE_DAWN) needs to be after the include for
 // ui/gl/buildflags.h
 #if BUILDFLAG(USE_DAWN)
-#include <dawn_native/D3D12Backend.h>
+#include <dawn/native/D3D12Backend.h>
 #endif  // BUILDFLAG(USE_DAWN)
 
 namespace gpu {
@@ -52,7 +53,7 @@ class SharedImageRepresentationDawnD3D : public SharedImageRepresentationDawn {
       SharedImageBacking* backing,
       MemoryTypeTracker* tracker,
       WGPUDevice device,
-      dawn_native::d3d12::ExternalImageDXGI* external_image);
+      dawn::native::d3d12::ExternalImageDXGI* external_image);
 
   ~SharedImageRepresentationDawnD3D() override;
 
@@ -62,7 +63,7 @@ class SharedImageRepresentationDawnD3D : public SharedImageRepresentationDawn {
  private:
   WGPUDevice device_;
   WGPUTexture texture_ = nullptr;
-  dawn_native::d3d12::ExternalImageDXGI* external_image_ = nullptr;
+  raw_ptr<dawn::native::d3d12::ExternalImageDXGI> external_image_ = nullptr;
 
   // TODO(cwallez@chromium.org): Load procs only once when the factory is
   // created and pass a pointer to them around?
@@ -76,14 +77,17 @@ class SharedImageRepresentationOverlayD3D
  public:
   SharedImageRepresentationOverlayD3D(SharedImageManager* manager,
                                       SharedImageBacking* backing,
-                                      MemoryTypeTracker* tracker);
-  ~SharedImageRepresentationOverlayD3D() override = default;
+                                      MemoryTypeTracker* tracker,
+                                      scoped_refptr<gl::GLImage> gl_image);
+  ~SharedImageRepresentationOverlayD3D() override;
 
  private:
   bool BeginReadAccess(std::vector<gfx::GpuFence>* acquire_fences) override;
   void EndReadAccess(gfx::GpuFenceHandle release_fence) override;
 
   gl::GLImage* GetGLImage() override;
+
+  scoped_refptr<gl::GLImage> gl_image_;
 };
 
 }  // namespace gpu

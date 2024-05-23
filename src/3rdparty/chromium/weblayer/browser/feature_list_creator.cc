@@ -5,9 +5,7 @@
 #include "weblayer/browser/feature_list_creator.h"
 
 #include "base/base_switches.h"
-#include "base/debug/leak_annotations.h"
 #include "build/build_config.h"
-#include "cc/base/switches.h"
 #include "components/metrics/metrics_state_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/variations/service/variations_service.h"
@@ -18,11 +16,11 @@
 #include "weblayer/browser/system_network_context_manager.h"
 #include "weblayer/browser/weblayer_variations_service_client.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "weblayer/browser/android/metrics/weblayer_metrics_service_client.h"
 #endif
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 namespace switches {
 const char kDisableBackgroundNetworking[] = "disable-background-networking";
 }  // namespace switches
@@ -58,26 +56,13 @@ void FeatureListCreator::SetSystemNetworkContextManager(
 }
 
 void FeatureListCreator::SetUpFieldTrials() {
-#if defined(OS_ANDROID)
-  auto* metrics_client = WebLayerMetricsServiceClient::GetInstance();
-
-  // Initialize FieldTrialList to support FieldTrials. If an instance already
-  // exists, this is likely a test scenario with a ScopedFeatureList active,
-  // so use that one to apply any overrides.
-  if (!base::FieldTrialList::GetInstance()) {
-    // Note: This is intentionally leaked since it needs to live for the
-    // duration of the browser process and there's no benefit in cleaning it up
-    // at exit.
-    // Note: We deliberately use CreateLowEntropyProvider because
-    // CreateDefaultEntropyProvider needs to know if user conset has been given
-    // but getting consent from GMS is slow.
-    base::FieldTrialList* leaked_field_trial_list = new base::FieldTrialList(
-        metrics_client->metrics_state_manager()->CreateLowEntropyProvider());
-    ANNOTATE_LEAKING_OBJECT_PTR(leaked_field_trial_list);
-    ignore_result(leaked_field_trial_list);
-  }
-
+#if BUILDFLAG(IS_ANDROID)
+  // The FieldTrialList should have been instantiated in
+  // AndroidMetricsServiceClient::Initialize().
+  DCHECK(base::FieldTrialList::GetInstance());
   DCHECK(system_network_context_manager_);
+
+  auto* metrics_client = WebLayerMetricsServiceClient::GetInstance();
   variations_service_ = variations::VariationsService::Create(
       std::make_unique<WebLayerVariationsServiceClient>(
           system_network_context_manager_),
@@ -90,9 +75,8 @@ void FeatureListCreator::SetUpFieldTrials() {
   std::vector<std::string> variation_ids;
   auto feature_list = std::make_unique<base::FeatureList>();
 
-  variations_service_->SetupFieldTrials(
-      cc::switches::kEnableGpuBenchmarking, switches::kEnableFeatures,
-      switches::kDisableFeatures, variation_ids,
+  variations_service_->SetUpFieldTrials(
+      variation_ids,
       content::GetSwitchDependentFeatureOverrides(
           *base::CommandLine::ForCurrentProcess()),
       std::move(feature_list), &weblayer_field_trials_);
@@ -103,14 +87,14 @@ void FeatureListCreator::SetUpFieldTrials() {
 }
 
 void FeatureListCreator::CreateFeatureListAndFieldTrials() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   WebLayerMetricsServiceClient::GetInstance()->Initialize(local_state_);
 #endif
   SetUpFieldTrials();
 }
 
 void FeatureListCreator::PerformPreMainMessageLoopStartup() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // It is expected this is called after SetUpFieldTrials().
   DCHECK(variations_service_);
   variations_service_->PerformPreMainMessageLoopStartup();

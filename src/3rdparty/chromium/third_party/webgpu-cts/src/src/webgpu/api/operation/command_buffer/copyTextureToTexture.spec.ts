@@ -1,8 +1,4 @@
-export const description = `copyTexturetoTexture operation tests
-
-TODO: rename "copy_stencil_aspect" to "copy_depth_stencil" and test the depth aspect.
-TODO: remove fragment stage in InitializeDepthAspect() when browsers support null fragment stage.
-`;
+export const description = `copyTextureToTexture operation tests`;
 
 import { makeTestGroup } from '../../../../common/framework/test_group.js';
 import { assert, memcpy } from '../../../../common/util/util.js';
@@ -15,8 +11,12 @@ import {
   DepthStencilFormat,
   kBufferSizeAlignment,
   kDepthStencilFormats,
+  kMinDynamicBufferOffsetAlignment,
+  kTextureDimensions,
+  textureDimensionAndFormatCompatible,
 } from '../../../capability_info.js';
 import { GPUTest } from '../../../gpu_test.js';
+import { makeBufferWithContents } from '../../../util/buffer.js';
 import { align } from '../../../util/math.js';
 import { physicalMipSize } from '../../../util/texture/base.js';
 import { kBytesPerRowAlignment, dataBytesForCopyOrFail } from '../../../util/texture/layout.js';
@@ -25,18 +25,18 @@ class F extends GPUTest {
   GetInitialData(byteSize: number): Uint8Array {
     const initialData = new Uint8Array(byteSize);
     for (let i = 0; i < initialData.length; ++i) {
-      initialData[i] = (i ** 3 + i) % 251;
+      initialData[i] = ((i ** 3 + i) % 251) + 1; // Have all initialData be non zero.
     }
     return initialData;
   }
 
   GetInitialDataPerMipLevel(
+    dimension: GPUTextureDimension,
     textureSize: Required<GPUExtent3DDict>,
     format: SizedTextureFormat,
     mipLevel: number
   ): Uint8Array {
-    // TODO(jiawei.shao@intel.com): support 3D textures
-    const textureSizeAtLevel = physicalMipSize(textureSize, format, '2d', mipLevel);
+    const textureSizeAtLevel = physicalMipSize(textureSize, format, dimension, mipLevel);
     const bytesPerBlock = kTextureFormatInfo[format].bytesPerBlock;
     const blockWidthInTexel = kTextureFormatInfo[format].blockWidth;
     const blockHeightInTexel = kTextureFormatInfo[format].blockHeight;
@@ -64,9 +64,11 @@ class F extends GPUTest {
   }
 
   DoCopyTextureToTextureTest(
+    dimension: GPUTextureDimension,
     srcTextureSize: Required<GPUExtent3DDict>,
     dstTextureSize: Required<GPUExtent3DDict>,
-    format: SizedTextureFormat,
+    srcFormat: SizedTextureFormat,
+    dstFormat: SizedTextureFormat,
     copyBoxOffsets: {
       srcOffset: { x: number; y: number; z: number };
       dstOffset: { x: number; y: number; z: number };
@@ -75,30 +77,42 @@ class F extends GPUTest {
     srcCopyLevel: number,
     dstCopyLevel: number
   ): void {
-    const kMipLevelCount = 4;
+    const mipLevelCount = dimension === '1d' ? 1 : 4;
 
     // Create srcTexture and dstTexture
     const srcTextureDesc: GPUTextureDescriptor = {
+      dimension,
       size: srcTextureSize,
-      format,
+      format: srcFormat,
       usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
-      mipLevelCount: kMipLevelCount,
+      mipLevelCount,
     };
     const srcTexture = this.device.createTexture(srcTextureDesc);
     const dstTextureDesc: GPUTextureDescriptor = {
+      dimension,
       size: dstTextureSize,
-      format,
+      format: dstFormat,
       usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
-      mipLevelCount: kMipLevelCount,
+      mipLevelCount,
     };
     const dstTexture = this.device.createTexture(dstTextureDesc);
 
     // Fill the whole subresource of srcTexture at srcCopyLevel with initialSrcData.
-    const initialSrcData = this.GetInitialDataPerMipLevel(srcTextureSize, format, srcCopyLevel);
-    const srcTextureSizeAtLevel = physicalMipSize(srcTextureSize, format, '2d', srcCopyLevel);
-    const bytesPerBlock = kTextureFormatInfo[format].bytesPerBlock;
-    const blockWidth = kTextureFormatInfo[format].blockWidth;
-    const blockHeight = kTextureFormatInfo[format].blockHeight;
+    const initialSrcData = this.GetInitialDataPerMipLevel(
+      dimension,
+      srcTextureSize,
+      srcFormat,
+      srcCopyLevel
+    );
+    const srcTextureSizeAtLevel = physicalMipSize(
+      srcTextureSize,
+      srcFormat,
+      dimension,
+      srcCopyLevel
+    );
+    const bytesPerBlock = kTextureFormatInfo[srcFormat].bytesPerBlock;
+    const blockWidth = kTextureFormatInfo[srcFormat].blockWidth;
+    const blockHeight = kTextureFormatInfo[srcFormat].blockHeight;
     const srcBlocksPerRow = srcTextureSizeAtLevel.width / blockWidth;
     const srcBlockRowsPerImage = srcTextureSizeAtLevel.height / blockHeight;
     this.device.queue.writeTexture(
@@ -112,19 +126,28 @@ class F extends GPUTest {
     );
 
     // Copy the region specified by copyBoxOffsets from srcTexture to dstTexture.
-    const dstTextureSizeAtLevel = physicalMipSize(dstTextureSize, format, '2d', dstCopyLevel);
+    const dstTextureSizeAtLevel = physicalMipSize(
+      dstTextureSize,
+      dstFormat,
+      dimension,
+      dstCopyLevel
+    );
     const minWidth = Math.min(srcTextureSizeAtLevel.width, dstTextureSizeAtLevel.width);
     const minHeight = Math.min(srcTextureSizeAtLevel.height, dstTextureSizeAtLevel.height);
+    const minDepth = Math.min(
+      srcTextureSizeAtLevel.depthOrArrayLayers,
+      dstTextureSizeAtLevel.depthOrArrayLayers
+    );
 
     const appliedSrcOffset = {
       x: Math.min(copyBoxOffsets.srcOffset.x * blockWidth, minWidth),
       y: Math.min(copyBoxOffsets.srcOffset.y * blockHeight, minHeight),
-      z: copyBoxOffsets.srcOffset.z,
+      z: Math.min(copyBoxOffsets.srcOffset.z, minDepth),
     };
     const appliedDstOffset = {
       x: Math.min(copyBoxOffsets.dstOffset.x * blockWidth, minWidth),
       y: Math.min(copyBoxOffsets.dstOffset.y * blockHeight, minHeight),
-      z: copyBoxOffsets.dstOffset.z,
+      z: Math.min(copyBoxOffsets.dstOffset.z, minDepth),
     };
 
     const appliedCopyWidth = Math.max(
@@ -141,10 +164,12 @@ class F extends GPUTest {
     );
     assert(appliedCopyWidth % blockWidth === 0 && appliedCopyHeight % blockHeight === 0);
 
-    const appliedCopyDepth =
-      srcTextureSize.depthOrArrayLayers +
-      copyBoxOffsets.copyExtent.depthOrArrayLayers -
-      Math.max(appliedSrcOffset.z, appliedDstOffset.z);
+    const appliedCopyDepth = Math.max(
+      0,
+      minDepth +
+        copyBoxOffsets.copyExtent.depthOrArrayLayers -
+        Math.max(appliedSrcOffset.z, appliedDstOffset.z)
+    );
     assert(appliedCopyDepth >= 0);
 
     const encoder = this.device.createCommandEncoder();
@@ -223,7 +248,7 @@ class F extends GPUTest {
       }
     }
 
-    // Verify the content of the whole subresouce of dstTexture at dstCopyLevel (in dstBuffer) is expected.
+    // Verify the content of the whole subresource of dstTexture at dstCopyLevel (in dstBuffer) is expected.
     this.expectGPUBufferValuesEqual(dstBuffer, expectedUint8DataWithPadding);
   }
 
@@ -296,6 +321,208 @@ class F extends GPUTest {
       }
     }
     this.expectGPUBufferValuesEqual(outputBuffer, expectedStencilData);
+  }
+
+  GetRenderPipelineForT2TCopyWithDepthTests(
+    bindGroupLayout: GPUBindGroupLayout,
+    hasColorAttachment: boolean,
+    depthStencil: GPUDepthStencilState
+  ): GPURenderPipeline {
+    const renderPipelineDescriptor: GPURenderPipelineDescriptor = {
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+      vertex: {
+        module: this.device.createShaderModule({
+          code: `
+            struct Params {
+              copyLayer: f32
+            };
+            @group(0) @binding(0) var<uniform> param: Params;
+            @stage(vertex)
+            fn main(@builtin(vertex_index) VertexIndex : u32)-> @builtin(position) vec4<f32> {
+              var depthValue = 0.5 + 0.2 * sin(param.copyLayer);
+              var pos : array<vec3<f32>, 6> = array<vec3<f32>, 6>(
+                  vec3<f32>(-1.0,  1.0, depthValue),
+                  vec3<f32>(-1.0, -1.0, 0.0),
+                  vec3<f32>( 1.0,  1.0, 1.0),
+                  vec3<f32>(-1.0, -1.0, 0.0),
+                  vec3<f32>( 1.0,  1.0, 1.0),
+                  vec3<f32>( 1.0, -1.0, depthValue));
+              return vec4<f32>(pos[VertexIndex], 1.0);
+            }`,
+        }),
+        entryPoint: 'main',
+      },
+      depthStencil,
+    };
+    if (hasColorAttachment) {
+      renderPipelineDescriptor.fragment = {
+        module: this.device.createShaderModule({
+          code: `
+            @stage(fragment)
+            fn main() -> @location(0) vec4<f32> {
+              return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+            }`,
+        }),
+        entryPoint: 'main',
+        targets: [{ format: 'rgba8unorm' }],
+      };
+    }
+    return this.device.createRenderPipeline(renderPipelineDescriptor);
+  }
+
+  GetBindGroupLayoutForT2TCopyWithDepthTests(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX,
+          buffer: {
+            type: 'uniform',
+            minBindingSize: 4,
+            hasDynamicOffset: true,
+          },
+        },
+      ],
+    });
+  }
+
+  GetBindGroupForT2TCopyWithDepthTests(
+    bindGroupLayout: GPUBindGroupLayout,
+    totalCopyArrayLayers: number
+  ): GPUBindGroup {
+    // Prepare the uniform buffer that contains all the copy layers to generate different depth
+    // values for different copy layers.
+    assert(totalCopyArrayLayers > 0);
+    const uniformBufferSize = kMinDynamicBufferOffsetAlignment * (totalCopyArrayLayers - 1) + 4;
+    const uniformBufferData = new Float32Array(uniformBufferSize / 4);
+    for (let i = 1; i < totalCopyArrayLayers; ++i) {
+      uniformBufferData[(kMinDynamicBufferOffsetAlignment / 4) * i] = i;
+    }
+    const uniformBuffer = makeBufferWithContents(
+      this.device,
+      uniformBufferData,
+      GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM
+    );
+    return this.device.createBindGroup({
+      layout: bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: {
+            buffer: uniformBuffer,
+            size: 4,
+          },
+        },
+      ],
+    });
+  }
+
+  /** Initialize the depth aspect of sourceTexture with draw calls */
+  InitializeDepthAspect(
+    sourceTexture: GPUTexture,
+    depthFormat: GPUTextureFormat,
+    srcCopyLevel: number,
+    srcCopyBaseArrayLayer: number,
+    copySize: readonly [number, number, number]
+  ): void {
+    // Prepare a renderPipeline with depthCompareFunction == 'always' and depthWriteEnabled == true
+    // for the initializations of the depth attachment.
+    const bindGroupLayout = this.GetBindGroupLayoutForT2TCopyWithDepthTests();
+    const renderPipeline = this.GetRenderPipelineForT2TCopyWithDepthTests(bindGroupLayout, false, {
+      format: depthFormat,
+      depthWriteEnabled: true,
+      depthCompare: 'always',
+    });
+    const bindGroup = this.GetBindGroupForT2TCopyWithDepthTests(bindGroupLayout, copySize[2]);
+
+    const encoder = this.device.createCommandEncoder();
+    for (let srcCopyLayer = 0; srcCopyLayer < copySize[2]; ++srcCopyLayer) {
+      const renderPass = encoder.beginRenderPass({
+        colorAttachments: [],
+        depthStencilAttachment: {
+          view: sourceTexture.createView({
+            baseArrayLayer: srcCopyLayer + srcCopyBaseArrayLayer,
+            arrayLayerCount: 1,
+            baseMipLevel: srcCopyLevel,
+            mipLevelCount: 1,
+          }),
+          depthClearValue: 0.0,
+          depthLoadOp: 'clear',
+          depthStoreOp: 'store',
+          stencilLoadOp: 'load',
+          stencilStoreOp: 'store',
+        },
+      });
+      renderPass.setBindGroup(0, bindGroup, [srcCopyLayer * kMinDynamicBufferOffsetAlignment]);
+      renderPass.setPipeline(renderPipeline);
+      renderPass.draw(6);
+      renderPass.end();
+    }
+    this.queue.submit([encoder.finish()]);
+  }
+
+  VerifyDepthAspect(
+    destinationTexture: GPUTexture,
+    depthFormat: GPUTextureFormat,
+    dstCopyLevel: number,
+    dstCopyBaseArrayLayer: number,
+    copySize: [number, number, number]
+  ): void {
+    // Prepare a renderPipeline with depthCompareFunction == 'equal' and depthWriteEnabled == false
+    // for the comparison of the depth attachment.
+    const bindGroupLayout = this.GetBindGroupLayoutForT2TCopyWithDepthTests();
+    const renderPipeline = this.GetRenderPipelineForT2TCopyWithDepthTests(bindGroupLayout, true, {
+      format: depthFormat,
+      depthWriteEnabled: false,
+      depthCompare: 'equal',
+    });
+    const bindGroup = this.GetBindGroupForT2TCopyWithDepthTests(bindGroupLayout, copySize[2]);
+
+    const outputColorTexture = this.device.createTexture({
+      format: 'rgba8unorm',
+      size: copySize,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    });
+    const encoder = this.device.createCommandEncoder();
+    for (let dstCopyLayer = 0; dstCopyLayer < copySize[2]; ++dstCopyLayer) {
+      // If the depth value is not expected, the color of outputColorTexture will remain Red after
+      // the render pass.
+      const renderPass = encoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: outputColorTexture.createView({
+              baseArrayLayer: dstCopyLayer,
+              arrayLayerCount: 1,
+            }),
+            clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store',
+          },
+        ],
+        depthStencilAttachment: {
+          view: destinationTexture.createView({
+            baseArrayLayer: dstCopyLayer + dstCopyBaseArrayLayer,
+            arrayLayerCount: 1,
+            baseMipLevel: dstCopyLevel,
+            mipLevelCount: 1,
+          }),
+          depthLoadOp: 'load',
+          depthStoreOp: 'store',
+          stencilLoadOp: 'load',
+          stencilStoreOp: 'store',
+        },
+      });
+      renderPass.setBindGroup(0, bindGroup, [dstCopyLayer * kMinDynamicBufferOffsetAlignment]);
+      renderPass.setPipeline(renderPipeline);
+      renderPass.draw(6);
+      renderPass.end();
+    }
+    this.queue.submit([encoder.finish()]);
+
+    this.expectSingleColor(outputColorTexture, 'rgba8unorm', {
+      size: copySize,
+      exp: { R: 0.0, G: 1.0, B: 0.0, A: 1.0 },
+    });
   }
 }
 
@@ -411,41 +638,89 @@ g.test('color_textures,non_compressed,non_array')
   - covers the corners of the dstTexture
   - doesn't cover any texels that are on the edge of the dstTexture
   - covers the mipmap level > 0
+
+  Tests for all pairs of valid source/destination formats, and all texture dimensions.
   `
   )
   .params(u =>
     u
-      .combine('format', kRegularTextureFormats)
+      .combine('srcFormat', kRegularTextureFormats)
+      .combine('dstFormat', kRegularTextureFormats)
+      .filter(({ srcFormat, dstFormat }) => {
+        const srcBaseFormat = kTextureFormatInfo[srcFormat].baseFormat;
+        const dstBaseFormat = kTextureFormatInfo[dstFormat].baseFormat;
+        return (
+          srcFormat === dstFormat ||
+          (srcBaseFormat !== undefined &&
+            dstBaseFormat !== undefined &&
+            srcBaseFormat === dstBaseFormat)
+        );
+      })
+      .combine('dimension', kTextureDimensions)
+      .filter(
+        ({ dimension, srcFormat, dstFormat }) =>
+          textureDimensionAndFormatCompatible(dimension, srcFormat) &&
+          textureDimensionAndFormatCompatible(dimension, dstFormat)
+      )
       .beginSubcases()
-      .combine('textureSize', [
-        {
-          srcTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
-        },
-        {
-          srcTextureSize: { width: 31, height: 33, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 31, height: 33, depthOrArrayLayers: 1 },
-        },
-        {
-          srcTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 64, height: 64, depthOrArrayLayers: 1 },
-        },
-        {
-          srcTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 63, height: 61, depthOrArrayLayers: 1 },
-        },
-      ])
+      .expandWithParams(p => {
+        const params = [
+          {
+            srcTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
+            dstTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
+          },
+          {
+            srcTextureSize: { width: 31, height: 33, depthOrArrayLayers: 1 },
+            dstTextureSize: { width: 31, height: 33, depthOrArrayLayers: 1 },
+          },
+          {
+            srcTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
+            dstTextureSize: { width: 64, height: 64, depthOrArrayLayers: 1 },
+          },
+          {
+            srcTextureSize: { width: 32, height: 32, depthOrArrayLayers: 1 },
+            dstTextureSize: { width: 63, height: 61, depthOrArrayLayers: 1 },
+          },
+        ];
+        if (p.dimension === '1d') {
+          for (const param of params) {
+            param.srcTextureSize.height = 1;
+            param.dstTextureSize.height = 1;
+          }
+        }
+
+        return params;
+      })
       .combine('copyBoxOffsets', kCopyBoxOffsetsForWholeDepth)
+      .unless(
+        p =>
+          p.dimension === '1d' &&
+          (p.copyBoxOffsets.copyExtent.height !== 0 ||
+            p.copyBoxOffsets.srcOffset.y !== 0 ||
+            p.copyBoxOffsets.dstOffset.y !== 0)
+      )
       .combine('srcCopyLevel', [0, 3])
       .combine('dstCopyLevel', [0, 3])
+      .unless(p => p.dimension === '1d' && (p.srcCopyLevel !== 0 || p.dstCopyLevel !== 0))
   )
   .fn(async t => {
-    const { textureSize, format, copyBoxOffsets, srcCopyLevel, dstCopyLevel } = t.params;
+    const {
+      dimension,
+      srcTextureSize,
+      dstTextureSize,
+      srcFormat,
+      dstFormat,
+      copyBoxOffsets,
+      srcCopyLevel,
+      dstCopyLevel,
+    } = t.params;
 
     t.DoCopyTextureToTextureTest(
-      textureSize.srcTextureSize,
-      textureSize.dstTextureSize,
-      format,
+      dimension,
+      srcTextureSize,
+      dstTextureSize,
+      srcFormat,
+      dstFormat,
       copyBoxOffsets,
       srcCopyLevel,
       dstCopyLevel
@@ -458,58 +733,84 @@ g.test('color_textures,compressed,non_array')
   Validate the correctness of the copy by filling the srcTexture with testable data and any
   compressed color format supported by WebGPU, doing CopyTextureToTexture() copy, and verifying
   the content of the whole dstTexture.
+
+  Tests for all pairs of valid source/destination formats, and all texture dimensions.
   `
   )
   .params(u =>
     u
-      .combine('format', kCompressedTextureFormats)
+      .combine('srcFormat', kCompressedTextureFormats)
+      .combine('dstFormat', kCompressedTextureFormats)
+      .filter(({ srcFormat, dstFormat }) => {
+        const srcBaseFormat = kTextureFormatInfo[srcFormat].baseFormat;
+        const dstBaseFormat = kTextureFormatInfo[dstFormat].baseFormat;
+        return (
+          srcFormat === dstFormat ||
+          (srcBaseFormat !== undefined &&
+            dstBaseFormat !== undefined &&
+            srcBaseFormat === dstBaseFormat)
+        );
+      })
+      .combine('dimension', kTextureDimensions)
+      .filter(
+        ({ dimension, srcFormat, dstFormat }) =>
+          textureDimensionAndFormatCompatible(dimension, srcFormat) &&
+          textureDimensionAndFormatCompatible(dimension, dstFormat)
+      )
       .beginSubcases()
-      .combine('textureSize', [
-        // The heights and widths are all power of 2
-        {
-          srcTextureSize: { width: 64, height: 32, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 64, height: 32, depthOrArrayLayers: 1 },
-        },
-        // The virtual width of the source texture at mipmap level 2 (15) is not a multiple of 4
-        {
-          srcTextureSize: { width: 60, height: 32, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 64, height: 32, depthOrArrayLayers: 1 },
-        },
+      .combine('textureSizeInBlocks', [
+        // The heights and widths in blocks are all power of 2
+        { src: { width: 16, height: 8 }, dst: { width: 16, height: 8 } },
+        // The virtual width of the source texture at mipmap level 2 (15) is not a multiple of 4 blocks
+        { src: { width: 15, height: 8 }, dst: { width: 16, height: 8 } },
         // The virtual width of the destination texture at mipmap level 2 (15) is not a multiple
-        // of 4
-        {
-          srcTextureSize: { width: 64, height: 32, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 60, height: 32, depthOrArrayLayers: 1 },
-        },
-        // The virtual height of the source texture at mipmap level 2 (13) is not a multiple of 4
-        {
-          srcTextureSize: { width: 64, height: 52, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 64, height: 32, depthOrArrayLayers: 1 },
-        },
+        // of 4 blocks
+        { src: { width: 16, height: 8 }, dst: { width: 15, height: 8 } },
+        // The virtual height of the source texture at mipmap level 2 (13) is not a multiple of 4 blocks
+        { src: { width: 16, height: 13 }, dst: { width: 16, height: 8 } },
         // The virtual height of the destination texture at mipmap level 2 (13) is not a
-        // multiple of 4
-        {
-          srcTextureSize: { width: 64, height: 32, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 64, height: 52, depthOrArrayLayers: 1 },
-        },
-        // None of the widths or heights are power of 2
-        {
-          srcTextureSize: { width: 60, height: 52, depthOrArrayLayers: 1 },
-          dstTextureSize: { width: 60, height: 52, depthOrArrayLayers: 1 },
-        },
+        // multiple of 4 blocks
+        { src: { width: 16, height: 8 }, dst: { width: 16, height: 13 } },
+        // None of the widths or heights in blocks are power of 2
+        { src: { width: 15, height: 13 }, dst: { width: 15, height: 13 } },
       ])
       .combine('copyBoxOffsets', kCopyBoxOffsetsForWholeDepth)
       .combine('srcCopyLevel', [0, 2])
       .combine('dstCopyLevel', [0, 2])
   )
   .fn(async t => {
-    const { textureSize, format, copyBoxOffsets, srcCopyLevel, dstCopyLevel } = t.params;
-    await t.selectDeviceOrSkipTestCase(kTextureFormatInfo[format].feature);
+    const {
+      dimension,
+      textureSizeInBlocks,
+      srcFormat,
+      dstFormat,
+      copyBoxOffsets,
+      srcCopyLevel,
+      dstCopyLevel,
+    } = t.params;
+    await t.selectDeviceOrSkipTestCase([
+      kTextureFormatInfo[srcFormat].feature,
+      kTextureFormatInfo[dstFormat].feature,
+    ]);
+    const srcBlockWidth = kTextureFormatInfo[srcFormat].blockWidth;
+    const srcBlockHeight = kTextureFormatInfo[srcFormat].blockHeight;
+    const dstBlockWidth = kTextureFormatInfo[dstFormat].blockWidth;
+    const dstBlockHeight = kTextureFormatInfo[dstFormat].blockHeight;
 
     t.DoCopyTextureToTextureTest(
-      textureSize.srcTextureSize,
-      textureSize.dstTextureSize,
-      format,
+      dimension,
+      {
+        width: textureSizeInBlocks.src.width * srcBlockWidth,
+        height: textureSizeInBlocks.src.height * srcBlockHeight,
+        depthOrArrayLayers: 1,
+      },
+      {
+        width: textureSizeInBlocks.dst.width * dstBlockWidth,
+        height: textureSizeInBlocks.dst.height * dstBlockHeight,
+        depthOrArrayLayers: 1,
+      },
+      srcFormat,
+      dstFormat,
       copyBoxOffsets,
       srcCopyLevel,
       dstCopyLevel
@@ -526,7 +827,24 @@ g.test('color_textures,non_compressed,array')
   )
   .params(u =>
     u
-      .combine('format', kRegularTextureFormats)
+      .combine('srcFormat', kRegularTextureFormats)
+      .combine('dstFormat', kRegularTextureFormats)
+      .filter(({ srcFormat, dstFormat }) => {
+        const srcBaseFormat = kTextureFormatInfo[srcFormat].baseFormat;
+        const dstBaseFormat = kTextureFormatInfo[dstFormat].baseFormat;
+        return (
+          srcFormat === dstFormat ||
+          (srcBaseFormat !== undefined &&
+            dstBaseFormat !== undefined &&
+            srcBaseFormat === dstBaseFormat)
+        );
+      })
+      .combine('dimension', ['2d', '3d'] as const)
+      .filter(
+        ({ dimension, srcFormat, dstFormat }) =>
+          textureDimensionAndFormatCompatible(dimension, srcFormat) &&
+          textureDimensionAndFormatCompatible(dimension, dstFormat)
+      )
       .beginSubcases()
       .combine('textureSize', [
         {
@@ -537,6 +855,10 @@ g.test('color_textures,non_compressed,array')
           srcTextureSize: { width: 31, height: 33, depthOrArrayLayers: 5 },
           dstTextureSize: { width: 31, height: 33, depthOrArrayLayers: 5 },
         },
+        {
+          srcTextureSize: { width: 31, height: 32, depthOrArrayLayers: 33 },
+          dstTextureSize: { width: 31, height: 32, depthOrArrayLayers: 33 },
+        },
       ])
 
       .combine('copyBoxOffsets', kCopyBoxOffsetsFor2DArrayTextures)
@@ -544,12 +866,22 @@ g.test('color_textures,non_compressed,array')
       .combine('dstCopyLevel', [0, 3])
   )
   .fn(async t => {
-    const { textureSize, format, copyBoxOffsets, srcCopyLevel, dstCopyLevel } = t.params;
+    const {
+      dimension,
+      textureSize,
+      srcFormat,
+      dstFormat,
+      copyBoxOffsets,
+      srcCopyLevel,
+      dstCopyLevel,
+    } = t.params;
 
     t.DoCopyTextureToTextureTest(
+      dimension,
       textureSize.srcTextureSize,
       textureSize.dstTextureSize,
-      format,
+      srcFormat,
+      dstFormat,
       copyBoxOffsets,
       srcCopyLevel,
       dstCopyLevel
@@ -562,37 +894,74 @@ g.test('color_textures,compressed,array')
   Validate the correctness of the texture-to-texture copy on 2D array textures by filling the
   srcTexture with testable data and any compressed color format supported by WebGPU, doing
   CopyTextureToTexture() copy, and verifying the content of the whole dstTexture.
+
+  Tests for all pairs of valid source/destination formats, and all texture dimensions.
   `
   )
   .params(u =>
     u
-      .combine('format', kCompressedTextureFormats)
+      .combine('srcFormat', kCompressedTextureFormats)
+      .combine('dstFormat', kCompressedTextureFormats)
+      .filter(({ srcFormat, dstFormat }) => {
+        const srcBaseFormat = kTextureFormatInfo[srcFormat].baseFormat;
+        const dstBaseFormat = kTextureFormatInfo[dstFormat].baseFormat;
+        return (
+          srcFormat === dstFormat ||
+          (srcBaseFormat !== undefined &&
+            dstBaseFormat !== undefined &&
+            srcBaseFormat === dstBaseFormat)
+        );
+      })
+      .combine('dimension', ['2d', '3d'] as const)
+      .filter(
+        ({ dimension, srcFormat, dstFormat }) =>
+          textureDimensionAndFormatCompatible(dimension, srcFormat) &&
+          textureDimensionAndFormatCompatible(dimension, dstFormat)
+      )
       .beginSubcases()
-      .combine('textureSize', [
-        // The heights and widths are all power of 2
-        {
-          srcTextureSize: { width: 8, height: 8, depthOrArrayLayers: 5 },
-          dstTextureSize: { width: 8, height: 8, depthOrArrayLayers: 5 },
-        },
-        // None of the widths or heights are power of 2
-        {
-          srcTextureSize: { width: 60, height: 52, depthOrArrayLayers: 5 },
-          dstTextureSize: { width: 60, height: 52, depthOrArrayLayers: 5 },
-        },
+      .combine('textureSizeInBlocks', [
+        // The heights and widths in blocks are all power of 2
+        { src: { width: 2, height: 2 }, dst: { width: 2, height: 2 } },
+        // None of the widths or heights in blocks are power of 2
+        { src: { width: 15, height: 13 }, dst: { width: 15, height: 13 } },
       ])
-
       .combine('copyBoxOffsets', kCopyBoxOffsetsFor2DArrayTextures)
       .combine('srcCopyLevel', [0, 2])
       .combine('dstCopyLevel', [0, 2])
   )
   .fn(async t => {
-    const { textureSize, format, copyBoxOffsets, srcCopyLevel, dstCopyLevel } = t.params;
-    await t.selectDeviceOrSkipTestCase(kTextureFormatInfo[format].feature);
+    const {
+      dimension,
+      textureSizeInBlocks,
+      srcFormat,
+      dstFormat,
+      copyBoxOffsets,
+      srcCopyLevel,
+      dstCopyLevel,
+    } = t.params;
+    await t.selectDeviceOrSkipTestCase([
+      kTextureFormatInfo[srcFormat].feature,
+      kTextureFormatInfo[dstFormat].feature,
+    ]);
+    const srcBlockWidth = kTextureFormatInfo[srcFormat].blockWidth;
+    const srcBlockHeight = kTextureFormatInfo[srcFormat].blockHeight;
+    const dstBlockWidth = kTextureFormatInfo[dstFormat].blockWidth;
+    const dstBlockHeight = kTextureFormatInfo[dstFormat].blockHeight;
 
     t.DoCopyTextureToTextureTest(
-      textureSize.srcTextureSize,
-      textureSize.dstTextureSize,
-      format,
+      dimension,
+      {
+        width: textureSizeInBlocks.src.width * srcBlockWidth,
+        height: textureSizeInBlocks.src.height * srcBlockHeight,
+        depthOrArrayLayers: 5,
+      },
+      {
+        width: textureSizeInBlocks.dst.width * dstBlockWidth,
+        height: textureSizeInBlocks.dst.height * dstBlockHeight,
+        depthOrArrayLayers: 5,
+      },
+      srcFormat,
+      dstFormat,
       copyBoxOffsets,
       srcCopyLevel,
       dstCopyLevel
@@ -604,12 +973,18 @@ g.test('zero_sized')
     `
   Validate the correctness of zero-sized copies (should be no-ops).
 
+  - For each texture dimension.
   - Copies that are zero-sized in only one dimension {x, y, z}, each touching the {lower, upper} end
   of that dimension.
   `
   )
   .paramsSubcasesOnly(u =>
     u //
+      .combineWithParams([
+        { dimension: '1d', textureSize: { width: 32, height: 1, depthOrArrayLayers: 1 } },
+        { dimension: '2d', textureSize: { width: 32, height: 32, depthOrArrayLayers: 5 } },
+        { dimension: '3d', textureSize: { width: 32, height: 32, depthOrArrayLayers: 5 } },
+      ] as const)
       .combine('copyBoxOffset', [
         // copyExtent.width === 0
         {
@@ -666,29 +1041,39 @@ g.test('zero_sized')
           copyExtent: { width: 0, height: 0, depthOrArrayLayers: 0 },
         },
       ])
+      .unless(
+        p =>
+          p.dimension === '1d' &&
+          (p.copyBoxOffset.copyExtent.height !== 0 ||
+            p.copyBoxOffset.srcOffset.y !== 0 ||
+            p.copyBoxOffset.dstOffset.y !== 0)
+      )
       .combine('srcCopyLevel', [0, 3])
       .combine('dstCopyLevel', [0, 3])
+      .unless(p => p.dimension === '1d' && (p.srcCopyLevel !== 0 || p.dstCopyLevel !== 0))
   )
   .fn(async t => {
-    const { copyBoxOffset, srcCopyLevel, dstCopyLevel } = t.params;
+    const { dimension, textureSize, copyBoxOffset, srcCopyLevel, dstCopyLevel } = t.params;
 
-    const format = 'rgba8unorm';
-    const textureSize = { width: 64, height: 32, depthOrArrayLayers: 5 };
+    const srcFormat = 'rgba8unorm';
+    const dstFormat = 'rgba8unorm';
 
     t.DoCopyTextureToTextureTest(
+      dimension,
       textureSize,
       textureSize,
-      format,
+      srcFormat,
+      dstFormat,
       copyBoxOffset,
       srcCopyLevel,
       dstCopyLevel
     );
   });
 
-g.test('copy_stencil_aspect')
+g.test('copy_depth_stencil')
   .desc(
     `
-  Validate the correctness of copyTextureToTexture() with stencil aspect.
+  Validate the correctness of copyTextureToTexture() with depth and stencil aspect.
 
   For all the texture formats with stencil aspect:
   - Initialize the stencil aspect of the source texture with writeTexture().
@@ -697,6 +1082,11 @@ g.test('copy_stencil_aspect')
     content
   - Test the copies from / into zero / non-zero array layer / mipmap levels
   - Test copying multiple array layers
+
+  For all the texture formats with depth aspect:
+  - Initialize the depth aspect of the source texture with a draw call
+  - Copy the depth aspect from the source texture into the destination texture
+  - Validate the content in the destination texture with the depth comparison function 'equal'
   `
   )
   .params(u =>
@@ -714,7 +1104,6 @@ g.test('copy_stencil_aspect')
       .combine('dstCopyBaseArrayLayer', [0, 1])
       .filter(t => {
         return (
-          kTextureFormatInfo[t.format].stencil &&
           t.srcTextureSize.depthOrArrayLayers > t.srcCopyBaseArrayLayer &&
           t.srcTextureSize.depthOrArrayLayers > t.dstCopyBaseArrayLayer
         );
@@ -755,18 +1144,20 @@ g.test('copy_stencil_aspect')
       mipLevelCount: dstCopyLevel + 1,
     });
 
-    const initialStencilData = t.GetInitialStencilDataPerMipLevel(
-      srcTextureSize,
-      format,
-      srcCopyLevel
-    );
-    t.InitializeStencilAspect(
-      sourceTexture,
-      initialStencilData,
-      srcCopyLevel,
-      srcCopyBaseArrayLayer,
-      copySize
-    );
+    let initialStencilData: undefined | Uint8Array = undefined;
+    if (kTextureFormatInfo[format].stencil) {
+      initialStencilData = t.GetInitialStencilDataPerMipLevel(srcTextureSize, format, srcCopyLevel);
+      t.InitializeStencilAspect(
+        sourceTexture,
+        initialStencilData,
+        srcCopyLevel,
+        srcCopyBaseArrayLayer,
+        copySize
+      );
+    }
+    if (kTextureFormatInfo[format].depth) {
+      t.InitializeDepthAspect(sourceTexture, format, srcCopyLevel, srcCopyBaseArrayLayer, copySize);
+    }
 
     const encoder = t.device.createCommandEncoder();
     encoder.copyTextureToTexture(
@@ -784,11 +1175,359 @@ g.test('copy_stencil_aspect')
     );
     t.queue.submit([encoder.finish()]);
 
-    t.VerifyStencilAspect(
-      destinationTexture,
-      initialStencilData,
-      dstCopyLevel,
-      dstCopyBaseArrayLayer,
-      copySize
+    if (kTextureFormatInfo[format].stencil) {
+      assert(initialStencilData !== undefined);
+      t.VerifyStencilAspect(
+        destinationTexture,
+        initialStencilData,
+        dstCopyLevel,
+        dstCopyBaseArrayLayer,
+        copySize
+      );
+    }
+    if (kTextureFormatInfo[format].depth) {
+      t.VerifyDepthAspect(
+        destinationTexture,
+        format,
+        dstCopyLevel,
+        dstCopyBaseArrayLayer,
+        copySize
+      );
+    }
+  });
+
+g.test('copy_multisampled_color')
+  .desc(
+    `
+  Validate the correctness of copyTextureToTexture() with multisampled color formats.
+
+  - Initialize the source texture with a triangle in a render pass.
+  - Copy from the source texture into the destination texture with CopyTextureToTexture().
+  - Compare every sub-pixel of source texture and destination texture in another render pass:
+    - If they are different, then output RED; otherwise output GREEN
+  - Verify the pixels in the output texture are all GREEN.
+  - Note that in current WebGPU SPEC the mipmap level count and array layer count of a multisampled
+    texture can only be 1.
+  `
+  )
+  .fn(async t => {
+    const textureSize = [32, 16, 1] as const;
+    const kColorFormat = 'rgba8unorm';
+    const kSampleCount = 4;
+
+    const sourceTexture = t.device.createTexture({
+      format: kColorFormat,
+      size: textureSize,
+      usage:
+        GPUTextureUsage.COPY_SRC |
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.RENDER_ATTACHMENT,
+      sampleCount: kSampleCount,
+    });
+    const destinationTexture = t.device.createTexture({
+      format: kColorFormat,
+      size: textureSize,
+      usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+      sampleCount: kSampleCount,
+    });
+
+    // Initialize sourceTexture with a draw call.
+    const renderPipelineForInit = t.device.createRenderPipeline({
+      vertex: {
+        module: t.device.createShaderModule({
+          code: `
+            @stage(vertex)
+            fn main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4<f32> {
+              var pos = array<vec2<f32>, 3>(
+                  vec2<f32>(-1.0,  1.0),
+                  vec2<f32>( 1.0,  1.0),
+                  vec2<f32>( 1.0, -1.0)
+              );
+              return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+            }`,
+        }),
+        entryPoint: 'main',
+      },
+      fragment: {
+        module: t.device.createShaderModule({
+          code: `
+            @stage(fragment)
+            fn main() -> @location(0) vec4<f32> {
+              return vec4<f32>(0.3, 0.5, 0.8, 1.0);
+            }`,
+        }),
+        entryPoint: 'main',
+        targets: [{ format: kColorFormat }],
+      },
+      multisample: {
+        count: kSampleCount,
+      },
+    });
+    const initEncoder = t.device.createCommandEncoder();
+    const renderPassForInit = initEncoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: sourceTexture.createView(),
+          clearValue: [1.0, 0.0, 0.0, 1.0],
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
+      ],
+    });
+    renderPassForInit.setPipeline(renderPipelineForInit);
+    renderPassForInit.draw(3);
+    renderPassForInit.end();
+    t.queue.submit([initEncoder.finish()]);
+
+    // Do the texture-to-texture copy
+    const copyEncoder = t.device.createCommandEncoder();
+    copyEncoder.copyTextureToTexture(
+      {
+        texture: sourceTexture,
+      },
+      {
+        texture: destinationTexture,
+      },
+      textureSize
     );
+    t.queue.submit([copyEncoder.finish()]);
+
+    // Verify if all the sub-pixel values at the same location of sourceTexture and
+    // destinationTexture are equal.
+    const renderPipelineForValidation = t.device.createRenderPipeline({
+      vertex: {
+        module: t.device.createShaderModule({
+          code: `
+          @stage(vertex)
+          fn main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4<f32> {
+            var pos = array<vec2<f32>, 6>(
+              vec2<f32>(-1.0,  1.0),
+              vec2<f32>(-1.0, -1.0),
+              vec2<f32>( 1.0,  1.0),
+              vec2<f32>(-1.0, -1.0),
+              vec2<f32>( 1.0,  1.0),
+              vec2<f32>( 1.0, -1.0));
+            return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+          }`,
+        }),
+        entryPoint: 'main',
+      },
+      fragment: {
+        module: t.device.createShaderModule({
+          code: `
+          @group(0) @binding(0) var sourceTexture : texture_multisampled_2d<f32>;
+          @group(0) @binding(1) var destinationTexture : texture_multisampled_2d<f32>;
+          @stage(fragment)
+          fn main(@builtin(position) coord_in: vec4<f32>) -> @location(0) vec4<f32> {
+            var coord_in_vec2 = vec2<i32>(i32(coord_in.x), i32(coord_in.y));
+            for (var sampleIndex = 0; sampleIndex < ${kSampleCount};
+              sampleIndex = sampleIndex + 1) {
+              var sourceSubPixel : vec4<f32> =
+                textureLoad(sourceTexture, coord_in_vec2, sampleIndex);
+              var destinationSubPixel : vec4<f32> =
+                textureLoad(destinationTexture, coord_in_vec2, sampleIndex);
+              if (!all(sourceSubPixel == destinationSubPixel)) {
+                return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+              }
+            }
+            return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+          }`,
+        }),
+        entryPoint: 'main',
+        targets: [{ format: kColorFormat }],
+      },
+    });
+    const bindGroup = t.device.createBindGroup({
+      layout: renderPipelineForValidation.getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: sourceTexture.createView(),
+        },
+        {
+          binding: 1,
+          resource: destinationTexture.createView(),
+        },
+      ],
+    });
+    const expectedOutputTexture = t.device.createTexture({
+      format: kColorFormat,
+      size: textureSize,
+      usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    const validationEncoder = t.device.createCommandEncoder();
+    const renderPassForValidation = validationEncoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: expectedOutputTexture.createView(),
+          clearValue: [1.0, 0.0, 0.0, 1.0],
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
+      ],
+    });
+    renderPassForValidation.setPipeline(renderPipelineForValidation);
+    renderPassForValidation.setBindGroup(0, bindGroup);
+    renderPassForValidation.draw(6);
+    renderPassForValidation.end();
+    t.queue.submit([validationEncoder.finish()]);
+
+    t.expectSingleColor(expectedOutputTexture, 'rgba8unorm', {
+      size: [textureSize[0], textureSize[1], textureSize[2]],
+      exp: { R: 0.0, G: 1.0, B: 0.0, A: 1.0 },
+    });
+  });
+
+g.test('copy_multisampled_depth')
+  .desc(
+    `
+  Validate the correctness of copyTextureToTexture() with multisampled depth formats.
+
+  - Initialize the source texture with a triangle in a render pass.
+  - Copy from the source texture into the destination texture with CopyTextureToTexture().
+  - Validate the content in the destination texture with the depth comparison function 'equal'.
+  - Note that in current WebGPU SPEC the mipmap level count and array layer count of a multisampled
+    texture can only be 1.
+  `
+  )
+  .fn(async t => {
+    const textureSize = [32, 16, 1] as const;
+    const kDepthFormat = 'depth24plus';
+    const kSampleCount = 4;
+
+    const sourceTexture = t.device.createTexture({
+      format: kDepthFormat,
+      size: textureSize,
+      usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
+      sampleCount: kSampleCount,
+    });
+    const destinationTexture = t.device.createTexture({
+      format: kDepthFormat,
+      size: textureSize,
+      usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      sampleCount: kSampleCount,
+    });
+
+    const vertexState: GPUVertexState = {
+      module: t.device.createShaderModule({
+        code: `
+          @stage(vertex)
+          fn main(@builtin(vertex_index) VertexIndex : u32)-> @builtin(position) vec4<f32> {
+            var pos : array<vec3<f32>, 6> = array<vec3<f32>, 6>(
+                vec3<f32>(-1.0,  1.0, 0.5),
+                vec3<f32>(-1.0, -1.0, 0.0),
+                vec3<f32>( 1.0,  1.0, 1.0),
+                vec3<f32>(-1.0, -1.0, 0.0),
+                vec3<f32>( 1.0,  1.0, 1.0),
+                vec3<f32>( 1.0, -1.0, 0.5));
+            return vec4<f32>(pos[VertexIndex], 1.0);
+          }`,
+      }),
+      entryPoint: 'main',
+    };
+
+    // Initialize the depth aspect of source texture with a draw call
+    const renderPipelineForInit = t.device.createRenderPipeline({
+      vertex: vertexState,
+      depthStencil: {
+        format: kDepthFormat,
+        depthCompare: 'always',
+        depthWriteEnabled: true,
+      },
+      multisample: {
+        count: kSampleCount,
+      },
+    });
+
+    const encoderForInit = t.device.createCommandEncoder();
+    const renderPassForInit = encoderForInit.beginRenderPass({
+      colorAttachments: [],
+      depthStencilAttachment: {
+        view: sourceTexture.createView(),
+        depthClearValue: 0.0,
+        depthLoadOp: 'clear',
+        depthStoreOp: 'store',
+      },
+    });
+    renderPassForInit.setPipeline(renderPipelineForInit);
+    renderPassForInit.draw(6);
+    renderPassForInit.end();
+    t.queue.submit([encoderForInit.finish()]);
+
+    // Do the texture-to-texture copy
+    const copyEncoder = t.device.createCommandEncoder();
+    copyEncoder.copyTextureToTexture(
+      {
+        texture: sourceTexture,
+      },
+      {
+        texture: destinationTexture,
+      },
+      textureSize
+    );
+    t.queue.submit([copyEncoder.finish()]);
+
+    // Verify the depth values in destinationTexture are what we expected with
+    // depthCompareFunction == 'equal' and depthWriteEnabled == false in the render pipeline
+    const kColorFormat = 'rgba8unorm';
+    const renderPipelineForVerify = t.device.createRenderPipeline({
+      vertex: vertexState,
+      fragment: {
+        module: t.device.createShaderModule({
+          code: `
+          @stage(fragment)
+          fn main() -> @location(0) vec4<f32> {
+            return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+          }`,
+        }),
+        entryPoint: 'main',
+        targets: [{ format: kColorFormat }],
+      },
+      depthStencil: {
+        format: kDepthFormat,
+        depthCompare: 'equal',
+        depthWriteEnabled: false,
+      },
+      multisample: {
+        count: kSampleCount,
+      },
+    });
+    const multisampledColorTexture = t.device.createTexture({
+      format: kColorFormat,
+      size: textureSize,
+      usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
+      sampleCount: kSampleCount,
+    });
+    const colorTextureAsResolveTarget = t.device.createTexture({
+      format: kColorFormat,
+      size: textureSize,
+      usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+
+    const encoderForVerify = t.device.createCommandEncoder();
+    const renderPassForVerify = encoderForVerify.beginRenderPass({
+      colorAttachments: [
+        {
+          view: multisampledColorTexture.createView(),
+          clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
+          storeOp: 'discard',
+          resolveTarget: colorTextureAsResolveTarget.createView(),
+        },
+      ],
+      depthStencilAttachment: {
+        view: destinationTexture.createView(),
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      },
+    });
+    renderPassForVerify.setPipeline(renderPipelineForVerify);
+    renderPassForVerify.draw(6);
+    renderPassForVerify.end();
+    t.queue.submit([encoderForVerify.finish()]);
+
+    t.expectSingleColor(colorTextureAsResolveTarget, kColorFormat, {
+      size: [textureSize[0], textureSize[1], textureSize[2]],
+      exp: { R: 0.0, G: 1.0, B: 0.0, A: 1.0 },
+    });
   });

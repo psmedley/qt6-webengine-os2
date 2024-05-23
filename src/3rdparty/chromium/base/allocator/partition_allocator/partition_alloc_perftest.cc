@@ -22,18 +22,30 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_result_reporter.h"
 
-#if defined(OS_ANDROID) || defined(ARCH_CPU_32_BITS)
+#if BUILDFLAG(IS_ANDROID) || defined(ARCH_CPU_32_BITS) || BUILDFLAG(IS_FUCHSIA)
 // Some tests allocate many GB of memory, which can cause issues on Android and
 // address-space exhaustion for any 32-bit process.
 #define MEMORY_CONSTRAINED
 #endif
 
+namespace partition_alloc::internal {
+
 namespace base {
+
+// TODO(https://crbug.com/1288247): Remove these 'using' declarations once
+// the migration to the new namespaces gets done.
+using ::base::BindOnce;
+using ::base::OnceCallback;
+using ::base::StringPrintf;
+using ::base::Unretained;
+
+}  // namespace base
+
 namespace {
 
 // Change kTimeLimit to something higher if you need more time to capture a
 // trace.
-constexpr base::TimeDelta kTimeLimit = base::TimeDelta::FromSeconds(2);
+constexpr base::TimeDelta kTimeLimit = base::Seconds(2);
 constexpr int kWarmupRuns = 10000;
 constexpr int kTimeCheckInterval = 100000;
 constexpr size_t kAllocSize = 40;
@@ -82,60 +94,70 @@ class SystemAllocator : public Allocator {
 class PartitionAllocator : public Allocator {
  public:
   PartitionAllocator() = default;
-  ~PartitionAllocator() override = default;
+  ~PartitionAllocator() override { alloc_.DestructForTesting(); }
 
   void* Alloc(size_t size) override {
-    return alloc_.AllocFlagsNoHooks(0, size, PartitionPageSize());
+    return alloc_.AllocWithFlagsNoHooks(0, size, PartitionPageSize());
   }
   void Free(void* data) override { ThreadSafePartitionRoot::FreeNoHooks(data); }
 
  private:
-  ThreadSafePartitionRoot alloc_{{PartitionOptions::AlignedAlloc::kDisallowed,
-                                  PartitionOptions::ThreadCache::kDisabled,
-                                  PartitionOptions::Quarantine::kDisallowed,
-                                  PartitionOptions::Cookies::kAllowed,
-                                  PartitionOptions::RefCount::kDisallowed}};
+  ThreadSafePartitionRoot alloc_{{
+      PartitionOptions::AlignedAlloc::kDisallowed,
+      PartitionOptions::ThreadCache::kDisabled,
+      PartitionOptions::Quarantine::kDisallowed,
+      PartitionOptions::Cookie::kAllowed,
+      PartitionOptions::BackupRefPtr::kDisabled,
+      PartitionOptions::UseConfigurablePool::kNo,
+  }};
 };
 
 // Only one partition with a thread cache.
 ThreadSafePartitionRoot* g_partition_root = nullptr;
 class PartitionAllocatorWithThreadCache : public Allocator {
  public:
-  PartitionAllocatorWithThreadCache() {
+  explicit PartitionAllocatorWithThreadCache(bool use_alternate_bucket_dist) {
     if (!g_partition_root) {
-      g_partition_root = new ThreadSafePartitionRoot(
-          {PartitionOptions::AlignedAlloc::kDisallowed,
-           PartitionOptions::ThreadCache::kEnabled,
-           PartitionOptions::Quarantine::kDisallowed,
-           PartitionOptions::Cookies::kAllowed,
-           PartitionOptions::RefCount::kDisallowed});
+      g_partition_root = new ThreadSafePartitionRoot({
+          PartitionOptions::AlignedAlloc::kDisallowed,
+          PartitionOptions::ThreadCache::kEnabled,
+          PartitionOptions::Quarantine::kDisallowed,
+          PartitionOptions::Cookie::kAllowed,
+          PartitionOptions::BackupRefPtr::kDisabled,
+          PartitionOptions::UseConfigurablePool::kNo,
+      });
     }
-    internal::ThreadCacheRegistry::Instance().PurgeAll();
+    ThreadCacheRegistry::Instance().PurgeAll();
+    if (!use_alternate_bucket_dist)
+      g_partition_root->SwitchToDenserBucketDistribution();
+    else
+      g_partition_root->ResetBucketDistributionForTesting();
   }
   ~PartitionAllocatorWithThreadCache() override = default;
 
   void* Alloc(size_t size) override {
-    return g_partition_root->AllocFlagsNoHooks(0, size, PartitionPageSize());
+    return g_partition_root->AllocWithFlagsNoHooks(0, size,
+                                                   PartitionPageSize());
   }
   void Free(void* data) override { ThreadSafePartitionRoot::FreeNoHooks(data); }
 };
 
-class TestLoopThread : public PlatformThread::Delegate {
+class TestLoopThread : public base::PlatformThread::Delegate {
  public:
-  explicit TestLoopThread(OnceCallback<float()> test_fn)
+  explicit TestLoopThread(base::OnceCallback<float()> test_fn)
       : test_fn_(std::move(test_fn)) {
-    PA_CHECK(PlatformThread::Create(0, this, &thread_handle_));
+    PA_CHECK(base::PlatformThread::Create(0, this, &thread_handle_));
   }
 
   float Run() {
-    PlatformThread::Join(thread_handle_);
+    base::PlatformThread::Join(thread_handle_);
     return laps_per_second_;
   }
 
   void ThreadMain() override { laps_per_second_ = std::move(test_fn_).Run(); }
 
-  OnceCallback<float()> test_fn_;
-  PlatformThreadHandle thread_handle_;
+  base::OnceCallback<float()> test_fn_;
+  base::PlatformThreadHandle thread_handle_;
   std::atomic<float> laps_per_second_;
 };
 
@@ -170,7 +192,7 @@ float SingleBucket(Allocator* allocator) {
       reinterpret_cast<MemoryAllocationPerfNode*>(allocator->Alloc(kAllocSize));
   size_t allocated_memory = kAllocSize;
 
-  LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
+  base::LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
   MemoryAllocationPerfNode* cur = first;
   do {
     auto* next = reinterpret_cast<MemoryAllocationPerfNode*>(
@@ -203,7 +225,7 @@ float SingleBucketWithFree(Allocator* allocator) {
   // Allocate an initial element to make sure the bucket stays set up.
   void* elem = allocator->Alloc(kAllocSize);
 
-  LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
+  base::LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
   do {
     void* cur = allocator->Alloc(kAllocSize);
     CHECK_NE(cur, nullptr);
@@ -222,7 +244,7 @@ float MultiBucket(Allocator* allocator) {
   MemoryAllocationPerfNode* cur = first;
   size_t allocated_memory = kAllocSize;
 
-  LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
+  base::LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
   do {
     for (int i = 0; i < kMultiBucketRounds; i++) {
       size_t size = kMultiBucketMinimumSize + (i * kMultiBucketIncrement);
@@ -264,7 +286,7 @@ float MultiBucketWithFree(Allocator* allocator) {
     elems.push_back(cur);
   }
 
-  LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
+  base::LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
   do {
     for (int i = 0; i < kMultiBucketRounds; i++) {
       void* cur = allocator->Alloc(kMultiBucketMinimumSize +
@@ -285,7 +307,7 @@ float MultiBucketWithFree(Allocator* allocator) {
 float DirectMapped(Allocator* allocator) {
   constexpr size_t kSize = 2 * 1000 * 1000;
 
-  LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
+  base::LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
   do {
     void* cur = allocator->Alloc(kSize);
     CHECK_NE(cur, nullptr);
@@ -296,14 +318,16 @@ float DirectMapped(Allocator* allocator) {
   return timer.LapsPerSecond();
 }
 
-std::unique_ptr<Allocator> CreateAllocator(AllocatorType type) {
+std::unique_ptr<Allocator> CreateAllocator(AllocatorType type,
+                                           bool use_alternate_bucket_dist) {
   switch (type) {
     case AllocatorType::kSystem:
       return std::make_unique<SystemAllocator>();
     case AllocatorType::kPartitionAlloc:
       return std::make_unique<PartitionAllocator>();
     case AllocatorType::kPartitionAllocWithThreadCache:
-      return std::make_unique<PartitionAllocatorWithThreadCache>();
+      return std::make_unique<PartitionAllocatorWithThreadCache>(
+          use_alternate_bucket_dist);
   }
 }
 
@@ -317,22 +341,23 @@ void LogResults(int thread_count,
 }
 
 void RunTest(int thread_count,
+             bool use_alternate_bucket_dist,
              AllocatorType alloc_type,
              float (*test_fn)(Allocator*),
              float (*noisy_neighbor_fn)(Allocator*),
              const char* story_base_name) {
-  auto alloc = CreateAllocator(alloc_type);
+  auto alloc = CreateAllocator(alloc_type, use_alternate_bucket_dist);
 
   std::unique_ptr<TestLoopThread> noisy_neighbor_thread = nullptr;
   if (noisy_neighbor_fn) {
     noisy_neighbor_thread = std::make_unique<TestLoopThread>(
-        BindOnce(noisy_neighbor_fn, Unretained(alloc.get())));
+        base::BindOnce(noisy_neighbor_fn, base::Unretained(alloc.get())));
   }
 
   std::vector<std::unique_ptr<TestLoopThread>> threads;
   for (int i = 0; i < thread_count; ++i) {
     threads.push_back(std::make_unique<TestLoopThread>(
-        BindOnce(test_fn, Unretained(alloc.get()))));
+        base::BindOnce(test_fn, base::Unretained(alloc.get()))));
   }
 
   uint64_t total_laps_per_second = 0;
@@ -370,7 +395,7 @@ void RunTest(int thread_count,
 }
 
 class PartitionAllocMemoryAllocationPerfTest
-    : public testing::TestWithParam<std::tuple<int, AllocatorType>> {};
+    : public testing::TestWithParam<std::tuple<int, bool, AllocatorType>> {};
 
 // Only one partition with a thread cache: cannot use the thread cache when
 // PartitionAlloc is malloc().
@@ -379,47 +404,48 @@ INSTANTIATE_TEST_SUITE_P(
     PartitionAllocMemoryAllocationPerfTest,
     ::testing::Combine(
         ::testing::Values(1, 2, 3, 4),
+        ::testing::Values(false, true),
         ::testing::Values(AllocatorType::kSystem,
-                          AllocatorType::kPartitionAlloc
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-                          ,
-                          AllocatorType::kPartitionAllocWithThreadCache
-#endif
-                          )));
+                          AllocatorType::kPartitionAlloc,
+                          AllocatorType::kPartitionAllocWithThreadCache)));
 
 // This test (and the other one below) allocates a large amount of memory, which
 // can cause issues on Android.
 #if !defined(MEMORY_CONSTRAINED)
 TEST_P(PartitionAllocMemoryAllocationPerfTest, SingleBucket) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), SingleBucket, nullptr,
+  RunTest(std::get<int>(params), std::get<bool>(params),
+          std::get<AllocatorType>(params), SingleBucket, nullptr,
           "SingleBucket");
 }
 #endif  // defined(MEMORY_CONSTRAINED)
 
 TEST_P(PartitionAllocMemoryAllocationPerfTest, SingleBucketWithFree) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), SingleBucketWithFree,
-          nullptr, "SingleBucketWithFree");
+  RunTest(std::get<int>(params), std::get<bool>(params),
+          std::get<AllocatorType>(params), SingleBucketWithFree, nullptr,
+          "SingleBucketWithFree");
 }
 
 #if !defined(MEMORY_CONSTRAINED)
 TEST_P(PartitionAllocMemoryAllocationPerfTest, MultiBucket) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), MultiBucket, nullptr,
-          "MultiBucket");
+  RunTest(std::get<int>(params), std::get<bool>(params),
+          std::get<AllocatorType>(params), MultiBucket, nullptr, "MultiBucket");
 }
 #endif  // defined(MEMORY_CONSTRAINED)
 
 TEST_P(PartitionAllocMemoryAllocationPerfTest, MultiBucketWithFree) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), MultiBucketWithFree,
-          nullptr, "MultiBucketWithFree");
+  RunTest(std::get<int>(params), std::get<bool>(params),
+          std::get<AllocatorType>(params), MultiBucketWithFree, nullptr,
+          "MultiBucketWithFree");
 }
 
 TEST_P(PartitionAllocMemoryAllocationPerfTest, DirectMapped) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), DirectMapped, nullptr,
+  RunTest(std::get<int>(params), std::get<bool>(params),
+          std::get<AllocatorType>(params), DirectMapped, nullptr,
           "DirectMapped");
 }
 
@@ -427,11 +453,12 @@ TEST_P(PartitionAllocMemoryAllocationPerfTest, DirectMapped) {
 TEST_P(PartitionAllocMemoryAllocationPerfTest,
        DISABLED_MultiBucketWithNoisyNeighbor) {
   auto params = GetParam();
-  RunTest(std::get<0>(params), std::get<1>(params), MultiBucket, DirectMapped,
+  RunTest(std::get<int>(params), std::get<bool>(params),
+          std::get<AllocatorType>(params), MultiBucket, DirectMapped,
           "MultiBucketWithNoisyNeighbor");
 }
 #endif  // !defined(MEMORY_CONSTRAINED)
 
 }  // namespace
 
-}  // namespace base
+}  // namespace partition_alloc::internal

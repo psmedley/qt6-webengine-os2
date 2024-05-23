@@ -5,7 +5,6 @@
 #ifndef UI_BASE_BASE_WINDOW_H_
 #define UI_BASE_BASE_WINDOW_H_
 
-#include "base/compiler_specific.h"
 #include "base/component_export.h"
 #include "build/build_config.h"
 #include "ui/base/ui_base_types.h"
@@ -36,6 +35,12 @@ class COMPONENT_EXPORT(UI_BASE) BaseWindow {
   // Returns true if the window is fully restored (not Fullscreen, Maximized,
   // Minimized).
   static bool IsRestored(const BaseWindow& window);
+
+  // IsFullscreenFakedForTesting is set by tests that are not written robustly
+  // to asynchronous transitions to fullscreen (e.g, by using
+  // ScopedFakeNSWindowFullscreen on macOS).
+  static void SetFullscreenFakedForTesting(bool);
+  static bool IsFullscreenFakedForTesting();
 
   // Return a platform dependent identifier for this window.
   virtual gfx::NativeWindow GetNativeWindow() const = 0;

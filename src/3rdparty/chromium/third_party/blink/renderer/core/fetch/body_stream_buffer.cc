@@ -20,7 +20,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/script_cached_metadata_handler.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -227,8 +227,8 @@ void BodyStreamBuffer::StartLoading(FetchDataLoader* loader,
                                     FetchDataLoader::Client* client,
                                     ExceptionState& exception_state) {
   DCHECK(!loader_);
+  DCHECK(!keep_alive_);
   DCHECK(script_state_->ContextIsValid());
-  loader_ = loader;
   if (signal_) {
     if (signal_->aborted()) {
       client->Abort();
@@ -237,9 +237,11 @@ void BodyStreamBuffer::StartLoading(FetchDataLoader* loader,
     signal_->AddAlgorithm(
         WTF::Bind(&FetchDataLoader::Client::Abort, WrapWeakPersistent(client)));
   }
+  loader_ = loader;
   auto* handle = ReleaseHandle(exception_state);
   if (exception_state.HadException())
     return;
+  keep_alive_ = this;
   loader->Start(handle,
                 MakeGarbageCollected<LoaderClient>(
                     ExecutionContext::From(script_state_), this, client));
@@ -314,8 +316,7 @@ ScriptPromise BodyStreamBuffer::pull(ScriptState* script_state) {
 ScriptPromise BodyStreamBuffer::Cancel(ScriptState* script_state,
                                        ScriptValue reason) {
   DCHECK_EQ(script_state, script_state_);
-  if (Controller())
-    Controller()->Close();
+  Controller()->Close();
   CancelConsumer();
   return ScriptPromise::CastUndefined(script_state);
 }
@@ -338,13 +339,10 @@ void BodyStreamBuffer::OnStateChange() {
   ProcessData();
 }
 
-bool BodyStreamBuffer::HasPendingActivity() const {
-  return loader_;
-}
-
 void BodyStreamBuffer::ContextDestroyed() {
   CancelConsumer();
   UnderlyingSourceBase::ContextDestroyed();
+  keep_alive_.Clear();
 }
 
 bool BodyStreamBuffer::IsStreamReadable() const {
@@ -403,8 +401,7 @@ void BodyStreamBuffer::Trace(Visitor* visitor) const {
 }
 
 void BodyStreamBuffer::Abort() {
-  if (!Controller()) {
-    DCHECK(!GetExecutionContext());
+  if (!GetExecutionContext()) {
     DCHECK(!consumer_);
     return;
   }
@@ -430,6 +427,15 @@ void BodyStreamBuffer::GetError() {
   CancelConsumer();
 }
 
+void BodyStreamBuffer::RaiseOOMError() {
+  {
+    ScriptState::Scope scope(script_state_);
+    Controller()->Error(V8ThrowException::CreateRangeError(
+        script_state_->GetIsolate(), "Array buffer allocation failed"));
+  }
+  CancelConsumer();
+}
+
 void BodyStreamBuffer::CancelConsumer() {
   side_data_blob_.reset();
   if (consumer_) {
@@ -451,10 +457,14 @@ void BodyStreamBuffer::ProcessData() {
       return;
     DOMUint8Array* array = nullptr;
     if (result == BytesConsumer::Result::kOk) {
-      array =
-          DOMUint8Array::Create(reinterpret_cast<const unsigned char*>(buffer),
-                                SafeCast<uint32_t>(available));
+      array = DOMUint8Array::CreateOrNull(
+          reinterpret_cast<const unsigned char*>(buffer),
+          SafeCast<uint32_t>(available));
       result = consumer_->EndRead(available);
+      if (!array) {
+        RaiseOOMError();
+        return;
+      }
     }
     switch (result) {
       case BytesConsumer::Result::kOk:
@@ -486,14 +496,17 @@ void BodyStreamBuffer::ProcessData() {
 
 void BodyStreamBuffer::EndLoading() {
   DCHECK(loader_);
+  keep_alive_.Clear();
   loader_ = nullptr;
 }
 
 void BodyStreamBuffer::StopLoading() {
-  if (!loader_)
+  if (!loader_) {
+    DCHECK(!keep_alive_);
     return;
+  }
   loader_->Cancel();
-  loader_ = nullptr;
+  EndLoading();
 }
 
 BytesConsumer* BodyStreamBuffer::ReleaseHandle(

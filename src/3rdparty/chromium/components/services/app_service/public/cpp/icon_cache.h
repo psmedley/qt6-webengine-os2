@@ -10,15 +10,30 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
+#include "components/services/app_service/public/cpp/app_types.h"
 #include "components/services/app_service/public/cpp/icon_loader.h"
 #include "components/services/app_service/public/mojom/app_service.mojom.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace apps {
+
+// This is used for logging, so do not remove or reorder existing entries.
+enum class IconLoadingMethod {
+  kFromCache = 0,
+  kViaMojomCall = 1,
+  kViaNonMojomCall = 2,
+
+  // Add any new values above this one, and update kMaxValue to the highest
+  // enumerator value.
+  kMaxValue = kViaNonMojomCall,
+};
+
+// Records metrics when loading icons.
+void RecordIconLoadMethodMetrics(IconLoadingMethod icon_loading_method);
 
 // An IconLoader that caches the apps::mojom::IconType::kUncompressed
 // results of another (wrapped) IconLoader.
@@ -67,10 +82,24 @@ class IconCache : public IconLoader {
   };
 
   IconCache(IconLoader* wrapped_loader, GarbageCollectionPolicy gc_policy);
+
+  IconCache(const IconCache&) = delete;
+  IconCache& operator=(const IconCache&) = delete;
+
   ~IconCache() override;
 
   // IconLoader overrides.
-  apps::mojom::IconKeyPtr GetIconKey(const std::string& app_id) override;
+  absl::optional<IconKey> GetIconKey(const std::string& app_id) override;
+  std::unique_ptr<Releaser> LoadIconFromIconKey(
+      AppType app_type,
+      const std::string& app_id,
+      const IconKey& icon_key,
+      IconType icon_type,
+      int32_t size_hint_in_dip,
+      bool allow_placeholder_icon,
+      apps::LoadIconCallback callback) override;
+
+  // TODO(crbug.com/1253250): Will be removed soon.
   std::unique_ptr<IconLoader::Releaser> LoadIconFromIconKey(
       apps::mojom::AppType app_type,
       const std::string& app_id,
@@ -84,7 +113,7 @@ class IconCache : public IconLoader {
   // actively held.
   void SweepReleasedIcons();
 
-  void RemoveIcon(apps::mojom::AppType app_type, const std::string& app_id);
+  void RemoveIcon(AppType app_type, const std::string& app_id);
 
  private:
   class Value {
@@ -95,24 +124,28 @@ class IconCache : public IconLoader {
 
     Value();
 
+    IconValuePtr AsIconValue(IconType icon_type);
     apps::mojom::IconValuePtr AsIconValue(apps::mojom::IconType icon_type);
   };
 
-  void Update(const IconLoader::Key&, const apps::mojom::IconValue&);
-  void OnLoadIcon(IconLoader::Key,
-                  apps::mojom::Publisher::LoadIconCallback,
-                  apps::mojom::IconValuePtr);
+  void Update(const IconLoader::Key& key, const IconValue& icon_value);
+  void OnLoadIcon(const IconLoader::Key& key,
+                  apps::LoadIconCallback callback,
+                  IconValuePtr icon_value);
+
+  // TODO(crbug.com/1253250): Will be removed soon.
+  void OnLoadMojomIcon(IconLoader::Key,
+                       apps::mojom::Publisher::LoadIconCallback,
+                       apps::mojom::IconValuePtr);
   void OnRelease(IconLoader::Key);
 
   std::map<IconLoader::Key, Value> map_;
-  IconLoader* wrapped_loader_;
+  raw_ptr<IconLoader> wrapped_loader_;
   GarbageCollectionPolicy gc_policy_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<IconCache> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IconCache);
 };
 
 }  // namespace apps

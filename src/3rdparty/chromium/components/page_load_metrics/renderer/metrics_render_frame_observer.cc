@@ -49,22 +49,20 @@ class MojoPageTimingSender : public PageTimingSender {
 
   ~MojoPageTimingSender() override = default;
 
-  void SendTiming(
-      const mojom::PageLoadTimingPtr& timing,
-      const mojom::FrameMetadataPtr& metadata,
-      const std::vector<blink::UseCounterFeature>& new_features,
-      std::vector<mojom::ResourceDataUpdatePtr> resources,
-      const mojom::FrameRenderDataUpdate& render_data,
-      const mojom::CpuTimingPtr& cpu_timing,
-      mojom::DeferredResourceCountsPtr new_deferred_resource_data,
-      mojom::InputTimingPtr input_timing_delta,
-      const blink::MobileFriendliness& mobile_friendliness) override {
+  void SendTiming(const mojom::PageLoadTimingPtr& timing,
+                  const mojom::FrameMetadataPtr& metadata,
+                  const std::vector<blink::UseCounterFeature>& new_features,
+                  std::vector<mojom::ResourceDataUpdatePtr> resources,
+                  const mojom::FrameRenderDataUpdate& render_data,
+                  const mojom::CpuTimingPtr& cpu_timing,
+                  mojom::InputTimingPtr input_timing_delta,
+                  const absl::optional<blink::MobileFriendliness>&
+                      mobile_friendliness) override {
     DCHECK(page_load_metrics_);
     page_load_metrics_->UpdateTiming(
         limited_sending_mode_ ? CreatePageLoadTiming() : timing->Clone(),
         metadata->Clone(), new_features, std::move(resources),
-        render_data.Clone(), cpu_timing->Clone(),
-        std::move(new_deferred_resource_data), std::move(input_timing_delta),
+        render_data.Clone(), cpu_timing->Clone(), std::move(input_timing_delta),
         std::move(mobile_friendliness));
   }
 
@@ -111,6 +109,16 @@ void MetricsRenderFrameObserver::DidObserveInputDelay(
   page_timing_metrics_sender_->DidObserveInputDelay(input_delay);
 }
 
+void MetricsRenderFrameObserver::DidObserveUserInteraction(
+    base::TimeDelta max_event_duration,
+    blink::UserInteractionType interaction_type) {
+  if (!page_timing_metrics_sender_ || HasNoRenderFrame()) {
+    return;
+  }
+  page_timing_metrics_sender_->DidObserveUserInteraction(max_event_duration,
+                                                         interaction_type);
+}
+
 void MetricsRenderFrameObserver::DidChangeCpuTiming(base::TimeDelta time) {
   if (!page_timing_metrics_sender_)
     return;
@@ -139,31 +147,20 @@ void MetricsRenderFrameObserver::DidObserveLayoutShift(
                                                        after_input_or_scroll);
 }
 
-void MetricsRenderFrameObserver::DidObserveLayoutNg(
-    uint32_t all_block_count,
-    uint32_t ng_block_count,
-    uint32_t all_call_count,
-    uint32_t ng_call_count,
-    uint32_t flexbox_ng_block_count,
-    uint32_t grid_ng_block_count) {
+void MetricsRenderFrameObserver::DidObserveLayoutNg(uint32_t all_block_count,
+                                                    uint32_t ng_block_count,
+                                                    uint32_t all_call_count,
+                                                    uint32_t ng_call_count) {
   if (page_timing_metrics_sender_)
     page_timing_metrics_sender_->DidObserveLayoutNg(
-        all_block_count, ng_block_count, all_call_count, ng_call_count,
-        flexbox_ng_block_count, grid_ng_block_count);
-}
-
-void MetricsRenderFrameObserver::DidObserveLazyLoadBehavior(
-    blink::WebLocalFrameClient::LazyLoadBehavior lazy_load_behavior) {
-  if (page_timing_metrics_sender_)
-    page_timing_metrics_sender_->DidObserveLazyLoadBehavior(lazy_load_behavior);
+        all_block_count, ng_block_count, all_call_count, ng_call_count);
 }
 
 void MetricsRenderFrameObserver::DidStartResponse(
     const GURL& response_url,
     int request_id,
     const network::mojom::URLResponseHead& response_head,
-    network::mojom::RequestDestination request_destination,
-    blink::PreviewsState previews_state) {
+    network::mojom::RequestDestination request_destination) {
   if (provisional_frame_resource_data_use_ &&
       blink::IsRequestDestinationFrame(request_destination)) {
     // TODO(rajendrant): This frame request might start before the provisional
@@ -582,6 +579,10 @@ MetricsRenderFrameObserver::Timing MetricsRenderFrameObserver::GetTiming()
         perf.LargestImagePaint() == 0.0
             ? base::TimeDelta()
             : ClampDelta(perf.LargestImagePaint(), start);
+    timing->paint_timing->largest_contentful_paint->type =
+        perf.LargestContentfulPaintType();
+    timing->paint_timing->largest_contentful_paint->image_bpp =
+        perf.LargestContentfulPaintImageBPP();
   }
   if (perf.LargestTextPaintSize() > 0) {
     // LargestTextPaint and LargestTextPaintSize should be available at the
@@ -604,6 +605,8 @@ MetricsRenderFrameObserver::Timing MetricsRenderFrameObserver::GetTiming()
         perf.ExperimentalLargestImagePaint() == 0.0
             ? base::TimeDelta()
             : ClampDelta(perf.ExperimentalLargestImagePaint(), start);
+    timing->paint_timing->experimental_largest_contentful_paint->type =
+        perf.LargestContentfulPaintType();
   }
   if (perf.ExperimentalLargestTextPaintSize() > 0) {
     // ExperimentalLargestTextPaint and ExperimentalLargestTextPaintSize should
@@ -637,17 +640,15 @@ MetricsRenderFrameObserver::Timing MetricsRenderFrameObserver::GetTiming()
     // If we started parsing, record all parser durations such as the amount of
     // time blocked on script load, even if those values are zero.
     timing->parse_timing->parse_blocked_on_script_load_duration =
-        base::TimeDelta::FromSecondsD(perf.ParseBlockedOnScriptLoadDuration());
+        base::Seconds(perf.ParseBlockedOnScriptLoadDuration());
     timing->parse_timing
         ->parse_blocked_on_script_load_from_document_write_duration =
-        base::TimeDelta::FromSecondsD(
-            perf.ParseBlockedOnScriptLoadFromDocumentWriteDuration());
+        base::Seconds(perf.ParseBlockedOnScriptLoadFromDocumentWriteDuration());
     timing->parse_timing->parse_blocked_on_script_execution_duration =
-        base::TimeDelta::FromSecondsD(
-            perf.ParseBlockedOnScriptExecutionDuration());
+        base::Seconds(perf.ParseBlockedOnScriptExecutionDuration());
     timing->parse_timing
         ->parse_blocked_on_script_execution_from_document_write_duration =
-        base::TimeDelta::FromSecondsD(
+        base::Seconds(
             perf.ParseBlockedOnScriptExecutionFromDocumentWriteDuration());
   }
   if (perf.LastPortalActivatedPaint().has_value()) {

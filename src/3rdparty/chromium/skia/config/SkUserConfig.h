@@ -202,6 +202,22 @@ SK_API void SkDebugf_FileLine(const char* file,
 // (https://bugs.chromium.org/p/skia/issues/detail?id=4863)
 #define SK_SUPPORT_LEGACY_ANISOTROPIC_MIPMAP_SCALE
 
+// Temporarily insulate Chrome pixel tests from Skia LOD bias change on GPU.
+#define SK_USE_LEGACY_MIPMAP_LOD_BIAS
+
+// Temporarily insulate Chrome pixel tests from Skia kStrict_SrcRectConstraint
+// change to disable mipmapping.
+#define SK_LEGACY_ALLOW_STRICT_CONSTRAINT_MIPMAPPING
+
+// Many Chrome tests use kStrict_SrcRectConstraint where the src subset rect
+// actually contains the entire image. This prevents mipmap disablement in those
+// cases until Chrome codepaths can be updated to identify this case and either
+// pass kFast_SrcRectConstraint or use drawImage instead of drawImageRect.
+#define SK_DISABLE_STRICT_CONSTRAINT_FOR_ENTIRE_IMAGE
+
+// Temporarily insulate Chrome pixel tests from Skia's edge AA -> non-AA checks.
+#define SK_USE_LEGACY_EDGE_AA_DOWNGRADE
+
 // Max. verb count for paths rendered by the edge-AA tessellating path renderer.
 #define GR_AA_TESSELLATOR_MAX_VERB_COUNT 100
 
@@ -215,6 +231,9 @@ SK_API void SkDebugf_FileLine(const char* file,
 
 #define SK_LEGACY_INNER_JOINS
 
+// crbug.com/1313579
+#define SK_DISABLE_SKIF_TOLERANCE_ROUND
+
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
 
 /* In some places Skia can use static initializers for global initialization,
@@ -227,10 +246,6 @@ SK_API void SkDebugf_FileLine(const char* file,
 
 #define SK_IGNORE_BLURRED_RRECT_OPT
 #define SK_USE_DISCARDABLE_SCALEDIMAGECACHE
-
-// Slight layout tests differences when changing GPU dither from shader
-// calculations to a texture table.
-#define SK_DISABLE_GPU_TABLE_DITHER
 
 #define SK_ATTR_DEPRECATED          SK_NOTHING_ARG1
 #define GR_GL_CUSTOM_SETUP_HEADER   "GrGLConfig_chrome.h"

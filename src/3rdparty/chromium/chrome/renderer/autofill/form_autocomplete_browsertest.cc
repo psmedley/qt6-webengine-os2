@@ -70,7 +70,8 @@ class FakeContentAutofillDriver : public mojom::AutofillDriver {
   void SetFormToBeProbablySubmitted(
       const absl::optional<FormData>& form) override {}
 
-  void FormsSeen(const std::vector<FormData>& forms) override {}
+  void FormsSeen(const std::vector<FormData>& updated_forms,
+                 const std::vector<FormRendererId>& removed_forms) override {}
 
   void FormSubmitted(const FormData& form,
                      bool known_success,
@@ -309,6 +310,10 @@ void SimulateFillFormWithNonFillableFields(
 class FormAutocompleteTest : public ChromeRenderViewTest {
  public:
   FormAutocompleteTest() {}
+
+  FormAutocompleteTest(const FormAutocompleteTest&) = delete;
+  FormAutocompleteTest& operator=(const FormAutocompleteTest&) = delete;
+
   ~FormAutocompleteTest() override {}
 
  protected:
@@ -349,9 +354,6 @@ class FormAutocompleteTest : public ChromeRenderViewTest {
 
   FakeContentAutofillDriver fake_driver_;
   std::unique_ptr<test::FocusTestUtils> focus_test_utils_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FormAutocompleteTest);
 };
 
 // Tests that submitting a form generates FormSubmitted message with the form
@@ -464,7 +466,7 @@ TEST_F(FormAutocompleteTest,
 // compare field data within the forms.
 // TODO(kolos) Re-enable when the implementation of IsFormVisible is on-par
 // for these platforms.
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #define MAYBE_NoLongerVisibleBothNoActions DISABLED_NoLongerVisibleBothNoActions
 #else
 #define MAYBE_NoLongerVisibleBothNoActions NoLongerVisibleBothNoActions
@@ -870,14 +872,13 @@ TEST_F(FormAutocompleteTest, AcceptDataListSuggestion) {
   for (const auto& c : cases) {
     WebElement element = document.GetElementById(WebString::FromUTF8(c.id));
     ASSERT_FALSE(element.IsNull());
-    WebInputElement* input_element = blink::ToWebInputElement(&element);
-    ASSERT_TRUE(input_element);
-    FieldRendererId field_id(input_element->UniqueRendererFormControlId());
+    WebInputElement input_element = element.To<WebInputElement>();
+    FieldRendererId field_id(input_element.UniqueRendererFormControlId());
     // Select this element in |autofill_agent_|.
-    autofill_agent_->FormControlElementClicked(element.To<WebInputElement>());
+    autofill_agent_->FormControlElementClicked(input_element);
 
     autofill_agent_->AcceptDataListSuggestion(field_id, kSuggestion);
-    EXPECT_EQ(c.expected, input_element->Value().Utf8()) << "Case id: " << c.id;
+    EXPECT_EQ(c.expected, input_element.Value().Utf8()) << "Case id: " << c.id;
   }
 }
 

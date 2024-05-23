@@ -28,14 +28,14 @@
 
 #include <memory>
 
-#include "base/containers/mru_cache.h"
-#include "base/macros.h"
+#include "base/containers/lru_cache.h"
 #include "base/numerics/checked_math.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_webgl_context_attributes.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -45,6 +45,7 @@
 #include "third_party/blink/renderer/core/layout/content_change_type.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
+#include "third_party/blink/renderer/core/typed_arrays/nadc_typed_array_view.h"
 #include "third_party/blink/renderer/core/typed_arrays/typed_flexible_array_buffer_view.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_extension_name.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_texture.h"
@@ -87,8 +88,8 @@ class HTMLImageElement;
 class HTMLVideoElement;
 class ImageBitmap;
 class ImageData;
-class IntSize;
 class OESVertexArrayObject;
+class V8PredefinedColorSpace;
 class V8UnionHTMLCanvasElementOrOffscreenCanvas;
 class VideoFrame;
 class WebGLActiveInfo;
@@ -139,7 +140,13 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                                                  public DrawingBuffer::Client,
                                                  public NoAllocDirectCallHost {
  public:
+  WebGLRenderingContextBase(const WebGLRenderingContextBase&) = delete;
+  WebGLRenderingContextBase& operator=(const WebGLRenderingContextBase&) =
+      delete;
+
   ~WebGLRenderingContextBase() override;
+
+  NoAllocDirectCallHost* AsNoAllocDirectCallHost() final;
 
   HTMLCanvasElement* canvas() const {
     if (Host()->IsOffscreenCanvas())
@@ -169,6 +176,14 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
 
   int drawingBufferWidth() const;
   int drawingBufferHeight() const;
+  GLenum drawingBufferFormat() const;
+  V8PredefinedColorSpace drawingBufferColorSpace() const;
+  void setDrawingBufferColorSpace(const V8PredefinedColorSpace& color_space,
+                                  ExceptionState&);
+
+  V8PredefinedColorSpace unpackColorSpace() const;
+  void setUnpackColorSpace(const V8PredefinedColorSpace& color_space,
+                           ExceptionState&);
 
   void activeTexture(GLenum texture);
   void attachShader(WebGLProgram*, WebGLShader*);
@@ -187,11 +202,11 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                          GLenum dst_alpha);
 
   void bufferData(GLenum target, int64_t size, GLenum usage);
-  void bufferData(GLenum target, DOMArrayBuffer* data, GLenum usage);
+  void bufferData(GLenum target, DOMArrayBufferBase* data, GLenum usage);
   void bufferData(GLenum target,
                   MaybeShared<DOMArrayBufferView> data,
                   GLenum usage);
-  void bufferSubData(GLenum target, int64_t offset, DOMArrayBuffer* data);
+  void bufferSubData(GLenum target, int64_t offset, DOMArrayBufferBase* data);
   void bufferSubData(GLenum target,
                      int64_t offset,
                      const FlexibleArrayBufferView& data);
@@ -484,52 +499,52 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                      ExceptionState&);
 
   void uniform1f(const WebGLUniformLocation*, GLfloat x);
-  void uniform1fv(const WebGLUniformLocation*, const FlexibleFloat32Array&);
+  void uniform1fv(const WebGLUniformLocation*, NADCTypedArrayView<GLfloat>);
   void uniform1fv(const WebGLUniformLocation*, Vector<GLfloat>&);
   void uniform1i(const WebGLUniformLocation*, GLint x);
-  void uniform1iv(const WebGLUniformLocation*, const FlexibleInt32Array&);
+  void uniform1iv(const WebGLUniformLocation*, NADCTypedArrayView<GLint>);
   void uniform1iv(const WebGLUniformLocation*, Vector<GLint>&);
   void uniform2f(const WebGLUniformLocation*, GLfloat x, GLfloat y);
-  void uniform2fv(const WebGLUniformLocation*, const FlexibleFloat32Array&);
+  void uniform2fv(const WebGLUniformLocation*, NADCTypedArrayView<GLfloat>);
   void uniform2fv(const WebGLUniformLocation*, Vector<GLfloat>&);
   void uniform2i(const WebGLUniformLocation*, GLint x, GLint y);
-  void uniform2iv(const WebGLUniformLocation*, const FlexibleInt32Array&);
+  void uniform2iv(const WebGLUniformLocation*, NADCTypedArrayView<GLint>);
   void uniform2iv(const WebGLUniformLocation*, Vector<GLint>&);
   void uniform3f(const WebGLUniformLocation*, GLfloat x, GLfloat y, GLfloat z);
-  void uniform3fv(const WebGLUniformLocation*, const FlexibleFloat32Array&);
+  void uniform3fv(const WebGLUniformLocation*, NADCTypedArrayView<GLfloat>);
   void uniform3fv(const WebGLUniformLocation*, Vector<GLfloat>&);
   void uniform3i(const WebGLUniformLocation*, GLint x, GLint y, GLint z);
-  void uniform3iv(const WebGLUniformLocation*, const FlexibleInt32Array&);
+  void uniform3iv(const WebGLUniformLocation*, NADCTypedArrayView<GLint>);
   void uniform3iv(const WebGLUniformLocation*, Vector<GLint>&);
   void uniform4f(const WebGLUniformLocation*,
                  GLfloat x,
                  GLfloat y,
                  GLfloat z,
                  GLfloat w);
-  void uniform4fv(const WebGLUniformLocation*, const FlexibleFloat32Array&);
+  void uniform4fv(const WebGLUniformLocation*, NADCTypedArrayView<GLfloat>);
   void uniform4fv(const WebGLUniformLocation*, Vector<GLfloat>&);
   void uniform4i(const WebGLUniformLocation*,
                  GLint x,
                  GLint y,
                  GLint z,
                  GLint w);
-  void uniform4iv(const WebGLUniformLocation*, const FlexibleInt32Array&);
+  void uniform4iv(const WebGLUniformLocation*, NADCTypedArrayView<GLint>);
   void uniform4iv(const WebGLUniformLocation*, Vector<GLint>&);
   void uniformMatrix2fv(const WebGLUniformLocation*,
                         GLboolean transpose,
-                        MaybeShared<DOMFloat32Array> value);
+                        NADCTypedArrayView<GLfloat> value);
   void uniformMatrix2fv(const WebGLUniformLocation*,
                         GLboolean transpose,
                         Vector<GLfloat>& value);
   void uniformMatrix3fv(const WebGLUniformLocation*,
                         GLboolean transpose,
-                        MaybeShared<DOMFloat32Array> value);
+                        NADCTypedArrayView<GLfloat> value);
   void uniformMatrix3fv(const WebGLUniformLocation*,
                         GLboolean transpose,
                         Vector<GLfloat>& value);
   void uniformMatrix4fv(const WebGLUniformLocation*,
                         GLboolean transpose,
-                        MaybeShared<DOMFloat32Array> value);
+                        NADCTypedArrayView<GLfloat> value);
   void uniformMatrix4fv(const WebGLUniformLocation*,
                         GLboolean transpose,
                         Vector<GLfloat>& value);
@@ -538,16 +553,16 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   void validateProgram(WebGLProgram*);
 
   void vertexAttrib1f(GLuint index, GLfloat x);
-  void vertexAttrib1fv(GLuint index, MaybeShared<const DOMFloat32Array> values);
+  void vertexAttrib1fv(GLuint index, NADCTypedArrayView<const GLfloat> values);
   void vertexAttrib1fv(GLuint index, const Vector<GLfloat>& values);
   void vertexAttrib2f(GLuint index, GLfloat x, GLfloat y);
-  void vertexAttrib2fv(GLuint index, MaybeShared<const DOMFloat32Array> values);
+  void vertexAttrib2fv(GLuint index, NADCTypedArrayView<const GLfloat> values);
   void vertexAttrib2fv(GLuint index, const Vector<GLfloat>& values);
   void vertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z);
-  void vertexAttrib3fv(GLuint index, MaybeShared<const DOMFloat32Array> values);
+  void vertexAttrib3fv(GLuint index, NADCTypedArrayView<const GLfloat> values);
   void vertexAttrib3fv(GLuint index, const Vector<GLfloat>& values);
   void vertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
-  void vertexAttrib4fv(GLuint index, MaybeShared<const DOMFloat32Array> values);
+  void vertexAttrib4fv(GLuint index, NADCTypedArrayView<const GLfloat> values);
   void vertexAttrib4fv(GLuint index, const Vector<GLfloat>& values);
   void vertexAttribPointer(GLuint index,
                            GLint size,
@@ -610,7 +625,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
 
   // Returns the drawing buffer size after it is, probably, has scaled down
   // to the maximum supported canvas size.
-  IntSize DrawingBufferSize() const override;
+  gfx::Size DrawingBufferSize() const override;
   DrawingBuffer* GetDrawingBuffer() const;
 
   class TextureUnitState {
@@ -630,13 +645,13 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
 
   // TODO(https://crbug.com/1208480): This function applies only to 2D rendering
   // contexts, and should be removed.
-  CanvasColorParams CanvasRenderingContextColorParams() const override {
-    return color_params_;
-  }
+  SkColorInfo CanvasRenderingContextSkColorInfo() const override;
   scoped_refptr<StaticBitmapImage> GetImage() override;
   void SetFilterQuality(cc::PaintFlags::FilterQuality) override;
 
   V8UnionHTMLCanvasElementOrOffscreenCanvas* getHTMLOrOffscreenCanvas() const;
+
+  void drawingBufferStorage(GLenum sizedformat, GLsizei width, GLsizei height);
 
   void commit();
 
@@ -701,9 +716,15 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   bool PaintRenderingResultsToCanvas(SourceDrawingBuffer) override;
   bool CopyRenderingResultsFromDrawingBuffer(CanvasResourceProvider*,
                                              SourceDrawingBuffer) override;
+  void CopyRenderingResultsToVideoFrame(
+      WebGraphicsContext3DVideoFramePool*,
+      SourceDrawingBuffer,
+      const gfx::ColorSpace&,
+      VideoFrameCopyCompletedCallback&) override;
+
   cc::Layer* CcLayer() const override;
   void Stop() override;
-  void FinalizeFrame() override;
+  void FinalizeFrame(bool printing) override;
   bool PushFrame() override;
 
   // DrawingBuffer::Client implementation.
@@ -841,7 +862,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
     enum class CacheType { kImage, kVideo };
     LRUCanvasResourceProviderCache(wtf_size_t capacity, CacheType type);
     // The pointer returned is owned by the image buffer map.
-    CanvasResourceProvider* GetCanvasResourceProvider(const IntSize&);
+    CanvasResourceProvider* GetCanvasResourceProvider(const gfx::Size&);
 
    private:
     void BubbleToFront(wtf_size_t idx);
@@ -1124,6 +1145,69 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   };
 
   enum TexImageDimension { kTex2D, kTex3D };
+
+  // Parameters for all TexImage functions.
+  struct TexImageParams {
+    TexImageFunctionID function_id = kTexImage2D;
+    GLenum target = 0;
+    GLint level = 0;
+
+    // The internal format for the texture to create, only applies to
+    // TexImage calls.
+    GLint internalformat = 0;
+
+    // The offset into the destination in which to do the copy, only applies
+    // to TexSubImage calls.
+    GLint xoffset = 0;
+    GLint yoffset = 0;
+    GLint zoffset = 0;
+
+    // The volume to copy. This is always specified by TexSubImage calls, and
+    // is sometimes specified by TexImage calls. For TexImage calls where this
+    // is not specified, it must be populated with the native size of the source
+    // of the texture upload.
+    absl::optional<GLsizei> width;
+    absl::optional<GLsizei> height;
+    absl::optional<GLsizei> depth;
+
+    // The border parameter, only applies to TexImage calls.
+    GLint border = 0;
+
+    // The format and type of the source texel data.
+    GLenum format = 0;
+    GLenum type = 0;
+
+    // If true, then the input should be converted to premultiplied before
+    // being uploaded (and if false, then the input should be converted to
+    // unpremultiplied). For ImageBitmap sources, this must be set in such a way
+    // that it will have no effect.
+    bool unpack_premultiply_alpha = false;
+
+    // If true, then the input should be flipped vertically before being
+    // uploaded. For ImageBitmap sources, this must be set in such a way that it
+    // will have no effect.
+    bool unpack_flip_y = false;
+
+    // The offset into the source from which to do the copy (the terminology
+    // used here is pixels,rows,images instead of x,y,z).
+    GLint unpack_skip_pixels = 0;
+    GLint unpack_skip_rows = 0;
+    GLint unpack_skip_images = 0;
+
+    // The source's height for 3D copies. If we are doing a 3D copy, then we
+    // interpret the 2D source as 3D by treating it as vertical sequence of
+    // images with this height.
+    GLint unpack_image_height = 0;
+  };
+
+  // Populate the unpack state based on the context's current state. This is
+  // virtual because some state is only tracked in WebGL 2.
+  virtual void GetCurrentUnpackState(TexImageParams& params);
+
+  void TexImageSkPixmap(TexImageParams params,
+                        const SkPixmap* pixmap,
+                        bool pixmap_has_flip_y);
+
   void TexImage2DBase(GLenum target,
                       GLint level,
                       GLint internalformat,
@@ -1133,32 +1217,20 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                       GLenum format,
                       GLenum type,
                       const void* pixels);
-  void TexImageImpl(TexImageFunctionID,
-                    GLenum target,
-                    GLint level,
-                    GLint internalformat,
-                    GLint xoffset,
-                    GLint yoffset,
-                    GLint zoffset,
-                    GLenum format,
-                    GLenum type,
-                    Image*,
+  void TexImageImpl(TexImageParams params,
+                    Image* image,
                     WebGLImageConversion::ImageHtmlDomSource,
-                    bool flip_y,
-                    bool premultiply_alpha,
-                    const IntRect&,
-                    GLsizei depth,
-                    GLint unpack_image_height);
+                    bool image_has_flip_y);
   template <typename T>
-  IntRect GetTextureSourceSize(T* texture_source) {
-    return IntRect(0, 0, texture_source->width(), texture_source->height());
+  gfx::Rect GetTextureSourceSize(T* texture_source) {
+    return gfx::Rect(0, 0, texture_source->width(), texture_source->height());
   }
 
   template <typename T>
   bool ValidateTexImageSubRectangle(const char* function_name,
                                     TexImageFunctionID function_id,
                                     T* image,
-                                    const IntRect& sub_rect,
+                                    const gfx::Rect& sub_rect,
                                     GLsizei depth,
                                     GLint unpack_image_height,
                                     bool* selecting_sub_rectangle) {
@@ -1173,21 +1245,21 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
     int image_width = static_cast<int>(image->width());
     int image_height = static_cast<int>(image->height());
     *selecting_sub_rectangle =
-        !(sub_rect.X() == 0 && sub_rect.Y() == 0 &&
-          sub_rect.Width() == image_width && sub_rect.Height() == image_height);
+        !(sub_rect.x() == 0 && sub_rect.y() == 0 &&
+          sub_rect.width() == image_width && sub_rect.height() == image_height);
     // If the source image rect selects anything except the entire
     // contents of the image, assert that we're running WebGL 2.0 or
     // higher, since this should never happen for WebGL 1.0 (even though
     // the code could support it). If the image is null, that will be
     // signaled as an error later.
     DCHECK(!*selecting_sub_rectangle || IsWebGL2())
-        << "subRect = (" << sub_rect.Width() << " x " << sub_rect.Height()
-        << ") @ (" << sub_rect.X() << ", " << sub_rect.Y() << "), image = ("
+        << "subRect = (" << sub_rect.width() << " x " << sub_rect.height()
+        << ") @ (" << sub_rect.x() << ", " << sub_rect.y() << "), image = ("
         << image_width << " x " << image_height << ")";
 
-    if (!sub_rect.IsValid() || sub_rect.X() < 0 || sub_rect.Y() < 0 ||
-        sub_rect.MaxX() > image_width || sub_rect.MaxY() > image_height ||
-        sub_rect.Width() < 0 || sub_rect.Height() < 0) {
+    if (sub_rect.x() < 0 || sub_rect.y() < 0 ||
+        sub_rect.right() > image_width || sub_rect.bottom() > image_height ||
+        sub_rect.width() < 0 || sub_rect.height() < 0) {
       SynthesizeGLError(GL_INVALID_OPERATION, function_name,
                         "source sub-rectangle specified via pixel unpack "
                         "parameters is invalid");
@@ -1209,11 +1281,11 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
       if (unpack_image_height) {
         max_y_accessed = unpack_image_height;
       } else {
-        max_y_accessed = sub_rect.Height();
+        max_y_accessed = sub_rect.height();
       }
       max_y_accessed *= depth - 1;
-      max_y_accessed += sub_rect.Height();
-      max_y_accessed += sub_rect.Y();
+      max_y_accessed += sub_rect.height();
+      max_y_accessed += sub_rect.y();
 
       if (!max_y_accessed.IsValid()) {
         SynthesizeGLError(GL_INVALID_OPERATION, function_name,
@@ -1294,21 +1366,12 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   // Helper function to check input internalformat/format/type for functions
   // Tex{Sub}Image taking TexImageSource source data.  Generates GL error and
   // returns false if parameters are invalid.
-  bool ValidateTexImageSourceFormatAndType(const char* function_name,
-                                           TexImageFunctionType,
-                                           GLenum internalformat,
-                                           GLenum format,
-                                           GLenum type);
+  bool ValidateTexImageSourceFormatAndType(const TexImageParams& params);
 
   // Helper function to check input internalformat/format/type for functions
   // Tex{Sub}Image.  Generates GL error and returns false if parameters are
   // invalid.
-  bool ValidateTexFuncFormatAndType(const char* function_name,
-                                    TexImageFunctionType,
-                                    GLenum internalformat,
-                                    GLenum format,
-                                    GLenum type,
-                                    GLint level);
+  bool ValidateTexFuncFormatAndType(const TexImageParams& params);
 
   // Helper function to check readbuffer validity for copyTex{Sub}Image.
   // If yes, obtains the bound read framebuffer, returns true.
@@ -1361,28 +1424,20 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
     kSourceVideoFrame,
   };
 
-  // Helper function for tex{Sub}Image{2|3}D to check if the input
+  // Helper function for tex{Sub}Image{2|3}D to check if the input params'
   // format/type/level/target/width/height/depth/border/xoffset/yoffset/zoffset
   // are valid.  Otherwise, it would return quickly without doing other work.
-  bool ValidateTexFunc(const char* function_name,
-                       TexImageFunctionType,
+  // If `source_width` and `source_height` are specified, then overwrite
+  // params.width and params.height with those values before performing
+  // validation.
+  bool ValidateTexFunc(TexImageParams params,
                        TexFuncValidationSourceType,
-                       GLenum target,
-                       GLint level,
-                       GLenum internalformat,
-                       GLsizei width,
-                       GLsizei height,
-                       GLsizei depth,
-                       GLint border,
-                       GLenum format,
-                       GLenum type,
-                       GLint xoffset,
-                       GLint yoffset,
-                       GLint zoffset);
+                       absl::optional<GLsizei> source_width,
+                       absl::optional<GLsizei> source_height);
 
   // Helper function to check input width and height for functions {copy,
-  // compressed}Tex{Sub}Image.  Generates GL error and returns false if width or
-  // height is invalid.
+  // compressed}Tex{Sub}Image.  Generates GL error and returns false if width,
+  // height, or depth is invalid.
   bool ValidateTexFuncDimensions(const char* function_name,
                                  TexImageFunctionType,
                                  GLenum target,
@@ -1394,32 +1449,15 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   // Helper function to check input parameters for functions
   // {copy}Tex{Sub}Image.  Generates GL error and returns false if parameters
   // are invalid.
-  bool ValidateTexFuncParameters(const char* function_name,
-                                 TexImageFunctionType,
-                                 TexFuncValidationSourceType,
-                                 GLenum target,
-                                 GLint level,
-                                 GLenum internalformat,
-                                 GLsizei width,
-                                 GLsizei height,
-                                 GLsizei depth,
-                                 GLint border,
-                                 GLenum format,
-                                 GLenum type);
+  bool ValidateTexFuncParameters(const TexImageParams& params,
+                                 TexFuncValidationSourceType);
 
   enum NullDisposition { kNullAllowed, kNullNotAllowed, kNullNotReachable };
 
   // Helper function to validate that the given ArrayBufferView
   // is of the correct type and contains enough data for the texImage call.
   // Generates GL error and returns false if parameters are invalid.
-  bool ValidateTexFuncData(const char* function_name,
-                           TexImageDimension,
-                           GLint level,
-                           GLsizei width,
-                           GLsizei height,
-                           GLsizei depth,
-                           GLenum format,
-                           GLenum type,
+  bool ValidateTexFuncData(const TexImageParams& params,
                            DOMArrayBufferView* pixels,
                            NullDisposition,
                            GLuint src_offset);
@@ -1496,7 +1534,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   bool ValidateUniformMatrixParameters(const char* function_name,
                                        const WebGLUniformLocation*,
                                        GLboolean transpose,
-                                       DOMFloat32Array*,
+                                       const NADCTypedArrayView<GLfloat>&,
                                        GLsizei mod,
                                        GLuint src_offset,
                                        size_t src_length);
@@ -1509,14 +1547,13 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                                        GLuint src_offset,
                                        GLuint src_length);
 
-  template <typename WTFTypedArray>
-  bool ValidateUniformParameters(
-      const char* function_name,
-      const WebGLUniformLocation* location,
-      const TypedFlexibleArrayBufferView<WTFTypedArray>& v,
-      GLsizei required_min_size,
-      GLuint src_offset,
-      size_t src_length) {
+  template <typename T>
+  bool ValidateUniformParameters(const char* function_name,
+                                 const WebGLUniformLocation* location,
+                                 const NADCTypedArrayView<T>& v,
+                                 GLsizei required_min_size,
+                                 GLuint src_offset,
+                                 size_t src_length) {
     GLuint length;
     if (!base::CheckedNumeric<GLuint>(src_length).AssignIfValid(&length)) {
       SynthesizeGLError(GL_INVALID_VALUE, function_name,
@@ -1524,17 +1561,16 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
       return false;
     }
     GLuint array_length;
-    if (!base::CheckedNumeric<GLuint>(v.length())
-             .AssignIfValid(&array_length)) {
+    if (!base::CheckedNumeric<GLuint>(v.Size()).AssignIfValid(&array_length)) {
       SynthesizeGLError(GL_INVALID_VALUE, function_name, "array is too big");
       return false;
     }
-    if (!v.DataMaybeOnStack()) {
+    if (v.IsEmpty()) {
       SynthesizeGLError(GL_INVALID_VALUE, function_name, "no array");
       return false;
     }
     return ValidateUniformMatrixParameters(
-        function_name, location, false, v.DataMaybeOnStack(), array_length,
+        function_name, location, false, v.Data(), array_length,
         required_min_size, src_offset, length);
   }
 
@@ -1647,7 +1683,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   void EnableOrDisable(GLenum capability, bool enable);
 
   // Clamp the width and height to GL_MAX_VIEWPORT_DIMS.
-  IntSize ClampedCanvasSize() const;
+  gfx::Size ClampedCanvasSize() const;
 
   // First time called, if EXT_draw_buffers is supported, query the value;
   // otherwise return 0.  Later, return the cached value.
@@ -1691,119 +1727,39 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   ImageBitmap* TransferToImageBitmapBase(ScriptState*);
 
   // Helper functions for tex(Sub)Image2D && texSubImage3D
-  void TexImageHelperDOMArrayBufferView(TexImageFunctionID,
-                                        GLenum,
-                                        GLint,
-                                        GLint,
-                                        GLsizei,
-                                        GLsizei,
-                                        GLsizei,
-                                        GLint,
-                                        GLenum,
-                                        GLenum,
-                                        GLint,
-                                        GLint,
-                                        GLint,
+  void TexImageHelperDOMArrayBufferView(TexImageParams params,
                                         DOMArrayBufferView*,
                                         NullDisposition,
                                         GLuint src_offset);
-  void TexImageHelperImageData(TexImageFunctionID,
-                               GLenum,
-                               GLint,
-                               GLint,
-                               GLint,
-                               GLenum,
-                               GLenum,
-                               GLsizei,
-                               GLint,
-                               GLint,
-                               GLint,
-                               ImageData*,
-                               const IntRect&,
-                               GLint);
+  void TexImageHelperImageData(TexImageParams, ImageData*);
 
   void TexImageHelperHTMLImageElement(const SecurityOrigin*,
-                                      TexImageFunctionID,
-                                      GLenum,
-                                      GLint,
-                                      GLint,
-                                      GLenum,
-                                      GLenum,
-                                      GLint,
-                                      GLint,
-                                      GLint,
+                                      const TexImageParams& params,
                                       HTMLImageElement*,
-                                      const IntRect&,
-                                      GLsizei,
-                                      GLint,
                                       ExceptionState&);
 
   void TexImageHelperCanvasRenderingContextHost(const SecurityOrigin*,
-                                                TexImageFunctionID,
-                                                GLenum,
-                                                GLint,
-                                                GLint,
-                                                GLenum,
-                                                GLenum,
-                                                GLint,
-                                                GLint,
-                                                GLint,
+                                                TexImageParams params,
                                                 CanvasRenderingContextHost*,
-                                                const IntRect&,
-                                                GLsizei,
-                                                GLint,
                                                 ExceptionState&);
 
   void TexImageHelperHTMLVideoElement(const SecurityOrigin*,
-                                      TexImageFunctionID,
-                                      GLenum,
-                                      GLint,
-                                      GLint,
-                                      GLenum,
-                                      GLenum,
-                                      GLint,
-                                      GLint,
-                                      GLint,
+                                      TexImageParams,
                                       HTMLVideoElement*,
-                                      const IntRect&,
-                                      GLsizei,
-                                      GLint,
                                       ExceptionState&);
 
   void TexImageHelperVideoFrame(const SecurityOrigin*,
-                                TexImageFunctionID,
-                                GLenum,
-                                GLint,
-                                GLint,
-                                GLenum,
-                                GLenum,
-                                GLint,
-                                GLint,
-                                GLint,
+                                TexImageParams,
                                 VideoFrame*,
-                                const IntRect&,
-                                GLsizei,
-                                GLint,
                                 ExceptionState&);
 
-  void TexImageHelperImageBitmap(TexImageFunctionID,
-                                 GLenum,
-                                 GLint,
-                                 GLint,
-                                 GLenum,
-                                 GLenum,
-                                 GLint,
-                                 GLint,
-                                 GLint,
+  void TexImageHelperImageBitmap(TexImageParams params,
                                  ImageBitmap*,
-                                 const IntRect&,
-                                 GLsizei,
-                                 GLint,
                                  ExceptionState&);
   static const char* GetTexImageFunctionName(TexImageFunctionID);
-  IntRect SentinelEmptyRect();
-  IntRect SafeGetImageSize(Image*);
-  IntRect GetImageDataSize(ImageData*);
+  static TexImageFunctionType GetTexImageFunctionType(TexImageFunctionID);
+  gfx::Rect SafeGetImageSize(Image*);
+  gfx::Rect GetImageDataSize(ImageData*);
 
   // Helper implementing readPixels for WebGL 1.0 and 2.0.
   void ReadPixelsHelper(GLint x,
@@ -1834,38 +1790,20 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                                 Platform::GraphicsInfo* graphics_info);
 
   void TexImageHelperMediaVideoFrame(
-      TexImageFunctionID function_id,
-      GLenum target,
-      GLint level,
-      GLint internalformat,
-      GLenum format,
-      GLenum type,
-      GLint xoffset,
-      GLint yoffset,
-      GLint zoffset,
-      const IntRect& source_image_rect,
-      GLsizei depth,
-      GLint unpack_image_height,
-      WebGLTexture* texture,
+      TexImageParams,
+      WebGLTexture*,
       scoped_refptr<media::VideoFrame> media_video_frame,
       media::PaintCanvasVideoRenderer* video_renderer);
 
   // Copy from the source directly to the texture via the gpu, without
   // a read-back to system memory. Source can be a texture-backed
   // Image, or another canvas's WebGLRenderingContext.
-  void TexImageViaGPU(TexImageFunctionID,
+  void TexImageViaGPU(TexImageParams,
                       WebGLTexture*,
-                      GLenum,
-                      GLint,
-                      GLint,
-                      GLint,
-                      GLint,
                       AcceleratedStaticBitmapImage*,
                       WebGLRenderingContextBase*,
-                      const IntRect& source_sub_rectangle,
-                      bool premultiply_alpha,
-                      bool flip_y);
-  bool CanUseTexImageViaGPU(GLenum format, GLenum type);
+                      const gfx::Rect& source_sub_rectangle);
+  bool CanUseTexImageViaGPU(const TexImageParams&);
 
   const Platform::ContextType context_type_;
 
@@ -1900,15 +1838,19 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   bool checkProgramCompletionQueryAvailable(WebGLProgram* program,
                                             bool* completed);
   static constexpr unsigned int kMaxProgramCompletionQueries = 128u;
-  base::MRUCache<WebGLProgram*, GLuint> program_completion_queries_;
+  base::LRUCache<WebGLProgram*, GLuint> program_completion_queries_;
 
   int number_of_user_allocated_multisampled_renderbuffers_;
 
   bool has_been_drawn_to_ = false;
 
-  CanvasColorParams color_params_;
+  PredefinedColorSpace drawing_buffer_color_space_ =
+      PredefinedColorSpace::kSRGB;
+  PredefinedColorSpace unpack_color_space_ = PredefinedColorSpace::kSRGB;
 
-  DISALLOW_COPY_AND_ASSIGN(WebGLRenderingContextBase);
+  // The pixel format of the WebGL canvas. This is based on a deprecated
+  // specification that is being replaced by drawingBufferStorage.
+  CanvasPixelFormat pixel_format_deprecated_ = CanvasPixelFormat::kUint8;
 };
 
 template <>

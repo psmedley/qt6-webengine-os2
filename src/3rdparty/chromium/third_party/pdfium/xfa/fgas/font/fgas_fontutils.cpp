@@ -32,7 +32,7 @@ const FGAS_FONTUSB kFXGdiFontUSBTable[] = {
     {0x0750, 0x077F, 13, FX_CodePage::kFailure},
     {0x0780, 0x07BF, 72, FX_CodePage::kFailure},
     {0x07C0, 0x07FF, 14, FX_CodePage::kFailure},
-    {0x0800, 0x08FF, 999, FX_CodePage::kFailure},
+    {0x0800, 0x08FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0x0900, 0x097F, 15, FX_CodePage::kFailure},
     {0x0980, 0x09FF, 16, FX_CodePage::kFailure},
     {0x0A00, 0x0A7F, 17, FX_CodePage::kFailure},
@@ -61,19 +61,19 @@ const FGAS_FONTUSB kFXGdiFontUSBTable[] = {
     {0x1760, 0x177F, 84, FX_CodePage::kFailure},
     {0x1780, 0x17FF, 80, FX_CodePage::kFailure},
     {0x1800, 0x18AF, 81, FX_CodePage::kFailure},
-    {0x18B0, 0x18FF, 999, FX_CodePage::kFailure},
+    {0x18B0, 0x18FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0x1900, 0x194F, 93, FX_CodePage::kFailure},
     {0x1950, 0x197F, 94, FX_CodePage::kFailure},
     {0x1980, 0x19DF, 95, FX_CodePage::kFailure},
     {0x19E0, 0x19FF, 80, FX_CodePage::kFailure},
     {0x1A00, 0x1A1F, 96, FX_CodePage::kFailure},
-    {0x1A20, 0x1AFF, 999, FX_CodePage::kFailure},
+    {0x1A20, 0x1AFF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0x1B00, 0x1B7F, 27, FX_CodePage::kFailure},
     {0x1B80, 0x1BBF, 112, FX_CodePage::kFailure},
-    {0x1BC0, 0x1BFF, 999, FX_CodePage::kFailure},
+    {0x1BC0, 0x1BFF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0x1C00, 0x1C4F, 113, FX_CodePage::kFailure},
     {0x1C50, 0x1C7F, 114, FX_CodePage::kFailure},
-    {0x1C80, 0x1CFF, 999, FX_CodePage::kFailure},
+    {0x1C80, 0x1CFF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0x1D00, 0x1D7F, 4, FX_CodePage::kFailure},
     {0x1D80, 0x1DBF, 4, FX_CodePage::kFailure},
     {0x1DC0, 0x1DFF, 6, FX_CodePage::kFailure},
@@ -124,7 +124,7 @@ const FGAS_FONTUSB kFXGdiFontUSBTable[] = {
     {0x2E00, 0x2E7F, 31, FX_CodePage::kFailure},
     {0x2E80, 0x2EFF, 59, FX_CodePage::kFailure},
     {0x2F00, 0x2FDF, 59, FX_CodePage::kFailure},
-    {0x2FE0, 0x2FEF, 999, FX_CodePage::kFailure},
+    {0x2FE0, 0x2FEF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0x2FF0, 0x2FFF, 59, FX_CodePage::kFailure},
     {0x3000, 0x303F, 48, FX_CodePage::kFailure},
     {0x3040, 0x309F, 49, FX_CodePage::kShiftJIS},
@@ -149,24 +149,24 @@ const FGAS_FONTUSB kFXGdiFontUSBTable[] = {
     {0x9FA6, 0x9FFF, 59, FX_CodePage::kFailure},
     {0xA000, 0xA48F, 83, FX_CodePage::kFailure},
     {0xA490, 0xA4CF, 83, FX_CodePage::kFailure},
-    {0xA4D0, 0xA4FF, 999, FX_CodePage::kFailure},
+    {0xA4D0, 0xA4FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0xA500, 0xA63F, 12, FX_CodePage::kFailure},
     {0xA640, 0xA69F, 9, FX_CodePage::kFailure},
-    {0xA6A0, 0xA6FF, 999, FX_CodePage::kFailure},
+    {0xA6A0, 0xA6FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0xA700, 0xA71F, 5, FX_CodePage::kFailure},
     {0xA720, 0xA7FF, 29, FX_CodePage::kFailure},
     {0xA800, 0xA82F, 100, FX_CodePage::kFailure},
-    {0xA830, 0xA8FF, 999, FX_CodePage::kFailure},
+    {0xA830, 0xA8FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0xA840, 0xA87F, 53, FX_CodePage::kFailure},
     {0xA880, 0xA8DF, 115, FX_CodePage::kFailure},
-    {0xA8E0, 0xA8FF, 999, FX_CodePage::kFailure},
+    {0xA8E0, 0xA8FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0xA900, 0xA92F, 116, FX_CodePage::kFailure},
     {0xA930, 0xA95F, 117, FX_CodePage::kFailure},
-    {0xA960, 0xA9FF, 999, FX_CodePage::kFailure},
+    {0xA960, 0xA9FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0xAA00, 0xAA5F, 118, FX_CodePage::kFailure},
-    {0xAA60, 0xABFF, 999, FX_CodePage::kFailure},
+    {0xAA60, 0xABFF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0xAC00, 0xD7AF, 56, FX_CodePage::kHangul},
-    {0xD7B0, 0xD7FF, 999, FX_CodePage::kFailure},
+    {0xD7B0, 0xD7FF, FGAS_FONTUSB::kNoBitField, FX_CodePage::kFailure},
     {0xD800, 0xDB7F, 57, FX_CodePage::kFailure},
     {0xDB80, 0xDBFF, 57, FX_CodePage::kFailure},
     {0xDC00, 0xDFFF, 57, FX_CodePage::kFailure},
@@ -190,7 +190,7 @@ const FGAS_FONTUSB kFXGdiFontUSBTable[] = {
     {0xFFA0, 0xFFEF, 68, FX_CodePage::kFailure},
 };
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 const FGAS_FontInfo kXFAFontsMap[] = {
     {0x01d5d33e, "SimSun", "Arial", 0, FX_CodePage::kChineseSimplified},
     {0x01e4f102, "YouYuan", "Arial", 1, FX_CodePage::kChineseSimplified},
@@ -540,7 +540,7 @@ const FGAS_FontInfo kXFAFontsMap[] = {
     {0xfef135f8, "AdobeHeitiStd-Regular", "Batang,Century,Dotum", 0,
      FX_CodePage::kChineseSimplified},
 };
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 const FGAS_FontInfo kXFAFontsMap[] = {
     {0x01d5d33e, "SimSun", "STHeiti,Heiti TC,STFangsong", 0,
      FX_CodePage::kChineseSimplified},
@@ -1103,7 +1103,7 @@ const FGAS_FontInfo kXFAFontsMap[] = {
     {0xfef135f8, "AdobeHeitiStd-Regular", "Heiti TC,STHeiti", 0,
      FX_CodePage::kChineseSimplified},
 };
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
 const FGAS_FontInfo kXFAFontsMap[] = {
     {0x01d5d33e, "SimSun", "Droid Sans Fallback", 0,
      FX_CodePage::kChineseSimplified},
@@ -1747,7 +1747,7 @@ const FGAS_FontInfo kXFAFontsMap[] = {
     {0xfef135f8, "AdobeHeitiStd-Regular", "Droid Sans Fallback", 0,
      FX_CodePage::kChineseSimplified},
 };
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 const FGAS_FontInfo kXFAFontsMap[] = {
     {0x01d5d33e, "SimSun",
      "WenQuanYi Zen Hei Mono,AR PL UMing CN,AR PL UMing HK,AR PL UMing TW,AR "

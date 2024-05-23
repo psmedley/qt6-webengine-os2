@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/containers/flat_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "components/viz/common/resources/resource_format.h"
@@ -20,10 +20,13 @@
 #include "gpu/command_buffer/service/shared_image_backing.h"
 #include "gpu/command_buffer/service/shared_image_manager.h"
 #include "gpu/command_buffer/service/shared_image_representation.h"
+#include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
 #include "gpu/ipc/common/surface_handle.h"
+#include "ui/gfx/buffer_types.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_fence.h"
+#include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/native_pixmap.h"
 
 namespace gpu {
@@ -37,25 +40,33 @@ class SharedImageBackingOzone final : public ClearTrackingSharedImageBacking {
   SharedImageBackingOzone(
       const Mailbox& mailbox,
       viz::ResourceFormat format,
+      gfx::BufferPlane plane,
       const gfx::Size& size,
       const gfx::ColorSpace& color_space,
       GrSurfaceOrigin surface_origin,
       SkAlphaType alpha_type,
       uint32_t usage,
-      SharedContextState* context_state,
+      scoped_refptr<SharedContextState> context_state,
       scoped_refptr<gfx::NativePixmap> pixmap,
       scoped_refptr<base::RefCountedData<DawnProcTable>> dawn_procs);
+
+  SharedImageBackingOzone(const SharedImageBackingOzone&) = delete;
+  SharedImageBackingOzone& operator=(const SharedImageBackingOzone&) = delete;
 
   ~SharedImageBackingOzone() override;
 
   // gpu::SharedImageBacking:
   void Update(std::unique_ptr<gfx::GpuFence> in_fence) override;
   bool ProduceLegacyMailbox(MailboxManager* mailbox_manager) override;
+  scoped_refptr<gfx::NativePixmap> GetNativePixmap() override;
   bool WritePixels(base::span<const uint8_t> pixel_data,
                    SharedContextState* const shared_context_state,
                    viz::ResourceFormat format,
                    const gfx::Size& size,
                    SkAlphaType alpha_type);
+  void SetSharedMemoryWrapper(SharedMemoryRegionWrapper wrapper);
+
+  enum class AccessStream { kGL, kVulkan, kWebGPU, kOverlay, kLast };
 
  protected:
   std::unique_ptr<SharedImageRepresentationDawn> ProduceDawn(
@@ -82,8 +93,9 @@ class SharedImageBackingOzone final : public ClearTrackingSharedImageBacking {
       VaapiDependenciesFactory* dep_factory) override;
 
  private:
-  friend class SharedImageRepresentationGLOzone;
+  friend class SharedImageRepresentationGLOzoneShared;
   friend class SharedImageRepresentationDawnOzone;
+  friend class SharedImageRepresentationSkiaVkOzone;
   class SharedImageRepresentationVaapiOzone;
   class SharedImageRepresentationOverlayOzone;
 
@@ -93,20 +105,30 @@ class SharedImageBackingOzone final : public ClearTrackingSharedImageBacking {
       std::vector<GrBackendSemaphore> signal_semaphores,
       SharedContextState* const shared_context_state);
 
-  bool NeedsSynchronization() const;
-
-  void BeginAccess(std::vector<gfx::GpuFenceHandle>* fences);
-  void EndAccess(bool readonly, gfx::GpuFenceHandle fence);
+  bool BeginAccess(bool readonly,
+                   AccessStream access_stream,
+                   std::vector<gfx::GpuFenceHandle>* fences,
+                   bool& need_end_fence);
+  void EndAccess(bool readonly,
+                 AccessStream access_stream,
+                 gfx::GpuFenceHandle fence);
 
   // Indicates if this backing produced a VASurface that may have pending work.
   bool has_pending_va_writes_ = false;
   std::unique_ptr<VaapiDependencies> vaapi_deps_;
+  gfx::BufferPlane plane_;
+  uint32_t reads_in_progress_ = 0;
+  bool is_write_in_progress_ = false;
+  int write_streams_count_;
+
   scoped_refptr<gfx::NativePixmap> pixmap_;
   scoped_refptr<base::RefCountedData<DawnProcTable>> dawn_procs_;
   gfx::GpuFenceHandle write_fence_;
-  std::vector<gfx::GpuFenceHandle> read_fences_;
-
-  DISALLOW_COPY_AND_ASSIGN(SharedImageBackingOzone);
+  base::flat_map<AccessStream, gfx::GpuFenceHandle> read_fences_;
+  AccessStream last_write_stream_;
+  // Set for shared memory GMB.
+  SharedMemoryRegionWrapper shared_memory_wrapper_;
+  scoped_refptr<SharedContextState> context_state_;
 };
 
 }  // namespace gpu

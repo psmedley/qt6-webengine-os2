@@ -12,11 +12,11 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/i18n/time_formatting.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -93,6 +93,10 @@ content::WebUIDataSource* CreateWebRtcLogsUIHTMLSource() {
 class WebRtcLogsDOMHandler final : public WebUIMessageHandler {
  public:
   explicit WebRtcLogsDOMHandler(Profile* profile);
+
+  WebRtcLogsDOMHandler(const WebRtcLogsDOMHandler&) = delete;
+  WebRtcLogsDOMHandler& operator=(const WebRtcLogsDOMHandler&) = delete;
+
   ~WebRtcLogsDOMHandler() override;
 
   // WebUIMessageHandler implementation.
@@ -161,8 +165,6 @@ class WebRtcLogsDOMHandler final : public WebUIMessageHandler {
 
   // Factory for creating weak references to instances of this class.
   base::WeakPtrFactory<WebRtcLogsDOMHandler> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebRtcLogsDOMHandler);
 };
 
 WebRtcLogsDOMHandler::WebRtcLogsDOMHandler(Profile* profile)
@@ -186,7 +188,7 @@ WebRtcLogsDOMHandler::~WebRtcLogsDOMHandler() {
 void WebRtcLogsDOMHandler::RegisterMessages() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "requestWebRtcLogsList",
       base::BindRepeating(&WebRtcLogsDOMHandler::HandleRequestWebRtcLogs,
                           base::Unretained(this)));
@@ -194,7 +196,7 @@ void WebRtcLogsDOMHandler::RegisterMessages() {
 
 void WebRtcLogsDOMHandler::HandleRequestWebRtcLogs(
     const base::ListValue* args) {
-  std::string callback_id = args->GetList()[0].GetString();
+  std::string callback_id = args->GetListDeprecated()[0].GetString();
   AllowJavascript();
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   LoadWebRtcTextLogs(callback_id);

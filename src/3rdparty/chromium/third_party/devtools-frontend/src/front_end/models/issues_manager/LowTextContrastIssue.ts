@@ -19,17 +19,17 @@ const str_ = i18n.i18n.registerUIStrings('models/issues_manager/LowTextContrastI
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 export class LowTextContrastIssue extends Issue {
-  private issueDetails: Protocol.Audits.LowTextContrastIssueDetails;
+  #issueDetails: Protocol.Audits.LowTextContrastIssueDetails;
 
-  constructor(issueDetails: Protocol.Audits.LowTextContrastIssueDetails) {
-    super('LowTextContrastIssue');
-    this.issueDetails = issueDetails;
+  constructor(issueDetails: Protocol.Audits.LowTextContrastIssueDetails, issuesModel: SDK.IssuesModel.IssuesModel) {
+    super('LowTextContrastIssue', issuesModel);
+    this.#issueDetails = issueDetails;
   }
 
   primaryKey(): string {
     // We intend to keep only one issue per element so other issues for the element will be discarded even
     // if the issue content is slightly different.
-    return `${this.code()}-(${this.issueDetails.violatingNodeId})`;
+    return `${this.code()}-(${this.#issueDetails.violatingNodeId})`;
   }
 
   getCategory(): IssueCategory {
@@ -37,7 +37,7 @@ export class LowTextContrastIssue extends Issue {
   }
 
   details(): Protocol.Audits.LowTextContrastIssueDetails {
-    return this.issueDetails;
+    return this.#issueDetails;
   }
 
   getDescription(): MarkdownIssueDescription {
@@ -56,13 +56,13 @@ export class LowTextContrastIssue extends Issue {
     return IssueKind.Improvement;
   }
 
-  static fromInspectorIssue(_issuesModel: SDK.IssuesModel.IssuesModel, inspectorIssue: Protocol.Audits.InspectorIssue):
+  static fromInspectorIssue(issuesModel: SDK.IssuesModel.IssuesModel, inspectorIssue: Protocol.Audits.InspectorIssue):
       LowTextContrastIssue[] {
     const lowTextContrastIssueDetails = inspectorIssue.details.lowTextContrastIssueDetails;
     if (!lowTextContrastIssueDetails) {
       console.warn('LowTextContrast issue without details received.');
       return [];
     }
-    return [new LowTextContrastIssue(lowTextContrastIssueDetails)];
+    return [new LowTextContrastIssue(lowTextContrastIssueDetails, issuesModel)];
   }
 }

@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "build/chromeos_buildflags.h"
 #include "components/feedback/system_logs/system_logs_source.h"
@@ -25,6 +26,10 @@ class LogSourceAccessManager;
 class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
  public:
   explicit FeedbackPrivateAPI(content::BrowserContext* context);
+
+  FeedbackPrivateAPI(const FeedbackPrivateAPI&) = delete;
+  FeedbackPrivateAPI& operator=(const FeedbackPrivateAPI&) = delete;
+
   ~FeedbackPrivateAPI() override;
 
   scoped_refptr<FeedbackService> GetService() const;
@@ -43,6 +48,7 @@ class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
       api::feedback_private::FeedbackFlow flow,
       bool from_assistant,
       bool include_bluetooth_logs,
+      bool show_questionnaire,
       bool from_chrome_labs_or_kaleidoscope);
 
   void RequestFeedbackForFlow(const std::string& description_template,
@@ -53,6 +59,7 @@ class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
                               api::feedback_private::FeedbackFlow flow,
                               bool from_assistant = false,
                               bool include_bluetooth_logs = false,
+                              bool show_questionnaire = false,
                               bool from_chrome_labs_or_kaleidoscope = false);
 
   // BrowserContextKeyedAPI implementation.
@@ -72,14 +79,12 @@ class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
 
   static const bool kServiceHasOwnInstanceInIncognito = true;
 
-  content::BrowserContext* const browser_context_;
+  const raw_ptr<content::BrowserContext> browser_context_;
   scoped_refptr<FeedbackService> service_;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<LogSourceAccessManager> log_source_access_manager_;
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
-
-  DISALLOW_COPY_AND_ASSIGN(FeedbackPrivateAPI);
 };
 
 // Feedback strings.

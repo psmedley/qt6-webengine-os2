@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "ash/display/window_tree_host_manager.h"
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "components/exo/vsync_timing_manager.h"
 #include "components/exo/wm_helper.h"
@@ -52,6 +52,10 @@ namespace exo {
 class WMHelperChromeOS : public WMHelper, public VSyncTimingManager::Delegate {
  public:
   WMHelperChromeOS();
+
+  WMHelperChromeOS(const WMHelperChromeOS&) = delete;
+  WMHelperChromeOS& operator=(const WMHelperChromeOS&) = delete;
+
   ~WMHelperChromeOS() override;
   static WMHelperChromeOS* GetInstance();
   void AddTabletModeObserver(ash::TabletModeObserver* observer);
@@ -89,6 +93,7 @@ class WMHelperChromeOS : public WMHelper, public VSyncTimingManager::Delegate {
   aura::Window* GetFocusedWindow() const override;
   aura::Window* GetRootWindowForNewWindows() const override;
   aura::client::CursorClient* GetCursorClient() override;
+  aura::client::DragDropClient* GetDragDropClient() override;
   void AddPreTargetHandler(ui::EventHandler* handler) override;
   void PrependPreTargetHandler(ui::EventHandler* handler) override;
   void RemovePreTargetHandler(ui::EventHandler* handler) override;
@@ -99,9 +104,6 @@ class WMHelperChromeOS : public WMHelper, public VSyncTimingManager::Delegate {
   double GetDeviceScaleFactorForWindow(aura::Window* window) const override;
   void SetDefaultScaleCancellation(bool default_scale_cancellation) override;
 
-  void SetImeBlocked(aura::Window* window, bool ime_blocked) override;
-  bool IsImeBlocked(aura::Window* window) const override;
-
   LifetimeManager* GetLifetimeManager() override;
   aura::client::CaptureClient* GetCaptureClient() override;
 
@@ -110,10 +112,7 @@ class WMHelperChromeOS : public WMHelper, public VSyncTimingManager::Delegate {
   aura::client::DragUpdateInfo OnDragUpdated(
       const ui::DropTargetEvent& event) override;
   void OnDragExited() override;
-  ui::mojom::DragOperation OnPerformDrop(
-      const ui::DropTargetEvent& event,
-      std::unique_ptr<ui::OSExchangeData> data) override;
-  WMHelper::DropCallback GetDropCallback(
+  aura::client::DragDropDelegate::DropCallback GetDropCallback(
       const ui::DropTargetEvent& event) override;
 
   // Overridden from VSyncTimingManager::Delegate:
@@ -122,12 +121,16 @@ class WMHelperChromeOS : public WMHelper, public VSyncTimingManager::Delegate {
       override;
 
  private:
+  void PerformDrop(
+      std::vector<WMHelper::DragDropObserver::DropCallback> drop_callbacks,
+      std::unique_ptr<ui::OSExchangeData> data,
+      ui::mojom::DragOperation& output_drag_op);
+
   base::ObserverList<DragDropObserver>::Unchecked drag_drop_observers_;
   LifetimeManager lifetime_manager_;
   VSyncTimingManager vsync_timing_manager_;
   bool default_scale_cancellation_ = true;
-
-  DISALLOW_COPY_AND_ASSIGN(WMHelperChromeOS);
+  base::WeakPtrFactory<WMHelperChromeOS> weak_ptr_factory_{this};
 };
 
 // Returnsn the default device scale factor used for

@@ -14,10 +14,8 @@
 #include "base/callback.h"
 #include "base/check.h"
 #include "base/location.h"
-#include "base/time/time.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "pdf/paint_ready_rect.h"
-#include "pdf/ppapi_migration/callback.h"
-#include "pdf/ppapi_migration/geometry_conversions.h"
 #include "pdf/ppapi_migration/graphics.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
@@ -161,11 +159,9 @@ void PaintManager::EnsureCallbackPending() {
   if (manual_callback_pending_)
     return;
 
-  client_->ScheduleTaskOnMainThread(
-      FROM_HERE,
-      base::BindOnce(&PaintManager::OnManualCallbackComplete,
-                     weak_factory_.GetWeakPtr()),
-      /*result=*/0, base::TimeDelta());
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&PaintManager::OnManualCallbackComplete,
+                                weak_factory_.GetWeakPtr()));
   manual_callback_pending_ = true;
 }
 
@@ -195,6 +191,7 @@ void PaintManager::DoPaint() {
     if (old_size != new_size || !graphics_) {
       graphics_ = client_->CreatePaintGraphics(new_size);
       graphics_need_to_be_bound_ = true;
+      device_scale_ = 1.0f;
 
       // Since we're binding a new one, all of the callbacks have been canceled.
       manual_callback_pending_ = false;
@@ -202,7 +199,7 @@ void PaintManager::DoPaint() {
       weak_factory_.InvalidateWeakPtrs();
     }
 
-    if (pending_device_scale_ != 1.0)
+    if (pending_device_scale_ != device_scale_)
       graphics_->SetScale(1.0 / pending_device_scale_);
     device_scale_ = pending_device_scale_;
 
@@ -275,7 +272,7 @@ void PaintManager::Flush() {
   DCHECK(flush_pending_);
 }
 
-void PaintManager::OnFlushComplete(int32_t) {
+void PaintManager::OnFlushComplete() {
   DCHECK(flush_pending_);
   flush_pending_ = false;
 
@@ -290,7 +287,7 @@ void PaintManager::OnFlushComplete(int32_t) {
   }
 }
 
-void PaintManager::OnManualCallbackComplete(int32_t) {
+void PaintManager::OnManualCallbackComplete() {
   DCHECK(manual_callback_pending_);
   manual_callback_pending_ = false;
 

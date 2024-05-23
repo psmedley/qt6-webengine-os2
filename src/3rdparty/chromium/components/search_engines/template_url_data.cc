@@ -45,7 +45,6 @@ TemplateURLData::TemplateURLData()
       usage_count(0),
       prepopulate_id(0),
       sync_guid(base::GenerateGUID()),
-      is_active(ActiveStatus::kTrue),
       keyword_(u"dummy"),
       url_("x") {}
 
@@ -66,9 +65,10 @@ TemplateURLData::TemplateURLData(const std::u16string& name,
                                  base::StringPiece search_url_post_params,
                                  base::StringPiece suggest_url_post_params,
                                  base::StringPiece image_url_post_params,
+                                 base::StringPiece side_search_param,
                                  base::StringPiece favicon_url,
                                  base::StringPiece encoding,
-                                 const base::ListValue& alternate_urls_list,
+                                 const base::Value& alternate_urls_list,
                                  bool preconnect_to_search_url,
                                  int prepopulate_id)
     : suggestions_url(suggest_url),
@@ -80,6 +80,7 @@ TemplateURLData::TemplateURLData(const std::u16string& name,
       search_url_post_params(search_url_post_params),
       suggestions_url_post_params(suggest_url_post_params),
       image_url_post_params(image_url_post_params),
+      side_search_param(side_search_param),
       favicon_url(favicon_url),
       safe_for_autoreplace(true),
       id(0),
@@ -95,11 +96,16 @@ TemplateURLData::TemplateURLData(const std::u16string& name,
   SetKeyword(keyword);
   SetURL(std::string(search_url));
   input_encodings.push_back(std::string(encoding));
-  for (size_t i = 0; i < alternate_urls_list.GetSize(); ++i) {
-    std::string alternate_url;
-    alternate_urls_list.GetString(i, &alternate_url);
-    DCHECK(!alternate_url.empty());
-    alternate_urls.push_back(alternate_url);
+  if (alternate_urls_list.is_list()) {
+    auto alternate_urls_list_view = alternate_urls_list.GetListDeprecated();
+    for (size_t i = 0; i < alternate_urls_list_view.size(); ++i) {
+      const std::string* alternate_url =
+          alternate_urls_list_view[i].GetIfString();
+      DCHECK(alternate_url && !alternate_url->empty());
+      if (alternate_url) {
+        alternate_urls.push_back(*alternate_url);
+      }
+    }
   }
 }
 

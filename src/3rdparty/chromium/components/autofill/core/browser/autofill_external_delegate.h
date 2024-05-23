@@ -11,7 +11,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill/core/browser/ui/autofill_popup_delegate.h"
 #include "components/autofill/core/browser/ui/suggestion.h"
@@ -36,6 +36,10 @@ class AutofillExternalDelegate : public AutofillPopupDelegate {
   // BrowserAutofillManager and AutofillDriver.
   AutofillExternalDelegate(BrowserAutofillManager* manager,
                            AutofillDriver* driver);
+
+  AutofillExternalDelegate(const AutofillExternalDelegate&) = delete;
+  AutofillExternalDelegate& operator=(const AutofillExternalDelegate&) = delete;
+
   virtual ~AutofillExternalDelegate();
 
   // AutofillPopupDelegate implementation.
@@ -43,7 +47,8 @@ class AutofillExternalDelegate : public AutofillPopupDelegate {
   void OnPopupHidden() override;
   void OnPopupSuppressed() override;
   void DidSelectSuggestion(const std::u16string& value,
-                           int frontend_id) override;
+                           int frontend_id,
+                           const std::string& backend_id) override;
   void DidAcceptSuggestion(const std::u16string& value,
                            int frontend_id,
                            const std::string& backend_id,
@@ -147,11 +152,11 @@ class AutofillExternalDelegate : public AutofillPopupDelegate {
   // Returns the text (i.e. |Suggestion| value) for Chrome autofill options.
   std::u16string GetSettingsSuggestionValue() const;
 
-  BrowserAutofillManager* const manager_;  // weak.
+  const raw_ptr<BrowserAutofillManager> manager_;  // weak.
 
   // Provides driver-level context to the shared code of the component. Must
   // outlive this object.
-  AutofillDriver* const driver_;  // weak
+  const raw_ptr<AutofillDriver> driver_;  // weak
 
   // The ID of the last request sent for form field Autofill.  Used to ignore
   // out of date responses.
@@ -183,8 +188,6 @@ class AutofillExternalDelegate : public AutofillPopupDelegate {
   base::OnceClosure deletion_callback_;
 
   base::WeakPtrFactory<AutofillExternalDelegate> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AutofillExternalDelegate);
 };
 
 }  // namespace autofill

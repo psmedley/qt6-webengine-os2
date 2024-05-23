@@ -19,13 +19,13 @@
 
 #if SK_SUPPORT_GPU
 #include "include/gpu/GrRecordingContext.h"
-#include "src/gpu/GrCaps.h"
-#include "src/gpu/GrColorSpaceXform.h"
-#include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/GrTextureProxy.h"
-#include "src/gpu/SkGr.h"
-#include "src/gpu/SurfaceFillContext.h"
-#include "src/gpu/effects/GrTextureEffect.h"
+#include "src/gpu/ganesh/GrCaps.h"
+#include "src/gpu/ganesh/GrColorSpaceXform.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
+#include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/SurfaceFillContext.h"
+#include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #endif
 
 namespace {
@@ -252,7 +252,7 @@ void SkBlendImageFilter::drawForeground(SkCanvas* canvas, SkSpecialImage* img,
 
 #if SK_SUPPORT_GPU
 
-#include "src/gpu/effects/GrBlendFragmentProcessor.h"
+#include "src/gpu/ganesh/effects/GrBlendFragmentProcessor.h"
 
 sk_sp<SkSpecialImage> SkBlendImageFilter::filterImageGPU(const Context& ctx,
                                                          sk_sp<SkSpecialImage> background,
@@ -306,7 +306,7 @@ sk_sp<SkSpecialImage> SkBlendImageFilter::filterImageGPU(const Context& ctx,
                                              foreground->alphaType(), ctx.colorSpace(),
                                              kPremul_SkAlphaType);
 
-        GrFPArgs args(rContext, SkSimpleMatrixProvider(SkMatrix::I()), &info.colorInfo());
+        GrFPArgs args(rContext, SkMatrixProvider(SkMatrix::I()), &info.colorInfo());
 
         fp = as_BB(fBlender)->asFragmentProcessor(std::move(fgFP), std::move(fp), args);
     }

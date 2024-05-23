@@ -11,7 +11,7 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "device/fido/fido_authenticator.h"
@@ -41,6 +41,11 @@ class COMPONENT_EXPORT(DEVICE_FIDO) WinWebAuthnApiAuthenticator
   // Callers must ensure that WinWebAuthnApi::IsAvailable() returns true
   // before creating instances of this class.
   WinWebAuthnApiAuthenticator(HWND current_window, WinWebAuthnApi* win_api_);
+
+  WinWebAuthnApiAuthenticator(const WinWebAuthnApiAuthenticator&) = delete;
+  WinWebAuthnApiAuthenticator& operator=(const WinWebAuthnApiAuthenticator&) =
+      delete;
+
   ~WinWebAuthnApiAuthenticator() override;
 
   // ShowsPrivacyNotice returns true if the Windows native UI will show a
@@ -59,6 +64,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) WinWebAuthnApiAuthenticator
                     GetAssertionCallback callback) override;
   void GetTouch(base::OnceClosure callback) override;
   void Cancel() override;
+  Type GetType() const override;
   std::string GetId() const override;
   bool IsInPairingMode() const override;
   bool IsPaired() const override;
@@ -67,9 +73,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) WinWebAuthnApiAuthenticator
   // credProtect CTAP extension.
   bool SupportsCredProtectExtension() const override;
   bool SupportsHMACSecretExtension() const override;
+  bool SupportsEnterpriseAttestation() const override;
+  bool SupportsCredBlobOfSize(size_t num_bytes) const override;
   const absl::optional<AuthenticatorSupportedOptions>& Options() const override;
   absl::optional<FidoTransportProtocol> AuthenticatorTransport() const override;
-  bool IsWinNativeApiAuthenticator() const override;
   base::WeakPtr<FidoAuthenticator> GetWeakPtr() override;
 
   void MakeCredentialDone(
@@ -88,13 +95,12 @@ class COMPONENT_EXPORT(DEVICE_FIDO) WinWebAuthnApiAuthenticator
   GUID cancellation_id_ = {};
   // The pointee of |win_api_| is assumed to be a singleton that outlives
   // this instance.
-  WinWebAuthnApi* win_api_;
+  raw_ptr<WinWebAuthnApi> win_api_;
 
   // Verifies callbacks from |win_api_| are posted back onto the originating
   // sequence.
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<WinWebAuthnApiAuthenticator> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(WinWebAuthnApiAuthenticator);
 };
 
 }  // namespace device

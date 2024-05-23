@@ -10,11 +10,17 @@
 #include "build/chromeos_buildflags.h"
 #include "ui/gl/gl_switches.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_MAC)
+#include "base/mac/mac_util.h"
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_split.h"
+#include "ui/gfx/android/achoreographer_compat.h"
+#include "ui/gfx/android/android_surface_control_compat.h"
 #endif
 
 namespace features {
@@ -22,7 +28,7 @@ namespace {
 
 const base::Feature kGpuVsync{"GpuVsync", base::FEATURE_ENABLED_BY_DEFAULT};
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 const base::FeatureParam<std::string>
     kPassthroughCommandDecoderBlockListByBrand{
         &kDefaultPassthroughCommandDecoder, "BlockListByBrand", ""};
@@ -64,6 +70,11 @@ bool IsDeviceBlocked(const char* field, const std::string& block_list) {
 
 }  // namespace
 
+#if BUILDFLAG(IS_ANDROID)
+const base::Feature kAndroidFrameDeadline{"AndroidFrameDeadline",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+#endif
+
 // Use the passthrough command decoder by default.  This can be overridden with
 // the --use-cmd-decoder=passthrough or --use-cmd-decoder=validating flags.
 // Feature lives in ui/gl because it affects the GL binding initialization on
@@ -71,9 +82,10 @@ bool IsDeviceBlocked(const char* field, const std::string& block_list) {
 // Launched on Windows, still experimental on other platforms.
 const base::Feature kDefaultPassthroughCommandDecoder {
   "DefaultPassthroughCommandDecoder",
-#if defined(OS_WIN) || defined(OS_FUCHSIA) ||                \
-    ((defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) && \
-     !defined(CHROMECAST_BUILD))
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_FUCHSIA) ||              \
+    ((BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) && \
+     !defined(CHROMECAST_BUILD)) ||                            \
+    BUILDFLAG(IS_MAC)
       base::FEATURE_ENABLED_BY_DEFAULT
 #else
       base::FEATURE_DISABLED_BY_DEFAULT
@@ -86,11 +98,33 @@ bool UseGpuVsync() {
          base::FeatureList::IsEnabled(kGpuVsync);
 }
 
+bool IsAndroidFrameDeadlineEnabled() {
+#if BUILDFLAG(IS_ANDROID)
+  static bool enabled =
+      base::android::BuildInfo::GetInstance()->is_at_least_t() &&
+      gfx::AChoreographerCompat33::Get().supported &&
+      gfx::SurfaceControl::SupportsSetFrameTimeline() &&
+      base::FeatureList::IsEnabled(kAndroidFrameDeadline);
+  return enabled;
+#else
+  return false;
+#endif
+}
+
 bool UsePassthroughCommandDecoder() {
   if (!base::FeatureList::IsEnabled(kDefaultPassthroughCommandDecoder))
     return false;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_MAC)
+  // Excessive crashes are seen in GL drivers on MacOS 10.15.7 in the glFlush
+  // function when using ANGLE and the passthrough command decoder.
+  // crbug.com/1257538
+  if (base::mac::IsOS10_15()) {
+    return false;
+  }
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
   // Check block list against build info.
   const auto* build_info = base::android::BuildInfo::GetInstance();
   if (IsDeviceBlocked(build_info->brand(),
@@ -116,7 +150,7 @@ bool UsePassthroughCommandDecoder() {
           build_info->android_build_fp(),
           kPassthroughCommandDecoderBlockListByAndroidBuildFP.Get()))
     return false;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   return true;
 }

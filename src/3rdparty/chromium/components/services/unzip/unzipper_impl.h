@@ -6,7 +6,6 @@
 #define COMPONENTS_SERVICES_UNZIP_UNZIPPER_IMPL_H_
 
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "components/services/unzip/public/mojom/unzipper.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -23,6 +22,9 @@ class UnzipperImpl : public mojom::Unzipper {
   // Constructs an UnzipperImpl bound to |receiver|.
   explicit UnzipperImpl(mojo::PendingReceiver<mojom::Unzipper> receiver);
 
+  UnzipperImpl(const UnzipperImpl&) = delete;
+  UnzipperImpl& operator=(const UnzipperImpl&) = delete;
+
   ~UnzipperImpl() override;
 
  private:
@@ -30,17 +32,14 @@ class UnzipperImpl : public mojom::Unzipper {
   void Unzip(
       base::File zip_file,
       mojo::PendingRemote<filesystem::mojom::Directory> output_dir_remote,
+      mojom::UnzipOptionsPtr options,
+      mojo::PendingRemote<mojom::UnzipFilter> filter_remote,
       UnzipCallback callback) override;
 
-  void UnzipWithFilter(
-      base::File zip_file,
-      mojo::PendingRemote<filesystem::mojom::Directory> output_dir_remote,
-      mojo::PendingRemote<mojom::UnzipFilter> filter_remote,
-      UnzipWithFilterCallback callback) override;
+  void DetectEncoding(base::File zip_file,
+                      DetectEncodingCallback callback) override;
 
   mojo::Receiver<mojom::Unzipper> receiver_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(UnzipperImpl);
 };
 
 }  // namespace unzip

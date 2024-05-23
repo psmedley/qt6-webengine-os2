@@ -20,6 +20,7 @@
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "test/gmock.h"
+#include "test/scoped_key_value_config.h"
 
 using cricket::ServerAddresses;
 using rtc::SocketAddress;
@@ -48,7 +49,7 @@ class StunPortTestBase : public ::testing::Test, public sigslot::has_slots<> {
       : ss_(new rtc::VirtualSocketServer()),
         thread_(ss_.get()),
         network_("unittest", "unittest", kLocalAddr.ipaddr(), 32),
-        socket_factory_(rtc::Thread::Current()),
+        socket_factory_(ss_.get()),
         stun_server_1_(cricket::TestStunServer::Create(ss_.get(), kStunAddr1)),
         stun_server_2_(cricket::TestStunServer::Create(ss_.get(), kStunAddr2)),
         done_(false),
@@ -77,7 +78,7 @@ class StunPortTestBase : public ::testing::Test, public sigslot::has_slots<> {
     stun_port_ = cricket::StunPort::Create(
         rtc::Thread::Current(), &socket_factory_, &network_, 0, 0,
         rtc::CreateRandomString(16), rtc::CreateRandomString(22), stun_servers,
-        std::string(), absl::nullopt);
+        absl::nullopt, &field_trials_);
     stun_port_->set_stun_keepalive_delay(stun_keepalive_delay_);
     // If `stun_keepalive_lifetime_` is negative, let the stun port
     // choose its lifetime from the network type.
@@ -103,8 +104,8 @@ class StunPortTestBase : public ::testing::Test, public sigslot::has_slots<> {
     socket_->SignalReadPacket.connect(this, &StunPortTestBase::OnReadPacket);
     stun_port_ = cricket::UDPPort::Create(
         rtc::Thread::Current(), &socket_factory_, &network_, socket_.get(),
-        rtc::CreateRandomString(16), rtc::CreateRandomString(22), std::string(),
-        false, absl::nullopt);
+        rtc::CreateRandomString(16), rtc::CreateRandomString(22), false,
+        absl::nullopt, &field_trials_);
     ASSERT_TRUE(stun_port_ != NULL);
     ServerAddresses stun_servers;
     stun_servers.insert(server_addr);
@@ -175,6 +176,7 @@ class StunPortTestBase : public ::testing::Test, public sigslot::has_slots<> {
 
  protected:
   cricket::IceCandidateErrorEvent error_event_;
+  webrtc::test::ScopedKeyValueConfig field_trials_;
 };
 
 class StunPortTestWithRealClock : public StunPortTestBase {};
@@ -391,7 +393,7 @@ TEST_F(StunPortTest, TestStunBindingRequestShortLifetime) {
   PrepareAddress();
   EXPECT_TRUE_SIMULATED_WAIT(done(), kTimeoutMs, fake_clock);
   EXPECT_TRUE_SIMULATED_WAIT(
-      !port()->HasPendingRequest(cricket::STUN_BINDING_REQUEST), 2000,
+      !port()->HasPendingRequestForTest(cricket::STUN_BINDING_REQUEST), 2000,
       fake_clock);
 }
 
@@ -402,7 +404,7 @@ TEST_F(StunPortTest, TestStunBindingRequestLongLifetime) {
   PrepareAddress();
   EXPECT_TRUE_SIMULATED_WAIT(done(), kTimeoutMs, fake_clock);
   EXPECT_TRUE_SIMULATED_WAIT(
-      port()->HasPendingRequest(cricket::STUN_BINDING_REQUEST), 1000,
+      port()->HasPendingRequestForTest(cricket::STUN_BINDING_REQUEST), 1000,
       fake_clock);
 }
 

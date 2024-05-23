@@ -19,6 +19,7 @@
  */
 
 #include "libavutil/avassert.h"
+#include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_cuda_internal.h"
 #include "libavutil/cuda_check.h"
 #include "internal.h"
@@ -211,23 +212,6 @@ static av_cold void deint_cuda_uninit(AVFilterContext *ctx)
     s->input_frames = NULL;
 }
 
-static int deint_cuda_query_formats(AVFilterContext *ctx)
-{
-    enum AVPixelFormat pix_fmts[] = {
-        AV_PIX_FMT_CUDA, AV_PIX_FMT_NONE,
-    };
-    int ret;
-
-    if ((ret = ff_formats_ref(ff_make_format_list(pix_fmts),
-                              &ctx->inputs[0]->outcfg.formats)) < 0)
-        return ret;
-    if ((ret = ff_formats_ref(ff_make_format_list(pix_fmts),
-                              &ctx->outputs[0]->incfg.formats)) < 0)
-        return ret;
-
-    return 0;
-}
-
 static int config_input(AVFilterLink *inlink)
 {
     AVFilterContext *ctx = inlink->dst;
@@ -362,7 +346,6 @@ static const AVFilterPad deint_cuda_inputs[] = {
         .filter_frame  = ff_yadif_filter_frame,
         .config_props  = config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad deint_cuda_outputs[] = {
@@ -372,7 +355,6 @@ static const AVFilterPad deint_cuda_outputs[] = {
         .request_frame = ff_yadif_request_frame,
         .config_props  = config_output,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_yadif_cuda = {
@@ -381,9 +363,9 @@ const AVFilter ff_vf_yadif_cuda = {
     .priv_size      = sizeof(DeintCUDAContext),
     .priv_class     = &yadif_cuda_class,
     .uninit         = deint_cuda_uninit,
-    .query_formats  = deint_cuda_query_formats,
-    .inputs         = deint_cuda_inputs,
-    .outputs        = deint_cuda_outputs,
+    FILTER_SINGLE_PIXFMT(AV_PIX_FMT_CUDA),
+    FILTER_INPUTS(deint_cuda_inputs),
+    FILTER_OUTPUTS(deint_cuda_outputs),
     .flags          = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };

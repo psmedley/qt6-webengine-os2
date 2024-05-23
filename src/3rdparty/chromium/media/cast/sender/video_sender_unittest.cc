@@ -11,10 +11,13 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/simple_test_tick_clock.h"
+#include "base/time/time.h"
 #include "media/base/fake_single_thread_task_runner.h"
 #include "media/base/video_frame.h"
 #include "media/cast/cast_environment.h"
@@ -23,8 +26,8 @@
 #include "media/cast/net/cast_transport_config.h"
 #include "media/cast/net/cast_transport_impl.h"
 #include "media/cast/net/pacing/paced_sender.h"
-#include "media/cast/sender/fake_video_encode_accelerator_factory.h"
 #include "media/cast/sender/video_frame_factory.h"
+#include "media/cast/test/fake_video_encode_accelerator_factory.h"
 #include "media/cast/test/utility/default_config.h"
 #include "media/cast/test/utility/video_utility.h"
 #include "media/video/fake_video_encode_accelerator.h"
@@ -53,6 +56,9 @@ class TestPacketSender : public PacketTransport {
  public:
   TestPacketSender()
       : number_of_rtp_packets_(0), number_of_rtcp_packets_(0), paused_(false) {}
+
+  TestPacketSender(const TestPacketSender&) = delete;
+  TestPacketSender& operator=(const TestPacketSender&) = delete;
 
   // A singular packet implies a RTCP packet.
   bool SendPacket(PacketRef packet, base::OnceClosure cb) final {
@@ -99,8 +105,6 @@ class TestPacketSender : public PacketTransport {
   bool paused_;
   base::OnceClosure callback_;
   PacketRef stored_packet_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestPacketSender);
 };
 
 void IgnorePlayoutDelayChanges(base::TimeDelta unused_playout_delay) {}
@@ -139,6 +143,9 @@ class TransportClient : public CastTransport::Client {
  public:
   TransportClient() = default;
 
+  TransportClient(const TransportClient&) = delete;
+  TransportClient& operator=(const TransportClient&) = delete;
+
   void OnStatusChanged(CastTransportStatus status) final {
     EXPECT_EQ(TRANSPORT_STREAM_INITIALIZED, status);
   }
@@ -146,13 +153,15 @@ class TransportClient : public CastTransport::Client {
       std::unique_ptr<std::vector<FrameEvent>> frame_events,
       std::unique_ptr<std::vector<PacketEvent>> packet_events) final {}
   void ProcessRtpPacket(std::unique_ptr<Packet> packet) final {}
-
-  DISALLOW_COPY_AND_ASSIGN(TransportClient);
 };
 
 }  // namespace
 
 class VideoSenderTest : public ::testing::Test {
+ public:
+  VideoSenderTest(const VideoSenderTest&) = delete;
+  VideoSenderTest& operator=(const VideoSenderTest&) = delete;
+
  protected:
   VideoSenderTest()
       : task_runner_(new FakeSingleThreadTaskRunner(&testing_clock_)),
@@ -168,7 +177,7 @@ class VideoSenderTest : public ::testing::Test {
     transport_ = new TestPacketSender();
     transport_sender_ = std::make_unique<CastTransportImpl>(
         &testing_clock_, base::TimeDelta(), std::make_unique<TransportClient>(),
-        base::WrapUnique(transport_), task_runner_);
+        base::WrapUnique(transport_.get()), task_runner_);
   }
 
   ~VideoSenderTest() override = default;
@@ -229,7 +238,7 @@ class VideoSenderTest : public ::testing::Test {
   }
 
   void RunTasks(int during_ms) {
-    task_runner_->Sleep(base::TimeDelta::FromMilliseconds(during_ms));
+    task_runner_->Sleep(base::Milliseconds(during_ms));
   }
 
   base::SimpleTestTickClock testing_clock_;
@@ -237,14 +246,11 @@ class VideoSenderTest : public ::testing::Test {
   const scoped_refptr<CastEnvironment> cast_environment_;
   OperationalStatus operational_status_;
   FakeVideoEncodeAcceleratorFactory vea_factory_;
-  TestPacketSender* transport_;  // Owned by CastTransport.
+  raw_ptr<TestPacketSender> transport_;  // Owned by CastTransport.
   std::unique_ptr<CastTransportImpl> transport_sender_;
   std::unique_ptr<PeerVideoSender> video_sender_;
   int last_pixel_value_;
   base::TimeTicks first_frame_timestamp_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(VideoSenderTest);
 };
 
 TEST_F(VideoSenderTest, BuiltInEncoder) {
@@ -326,7 +332,7 @@ TEST_F(VideoSenderTest, RtcpTimer) {
 
   // Make sure that we send at least one RTCP packet.
   base::TimeDelta max_rtcp_timeout =
-      base::TimeDelta::FromMilliseconds(1 + kRtcpReportIntervalMs * 3 / 2);
+      base::Milliseconds(1) + kRtcpReportInterval * 3 / 2;
 
   RunTasks(max_rtcp_timeout.InMilliseconds());
   EXPECT_LE(1, transport_->number_of_rtp_packets());
@@ -359,7 +365,7 @@ TEST_F(VideoSenderTest, ResendTimer) {
   video_sender_->InsertRawVideoFrame(video_frame, reference_time);
 
   base::TimeDelta max_resend_timeout =
-      base::TimeDelta::FromMilliseconds(1 + kDefaultRtpMaxDelayMs);
+      kDefaultTargetPlayoutDelay + base::Milliseconds(1);
 
   // Make sure that we do a re-send.
   RunTasks(max_resend_timeout.InMilliseconds());
@@ -410,11 +416,13 @@ TEST_F(VideoSenderTest, StopSendingInTheAbsenceOfAck) {
   // than 4 frames in flight.
   scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
   video_sender_->InsertRawVideoFrame(video_frame, testing_clock_.NowTicks());
-  RunTasks(33);
+  // Give time for the frame to be processed plus handling some of the playout
+  // delay.
+  RunTasks(300);
 
   // Send 3 more frames and record the number of packets sent.
   for (int i = 0; i < 3; ++i) {
-    scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
+    video_frame = GetNewVideoFrame();
     video_sender_->InsertRawVideoFrame(video_frame, testing_clock_.NowTicks());
     RunTasks(33);
   }
@@ -423,7 +431,7 @@ TEST_F(VideoSenderTest, StopSendingInTheAbsenceOfAck) {
   // Send 3 more frames - they should not be encoded, as we have not received
   // any acks.
   for (int i = 0; i < 3; ++i) {
-    scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
+    video_frame = GetNewVideoFrame();
     video_sender_->InsertRawVideoFrame(video_frame, testing_clock_.NowTicks());
     RunTasks(33);
   }
@@ -460,7 +468,7 @@ TEST_F(VideoSenderTest, DuplicateAckRetransmit) {
 
   // Send 3 more frames but don't ACK.
   for (int i = 0; i < 3; ++i) {
-    scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
+    video_frame = GetNewVideoFrame();
     video_sender_->InsertRawVideoFrame(video_frame, testing_clock_.NowTicks());
     RunTasks(33);
   }
@@ -503,7 +511,7 @@ TEST_F(VideoSenderTest, DuplicateAckRetransmitDoesNotCancelRetransmits) {
 
   // Send 2 more frames but don't ACK.
   for (int i = 0; i < 2; ++i) {
-    scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
+    video_frame = GetNewVideoFrame();
     video_sender_->InsertRawVideoFrame(video_frame, testing_clock_.NowTicks());
     RunTasks(33);
   }
@@ -625,8 +633,7 @@ TEST_F(VideoSenderTest, CancelSendingOnReceivingPli) {
   video_sender_->OnReceivedPli();
   video_frame = GetNewVideoFrame();
   video_sender_->InsertRawVideoFrame(
-      video_frame,
-      testing_clock_.NowTicks() + base::TimeDelta::FromMilliseconds(1000));
+      video_frame, testing_clock_.NowTicks() + base::Milliseconds(1000));
   RunTasks(33);
   transport_->SetPause(false);
   RunTasks(33);

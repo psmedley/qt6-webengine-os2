@@ -8,8 +8,17 @@ export const enum FormatterActions {
   HTML_OUTLINE = 'htmlOutline',
   JAVASCRIPT_OUTLINE = 'javaScriptOutline',
   JAVASCRIPT_IDENTIFIERS = 'javaScriptIdentifiers',
+  JAVASCRIPT_SUBSTITUTE = 'javaScriptSubstitute',
   EVALUATE_JAVASCRIPT_SUBSTRING = 'evaluatableJavaScriptSubstring',
-  FIND_LAST_EXPRESSION = 'findLastExpression',
-  FIND_LAST_FUNCTION_CALL = 'findLastFunctionCall',
   ARGUMENTS_LIST = 'argumentsList',
+}
+
+export interface FormatMapping {
+  original: number[];
+  formatted: number[];
+}
+
+export interface FormatResult {
+  content: string;
+  mapping: FormatMapping;
 }

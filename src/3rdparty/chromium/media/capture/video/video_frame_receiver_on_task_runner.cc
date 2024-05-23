@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 
 namespace media {
 
@@ -51,6 +51,13 @@ void VideoFrameReceiverOnTaskRunner::OnFrameDropped(
   task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&VideoFrameReceiver::OnFrameDropped, receiver_, reason));
+}
+
+void VideoFrameReceiverOnTaskRunner::OnFrameWithEmptyRegionCapture() {
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&VideoFrameReceiver::OnFrameWithEmptyRegionCapture,
+                     receiver_));
 }
 
 void VideoFrameReceiverOnTaskRunner::OnLog(const std::string& message) {

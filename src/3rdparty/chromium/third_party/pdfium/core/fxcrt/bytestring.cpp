@@ -36,23 +36,22 @@ namespace {
 constexpr char kTrimChars[] = "\x09\x0a\x0b\x0c\x0d\x20";
 
 const char* FX_strstr(const char* haystack,
-                      int haystack_len,
+                      size_t haystack_len,
                       const char* needle,
-                      int needle_len) {
-  if (needle_len > haystack_len || needle_len == 0) {
+                      size_t needle_len) {
+  if (needle_len > haystack_len || needle_len == 0)
     return nullptr;
-  }
+
   const char* end_ptr = haystack + haystack_len - needle_len;
   while (haystack <= end_ptr) {
-    int i = 0;
-    while (1) {
-      if (haystack[i] != needle[i]) {
+    size_t i = 0;
+    while (true) {
+      if (haystack[i] != needle[i])
         break;
-      }
+
       i++;
-      if (i == needle_len) {
+      if (i == needle_len)
         return haystack;
-      }
     }
     haystack++;
   }
@@ -182,13 +181,21 @@ ByteString::ByteString(const std::initializer_list<ByteStringView>& list) {
   }
 }
 
-ByteString::ByteString(const std::ostringstream& outStream) {
-  std::string str = outStream.str();
-  if (str.length() > 0)
-    m_pData.Reset(StringData::Create(str.c_str(), str.length()));
+ByteString::ByteString(const fxcrt::ostringstream& outStream) {
+  auto str = outStream.str();
+  if (str.size() > 0)
+    m_pData.Reset(StringData::Create(str.c_str(), str.size()));
 }
 
 ByteString::~ByteString() = default;
+
+void ByteString::clear() {
+  if (m_pData && m_pData->CanOperateInPlace(0)) {
+    m_pData->m_nDataLength = 0;
+    return;
+  }
+  m_pData.Reset();
+}
 
 ByteString& ByteString::operator=(const char* str) {
   if (!str || !str[0])
@@ -469,6 +476,11 @@ intptr_t ByteString::ReferenceCountForTesting() const {
   return m_pData ? m_pData->m_nRefs : 0;
 }
 
+ByteString ByteString::Substr(size_t offset) const {
+  // Unsigned underflow is well-defined and out-of-range is handled by Substr().
+  return Substr(offset, GetLength() - offset);
+}
+
 ByteString ByteString::Substr(size_t first, size_t count) const {
   if (!m_pData)
     return ByteString();
@@ -530,47 +542,50 @@ size_t ByteString::Insert(size_t index, char ch) {
   return new_length;
 }
 
-Optional<size_t> ByteString::Find(char ch, size_t start) const {
+absl::optional<size_t> ByteString::Find(char ch, size_t start) const {
   if (!m_pData)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   if (!IsValidIndex(start))
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   const char* pStr = static_cast<const char*>(
       memchr(m_pData->m_String + start, ch, m_pData->m_nDataLength - start));
-  return pStr ? Optional<size_t>(static_cast<size_t>(pStr - m_pData->m_String))
-              : pdfium::nullopt;
+  return pStr ? absl::optional<size_t>(
+                    static_cast<size_t>(pStr - m_pData->m_String))
+              : absl::nullopt;
 }
 
-Optional<size_t> ByteString::Find(ByteStringView subStr, size_t start) const {
+absl::optional<size_t> ByteString::Find(ByteStringView subStr,
+                                        size_t start) const {
   if (!m_pData)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   if (!IsValidIndex(start))
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   const char* pStr =
       FX_strstr(m_pData->m_String + start, m_pData->m_nDataLength - start,
                 subStr.unterminated_c_str(), subStr.GetLength());
-  return pStr ? Optional<size_t>(static_cast<size_t>(pStr - m_pData->m_String))
-              : pdfium::nullopt;
+  return pStr ? absl::optional<size_t>(
+                    static_cast<size_t>(pStr - m_pData->m_String))
+              : absl::nullopt;
 }
 
-Optional<size_t> ByteString::ReverseFind(char ch) const {
+absl::optional<size_t> ByteString::ReverseFind(char ch) const {
   if (!m_pData)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   size_t nLength = m_pData->m_nDataLength;
   while (nLength--) {
     if (m_pData->m_String[nLength] == ch)
       return nLength;
   }
-  return pdfium::nullopt;
+  return absl::nullopt;
 }
 
 void ByteString::MakeLower() {
-  if (!m_pData)
+  if (IsEmpty())
     return;
 
   ReallocBeforeWrite(m_pData->m_nDataLength);
@@ -578,7 +593,7 @@ void ByteString::MakeLower() {
 }
 
 void ByteString::MakeUpper() {
-  if (!m_pData)
+  if (IsEmpty())
     return;
 
   ReallocBeforeWrite(m_pData->m_nDataLength);
@@ -586,7 +601,7 @@ void ByteString::MakeUpper() {
 }
 
 size_t ByteString::Remove(char chRemove) {
-  if (!m_pData || m_pData->m_nDataLength == 0)
+  if (IsEmpty())
     return 0;
 
   char* pstrSource = m_pData->m_String;
@@ -628,7 +643,7 @@ size_t ByteString::Replace(ByteStringView pOld, ByteStringView pNew) {
   size_t nCount = 0;
   const char* pStart = m_pData->m_String;
   char* pEnd = m_pData->m_String + m_pData->m_nDataLength;
-  while (1) {
+  while (true) {
     const char* pTarget = FX_strstr(pStart, static_cast<int>(pEnd - pStart),
                                     pOld.unterminated_c_str(), nSourceLen);
     if (!pTarget)

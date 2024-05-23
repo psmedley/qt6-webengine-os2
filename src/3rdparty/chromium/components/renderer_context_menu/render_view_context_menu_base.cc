@@ -11,6 +11,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/observer_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "content/public/browser/global_routing_id.h"
@@ -160,16 +161,17 @@ bool RenderViewContextMenuBase::IsContentCustomCommandId(int id) {
 }
 
 RenderViewContextMenuBase::RenderViewContextMenuBase(
-    content::RenderFrameHost* render_frame_host,
+    content::RenderFrameHost& render_frame_host,
     const content::ContextMenuParams& params)
     : params_(params),
-      source_web_contents_(WebContents::FromRenderFrameHost(render_frame_host)),
+      source_web_contents_(
+          WebContents::FromRenderFrameHost(&render_frame_host)),
       browser_context_(source_web_contents_->GetBrowserContext()),
       menu_model_(this),
-      render_frame_id_(render_frame_host->GetRoutingID()),
-      render_frame_token_(render_frame_host->GetFrameToken()),
-      render_process_id_(render_frame_host->GetProcess()->GetID()),
-      site_instance_(render_frame_host->GetSiteInstance()),
+      render_frame_id_(render_frame_host.GetRoutingID()),
+      render_frame_token_(render_frame_host.GetFrameToken()),
+      render_process_id_(render_frame_host.GetProcess()->GetID()),
+      site_instance_(render_frame_host.GetSiteInstance()),
       command_executed_(false) {}
 
 RenderViewContextMenuBase::~RenderViewContextMenuBase() {
@@ -253,7 +255,7 @@ void RenderViewContextMenuBase::UpdateMenuItem(int command_id,
   menu_model_.SetEnabledAt(index, enabled);
   menu_model_.SetVisibleAt(index, !hidden);
   if (toolkit_delegate_) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     toolkit_delegate_->UpdateMenuItem(command_id, enabled, hidden, label);
 #else
     toolkit_delegate_->RebuildMenu();
@@ -408,9 +410,9 @@ void RenderViewContextMenuBase::ExecuteCommand(int id, int event_flags) {
 void RenderViewContextMenuBase::OnMenuWillShow(ui::SimpleMenuModel* source) {
   for (int i = 0; i < source->GetItemCount(); ++i) {
     if (source->IsVisibleAt(i) &&
-        source->GetTypeAt(i) != ui::MenuModel::TYPE_SEPARATOR &&
-        source->GetTypeAt(i) != ui::MenuModel::TYPE_SUBMENU) {
-      RecordShownItem(source->GetCommandIdAt(i));
+        source->GetTypeAt(i) != ui::MenuModel::TYPE_SEPARATOR) {
+      RecordShownItem(source->GetCommandIdAt(i),
+                      source->GetTypeAt(i) == ui::MenuModel::TYPE_SUBMENU);
     }
   }
 

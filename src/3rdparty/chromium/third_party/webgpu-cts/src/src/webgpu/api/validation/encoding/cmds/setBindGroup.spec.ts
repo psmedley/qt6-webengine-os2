@@ -13,11 +13,12 @@ TODO: merge these notes and implement.
 import { makeTestGroup } from '../../../../../common/framework/test_group.js';
 import { range, unreachable } from '../../../../../common/util/util.js';
 import { kMinDynamicBufferOffsetAlignment } from '../../../../capability_info.js';
+import { kResourceStates, ResourceState } from '../../../../gpu_test.js';
 import {
   kProgrammableEncoderTypes,
   ProgrammableEncoderType,
-} from '../../util/command_buffer_maker.js';
-import { kResourceStates, ResourceState, ValidationTest } from '../../validation_test.js';
+} from '../../../../util/command_buffer_maker.js';
+import { ValidationTest } from '../../validation_test.js';
 
 class F extends ValidationTest {
   encoderTypeToStageFlag(encoderType: ProgrammableEncoderType): GPUShaderStageFlags {
@@ -100,7 +101,7 @@ class F extends ValidationTest {
 export const g = makeTestGroup(F);
 
 g.test('state_and_binding_index')
-  .desc('Tests that setBindGroup correctly handles {valid, invalid} bindGroups.')
+  .desc('Tests that setBindGroup correctly handles {valid, invalid, destroyed} bindGroups.')
   .params(u =>
     u
       .combine('encoderType', kProgrammableEncoderTypes)
@@ -118,7 +119,7 @@ g.test('state_and_binding_index')
       validateFinishAndSubmit(state !== 'invalid' && index < maxBindGroups, state !== 'destroyed');
     }
 
-    // TODO: move to subcases() once we can query the device limits
+    // MAINTENANCE_TODO: move to subcases() once we can query the device limits
     for (const index of [1, maxBindGroups - 1, maxBindGroups]) {
       t.debug(`test bind group index ${index}`);
       await runTest(index);
@@ -139,7 +140,48 @@ g.test('bind_group,device_mismatch')
       .combine('useU32Array', [true, false])
       .combine('mismatched', [true, false])
   )
-  .unimplemented();
+  .fn(async t => {
+    const { encoderType, useU32Array, mismatched } = t.params;
+
+    if (mismatched) {
+      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
+    }
+
+    const device = mismatched ? t.mismatchedDevice : t.device;
+
+    const buffer = device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.STORAGE,
+    });
+
+    const layout = device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: t.encoderTypeToStageFlag(encoderType),
+          buffer: { type: 'storage', hasDynamicOffset: useU32Array },
+        },
+      ],
+    });
+
+    const bindGroup = device.createBindGroup({
+      layout,
+      entries: [
+        {
+          binding: 0,
+          resource: { buffer },
+        },
+      ],
+    });
+
+    const { encoder, validateFinish } = t.createEncoder(encoderType);
+    if (useU32Array) {
+      encoder.setBindGroup(0, bindGroup, new Uint32Array([0]), 0, 1);
+    } else {
+      encoder.setBindGroup(0, bindGroup);
+    }
+    validateFinish(!mismatched);
+  });
 
 g.test('dynamic_offsets_passed_but_not_expected')
   .desc('Tests that setBindGroup correctly errors on unexpected dynamicOffsets.')

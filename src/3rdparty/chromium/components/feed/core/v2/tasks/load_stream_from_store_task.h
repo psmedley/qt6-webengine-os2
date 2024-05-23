@@ -9,7 +9,9 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "components/feed/core/proto/v2/wire/reliability_logging_enums.pb.h"
 #include "components/feed/core/v2/enums.h"
 #include "components/feed/core/v2/feed_store.h"
@@ -66,6 +68,7 @@ class LoadStreamFromStoreTask : public offline_pages::Task {
   LoadStreamFromStoreTask& operator=(const LoadStreamFromStoreTask&) = delete;
 
   void IgnoreStalenessForTesting() { ignore_staleness_ = true; }
+  void IngoreAccountForTesting() { ignore_account_ = true; }
 
  private:
   void Run() override;
@@ -84,9 +87,10 @@ class LoadStreamFromStoreTask : public offline_pages::Task {
   LoadType load_type_;
   FeedStream& feed_stream_;
   StreamType stream_type_;
-  FeedStore* store_;  // Unowned.
+  raw_ptr<FeedStore> store_;  // Unowned.
   bool ignore_staleness_ = false;
   bool missed_last_refresh_ = false;
+  bool ignore_account_ = false;
   base::OnceCallback<void(Result)> result_callback_;
 
   // Data to be stuffed into the Result when the task is complete.

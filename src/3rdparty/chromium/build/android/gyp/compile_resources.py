@@ -12,20 +12,18 @@ final R.java class for all resource packages the APK depends on.
 This will crunch images with aapt2.
 """
 
-import argparse
 import collections
 import contextlib
 import filecmp
 import hashlib
 import logging
 import os
+import pathlib
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import textwrap
-import zipfile
 from xml.etree import ElementTree
 
 from util import build_utils
@@ -180,7 +178,6 @@ def _ParseArgs(args):
 
   output_opts.add_argument('--arsc-path', help='Apk output for arsc format.')
   output_opts.add_argument('--proto-path', help='Apk output for proto format.')
-  group = input_opts.add_mutually_exclusive_group()
 
   output_opts.add_argument(
       '--info-path', help='Path to output info file for the partial apk.')
@@ -381,6 +378,7 @@ def _FixManifest(options, temp_dir, extra_manifest=None):
     Tuple of:
      * Manifest path within |temp_dir|.
      * Original package_name.
+     * Manifest package name.
   """
   def maybe_extract_version(j):
     try:
@@ -397,7 +395,7 @@ def _FixManifest(options, temp_dir, extra_manifest=None):
     raise Exception(
         'Unable to find android SDK jar among candidates: %s'
             % ', '.join(android_sdk_jars))
-  elif len(successful_extractions) > 1:
+  if len(successful_extractions) > 1:
     raise Exception(
         'Found multiple android SDK jars among candidates: %s'
             % ', '.join(android_sdk_jars))
@@ -432,8 +430,10 @@ def _FixManifest(options, temp_dir, extra_manifest=None):
   manifest_node.set('platformBuildVersionName', version_name)
 
   orig_package = manifest_node.get('package')
+  fixed_package = orig_package
   if options.arsc_package_name:
     manifest_node.set('package', options.arsc_package_name)
+    fixed_package = options.arsc_package_name
 
   if options.debuggable:
     app_node.set('{%s}%s' % (manifest_utils.ANDROID_NAMESPACE, 'debuggable'),
@@ -452,7 +452,7 @@ def _FixManifest(options, temp_dir, extra_manifest=None):
       min_sdk_node.set(dist_value, options.min_sdk_version)
 
   manifest_utils.SaveManifest(doc, debug_manifest_path)
-  return debug_manifest_path, orig_package
+  return debug_manifest_path, orig_package, fixed_package
 
 
 def _CreateKeepPredicate(resource_exclusion_regex,
@@ -767,6 +767,8 @@ def _PackageApk(options, build):
       options.min_sdk_version,
       '--target-sdk-version',
       options.target_sdk_version,
+      '--output-text-symbols',
+      build.r_txt_path,
   ]
 
   for j in options.include_resources:
@@ -782,10 +784,6 @@ def _PackageApk(options, build):
     link_command += ['--proguard-main-dex', build.proguard_main_dex_path]
   if options.emit_ids_out:
     link_command += ['--emit-ids', build.emit_ids_path]
-  if options.r_text_in:
-    shutil.copyfile(options.r_text_in, build.r_txt_path)
-  else:
-    link_command += ['--output-text-symbols', build.r_txt_path]
 
   # Note: only one of --proto-format, --shared-lib or --app-as-shared-lib
   #       can be used with recent versions of aapt2.
@@ -798,12 +796,12 @@ def _PackageApk(options, build):
   if options.package_id:
     link_command += [
         '--package-id',
-        hex(options.package_id),
+        '0x%02x' % options.package_id,
         '--allow-reserved-package-id',
     ]
 
-  fixed_manifest, desired_manifest_package_name = _FixManifest(
-      options, build.temp_dir)
+  fixed_manifest, desired_manifest_package_name, fixed_manifest_package = (
+      _FixManifest(options, build.temp_dir))
   if options.rename_manifest_package:
     desired_manifest_package_name = options.rename_manifest_package
 
@@ -812,12 +810,15 @@ def _PackageApk(options, build):
       desired_manifest_package_name
   ]
 
-  # Creates a .zip with AndroidManifest.xml, resources.arsc, res/*
-  # Also creates R.txt
-  if options.use_resource_ids_path:
-    _CreateStableIdsFile(options.use_resource_ids_path, build.stable_ids_path,
-                         desired_manifest_package_name)
-    link_command += ['--stable-ids', build.stable_ids_path]
+  if options.package_id is not None:
+    package_id = options.package_id
+  elif options.shared_resources:
+    package_id = 0
+  else:
+    package_id = 0x7f
+  _CreateStableIdsFile(options.use_resource_ids_path, build.stable_ids_path,
+                       fixed_manifest_package, package_id)
+  link_command += ['--stable-ids', build.stable_ids_path]
 
   link_command += partials
 
@@ -834,7 +835,15 @@ def _PackageApk(options, build):
   logging.debug('Created .res.info file')
 
   exit_code = link_proc.wait()
+  assert exit_code == 0, f'aapt2 link cmd failed with {exit_code=}'
   logging.debug('Finished: aapt2 link')
+
+  if options.shared_resources:
+    logging.debug('Resolving styleables in R.txt')
+    # Need to resolve references because unused resource removal tool does not
+    # support references in R.txt files.
+    resource_utils.ResolveStyleableReferences(build.r_txt_path)
+
   if exit_code:
     raise subprocess.CalledProcessError(exit_code, link_command)
 
@@ -870,29 +879,38 @@ def _PackageApk(options, build):
         build.arsc_path, build.proto_path
     ])
 
+  # Sanity check that the created resources have the expected package ID.
+  logging.debug('Performing sanity check')
+  _, actual_package_id = resource_utils.ExtractArscPackage(
+      options.aapt2_path,
+      build.arsc_path if options.arsc_path else build.proto_path)
+  # When there are no resources, ExtractArscPackage returns (None, None), in
+  # this case there is no need to check for matching package ID.
+  if actual_package_id is not None and actual_package_id != package_id:
+    raise Exception('Invalid package ID 0x%x (expected 0x%x)' %
+                    (actual_package_id, package_id))
+
   return desired_manifest_package_name
 
 
-@contextlib.contextmanager
-def _CreateStableIdsFile(in_path, out_path, package_name):
+def _CreateStableIdsFile(in_path, out_path, package_name, package_id):
   """Transforms a file generated by --emit-ids from another package.
 
   --stable-ids is generally meant to be used by different versions of the same
   package. To make it work for other packages, we need to transform the package
   name references to match the package that resources are being generated for.
-
-  Note: This will fail if the package ID of the resources in
-  |options.use_resource_ids_path| does not match the package ID of the
-  resources being linked.
   """
-  with open(in_path) as stable_ids_file:
-    with open(out_path, 'w') as output_ids_file:
-      output_stable_ids = re.sub(
-          r'^.*?:',
-          package_name + ':',
-          stable_ids_file.read(),
-          flags=re.MULTILINE)
-      output_ids_file.write(output_stable_ids)
+  if in_path:
+    data = pathlib.Path(in_path).read_text()
+  else:
+    # Force IDs to use 0x01 for the type byte in order to ensure they are
+    # different from IDs generated by other apps. https://crbug.com/1293336
+    data = 'pkg:id/fake_resource_id = 0x7f010000\n'
+  # Replace "pkg:" with correct package name.
+  data = re.sub(r'^.*?:', package_name + ':', data, flags=re.MULTILINE)
+  # Replace "0x7f" with correct package id.
+  data = re.sub(r'0x..', '0x%02x' % package_id, data)
+  pathlib.Path(out_path).write_text(data)
 
 
 def _WriteOutputs(options, build):
@@ -915,7 +933,7 @@ def _WriteOutputs(options, build):
 
 def _CreateNormalizedManifestForVerification(options):
   with build_utils.TempDir() as tempdir:
-    fixed_manifest, _ = _FixManifest(
+    fixed_manifest, _, _ = _FixManifest(
         options, tempdir, extra_manifest=options.extra_verification_manifest)
     with open(fixed_manifest) as f:
       return manifest_utils.NormalizeManifest(f.read())
@@ -999,21 +1017,6 @@ def main(args):
         custom_root_package_name, grandparent_custom_package_name,
         options.extra_main_r_text_files)
     build_utils.ZipDir(build.srcjar_path, build.srcjar_dir)
-
-    # Sanity check that the created resources have the expected package ID.
-    logging.debug('Performing sanity check')
-    if options.package_id:
-      expected_id = options.package_id
-    elif options.shared_resources:
-      expected_id = 0
-    else:
-      expected_id = 127  # == '0x7f'.
-    _, package_id = resource_utils.ExtractArscPackage(
-        options.aapt2_path,
-        build.arsc_path if options.arsc_path else build.proto_path)
-    if package_id != expected_id:
-      raise Exception(
-          'Invalid package ID 0x%x (expected 0x%x)' % (package_id, expected_id))
 
     logging.debug('Copying outputs')
     _WriteOutputs(options, build)

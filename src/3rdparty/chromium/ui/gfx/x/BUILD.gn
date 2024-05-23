@@ -7,7 +7,7 @@ import("//build/config/ozone.gni")
 import("//build/config/ui.gni")
 import("//tools/generate_library_loader/generate_library_loader.gni")
 
-assert(use_x11 || ozone_platform_x11)
+assert(ozone_platform_x11)
 
 declare_args() {
   regenerate_x11_protos = false
@@ -19,13 +19,17 @@ config("x11_private_config") {
 }
 
 config("build_xprotos_config") {
-  cflags = [
-    # Generated proto files pull all fields from a struct into scope
-    # even if they aren't used.  Rather than adding logic in the
-    # generator to determine which fields are used and keeping only
-    # those, simply ignore unused variable warnings.
-    "-Wno-unused-variable",
-  ]
+  if (is_clang || !is_win) {
+    cflags = [
+      "-Wno-shadow",
+
+      # Generated proto files pull all fields from a struct into scope
+      # even if they aren't used.  Rather than adding logic in the
+      # generator to determine which fields are used and keeping only
+      # those, simply ignore unused variable warnings.
+      "-Wno-unused-variable",
+    ]
+  }
 }
 
 generate_library_loader("xlib_loader") {
@@ -157,6 +161,7 @@ source_set("xproto") {
     "error.h",
     "event.cc",
     "event.h",
+    "future.cc",
     "future.h",
     "keyboard_state.cc",
     "keyboard_state.h",
@@ -164,8 +169,6 @@ source_set("xproto") {
     "ref_counted_fd.h",
     "scoped_ignore_errors.cc",
     "scoped_ignore_errors.h",
-    "x11_switches.cc",
-    "x11_switches.h",
     "xlib_support.cc",
     "xlib_support.h",
     "xproto_internal.cc",
@@ -181,6 +184,7 @@ source_set("xproto") {
     "//base",
     "//base:i18n",
     "//ui/events/platform",
+    "//ui/gfx:gfx_switches",
   ]
   public_deps = [
     ":build_xprotos",
@@ -196,6 +200,8 @@ jumbo_component("x") {
   sources = [
     "property_cache.cc",
     "property_cache.h",
+    "window_cache.cc",
+    "window_cache.h",
     "x11_atom_cache.cc",
     "x11_atom_cache.h",
     "x11_path.cc",
@@ -209,6 +215,7 @@ jumbo_component("x") {
   deps = [
     "//base",
     "//skia",
+    "//ui/gfx/geometry",
   ]
   public_deps = [ ":xproto" ]
 }
@@ -218,10 +225,12 @@ source_set("unit_test") {
   sources = [
     "connection_unittest.cc",
     "property_cache_unittest.cc",
+    "window_cache_unittest.cc",
   ]
   deps = [
     "//base",
     "//testing/gtest",
+    "//ui/gfx/geometry",
     "//ui/gfx/x",
   ]
 }

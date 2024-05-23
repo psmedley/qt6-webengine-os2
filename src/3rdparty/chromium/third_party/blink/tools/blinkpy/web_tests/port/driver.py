@@ -120,7 +120,7 @@ class DriverOutput(object):
                  test_time=0,
                  measurements=None,
                  timeout=False,
-                 error='',
+                 error=b'',
                  crashed_process_name='??',
                  crashed_pid=None,
                  crash_log=None,
@@ -504,16 +504,16 @@ class Driver(object):
         init_timeout = self._port.get_option(
             'initialize_webgpu_adapter_at_startup_timeout_ms')
         startup_input = DriverInput(
-            "wpt_internal/webgpu/000_run_me_first.html",
+            "wpt_internal/webgpu/000_run_me_first.https.html",
             timeout=init_timeout,
             image_hash=None,
             args=per_test_args)
         output = self._run_one_input(startup_input, start_time=time.time())
-        if output.text and 'PASS 000_run_me_first' in output.text:
+        if output.text and b'PASS 000_run_me_first' in output.text:
             return True, None
 
-        output.text = ('Failed to initialize WebGPU adapter at startup '
-                       'via wpt_internal_webgpu/000_run_me_first.html:\n' +
+        output.text = (b'Failed to initialize WebGPU adapter at startup via '
+                       b'wpt_internal_webgpu/000_run_me_first.https.html:\n' +
                        output.text)
         return False, output
 
@@ -577,17 +577,6 @@ class Driver(object):
         if self._port.get_option('enable_leak_detection'):
             cmd.append('--enable-leak-detection')
         cmd.extend(per_test_args)
-
-        # The following code temporarily disables CompositeAfterPaint in web
-        # tests unless it is explicitly enabled. CompositeAfterPaint is enabled
-        # via fieldtrial_testing_config.json which would make web tests run
-        # with CompositeAfterPaint. This is disabled in order to stage the
-        # enabling of the feature because of the number of rebaselines needed.
-        # TODO(pdr): Remove this code and run web tests with
-        # CompositeAfterPaint.
-        if '--enable-blink-features=CompositeAfterPaint' not in cmd:
-            cmd.append('--disable-blink-features=CompositeAfterPaint')
-
         cmd = coalesce_repeated_switches(cmd)
         cmd.append('-')
         return cmd
@@ -624,7 +613,7 @@ class Driver(object):
         if error_line.startswith('#LEAK - '):
             self._leaked = True
             match = re.match(r'#LEAK - (\S+) pid (\d+) (.+)\n', error_line)
-            self._leak_log = match.group(3)
+            self._leak_log = (match.group(3)).encode('utf-8')
         return self._leaked
 
     def _command_from_driver_input(self, driver_input):

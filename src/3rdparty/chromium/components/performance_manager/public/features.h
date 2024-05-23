@@ -13,35 +13,12 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 
-namespace performance_manager {
-namespace features {
-
-// The feature that gates the TabLoadingFrameNavigationPolicy, and its
-// mechanism counterpart the TabLoadingFrameNavigationScheduler.
-extern const base::Feature kTabLoadingFrameNavigationThrottles;
-
-// Parameters controlling the TabLoadingFrameNavigationThrottles feature.
-struct TabLoadingFrameNavigationThrottlesParams {
-  TabLoadingFrameNavigationThrottlesParams();
-  ~TabLoadingFrameNavigationThrottlesParams();
-
-  static TabLoadingFrameNavigationThrottlesParams GetParams();
-
-  // The minimum and maximum amount of time throttles will be applied to
-  // non-primary content frames.
-  base::TimeDelta minimum_throttle_timeout;
-  base::TimeDelta maximum_throttle_timeout;
-
-  // The multiple of elapsed time from navigation start until
-  // FirstContentfulPaint (FCP) that is used in calculating the timeout to apply
-  // to the throttles.
-  double fcp_multiple;
-};
+namespace performance_manager::features {
 
 // The feature that gates whether or not the PM runs on the main (UI) thread.
 extern const base::Feature kRunOnMainThread;
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 // Enables urgent discarding of pages directly from PerformanceManager rather
 // than via TabManager.
 extern const base::Feature kUrgentDiscardingFromPerformanceManager;
@@ -89,34 +66,6 @@ extern const base::Feature kBackgroundTabLoadingFromPerformanceManager;
 // BFCache of all pages when the system is under memory pressure.
 extern const base::Feature kBFCachePerformanceManagerPolicy;
 
-// Parameters allowing to control some aspects of the
-// |kBFCachePerformanceManagerPolicy|.
-class BFCachePerformanceManagerPolicyParams {
- public:
-  ~BFCachePerformanceManagerPolicyParams();
-
-  static BFCachePerformanceManagerPolicyParams GetParams();
-
-  // Whether or not the BFCache of all pages should be flushed when the system
-  // is under *moderate* memory pressure. The policy always flushes the bfcache
-  // under critical pressure.
-  bool flush_on_moderate_pressure() const {
-    return flush_on_moderate_pressure_;
-  }
-
-  static constexpr base::FeatureParam<bool> kFlushOnModeratePressure{
-      &features::kBFCachePerformanceManagerPolicy, "flush_on_moderate_pressure",
-      true};
-
- private:
-  BFCachePerformanceManagerPolicyParams();
-  BFCachePerformanceManagerPolicyParams(
-      const BFCachePerformanceManagerPolicyParams& rhs);
-
-  bool flush_on_moderate_pressure_ = true;
-};
-
-}  // namespace features
-}  // namespace performance_manager
+}  // namespace performance_manager::features
 
 #endif  // COMPONENTS_PERFORMANCE_MANAGER_PUBLIC_FEATURES_H_

@@ -42,7 +42,7 @@ class TextControlElementTest : public testing::Test {
 
 void TextControlElementTest::SetUp() {
   dummy_page_holder_ =
-      std::make_unique<DummyPageHolder>(IntSize(800, 600), nullptr);
+      std::make_unique<DummyPageHolder>(gfx::Size(800, 600), nullptr);
 
   document_ = &dummy_page_holder_->GetDocument();
   document_->documentElement()->setInnerHTML(
@@ -93,12 +93,12 @@ TEST_F(TextControlElementTest, ReadOnlyAttributeChangeEditability) {
   Input().setAttribute(html_names::kReadonlyAttr, "");
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 
   Input().removeAttribute(html_names::kReadonlyAttr);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadWritePlaintextOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 }
 
 TEST_F(TextControlElementTest, DisabledAttributeChangeEditability) {
@@ -106,12 +106,12 @@ TEST_F(TextControlElementTest, DisabledAttributeChangeEditability) {
   Input().setAttribute(html_names::kDisabledAttr, "");
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 
   Input().removeAttribute(html_names::kDisabledAttr);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadWritePlaintextOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 }
 
 }  // namespace blink

@@ -17,12 +17,10 @@
 #include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/no_destructor.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "fuchsia/base/fuchsia_dir_scheme.h"
@@ -232,7 +230,8 @@ class ContentDirectoryURLLoader final : public network::mojom::URLLoader {
     response->mime_type = *mime_type;
     response->headers = CreateHeaders(*mime_type, charset);
     response->content_length = content_length;
-    client_->OnReceiveResponse(std::move(response));
+    client_->OnReceiveResponse(std::move(response),
+                               mojo::ScopedDataPipeConsumerHandle());
 
     // Set up the Mojo DataPipe used for streaming the response payload to the
     // client.
@@ -312,9 +311,10 @@ net::Error OpenFileFromDirectory(
           .Append(content_directory_name)
           .Append(relative_file_path);
 
-  zx_status_t status = fdio_open(absolute_file_path.value().c_str(),
-                                 fuchsia::io::OPEN_RIGHT_READABLE,
-                                 file_request.TakeChannel().release());
+  const zx_status_t status =
+      fdio_open(absolute_file_path.value().c_str(),
+                static_cast<uint32_t>(fuchsia::io::OpenFlags::RIGHT_READABLE),
+                file_request.TakeChannel().release());
   if (status != ZX_OK) {
     ZX_DLOG(WARNING, status) << "fdio_open";
     return net::ERR_FILE_NOT_FOUND;
@@ -380,9 +380,9 @@ void ContentDirectoryLoaderFactory::CreateLoaderAndStart(
   requested_path.remove_prefix(1);
 
   fidl::InterfaceHandle<fuchsia::io::Node> file_handle;
-  net::Error open_result = OpenFileFromDirectory(request.url.GetOrigin().host(),
-                                                 base::FilePath(requested_path),
-                                                 file_handle.NewRequest());
+  net::Error open_result = OpenFileFromDirectory(
+      request.url.DeprecatedGetOriginAsURL().host(),
+      base::FilePath(requested_path), file_handle.NewRequest());
   if (open_result != net::OK) {
     mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
         ->OnComplete(network::URLLoaderCompletionStatus(open_result));
@@ -395,7 +395,7 @@ void ContentDirectoryLoaderFactory::CreateLoaderAndStart(
   // ContentDirectoryURLLoader::Start().
   fidl::InterfaceHandle<fuchsia::io::Node> metadata_handle;
   open_result = OpenFileFromDirectory(
-      request.url.GetOrigin().host(),
+      request.url.DeprecatedGetOriginAsURL().host(),
       base::FilePath(base::StrCat({requested_path, "._metadata"})),
       metadata_handle.NewRequest());
   if (open_result != net::OK) {

@@ -4,8 +4,10 @@
 
 #include "media/mojo/services/mojo_cdm_helper.h"
 
+#include <tuple>
+
 #include "base/containers/cxx20_erase.h"
-#include "base/macros.h"
+#include "build/build_config.h"
 #include "media/base/cdm_context.h"
 #include "media/cdm/cdm_helpers.h"
 #include "media/mojo/services/mojo_cdm_allocator.h"
@@ -45,14 +47,15 @@ url::Origin MojoCdmHelper::GetCdmOrigin() {
   // Since the CDM is created asynchronously, by the time this function is
   // called, the render frame host in the browser process may already be gone.
   // It's safe to ignore the error since the origin is used for crash reporting.
-  ignore_result(frame_interfaces_->GetCdmOrigin(&cdm_origin));
+  std::ignore = frame_interfaces_->GetCdmOrigin(&cdm_origin);
   return cdm_origin;
 }
 
-#if defined(OS_WIN)
-void MojoCdmHelper::GetCdmPreferenceData(GetCdmPreferenceDataCB callback) {
+#if BUILDFLAG(IS_WIN)
+void MojoCdmHelper::GetMediaFoundationCdmData(
+    GetMediaFoundationCdmDataCB callback) {
   ConnectToCdmDocumentService();
-  cdm_document_service_->GetCdmPreferenceData(std::move(callback));
+  cdm_document_service_->GetMediaFoundationCdmData(std::move(callback));
 }
 
 void MojoCdmHelper::SetCdmClientToken(
@@ -60,7 +63,12 @@ void MojoCdmHelper::SetCdmClientToken(
   ConnectToCdmDocumentService();
   cdm_document_service_->SetCdmClientToken(client_token);
 }
-#endif  // defined(OS_WIN)
+
+void MojoCdmHelper::OnCdmEvent(CdmEvent event) {
+  ConnectToCdmDocumentService();
+  cdm_document_service_->OnCdmEvent(event);
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 cdm::Buffer* MojoCdmHelper::CreateCdmBuffer(size_t capacity) {
   return GetAllocator()->CreateCdmBuffer(capacity);

@@ -3,12 +3,15 @@
 # found in the LICENSE file.
 """Class for interacting with the Skia Gold image diffing service."""
 
+# pylint: disable=useless-object-inheritance
+
 import logging
 import os
+import platform
 import shutil
-import subprocess
 import sys
 import tempfile
+import time
 
 CHROMIUM_SRC = os.path.realpath(
     os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -17,7 +20,11 @@ GOLDCTL_BINARY = os.path.join(CHROMIUM_SRC, 'tools', 'skia_goldctl')
 if sys.platform == 'win32':
   GOLDCTL_BINARY = os.path.join(GOLDCTL_BINARY, 'win', 'goldctl') + '.exe'
 elif sys.platform == 'darwin':
-  GOLDCTL_BINARY = os.path.join(GOLDCTL_BINARY, 'mac', 'goldctl')
+  machine = platform.machine().lower()
+  if any(machine.startswith(m) for m in ('arm64', 'aarch64')):
+    GOLDCTL_BINARY = os.path.join(GOLDCTL_BINARY, 'mac_arm64', 'goldctl')
+  else:
+    GOLDCTL_BINARY = os.path.join(GOLDCTL_BINARY, 'mac_amd64', 'goldctl')
 else:
   GOLDCTL_BINARY = os.path.join(GOLDCTL_BINARY, 'linux', 'goldctl')
 
@@ -73,6 +80,8 @@ class SkiaGoldSession(object):
     self._corpus = corpus
     self._instance = instance
     self._bucket = bucket
+    self._local_png_directory = (self._gold_properties.local_png_directory
+                                 or tempfile.mkdtemp())
     self._triage_link_file = tempfile.NamedTemporaryFile(suffix='.txt',
                                                          dir=working_dir,
                                                          delete=False).name
@@ -368,7 +377,7 @@ class SkiaGoldSession(object):
           '--bypass-skia-gold-functionality is not supported when running '
           'tests locally.')
 
-    output_dir = self._CreateDiffOutputDir()
+    output_dir = self._CreateDiffOutputDir(name)
     # TODO(skbug.com/10611): Remove this temporary work dir and instead just use
     # self._working_dir once `goldctl diff` stops clobbering the auth files in
     # the provided work directory.
@@ -503,7 +512,10 @@ class SkiaGoldSession(object):
     """
     open(self._triage_link_file, 'w').close()
 
-  def _CreateDiffOutputDir(self):
+  def _CreateDiffOutputDir(self, _):
+    # We don't use self._local_png_directory here since we want it to be
+    # automatically cleaned up with the working directory. Any subclasses that
+    # want to keep it around can override this method.
     return tempfile.mkdtemp(dir=self._working_dir)
 
   def _GetDiffGoldInstance(self):

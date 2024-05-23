@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/media_stream_request.h"
@@ -39,7 +39,7 @@ class DesktopMediaPicker {
     ~Params();
 
     // WebContents this picker is relative to, can be null.
-    content::WebContents* web_contents = nullptr;
+    raw_ptr<content::WebContents> web_contents = nullptr;
     // The context whose root window is used for dialog placement, cannot be
     // null for Aura.
     gfx::NativeWindow context = nullptr;
@@ -80,6 +80,10 @@ class DesktopMediaPicker {
       const content::MediaStreamRequest* request = nullptr);
 
   DesktopMediaPicker() = default;
+
+  DesktopMediaPicker(const DesktopMediaPicker&) = delete;
+  DesktopMediaPicker& operator=(const DesktopMediaPicker&) = delete;
+
   virtual ~DesktopMediaPicker() = default;
 
   // Shows dialog with list of desktop media sources (screens, windows, tabs)
@@ -89,9 +93,6 @@ class DesktopMediaPicker {
   virtual void Show(const Params& params,
                     std::vector<std::unique_ptr<DesktopMediaList>> source_lists,
                     DoneCallback done_callback) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DesktopMediaPicker);
 };
 
 #endif  // CHROME_BROWSER_MEDIA_WEBRTC_DESKTOP_MEDIA_PICKER_H_

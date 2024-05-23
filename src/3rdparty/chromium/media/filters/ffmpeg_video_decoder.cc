@@ -13,7 +13,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
@@ -37,23 +37,23 @@ static int GetFFmpegVideoDecoderThreadCount(const VideoDecoderConfig& config) {
   // Some ffmpeg codecs don't actually benefit from using more threads.
   // Only add more threads for those codecs that we know will benefit.
   switch (config.codec()) {
-    case kUnknownVideoCodec:
-    case kCodecVC1:
-    case kCodecMPEG2:
-    case kCodecHEVC:
-    case kCodecVP9:
-    case kCodecAV1:
-    case kCodecDolbyVision:
+    case VideoCodec::kUnknown:
+    case VideoCodec::kVC1:
+    case VideoCodec::kMPEG2:
+    case VideoCodec::kHEVC:
+    case VideoCodec::kVP9:
+    case VideoCodec::kAV1:
+    case VideoCodec::kDolbyVision:
       // We do not compile ffmpeg with support for any of these codecs.
       break;
 
-    case kCodecTheora:
-    case kCodecMPEG4:
+    case VideoCodec::kTheora:
+    case VideoCodec::kMPEG4:
       // No extra threads for these codecs.
       break;
 
-    case kCodecH264:
-    case kCodecVP8:
+    case VideoCodec::kH264:
+    case VideoCodec::kVP8:
       // Normalize to three threads for 1080p content, then scale linearly
       // with number of pixels.
       // Examples:
@@ -89,7 +89,7 @@ bool FFmpegVideoDecoder::IsCodecSupported(VideoCodec codec) {
 SupportedVideoDecoderConfigs FFmpegVideoDecoder::SupportedConfigsForWebRTC() {
   SupportedVideoDecoderConfigs supported_configs;
 
-  if (IsCodecSupported(kCodecH264)) {
+  if (IsCodecSupported(VideoCodec::kH264)) {
     supported_configs.emplace_back(/*profile_min=*/H264PROFILE_BASELINE,
                                    /*profile_max=*/H264PROFILE_HIGH,
                                    /*coded_size_min=*/kDefaultSwDecodeSizeMin,
@@ -97,7 +97,7 @@ SupportedVideoDecoderConfigs FFmpegVideoDecoder::SupportedConfigsForWebRTC() {
                                    /*allow_encrypted=*/false,
                                    /*require_encrypted=*/false);
   }
-  if (IsCodecSupported(kCodecVP8)) {
+  if (IsCodecSupported(VideoCodec::kVP8)) {
     supported_configs.emplace_back(/*profile_min=*/VP8PROFILE_ANY,
                                    /*profile_max=*/VP8PROFILE_ANY,
                                    /*coded_size_min=*/kDefaultSwDecodeSizeMin,
@@ -248,20 +248,21 @@ void FFmpegVideoDecoder::Initialize(const VideoDecoderConfig& config,
   InitCB bound_init_cb = BindToCurrentLoop(std::move(init_cb));
 
   if (config.is_encrypted()) {
-    std::move(bound_init_cb).Run(StatusCode::kEncryptedContentUnsupported);
+    std::move(bound_init_cb)
+        .Run(DecoderStatus::Codes::kUnsupportedEncryptionMode);
     return;
   }
 
   if (!ConfigureDecoder(config, low_delay)) {
-    std::move(bound_init_cb).Run(StatusCode::kDecoderFailedInitialization);
+    std::move(bound_init_cb).Run(DecoderStatus::Codes::kUnsupportedConfig);
     return;
   }
 
   // Success!
   config_ = config;
   output_cb_ = output_cb;
-  state_ = kNormal;
-  std::move(bound_init_cb).Run(OkStatus());
+  state_ = DecoderState::kNormal;
+  std::move(bound_init_cb).Run(DecoderStatus::Codes::kOk);
 }
 
 void FFmpegVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
@@ -270,52 +271,52 @@ void FFmpegVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(buffer.get());
   DCHECK(decode_cb);
-  CHECK_NE(state_, kUninitialized);
+  CHECK_NE(state_, DecoderState::kUninitialized);
 
   DecodeCB decode_cb_bound = BindToCurrentLoop(std::move(decode_cb));
 
-  if (state_ == kError) {
-    std::move(decode_cb_bound).Run(DecodeStatus::DECODE_ERROR);
+  if (state_ == DecoderState::kError) {
+    std::move(decode_cb_bound).Run(DecoderStatus::Codes::kFailed);
     return;
   }
 
-  if (state_ == kDecodeFinished) {
-    std::move(decode_cb_bound).Run(DecodeStatus::OK);
+  if (state_ == DecoderState::kDecodeFinished) {
+    std::move(decode_cb_bound).Run(DecoderStatus::Codes::kOk);
     return;
   }
 
-  DCHECK_EQ(state_, kNormal);
+  DCHECK_EQ(state_, DecoderState::kNormal);
 
   // During decode, because reads are issued asynchronously, it is possible to
   // receive multiple end of stream buffers since each decode is acked. There
   // are three states the decoder can be in:
   //
-  //   kNormal: This is the starting state. Buffers are decoded. Decode errors
-  //            are discarded.
-  //   kDecodeFinished: All calls return empty frames.
-  //   kError: Unexpected error happened.
+  //   DecoderState::kNormal: This is the starting state. Buffers are decoded.
+  //                          Decode errors are discarded.
+  //   DecoderState::kDecodeFinished: All calls return empty frames.
+  //   DecoderState::kError: Unexpected error happened.
   //
   // These are the possible state transitions.
   //
-  // kNormal -> kDecodeFinished:
+  // DecoderState::kNormal -> DecoderState::kDecodeFinished:
   //     When EOS buffer is received and the codec has been flushed.
-  // kNormal -> kError:
+  // DecoderState::kNormal -> DecoderState::kError:
   //     A decoding error occurs and decoding needs to stop.
-  // (any state) -> kNormal:
+  // (any state) -> DecoderState::kNormal:
   //     Any time Reset() is called.
 
   if (!FFmpegDecode(*buffer)) {
-    state_ = kError;
-    std::move(decode_cb_bound).Run(DecodeStatus::DECODE_ERROR);
+    state_ = DecoderState::kError;
+    std::move(decode_cb_bound).Run(DecoderStatus::Codes::kFailed);
     return;
   }
 
   if (buffer->end_of_stream())
-    state_ = kDecodeFinished;
+    state_ = DecoderState::kDecodeFinished;
 
   // VideoDecoderShim expects that |decode_cb| is called only after
   // |output_cb_|.
-  std::move(decode_cb_bound).Run(DecodeStatus::OK);
+  std::move(decode_cb_bound).Run(DecoderStatus::Codes::kOk);
 }
 
 void FFmpegVideoDecoder::Reset(base::OnceClosure closure) {
@@ -323,7 +324,7 @@ void FFmpegVideoDecoder::Reset(base::OnceClosure closure) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   avcodec_flush_buffers(codec_context_.get());
-  state_ = kNormal;
+  state_ = DecoderState::kNormal;
   // PostTask() to avoid calling |closure| immediately.
   base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
                                                    std::move(closure));
@@ -332,7 +333,7 @@ void FFmpegVideoDecoder::Reset(base::OnceClosure closure) {
 FFmpegVideoDecoder::~FFmpegVideoDecoder() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (state_ != kUninitialized)
+  if (state_ != DecoderState::kUninitialized)
     ReleaseFFmpegResources();
 }
 
@@ -393,8 +394,7 @@ bool FFmpegVideoDecoder::OnNewFrame(AVFrame* frame) {
 
   scoped_refptr<VideoFrame> video_frame =
       reinterpret_cast<VideoFrame*>(av_buffer_get_opaque(frame->buf[0]));
-  video_frame->set_timestamp(
-      base::TimeDelta::FromMicroseconds(frame->reordered_opaque));
+  video_frame->set_timestamp(base::Microseconds(frame->reordered_opaque));
   video_frame->metadata().power_efficient = false;
   output_cb_.Run(video_frame);
   return true;

@@ -15,10 +15,12 @@ class WaylandConnection;
 // Wraps the zaura_shell object.
 class WaylandZAuraShell : public wl::GlobalObjectRegistrar<WaylandZAuraShell> {
  public:
-  static void Register(WaylandConnection* connection);
+  static constexpr char kInterfaceName[] = "zaura_shell";
+
   static void Instantiate(WaylandConnection* connection,
                           wl_registry* registry,
                           uint32_t name,
+                          const std::string& interface,
                           uint32_t version);
 
   WaylandZAuraShell(zaura_shell* aura_shell, WaylandConnection* connection);
@@ -50,6 +52,10 @@ class WaylandZAuraShell : public wl::GlobalObjectRegistrar<WaylandZAuraShell> {
   static void OnDeskActivationChanged(void* data,
                                       struct zaura_shell* zaura_shell,
                                       int active_desk_index);
+  static void OnActivated(void* data,
+                          struct zaura_shell* zaura_shell,
+                          struct wl_surface* gained_active,
+                          struct wl_surface* lost_active);
 
   wl::Object<zaura_shell> obj_;
   WaylandConnection* const connection_;

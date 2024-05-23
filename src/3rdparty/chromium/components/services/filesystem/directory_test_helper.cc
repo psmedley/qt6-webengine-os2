@@ -9,8 +9,6 @@
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/test/bind.h"
 #include "components/services/filesystem/directory_impl.h"
@@ -24,6 +22,10 @@ namespace filesystem {
 class DirectoryTestHelper::BlockingState {
  public:
   BlockingState() : lock_table_(base::MakeRefCounted<LockTable>()) {}
+
+  BlockingState(const BlockingState&) = delete;
+  BlockingState& operator=(const BlockingState&) = delete;
+
   ~BlockingState() = default;
 
   void BindNewTempDirectory(mojo::PendingReceiver<mojom::Directory> receiver) {
@@ -40,8 +42,6 @@ class DirectoryTestHelper::BlockingState {
  private:
   const scoped_refptr<LockTable> lock_table_;
   mojo::UniqueReceiverSet<mojom::Directory> directories_;
-
-  DISALLOW_COPY_AND_ASSIGN(BlockingState);
 };
 
 DirectoryTestHelper::DirectoryTestHelper()

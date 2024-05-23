@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_ANDROID_AUTOFILL_BROWSER_ANDROID_AUTOFILL_MANAGER_H_
 #define COMPONENTS_ANDROID_AUTOFILL_BROWSER_ANDROID_AUTOFILL_MANAGER_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/common/dense_set.h"
@@ -21,6 +22,9 @@ class AndroidAutofillManager : public AutofillManager {
       AutofillClient* client,
       const std::string& app_locale,
       AutofillManager::AutofillDownloadManagerState enable_download_manager);
+
+  AndroidAutofillManager(const AndroidAutofillManager&) = delete;
+  AndroidAutofillManager& operator=(const AndroidAutofillManager&) = delete;
 
   ~AndroidAutofillManager() override;
 
@@ -110,10 +114,8 @@ class AndroidAutofillManager : public AutofillManager {
   AutofillProvider* GetAutofillProvider();
 
   bool has_server_prediction_ = false;
-  AutofillProvider* autofill_provider_for_testing_ = nullptr;
+  raw_ptr<AutofillProvider> autofill_provider_for_testing_ = nullptr;
   base::WeakPtrFactory<AndroidAutofillManager> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AndroidAutofillManager);
 };
 
 }  // namespace autofill

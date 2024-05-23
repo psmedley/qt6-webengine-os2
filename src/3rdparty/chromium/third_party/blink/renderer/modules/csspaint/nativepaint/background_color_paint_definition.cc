@@ -15,31 +15,32 @@
 #include "third_party/blink/renderer/core/css/cssom/paint_worklet_style_property_map.h"
 #include "third_party/blink/renderer/core/css/cssom/style_property_map_read_only.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
-#include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/workers/worker_backing_thread_startup_data.h"
 #include "third_party/blink/renderer/modules/csspaint/paint_rendering_context_2d.h"
-#include "third_party/blink/renderer/modules/csspaint/paint_worklet_id_generator.h"
-#include "third_party/blink/renderer/modules/csspaint/paint_worklet_proxy_client.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/paint_worklet_paint_dispatcher.h"
 #include "third_party/blink/renderer/platform/graphics/platform_paint_worklet_layer_painter.h"
-#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
-#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
 
 namespace {
+
+bool AllColorsOpaque(const Vector<Color>& animated_colors) {
+  for (const auto& color : animated_colors) {
+    if (color.HasAlpha())
+      return false;
+  }
+  return true;
+}
 
 // This class includes information that is required by the compositor thread
 // when painting background color.
 class BackgroundColorPaintWorkletInput : public PaintWorkletInput {
  public:
   BackgroundColorPaintWorkletInput(
-      const FloatSize& container_size,
+      const gfx::SizeF& container_size,
       int worklet_id,
       const Vector<Color>& animated_colors,
       const Vector<double>& offsets,
@@ -48,13 +49,15 @@ class BackgroundColorPaintWorkletInput : public PaintWorkletInput {
       : PaintWorkletInput(container_size, worklet_id, std::move(property_keys)),
         animated_colors_(animated_colors),
         offsets_(offsets),
-        progress_(progress) {}
+        progress_(progress),
+        is_opaque_(AllColorsOpaque(animated_colors)) {}
 
   ~BackgroundColorPaintWorkletInput() override = default;
 
   const Vector<Color>& AnimatedColors() const { return animated_colors_; }
   const Vector<double>& Offsets() const { return offsets_; }
   const absl::optional<double>& MainThreadProgress() const { return progress_; }
+  bool KnownToBeOpaque() const override { return is_opaque_; }
 
   PaintWorkletInputType GetType() const override {
     return PaintWorkletInputType::kBackgroundColor;
@@ -68,11 +71,12 @@ class BackgroundColorPaintWorkletInput : public PaintWorkletInput {
   Vector<Color> animated_colors_;
   Vector<double> offsets_;
   absl::optional<double> progress_;
+  const bool is_opaque_;
 };
 
 // TODO(crbug.com/1163949): Support animation keyframes without 0% or 100%.
 // Returns false if we cannot successfully get the animated color.
-void GetColorsFromKeyframe(const PropertySpecificKeyframe* frame,
+bool GetColorsFromKeyframe(const PropertySpecificKeyframe* frame,
                            const KeyframeEffectModelBase* model,
                            Vector<Color>* animated_colors,
                            const Element* element) {
@@ -83,7 +87,10 @@ void GetColorsFromKeyframe(const PropertySpecificKeyframe* frame,
         CSSPropertyName(CSSPropertyID::kBackgroundColor);
     const CSSValue* computed_value = StyleResolver::ComputeValue(
         const_cast<Element*>(element), property_name, *value);
-    DCHECK(computed_value->IsColorValue());
+    // TODO(crbug.com/1255912): handle system color.
+    if (!computed_value->IsColorValue())
+      return false;
+
     const cssvalue::CSSColor* color_value =
         static_cast<const cssvalue::CSSColor*>(computed_value);
     animated_colors->push_back(color_value->Value());
@@ -93,37 +100,24 @@ void GetColorsFromKeyframe(const PropertySpecificKeyframe* frame,
         To<TransitionKeyframe::PropertySpecificKeyframe>(frame);
     InterpolableValue* value =
         keyframe->GetValue()->Value().interpolable_value.get();
+
+    if (!value->IsList())
+      return false;
+
+    // Transition keyframes store a pair of color values: one for the actual
+    // color and one for the reported color (conditionally resolved). This is to
+    // prevent JavaScript code from snooping the visited status of links. The
+    // color to use for the animation is stored first in the list.
+    // We need to further check that the color is a simple RGBA color and does
+    // not require blending with other colors (e.g. currentcolor).
     const InterpolableList& list = To<InterpolableList>(*value);
-    // Only the first one has the real value.
+    if (!CSSColorInterpolationType::IsRGBA(*(list.Get(0))))
+      return false;
+
     Color rgba = CSSColorInterpolationType::GetRGBA(*(list.Get(0)));
     animated_colors->push_back(rgba);
   }
-}
-
-bool CanGetValueFromKeyframe(const PropertySpecificKeyframe* frame,
-                             const KeyframeEffectModelBase* model) {
-  if (model->IsStringKeyframeEffectModel()) {
-    DCHECK(frame->IsCSSPropertySpecificKeyframe());
-    const CSSValue* value = To<CSSPropertySpecificKeyframe>(frame)->Value();
-    if (!value)
-      return false;
-  } else {
-    DCHECK(frame->IsTransitionPropertySpecificKeyframe());
-    const TransitionKeyframe::PropertySpecificKeyframe* keyframe =
-        To<TransitionKeyframe::PropertySpecificKeyframe>(frame);
-    InterpolableValue* value =
-        keyframe->GetValue()->Value().interpolable_value.get();
-    if (!value)
-      return false;
-  }
   return true;
-}
-
-void GetCompositorKeyframeOffset(const PropertySpecificKeyframe* frame,
-                                 Vector<double>* offsets) {
-  const CompositorKeyframeDouble& value =
-      To<CompositorKeyframeDouble>(*(frame->GetCompositorKeyframeValue()));
-  offsets->push_back(value.ToDouble());
 }
 
 bool GetBGColorPaintWorkletParamsInternal(
@@ -142,8 +136,9 @@ bool GetBGColorPaintWorkletParamsInternal(
       model->GetPropertySpecificKeyframes(
           PropertyHandle(GetCSSPropertyBackgroundColor()));
   for (const auto& frame : *frames) {
-    GetColorsFromKeyframe(frame, model, animated_colors, element);
-    GetCompositorKeyframeOffset(frame, offsets);
+    if (!GetColorsFromKeyframe(frame, model, animated_colors, element))
+      return false;
+    offsets->push_back(frame->Offset());
   }
   *progress = compositable_animation->effect()->Progress();
   return true;
@@ -166,40 +161,7 @@ struct DowncastTraits<BackgroundColorPaintWorkletInput> {
 
 Animation* BackgroundColorPaintDefinition::GetAnimationIfCompositable(
     const Element* element) {
-  if (!element->GetElementAnimations())
-    return nullptr;
-  Animation* compositable_animation = nullptr;
-  // We'd composite the background-color only if it is the only background color
-  // animation on this element.
-  unsigned count = 0;
-  for (const auto& animation : element->GetElementAnimations()->Animations()) {
-    if (animation.key->CalculateAnimationPlayState() == Animation::kIdle ||
-        !animation.key->Affects(*element, GetCSSPropertyBackgroundColor()))
-      continue;
-    count++;
-    compositable_animation = animation.key;
-  }
-  if (!compositable_animation || count > 1)
-    return nullptr;
-
-  // If we are here, then this element must have one background color animation
-  // only. Fall back to the main thread if it is not composite:replace.
-  const AnimationEffect* effect = compositable_animation->effect();
-  DCHECK(effect->IsKeyframeEffect());
-  const KeyframeEffectModelBase* model =
-      static_cast<const KeyframeEffect*>(effect)->Model();
-  if (model->AffectedByUnderlyingAnimations())
-    return nullptr;
-  const PropertySpecificKeyframeVector* frames =
-      model->GetPropertySpecificKeyframes(
-          PropertyHandle(GetCSSPropertyBackgroundColor()));
-  DCHECK_GE(frames->size(), 2u);
-  for (const auto& frame : *frames) {
-    if (!CanGetValueFromKeyframe(frame, model)) {
-      return nullptr;
-    }
-  }
-  return compositable_animation;
+  return GetAnimationForProperty(element, GetCSSPropertyBackgroundColor());
 }
 
 // static
@@ -212,38 +174,9 @@ BackgroundColorPaintDefinition* BackgroundColorPaintDefinition::Create(
 
 BackgroundColorPaintDefinition::BackgroundColorPaintDefinition(
     LocalFrame& local_root)
-    : worklet_id_(PaintWorkletIdGenerator::NextId()) {
-  DCHECK(local_root.IsLocalRoot());
-  DCHECK(IsMainThread());
-  ExecutionContext* context = local_root.DomWindow();
-  FrameOrWorkerScheduler* scheduler =
-      context ? context->GetScheduler() : nullptr;
-  // TODO(crbug.com/1143407): We don't need this thread if we can make the
-  // compositor thread support GC.
-  ThreadCreationParams params(ThreadType::kAnimationAndPaintWorkletThread);
-  worker_backing_thread_ = std::make_unique<WorkerBackingThread>(
-      params.SetFrameOrWorkerScheduler(scheduler));
-  auto startup_data = WorkerBackingThreadStartupData::CreateDefault();
-  PostCrossThreadTask(
-      *worker_backing_thread_->BackingThread().GetTaskRunner(), FROM_HERE,
-      CrossThreadBindOnce(&WorkerBackingThread::InitializeOnBackingThread,
-                          CrossThreadUnretained(worker_backing_thread_.get()),
-                          startup_data));
-  RegisterProxyClient(local_root);
-}
-
-void BackgroundColorPaintDefinition::RegisterProxyClient(
-    LocalFrame& local_root) {
-  proxy_client_ =
-      PaintWorkletProxyClient::Create(local_root.DomWindow(), worklet_id_);
-  proxy_client_->RegisterForNativePaintWorklet(
-      worker_backing_thread_.get(), this,
-      PaintWorkletInput::PaintWorkletInputType::kBackgroundColor);
-}
-
-void BackgroundColorPaintDefinition::UnregisterProxyClient() {
-  proxy_client_->UnregisterForNativePaintWorklet();
-}
+    : NativeCssPaintDefinition(
+          &local_root,
+          PaintWorkletInput::PaintWorkletInputType::kBackgroundColor) {}
 
 sk_sp<PaintRecord> BackgroundColorPaintDefinition::Paint(
     const CompositorPaintWorkletInput* compositor_input,
@@ -251,7 +184,7 @@ sk_sp<PaintRecord> BackgroundColorPaintDefinition::Paint(
         animated_property_values) {
   const BackgroundColorPaintWorkletInput* input =
       static_cast<const BackgroundColorPaintWorkletInput*>(compositor_input);
-  FloatSize container_size = input->ContainerSize();
+  gfx::SizeF container_size = input->ContainerSize();
   Vector<Color> animated_colors = input->AnimatedColors();
   Vector<double> offsets = input->Offsets();
   DCHECK_GT(animated_colors.size(), 1u);
@@ -303,9 +236,9 @@ sk_sp<PaintRecord> BackgroundColorPaintDefinition::Paint(
 
   // When render this element, we always do pixel snapping to its nearest pixel,
   // therefore we use rounded |container_size| to create the rendering context.
-  IntSize rounded_size = RoundedIntSize(container_size);
-  if (!context_ || context_->Width() != rounded_size.Width() ||
-      context_->Height() != rounded_size.Height()) {
+  gfx::Size rounded_size = gfx::ToRoundedSize(container_size);
+  if (!context_ || context_->Width() != rounded_size.width() ||
+      context_->Height() != rounded_size.height()) {
     PaintRenderingContext2DSettings* context_settings =
         PaintRenderingContext2DSettings::Create();
     context_ = MakeGarbageCollected<PaintRenderingContext2D>(
@@ -316,7 +249,7 @@ sk_sp<PaintRecord> BackgroundColorPaintDefinition::Paint(
 }
 
 scoped_refptr<Image> BackgroundColorPaintDefinition::Paint(
-    const FloatSize& container_size,
+    const gfx::SizeF& container_size,
     const Node* node,
     const Vector<Color>& animated_colors,
     const Vector<double>& offsets,
@@ -355,7 +288,7 @@ sk_sp<PaintRecord> BackgroundColorPaintDefinition::PaintForTest(
     const Vector<double>& offsets,
     const CompositorPaintWorkletJob::AnimatedPropertyValues&
         animated_property_values) {
-  FloatSize container_size(100, 100);
+  gfx::SizeF container_size(100, 100);
   absl::optional<double> progress = 0;
   CompositorPaintWorkletInput::PropertyKeys property_keys;
   scoped_refptr<BackgroundColorPaintWorkletInput> input =
@@ -366,7 +299,6 @@ sk_sp<PaintRecord> BackgroundColorPaintDefinition::PaintForTest(
 }
 
 void BackgroundColorPaintDefinition::Trace(Visitor* visitor) const {
-  visitor->Trace(proxy_client_);
   NativePaintDefinition::Trace(visitor);
 }
 

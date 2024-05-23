@@ -46,6 +46,9 @@ constexpr char kWebBundleFileMimeTypeWithoutParameters[] =
 constexpr char kNoSniffErrorMessage[] =
     "Web Bundle response must have \"X-Content-Type-Options: nosniff\" header.";
 
+constexpr char kNoPrimaryUrlErrorMessage[] =
+    "Web Bundle is missing the Primary URL to navigate to.";
+
 extern const net::NetworkTrafficAnnotationTag kTrafficAnnotation;
 
 // Adds |error_message| to the console and calls OnComplete() of |client|.
@@ -53,6 +56,9 @@ void CompleteWithInvalidWebBundleError(
     mojo::Remote<network::mojom::URLLoaderClient> client,
     int frame_tree_node_id,
     const std::string& error_message);
+
+void LogErrorMessageToConsole(const int frame_tree_node_id,
+                              const std::string& error_message);
 
 std::string GetMetadataParseErrorMessage(
     const web_package::mojom::BundleMetadataParseErrorPtr& metadata_error);

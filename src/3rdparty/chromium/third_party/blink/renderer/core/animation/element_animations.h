@@ -31,13 +31,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ELEMENT_ANIMATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ELEMENT_ANIMATIONS_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/animation/css/css_animations.h"
 #include "third_party/blink/renderer/core/animation/effect_stack.h"
 #include "third_party/blink/renderer/core/animation/worklet_animation_base.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/properties/css_bitset.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_counted_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
@@ -72,18 +75,17 @@ class CORE_EXPORT ElementAnimations final
 
   bool IsEmpty() const {
     return effect_stack_.IsEmpty() && css_animations_.IsEmpty() &&
-           animations_.IsEmpty();
+           animations_.IsEmpty() && worklet_animations_.IsEmpty();
   }
 
   void RestartAnimationOnCompositor();
 
-  void UpdateAnimationFlags(ComputedStyle&);
   void SetAnimationStyleChange(bool animation_style_change) {
     animation_style_change_ = animation_style_change;
   }
   bool IsAnimationStyleChange() const { return animation_style_change_; }
 
-  bool UpdateBoxSizeAndCheckTransformAxisAlignment(const FloatSize& box_size);
+  bool UpdateBoxSizeAndCheckTransformAxisAlignment(const gfx::SizeF& box_size);
   bool IsIdentityOrTranslation() const;
 
   void Trace(Visitor*) const;

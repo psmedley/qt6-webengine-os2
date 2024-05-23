@@ -95,8 +95,8 @@ bool CFX_XMLParser::DoSyntaxParse(CFX_XMLDocument* doc) {
   if (!alloc_size_safe.IsValid())
     return false;
 
-  FX_FILESIZE current_buffer_idx = 0;
-  FX_FILESIZE buffer_size = 0;
+  size_t current_buffer_idx = 0;
+  size_t buffer_size = 0;
 
   std::vector<wchar_t, FxAllocAllocator<wchar_t>> buffer;
   buffer.resize(alloc_size_safe.ValueOrDie());
@@ -105,7 +105,6 @@ bool CFX_XMLParser::DoSyntaxParse(CFX_XMLDocument* doc) {
   std::stack<CFX_XMLNode::Type> node_type_stack;
   WideString current_attribute_name;
   FDE_XmlSyntaxState current_parser_state = FDE_XmlSyntaxState::Text;
-  int32_t iCount = 0;
   wchar_t current_quote_character = 0;
   wchar_t current_character_to_skip_to = 0;
 
@@ -262,7 +261,7 @@ bool CFX_XMLParser::DoSyntaxParse(CFX_XMLDocument* doc) {
           break;
         case FDE_XmlSyntaxState::AttriValue:
           if (ch == current_quote_character) {
-            if (entity_start_ > -1)
+            if (entity_start_.has_value())
               return false;
 
             current_quote_character = 0;
@@ -328,7 +327,6 @@ bool CFX_XMLParser::DoSyntaxParse(CFX_XMLDocument* doc) {
               }
 
               current_node_ = current_node_->GetParent();
-              iCount++;
             } else if (!IsXMLWhiteSpace(ch)) {
               return false;
             }
@@ -470,27 +468,27 @@ bool CFX_XMLParser::DoSyntaxParse(CFX_XMLDocument* doc) {
 void CFX_XMLParser::ProcessTextChar(wchar_t character) {
   current_text_.push_back(character);
 
-  if (entity_start_ > -1 && character == L';') {
+  if (entity_start_.has_value() && character == L';') {
     // Copy the entity out into a string and remove from the vector. When we
     // copy the entity we don't want to copy out the & or the ; so we start
     // shifted by one and want to copy 2 less characters in total.
-    WideString csEntity(current_text_.data() + entity_start_ + 1,
-                        current_text_.size() - entity_start_ - 2);
-    current_text_.erase(current_text_.begin() + entity_start_,
+    WideString csEntity(current_text_.data() + entity_start_.value() + 1,
+                        current_text_.size() - entity_start_.value() - 2);
+    current_text_.erase(current_text_.begin() + entity_start_.value(),
                         current_text_.end());
 
-    int32_t iLen = csEntity.GetLength();
+    size_t iLen = csEntity.GetLength();
     if (iLen > 0) {
       if (csEntity[0] == L'#') {
         uint32_t ch = 0;
         if (iLen > 1 && csEntity[1] == L'x') {
-          for (int32_t i = 2; i < iLen; i++) {
+          for (size_t i = 2; i < iLen; i++) {
             if (!FXSYS_IsHexDigit(csEntity[i]))
               break;
             ch = (ch << 4) + FXSYS_HexCharToInt(csEntity[i]);
           }
         } else {
-          for (int32_t i = 1; i < iLen; i++) {
+          for (size_t i = 1; i < iLen; i++) {
             if (!FXSYS_IsDecimalDigit(csEntity[i]))
               break;
             ch = ch * 10 + FXSYS_DecimalCharToInt(csEntity[i]);
@@ -516,9 +514,8 @@ void CFX_XMLParser::ProcessTextChar(wchar_t character) {
         }
       }
     }
-
-    entity_start_ = -1;
-  } else if (entity_start_ < 0 && character == L'&') {
+    entity_start_ = absl::nullopt;
+  } else if (!entity_start_.has_value() && character == L'&') {
     entity_start_ = current_text_.size() - 1;
   }
 }
@@ -535,7 +532,7 @@ void CFX_XMLParser::ProcessTargetData() {
 
 WideString CFX_XMLParser::GetTextData() {
   WideString ret(current_text_.data(), current_text_.size());
-  entity_start_ = -1;
+  entity_start_ = absl::nullopt;
   current_text_.clear();
   current_text_.reserve(kCurrentTextReserve);
   return ret;

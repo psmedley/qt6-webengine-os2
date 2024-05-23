@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
+#include "base/no_destructor.h"
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/storage_partition_impl.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,9 +28,9 @@ namespace content {
 
 // Implement the public "API" from
 // content/public/browser/origin_policy_commands.h:
-void OriginPolicyAddExceptionFor(BrowserContext* browser_context,
+void OriginPolicyAddExceptionFor(StoragePartition* storage_partition,
                                  const GURL& url) {
-  OriginPolicyThrottle::AddExceptionFor(browser_context, url);
+  OriginPolicyThrottle::AddExceptionFor(storage_partition, url);
 }
 
 // static
@@ -57,13 +58,12 @@ OriginPolicyThrottle::MaybeCreateThrottleFor(NavigationHandle* handle) {
 }
 
 // static
-void OriginPolicyThrottle::AddExceptionFor(BrowserContext* browser_context,
+void OriginPolicyThrottle::AddExceptionFor(StoragePartition* storage_partition,
                                            const GURL& url) {
-  DCHECK(browser_context);
-  StoragePartitionImpl* storage_partition = static_cast<StoragePartitionImpl*>(
-      browser_context->GetStoragePartitionForUrl(url));
+  auto* storage_partition_impl =
+      static_cast<StoragePartitionImpl*>(storage_partition);
   network::mojom::OriginPolicyManager* origin_policy_manager =
-      storage_partition->GetOriginPolicyManagerForBrowserProcess();
+      storage_partition_impl->GetOriginPolicyManagerForBrowserProcess();
 
   origin_policy_manager->AddExceptionFor(url::Origin::Create(url));
 }
@@ -102,6 +102,13 @@ OriginPolicyThrottle::WillProcessResponse() {
   switch (origin_policy->state) {
     case network::OriginPolicyState::kCannotLoadPolicy:
     case network::OriginPolicyState::kCannotParseHeader:
+      // Don't show an interstitial for iframes or non-primary pages;
+      // Origin-Policy errors in iframes should be treated as normal network
+      // errors.
+      if (!navigation_handle()->IsInPrimaryMainFrame()) {
+        return NavigationThrottle::ThrottleCheckResult(
+            NavigationThrottle::CANCEL, net::ERR_BLOCKED_BY_CLIENT);
+      }
       return NavigationThrottle::ThrottleCheckResult(
           NavigationThrottle::CANCEL, net::ERR_BLOCKED_BY_CLIENT,
           GetContentClient()->browser()->GetOriginPolicyErrorPage(

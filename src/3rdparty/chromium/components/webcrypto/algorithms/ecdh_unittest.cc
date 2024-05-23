@@ -75,14 +75,14 @@ bool ImportKeysFromTest(const base::DictionaryValue* test,
 class WebCryptoEcdhTest : public WebCryptoTestBase {};
 
 TEST_F(WebCryptoEcdhTest, DeriveBitsKnownAnswer) {
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("ecdh.json", &tests));
+  base::Value::List tests = ReadJsonTestFileAsList("ecdh.json");
 
-  for (size_t test_index = 0; test_index < tests.GetSize(); ++test_index) {
-    SCOPED_TRACE(test_index);
+  for (const base::Value& test_value : tests) {
+    SCOPED_TRACE(&test_value - &tests[0]);
 
-    const base::DictionaryValue* test;
-    ASSERT_TRUE(tests.GetDictionary(test_index, &test));
+    ASSERT_TRUE(test_value.is_dict());
+    const base::DictionaryValue* test =
+        &base::Value::AsDictionaryValue(test_value);
 
     // Import the keys.
     blink::WebCryptoKey public_key;
@@ -92,15 +92,15 @@ TEST_F(WebCryptoEcdhTest, DeriveBitsKnownAnswer) {
 
     // Now try to derive bytes.
     std::vector<uint8_t> derived_bytes;
-    int length_bits = 0;
-    ASSERT_TRUE(test->GetInteger("length_bits", &length_bits));
+    absl::optional<int> length_bits = test->FindIntKey("length_bits");
+    ASSERT_TRUE(length_bits);
 
     // If the test didn't specify an error, that implies it expects success.
     std::string expected_error = "Success";
     test->GetString("error", &expected_error);
 
     Status status = DeriveBits(CreateEcdhDeriveParams(public_key), private_key,
-                               length_bits, &derived_bytes);
+                               *length_bits, &derived_bytes);
     ASSERT_EQ(expected_error, StatusToString(status));
     if (status.IsError())
       continue;
@@ -117,18 +117,19 @@ TEST_F(WebCryptoEcdhTest, DeriveBitsKnownAnswer) {
 // 528 bits.
 ::testing::AssertionResult LoadTestKeys(blink::WebCryptoKey* public_key,
                                         blink::WebCryptoKey* private_key) {
-  base::ListValue tests;
-  if (!ReadJsonTestFileToList("ecdh.json", &tests))
-    return ::testing::AssertionFailure() << "Failed loading ecdh.json";
+  base::Value::List tests = ReadJsonTestFileAsList("ecdh.json");
 
   const base::DictionaryValue* test = nullptr;
   bool valid_p521_keys = false;
-  for (size_t test_index = 0; test_index < tests.GetSize(); ++test_index) {
-    SCOPED_TRACE(test_index);
-    EXPECT_TRUE(tests.GetDictionary(test_index, &test));
-    test->GetBoolean("valid_p521_keys", &valid_p521_keys);
-    if (valid_p521_keys)
+  for (const base::Value& test_value : tests) {
+    SCOPED_TRACE(&test_value - &tests[0]);
+    EXPECT_TRUE(test_value.is_dict());
+    test = &base::Value::AsDictionaryValue(test_value);
+    absl::optional<bool> keys = test->FindBoolKey("valid_p521_keys");
+    if (keys && keys.value()) {
+      valid_p521_keys = true;
       break;
+    }
   }
   if (!valid_p521_keys) {
     return ::testing::AssertionFailure()
@@ -300,11 +301,12 @@ TEST_F(WebCryptoEcdhTest, DeriveKeyAes128) {
 TEST_F(WebCryptoEcdhTest, ImportKeyEmptyUsage) {
   blink::WebCryptoKey key;
 
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("ecdh.json", &tests));
+  base::Value::List tests = ReadJsonTestFileAsList("ecdh.json");
+  const base::Value& test_value = tests[0];
 
-  const base::DictionaryValue* test;
-  ASSERT_TRUE(tests.GetDictionary(0, &test));
+  ASSERT_TRUE(test_value.is_dict());
+  const base::DictionaryValue* test =
+      &base::Value::AsDictionaryValue(test_value);
 
   // Import the public key.
   const base::DictionaryValue* public_key_json = nullptr;

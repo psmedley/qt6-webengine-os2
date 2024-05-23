@@ -18,16 +18,16 @@
 
 namespace skiagm {
 
-// This GM exercises HighQuality anisotropic filtering.
+// This GM exercises anisotropic image scaling.
 class AnisotropicGM : public GM {
 public:
-    AnisotropicGM() : fSampling(SkCubicResampler::Mitchell()) {
+    AnisotropicGM() : fSampling(SkFilterMode::kLinear, SkMipmapMode::kLinear) {
         this->setBGColor(0xFFCCCCCC);
     }
 
 protected:
 
-    SkString onShortName() override { return SkString("anisotropic_hq"); }
+    SkString onShortName() override { return SkString("anisotropic_image_scale_mip"); }
 
     SkISize onISize() override {
         return SkISize::Make(2*kImageSize + 3*kSpacer,
@@ -106,9 +106,9 @@ protected:
     }
 
 private:
-    static constexpr int kImageSize     = 256;
-    static constexpr int kSpacer        = 10;
-    static constexpr int kNumVertImages = 5;
+    inline static constexpr int kImageSize     = 256;
+    inline static constexpr int kSpacer        = 10;
+    inline static constexpr int kNumVertImages = 5;
 
     sk_sp<SkImage>    fImage;
     SkSamplingOptions fSampling;

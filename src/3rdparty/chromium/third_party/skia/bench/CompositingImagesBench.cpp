@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "bench/Benchmark.h"
-
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkSurface.h"
 #include "include/gpu/GrDirectContext.h"
@@ -126,7 +126,7 @@ protected:
         canvas->save();
         canvas->concat(this->getTransform());
 
-        for (int i = 0; i < loops; ++i) {
+        for (int loop = 0; loop < loops; ++loop) {
             for (int l = 0; l < fLayerCnt; ++l) {
                 SkAutoTArray<SkCanvas::ImageSetEntry> set(
                         fTileGridSize.fWidth * fTileGridSize.fHeight);

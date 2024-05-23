@@ -4,13 +4,15 @@
 
 #include "components/viz/common/resources/resource_format_utils.h"
 
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <GLES2/gl2extchromium.h>
+
 #include <ostream>
 
 #include "base/check_op.h"
-#include "base/cxx17_backports.h"
 #include "base/notreached.h"
-#include "third_party/khronos/GLES2/gl2.h"
-#include "third_party/khronos/GLES2/gl2ext.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/gfx/buffer_types.h"
 
 namespace viz {
@@ -35,6 +37,7 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
       return kBGRA_8888_SkColorType;
     case ALPHA_8:
       return kAlpha_8_SkColorType;
+    case BGR_565:
     case RGB_565:
       return kRGB_565_SkColorType;
     case LUMINANCE_8:
@@ -53,13 +56,14 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
     case YUV_420_BIPLANAR:
       return kRGB_888x_SkColorType;
 
-    // Use kN32_SkColorType if there is no corresponding SkColorType.
     case RED_8:
-      return kGray_8_SkColorType;
-    case LUMINANCE_F16:
+      return kAlpha_8_SkColorType;
     case R16_EXT:
+      return kA16_unorm_SkColorType;
     case RG16_EXT:
-    case BGR_565:
+      return kR16G16_unorm_SkColorType;
+    // Use kN32_SkColorType if there is no corresponding SkColorType.
+    case LUMINANCE_F16:
       return kN32_SkColorType;
     case RG_88:
       return kR8G8_unorm_SkColorType;
@@ -107,6 +111,9 @@ ResourceFormat SkColorTypeToResourceFormat(SkColorType color_type) {
     case kBGR_101010x_SkColorType:
     case kRGBA_F16Norm_SkColorType:
     case kRGBA_F32_SkColorType:
+    case kSRGBA_8888_SkColorType:
+    // Default case is for new color types added to Skia
+    default:
       break;
   }
   NOTREACHED();
@@ -186,7 +193,7 @@ unsigned int GLDataType(ResourceFormat format) {
       GL_UNSIGNED_BYTE,                    // ALPHA_8
       GL_UNSIGNED_BYTE,                    // LUMINANCE_8
       GL_UNSIGNED_SHORT_5_6_5,             // RGB_565,
-      GL_ZERO,                             // BGR_565
+      GL_UNSIGNED_SHORT_5_6_5,             // BGR_565
       GL_UNSIGNED_BYTE,                    // ETC1
       GL_UNSIGNED_BYTE,                    // RED_8
       GL_UNSIGNED_BYTE,                    // RG_88
@@ -202,7 +209,7 @@ unsigned int GLDataType(ResourceFormat format) {
       GL_ZERO,                             // YUV_420_BIPLANAR
       GL_ZERO,                             // P010
   };
-  static_assert(base::size(format_gl_data_type) == (RESOURCE_FORMAT_MAX + 1),
+  static_assert(std::size(format_gl_data_type) == (RESOURCE_FORMAT_MAX + 1),
                 "format_gl_data_type does not handle all cases.");
 
   return format_gl_data_type[format];
@@ -217,7 +224,7 @@ unsigned int GLDataFormat(ResourceFormat format) {
       GL_ALPHA,      // ALPHA_8
       GL_LUMINANCE,  // LUMINANCE_8
       GL_RGB,        // RGB_565
-      GL_ZERO,       // BGR_565
+      GL_RGB,        // BGR_565
       GL_RGB,        // ETC1
       GL_RED_EXT,    // RED_8
       GL_RG_EXT,     // RG_88
@@ -233,7 +240,7 @@ unsigned int GLDataFormat(ResourceFormat format) {
       GL_ZERO,       // YUV_420_BIPLANAR
       GL_ZERO,       // P010
   };
-  static_assert(base::size(format_gl_data_format) == (RESOURCE_FORMAT_MAX + 1),
+  static_assert(std::size(format_gl_data_format) == (RESOURCE_FORMAT_MAX + 1),
                 "format_gl_data_format does not handle all cases.");
 
   return format_gl_data_format[format];
@@ -274,7 +281,7 @@ unsigned int GLCopyTextureInternalFormat(ResourceFormat format) {
       GL_ALPHA,      // ALPHA_8
       GL_LUMINANCE,  // LUMINANCE_8
       GL_RGB,        // RGB_565
-      GL_ZERO,       // BGR_565
+      GL_RGB,        // BGR_565
       GL_RGB,        // ETC1
       GL_LUMINANCE,  // RED_8
       GL_RGBA,       // RG_88
@@ -291,7 +298,7 @@ unsigned int GLCopyTextureInternalFormat(ResourceFormat format) {
       GL_ZERO,       // P010
   };
 
-  static_assert(base::size(format_gl_data_format) == (RESOURCE_FORMAT_MAX + 1),
+  static_assert(std::size(format_gl_data_format) == (RESOURCE_FORMAT_MAX + 1),
                 "format_gl_data_format does not handle all cases.");
 
   return format_gl_data_format[format];
@@ -305,6 +312,8 @@ gfx::BufferFormat BufferFormat(ResourceFormat format) {
       return gfx::BufferFormat::R_8;
     case R16_EXT:
       return gfx::BufferFormat::R_16;
+    case RG16_EXT:
+      return gfx::BufferFormat::RG_1616;
     case RGBA_4444:
       return gfx::BufferFormat::RGBA_4444;
     case RGBA_8888:
@@ -334,7 +343,6 @@ gfx::BufferFormat BufferFormat(ResourceFormat format) {
     case LUMINANCE_8:
     case RGB_565:
     case LUMINANCE_F16:
-    case RG16_EXT:
       // These types not allowed by IsGpuMemoryBufferFormatSupported(), so
       // give a default value that will not be used.
       break;
@@ -346,7 +354,8 @@ bool IsResourceFormatCompressed(ResourceFormat format) {
   return format == ETC1;
 }
 
-unsigned int TextureStorageFormat(ResourceFormat format) {
+unsigned int TextureStorageFormat(ResourceFormat format,
+                                  bool use_angle_rgbx_format) {
   switch (format) {
     case RGBA_8888:
       return GL_RGBA8_OES;
@@ -360,6 +369,7 @@ unsigned int TextureStorageFormat(ResourceFormat format) {
       return GL_ALPHA8_EXT;
     case LUMINANCE_8:
       return GL_LUMINANCE8_EXT;
+    case BGR_565:
     case RGB_565:
       return GL_RGB565;
     case RED_8:
@@ -373,7 +383,8 @@ unsigned int TextureStorageFormat(ResourceFormat format) {
     case RG16_EXT:
       return GL_RG16_EXT;
     case RGBX_8888:
-      return GL_RGB8_OES;
+    case BGRX_8888:
+      return use_angle_rgbx_format ? GL_RGBX8_ANGLE : GL_RGB8_OES;
     case ETC1:
       return GL_ETC1_RGB8_OES;
     case P010:
@@ -383,9 +394,7 @@ unsigned int TextureStorageFormat(ResourceFormat format) {
     case YVU_420:
     case YUV_420_BIPLANAR:
       return GL_RGB8_OES;
-    case BGRX_8888:
-      return GL_RGB8_OES;
-    case BGR_565:
+    default:
       break;
   }
   NOTREACHED();
@@ -395,7 +404,13 @@ unsigned int TextureStorageFormat(ResourceFormat format) {
 bool IsGpuMemoryBufferFormatSupported(ResourceFormat format) {
   switch (format) {
     case BGRA_8888:
+#if !BUILDFLAG(IS_CHROMEOS_LACROS)
+    // TODO(crbug.com/1307837): On ARM devices LaCrOS can't create RED_8
+    // GpuMemoryBuffer Objects with GBM device. This capability should be
+    // plumbed and known by clients requesting shared images as overlay
+    // candidate.
     case RED_8:
+#endif
     case R16_EXT:
     case RGBA_4444:
     case RGBA_8888:
@@ -408,6 +423,9 @@ bool IsGpuMemoryBufferFormatSupported(ResourceFormat format) {
     case ETC1:
     case ALPHA_8:
     case LUMINANCE_8:
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+    case RED_8:
+#endif
     case RGB_565:
     case LUMINANCE_F16:
     case BGR_565:
@@ -462,6 +480,8 @@ ResourceFormat GetResourceFormat(gfx::BufferFormat format) {
       return RED_8;
     case gfx::BufferFormat::R_16:
       return R16_EXT;
+    case gfx::BufferFormat::RG_1616:
+      return RG16_EXT;
     case gfx::BufferFormat::RGBA_4444:
       return RGBA_4444;
     case gfx::BufferFormat::RGBA_8888:
@@ -584,6 +604,8 @@ wgpu::TextureFormat ToDawnFormat(ResourceFormat format) {
       return wgpu::TextureFormat::RGBA16Float;
     case RGBA_1010102:
       return wgpu::TextureFormat::RGB10A2Unorm;
+    case YUV_420_BIPLANAR:
+      return wgpu::TextureFormat::R8BG8Biplanar420Unorm;
     case RGBA_4444:
     case RGB_565:
     case BGR_565:
@@ -591,7 +613,6 @@ wgpu::TextureFormat ToDawnFormat(ResourceFormat format) {
     case RG16_EXT:
     case BGRA_1010102:
     case YVU_420:
-    case YUV_420_BIPLANAR:
     case ETC1:
     case LUMINANCE_F16:
     case P010:
@@ -602,6 +623,54 @@ wgpu::TextureFormat ToDawnFormat(ResourceFormat format) {
 
 WGPUTextureFormat ToWGPUFormat(ResourceFormat format) {
   return static_cast<WGPUTextureFormat>(ToDawnFormat(format));
+}
+
+size_t AlphaBitsForSkColorType(SkColorType color_type) {
+  switch (color_type) {
+    case kAlpha_8_SkColorType:
+      return 8;
+    case kRGB_565_SkColorType:
+      return 0;
+    case kARGB_4444_SkColorType:
+      return 4;
+    case kRGBA_8888_SkColorType:
+      return 8;
+    case kRGB_888x_SkColorType:
+      return 0;
+    case kBGRA_8888_SkColorType:
+      return 8;
+    case kRGBA_1010102_SkColorType:
+    case kBGRA_1010102_SkColorType:
+      return 2;
+    case kRGB_101010x_SkColorType:
+    case kBGR_101010x_SkColorType:
+    case kGray_8_SkColorType:
+      return 0;
+    case kRGBA_F16Norm_SkColorType:
+    case kRGBA_F16_SkColorType:
+      return 16;
+    case kRGBA_F32_SkColorType:
+      return 32;
+    case kR8G8_unorm_SkColorType:
+      return 0;
+    case kA16_float_SkColorType:
+      return 16;
+    case kR16G16_float_SkColorType:
+      return 0;
+    case kA16_unorm_SkColorType:
+      return 16;
+    case kR16G16_unorm_SkColorType:
+      return 0;
+    case kR16G16B16A16_unorm_SkColorType:
+      return 16;
+    case kSRGBA_8888_SkColorType:
+      return 8;
+    case kR8_unorm_SkColorType:
+      return 0;
+    case kUnknown_SkColorType:
+    default:
+      return 0;
+  }
 }
 
 }  // namespace viz

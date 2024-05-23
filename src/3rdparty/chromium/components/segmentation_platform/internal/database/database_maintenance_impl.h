@@ -11,9 +11,13 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/containers/flat_set.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "components/segmentation_platform/internal/database/database_maintenance.h"
+#include "components/segmentation_platform/internal/execution/default_model_manager.h"
 #include "components/segmentation_platform/internal/proto/types.pb.h"
 
 namespace base {
@@ -24,12 +28,9 @@ class Time;
 using optimization_guide::proto::OptimizationTarget;
 
 namespace segmentation_platform {
-namespace proto {
-class SegmentInfo;
-}  // namespace proto
-struct Config;
-class SignalDatabase;
+class DefaultModelManager;
 class SegmentInfoDatabase;
+class SignalDatabase;
 class SignalStorageConfig;
 
 // DatabaseMaintenanceImpl is the main implementation of the DatabaseMaintenance
@@ -39,11 +40,13 @@ class DatabaseMaintenanceImpl : public DatabaseMaintenance {
   using SignalIdentifier = std::pair<uint64_t, proto::SignalType>;
   using CleanupItem = std::tuple<uint64_t, proto::SignalType, base::Time>;
 
-  explicit DatabaseMaintenanceImpl(Config* config,
-                                   base::Clock* clock,
-                                   SegmentInfoDatabase* segment_info_database,
-                                   SignalDatabase* signal_database,
-                                   SignalStorageConfig* signal_storage_config);
+  explicit DatabaseMaintenanceImpl(
+      const base::flat_set<OptimizationTarget>& segment_ids,
+      base::Clock* clock,
+      SegmentInfoDatabase* segment_info_database,
+      SignalDatabase* signal_database,
+      SignalStorageConfig* signal_storage_config,
+      DefaultModelManager* default_model_manager);
   ~DatabaseMaintenanceImpl() override;
 
   // DatabaseMaintenance overrides.
@@ -57,8 +60,7 @@ class DatabaseMaintenanceImpl : public DatabaseMaintenance {
   // All tasks currently need information about various segments, so this is
   // the callback after the initial database lookup for this data.
   void OnSegmentInfoCallback(
-      std::vector<std::pair<OptimizationTarget, proto::SegmentInfo>>
-          segment_infos);
+      DefaultModelManager::SegmentInfoList segment_infos);
 
   // Returns an ordered vector of all the tasks we are supposed to perform.
   // These are unfinished and also need to be linked to the next task to be
@@ -86,13 +88,16 @@ class DatabaseMaintenanceImpl : public DatabaseMaintenance {
   void CompactSamplesDone(base::OnceClosure next_action);
 
   // Input.
-  Config* config_;
-  base::Clock* clock_;
+  base::flat_set<OptimizationTarget> segment_ids_;
+  raw_ptr<base::Clock> clock_;
 
   // Databases.
-  SegmentInfoDatabase* segment_info_database_;
-  SignalDatabase* signal_database_;
-  SignalStorageConfig* signal_storage_config_;
+  raw_ptr<SegmentInfoDatabase> segment_info_database_;
+  raw_ptr<SignalDatabase> signal_database_;
+  raw_ptr<SignalStorageConfig> signal_storage_config_;
+
+  // Default model provider.
+  raw_ptr<DefaultModelManager> default_model_manager_;
 
   base::WeakPtrFactory<DatabaseMaintenanceImpl> weak_ptr_factory_{this};
 };

@@ -11,9 +11,9 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/download/public/background_service/download_params.h"
 #include "net/base/mac/url_conversions.h"
@@ -22,6 +22,13 @@
 #error "This file requires ARC support."
 #endif
 
+namespace {
+bool g_ignore_localhost_ssl_error_for_testing = false;
+}
+
+using AuthenticationChallengeBlock =
+    void (^)(NSURLSessionAuthChallengeDisposition disposition,
+             NSURLCredential* credential);
 using CompletionCallback =
     download::BackgroundDownloadTaskHelper::CompletionCallback;
 using UpdateCallback = download::BackgroundDownloadTaskHelper::UpdateCallback;
@@ -33,6 +40,7 @@ using UpdateCallback = download::BackgroundDownloadTaskHelper::UpdateCallback;
                           taskRunner:
                               (scoped_refptr<base::SingleThreadTaskRunner>)
                                   taskRunner;
+
 @end
 
 @implementation BackgroundDownloadDelegate {
@@ -55,14 +63,17 @@ using UpdateCallback = download::BackgroundDownloadTaskHelper::UpdateCallback;
   return self;
 }
 
-- (void)invokeCompletionHandler:(bool)success
-                       filePath:(base::FilePath)filePath
-                       fileSize:(int64_t)fileSize {
+- (void)onDownloadCompletion:(bool)success
+                     session:(NSURLSession*)session
+                    filePath:(base::FilePath)filePath
+                    fileSize:(int64_t)fileSize {
   if (_completionCallback) {
+    // Invoke the completion callback on main thread.
     _taskRunner->PostTask(
         FROM_HERE, base::BindOnce(std::move(_completionCallback), success,
                                   filePath, fileSize));
   }
+  [session invalidateAndCancel];
 }
 
 #pragma mark - NSURLSessionDownloadDelegate
@@ -95,10 +106,24 @@ using UpdateCallback = download::BackgroundDownloadTaskHelper::UpdateCallback;
     didFinishDownloadingToURL:(NSURL*)location {
   DVLOG(1) << __func__;
   if (!location) {
-    [self invokeCompletionHandler:/*success=*/false
-                         filePath:base::FilePath()
-                         fileSize:0];
+    [self onDownloadCompletion:/*success=*/false
+                       session:session
+                      filePath:base::FilePath()
+                      fileSize:0];
     return;
+  }
+
+  // Analyze the response code. Treat non http 200 as failure downloads.
+  NSURLResponse* response = [downloadTask response];
+  if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+    NSHTTPURLResponse* httpResponse = (NSHTTPURLResponse*)response;
+    if ([httpResponse statusCode] != 200) {
+      [self onDownloadCompletion:/*success=*/false
+                         session:session
+                        filePath:base::FilePath()
+                        fileSize:0];
+      return;
+    }
   }
 
   // Move the downloaded file from platform temporary directory to download
@@ -109,9 +134,10 @@ using UpdateCallback = download::BackgroundDownloadTaskHelper::UpdateCallback;
   if (!base::Move(tempPath, _downloadPath)) {
     LOG(ERROR) << "Failed to move file from:" << tempPath
                << ", to:" << _downloadPath;
-    [self invokeCompletionHandler:/*success=*/false
-                         filePath:base::FilePath()
-                         fileSize:0];
+    [self onDownloadCompletion:/*success=*/false
+                       session:session
+                      filePath:base::FilePath()
+                      fileSize:0];
     return;
   }
 
@@ -119,14 +145,16 @@ using UpdateCallback = download::BackgroundDownloadTaskHelper::UpdateCallback;
   int64_t fileSize = 0;
   if (!base::GetFileSize(_downloadPath, &fileSize)) {
     LOG(ERROR) << "Failed to get file size from:" << _downloadPath;
-    [self invokeCompletionHandler:/*success=*/false
-                         filePath:base::FilePath()
-                         fileSize:0];
+    [self onDownloadCompletion:/*success=*/false
+                       session:session
+                      filePath:base::FilePath()
+                      fileSize:0];
     return;
   }
-  [self invokeCompletionHandler:/*success=*/true
-                       filePath:_downloadPath
-                       fileSize:fileSize];
+  [self onDownloadCompletion:/*success=*/true
+                     session:session
+                    filePath:_downloadPath
+                    fileSize:fileSize];
 }
 
 #pragma mark - NSURLSessionDelegate
@@ -135,8 +163,31 @@ using UpdateCallback = download::BackgroundDownloadTaskHelper::UpdateCallback;
                     task:(NSURLSessionTask*)task
     didCompleteWithError:(NSError*)error {
   VLOG(1) << __func__;
-  // TODO(xingliu): Check whether we can resume for a few times if the user
-  // terminated the app in multitask window or failed downloads.
+
+  if (!error)
+    return;
+
+  [self onDownloadCompletion:/*success=*/false
+                     session:session
+                    filePath:base::FilePath()
+                    fileSize:0];
+}
+
+- (void)URLSession:(NSURLSession*)session
+    didReceiveChallenge:(NSURLAuthenticationChallenge*)challenge
+      completionHandler:(AuthenticationChallengeBlock)completionHandler {
+  DCHECK(completionHandler);
+  if ([challenge.protectionSpace.authenticationMethod
+          isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+    if (g_ignore_localhost_ssl_error_for_testing &&
+        [challenge.protectionSpace.host isEqualToString:@"127.0.0.1"]) {
+      NSURLCredential* credential = [NSURLCredential
+          credentialForTrust:challenge.protectionSpace.serverTrust];
+      completionHandler(NSURLSessionAuthChallengeUseCredential, credential);
+      return;
+    }
+  }
+  completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
 }
 @end
 
@@ -200,6 +251,12 @@ class BackgroundDownloadTaskHelperImpl : public BackgroundDownloadTaskHelper {
 std::unique_ptr<BackgroundDownloadTaskHelper>
 BackgroundDownloadTaskHelper::Create() {
   return std::make_unique<BackgroundDownloadTaskHelperImpl>();
+}
+
+// static
+void BackgroundDownloadTaskHelper::SetIgnoreLocalSSLErrorForTesting(
+    bool ignore) {
+  g_ignore_localhost_ssl_error_for_testing = ignore;
 }
 
 }  // namespace download

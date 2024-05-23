@@ -17,17 +17,17 @@
 #include "base/containers/contains.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
-#include "base/task_runner_util.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
 #include "components/services/storage/dom_storage/async_dom_storage_database.h"
@@ -78,7 +78,7 @@ const int kCommitErrorThreshold = 8;
 
 // Limits on the cache size and number of areas in memory, over which the areas
 // are purged.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 const unsigned kMaxLocalStorageAreaCount = 10;
 const size_t kMaxLocalStorageCacheSize = 2 * 1024 * 1024;
 #else
@@ -92,8 +92,8 @@ DomStorageDatabase::Key CreateMetaDataKey(
   std::vector<uint8_t> serialized_storage_key(storage_key_str.begin(),
                                               storage_key_str.end());
   DomStorageDatabase::Key key;
-  key.reserve(base::size(kMetaPrefix) + serialized_storage_key.size());
-  key.insert(key.end(), kMetaPrefix, kMetaPrefix + base::size(kMetaPrefix));
+  key.reserve(std::size(kMetaPrefix) + serialized_storage_key.size());
+  key.insert(key.end(), kMetaPrefix, kMetaPrefix + std::size(kMetaPrefix));
   key.insert(key.end(), serialized_storage_key.begin(),
              serialized_storage_key.end());
   return key;
@@ -101,11 +101,11 @@ DomStorageDatabase::Key CreateMetaDataKey(
 
 absl::optional<blink::StorageKey> ExtractStorageKeyFromMetaDataKey(
     const DomStorageDatabase::Key& key) {
-  DCHECK_GT(key.size(), base::size(kMetaPrefix));
+  DCHECK_GT(key.size(), std::size(kMetaPrefix));
   const base::StringPiece key_string(reinterpret_cast<const char*>(key.data()),
                                      key.size());
   return blink::StorageKey::Deserialize(
-      key_string.substr(base::size(kMetaPrefix)));
+      key_string.substr(std::size(kMetaPrefix)));
 }
 
 void SuccessResponse(base::OnceClosure callback, bool success) {
@@ -200,8 +200,7 @@ class LocalStorageImpl::StorageAreaHolder final
       : context_(context), storage_key_(storage_key) {
     // Delay for a moment after a value is set in anticipation
     // of other values being set, so changes are batched.
-    static constexpr base::TimeDelta kCommitDefaultDelaySecs =
-        base::TimeDelta::FromSeconds(5);
+    static constexpr base::TimeDelta kCommitDefaultDelaySecs = base::Seconds(5);
 
     // To avoid excessive IO we apply limits to the amount of data being written
     // and the frequency of writes.
@@ -213,7 +212,7 @@ class LocalStorageImpl::StorageAreaHolder final
     options.default_commit_delay = kCommitDefaultDelaySecs;
     options.max_bytes_per_hour = kMaxBytesPerHour;
     options.max_commits_per_hour = kMaxCommitsPerHour;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     options.cache_mode = StorageAreaImpl::CacheMode::KEYS_ONLY_WHEN_POSSIBLE;
 #else
     options.cache_mode = StorageAreaImpl::CacheMode::KEYS_AND_VALUES;
@@ -289,13 +288,13 @@ class LocalStorageImpl::StorageAreaHolder final
   bool has_bindings() const { return has_bindings_; }
 
  private:
-  LocalStorageImpl* context_;
+  raw_ptr<LocalStorageImpl> context_;
   blink::StorageKey storage_key_;
   // Holds the same value as |area_|. The reason for this is that
   // during destruction of the StorageAreaImpl instance we might still get
   // called and need access  to the StorageAreaImpl instance. The unique_ptr
   // could already be null, but this field should still be valid.
-  StorageAreaImpl* area_ptr_;
+  raw_ptr<StorageAreaImpl> area_ptr_;
   std::unique_ptr<StorageAreaImpl> area_;
   bool has_bindings_ = false;
 };

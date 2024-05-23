@@ -1,3 +1,7 @@
+// Copyright 2021 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 /*
  * Copyright (C) 2010 Google Inc. All rights reserved.
  *
@@ -11,7 +15,7 @@
  * copyright notice, this list of conditions and the following disclaimer
  * in the documentation and/or other materials provided with the
  * distribution.
- *     * Neither the name of Google Inc. nor the names of its
+ *     * Neither the #name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
  *
@@ -43,6 +47,7 @@ import {CSSStyleDeclaration, Type} from './CSSStyleDeclaration.js';
 import {CSSStyleSheetHeader} from './CSSStyleSheetHeader.js';
 import type {DOMNode} from './DOMModel.js';
 import {DOMModel} from './DOMModel.js';
+import type {ResourceTreeFrame} from './ResourceTreeModel.js';
 import {Events as ResourceTreeModelEvents, ResourceTreeModel} from './ResourceTreeModel.js';
 import type {Target} from './Target.js';
 import {Capability} from './Target.js';
@@ -50,65 +55,63 @@ import {SDKModel} from './SDKModel.js';
 import {SourceMapManager} from './SourceMapManager.js';
 
 export class CSSModel extends SDKModel<EventTypes> {
-  private isEnabledInternal: boolean;
-  private cachedMatchedCascadeNode: DOMNode|null;
-  private cachedMatchedCascadePromise: Promise<CSSMatchedStyles|null>|null;
-  private readonly domModelInternal: DOMModel;
-  private readonly sourceMapManagerInternal: SourceMapManager<CSSStyleSheetHeader>;
-  agent: ProtocolProxyApi.CSSApi;
-  private readonly styleLoader: ComputedStyleLoader;
-  private readonly resourceTreeModel: ResourceTreeModel|null;
-  private styleSheetIdToHeader: Map<Protocol.CSS.StyleSheetId, CSSStyleSheetHeader>;
-  private readonly styleSheetIdsForURL: Map<string, Map<string, Set<Protocol.CSS.StyleSheetId>>>;
-  private readonly originalStyleSheetTextInternal: Map<CSSStyleSheetHeader, Promise<string|null>>;
-  private isRuleUsageTrackingEnabled: boolean;
-  private readonly fontFacesInternal: Map<string, CSSFontFace>;
-  private cssPropertyTracker: CSSPropertyTracker|null;
-  private isCSSPropertyTrackingEnabled: boolean;
-  private isTrackingRequestPending: boolean;
-  private readonly trackedCSSProperties: Map<number, Protocol.CSS.CSSComputedStyleProperty[]>;
-  private readonly stylePollingThrottler: Common.Throttler.Throttler;
+  readonly agent: ProtocolProxyApi.CSSApi;
+  readonly #domModel: DOMModel;
+  readonly #fontFaces: Map<string, CSSFontFace>;
+  readonly #originalStyleSheetText: Map<CSSStyleSheetHeader, Promise<string|null>>;
+  readonly #resourceTreeModel: ResourceTreeModel|null;
+  readonly #sourceMapManager: SourceMapManager<CSSStyleSheetHeader>;
+  readonly #styleLoader: ComputedStyleLoader;
+  readonly #stylePollingThrottler: Common.Throttler.Throttler;
+  readonly #styleSheetIdsForURL: Map<Platform.DevToolsPath.UrlString, Map<string, Set<Protocol.CSS.StyleSheetId>>>;
+  readonly #styleSheetIdToHeader: Map<Protocol.CSS.StyleSheetId, CSSStyleSheetHeader>;
+  #cachedMatchedCascadeNode: DOMNode|null;
+  #cachedMatchedCascadePromise: Promise<CSSMatchedStyles|null>|null;
+  #cssPropertyTracker: CSSPropertyTracker|null;
+  #isCSSPropertyTrackingEnabled: boolean;
+  #isEnabled: boolean;
+  #isRuleUsageTrackingEnabled: boolean;
+  #isTrackingRequestPending: boolean;
 
   constructor(target: Target) {
     super(target);
-    this.isEnabledInternal = false;
-    this.cachedMatchedCascadeNode = null;
-    this.cachedMatchedCascadePromise = null;
-    this.domModelInternal = (target.model(DOMModel) as DOMModel);
-    this.sourceMapManagerInternal = new SourceMapManager(target);
+    this.#isEnabled = false;
+    this.#cachedMatchedCascadeNode = null;
+    this.#cachedMatchedCascadePromise = null;
+    this.#domModel = (target.model(DOMModel) as DOMModel);
+    this.#sourceMapManager = new SourceMapManager(target);
     this.agent = target.cssAgent();
-    this.styleLoader = new ComputedStyleLoader(this);
-    this.resourceTreeModel = target.model(ResourceTreeModel);
-    if (this.resourceTreeModel) {
-      this.resourceTreeModel.addEventListener(ResourceTreeModelEvents.MainFrameNavigated, this.resetStyleSheets, this);
+    this.#styleLoader = new ComputedStyleLoader(this);
+    this.#resourceTreeModel = target.model(ResourceTreeModel);
+    if (this.#resourceTreeModel) {
+      this.#resourceTreeModel.addEventListener(
+          ResourceTreeModelEvents.MainFrameNavigated, this.onMainFrameNavigated, this);
     }
     target.registerCSSDispatcher(new CSSDispatcher(this));
     if (!target.suspended()) {
-      this.enable();
+      void this.enable();
     }
-    this.styleSheetIdToHeader = new Map();
-    this.styleSheetIdsForURL = new Map();
+    this.#styleSheetIdToHeader = new Map();
+    this.#styleSheetIdsForURL = new Map();
 
-    this.originalStyleSheetTextInternal = new Map();
+    this.#originalStyleSheetText = new Map();
 
-    this.isRuleUsageTrackingEnabled = false;
+    this.#isRuleUsageTrackingEnabled = false;
 
-    this.fontFacesInternal = new Map();
+    this.#fontFaces = new Map();
 
-    this.cssPropertyTracker = null;  // TODO: support multiple trackers when we refactor the backend
-    this.isCSSPropertyTrackingEnabled = false;
-    this.isTrackingRequestPending = false;
-    this.trackedCSSProperties = new Map();
-    this.stylePollingThrottler = new Common.Throttler.Throttler(StylePollingInterval);
+    this.#cssPropertyTracker = null;  // TODO: support multiple trackers when we refactor the backend
+    this.#isCSSPropertyTrackingEnabled = false;
+    this.#isTrackingRequestPending = false;
+    this.#stylePollingThrottler = new Common.Throttler.Throttler(StylePollingInterval);
 
-    this.sourceMapManagerInternal.setEnabled(
-        Common.Settings.Settings.instance().moduleSetting('cssSourceMapsEnabled').get());
+    this.#sourceMapManager.setEnabled(Common.Settings.Settings.instance().moduleSetting('cssSourceMapsEnabled').get());
     Common.Settings.Settings.instance()
         .moduleSetting('cssSourceMapsEnabled')
-        .addChangeListener(event => this.sourceMapManagerInternal.setEnabled((event.data as boolean)));
+        .addChangeListener(event => this.#sourceMapManager.setEnabled((event.data as boolean)));
   }
 
-  headersForSourceURL(sourceURL: string): CSSStyleSheetHeader[] {
+  headersForSourceURL(sourceURL: Platform.DevToolsPath.UrlString): CSSStyleSheetHeader[] {
     const headers = [];
     for (const headerId of this.getStyleSheetIdsForURL(sourceURL)) {
       const header = this.styleSheetHeaderForId(headerId);
@@ -119,7 +122,9 @@ export class CSSModel extends SDKModel<EventTypes> {
     return headers;
   }
 
-  createRawLocationsByURL(sourceURL: string, lineNumber: number, columnNumber: number|undefined = 0): CSSLocation[] {
+  createRawLocationsByURL(
+      sourceURL: Platform.DevToolsPath.UrlString, lineNumber: number,
+      columnNumber: number|undefined = 0): CSSLocation[] {
     const headers = this.headersForSourceURL(sourceURL);
     headers.sort(stylesheetComparator);
     const endIndex = Platform.ArrayUtilities.upperBound(
@@ -144,7 +149,11 @@ export class CSSModel extends SDKModel<EventTypes> {
   }
 
   sourceMapManager(): SourceMapManager<CSSStyleSheetHeader> {
-    return this.sourceMapManagerInternal;
+    return this.#sourceMapManager;
+  }
+
+  static readableLayerName(text: string): string {
+    return text || '<anonymous>';
   }
 
   static trimSourceURL(text: string): string {
@@ -168,7 +177,7 @@ export class CSSModel extends SDKModel<EventTypes> {
   }
 
   domModel(): DOMModel {
-    return this.domModelInternal;
+    return this.#domModel;
   }
 
   async setStyleText(
@@ -183,7 +192,7 @@ export class CSSModel extends SDKModel<EventTypes> {
         return false;
       }
 
-      this.domModelInternal.markUndoableState(!majorChange);
+      this.#domModel.markUndoableState(!majorChange);
       const edit = new Edit(styleSheetId, range, text, styles[0]);
       this.fireStyleSheetChanged(styleSheetId, edit);
       return true;
@@ -203,7 +212,7 @@ export class CSSModel extends SDKModel<EventTypes> {
       if (!selectorList) {
         return false;
       }
-      this.domModelInternal.markUndoableState();
+      this.#domModel.markUndoableState();
       const edit = new Edit(styleSheetId, range, text, selectorList);
       this.fireStyleSheetChanged(styleSheetId, edit);
       return true;
@@ -223,7 +232,7 @@ export class CSSModel extends SDKModel<EventTypes> {
       if (!keyText) {
         return false;
       }
-      this.domModelInternal.markUndoableState();
+      this.#domModel.markUndoableState();
       const edit = new Edit(styleSheetId, range, text, keyText);
       this.fireStyleSheetChanged(styleSheetId, edit);
       return true;
@@ -233,7 +242,7 @@ export class CSSModel extends SDKModel<EventTypes> {
   }
 
   startCoverage(): Promise<Protocol.ProtocolResponseWithError> {
-    this.isRuleUsageTrackingEnabled = true;
+    this.#isRuleUsageTrackingEnabled = true;
     return this.agent.invoke_startRuleUsageTracking();
   }
 
@@ -254,36 +263,41 @@ export class CSSModel extends SDKModel<EventTypes> {
   }
 
   async stopCoverage(): Promise<void> {
-    this.isRuleUsageTrackingEnabled = false;
+    this.#isRuleUsageTrackingEnabled = false;
     await this.agent.invoke_stopRuleUsageTracking();
   }
 
-  async mediaQueriesPromise(): Promise<CSSMedia[]> {
+  async getMediaQueries(): Promise<CSSMedia[]> {
     const {medias} = await this.agent.invoke_getMediaQueries();
     return medias ? CSSMedia.parseMediaArrayPayload(this, medias) : [];
   }
 
+  async getRootLayer(nodeId: Protocol.DOM.NodeId): Promise<Protocol.CSS.CSSLayerData> {
+    const {rootLayer} = await this.agent.invoke_getLayersForNode({nodeId});
+    return rootLayer;
+  }
+
   isEnabled(): boolean {
-    return this.isEnabledInternal;
+    return this.#isEnabled;
   }
 
   private async enable(): Promise<void> {
     await this.agent.invoke_enable();
-    this.isEnabledInternal = true;
-    if (this.isRuleUsageTrackingEnabled) {
+    this.#isEnabled = true;
+    if (this.#isRuleUsageTrackingEnabled) {
       await this.startCoverage();
     }
     this.dispatchEventToListeners(Events.ModelWasEnabled);
   }
 
-  async matchedStylesPromise(nodeId: Protocol.DOM.NodeId): Promise<CSSMatchedStyles|null> {
+  async getMatchedStyles(nodeId: Protocol.DOM.NodeId): Promise<CSSMatchedStyles|null> {
     const response = await this.agent.invoke_getMatchedStylesForNode({nodeId});
 
     if (response.getError()) {
       return null;
     }
 
-    const node = this.domModelInternal.nodeForId(nodeId);
+    const node = this.#domModel.nodeForId(nodeId);
     if (!node) {
       return null;
     }
@@ -291,19 +305,19 @@ export class CSSModel extends SDKModel<EventTypes> {
     return new CSSMatchedStyles(
         this, (node as DOMNode), response.inlineStyle || null, response.attributesStyle || null,
         response.matchedCSSRules || [], response.pseudoElements || [], response.inherited || [],
-        response.cssKeyframesRules || []);
+        response.inheritedPseudoElements || [], response.cssKeyframesRules || []);
   }
 
-  async classNamesPromise(styleSheetId: Protocol.CSS.StyleSheetId): Promise<string[]> {
+  async getClassNames(styleSheetId: Protocol.CSS.StyleSheetId): Promise<string[]> {
     const {classNames} = await this.agent.invoke_collectClassNames({styleSheetId});
     return classNames || [];
   }
 
-  computedStylePromise(nodeId: Protocol.DOM.NodeId): Promise<Map<string, string>|null> {
-    return this.styleLoader.computedStylePromise(nodeId);
+  getComputedStyle(nodeId: Protocol.DOM.NodeId): Promise<Map<string, string>|null> {
+    return this.#styleLoader.computedStylePromise(nodeId);
   }
 
-  async backgroundColorsPromise(nodeId: Protocol.DOM.NodeId): Promise<ContrastInfo|null> {
+  async getBackgroundColors(nodeId: Protocol.DOM.NodeId): Promise<ContrastInfo|null> {
     const response = await this.agent.invoke_getBackgroundColors({nodeId});
     if (response.getError()) {
       return null;
@@ -316,13 +330,13 @@ export class CSSModel extends SDKModel<EventTypes> {
     };
   }
 
-  async platformFontsPromise(nodeId: Protocol.DOM.NodeId): Promise<Protocol.CSS.PlatformFontUsage[]|null> {
+  async getPlatformFonts(nodeId: Protocol.DOM.NodeId): Promise<Protocol.CSS.PlatformFontUsage[]|null> {
     const {fonts} = await this.agent.invoke_getPlatformFontsForNode({nodeId});
     return fonts;
   }
 
   allStyleSheets(): CSSStyleSheetHeader[] {
-    const values = [...this.styleSheetIdToHeader.values()];
+    const values = [...this.#styleSheetIdToHeader.values()];
     function styleSheetComparator(a: CSSStyleSheetHeader, b: CSSStyleSheetHeader): number {
       if (a.sourceURL < b.sourceURL) {
         return -1;
@@ -337,7 +351,7 @@ export class CSSModel extends SDKModel<EventTypes> {
     return values;
   }
 
-  async inlineStylesPromise(nodeId: Protocol.DOM.NodeId): Promise<InlineStyleResult|null> {
+  async getInlineStyles(nodeId: Protocol.DOM.NodeId): Promise<InlineStyleResult|null> {
     const response = await this.agent.invoke_getInlineStylesForNode({nodeId});
 
     if (response.getError() || !response.inlineStyle) {
@@ -374,7 +388,7 @@ export class CSSModel extends SDKModel<EventTypes> {
     if (node.id === undefined) {
       return false;
     }
-    this.agent.invoke_forcePseudoState({nodeId: node.id, forcedPseudoClasses});
+    void this.agent.invoke_forcePseudoState({nodeId: node.id, forcedPseudoClasses});
     this.dispatchEventToListeners(Events.PseudoStateForced, {node: node, pseudoClass: pseudoClass, enable: enable});
     return true;
   }
@@ -395,7 +409,7 @@ export class CSSModel extends SDKModel<EventTypes> {
       if (!media) {
         return false;
       }
-      this.domModelInternal.markUndoableState();
+      this.#domModel.markUndoableState();
       const edit = new Edit(styleSheetId, range, newMediaText, media);
       this.fireStyleSheetChanged(styleSheetId, edit);
       return true;
@@ -417,8 +431,29 @@ export class CSSModel extends SDKModel<EventTypes> {
       if (!containerQuery) {
         return false;
       }
-      this.domModelInternal.markUndoableState();
+      this.#domModel.markUndoableState();
       const edit = new Edit(styleSheetId, range, newContainerQueryText, containerQuery);
+      this.fireStyleSheetChanged(styleSheetId, edit);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async setSupportsText(
+      styleSheetId: Protocol.CSS.StyleSheetId, range: TextUtils.TextRange.TextRange,
+      newSupportsText: string): Promise<boolean> {
+    Host.userMetrics.actionTaken(Host.UserMetrics.Action.StyleRuleEdited);
+
+    try {
+      await this.ensureOriginalStyleSheetText(styleSheetId);
+      const {supports} = await this.agent.invoke_setSupportsText({styleSheetId, range, text: newSupportsText});
+
+      if (!supports) {
+        return false;
+      }
+      this.#domModel.markUndoableState();
+      const edit = new Edit(styleSheetId, range, newSupportsText, supports);
       this.fireStyleSheetChanged(styleSheetId, edit);
       return true;
     } catch (e) {
@@ -435,7 +470,7 @@ export class CSSModel extends SDKModel<EventTypes> {
       if (!rule) {
         return null;
       }
-      this.domModelInternal.markUndoableState();
+      this.#domModel.markUndoableState();
       const edit = new Edit(styleSheetId, ruleLocation, ruleText, rule);
       this.fireStyleSheetChanged(styleSheetId, edit);
       return new CSSStyleRule(this, rule);
@@ -446,11 +481,14 @@ export class CSSModel extends SDKModel<EventTypes> {
 
   async requestViaInspectorStylesheet(node: DOMNode): Promise<CSSStyleSheetHeader|null> {
     const frameId = node.frameId() ||
-        (this.resourceTreeModel && this.resourceTreeModel.mainFrame ? this.resourceTreeModel.mainFrame.id : '');
-    const headers = [...this.styleSheetIdToHeader.values()];
+        (this.#resourceTreeModel && this.#resourceTreeModel.mainFrame ? this.#resourceTreeModel.mainFrame.id : null);
+    const headers = [...this.#styleSheetIdToHeader.values()];
     const styleSheetHeader = headers.find(header => header.frameId === frameId && header.isViaInspector());
     if (styleSheetHeader) {
       return styleSheetHeader;
+    }
+    if (!frameId) {
+      return null;
     }
 
     try {
@@ -458,7 +496,7 @@ export class CSSModel extends SDKModel<EventTypes> {
       if (!styleSheetId) {
         return null;
       }
-      return this.styleSheetIdToHeader.get(styleSheetId) || null;
+      return this.#styleSheetIdToHeader.get(styleSheetId) || null;
     } catch (e) {
       return null;
     }
@@ -470,21 +508,21 @@ export class CSSModel extends SDKModel<EventTypes> {
 
   fontsUpdated(fontFace?: Protocol.CSS.FontFace|null): void {
     if (fontFace) {
-      this.fontFacesInternal.set(fontFace.src, new CSSFontFace(fontFace));
+      this.#fontFaces.set(fontFace.src, new CSSFontFace(fontFace));
     }
     this.dispatchEventToListeners(Events.FontsUpdated);
   }
 
   fontFaces(): CSSFontFace[] {
-    return [...this.fontFacesInternal.values()];
+    return [...this.#fontFaces.values()];
   }
 
   styleSheetHeaderForId(id: Protocol.CSS.StyleSheetId): CSSStyleSheetHeader|null {
-    return this.styleSheetIdToHeader.get(id) || null;
+    return this.#styleSheetIdToHeader.get(id) || null;
   }
 
   styleSheetHeaders(): CSSStyleSheetHeader[] {
-    return [...this.styleSheetIdToHeader.values()];
+    return [...this.#styleSheetIdToHeader.values()];
   }
 
   fireStyleSheetChanged(styleSheetId: Protocol.CSS.StyleSheetId, edit?: Edit): void {
@@ -496,10 +534,10 @@ export class CSSModel extends SDKModel<EventTypes> {
     if (!header) {
       return Promise.resolve(null);
     }
-    let promise = this.originalStyleSheetTextInternal.get(header);
+    let promise = this.#originalStyleSheetText.get(header);
     if (!promise) {
       promise = this.getStyleSheetText(header.id);
-      this.originalStyleSheetTextInternal.set(header, promise);
+      this.#originalStyleSheetText.set(header, promise);
       this.originalContentRequestedForTest(header);
     }
     return promise;
@@ -513,18 +551,18 @@ export class CSSModel extends SDKModel<EventTypes> {
   }
 
   getAllStyleSheetHeaders(): Iterable<CSSStyleSheetHeader> {
-    return this.styleSheetIdToHeader.values();
+    return this.#styleSheetIdToHeader.values();
   }
 
   styleSheetAdded(header: Protocol.CSS.CSSStyleSheetHeader): void {
-    console.assert(!this.styleSheetIdToHeader.get(header.styleSheetId));
+    console.assert(!this.#styleSheetIdToHeader.get(header.styleSheetId));
     const styleSheetHeader = new CSSStyleSheetHeader(this, header);
-    this.styleSheetIdToHeader.set(header.styleSheetId, styleSheetHeader);
+    this.#styleSheetIdToHeader.set(header.styleSheetId, styleSheetHeader);
     const url = styleSheetHeader.resourceURL();
-    let frameIdToStyleSheetIds = this.styleSheetIdsForURL.get(url);
+    let frameIdToStyleSheetIds = this.#styleSheetIdsForURL.get(url);
     if (!frameIdToStyleSheetIds) {
       frameIdToStyleSheetIds = new Map();
-      this.styleSheetIdsForURL.set(url, frameIdToStyleSheetIds);
+      this.#styleSheetIdsForURL.set(url, frameIdToStyleSheetIds);
     }
     if (frameIdToStyleSheetIds) {
       let styleSheetIds = frameIdToStyleSheetIds.get(styleSheetHeader.frameId);
@@ -534,20 +572,19 @@ export class CSSModel extends SDKModel<EventTypes> {
       }
       styleSheetIds.add(styleSheetHeader.id);
     }
-    this.sourceMapManagerInternal.attachSourceMap(
-        styleSheetHeader, styleSheetHeader.sourceURL, styleSheetHeader.sourceMapURL);
+    this.#sourceMapManager.attachSourceMap(styleSheetHeader, styleSheetHeader.sourceURL, styleSheetHeader.sourceMapURL);
     this.dispatchEventToListeners(Events.StyleSheetAdded, styleSheetHeader);
   }
 
   styleSheetRemoved(id: Protocol.CSS.StyleSheetId): void {
-    const header = this.styleSheetIdToHeader.get(id);
+    const header = this.#styleSheetIdToHeader.get(id);
     console.assert(Boolean(header));
     if (!header) {
       return;
     }
-    this.styleSheetIdToHeader.delete(id);
+    this.#styleSheetIdToHeader.delete(id);
     const url = header.resourceURL();
-    const frameIdToStyleSheetIds = this.styleSheetIdsForURL.get(url);
+    const frameIdToStyleSheetIds = this.#styleSheetIdsForURL.get(url);
     console.assert(
         Boolean(frameIdToStyleSheetIds), 'No frameId to styleSheetId map is available for given style sheet URL.');
     if (frameIdToStyleSheetIds) {
@@ -557,18 +594,18 @@ export class CSSModel extends SDKModel<EventTypes> {
         if (!stylesheetIds.size) {
           frameIdToStyleSheetIds.delete(header.frameId);
           if (!frameIdToStyleSheetIds.size) {
-            this.styleSheetIdsForURL.delete(url);
+            this.#styleSheetIdsForURL.delete(url);
           }
         }
       }
     }
-    this.originalStyleSheetTextInternal.delete(header);
-    this.sourceMapManagerInternal.detachSourceMap(header);
+    this.#originalStyleSheetText.delete(header);
+    this.#sourceMapManager.detachSourceMap(header);
     this.dispatchEventToListeners(Events.StyleSheetRemoved, header);
   }
 
-  getStyleSheetIdsForURL(url: string): Protocol.CSS.StyleSheetId[] {
-    const frameIdToStyleSheetIds = this.styleSheetIdsForURL.get(url);
+  getStyleSheetIdsForURL(url: Platform.DevToolsPath.UrlString): Protocol.CSS.StyleSheetId[] {
+    const frameIdToStyleSheetIds = this.#styleSheetIdsForURL.get(url);
     if (!frameIdToStyleSheetIds) {
       return [];
     }
@@ -582,7 +619,7 @@ export class CSSModel extends SDKModel<EventTypes> {
 
   async setStyleSheetText(styleSheetId: Protocol.CSS.StyleSheetId, newText: string, majorChange: boolean):
       Promise<string|null> {
-    const header = this.styleSheetIdToHeader.get(styleSheetId);
+    const header = this.#styleSheetIdToHeader.get(styleSheetId);
     if (!header) {
       return 'Unknown stylesheet in CSS.setStyleSheetText';
     }
@@ -593,15 +630,15 @@ export class CSSModel extends SDKModel<EventTypes> {
 
     await this.ensureOriginalStyleSheetText(styleSheetId);
     const response = await this.agent.invoke_setStyleSheetText({styleSheetId: header.id, text: newText});
-    const sourceMapURL = response.sourceMapURL;
+    const sourceMapURL = response.sourceMapURL as Platform.DevToolsPath.UrlString;
 
-    this.sourceMapManagerInternal.detachSourceMap(header);
+    this.#sourceMapManager.detachSourceMap(header);
     header.setSourceMapURL(sourceMapURL);
-    this.sourceMapManagerInternal.attachSourceMap(header, header.sourceURL, header.sourceMapURL);
+    this.#sourceMapManager.attachSourceMap(header, header.sourceURL, header.sourceMapURL);
     if (sourceMapURL === null) {
       return 'Error in CSS.setStyleSheetText';
     }
-    this.domModelInternal.markUndoableState(!majorChange);
+    this.#domModel.markUndoableState(!majorChange);
     this.fireStyleSheetChanged(styleSheetId);
     return null;
   }
@@ -615,22 +652,38 @@ export class CSSModel extends SDKModel<EventTypes> {
     }
   }
 
+  private async onMainFrameNavigated(event: Common.EventTarget.EventTargetEvent<ResourceTreeFrame>): Promise<void> {
+    // If the main frame was restored from the back-forward cache, the order of CDP
+    // is different from the regular navigations. In this case, events about CSS
+    // stylesheet has already been received and they are mixed with the previous page
+    // stylesheets. Therefore, we re-enable the CSS agent to get fresh events.
+    // For the regular navigatons, we can just clear the local data because events about
+    // stylesheets will arrive later.
+    if (event.data.backForwardCacheDetails.restoredFromCache) {
+      await this.suspendModel();
+      await this.resumeModel();
+    } else {
+      this.resetStyleSheets();
+      this.resetFontFaces();
+    }
+  }
+
   private resetStyleSheets(): void {
-    const headers = [...this.styleSheetIdToHeader.values()];
-    this.styleSheetIdsForURL.clear();
-    this.styleSheetIdToHeader.clear();
+    const headers = [...this.#styleSheetIdToHeader.values()];
+    this.#styleSheetIdsForURL.clear();
+    this.#styleSheetIdToHeader.clear();
     for (const header of headers) {
-      this.sourceMapManagerInternal.detachSourceMap(header);
+      this.#sourceMapManager.detachSourceMap(header);
       this.dispatchEventToListeners(Events.StyleSheetRemoved, header);
     }
   }
 
   private resetFontFaces(): void {
-    this.fontFacesInternal.clear();
+    this.#fontFaces.clear();
   }
 
   async suspendModel(): Promise<void> {
-    this.isEnabledInternal = false;
+    this.#isEnabled = false;
     await this.agent.invoke_disable();
     this.resetStyleSheets();
     this.resetFontFaces();
@@ -641,27 +694,27 @@ export class CSSModel extends SDKModel<EventTypes> {
   }
 
   setEffectivePropertyValueForNode(nodeId: Protocol.DOM.NodeId, propertyName: string, value: string): void {
-    this.agent.invoke_setEffectivePropertyValueForNode({nodeId, propertyName, value});
+    void this.agent.invoke_setEffectivePropertyValueForNode({nodeId, propertyName, value});
   }
 
   cachedMatchedCascadeForNode(node: DOMNode): Promise<CSSMatchedStyles|null> {
-    if (this.cachedMatchedCascadeNode !== node) {
+    if (this.#cachedMatchedCascadeNode !== node) {
       this.discardCachedMatchedCascade();
     }
-    this.cachedMatchedCascadeNode = node;
-    if (!this.cachedMatchedCascadePromise) {
+    this.#cachedMatchedCascadeNode = node;
+    if (!this.#cachedMatchedCascadePromise) {
       if (node.id) {
-        this.cachedMatchedCascadePromise = this.matchedStylesPromise(node.id);
+        this.#cachedMatchedCascadePromise = this.getMatchedStyles(node.id);
       } else {
         return Promise.resolve(null);
       }
     }
-    return this.cachedMatchedCascadePromise;
+    return this.#cachedMatchedCascadePromise;
   }
 
   discardCachedMatchedCascade(): void {
-    this.cachedMatchedCascadeNode = null;
-    this.cachedMatchedCascadePromise = null;
+    this.#cachedMatchedCascadeNode = null;
+    this.#cachedMatchedCascadePromise = null;
   }
 
   createCSSPropertyTracker(propertiesToTrack: Protocol.CSS.CSSComputedStyleProperty[]): CSSPropertyTracker {
@@ -674,51 +727,51 @@ export class CSSModel extends SDKModel<EventTypes> {
     if (propertiesToTrack.length === 0) {
       return;
     }
-    this.agent.invoke_trackComputedStyleUpdates({propertiesToTrack});
-    this.isCSSPropertyTrackingEnabled = true;
-    this.cssPropertyTracker = cssPropertyTracker;
-    this.pollComputedStyleUpdates();
+    void this.agent.invoke_trackComputedStyleUpdates({propertiesToTrack});
+    this.#isCSSPropertyTrackingEnabled = true;
+    this.#cssPropertyTracker = cssPropertyTracker;
+    void this.pollComputedStyleUpdates();
   }
 
   // Since we only support one tracker at a time, this call effectively disables
   // style tracking.
   disableCSSPropertyTracker(): void {
-    this.isCSSPropertyTrackingEnabled = false;
-    this.cssPropertyTracker = null;
+    this.#isCSSPropertyTrackingEnabled = false;
+    this.#cssPropertyTracker = null;
     // Sending an empty list to the backend signals the close of style tracking
-    this.agent.invoke_trackComputedStyleUpdates({propertiesToTrack: []});
+    void this.agent.invoke_trackComputedStyleUpdates({propertiesToTrack: []});
   }
 
   private async pollComputedStyleUpdates(): Promise<void> {
-    if (this.isTrackingRequestPending) {
+    if (this.#isTrackingRequestPending) {
       return;
     }
 
-    if (this.isCSSPropertyTrackingEnabled) {
-      this.isTrackingRequestPending = true;
+    if (this.#isCSSPropertyTrackingEnabled) {
+      this.#isTrackingRequestPending = true;
       const result = await this.agent.invoke_takeComputedStyleUpdates();
-      this.isTrackingRequestPending = false;
+      this.#isTrackingRequestPending = false;
 
-      if (result.getError() || !result.nodeIds || !this.isCSSPropertyTrackingEnabled) {
+      if (result.getError() || !result.nodeIds || !this.#isCSSPropertyTrackingEnabled) {
         return;
       }
 
-      if (this.cssPropertyTracker) {
-        this.cssPropertyTracker.dispatchEventToListeners(CSSPropertyTrackerEvents.TrackedCSSPropertiesUpdated, {
-          domNodes: result.nodeIds.map(nodeId => this.domModelInternal.nodeForId(nodeId)),
-        });
+      if (this.#cssPropertyTracker) {
+        this.#cssPropertyTracker.dispatchEventToListeners(
+            CSSPropertyTrackerEvents.TrackedCSSPropertiesUpdated,
+            result.nodeIds.map(nodeId => this.#domModel.nodeForId(nodeId)));
       }
     }
 
-    if (this.isCSSPropertyTrackingEnabled) {
-      this.stylePollingThrottler.schedule(this.pollComputedStyleUpdates.bind(this));
+    if (this.#isCSSPropertyTrackingEnabled) {
+      void this.#stylePollingThrottler.schedule(this.pollComputedStyleUpdates.bind(this));
     }
   }
 
   dispose(): void {
     this.disableCSSPropertyTracker();
     super.dispose();
-    this.sourceMapManagerInternal.dispose();
+    this.#sourceMapManager.dispose();
   }
 
   getAgent(): ProtocolProxyApi.CSSApi {
@@ -738,13 +791,24 @@ export enum Events {
   StyleSheetRemoved = 'StyleSheetRemoved',
 }
 
+export interface StyleSheetChangedEvent {
+  styleSheetId: Protocol.CSS.StyleSheetId;
+  edit?: Edit;
+}
+
+export interface PseudoStateForcedEvent {
+  node: DOMNode;
+  pseudoClass: string;
+  enable: boolean;
+}
+
 export type EventTypes = {
   [Events.FontsUpdated]: void,
   [Events.MediaQueryResultChanged]: void,
   [Events.ModelWasEnabled]: void,
-  [Events.PseudoStateForced]: {node: DOMNode, pseudoClass: string, enable: boolean},
+  [Events.PseudoStateForced]: PseudoStateForcedEvent,
   [Events.StyleSheetAdded]: CSSStyleSheetHeader,
-  [Events.StyleSheetChanged]: {styleSheetId: Protocol.CSS.StyleSheetId, edit?: Edit},
+  [Events.StyleSheetChanged]: StyleSheetChangedEvent,
   [Events.StyleSheetRemoved]: CSSStyleSheetHeader,
 };
 
@@ -766,13 +830,13 @@ export class Edit {
 }
 
 export class CSSLocation {
-  private readonly cssModelInternal: CSSModel;
+  readonly #cssModelInternal: CSSModel;
   styleSheetId: Protocol.CSS.StyleSheetId;
-  url: string;
+  url: Platform.DevToolsPath.UrlString;
   lineNumber: number;
   columnNumber: number;
   constructor(header: CSSStyleSheetHeader, lineNumber: number, columnNumber?: number) {
-    this.cssModelInternal = header.cssModel();
+    this.#cssModelInternal = header.cssModel();
     this.styleSheetId = header.id;
     this.url = header.resourceURL();
     this.lineNumber = lineNumber;
@@ -780,56 +844,56 @@ export class CSSLocation {
   }
 
   cssModel(): CSSModel {
-    return this.cssModelInternal;
+    return this.#cssModelInternal;
   }
 
   header(): CSSStyleSheetHeader|null {
-    return this.cssModelInternal.styleSheetHeaderForId(this.styleSheetId);
+    return this.#cssModelInternal.styleSheetHeaderForId(this.styleSheetId);
   }
 }
 
 class CSSDispatcher implements ProtocolProxyApi.CSSDispatcher {
-  private readonly cssModel: CSSModel;
+  readonly #cssModel: CSSModel;
   constructor(cssModel: CSSModel) {
-    this.cssModel = cssModel;
+    this.#cssModel = cssModel;
   }
 
   mediaQueryResultChanged(): void {
-    this.cssModel.mediaQueryResultChanged();
+    this.#cssModel.mediaQueryResultChanged();
   }
 
   fontsUpdated({font}: Protocol.CSS.FontsUpdatedEvent): void {
-    this.cssModel.fontsUpdated(font);
+    this.#cssModel.fontsUpdated(font);
   }
 
   styleSheetChanged({styleSheetId}: Protocol.CSS.StyleSheetChangedEvent): void {
-    this.cssModel.fireStyleSheetChanged(styleSheetId);
+    this.#cssModel.fireStyleSheetChanged(styleSheetId);
   }
 
   styleSheetAdded({header}: Protocol.CSS.StyleSheetAddedEvent): void {
-    this.cssModel.styleSheetAdded(header);
+    this.#cssModel.styleSheetAdded(header);
   }
 
   styleSheetRemoved({styleSheetId}: Protocol.CSS.StyleSheetRemovedEvent): void {
-    this.cssModel.styleSheetRemoved(styleSheetId);
+    this.#cssModel.styleSheetRemoved(styleSheetId);
   }
 }
 
 class ComputedStyleLoader {
-  private cssModel: CSSModel;
-  private nodeIdToPromise: Map<number, Promise<Map<string, string>|null>>;
+  #cssModel: CSSModel;
+  #nodeIdToPromise: Map<number, Promise<Map<string, string>|null>>;
   constructor(cssModel: CSSModel) {
-    this.cssModel = cssModel;
-    this.nodeIdToPromise = new Map();
+    this.#cssModel = cssModel;
+    this.#nodeIdToPromise = new Map();
   }
 
   computedStylePromise(nodeId: Protocol.DOM.NodeId): Promise<Map<string, string>|null> {
-    let promise = this.nodeIdToPromise.get(nodeId);
+    let promise = this.#nodeIdToPromise.get(nodeId);
     if (promise) {
       return promise;
     }
-    promise = this.cssModel.getAgent().invoke_getComputedStyleForNode({nodeId}).then(({computedStyle}) => {
-      this.nodeIdToPromise.delete(nodeId);
+    promise = this.#cssModel.getAgent().invoke_getComputedStyleForNode({nodeId}).then(({computedStyle}) => {
+      this.#nodeIdToPromise.delete(nodeId);
       if (!computedStyle || !computedStyle.length) {
         return null;
       }
@@ -839,7 +903,7 @@ class ComputedStyleLoader {
       }
       return result;
     });
-    this.nodeIdToPromise.set(nodeId, promise);
+    this.#nodeIdToPromise.set(nodeId, promise);
     return promise;
   }
 }
@@ -853,25 +917,25 @@ export class InlineStyleResult {
   }
 }
 
-export class CSSPropertyTracker extends Common.ObjectWrapper.ObjectWrapper {
-  private readonly cssModel: CSSModel;
-  private readonly properties: Protocol.CSS.CSSComputedStyleProperty[];
+export class CSSPropertyTracker extends Common.ObjectWrapper.ObjectWrapper<CSSPropertyTrackerEventTypes> {
+  readonly #cssModel: CSSModel;
+  readonly #properties: Protocol.CSS.CSSComputedStyleProperty[];
   constructor(cssModel: CSSModel, propertiesToTrack: Protocol.CSS.CSSComputedStyleProperty[]) {
     super();
-    this.cssModel = cssModel;
-    this.properties = propertiesToTrack;
+    this.#cssModel = cssModel;
+    this.#properties = propertiesToTrack;
   }
 
   start(): void {
-    this.cssModel.enableCSSPropertyTracker(this);
+    this.#cssModel.enableCSSPropertyTracker(this);
   }
 
   stop(): void {
-    this.cssModel.disableCSSPropertyTracker();
+    this.#cssModel.disableCSSPropertyTracker();
   }
 
   getTrackedProperties(): Protocol.CSS.CSSComputedStyleProperty[] {
-    return this.properties;
+    return this.#properties;
   }
 }
 
@@ -882,6 +946,10 @@ const StylePollingInterval = 1000;  // throttling interval for style polling, in
 export enum CSSPropertyTrackerEvents {
   TrackedCSSPropertiesUpdated = 'TrackedCSSPropertiesUpdated',
 }
+
+export type CSSPropertyTrackerEventTypes = {
+  [CSSPropertyTrackerEvents.TrackedCSSPropertiesUpdated]: (DOMNode|null)[],
+};
 
 SDKModel.register(CSSModel, {capabilities: Capability.DOM, autostart: true});
 export interface ContrastInfo {

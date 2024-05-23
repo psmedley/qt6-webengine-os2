@@ -10,12 +10,12 @@ load("//lib/branches.star", "branches")
 load("//project.star", "settings")
 
 lucicfg.check_version(
-    min = "1.29.1",
+    min = "1.30.9",
     message = "Update depot_tools",
 )
 
-# Enable LUCI Realms support.
-lucicfg.enable_experiment("crbug.com/1085650")
+# Use LUCI Scheduler BBv2 names and add Scheduler realms configs.
+lucicfg.enable_experiment("crbug.com/1182002")
 
 # Tell lucicfg what files it is allowed to touch
 lucicfg.config(
@@ -26,6 +26,7 @@ lucicfg.config(
         "cq-usage/default.cfg",
         "cq-usage/full.cfg",
         "luci/commit-queue.cfg",
+        "luci/chops-weetbix.cfg",
         "luci/cr-buildbucket.cfg",
         "luci/luci-logdog.cfg",
         "luci/luci-milo.cfg",
@@ -36,6 +37,7 @@ lucicfg.config(
         "luci/realms.cfg",
         "luci/tricium-prod.cfg",
         "outages.pyl",
+        "sheriff-rotations/*.txt",
         "project.pyl",
     ],
     fail_on_warnings = True,
@@ -54,6 +56,13 @@ lucicfg.config(
 lucicfg.emit(
     dest = "luci/tricium-prod.cfg",
     data = io.read_file("tricium-prod.cfg"),
+)
+
+# Weetbix configuration is also copied verbatim to generated
+# outputs.
+lucicfg.emit(
+    dest = "luci/chops-weetbix.cfg",
+    data = io.read_file("chops-weetbix.cfg"),
 )
 
 luci.project(
@@ -158,8 +167,6 @@ luci.realm(
     ],
 )
 
-# Launch Swarming tasks in "realms-aware mode", crbug.com/1136313.
-luci.builder.defaults.experiments.set({"luci.use_realms": 100})
 luci.builder.defaults.test_presentation.set(resultdb.test_presentation(grouping_keys = ["status", "v.test_suite"]))
 
 exec("//swarming.star")
@@ -171,6 +178,7 @@ exec("//notifiers.star")
 exec("//subprojects/chromium/subproject.star")
 branches.exec("//subprojects/codesearch/subproject.star")
 branches.exec("//subprojects/findit/subproject.star")
+branches.exec("//subprojects/flakiness/subproject.star")
 branches.exec("//subprojects/goma/subproject.star")
 branches.exec("//subprojects/reclient/subproject.star")
 branches.exec("//subprojects/webrtc/subproject.star")
@@ -178,7 +186,6 @@ branches.exec("//subprojects/webrtc/subproject.star")
 exec("//generators/cq-usage.star")
 branches.exec("//generators/cq-builders-md.star")
 
-exec("//generators/scheduler-noop-jobs.star")
 exec("//generators/sort-consoles.star")
 
 exec("//validators/builders-in-consoles.star")

@@ -7,6 +7,10 @@ import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
 
 config("common_config") {
+  if (is_clang || !is_win) {
+    cflags = [ "-Wno-shadow" ]
+  }
+
   if (is_win) {
     defines = [
       # Required to use math constants from math.h.

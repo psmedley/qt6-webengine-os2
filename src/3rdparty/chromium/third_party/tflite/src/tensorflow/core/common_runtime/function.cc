@@ -31,8 +31,11 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/memory_types.h"
 #include "tensorflow/core/common_runtime/process_function_library_runtime.h"
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
+#include "tensorflow/core/common_runtime/single_threaded_executor.h"
 #include "tensorflow/core/framework/collective.h"
 #include "tensorflow/core/framework/function.h"
+#include "tensorflow/core/framework/function_handle_cache.h"
+#include "tensorflow/core/framework/metrics.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op.h"
@@ -45,6 +48,8 @@ limitations under the License.
 #include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/platform/macros.h"
+#include "tensorflow/core/platform/str_util.h"
+#include "tensorflow/core/profiler/lib/connected_traceme.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 
@@ -325,7 +330,6 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
                              const FunctionLibraryDefinition* lib_def,
                              thread::ThreadPool* default_thread_pool,
                              const OptimizerOptions& optimizer_options,
-                             const CustomKernelCreator* custom_kernel_creator,
                              const SessionMetadata* session_metadata,
                              ProcessFunctionLibraryRuntime* parent);
 
@@ -389,7 +393,6 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
   const int graph_def_version_;
   const FunctionLibraryDefinition* const base_lib_def_;
   GraphOptimizer optimizer_;
-  const CustomKernelCreator* custom_kernel_creator_;
   const SessionMetadata* const session_metadata_;
   Executor::Args::Runner default_runner_;
   const string device_name_;
@@ -413,6 +416,8 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
     Executor* exec = nullptr;
     FunctionLibraryRuntimeOverlay* overlay_flr = nullptr;
     string executor_type;
+    bool allow_small_function_optimizations = false;
+    bool allow_control_flow_sync_execution = false;
 
     ~Item() {
       delete this->func_graph;
@@ -420,9 +425,9 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
       delete this->overlay_flr;
     }
   };
-  std::unique_ptr<std::unordered_map<Handle, std::unique_ptr<Item>>> items_
+  std::unique_ptr<absl::flat_hash_map<Handle, std::unique_ptr<Item>>> items_
       TF_GUARDED_BY(mu_);
-
+  std::unique_ptr<FunctionHandleCache> function_handle_cache_;
   ProcessFunctionLibraryRuntime* parent_ = nullptr;  // not owned.
 
   // Overloads the CreateKernel method, providing a FunctionLibraryRuntime
@@ -445,6 +450,8 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
                  gtl::ArraySlice<Tensor> args, std::vector<Tensor>* rets,
                  Item* item, DoneCallback done);
 
+  // TODO(fishx): Avoid using std::unique_ptr for PrivateIntraProcessRendezvous,
+  // since it will allocate the object on heap.
   Status PrepareRunSync(
       Handle handle, Options* run_opts, Item** out_item,
       std::unique_ptr<PrivateIntraProcessRendezvous>* out_rendezvous);
@@ -461,7 +468,6 @@ FunctionLibraryRuntimeImpl::FunctionLibraryRuntimeImpl(
     int graph_def_version, const FunctionLibraryDefinition* lib_def,
     thread::ThreadPool* default_thread_pool,
     const OptimizerOptions& optimizer_options,
-    const CustomKernelCreator* custom_kernel_creator,
     const SessionMetadata* session_metadata,
     ProcessFunctionLibraryRuntime* parent)
     : device_mgr_(dmgr),
@@ -471,14 +477,15 @@ FunctionLibraryRuntimeImpl::FunctionLibraryRuntimeImpl(
       graph_def_version_(graph_def_version),
       base_lib_def_(lib_def),
       optimizer_(optimizer_options),
-      custom_kernel_creator_(custom_kernel_creator),
       session_metadata_(session_metadata),
       default_runner_(nullptr),
       device_name_(device_ == nullptr
                        ? ProcessFunctionLibraryRuntime::kDefaultFLRDevice
                        : device_->name()),
       next_handle_(0),
-      items_(new std::unordered_map<Handle, std::unique_ptr<Item>>),
+      items_(absl::make_unique<
+             absl::flat_hash_map<Handle, std::unique_ptr<Item>>>()),
+      function_handle_cache_(absl::make_unique<FunctionHandleCache>(this)),
       parent_(parent) {
   get_func_sig_ = [this](const string& op, const OpDef** sig) {
     return base_lib_def_->LookUpOpDef(op, sig);
@@ -536,6 +543,7 @@ class CallOp : public AsyncOpKernel {
     opts.runner = ctx->runner();
     opts.run_all_kernels_inline = ctx->run_all_kernels_inline();
     opts.collective_executor = ctx->collective_executor();
+    opts.stack_trace = ctx->stack_trace();
     std::vector<Tensor> args;
     args.reserve(ctx->num_inputs());
     for (int i = 0; i < ctx->num_inputs(); ++i) {
@@ -608,10 +616,12 @@ Status FunctionLibraryRuntimeImpl::CreateKernel(
     FunctionLibraryRuntime* flr, OpKernel** kernel) {
   // If a custom kernel creator is given, try that.
   Status s;
-  if (custom_kernel_creator_ != nullptr &&
-      custom_kernel_creator_->CanCreateKernel(*this, props)) {
+  const CustomKernelCreator* custom_kernel_creator =
+      GetDefaultCustomKernelCreator();
+  if (custom_kernel_creator &&
+      custom_kernel_creator->CanCreateKernel(*flr, props)) {
     std::unique_ptr<OpKernel> ret;
-    s = custom_kernel_creator_->CreateKernel(this, props, &ret);
+    s = custom_kernel_creator->CreateKernel(flr, props, &ret);
     if (s.ok()) {
       *kernel = ret.release();
     } else {
@@ -745,6 +755,13 @@ Status FunctionLibraryRuntimeImpl::Instantiate(
     return parent_->Instantiate(function_name, attrs, options, handle);
   }
 
+  if (options.use_function_cache) {
+    InstantiateOptions options_copy(options);
+    options_copy.use_function_cache = false;
+    return function_handle_cache_->Instantiate(function_name, attrs,
+                                               options_copy, handle);
+  }
+
   // Since this is a local target, ensure that the local `device_name_` appears
   // in the canonical key.
   InstantiateOptions options_copy(options);
@@ -810,6 +827,10 @@ Status FunctionLibraryRuntimeImpl::Instantiate(
       item->func_graph = fbody.release();
       item->instantiation_counter = 1;
       item->executor_type = ExecutorType(options, attrs);
+      item->allow_small_function_optimizations =
+          options.allow_small_function_optimizations;
+      item->allow_control_flow_sync_execution =
+          options.allow_control_flow_sync_execution;
       if (options.lib_def) {
         item->overlay_flr =
             new FunctionLibraryRuntimeOverlay(this, options.lib_def);
@@ -863,6 +884,7 @@ Status FunctionLibraryRuntimeImpl::ReleaseHandle(Handle handle) {
 }
 
 namespace {
+
 // Removes all stateless nodes that do not contribute to a return
 // value from the function body. Unlike `RemoveDeadNodes()`, which is
 // triggered by `OptimizerOptions.do_function_inlining`, this pass
@@ -902,6 +924,7 @@ void PruneFunctionBody(const FunctionDef& fdef, Graph* g) {
     FixupSourceAndSinkEdges(g);
   }
 }
+
 }  // namespace
 
 Status FunctionLibraryRuntimeImpl::CreateItem(Item** item) {
@@ -918,11 +941,11 @@ Status FunctionLibraryRuntimeImpl::CreateItem(Item** item) {
   }
   const FunctionLibraryDefinition* lib_def =
       flr->GetFunctionLibraryDefinition();
-  std::unique_ptr<Graph> g(new Graph(lib_def));
+  auto g = absl::make_unique<Graph>(lib_def);
   CopyGraph(*fbody->graph, g.get());
 
   PruneFunctionBody(fbody->fdef, g.get());
-  optimizer_.Optimize(this, env(), device(), &g, /*shape_map=*/nullptr);
+  optimizer_.Optimize(this, env(), device(), &g, GraphOptimizer::Options());
   TF_RETURN_IF_ERROR(EnsureMemoryTypes(DeviceType(device()->device_type()),
                                        device()->name(), g.get()));
 
@@ -931,6 +954,8 @@ Status FunctionLibraryRuntimeImpl::CreateItem(Item** item) {
   LocalExecutorParams params;
   params.device = device_;
   params.function_library = flr;
+  params.allow_control_flow_sync_execution =
+      (*item)->allow_control_flow_sync_execution;
   if (flr == this) {
     params.create_kernel = create_kernel_;
   } else {
@@ -945,6 +970,18 @@ Status FunctionLibraryRuntimeImpl::CreateItem(Item** item) {
   };
   params.session_metadata = session_metadata_;
   std::unique_ptr<Executor> exec;
+
+  // When the instantiation options request small function optimizations, all
+  // graphs which are safe for synchronous execution will set this flag to true:
+  if ((*item)->allow_small_function_optimizations && executor_type.empty()) {
+    executor_type = "SINGLE_THREADED_EXECUTOR";
+  }
+
+  metrics::IncrementTestCounter("flr_executor",
+                                (executor_type == "SINGLE_THREADED_EXECUTOR")
+                                    ? "single_threaded"
+                                    : "default");
+
   TF_RETURN_IF_ERROR(NewExecutor(executor_type, params, *g, &exec));
   {
     // Guard item since it is already inserted in items_.
@@ -993,6 +1030,9 @@ void FunctionLibraryRuntimeImpl::ExecutorArgsFromOptions(
   exec_args->collective_executor = run_opts.collective_executor;
   exec_args->call_frame = frame;
   exec_args->run_all_kernels_inline = run_opts.run_all_kernels_inline;
+  exec_args->user_intra_op_threadpool = run_opts.user_intra_op_threadpool;
+  exec_args->coordination_service_agent = run_opts.coordination_service_agent;
+  exec_args->stack_trace = run_opts.stack_trace;
 }
 
 void FunctionLibraryRuntimeImpl::RunRemote(const Options& opts, Handle handle,
@@ -1008,7 +1048,7 @@ void FunctionLibraryRuntimeImpl::RunRemote(const Options& opts, Handle handle,
     done(s);
     return;
   }
-  int64 src_incarnation, target_incarnation;
+  int64_t src_incarnation, target_incarnation;
   s = parent_->GetDeviceIncarnation(source_device, &src_incarnation);
   s.Update(parent_->GetDeviceIncarnation(target_device, &target_incarnation));
   if (!s.ok()) {
@@ -1100,11 +1140,11 @@ void FunctionLibraryRuntimeImpl::Run(const Options& opts, Handle handle,
   }
   Options run_opts = opts;
   if (opts.create_rendezvous) {
-    auto* rendezvous = new PrivateIntraProcessRendezvous(device_mgr_);
+    auto* rendezvous = new RefCountedIntraProcessRendezvous(device_mgr_);
     run_opts.rendezvous = rendezvous;
     run_opts.create_rendezvous = false;
     done = [done = std::move(done), rendezvous](const Status& status) mutable {
-      delete rendezvous;
+      rendezvous->Unref();
       done(status);
     };
   }
@@ -1143,6 +1183,15 @@ void FunctionLibraryRuntimeImpl::Run(const Options& opts, Handle handle,
     return;
   }
 
+  profiler::TraceMeProducer activity(
+      // To TraceMeConsumers in ExecutorState::Process/Finish.
+      [&opts] {
+        return profiler::TraceMeEncode("FunctionRun",
+                                       {{"id", opts.step_id}, {"_r", 1}});
+      },
+      profiler::ContextType::kTfExecutor, opts.step_id,
+      profiler::TraceMeLevel::kInfo);
+
   Executor::Args exec_args;
   ExecutorArgsFromOptions(run_opts, frame, &exec_args);
 
@@ -1171,11 +1220,11 @@ void FunctionLibraryRuntimeImpl::Run(const Options& opts, Handle handle,
 
   Options run_opts = opts;
   if (opts.create_rendezvous) {
-    auto* rendezvous = new PrivateIntraProcessRendezvous(device_mgr_);
+    auto* rendezvous = new RefCountedIntraProcessRendezvous(device_mgr_);
     run_opts.rendezvous = rendezvous;
     run_opts.create_rendezvous = false;
     done = [done = std::move(done), rendezvous](const Status& status) mutable {
-      delete rendezvous;
+      rendezvous->Unref();
       done(status);
     };
   }
@@ -1206,6 +1255,15 @@ void FunctionLibraryRuntimeImpl::Run(const Options& opts, Handle handle,
     run_opts.runner = &default_runner_;
   }
   DCHECK(run_opts.runner != nullptr);
+
+  profiler::TraceMeProducer activity(
+      // To TraceMeConsumers in ExecutorState::Process/Finish.
+      [&opts] {
+        return profiler::TraceMeEncode("FunctionRun",
+                                       {{"id", opts.step_id}, {"_r", 1}});
+      },
+      profiler::ContextType::kTfExecutor, opts.step_id,
+      profiler::TraceMeLevel::kInfo);
 
   Executor::Args exec_args;
   ExecutorArgsFromOptions(run_opts, frame, &exec_args);
@@ -1311,9 +1369,9 @@ Status FunctionLibraryRuntimeImpl::Clone(
     std::unique_ptr<FunctionLibraryDefinition>* out_lib_def,
     std::unique_ptr<ProcessFunctionLibraryRuntime>* out_pflr,
     FunctionLibraryRuntime** out_flr, bool skip_flib_def) {
-  TF_RETURN_IF_ERROR(parent_->Clone(
-      env_, graph_def_version_, optimizer_.options(), custom_kernel_creator_,
-      out_lib_def, out_pflr, skip_flib_def));
+  TF_RETURN_IF_ERROR(parent_->Clone(env_, graph_def_version_,
+                                    optimizer_.options(), out_lib_def, out_pflr,
+                                    skip_flib_def));
   *out_flr = (*out_pflr)->GetFLR(device_->name());
   if (*out_flr != nullptr) {
     return Status::OK();
@@ -1326,16 +1384,16 @@ namespace {
 
 struct CustomCreatorSingleton {
   mutex mu;
-  CustomKernelCreator* custom_creator = nullptr;
+  std::unique_ptr<CustomKernelCreator> custom_creator = nullptr;
 
   void Set(CustomKernelCreator* cb) {
     mutex_lock l(mu);
-    custom_creator = cb;
+    custom_creator.reset(cb);
   }
 
   CustomKernelCreator* Get() {
     mutex_lock l(mu);
-    return custom_creator;
+    return custom_creator.get();
   }
 };
 
@@ -1359,12 +1417,11 @@ std::unique_ptr<FunctionLibraryRuntime> NewFunctionLibraryRuntime(
     Device* device, int graph_def_version,
     const FunctionLibraryDefinition* lib_def, thread::ThreadPool* thread_pool,
     const OptimizerOptions& optimizer_options,
-    const CustomKernelCreator* custom_kernel_creator,
     const SessionMetadata* session_metadata,
     ProcessFunctionLibraryRuntime* parent) {
   return std::unique_ptr<FunctionLibraryRuntime>(new FunctionLibraryRuntimeImpl(
       device_mgr, env, config, device, graph_def_version, lib_def, thread_pool,
-      optimizer_options, custom_kernel_creator, session_metadata, parent));
+      optimizer_options, session_metadata, parent));
 }
 
 class SymbolicGradientHelper {

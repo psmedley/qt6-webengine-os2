@@ -9,6 +9,7 @@
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_token_builder.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_insertable_streams.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_parameters.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_capabilities.h"
@@ -16,9 +17,6 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_decoding_parameters.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_capability.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_parameters.h"
-#include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
 #include "third_party/blink/renderer/core/streams/writable_stream.h"
 #include "third_party/blink/renderer/modules/peerconnection/identifiability_metrics.h"
@@ -33,7 +31,6 @@
 #include "third_party/blink/renderer/modules/peerconnection/rtc_rtp_sender.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_stats_report.h"
 #include "third_party/blink/renderer/modules/peerconnection/web_rtc_stats_report_callback_resolver.h"
-#include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_encoded_video_stream_transformer.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_stats.h"
@@ -66,12 +63,12 @@ RTCRtpReceiver::RTCRtpReceiver(RTCPeerConnection* pc,
   DCHECK(pc_);
   DCHECK(receiver_);
   DCHECK(track_);
-  if (force_encoded_audio_insertable_streams_ && track_->kind() == "audio") {
+  if (force_encoded_audio_insertable_streams_ && kind() == MediaKind::kAudio) {
     encoded_audio_transformer_ =
         receiver_->GetEncodedAudioStreamTransformer()->GetBroker();
     RegisterEncodedAudioStreamCallback();
   }
-  if (force_encoded_video_insertable_streams_ && track_->kind() == "video")
+  if (force_encoded_video_insertable_streams_ && kind() == MediaKind::kVideo)
     RegisterEncodedVideoStreamCallback();
 }
 
@@ -111,86 +108,16 @@ HeapVector<Member<RTCRtpSynchronizationSource>>
 RTCRtpReceiver::getSynchronizationSources(ScriptState* script_state,
                                           ExceptionState& exception_state) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (!script_state->ContextIsValid()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "Window is detached");
-    return HeapVector<Member<RTCRtpSynchronizationSource>>();
-  }
-
-  UpdateSourcesIfNeeded();
-
-  LocalDOMWindow* window = LocalDOMWindow::From(script_state);
-  DocumentLoadTiming& time_converter =
-      window->GetFrame()->Loader().GetDocumentLoader()->GetTiming();
-
-  HeapVector<Member<RTCRtpSynchronizationSource>> synchronization_sources;
-  for (const auto& web_source : web_sources_) {
-    if (web_source->SourceType() != RTCRtpSource::Type::kSSRC)
-      continue;
-    RTCRtpSynchronizationSource* synchronization_source =
-        MakeGarbageCollected<RTCRtpSynchronizationSource>();
-    synchronization_source->setTimestamp(
-        time_converter.MonotonicTimeToPseudoWallTime(web_source->Timestamp())
-            .InMilliseconds());
-    synchronization_source->setSource(web_source->Source());
-    if (web_source->AudioLevel().has_value()) {
-      synchronization_source->setAudioLevel(web_source->AudioLevel().value());
-    }
-    if (web_source->CaptureTimestamp().has_value()) {
-      synchronization_source->setCaptureTimestamp(
-          web_source->CaptureTimestamp().value());
-    }
-    if (web_source->SenderCaptureTimeOffset().has_value()) {
-      synchronization_source->setSenderCaptureTimeOffset(
-          web_source->SenderCaptureTimeOffset().value());
-    }
-    synchronization_source->setRtpTimestamp(web_source->RtpTimestamp());
-    synchronization_sources.push_back(synchronization_source);
-  }
-  return synchronization_sources;
+  return pc_->GetRtpContributingSourceCache().getSynchronizationSources(
+      script_state, exception_state, this);
 }
 
 HeapVector<Member<RTCRtpContributingSource>>
 RTCRtpReceiver::getContributingSources(ScriptState* script_state,
                                        ExceptionState& exception_state) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (!script_state->ContextIsValid()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "Window is detached");
-    return HeapVector<Member<RTCRtpContributingSource>>();
-  }
-
-  UpdateSourcesIfNeeded();
-
-  LocalDOMWindow* window = LocalDOMWindow::From(script_state);
-  DocumentLoadTiming& time_converter =
-      window->GetFrame()->Loader().GetDocumentLoader()->GetTiming();
-
-  HeapVector<Member<RTCRtpContributingSource>> contributing_sources;
-  for (const auto& web_source : web_sources_) {
-    if (web_source->SourceType() != RTCRtpSource::Type::kCSRC)
-      continue;
-    RTCRtpContributingSource* contributing_source =
-        MakeGarbageCollected<RTCRtpContributingSource>();
-    contributing_source->setTimestamp(
-        time_converter.MonotonicTimeToPseudoWallTime(web_source->Timestamp())
-            .InMilliseconds());
-    contributing_source->setSource(web_source->Source());
-    if (web_source->AudioLevel().has_value()) {
-      contributing_source->setAudioLevel(web_source->AudioLevel().value());
-    }
-    if (web_source->CaptureTimestamp().has_value()) {
-      contributing_source->setCaptureTimestamp(
-          web_source->CaptureTimestamp().value());
-    }
-    if (web_source->SenderCaptureTimeOffset().has_value()) {
-      contributing_source->setSenderCaptureTimeOffset(
-          web_source->SenderCaptureTimeOffset().value());
-    }
-    contributing_source->setRtpTimestamp(web_source->RtpTimestamp());
-    contributing_sources.push_back(contributing_source);
-  }
-  return contributing_sources;
+  return pc_->GetRtpContributingSourceCache().getContributingSources(
+      script_state, exception_state, this);
 }
 
 ScriptPromise RTCRtpReceiver::getStats(ScriptState* script_state) {
@@ -207,9 +134,9 @@ RTCInsertableStreams* RTCRtpReceiver::createEncodedStreams(
     ScriptState* script_state,
     ExceptionState& exception_state) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (track_->kind() == "audio")
+  if (kind() == MediaKind::kAudio)
     return createEncodedAudioStreams(script_state, exception_state);
-  DCHECK_EQ(track_->kind(), "video");
+  DCHECK_EQ(kind(), MediaKind::kVideo);
   return createEncodedVideoStreams(script_state, exception_state);
 }
 
@@ -258,6 +185,14 @@ RTCRtpReceiverPlatform* RTCRtpReceiver::platform_receiver() {
   return receiver_.get();
 }
 
+RTCRtpReceiver::MediaKind RTCRtpReceiver::kind() const {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (track_->kind() == "audio")
+    return MediaKind::kAudio;
+  DCHECK_EQ(track_->kind(), "video");
+  return MediaKind::kVideo;
+}
+
 MediaStreamVector RTCRtpReceiver::streams() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return streams_;
@@ -278,22 +213,6 @@ void RTCRtpReceiver::set_transport(RTCDtlsTransport* transport) {
   transport_ = transport;
 }
 
-void RTCRtpReceiver::UpdateSourcesIfNeeded() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (!web_sources_needs_updating_)
-    return;
-  web_sources_ = receiver_->GetSources();
-  // Clear the flag and schedule a microtask to reset it to true. This makes
-  // the cache valid until the next microtask checkpoint. As such, sources
-  // represent a snapshot and can be compared reliably in .js code, no risk of
-  // being updated due to an RTP packet arriving. E.g.
-  // "source.timestamp == source.timestamp" will always be true.
-  web_sources_needs_updating_ = false;
-  Microtask::EnqueueMicrotask(
-      WTF::Bind(&RTCRtpReceiver::SetContributingSourcesNeedsUpdating,
-                WrapWeakPersistent(this)));
-}
-
 void RTCRtpReceiver::ContextDestroyed() {
   {
     WTF::MutexLocker locker(audio_underlying_source_mutex_);
@@ -303,11 +222,6 @@ void RTCRtpReceiver::ContextDestroyed() {
     WTF::MutexLocker locker(audio_underlying_sink_mutex_);
     audio_to_decoder_underlying_sink_.Clear();
   }
-}
-
-void RTCRtpReceiver::SetContributingSourcesNeedsUpdating() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  web_sources_needs_updating_ = true;
 }
 
 void RTCRtpReceiver::Trace(Visitor* visitor) const {
@@ -354,7 +268,11 @@ RTCRtpCapabilities* RTCRtpReceiver::getCapabilities(ScriptState* state,
       for (const auto& parameter : rtc_codec.parameters) {
         if (!sdp_fmtp_line.empty())
           sdp_fmtp_line += ";";
-        sdp_fmtp_line += parameter.first + "=" + parameter.second;
+        if (parameter.first.empty()) {
+          sdp_fmtp_line += parameter.second;
+        } else {
+          sdp_fmtp_line += parameter.first + "=" + parameter.second;
+        }
       }
       codec->setSdpFmtpLine(sdp_fmtp_line.c_str());
     }
@@ -372,12 +290,12 @@ RTCRtpCapabilities* RTCRtpReceiver::getCapabilities(ScriptState* state,
   }
   capabilities->setHeaderExtensions(header_extensions);
 
-  if (IdentifiabilityStudySettings::Get()->IsTypeAllowed(
+  if (IdentifiabilityStudySettings::Get()->ShouldSampleType(
           IdentifiableSurface::Type::kRtcRtpReceiverGetCapabilities)) {
     IdentifiableTokenBuilder builder;
     IdentifiabilityAddRTCRtpCapabilitiesToBuilder(builder, *capabilities);
     IdentifiabilityMetricBuilder(ExecutionContext::From(state)->UkmSourceID())
-        .Set(IdentifiableSurface::FromTypeAndToken(
+        .Add(IdentifiableSurface::FromTypeAndToken(
                  IdentifiableSurface::Type::kRtcRtpReceiverGetCapabilities,
                  IdentifiabilityBenignStringToken(kind)),
              builder.GetToken())
@@ -507,7 +425,6 @@ void RTCRtpReceiver::InitializeEncodedAudioStreams(ScriptState* script_state) {
             absl::make_unique<RtcEncodedAudioReceiverSourceOptimizer>(
                 std::move(set_underlying_source),
                 std::move(disconnect_callback)));
-    encoded_audio_streams_->setReadableStream(readable_stream);
     encoded_audio_streams_->setReadable(readable_stream);
   }
 
@@ -534,7 +451,6 @@ void RTCRtpReceiver::InitializeEncodedAudioStreams(ScriptState* script_state) {
             std::move(set_underlying_sink), encoded_audio_transformer_));
   }
 
-  encoded_audio_streams_->setWritableStream(writable_stream);
   encoded_audio_streams_->setWritable(writable_stream);
 }
 
@@ -552,7 +468,7 @@ void RTCRtpReceiver::RegisterEncodedVideoStreamCallback() {
   DCHECK(!platform_receiver()
               ->GetEncodedVideoStreamTransformer()
               ->HasTransformerCallback());
-  DCHECK_EQ(track_->kind(), "video");
+  DCHECK_EQ(kind(), MediaKind::kVideo);
   platform_receiver()
       ->GetEncodedVideoStreamTransformer()
       ->SetTransformerCallback(
@@ -562,7 +478,7 @@ void RTCRtpReceiver::RegisterEncodedVideoStreamCallback() {
 
 void RTCRtpReceiver::UnregisterEncodedVideoStreamCallback() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK_EQ(track_->kind(), "video");
+  DCHECK_EQ(kind(), MediaKind::kVideo);
   platform_receiver()
       ->GetEncodedVideoStreamTransformer()
       ->ResetTransformerCallback();
@@ -589,7 +505,6 @@ void RTCRtpReceiver::InitializeEncodedVideoStreams(ScriptState* script_state) {
       ReadableStream::CreateWithCountQueueingStrategy(
           script_state, video_from_depacketizer_underlying_source_,
           /*high_water_mark=*/0);
-  encoded_video_streams_->setReadableStream(readable_stream);
   encoded_video_streams_->setReadable(readable_stream);
 
   // Set up writable.
@@ -603,14 +518,14 @@ void RTCRtpReceiver::InitializeEncodedVideoStreams(ScriptState* script_state) {
                                       ->GetEncodedVideoStreamTransformer()
                                 : nullptr;
               },
-              WrapWeakPersistent(this)));
+              WrapWeakPersistent(this)),
+          webrtc::TransformableFrameInterface::Direction::kReceiver);
   // The high water mark for the stream is set to 1 so that the stream seems
   // ready to write, but without queuing frames.
   WritableStream* writable_stream =
       WritableStream::CreateWithCountQueueingStrategy(
           script_state, video_to_decoder_underlying_sink_,
           /*high_water_mark=*/1);
-  encoded_video_streams_->setWritableStream(writable_stream);
   encoded_video_streams_->setWritable(writable_stream);
 }
 

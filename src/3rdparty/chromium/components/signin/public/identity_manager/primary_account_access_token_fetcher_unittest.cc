@@ -10,9 +10,10 @@
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
+#include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
-#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -49,7 +50,7 @@ class PrimaryAccountAccessTokenFetcherTest
   PrimaryAccountAccessTokenFetcherTest()
       : identity_test_env_(std::make_unique<IdentityTestEnvironment>()),
         access_token_info_("access token",
-                           base::Time::Now() + base::TimeDelta::FromHours(1),
+                           base::Time::Now() + base::Hours(1),
                            "id_token") {}
 
   ~PrimaryAccountAccessTokenFetcherTest() override = default;
@@ -407,7 +408,7 @@ TEST_P(PrimaryAccountAccessTokenFetcherTest,
   identity_test_env()->ClearPrimaryAccount();
 }
 
-#endif  // !OS_CHROMEOS
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
 TEST_P(PrimaryAccountAccessTokenFetcherTest,
        ShouldNotRetryCanceledAccessTokenRequestIfRefreshTokenRevoked) {

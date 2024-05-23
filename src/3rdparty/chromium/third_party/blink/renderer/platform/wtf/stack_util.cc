@@ -9,7 +9,7 @@
 #include "base/notreached.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <intrin.h>
 #include <stddef.h>
 #include <windows.h>
@@ -32,15 +32,15 @@ size_t GetUnderestimatedStackSize() {
 // FIXME: On Mac OSX and Linux, this method cannot estimate stack size
 // correctly for the main thread.
 
-#elif defined(__GLIBC__) || defined(OS_ANDROID) || defined(OS_FREEBSD) || \
-    defined(OS_FUCHSIA)
+#elif defined(__GLIBC__) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FREEBSD) || \
+    BUILDFLAG(IS_FUCHSIA)
   // pthread_getattr_np() can fail if the thread is not invoked by
   // pthread_create() (e.g., the main thread of blink_unittests).
   // If so, a conservative size estimate is returned.
 
   pthread_attr_t attr;
   int error;
-#if defined(OS_FREEBSD)
+#if BUILDFLAG(IS_FREEBSD)
   pthread_attr_init(&attr);
   error = pthread_attr_get_np(pthread_self(), &attr);
 #else
@@ -54,7 +54,7 @@ size_t GetUnderestimatedStackSize() {
     pthread_attr_destroy(&attr);
     return size;
   }
-#if defined(OS_FREEBSD)
+#if BUILDFLAG(IS_FREEBSD)
   pthread_attr_destroy(&attr);
 #endif
 
@@ -65,7 +65,7 @@ size_t GetUnderestimatedStackSize() {
   //    low as 512k.
   //
   return 512 * 1024;
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
   // pthread_get_stacksize_np() returns too low a value for the main thread on
   // OSX 10.9,
   // http://mail.openjdk.java.net/pipermail/hotspot-dev/2013-October/011369.html
@@ -91,9 +91,9 @@ size_t GetUnderestimatedStackSize() {
 #endif
   }
   return pthread_get_stacksize_np(pthread_self());
-#elif defined(OS_WIN) && defined(COMPILER_MSVC)
+#elif BUILDFLAG(IS_WIN) && defined(COMPILER_MSVC)
   return Threading::ThreadStackSize();
-#elif defined(OS_OS2)
+#elif BUILDFLAG(IS_OS2)
   PTIB ptib;
   DosGetInfoBlocks(&ptib, NULL);
   // Reduce the stack size by two pages to avoid hitting a stack overflow
@@ -110,11 +110,11 @@ size_t GetUnderestimatedStackSize() {
 }
 
 void* GetStackStart() {
-#if defined(__GLIBC__) || defined(OS_ANDROID) || defined(OS_FREEBSD) || \
-    defined(OS_FUCHSIA)
+#if defined(__GLIBC__) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FREEBSD) || \
+    BUILDFLAG(IS_FUCHSIA)
   pthread_attr_t attr;
   int error;
-#if defined(OS_FREEBSD)
+#if BUILDFLAG(IS_FREEBSD)
   pthread_attr_init(&attr);
   error = pthread_attr_get_np(pthread_self(), &attr);
 #else
@@ -128,7 +128,7 @@ void* GetStackStart() {
     pthread_attr_destroy(&attr);
     return reinterpret_cast<uint8_t*>(base) + size;
   }
-#if defined(OS_FREEBSD)
+#if BUILDFLAG(IS_FREEBSD)
   pthread_attr_destroy(&attr);
 #endif
 #if defined(__GLIBC__)
@@ -141,9 +141,9 @@ void* GetStackStart() {
   NOTREACHED();
   return nullptr;
 #endif
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
   return pthread_get_stackaddr_np(pthread_self());
-#elif defined(OS_WIN) && defined(COMPILER_MSVC)
+#elif BUILDFLAG(IS_WIN) && defined(COMPILER_MSVC)
 // On Windows stack limits for the current thread are available in
 // the thread information block (TIB).
 // On Windows ARM64, stack limits could be retrieved by calling
@@ -197,7 +197,7 @@ void InitializeMainThreadStackEstimate() {
   g_main_thread_underestimated_stack_size = underestimated_stack_size;
 }
 
-#if defined(OS_WIN) && defined(COMPILER_MSVC)
+#if BUILDFLAG(IS_WIN) && defined(COMPILER_MSVC)
 size_t ThreadStackSize() {
   // Notice that we cannot use the TIB's StackLimit for the stack end, as i
   // tracks the end of the committed range. We're after the end of the reserved

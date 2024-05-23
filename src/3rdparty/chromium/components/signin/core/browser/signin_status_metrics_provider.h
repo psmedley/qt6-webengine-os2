@@ -10,7 +10,6 @@
 #include <memory>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_multi_source_observation.h"
 #include "build/build_config.h"
@@ -29,6 +28,10 @@ class SigninStatusMetricsProviderDelegate;
 class SigninStatusMetricsProvider : public SigninStatusMetricsProviderBase,
                                     public signin::IdentityManager::Observer {
  public:
+  SigninStatusMetricsProvider(const SigninStatusMetricsProvider&) = delete;
+  SigninStatusMetricsProvider& operator=(const SigninStatusMetricsProvider&) =
+      delete;
+
   ~SigninStatusMetricsProvider() override;
 
   // SigninStatusMetricsProviderBase:
@@ -96,8 +99,6 @@ class SigninStatusMetricsProvider : public SigninStatusMetricsProviderBase,
   bool is_test_;
 
   base::WeakPtrFactory<SigninStatusMetricsProvider> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SigninStatusMetricsProvider);
 };
 
 #endif  // COMPONENTS_SIGNIN_CORE_BROWSER_SIGNIN_STATUS_METRICS_PROVIDER_H_

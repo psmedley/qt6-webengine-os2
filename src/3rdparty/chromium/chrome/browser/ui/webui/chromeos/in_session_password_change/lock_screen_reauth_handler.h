@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_IN_SESSION_PASSWORD_CHANGE_LOCK_SCREEN_REAUTH_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_IN_SESSION_PASSWORD_CHANGE_LOCK_SCREEN_REAUTH_HANDLER_H_
 
+#include <memory>
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 // TODO(https://crbug.com/1164001): move to forward declaration.
@@ -25,13 +26,12 @@ class LockScreenReauthHandler : public content::WebUIMessageHandler {
   void ShowPasswordChangedScreen();
 
   // WebUI message handlers.
-  void HandleInitialize(const base::ListValue*);
-  void HandleCompleteAuthentication(const base::ListValue*);
-  void HandleAuthenticatorLoaded(const base::ListValue*);
-  void HandleUpdateUserPassword(const base::ListValue*);
+  void HandleInitialize(const base::Value::List&);
+  void HandleCompleteAuthentication(const base::Value::List&);
+  void HandleAuthenticatorLoaded(const base::Value::List&);
+  void HandleUpdateUserPassword(const base::Value::List&);
 
   bool IsAuthenticatorLoaded(base::OnceClosure callback);
-  bool IsJsReadyForTesting(base::OnceClosure js_ready_callback);
 
   void force_saml_redirect_for_testing() {
     force_saml_redirect_for_testing_ = true;
@@ -60,9 +60,9 @@ class LockScreenReauthHandler : public content::WebUIMessageHandler {
 
   void OnCookieWaitTimeout();
 
-  void OnJsReadyForTesting();
+  void OnReauthDialogReadyForTesting();
 
-  void CheckCredentials(const UserContext& user_context);
+  void CheckCredentials(std::unique_ptr<UserContext> user_context);
 
   void UpdateOrientationAndWidth();
 
@@ -90,10 +90,6 @@ class LockScreenReauthHandler : public content::WebUIMessageHandler {
 
   // A test may be waiting for the authenticator to load.
   base::OnceClosure waiting_caller_;
-
-  // Tests need to wait until the renderer is ready to execute JavaScript.
-  bool js_ready_ = false;
-  base::OnceClosure initialization_callback_for_testing_;
 
   base::WeakPtrFactory<LockScreenReauthHandler> weak_factory_{this};
 };

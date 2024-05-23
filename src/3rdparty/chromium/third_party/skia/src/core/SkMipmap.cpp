@@ -384,6 +384,11 @@ template <typename F> void downsample_3_3(void* dst, const void* src, size_t src
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+SkMipmap::SkMipmap(void* malloc, size_t size) : SkCachedData(malloc, size) {}
+SkMipmap::SkMipmap(size_t size, SkDiscardableMemory* dm) : SkCachedData(size, dm) {}
+
+SkMipmap::~SkMipmap() = default;
+
 size_t SkMipmap::AllocLevelsSize(int levelCount, size_t pixelSize) {
     if (levelCount < 0) {
         return 0;
@@ -445,6 +450,7 @@ SkMipmap* SkMipmap::Build(const SkPixmap& src, SkDiscardableFactoryProc fact,
             break;
         case kAlpha_8_SkColorType:
         case kGray_8_SkColorType:
+        case kR8_unorm_SkColorType:
             proc_1_2 = downsample_1_2<ColorTypeFilter_8>;
             proc_1_3 = downsample_1_3<ColorTypeFilter_8>;
             proc_2_1 = downsample_2_1<ColorTypeFilter_8>;
@@ -542,6 +548,9 @@ SkMipmap* SkMipmap::Build(const SkPixmap& src, SkDiscardableFactoryProc fact,
         case kRGB_101010x_SkColorType:  // TODO: use 1010102?
         case kBGR_101010x_SkColorType:  // TODO: use 1010102?
         case kRGBA_F32_SkColorType:
+            return nullptr;
+
+        case kSRGBA_8888_SkColorType:  // TODO: needs careful handling
             return nullptr;
     }
 
@@ -719,23 +728,23 @@ float SkMipmap::ComputeLevel(SkSize scaleSize) {
 
 #ifndef SK_SUPPORT_LEGACY_ANISOTROPIC_MIPMAP_SCALE
     // Use the smallest scale to match the GPU impl.
-    const SkScalar scale = std::min(scaleSize.width(), scaleSize.height());
+    const float scale = std::min(scaleSize.width(), scaleSize.height());
 #else
     // Ideally we'd pick the smaller scale, to match Ganesh.  But ignoring one of the
     // scales can produce some atrocious results, so for now we use the geometric mean.
     // (https://bugs.chromium.org/p/skia/issues/detail?id=4863)
-    const SkScalar scale = SkScalarSqrt(scaleSize.width() * scaleSize.height());
+    const float scale = sk_float_sqrt(scaleSize.width() * scaleSize.height());
 #endif
 
     if (scale >= SK_Scalar1 || scale <= 0 || !SkScalarIsFinite(scale)) {
         return -1;
     }
 
-    SkScalar L = -SkScalarLog2(scale);
+    // The -0.5 bias here is to emulate GPU's sharpen mipmap option.
+    float L = std::max(-SkScalarLog2(scale) - 0.5f, 0.f);
     if (!SkScalarIsFinite(L)) {
         return -1;
     }
-    SkASSERT(L >= 0);
     return L;
 }
 
@@ -745,7 +754,7 @@ bool SkMipmap::extractLevel(SkSize scaleSize, Level* levelPtr) const {
     }
 
     float L = ComputeLevel(scaleSize);
-    int level = SkScalarFloorToInt(L);
+    int level = sk_float_round2int(L);
     if (level <= 0) {
         return false;
     }
@@ -771,17 +780,16 @@ bool SkMipmap::validForRootLevel(const SkImageInfo& root) const {
         return false;
     }
 
-    const SkPixmap& pm = fLevels[0].fPixmap;
-    if (pm. width() != std::max(1, dimension. width() >> 1) ||
-        pm.height() != std::max(1, dimension.height() >> 1)) {
+    if (fLevels[0].fPixmap. width() != std::max(1, dimension. width() >> 1) ||
+        fLevels[0].fPixmap.height() != std::max(1, dimension.height() >> 1)) {
         return false;
     }
 
     for (int i = 0; i < this->countLevels(); ++i) {
-        const SkPixmap& pm = fLevels[0].fPixmap;
-        if (pm.colorType() != root.colorType() ||
-            pm.alphaType() != root.alphaType())
+        if (fLevels[i].fPixmap.colorType() != root.colorType() ||
+            fLevels[i].fPixmap.alphaType() != root.alphaType()) {
             return false;
+        }
     }
     return true;
 }
@@ -856,8 +864,8 @@ sk_sp<SkData> SkMipmap::serialize() const {
     return buffer.snapshotAsData();
 }
 
-bool SkMipmap::Deserialize(SkMipmapBuilder* builder, const void* data, size_t size) {
-    SkReadBuffer buffer(data, size);
+bool SkMipmap::Deserialize(SkMipmapBuilder* builder, const void* data, size_t length) {
+    SkReadBuffer buffer(data, length);
 
     int count = buffer.read32();
     if (builder->countLevels() != count) {

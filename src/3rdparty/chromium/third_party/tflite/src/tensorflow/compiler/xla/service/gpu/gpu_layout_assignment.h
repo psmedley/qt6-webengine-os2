@@ -29,23 +29,17 @@ namespace gpu {
 // layout constraints for operands and results of library calls.
 class GpuLayoutAssignment : public LayoutAssignment {
  public:
-  explicit GpuLayoutAssignment(ComputationLayout* entry_computation_layout,
-                               std::function<bool(const HloInstruction*)>
-                                   instruction_can_change_layout_func,
-                               se::StreamExecutor* stream_executor)
+  explicit GpuLayoutAssignment(
+      ComputationLayout* entry_computation_layout,
+      se::StreamExecutor* stream_executor,
+      ChannelLayoutConstraints* channel_constraints = nullptr)
       : LayoutAssignment(entry_computation_layout,
-                         std::move(instruction_can_change_layout_func)),
+                         channel_constraints),
         stream_executor_(stream_executor) {}
   ~GpuLayoutAssignment() override {}
 
  protected:
   Status AddBackendConstraints(LayoutConstraints* constraints) override;
-  Status PropagateOperandConstraint(
-      const OperandLayoutConstraint& layout_constraint,
-      LayoutConstraints* constraints) override;
-  Status PropagateBufferConstraint(
-      const BufferLayoutConstraint& buffer_constraint,
-      LayoutConstraints* constraints) override;
 
  private:
   Status AddBackendConstraintsToDnnConvCustomCall(

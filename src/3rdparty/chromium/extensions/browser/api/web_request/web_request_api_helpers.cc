@@ -17,10 +17,8 @@
 #include "base/containers/contains.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/containers/fixed_flat_set.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/no_destructor.h"
 #include "base/ranges/algorithm.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -28,6 +26,7 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -40,7 +39,6 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
-#include "extensions/browser/runtime_data.h"
 #include "extensions/common/api/declarative_net_request.h"
 #include "extensions/common/extension_messages.h"
 #include "net/cookies/cookie_util.h"
@@ -546,7 +544,7 @@ bool ExtraInfoSpec::InitFromValue(content::BrowserContext* browser_context,
   *extra_info_spec = 0;
   if (!value.is_list())
     return false;
-  base::Value::ConstListView value_list = value.GetList();
+  base::Value::ConstListView value_list = value.GetListDeprecated();
   for (size_t i = 0; i < value_list.size(); ++i) {
     const std::string* str = value_list[i].GetIfString();
     if (!str)
@@ -1718,16 +1716,14 @@ void ClearCacheOnNavigation() {
 
 // Converts the |name|, |value| pair of a http header to a HttpHeaders
 // dictionary.
-std::unique_ptr<base::DictionaryValue> CreateHeaderDictionary(
-    const std::string& name,
-    const std::string& value) {
-  auto header = std::make_unique<base::DictionaryValue>();
-  header->SetString(keys::kHeaderNameKey, name);
+base::Value::Dict CreateHeaderDictionary(const std::string& name,
+                                         const std::string& value) {
+  base::Value::Dict header;
+  header.Set(keys::kHeaderNameKey, name);
   if (base::IsStringUTF8(value)) {
-    header->SetString(keys::kHeaderValueKey, value);
+    header.Set(keys::kHeaderValueKey, value);
   } else {
-    header->Set(keys::kHeaderBinaryValueKey,
-                std::make_unique<base::Value>(StringToCharList(value)));
+    header.Set(keys::kHeaderBinaryValueKey, StringToCharList(value));
   }
   return header;
 }
@@ -1750,15 +1746,15 @@ bool ShouldHideResponseHeader(int extra_info_spec, const std::string& name) {
 
 bool ArePublicSessionRestrictionsEnabled() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  if (chromeos::LoginState::IsInitialized()) {
-    return chromeos::LoginState::Get()->ArePublicSessionRestrictionsEnabled();
-  }
+  return chromeos::LoginState::IsInitialized() &&
+         chromeos::LoginState::Get()->ArePublicSessionRestrictionsEnabled();
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
   DCHECK(chromeos::LacrosService::Get());
   return chromeos::LacrosService::Get()->init_params()->session_type ==
          crosapi::mojom::SessionType::kPublicSession;
-#endif
+#else
   return false;
+#endif
 }
 
 }  // namespace extension_web_request_api_helpers

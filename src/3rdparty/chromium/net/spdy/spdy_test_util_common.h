@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/containers/span.h"
-#include "base/cxx17_backports.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_piece.h"
 #include "crypto/ec_private_key.h"
@@ -34,9 +34,7 @@
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/ssl/ssl_config_service_defaults.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_context_storage.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_protocol.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(ENABLE_REPORTING)
@@ -49,6 +47,7 @@ class GURL;
 namespace net {
 
 class CTPolicyEnforcer;
+class ClientSocketFactory;
 class HashValue;
 class HostPortPair;
 class HostResolver;
@@ -59,12 +58,13 @@ class SpdySessionKey;
 class SpdyStream;
 class SpdyStreamRequest;
 class TransportSecurityState;
+class URLRequestContextBuilder;
 
 // Default upload data used by both, mock objects and framer when creating
 // data frames.
 const char kDefaultUrl[] = "https://www.example.org/";
 const char kUploadData[] = "hello!";
-const int kUploadDataSize = base::size(kUploadData) - 1;
+const int kUploadDataSize = std::size(kUploadData) - 1;
 
 // While HTTP/2 protocol defines default SETTINGS_MAX_HEADER_LIST_SIZE_FOR_TEST
 // to be unlimited, BufferedSpdyFramer constructor requires a value.
@@ -124,7 +124,9 @@ base::WeakPtr<SpdyStream> CreateStreamSynchronously(
     const base::WeakPtr<SpdySession>& session,
     const GURL& url,
     RequestPriority priority,
-    const NetLogWithSource& net_log);
+    const NetLogWithSource& net_log,
+    bool detect_broken_connection = false,
+    base::TimeDelta heartbeat_interval = base::Seconds(0));
 
 // Helper class used by some tests to release a stream as soon as it's
 // created.
@@ -151,7 +153,11 @@ struct SpdySessionDependencies {
   explicit SpdySessionDependencies(
       std::unique_ptr<ProxyResolutionService> proxy_resolution_service);
 
+  SpdySessionDependencies(SpdySessionDependencies&&);
+
   ~SpdySessionDependencies();
+
+  SpdySessionDependencies& operator=(SpdySessionDependencies&&);
 
   HostResolver* GetHostResolver() {
     return alternate_host_resolver ? alternate_host_resolver.get()
@@ -200,26 +206,21 @@ struct SpdySessionDependencies {
   SpdySession::TimeFunc time_func;
   bool enable_http2_alternative_service;
   bool enable_websocket_over_http2;
+  bool enable_http2_settings_grease;
   absl::optional<SpdySessionPool::GreasedHttp2Frame> greased_http2_frame;
   bool http2_end_stream_with_data_frame;
-  NetLog* net_log;
+  raw_ptr<NetLog> net_log;
   bool disable_idle_sockets_close_on_memory_pressure;
   bool enable_early_data;
   bool key_auth_cache_server_entries_by_network_isolation_key;
   bool enable_priority_update;
+  bool go_away_on_ip_change;
+  bool ignore_ip_address_changes;
 };
 
-class SpdyURLRequestContext : public URLRequestContext {
- public:
-  SpdyURLRequestContext();
-  ~SpdyURLRequestContext() override;
-
-  MockClientSocketFactory& socket_factory() { return socket_factory_; }
-
- private:
-  MockClientSocketFactory socket_factory_;
-  URLRequestContextStorage storage_;
-};
+std::unique_ptr<URLRequestContextBuilder>
+CreateSpdyTestURLRequestContextBuilder(
+    ClientSocketFactory* client_socket_factory);
 
 // Equivalent to pool->GetIfExists(spdy_session_key, NetLogWithSource()) !=
 // NULL.
@@ -249,13 +250,14 @@ class SpdySessionPoolPeer {
  public:
   explicit SpdySessionPoolPeer(SpdySessionPool* pool);
 
+  SpdySessionPoolPeer(const SpdySessionPoolPeer&) = delete;
+  SpdySessionPoolPeer& operator=(const SpdySessionPoolPeer&) = delete;
+
   void RemoveAliases(const SpdySessionKey& key);
   void SetEnableSendingInitialData(bool enabled);
 
  private:
-  SpdySessionPool* const pool_;
-
-  DISALLOW_COPY_AND_ASSIGN(SpdySessionPoolPeer);
+  const raw_ptr<SpdySessionPool> pool_;
 };
 
 class SpdyTestUtil {

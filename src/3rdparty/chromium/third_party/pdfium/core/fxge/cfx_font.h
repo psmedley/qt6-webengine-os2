@@ -18,7 +18,7 @@
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/cfx_face.h"
 #include "core/fxge/fx_freetype.h"
-#include "third_party/base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/span.h"
 
 #if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
@@ -38,6 +38,11 @@ class CFX_Font {
   struct CharsetFontMap {
     int charset;           // Character Set Enum value, see FX_Charset::kXXX.
     const char* fontname;  // Name of default font to use with that charset.
+  };
+
+  enum class FontType {
+    kUnknown,
+    kCIDTrueType,
   };
 
   // Pointer to the default character set to TT Font name map. The map is an
@@ -72,7 +77,8 @@ class CFX_Font {
                  bool bVertical);
 
   bool LoadEmbedded(pdfium::span<const uint8_t> src_span,
-                    bool bForceAsVertical);
+                    bool force_vertical,
+                    uint64_t object_tag);
   RetainPtr<CFX_Face> GetFace() const { return m_Face; }
   FXFT_FaceRec* GetFaceRec() const {
     return m_Face ? m_Face->GetRec() : nullptr;
@@ -83,11 +89,11 @@ class CFX_Font {
 #if defined(PDF_ENABLE_XFA)
   bool LoadFile(RetainPtr<IFX_SeekableReadStream> pFile, int nFaceIndex);
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   void SetFace(RetainPtr<CFX_Face> face);
   void SetFontSpan(pdfium::span<uint8_t> pSpan) { m_FontData = pSpan; }
   void SetSubstFont(std::unique_ptr<CFX_SubstFont> subst);
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 #endif  // defined(PDF_ENABLE_XFA)
 
   const CFX_GlyphBitmap* LoadGlyphBitmap(
@@ -98,10 +104,11 @@ class CFX_Font {
       int anti_alias,
       CFX_TextRenderOptions* text_options) const;
   const CFX_Path* LoadGlyphPath(uint32_t glyph_index, int dest_width) const;
-  int GetGlyphWidth(uint32_t glyph_index);
+  int GetGlyphWidth(uint32_t glyph_index) const;
+  int GetGlyphWidth(uint32_t glyph_index, int dest_width, int weight) const;
   int GetAscent() const;
   int GetDescent() const;
-  Optional<FX_RECT> GetGlyphBBox(uint32_t glyph_index);
+  absl::optional<FX_RECT> GetGlyphBBox(uint32_t glyph_index);
   bool IsItalic() const;
   bool IsBold() const;
   bool IsFixedWidth() const;
@@ -111,10 +118,19 @@ class CFX_Font {
   ByteString GetFaceName() const;
   ByteString GetBaseFontName() const;
   bool IsTTFont() const;
-  Optional<FX_RECT> GetBBox();
+
+  // Raw bounding box.
+  absl::optional<FX_RECT> GetRawBBox() const;
+
+  // Bounding box adjusted for font units.
+  absl::optional<FX_RECT> GetBBox() const;
+
   bool IsEmbedded() const { return m_bEmbedded; }
   uint8_t* GetSubData() const { return m_pGsubData.get(); }
   void SetSubData(uint8_t* data) { m_pGsubData.reset(data); }
+  FontType GetFontType() const { return m_FontType; }
+  void SetFontType(FontType type) { m_FontType = type; }
+  uint64_t GetObjectTag() const { return m_ObjectTag; }
   pdfium::span<uint8_t> GetFontSpan() const { return m_FontData; }
   void AdjustMMParams(int glyph_index, int dest_width, int weight) const;
   std::unique_ptr<CFX_Path> LoadGlyphPathImpl(uint32_t glyph_index,
@@ -125,7 +141,7 @@ class CFX_Font {
   bool IsSubstFontBold() const;
 #endif
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   void* GetPlatformFont() const { return m_pPlatformFont; }
   void SetPlatformFont(void* font) { m_pPlatformFont = font; }
 #endif
@@ -133,7 +149,7 @@ class CFX_Font {
  private:
   RetainPtr<CFX_GlyphCache> GetOrCreateGlyphCache() const;
   void ClearGlyphCache();
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   void ReleasePlatformResource();
 #endif
   ByteString GetFamilyNameOrUntitled() const;
@@ -150,9 +166,11 @@ class CFX_Font {
   std::unique_ptr<uint8_t, FxFreeDeleter> m_pGsubData;
   std::vector<uint8_t, FxAllocAllocator<uint8_t>> m_FontDataAllocation;
   pdfium::span<uint8_t> m_FontData;
+  FontType m_FontType = FontType::kUnknown;
+  uint64_t m_ObjectTag = 0;
   bool m_bEmbedded = false;
   bool m_bVertical = false;
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   void* m_pPlatformFont = nullptr;
 #endif
 };

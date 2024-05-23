@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <util.h>
 #include <QtTest/QtTest>
@@ -70,6 +45,7 @@ private Q_SLOTS:
     void replaceInterceptor_data();
     void replaceInterceptor();
     void replaceOnIntercept();
+    void multipleRedirects();
 };
 
 tst_QWebEngineUrlRequestInterceptor::tst_QWebEngineUrlRequestInterceptor()
@@ -198,6 +174,29 @@ public:
 
     TestRequestInterceptor(bool redirect = false, const QUrl &url = kRedirectUrl)
         : shouldRedirect(redirect), redirectUrl(url)
+    {
+    }
+};
+
+class TestMultipleRedirectsInterceptor : public QWebEngineUrlRequestInterceptor {
+public:
+    QList<RequestInfo> requestInfos;
+    QMap<QUrl, QUrl> redirectPairs;
+    int redirectCount = 0;
+    void interceptRequest(QWebEngineUrlRequestInfo &info) override
+    {
+        QVERIFY(QThread::currentThread() == QCoreApplication::instance()->thread());
+        qCDebug(lc) << this << "Type:" << info.resourceType() << info.requestMethod() << "Navigation:" << info.navigationType()
+                    << info.requestUrl() << "Initiator:" << info.initiator();
+        auto redirectUrl = redirectPairs.constFind(info.requestUrl());
+        if (redirectUrl != redirectPairs.constEnd()) {
+          info.redirect(redirectUrl.value());
+          requestInfos.append(info);
+          redirectCount++;
+        }
+    }
+
+    TestMultipleRedirectsInterceptor()
     {
     }
 };
@@ -726,7 +725,6 @@ void tst_QWebEngineUrlRequestInterceptor::jsServiceWorker()
     HttpServer server;
     server.setResourceDirs({ QDir(QT_TESTCASE_SOURCEDIR).canonicalPath() + "/resources" });
     QVERIFY(server.start());
-
     QWebEngineProfile profile;
     std::unique_ptr<ConsolePage> page;
     page.reset(new ConsolePage(&profile));
@@ -735,10 +733,17 @@ void tst_QWebEngineUrlRequestInterceptor::jsServiceWorker()
     QVERIFY(loadSync(page.get(), server.url("/sw.html")));
 
     // We expect only one message here, because logging of services workers is not exposed in our API.
-    QTRY_COMPARE_WITH_TIMEOUT(page->messages.count(), 1, 20000);
-    QCOMPARE(page->levels.at(0), QWebEnginePage::InfoMessageLevel);
+    // Note this is very fragile setup , you need fresh profile otherwise install event might not get triggered
+    // and this in turn can lead to incorrect intercepted requests, therefore we should keep this off the record.
+    QTRY_COMPARE_WITH_TIMEOUT(page->messages.count(), 5, 20000);
 
-    QUrl firstPartyUrl = QUrl(server.url().toString() + "sw.js");
+    QCOMPARE(page->levels.at(0), QWebEnginePage::InfoMessageLevel);
+    QCOMPARE(page->messages.at(0),QLatin1String("Service worker installing"));
+    QCOMPARE(page->messages.at(1),QLatin1String("Service worker installed"));
+    QCOMPARE(page->messages.at(2),QLatin1String("Service worker activating"));
+    QCOMPARE(page->messages.at(3),QLatin1String("Service worker activated"));
+    QCOMPARE(page->messages.at(4),QLatin1String("Service worker done"));
+    QUrl firstPartyUrl = QUrl(server.url().toString() + "sw.html");
     QList<RequestInfo> infos;
     // Service Worker
     QTRY_VERIFY(interceptor.hasUrlRequestForType(QWebEngineUrlRequestInfo::ResourceTypeServiceWorker));
@@ -867,6 +872,29 @@ void tst_QWebEngineUrlRequestInterceptor::replaceOnIntercept()
     QCOMPARE(profileInterceptor.requestInfos.size(), 3);
     QCOMPARE(pageInterceptor1.requestInfos.size(), 0);
     QCOMPARE(profileInterceptor.requestInfos.size(), pageInterceptor2.requestInfos.size());
+}
+
+void tst_QWebEngineUrlRequestInterceptor::multipleRedirects()
+{
+    HttpServer server;
+    server.setResourceDirs({ ":/resources" });
+    QVERIFY(server.start());
+
+    TestMultipleRedirectsInterceptor multiInterceptor;
+    multiInterceptor.redirectPairs.insert(QUrl(server.url("/content.html")), QUrl(server.url("/content2.html")));
+    multiInterceptor.redirectPairs.insert(QUrl(server.url("/content2.html")), QUrl(server.url("/content3.html")));
+
+    QWebEngineProfile profile;
+    profile.settings()->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
+    profile.setUrlRequestInterceptor(&multiInterceptor);
+    QWebEnginePage page(&profile);
+    QSignalSpy spy(&page, SIGNAL(loadFinished(bool)));
+
+    page.setUrl(server.url("/content.html"));
+
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 20000);
+    QTRY_COMPARE(multiInterceptor.redirectCount, 2);
+    QTRY_COMPARE(multiInterceptor.requestInfos.size(), 2);
 }
 
 QTEST_MAIN(tst_QWebEngineUrlRequestInterceptor)

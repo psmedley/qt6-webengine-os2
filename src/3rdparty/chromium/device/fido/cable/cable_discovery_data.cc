@@ -6,6 +6,8 @@
 
 #include <cstring>
 
+#include "base/i18n/string_compare.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "components/cbor/values.h"
 #include "crypto/random.h"
@@ -17,6 +19,8 @@
 #include "third_party/boringssl/src/include/openssl/hkdf.h"
 #include "third_party/boringssl/src/include/openssl/mem.h"
 #include "third_party/boringssl/src/include/openssl/obj.h"
+#include "third_party/icu/source/common/unicode/locid.h"
+#include "third_party/icu/source/i18n/unicode/coll.h"
 
 namespace device {
 
@@ -70,13 +74,29 @@ bool CableDiscoveryData::MatchV1(const CableEidArray& eid) const {
 
 namespace cablev2 {
 
+Pairing::NameComparator::NameComparator(const icu::Locale* locale) {
+  UErrorCode error = U_ZERO_ERROR;
+  collator_.reset(icu::Collator::createInstance(*locale, error));
+}
+
+Pairing::NameComparator::NameComparator(NameComparator&&) = default;
+
+Pairing::NameComparator::~NameComparator() = default;
+
+bool Pairing::NameComparator::operator()(const std::unique_ptr<Pairing>& a,
+                                         const std::unique_ptr<Pairing>& b) {
+  return base::i18n::CompareString16WithCollator(
+             *collator_, base::UTF8ToUTF16(a->name),
+             base::UTF8ToUTF16(b->name)) == UCOL_LESS;
+}
+
 Pairing::Pairing() = default;
 Pairing::~Pairing() = default;
 
 // static
 absl::optional<std::unique_ptr<Pairing>> Pairing::Parse(
     const cbor::Value& cbor,
-    uint32_t tunnel_server_domain,
+    tunnelserver::KnownDomainID domain,
     base::span<const uint8_t, kQRSeedSize> local_identity_seed,
     base::span<const uint8_t, 32> handshake_hash) {
   if (!cbor.is_map()) {
@@ -100,10 +120,10 @@ absl::optional<std::unique_ptr<Pairing>> Pairing::Parse(
           }) ||
       its[3]->second.GetBytestring().size() !=
           std::tuple_size<decltype(pairing->peer_public_key_x962)>::value) {
+    return absl::nullopt;
   }
 
-  pairing->tunnel_server_domain =
-      tunnelserver::DecodeDomain(tunnel_server_domain),
+  pairing->tunnel_server_domain = tunnelserver::DecodeDomain(domain);
   pairing->contact_id = its[0]->second.GetBytestring();
   pairing->id = its[1]->second.GetBytestring();
   pairing->secret = its[2]->second.GetBytestring();
@@ -139,6 +159,11 @@ bool Pairing::CompareByPublicKey(const std::unique_ptr<Pairing>& a,
                                  const std::unique_ptr<Pairing>& b) {
   return memcmp(a->peer_public_key_x962.data(), b->peer_public_key_x962.data(),
                 sizeof(a->peer_public_key_x962)) < 0;
+}
+
+// static
+Pairing::NameComparator Pairing::CompareByName(const icu::Locale* locale) {
+  return NameComparator(locale);
 }
 
 // static

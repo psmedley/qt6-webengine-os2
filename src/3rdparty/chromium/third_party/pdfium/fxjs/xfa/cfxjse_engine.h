@@ -16,7 +16,8 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "fxjs/cfx_v8.h"
 #include "v8/include/cppgc/persistent.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-forward.h"
+#include "v8/include/v8-persistent-handle.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 #include "xfa/fxfa/parser/cxfa_script.h"
@@ -96,14 +97,14 @@ class CFXJSE_Engine final : public CFX_V8 {
   static CJS_Result NormalMethodCall(
       const v8::FunctionCallbackInfo<v8::Value>& info,
       const WideString& functionName);
-  static int32_t NormalPropTypeGetter(v8::Isolate* pIsolate,
-                                      v8::Local<v8::Object> pObject,
-                                      ByteStringView szPropName,
-                                      bool bQueryIn);
-  static int32_t GlobalPropTypeGetter(v8::Isolate* pIsolate,
-                                      v8::Local<v8::Object> pObject,
-                                      ByteStringView szPropName,
-                                      bool bQueryIn);
+  static FXJSE_ClassPropType NormalPropTypeGetter(v8::Isolate* pIsolate,
+                                                  v8::Local<v8::Object> pObject,
+                                                  ByteStringView szPropName,
+                                                  bool bQueryIn);
+  static FXJSE_ClassPropType GlobalPropTypeGetter(v8::Isolate* pIsolate,
+                                                  v8::Local<v8::Object> pObject,
+                                                  ByteStringView szPropName,
+                                                  bool bQueryIn);
 
   CFXJSE_Engine(CXFA_Document* pDocument, CJS_Runtime* fxjs_runtime);
   ~CFXJSE_Engine() override;
@@ -115,11 +116,11 @@ class CFXJSE_Engine final : public CFX_V8 {
                  CFXJSE_Value* pRetValue,
                  CXFA_Object* pThisObject);
 
-  Optional<ResolveResult> ResolveObjects(CXFA_Object* refObject,
-                                         WideStringView wsExpression,
-                                         Mask<XFA_ResolveFlag> dwStyles);
+  absl::optional<ResolveResult> ResolveObjects(CXFA_Object* refObject,
+                                               WideStringView wsExpression,
+                                               Mask<XFA_ResolveFlag> dwStyles);
 
-  Optional<ResolveResult> ResolveObjectsWithBindNode(
+  absl::optional<ResolveResult> ResolveObjectsWithBindNode(
       CXFA_Object* refObject,
       WideStringView wsExpression,
       Mask<XFA_ResolveFlag> dwStyles,
@@ -183,7 +184,7 @@ class CFXJSE_Engine final : public CFX_V8 {
   std::vector<cppgc::Persistent<CXFA_Node>> m_upObjectArray;
   UnownedPtr<std::vector<cppgc::Persistent<CXFA_Node>>> m_pScriptNodeArray;
   std::unique_ptr<CFXJSE_ResolveProcessor> const m_ResolveProcessor;
-  std::unique_ptr<CFXJSE_FormCalcContext> m_FM2JSContext;
+  std::unique_ptr<CFXJSE_FormCalcContext> m_FormCalcContext;
   cppgc::Persistent<CXFA_Object> m_pThisObject;
   XFA_AttributeValue m_eRunAtType = XFA_AttributeValue::Client;
 };

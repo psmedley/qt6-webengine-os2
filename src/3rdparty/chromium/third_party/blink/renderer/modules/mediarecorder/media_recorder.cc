@@ -13,12 +13,13 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/mediarecorder/blob_event.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/network/mime/content_type.h"
 #include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
@@ -52,9 +53,9 @@ String StateToString(MediaRecorder::State state) {
 
 String BitrateModeToString(AudioTrackRecorder::BitrateMode bitrateMode) {
   switch (bitrateMode) {
-    case AudioTrackRecorder::BitrateMode::CONSTANT:
+    case AudioTrackRecorder::BitrateMode::kConstant:
       return "constant";
-    case AudioTrackRecorder::BitrateMode::VARIABLE:
+    case AudioTrackRecorder::BitrateMode::kVariable:
       return "variable";
   }
 
@@ -67,10 +68,10 @@ AudioTrackRecorder::BitrateMode GetBitrateModeFromOptions(
   if (options->hasAudioBitrateMode()) {
     if (!WTF::CodeUnitCompareIgnoringASCIICase(options->audioBitrateMode(),
                                                "constant"))
-      return AudioTrackRecorder::BitrateMode::CONSTANT;
+      return AudioTrackRecorder::BitrateMode::kConstant;
   }
 
-  return AudioTrackRecorder::BitrateMode::VARIABLE;
+  return AudioTrackRecorder::BitrateMode::kVariable;
 }
 
 // Allocates the requested bit rates from |bitrateOptions| into the respective
@@ -228,6 +229,11 @@ String MediaRecorder::state() const {
 }
 
 String MediaRecorder::audioBitrateMode() const {
+  if (!GetExecutionContext() || GetExecutionContext()->IsContextDestroyed()) {
+    // Return a valid enum value; variable is the default.
+    return BitrateModeToString(AudioTrackRecorder::BitrateMode::kVariable);
+  }
+  DCHECK(recorder_handler_);
   return BitrateModeToString(recorder_handler_->AudioBitrateMode());
 }
 
@@ -355,10 +361,10 @@ bool MediaRecorder::isTypeSupported(ExecutionContext* context,
   ContentType content_type(type);
   bool result = handler->CanSupportMimeType(content_type.GetType(),
                                             content_type.Parameter("codecs"));
-  if (IdentifiabilityStudySettings::Get()->ShouldSample(
+  if (IdentifiabilityStudySettings::Get()->ShouldSampleType(
           blink::IdentifiableSurface::Type::kMediaRecorder_IsTypeSupported)) {
     blink::IdentifiabilityMetricBuilder(context->UkmSourceID())
-        .Set(blink::IdentifiableSurface::FromTypeAndToken(
+        .Add(blink::IdentifiableSurface::FromTypeAndToken(
                  blink::IdentifiableSurface::Type::
                      kMediaRecorder_IsTypeSupported,
                  IdentifiabilityBenignStringToken(type)),

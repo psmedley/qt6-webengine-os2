@@ -21,6 +21,8 @@
  * filter for manipulating frame side data
  */
 
+#include "config_components.h"
+
 #include "libavutil/avassert.h"
 #include "libavutil/internal.h"
 #include "libavutil/frame.h"
@@ -130,7 +132,6 @@ static const AVFilterPad ainputs[] = {
         .type         = AVMEDIA_TYPE_AUDIO,
         .filter_frame = filter_frame,
     },
-    { NULL }
 };
 
 static const AVFilterPad aoutputs[] = {
@@ -138,7 +139,6 @@ static const AVFilterPad aoutputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_AUDIO,
     },
-    { NULL }
 };
 
 const AVFilter ff_af_asidedata = {
@@ -147,9 +147,10 @@ const AVFilter ff_af_asidedata = {
     .priv_size     = sizeof(SideDataContext),
     .priv_class    = &asidedata_class,
     .init          = init,
-    .inputs        = ainputs,
-    .outputs       = aoutputs,
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
+    FILTER_INPUTS(ainputs),
+    FILTER_OUTPUTS(aoutputs),
+    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC |
+                     AVFILTER_FLAG_METADATA_ONLY,
 };
 #endif /* CONFIG_ASIDEDATA_FILTER */
 
@@ -164,7 +165,6 @@ static const AVFilterPad inputs[] = {
         .type         = AVMEDIA_TYPE_VIDEO,
         .filter_frame = filter_frame,
     },
-    { NULL }
 };
 
 static const AVFilterPad outputs[] = {
@@ -172,7 +172,6 @@ static const AVFilterPad outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_sidedata = {
@@ -181,8 +180,9 @@ const AVFilter ff_vf_sidedata = {
     .priv_size   = sizeof(SideDataContext),
     .priv_class  = &sidedata_class,
     .init        = init,
-    .inputs      = inputs,
-    .outputs     = outputs,
-    .flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    .flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC |
+                   AVFILTER_FLAG_METADATA_ONLY,
 };
 #endif /* CONFIG_SIDEDATA_FILTER */

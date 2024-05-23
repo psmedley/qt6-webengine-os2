@@ -9,12 +9,14 @@
 #include <lib/fidl/cpp/binding.h>
 #include <memory>
 #include <string>
+#include <vector>
 
-#include "base/macros.h"
 #include "content/public/browser/browser_main_parts.h"
+#include "content/public/common/main_function_params.h"
 #include "fuchsia/engine/browser/context_impl.h"
 #include "fuchsia/engine/browser/web_engine_browser_context.h"
 #include "fuchsia/engine/web_engine_export.h"
+#include "services/network/public/cpp/network_quality_tracker.h"
 
 namespace base {
 class FuchsiaIntlProfileWatcher;
@@ -26,24 +28,55 @@ class Screen;
 
 namespace content {
 class ContentBrowserClient;
-struct MainFunctionParams;
 }
 
 namespace cr_fuchsia {
 class LegacyMetricsClient;
 }
 
+namespace media {
+class FuchsiaCdmManager;
+}
+
 namespace sys {
 class ComponentInspector;
 }
 
-class MediaResourceProviderService;
+class WebEngineMemoryInspector;
+
+// Implements the fuchsia.web.FrameHost protocol using a ContextImpl with
+// incognito browser context.
+class FrameHostImpl final : public fuchsia::web::FrameHost {
+ public:
+  explicit FrameHostImpl(
+      inspect::Node inspect_node,
+      WebEngineDevToolsController* devtools_controller,
+      network::NetworkQualityTracker* network_quality_tracker)
+      : context_(
+            WebEngineBrowserContext::CreateIncognito(network_quality_tracker),
+            std::move(inspect_node),
+            devtools_controller) {}
+  ~FrameHostImpl() override = default;
+
+  FrameHostImpl(const FrameHostImpl&) = delete;
+  FrameHostImpl& operator=(const FrameHostImpl&) = delete;
+
+  // fuchsia.web.FrameHost implementation.
+  void CreateFrameWithParams(
+      fuchsia::web::CreateFrameParams params,
+      fidl::InterfaceRequest<fuchsia::web::Frame> request) override;
+
+  ContextImpl* context_impl_for_test() { return &context_; }
+
+ private:
+  ContextImpl context_;
+};
 
 class WEB_ENGINE_EXPORT WebEngineBrowserMainParts
     : public content::BrowserMainParts {
  public:
   WebEngineBrowserMainParts(content::ContentBrowserClient* browser_client,
-                            const content::MainFunctionParams& parameters);
+                            content::MainFunctionParams parameters);
   ~WebEngineBrowserMainParts() override;
 
   WebEngineBrowserMainParts(const WebEngineBrowserMainParts&) = delete;
@@ -54,11 +87,9 @@ class WEB_ENGINE_EXPORT WebEngineBrowserMainParts
   WebEngineDevToolsController* devtools_controller() const {
     return devtools_controller_.get();
   }
-  MediaResourceProviderService* media_resource_provider_service() const {
-    return media_resource_provider_service_.get();
-  }
 
   // content::BrowserMainParts overrides.
+  int PreEarlyInitialization() override;
   void PostEarlyInitialization() override;
   int PreMainMessageLoopRun() override;
   void WillRunMainMessageLoop(
@@ -68,7 +99,12 @@ class WEB_ENGINE_EXPORT WebEngineBrowserMainParts
   // Methods used by tests.
   static void SetContextRequestForTest(
       fidl::InterfaceRequest<fuchsia::web::Context> request);
+
+  // Returns the bound ContextImpl instance, or nullptr if there isn't one.
   ContextImpl* context_for_test() const;
+
+  // Returns all FrameHostImpl instances.
+  std::vector<FrameHostImpl*> frame_hosts_for_test() const;
 
  private:
   // Handle fuchsia.web.Context and fuchsia.web.FrameHost connection requests.
@@ -80,30 +116,39 @@ class WEB_ENGINE_EXPORT WebEngineBrowserMainParts
   // Notified if the system timezone, language, settings change.
   void OnIntlProfileChanged(const fuchsia::intl::Profile& profile);
 
+  // Quits the main loop and gracefully shuts down the instance.
+  void BeginGracefulShutdown();
+
   content::ContentBrowserClient* const browser_client_;
-  const content::MainFunctionParams& parameters_;
+  content::MainFunctionParams parameters_;
 
   std::unique_ptr<display::Screen> screen_;
 
   // Used to publish diagnostics including the active Contexts and FrameHosts.
   std::unique_ptr<sys::ComponentInspector> component_inspector_;
+  std::unique_ptr<WebEngineMemoryInspector> memory_inspector_;
 
-  // Browsing contexts for the connected clients.
+  // Browsing contexts for the connected clients. There is at most one
+  // fuchsia.web.Context binding, and any number of fuchsia.web.FrameHost
+  // bindings.
   fidl::BindingSet<fuchsia::web::Context, std::unique_ptr<ContextImpl>>
       context_bindings_;
-  fidl::BindingSet<fuchsia::web::FrameHost,
-                   std::unique_ptr<fuchsia::web::FrameHost>>
+  fidl::BindingSet<fuchsia::web::FrameHost, std::unique_ptr<FrameHostImpl>>
       frame_host_bindings_;
 
   std::unique_ptr<WebEngineDevToolsController> devtools_controller_;
   std::unique_ptr<cr_fuchsia::LegacyMetricsClient> legacy_metrics_client_;
-  std::unique_ptr<MediaResourceProviderService>
-      media_resource_provider_service_;
+  std::unique_ptr<media::FuchsiaCdmManager> cdm_manager_;
 
   // Used to respond to changes to the system's current locale.
   std::unique_ptr<base::FuchsiaIntlProfileWatcher> intl_profile_watcher_;
 
-  bool run_message_loop_ = true;
+  // Used to report networking-related Client Hints.
+  std::unique_ptr<network::NetworkQualityTracker> network_quality_tracker_;
+  std::unique_ptr<
+      network::NetworkQualityTracker::RTTAndThroughputEstimatesObserver>
+      network_quality_observer_;
+
   base::OnceClosure quit_closure_;
 };
 

@@ -15,25 +15,81 @@
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgpu_mailbox_texture.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
-GPUSwapChain::GPUSwapChain(GPUCanvasContext* context,
-                           GPUDevice* device,
-                           WGPUTextureUsage usage,
-                           WGPUTextureFormat format,
-                           cc::PaintFlags::FilterQuality filter_quality,
-                           IntSize size)
-    : DawnObjectImpl(device),
+GPUSwapChain::GPUSwapChain(
+    GPUCanvasContext* context,
+    GPUDevice* device,
+    WGPUTextureUsage usage,
+    WGPUTextureFormat format,
+    cc::PaintFlags::FilterQuality filter_quality,
+    V8GPUCanvasCompositingAlphaMode::Enum compositing_alpha_mode,
+    gfx::Size size)
+    : DawnObjectBase(device->GetDawnControlClient()),
+      device_(device),
       context_(context),
       usage_(usage),
       format_(format),
+      compositing_alpha_mode_(compositing_alpha_mode),
       size_(size) {
   // TODO: Use label from GPUObjectDescriptorBase.
   swap_buffers_ = base::AdoptRef(new WebGPUSwapBufferProvider(
       this, GetDawnControlClient(), device->GetHandle(), usage_, format));
   swap_buffers_->SetFilterQuality(filter_quality);
+
+  // Note: SetContentsOpaque is only an optimization hint. It doesn't
+  // actually make the contents opaque.
+  switch (compositing_alpha_mode) {
+    case V8GPUCanvasCompositingAlphaMode::Enum::kOpaque: {
+      CcLayer()->SetContentsOpaque(true);
+
+      WGPUShaderModuleWGSLDescriptor wgsl_desc = {};
+      wgsl_desc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
+      wgsl_desc.source = R"(
+          @stage(vertex) fn vert_main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4<f32> {
+            var pos = array<vec2<f32>, 3>(
+                vec2<f32>(-1.0, -1.0),
+                vec2<f32>( 3.0, -1.0),
+                vec2<f32>(-1.0,  3.0));
+            return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+          }
+
+          @stage(fragment) fn frag_main() -> @location(0) vec4<f32> {
+            return vec4<f32>(1.0);
+          }
+        )";
+      WGPUShaderModuleDescriptor shader_module_desc = {};
+      shader_module_desc.nextInChain = &wgsl_desc.chain;
+      WGPUShaderModule shader_module = GetProcs().deviceCreateShaderModule(
+          device_->GetHandle(), &shader_module_desc);
+
+      WGPUColorTargetState color_target = {};
+      color_target.format = format_;
+      color_target.writeMask = WGPUColorWriteMask_Alpha;
+      WGPUFragmentState fragment = {};
+      fragment.module = shader_module;
+      fragment.entryPoint = "frag_main";
+      fragment.targetCount = 1;
+      fragment.targets = &color_target;
+
+      WGPURenderPipelineDescriptor pipeline_desc = {};
+      pipeline_desc.vertex.module = shader_module;
+      pipeline_desc.vertex.entryPoint = "vert_main";
+      pipeline_desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+      pipeline_desc.multisample.count =1;
+      pipeline_desc.multisample.mask = 0xFFFFFFFF;
+      pipeline_desc.fragment = &fragment;
+      alpha_to_one_pipeline_ = GetProcs().deviceCreateRenderPipeline(
+          device_->GetHandle(), &pipeline_desc);
+      GetProcs().shaderModuleRelease(shader_module);
+      break;
+    }
+    case V8GPUCanvasCompositingAlphaMode::Enum::kPremultiplied:
+      CcLayer()->SetContentsOpaque(false);
+      break;
+  }
 }
 
 GPUSwapChain::~GPUSwapChain() {
@@ -41,12 +97,16 @@ GPUSwapChain::~GPUSwapChain() {
 }
 
 void GPUSwapChain::Trace(Visitor* visitor) const {
+  visitor->Trace(device_);
   visitor->Trace(context_);
   visitor->Trace(texture_);
-  DawnObjectImpl::Trace(visitor);
 }
 
 void GPUSwapChain::Neuter() {
+  if (alpha_to_one_pipeline_ != nullptr) {
+    GetProcs().renderPipelineRelease(alpha_to_one_pipeline_);
+    alpha_to_one_pipeline_ = nullptr;
+  }
   texture_ = nullptr;
   if (swap_buffers_) {
     swap_buffers_->Neuter();
@@ -95,8 +155,11 @@ scoped_refptr<StaticBitmapImage> GPUSwapChain::TransferToStaticBitmapImage() {
   const auto& sk_image_sync_token =
       transferable_resource.mailbox_holder.sync_token;
 
-  const SkImageInfo sk_image_info = SkImageInfo::MakeN32Premul(
-      transferable_resource.size.width(), transferable_resource.size.height());
+  auto sk_color_type = viz::ResourceFormatToClosestSkColorType(
+      /*gpu_compositing=*/true, transferable_resource.format);
+
+  const SkImageInfo sk_image_info = SkImageInfo::Make(
+      size_.width(), size_.height(), sk_color_type, kPremul_SkAlphaType);
 
   return AcceleratedStaticBitmapImage::CreateFromCanvasMailbox(
       sk_image_mailbox, sk_image_sync_token, /* shared_image_texture_id = */ 0,
@@ -104,7 +167,8 @@ scoped_refptr<StaticBitmapImage> GPUSwapChain::TransferToStaticBitmapImage() {
       /* is_origin_top_left = */ kBottomLeft_GrSurfaceOrigin,
       swap_buffers_->GetContextProviderWeakPtr(),
       base::PlatformThread::CurrentRef(), Thread::Current()->GetTaskRunner(),
-      std::move(release_callback));
+      std::move(release_callback), /*supports_display_compositing=*/true,
+      transferable_resource.is_overlay_candidate);
 }
 
 scoped_refptr<CanvasResource> GPUSwapChain::ExportCanvasResource() {
@@ -115,34 +179,84 @@ scoped_refptr<CanvasResource> GPUSwapChain::ExportCanvasResource() {
     return nullptr;
   }
 
-  CanvasResourceParams resource_params;
-  resource_params.SetSkColorType(viz::ResourceFormatToClosestSkColorType(
-      /*gpu_compositing=*/true, transferable_resource.format));
-
+  SkImageInfo resource_info = SkImageInfo::Make(
+      transferable_resource.size.width(), transferable_resource.size.height(),
+      viz::ResourceFormatToClosestSkColorType(
+          /*gpu_compositing=*/true, transferable_resource.format),
+      kPremul_SkAlphaType);
   return ExternalCanvasResource::Create(
       transferable_resource.mailbox_holder.mailbox, std::move(release_callback),
-      transferable_resource.mailbox_holder.sync_token,
-      IntSize(transferable_resource.size),
-      transferable_resource.mailbox_holder.texture_target, resource_params,
+      transferable_resource.mailbox_holder.sync_token, resource_info,
+      transferable_resource.mailbox_holder.texture_target,
       swap_buffers_->GetContextProviderWeakPtr(), /*resource_provider=*/nullptr,
       cc::PaintFlags::FilterQuality::kLow,
       /*is_origin_top_left=*/kBottomLeft_GrSurfaceOrigin,
       transferable_resource.is_overlay_candidate);
 }
 
-bool GPUSwapChain::CopyToResourceProvider(
-    CanvasResourceProvider* resource_provider) {
-  DCHECK(resource_provider);
-  DCHECK_EQ(resource_provider->Size(), IntSize(Size()));
-  DCHECK(resource_provider->GetSharedImageUsageFlags() &
-         gpu::SHARED_IMAGE_USAGE_WEBGPU);
-  DCHECK(resource_provider->IsOriginTopLeft());
+scoped_refptr<StaticBitmapImage> GPUSwapChain::Snapshot() const {
+  // If there is a current texture, create a snapshot from it.
+  if (texture_) {
+    return SnapshotInternal(texture_->GetHandle(), Size());
+  }
 
+  // If there is no current texture, we need to get the information of the last
+  // texture reserved, that contains the last mailbox, create a new texture for
+  // it, and use it to create the resource provider. We also need the size of
+  // the texture to create the resource provider.
+  auto mailbox_texture_size =
+      swap_buffers_->GetLastWebGPUMailboxTextureAndSize();
+  if (!mailbox_texture_size.mailbox_texture)
+    return nullptr;
+  scoped_refptr<WebGPUMailboxTexture> mailbox_texture =
+      mailbox_texture_size.mailbox_texture;
+  gfx::Size size = mailbox_texture_size.size;
+
+  return SnapshotInternal(mailbox_texture->GetTexture(), size);
+}
+
+scoped_refptr<StaticBitmapImage> GPUSwapChain::SnapshotInternal(
+    const WGPUTexture& texture,
+    const gfx::Size& size) const {
+  const auto info = SkImageInfo::Make(size.width(), size.height(),
+                                      viz::ResourceFormatToClosestSkColorType(
+                                          /*gpu_compositing=*/true, Format()),
+                                      kPremul_SkAlphaType);
+  // We tag the SharedImage inside the WebGPUImageProvider with display usage
+  // since there are uncommon paths which may use this snapshot for compositing.
+  // These paths are usually related to either printing or either video and
+  // usually related to OffscreenCanvas; in cases where the image created from
+  // this Snapshot will be sent eventually to the Display Compositor.
+  auto resource_provider = CanvasResourceProvider::CreateWebGPUImageProvider(
+      info,
+      /*is_origin_top_left=*/true, gpu::SHARED_IMAGE_USAGE_DISPLAY);
+  if (!resource_provider)
+    return nullptr;
+
+  if (!CopyTextureToResourceProvider(texture, size, resource_provider.get()))
+    return nullptr;
+
+  return resource_provider->Snapshot();
+}
+
+bool GPUSwapChain::CopyToResourceProvider(
+    CanvasResourceProvider* resource_provider) const {
   if (!texture_)
     return false;
 
-  if (!(usage_ & WGPUTextureUsage_CopySrc))
-    return false;
+  return CopyTextureToResourceProvider(texture_->GetHandle(), Size(),
+                                       resource_provider);
+}
+
+bool GPUSwapChain::CopyTextureToResourceProvider(
+    const WGPUTexture& texture,
+    const gfx::Size& size,
+    CanvasResourceProvider* resource_provider) const {
+  DCHECK(resource_provider);
+  DCHECK_EQ(resource_provider->Size(), size);
+  DCHECK(resource_provider->GetSharedImageUsageFlags() &
+         gpu::SHARED_IMAGE_USAGE_WEBGPU);
+  DCHECK(resource_provider->IsOriginTopLeft());
 
   base::WeakPtr<WebGraphicsContext3DProviderWrapper> shared_context_wrapper =
       SharedGpuContext::ContextProviderWrapper();
@@ -159,6 +273,8 @@ bool GPUSwapChain::CopyToResourceProvider(
   if (!GetContextProviderWeakPtr()) {
     return false;
   }
+  // todo(crbug/1267244) Use WebGPUMailboxTexture here instead of doing things
+  // manually.
   gpu::webgpu::WebGPUInterface* webgpu =
       GetContextProviderWeakPtr()->ContextProvider()->WebGPUInterface();
   gpu::webgpu::ReservedTexture reservation =
@@ -172,29 +288,33 @@ bool GPUSwapChain::CopyToResourceProvider(
                            reservation.id, reservation.generation,
                            WGPUTextureUsage_CopyDst,
                            reinterpret_cast<const GLbyte*>(&dst_mailbox));
-
-  WGPUCommandEncoder command_encoder =
-      GetProcs().deviceCreateCommandEncoder(device_->GetHandle(), nullptr);
-
-  WGPUImageCopyTexture source;
+  WGPUImageCopyTexture source = {};
       source.nextInChain = nullptr;
-      source.texture = texture_->GetHandle();
+      source.texture = texture;
       source.mipLevel = 0;
       source.origin = WGPUOrigin3D{0};
       source.aspect = WGPUTextureAspect_All;
-
-  WGPUImageCopyTexture destination;
+  WGPUImageCopyTexture destination = {};
       destination.nextInChain = nullptr;
       destination.texture = reservation.texture;
       destination.mipLevel = 0;
       destination.origin = WGPUOrigin3D{0};
       destination.aspect = WGPUTextureAspect_All;
-
-  WGPUExtent3D copy_size;
-      copy_size.width = static_cast<uint32_t>(swap_buffers_->Size().width());
-      copy_size.height = static_cast<uint32_t>(swap_buffers_->Size().height());
+  WGPUExtent3D copy_size = {};
+      copy_size.width = static_cast<uint32_t>(size.width());
+      copy_size.height = static_cast<uint32_t>(size.height());
       copy_size.depthOrArrayLayers = 1;
 
+  WGPUDawnEncoderInternalUsageDescriptor internal_usage_desc = {};
+      internal_usage_desc.chain = {};
+      internal_usage_desc.chain.sType = WGPUSType_DawnEncoderInternalUsageDescriptor;
+      internal_usage_desc.useInternalUsages = true;
+
+  WGPUCommandEncoderDescriptor command_encoder_desc = {};
+      command_encoder_desc.nextInChain = &internal_usage_desc.chain;
+
+  WGPUCommandEncoder command_encoder = GetProcs().deviceCreateCommandEncoder(
+      device_->GetHandle(), &command_encoder_desc);
   GetProcs().commandEncoderCopyTextureToTexture(command_encoder, &source,
                                                 &destination, &copy_size);
 
@@ -206,6 +326,7 @@ bool GPUSwapChain::CopyToResourceProvider(
   GetProcs().commandBufferRelease(command_buffer);
 
   webgpu->DissociateMailbox(reservation.id, reservation.generation);
+  GetProcs().textureRelease(reservation.texture);
   webgpu->GenUnverifiedSyncTokenCHROMIUM(sync_token.GetData());
   ri->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
 
@@ -214,9 +335,11 @@ bool GPUSwapChain::CopyToResourceProvider(
 
 // gpu_swap_chain.idl
 GPUTexture* GPUSwapChain::getCurrentTexture() {
-  // As we are getting a new texture, we need to tell the canvas context that
-  // there will be a need to send a new frame to the offscreencanvas.
-  if (context_->IsOffscreenCanvas())
+  // As we are getting a new texture, if this is an offscreencanvas or if it is
+  // going to be presented to video, we have to notify the placeholder or
+  // listeners.
+  if (context_->IsOffscreenCanvas() ||
+      static_cast<HTMLCanvasElement*>(context_->Host())->HasCanvasCapture())
     context_->DidDraw(CanvasPerformanceMonitor::DrawType::kOther);
 
   // Calling getCurrentTexture returns a texture that is valid until the
@@ -232,11 +355,7 @@ GPUTexture* GPUSwapChain::getCurrentTexture() {
     return texture_;
   }
 
-  // A negative size indicates we're on the deprecated path which automatically
-  // adjusts to the canvas width/height attributes.
-  // TODO(bajones@chromium.org): Remove automatic path after deprecation period.
-  IntSize texture_size = size_.Width() >= 0 ? size_ : context_->CanvasSize();
-  WGPUTexture dawn_client_texture = swap_buffers_->GetNewTexture(texture_size);
+  WGPUTexture dawn_client_texture = swap_buffers_->GetNewTexture(size_);
   if (!dawn_client_texture) {
     texture_ = GPUTexture::CreateError(device_);
     return texture_;
@@ -250,6 +369,50 @@ GPUTexture* GPUSwapChain::getCurrentTexture() {
 // WebGPUSwapBufferProvider::Client implementation
 void GPUSwapChain::OnTextureTransferred() {
   DCHECK(texture_);
+  // The texture is about to be transferred to the compositor.
+  // For compositing alpha mode Opaque, clear the alpha channel to
+  // 1.0.
+  switch (compositing_alpha_mode_) {
+    case V8GPUCanvasCompositingAlphaMode::Enum::kOpaque: {
+      WGPUTextureView attachment_view =
+          GetProcs().textureCreateView(texture_->GetHandle(), nullptr);
+
+      WGPUDawnEncoderInternalUsageDescriptor internal_usage_desc = {};
+      internal_usage_desc.chain.sType = WGPUSType_DawnEncoderInternalUsageDescriptor;
+      internal_usage_desc.useInternalUsages = true;
+      WGPUCommandEncoderDescriptor command_encoder_desc = {};
+      command_encoder_desc.nextInChain = &internal_usage_desc.chain;
+      WGPUCommandEncoder command_encoder =
+          GetProcs().deviceCreateCommandEncoder(device_->GetHandle(),
+                                                &command_encoder_desc);
+
+      WGPURenderPassColorAttachment color_attachment = {};
+      color_attachment.view = attachment_view;
+      color_attachment.loadOp = WGPULoadOp_Load;
+      color_attachment.storeOp = WGPUStoreOp_Store;
+      WGPURenderPassDescriptor render_pass_desc = {};
+      render_pass_desc.colorAttachmentCount = 1;
+      render_pass_desc.colorAttachments = &color_attachment;
+      WGPURenderPassEncoder pass = GetProcs().commandEncoderBeginRenderPass(
+          command_encoder, &render_pass_desc);
+      DCHECK(alpha_to_one_pipeline_);
+      GetProcs().renderPassEncoderSetPipeline(pass, alpha_to_one_pipeline_);
+      GetProcs().renderPassEncoderDraw(pass, 3, 1, 0, 0);
+      GetProcs().renderPassEncoderEnd(pass);
+
+      WGPUCommandBuffer command_buffer =
+          GetProcs().commandEncoderFinish(command_encoder, nullptr);
+      GetProcs().queueSubmit(device_->queue()->GetHandle(), 1, &command_buffer);
+
+      GetProcs().renderPassEncoderRelease(pass);
+      GetProcs().commandEncoderRelease(command_encoder);
+      GetProcs().commandBufferRelease(command_buffer);
+      GetProcs().textureViewRelease(attachment_view);
+      break;
+    }
+    case V8GPUCanvasCompositingAlphaMode::Enum::kPremultiplied:
+      break;
+  }
   texture_ = nullptr;
 }
 

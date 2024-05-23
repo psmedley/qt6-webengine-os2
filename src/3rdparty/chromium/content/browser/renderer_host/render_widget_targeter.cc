@@ -7,13 +7,10 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
-#include "components/viz/common/features.h"
-#include "components/viz/host/host_frame_sink_manager.h"
-#include "content/browser/compositor/surface_utils.h"
-#include "content/browser/renderer_host/input/one_shot_timeout_monitor.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/browser/site_isolation_policy.h"
@@ -48,8 +45,7 @@ bool IsMouseMiddleClick(const blink::WebInputEvent& event) {
 
 constexpr const char kTracingCategory[] = "input,latency";
 
-constexpr base::TimeDelta kAsyncHitTestTimeout =
-    base::TimeDelta::FromSeconds(5);
+constexpr base::TimeDelta kAsyncHitTestTimeout = base::Seconds(5);
 
 }  // namespace
 
@@ -63,6 +59,10 @@ class TracingUmaTracker {
         kTracingCategory, metric_name_,
         TRACE_ID_WITH_SCOPE("UmaTracker", TRACE_ID_LOCAL(id_)));
   }
+
+  TracingUmaTracker(const TracingUmaTracker&) = delete;
+  TracingUmaTracker& operator=(const TracingUmaTracker&) = delete;
+
   ~TracingUmaTracker() = default;
   TracingUmaTracker(TracingUmaTracker&& tracker) = default;
 
@@ -82,8 +82,6 @@ class TracingUmaTracker {
   const char* metric_name_;
 
   static int next_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(TracingUmaTracker);
 };
 
 int TracingUmaTracker::next_id_ = 1;
@@ -176,8 +174,6 @@ const ui::LatencyInfo& RenderWidgetTargeter::TargetingRequest::GetLatency()
 RenderWidgetTargeter::RenderWidgetTargeter(Delegate* delegate)
     : async_hit_test_timeout_delay_(kAsyncHitTestTimeout),
       trace_id_(base::RandUint64()),
-      is_viz_hit_testing_debug_enabled_(
-          features::IsVizHitTestingDebugEnabled()),
       delegate_(delegate) {
   DCHECK(delegate_);
 }
@@ -303,7 +299,7 @@ void RenderWidgetTargeter::QueryClient(
   // |target_client| may not be set yet for this |target| on Mac, need to
   // understand why this happens. https://crbug.com/859492.
   // We do not verify hit testing result under this circumstance.
-  if (!target_client.get() || !target_client.is_connected()) {
+  if (!target_client.is_bound() || !target_client.is_connected()) {
     FoundTarget(target, target_location, false, &request);
     return;
   }
@@ -314,13 +310,13 @@ void RenderWidgetTargeter::QueryClient(
   async_depth_++;
 
   TracingUmaTracker tracker("Event.AsyncTargeting.ResponseTime");
-  async_hit_test_timeout_ = std::make_unique<OneShotTimeoutMonitor>(
+  async_hit_test_timeout_.Start(
+      FROM_HERE, async_hit_test_timeout_delay_,
       base::BindOnce(
           &RenderWidgetTargeter::AsyncHitTestTimedOut,
           weak_ptr_factory_.GetWeakPtr(), target->GetWeakPtr(), target_location,
           last_request_target ? last_request_target->GetWeakPtr() : nullptr,
-          last_target_location),
-      async_hit_test_timeout_delay_);
+          last_target_location));
 
   target_client.set_disconnect_handler(base::BindOnce(
       &RenderWidgetTargeter::OnInputTargetDisconnect,
@@ -384,14 +380,9 @@ void RenderWidgetTargeter::FoundFrameSinkId(
   TargetingRequest request = std::move(request_in_flight_.value());
 
   request_in_flight_.reset();
-  async_hit_test_timeout_.reset(nullptr);
+  async_hit_test_timeout_.Stop();
   target->host()->input_target_client().set_disconnect_handler(
       base::OnceClosure());
-
-  if (is_viz_hit_testing_debug_enabled_ && request.IsWebInputEventRequest() &&
-      request.GetEvent()->GetType() == blink::WebInputEvent::Type::kMouseDown) {
-    hit_test_async_queried_debug_queue_.push_back(target->GetFrameSinkId());
-  }
 
   auto* view = delegate_->FindViewFromFrameSinkId(frame_sink_id);
   if (!view)
@@ -439,14 +430,6 @@ void RenderWidgetTargeter::FoundTarget(
   // View will be valid but there will no longer be a RenderWidgetHostImpl.
   if (!request->GetRootView() || !request->GetRootView()->GetRenderWidgetHost())
     return;
-
-  if (is_viz_hit_testing_debug_enabled_ &&
-      !hit_test_async_queried_debug_queue_.empty()) {
-    GetHostFrameSinkManager()->SetHitTestAsyncQueriedDebugRegions(
-        request->GetRootView()->GetRootFrameSinkId(),
-        hit_test_async_queried_debug_queue_);
-    hit_test_async_queried_debug_queue_.clear();
-  }
 
   if (request->IsWebInputEventRequest()) {
     delegate_->DispatchEventToTarget(request->GetRootView(), target,
@@ -497,10 +480,10 @@ void RenderWidgetTargeter::AsyncHitTestTimedOut(
 void RenderWidgetTargeter::OnInputTargetDisconnect(
     base::WeakPtr<RenderWidgetHostViewBase> target,
     const gfx::PointF& location) {
-  if (!async_hit_test_timeout_)
+  if (!async_hit_test_timeout_.IsRunning())
     return;
 
-  async_hit_test_timeout_.reset(nullptr);
+  async_hit_test_timeout_.Stop();
   TargetingRequest request = std::move(request_in_flight_.value());
   request_in_flight_.reset();
 

@@ -63,21 +63,19 @@ void GPURenderPassEncoder::setBlendConstant(const V8GPUColor* color,
   GetProcs().renderPassEncoderSetBlendConstant(GetHandle(), &dawn_color);
 }
 
-void GPURenderPassEncoder::setBlendColor(
-    const V8GPUColor* color,
-    ExceptionState& exception_state) {
-  device_->AddConsoleWarning(
-      "setBlendColor is deprecated. Use setBlendConstant instead.");
-
-  setBlendConstant(color, exception_state);
-}
-
 void GPURenderPassEncoder::executeBundles(
     const HeapVector<Member<GPURenderBundle>>& bundles) {
   std::unique_ptr<WGPURenderBundle[]> dawn_bundles = AsDawnType(bundles);
 
   GetProcs().renderPassEncoderExecuteBundles(GetHandle(), bundles.size(),
                                              dawn_bundles.get());
+}
+
+void GPURenderPassEncoder::endPass() {
+  device_->AddConsoleWarning(
+      "endPass() has been deprecated and will soon be "
+      "removed. Use end() instead.");
+  end();
 }
 
 }  // namespace blink

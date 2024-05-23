@@ -22,9 +22,10 @@ import 'chrome://resources/polymer/v3_0/paper-tooltip/paper-tooltip.js';
 
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
 import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
-import {assert, assertNotReached} from 'chrome://resources/js/assert.m.js';
-import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
-import {flush, html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {assert, assertNotReached} from 'chrome://resources/js/assert_ts.js';
+import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
+import {flush, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {getTemplate} from './item.html.js';
 
 import {ItemMixin} from './item_mixin.js';
 import {computeInspectableViewLabel, EnableControl, getEnableControl, getItemSource, getItemSourceString, isEnabled, SourceType, userCanChangeEnablement} from './item_util.js';
@@ -56,14 +57,15 @@ export interface ItemDelegate {
 
 export interface ExtensionsItemElement {
   $: {
+    a11yAssociation: HTMLElement,
     detailsButton: HTMLElement,
     enableToggle: CrToggleElement,
+    name: HTMLElement,
+    removeButton: HTMLElement,
   };
 }
 
-const ExtensionsItemElementBase =
-    mixinBehaviors([I18nBehavior], ItemMixin(PolymerElement)) as
-    {new (): PolymerElement & I18nBehavior};
+const ExtensionsItemElementBase = I18nMixin(ItemMixin(PolymerElement));
 
 export class ExtensionsItemElement extends ExtensionsItemElementBase {
   static get is() {
@@ -71,7 +73,7 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -251,8 +253,9 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
         return 'extensions-icons:unpacked';
       case SourceType.WEBSTORE:
         return '';
+      default:
+        assertNotReached();
     }
-    assertNotReached();
   }
 
   private computeSourceIndicatorText_(): string {
@@ -329,6 +332,12 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     // warning will still be shown in the item detail view.
     return this.data.showSafeBrowsingAllowlistWarning &&
         !this.hasSevereWarnings_();
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'extensions-item': ExtensionsItemElement;
   }
 }
 

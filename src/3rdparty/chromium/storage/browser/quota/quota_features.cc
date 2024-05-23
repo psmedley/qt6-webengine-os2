@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "storage/browser/quota/quota_features.h"
+#include "base/feature_list.h"
 
 namespace storage {
 
@@ -37,6 +38,11 @@ const base::FeatureParam<double> kShouldRemainAvailableBytes{
 const base::FeatureParam<double> kShouldRemainAvailableRatio{
     &kStorageQuotaSettings, "ShouldRemainAvailableRatio", 0.1 /* 10% */
 };
+
+// Whether the StoragePolicyObserver only sends updates for modified origins.
+const base::Feature kOnlySendStoragePolicyUpdatesForModifiedOrigins{
+    "OnlySendStoragePolicyUpdatesForModifiedOrigins",
+    base::FEATURE_ENABLED_BY_DEFAULT};
 
 }  // namespace features
 }  // namespace storage

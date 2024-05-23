@@ -95,12 +95,11 @@ void TreeScopeAdopter::MoveShadowTreeToNewDocument(
       new_document.TemplateDocumentHost() != &old_document) {
     // If this is not a move from a document to a <template> within it or vice
     // versa, we need to clear |shadow_root|'s adoptedStyleSheets.
-    HeapVector<Member<CSSStyleSheet>> empty_vector;
-    shadow_root.SetAdoptedStyleSheets(empty_vector);
+    shadow_root.ClearAdoptedStyleSheets();
   }
 
   if (!shadow_root.IsUserAgent()) {
-    new_document.SetShadowCascadeOrder(ShadowCascadeOrder::kShadowCascade);
+    new_document.SetContainsShadowRoot();
   }
   MoveTreeToNewDocument(shadow_root, old_document, new_document);
 }

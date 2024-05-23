@@ -11,6 +11,7 @@
 
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/stl_util.h"
+#include "core/fxcrt/xml/cfx_xmlparser.h"
 #include "fxjs/gc/container_trace.h"
 #include "fxjs/xfa/cfxjse_engine.h"
 #include "fxjs/xfa/cjx_object.h"
@@ -43,6 +44,21 @@
 #include "xfa/fxfa/parser/cxfa_validate.h"
 #include "xfa/fxfa/parser/xfa_utils.h"
 
+namespace {
+
+bool IsValidXMLNameString(const WideString& str) {
+  bool first = true;
+  for (const auto ch : str) {
+    if (!CFX_XMLParser::IsXMLNameChar(ch, first)) {
+      return false;
+    }
+    first = false;
+  }
+  return true;
+}
+
+}  // namespace
+
 const XFA_AttributeValue kXFAEventActivity[] = {
     XFA_AttributeValue::Click,      XFA_AttributeValue::Change,
     XFA_AttributeValue::DocClose,   XFA_AttributeValue::DocReady,
@@ -59,6 +75,16 @@ const XFA_AttributeValue kXFAEventActivity[] = {
     XFA_AttributeValue::PreSubmit,  XFA_AttributeValue::Ready,
     XFA_AttributeValue::Unknown,
 };
+
+CXFA_FFDocView::UpdateScope::UpdateScope(CXFA_FFDocView* pDocView)
+    : m_pDocView(pDocView) {
+  m_pDocView->LockUpdate();
+}
+
+CXFA_FFDocView::UpdateScope::~UpdateScope() {
+  m_pDocView->UnlockUpdate();
+  m_pDocView->UpdateDocView();
+}
 
 CXFA_FFDocView::CXFA_FFDocView(CXFA_FFDoc* pDoc) : m_pDoc(pDoc) {}
 
@@ -83,7 +109,7 @@ void CXFA_FFDocView::InitLayout(CXFA_Node* pNode) {
 }
 
 int32_t CXFA_FFDocView::StartLayout() {
-  m_iStatus = XFA_DOCVIEW_LAYOUTSTATUS_Start;
+  m_iStatus = LayoutStatus::kStart;
   m_pDoc->GetXFADoc()->DoProtoMerge();
   m_pDoc->GetXFADoc()->DoDataMerge();
 
@@ -101,7 +127,7 @@ int32_t CXFA_FFDocView::StartLayout() {
   InitValidate(pRootItem);
 
   ExecEventActivityByDeepFirst(pRootItem, XFA_EVENT_Ready, true, true);
-  m_iStatus = XFA_DOCVIEW_LAYOUTSTATUS_Start;
+  m_iStatus = LayoutStatus::kStart;
   return iStatus;
 }
 
@@ -110,7 +136,7 @@ int32_t CXFA_FFDocView::DoLayout() {
   if (iStatus != 100)
     return iStatus;
 
-  m_iStatus = XFA_DOCVIEW_LAYOUTSTATUS_Doing;
+  m_iStatus = LayoutStatus::kDoing;
   return iStatus;
 }
 
@@ -151,7 +177,11 @@ void CXFA_FFDocView::StopLayout() {
   if (m_pFocusNode && !m_pFocusWidget)
     SetFocusNode(m_pFocusNode);
 
-  m_iStatus = XFA_DOCVIEW_LAYOUTSTATUS_End;
+  m_iStatus = LayoutStatus::kEnd;
+}
+
+void CXFA_FFDocView::AddNullTestMsg(const WideString& msg) {
+  m_NullTestMsgArray.push_back(msg);
 }
 
 void CXFA_FFDocView::ShowNullTestMsg() {
@@ -338,7 +368,7 @@ void CXFA_FFDocView::SetFocusNode(CXFA_Node* node) {
     return;
 
   m_pFocusNode = node;
-  if (m_iStatus != XFA_DOCVIEW_LAYOUTSTATUS_End)
+  if (m_iStatus != LayoutStatus::kEnd)
     return;
 
   m_pDoc->SetFocusWidget(m_pFocusWidget);
@@ -431,6 +461,9 @@ XFA_EventError CXFA_FFDocView::ExecEventActivityByDeepFirst(
 
 CXFA_FFWidget* CXFA_FFDocView::GetWidgetByName(const WideString& wsName,
                                                CXFA_FFWidget* pRefWidget) {
+  if (!IsValidXMLNameString(wsName)) {
+    return nullptr;
+  }
   CFXJSE_Engine* pScriptContext = m_pDoc->GetXFADoc()->GetScriptContext();
   CXFA_Node* pRefNode = nullptr;
   if (pRefWidget) {
@@ -438,7 +471,7 @@ CXFA_FFWidget* CXFA_FFDocView::GetWidgetByName(const WideString& wsName,
     pRefNode = node->IsWidgetReady() ? node : nullptr;
   }
   WideString wsExpression = (!pRefNode ? L"$form." : L"") + wsName;
-  Optional<CFXJSE_Engine::ResolveResult> maybeResult =
+  absl::optional<CFXJSE_Engine::ResolveResult> maybeResult =
       pScriptContext->ResolveObjects(
           pRefNode, wsExpression.AsStringView(),
           Mask<XFA_ResolveFlag>{
@@ -635,7 +668,7 @@ void CXFA_FFDocView::RunBindItems() {
     CFXJSE_Engine* pScriptContext =
         pWidgetNode->GetDocument()->GetScriptContext();
     WideString wsRef = item->GetRef();
-    Optional<CFXJSE_Engine::ResolveResult> maybeRS =
+    absl::optional<CFXJSE_Engine::ResolveResult> maybeRS =
         pScriptContext->ResolveObjects(
             pWidgetNode, wsRef.AsStringView(),
             Mask<XFA_ResolveFlag>{
@@ -689,7 +722,7 @@ void CXFA_FFDocView::RunBindItems() {
 }
 
 void CXFA_FFDocView::SetChangeMark() {
-  if (m_iStatus < XFA_DOCVIEW_LAYOUTSTATUS_End)
+  if (m_iStatus != LayoutStatus::kEnd)
     return;
 
   m_pDoc->SetChangeMark();

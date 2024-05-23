@@ -13,6 +13,7 @@
 
 #include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/notreached.h"
+#include "third_party/base/numerics/safe_conversions.h"
 #include "xfa/fgas/graphics/cfgas_gegraphics.h"
 #include "xfa/fgas/graphics/cfgas_gepath.h"
 #include "xfa/fgas/graphics/cfgas_gepattern.h"
@@ -62,7 +63,7 @@ CXFA_Rectangle* ToRectangle(CXFA_Box* box) {
 
 CXFA_Box::CXFA_Box(CXFA_Document* pDoc,
                    XFA_PacketType ePacket,
-                   uint32_t validPackets,
+                   Mask<XFA_XDPPACKET> validPackets,
                    XFA_ObjectType oType,
                    XFA_Element eType,
                    pdfium::span<const PropertyData> properties,
@@ -89,15 +90,17 @@ XFA_AttributeValue CXFA_Box::GetPresence() {
       .value_or(XFA_AttributeValue::Visible);
 }
 
-int32_t CXFA_Box::CountEdges() {
+size_t CXFA_Box::CountEdges() {
   return CountChildren(XFA_Element::Edge, false);
 }
 
-CXFA_Edge* CXFA_Box::GetEdgeIfExists(int32_t nIndex) {
-  if (nIndex == 0)
-    return JSObject()->GetOrCreateProperty<CXFA_Edge>(nIndex,
-                                                      XFA_Element::Edge);
-  return JSObject()->GetProperty<CXFA_Edge>(nIndex, XFA_Element::Edge);
+CXFA_Edge* CXFA_Box::GetEdgeIfExists(size_t nIndex) {
+  if (nIndex == 0) {
+    return JSObject()->GetOrCreateProperty<CXFA_Edge>(
+        pdfium::base::checked_cast<int32_t>(nIndex), XFA_Element::Edge);
+  }
+  return JSObject()->GetProperty<CXFA_Edge>(
+      pdfium::base::checked_cast<int32_t>(nIndex), XFA_Element::Edge);
 }
 
 std::vector<CXFA_Stroke*> CXFA_Box::GetStrokes() {
@@ -108,11 +111,11 @@ bool CXFA_Box::IsCircular() {
   return JSObject()->GetBoolean(XFA_Attribute::Circular);
 }
 
-Optional<int32_t> CXFA_Box::GetStartAngle() {
+absl::optional<int32_t> CXFA_Box::GetStartAngle() {
   return JSObject()->TryInteger(XFA_Attribute::StartAngle, false);
 }
 
-Optional<int32_t> CXFA_Box::GetSweepAngle() {
+absl::optional<int32_t> CXFA_Box::GetSweepAngle() {
   return JSObject()->TryInteger(XFA_Attribute::SweepAngle, false);
 }
 
@@ -256,8 +259,8 @@ void CXFA_Box::GetPathArcOrRounded(CFX_RectF rtDraw,
   rtDraw.top = center.y - b;
   rtDraw.width = a + a;
   rtDraw.height = b + b;
-  Optional<int32_t> startAngle = GetStartAngle();
-  Optional<int32_t> sweepAngle = GetSweepAngle();
+  absl::optional<int32_t> startAngle = GetStartAngle();
+  absl::optional<int32_t> sweepAngle = GetSweepAngle();
   if (!startAngle.has_value() && !sweepAngle.has_value()) {
     fillPath->AddEllipse(rtDraw);
     return;

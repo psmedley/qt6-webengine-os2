@@ -42,12 +42,18 @@ class GrVkMemoryAllocatorImpl : public GrVkMemoryAllocator {
     info.pool = VK_NULL_HANDLE;
     info.pUserData = nullptr;
 
+#if defined(TOOLKIT_QT)
+    info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+#endif
+
     if (AllocationPropertyFlags::kDedicatedAllocation & flags) {
       info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
     }
 
     if (AllocationPropertyFlags::kLazyAllocation & flags) {
-      info.preferredFlags |= VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+      // If the caller asked for lazy allocation then they already set up the
+      // VkImage for it so we must require the lazy property.
+      info.requiredFlags |= VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
     }
 
     if (AllocationPropertyFlags::kProtected & flags) {
@@ -143,6 +149,9 @@ class GrVkMemoryAllocatorImpl : public GrVkMemoryAllocator {
     }
     if (!SkToBool(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT & mem_flags)) {
       flags |= GrVkAlloc::kNoncoherent_Flag;
+    }
+    if (VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT & mem_flags) {
+      flags |= GrVkAlloc::kLazilyAllocated_Flag;
     }
 
     alloc->fMemory = vma_info.deviceMemory;

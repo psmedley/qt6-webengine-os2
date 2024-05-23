@@ -14,11 +14,13 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/files/file_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/thread_pool.h"
 #include "base/win/scoped_propvariant.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/cdm_config.h"
+#include "media/base/key_systems.h"
 #include "media/base/win/mf_helpers.h"
 #include "media/cdm/cdm_paths.h"
 #include "media/cdm/win/media_foundation_cdm.h"
@@ -29,6 +31,8 @@ namespace media {
 namespace {
 
 using Microsoft::WRL::ComPtr;
+
+const char kMediaFoundationCdmUmaPrefix[] = "Media.EME.MediaFoundationCdm.";
 
 // Key to the CDM Origin ID to be passed to the CDM for privacy purposes. The
 // same value is also used in MediaFoundation CDMs. Do NOT change this value!
@@ -179,10 +183,8 @@ crash_reporter::CrashKeyString<256> g_origin_crash_key("cdm-origin");
 }  // namespace
 
 MediaFoundationCdmFactory::MediaFoundationCdmFactory(
-    std::unique_ptr<CdmAuxiliaryHelper> helper,
-    const base::FilePath& user_data_dir)
+    std::unique_ptr<CdmAuxiliaryHelper> helper)
     : helper_(std::move(helper)),
-      user_data_dir_(user_data_dir),
       cdm_origin_crash_key_(&g_origin_crash_key,
                             helper_->GetCdmOrigin().Serialize()) {}
 
@@ -197,14 +199,13 @@ void MediaFoundationCdmFactory::SetCreateCdmFactoryCallbackForTesting(
 }
 
 void MediaFoundationCdmFactory::Create(
-    const std::string& key_system,
     const CdmConfig& cdm_config,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,
     const SessionKeysChangeCB& session_keys_change_cb,
     const SessionExpirationUpdateCB& session_expiration_update_cb,
     CdmCreatedCB cdm_created_cb) {
-  DVLOG_FUNC(1) << "key_system=" << key_system;
+  DVLOG_FUNC(1) << "cdm_config=" << cdm_config;
 
   // IMFContentDecryptionModule CDMs typically require persistent storage and
   // distinctive identifier and this should be guaranteed by key system support
@@ -213,41 +214,51 @@ void MediaFoundationCdmFactory::Create(
   DCHECK(cdm_config.allow_distinctive_identifier);
 
   // Don't cache `cdm_origin_id` in this class since user can clear it any time.
-  helper_->GetCdmPreferenceData(base::BindOnce(
-      &MediaFoundationCdmFactory::OnCdmOriginIdObtained,
-      weak_factory_.GetWeakPtr(), key_system, cdm_config, session_message_cb,
-      session_closed_cb, session_keys_change_cb, session_expiration_update_cb,
-      std::move(cdm_created_cb)));
+  helper_->GetMediaFoundationCdmData(
+      base::BindOnce(&MediaFoundationCdmFactory::OnCdmOriginIdObtained,
+                     weak_factory_.GetWeakPtr(), cdm_config, session_message_cb,
+                     session_closed_cb, session_keys_change_cb,
+                     session_expiration_update_cb, std::move(cdm_created_cb)));
 }
 
 void MediaFoundationCdmFactory::OnCdmOriginIdObtained(
-    const std::string& key_system,
     const CdmConfig& cdm_config,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,
     const SessionKeysChangeCB& session_keys_change_cb,
     const SessionExpirationUpdateCB& session_expiration_update_cb,
     CdmCreatedCB cdm_created_cb,
-    const std::unique_ptr<CdmPreferenceData> cdm_preference_data) {
-  if (!cdm_preference_data) {
+    const std::unique_ptr<MediaFoundationCdmData> media_foundation_cdm_data) {
+  if (!media_foundation_cdm_data) {
     std::move(cdm_created_cb)
         .Run(nullptr, "Failed to get the CDM preference data.");
     return;
   }
 
-  if (cdm_preference_data->origin_id.is_empty()) {
+  if (media_foundation_cdm_data->origin_id.is_empty()) {
     std::move(cdm_created_cb).Run(nullptr, "Failed to get the CDM origin ID.");
     return;
   }
 
+  // This will construct a UMA prefix to be something like (with trailing dot):
+  // "Media.EME.MediaFoundationCdm.FooKeySystem.HardwareSecure.".
+  auto uma_prefix = kMediaFoundationCdmUmaPrefix +
+                    GetKeySystemNameForUMA(cdm_config.key_system,
+                                           cdm_config.use_hw_secure_codecs) +
+                    ".";
+
   auto cdm = base::MakeRefCounted<MediaFoundationCdm>(
+      uma_prefix,
       base::BindRepeating(&MediaFoundationCdmFactory::CreateMfCdm,
-                          weak_factory_.GetWeakPtr(), key_system, cdm_config,
-                          cdm_preference_data->origin_id,
-                          cdm_preference_data->client_token),
+                          weak_factory_.GetWeakPtr(), cdm_config,
+                          media_foundation_cdm_data->origin_id,
+                          media_foundation_cdm_data->client_token,
+                          media_foundation_cdm_data->cdm_store_path_root),
       base::BindRepeating(&MediaFoundationCdmFactory::IsTypeSupported,
-                          weak_factory_.GetWeakPtr(), key_system),
+                          weak_factory_.GetWeakPtr(), cdm_config.key_system),
       base::BindRepeating(&MediaFoundationCdmFactory::StoreClientToken,
+                          weak_factory_.GetWeakPtr()),
+      base::BindRepeating(&MediaFoundationCdmFactory::OnCdmEvent,
                           weak_factory_.GetWeakPtr()),
       session_message_cb, session_closed_cb, session_keys_change_cb,
       session_expiration_update_cb);
@@ -255,8 +266,18 @@ void MediaFoundationCdmFactory::OnCdmOriginIdObtained(
   // `cdm_created_cb` should always be run asynchronously.
   auto bound_cdm_created_cb = BindToCurrentLoop(std::move(cdm_created_cb));
 
-  if (FAILED(cdm->Initialize())) {
-    std::move(bound_cdm_created_cb).Run(nullptr, "Failed to create CDM");
+  HRESULT hr = cdm->Initialize();
+
+  static bool s_first_initialize_reported = false;
+  if (!s_first_initialize_reported) {
+    base::UmaHistogramSparse(uma_prefix + "FirstInitialize", hr);
+    s_first_initialize_reported = true;
+  }
+
+  if (FAILED(hr)) {
+    base::UmaHistogramSparse(uma_prefix + "Initialize", hr);
+    std::move(bound_cdm_created_cb)
+        .Run(nullptr, "Failed to initialize CDM: " + PrintHr(hr));
     return;
   }
 
@@ -309,12 +330,17 @@ void MediaFoundationCdmFactory::StoreClientToken(
   helper_->SetCdmClientToken(client_token);
 }
 
+void MediaFoundationCdmFactory::OnCdmEvent(CdmEvent event) {
+  helper_->OnCdmEvent(event);
+}
+
 HRESULT MediaFoundationCdmFactory::CreateMfCdmInternal(
-    const std::string& key_system,
     const CdmConfig& cdm_config,
     const base::UnguessableToken& cdm_origin_id,
     const absl::optional<std::vector<uint8_t>>& cdm_client_token,
+    const base::FilePath& cdm_store_path_root,
     ComPtr<IMFContentDecryptionModule>& mf_cdm) {
+  const auto key_system = cdm_config.key_system;
   ComPtr<IMFContentDecryptionModuleFactory> cdm_factory;
   RETURN_IF_FAILED(GetCdmFactory(key_system, cdm_factory));
 
@@ -336,14 +362,15 @@ HRESULT MediaFoundationCdmFactory::CreateMfCdmInternal(
       &cdm_access));
 
   // Provide a per-user, per-arch, per-origin and per-key-system path.
-  auto store_path = GetCdmStorePath(user_data_dir_, cdm_origin_id, key_system);
+  auto store_path =
+      GetCdmStorePath(cdm_store_path_root, cdm_origin_id, key_system);
   DVLOG(1) << "store_path=" << store_path;
 
   // Ensure the path exists. If it already exists, this call will do nothing.
   base::File::Error file_error;
   if (!base::CreateDirectoryAndGetError(store_path, &file_error)) {
     DLOG(ERROR) << "Create CDM store path failed with " << file_error;
-    return E_FAIL;
+    return MF_INVALID_ACCESS_ERR;
   }
 
   ComPtr<IPropertyStore> cdm_properties;
@@ -358,14 +385,14 @@ HRESULT MediaFoundationCdmFactory::CreateMfCdmInternal(
 }
 
 void MediaFoundationCdmFactory::CreateMfCdm(
-    const std::string& key_system,
     const CdmConfig& cdm_config,
     const base::UnguessableToken& cdm_origin_id,
     const absl::optional<std::vector<uint8_t>>& cdm_client_token,
+    const base::FilePath& cdm_store_path_root,
     HRESULT& hresult,
     Microsoft::WRL::ComPtr<IMFContentDecryptionModule>& mf_cdm) {
-  hresult = CreateMfCdmInternal(key_system, cdm_config, cdm_origin_id,
-                                cdm_client_token, mf_cdm);
+  hresult = CreateMfCdmInternal(cdm_config, cdm_origin_id, cdm_client_token,
+                                cdm_store_path_root, mf_cdm);
 }
 
 }  // namespace media

@@ -5,7 +5,6 @@
 #ifndef CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_NEW_SCRIPT_LOADER_H_
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_NEW_SCRIPT_LOADER_H_
 
-#include "base/macros.h"
 #include "content/browser/service_worker/service_worker_cache_writer.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_routing_id.h"
@@ -98,6 +97,10 @@ class CONTENT_EXPORT ServiceWorkerNewScriptLoader final
       bool is_throttle_needed,
       const GlobalRenderFrameHostId& requesting_frame_id);
 
+  ServiceWorkerNewScriptLoader(const ServiceWorkerNewScriptLoader&) = delete;
+  ServiceWorkerNewScriptLoader& operator=(const ServiceWorkerNewScriptLoader&) =
+      delete;
+
   ~ServiceWorkerNewScriptLoader() override;
 
   // network::mojom::URLLoader:
@@ -113,8 +116,8 @@ class CONTENT_EXPORT ServiceWorkerNewScriptLoader final
 
   // network::mojom::URLLoaderClient for the network load:
   void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
-  void OnReceiveResponse(
-      network::mojom::URLResponseHeadPtr response_head) override;
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr response_head,
+                         mojo::ScopedDataPipeConsumerHandle body) override;
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
       network::mojom::URLResponseHeadPtr response_head) override;
@@ -180,6 +183,11 @@ class CONTENT_EXPORT ServiceWorkerNewScriptLoader final
   // Called when ServiceWorkerCacheWriter::Resume() completes its work.
   // If not all data are received, it continues to download from network.
   void OnCacheWriterResumed(net::Error error);
+
+  // 'response_head' is only valid when kCombineResponseBody is enabled.
+  void OnStartLoadingResponseBodyInternal(
+      network::mojom::URLResponseHeadPtr response_head,
+      mojo::ScopedDataPipeConsumerHandle consumer);
 
   const GURL request_url_;
 
@@ -248,8 +256,6 @@ class CONTENT_EXPORT ServiceWorkerNewScriptLoader final
   const GlobalRenderFrameHostId requesting_frame_id_;
 
   base::WeakPtrFactory<ServiceWorkerNewScriptLoader> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerNewScriptLoader);
 };
 
 }  // namespace content

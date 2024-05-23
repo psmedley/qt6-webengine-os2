@@ -248,6 +248,50 @@ int InitVulkan(void) {
         reinterpret_cast<PFN_vkGetBufferOpaqueCaptureAddress>(dlsym(libvulkan, "vkGetBufferOpaqueCaptureAddress"));
     vkGetDeviceMemoryOpaqueCaptureAddress =
         reinterpret_cast<PFN_vkGetDeviceMemoryOpaqueCaptureAddress>(dlsym(libvulkan, "vkGetDeviceMemoryOpaqueCaptureAddress"));
+    vkGetPhysicalDeviceToolProperties =
+        reinterpret_cast<PFN_vkGetPhysicalDeviceToolProperties>(dlsym(libvulkan, "vkGetPhysicalDeviceToolProperties"));
+    vkCreatePrivateDataSlot = reinterpret_cast<PFN_vkCreatePrivateDataSlot>(dlsym(libvulkan, "vkCreatePrivateDataSlot"));
+    vkDestroyPrivateDataSlot = reinterpret_cast<PFN_vkDestroyPrivateDataSlot>(dlsym(libvulkan, "vkDestroyPrivateDataSlot"));
+    vkSetPrivateData = reinterpret_cast<PFN_vkSetPrivateData>(dlsym(libvulkan, "vkSetPrivateData"));
+    vkGetPrivateData = reinterpret_cast<PFN_vkGetPrivateData>(dlsym(libvulkan, "vkGetPrivateData"));
+    vkCmdSetEvent2 = reinterpret_cast<PFN_vkCmdSetEvent2>(dlsym(libvulkan, "vkCmdSetEvent2"));
+    vkCmdResetEvent2 = reinterpret_cast<PFN_vkCmdResetEvent2>(dlsym(libvulkan, "vkCmdResetEvent2"));
+    vkCmdWaitEvents2 = reinterpret_cast<PFN_vkCmdWaitEvents2>(dlsym(libvulkan, "vkCmdWaitEvents2"));
+    vkCmdPipelineBarrier2 = reinterpret_cast<PFN_vkCmdPipelineBarrier2>(dlsym(libvulkan, "vkCmdPipelineBarrier2"));
+    vkCmdWriteTimestamp2 = reinterpret_cast<PFN_vkCmdWriteTimestamp2>(dlsym(libvulkan, "vkCmdWriteTimestamp2"));
+    vkQueueSubmit2 = reinterpret_cast<PFN_vkQueueSubmit2>(dlsym(libvulkan, "vkQueueSubmit2"));
+    vkCmdCopyBuffer2 = reinterpret_cast<PFN_vkCmdCopyBuffer2>(dlsym(libvulkan, "vkCmdCopyBuffer2"));
+    vkCmdCopyImage2 = reinterpret_cast<PFN_vkCmdCopyImage2>(dlsym(libvulkan, "vkCmdCopyImage2"));
+    vkCmdCopyBufferToImage2 = reinterpret_cast<PFN_vkCmdCopyBufferToImage2>(dlsym(libvulkan, "vkCmdCopyBufferToImage2"));
+    vkCmdCopyImageToBuffer2 = reinterpret_cast<PFN_vkCmdCopyImageToBuffer2>(dlsym(libvulkan, "vkCmdCopyImageToBuffer2"));
+    vkCmdBlitImage2 = reinterpret_cast<PFN_vkCmdBlitImage2>(dlsym(libvulkan, "vkCmdBlitImage2"));
+    vkCmdResolveImage2 = reinterpret_cast<PFN_vkCmdResolveImage2>(dlsym(libvulkan, "vkCmdResolveImage2"));
+    vkCmdBeginRendering = reinterpret_cast<PFN_vkCmdBeginRendering>(dlsym(libvulkan, "vkCmdBeginRendering"));
+    vkCmdEndRendering = reinterpret_cast<PFN_vkCmdEndRendering>(dlsym(libvulkan, "vkCmdEndRendering"));
+    vkCmdSetCullMode = reinterpret_cast<PFN_vkCmdSetCullMode>(dlsym(libvulkan, "vkCmdSetCullMode"));
+    vkCmdSetFrontFace = reinterpret_cast<PFN_vkCmdSetFrontFace>(dlsym(libvulkan, "vkCmdSetFrontFace"));
+    vkCmdSetPrimitiveTopology = reinterpret_cast<PFN_vkCmdSetPrimitiveTopology>(dlsym(libvulkan, "vkCmdSetPrimitiveTopology"));
+    vkCmdSetViewportWithCount = reinterpret_cast<PFN_vkCmdSetViewportWithCount>(dlsym(libvulkan, "vkCmdSetViewportWithCount"));
+    vkCmdSetScissorWithCount = reinterpret_cast<PFN_vkCmdSetScissorWithCount>(dlsym(libvulkan, "vkCmdSetScissorWithCount"));
+    vkCmdBindVertexBuffers2 = reinterpret_cast<PFN_vkCmdBindVertexBuffers2>(dlsym(libvulkan, "vkCmdBindVertexBuffers2"));
+    vkCmdSetDepthTestEnable = reinterpret_cast<PFN_vkCmdSetDepthTestEnable>(dlsym(libvulkan, "vkCmdSetDepthTestEnable"));
+    vkCmdSetDepthWriteEnable = reinterpret_cast<PFN_vkCmdSetDepthWriteEnable>(dlsym(libvulkan, "vkCmdSetDepthWriteEnable"));
+    vkCmdSetDepthCompareOp = reinterpret_cast<PFN_vkCmdSetDepthCompareOp>(dlsym(libvulkan, "vkCmdSetDepthCompareOp"));
+    vkCmdSetDepthBoundsTestEnable =
+        reinterpret_cast<PFN_vkCmdSetDepthBoundsTestEnable>(dlsym(libvulkan, "vkCmdSetDepthBoundsTestEnable"));
+    vkCmdSetStencilTestEnable = reinterpret_cast<PFN_vkCmdSetStencilTestEnable>(dlsym(libvulkan, "vkCmdSetStencilTestEnable"));
+    vkCmdSetStencilOp = reinterpret_cast<PFN_vkCmdSetStencilOp>(dlsym(libvulkan, "vkCmdSetStencilOp"));
+    vkCmdSetRasterizerDiscardEnable =
+        reinterpret_cast<PFN_vkCmdSetRasterizerDiscardEnable>(dlsym(libvulkan, "vkCmdSetRasterizerDiscardEnable"));
+    vkCmdSetDepthBiasEnable = reinterpret_cast<PFN_vkCmdSetDepthBiasEnable>(dlsym(libvulkan, "vkCmdSetDepthBiasEnable"));
+    vkCmdSetPrimitiveRestartEnable =
+        reinterpret_cast<PFN_vkCmdSetPrimitiveRestartEnable>(dlsym(libvulkan, "vkCmdSetPrimitiveRestartEnable"));
+    vkGetDeviceBufferMemoryRequirements =
+        reinterpret_cast<PFN_vkGetDeviceBufferMemoryRequirements>(dlsym(libvulkan, "vkGetDeviceBufferMemoryRequirements"));
+    vkGetDeviceImageMemoryRequirements =
+        reinterpret_cast<PFN_vkGetDeviceImageMemoryRequirements>(dlsym(libvulkan, "vkGetDeviceImageMemoryRequirements"));
+    vkGetDeviceImageSparseMemoryRequirements = reinterpret_cast<PFN_vkGetDeviceImageSparseMemoryRequirements>(
+        dlsym(libvulkan, "vkGetDeviceImageSparseMemoryRequirements"));
     vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>(dlsym(libvulkan, "vkDestroySurfaceKHR"));
     vkGetPhysicalDeviceSurfaceSupportKHR =
         reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(dlsym(libvulkan, "vkGetPhysicalDeviceSurfaceSupportKHR"));
@@ -284,6 +328,8 @@ int InitVulkan(void) {
         reinterpret_cast<PFN_vkCreateDisplayPlaneSurfaceKHR>(dlsym(libvulkan, "vkCreateDisplayPlaneSurfaceKHR"));
     vkCreateSharedSwapchainsKHR =
         reinterpret_cast<PFN_vkCreateSharedSwapchainsKHR>(dlsym(libvulkan, "vkCreateSharedSwapchainsKHR"));
+    vkCmdBeginRenderingKHR = reinterpret_cast<PFN_vkCmdBeginRenderingKHR>(dlsym(libvulkan, "vkCmdBeginRenderingKHR"));
+    vkCmdEndRenderingKHR = reinterpret_cast<PFN_vkCmdEndRenderingKHR>(dlsym(libvulkan, "vkCmdEndRenderingKHR"));
     vkGetPhysicalDeviceFeatures2KHR =
         reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(dlsym(libvulkan, "vkGetPhysicalDeviceFeatures2KHR"));
     vkGetPhysicalDeviceProperties2KHR =
@@ -413,6 +459,12 @@ int InitVulkan(void) {
     vkCmdCopyImageToBuffer2KHR = reinterpret_cast<PFN_vkCmdCopyImageToBuffer2KHR>(dlsym(libvulkan, "vkCmdCopyImageToBuffer2KHR"));
     vkCmdBlitImage2KHR = reinterpret_cast<PFN_vkCmdBlitImage2KHR>(dlsym(libvulkan, "vkCmdBlitImage2KHR"));
     vkCmdResolveImage2KHR = reinterpret_cast<PFN_vkCmdResolveImage2KHR>(dlsym(libvulkan, "vkCmdResolveImage2KHR"));
+    vkGetDeviceBufferMemoryRequirementsKHR =
+        reinterpret_cast<PFN_vkGetDeviceBufferMemoryRequirementsKHR>(dlsym(libvulkan, "vkGetDeviceBufferMemoryRequirementsKHR"));
+    vkGetDeviceImageMemoryRequirementsKHR =
+        reinterpret_cast<PFN_vkGetDeviceImageMemoryRequirementsKHR>(dlsym(libvulkan, "vkGetDeviceImageMemoryRequirementsKHR"));
+    vkGetDeviceImageSparseMemoryRequirementsKHR = reinterpret_cast<PFN_vkGetDeviceImageSparseMemoryRequirementsKHR>(
+        dlsym(libvulkan, "vkGetDeviceImageSparseMemoryRequirementsKHR"));
     vkCreateAccelerationStructureKHR =
         reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(dlsym(libvulkan, "vkCreateAccelerationStructureKHR"));
     vkDestroyAccelerationStructureKHR =
@@ -714,6 +766,43 @@ PFN_vkSignalSemaphore vkSignalSemaphore;
 PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress;
 PFN_vkGetBufferOpaqueCaptureAddress vkGetBufferOpaqueCaptureAddress;
 PFN_vkGetDeviceMemoryOpaqueCaptureAddress vkGetDeviceMemoryOpaqueCaptureAddress;
+PFN_vkGetPhysicalDeviceToolProperties vkGetPhysicalDeviceToolProperties;
+PFN_vkCreatePrivateDataSlot vkCreatePrivateDataSlot;
+PFN_vkDestroyPrivateDataSlot vkDestroyPrivateDataSlot;
+PFN_vkSetPrivateData vkSetPrivateData;
+PFN_vkGetPrivateData vkGetPrivateData;
+PFN_vkCmdSetEvent2 vkCmdSetEvent2;
+PFN_vkCmdResetEvent2 vkCmdResetEvent2;
+PFN_vkCmdWaitEvents2 vkCmdWaitEvents2;
+PFN_vkCmdPipelineBarrier2 vkCmdPipelineBarrier2;
+PFN_vkCmdWriteTimestamp2 vkCmdWriteTimestamp2;
+PFN_vkQueueSubmit2 vkQueueSubmit2;
+PFN_vkCmdCopyBuffer2 vkCmdCopyBuffer2;
+PFN_vkCmdCopyImage2 vkCmdCopyImage2;
+PFN_vkCmdCopyBufferToImage2 vkCmdCopyBufferToImage2;
+PFN_vkCmdCopyImageToBuffer2 vkCmdCopyImageToBuffer2;
+PFN_vkCmdBlitImage2 vkCmdBlitImage2;
+PFN_vkCmdResolveImage2 vkCmdResolveImage2;
+PFN_vkCmdBeginRendering vkCmdBeginRendering;
+PFN_vkCmdEndRendering vkCmdEndRendering;
+PFN_vkCmdSetCullMode vkCmdSetCullMode;
+PFN_vkCmdSetFrontFace vkCmdSetFrontFace;
+PFN_vkCmdSetPrimitiveTopology vkCmdSetPrimitiveTopology;
+PFN_vkCmdSetViewportWithCount vkCmdSetViewportWithCount;
+PFN_vkCmdSetScissorWithCount vkCmdSetScissorWithCount;
+PFN_vkCmdBindVertexBuffers2 vkCmdBindVertexBuffers2;
+PFN_vkCmdSetDepthTestEnable vkCmdSetDepthTestEnable;
+PFN_vkCmdSetDepthWriteEnable vkCmdSetDepthWriteEnable;
+PFN_vkCmdSetDepthCompareOp vkCmdSetDepthCompareOp;
+PFN_vkCmdSetDepthBoundsTestEnable vkCmdSetDepthBoundsTestEnable;
+PFN_vkCmdSetStencilTestEnable vkCmdSetStencilTestEnable;
+PFN_vkCmdSetStencilOp vkCmdSetStencilOp;
+PFN_vkCmdSetRasterizerDiscardEnable vkCmdSetRasterizerDiscardEnable;
+PFN_vkCmdSetDepthBiasEnable vkCmdSetDepthBiasEnable;
+PFN_vkCmdSetPrimitiveRestartEnable vkCmdSetPrimitiveRestartEnable;
+PFN_vkGetDeviceBufferMemoryRequirements vkGetDeviceBufferMemoryRequirements;
+PFN_vkGetDeviceImageMemoryRequirements vkGetDeviceImageMemoryRequirements;
+PFN_vkGetDeviceImageSparseMemoryRequirements vkGetDeviceImageSparseMemoryRequirements;
 PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
 PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
 PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
@@ -736,6 +825,8 @@ PFN_vkCreateDisplayModeKHR vkCreateDisplayModeKHR;
 PFN_vkGetDisplayPlaneCapabilitiesKHR vkGetDisplayPlaneCapabilitiesKHR;
 PFN_vkCreateDisplayPlaneSurfaceKHR vkCreateDisplayPlaneSurfaceKHR;
 PFN_vkCreateSharedSwapchainsKHR vkCreateSharedSwapchainsKHR;
+PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
+PFN_vkCmdEndRenderingKHR vkCmdEndRenderingKHR;
 PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR;
 PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR;
 PFN_vkGetPhysicalDeviceFormatProperties2KHR vkGetPhysicalDeviceFormatProperties2KHR;
@@ -818,6 +909,9 @@ PFN_vkCmdCopyBufferToImage2KHR vkCmdCopyBufferToImage2KHR;
 PFN_vkCmdCopyImageToBuffer2KHR vkCmdCopyImageToBuffer2KHR;
 PFN_vkCmdBlitImage2KHR vkCmdBlitImage2KHR;
 PFN_vkCmdResolveImage2KHR vkCmdResolveImage2KHR;
+PFN_vkGetDeviceBufferMemoryRequirementsKHR vkGetDeviceBufferMemoryRequirementsKHR;
+PFN_vkGetDeviceImageMemoryRequirementsKHR vkGetDeviceImageMemoryRequirementsKHR;
+PFN_vkGetDeviceImageSparseMemoryRequirementsKHR vkGetDeviceImageSparseMemoryRequirementsKHR;
 PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
 PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT;
 PFN_vkDebugReportMessageEXT vkDebugReportMessageEXT;
@@ -958,6 +1052,9 @@ PFN_vkCmdSetPrimitiveRestartEnableEXT vkCmdSetPrimitiveRestartEnableEXT;
 PFN_vkCmdSetColorWriteEnableEXT vkCmdSetColorWriteEnableEXT;
 PFN_vkCmdDrawMultiEXT vkCmdDrawMultiEXT;
 PFN_vkCmdDrawMultiIndexedEXT vkCmdDrawMultiIndexedEXT;
+PFN_vkSetDeviceMemoryPriorityEXT vkSetDeviceMemoryPriorityEXT;
+PFN_vkGetDescriptorSetLayoutHostMappingInfoVALVE vkGetDescriptorSetLayoutHostMappingInfoVALVE;
+PFN_vkGetDescriptorSetHostMappingVALVE vkGetDescriptorSetHostMappingVALVE;
 PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
 PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR;
 PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR;
@@ -1002,6 +1099,14 @@ PFN_vkGetMemoryZirconHandlePropertiesFUCHSIA vkGetMemoryZirconHandlePropertiesFU
 #ifdef VK_USE_PLATFORM_FUCHSIA
 PFN_vkImportSemaphoreZirconHandleFUCHSIA vkImportSemaphoreZirconHandleFUCHSIA;
 PFN_vkGetSemaphoreZirconHandleFUCHSIA vkGetSemaphoreZirconHandleFUCHSIA;
+#endif
+
+#ifdef VK_USE_PLATFORM_FUCHSIA
+PFN_vkCreateBufferCollectionFUCHSIA vkCreateBufferCollectionFUCHSIA;
+PFN_vkSetBufferCollectionImageConstraintsFUCHSIA vkSetBufferCollectionImageConstraintsFUCHSIA;
+PFN_vkSetBufferCollectionBufferConstraintsFUCHSIA vkSetBufferCollectionBufferConstraintsFUCHSIA;
+PFN_vkDestroyBufferCollectionFUCHSIA vkDestroyBufferCollectionFUCHSIA;
+PFN_vkGetBufferCollectionPropertiesFUCHSIA vkGetBufferCollectionPropertiesFUCHSIA;
 #endif
 
 #ifdef VK_USE_PLATFORM_IOS_MVK

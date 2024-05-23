@@ -49,14 +49,18 @@ export class TrackGroupPanel extends Panel<Attrs> {
   private readonly trackGroupId: string;
   private shellWidth = 0;
   private backgroundColor = '#ffffff';  // Updated from CSS later.
-  private summaryTrack: Track;
+  private summaryTrack: Track|undefined;
 
   constructor({attrs}: m.CVnode<Attrs>) {
     super();
     this.trackGroupId = attrs.trackGroupId;
     const trackCreator = trackRegistry.get(this.summaryTrackState.kind);
-    this.summaryTrack =
-        trackCreator.create({trackId: this.summaryTrackState.id});
+    const engineId = this.summaryTrackState.engineId;
+    const engine = globals.engines.get(engineId);
+    if (engine !== undefined) {
+      this.summaryTrack =
+          trackCreator.create({trackId: this.summaryTrackState.id, engine});
+    }
   }
 
   get trackGroupState(): TrackGroupState {
@@ -102,6 +106,12 @@ export class TrackGroupPanel extends Panel<Attrs> {
       }
     }
 
+    let child = null;
+    if (this.summaryTrackState.labels &&
+        this.summaryTrackState.labels.length > 0) {
+      child = m('span', this.summaryTrackState.labels.join(', '));
+    }
+
     return m(
         `.track-group-panel[collapsed=${collapsed}]`,
         {id: 'track_' + this.trackGroupId},
@@ -119,11 +129,11 @@ export class TrackGroupPanel extends Panel<Attrs> {
           m('.fold-button',
             m('i.material-icons',
               this.trackGroupState.collapsed ? EXPAND_DOWN : EXPAND_UP)),
-          m('h1',
-            {
-              title: name,
-            },
-            name),
+          m('h1.track-title',
+            {title: name},
+            name,
+            ('namespace' in this.summaryTrackState.config) &&
+                m('span.chip', 'metric')),
           selection && selection.kind === 'AREA' ?
               m('i.material-icons.track-button',
                 {
@@ -136,7 +146,10 @@ export class TrackGroupPanel extends Panel<Attrs> {
                 checkBox) :
               ''),
 
-        this.summaryTrack ? m(TrackContent, {track: this.summaryTrack}) : null);
+        this.summaryTrack ? m(TrackContent,
+                              {track: this.summaryTrack},
+                              this.trackGroupState.collapsed ? '' : child) :
+                            null);
   }
 
   oncreate(vnode: m.CVnodeDOM<Attrs>) {
@@ -153,6 +166,16 @@ export class TrackGroupPanel extends Panel<Attrs> {
     } else {
       this.backgroundColor =
           getComputedStyle(dom).getPropertyValue('--expanded-background');
+    }
+    if (this.summaryTrack !== undefined) {
+      this.summaryTrack.onFullRedraw();
+    }
+  }
+
+  onremove() {
+    if (this.summaryTrack !== undefined) {
+      this.summaryTrack.onDestroy();
+      this.summaryTrack = undefined;
     }
   }
 

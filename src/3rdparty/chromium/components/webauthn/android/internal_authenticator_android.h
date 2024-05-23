@@ -6,7 +6,6 @@
 #define COMPONENTS_WEBAUTHN_ANDROID_INTERNAL_AUTHENTICATOR_ANDROID_H_
 
 #include "base/android/jni_weak_ref.h"
-#include "base/macros.h"
 #include "components/webauthn/core/browser/internal_authenticator.h"
 #include "content/public/browser/global_routing_id.h"
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom.h"
@@ -27,7 +26,7 @@ class RenderFrameHost;
 // passes the response through InvokeMakeCredentialResponse() and
 // InvokeGetAssertionResponse(), which eventually invokes the callback given by
 // the original caller.
-class InternalAuthenticatorAndroid : public autofill::InternalAuthenticator {
+class InternalAuthenticatorAndroid : public webauthn::InternalAuthenticator {
  public:
   explicit InternalAuthenticatorAndroid(
       content::RenderFrameHost* render_frame_host);

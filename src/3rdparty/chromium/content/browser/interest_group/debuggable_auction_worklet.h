@@ -5,9 +5,15 @@
 #ifndef CONTENT_BROWSER_INTEREST_GROUP_DEBUGGABLE_AUCTION_WORKLET_H_
 #define CONTENT_BROWSER_INTEREST_GROUP_DEBUGGABLE_AUCTION_WORKLET_H_
 
+#include <string>
+
+#include "base/memory/raw_ptr.h"
 #include "content/common/content_export.h"
 #include "content/services/auction_worklet/public/mojom/bidder_worklet.mojom-forward.h"
 #include "content/services/auction_worklet/public/mojom/seller_worklet.mojom-forward.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
+#include "third_party/blink/public/mojom/devtools/devtools_agent.mojom-forward.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -17,49 +23,54 @@ class RenderFrameHostImpl;
 // This is an opaque representation of a worklet (either buyer or seller) for
 // help in interfacing with a debugger --- adding observers to
 // DebuggableAuctionWorkletTracker will notify of creation/destruction of these.
-//
-// TODO(morlovich): This will eventually get methods to connect to the worklet
-// via devtools protocol over mojo, but that's a bit too much for an initial CL.
 class CONTENT_EXPORT DebuggableAuctionWorklet {
  public:
   explicit DebuggableAuctionWorklet(const DebuggableAuctionWorklet&) = delete;
   DebuggableAuctionWorklet& operator=(const DebuggableAuctionWorklet&) = delete;
 
   const GURL& url() const { return url_; }
-
   RenderFrameHostImpl* owning_frame() const { return owning_frame_; }
+
+  // Human-readable description of the worklet. (For English-speaking humans,
+  // anyway).
+  std::string Title() const;
+
+  void ConnectDevToolsAgent(
+      mojo::PendingAssociatedReceiver<blink::mojom::DevToolsAgent> agent);
+
+  // Returns true if the worklet should start in the paused state.
+  bool should_pause_on_start() const { return should_pause_on_start_; }
 
  private:
   friend class AuctionRunner;
+  friend class AuctionWorkletManager;
   friend class std::default_delete<DebuggableAuctionWorklet>;
 
   // Registers `this` with DebuggableAuctionWorkletTracker, and passes through
   // NotifyCreated() observers.
   //
   // The mojo pipe must outlive `this`, as must `owning_frame`.
-  //
-  // `should_pause_on_start` will output, at constructor completion, if any
-  // observer has requested the worklet to pause before starting work until
-  // resumed by debugger.
   DebuggableAuctionWorklet(
       RenderFrameHostImpl* owning_frame,
       const GURL& url,
-      auction_worklet::mojom::BidderWorklet* bidder_worklet,
-      bool& should_pause_on_start);
+      auction_worklet::mojom::BidderWorklet* bidder_worklet);
   DebuggableAuctionWorklet(
       RenderFrameHostImpl* owning_frame,
       const GURL& url,
-      auction_worklet::mojom::SellerWorklet* seller_worklet,
-      bool& should_pause_on_start);
+      auction_worklet::mojom::SellerWorklet* seller_worklet);
 
   // Unregisters `this` from DebuggableAuctionWorkletTracker, and notifies
   // NotifyDestroyed() observers.
   ~DebuggableAuctionWorklet();
 
-  RenderFrameHostImpl* const owning_frame_ = nullptr;
+  const raw_ptr<RenderFrameHostImpl> owning_frame_ = nullptr;
   const GURL url_;
-  auction_worklet::mojom::BidderWorklet* bidder_worklet_ = nullptr;
-  auction_worklet::mojom::SellerWorklet* seller_worklet_ = nullptr;
+
+  bool should_pause_on_start_ = false;
+
+  absl::variant<auction_worklet::mojom::BidderWorklet*,
+                auction_worklet::mojom::SellerWorklet*>
+      worklet_;
 };
 
 }  // namespace content

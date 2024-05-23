@@ -24,10 +24,12 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_ELEMENT_H_
 
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_boolean_string_unrestricteddouble.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/html/forms/labels_node_list.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
@@ -172,6 +174,9 @@ class CORE_EXPORT HTMLElement : public Element {
   void AdjustDirectionalityIfNeededAfterShadowRootChanged();
   void BeginParsingChildren() override;
 
+  V8UnionBooleanOrStringOrUnrestrictedDouble* hidden() const;
+  void setHidden(const V8UnionBooleanOrStringOrUnrestrictedDouble*);
+
  protected:
   enum AllowPercentage { kDontAllowPercentageValues, kAllowPercentageValues };
   enum AllowZero { kDontAllowZeroValues, kAllowZeroValues };
@@ -184,9 +189,20 @@ class CORE_EXPORT HTMLElement : public Element {
                            CSSPropertyID,
                            const String& color);
 
+  // This corresponds to:
+  //  'map to the aspect-ratio property (using dimension rules)'
+  // described by:
+  // https://html.spec.whatwg.org/multipage/rendering.html#map-to-the-aspect-ratio-property-(using-dimension-rules)
   void ApplyAspectRatioToStyle(const AtomicString& width,
                                const AtomicString& height,
                                MutableCSSPropertyValueSet*);
+  // This corresponds to:
+  //  'map to the aspect-ratio property'
+  // described by:
+  // https://html.spec.whatwg.org/multipage/rendering.html#map-to-the-aspect-ratio-property
+  void ApplyIntegerAspectRatioToStyle(const AtomicString& width,
+                                      const AtomicString& height,
+                                      MutableCSSPropertyValueSet*);
   void ApplyAlignmentAttributeToStyle(const AtomicString&,
                                       MutableCSSPropertyValueSet*);
   void ApplyBorderAttributeToStyle(const AtomicString&,
@@ -222,6 +238,9 @@ class CORE_EXPORT HTMLElement : public Element {
 
   void MapLanguageAttributeToLocale(const AtomicString&,
                                     MutableCSSPropertyValueSet*);
+  void ApplyAspectRatioToStyle(double width,
+                               double height,
+                               MutableCSSPropertyValueSet* style);
 
   DocumentFragment* TextToFragment(const String&, ExceptionState&);
 
@@ -242,12 +261,13 @@ class CORE_EXPORT HTMLElement : public Element {
       const QualifiedName& attr_name);
 
   void OnDirAttrChanged(const AttributeModificationParams&);
+  void OnFocusgroupAttrChanged(const AttributeModificationParams&);
   void OnFormAttrChanged(const AttributeModificationParams&);
-  void OnInertAttrChanged(const AttributeModificationParams&);
   void OnLangAttrChanged(const AttributeModificationParams&);
   void OnNonceAttrChanged(const AttributeModificationParams&);
   void OnTabIndexAttrChanged(const AttributeModificationParams&);
   void OnXMLLangAttrChanged(const AttributeModificationParams&);
+  void OnPopupAttrChanged(const AttributeModificationParams&);
 };
 
 template <typename T>

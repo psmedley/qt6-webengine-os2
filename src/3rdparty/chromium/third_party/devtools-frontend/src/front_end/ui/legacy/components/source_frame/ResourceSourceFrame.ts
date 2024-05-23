@@ -31,13 +31,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* eslint-disable rulesdir/no_underscored_properties */
-
 import * as i18n from '../../../../core/i18n/i18n.js';
 import type * as TextUtils from '../../../../models/text_utils/text_utils.js';
 import * as UI from '../../legacy.js';
 
+import type {SourceFrameOptions} from './SourceFrame.js';
 import {SourceFrameImpl} from './SourceFrame.js';
+import resourceSourceFrameStyles from './resourceSourceFrame.css.legacy.js';
 
 const UIStrings = {
   /**
@@ -49,43 +49,46 @@ const str_ = i18n.i18n.registerUIStrings('ui/legacy/components/source_frame/Reso
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 export class ResourceSourceFrame extends SourceFrameImpl {
-  _resource: TextUtils.ContentProvider.ContentProvider;
+  private readonly resourceInternal: TextUtils.ContentProvider.ContentProvider;
 
   constructor(
-      resource: TextUtils.ContentProvider.ContentProvider, autoPrettyPrint?: boolean,
-      codeMirrorOptions?: UI.TextEditor.Options) {
-    super(() => resource.requestContent(), codeMirrorOptions);
-    this._resource = resource;
+      resource: TextUtils.ContentProvider.ContentProvider, private readonly givenContentType: string,
+      options?: SourceFrameOptions) {
+    super(() => resource.requestContent(), options);
+    this.resourceInternal = resource;
   }
 
   static createSearchableView(
-      resource: TextUtils.ContentProvider.ContentProvider, highlighterType: string,
+      resource: TextUtils.ContentProvider.ContentProvider, contentType: string,
       autoPrettyPrint?: boolean): UI.Widget.Widget {
-    return new SearchableContainer(resource, highlighterType, autoPrettyPrint);
+    return new SearchableContainer(resource, contentType, autoPrettyPrint);
+  }
+
+  protected getContentType(): string {
+    return this.givenContentType;
   }
 
   get resource(): TextUtils.ContentProvider.ContentProvider {
-    return this._resource;
+    return this.resourceInternal;
   }
 
-  populateTextAreaContextMenu(contextMenu: UI.ContextMenu.ContextMenu, _lineNumber: number, _columnNumber: number):
-      Promise<void> {
-    contextMenu.appendApplicableItems(this._resource);
-    return Promise.resolve();
+  protected populateTextAreaContextMenu(
+      contextMenu: UI.ContextMenu.ContextMenu, lineNumber: number, columnNumber: number): void {
+    super.populateTextAreaContextMenu(contextMenu, lineNumber, columnNumber);
+    contextMenu.appendApplicableItems(this.resourceInternal);
   }
 }
 
 export class SearchableContainer extends UI.Widget.VBox {
-  _sourceFrame: ResourceSourceFrame;
+  private readonly sourceFrame: ResourceSourceFrame;
 
-  constructor(resource: TextUtils.ContentProvider.ContentProvider, highlighterType: string, autoPrettyPrint?: boolean) {
+  constructor(resource: TextUtils.ContentProvider.ContentProvider, contentType: string, autoPrettyPrint?: boolean) {
     super(true);
-    this.registerRequiredCSS('ui/legacy/components/source_frame/resourceSourceFrame.css');
-    const sourceFrame = new ResourceSourceFrame(resource, autoPrettyPrint);
-    this._sourceFrame = sourceFrame;
-    sourceFrame.setHighlighterType(highlighterType);
-    const canPrettyPrint = sourceFrame.resource.contentType().isDocumentOrScriptOrStyleSheet() ||
-        sourceFrame.highlighterType() === 'application/json';
+    this.registerRequiredCSS(resourceSourceFrameStyles);
+    const sourceFrame = new ResourceSourceFrame(resource, contentType);
+    this.sourceFrame = sourceFrame;
+    const canPrettyPrint =
+        sourceFrame.resource.contentType().isDocumentOrScriptOrStyleSheet() || contentType === 'application/json';
     sourceFrame.setCanPrettyPrint(canPrettyPrint, autoPrettyPrint);
     const searchableView = new UI.SearchableView.SearchableView(sourceFrame, sourceFrame);
     searchableView.element.classList.add('searchable-view');
@@ -95,12 +98,12 @@ export class SearchableContainer extends UI.Widget.VBox {
     searchableView.show(this.contentElement);
 
     const toolbar = new UI.Toolbar.Toolbar('toolbar', this.contentElement);
-    sourceFrame.toolbarItems().then(items => {
+    void sourceFrame.toolbarItems().then(items => {
       items.map(item => toolbar.appendToolbarItem(item));
     });
   }
 
   async revealPosition(lineNumber: number, columnNumber?: number): Promise<void> {
-    this._sourceFrame.revealPosition(lineNumber, columnNumber, true);
+    this.sourceFrame.revealPosition({lineNumber, columnNumber}, true);
   }
 }

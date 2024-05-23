@@ -11,19 +11,20 @@
 #include <string>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 #include "components/safe_browsing/content/browser/base_ui_manager.h"
-#include "components/safe_browsing/content/browser/client_side_model_loader.h"
 #include "components/safe_browsing/content/common/safe_browsing.mojom-shared.h"
 #include "components/safe_browsing/content/common/safe_browsing.mojom.h"
 #include "components/safe_browsing/core/browser/db/database_manager.h"
 #include "components/safe_browsing/core/browser/safe_browsing_token_fetcher.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
-
 #include "url/gurl.h"
 
 namespace base {
@@ -59,7 +60,9 @@ class ClientSideDetectionHost : public content::WebContentsObserver {
     virtual scoped_refptr<BaseUIManager> GetSafeBrowsingUIManager() = 0;
     virtual ClientSideDetectionService* GetClientSideDetectionService() = 0;
     virtual void AddReferrerChain(ClientPhishingRequest* verdict,
-                                  GURL current_url) = 0;
+                                  GURL current_url,
+                                  const content::GlobalRenderFrameHostId&
+                                      current_outermost_main_frame_id) = 0;
   };
 
   // The caller keeps ownership of the tab object and is responsible for
@@ -75,6 +78,9 @@ class ClientSideDetectionHost : public content::WebContentsObserver {
       std::unique_ptr<SafeBrowsingTokenFetcher> token_fetcher,
       bool is_off_the_record,
       const PrimaryAccountSignedIn& account_signed_in_callback);
+
+  ClientSideDetectionHost(const ClientSideDetectionHost&) = delete;
+  ClientSideDetectionHost& operator=(const ClientSideDetectionHost&) = delete;
 
   // The caller keeps ownership of the tab object and is responsible for
   // ensuring that it stays valid until WebContentsDestroyed is called.
@@ -181,11 +187,13 @@ class ClientSideDetectionHost : public content::WebContentsObserver {
   // Setup a PhishingDetector Mojo connection for the given render frame.
   void InitializePhishingDetector(content::RenderFrameHost* render_frame_host);
 
+  void ClearPhishingDetector(content::GlobalRenderFrameHostId rfh_id);
+
   // This pointer may be nullptr if client-side phishing detection is
   // disabled.
-  ClientSideDetectionService* csd_service_;
+  raw_ptr<ClientSideDetectionService> csd_service_;
   // The WebContents that the class is observing.
-  content::WebContents* tab_;
+  raw_ptr<content::WebContents> tab_;
   // These pointers may be nullptr if SafeBrowsing is disabled.
   scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
   scoped_refptr<BaseUIManager> ui_manager_;
@@ -194,21 +202,23 @@ class ClientSideDetectionHost : public content::WebContentsObserver {
   scoped_refptr<ShouldClassifyUrlRequest> classification_request_;
   // The current URL
   GURL current_url_;
+  // The current outermost main frame's id.
+  content::GlobalRenderFrameHostId current_outermost_main_frame_id_;
   // A map from the live RenderFrameHosts to their PhishingDetector. These
   // correspond to the `phishing_detector_receiver_` in the
   // PhishingClassifierDelegate.
-  base::flat_map<content::RenderFrameHost*,
+  base::flat_map<content::GlobalRenderFrameHostId,
                  mojo::Remote<mojom::PhishingDetector>>
       phishing_detectors_;
 
   // Records the start time of when phishing detection started.
   base::TimeTicks phishing_detection_start_time_;
-  const base::TickClock* tick_clock_;
+  raw_ptr<const base::TickClock> tick_clock_;
 
   std::unique_ptr<Delegate> delegate_;
 
   // Unowned object used for getting preference settings.
-  PrefService* pref_service_;
+  raw_ptr<PrefService> pref_service_;
 
   // The token fetcher used for getting access token.
   std::unique_ptr<SafeBrowsingTokenFetcher> token_fetcher_;
@@ -222,8 +232,6 @@ class ClientSideDetectionHost : public content::WebContentsObserver {
   PrimaryAccountSignedIn account_signed_in_callback_;
 
   base::WeakPtrFactory<ClientSideDetectionHost> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ClientSideDetectionHost);
 };
 
 }  // namespace safe_browsing

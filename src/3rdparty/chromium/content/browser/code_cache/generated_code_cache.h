@@ -10,7 +10,6 @@
 
 #include "base/containers/queue.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/base/big_buffer.h"
@@ -90,6 +89,9 @@ class CONTENT_EXPORT GeneratedCodeCache {
   GeneratedCodeCache(const base::FilePath& path,
                      int max_size_bytes,
                      CodeCacheType cache_type);
+
+  GeneratedCodeCache(const GeneratedCodeCache&) = delete;
+  GeneratedCodeCache& operator=(const GeneratedCodeCache&) = delete;
 
   ~GeneratedCodeCache();
 
@@ -232,8 +234,6 @@ class CONTENT_EXPORT GeneratedCodeCache {
   CodeCacheType cache_type_;
 
   base::WeakPtrFactory<GeneratedCodeCache> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(GeneratedCodeCache);
 };
 
 }  // namespace content

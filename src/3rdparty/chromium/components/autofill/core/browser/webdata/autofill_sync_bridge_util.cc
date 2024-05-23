@@ -17,32 +17,13 @@
 #include "components/autofill/core/browser/payments/payments_customer_data.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/common/autofill_util.h"
-#include "components/sync/engine/entity_data.h"
+#include "components/sync/protocol/entity_data.h"
 
 using autofill::data_util::TruncateUTF8;
 using sync_pb::AutofillWalletSpecifics;
 
 namespace autofill {
 namespace {
-sync_pb::WalletMaskedCreditCard::WalletCardStatus LocalToServerStatus(
-    const CreditCard& card) {
-  switch (card.GetServerStatus()) {
-    case CreditCard::OK:
-      return sync_pb::WalletMaskedCreditCard::VALID;
-    case CreditCard::EXPIRED:
-      return sync_pb::WalletMaskedCreditCard::EXPIRED;
-  }
-}
-
-CreditCard::ServerStatus ServerToLocalStatus(
-    sync_pb::WalletMaskedCreditCard::WalletCardStatus status) {
-  switch (status) {
-    case sync_pb::WalletMaskedCreditCard::VALID:
-      return CreditCard::OK;
-    case sync_pb::WalletMaskedCreditCard::EXPIRED:
-      return CreditCard::EXPIRED;
-  }
-}
 
 sync_pb::WalletMaskedCreditCard::WalletCardType WalletCardTypeFromCardNetwork(
     const std::string& network) {
@@ -92,7 +73,6 @@ const char* CardNetworkFromWalletCardType(
 CreditCard CardFromSpecifics(const sync_pb::WalletMaskedCreditCard& card) {
   CreditCard result(CreditCard::MASKED_SERVER_CARD, card.id());
   result.SetNumber(base::UTF8ToUTF16(card.last_four()));
-  result.SetServerStatus(ServerToLocalStatus(card.status()));
   result.SetNetworkForMaskedCard(CardNetworkFromWalletCardType(card.type()));
   result.SetRawInfo(CREDIT_CARD_NAME_FULL,
                     base::UTF8ToUTF16(card.name_on_card()));
@@ -123,8 +103,13 @@ CreditCard CardFromSpecifics(const sync_pb::WalletMaskedCreditCard& card) {
     case sync_pb::WalletMaskedCreditCard::ENROLLED:
       state = CreditCard::ENROLLED;
       break;
+    case sync_pb::WalletMaskedCreditCard::UNENROLLED_AND_NOT_ELIGIBLE:
+      state = CreditCard::UNENROLLED_AND_NOT_ELIGIBLE;
+      break;
+    case sync_pb::WalletMaskedCreditCard::UNENROLLED_AND_ELIGIBLE:
+      state = CreditCard::UNENROLLED_AND_ELIGIBLE;
+      break;
     case sync_pb::WalletMaskedCreditCard::UNSPECIFIED:
-      state = CreditCard::UNSPECIFIED;
       break;
   }
   result.set_virtual_card_enrollment_state(state);
@@ -262,7 +247,6 @@ void SetAutofillWalletSpecificsFromServerCard(
     wallet_card->set_billing_address_id(card.billing_address_id());
   }
 
-  wallet_card->set_status(LocalToServerStatus(card));
   if (card.HasRawInfo(CREDIT_CARD_NAME_FULL)) {
     wallet_card->set_name_on_card(TruncateUTF8(
         base::UTF16ToUTF8(card.GetRawInfo(CREDIT_CARD_NAME_FULL))));
@@ -295,6 +279,12 @@ void SetAutofillWalletSpecificsFromServerCard(
       break;
     case CreditCard::ENROLLED:
       state = sync_pb::WalletMaskedCreditCard::ENROLLED;
+      break;
+    case CreditCard::UNENROLLED_AND_NOT_ELIGIBLE:
+      state = sync_pb::WalletMaskedCreditCard::UNENROLLED_AND_NOT_ELIGIBLE;
+      break;
+    case CreditCard::UNENROLLED_AND_ELIGIBLE:
+      state = sync_pb::WalletMaskedCreditCard::UNENROLLED_AND_ELIGIBLE;
       break;
     case CreditCard::UNSPECIFIED:
       state = sync_pb::WalletMaskedCreditCard::UNSPECIFIED;
@@ -356,7 +346,7 @@ void SetAutofillOfferSpecificsFromOfferData(
       (offer_data.expiry - base::Time::UnixEpoch()).InSeconds());
   offer_specifics->mutable_display_strings()->set_value_prop_text(
       offer_data.display_strings.value_prop_text);
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   offer_specifics->mutable_display_strings()->set_see_details_text_mobile(
       offer_data.display_strings.see_details_text);
   offer_specifics->mutable_display_strings()
@@ -368,7 +358,7 @@ void SetAutofillOfferSpecificsFromOfferData(
   offer_specifics->mutable_display_strings()
       ->set_usage_instructions_text_desktop(
           offer_data.display_strings.usage_instructions_text);
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
   // Because card_linked_offer_data and promo_code_offer_data are a oneof,
   // setting one will clear the other. We should figure out which one we care
@@ -400,18 +390,18 @@ AutofillOfferData AutofillOfferDataFromOfferSpecifics(
 
   // General offer data:
   offer_data.offer_id = offer_specifics.id();
-  offer_data.expiry =
-      base::Time::UnixEpoch() +
-      base::TimeDelta::FromSeconds(offer_specifics.offer_expiry_date());
+  offer_data.expiry = base::Time::UnixEpoch() +
+                      base::Seconds(offer_specifics.offer_expiry_date());
   offer_data.offer_details_url = GURL(offer_specifics.offer_details_url());
   for (const std::string& domain : offer_specifics.merchant_domain()) {
     const GURL gurl_domain = GURL(domain);
     if (gurl_domain.is_valid())
-      offer_data.merchant_origins.emplace_back(gurl_domain.GetOrigin());
+      offer_data.merchant_origins.emplace_back(
+          gurl_domain.DeprecatedGetOriginAsURL());
   }
   offer_data.display_strings.value_prop_text =
       offer_specifics.display_strings().value_prop_text();
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   offer_data.display_strings.see_details_text =
       offer_specifics.display_strings().see_details_text_mobile();
   offer_data.display_strings.usage_instructions_text =
@@ -421,7 +411,7 @@ AutofillOfferData AutofillOfferDataFromOfferSpecifics(
       offer_specifics.display_strings().see_details_text_desktop();
   offer_data.display_strings.usage_instructions_text =
       offer_specifics.display_strings().usage_instructions_text_desktop();
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
   // Card-linked offer fields:
   offer_data.offer_reward_amount =

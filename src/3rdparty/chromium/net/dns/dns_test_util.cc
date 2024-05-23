@@ -13,22 +13,28 @@
 #include "base/check.h"
 #include "base/location.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
+#include "base/ranges/algorithm.h"
 #include "base/stl_util.h"
+#include "base/strings/strcat.h"
 #include "base/sys_byteorder.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
+#include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/dns/address_sorter.h"
 #include "net/dns/dns_hosts.h"
 #include "net/dns/dns_query.h"
 #include "net/dns/dns_session.h"
-#include "net/dns/dns_socket_allocator.h"
 #include "net/dns/dns_util.h"
+#include "net/dns/public/dns_over_https_server_config.h"
 #include "net/dns/resolve_context.h"
+#include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/scheme_host_port.h"
 
 namespace net {
 namespace {
@@ -68,9 +74,10 @@ DnsResponse CreateMalformedResponse(std::string hostname, uint16_t type) {
 class MockAddressSorter : public AddressSorter {
  public:
   ~MockAddressSorter() override = default;
-  void Sort(const AddressList& list, CallbackType callback) const override {
+  void Sort(const std::vector<IPEndPoint>& endpoints,
+            CallbackType callback) const override {
     // Do nothing.
-    std::move(callback).Run(true, list);
+    std::move(callback).Run(true, endpoints);
   }
 };
 
@@ -149,6 +156,52 @@ DnsResourceRecord BuildTestHttpsAliasRecord(std::string name,
 
   return BuildTestDnsRecord(std::move(name), dns_protocol::kTypeHttps,
                             std::move(rdata), ttl);
+}
+
+std::pair<uint16_t, std::string> BuildTestHttpsServiceAlpnParam(
+    const std::vector<std::string>& alpns) {
+  std::string param_value;
+
+  for (const std::string& alpn : alpns) {
+    CHECK(!alpn.empty());
+    param_value.append(
+        1, static_cast<char>(base::checked_cast<uint8_t>(alpn.size())));
+    param_value.append(alpn);
+  }
+
+  return std::make_pair(dns_protocol::kHttpsServiceParamKeyAlpn,
+                        std::move(param_value));
+}
+
+std::pair<uint16_t, std::string> BuildTestHttpsServiceEchConfigParam(
+    base::span<const uint8_t> ech_config_list) {
+  return std::make_pair(
+      dns_protocol::kHttpsServiceParamKeyEchConfig,
+      std::string(reinterpret_cast<const char*>(ech_config_list.data()),
+                  ech_config_list.size()));
+}
+
+std::pair<uint16_t, std::string> BuildTestHttpsServiceMandatoryParam(
+    std::vector<uint16_t> param_key_list) {
+  base::ranges::sort(param_key_list);
+
+  std::string value;
+  for (uint16_t param_key : param_key_list) {
+    char num_buffer[2];
+    base::WriteBigEndian(num_buffer, param_key);
+    value.append(num_buffer, 2);
+  }
+
+  return std::make_pair(dns_protocol::kHttpsServiceParamKeyMandatory,
+                        std::move(value));
+}
+
+std::pair<uint16_t, std::string> BuildTestHttpsServicePortParam(uint16_t port) {
+  char buffer[2];
+  base::WriteBigEndian(buffer, port);
+
+  return std::make_pair(dns_protocol::kHttpsServiceParamKeyPort,
+                        std::string(buffer, 2));
 }
 
 DnsResourceRecord BuildTestHttpsServiceRecord(
@@ -306,8 +359,7 @@ DnsResponse BuildTestDnsServiceResponse(
     rdata += dns_name;
 
     answers.push_back(BuildTestDnsRecord(answer_name, dns_protocol::kTypeSRV,
-                                         std::move(rdata),
-                                         base::TimeDelta::FromHours(5)));
+                                         std::move(rdata), base::Hours(5)));
   }
 
   return BuildTestDnsResponse(std::move(name), dns_protocol::kTypeSRV, answers);
@@ -319,14 +371,16 @@ MockDnsClientRule::Result::Result(ResultType type,
     : type(type), response(std::move(response)), net_error(net_error) {}
 
 MockDnsClientRule::Result::Result(DnsResponse response)
-    : type(OK), response(std::move(response)), net_error(absl::nullopt) {}
+    : type(ResultType::kOk),
+      response(std::move(response)),
+      net_error(absl::nullopt) {}
 
-MockDnsClientRule::Result::Result(Result&& result) = default;
+MockDnsClientRule::Result::Result(Result&&) = default;
+
+MockDnsClientRule::Result& MockDnsClientRule::Result::operator=(Result&&) =
+    default;
 
 MockDnsClientRule::Result::~Result() = default;
-
-MockDnsClientRule::Result& MockDnsClientRule::Result::operator=(
-    Result&& result) = default;
 
 MockDnsClientRule::MockDnsClientRule(const std::string& prefix,
                                      uint16_t qtype,
@@ -355,14 +409,10 @@ class MockDnsTransactionFactory::MockTransaction
                   bool force_doh_server_available,
                   SecureDnsMode secure_dns_mode,
                   ResolveContext* resolve_context,
-                  bool fast_timeout,
-                  DnsTransactionFactory::CallbackType callback)
-      : result_(MockDnsClientRule::FAIL),
+                  bool fast_timeout)
+      : result_(MockDnsClientRule::ResultType::kFail),
         hostname_(std::move(hostname)),
-        qtype_(qtype),
-        callback_(std::move(callback)),
-        started_(false),
-        delayed_(false) {
+        qtype_(qtype) {
     // Do not allow matching any rules if transaction is secure and no DoH
     // servers are available.
     if (!secure || force_doh_server_available ||
@@ -390,8 +440,8 @@ class MockDnsTransactionFactory::MockTransaction
           absl::optional<DnsQuery> query(absl::in_place, 22 /* id */, dns_name,
                                          qtype_);
           switch (result->type) {
-            case MockDnsClientRule::NODOMAIN:
-            case MockDnsClientRule::EMPTY:
+            case MockDnsClientRule::ResultType::kNoDomain:
+            case MockDnsClientRule::ResultType::kEmpty:
               DCHECK(!result->response);  // Not expected to be provided.
               authority_records = {BuildTestDnsRecord(
                   hostname_, dns_protocol::kTypeSOA, "fake rdata")};
@@ -401,32 +451,36 @@ class MockDnsTransactionFactory::MockTransaction
                   authority_records,
                   std::vector<DnsResourceRecord>() /* additional_records */,
                   query,
-                  result->type == MockDnsClientRule::NODOMAIN
+                  result->type == MockDnsClientRule::ResultType::kNoDomain
                       ? dns_protocol::kRcodeNXDOMAIN
                       : 0);
               break;
-            case MockDnsClientRule::FAIL:
+            case MockDnsClientRule::ResultType::kFail:
               if (result->response)
                 SetResponse(result);
               break;
-            case MockDnsClientRule::TIMEOUT:
+            case MockDnsClientRule::ResultType::kTimeout:
               DCHECK(!result->response);  // Not expected to be provided.
               break;
-            case MockDnsClientRule::SLOW:
+            case MockDnsClientRule::ResultType::kSlow:
               if (!fast_timeout)
                 SetResponse(result);
               break;
-            case MockDnsClientRule::OK:
+            case MockDnsClientRule::ResultType::kOk:
               SetResponse(result);
               break;
-            case MockDnsClientRule::MALFORMED:
+            case MockDnsClientRule::ResultType::kMalformed:
               DCHECK(!result->response);  // Not expected to be provided.
               result_.response = CreateMalformedResponse(hostname_, qtype_);
               break;
-            case MockDnsClientRule::UNEXPECTED:
-              ADD_FAILURE()
-                  << "Unexpected DNS transaction created for hostname "
-                  << hostname_;
+            case MockDnsClientRule::ResultType::kUnexpected:
+              if (!delayed_) {
+                // Assume a delayed kUnexpected transaction is only an issue if
+                // allowed to complete.
+                ADD_FAILURE()
+                    << "Unexpected DNS transaction created for hostname "
+                    << hostname_;
+              }
               break;
           }
 
@@ -440,8 +494,12 @@ class MockDnsTransactionFactory::MockTransaction
 
   uint16_t GetType() const override { return qtype_; }
 
-  void Start() override {
+  void Start(ResponseCallback callback) override {
+    CHECK(!callback.is_null());
+    CHECK(callback_.is_null());
     EXPECT_FALSE(started_);
+
+    callback_ = std::move(callback);
     started_ = true;
     if (delayed_)
       return;
@@ -484,40 +542,37 @@ class MockDnsTransactionFactory::MockTransaction
 
   void Finish() {
     switch (result_.type) {
-      case MockDnsClientRule::NODOMAIN:
-      case MockDnsClientRule::FAIL: {
+      case MockDnsClientRule::ResultType::kNoDomain:
+      case MockDnsClientRule::ResultType::kFail: {
         int error = result_.net_error.value_or(ERR_NAME_NOT_RESOLVED);
         DCHECK_NE(error, OK);
-        std::move(callback_).Run(this, error,
-                                 base::OptionalOrNullptr(result_.response),
-                                 absl::nullopt);
+        std::move(callback_).Run(
+            error, base::OptionalOrNullptr(result_.response), absl::nullopt);
         break;
       }
-      case MockDnsClientRule::EMPTY:
-      case MockDnsClientRule::OK:
-      case MockDnsClientRule::MALFORMED:
+      case MockDnsClientRule::ResultType::kEmpty:
+      case MockDnsClientRule::ResultType::kOk:
+      case MockDnsClientRule::ResultType::kMalformed:
         DCHECK(!result_.net_error.has_value());
-        std::move(callback_).Run(
-            this, OK, base::OptionalOrNullptr(result_.response), absl::nullopt);
-        break;
-      case MockDnsClientRule::TIMEOUT:
-        DCHECK(!result_.net_error.has_value());
-        std::move(callback_).Run(this, ERR_DNS_TIMED_OUT, nullptr,
+        std::move(callback_).Run(OK, base::OptionalOrNullptr(result_.response),
                                  absl::nullopt);
         break;
-      case MockDnsClientRule::SLOW:
+      case MockDnsClientRule::ResultType::kTimeout:
+        DCHECK(!result_.net_error.has_value());
+        std::move(callback_).Run(ERR_DNS_TIMED_OUT, nullptr, absl::nullopt);
+        break;
+      case MockDnsClientRule::ResultType::kSlow:
         if (result_.response) {
           std::move(callback_).Run(
-              this, result_.net_error.value_or(OK),
+              result_.net_error.value_or(OK),
               result_.response ? &result_.response.value() : nullptr,
               absl::nullopt);
         } else {
           DCHECK(!result_.net_error.has_value());
-          std::move(callback_).Run(this, ERR_DNS_TIMED_OUT, nullptr,
-                                   absl::nullopt);
+          std::move(callback_).Run(ERR_DNS_TIMED_OUT, nullptr, absl::nullopt);
         }
         break;
-      case MockDnsClientRule::UNEXPECTED:
+      case MockDnsClientRule::ResultType::kUnexpected:
         ADD_FAILURE() << "Unexpected DNS transaction completed for hostname "
                       << hostname_;
         break;
@@ -529,9 +584,9 @@ class MockDnsTransactionFactory::MockTransaction
   MockDnsClientRule::Result result_;
   const std::string hostname_;
   const uint16_t qtype_;
-  DnsTransactionFactory::CallbackType callback_;
-  bool started_;
-  bool delayed_;
+  ResponseCallback callback_;
+  bool started_ = false;
+  bool delayed_ = false;
 };
 
 class MockDnsTransactionFactory::MockDohProbeRunner : public DnsProbeRunner {
@@ -568,7 +623,6 @@ MockDnsTransactionFactory::~MockDnsTransactionFactory() = default;
 std::unique_ptr<DnsTransaction> MockDnsTransactionFactory::CreateTransaction(
     std::string hostname,
     uint16_t qtype,
-    DnsTransactionFactory::CallbackType callback,
     const NetLogWithSource&,
     bool secure,
     SecureDnsMode secure_dns_mode,
@@ -578,7 +632,7 @@ std::unique_ptr<DnsTransaction> MockDnsTransactionFactory::CreateTransaction(
       std::make_unique<MockTransaction>(rules_, std::move(hostname), qtype,
                                         secure, force_doh_server_available_,
                                         secure_dns_mode, resolve_context,
-                                        fast_timeout, std::move(callback));
+                                        fast_timeout);
   if (transaction->delayed())
     delayed_transactions_.push_back(transaction->AsWeakPtr());
   return transaction;
@@ -629,7 +683,7 @@ MockDnsClient::~MockDnsClient() = default;
 
 bool MockDnsClient::CanUseSecureDnsTransactions() const {
   const DnsConfig* config = GetEffectiveConfig();
-  return config && config->IsValid() && !config->dns_over_https_servers.empty();
+  return config && config->IsValid() && !config->doh_config.servers().empty();
 }
 
 bool MockDnsClient::CanUseInsecureDnsTransactions() const {
@@ -694,6 +748,11 @@ const DnsConfig* MockDnsClient::GetEffectiveConfig() const {
   return effective_config_.has_value() ? &effective_config_.value() : nullptr;
 }
 
+base::Value MockDnsClient::GetDnsConfigAsValueForNetLog() const {
+  // This is just a stub implementation that never produces a meaningful value.
+  return base::Value(base::Value::Dict());
+}
+
 const DnsHosts* MockDnsClient::GetHosts() const {
   const DnsConfig* config = GetEffectiveConfig();
   if (!config)
@@ -731,6 +790,12 @@ void MockDnsClient::SetTransactionFactoryForTesting(
   NOTREACHED();
 }
 
+absl::optional<AddressList> MockDnsClient::GetPresetAddrs(
+    const url::SchemeHostPort& endpoint) const {
+  EXPECT_THAT(preset_endpoint_, testing::Optional(endpoint));
+  return preset_addrs_;
+}
+
 void MockDnsClient::CompleteDelayedTransactions() {
   factory_->CompleteDelayedTransactions();
 }
@@ -762,13 +827,8 @@ scoped_refptr<DnsSession> MockDnsClient::BuildSession() {
   auto null_random_callback =
       base::BindRepeating([](int, int) -> int { IMMEDIATE_CRASH(); });
 
-  auto socket_allocator = std::make_unique<DnsSocketAllocator>(
-      &socket_factory_, effective_config_.value().nameservers,
-      nullptr /* net_log */);
-
   return base::MakeRefCounted<DnsSession>(
-      effective_config_.value(), std::move(socket_allocator),
-      null_random_callback, nullptr /* net_log */);
+      effective_config_.value(), null_random_callback, nullptr /* net_log */);
 }
 
 }  // namespace net

@@ -67,12 +67,13 @@ using ::testing::ValuesIn;
 class MockLineToModuleHandler: public DwarfCUToModule::LineToModuleHandler {
  public:
   MOCK_METHOD1(StartCompilationUnit, void(const string& compilation_dir));
-  MOCK_METHOD8(ReadProgram, void(const uint8_t* program, uint64_t length,
+  MOCK_METHOD9(ReadProgram, void(const uint8_t* program, uint64_t length,
                                  const uint8_t* string_section,
                                  uint64_t string_section_length,
                                  const uint8_t* line_string_section,
                                  uint64_t line_string_section_length,
-                                 Module* module, vector<Module::Line>* lines));
+                                 Module* module, vector<Module::Line>* lines,
+                                 std::map<uint32_t, Module::File*>* files));
 };
 
 class MockWarningReporter: public DwarfCUToModule::WarningReporter {
@@ -122,7 +123,8 @@ class CUFixtureBase {
                     uint64_t string_section_length,
                     const uint8_t* line_string_section,
                     uint64_t line_string_section_length,
-                    Module *module, vector<Module::Line>* lines) {
+                    Module *module, vector<Module::Line>* lines, 
+                    std::map<uint32_t, Module::File*>* files) {
       lines->insert(lines->end(), lines_->begin(), lines_->end());
     }
    private:
@@ -155,7 +157,7 @@ class CUFixtureBase {
     // By default, expect the line program reader not to be invoked. We
     // may override this in StartCU.
     EXPECT_CALL(line_reader_, StartCompilationUnit(_)).Times(0);
-    EXPECT_CALL(line_reader_, ReadProgram(_,_,_,_,_,_,_,_)).Times(0);
+    EXPECT_CALL(line_reader_, ReadProgram(_,_,_,_,_,_,_,_,_)).Times(0);
 
     // The handler will consult this section map to decide what to
     // pass to our line reader.
@@ -341,7 +343,7 @@ void CUFixtureBase::StartCU() {
     EXPECT_CALL(line_reader_,
                 ReadProgram(&dummy_line_program_[0], dummy_line_size_,
                             _,_,_,_,
-                            &module_, _))
+                            &module_, _,_))
         .Times(AtMost(1))
         .WillOnce(DoAll(Invoke(appender_), Return()));
   ASSERT_TRUE(root_handler_
@@ -1266,12 +1268,12 @@ TEST_F(Specifications, MangledNameRust) {
 
   TestFunctionCount(1);
   TestFunction(0,
-#ifndef HAVE_RUST_DEMANGLE
+#ifndef HAVE_RUSTC_DEMANGLE
                // Rust mangled names should pass through untouched if not
-               // using rust-demangle.
+               // using rustc-demangle.
                kName,
 #else
-               // If rust-demangle is available this should be properly
+               // If rustc-demangle is available this should be properly
                // demangled.
                "rustc_demangle::demangle",
 #endif
@@ -1517,7 +1519,7 @@ TEST_F(Specifications, InterCU) {
   DwarfCUToModule::FileContext fc("dwarf-filename", &m, true);
   EXPECT_CALL(reporter_, UncoveredFunction(_)).WillOnce(Return());
   MockLineToModuleHandler lr;
-  EXPECT_CALL(lr, ReadProgram(_,_,_,_,_,_,_,_)).Times(0);
+  EXPECT_CALL(lr, ReadProgram(_,_,_,_,_,_,_,_,_)).Times(0);
 
   // Kludge: satisfy reporter_'s expectation.
   reporter_.SetCUName("compilation-unit-name");
@@ -1568,7 +1570,7 @@ TEST_F(Specifications, InterCU) {
   vector<Module::Function*> functions;
   m.GetFunctions(&functions, functions.end());
   EXPECT_EQ(1U, functions.size());
-  EXPECT_STREQ("class_A::member_func_B", functions[0]->name.c_str());
+  EXPECT_STREQ("class_A::member_func_B", functions[0]->name.str().c_str());
 }
 
 TEST_F(Specifications, UnhandledInterCU) {
@@ -1576,7 +1578,7 @@ TEST_F(Specifications, UnhandledInterCU) {
   DwarfCUToModule::FileContext fc("dwarf-filename", &m, false);
   EXPECT_CALL(reporter_, UncoveredFunction(_)).WillOnce(Return());
   MockLineToModuleHandler lr;
-  EXPECT_CALL(lr, ReadProgram(_,_,_,_,_,_,_,_)).Times(0);
+  EXPECT_CALL(lr, ReadProgram(_,_,_,_,_,_,_,_,_)).Times(0);
 
   // Kludge: satisfy reporter_'s expectation.
   reporter_.SetCUName("compilation-unit-name");

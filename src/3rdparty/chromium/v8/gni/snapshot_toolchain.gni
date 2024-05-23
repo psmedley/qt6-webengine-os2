@@ -70,6 +70,10 @@ if (v8_snapshot_toolchain == "") {
     # therefore snapshots will need to be built using native mksnapshot
     # in combination with qemu
     v8_snapshot_toolchain = current_toolchain
+  } else if (host_cpu == "arm64" && current_cpu == "x64") {
+    # Cross-build from arm64 to intel (likely on an Apple Silicon mac).
+    v8_snapshot_toolchain =
+        "//build/toolchain/${host_os}:clang_arm64_v8_$v8_current_cpu"
   } else if (host_cpu == "x64") {
     # This is a cross-compile from an x64 host to either a non-Intel target
     # cpu or a different target OS. Clang will always be used by default on the
@@ -84,7 +88,7 @@ if (v8_snapshot_toolchain == "") {
     if (v8_current_cpu == "x64" || v8_current_cpu == "x86") {
       _cpus = v8_current_cpu
     } else if (v8_current_cpu == "arm64" || v8_current_cpu == "mips64el" ||
-               v8_current_cpu == "riscv64") {
+               v8_current_cpu == "riscv64" || v8_current_cpu == "loong64") {
       if (is_win && v8_current_cpu == "arm64") {
         # set _cpus to blank for Windows ARM64 so host_toolchain could be
         # selected as snapshot toolchain later.
@@ -105,29 +109,6 @@ if (v8_snapshot_toolchain == "") {
     } else if (is_win && v8_current_cpu == "arm64") {
       # cross compile Windows arm64 with host toolchain.
       v8_snapshot_toolchain = host_toolchain
-    }
-  } else if (host_cpu == "arm64") {
-    if (is_chromeos && !is_clang) {
-      _clang = ""
-    } else {
-      _clang = "clang_"
-    }
-
-    if (v8_current_cpu == "arm64" || v8_current_cpu == "arm") {
-      _cpus = v8_current_cpu
-    } else if (v8_current_cpu == "x64" || v8_current_cpu == "mips64el" ||
-               v8_current_cpu == "riscv64" || v8_current_cpu == "loong64") {
-      _cpus = "arm64_v8_${v8_current_cpu}"
-    } else if (v8_current_cpu == "x86" || v8_current_cpu == "mipsel") {
-      _cpus = "arm_v8_${v8_current_cpu}"
-    } else {
-      # This branch should not be reached; leave _cpus blank so the assert
-      # below will fail.
-      _cpus = ""
-    }
-
-    if (_cpus != "") {
-      v8_snapshot_toolchain = "//build/toolchain/${host_os}:${_clang}${_cpus}"
     }
   }
 }

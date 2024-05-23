@@ -11,24 +11,36 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/component_export.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/task/current_thread.h"
 #include "ui/events/devices/gamepad_device.h"
+#include "ui/events/devices/haptic_touchpad_effects.h"
 #include "ui/events/devices/input_device.h"
 #include "ui/events/devices/stylus_state.h"
 #include "ui/events/ozone/evdev/event_dispatch_callback.h"
+#include "ui/events/ozone/evdev/touch_evdev_types.h"
 #include "ui/gfx/geometry/size.h"
 
 struct input_event;
 
 namespace ui {
 enum class DomCode;
+struct InputDeviceSettingsEvdev;
 
 class COMPONENT_EXPORT(EVDEV) EventConverterEvdev
     : public base::MessagePumpForUI::FdWatcher {
  public:
+  using ReportStylusStateCallback =
+      base::RepeatingCallback<void(const InProgressTouchEvdev&,
+                                   const int32_t x_res,
+                                   const int32_t y_res,
+                                   const base::TimeTicks&)>;
+
+  using GetLatestStylusStateCallback =
+      base::RepeatingCallback<void(const InProgressStylusState**)>;
+
   EventConverterEvdev(int fd,
                       const base::FilePath& path,
                       int id,
@@ -38,6 +50,10 @@ class COMPONENT_EXPORT(EVDEV) EventConverterEvdev
                       uint16_t vendor_id,
                       uint16_t product_id,
                       uint16_t version);
+
+  EventConverterEvdev(const EventConverterEvdev&) = delete;
+  EventConverterEvdev& operator=(const EventConverterEvdev&) = delete;
+
   ~EventConverterEvdev() override;
 
   int id() const { return input_device_.id; }
@@ -47,6 +63,10 @@ class COMPONENT_EXPORT(EVDEV) EventConverterEvdev
   InputDeviceType type() const { return input_device_.type; }
 
   const InputDevice& input_device() const { return input_device_; }
+
+  // Update device settings. The default implementation doesn't do
+  // anything
+  virtual void ApplyDeviceSettings(const InputDeviceSettingsEvdev& settings);
 
   // Start reading events.
   void Start();
@@ -85,6 +105,10 @@ class COMPONENT_EXPORT(EVDEV) EventConverterEvdev
 
   // Returns true if the converter is used for a touchpad device.
   virtual bool HasTouchpad() const;
+
+  // Returns true if the converter is used for a haptic touchpad device.
+  // If HasHapticTouchpad() is true, then HasTouchpad() is also true.
+  virtual bool HasHapticTouchpad() const;
 
   // Returns true if the converter is used for a touchscreen device.
   virtual bool HasTouchscreen() const;
@@ -137,12 +161,27 @@ class COMPONENT_EXPORT(EVDEV) EventConverterEvdev
   virtual void SetPalmSuppressionCallback(
       const base::RepeatingCallback<void(bool)>& callback);
 
+  // Sets callback to report the latest stylus state.
+  virtual void SetReportStylusStateCallback(
+      const ReportStylusStateCallback& callback);
+
+  // Sets callback to get the latest stylus state.
+  virtual void SetGetLatestStylusStateCallback(
+      const GetLatestStylusStateCallback& callback);
+
   // Helper to generate a base::TimeTicks from an input_event's time
   static base::TimeTicks TimeTicksFromInputEvent(const input_event& event);
 
   // Handle gamepad force feedback effects.
   virtual void PlayVibrationEffect(uint8_t amplitude, uint16_t duration_millis);
   virtual void StopVibration();
+
+  // Handle haptic touchpad effects.
+  virtual void PlayHapticTouchpadEffect(HapticTouchpadEffect effect,
+                                        HapticTouchpadEffectStrength strength);
+  virtual void SetHapticTouchpadEffectForNextButtonRelease(
+      HapticTouchpadEffect effect,
+      HapticTouchpadEffectStrength strength);
 
  protected:
   // base::MessagePumpForUI::FdWatcher:
@@ -163,9 +202,6 @@ class COMPONENT_EXPORT(EVDEV) EventConverterEvdev
 
   // Controller for watching the input fd.
   base::MessagePumpForUI::FdWatchController controller_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(EventConverterEvdev);
 };
 
 }  // namespace ui

@@ -4,9 +4,14 @@
 
 #include "third_party/blink/renderer/platform/storage/blink_storage_key_mojom_traits.h"
 
+#include "base/stl_util.h"
 #include "base/unguessable_token.h"
+#include "mojo/public/cpp/base/unguessable_token_mojom_traits.h"
+#include "third_party/blink/public/mojom/storage_key/ancestor_chain_bit.mojom-blink.h"
 #include "third_party/blink/renderer/platform/mojo/security_origin_mojom_traits.h"
-#include "third_party/blink/renderer/platform/storage/blink_storage_key.h"
+#include "third_party/blink/renderer/platform/network/blink_schemeful_site.h"
+#include "third_party/blink/renderer/platform/network/blink_schemeful_site_mojom_traits.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace mojo {
 
@@ -18,17 +23,21 @@ bool StructTraits<blink::mojom::StorageKeyDataView, blink::BlinkStorageKey>::
     return false;
   DCHECK(origin);
 
+  blink::BlinkSchemefulSite top_level_site;
+  if (!data.ReadTopLevelSite(&top_level_site))
+    return false;
+
   absl::optional<base::UnguessableToken> nonce;
   if (!data.ReadNonce(&nonce))
     return false;
 
-  if (nonce.has_value()) {
-    *out = blink::BlinkStorageKey::CreateWithNonce(std::move(origin),
-                                                   nonce.value());
-  } else {
-    *out = blink::BlinkStorageKey(std::move(origin));
-  }
+  blink::mojom::blink::AncestorChainBit ancestor_chain_bit;
+  if (!data.ReadAncestorChainBit(&ancestor_chain_bit))
+    return false;
 
+  *out = blink::BlinkStorageKey(std::move(origin), top_level_site,
+                                base::OptionalOrNullptr(nonce),
+                                ancestor_chain_bit);
   return true;
 }
 

@@ -8,7 +8,7 @@
 #include "tools/gpu/gl/GLTestContext.h"
 
 #include "include/gpu/GrDirectContext.h"
-#include "src/gpu/gl/GrGLUtil.h"
+#include "src/gpu/ganesh/gl/GrGLUtil.h"
 #include "tools/gpu/GpuTimer.h"
 
 namespace {
@@ -30,10 +30,10 @@ private:
     sk_gpu_test::PlatformTimerQuery onQueueTimerStart() const override;
     void onQueueTimerStop(sk_gpu_test::PlatformTimerQuery) const override;
 
-    static constexpr GrGLenum GL_QUERY_RESULT            = 0x8866;
-    static constexpr GrGLenum GL_QUERY_RESULT_AVAILABLE  = 0x8867;
-    static constexpr GrGLenum GL_TIME_ELAPSED            = 0x88bf;
-    static constexpr GrGLenum GL_GPU_DISJOINT            = 0x8fbb;
+    inline static constexpr GrGLenum GL_QUERY_RESULT            = 0x8866;
+    inline static constexpr GrGLenum GL_QUERY_RESULT_AVAILABLE  = 0x8867;
+    inline static constexpr GrGLenum GL_TIME_ELAPSED            = 0x88bf;
+    inline static constexpr GrGLenum GL_GPU_DISJOINT            = 0x8fbb;
 
     typedef void (GR_GL_FUNCTION_TYPE* GLGetIntegervProc) (GrGLenum, GrGLint*);
     typedef void (GR_GL_FUNCTION_TYPE* GLGenQueriesProc) (GrGLsizei, GrGLuint*);

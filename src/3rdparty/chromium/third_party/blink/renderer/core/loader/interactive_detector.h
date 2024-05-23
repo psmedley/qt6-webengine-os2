@@ -11,12 +11,13 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/loader/long_task_detector.h"
 #include "third_party/blink/renderer/core/page/page_hidden_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/pod_interval.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace base {
@@ -28,8 +29,6 @@ class UkmRecorder;
 }  // namespace ukm
 
 namespace blink {
-
-CORE_EXPORT extern const base::Feature kFixFirstInputDelayForDesktop;
 
 class Document;
 class Event;

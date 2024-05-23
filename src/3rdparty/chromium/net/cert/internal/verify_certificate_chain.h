@@ -90,7 +90,9 @@ class NET_EXPORT VerifyCertificateChainDelegate {
 //  * The end-entity's KeyUsage before using its SPKI.
 //  * The end-entity's name/subjectAltName. Name constraints from intermediates
 //    will have already been applied, so it is sufficient to check the
-//    end-entity for a match.
+//    end-entity for a match. The caller MUST NOT check hostnames on the
+//    commonName field because this implementation does not apply dnsName
+//    constraints on commonName.
 //
 // ---------
 // Inputs
@@ -205,6 +207,10 @@ class NET_EXPORT VerifyCertificateChainDelegate {
 // No properties from the root certificate, other than its Subject and
 // SPKI, are checked during verification. This is the usual
 // interpretation for a "trust anchor".
+//
+// TRUSTED_ANCHOR_WITH_EXPIRATION:
+//
+// The validity period of the root is checked, in addition to Subject and SPKI.
 //
 // TRUSTED_ANCHOR_WITH_CONSTRAINTS:
 //

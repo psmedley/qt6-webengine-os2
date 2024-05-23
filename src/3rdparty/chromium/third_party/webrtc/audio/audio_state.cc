@@ -50,11 +50,6 @@ AudioTransport* AudioState::audio_transport() {
   return &audio_transport_;
 }
 
-bool AudioState::typing_noise_detected() const {
-  RTC_DCHECK(thread_checker_.IsCurrent());
-  return audio_transport_.typing_noise_detected();
-}
-
 void AudioState::AddReceivingStream(webrtc::AudioReceiveStream* stream) {
   RTC_DCHECK(thread_checker_.IsCurrent());
   RTC_DCHECK_EQ(0, receiving_streams_.count(stream));
@@ -123,7 +118,7 @@ void AudioState::RemoveSendingStream(webrtc::AudioSendStream* stream) {
 }
 
 void AudioState::SetPlayout(bool enabled) {
-  RTC_LOG(INFO) << "SetPlayout(" << enabled << ")";
+  RTC_LOG(LS_INFO) << "SetPlayout(" << enabled << ")";
   RTC_DCHECK(thread_checker_.IsCurrent());
   if (playout_enabled_ != enabled) {
     playout_enabled_ = enabled;
@@ -140,7 +135,7 @@ void AudioState::SetPlayout(bool enabled) {
 }
 
 void AudioState::SetRecording(bool enabled) {
-  RTC_LOG(INFO) << "SetRecording(" << enabled << ")";
+  RTC_LOG(LS_INFO) << "SetRecording(" << enabled << ")";
   RTC_DCHECK(thread_checker_.IsCurrent());
   if (recording_enabled_ != enabled) {
     recording_enabled_ = enabled;

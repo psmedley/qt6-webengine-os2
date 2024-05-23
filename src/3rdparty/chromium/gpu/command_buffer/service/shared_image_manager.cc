@@ -12,16 +12,23 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "gpu/command_buffer/common/shared_image_trace_utils.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/shared_image_representation.h"
 #include "ui/gl/trace_util.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "gpu/command_buffer/service/shared_image_batch_access_manager.h"
+#endif
+
+#if BUILDFLAG(IS_WIN)
+#include "gpu/command_buffer/service/dxgi_shared_handle_manager.h"
+#include "ui/gl/gl_angle_util_win.h"
 #endif
 
 #if DCHECK_IS_ON()
@@ -61,19 +68,19 @@ class SCOPED_LOCKABLE SharedImageManager::AutoLock {
     if (manager->is_thread_safe()) {
       UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
           "GPU.SharedImageManager.TimeToAcquireLock",
-          base::TimeTicks::Now() - start_time_,
-          base::TimeDelta::FromMicroseconds(1), base::TimeDelta::FromSeconds(1),
-          50);
+          base::TimeTicks::Now() - start_time_, base::Microseconds(1),
+          base::Seconds(1), 50);
     }
   }
+
+  AutoLock(const AutoLock&) = delete;
+  AutoLock& operator=(const AutoLock&) = delete;
 
   ~AutoLock() UNLOCK_FUNCTION() = default;
 
  private:
   base::TimeTicks start_time_;
   base::AutoLockMaybe auto_lock_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutoLock);
 };
 
 SharedImageManager::SharedImageManager(bool thread_safe,
@@ -82,8 +89,15 @@ SharedImageManager::SharedImageManager(bool thread_safe,
   DCHECK(!display_context_on_another_thread || thread_safe);
   if (thread_safe)
     lock_.emplace();
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   batch_access_manager_ = std::make_unique<SharedImageBatchAccessManager>();
+#endif
+#if BUILDFLAG(IS_WIN)
+  auto d3d11_device = gl::QueryD3D11DeviceObjectFromANGLE();
+  if (d3d11_device) {
+    dxgi_shared_handle_manager_ =
+        base::MakeRefCounted<DXGISharedHandleManager>(std::move(d3d11_device));
+  }
 #endif
   CALLED_ON_VALID_THREAD();
 }
@@ -307,7 +321,7 @@ SharedImageManager::ProduceMemory(const Mailbox& mailbox,
   AutoLock autolock(this);
   auto found = images_.find(mailbox);
   if (found == images_.end()) {
-    LOG(ERROR) << "SharedImageManager::Producememory: Trying to Produce a "
+    LOG(ERROR) << "SharedImageManager::ProduceMemory: Trying to Produce a "
                   "Memory representation from a non-existent mailbox.";
     return nullptr;
   }
@@ -316,6 +330,51 @@ SharedImageManager::ProduceMemory(const Mailbox& mailbox,
   // error here. Caller is expected to handle nullptr.
   return (*found)->ProduceMemory(this, tracker);
 }
+
+std::unique_ptr<SharedImageRepresentationRaster>
+SharedImageManager::ProduceRaster(const Mailbox& mailbox,
+                                  MemoryTypeTracker* tracker) {
+  CALLED_ON_VALID_THREAD();
+
+  AutoLock autolock(this);
+  auto found = images_.find(mailbox);
+  if (found == images_.end()) {
+    LOG(ERROR) << "SharedImageManager::ProduceRaster: Trying to Produce a "
+                  "Raster representation from a non-existent mailbox.";
+    return nullptr;
+  }
+
+  // This is expected to fail based on the SharedImageBacking type, so don't log
+  // error here. Caller is expected to handle nullptr.
+  return (*found)->ProduceRaster(this, tracker);
+}
+
+#if BUILDFLAG(IS_ANDROID)
+std::unique_ptr<SharedImageRepresentationLegacyOverlay>
+SharedImageManager::ProduceLegacyOverlay(const Mailbox& mailbox,
+                                         MemoryTypeTracker* tracker) {
+  CALLED_ON_VALID_THREAD();
+
+  AutoLock autolock(this);
+  auto found = images_.find(mailbox);
+  if (found == images_.end()) {
+    LOG(ERROR)
+        << "SharedImageManager::ProduceLegacyOverlay: Trying to Produce a "
+           "Legacy Overlay representation from a non-existent mailbox.";
+    return nullptr;
+  }
+
+  auto representation = (*found)->ProduceLegacyOverlay(this, tracker);
+  if (!representation) {
+    LOG(ERROR)
+        << "SharedImageManager::ProduceLegacyOverlay: Trying to produce a "
+           "Legacy Overlay representation from an incompatible mailbox.";
+    return nullptr;
+  }
+
+  return representation;
+}
+#endif
 
 void SharedImageManager::OnRepresentationDestroyed(
     const Mailbox& mailbox,
@@ -402,7 +461,7 @@ scoped_refptr<gfx::NativePixmap> SharedImageManager::GetNativePixmap(
 }
 
 bool SharedImageManager::BeginBatchReadAccess() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return batch_access_manager_->BeginBatchReadAccess();
 #else
   return true;
@@ -410,7 +469,7 @@ bool SharedImageManager::BeginBatchReadAccess() {
 }
 
 bool SharedImageManager::EndBatchReadAccess() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return batch_access_manager_->EndBatchReadAccess();
 #else
   return true;

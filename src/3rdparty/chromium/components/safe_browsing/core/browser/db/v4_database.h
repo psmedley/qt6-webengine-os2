@@ -12,10 +12,11 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/safe_browsing/core/browser/db/v4_protocol_manager_util.h"
 #include "components/safe_browsing/core/browser/db/v4_store.h"
 #include "components/safe_browsing/core/common/proto/webui.pb.h"
@@ -29,8 +30,8 @@ class V4Database;
 
 // Scheduled when the database has been read from disk and is ready to process
 // resource reputation requests.
-using NewDatabaseReadyCallback =
-    base::OnceCallback<void(std::unique_ptr<V4Database>)>;
+using NewDatabaseReadyCallback = base::OnceCallback<void(
+    std::unique_ptr<V4Database, base::OnTaskRunnerDeleter>)>;
 
 // Scheduled when the checksum for all the stores in the database has been
 // verified to match the expected value. Stores for which the checksum did not
@@ -88,7 +89,7 @@ using ListInfos = std::vector<ListInfo>;
 class V4DatabaseFactory {
  public:
   virtual ~V4DatabaseFactory() {}
-  virtual std::unique_ptr<V4Database> Create(
+  virtual std::unique_ptr<V4Database, base::OnTaskRunnerDeleter> Create(
       const scoped_refptr<base::SequencedTaskRunner>& db_task_runner,
       std::unique_ptr<StoreMap> store_map);
 };
@@ -117,9 +118,8 @@ class V4Database {
   // Initialize state that lives on the IO thread.
   void InitializeOnIOSequence();
 
-  // Destroys the provided v4_database on its task_runner since this may be a
-  // long operation.
-  static void Destroy(std::unique_ptr<V4Database> v4_database);
+  V4Database(const V4Database&) = delete;
+  V4Database& operator=(const V4Database&) = delete;
 
   virtual ~V4Database();
 
@@ -251,8 +251,6 @@ class V4Database {
   // Only meant to be dereferenced and invalidated on the IO thread and hence
   // named. For details, see the comment at the top of weak_ptr.h
   base::WeakPtrFactory<V4Database> weak_factory_on_io_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(V4Database);
 };
 
 }  // namespace safe_browsing

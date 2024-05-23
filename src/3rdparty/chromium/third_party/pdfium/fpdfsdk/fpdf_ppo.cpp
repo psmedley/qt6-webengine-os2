@@ -29,8 +29,10 @@
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fpdfapi/render/cpdf_pagerendercache.h"
 #include "core/fxcrt/fx_safe_types.h"
+#include "core/fxcrt/fx_string_wrappers.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
@@ -303,8 +305,6 @@ bool CPDF_PageOrganizer::UpdateReference(CPDF_Object* pObj) {
           if (key == "Parent" || key == "Prev" || key == "First")
             continue;
           CPDF_Object* pNextObj = it.second.Get();
-          if (!pNextObj)
-            return false;
           if (!UpdateReference(pNextObj))
             bad_keys.push_back(key);
         }
@@ -316,8 +316,7 @@ bool CPDF_PageOrganizer::UpdateReference(CPDF_Object* pObj) {
     case CPDF_Object::kArray: {
       CPDF_Array* pArray = pObj->AsArray();
       for (size_t i = 0; i < pArray->size(); ++i) {
-        CPDF_Object* pNextObj = pArray->GetObjectAt(i);
-        if (!pNextObj || !UpdateReference(pNextObj))
+        if (!UpdateReference(pArray->GetObjectAt(i)))
           return false;
       }
       return true;
@@ -352,9 +351,9 @@ uint32_t CPDF_PageOrganizer::GetNewObjId(CPDF_Reference* pRef) {
   if (CPDF_Dictionary* pDictClone = pClone->AsDictionary()) {
     if (pDictClone->KeyExist("Type")) {
       ByteString strType = pDictClone->GetStringFor("Type");
-      if (!FXSYS_stricmp(strType.c_str(), "Pages"))
+      if (strType.EqualNoCase("Pages"))
         return 4;
-      if (!FXSYS_stricmp(strType.c_str(), "Page"))
+      if (strType.EqualNoCase("Page"))
         return 0;
     }
   }
@@ -538,15 +537,15 @@ bool CPDF_NPageToOneExporter::ExportNPagesToOne(
   size_t nPagesPerSheet = nSafePagesPerSheet.ValueOrDie();
   NupState nupState(destPageSize, nPagesOnXAxis, nPagesOnYAxis);
 
-  size_t curpage = 0;
+  FX_SAFE_INT32 curpage = 0;
   const CFX_FloatRect destPageRect(0, 0, destPageSize.width,
                                    destPageSize.height);
   for (size_t iOuterPage = 0; iOuterPage < pageIndices.size();
        iOuterPage += nPagesPerSheet) {
     m_XObjectNameToNumberMap.clear();
 
-    // Create a new page
-    CPDF_Dictionary* pDestPageDict = dest()->CreateNewPage(curpage);
+    CPDF_Dictionary* pDestPageDict =
+        dest()->CreateNewPage(curpage.ValueOrDie());
     if (!pDestPageDict)
       return false;
 
@@ -587,7 +586,7 @@ ByteString CPDF_NPageToOneExporter::AddSubPage(
   matrix.Scale(settings.scale, settings.scale);
   matrix.Translate(settings.subPageStartPoint.x, settings.subPageStartPoint.y);
 
-  std::ostringstream contentStream;
+  fxcrt::ostringstream contentStream;
   contentStream << "q\n"
                 << matrix.a << " " << matrix.b << " " << matrix.c << " "
                 << matrix.d << " " << matrix.e << " " << matrix.f << " cm\n"
@@ -671,16 +670,8 @@ void CPDF_NPageToOneExporter::FinishPage(CPDF_Dictionary* pDestPageDict,
   DCHECK(pDestPageDict);
 
   CPDF_Dictionary* pRes =
-      pDestPageDict->GetDictFor(pdfium::page_object::kResources);
-  if (!pRes) {
-    pRes = pDestPageDict->SetNewFor<CPDF_Dictionary>(
-        pdfium::page_object::kResources);
-  }
-
-  CPDF_Dictionary* pPageXObject = pRes->GetDictFor("XObject");
-  if (!pPageXObject)
-    pPageXObject = pRes->SetNewFor<CPDF_Dictionary>("XObject");
-
+      GetOrCreateDict(pDestPageDict, pdfium::page_object::kResources);
+  CPDF_Dictionary* pPageXObject = GetOrCreateDict(pRes, "XObject");
   for (auto& it : m_XObjectNameToNumberMap)
     pPageXObject->SetNewFor<CPDF_Reference>(it.first, dest(), it.second);
 

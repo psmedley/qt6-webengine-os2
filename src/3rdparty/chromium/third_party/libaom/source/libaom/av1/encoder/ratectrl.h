@@ -19,7 +19,6 @@
 
 #include "av1/common/av1_common_int.h"
 #include "av1/common/blockd.h"
-#include "av1/encoder/tpl_model.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,10 +46,26 @@ extern "C" {
 #define FIXED_GF_INTERVAL 16
 #define MAX_GF_LENGTH_LAP 16
 
+#define FIXED_GF_INTERVAL_RT 80
+#define MAX_GF_INTERVAL_RT 160
+
 #define MAX_NUM_GF_INTERVALS 15
 
 #define MAX_ARF_LAYERS 6
 // #define STRICT_RC
+
+#define DEFAULT_KF_BOOST_RT 2300
+#define DEFAULT_GF_BOOST_RT 2000
+
+// A passive rate control strategy for screen content type in real-time mode.
+// When it is turned on, the compression performance is improved by
+// 7.8% (overall_psnr), 5.0% (VMAF) on average. Some clips see gains
+// over 20% on metric.
+// The downside is that it does not guarantee frame size.
+// Since RT mode has a tight restriction on buffer overflow control, we
+// turn it off by default.
+#define RT_PASSIVE_STRATEGY 0
+#define MAX_Q_HISTORY 1000
 
 typedef struct {
   int resize_width;
@@ -145,22 +160,6 @@ typedef struct {
   int sb64_target_rate;
 
   /*!
-   * Q used on last encoded frame of the given type.
-   */
-  int last_q[FRAME_TYPES];
-
-  /*!
-   * Q used for last boosted (non leaf) frame (GF/KF/ARF)
-   */
-  int last_boosted_qindex;
-
-  /*!
-   * Correction factors used to adjust the q estimate for a given target rate
-   * in the encode loop.
-   */
-  double rate_correction_factors[RATE_FACTOR_LEVELS];
-
-  /*!
    * Number of frames since the last ARF / GF.
    */
   int frames_since_golden;
@@ -193,6 +192,7 @@ typedef struct {
   int high_source_sad;
   uint64_t avg_source_sad;
   uint64_t prev_avg_source_sad;
+  uint64_t frame_source_sad;
 
   int avg_frame_bandwidth;  // Average frame size target for clip
   int min_frame_bandwidth;  // Minimum allocation used for any frame
@@ -201,23 +201,9 @@ typedef struct {
 
   int ni_av_qi;
   int ni_tot_qi;
-  double avg_q;
-
-  int64_t buffer_level;
-  int64_t bits_off_target;
-  int64_t vbr_bits_off_target;
-  int64_t vbr_bits_off_target_fast;
 
   int decimation_factor;
   int decimation_count;
-
-  int rolling_target_bits;
-  int rolling_actual_bits;
-
-  int rate_error_estimate;
-
-  int64_t total_actual_bits;
-  int64_t total_target_bits;
 
   /*!\endcond */
   /*!
@@ -232,8 +218,8 @@ typedef struct {
   /*!\cond */
 
   // rate control history for last frame(1) and the frame before(2).
-  // -1: undershot
-  //  1: overshoot
+  // -1: overshoot
+  //  1: undershoot
   //  0: not initialized.
   int rc_1_frame;
   int rc_2_frame;
@@ -242,28 +228,38 @@ typedef struct {
 
   /*!\endcond */
   /*!
-   * Proposed maximum alloed Q for current frame
+   * Proposed maximum allowed Q for current frame
    */
   int active_worst_quality;
-  /*!
-   * Proposed minimum allowed Q different layers in a coding pyramid
-   */
-  int active_best_quality[MAX_ARF_LAYERS + 1];
 
   /*!\cond */
   // Track amount of low motion in scene
   int avg_frame_low_motion;
+  int cnt_zeromv;
+
+  // signals if number of blocks with motion is high
+  int percent_blocks_with_motion;
+
+  // Maximum value of source sad across all blocks of frame.
+  uint64_t max_block_source_sad;
 
   // For dynamic resize, 1 pass cbr.
   RESIZE_STATE resize_state;
   int resize_avg_qp;
   int resize_buffer_underflow;
   int resize_count;
-#if CONFIG_FRAME_PARALLEL_ENCODE
+
+  // Flag to disable content related qp adjustment.
+  int rtc_external_ratectrl;
+
+  // Stores fast_extra_bits of the current frame.
   int frame_level_fast_extra_bits;
+
   double frame_level_rate_correction_factors[RATE_FACTOR_LEVELS];
-#endif
   /*!\endcond */
+
+  int prev_coded_width;
+  int prev_coded_height;
 } RATE_CONTROL;
 
 /*!
@@ -347,8 +343,6 @@ typedef struct {
   // Total number of stats required by gfu_boost calculation.
   int num_stats_required_for_gfu_boost;
 
-  int next_is_fwd_key;
-
   int enable_scenecut_detection;
 
   int use_arf_in_this_kf_group;
@@ -368,7 +362,7 @@ typedef struct {
    */
   int avg_frame_qindex[FRAME_TYPES];
 
-#if CONFIG_FRAME_PARALLEL_ENCODE
+#if CONFIG_FPMT_TEST
   /*!
    * Temporary variable used in simulating the delayed update of
    * active_best_quality.
@@ -452,8 +446,106 @@ typedef struct {
    * bits_left;.
    */
   int64_t temp_bits_left;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * extend_minq.
+   */
+  int temp_extend_minq;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * extend_maxq.
+   */
+  int temp_extend_maxq;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * extend_minq_fast.
+   */
+  int temp_extend_minq_fast;
 #endif
+  /*!
+   * Proposed minimum allowed Q different layers in a coding pyramid
+   */
+  int active_best_quality[MAX_ARF_LAYERS + 1];
+
+  /*!
+   * Q used for last boosted (non leaf) frame (GF/KF/ARF)
+   */
+  int last_boosted_qindex;
+
+  /*!
+   * Average Q value of previous inter frames
+   */
+  double avg_q;
+
+  /*!
+   * Q used on last encoded frame of the given type.
+   */
+  int last_q[FRAME_TYPES];
+
+  /*!
+   * Correction factors used to adjust the q estimate for a given target rate
+   * in the encode loop.
+   */
+  double rate_correction_factors[RATE_FACTOR_LEVELS];
+
+  /*!
+   * Current total consumed bits.
+   */
+  int64_t total_actual_bits;
+
+  /*!
+   * Current total target bits.
+   */
+  int64_t total_target_bits;
+
+  /*!
+   * Current buffer level.
+   */
+  int64_t buffer_level;
+
+  /*!
+   * PCT rc error.
+   */
+  int rate_error_estimate;
+
+  /*!
+   * Error bits available from previously encoded frames.
+   */
+  int64_t vbr_bits_off_target;
+
+  /*!
+   * Error bits available from previously encoded frames undershoot.
+   */
+  int64_t vbr_bits_off_target_fast;
+
+  /*!
+   * Total bits deviated from the average frame target, from previously
+   * encoded frames.
+   */
+  int64_t bits_off_target;
+
+  /*!
+   * Rolling monitor target bits updated based on current frame target size.
+   */
+  int rolling_target_bits;
+
+  /*!
+   * Rolling monitor actual bits updated based on current frame final projected
+   * size.
+   */
+  int rolling_actual_bits;
+
+  /*!
+   * The history of qindex for each frame.
+   * Only used when RT_PASSIVE_STRATEGY = 1.
+   */
+  int q_history[MAX_Q_HISTORY];
 } PRIMARY_RATE_CONTROL;
+
+/*!\cond */
 
 struct AV1_COMP;
 struct AV1EncoderConfig;
@@ -462,8 +554,7 @@ struct GF_GROUP;
 void av1_primary_rc_init(const struct AV1EncoderConfig *oxcf,
                          PRIMARY_RATE_CONTROL *p_rc);
 
-void av1_rc_init(const struct AV1EncoderConfig *oxcf, RATE_CONTROL *rc,
-                 const PRIMARY_RATE_CONTROL *const p_rc);
+void av1_rc_init(const struct AV1EncoderConfig *oxcf, RATE_CONTROL *rc);
 
 int av1_estimate_bits_at_q(FRAME_TYPE frame_kind, int q, int mbs,
                            double correction_factor, aom_bit_depth_t bit_depth,
@@ -482,8 +573,8 @@ int av1_rc_get_default_max_gf_interval(double framerate, int min_gf_interval);
 // Generally at the high level, the following flow is expected
 // to be enforced for rate control:
 // First call per frame, one of:
-//   av1_rc_get_first_pass_params()
-//   av1_rc_get_second_pass_params()
+//   av1_get_one_pass_rt_params()
+//   av1_get_second_pass_params()
 // depending on the usage to set the rate control encode parameters desired.
 //
 // Then, call encode_frame_to_data_rate() to perform the
@@ -492,14 +583,14 @@ int av1_rc_get_default_max_gf_interval(double framerate, int min_gf_interval);
 //   av1_rc_postencode_update_drop_frame()
 //
 // The majority of rate control parameters are only expected
-// to be set in the av1_rc_get_..._params() functions and
+// to be set in the av1_get_..._params() functions and
 // updated during the av1_rc_postencode_update...() functions.
 // The only exceptions are av1_rc_drop_frame() and
 // av1_rc_update_rate_correction_factors() functions.
 
 // Functions to set parameters for encoding before the actual
 // encode_frame_to_data_rate() function.
-struct EncodeFrameParams;
+struct EncodeFrameInput;
 
 // Post encode update of the rate control parameters based
 // on bytes used
@@ -515,16 +606,15 @@ void av1_rc_postencode_update_drop_frame(struct AV1_COMP *cpi);
  *
  * \ingroup rate_control
  * \param[in]   cpi                   Top level encoder instance structure
+ * \param[in]   is_encode_stage       Indicates if recode loop or post-encode
  * \param[in]   width                 Frame width
  * \param[in]   height                Frame height
  *
- * \return None but updates the relevant rate correction factor in cpi->rc
+ * \remark Updates the relevant rate correction factor in cpi->rc
  */
 void av1_rc_update_rate_correction_factors(struct AV1_COMP *cpi,
-#if CONFIG_FRAME_PARALLEL_ENCODE
-                                           int is_encode_stage,
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
-                                           int width, int height);
+                                           int is_encode_stage, int width,
+                                           int height);
 /*!\cond */
 
 // Decide if we should drop this frame: For 1-pass CBR.
@@ -551,7 +641,7 @@ void av1_rc_compute_frame_size_bounds(const struct AV1_COMP *cpi,
  * \return Returns selected q index to be used for encoding this frame.
  * Also, updates \c rc->arf_q.
  */
-int av1_rc_pick_q_and_bounds(const struct AV1_COMP *cpi, int width, int height,
+int av1_rc_pick_q_and_bounds(struct AV1_COMP *cpi, int width, int height,
                              int gf_index, int *bottom_index, int *top_index);
 
 /*!\brief Estimates q to achieve a target bits per frame
@@ -578,7 +668,7 @@ int av1_rc_bits_per_mb(FRAME_TYPE frame_type, int qindex,
 
 // Clamping utilities for bitrate targets for iframes and pframes.
 int av1_rc_clamp_iframe_target_size(const struct AV1_COMP *const cpi,
-                                    int target);
+                                    int64_t target);
 int av1_rc_clamp_pframe_target_size(const struct AV1_COMP *const cpi,
                                     int target, uint8_t frame_update_type);
 
@@ -615,8 +705,10 @@ int av1_resize_one_pass_cbr(struct AV1_COMP *cpi);
 void av1_rc_set_frame_target(struct AV1_COMP *cpi, int target, int width,
                              int height);
 
-void av1_set_reference_structure_one_pass_rt(struct AV1_COMP *cpi,
-                                             int gf_update);
+void av1_adjust_gf_refresh_qp_one_pass_rt(struct AV1_COMP *cpi);
+
+void av1_set_rtc_reference_structure_one_layer(struct AV1_COMP *cpi,
+                                               int gf_update);
 
 /*!\endcond */
 /*!\brief Calculates how many bits to use for a P frame in one pass vbr
@@ -681,14 +773,17 @@ int av1_calc_iframe_target_size_one_pass_cbr(const struct AV1_COMP *cpi);
  *
  * \ingroup rate_control
  * \param[in]       cpi          Top level encoder structure
- * \param[in]       frame_params Encoder frame parameters
- * \param[in]       frame_flags  Emcoder frame flags
+ * \param[in]       frame_type   Encoder frame type
+ * \param[in]       frame_input  Current and last input source frames
+ * \param[in]       frame_flags  Encoder frame flags
  *
- * \return Nothing is returned. Instead the settings computed in this
- * funtion are set in: \c frame_params, \c cpi->common, \c cpi->rc, \c cpi->svc.
+ * \remark Nothing is returned. Instead the settings computed in this
+ * function are set in: \c frame_params, \c cpi->common, \c cpi->rc,
+ * \c cpi->svc.
  */
 void av1_get_one_pass_rt_params(struct AV1_COMP *cpi,
-                                struct EncodeFrameParams *const frame_params,
+                                FRAME_TYPE *const frame_type,
+                                const struct EncodeFrameInput *frame_input,
                                 unsigned int frame_flags);
 
 /*!\brief Increase q on expected encoder overshoot, for CBR mode.
@@ -706,26 +801,6 @@ void av1_get_one_pass_rt_params(struct AV1_COMP *cpi,
  * \return q is returned, and updates are done to \c cpi->rc.
  */
 int av1_encodedframe_overshoot_cbr(struct AV1_COMP *cpi, int *q);
-
-#if !CONFIG_REALTIME_ONLY
-/*!\brief Compute the q_indices for the entire GOP.
- *
- * \param[in]       gf_frame_index    Index of the current frame
- * \param[in]       base_q_index      Base q index
- * \param[in]       arf_qstep_ratio   The quantize step ratio between arf q
- *                                    index and base q index
- * \param[in]       bit_depth         Bit depth
- * \param[in]       gf_group          Pointer to the GOP
- * \param[out]      q_index_list      An array to store output gop q indices.
- *                                    the array size should be equal or
- *                                    greater than gf_group.size()
- */
-void av1_q_mode_compute_gop_q_indices(int gf_frame_index, int base_q_index,
-                                      double arf_qstep_ratio,
-                                      aom_bit_depth_t bit_depth,
-                                      const struct GF_GROUP *gf_group,
-                                      int *q_index_list);
-#endif  // !CONFIG_REALTIME_ONLY
 
 /*!\brief Compute the q_indices for a single frame.
  *
@@ -754,6 +829,7 @@ int av1_get_arf_q_index(int base_q_index, int gfu_boost, int bit_depth,
                         double arf_boost_factor);
 
 #if !CONFIG_REALTIME_ONLY
+struct TplDepFrame;
 /*!\brief Compute the q_indices for the ARF of a GOP in Q mode.
  *
  * \param[in]       cpi               Top level encoder structure

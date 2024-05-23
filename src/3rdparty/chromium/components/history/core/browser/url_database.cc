@@ -191,14 +191,14 @@ URLID URLDatabase::AddURLInternal(const URLRow& info, bool is_temporary) {
 }
 
 bool URLDatabase::URLTableContainsAutoincrement() {
-  // sqlite_master has columns:
+  // sqlite_schema has columns:
   //   type - "index" or "table".
   //   name - name of created element.
   //   tbl_name - name of element, or target table in case of index.
   //   rootpage - root page of the element in database file.
   //   sql - SQL to create the element.
   sql::Statement statement(GetDB().GetUniqueStatement(
-      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'urls'"));
+      "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'urls'"));
 
   // urls table does not exist.
   if (!statement.Step())
@@ -731,17 +731,6 @@ bool URLDatabase::CreateURLTable(bool is_temporary) {
       // during this period. Once Sync come back, Sync would use ROWIDs and
       // timestamps to see if there are any updates need to be synced. And sync
       // will only see the new URL, but missed the deleted URL.
-      //
-      // IMPORTANT NOTE: Currently new tables are created with AUTOINCREMENT
-      // but the migration code is disabled. This means that you will not
-      // be able to count on AUTOINCREMENT behavior without adding
-      // additional migration steps.
-      //
-      // Along with this, an unused favicon_id column will exist for tables
-      // without AUTOINCREMENT. This should be removed everywhere.
-      //
-      // TODO(https://crbug.com/736136) figure out how to update users to use
-      // AUTOINCREMENT and remove the favicon_id column consistently.
       "id INTEGER PRIMARY KEY AUTOINCREMENT,"
       "url LONGVARCHAR,"
       "title LONGVARCHAR,"
@@ -786,11 +775,10 @@ const int kLowQualityMatchVisitLimit = 4;
 const int kLowQualityMatchAgeLimitInDays = 3;
 
 const base::TimeDelta kAutocompleteDuplicateVisitIntervalThreshold =
-    base::TimeDelta::FromMinutes(5);
+    base::Minutes(5);
 
 base::Time AutocompleteAgeThreshold() {
-  return (base::Time::Now() -
-          base::TimeDelta::FromDays(kLowQualityMatchAgeLimitInDays));
+  return (base::Time::Now() - base::Days(kLowQualityMatchAgeLimitInDays));
 }
 
 bool RowQualifiesAsSignificant(const URLRow& row,

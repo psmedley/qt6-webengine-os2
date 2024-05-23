@@ -40,7 +40,7 @@ const base::Feature kAutofillAutoTriggerManualFallbackForCards{
 // credit cards from Google payments.
 const base::Feature kAutofillCreditCardAuthentication{
   "AutofillCreditCardAuthentication",
-#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)
       // Better Auth project is fully launched on Win/Mac/Clank.
       base::FEATURE_ENABLED_BY_DEFAULT
 #else
@@ -54,26 +54,22 @@ const base::Feature kAutofillCreditCardAuthentication{
 const base::Feature kAutofillCreditCardUploadFeedback{
     "AutofillCreditCardUploadFeedback", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Controls whether we show a Google-issued card in the suggestions list.
-const base::Feature kAutofillEnableGoogleIssuedCard{
-    "AutofillEnableGoogleIssuedCard", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // When enabled, merchant bound virtual cards will be offered when users
 // interact with a payment form.
 const base::Feature kAutofillEnableMerchantBoundVirtualCards{
     "AutofillEnableMerchantBoundVirtualCards",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// When enabled, enable manual falling component for virtual cards on Android.
+const base::Feature kAutofillEnableManualFallbackForVirtualCards{
+    "AutofillEnableManualFallbackForVirtualCards",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
 // When enabled, a notification will be displayed on page navigation if the
-// domain has an eligible credit card linked offer or reward.
-const base::Feature kAutofillEnableOfferNotification{
-    "AutofillEnableOfferNotification", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Controls whether to track the cross-tab-status of the offer notification
-// bubble.
-const base::Feature kAutofillEnableOfferNotificationCrossTabTracking{
-    "AutofillEnableOfferNotificationCrossTabTracking",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+// domain has an eligible merchant promo code offer or reward.
+const base::Feature kAutofillEnableOfferNotificationForPromoCodes{
+    "AutofillEnableOfferNotificationForPromoCodes",
+    base::FEATURE_ENABLED_BY_DEFAULT};
 
 // When enabled, offers will be displayed in the Clank keyboard accessory during
 // downstream.
@@ -81,16 +77,11 @@ const base::Feature kAutofillEnableOffersInClankKeyboardAccessory{
     "AutofillEnableOffersInClankKeyboardAccessory",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-// When enabled, offer data will be retrieved during downstream and shown in
-// the dropdown list.
-const base::Feature kAutofillEnableOffersInDownstream{
-    "kAutofillEnableOffersInDownstream", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// When enabled and user is signed in, a footer indicating user's e-mail address
-// and profile picture will appear at the bottom of SaveCardInfoBar.
-const base::Feature kAutofillEnableSaveCardInfoBarAccountIndicationFooter{
-    "AutofillEnableSaveCardInfoBarAccountIndicationFooter",
-    base::FEATURE_ENABLED_BY_DEFAULT};
+// Controls whether we send billing customer number in GetUploadDetails
+// preflight call.
+const base::Feature kAutofillEnableSendingBcnInGetUploadDetails{
+    "AutofillEnableSendingBcnInGetUploadDetails",
+    base::FEATURE_DISABLED_BY_DEFAULT};
 
 // When enabled, if the user interacts with the manual fallback bottom sheet
 // on Android, it'll remain sticky until the user dismisses it.
@@ -103,19 +94,60 @@ const base::Feature kAutofillEnableStickyManualFallbackForCards{
 const base::Feature kAutofillEnableToolbarStatusChip{
     "AutofillEnableToolbarStatusChip", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// When enabled, UnmaskCardRequest will set instrument id, which is Chrome-side
+// field for non-legacy ID.
+const base::Feature kAutofillEnableUnmaskCardRequestSetInstrumentId{
+    "AutofillEnableUnmaskCardRequestSetInstrumentId",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// When enabled, the user will have the ability to update the virtual card
+// enrollment of a credit card through their chrome browser after certain
+// autofill flows (for example, downstream and upstream), and from the settings
+// page.
+const base::Feature kAutofillEnableUpdateVirtualCardEnrollment{
+    "AutofillEnableUpdateVirtualCardEnrollment",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
 // When enabled, the option of using cloud token virtual card will be offered
 // when all requirements are met.
 const base::Feature kAutofillEnableVirtualCard{
     "AutofillEnableVirtualCard", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// When enabled, after a successful authentication to autofill a virtual card,
+// the user will be prompted to opt-in to FIDO if the user is not currently
+// opted-in, and if the user is opted-in already and the virtual card is FIDO
+// eligible the user will be prompted to register the virtual card into FIDO.
+const base::Feature kAutofillEnableVirtualCardFidoEnrollment(
+    "AutofillEnableVirtualCardFidoEnrollment",
+    base::FEATURE_ENABLED_BY_DEFAULT);
+
+// When enabled, in the payments settings page on desktop, virtual card
+// enrollment management will be provided so that the user can enroll/unenroll a
+// card in virtual card.
+const base::Feature kAutofillEnableVirtualCardManagementInDesktopSettingsPage{
+    "AutofillEnableVirtualCardManagementInDesktopSettingsPage",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// When enabled, Chrome will show metadata along with other card information
+// when the virtual card is presented to users.
+const base::Feature kAutofillEnableVirtualCardMetadata{
+    "AutofillEnableVirtualCardMetadata", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// When enabled, virtual card retrieval will pass an optional
+// authentication based on risk level.
+const base::Feature kAutofillEnableVirtualCardsRiskBasedAuthentication{
+    "AutofillEnableVirtualCardsRiskBasedAuthentication",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// When enabled, if the previous feature offer was declined, a delay will be
+// added before Chrome attempts to show offer again.
+const base::Feature kAutofillEnforceDelaysInStrikeDatabase{
+    "AutofillEnforceDelaysInStrikeDatabase", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // When enabled, Autofill will attempt to fill merchant promo/coupon/gift code
 // fields when data is available.
 const base::Feature kAutofillFillMerchantPromoCodeFields{
     "AutofillFillMerchantPromoCodeFields", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Controls whether to enable the fix for the offer feature in Incognito mode.
-const base::Feature kAutofillFixOfferInIncognito{
-    "AutofillFixOfferInIncognito", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // The merchant bound virtual card feature introduces new customized card art
 // images. This parameter defines the expiration of the fetched image in the
@@ -155,19 +187,11 @@ const base::Feature kAutofillSuggestVirtualCardsOnIncompleteForm{
     "AutofillSuggestVirtualCardsOnIncompleteForm",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-// When enabled, if the Autofill Assistant is running, credit card save (both
-// local and upload) will not be offered.
-const base::Feature kAutofillSuppressCreditCardSaveForAssistant{
-    "AutofillSuppressCreditCardSaveForAssistant",
-    base::FEATURE_ENABLED_BY_DEFAULT};
-
 // Controls offering credit card upload to Google Payments. Cannot ever be
 // ENABLED_BY_DEFAULT because the feature state depends on the user's country.
-// There are countries we simply can't turn this on for, and they change over
-// time, so it's important that we can flip a switch and be done instead of
-// having old versions of Chrome forever do the wrong thing. Enabling it by
-// default would mean that any first-run client without a Finch config won't get
-// the overriding command to NOT turn it on, which becomes an issue.
+// The set of launched countries is listed in autofill_experiments.cc, and this
+// flag remains as a way to easily enable upload credit card save for testers,
+// as well as enable non-fully-launched countries on a trial basis.
 const base::Feature kAutofillUpstream{"AutofillUpstream",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -177,8 +201,8 @@ const base::Feature kAutofillUpstreamAllowAllEmailDomains{
 bool ShouldShowImprovedUserConsentForCreditCardSave() {
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
-#if defined(OS_WIN) || defined(OS_APPLE) || \
-    (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || \
+    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
   // The new user consent UI is fully launched on MacOS, Windows and Linux.
   return true;
 #else

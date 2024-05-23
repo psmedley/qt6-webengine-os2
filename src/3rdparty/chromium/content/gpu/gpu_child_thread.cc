@@ -18,14 +18,15 @@
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/run_loop.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/child/child_process.h"
 #include "content/common/process_visibility_tracker.h"
 #include "content/gpu/browser_exposed_gpu_interfaces.h"
 #include "content/gpu/gpu_service_factory.h"
-#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/gpu/content_gpu_client.h"
@@ -46,9 +47,16 @@
 #include "services/viz/privileged/mojom/gl/gpu_service.mojom.h"
 #include "third_party/skia/include/core/SkGraphics.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "media/base/android/media_drm_bridge_client.h"
 #include "media/mojo/clients/mojo_android_overlay.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "components/services/font/public/cpp/font_loader.h"  // nogncheck
+#include "components/services/font/public/mojom/font_service.mojom.h"  // nogncheck
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/ports/SkFontConfigInterface.h"
 #endif
 
 namespace content {
@@ -139,10 +147,19 @@ void GpuChildThread::Init(const base::Time& process_start_time) {
 
   // When running in in-process mode, this has been set in the browser at
   // ChromeBrowserMainPartsAndroid::PreMainMessageLoopRun().
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (!in_process_gpu()) {
     media::SetMediaDrmBridgeClient(
         GetContentClient()->GetMediaDrmBridgeClient());
+  }
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (!in_process_gpu()) {
+    mojo::PendingRemote<font_service::mojom::FontService> font_service;
+    BindHostReceiver(font_service.InitWithNewPipeAndPassReceiver());
+    SkFontConfigInterface::SetGlobal(
+        sk_make_sp<font_service::FontLoader>(std::move(font_service)));
   }
 #endif
 
@@ -161,7 +178,7 @@ void GpuChildThread::OnInitializationFailed() {
 
 void GpuChildThread::OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) {
   media::AndroidOverlayMojoFactoryCB overlay_factory_cb;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   overlay_factory_cb =
       base::BindRepeating(&GpuChildThread::CreateAndroidOverlay,
                           base::ThreadTaskRunnerHandle::Get());
@@ -170,7 +187,7 @@ void GpuChildThread::OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) {
 #endif
 
 #if defined(TOOLKIT_QT)
-  gpu_channel_manager()->set_share_group(GetContentClient()->browser()->GetInProcessGpuShareGroup());
+  gpu_channel_manager()->set_share_group(GetContentClient()->gpu()->GetInProcessGpuShareGroup());
 #endif
 
   if (!IsInBrowserProcess()) {
@@ -185,7 +202,7 @@ void GpuChildThread::OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) {
   service_factory_ = std::make_unique<GpuServiceFactory>(
       gpu_service->gpu_preferences(),
       gpu_service->gpu_channel_manager()->gpu_driver_bug_workarounds(),
-      gpu_service->gpu_feature_info(),
+      gpu_service->gpu_feature_info(), gpu_service->gpu_info(),
       gpu_service->media_gpu_channel_manager()->AsWeakPtr(),
       gpu_service->gpu_memory_buffer_factory(), std::move(overlay_factory_cb));
   for (auto& receiver : pending_service_receivers_)
@@ -253,7 +270,7 @@ base::RepeatingClosure GpuChildThread::MakeQuitSafelyClosure() {
                              base::ThreadTaskRunnerHandle::Get());
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // static
 std::unique_ptr<media::AndroidOverlay> GpuChildThread::CreateAndroidOverlay(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,

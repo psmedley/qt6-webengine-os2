@@ -11,6 +11,7 @@
 // Chromium OS and Chromium environment.
 #include "anomaly_detector/dbus-constants.h"
 #include "arc-data-snapshotd/dbus-constants.h"
+#include "audio/dbus-constants.h"
 #include "authpolicy/dbus-constants.h"
 #include "biod/dbus-constants.h"
 #include "bluetooth/dbus-constants.h"
@@ -24,26 +25,33 @@
 #include "debugd/dbus-constants.h"
 #include "dlp/dbus-constants.h"
 #include "drivefs/dbus-constants.h"
+#include "featured/dbus-constants.h"
+#include "fusebox/dbus-constants.h"
 #include "hammerd/dbus-constants.h"
 #include "hermes/dbus-constants.h"
+#include "hiberman/dbus-constants.h"
 #include "hps/dbus-constants.h"
 #include "ip_peripheral/dbus-constants.h"
 #include "login_manager/dbus-constants.h"
 #include "lorgnette/dbus-constants.h"
 #include "missive/dbus-constants.h"
+#include "modemfwd/dbus-constants.h"
 #include "ocr/dbus-constants.h"
 #include "oobe_config/dbus-constants.h"
 #include "os_install_service/dbus-constants.h"
 #include "patchpanel/dbus-constants.h"
 #include "permission_broker/dbus-constants.h"
 #include "power_manager/dbus-constants.h"
+#include "privacy_screen/dbus-constants.h"
 #include "resource_manager/dbus-constants.h"
+#include "rgbkbd/dbus-constants.h"
 #include "rmad/dbus-constants.h"
 #include "runtime_probe/dbus-constants.h"
 #include "seneschal/dbus-constants.h"
 #include "shill/dbus-constants.h"
 #include "smbfs/dbus-constants.h"
 #include "smbprovider/dbus-constants.h"
+#include "spaced/dbus-constants.h"
 #include "update_engine/dbus-constants.h"
 #include "usbguard/dbus-constants.h"
 #include "vm_applications/dbus-constants.h"
@@ -210,6 +218,8 @@ const char kUserAuthenticationServicePath[] =
 const char kUserAuthenticationServiceInterface[] =
     "org.chromium.UserAuthenticationServiceInterface";
 const char kUserAuthenticationServiceShowAuthDialogMethod[] = "ShowAuthDialog";
+const char kUserAuthenticationServiceShowAuthDialogV2Method[] =
+    "ShowAuthDialogV2";
 const char kUserAuthenticationServiceCancelMethod[] = "Cancel";
 const char kUserAuthenticationServiceIsAuthenticatorAvailableMethod[] =
     "IsAuthenticatorAvailable";
@@ -406,108 +416,6 @@ const char kSystemLastSyncInfo[] = "LastSyncInfo";
 const char kSystemClockUpdated[] = "TimeUpdated";
 }  // namespace system_clock
 
-namespace cras {
-const char kCrasServicePath[] = "/org/chromium/cras";
-const char kCrasServiceName[] = "org.chromium.cras";
-const char kCrasControlInterface[] = "org.chromium.cras.Control";
-
-// Methods.
-const char kSetOutputVolume[] = "SetOutputVolume";
-const char kSetOutputNodeVolume[] = "SetOutputNodeVolume";
-const char kSwapLeftRight[] = "SwapLeftRight";
-const char kSetDisplayRotation[] = "SetDisplayRotation";
-const char kSetOutputMute[] = "SetOutputMute";
-const char kSetOutputUserMute[] = "SetOutputUserMute";
-const char kSetSuspendAudio[] = "SetSuspendAudio";
-const char kSetInputGain[] = "SetInputGain";
-const char kSetInputNodeGain[] = "SetInputNodeGain";
-const char kSetInputMute[] = "SetInputMute";
-const char kGetVolumeState[] = "GetVolumeState";
-const char kGetDefaultOutputBufferSize[] = "GetDefaultOutputBufferSize";
-const char kGetNodes[] = "GetNodes";
-const char kSetActiveOutputNode[] = "SetActiveOutputNode";
-const char kSetActiveInputNode[] = "SetActiveInputNode";
-const char kSetHotwordModel[] = "SetHotwordModel";
-const char kAddActiveOutputNode[] = "AddActiveOutputNode";
-const char kAddActiveInputNode[] = "AddActiveInputNode";
-const char kRemoveActiveOutputNode[] = "RemoveActiveOutputNode";
-const char kRemoveActiveInputNode[] = "RemoveActiveInputNode";
-const char kGetNumberOfActiveStreams[] = "GetNumberOfActiveStreams";
-const char kGetNumberOfActiveInputStreams[] = "GetNumberOfActiveInputStreams";
-const char kGetNumberOfActiveOutputStreams[] = "GetNumberOfActiveOutputStreams";
-const char kGetNumberOfInputStreamsWithPermission[] =
-    "GetNumberOfInputStreamsWithPermission";
-const char kIsAudioOutputActive[] = "IsAudioOutputActive";
-const char kSetGlobalOutputChannelRemix[] = "SetGlobalOutputChannelRemix";
-const char kGetSystemAecSupported[] = "GetSystemAecSupported";
-const char kGetSystemAecGroupId[] = "GetSystemAecGroupId";
-const char kGetSystemNsSupported[] = "GetSystemNsSupported";
-const char kGetSystemAgcSupported[] = "GetSystemAgcSupported";
-const char kSetPlayerPlaybackStatus[] = "SetPlayerPlaybackStatus";
-const char kSetPlayerIdentity[] = "SetPlayerIdentity";
-const char kSetPlayerPosition[] = "SetPlayerPosition";
-const char kSetPlayerMetadata[] = "SetPlayerMetadata";
-const char kSetNextHandsfreeProfile[] = "SetNextHandsfreeProfile";
-const char kSetFixA2dpPacketSize[] = "SetFixA2dpPacketSize";
-const char kResendBluetoothBattery[] = "ResendBluetoothBattery";
-const char kGetDeprioritizeBtWbsMic[] = "GetDeprioritizeBtWbsMic";
-const char kSetNoiseCancellationEnabled[] = "SetNoiseCancellationEnabled";
-const char kIsNoiseCancellationSupported[] = "IsNoiseCancellationSupported";
-const char kSetFlossEnabled[] = "SetFlossEnabled";
-
-// Names of properties returned by GetNodes() and GetNodeInfos()
-const char kIsInputProperty[] = "IsInput";
-const char kIdProperty[] = "Id";
-const char kTypeProperty[] = "Type";
-const char kNameProperty[] = "Name";
-const char kDeviceNameProperty[] = "DeviceName";
-const char kActiveProperty[] = "Active";
-const char kPluggedTimeProperty[] = "PluggedTime";
-const char kStableDeviceIdProperty[] = "StableDeviceId";
-const char kStableDeviceIdNewProperty[] = "StableDeviceIdNew";
-const char kMaxSupportedChannelsProperty[] = "MaxSupportedChannels";
-const char kAudioEffectProperty[] = "AudioEffect";
-const char kNodeVolumeProperty[] = "NodeVolume";
-const char kInputNodeGainProperty[] = "InputNodeGain";
-// The following two properties are optional.
-const char kNumberOfUnderrunsProperty[] = "NumberOfUnderruns";
-const char kNumberOfSevereUnderrunsProperty[] = "NumberOfSevereUnderruns";
-enum AudioEffectType {
-  EFFECT_TYPE_NOISE_CANCELLATION = 1 << 0,
-};
-// Screen Rotation in clock-wise degrees.
-// This enum corresponds to enum Rotation in chromium ui/display/display.h
-enum class DisplayRotation {
-  ROTATE_0 = 0,
-  ROTATE_90,
-  ROTATE_180,
-  ROTATE_270,
-  NUM_DISPLAY_ROTATION,
-};
-// Names of properties returned by
-// * method - GetNumberOfInputStreamsWithPermission and
-// * signal - NumberOfInputStreamsWithPermissionChanged.
-const char kClientType[] = "ClientType";
-const char kNumStreamsWithPermission[] = "NumStreamsWithPermission";
-
-// Signals.
-const char kOutputVolumeChanged[] = "OutputVolumeChanged";
-const char kOutputMuteChanged[] = "OutputMuteChanged";
-const char kOutputNodeVolumeChanged[] = "OutputNodeVolumeChanged";
-const char kNodeLeftRightSwappedChanged[] = "NodeLeftRightSwappedChanged";
-const char kInputGainChanged[] = "InputGainChanged";
-const char kInputMuteChanged[] = "InputMuteChanged";
-const char kNodesChanged[] = "NodesChanged";
-const char kActiveOutputNodeChanged[] = "ActiveOutputNodeChanged";
-const char kActiveInputNodeChanged[] = "ActiveInputNodeChanged";
-const char kNumberOfActiveStreamsChanged[] = "NumberOfActiveStreamsChanged";
-const char kNumberOfInputStreamsWithPermissionChanged[] =
-    "NumberOfInputStreamsWithPermissionChanged";
-const char kAudioOutputActiveStateChanged[] = "AudioOutputActiveStateChanged";
-const char kHotwordTriggered[] = "HotwordTriggered";
-const char kBluetoothBatteryChanged[] = "BluetoothBatteryChanged";
-}  // namespace cras
-
 namespace feedback {
 const char kFeedbackServicePath[] = "/org/chromium/feedback";
 const char kFeedbackServiceName[] = "org.chromium.feedback";
@@ -549,9 +457,11 @@ const char kCdmFactoryDaemonServiceInterface[] =
 const char kCdmFactoryDaemonServiceName[] = "org.chromium.CdmFactoryDaemon";
 const char kCdmFactoryDaemonServicePath[] = "/org/chromium/CdmFactoryDaemon";
 // Methods
-const char kBootstrapMojoConnection[] = "BootstrapMojoConnection";
 const char kBootstrapCdmFactoryDaemonMojoConnection[] =
     "BootstrapCdmFactoryDaemonMojoConnection";
+const char kGetFactoryTransportKeyMaterial[] = "GetFactoryTransportKeyMaterial";
+const char kWrapFactoryKeybox[] = "WrapFactoryKeybox";
+const char kGetClientInformation[] = "GetClientInformation";
 }  // namespace cdm_oemcrypto
 
 namespace midis {
@@ -611,6 +521,8 @@ constexpr char kBootstrapMojoConnectionForSensorClientsMethod[] =
     "BootstrapMojoConnectionForSensorClients";
 constexpr char kBootstrapMojoConnectionForRollbackNetworkConfigMethod[] =
     "BootstrapMojoConnectionForRollbackNetworkConfigService";
+constexpr char kBootstrapForCrosHealthdInternalServiceFactoryMethod[] =
+    "kBootstrapForCrosHealthdInternalServiceFactoryMethod";
 }  // namespace mojo_connection_service
 
 namespace virtual_file_provider {
@@ -721,16 +633,6 @@ constexpr char kArcCameraServiceInterface[] = "org.chromium.ArcCamera";
 // Method names.
 constexpr char kStartServiceMethod[] = "StartService";
 }  // namespace arc_camera
-
-namespace modemfwd {
-const char kModemfwdInterface[] = "org.chromium.Modemfwd";
-const char kModemfwdServicePath[] = "/org/chromium/Modemfwd";
-const char kModemfwdServiceName[] = "org.chromium.Modemfwd";
-
-// Methods.
-const char kSetDebugMode[] = "SetDebugMode";
-
-}  // namespace modemfwd
 
 namespace lock_to_single_user {
 const char kLockToSingleUserInterface[] = "org.chromium.LockToSingleUser";

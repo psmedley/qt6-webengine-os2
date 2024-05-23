@@ -124,16 +124,15 @@ void ManageProfileHandler::OnProfileThemeColorsChanged(
 }
 
 void ManageProfileHandler::HandleGetAvailableIcons(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
 
   profiles::UpdateGaiaProfileInfoIfNeeded(profile_);
 
-  CHECK_EQ(1U, args->GetSize());
-  const base::Value* callback_id;
-  CHECK(args->Get(0, &callback_id));
+  CHECK_EQ(1U, args.size());
+  const base::Value& callback_id = args[0];
 
-  ResolveJavascriptCallback(*callback_id, base::Value(GetAvailableIcons()));
+  ResolveJavascriptCallback(callback_id, base::Value(GetAvailableIcons()));
 }
 
 std::vector<base::Value> ManageProfileHandler::GetAvailableIcons() {
@@ -182,7 +181,7 @@ std::vector<base::Value> ManageProfileHandler::GetAvailableIcons() {
 }
 
 void ManageProfileHandler::HandleSetProfileIconToGaiaAvatar(
-    const base::ListValue* /* args */) {
+    const base::Value::List& args) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   PrefService* pref_service = profile_->GetPrefs();
@@ -202,13 +201,12 @@ void ManageProfileHandler::HandleSetProfileIconToGaiaAvatar(
 }
 
 void ManageProfileHandler::HandleSetProfileIconToDefaultAvatar(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  CHECK(args);
-  CHECK_EQ(1u, args->GetSize());
-  CHECK(args->GetList()[0].is_int());
+  CHECK_EQ(1u, args.size());
+  CHECK(args[0].is_int());
 
-  size_t new_icon_index = args->GetList()[0].GetInt();
+  size_t new_icon_index = args[0].GetInt();
   CHECK(profiles::IsDefaultAvatarIconIndex(new_icon_index));
 
   PrefService* pref_service = profile_->GetPrefs();
@@ -222,13 +220,11 @@ void ManageProfileHandler::HandleSetProfileIconToDefaultAvatar(
   ProfileMetrics::LogProfileUpdate(profile_->GetPath());
 }
 
-void ManageProfileHandler::HandleSetProfileName(const base::ListValue* args) {
+void ManageProfileHandler::HandleSetProfileName(const base::Value::List& args) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  CHECK(args);
-  CHECK_EQ(1u, args->GetSize());
+  CHECK_EQ(1u, args.size());
 
-  std::u16string new_profile_name;
-  CHECK(args->GetString(0, &new_profile_name));
+  std::u16string new_profile_name = base::UTF8ToUTF16(args[0].GetString());
 
   base::TrimWhitespace(new_profile_name, base::TRIM_ALL, &new_profile_name);
   CHECK(!new_profile_name.empty());
@@ -238,14 +234,13 @@ void ManageProfileHandler::HandleSetProfileName(const base::ListValue* args) {
 }
 
 void ManageProfileHandler::HandleRequestProfileShortcutStatus(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(ProfileShortcutManager::IsFeatureEnabled());
 
-  CHECK_EQ(1U, args->GetSize());
-  std::string callback_id;
-  CHECK(args->GetString(0, &callback_id));
+  CHECK_EQ(1U, args.size());
+  const std::string& callback_id = args[0].GetString();
 
   // Don't show the add/remove desktop shortcut button in the single user case.
   ProfileAttributesStorage& storage =
@@ -275,7 +270,7 @@ void ManageProfileHandler::OnHasProfileShortcuts(
 }
 
 void ManageProfileHandler::HandleAddProfileShortcut(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   DCHECK(ProfileShortcutManager::IsFeatureEnabled());
   ProfileShortcutManager* shortcut_manager =
       g_browser_process->profile_manager()->profile_shortcut_manager();
@@ -285,7 +280,7 @@ void ManageProfileHandler::HandleAddProfileShortcut(
 }
 
 void ManageProfileHandler::HandleRemoveProfileShortcut(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   DCHECK(ProfileShortcutManager::IsFeatureEnabled());
   ProfileShortcutManager* shortcut_manager =
     g_browser_process->profile_manager()->profile_shortcut_manager();

@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,6 +17,9 @@ if (is_win) {
   assert(current_cpu == "x64" && (is_linux || is_chromeos),
          "Only Linux X64 MSAN is supported")
   platform_config_root = "config/linux-noasm/$current_cpu"
+} else if (current_cpu == "riscv64" || current_cpu == "loong64" ||
+           current_cpu == "ppc64") {
+  platform_config_root = "config/linux-noasm/generic"
 } else {
   # Linux configuration files seem to work on Mac, so just reuse them.
   platform_config_root = "config/linux/$current_cpu"
@@ -79,6 +82,10 @@ config("public_dav1d_config") {
     defines += [ "STACK_ALIGNMENT=$stack_alignment" ]
   }
 
+  if (!is_android && !is_win) {
+    defines += [ "HAVE_PTHREAD_GETAFFINITY_NP=1" ]
+  }
+
   # Don't let dav1d export any symbols. Otherwise the verify_order step on macOS
   # can fail since these exports end up in the final Chromium binary.
   defines += [ "DAV1D_API=" ]
@@ -111,7 +118,7 @@ if (is_win) {
   if (needs_stack_alignment) {
     dav1d_copts += [ stackalign_flag ]
   }
-  if (is_mac) {
+  if (is_mac || is_ios) {
     dav1d_copts += [ "-D_DARWIN_C_SOURCE" ]
   }
   if (is_linux || is_chromeos || is_android || current_os == "aix") {
@@ -146,7 +153,7 @@ if (enable_nasm) {
     }
 
     # Necessary to ensure macOS symbols end up with a _ prefix.
-    if (is_mac) {
+    if (is_mac || is_ios) {
       defines += [ "PREFIX" ]
     }
   }
@@ -241,12 +248,6 @@ if (current_cpu == "x86" || current_cpu == "x64") {
       "libdav1d/src/x86/cpu.h",
     ]
 
-    # x86/msac.h redefines macros in msac.h if x86/msac.h is included and
-    # HAVE_ASM is 0, so we must exclude msac_init.c if !enable_nasm. Also, it
-    # is only used for x64.
-    if (enable_nasm && current_cpu == "x64") {
-      sources += [ "libdav1d/src/x86/msac_init.c" ]
-    }
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [
       "//build/config/compiler:no_chromium_code",
@@ -278,7 +279,7 @@ if (current_cpu == "x86" || current_cpu == "x64") {
     ]
 
     # Necessary to ensure macOS symbols end up with a _ prefix.
-    if (is_mac) {
+    if (is_mac || is_ios) {
       defines = [ "PREFIX" ]
     }
 

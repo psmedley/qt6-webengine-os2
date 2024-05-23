@@ -26,6 +26,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_CUSTOM_SCROLLBAR_PART_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_CUSTOM_SCROLLBAR_PART_H_
 
+#include "base/notreached.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 
@@ -79,9 +81,9 @@ class CORE_EXPORT LayoutCustomScrollbarPart final : public LayoutReplaced {
     return scrollable_area_;
   }
 
- private:
   LayoutCustomScrollbarPart(ScrollableArea*, CustomScrollbar*, ScrollbarPart);
 
+ private:
   void UpdateFromStyle() override;
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;

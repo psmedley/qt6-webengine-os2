@@ -150,20 +150,12 @@ function createServerIndexFile(componentNames) {
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width" />
       <title>DevTools components</title>
-      <style>
-        a:link, a:visited {
-          color: blue;
-          text-transform: capitalize;
-          text-decoration: none;
-        }
-        a:hover {
-          text-decoration: underline;
-        }
-      </style>
+      <link rel="stylesheet" href="${sharedResourcesBase}front_end/ui/legacy/themeColors.css" />
+      <link rel="stylesheet" href="${sharedResourcesBase}front_end/ui/components/docs/component_docs_styles.css" />
     </head>
-    <body>
+    <body id="index-page">
       <h1>DevTools components</h1>
-      <ul>
+      <ul class="components-list">
         ${componentNames.map(name => {
           const niceName = name.replace(/_/g, ' ');
           return `<li><a href='/front_end/ui/components/docs/${name}'>${niceName}</a></li>`;
@@ -292,9 +284,21 @@ async function requestHandler(request, response) {
   } else {
     // This means it's an asset like a JS file or an image.
     let fullPath = path.join(componentDocsBaseFolder, filePath);
-    if (fullPath.endsWith(path.join('locales', 'en-US.json'))) {
+    if (fullPath.endsWith(path.join('locales', 'en-US.json')) &&
+        !componentDocsBaseFolder.includes(sharedResourcesBase)) {
+      /**
+       * If the path is for locales/en-US.json we special case the loading of that to fix the path so it works properly in the server.
+       * We also make sure that we take into account the shared resources base;
+       * but if the base folder already contains the shared resources base, we don't
+       * add it to the path, because otherwise that would cause the shared resources
+       * base to be duplicated in the fullPath.
+       */
       // Rewrite this path so we can load up the locale in the component-docs
-      fullPath = path.join(componentDocsBaseFolder, 'front_end', 'core', 'i18n', 'locales', 'en-US.json');
+      let prefix = componentDocsBaseFolder;
+      if (sharedResourcesBase && !componentDocsBaseFolder.includes(sharedResourcesBase)) {
+        prefix = path.join(componentDocsBaseFolder, sharedResourcesBase);
+      }
+      fullPath = path.join(prefix, 'front_end', 'core', 'i18n', 'locales', 'en-US.json');
     }
 
     if (!fullPath.startsWith(devtoolsRootFolder) && !fileIsInTestFolder) {

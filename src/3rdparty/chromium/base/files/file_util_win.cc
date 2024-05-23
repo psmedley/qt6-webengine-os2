@@ -5,6 +5,7 @@
 #include "base/files/file_util.h"
 
 #include <windows.h>
+
 #include <io.h>
 #include <psapi.h>
 #include <shellapi.h>
@@ -20,7 +21,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/cxx17_backports.h"
 #include "base/debug/alias.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
@@ -32,13 +32,13 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/process/process_handle.h"
 #include "base/rand_util.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/string_util_win.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/scoped_thread_priority.h"
@@ -54,67 +54,6 @@ namespace {
 
 const DWORD kFileShareAll =
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-
-// Records a sample in a histogram named
-// "Windows.PostOperationState.|operation|" indicating the state of |path|
-// following the named operation. If |operation_succeeded| is true, the
-// "operation succeeded" sample is recorded. Otherwise, the state of |path| is
-// queried and the most meaningful sample is recorded.
-void RecordPostOperationState(const FilePath& path,
-                              StringPiece operation,
-                              bool operation_succeeded) {
-  // The state of a filesystem item after an operation.
-  // These values are persisted to logs. Entries should not be renumbered and
-  // numeric values should never be reused.
-  enum class PostOperationState {
-    kOperationSucceeded = 0,
-    kFileNotFoundAfterFailure = 1,
-    kPathNotFoundAfterFailure = 2,
-    kAccessDeniedAfterFailure = 3,
-    kNoAttributesAfterFailure = 4,
-    kEmptyDirectoryAfterFailure = 5,
-    kNonEmptyDirectoryAfterFailure = 6,
-    kNotDirectoryAfterFailure = 7,
-    kCount
-  } metric = PostOperationState::kOperationSucceeded;
-
-  if (!operation_succeeded) {
-    const DWORD attributes = ::GetFileAttributes(path.value().c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES) {
-      // On failure to delete, one might expect the file/directory to still be
-      // in place. Slice a failure to get its attributes into a few common error
-      // buckets.
-      const DWORD error_code = ::GetLastError();
-      if (error_code == ERROR_FILE_NOT_FOUND)
-        metric = PostOperationState::kFileNotFoundAfterFailure;
-      else if (error_code == ERROR_PATH_NOT_FOUND)
-        metric = PostOperationState::kPathNotFoundAfterFailure;
-      else if (error_code == ERROR_ACCESS_DENIED)
-        metric = PostOperationState::kAccessDeniedAfterFailure;
-      else
-        metric = PostOperationState::kNoAttributesAfterFailure;
-    } else if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
-      if (IsDirectoryEmpty(path))
-        metric = PostOperationState::kEmptyDirectoryAfterFailure;
-      else
-        metric = PostOperationState::kNonEmptyDirectoryAfterFailure;
-    } else {
-      metric = PostOperationState::kNotDirectoryAfterFailure;
-    }
-  }
-
-  std::string histogram_name =
-      base::StrCat({"Windows.PostOperationState.", operation});
-  UmaHistogramEnumeration(histogram_name, metric, PostOperationState::kCount);
-}
-
-// Records the sample |error| in a histogram named
-// "Windows.FilesystemError.|operation|".
-void RecordFilesystemError(StringPiece operation, DWORD error) {
-  std::string histogram_name =
-      base::StrCat({"Windows.FilesystemError.", operation});
-  UmaHistogramSparse(histogram_name, error);
-}
 
 // Returns the Win32 last error code or ERROR_SUCCESS if the last error code is
 // ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND. This is useful in cases where
@@ -361,23 +300,10 @@ DWORD DoDeleteFile(const FilePath& path, bool recursive) {
 // Deletes the file/directory at |path| (recursively if |recursive| and |path|
 // names a directory), returning true on success. Sets the Windows last-error
 // code and returns false on failure.
-bool DeleteFileAndRecordMetrics(const FilePath& path, bool recursive) {
-  static constexpr char kRecursive[] = "DeleteFile.Recursive";
-  static constexpr char kNonRecursive[] = "DeleteFile.NonRecursive";
-  const StringPiece operation(recursive ? kRecursive : kNonRecursive);
-
-  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
-
-  // Metrics for delete failures tracked in https://crbug.com/599084. Delete may
-  // fail for a number of reasons. Log some metrics relating to failures in the
-  // current code so that any improvements or regressions resulting from
-  // subsequent code changes can be detected.
+bool DeleteFileOrSetLastError(const FilePath& path, bool recursive) {
   const DWORD error = DoDeleteFile(path, recursive);
-  RecordPostOperationState(path, operation, error == ERROR_SUCCESS);
   if (error == ERROR_SUCCESS)
     return true;
-
-  RecordFilesystemError(operation, error);
 
   ::SetLastError(error);
   return false;
@@ -393,8 +319,7 @@ void LogFileDeleteRetryCount(int attempt) {
 void DeleteFileWithRetry(int attempt, const FilePath& file_path) {
   // Retry every 250ms for up to two seconds. These values were pulled out of
   // thin air, and may be adjusted in the future based on the metrics collected.
-  static constexpr TimeDelta kDeleteFileRetryDelay =
-      TimeDelta::FromMilliseconds(250);
+  static constexpr TimeDelta kDeleteFileRetryDelay = Milliseconds(250);
 
   if (DeleteFile(file_path)) {
     // Log how many times we had to retry the RetryDeleteFile operation before
@@ -432,11 +357,11 @@ FilePath MakeAbsoluteFilePath(const FilePath& input) {
 }
 
 bool DeleteFile(const FilePath& path) {
-  return DeleteFileAndRecordMetrics(path, /*recursive=*/false);
+  return DeleteFileOrSetLastError(path, /*recursive=*/false);
 }
 
 bool DeletePathRecursively(const FilePath& path) {
-  return DeleteFileAndRecordMetrics(path, /*recursive=*/true);
+  return DeleteFileOrSetLastError(path, /*recursive=*/true);
 }
 
 bool DeleteFileAfterReboot(const FilePath& path) {
@@ -457,10 +382,10 @@ bool ReplaceFile(const FilePath& from_path,
   // Alias paths for investigation of shutdown hangs. crbug.com/1054164
   FilePath::CharType from_path_str[MAX_PATH];
   base::wcslcpy(from_path_str, from_path.value().c_str(),
-                base::size(from_path_str));
+                std::size(from_path_str));
   base::debug::Alias(from_path_str);
   FilePath::CharType to_path_str[MAX_PATH];
-  base::wcslcpy(to_path_str, to_path.value().c_str(), base::size(to_path_str));
+  base::wcslcpy(to_path_str, to_path.value().c_str(), std::size(to_path_str));
   base::debug::Alias(to_path_str);
 
   // Assume that |to_path| already exists and try the normal replace. This will
@@ -529,7 +454,7 @@ bool PathHasAccess(const FilePath& path,
                                     nullptr, OPEN_EXISTING, flags_and_attrs,
                                     nullptr));
 
-  return file.IsValid();
+  return file.is_valid();
 }
 
 }  // namespace
@@ -585,8 +510,8 @@ File CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* temp_file) {
   // Open the file with exclusive r/w/d access, and allow the caller to decide
   // to mark it for deletion upon close after the fact.
   constexpr uint32_t kFlags = File::FLAG_CREATE | File::FLAG_READ |
-                              File::FLAG_WRITE | File::FLAG_EXCLUSIVE_READ |
-                              File::FLAG_EXCLUSIVE_WRITE |
+                              File::FLAG_WRITE | File::FLAG_WIN_EXCLUSIVE_READ |
+                              File::FLAG_WIN_EXCLUSIVE_WRITE |
                               File::FLAG_CAN_DELETE_ON_CLOSE;
 
   // Use GUID instead of ::GetTempFileName() to generate unique file names.
@@ -739,7 +664,8 @@ bool CreateDirectoryAndGetError(const FilePath& full_path,
 
 bool NormalizeFilePath(const FilePath& path, FilePath* real_path) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
-  File file(path, File::FLAG_OPEN | File::FLAG_READ | File::FLAG_SHARE_DELETE);
+  File file(path,
+            File::FLAG_OPEN | File::FLAG_READ | File::FLAG_WIN_SHARE_DELETE);
   if (!file.IsValid())
     return false;
 
@@ -917,11 +843,11 @@ int ReadFile(const FilePath& filename, char* data, int max_size) {
                                     FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                                     OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN,
                                     NULL));
-  if (!file.IsValid())
+  if (!file.is_valid())
     return -1;
 
   DWORD read;
-  if (::ReadFile(file.Get(), data, max_size, &read, NULL))
+  if (::ReadFile(file.get(), data, max_size, &read, NULL))
     return read;
 
   return -1;
@@ -932,13 +858,13 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
   win::ScopedHandle file(CreateFile(filename.value().c_str(), GENERIC_WRITE, 0,
                                     NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
                                     NULL));
-  if (!file.IsValid()) {
+  if (!file.is_valid()) {
     DPLOG(WARNING) << "CreateFile failed for path " << filename.value();
     return -1;
   }
 
   DWORD written;
-  BOOL result = ::WriteFile(file.Get(), data, size, &written, NULL);
+  BOOL result = ::WriteFile(file.get(), data, size, &written, NULL);
   if (result && static_cast<int>(written) == size)
     return written;
 
@@ -957,14 +883,14 @@ bool AppendToFile(const FilePath& filename, span<const uint8_t> data) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   win::ScopedHandle file(CreateFile(filename.value().c_str(), FILE_APPEND_DATA,
                                     0, nullptr, OPEN_EXISTING, 0, nullptr));
-  if (!file.IsValid()) {
+  if (!file.is_valid()) {
     VPLOG(1) << "CreateFile failed for path " << filename.value();
     return false;
   }
 
   DWORD written;
   DWORD size = checked_cast<DWORD>(data.size());
-  BOOL result = ::WriteFile(file.Get(), data.data(), size, &written, nullptr);
+  BOOL result = ::WriteFile(file.get(), data.data(), size, &written, nullptr);
   if (result && written == size)
     return true;
 
@@ -1009,7 +935,7 @@ int GetMaximumPathComponentLength(const FilePath& path) {
 
   wchar_t volume_path[MAX_PATH];
   if (!GetVolumePathNameW(path.NormalizePathSeparators().value().c_str(),
-                          volume_path, size(volume_path))) {
+                          volume_path, std::size(volume_path))) {
     return -1;
   }
 

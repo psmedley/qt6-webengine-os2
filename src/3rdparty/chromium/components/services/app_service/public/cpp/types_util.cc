@@ -22,6 +22,22 @@ bool IsInstalled(apps::mojom::Readiness readiness) {
   }
 }
 
+bool IsInstalled(apps::Readiness readiness) {
+  switch (readiness) {
+    case apps::Readiness::kReady:
+    case apps::Readiness::kDisabledByBlocklist:
+    case apps::Readiness::kDisabledByPolicy:
+    case apps::Readiness::kDisabledByUser:
+    case apps::Readiness::kTerminated:
+      return true;
+    case apps::Readiness::kUninstalledByUser:
+    case apps::Readiness::kUninstalledByMigration:
+    case apps::Readiness::kRemoved:
+    case apps::Readiness::kUnknown:
+      return false;
+  }
+}
+
 bool IsHumanLaunch(apps::mojom::LaunchSource launch_source) {
   switch (launch_source) {
     case apps::mojom::LaunchSource::kFromAppListGrid:
@@ -43,11 +59,43 @@ bool IsHumanLaunch(apps::mojom::LaunchSource launch_source) {
     case apps::mojom::LaunchSource::kFromFullRestore:
     case apps::mojom::LaunchSource::kFromSmartTextContextMenu:
     case apps::mojom::LaunchSource::kFromDiscoverTabNotification:
+    case apps::mojom::LaunchSource::kFromCommandLine:
       return true;
     case apps::mojom::LaunchSource::kUnknown:
     case apps::mojom::LaunchSource::kFromChromeInternal:
     case apps::mojom::LaunchSource::kFromTest:
     case apps::mojom::LaunchSource::kFromArc:
+    case apps::mojom::LaunchSource::kFromManagementApi:
+    case apps::mojom::LaunchSource::kFromKiosk:
+    case apps::mojom::LaunchSource::kFromBackgroundMode:
+    case apps::mojom::LaunchSource::kFromNewTabPage:
+    case apps::mojom::LaunchSource::kFromIntentUrl:
+    case apps::mojom::LaunchSource::kFromOsLogin:
+    case apps::mojom::LaunchSource::kFromProtocolHandler:
+    case apps::mojom::LaunchSource::kFromUrlHandler:
+      return false;
+  }
+  NOTREACHED();
+}
+
+bool AppTypeUsesWebContents(apps::AppType app_type) {
+  switch (app_type) {
+    case apps::AppType::kWeb:
+    case apps::AppType::kSystemWeb:
+    case apps::AppType::kChromeApp:
+    case apps::AppType::kExtension:
+      return true;
+    case apps::AppType::kUnknown:
+    case apps::AppType::kArc:
+    case apps::AppType::kBuiltIn:
+    case apps::AppType::kCrostini:
+    case apps::AppType::kMacOs:
+    case apps::AppType::kPluginVm:
+    case apps::AppType::kStandaloneBrowser:
+    case apps::AppType::kRemote:
+    case apps::AppType::kBorealis:
+    case apps::AppType::kStandaloneBrowserChromeApp:
+    case apps::AppType::kStandaloneBrowserExtension:
       return false;
   }
   NOTREACHED();

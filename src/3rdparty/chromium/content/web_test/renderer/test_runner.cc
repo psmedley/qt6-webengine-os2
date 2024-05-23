@@ -18,12 +18,11 @@
 #include "base/containers/cxx20_erase.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "cc/paint/paint_canvas.h"
 #include "content/public/common/isolated_world_ids.h"
-#include "content/public/common/use_zoom_for_dsf_policy.h"
+#include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
@@ -73,19 +72,21 @@
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/public/web/web_security_policy.h"
 #include "third_party/blink/public/web/web_serialized_script_value.h"
+#include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_testing_support.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/public/web/web_view_observer.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/test/icc_profiles.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
 #include "third_party/blink/public/platform/web_font_render_style.h"
 #endif
 
@@ -203,6 +204,9 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
  public:
   static gin::WrapperInfo kWrapperInfo;
 
+  TestRunnerBindings(const TestRunnerBindings&) = delete;
+  TestRunnerBindings& operator=(const TestRunnerBindings&) = delete;
+
   static void Install(TestRunner* test_runner,
                       WebFrameTestProxy* frame,
                       SpellCheckClient* spell_check,
@@ -226,9 +230,27 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void PostV8Callback(v8::Local<v8::Function> v8_callback,
                       std::vector<v8::Local<v8::Value>> args = {});
 
-  blink::WebLocalFrame* GetWebFrame() { return frame_->GetWebFrame(); }
+  blink::WebLocalFrame* GetWebFrame() {
+    CHECK(!invalid_);
+    return frame_->GetWebFrame();
+  }
 
  private:
+  // Watches for the RenderFrame that the TestRunnerBindings is attached to
+  // being destroyed.
+  class TestRunnerBindingsRenderFrameObserver : public RenderFrameObserver {
+   public:
+    TestRunnerBindingsRenderFrameObserver(TestRunnerBindings* bindings,
+                                          RenderFrame* frame)
+        : RenderFrameObserver(frame), bindings_(bindings) {}
+
+    // RenderFrameObserver implementation.
+    void OnDestruct() override { bindings_->OnFrameDestroyed(); }
+
+   private:
+    TestRunnerBindings* const bindings_;
+  };
+
   explicit TestRunnerBindings(TestRunner* test_runner,
                               WebFrameTestProxy* frame,
                               SpellCheckClient* spell_check);
@@ -314,6 +336,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetBluetoothFakeAdapter(const std::string& adapter_name,
                                v8::Local<v8::Function> callback);
   void SetBluetoothManualChooser(bool enable);
+  void SetBrowserHandlesFocus(bool enable);
   void SetCaretBrowsingEnabled();
   void SetColorProfile(const std::string& name,
                        v8::Local<v8::Function> callback);
@@ -391,6 +414,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void ZoomPageOut();
   void SetPageZoomFactor(double factor);
   std::string TooltipText();
+  void DisableEndDocumentTransition();
 
   int WebHistoryItemCount();
   int WindowCount();
@@ -405,6 +429,9 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
     invalid_ = true;
   }
 
+  // Observer for the |frame_| the TestRunningBindings is bound to.
+  TestRunnerBindingsRenderFrameObserver frame_observer_;
+
   // Becomes true when the underlying frame is destroyed. Then the class should
   // stop doing anything.
   bool invalid_ = false;
@@ -416,8 +443,6 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   std::unique_ptr<AppBannerService> app_banner_service_;
 
   base::WeakPtrFactory<TestRunnerBindings> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(TestRunnerBindings);
 };
 
 gin::WrapperInfo TestRunnerBindings::kWrapperInfo = {gin::kEmbedderNativeGin};
@@ -466,7 +491,7 @@ void TestRunnerBindings::Install(TestRunner* test_runner,
   // because WPT reftests never access this object.
   if (is_wpt_test && is_main_test_window && !web_frame->Parent() &&
       !web_frame->Opener()) {
-    web_frame->ExecuteScript(blink::WebString(
+    web_frame->ExecuteScript(blink::WebScriptSource(blink::WebString(
         R"(if (!window.testRunner._wpt_reftest_setup) {
           window.testRunner._wpt_reftest_setup = true;
 
@@ -495,14 +520,17 @@ void TestRunnerBindings::Install(TestRunner* test_runner,
               document.fonts.ready.then(() => window.testRunner.notifyDone());
             }
           });
-        })"));
+        })")));
   }
 }
 
 TestRunnerBindings::TestRunnerBindings(TestRunner* runner,
                                        WebFrameTestProxy* frame,
                                        SpellCheckClient* spell_check)
-    : runner_(runner), frame_(frame), spell_check_(spell_check) {}
+    : frame_observer_(this, frame),
+      runner_(runner),
+      frame_(frame),
+      spell_check_(spell_check) {}
 
 TestRunnerBindings::~TestRunnerBindings() = default;
 
@@ -704,6 +732,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       // Otherwise falls back to the browser's default chooser.
       .SetMethod("setBluetoothManualChooser",
                  &TestRunnerBindings::SetBluetoothManualChooser)
+      .SetMethod("setBrowserHandlesFocus",
+                 &TestRunnerBindings::SetBrowserHandlesFocus)
       .SetMethod("setCallCloseOnWebViews", &TestRunnerBindings::NotImplemented)
       .SetMethod("setCaretBrowsingEnabled",
                  &TestRunnerBindings::SetCaretBrowsingEnabled)
@@ -814,7 +844,11 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       // webHistoryItemCount is used by tests in web_tests\http\tests\history
       .SetProperty("webHistoryItemCount",
                    &TestRunnerBindings::WebHistoryItemCount)
-      .SetMethod("windowCount", &TestRunnerBindings::WindowCount);
+      .SetMethod("windowCount", &TestRunnerBindings::WindowCount)
+
+      // document-transition functionality to avoid ending the animation.
+      .SetMethod("disableEndDocumentTransition",
+                 &TestRunnerBindings::DisableEndDocumentTransition);
 }
 
 BoundV8Callback TestRunnerBindings::WrapV8Callback(
@@ -844,6 +878,8 @@ base::OnceClosure TestRunnerBindings::WrapV8Closure(
 void TestRunnerBindings::PostV8Callback(
     v8::Local<v8::Function> v8_callback,
     std::vector<v8::Local<v8::Value>> args) {
+  if (invalid_)
+    return;
   const auto& task_runner =
       GetWebFrame()->GetTaskRunner(blink::TaskType::kInternalTest);
   task_runner->PostTask(FROM_HERE,
@@ -854,6 +890,8 @@ void TestRunnerBindings::InvokeV8Callback(
     v8::UniquePersistent<v8::Function> callback,
     std::vector<v8::UniquePersistent<v8::Value>> bound_args,
     const std::vector<v8::Local<v8::Value>>& runtime_args) {
+  if (invalid_)
+    return;
   v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
 
@@ -949,6 +987,12 @@ int TestRunnerBindings::WindowCount() {
   return runner_->InProcessWindowCount();
 }
 
+void TestRunnerBindings::DisableEndDocumentTransition() {
+  if (invalid_)
+    return;
+  frame_->GetLocalRootFrameWidgetTestHelper()->DisableEndDocumentTransition();
+}
+
 void TestRunnerBindings::SetTabKeyCyclesThroughElements(
     bool tab_key_cycles_through_elements) {
   if (invalid_)
@@ -981,7 +1025,7 @@ void TestRunnerBindings::TriggerTestInspectorIssue(gin::Arguments* args) {
   if (invalid_)
     return;
   GetWebFrame()->AddInspectorIssue(
-      blink::mojom::InspectorIssueCode::kSameSiteCookieIssue);
+      blink::mojom::InspectorIssueCode::kCookieIssue);
 }
 
 bool TestRunnerBindings::IsCommandEnabled(const std::string& command) {
@@ -1078,7 +1122,7 @@ TestRunnerBindings::EvaluateScriptInIsolatedWorldAndReturnValue(
   if (invalid_ || world_id <= 0 || world_id >= (1 << 29))
     return {};
 
-  blink::WebScriptSource source = blink::WebString::FromUTF8(script);
+  blink::WebScriptSource source(blink::WebString::FromUTF8(script));
   return GetWebFrame()->ExecuteScriptInIsolatedWorldAndReturnValue(
       world_id, source, blink::BackForwardCacheAware::kAllow);
 }
@@ -1089,7 +1133,7 @@ void TestRunnerBindings::EvaluateScriptInIsolatedWorld(
   if (invalid_ || world_id <= 0 || world_id >= (1 << 29))
     return;
 
-  blink::WebScriptSource source = blink::WebString::FromUTF8(script);
+  blink::WebScriptSource source(blink::WebString::FromUTF8(script));
   GetWebFrame()->ExecuteScriptInIsolatedWorld(
       world_id, source, blink::BackForwardCacheAware::kAllow);
 }
@@ -1680,12 +1724,7 @@ void TestRunnerBindings::SetBackingScaleFactor(
   v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
 
-  WrapV8Callback(std::move(v8_callback))
-      .Run({
-          // TODO(oshima): remove this callback argument when all platforms are
-          // migrated to use-zoom-for-dsf by default.
-          v8::Boolean::New(isolate, IsUseZoomForDSFEnabled()),
-      });
+  WrapV8Closure(std::move(v8_callback)).Run();
 }
 
 void TestRunnerBindings::SetColorProfile(const std::string& name,
@@ -1756,6 +1795,12 @@ void TestRunnerBindings::GetBluetoothManualChooserEvents(
       base::BindOnce(&GetBluetoothManualChooserEventsReply,
                      weak_ptr_factory_.GetWeakPtr(), GetWebFrame(),
                      WrapV8Callback(std::move(callback))));
+}
+
+void TestRunnerBindings::SetBrowserHandlesFocus(bool enable) {
+  if (invalid_)
+    return;
+  blink::SetBrowserCanHandleFocusForWebTest(enable);
 }
 
 void TestRunnerBindings::SendBluetoothManualChooserEvent(
@@ -1920,6 +1965,8 @@ void TestRunnerBindings::CheckForLeakedWindows() {
 void TestRunnerBindings::CopyImageThen(int x,
                                        int y,
                                        v8::Local<v8::Function> v8_callback) {
+  if (invalid_)
+    return;
   mojo::Remote<blink::mojom::ClipboardHost> remote_clipboard;
   frame_->GetBrowserInterfaceBroker()->GetInterface(
       remote_clipboard.BindNewPipeAndPassReceiver());
@@ -1936,8 +1983,10 @@ void TestRunnerBindings::CopyImageThen(int x,
                                         &sequence_number_after);
   }
 
+  mojo_base::BigBuffer png_data;
+  remote_clipboard->ReadPng(ui::ClipboardBuffer::kCopyPaste, &png_data);
   SkBitmap bitmap;
-  remote_clipboard->ReadImage(ui::ClipboardBuffer::kCopyPaste, &bitmap);
+  gfx::PNGCodec::Decode(png_data.data(), png_data.size(), &bitmap);
 
   v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
@@ -2322,11 +2371,12 @@ void TestRunner::Reset() {
   blink::WebTestingSupport::ResetRuntimeFeatures();
   blink::WebCache::Clear();
   blink::WebSecurityPolicy::ClearOriginAccessList();
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
   blink::WebFontRenderStyle::SetSubpixelPositioning(false);
 #endif
   blink::ResetDomainRelaxationForTest();
 
+  blink::SetBrowserCanHandleFocusForWebTest(false);
   setlocale(LC_ALL, "");
   setlocale(LC_NUMERIC, "C");
 
@@ -2924,7 +2974,7 @@ void TestRunner::AddOriginAccessAllowListEntry(
 }
 
 void TestRunner::SetTextSubpixelPositioning(bool value) {
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
   // Since FontConfig doesn't provide a variable to control subpixel
   // positioning, we'll fall back to setting it globally for all fonts.
   blink::WebFontRenderStyle::SetSubpixelPositioning(value);

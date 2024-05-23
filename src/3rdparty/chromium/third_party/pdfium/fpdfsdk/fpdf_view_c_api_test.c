@@ -156,8 +156,18 @@ int CheckPDFiumCApi() {
 
     // fpdf_edit.h
     CHK(FPDFFont_Close);
+    CHK(FPDFFont_GetAscent);
+    CHK(FPDFFont_GetDescent);
+    CHK(FPDFFont_GetFlags);
+    CHK(FPDFFont_GetFontName);
+    CHK(FPDFFont_GetGlyphPath);
+    CHK(FPDFFont_GetGlyphWidth);
+    CHK(FPDFFont_GetItalicAngle);
+    CHK(FPDFFont_GetWeight);
     CHK(FPDFFormObj_CountObjects);
     CHK(FPDFFormObj_GetObject);
+    CHK(FPDFGlyphPath_CountGlyphSegments);
+    CHK(FPDFGlyphPath_GetGlyphPathSegment);
     CHK(FPDFImageObj_GetBitmap);
     CHK(FPDFImageObj_GetImageDataDecoded);
     CHK(FPDFImageObj_GetImageDataRaw);
@@ -234,7 +244,7 @@ int CheckPDFiumCApi() {
     CHK(FPDFPath_LineTo);
     CHK(FPDFPath_MoveTo);
     CHK(FPDFPath_SetDrawMode);
-    CHK(FPDFTextObj_GetFontName);
+    CHK(FPDFTextObj_GetFont);
     CHK(FPDFTextObj_GetFontSize);
     CHK(FPDFTextObj_GetText);
     CHK(FPDFTextObj_GetTextRenderMode);
@@ -342,12 +352,26 @@ int CheckPDFiumCApi() {
     CHK(FPDF_GetSignatureObject);
 
     // fpdf_structtree.h
+    CHK(FPDF_StructElement_Attr_GetBlobValue);
+    CHK(FPDF_StructElement_Attr_GetBooleanValue);
+    CHK(FPDF_StructElement_Attr_GetCount);
+    CHK(FPDF_StructElement_Attr_GetName);
+    CHK(FPDF_StructElement_Attr_GetNumberValue);
+    CHK(FPDF_StructElement_Attr_GetStringValue);
+    CHK(FPDF_StructElement_Attr_GetType);
     CHK(FPDF_StructElement_CountChildren);
+    CHK(FPDF_StructElement_GetActualText);
     CHK(FPDF_StructElement_GetAltText);
+    CHK(FPDF_StructElement_GetAttributeAtIndex);
+    CHK(FPDF_StructElement_GetAttributeCount);
     CHK(FPDF_StructElement_GetChildAtIndex);
     CHK(FPDF_StructElement_GetID);
     CHK(FPDF_StructElement_GetLang);
     CHK(FPDF_StructElement_GetMarkedContentID);
+    CHK(FPDF_StructElement_GetMarkedContentIdAtIndex);
+    CHK(FPDF_StructElement_GetMarkedContentIdCount);
+    CHK(FPDF_StructElement_GetObjType);
+    CHK(FPDF_StructElement_GetParent);
     CHK(FPDF_StructElement_GetStringAttribute);
     CHK(FPDF_StructElement_GetTitle);
     CHK(FPDF_StructElement_GetType);
@@ -487,14 +511,8 @@ int CheckPDFiumCApi() {
 #endif
 #if defined(_WIN32)
     CHK(FPDF_SetPrintMode);
-#if defined(PDFIUM_PRINT_TEXT_WITH_GDI)
-    CHK(FPDF_SetPrintTextWithGDI);
-#endif
 #endif
     CHK(FPDF_SetSandBoxPolicy);
-#if defined(_WIN32) && defined(PDFIUM_PRINT_TEXT_WITH_GDI)
-    CHK(FPDF_SetTypefaceAccessibleFunc);
-#endif
     CHK(FPDF_VIEWERREF_GetDuplex);
     CHK(FPDF_VIEWERREF_GetName);
     CHK(FPDF_VIEWERREF_GetNumCopies);

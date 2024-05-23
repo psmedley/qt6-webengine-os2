@@ -8,9 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <vector>
+#include <deque>
 
-#include "base/macros.h"
 #include "components/zucchini/address_translator.h"
 #include "components/zucchini/buffer_view.h"
 #include "components/zucchini/image_utils.h"
@@ -71,7 +70,7 @@ class Abs32RvaExtractorWin32 {
   // length |addr.width()|) in |abs32_locations|.
   Abs32RvaExtractorWin32(ConstBufferView image,
                          AbsoluteAddress&& addr,
-                         const std::vector<offset_t>& abs32_locations,
+                         const std::deque<offset_t>& abs32_locations,
                          offset_t lo,
                          offset_t hi);
   Abs32RvaExtractorWin32(Abs32RvaExtractorWin32&&);
@@ -84,8 +83,8 @@ class Abs32RvaExtractorWin32 {
  private:
   ConstBufferView image_;
   AbsoluteAddress addr_;
-  std::vector<offset_t>::const_iterator cur_abs32_;
-  std::vector<offset_t>::const_iterator end_abs32_;
+  std::deque<offset_t>::const_iterator cur_abs32_;
+  std::deque<offset_t>::const_iterator end_abs32_;
 };
 
 // A reader for Win32 abs32 references that filters and translates results from
@@ -94,6 +93,8 @@ class Abs32ReaderWin32 : public ReferenceReader {
  public:
   Abs32ReaderWin32(Abs32RvaExtractorWin32&& abs32_rva_extractor,
                    const AddressTranslator& translator);
+  Abs32ReaderWin32(const Abs32ReaderWin32&) = delete;
+  const Abs32ReaderWin32& operator=(const Abs32ReaderWin32&) = delete;
   ~Abs32ReaderWin32() override;
 
   // ReferenceReader:
@@ -102,8 +103,6 @@ class Abs32ReaderWin32 : public ReferenceReader {
  private:
   Abs32RvaExtractorWin32 abs32_rva_extractor_;
   AddressTranslator::RvaToOffsetCache target_rva_to_offset_;
-
-  DISALLOW_COPY_AND_ASSIGN(Abs32ReaderWin32);
 };
 
 // A writer for Win32 abs32 references. |addr| determines the bitness of the
@@ -113,6 +112,8 @@ class Abs32WriterWin32 : public ReferenceWriter {
   Abs32WriterWin32(MutableBufferView image,
                    AbsoluteAddress&& addr,
                    const AddressTranslator& translator);
+  Abs32WriterWin32(const Abs32WriterWin32&) = delete;
+  const Abs32WriterWin32& operator=(const Abs32WriterWin32&) = delete;
   ~Abs32WriterWin32() override;
 
   // ReferenceWriter:
@@ -122,8 +123,6 @@ class Abs32WriterWin32 : public ReferenceWriter {
   MutableBufferView image_;
   AbsoluteAddress addr_;
   AddressTranslator::OffsetToRvaCache target_offset_to_rva_;
-
-  DISALLOW_COPY_AND_ASSIGN(Abs32WriterWin32);
 };
 
 // Given a list of abs32 |locations|, removes all elements whose targets cannot
@@ -131,12 +130,12 @@ class Abs32WriterWin32 : public ReferenceWriter {
 size_t RemoveUntranslatableAbs32(ConstBufferView image,
                                  AbsoluteAddress&& addr,
                                  const AddressTranslator& translator,
-                                 std::vector<offset_t>* locations);
+                                 std::deque<offset_t>* locations);
 
 // Given a sorted list of abs32 |locations|, removes all elements whose body
 // (with |width| given) overlaps with the body of a previous element.
 size_t RemoveOverlappingAbs32Locations(uint32_t width,
-                                       std::vector<offset_t>* locations);
+                                       std::deque<offset_t>* locations);
 
 }  // namespace zucchini
 

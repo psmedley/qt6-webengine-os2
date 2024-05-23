@@ -7,6 +7,7 @@ import * as chokidar from 'chokidar';
 import * as express from 'express';
 import * as morgan from 'morgan';
 import * as portfinder from 'portfinder';
+import * as serveIndex from 'serve-index';
 
 import { makeListing } from './crawl.js';
 
@@ -90,6 +91,17 @@ watcher.on('change', dirtyCompileCache);
 
 const app = express();
 
+// Send Chrome Origin Trial tokens
+app.use((req, res, next) => {
+  res.header('Origin-Trial', [
+    // Token for http://localhost:8080
+    'Ak2PbRK+Dtqxmf674mzpBNMFBexvOQC4PJUEL4oOIn4Yzsd2cr9p7IPmOwctzEnW44LbNg1fFt2F4mXOd4oxgA4AAABJeyJvcmlnaW4iOiJodHRwOi8vbG9jYWxob3N0OjgwODAiLCJmZWF0dXJlIjoiV2ViR1BVIiwiZXhwaXJ5IjoxNjUyODMxOTk5fQ==',
+    // Token for http://localhost:8081
+    'At4vqQ4HYWorpfwbvDdiIIENLLbftULveMfTVwtz/DOHmQ91n5pBYVxIrSglnGGc048cB0gZnTQHSRnupwJt1AAAAABJeyJvcmlnaW4iOiJodHRwOi8vbG9jYWxob3N0OjgwODEiLCJmZWF0dXJlIjoiV2ViR1BVIiwiZXhwaXJ5IjoxNjUyODMxOTk5fQ==',
+  ]);
+  next();
+});
+
 // Set up logging
 app.use(morgan('dev'));
 
@@ -170,4 +182,5 @@ portfinder.getPort({ host, port }, (err, port) => {
 });
 
 // Serve everything else (not .js) as static, and directories as directory listings.
+app.use('/out', serveIndex(path.resolve(srcDir, '../src')));
 app.use('/out', express.static(path.resolve(srcDir, '../src')));

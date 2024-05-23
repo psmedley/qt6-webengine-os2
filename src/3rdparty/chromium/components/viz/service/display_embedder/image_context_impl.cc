@@ -13,6 +13,7 @@
 #include "gpu/command_buffer/service/shared_image_factory.h"
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "third_party/skia/include/core/SkPromiseImageTexture.h"
 #include "third_party/skia/include/gpu/GrContextThreadSafeProxy.h"
@@ -26,14 +27,16 @@ ImageContextImpl::ImageContextImpl(
     bool maybe_concurrent_reads,
     const absl::optional<gpu::VulkanYCbCrInfo>& ycbcr_info,
     sk_sp<SkColorSpace> color_space,
-    const bool allow_keeping_read_access)
+    bool allow_keeping_read_access,
+    bool raw_draw_if_possible)
     : ImageContext(mailbox_holder,
                    size,
                    resource_format,
                    ycbcr_info,
                    color_space),
       maybe_concurrent_reads_(maybe_concurrent_reads),
-      allow_keeping_read_access_(allow_keeping_read_access) {}
+      allow_keeping_read_access_(allow_keeping_read_access),
+      raw_draw_if_possible_(raw_draw_if_possible) {}
 
 ImageContextImpl::~ImageContextImpl() {
   if (fallback_context_state_)
@@ -93,6 +96,9 @@ void ImageContextImpl::BeginAccessIfNecessary(
     gpu::MailboxManager* mailbox_manager,
     std::vector<GrBackendSemaphore>* begin_semaphores,
     std::vector<GrBackendSemaphore>* end_semaphores) {
+  if (representation_raster_scoped_access_)
+    return;
+
   // Prepare for accessing shared image.
   if (mailbox_holder().mailbox.IsSharedImage()) {
     if (!BeginAccessIfNecessaryForSharedImage(
@@ -156,6 +162,34 @@ void ImageContextImpl::BeginAccessIfNecessary(
   // TODO(crbug.com/1118166): The case above handles textures with the
   // passthrough command decoder, verify if something is required for the
   // validating command decoder as well.
+}
+
+bool ImageContextImpl::BeginRasterAccess(
+    gpu::SharedImageRepresentationFactory* representation_factory) {
+  if (paint_op_buffer()) {
+    DCHECK(raster_representation_);
+    DCHECK(representation_raster_scoped_access_);
+    return true;
+  }
+
+  auto raster =
+      raw_draw_if_possible_
+          ? representation_factory->ProduceRaster(mailbox_holder().mailbox)
+          : nullptr;
+  if (!raster)
+    return false;
+
+  auto scoped_access = raster->BeginScopedReadAccess();
+  if (!scoped_access)
+    return false;
+
+  set_paint_op_buffer(scoped_access->paint_op_buffer());
+  set_clear_color(scoped_access->clear_color());
+
+  raster_representation_ = std::move(raster);
+  representation_raster_scoped_access_ = std::move(scoped_access);
+
+  return true;
 }
 
 bool ImageContextImpl::BeginAccessIfNecessaryForSharedImage(
@@ -253,6 +287,11 @@ bool ImageContextImpl::BindOrCopyTextureIfNecessary(
 }
 
 void ImageContextImpl::EndAccessIfNecessary() {
+  if (paint_op_buffer()) {
+    DCHECK(!representation_scoped_read_access_);
+    return;
+  }
+
   if (!representation_scoped_read_access_)
     return;
 

@@ -31,6 +31,7 @@
 import * as TextUtils from '../../models/text_utils/text_utils.js';
 import type * as Common from '../common/common.js';
 import * as i18n from '../i18n/i18n.js';
+import type * as Platform from '../platform/platform.js';
 
 import type {PageResourceLoadInitiator} from './PageResourceLoader.js';
 import {PageResourceLoader} from './PageResourceLoader.js';
@@ -48,22 +49,24 @@ const str_ = i18n.i18n.registerUIStrings('core/sdk/CompilerSourceMappingContentP
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 export class CompilerSourceMappingContentProvider implements TextUtils.ContentProvider.ContentProvider {
-  private readonly sourceURL: string;
-  private readonly contentTypeInternal: Common.ResourceType.ResourceType;
-  private readonly initiator: PageResourceLoadInitiator;
+  readonly #sourceURL: Platform.DevToolsPath.UrlString;
+  readonly #contentTypeInternal: Common.ResourceType.ResourceType;
+  readonly #initiator: PageResourceLoadInitiator;
 
-  constructor(sourceURL: string, contentType: Common.ResourceType.ResourceType, initiator: PageResourceLoadInitiator) {
-    this.sourceURL = sourceURL;
-    this.contentTypeInternal = contentType;
-    this.initiator = initiator;
+  constructor(
+      sourceURL: Platform.DevToolsPath.UrlString, contentType: Common.ResourceType.ResourceType,
+      initiator: PageResourceLoadInitiator) {
+    this.#sourceURL = sourceURL;
+    this.#contentTypeInternal = contentType;
+    this.#initiator = initiator;
   }
 
-  contentURL(): string {
-    return this.sourceURL;
+  contentURL(): Platform.DevToolsPath.UrlString {
+    return this.#sourceURL;
   }
 
   contentType(): Common.ResourceType.ResourceType {
-    return this.contentTypeInternal;
+    return this.#contentTypeInternal;
   }
 
   async contentEncoded(): Promise<boolean> {
@@ -72,10 +75,10 @@ export class CompilerSourceMappingContentProvider implements TextUtils.ContentPr
 
   async requestContent(): Promise<TextUtils.ContentProvider.DeferredContent> {
     try {
-      const {content} = await PageResourceLoader.instance().loadResource(this.sourceURL, this.initiator);
+      const {content} = await PageResourceLoader.instance().loadResource(this.#sourceURL, this.#initiator);
       return {content, isEncoded: false};
     } catch (e) {
-      const error = i18nString(UIStrings.couldNotLoadContentForSS, {PH1: this.sourceURL, PH2: e.message});
+      const error = i18nString(UIStrings.couldNotLoadContentForSS, {PH1: this.#sourceURL, PH2: e.message});
       console.error(error);
       return {content: null, error, isEncoded: false};
     }

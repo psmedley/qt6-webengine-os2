@@ -119,23 +119,6 @@ base::Value LocalPrinterHandlerChromeos::CapabilityToValue(
       PrinterSemanticCapsAndDefaults::Papers(), caps->has_secure_protocol,
       base::OptionalOrNullptr(caps->capabilities));
 
-  // TODO(b/195001379, jkopanski): This block of code should be removed once
-  // Ash Chrome M94 is on stable channel.
-  base::Value policies(base::Value::Type::DICTIONARY);
-  policies.SetIntKey(kAllowedColorModes, caps->allowed_color_modes_deprecated);
-  policies.SetIntKey(kAllowedDuplexModes,
-                     caps->allowed_duplex_modes_deprecated);
-  policies.SetIntKey(
-      kAllowedPinModes,
-      static_cast<int>(caps->allowed_pin_modes_deprecated_version_1));
-  policies.SetIntKey(kDefaultColorMode,
-                     static_cast<int>(caps->default_color_mode_deprecated));
-  policies.SetIntKey(kDefaultDuplexMode,
-                     static_cast<int>(caps->default_duplex_mode_deprecated));
-  policies.SetIntKey(kDefaultPinMode,
-                     static_cast<int>(caps->default_pin_mode_deprecated));
-  dict.FindKey(kPrinter)->SetKey(kSettingPolicies, std::move(policies));
-
   return dict;
 }
 
@@ -194,7 +177,7 @@ void LocalPrinterHandlerChromeos::StartGetCapability(
 }
 void LocalPrinterHandlerChromeos::StartPrint(
     const std::u16string& job_title,
-    base::Value settings,
+    base::Value::Dict settings,
     scoped_refptr<base::RefCountedMemory> print_data,
     PrintCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -226,13 +209,13 @@ void LocalPrinterHandlerChromeos::StartPrint(
 }
 
 void LocalPrinterHandlerChromeos::OnProfileUsernameReady(
-    base::Value settings,
+    base::Value::Dict settings,
     scoped_refptr<base::RefCountedMemory> print_data,
     PrinterHandler::PrintCallback callback,
     const absl::optional<std::string>& username) {
   if (username.has_value() && !username->empty()) {
-    settings.SetKey(kSettingUsername, base::Value(*username));
-    settings.SetKey(kSettingSendUserInfo, base::Value(true));
+    settings.Set(kSettingUsername, *username);
+    settings.Set(kSettingSendUserInfo, true);
   }
   StartLocalPrint(std::move(settings), std::move(print_data),
                   preview_web_contents_, std::move(callback));

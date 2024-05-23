@@ -24,13 +24,8 @@ D3D11VideoDecoder::GetD3D11DeviceCB GetD3D11DeviceCallback() {
 
 bool ShouldUseD3D11VideoDecoder(
     const gpu::GpuDriverBugWorkarounds& gpu_workarounds) {
-  if (!base::FeatureList::IsEnabled(kD3D11VideoDecoder))
-    return false;
-  if (gpu_workarounds.disable_d3d11_video_decoder)
-    return false;
-  if (base::win::GetVersion() == base::win::Version::WIN7)
-    return false;
-  return true;
+  return !gpu_workarounds.disable_d3d11_video_decoder &&
+         base::win::GetVersion() > base::win::Version::WIN7;
 }
 
 }  // namespace
@@ -45,20 +40,18 @@ std::unique_ptr<VideoDecoder> CreatePlatformVideoDecoder(
         *traits.target_color_space, traits.gpu_preferences,
         *traits.gpu_workarounds, traits.get_command_buffer_stub_cb);
   }
-  DCHECK(base::FeatureList::IsEnabled(kD3D11VideoDecoder));
-  const bool enable_hdr =
-      gl::DirectCompositionSurfaceWin::IsHDRSupported() ||
-      base::FeatureList::IsEnabled(kD3D11VideoDecoderForceEnableHDR);
   return D3D11VideoDecoder::Create(
       traits.gpu_task_runner, traits.media_log->Clone(), traits.gpu_preferences,
       *traits.gpu_workarounds, traits.get_command_buffer_stub_cb,
-      GetD3D11DeviceCallback(), traits.get_cached_configs_cb.Run(), enable_hdr);
+      GetD3D11DeviceCallback(), traits.get_cached_configs_cb.Run(),
+      gl::DirectCompositionSurfaceWin::IsHDRSupported());
 }
 
 absl::optional<SupportedVideoDecoderConfigs>
 GetPlatformSupportedVideoDecoderConfigs(
     gpu::GpuDriverBugWorkarounds gpu_workarounds,
     gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info,
     base::OnceCallback<SupportedVideoDecoderConfigs()> get_vda_configs) {
   SupportedVideoDecoderConfigs supported_configs;
   if (ShouldUseD3D11VideoDecoder(gpu_workarounds)) {
@@ -77,10 +70,10 @@ std::unique_ptr<AudioDecoder> CreatePlatformAudioDecoder(
 
 VideoDecoderType GetPlatformDecoderImplementationType(
     gpu::GpuDriverBugWorkarounds gpu_workarounds,
-    gpu::GpuPreferences gpu_preferences) {
-  if (!ShouldUseD3D11VideoDecoder(gpu_workarounds))
-    return VideoDecoderType::kVda;
-  return VideoDecoderType::kD3D11;
+    gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info) {
+  return ShouldUseD3D11VideoDecoder(gpu_workarounds) ? VideoDecoderType::kD3D11
+                                                     : VideoDecoderType::kVda;
 }
 
 // There is no CdmFactory on windows, so just stub it out.

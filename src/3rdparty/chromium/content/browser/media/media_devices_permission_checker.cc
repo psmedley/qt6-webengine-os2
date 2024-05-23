@@ -155,7 +155,7 @@ bool MediaDevicesPermissionChecker::HasPanTiltZoomPermissionGrantedOnUIThread(
     int render_process_id,
     int render_frame_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // The PTZ permission is automatically granted on Android. This way, zoom is
   // not initially empty in ImageCapture. It is safe to do so because pan and
   // tilt are not supported on Android.
@@ -167,23 +167,13 @@ bool MediaDevicesPermissionChecker::HasPanTiltZoomPermissionGrantedOnUIThread(
   if (!frame_host)
     return false;
 
-  auto* web_contents = WebContents::FromRenderFrameHost(frame_host);
-  if (!web_contents)
-    return false;
-
   auto* permission_controller =
-      web_contents->GetBrowserContext()->GetPermissionController();
+      frame_host->GetBrowserContext()->GetPermissionController();
   DCHECK(permission_controller);
 
-  // TODO(crbug.com/698985): The semantics of the passed-in origin is incorrect:
-  // It should be the requesting origin, not the embedding origin. With the
-  // current implementation of the //chrome embedder, this parameter will be
-  // ignored, so it has no impact.
-  const GURL& origin =
-      PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
   blink::mojom::PermissionStatus status =
-      permission_controller->GetPermissionStatusForFrame(
-          PermissionType::CAMERA_PAN_TILT_ZOOM, frame_host, origin);
+      permission_controller->GetPermissionStatusForCurrentDocument(
+          PermissionType::CAMERA_PAN_TILT_ZOOM, frame_host);
 
   return status == blink::mojom::PermissionStatus::GRANTED;
 #endif

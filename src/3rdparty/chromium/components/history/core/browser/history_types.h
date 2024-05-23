@@ -16,7 +16,6 @@
 
 #include "base/callback.h"
 #include "base/containers/stack_container.h"
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "components/favicon_base/favicon_types.h"
 #include "components/history/core/browser/history_context.h"
@@ -68,7 +67,7 @@ class VisitRow {
            ui::PageTransition arg_transition,
            SegmentID arg_segment_id,
            bool arg_incremented_omnibox_typed_score,
-           bool floc_allowed);
+           VisitID arg_opener_visit);
   ~VisitRow();
 
   // Compares two visits based on dates, for sorting.
@@ -104,6 +103,18 @@ class VisitRow {
   // Records whether the visit incremented the omnibox typed score.
   bool incremented_omnibox_typed_score = false;
 
+  // Indicates the visit that opened this one.
+  //
+  // 0 indicates no opener visit. Only non-zero if this visit was directly
+  // initiated by open in a new tab, window, or for same-document navigations.
+  // It is possible for this to be non-zero and the visit to not exist (i.e., if
+  // the visit expired).
+  //
+  // This differs from `referring_visit` since this links visits across tabs
+  // whereas `referring_visit` is only populated if the Referrer is from the
+  // same tab.
+  VisitID opener_visit = 0;
+
   // We allow the implicit copy constructor and operator=.
 };
 
@@ -134,6 +145,10 @@ class QueryResults {
   typedef std::vector<URLResult> URLResultVector;
 
   QueryResults();
+
+  QueryResults(const QueryResults&) = delete;
+  QueryResults& operator=(const QueryResults&) = delete;
+
   ~QueryResults();
 
   QueryResults(QueryResults&& other) noexcept;
@@ -207,8 +222,6 @@ class QueryResults {
 
   // Maps URLs to entries in results_.
   URLToResultIndices url_to_results_;
-
-  DISALLOW_COPY_AND_ASSIGN(QueryResults);
 };
 
 // QueryOptions ----------------------------------------------------------------
@@ -221,8 +234,10 @@ struct QueryOptions {
   QueryOptions& operator=(QueryOptions&&) noexcept;
   ~QueryOptions();
 
-  // The time range to search for matches in. The beginning is inclusive and
-  // the ending is exclusive. Either one (or both) may be null.
+  // The time range to search for matches in. When `visit_order` is
+  // `RECENT_FIRST`, the beginning is inclusive and the ending is exclusive.
+  // When `VisitOrder` is `OLDEST_FIRST`, vice versa. Either one (or both) may
+  // be null.
   //
   // This will match only the one recent visit of a URL. For text search
   // queries, if the URL was visited in the given time period, but has also
@@ -267,6 +282,15 @@ struct QueryOptions {
   // Whether the history query should only search through hostnames.
   // When this is true, the matching_algorithm field is ignored.
   bool host_only = false;
+
+  enum VisitOrder {
+    RECENT_FIRST,
+    OLDEST_FIRST,
+  };
+
+  // Whether to prioritize most recent or oldest visits when `max_count` is
+  // reached. Will affect visit order as well.
+  VisitOrder visit_order = RECENT_FIRST;
 
   // Helpers to get the effective parameters values, since a value of 0 means
   // "unspecified".
@@ -353,6 +377,24 @@ struct FilteredURL {
   ExtendedInfo extended_info;
 };
 
+// Opener ---------------------------------------------------------------------
+
+// Contains the information required to determine the VisitID of an opening
+// visit.
+struct Opener {
+  // The default constructor is equivalent to:
+  //
+  // Opener(nullptr, 0, GURL())
+  Opener();
+  Opener(ContextID context_id, int nav_entry_id, const GURL& url);
+  Opener(const Opener& other);
+  ~Opener();
+
+  ContextID context_id;
+  int nav_entry_id;
+  GURL url;
+};
+
 // Navigation -----------------------------------------------------------------
 
 // Marshalling structure for AddPage.
@@ -363,7 +405,7 @@ struct HistoryAddPageArgs {
   //       GURL(), base::Time(), nullptr, 0, GURL(),
   //       RedirectList(), ui::PAGE_TRANSITION_LINK,
   //       false, SOURCE_BROWSED, false, true,
-  //       absl::nullopt)
+  //       absl::nullopt, absl::nullopt)
   HistoryAddPageArgs();
   HistoryAddPageArgs(const GURL& url,
                      base::Time time,
@@ -377,7 +419,8 @@ struct HistoryAddPageArgs {
                      bool did_replace_entry,
                      bool consider_for_ntp_most_visited,
                      bool floc_allowed,
-                     absl::optional<std::u16string> title = absl::nullopt);
+                     absl::optional<std::u16string> title = absl::nullopt,
+                     absl::optional<Opener> opener = absl::nullopt);
   HistoryAddPageArgs(const HistoryAddPageArgs& other);
   ~HistoryAddPageArgs();
 
@@ -400,6 +443,7 @@ struct HistoryAddPageArgs {
   // VisitRow::floc_allowed for details.
   bool floc_allowed;
   absl::optional<std::u16string> title;
+  absl::optional<Opener> opener;
 };
 
 // TopSites -------------------------------------------------------------------
@@ -587,6 +631,9 @@ class DeletionInfo {
                std::set<GURL> favicon_urls,
                absl::optional<std::set<GURL>> restrict_urls);
 
+  DeletionInfo(const DeletionInfo&) = delete;
+  DeletionInfo& operator=(const DeletionInfo&) = delete;
+
   ~DeletionInfo();
   // Move-only because of potentially large containers.
   DeletionInfo(DeletionInfo&& other) noexcept;
@@ -637,8 +684,6 @@ class DeletionInfo {
   std::set<GURL> favicon_urls_;
   absl::optional<std::set<GURL>> restrict_urls_;
   OriginCountAndLastVisitMap deleted_urls_origin_map_;
-
-  DISALLOW_COPY_AND_ASSIGN(DeletionInfo);
 };
 
 // Represents a visit to a domain.
@@ -695,7 +740,7 @@ struct VisitContextAnnotations {
   // respond. Any duration that exceeds 30 days will be recorded as 30 days, so
   // in practice, if this duration indicates 30 days, it can be anything from 30
   // to the maximum duration that local history is stored.
-  base::TimeDelta duration_since_last_visit = base::TimeDelta::FromSeconds(-1);
+  base::TimeDelta duration_since_last_visit = base::Seconds(-1);
 
   // ---------------------------------------------------------------------------
   // The below metrics are all already recorded by UKM for non-memories reasons.
@@ -706,6 +751,10 @@ struct VisitContextAnnotations {
   // Do not use this directly, as it's a raw integer for serialization, and not
   // a typesafe page_load_metrics::PageEndReason.
   int page_end_reason = 0;
+
+  // The total duration that this visit was in the foreground. Recorded as -1 if
+  // not recorded.
+  base::TimeDelta total_foreground_duration = base::Seconds(-1);
 };
 
 // A `VisitRow` along with its corresponding `URLRow`,
@@ -716,9 +765,13 @@ struct AnnotatedVisit {
                  VisitRow visit_row,
                  VisitContextAnnotations context_annotations,
                  VisitContentAnnotations content_annotations,
-                 VisitID referring_visit_of_redirect_chain_start);
+                 VisitID referring_visit_of_redirect_chain_start,
+                 VisitID opener_visit_of_redirect_chain_start,
+                 VisitSource visit);
   AnnotatedVisit(const AnnotatedVisit&);
+  AnnotatedVisit(AnnotatedVisit&&);
   AnnotatedVisit& operator=(const AnnotatedVisit&);
+  AnnotatedVisit& operator=(AnnotatedVisit&&);
   ~AnnotatedVisit();
 
   URLRow url_row;
@@ -732,6 +785,14 @@ struct AnnotatedVisit {
   // important because redirect visits are omitted from AnnotatedVisits, so
   // the uncollapsed referring visit could refer to an omitted visit.
   VisitID referring_visit_of_redirect_chain_start = 0;
+  // The `VisitRow::opener_visit` of the 1st visit in the redirect chain that
+  // includes this visit. If this visit is not part of a redirect chain or is
+  // the 1st visit in a redirect chain, then it will be
+  // `visit_row.opener_visit`. Using the collapsed opener visit is
+  // important because opener visits are omitted from AnnotatedVisits, so
+  // the uncollapsed opener visit could refer to an omitted visit.
+  VisitID opener_visit_of_redirect_chain_start = 0;
+  VisitSource source;
 };
 
 // A minimal representation of `AnnotationVisit` used when retrieving them from
@@ -752,26 +813,78 @@ struct AnnotatedVisitRow {
   VisitContentAnnotations content_annotations;
 };
 
-// An `AnnotatedVisit` associated with a score.
-struct ScoredAnnotatedVisit {
+// An `AnnotatedVisit` associated with some other metadata from clustering.
+struct ClusterVisit {
+  ClusterVisit();
+  ~ClusterVisit();
+  ClusterVisit(const ClusterVisit&);
+  ClusterVisit(ClusterVisit&&);
+  ClusterVisit& operator=(const ClusterVisit&);
+  ClusterVisit& operator=(ClusterVisit&&);
+
   AnnotatedVisit annotated_visit;
-  float score;
+
+  // A floating point score in the range [0, 1] describing how important this
+  // visit is to the containing cluster.
+  float score = 0.0;
+
+  // Flagged as true if this cluster visit matches the user's search query.
+  // This value depends on the user's search query, and is not meant to be ever
+  // persisted. It's a UI-state-specific flag that's convenient to buffer here.
+  bool matches_search_query = false;
+
+  // A list of visits that have been de-duplicated into this visit. The parent
+  // visit is considered the best visit among all the duplicates, and the worse
+  // visits are now contained here.
+  std::vector<ClusterVisit> duplicate_visits;
+
+  // The site engagement score of the URL associated with this visit. This
+  // should not be used by the UI.
+  float engagement_score = 0.0;
+
+  // The visit URL modified for better dupe finding.  The result may not be
+  // navigable or even valid; it's only meant to be used for detecting
+  // duplicates. This is similar in intent to
+  // `AutocompleteMatch::stripped_destination_url`, but is not the same, as
+  // History Clusters and Omnibox have different deduping requirements.
+  GURL url_for_deduping;
+
+  // The normalized URL for the visit (i.e. a SRP URL normalized based on the
+  // user's default search provider).
+  GURL normalized_url;
 };
 
-// A cluster of `ScoredAnnotatedVisit`s with associated `keywords`.
+// A cluster of `ClusterVisit`s with associated metadata (i.e. `keywords` and
+// `should_show_on_prominent_ui_surfaces`).
 struct Cluster {
   Cluster();
   Cluster(int64_t cluster_id,
-          const std::vector<ScoredAnnotatedVisit>& scored_annotated_visits,
-          const std::vector<std::u16string>& keywords);
+          const std::vector<ClusterVisit>& visits,
+          const std::vector<std::u16string>& keywords,
+          bool should_show_on_prominent_ui_surfaces = true,
+          absl::optional<std::u16string> label = absl::nullopt);
   Cluster(const Cluster&);
+  Cluster(Cluster&&);
   Cluster& operator=(const Cluster&);
+  Cluster& operator=(Cluster&&);
   ~Cluster();
 
-  int64_t cluster_id;
-  std::vector<ScoredAnnotatedVisit> scored_annotated_visits;
-  // TODO(manukh): retrieve and persist `keywords`.
+  int64_t cluster_id = 0;
+  std::vector<ClusterVisit> visits;
+  // TODO(manukh): retrieve and persist `keywords`,
+  // `should_show_on_prominent_ui_surfaces, and `label`.
   std::vector<std::u16string> keywords;
+  // Whether the cluster should be shown prominently on UI surfaces.
+  bool should_show_on_prominent_ui_surfaces = true;
+  // A suitable label for the cluster. Will be nullopt if no suitable label
+  // could be determined.
+  absl::optional<std::u16string> label;
+
+  // A floating point score that's positive if the cluster matches the user's
+  // search query, and zero otherwise. This score changes depending on the
+  // entered search query, so this should never be persisted. It's a
+  // UI-state-specific score that's convenient to buffer here.
+  float search_match_score = 0.0;
 };
 
 // A minimal representation of `Cluster` used when retrieving them from

@@ -7,11 +7,11 @@
 #include <stddef.h>
 
 #include <limits>
+#include <tuple>
 
 #include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -33,7 +33,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // For fine-grained suppression.
 #include "base/win/windows_version.h"
 #endif
@@ -112,14 +112,10 @@ std::vector<std::string> JsonArrayToVectorOfStrings(
   std::unique_ptr<base::ListValue> list =
       base::ListValue::From(std::move(value));
   std::vector<std::string> vector;
-  vector.reserve(list->GetSize());
-  for (size_t i = 0; i < list->GetSize(); ++i) {
-    base::Value* item;
-    EXPECT_TRUE(list->Get(i, &item));
-    EXPECT_TRUE(item->is_string());
-    std::string item_str;
-    EXPECT_TRUE(item->GetAsString(&item_str));
-    vector.push_back(std::move(item_str));
+  vector.reserve(list->GetListDeprecated().size());
+  for (const base::Value& item : list->GetListDeprecated()) {
+    EXPECT_TRUE(item.is_string());
+    vector.push_back(std::move(item.GetString()));
   }
   return vector;
 }
@@ -266,6 +262,21 @@ void WebRtcTestBase::GetUserMedia(content::WebContents* tab_contents,
               result == "request-callback-granted");
 }
 
+void WebRtcTestBase::GetUserMediaReturnsFalseIfWaitIsTooLong(
+    content::WebContents* tab_contents,
+    const std::string& constraints) const {
+  std::string result;
+  permissions::PermissionRequestManager::FromWebContents(tab_contents)
+      ->set_auto_response_for_test(
+          permissions::PermissionRequestManager::ACCEPT_ALL);
+  permissions::PermissionRequestObserver observer(tab_contents);
+  // Request user media: this will launch the media stream info bar or bubble.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab_contents, "doGetUserMedia(" + constraints + ");", &result));
+
+  EXPECT_TRUE(result == "request-timedout");
+}
+
 content::WebContents* WebRtcTestBase::OpenPageAndGetUserMediaInNewTab(
     const GURL& url) const {
   return OpenPageAndGetUserMediaInNewTabWithConstraints(
@@ -277,7 +288,7 @@ WebRtcTestBase::OpenPageAndGetUserMediaInNewTabWithConstraints(
     const GURL& url,
     const std::string& constraints) const {
   chrome::AddTabAt(browser(), GURL(url::kAboutBlankURL), -1, true);
-  ui_test_utils::NavigateToURL(browser(), url);
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* new_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   // Accept if necessary, but don't expect a prompt (because auto-accept is also
@@ -303,7 +314,7 @@ content::WebContents* WebRtcTestBase::OpenTestPageInNewTab(
     const std::string& test_page) const {
   chrome::AddTabAt(browser(), GURL(url::kAboutBlankURL), -1, true);
   GURL url = embedded_test_server()->GetURL(test_page);
-  ui_test_utils::NavigateToURL(browser(), url);
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* new_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   // Accept if necessary, but don't expect a prompt (because auto-accept is also
@@ -492,7 +503,7 @@ std::string WebRtcTestBase::GetStreamSize(
 }
 
 bool WebRtcTestBase::OnWin8OrHigher() const {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return base::win::GetVersion() >= base::win::Version::WIN8;
 #else
   return false;
@@ -551,7 +562,7 @@ WebRtcTestBase::GetStatsReportDictionary(content::WebContents* tab) const {
   base::DictionaryValue* dictionary;
   CHECK(parsed_json);
   CHECK(parsed_json->GetAsDictionary(&dictionary));
-  ignore_result(parsed_json.release());
+  std::ignore = parsed_json.release();
   return scoped_refptr<content::TestStatsReportDictionary>(
       new content::TestStatsReportDictionary(
           std::unique_ptr<base::DictionaryValue>(dictionary)));

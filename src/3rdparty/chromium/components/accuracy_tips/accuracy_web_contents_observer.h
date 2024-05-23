@@ -6,6 +6,7 @@
 #define COMPONENTS_ACCURACY_TIPS_ACCURACY_WEB_CONTENTS_OBSERVER_H_
 
 #include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "components/accuracy_tips/accuracy_service.h"
 #include "components/accuracy_tips/accuracy_tip_status.h"
 #include "content/public/browser/visibility.h"
@@ -20,7 +21,7 @@ class NavigationHandle;
 namespace accuracy_tips {
 
 // Observes navigations and triggers a warning if a visited site is determined
-// to be low-accuracy.
+// if a visited site is determined to be news-related.
 class AccuracyWebContentsObserver
     : public content::WebContentsObserver,
       public content::WebContentsUserData<AccuracyWebContentsObserver> {
@@ -46,7 +47,7 @@ class AccuracyWebContentsObserver
   AccuracyWebContentsObserver(content::WebContents* web_contents,
                               AccuracyService* accuracy_service);
 
-  AccuracyService* accuracy_service_;
+  raw_ptr<AccuracyService> accuracy_service_;
 
   base::WeakPtrFactory<AccuracyWebContentsObserver> weak_factory_{this};
   WEB_CONTENTS_USER_DATA_KEY_DECL();

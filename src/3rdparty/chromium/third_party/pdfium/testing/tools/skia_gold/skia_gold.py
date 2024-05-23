@@ -21,7 +21,7 @@ def _ParseKeyValuePairs(kv_str):
   kv_pairs = shlex.split(kv_str)
   if len(kv_pairs) % 2:
     raise ValueError('Uneven number of key/value pairs. Got %s' % kv_str)
-  return {kv_pairs[i]: kv_pairs[i + 1] for i in xrange(0, len(kv_pairs), 2)}
+  return {kv_pairs[i]: kv_pairs[i + 1] for i in range(0, len(kv_pairs), 2)}
 
 
 def add_skia_gold_args(parser):
@@ -97,7 +97,7 @@ def clear_gold_output_dir(output_dir):
   os.makedirs(output_dir)
 
 
-class SkiaGoldTester(object):
+class SkiaGoldTester:
 
   def __init__(self, source_type, skia_gold_args, process_name=None):
     """
@@ -126,7 +126,7 @@ class SkiaGoldTester(object):
     if os.path.exists(output_file_name):
       os.remove(output_file_name)
     with open(output_file_name, 'wb') as outfile:
-      outfile.write(link)
+      outfile.write(link.encode('utf8'))
 
   def GetSkiaGoldProperties(self):
     if not self._skia_gold_properties:
@@ -175,7 +175,7 @@ class SkiaGoldTester(object):
         self.GetSkiaGoldSessionManager().GetSessionClass().StatusCodes
     if status == status_codes.SUCCESS:
       return True
-    elif status == status_codes.AUTH_FAILURE:
+    if status == status_codes.AUTH_FAILURE:
       logging.error('Gold authentication failed with output %s', error)
     elif status == status_codes.INIT_FAILURE:
       logging.error('Gold initialization failed with output %s', error)

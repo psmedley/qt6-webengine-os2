@@ -17,6 +17,7 @@
 #include "core/fxcrt/fx_stream.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_fontcache.h"
+#include "core/fxge/cfx_fontmapper.h"
 #include "core/fxge/cfx_fontmgr.h"
 #include "core/fxge/cfx_gemodule.h"
 #include "core/fxge/cfx_glyphcache.h"
@@ -26,6 +27,7 @@
 #include "core/fxge/scoped_font_transform.h"
 #include "third_party/base/check.h"
 #include "third_party/base/cxx17_backports.h"
+#include "third_party/base/numerics/safe_conversions.h"
 #include "third_party/base/span.h"
 
 #define EM_ADJUST(em, a) (em == 0 ? (a) : (a)*1000 / em)
@@ -37,10 +39,54 @@ constexpr int kThousandthMaxInt = std::numeric_limits<int>::max() / 1000;
 
 struct OUTLINE_PARAMS {
   UnownedPtr<CFX_Path> m_pPath;
-  int m_CurX;
-  int m_CurY;
+  FT_Pos m_CurX;
+  FT_Pos m_CurY;
   float m_CoordUnit;
 };
+
+// TODO(crbug.com/pdfium/1400): When FT_Done_MM_Var() is more likely to be
+// available to all users in the future, remove FreeMMVar() and use
+// FT_Done_MM_Var() directly.
+//
+// Use weak symbols to check if FT_Done_MM_Var() is available at runtime.
+#if !BUILDFLAG(IS_WIN)
+extern "C" __attribute__((weak)) decltype(FT_Done_MM_Var) FT_Done_MM_Var;
+#endif
+
+void FreeMMVar(FXFT_FaceRec* rec, FXFT_MM_VarPtr variation_desc) {
+#if BUILDFLAG(IS_WIN)
+  // Assume `use_system_freetype` GN var is never set on Windows.
+  constexpr bool has_ft_done_mm_var_func = true;
+#else
+  static const bool has_ft_done_mm_var_func = !!FT_Done_MM_Var;
+#endif
+  if (has_ft_done_mm_var_func) {
+    FT_Done_MM_Var(CFX_GEModule::Get()->GetFontMgr()->GetFTLibrary(),
+                   variation_desc);
+  } else {
+    FXFT_Free(rec, variation_desc);
+  }
+}
+
+FX_RECT FXRectFromFTPos(FT_Pos left, FT_Pos top, FT_Pos right, FT_Pos bottom) {
+  return FX_RECT(pdfium::base::checked_cast<int32_t>(left),
+                 pdfium::base::checked_cast<int32_t>(top),
+                 pdfium::base::checked_cast<int32_t>(right),
+                 pdfium::base::checked_cast<int32_t>(bottom));
+}
+
+FX_RECT ScaledFXRectFromFTPos(FT_Pos left,
+                              FT_Pos top,
+                              FT_Pos right,
+                              FT_Pos bottom,
+                              int x_scale,
+                              int y_scale) {
+  if (x_scale == 0 || y_scale == 0)
+    return FXRectFromFTPos(left, top, right, bottom);
+
+  return FXRectFromFTPos(left * 1000 / x_scale, top * 1000 / y_scale,
+                         right * 1000 / x_scale, bottom * 1000 / y_scale);
+}
 
 #ifdef PDF_ENABLE_XFA
 unsigned long FTStreamRead(FXFT_StreamRec* stream,
@@ -209,7 +255,7 @@ const CFX_Font::CharsetFontMap CFX_Font::kDefaultTTFMap[] = {
     {static_cast<int>(FX_Charset::kShiftJIS), "MS Gothic"},
     {static_cast<int>(FX_Charset::kHangul), "Batang"},
     {static_cast<int>(FX_Charset::kMSWin_Cyrillic), "Arial"},
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     {static_cast<int>(FX_Charset::kMSWin_EasternEuropean), "Tahoma"},
 #else
     {static_cast<int>(FX_Charset::kMSWin_EasternEuropean), "Arial"},
@@ -297,6 +343,7 @@ int CFX_Font::GetSubstFontItalicAngle() const {
 bool CFX_Font::LoadFile(RetainPtr<IFX_SeekableReadStream> pFile,
                         int nFaceIndex) {
   m_bEmbedded = false;
+  m_ObjectTag = 0;
 
   auto pStreamRec = std::make_unique<FXFT_StreamRec>();
   pStreamRec->base = nullptr;
@@ -321,23 +368,24 @@ bool CFX_Font::LoadFile(RetainPtr<IFX_SeekableReadStream> pFile,
   return true;
 }
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 void CFX_Font::SetFace(RetainPtr<CFX_Face> face) {
   ClearGlyphCache();
+  m_ObjectTag = 0;
   m_Face = face;
 }
 
 void CFX_Font::SetSubstFont(std::unique_ptr<CFX_SubstFont> subst) {
   m_pSubstFont = std::move(subst);
 }
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 #endif  // PDF_ENABLE_XFA
 
 CFX_Font::~CFX_Font() {
   m_FontData = {};  // m_FontData can't outive m_Face.
   m_Face.Reset();
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   ReleasePlatformResource();
 #endif
 }
@@ -351,8 +399,9 @@ void CFX_Font::LoadSubst(const ByteString& face_name,
                          bool bVertical) {
   m_bEmbedded = false;
   m_bVertical = bVertical;
+  m_ObjectTag = 0;
   m_pSubstFont = std::make_unique<CFX_SubstFont>();
-  m_Face = CFX_GEModule::Get()->GetFontMgr()->FindSubstFont(
+  m_Face = CFX_GEModule::Get()->GetFontMgr()->GetBuiltinMapper()->FindSubstFont(
       face_name, bTrueType, flags, weight, italic_angle, code_page,
       m_pSubstFont.get());
   if (m_Face) {
@@ -361,28 +410,36 @@ void CFX_Font::LoadSubst(const ByteString& face_name,
   }
 }
 
-int CFX_Font::GetGlyphWidth(uint32_t glyph_index) {
+int CFX_Font::GetGlyphWidth(uint32_t glyph_index) const {
+  return GetGlyphWidth(glyph_index, 0, 0);
+}
+
+int CFX_Font::GetGlyphWidth(uint32_t glyph_index,
+                            int dest_width,
+                            int weight) const {
   if (!m_Face)
     return 0;
   if (m_pSubstFont && m_pSubstFont->m_bFlagMM)
-    AdjustMMParams(glyph_index, 0, 0);
+    AdjustMMParams(glyph_index, dest_width, weight);
   int err =
       FT_Load_Glyph(m_Face->GetRec(), glyph_index,
                     FT_LOAD_NO_SCALE | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH);
   if (err)
     return 0;
 
-  int horiAdvance = FXFT_Get_Glyph_HoriAdvance(m_Face->GetRec());
+  FT_Pos horiAdvance = FXFT_Get_Glyph_HoriAdvance(m_Face->GetRec());
   if (horiAdvance < kThousandthMinInt || horiAdvance > kThousandthMaxInt)
     return 0;
 
-  return EM_ADJUST(FXFT_Get_Face_UnitsPerEM(m_Face->GetRec()), horiAdvance);
+  return static_cast<int>(
+      EM_ADJUST(FXFT_Get_Face_UnitsPerEM(m_Face->GetRec()), horiAdvance));
 }
 
 bool CFX_Font::LoadEmbedded(pdfium::span<const uint8_t> src_span,
-                            bool bForceAsVertical) {
-  if (bForceAsVertical)
-    m_bVertical = true;
+                            bool force_vertical,
+                            uint64_t object_tag) {
+  m_bVertical = force_vertical;
+  m_ObjectTag = object_tag;
   m_FontDataAllocation = std::vector<uint8_t, FxAllocAllocator<uint8_t>>(
       src_span.begin(), src_span.end());
   m_Face = CFX_GEModule::Get()->GetFontMgr()->NewFixedFace(
@@ -418,72 +475,53 @@ int CFX_Font::GetDescent() const {
   return EM_ADJUST(FXFT_Get_Face_UnitsPerEM(m_Face->GetRec()), descender);
 }
 
-Optional<FX_RECT> CFX_Font::GetGlyphBBox(uint32_t glyph_index) {
+absl::optional<FX_RECT> CFX_Font::GetGlyphBBox(uint32_t glyph_index) {
   if (!m_Face)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
-  FX_RECT result;
   if (FXFT_Is_Face_Tricky(m_Face->GetRec())) {
     int error = FT_Set_Char_Size(m_Face->GetRec(), 0, 1000 * 64, 72, 72);
     if (error)
-      return pdfium::nullopt;
+      return absl::nullopt;
 
     error = FT_Load_Glyph(m_Face->GetRec(), glyph_index,
                           FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH);
     if (error)
-      return pdfium::nullopt;
+      return absl::nullopt;
 
     FT_Glyph glyph;
     error = FT_Get_Glyph(m_Face->GetRec()->glyph, &glyph);
     if (error)
-      return pdfium::nullopt;
+      return absl::nullopt;
 
     FT_BBox cbox;
     FT_Glyph_Get_CBox(glyph, FT_GLYPH_BBOX_PIXELS, &cbox);
     int pixel_size_x = m_Face->GetRec()->size->metrics.x_ppem;
     int pixel_size_y = m_Face->GetRec()->size->metrics.y_ppem;
-    if (pixel_size_x == 0 || pixel_size_y == 0) {
-      result.left = cbox.xMin;
-      result.right = cbox.xMax;
-      result.top = cbox.yMax;
-      result.bottom = cbox.yMin;
-    } else {
-      result.left = cbox.xMin * 1000 / pixel_size_x;
-      result.right = cbox.xMax * 1000 / pixel_size_x;
-      result.top = cbox.yMax * 1000 / pixel_size_y;
-      result.bottom = cbox.yMin * 1000 / pixel_size_y;
-    }
-    result.top = std::min(
-        result.top,
-        static_cast<int32_t>(FXFT_Get_Face_Ascender(m_Face->GetRec())));
-    result.bottom = std::max(
-        result.bottom,
-        static_cast<int32_t>(FXFT_Get_Face_Descender(m_Face->GetRec())));
+    FX_RECT result = ScaledFXRectFromFTPos(
+        cbox.xMin, cbox.yMax, cbox.xMax, cbox.yMin, pixel_size_x, pixel_size_y);
+    result.top =
+        std::min(result.top, pdfium::base::checked_cast<int32_t>(
+                                 FXFT_Get_Face_Ascender(m_Face->GetRec())));
+    result.bottom =
+        std::max(result.bottom, pdfium::base::checked_cast<int32_t>(
+                                    FXFT_Get_Face_Descender(m_Face->GetRec())));
     FT_Done_Glyph(glyph);
     if (FT_Set_Pixel_Sizes(m_Face->GetRec(), 0, 64) != 0)
-      return pdfium::nullopt;
+      return absl::nullopt;
     return result;
   }
   constexpr int kFlag = FT_LOAD_NO_SCALE | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
   if (FT_Load_Glyph(m_Face->GetRec(), glyph_index, kFlag) != 0)
-    return pdfium::nullopt;
+    return absl::nullopt;
   int em = FXFT_Get_Face_UnitsPerEM(m_Face->GetRec());
-  if (em == 0) {
-    result.left = FXFT_Get_Glyph_HoriBearingX(m_Face->GetRec());
-    result.bottom = FXFT_Get_Glyph_HoriBearingY(m_Face->GetRec());
-    result.top = result.bottom - FXFT_Get_Glyph_Height(m_Face->GetRec());
-    result.right = result.left + FXFT_Get_Glyph_Width(m_Face->GetRec());
-  } else {
-    result.left = FXFT_Get_Glyph_HoriBearingX(m_Face->GetRec()) * 1000 / em;
-    result.top = (FXFT_Get_Glyph_HoriBearingY(m_Face->GetRec()) -
-                  FXFT_Get_Glyph_Height(m_Face->GetRec())) *
-                 1000 / em;
-    result.right = (FXFT_Get_Glyph_HoriBearingX(m_Face->GetRec()) +
-                    FXFT_Get_Glyph_Width(m_Face->GetRec())) *
-                   1000 / em;
-    result.bottom = (FXFT_Get_Glyph_HoriBearingY(m_Face->GetRec())) * 1000 / em;
-  }
-  return result;
+  return ScaledFXRectFromFTPos(FXFT_Get_Glyph_HoriBearingX(m_Face->GetRec()),
+                               FXFT_Get_Glyph_HoriBearingY(m_Face->GetRec()) -
+                                   FXFT_Get_Glyph_Height(m_Face->GetRec()),
+                               FXFT_Get_Glyph_HoriBearingX(m_Face->GetRec()) +
+                                   FXFT_Get_Glyph_Width(m_Face->GetRec()),
+                               FXFT_Get_Glyph_HoriBearingY(m_Face->GetRec()),
+                               em, em);
 }
 
 bool CFX_Font::IsItalic() const {
@@ -566,20 +604,28 @@ ByteString CFX_Font::GetBaseFontName() const {
   return ByteString();
 }
 
-Optional<FX_RECT> CFX_Font::GetBBox() {
+absl::optional<FX_RECT> CFX_Font::GetRawBBox() const {
   if (!m_Face)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
-  FX_RECT result(FXFT_Get_Face_xMin(m_Face->GetRec()),
-                 FXFT_Get_Face_yMin(m_Face->GetRec()),
-                 FXFT_Get_Face_xMax(m_Face->GetRec()),
-                 FXFT_Get_Face_yMax(m_Face->GetRec()));
+  return FXRectFromFTPos(FXFT_Get_Face_xMin(m_Face->GetRec()),
+                         FXFT_Get_Face_yMin(m_Face->GetRec()),
+                         FXFT_Get_Face_xMax(m_Face->GetRec()),
+                         FXFT_Get_Face_yMax(m_Face->GetRec()));
+}
+
+absl::optional<FX_RECT> CFX_Font::GetBBox() const {
+  absl::optional<FX_RECT> result = GetRawBBox();
+  if (!result.has_value())
+    return result;
+
   int em = FXFT_Get_Face_UnitsPerEM(m_Face->GetRec());
   if (em != 0) {
-    result.left = (result.left * 1000) / em;
-    result.top = (result.top * 1000) / em;
-    result.right = (result.right * 1000) / em;
-    result.bottom = (result.bottom * 1000) / em;
+    FX_RECT& bbox = result.value();
+    bbox.left = (bbox.left * 1000) / em;
+    bbox.top = (bbox.top * 1000) / em;
+    bbox.right = (bbox.right * 1000) / em;
+    bbox.bottom = (bbox.bottom * 1000) / em;
   }
   return result;
 }
@@ -603,7 +649,7 @@ void CFX_Font::AdjustMMParams(int glyph_index,
   if (!pMasters)
     return;
 
-  long coords[2];
+  FT_Pos coords[2];
   if (weight == 0)
     coords[0] = FXFT_Get_MM_Axis_Def(FXFT_Get_MM_Axis(pMasters, 0)) / 65536;
   else
@@ -612,29 +658,32 @@ void CFX_Font::AdjustMMParams(int glyph_index,
   if (dest_width == 0) {
     coords[1] = FXFT_Get_MM_Axis_Def(FXFT_Get_MM_Axis(pMasters, 1)) / 65536;
   } else {
-    int min_param = FXFT_Get_MM_Axis_Min(FXFT_Get_MM_Axis(pMasters, 1)) / 65536;
-    int max_param = FXFT_Get_MM_Axis_Max(FXFT_Get_MM_Axis(pMasters, 1)) / 65536;
+    FT_Long min_param =
+        FXFT_Get_MM_Axis_Min(FXFT_Get_MM_Axis(pMasters, 1)) / 65536;
+    FT_Long max_param =
+        FXFT_Get_MM_Axis_Max(FXFT_Get_MM_Axis(pMasters, 1)) / 65536;
     coords[1] = min_param;
     FT_Set_MM_Design_Coordinates(m_Face->GetRec(), 2, coords);
     FT_Load_Glyph(m_Face->GetRec(), glyph_index,
                   FT_LOAD_NO_SCALE | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH);
-    int min_width = FXFT_Get_Glyph_HoriAdvance(m_Face->GetRec()) * 1000 /
-                    FXFT_Get_Face_UnitsPerEM(m_Face->GetRec());
+    FT_Pos min_width = FXFT_Get_Glyph_HoriAdvance(m_Face->GetRec()) * 1000 /
+                       FXFT_Get_Face_UnitsPerEM(m_Face->GetRec());
     coords[1] = max_param;
     FT_Set_MM_Design_Coordinates(m_Face->GetRec(), 2, coords);
     FT_Load_Glyph(m_Face->GetRec(), glyph_index,
                   FT_LOAD_NO_SCALE | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH);
-    int max_width = FXFT_Get_Glyph_HoriAdvance(m_Face->GetRec()) * 1000 /
-                    FXFT_Get_Face_UnitsPerEM(m_Face->GetRec());
+    FT_Pos max_width = FXFT_Get_Glyph_HoriAdvance(m_Face->GetRec()) * 1000 /
+                       FXFT_Get_Face_UnitsPerEM(m_Face->GetRec());
     if (max_width == min_width) {
-      FXFT_Free(m_Face->GetRec(), pMasters);
+      FreeMMVar(m_Face->GetRec(), pMasters);
       return;
     }
-    int param = min_param + (max_param - min_param) * (dest_width - min_width) /
-                                (max_width - min_width);
+    FT_Pos param = min_param + (max_param - min_param) *
+                                   (dest_width - min_width) /
+                                   (max_width - min_width);
     coords[1] = param;
   }
-  FXFT_Free(m_Face->GetRec(), pMasters);
+  FreeMMVar(m_Face->GetRec(), pMasters);
   FT_Set_MM_Design_Coordinates(m_Face->GetRec(), 2, coords);
 }
 

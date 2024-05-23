@@ -6,7 +6,7 @@ import * as SDK from '../../core/sdk/sdk.js';
 import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
 import * as Protocol from '../../generated/protocol.js';
 
-export class InputModel extends SDK.SDKModel.SDKModel {
+export class InputModel extends SDK.SDKModel.SDKModel<void> {
   private readonly inputAgent: ProtocolProxyApi.InputApi;
   private eventDispatchTimer: number;
   private dispatchEventDataList: EventData[];
@@ -107,9 +107,9 @@ export class InputModel extends SDK.SDKModel.SDKModel {
     const eventData = this.dispatchEventDataList[this.dispatchingIndex];
     this.lastEventTime = eventData.timestamp;
     if (MOUSE_EVENT_TYPE_TO_REQUEST_TYPE.has(eventData.type)) {
-      this.dispatchMouseEvent(eventData as MouseEventData);
+      void this.dispatchMouseEvent(eventData as MouseEventData);
     } else if (KEYBOARD_EVENT_TYPE_TO_REQUEST_TYPE.has(eventData.type)) {
-      this.dispatchKeyEvent(eventData as KeyboardEventData);
+      void this.dispatchKeyEvent(eventData as KeyboardEventData);
     }
 
     ++this.dispatchingIndex;

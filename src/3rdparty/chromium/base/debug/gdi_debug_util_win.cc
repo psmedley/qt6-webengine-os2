@@ -301,8 +301,7 @@ absl::optional<base::debug::GdiHandleCounts> CollectGdiHandleCountsImpl(
 // Returns the GDI Handle counts from the GDI Shared handle table. Empty on
 // failure.
 absl::optional<base::debug::GdiHandleCounts> CollectGdiHandleCounts(DWORD pid) {
-  if (base::win::OSInfo::GetInstance()->wow64_status() ==
-      base::win::OSInfo::WOW64_ENABLED) {
+  if (base::win::OSInfo::GetInstance()->IsWowX86OnAMD64()) {
     return CollectGdiHandleCountsImpl<WowProcessTypes>(pid);
   }
 
@@ -403,11 +402,11 @@ void CollectChildGDIUsageAndDie(DWORD parent_pid) {
         OpenProcess(PROCESS_QUERY_INFORMATION,
                     FALSE,
                     proc_entry.th32ProcessID));
-    if (!process.IsValid())
+    if (!process.is_valid())
       continue;
 
-    int num_gdi_handles = GetGuiResources(process.Get(), GR_GDIOBJECTS);
-    int num_user_handles = GetGuiResources(process.Get(), GR_USEROBJECTS);
+    int num_gdi_handles = GetGuiResources(process.get(), GR_GDIOBJECTS);
+    int num_user_handles = GetGuiResources(process.get(), GR_USEROBJECTS);
 
     // Compute sum and peak counts for all processes.
     ++total_process_count;

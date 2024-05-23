@@ -10,8 +10,9 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/clock.h"
+#include "base/time/time.h"
 
 class PrefService;
 
@@ -66,6 +67,10 @@ using TriggerTypeAndQuotaItem = std::pair<TriggerType, int>;
 class TriggerThrottler {
  public:
   TriggerThrottler(PrefService* local_state_prefs);
+
+  TriggerThrottler(const TriggerThrottler&) = delete;
+  TriggerThrottler& operator=(const TriggerThrottler&) = delete;
+
   virtual ~TriggerThrottler();
 
   // Check if the the specified |trigger_type| has quota available and is
@@ -101,10 +106,10 @@ class TriggerThrottler {
 
   // Pref service for accessing local state prefs (ie: unsynced, tied to the
   // browser not to a profile). Used to persist quota.
-  PrefService* local_state_prefs_;
+  raw_ptr<PrefService> local_state_prefs_;
 
   // Can be set for testing.
-  base::Clock* clock_;
+  raw_ptr<base::Clock> clock_;
 
   // Stores each trigger type that fired along with the timestamps of when it
   // fired.
@@ -113,8 +118,6 @@ class TriggerThrottler {
   // List of trigger types and their quotas, controlled by Finch feature
   // |kTriggerThrottlerDailyQuotaFeature|.
   std::vector<TriggerTypeAndQuotaItem> trigger_type_and_quota_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(TriggerThrottler);
 };
 
 }  // namespace safe_browsing

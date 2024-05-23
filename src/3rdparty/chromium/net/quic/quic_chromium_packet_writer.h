@@ -7,17 +7,17 @@
 
 #include <stddef.h>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_export.h"
 #include "net/socket/datagram_client_socket.h"
-#include "net/third_party/quiche/src/quic/core/quic_connection.h"
-#include "net/third_party/quiche/src/quic/core/quic_packet_writer.h"
-#include "net/third_party/quiche/src/quic/core/quic_packets.h"
-#include "net/third_party/quiche/src/quic/core/quic_types.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_connection.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packet_writer.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_types.h"
 
 namespace net {
 
@@ -69,6 +69,10 @@ class NET_EXPORT_PRIVATE QuicChromiumPacketWriter
   // |socket| and |task_runner| must outlive writer.
   QuicChromiumPacketWriter(DatagramClientSocket* socket,
                            base::SequencedTaskRunner* task_runner);
+
+  QuicChromiumPacketWriter(const QuicChromiumPacketWriter&) = delete;
+  QuicChromiumPacketWriter& operator=(const QuicChromiumPacketWriter&) = delete;
+
   ~QuicChromiumPacketWriter() override;
 
   // |delegate| must outlive writer.
@@ -90,6 +94,7 @@ class NET_EXPORT_PRIVATE QuicChromiumPacketWriter
                                 quic::PerPacketOptions* options) override;
   bool IsWriteBlocked() const override;
   void SetWritable() override;
+  absl::optional<int> MessageTooBigErrorCode() const override;
   quic::QuicByteCount GetMaxPacketSize(
       const quic::QuicSocketAddress& peer_address) const override;
   bool SupportsReleaseTime() const override;
@@ -106,8 +111,8 @@ class NET_EXPORT_PRIVATE QuicChromiumPacketWriter
   bool MaybeRetryAfterWriteError(int rv);
   void RetryPacketAfterNoBuffers();
   quic::WriteResult WritePacketToSocketImpl();
-  DatagramClientSocket* socket_;  // Unowned.
-  Delegate* delegate_;            // Unowned.
+  raw_ptr<DatagramClientSocket> socket_;  // Unowned.
+  raw_ptr<Delegate> delegate_;            // Unowned.
   // Reused for every packet write for the lifetime of the writer.  Is
   // moved to the delegate in the case of a write error.
   scoped_refptr<ReusableIOBuffer> packet_;
@@ -127,8 +132,6 @@ class NET_EXPORT_PRIVATE QuicChromiumPacketWriter
 
   CompletionRepeatingCallback write_callback_;
   base::WeakPtrFactory<QuicChromiumPacketWriter> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(QuicChromiumPacketWriter);
 };
 
 }  // namespace net

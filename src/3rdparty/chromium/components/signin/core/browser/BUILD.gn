@@ -56,7 +56,6 @@ static_library("browser") {
     "//components/content_settings/core/common",
     "//components/keyed_service/core",
     "//components/prefs",
-    "//components/signin/public/base",
     "//components/signin/public/base:signin_buildflags",
     "//google_apis",
     "//net",
@@ -85,8 +84,8 @@ static_library("browser") {
       "active_directory_account_reconcilor_delegate.h",
     ]
     deps += [
+      "//ash/components/tpm",
       "//chromeos/crosapi/mojom",
-      "//chromeos/tpm:tpm",
     ]
     sources -= [
       "signin_status_metrics_provider.cc",
@@ -98,6 +97,12 @@ static_library("browser") {
     deps += [
       "//chromeos/crosapi/mojom",
       "//chromeos/lacros",
+    ]
+    sources += [
+      "consistency_cookie_manager.cc",
+      "consistency_cookie_manager.h",
+      "mirror_landing_account_reconcilor_delegate.cc",
+      "mirror_landing_account_reconcilor_delegate.h",
     ]
   }
 
@@ -132,7 +137,6 @@ source_set("unit_tests") {
     "//components/content_settings/core/browser",
     "//components/prefs",
     "//components/prefs:test_support",
-    "//components/signin/public/base",
     "//components/signin/public/base:signin_buildflags",
     "//components/signin/public/base:test_support",
     "//components/signin/public/identity_manager",
@@ -149,8 +153,8 @@ source_set("unit_tests") {
 
   if (is_chromeos_ash) {
     deps += [
+      "//ash/components/tpm:test_support",
       "//chromeos/crosapi/mojom",
-      "//chromeos/tpm:test_support",
     ]
     sources -= [
       "account_investigator_unittest.cc",
@@ -163,6 +167,10 @@ source_set("unit_tests") {
       "//chromeos/crosapi/mojom",
       "//chromeos/lacros",
       "//chromeos/lacros:test_support",
+    ]
+    sources += [
+      "consistency_cookie_manager_unittest.cc",
+      "mirror_landing_account_reconcilor_delegate_unittest.cc",
     ]
   }
 

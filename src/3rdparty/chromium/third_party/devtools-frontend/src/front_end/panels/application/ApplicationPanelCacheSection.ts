@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as Common from '../../core/common/common.js';
+import type * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import type * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as ApplicationComponents from './components/components.js';
+import * as Host from '../../core/host/host.js';
 
-import type {ApplicationPanelSidebar} from './ApplicationPanelSidebar.js';
 import {ApplicationPanelTreeElement, ExpandableApplicationPanelTreeElement} from './ApplicationPanelTreeElement.js';
-import {BackForwardCacheView} from './BackForwardCacheView.js';
 import type {ResourcesPanel} from './ResourcesPanel.js';
 import {ServiceWorkerCacheView} from './ServiceWorkerCacheViews.js';
 
@@ -21,7 +22,7 @@ const UIStrings = {
   /**
   *@description Text in Application Panel Sidebar of the Application panel
   */
-  backForwardCache: 'Back-forward Cache',
+  backForwardCache: 'Back/forward cache',
   /**
   *@description A context menu item in the Application Panel Sidebar of the Application panel
   */
@@ -33,27 +34,6 @@ const UIStrings = {
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/ApplicationPanelCacheSection.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-export class ApplicationCacheManifestTreeElement extends ApplicationPanelTreeElement {
-  private readonly manifestURL: string;
-
-  constructor(resourcesPanel: ResourcesPanel, manifestURL: string) {
-    const title = new Common.ParsedURL.ParsedURL(manifestURL).displayName;
-    super(resourcesPanel, title, false);
-    this.tooltip = manifestURL;
-    this.manifestURL = manifestURL;
-  }
-
-  get itemURL(): string {
-    return 'appcache://' + this.manifestURL;
-  }
-
-  onselect(selectedByUser: boolean|undefined): boolean {
-    super.onselect(selectedByUser);
-    this.resourcesPanel.showCategoryView(this.manifestURL, null);
-    return false;
-  }
-}
-
 export class ServiceWorkerCacheTreeElement extends ExpandableApplicationPanelTreeElement {
   private swCacheModel: SDK.ServiceWorkerCacheModel.ServiceWorkerCacheModel|null;
   private swCacheTreeElements: Set<SWCacheTreeElement>;
@@ -91,7 +71,7 @@ export class ServiceWorkerCacheTreeElement extends ExpandableApplicationPanelTre
   private handleContextMenuEvent(event: MouseEvent): void {
     const contextMenu = new UI.ContextMenu.ContextMenu(event);
     contextMenu.defaultSection().appendItem(i18nString(UIStrings.refreshCaches), this.refreshCaches.bind(this));
-    contextMenu.show();
+    void contextMenu.show();
   }
 
   private refreshCaches(): void {
@@ -147,15 +127,14 @@ export class SWCacheTreeElement extends ApplicationPanelTreeElement {
     super(resourcesPanel, cache.cacheName + ' - ' + cache.securityOrigin, false);
     this.model = model;
     this.cache = cache;
-    /** @type {?} */
     this.view = null;
     const icon = UI.Icon.Icon.create('mediumicon-table', 'resource-tree-item');
     this.setLeadingIcons([icon]);
   }
 
-  get itemURL(): string {
+  get itemURL(): Platform.DevToolsPath.UrlString {
     // I don't think this will work at all.
-    return 'cache://' + this.cache.cacheId;
+    return 'cache://' + this.cache.cacheId as Platform.DevToolsPath.UrlString;
   }
 
   onattach(): void {
@@ -166,11 +145,11 @@ export class SWCacheTreeElement extends ApplicationPanelTreeElement {
   private handleContextMenuEvent(event: MouseEvent): void {
     const contextMenu = new UI.ContextMenu.ContextMenu(event);
     contextMenu.defaultSection().appendItem(i18nString(UIStrings.delete), this.clearCache.bind(this));
-    contextMenu.show();
+    void contextMenu.show();
   }
 
   private clearCache(): void {
-    this.model.deleteCache(this.cache);
+    void this.model.deleteCache(this.cache);
   }
 
   update(cache: SDK.ServiceWorkerCacheModel.Cache): void {
@@ -187,6 +166,7 @@ export class SWCacheTreeElement extends ApplicationPanelTreeElement {
     }
 
     this.showView(this.view);
+    Host.userMetrics.panelShown(Host.UserMetrics.PanelCodes[Host.UserMetrics.PanelCodes.service_worker_cache]);
     return false;
   }
 
@@ -196,43 +176,8 @@ export class SWCacheTreeElement extends ApplicationPanelTreeElement {
   }
 }
 
-export class ApplicationCacheFrameTreeElement extends ApplicationPanelTreeElement {
-  private readonly sidebar: ApplicationPanelSidebar;
-  readonly frameId: string;
-  readonly manifestURL: string;
-
-  constructor(sidebar: ApplicationPanelSidebar, frame: SDK.ResourceTreeModel.ResourceTreeFrame, manifestURL: string) {
-    super(sidebar._panel, '', false);
-    this.sidebar = sidebar;
-    this.frameId = frame.id;
-    this.manifestURL = manifestURL;
-    this.refreshTitles(frame);
-
-    const icon = UI.Icon.Icon.create('mediumicon-frame-top', 'navigator-folder-tree-item');
-    this.setLeadingIcons([icon]);
-  }
-
-  get itemURL(): string {
-    return 'appcache://' + this.manifestURL + '/' + encodeURI(this.titleAsText());
-  }
-
-  private refreshTitles(frame: SDK.ResourceTreeModel.ResourceTreeFrame): void {
-    this.title = frame.displayName();
-  }
-
-  frameNavigated(frame: SDK.ResourceTreeModel.ResourceTreeFrame): void {
-    this.refreshTitles(frame);
-  }
-
-  onselect(selectedByUser: boolean|undefined): boolean {
-    super.onselect(selectedByUser);
-    this.sidebar._showApplicationCache(this.frameId);
-    return false;
-  }
-}
-
 export class BackForwardCacheTreeElement extends ApplicationPanelTreeElement {
-  private view?: BackForwardCacheView;
+  private view?: ApplicationComponents.BackForwardCacheView.BackForwardCacheViewWrapper;
 
   constructor(resourcesPanel: ResourcesPanel) {
     super(resourcesPanel, i18nString(UIStrings.backForwardCache), false);
@@ -240,16 +185,17 @@ export class BackForwardCacheTreeElement extends ApplicationPanelTreeElement {
     this.setLeadingIcons([icon]);
   }
 
-  get itemURL(): string {
-    return 'bfcache://';
+  get itemURL(): Platform.DevToolsPath.UrlString {
+    return 'bfcache://' as Platform.DevToolsPath.UrlString;
   }
 
   onselect(selectedByUser?: boolean): boolean {
     super.onselect(selectedByUser);
     if (!this.view) {
-      this.view = new BackForwardCacheView();
+      this.view = new ApplicationComponents.BackForwardCacheView.BackForwardCacheViewWrapper();
     }
     this.showView(this.view);
+    Host.userMetrics.panelShown(Host.UserMetrics.PanelCodes[Host.UserMetrics.PanelCodes.back_forward_cache]);
     return false;
   }
 }

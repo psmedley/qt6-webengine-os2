@@ -6,12 +6,12 @@
 
 #include <memory>
 
+#include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings_provider.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_float32array_uint16array_uint8clampedarray.h"
-#include "third_party/blink/renderer/bindings/modules/v8/v8_hit_region_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_csscolorvalue_canvasgradient_canvaspattern_string.h"
 #ifndef __OS2__
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_cssimagevalue_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_offscreencanvas_svgimageelement_videoframe.h"
@@ -349,60 +349,6 @@ void ResetCanvasForAccessibilityRectTest(Document& document) {
   EXPECT_TRUE(canvas->RenderingContext()->IsRenderingContext2D());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, AccessibilityRectTestForAddHitRegion) {
-  ResetCanvasForAccessibilityRectTest(GetDocument());
-  AXContext ax_context(GetDocument(), ui::kAXModeComplete);
-
-  Element* button_element = GetDocument().getElementById("button");
-  auto* canvas = To<HTMLCanvasElement>(GetDocument().getElementById("canvas"));
-  CanvasRenderingContext2D* context =
-      static_cast<CanvasRenderingContext2D*>(canvas->RenderingContext());
-
-  NonThrowableExceptionState exception_state;
-  HitRegionOptions* options = HitRegionOptions::Create();
-  options->setControl(button_element);
-
-  context->beginPath();
-  context->rect(10, 10, 40, 40);
-  context->addHitRegion(options, exception_state);
-
-  auto* ax_object_cache =
-      To<AXObjectCacheImpl>(GetDocument().ExistingAXObjectCache());
-  AXObject* ax_object = ax_object_cache->GetOrCreate(button_element);
-
-  LayoutRect ax_bounds = ax_object->GetBoundsInFrameCoordinates();
-  EXPECT_EQ(25, ax_bounds.X().ToInt());
-  EXPECT_EQ(25, ax_bounds.Y().ToInt());
-  EXPECT_EQ(40, ax_bounds.Width().ToInt());
-  EXPECT_EQ(40, ax_bounds.Height().ToInt());
-}
-
-TEST_F(CanvasRenderingContext2DAPITest,
-       AccessibilityRectTestForDrawFocusIfNeeded) {
-  ResetCanvasForAccessibilityRectTest(GetDocument());
-  AXContext ax_context(GetDocument(), ui::kAXModeComplete);
-
-  Element* button_element = GetDocument().getElementById("button");
-  auto* canvas = To<HTMLCanvasElement>(GetDocument().getElementById("canvas"));
-  CanvasRenderingContext2D* context =
-      static_cast<CanvasRenderingContext2D*>(canvas->RenderingContext());
-
-  GetDocument().UpdateStyleAndLayoutTreeForNode(canvas);
-
-  context->beginPath();
-  context->rect(10, 10, 40, 40);
-  context->drawFocusIfNeeded(button_element);
-
-  auto* ax_object_cache =
-      To<AXObjectCacheImpl>(GetDocument().ExistingAXObjectCache());
-  AXObject* ax_object = ax_object_cache->GetOrCreate(button_element);
-
-  LayoutRect ax_bounds = ax_object->GetBoundsInFrameCoordinates();
-  EXPECT_EQ(25, ax_bounds.X().ToInt());
-  EXPECT_EQ(25, ax_bounds.Y().ToInt());
-  EXPECT_EQ(40, ax_bounds.Width().ToInt());
-  EXPECT_EQ(40, ax_bounds.Height().ToInt());
-}
 
 // A IdentifiabilityStudySettingsProvider implementation that opts-into study
 // participation.
@@ -460,7 +406,16 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyMaxOperations) {
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_Font) {
+// TODO(crbug.com/1239374): Fix test on Android L and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_Font \
+  DISABLED_IdentifiabilityStudyDigest_Font
+#else
+#define MAYBE_IdentifiabilityStudyDigest_Font IdentifiabilityStudyDigest_Font
+#endif  // BUILDFLAG(IS_ANDROID)
+
+TEST_F(CanvasRenderingContext2DAPITest, MAYBE_IdentifiabilityStudyDigest_Font) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -488,7 +443,18 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDisabled) {
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_StrokeText) {
+// TODO(crbug.com/1239374): Fix test on Android and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_StrokeText \
+  DISABLED_IdentifiabilityStudyDigest_StrokeText
+#else
+#define MAYBE_IdentifiabilityStudyDigest_StrokeText \
+  IdentifiabilityStudyDigest_StrokeText
+#endif  // BUILDFLAG(IS_ANDROID)
+
+TEST_F(CanvasRenderingContext2DAPITest,
+       MAYBE_IdentifiabilityStudyDigest_StrokeText) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -501,7 +467,18 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_StrokeText) {
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_FillText) {
+// TODO(crbug.com/1239374): Fix test on Android and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_FillText \
+  DISABLED_IdentifiabilityStudyDigest_FillText
+#else
+#define MAYBE_IdentifiabilityStudyDigest_FillText \
+  IdentifiabilityStudyDigest_FillText
+#endif  // BUILDFLAG(IS_ANDROID)
+
+TEST_F(CanvasRenderingContext2DAPITest,
+       MAYBE_IdentifiabilityStudyDigest_FillText) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -514,7 +491,18 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_FillText) {
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_TextAlign) {
+// TODO(crbug.com/1239374): Fix test on Android and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_TextAlign \
+  DISABLED_IdentifiabilityStudyDigest_TextAlign
+#else
+#define MAYBE_IdentifiabilityStudyDigest_TextAlign \
+  IdentifiabilityStudyDigest_TextAlign
+#endif  // BUILDFLAG(IS_ANDROID)
+
+TEST_F(CanvasRenderingContext2DAPITest,
+       MAYBE_IdentifiabilityStudyDigest_TextAlign) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -527,8 +515,18 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_TextAlign) {
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
+// TODO(crbug.com/1239374): Fix test on Android and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_TextBaseline \
+  DISABLED_IdentifiabilityStudyDigest_TextBaseline
+#else
+#define MAYBE_IdentifiabilityStudyDigest_TextBaseline \
+  IdentifiabilityStudyDigest_TextBaseline
+#endif  // BUILDFLAG(IS_ANDROID)
+
 TEST_F(CanvasRenderingContext2DAPITest,
-       IdentifiabilityStudyDigest_TextBaseline) {
+       MAYBE_IdentifiabilityStudyDigest_TextBaseline) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -541,8 +539,18 @@ TEST_F(CanvasRenderingContext2DAPITest,
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
+// TODO(crbug.com/1239374): Fix test on Android and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_StrokeStyle \
+  DISABLED_IdentifiabilityStudyDigest_StrokeStyle
+#else
+#define MAYBE_IdentifiabilityStudyDigest_StrokeStyle \
+  IdentifiabilityStudyDigest_StrokeStyle
+#endif  // BUILDFLAG(IS_ANDROID)
+
 TEST_F(CanvasRenderingContext2DAPITest,
-       IdentifiabilityStudyDigest_StrokeStyle) {
+       MAYBE_IdentifiabilityStudyDigest_StrokeStyle) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -557,7 +565,18 @@ TEST_F(CanvasRenderingContext2DAPITest,
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_FillStyle) {
+// TODO(crbug.com/1239374): Fix test on Android and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_FillStyle \
+  DISABLED_IdentifiabilityStudyDigest_FillStyle
+#else
+#define MAYBE_IdentifiabilityStudyDigest_FillStyle \
+  IdentifiabilityStudyDigest_FillStyle
+#endif  // BUILDFLAG(IS_ANDROID)
+
+TEST_F(CanvasRenderingContext2DAPITest,
+       MAYBE_IdentifiabilityStudyDigest_FillStyle) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -572,7 +591,17 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_FillStyle) {
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_Combo) {
+// TODO(crbug.com/1239374): Fix test on Android and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_Combo \
+  DISABLED_IdentifiabilityStudyDigest_Combo
+#else
+#define MAYBE_IdentifiabilityStudyDigest_Combo IdentifiabilityStudyDigest_Combo
+#endif  // BUILDFLAG(IS_ANDROID)
+
+TEST_F(CanvasRenderingContext2DAPITest,
+       MAYBE_IdentifiabilityStudyDigest_Combo) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
 
@@ -594,8 +623,18 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_Combo) {
   EXPECT_FALSE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
+// TODO(crbug.com/1239374): Fix test on Android L and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_putImageData \
+  DISABLED_IdentifiabilityStudyDigest_putImageData
+#else
+#define MAYBE_IdentifiabilityStudyDigest_putImageData \
+  IdentifiabilityStudyDigest_putImageData
+#endif  // BUILDFLAG(IS_ANDROID)
+
 TEST_F(CanvasRenderingContext2DAPITest,
-       IdentifiabilityStudyDigest_putImageData) {
+       MAYBE_IdentifiabilityStudyDigest_putImageData) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
   NonThrowableExceptionState exception_state;
@@ -612,7 +651,18 @@ TEST_F(CanvasRenderingContext2DAPITest,
   EXPECT_TRUE(Context2D()->IdentifiabilityEncounteredPartiallyDigestedImage());
 }
 
-TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_drawImage) {
+// TODO(crbug.com/1239374): Fix test on Android L and re-enable.
+// TODO(crbug.com/1258605): Fix test on Windows and re-enable.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+#define MAYBE_IdentifiabilityStudyDigest_drawImage \
+  DISABLED_IdentifiabilityStudyDigest_drawImage
+#else
+#define MAYBE_IdentifiabilityStudyDigest_drawImage \
+  IdentifiabilityStudyDigest_drawImage
+#endif  // BUILDFLAG(IS_ANDROID)
+
+TEST_F(CanvasRenderingContext2DAPITest,
+       MAYBE_IdentifiabilityStudyDigest_drawImage) {
   StudyParticipationRaii study_participation_raii;
   CreateContext(kNonOpaque);
   NonThrowableExceptionState exception_state;
@@ -620,7 +670,7 @@ TEST_F(CanvasRenderingContext2DAPITest, IdentifiabilityStudyDigest_drawImage) {
   // We can use our own canvas as the image source!
   auto* image_source =
       MakeGarbageCollected<V8CanvasImageSource>(&CanvasElement());
-  Context2D()->drawImage(/*script_state=*/nullptr, image_source, /*x=*/1,
+  Context2D()->drawImage(image_source, /*x=*/1,
                          /*y=*/1, exception_state);
   EXPECT_EQ(INT64_C(-4851825694092845811),
             Context2D()->IdentifiableTextToken().ToUkmMetricValue());

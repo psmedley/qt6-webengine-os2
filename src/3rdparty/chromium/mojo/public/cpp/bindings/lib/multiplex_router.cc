@@ -12,12 +12,12 @@
 #include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/types/pass_key.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_client.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_controller.h"
@@ -43,6 +43,9 @@ class MultiplexRouter::InterfaceEndpoint
         peer_closed_(false),
         handle_created_(false),
         client_(nullptr) {}
+
+  InterfaceEndpoint(const InterfaceEndpoint&) = delete;
+  InterfaceEndpoint& operator=(const InterfaceEndpoint&) = delete;
 
   // ---------------------------------------------------------------------------
   // The following public methods are safe to call from any sequence without
@@ -182,7 +185,7 @@ class MultiplexRouter::InterfaceEndpoint
 
   void OnSyncEventSignaled() {
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
-    scoped_refptr<MultiplexRouter> router_protector(router_);
+    scoped_refptr<MultiplexRouter> router_protector(router_.get());
 
     MayAutoLock locker(&router_->lock_);
     scoped_refptr<InterfaceEndpoint> self_protector(this);
@@ -218,7 +221,7 @@ class MultiplexRouter::InterfaceEndpoint
   // ---------------------------------------------------------------------------
   // The following members are safe to access from any sequence.
 
-  MultiplexRouter* const router_;
+  const raw_ptr<MultiplexRouter> router_;
   const InterfaceId id_;
 
   // ---------------------------------------------------------------------------
@@ -238,7 +241,7 @@ class MultiplexRouter::InterfaceEndpoint
   // The task runner on which |client_|'s methods can be called.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   // Not owned. It is null if no client is attached to this endpoint.
-  InterfaceEndpointClient* client_;
+  raw_ptr<InterfaceEndpointClient> client_;
 
   // Indicates whether the sync watcher should be signaled for this endpoint.
   bool sync_message_event_signaled_ = false;
@@ -246,8 +249,6 @@ class MultiplexRouter::InterfaceEndpoint
   // Guarded by the router's lock. Used to synchronously wait on replies.
   std::unique_ptr<SequenceLocalSyncEventWatcher> sync_watcher_;
   base::flat_set<uint64_t> requests_with_external_sync_waiter_;
-
-  DISALLOW_COPY_AND_ASSIGN(InterfaceEndpoint);
 };
 
 // MessageWrapper objects are always destroyed under the router's lock. On
@@ -262,6 +263,9 @@ class MultiplexRouter::MessageWrapper {
 
   MessageWrapper(MessageWrapper&& other)
       : router_(other.router_), value_(std::move(other.value_)) {}
+
+  MessageWrapper(const MessageWrapper&) = delete;
+  MessageWrapper& operator=(const MessageWrapper&) = delete;
 
   ~MessageWrapper() {
     if (!router_ || value_.IsNull())
@@ -297,10 +301,11 @@ class MultiplexRouter::MessageWrapper {
   }
 
  private:
+  // `router_` is not a raw_ptr<...> for performance reasons (based on analysis
+  // of sampling profiler data and tab_search:top100:2020).
   MultiplexRouter* router_ = nullptr;
-  Message value_;
 
-  DISALLOW_COPY_AND_ASSIGN(MessageWrapper);
+  Message value_;
 };
 
 struct MultiplexRouter::Task {
@@ -1062,6 +1067,12 @@ bool MultiplexRouter::ProcessIncomingMessage(
 
   bool can_direct_call;
   if (message->has_flag(Message::kFlagIsSync)) {
+    if (!message->has_flag(Message::kFlagIsResponse) &&
+        !base::Contains(endpoint->client()->sync_method_ordinals(),
+                        message->name())) {
+      RaiseErrorInNonTestingMode();
+      return true;
+    }
     can_direct_call = client_call_behavior != NO_DIRECT_CLIENT_CALLS &&
                       endpoint->task_runner()->RunsTasksInCurrentSequence();
   } else {

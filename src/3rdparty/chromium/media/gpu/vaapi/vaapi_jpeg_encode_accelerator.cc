@@ -11,14 +11,12 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/cxx17_backports.h"
 #include "base/logging.h"
 #include "base/memory/writable_shared_memory_region.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/sequence_checker.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
@@ -70,6 +68,10 @@ class VaapiJpegEncodeAccelerator::Encoder {
           scoped_refptr<VaapiWrapper> vpp_vaapi_wrapper,
           base::RepeatingCallback<void(int32_t, size_t)> video_frame_ready_cb,
           base::RepeatingCallback<void(int32_t, Status)> notify_error_cb);
+
+  Encoder(const Encoder&) = delete;
+  Encoder& operator=(const Encoder&) = delete;
+
   ~Encoder();
 
   // Processes one encode task with DMA-buf.
@@ -106,8 +108,6 @@ class VaapiJpegEncodeAccelerator::Encoder {
   uint32_t va_format_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(Encoder);
 };
 
 VaapiJpegEncodeAccelerator::Encoder::Encoder(
@@ -317,12 +317,12 @@ void VaapiJpegEncodeAccelerator::Encoder::EncodeWithDmaBufTask(
     constexpr uint8_t kJpegSoiAndApp0Header[] = {
         0xFF, JPEG_SOI, 0xFF, JPEG_APP0, 0x00, 0x10,
     };
-    if (encoded_size < base::size(kJpegSoiAndApp0Header)) {
+    if (encoded_size < std::size(kJpegSoiAndApp0Header)) {
       VLOGF(1) << "Unexpected JPEG data size received from encoder";
       notify_error_cb_.Run(task_id, PLATFORM_FAILURE);
       return;
     }
-    for (size_t i = 0; i < base::size(kJpegSoiAndApp0Header); ++i) {
+    for (size_t i = 0; i < std::size(kJpegSoiAndApp0Header); ++i) {
       if (frame_content[i] != kJpegSoiAndApp0Header[i]) {
         VLOGF(1) << "Unexpected JPEG header received from encoder";
         notify_error_cb_.Run(task_id, PLATFORM_FAILURE);
@@ -338,15 +338,15 @@ void VaapiJpegEncodeAccelerator::Encoder::EncodeWithDmaBufTask(
         static_cast<uint8_t>((exif_buffer_size + 2) / 256),
         static_cast<uint8_t>((exif_buffer_size + 2) % 256),
     };
-    CHECK_GE(output_size, base::size(jpeg_soi_and_app1_header));
-    if (exif_buffer_size > output_size - base::size(jpeg_soi_and_app1_header)) {
+    CHECK_GE(output_size, std::size(jpeg_soi_and_app1_header));
+    if (exif_buffer_size > output_size - std::size(jpeg_soi_and_app1_header)) {
       VLOGF(1) << "Insufficient buffer size reserved for JPEG APP1 data";
       notify_error_cb_.Run(task_id, PLATFORM_FAILURE);
       return;
     }
     memcpy(output_memory, jpeg_soi_and_app1_header,
-           base::size(jpeg_soi_and_app1_header));
-    memcpy(output_memory + base::size(jpeg_soi_and_app1_header), exif_buffer,
+           std::size(jpeg_soi_and_app1_header));
+    memcpy(output_memory + std::size(jpeg_soi_and_app1_header), exif_buffer,
            exif_buffer_size);
     encoded_size += output_offset;
   }

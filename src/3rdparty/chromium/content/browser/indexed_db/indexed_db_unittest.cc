@@ -8,13 +8,13 @@
 #include "base/barrier_closure.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/default_clock.h"
-#include "components/services/storage/indexed_db/scopes/scopes_lock_manager.h"
+#include "components/services/storage/indexed_db/locks/leveled_lock_manager.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_database.h"
 #include "components/services/storage/public/mojom/indexed_db_control.mojom-test-utils.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
@@ -50,16 +50,18 @@ class LevelDBLock {
   LevelDBLock() = default;
   LevelDBLock(leveldb::Env* env, leveldb::FileLock* lock)
       : env_(env), lock_(lock) {}
+
+  LevelDBLock(const LevelDBLock&) = delete;
+  LevelDBLock& operator=(const LevelDBLock&) = delete;
+
   ~LevelDBLock() {
     if (env_)
       env_->UnlockFile(lock_);
   }
 
  private:
-  leveldb::Env* env_ = nullptr;
-  leveldb::FileLock* lock_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(LevelDBLock);
+  raw_ptr<leveldb::Env> env_ = nullptr;
+  raw_ptr<leveldb::FileLock> lock_ = nullptr;
 };
 
 std::unique_ptr<LevelDBLock> LockForTesting(const base::FilePath& file_name) {
@@ -103,6 +105,10 @@ class IndexedDBTest : public testing::Test {
         kSessionOnlyStorageKey.origin(), should_purge_on_shutdown));
     context_->ApplyPolicyUpdates(std::move(policy_updates));
   }
+
+  IndexedDBTest(const IndexedDBTest&) = delete;
+  IndexedDBTest& operator=(const IndexedDBTest&) = delete;
+
   ~IndexedDBTest() override = default;
 
   void RunPostedTasks() {
@@ -157,8 +163,6 @@ class IndexedDBTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   scoped_refptr<storage::MockQuotaManagerProxy> quota_manager_proxy_;
   scoped_refptr<IndexedDBContextImpl> context_;
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBTest);
 };
 
 TEST_F(IndexedDBTest, ClearSessionOnlyDatabases) {
@@ -212,6 +216,9 @@ class ForceCloseDBCallbacks : public IndexedDBCallbacks {
         idb_context_(idb_context),
         storage_key_(storage_key) {}
 
+  ForceCloseDBCallbacks(const ForceCloseDBCallbacks&) = delete;
+  ForceCloseDBCallbacks& operator=(const ForceCloseDBCallbacks&) = delete;
+
   void OnSuccess() override {}
   void OnSuccess(std::unique_ptr<IndexedDBConnection> connection,
                  const IndexedDBDatabaseMetadata& metadata) override {
@@ -228,7 +235,6 @@ class ForceCloseDBCallbacks : public IndexedDBCallbacks {
   scoped_refptr<IndexedDBContextImpl> idb_context_;
   blink::StorageKey storage_key_;
   std::unique_ptr<IndexedDBConnection> connection_;
-  DISALLOW_COPY_AND_ASSIGN(ForceCloseDBCallbacks);
 };
 
 TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnDelete) {
@@ -348,11 +354,11 @@ TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnCommitFailure) {
   EXPECT_FALSE(factory->IsBackingStoreOpen(kTestStorageKey));
 }
 
-TEST(ScopesLockManager, TestRangeDifferences) {
-  ScopeLockRange range_db1;
-  ScopeLockRange range_db2;
-  ScopeLockRange range_db1_os1;
-  ScopeLockRange range_db1_os2;
+TEST(LeveledLockManager, TestRangeDifferences) {
+  LeveledLockRange range_db1;
+  LeveledLockRange range_db2;
+  LeveledLockRange range_db1_os1;
+  LeveledLockRange range_db1_os2;
   for (int64_t i = 0; i < 512; ++i) {
     range_db1 = GetDatabaseLockRange(i);
     range_db2 = GetDatabaseLockRange(i + 1);

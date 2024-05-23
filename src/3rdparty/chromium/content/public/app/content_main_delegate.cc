@@ -18,29 +18,33 @@ bool ContentMainDelegate::BasicStartupComplete(int* exit_code) {
   return false;
 }
 
-int ContentMainDelegate::RunProcess(
+absl::variant<int, MainFunctionParams> ContentMainDelegate::RunProcess(
     const std::string& process_type,
-    const content::MainFunctionParams& main_function_params) {
-  return -1;
+    MainFunctionParams main_function_params) {
+  return std::move(main_function_params);
 }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 void ContentMainDelegate::ZygoteStarting(
     std::vector<std::unique_ptr<ZygoteForkDelegate>>* delegates) {}
 
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 int ContentMainDelegate::TerminateForFatalInitializationError() {
   CHECK(false);
   return 0;
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 bool ContentMainDelegate::ShouldHandleConsoleControlEvents() {
   return false;
 }
 #endif
+
+bool ContentMainDelegate::ShouldLockSchemeRegistry() {
+  return true;
+}
 
 bool ContentMainDelegate::ShouldCreateFeatureList() {
   return true;

@@ -10,11 +10,12 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/media_observer.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_task_environment.h"
 #include "media/audio/audio_device_description.h"
@@ -37,11 +39,11 @@
 
 #if defined(USE_ALSA)
 #include "media/audio/alsa/audio_manager_alsa.h"
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
 #include "media/audio/android/audio_manager_android.h"
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
 #include "media/audio/mac/audio_manager_mac.h"
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
 #include "media/audio/win/audio_manager_win.h"
 #else
 #include "media/audio/fake_audio_manager.h"
@@ -57,11 +59,11 @@ namespace content {
 
 #if defined(USE_ALSA)
 typedef media::AudioManagerAlsa AudioManagerPlatform;
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
 typedef media::AudioManagerMac AudioManagerPlatform;
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
 typedef media::AudioManagerWin AudioManagerPlatform;
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
 typedef media::AudioManagerAndroid AudioManagerPlatform;
 #else
 typedef media::FakeAudioManager AudioManagerPlatform;
@@ -81,6 +83,10 @@ class MockAudioManager : public AudioManagerPlatform {
                              &fake_audio_log_factory_),
         num_output_devices_(2),
         num_input_devices_(2) {}
+
+  MockAudioManager(const MockAudioManager&) = delete;
+  MockAudioManager& operator=(const MockAudioManager&) = delete;
+
   ~MockAudioManager() override {}
 
   void GetAudioInputDeviceNames(
@@ -136,7 +142,6 @@ class MockAudioManager : public AudioManagerPlatform {
   media::FakeAudioLogFactory fake_audio_log_factory_;
   size_t num_output_devices_;
   size_t num_input_devices_;
-  DISALLOW_COPY_AND_ASSIGN(MockAudioManager);
 };
 
 class MockMediaObserver : public MediaObserver {
@@ -163,7 +168,7 @@ class TestBrowserClient : public ContentBrowserClient {
   MediaObserver* GetMediaObserver() override { return media_observer_; }
 
  private:
-  MediaObserver* media_observer_;
+  raw_ptr<MediaObserver> media_observer_;
 };
 
 class MockMediaStreamUIProxy : public FakeMediaStreamUIProxy {
@@ -207,6 +212,9 @@ class MediaStreamManagerTest : public ::testing::Test {
               std::move(result_callback).Run(stub_results);
             }));
   }
+
+  MediaStreamManagerTest(const MediaStreamManagerTest&) = delete;
+  MediaStreamManagerTest& operator=(const MediaStreamManagerTest&) = delete;
 
   ~MediaStreamManagerTest() override { audio_manager_->Shutdown(); }
 
@@ -354,6 +362,17 @@ class MediaStreamManagerTest : public ::testing::Test {
     wait_loop->Quit();
   }
 
+  static void GetOpenDeviceCallback(
+      blink::MediaStreamDevice* transferred_device,
+      blink::mojom::MediaStreamRequestResult* result_out,
+      blink::mojom::MediaStreamRequestResult result,
+      absl::optional<blink::mojom::GetOpenDeviceResponse> response) {
+    *result_out = result;
+    if (response.has_value()) {
+      *transferred_device = response->device;
+    }
+  }
+
   blink::MediaStreamDevice CreateOrSearchAudioDeviceStream(
       const StreamSelectionStrategy& strategy,
       const absl::optional<base::UnguessableToken>& session_id,
@@ -395,16 +414,14 @@ class MediaStreamManagerTest : public ::testing::Test {
   // CurrentThread::DestructionObserver. audio_manager_ needs to outlive
   // task_environment_ because it uses the underlying message loop.
   std::unique_ptr<MediaStreamManager> media_stream_manager_;
+  base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<MockMediaObserver> media_observer_;
   std::unique_ptr<ContentBrowserClient> browser_content_client_;
   content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<MockAudioManager> audio_manager_;
   std::unique_ptr<media::AudioSystem> audio_system_;
-  MockVideoCaptureProvider* video_capture_provider_;
+  raw_ptr<MockVideoCaptureProvider> video_capture_provider_;
   base::RunLoop run_loop_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MediaStreamManagerTest);
 };
 
 TEST_F(MediaStreamManagerTest, MakeMediaAccessRequest) {
@@ -880,6 +897,66 @@ TEST_F(MediaStreamManagerTest, DesktopCaptureDeviceChanged) {
   media_stream_manager_->StopStreamDevice(render_process_id, render_frame_id,
                                           requester_id, video_device.id,
                                           video_device.session_id());
+}
+
+TEST_F(MediaStreamManagerTest, GetOpenDeviceForExistingDeviceReturnsDevice) {
+  scoped_feature_list_.InitAndEnableFeature(
+      features::kMediaStreamTrackTransfer);
+  media_stream_manager_->UseFakeUIFactoryForTests(base::BindRepeating([]() {
+    return std::make_unique<FakeMediaStreamUIProxy>(
+        /*tests_use_fake_render_frame_hosts=*/true);
+  }));
+
+  blink::MediaStreamDevice original_device = CreateOrSearchAudioDeviceStream(
+      blink::mojom::StreamSelectionStrategy::FORCE_NEW_STREAM, absl::nullopt);
+
+  blink::MediaStreamDevice transferred_device;
+  auto result =
+      blink::mojom::MediaStreamRequestResult::NUM_MEDIA_REQUEST_RESULTS;
+  EXPECT_EQ(original_device.id, "default");
+  EXPECT_NE(transferred_device.id, original_device.id);
+
+  MediaStreamManager::GetOpenDeviceCallback get_open_device_cb =
+      base::BindOnce(GetOpenDeviceCallback, &transferred_device, &result)
+          .Then(run_loop_.QuitClosure());
+
+  media_stream_manager_->GetOpenDevice(
+      original_device.session_id(), /*render_process_id=*/1,
+      /*render_frame_id=*/1, /*requester_id=*/1, /*page_request_id=*/1,
+      MediaDeviceSaltAndOrigin(), std::move(get_open_device_cb),
+      base::DoNothing(), base::DoNothing(), base::DoNothing(),
+      base::DoNothing());
+
+  run_loop_.Run();
+  EXPECT_EQ(result, blink::mojom::MediaStreamRequestResult::OK);
+  EXPECT_EQ(transferred_device.id, original_device.id);
+  EXPECT_NE(transferred_device.session_id(), original_device.session_id());
+}
+
+TEST_F(MediaStreamManagerTest,
+       GetOpenDeviceForNonExistentDeviceReturnsInvalidState) {
+  scoped_feature_list_.InitAndEnableFeature(
+      features::kMediaStreamTrackTransfer);
+  media_stream_manager_->UseFakeUIFactoryForTests(base::BindRepeating([]() {
+    return std::make_unique<FakeMediaStreamUIProxy>(
+        /*tests_use_fake_render_frame_hosts=*/true);
+  }));
+
+  blink::MediaStreamDevice transferred_device;
+  auto result =
+      blink::mojom::MediaStreamRequestResult::NUM_MEDIA_REQUEST_RESULTS;
+  MediaStreamManager::GetOpenDeviceCallback get_open_device_cb =
+      base::BindOnce(GetOpenDeviceCallback, &transferred_device, &result)
+          .Then(run_loop_.QuitClosure());
+
+  media_stream_manager_->GetOpenDevice(
+      base::UnguessableToken::Create(), /*render_process_id=*/1,
+      /*render_frame_id=*/1, /*requester_id=*/1, /*page_request_id=*/1,
+      MediaDeviceSaltAndOrigin(), std::move(get_open_device_cb),
+      base::DoNothing(), base::DoNothing(), base::DoNothing(),
+      base::DoNothing());
+  run_loop_.Run();
+  EXPECT_EQ(result, blink::mojom::MediaStreamRequestResult::INVALID_STATE);
 }
 
 TEST_F(MediaStreamManagerTest, GetMediaDeviceIDForHMAC) {

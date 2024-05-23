@@ -41,6 +41,7 @@ import type * as Protocol from '../../../../generated/protocol.js';
 import * as UI from '../../legacy.js';
 
 import {Linkifier} from './Linkifier.js';
+import jsUtilsStyles from './jsUtils.css.js';
 
 const UIStrings = {
   /**
@@ -82,7 +83,7 @@ function populateContextMenu(link: Element, event: Event): void {
     }
   }
   contextMenu.appendApplicableItems(event);
-  contextMenu.show();
+  void contextMenu.show();
 }
 
 export function buildStackTraceRows(
@@ -101,11 +102,13 @@ export function buildStackTraceRows(
         () => throttler.schedule(async () => updateHiddenRows(updateCallback, stackTraceRows)));
   }
 
-  function buildStackTraceRowsHelper(stackTrace: Protocol.Runtime.StackTrace, asyncFlag: boolean): void {
+  function buildStackTraceRowsHelper(
+      stackTrace: Protocol.Runtime.StackTrace,
+      previousCallFrames: Protocol.Runtime.CallFrame[]|undefined = undefined): void {
     let asyncRow: StackTraceAsyncRow|null = null;
-    if (asyncFlag) {
+    if (previousCallFrames) {
       asyncRow = {
-        asyncDescription: UI.UIUtils.asyncStackTraceLabel(stackTrace.description),
+        asyncDescription: UI.UIUtils.asyncStackTraceLabel(stackTrace.description, previousCallFrames),
         ignoreListHide: false,
         rowCountHide: false,
       };
@@ -117,9 +120,8 @@ export function buildStackTraceRows(
       const rowCountHide = regularRowCount > 30 && stackTrace.callFrames.length > 31;
       let ignoreListHide = false;
       const functionName = UI.UIUtils.beautifyFunctionName(stackFrame.functionName);
-      const link = linkifier.maybeLinkifyConsoleCallFrame(
-          target, stackFrame,
-          {tabStop: Boolean(tabStops), className: undefined, columnNumber: undefined, inlineFrameIndex: 0});
+      const link =
+          linkifier.maybeLinkifyConsoleCallFrame(target, stackFrame, {tabStop: Boolean(tabStops), inlineFrameIndex: 0});
       if (link) {
         link.addEventListener('contextmenu', populateContextMenu.bind(null, link));
         // TODO(crbug.com/1183325): fix race condition with uiLocation still being null here
@@ -140,18 +142,18 @@ export function buildStackTraceRows(
       }
       stackTraceRows.push({functionName, link, ignoreListHide, rowCountHide});
     }
-    if (asyncFlag && asyncRow && hiddenCallFrames > 0 && hiddenCallFrames === stackTrace.callFrames.length) {
+    if (asyncRow && hiddenCallFrames > 0 && hiddenCallFrames === stackTrace.callFrames.length) {
       stackTraceRows[1].rowCountHide ? asyncRow.rowCountHide = true : asyncRow.ignoreListHide = true;
     }
   }
 
-  buildStackTraceRowsHelper(stackTrace, false);
-  let asyncStackTrace = stackTrace.parent;
-  while (asyncStackTrace) {
+  buildStackTraceRowsHelper(stackTrace);
+  let previousCallFrames = stackTrace.callFrames;
+  for (let asyncStackTrace = stackTrace.parent; asyncStackTrace; asyncStackTrace = asyncStackTrace.parent) {
     if (asyncStackTrace.callFrames.length) {
-      buildStackTraceRowsHelper(asyncStackTrace, true);
+      buildStackTraceRowsHelper(asyncStackTrace, previousCallFrames);
     }
-    asyncStackTrace = asyncStackTrace.parent;
+    previousCallFrames = asyncStackTrace.callFrames;
   }
   return stackTraceRows;
 }
@@ -201,8 +203,8 @@ export function buildStackTracePreviewContents(
   const element = document.createElement('span');
   element.classList.add('monospace');
   element.style.display = 'inline-block';
-  const shadowRoot = UI.Utils.createShadowRootWithCoreStyles(
-      element, {cssFile: 'ui/legacy/components/utils/jsUtils.css', delegatesFocus: undefined});
+  const shadowRoot =
+      UI.Utils.createShadowRootWithCoreStyles(element, {cssFile: [jsUtilsStyles], delegatesFocus: undefined});
   const contentElement = shadowRoot.createChild('table', 'stack-preview-container');
   if (!stackTrace) {
     return {element, links: []};

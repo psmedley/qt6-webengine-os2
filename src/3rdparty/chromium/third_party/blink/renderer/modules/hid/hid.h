@@ -11,8 +11,13 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/modules/hid/hid_device.h"
+#include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
@@ -21,15 +26,17 @@
 namespace blink {
 
 class ExecutionContext;
-class HIDDevice;
+class HIDDeviceFilter;
 class HIDDeviceRequestOptions;
 class Navigator;
 class ScriptPromiseResolver;
 class ScriptState;
 
-class HID : public EventTargetWithInlineData,
-            public Supplement<Navigator>,
-            public device::mojom::blink::HidManagerClient {
+class MODULES_EXPORT HID : public EventTargetWithInlineData,
+                           public ExecutionContextLifecycleObserver,
+                           public Supplement<Navigator>,
+                           public device::mojom::blink::HidManagerClient,
+                           public HIDDevice::ServiceInterface {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -44,6 +51,9 @@ class HID : public EventTargetWithInlineData,
   // EventTarget:
   ExecutionContext* GetExecutionContext() const override;
   const AtomicString& InterfaceName() const override;
+
+  // ExecutionContextLifecycleObserver:
+  void ContextDestroyed() override;
 
   // device::mojom::HidManagerClient:
   void DeviceAdded(device::mojom::blink::HidDeviceInfoPtr device_info) override;
@@ -60,10 +70,23 @@ class HID : public EventTargetWithInlineData,
                               const HIDDeviceRequestOptions*,
                               ExceptionState&);
 
-  void Connect(const String& device_guid,
-               mojo::PendingRemote<device::mojom::blink::HidConnectionClient>
-                   connection_client,
-               device::mojom::blink::HidManager::ConnectCallback callback);
+  // HIDDevice::ServiceInterface:
+  void Connect(
+      const String& device_guid,
+      mojo::PendingRemote<device::mojom::blink::HidConnectionClient>
+          connection_client,
+      device::mojom::blink::HidManager::ConnectCallback callback) override;
+  void Forget(device::mojom::blink::HidDeviceInfoPtr device_info,
+              mojom::blink::HidService::ForgetCallback callback) override;
+
+  // Converts a HID device `filter` into the equivalent Mojo type and returns
+  // it. CheckDeviceFilterValidity must be called first.
+  static mojom::blink::HidDeviceFilterPtr ConvertDeviceFilter(
+      const HIDDeviceFilter& filter);
+
+  // Checks the validity of the given HIDDeviceFilter. Returns null string when
+  // filter is valid or an error message when the filter is invalid.
+  static String CheckDeviceFilterValidity(const HIDDeviceFilter& filter);
 
   void Trace(Visitor*) const override;
 
@@ -80,7 +103,10 @@ class HID : public EventTargetWithInlineData,
   // Opens a connection to HidService, or does nothing if the connection is
   // already open.
   void EnsureServiceConnection();
-  void OnServiceConnectionError();
+
+  // Closes the connection to HidService and resolves any pending promises.
+  void CloseServiceConnection();
+
   void FinishGetDevices(ScriptPromiseResolver*,
                         Vector<device::mojom::blink::HidDeviceInfoPtr>);
   void FinishRequestDevice(ScriptPromiseResolver*,

@@ -1,3 +1,4 @@
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load(
     "//tensorflow/core/platform:build_config_root.bzl",
     "if_static",
@@ -5,7 +6,7 @@ load(
 
 package(
     default_visibility = ["//visibility:public"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 cc_library(
@@ -16,7 +17,6 @@ cc_library(
         "//tensorflow/compiler/xla/service:generic_transfer_manager",
         "//tensorflow/compiler/xla/service:transfer_manager",
         "//tensorflow/compiler/xla/service/interpreter:platform_id",
-        "//tensorflow/core:lib",
         "@com_google_absl//absl/memory",
     ],
     alwayslink = True,  # Contains per-platform transfer manager registration
@@ -34,10 +34,12 @@ cc_library(
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla/service:algebraic_simplifier",
         "//tensorflow/compiler/xla/service:cholesky_expander",
+        "//tensorflow/compiler/xla/service:comparison_expander",
         "//tensorflow/compiler/xla/service:compiler",
         "//tensorflow/compiler/xla/service:computation_placer",
         "//tensorflow/compiler/xla/service:custom_call_target_registry",
         "//tensorflow/compiler/xla/service:dynamic_index_splitter",
+        "//tensorflow/compiler/xla/service:eigh_expander",
         "//tensorflow/compiler/xla/service:executable",
         "//tensorflow/compiler/xla/service:flatten_call_graph",
         "//tensorflow/compiler/xla/service:hlo",
@@ -51,6 +53,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo_subcomputation_unification",
         "//tensorflow/compiler/xla/service:layout_assignment",
         "//tensorflow/compiler/xla/service:map_inliner",
+        "//tensorflow/compiler/xla/service:qr_expander",
         "//tensorflow/compiler/xla/service:reshape_mover",
         "//tensorflow/compiler/xla/service:triangular_solve_expander",
         "//tensorflow/compiler/xla/service:while_loop_simplifier",
@@ -118,10 +121,8 @@ cc_library(
         "//tensorflow/compiler/xla/service:shaped_buffer",
         "//tensorflow/compiler/xla/service:transfer_manager",
         "//tensorflow/core:lib",
-        "//tensorflow/core:stream_executor_no_cuda",
-        "//tensorflow/core/platform:macros",
         "//tensorflow/core/platform:mutex",
-        "//tensorflow/core/platform:types",
+        "//tensorflow/core/platform:stream_executor_no_cuda",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/types:span",
     ],

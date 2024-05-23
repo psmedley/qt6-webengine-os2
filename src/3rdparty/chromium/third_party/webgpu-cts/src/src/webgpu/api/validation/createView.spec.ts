@@ -9,7 +9,9 @@ import {
   kTextureFormatInfo,
   kTextureFormats,
   kTextureViewDimensions,
+  viewCompatible,
 } from '../../capability_info.js';
+import { kResourceStates } from '../../gpu_test.js';
 import {
   getTextureDimensionFromView,
   reifyTextureViewDescriptor,
@@ -17,7 +19,7 @@ import {
 } from '../../util/texture/base.js';
 import { reifyExtent3D } from '../../util/unions.js';
 
-import { kResourceStates, ValidationTest } from './validation_test.js';
+import { ValidationTest } from './validation_test.js';
 
 export const g = makeTestGroup(ValidationTest);
 
@@ -25,26 +27,37 @@ const kLevels = 6;
 
 g.test('format')
   .desc(
-    `Views must have the same format as the base texture, for all {texture format}x{view format}.`
+    `Views must have the view format compatible with the base texture, for all {texture format}x{view format}.`
   )
   .params(u =>
     u
       .combine('textureFormat', kTextureFormats)
       .beginSubcases()
-      // If undefined, should default to textureFormat.
       .combine('viewFormat', [undefined, ...kTextureFormats])
+      .combine('useViewFormatList', [false, true])
   )
   .fn(async t => {
-    const { textureFormat, viewFormat } = t.params;
+    const { textureFormat, viewFormat, useViewFormatList } = t.params;
     await t.selectDeviceForTextureFormatOrSkipTestCase([textureFormat, viewFormat]);
+    const { blockWidth, blockHeight } = kTextureFormatInfo[textureFormat];
+
+    const compatible = viewFormat === undefined || viewCompatible(textureFormat, viewFormat);
 
     const texture = t.device.createTexture({
       format: textureFormat,
-      size: [4, 4],
-      usage: GPUTextureUsage.SAMPLED,
+      size: [blockWidth, blockHeight],
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+
+      // This is a test of createView, not createTexture. Don't pass viewFormats here that
+      // are not compatible, as that is tested in createTexture.spec.ts.
+      viewFormats:
+        useViewFormatList && compatible && viewFormat !== undefined ? [viewFormat] : undefined,
     });
 
-    const success = viewFormat === undefined || viewFormat === textureFormat;
+    // Successful if there is no view format, no reinterpretation was required, or the formats are compatible
+    // and is was specified in the viewFormats list.
+    const success =
+      viewFormat === undefined || viewFormat === textureFormat || (compatible && useViewFormatList);
     t.expectValidationError(() => {
       texture.createView({ format: viewFormat });
     }, !success);
@@ -70,7 +83,7 @@ g.test('dimension')
       format: 'rgba8unorm' as const,
       dimension: textureDimension,
       size,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
     const texture = t.device.createTexture(textureDescriptor);
 
@@ -102,8 +115,8 @@ g.test('aspect')
 
     const texture = t.device.createTexture({
       format,
-      size: [4, 4, 1],
-      usage: GPUTextureUsage.SAMPLED,
+      size: [info.blockWidth, info.blockHeight, 1],
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     });
 
     const success =
@@ -161,6 +174,7 @@ g.test('array_layers')
       .beginSubcases()
       .expand('textureLayers', ({ textureDimension: d }) => (d === '2d' ? [1, 6, 18] : [1]))
       .combine('textureLevels', [1, kLevels])
+      .unless(p => p.textureDimension === '1d' && p.textureLevels !== 1)
       .expand(
         'baseArrayLayer',
         ({ textureLayers: l }) => new Set([undefined, 0, 1, 5, 6, 7, l - 1, l, l + 1])
@@ -195,7 +209,7 @@ g.test('array_layers')
           ? [kWidth, kWidth, kWidth]
           : unreachable(),
       mipLevelCount: textureLevels,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const viewDescriptor = { dimension: viewDimension, baseArrayLayer, arrayLayerCount };
@@ -220,6 +234,7 @@ g.test('mip_levels')
     kTextureAndViewDimensions
       .beginSubcases()
       .combine('textureLevels', [1, kLevels - 2, kLevels])
+      .unless(p => p.textureDimension === '1d' && p.textureLevels !== 1)
       .expand(
         'baseMipLevel',
         ({ textureLevels: l }) => new Set([undefined, 0, 1, 5, 6, 7, l - 1, l, l + 1])
@@ -246,7 +261,7 @@ g.test('mip_levels')
       size:
         textureDimension === '1d' ? [32] : textureDimension === '3d' ? [32, 32, 32] : [32, 32, 18],
       mipLevelCount: textureLevels,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const viewDescriptor = { dimension: viewDimension, baseMipLevel, mipLevelCount };
@@ -281,7 +296,7 @@ g.test('cube_faces_square')
     const texture = t.device.createTexture({
       format: 'rgba8unorm',
       size,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     });
 
     const success = dimension === '2d' || size[0] === size[1];

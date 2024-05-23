@@ -4,7 +4,7 @@
 
 export namespace Chrome {
   export namespace DevTools {
-    export interface EventSink<ListenerT extends(...args: any) => any> {
+    export interface EventSink<ListenerT extends(...args: any) => void> {
       addListener(listener: ListenerT): void;
     }
 
@@ -68,7 +68,14 @@ export namespace Chrome {
       themeName: string;
 
       create(title: string, iconPath: string, pagePath: string, callback?: (panel: ExtensionPanel) => unknown): void;
-      openResource(url: string, lineNumber: number, callback?: () => unknown): void;
+      openResource(url: string, lineNumber: number, columnNumber?: number, callback?: () => unknown): void;
+
+      /**
+       * Fired when the theme changes in DevTools.
+       *
+       * @param callback The handler callback to register and be invoked on theme changes.
+       */
+      setThemeChangeHandler(callback?: (themeName: string) => unknown): void;
     }
 
     export interface Request {

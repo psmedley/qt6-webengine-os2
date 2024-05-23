@@ -9,6 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/web_package/signed_exchange_consts.h"
 #include "content/browser/web_package/signed_exchange_utils.h"
 #include "content/public/common/content_features.h"
@@ -114,7 +115,11 @@ void SignedExchangeValidityPinger::OnReceiveEarlyHints(
     network::mojom::EarlyHintsPtr early_hints) {}
 
 void SignedExchangeValidityPinger::OnReceiveResponse(
-    network::mojom::URLResponseHeadPtr head) {}
+    network::mojom::URLResponseHeadPtr head,
+    mojo::ScopedDataPipeConsumerHandle body) {
+  if (body)
+    OnStartLoadingResponseBody(std::move(body));
+}
 
 void SignedExchangeValidityPinger::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,

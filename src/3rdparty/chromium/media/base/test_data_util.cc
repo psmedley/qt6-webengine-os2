@@ -8,7 +8,6 @@
 
 #include "base/check_op.h"
 #include "base/containers/flat_map.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/no_destructor.h"
 #include "base/numerics/safe_conversions.h"
@@ -167,14 +166,14 @@ const uint8_t kKeyId[] = {0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
 // See http://crbug.com/592067
 
 // Common test results.
-const char kFailed[] = "FAILED";
+const char kFailedTitle[] = "FAILED";
 
 // Upper case event name set by Utils.installTitleEventHandler().
-const char kEnded[] = "ENDED";
-const char kErrorEvent[] = "ERROR";
+const char kEndedTitle[] = "ENDED";
+const char kErrorEventTitle[] = "ERROR";
 
 // Lower case event name as set by Utils.failTest().
-const char kError[] = "error";
+const char kErrorTitle[] = "error";
 
 const base::FilePath::CharType kTestDataPath[] =
     FILE_PATH_LITERAL("media/test/data");
@@ -227,13 +226,13 @@ scoped_refptr<DecoderBuffer> ReadTestDataFile(const std::string& name) {
 bool LookupTestKeyVector(const std::vector<uint8_t>& key_id,
                          bool allow_rotation,
                          std::vector<uint8_t>* key) {
-  std::vector<uint8_t> starting_key_id(kKeyId, kKeyId + base::size(kKeyId));
+  std::vector<uint8_t> starting_key_id(kKeyId, kKeyId + std::size(kKeyId));
   size_t rotate_limit = allow_rotation ? starting_key_id.size() : 1;
   for (size_t pos = 0; pos < rotate_limit; ++pos) {
     std::rotate(starting_key_id.begin(), starting_key_id.begin() + pos,
                 starting_key_id.end());
     if (key_id == starting_key_id) {
-      key->assign(kSecretKey, kSecretKey + base::size(kSecretKey));
+      key->assign(kSecretKey, kSecretKey + std::size(kSecretKey));
       std::rotate(key->begin(), key->begin() + pos, key->end());
       return true;
     }

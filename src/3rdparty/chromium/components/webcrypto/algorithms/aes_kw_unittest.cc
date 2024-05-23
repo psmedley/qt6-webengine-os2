@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/cxx17_backports.h"
 #include "base/values.h"
 #include "components/webcrypto/algorithm_dispatch.h"
 #include "components/webcrypto/algorithms/test_helpers.h"
@@ -30,7 +29,7 @@ class WebCryptoAesKwTest : public WebCryptoTestBase {};
 TEST_F(WebCryptoAesKwTest, GenerateKeyBadLength) {
   const uint16_t kKeyLen[] = {0, 127, 257};
   blink::WebCryptoKey key;
-  for (size_t i = 0; i < base::size(kKeyLen); ++i) {
+  for (size_t i = 0; i < std::size(kKeyLen); ++i) {
     SCOPED_TRACE(i);
     EXPECT_EQ(Status::ErrorGenerateAesKeyLength(),
               GenerateSecretKey(CreateAesKwKeyGenAlgorithm(kKeyLen[i]), true,
@@ -137,8 +136,8 @@ TEST_F(WebCryptoAesKwTest, AesKwKeyImport) {
       ImportKey(blink::kWebCryptoKeyFormatRaw, CryptoData(HexStringToBytes("")),
                 algorithm, true, blink::kWebCryptoKeyUsageWrapKey, &key));
 
-  // Fail import of 124-bit KEK
-  key_raw_hex_in = "3e4566a2bdaa10cb68134fa66c15ddb";
+  // Fail import of 120-bit KEK
+  key_raw_hex_in = "3e4566a2bdaa10cb68134fa66c15dd";
   EXPECT_EQ(Status::ErrorImportAesKeyLength(),
             ImportKey(blink::kWebCryptoKeyFormatRaw,
                       CryptoData(HexStringToBytes(key_raw_hex_in)), algorithm,
@@ -150,22 +149,14 @@ TEST_F(WebCryptoAesKwTest, AesKwKeyImport) {
             ImportKey(blink::kWebCryptoKeyFormatRaw,
                       CryptoData(HexStringToBytes(key_raw_hex_in)), algorithm,
                       true, blink::kWebCryptoKeyUsageWrapKey, &key));
-
-  // Fail import of 260-bit KEK
-  key_raw_hex_in =
-      "72d4e475ff34215416c9ad9c8281247a4d730c5f275ac23f376e73e3bce8d7d5a";
-  EXPECT_EQ(Status::ErrorImportAesKeyLength(),
-            ImportKey(blink::kWebCryptoKeyFormatRaw,
-                      CryptoData(HexStringToBytes(key_raw_hex_in)), algorithm,
-                      true, blink::kWebCryptoKeyUsageWrapKey, &key));
 }
 
 TEST_F(WebCryptoAesKwTest, UnwrapFailures) {
-  // This test exercises the code path common to all unwrap operations.
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("aes_kw.json", &tests));
-  base::DictionaryValue* test;
-  ASSERT_TRUE(tests.GetDictionary(0, &test));
+  auto tests = ReadJsonTestFileAsList("aes_kw.json");
+  const base::Value& test_value = tests[0];
+  ASSERT_TRUE(test_value.is_dict());
+  const base::DictionaryValue* test =
+      &base::Value::AsDictionaryValue(test_value);
   const std::vector<uint8_t> test_kek = GetBytesFromHexString(test, "kek");
   const std::vector<uint8_t> test_ciphertext =
       GetBytesFromHexString(test, "ciphertext");
@@ -186,13 +177,13 @@ TEST_F(WebCryptoAesKwTest, UnwrapFailures) {
 }
 
 TEST_F(WebCryptoAesKwTest, AesKwRawSymkeyWrapUnwrapKnownAnswer) {
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("aes_kw.json", &tests));
+  base::Value::List tests = ReadJsonTestFileAsList("aes_kw.json");
 
-  for (size_t test_index = 0; test_index < tests.GetSize(); ++test_index) {
-    SCOPED_TRACE(test_index);
-    base::DictionaryValue* test;
-    ASSERT_TRUE(tests.GetDictionary(test_index, &test));
+  for (const auto& test_value : tests) {
+    SCOPED_TRACE(&test_value - &tests[0]);
+    ASSERT_TRUE(test_value.is_dict());
+    const base::DictionaryValue* test =
+        &base::Value::AsDictionaryValue(test_value);
     const std::vector<uint8_t> test_kek = GetBytesFromHexString(test, "kek");
     const std::vector<uint8_t> test_key = GetBytesFromHexString(test, "key");
     const std::vector<uint8_t> test_ciphertext =
@@ -245,11 +236,11 @@ TEST_F(WebCryptoAesKwTest, AesKwRawSymkeyWrapUnwrapKnownAnswer) {
 // Unwrap a HMAC key using AES-KW, and then try doing a sign/verify with the
 // unwrapped key
 TEST_F(WebCryptoAesKwTest, AesKwRawSymkeyUnwrapSignVerifyHmac) {
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("aes_kw.json", &tests));
-
-  base::DictionaryValue* test;
-  ASSERT_TRUE(tests.GetDictionary(0, &test));
+  auto tests = ReadJsonTestFileAsList("aes_kw.json");
+  const base::Value& test_value = tests[0];
+  ASSERT_TRUE(test_value.is_dict());
+  const base::DictionaryValue* test =
+      &base::Value::AsDictionaryValue(test_value);
   const std::vector<uint8_t> test_kek = GetBytesFromHexString(test, "kek");
   const std::vector<uint8_t> test_ciphertext =
       GetBytesFromHexString(test, "ciphertext");
@@ -296,11 +287,12 @@ TEST_F(WebCryptoAesKwTest, AesKwRawSymkeyUnwrapSignVerifyHmac) {
 }
 
 TEST_F(WebCryptoAesKwTest, AesKwRawSymkeyWrapUnwrapErrors) {
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("aes_kw.json", &tests));
-  base::DictionaryValue* test;
   // Use 256 bits of data with a 256-bit KEK
-  ASSERT_TRUE(tests.GetDictionary(3, &test));
+  auto tests = ReadJsonTestFileAsList("aes_kw.json");
+  const base::Value& test_value = tests[3];
+  ASSERT_TRUE(test_value.is_dict());
+  const base::DictionaryValue* test =
+      &base::Value::AsDictionaryValue(test_value);
   const std::vector<uint8_t> test_kek = GetBytesFromHexString(test, "kek");
   const std::vector<uint8_t> test_key = GetBytesFromHexString(test, "key");
   const std::vector<uint8_t> test_ciphertext =
@@ -337,11 +329,12 @@ TEST_F(WebCryptoAesKwTest, AesKwRawSymkeyWrapUnwrapErrors) {
 }
 
 TEST_F(WebCryptoAesKwTest, AesKwRawSymkeyUnwrapCorruptData) {
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("aes_kw.json", &tests));
-  base::DictionaryValue* test;
   // Use 256 bits of data with a 256-bit KEK
-  ASSERT_TRUE(tests.GetDictionary(3, &test));
+  auto tests = ReadJsonTestFileAsList("aes_kw.json");
+  const base::Value& test_value = tests[3];
+  ASSERT_TRUE(test_value.is_dict());
+  const base::DictionaryValue* test =
+      &base::Value::AsDictionaryValue(test_value);
   const std::vector<uint8_t> test_kek = GetBytesFromHexString(test, "kek");
   const std::vector<uint8_t> test_key = GetBytesFromHexString(test, "key");
   const std::vector<uint8_t> test_ciphertext =
@@ -436,7 +429,7 @@ TEST_F(WebCryptoAesKwTest, ImportKeyBadUsage_Raw) {
 
   std::vector<uint8_t> key_bytes(16);
 
-  for (size_t i = 0; i < base::size(bad_usages); ++i) {
+  for (size_t i = 0; i < std::size(bad_usages); ++i) {
     SCOPED_TRACE(i);
 
     blink::WebCryptoKey key;
@@ -474,7 +467,7 @@ TEST_F(WebCryptoAesKwTest, UnwrapHmacKeyBadUsage_JWK) {
       "C2B7F19A32EE31372CD40C9C969B8CD67553E5AEA7FD1144874584E46ABCD79FDC308848"
       "B2DD8BD36A2D61062B9C5B8B499B8D6EF8EB320D87A614952B4EE771";
 
-  for (size_t i = 0; i < base::size(bad_usages); ++i) {
+  for (size_t i = 0; i < std::size(bad_usages); ++i) {
     SCOPED_TRACE(i);
 
     blink::WebCryptoKey key;
@@ -523,7 +516,7 @@ TEST_F(WebCryptoAesKwTest, UnwrapRsaSsaPublicKeyBadUsage_JWK) {
       "40C72DCF0AEA454113CC47457B13305B25507CBEAB9BDC8D8E0F867F9167F9DCEF0D9F9B"
       "30F2EE83CEDFD51136852C8A5939B768";
 
-  for (size_t i = 0; i < base::size(bad_usages); ++i) {
+  for (size_t i = 0; i < std::size(bad_usages); ++i) {
     SCOPED_TRACE(i);
 
     blink::WebCryptoKey key;

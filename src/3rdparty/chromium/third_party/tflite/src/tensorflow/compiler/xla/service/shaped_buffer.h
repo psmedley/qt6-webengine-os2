@@ -26,7 +26,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/platform/stream_executor_no_cuda.h"
-#include "tensorflow/core/platform/types.h"
 #include "tensorflow/stream_executor/device_memory_allocator.h"
 
 namespace xla {
@@ -43,8 +42,10 @@ class ShapedBuffer {
   // both the on-host and on-device shape are required. The on-device shape
   // determines the number of device allocations (DeviceMemoryBase) held by the
   // ShapedBuffer.
-  ShapedBuffer(Shape on_host_shape, Shape on_device_shape,
-               const se::Platform* platform, int device_ordinal);
+  ShapedBuffer(Shape on_device_shape, int device_ordinal);
+
+  // TODO(b/170310047): remove this overload.
+  ShapedBuffer(Shape on_host_shape, Shape on_device_shape, int device_ordinal);
 
   // Movable, but not copyable.
   ShapedBuffer(ShapedBuffer&& s);
@@ -66,7 +67,6 @@ class ShapedBuffer {
   // ShapedBuffer.
   const Shape& on_device_shape() const { return on_device_shape_; }
 
-  const se::Platform* platform() const { return platform_; }
   int device_ordinal() const { return device_ordinal_; }
 
   // Return the root buffer of the shape (shape index {}).
@@ -91,19 +91,23 @@ class ShapedBuffer {
   void set_buffers(ShapeTree<se::DeviceMemoryBase> buffers) {
     CHECK(ShapeUtil::Equal(buffers.shape(), on_device_shape_));
     buffers_ = std::move(buffers);
-    buffers_.replace_shape_ptr(&on_device_shape_);
+    buffers_.replace_shape_ptr(on_device_shape_);
   }
 
   // Reset the shape of this shaped buffer and underlying buffer structure.
   //
   // Precondition: EqualStructure(this->on_device_shape_, on_device_shape).
-  void set_shapes(const Shape& on_host_shape, const Shape& on_device_shape) {
+  void set_shapes(const Shape& on_device_shape) {
     CHECK(ShapeUtil::EqualStructure(on_device_shape, on_device_shape_))
         << "Structures are not the same. new: " << on_device_shape
         << ", old: " << on_device_shape_;
-    on_host_shape_ = on_host_shape;
+    on_host_shape_ = ShapeUtil::DeviceShapeToHostShape(on_device_shape);
     on_device_shape_ = on_device_shape;
-    buffers_.replace_shape_ptr(&on_device_shape_);
+    buffers_.replace_shape_ptr(on_device_shape_);
+  }
+  // TODO(b/170310047): remove this overload.
+  void set_shapes(const Shape& on_host_shape, const Shape& on_device_shape) {
+    set_shapes(on_device_shape);
   }
 
   // Returns the underlying ShapeTree containing all the device addresses in the
@@ -116,17 +120,13 @@ class ShapedBuffer {
   // Set all device memory pointers in the object to null.
   void clear();
 
-  string ToString() const;
+  std::string ToString() const;
 
  protected:
-  // The shape of the data when represented on the host.
   Shape on_host_shape_;
 
   // The shape of the data on the device.
   Shape on_device_shape_;
-
-  // The platform the memory is allocated on.
-  const se::Platform* platform_;
 
   // The device the memory is allocated on.
   int device_ordinal_;
@@ -148,6 +148,10 @@ std::ostream& operator<<(std::ostream& out, const ShapedBuffer& buffer);
 class ScopedShapedBuffer : public ShapedBuffer {
  public:
   // Creates a ScopedShapedBuffer with null DeviceMemoryBases at each index.
+  explicit ScopedShapedBuffer(Shape on_device_shape,
+                              se::DeviceMemoryAllocator* allocator,
+                              int device_ordinal);
+  // TODO(b/170310047): remove this overload.
   explicit ScopedShapedBuffer(Shape on_host_shape, Shape on_device_shape,
                               se::DeviceMemoryAllocator* allocator,
                               int device_ordinal);
@@ -188,7 +192,7 @@ class ScopedShapedBuffer : public ShapedBuffer {
   // this ScopedShapedBuffer, without freeing any of the associated memory.
   //
   // It's the caller's job to ensure that the memory contained therein is freed.
-  TF_MUST_USE_RESULT ShapedBuffer release();
+  ABSL_MUST_USE_RESULT ShapedBuffer release();
 
   // Extracts the sub-tree rooted at 'index' and returns a ScopedShapedBuffer
   // that holds ownership of the subtree. Sets the buffers corresponding to the

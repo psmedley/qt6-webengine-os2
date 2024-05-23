@@ -36,7 +36,7 @@
 #include <utility>
 
 #include "base/callback_helpers.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_evaluation_result.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
@@ -164,33 +164,8 @@ void ScriptController::ExecuteJavaScriptURL(
     const DOMWrapperWorld* world_for_csp) {
   DCHECK(url.ProtocolIsJavaScript());
 
-  const int kJavascriptSchemeLength = sizeof("javascript:") - 1;
-  String script_source = DecodeURLEscapeSequences(
-      url.GetString(), DecodeURLMode::kUTF8OrIsomorphic);
-
   if (!window_->GetFrame())
     return;
-
-  auto* policy = window_->GetContentSecurityPolicyForWorld(world_for_csp);
-  if (csp_disposition == network::mojom::CSPDisposition::CHECK &&
-      !policy->AllowInline(ContentSecurityPolicy::InlineType::kNavigation,
-                           nullptr, script_source, String() /* nonce */,
-                           window_->Url(), EventHandlerPosition().line_)) {
-    return;
-  }
-
-  // TODO(crbug.com/896041): Investigate how trusted type checks can be
-  // implemented for isolated worlds.
-  const bool should_bypass_trusted_type_check =
-      csp_disposition == network::mojom::CSPDisposition::DO_NOT_CHECK ||
-      ContentSecurityPolicy::ShouldBypassMainWorld(world_for_csp);
-  script_source = script_source.Substring(kJavascriptSchemeLength);
-  if (!should_bypass_trusted_type_check) {
-    script_source = TrustedTypesCheckForJavascriptURLinNavigation(
-        script_source, window_.Get());
-    if (script_source.IsEmpty())
-      return;
-  }
 
   bool had_navigation_before =
       window_->GetFrame()->Loader().HasProvisionalNavigation();
@@ -199,19 +174,24 @@ void ScriptController::ExecuteJavaScriptURL(
   // Step 6. "Let baseURL be settings's API base URL." [spec text]
   const KURL base_url = window_->BaseURL();
 
+  String script_source = window_->CheckAndGetJavascriptUrl(
+      world_for_csp, url, nullptr /* element */, csp_disposition);
+
   // Step 7. "Let script be the result of creating a classic script given
   // scriptSource, settings, baseURL, and the default classic script fetch
   // options." [spec text]
   //
   // We pass |SanitizeScriptErrors::kDoNotSanitize| because |muted errors| is
   // false by default.
-  ClassicScript* script = MakeGarbageCollected<ClassicScript>(
-      ScriptSourceCode(script_source, ScriptSourceLocationType::kJavascriptUrl),
-      base_url, ScriptFetchOptions(), SanitizeScriptErrors::kDoNotSanitize);
+  ClassicScript* script = ClassicScript::Create(
+      script_source, KURL(), base_url, ScriptFetchOptions(),
+      ScriptSourceLocationType::kJavascriptUrl,
+      SanitizeScriptErrors::kDoNotSanitize);
 
   DCHECK_EQ(&window_->GetScriptController(), this);
   v8::HandleScope handle_scope(GetIsolate());
-  v8::Local<v8::Value> v8_result = script->RunScriptAndReturnValue(window_);
+  v8::Local<v8::Value> v8_result =
+      script->RunScriptAndReturnValue(window_).GetSuccessValueOrEmpty();
   UseCounter::Count(window_.Get(), WebFeature::kExecutedJavaScriptURL);
 
   // If executing script caused this frame to be removed from the page, we

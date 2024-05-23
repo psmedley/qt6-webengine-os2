@@ -287,7 +287,7 @@ void AddWifiData(const WifiData& wifi_data,
     AddInteger("signalToNoiseRatio", ap_data->signal_to_noise, wifi_dict.get());
     wifi_access_point_list->Append(std::move(wifi_dict));
   }
-  if (!wifi_access_point_list->GetList().empty())
+  if (!wifi_access_point_list->GetListDeprecated().empty())
     request->Set("wifiAccessPoints", std::move(wifi_access_point_list));
 }
 
@@ -296,7 +296,7 @@ void FormatPositionError(const GURL& server_url,
                          mojom::Geoposition* position) {
   position->error_code = mojom::Geoposition::ErrorCode::POSITION_UNAVAILABLE;
   position->error_message = "Network location provider at '";
-  position->error_message += server_url.GetOrigin().spec();
+  position->error_message += server_url.DeprecatedGetOriginAsURL().spec();
   position->error_message += "' : ";
   position->error_message += message;
   position->error_message += ".";

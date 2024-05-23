@@ -12,6 +12,8 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_artifact.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_chunk.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -38,14 +40,16 @@ class PLATFORM_EXPORT PaintChunker final {
 #endif
 
   void StartMarkingClientsForValidation(
-      Vector<const DisplayItemClient*>& clients_to_validate);
+      HeapVector<Member<const DisplayItemClient>>& clients_to_validate);
   void MarkClientForValidation(const DisplayItemClient& client);
   void StopMarkingClientsForValidation();
 
   const PropertyTreeStateOrAlias& CurrentPaintChunkProperties() const {
     return current_properties_;
   }
-  void UpdateCurrentPaintChunkProperties(const PaintChunk::Id*,
+  void UpdateCurrentPaintChunkProperties(const PropertyTreeStateOrAlias&);
+  void UpdateCurrentPaintChunkProperties(const PaintChunk::Id&,
+                                         const DisplayItemClient&,
                                          const PropertyTreeStateOrAlias&);
 
   // Sets the forcing new chunk status on or off. If the status is on, even the
@@ -59,25 +63,30 @@ class PLATFORM_EXPORT PaintChunker final {
   }
   bool WillForceNewChunk() const { return will_force_new_chunk_; }
 
-  void SetShouldComputeContentsOpaque(bool should_compute_) {
-    should_compute_contents_opaque_ = should_compute_;
-  }
-
   void AppendByMoving(PaintChunk&&);
 
   // Returns true if a new chunk is created.
-  bool IncrementDisplayItemIndex(const DisplayItem&);
+  bool IncrementDisplayItemIndex(const DisplayItemClient&, const DisplayItem&);
 
   // The id will be used when we need to create a new current chunk.
   // Otherwise it's ignored. Returns true if a new chunk is added.
   bool AddHitTestDataToCurrentChunk(const PaintChunk::Id&,
-                                    const IntRect&,
+                                    const DisplayItemClient&,
+                                    const gfx::Rect&,
                                     TouchAction,
                                     bool blocking_wheel);
   void CreateScrollHitTestChunk(
       const PaintChunk::Id&,
+      const DisplayItemClient&,
       const TransformPaintPropertyNode* scroll_translation,
-      const IntRect&);
+      const gfx::Rect&);
+
+  // The id will be used when we need to create a new current chunk.
+  // Otherwise it's ignored. Returns true if a new chunk is added.
+  bool AddRegionCaptureDataToCurrentChunk(const PaintChunk::Id& id,
+                                          const DisplayItemClient& client,
+                                          const RegionCaptureCropId& crop_id,
+                                          const gfx::Rect& bounds);
 
   // The id will be used when we need to create a new current chunk.
   // Otherwise it's ignored. Returns true if a new chunk is added.
@@ -85,12 +94,9 @@ class PLATFORM_EXPORT PaintChunker final {
                                   absl::optional<PaintedSelectionBound> end);
 
   // Returns true if a new chunk is created.
-  bool ProcessBackgroundColorCandidate(const PaintChunk::Id& id,
-                                       Color color,
-                                       float area);
-
-  // Returns true if a new chunk is created.
-  bool EnsureChunk() { return EnsureCurrentChunk(*next_chunk_id_); }
+  bool EnsureChunk() {
+    return EnsureCurrentChunk(next_chunk_id_->first, next_chunk_id_->second);
+  }
 
   bool CurrentEffectivelyInvisible() const {
     return current_effectively_invisible_;
@@ -101,20 +107,26 @@ class PLATFORM_EXPORT PaintChunker final {
 
  private:
   // Returns true if a new chunk is created.
-  bool EnsureCurrentChunk(const PaintChunk::Id&);
+  bool EnsureCurrentChunk(const PaintChunk::Id&, const DisplayItemClient&);
+
+  void ProcessBackgroundColorCandidate(const PaintChunk::Id&,
+                                       const DisplayItemClient&,
+                                       Color color,
+                                       float area);
 
   void FinalizeLastChunkProperties();
 
   Vector<PaintChunk>* chunks_ = nullptr;
-  Vector<const DisplayItemClient*>* clients_to_validate_ = nullptr;
-
+  WeakPersistent<HeapVector<Member<const DisplayItemClient>>>
+      clients_to_validate_ = nullptr;
   // The id specified by UpdateCurrentPaintChunkProperties(). If it is not
   // nullopt, we will use it as the id of the next new chunk. Otherwise we will
   // use the id of the first display item of the new chunk as the id.
   // It's cleared when we create a new chunk with the id, or decide not to
   // create a chunk with it (e.g. when properties don't change and we are not
   // forced to create a new chunk).
-  absl::optional<PaintChunk::Id> next_chunk_id_;
+  typedef std::pair<PaintChunk::Id, const DisplayItemClient&> NextChunkId;
+  absl::optional<NextChunkId> next_chunk_id_;
 
   PropertyTreeStateOrAlias current_properties_ =
       PropertyTreeState::Uninitialized();
@@ -125,7 +137,6 @@ class PLATFORM_EXPORT PaintChunker final {
   bool will_force_new_chunk_ = true;
 
   bool current_effectively_invisible_ = false;
-  bool should_compute_contents_opaque_ = true;
 
   Color candidate_background_color_ = Color::kTransparent;
   float candidate_background_area_ = 0;

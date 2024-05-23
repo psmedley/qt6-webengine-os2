@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/remote_cocoa/browser/scoped_cg_window_id.h"
 #include "content/browser/media/capture/mouse_cursor_overlay_controller.h"
@@ -54,9 +53,10 @@ class ViewsWidgetVideoCaptureDeviceMac::UIThreadDelegate final
       scoped_cg_window_id_->AddObserver(this);
       device_task_runner_->PostTask(
           FROM_HERE,
-          base::BindOnce(&FrameSinkVideoCaptureDevice::OnTargetChanged, device_,
-                         FrameSinkVideoCaptureDevice::VideoCaptureTarget{
-                             scoped_cg_window_id_->GetFrameSinkId()}));
+          base::BindOnce(
+              &FrameSinkVideoCaptureDevice::OnTargetChanged, device_,
+              viz::VideoCaptureTarget(scoped_cg_window_id_->GetFrameSinkId()),
+              /*crop_version=*/0));
     } else {
       // It is entirely possible (although unlikely) that the window
       // corresponding to |cg_window_id| be destroyed between when the capture

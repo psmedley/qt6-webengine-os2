@@ -7,10 +7,7 @@
 
 #include "src/sksl/SkSLBuiltinTypes.h"
 
-#include "include/private/SkSLModifiers.h"
 #include "src/sksl/SkSLCompiler.h"
-#include "src/sksl/SkSLErrorReporter.h"
-#include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/spirv.h"
 
 namespace SkSL {
@@ -77,6 +74,27 @@ BuiltinTypes::BuiltinTypes()
         , fHalf4x2(Type::MakeMatrixType("half4x2", "h42", *fHalf, /*columns=*/4, /*rows=*/2))
         , fHalf4x3(Type::MakeMatrixType("half4x3", "h43", *fHalf, /*columns=*/4, /*rows=*/3))
         , fHalf4x4(Type::MakeMatrixType("half4x4", "h44", *fHalf, /*columns=*/4, /*rows=*/4))
+        , fVec2(Type::MakeAliasType("vec2", *fFloat2))
+        , fVec3(Type::MakeAliasType("vec3", *fFloat3))
+        , fVec4(Type::MakeAliasType("vec4", *fFloat4))
+        , fIVec2(Type::MakeAliasType("ivec2", *fInt2))
+        , fIVec3(Type::MakeAliasType("ivec3", *fInt3))
+        , fIVec4(Type::MakeAliasType("ivec4", *fInt4))
+        , fBVec2(Type::MakeAliasType("bvec2", *fBool2))
+        , fBVec3(Type::MakeAliasType("bvec3", *fBool3))
+        , fBVec4(Type::MakeAliasType("bvec4", *fBool4))
+        , fMat2(Type::MakeAliasType("mat2", *fFloat2x2))
+        , fMat3(Type::MakeAliasType("mat3", *fFloat3x3))
+        , fMat4(Type::MakeAliasType("mat4", *fFloat4x4))
+        , fMat2x2(Type::MakeAliasType("mat2x2", *fFloat2x2))
+        , fMat2x3(Type::MakeAliasType("mat2x3", *fFloat2x3))
+        , fMat2x4(Type::MakeAliasType("mat2x4", *fFloat2x4))
+        , fMat3x2(Type::MakeAliasType("mat3x2", *fFloat3x2))
+        , fMat3x3(Type::MakeAliasType("mat3x3", *fFloat3x3))
+        , fMat3x4(Type::MakeAliasType("mat3x4", *fFloat3x4))
+        , fMat4x2(Type::MakeAliasType("mat4x2", *fFloat4x2))
+        , fMat4x3(Type::MakeAliasType("mat4x3", *fFloat4x3))
+        , fMat4x4(Type::MakeAliasType("mat4x4", *fFloat4x4))
         , fTexture1D(Type::MakeTextureType("texture1D",
                                            SpvDim1D,
                                            /*isDepth=*/false,
@@ -101,12 +119,6 @@ BuiltinTypes::BuiltinTypes()
                                                     /*isArrayedTexture=*/false,
                                                     /*isMultisampled=*/false,
                                                     /*isSampled=*/true))
-        , fTextureCube(Type::MakeTextureType("textureCube",
-                                             SpvDimCube,
-                                             /*isDepth=*/false,
-                                             /*isArrayedTexture=*/false,
-                                             /*isMultisampled=*/false,
-                                             /*isSampled=*/true))
         , fTexture2DRect(Type::MakeTextureType("texture2DRect",
                                                SpvDimRect,
                                                /*isDepth=*/false,
@@ -159,10 +171,10 @@ BuiltinTypes::BuiltinTypes()
                   "$hmat",
                   {fHalf2x2.get(), fHalf2x3.get(), fHalf2x4.get(), fHalf3x2.get(), fHalf3x3.get(),
                    fHalf3x4.get(), fHalf4x2.get(), fHalf4x3.get(), fHalf4x4.get()}))
-        , fSquareMat(Type::MakeGenericType("$squareMat", {fFloat2x2.get(), fFloat3x3.get(),
-                                                          fFloat4x4.get()}))
-        , fSquareHMat(Type::MakeGenericType("$squareHMat", {fHalf2x2.get(), fHalf3x3.get(),
-                                                            fHalf4x4.get()}))
+        , fSquareMat(Type::MakeGenericType("$squareMat", {fInvalid.get(), fFloat2x2.get(),
+                                                          fFloat3x3.get(), fFloat4x4.get()}))
+        , fSquareHMat(Type::MakeGenericType("$squareHMat", {fInvalid.get(), fHalf2x2.get(),
+                                                            fHalf3x3.get(), fHalf4x4.get()}))
         , fVec(Type::MakeGenericType("$vec", {fInvalid.get(), fFloat2.get(), fFloat3.get(),
                                               fFloat4.get()}))
         , fHVec(Type::MakeGenericType("$hvec", {fInvalid.get(), fHalf2.get(), fHalf3.get(),

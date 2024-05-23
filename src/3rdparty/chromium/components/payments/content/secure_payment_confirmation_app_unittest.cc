@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
@@ -32,10 +33,10 @@ namespace {
 using ::testing::_;
 using ::testing::Eq;
 
-static constexpr char kNetworkDataBase64[] = "aaaa";
+static constexpr char kChallengeBase64[] = "aaaa";
 static constexpr char kCredentialIdBase64[] = "cccc";
 
-class MockAuthenticator : public autofill::InternalAuthenticator {
+class MockAuthenticator : public webauthn::InternalAuthenticator {
  public:
   explicit MockAuthenticator(bool should_succeed)
       : web_contents_(web_contents_factory_.CreateWebContents(&context_)),
@@ -58,7 +59,7 @@ class MockAuthenticator : public autofill::InternalAuthenticator {
     return web_contents_->GetMainFrame();
   }
 
-  // Implements an autofill::InternalAuthenticator method to delegate fields of
+  // Implements an webauthn::InternalAuthenticator method to delegate fields of
   // |options| to gmock methods for easier verification.
   void GetAssertion(
       blink::mojom::PublicKeyCredentialRequestOptionsPtr options,
@@ -67,7 +68,8 @@ class MockAuthenticator : public autofill::InternalAuthenticator {
     std::move(callback).Run(
         should_succeed_ ? blink::mojom::AuthenticatorStatus::SUCCESS
                         : blink::mojom::AuthenticatorStatus::NOT_ALLOWED_ERROR,
-        blink::mojom::GetAssertionAuthenticatorResponse::New());
+        blink::mojom::GetAssertionAuthenticatorResponse::New(),
+        /*dom_exception_details=*/nullptr);
   }
 
   content::WebContents* web_contents() { return web_contents_; }
@@ -76,7 +78,8 @@ class MockAuthenticator : public autofill::InternalAuthenticator {
   content::BrowserTaskEnvironment task_environment_;
   content::TestBrowserContext context_;
   content::TestWebContentsFactory web_contents_factory_;
-  content::WebContents* web_contents_;  // Owned by `web_contents_factory_`.
+  raw_ptr<content::WebContents>
+      web_contents_;  // Owned by `web_contents_factory_`.
   bool should_succeed_;
 };
 
@@ -96,14 +99,14 @@ class SecurePaymentConfirmationAppTest : public testing::Test,
   }
 
   void SetUp() override {
-    ASSERT_TRUE(base::Base64Decode(kNetworkDataBase64, &network_data_bytes_));
+    ASSERT_TRUE(base::Base64Decode(kChallengeBase64, &challenge_bytes_));
     ASSERT_TRUE(base::Base64Decode(kCredentialIdBase64, &credential_id_bytes_));
   }
 
   mojom::SecurePaymentConfirmationRequestPtr MakeRequest() {
     auto request = mojom::SecurePaymentConfirmationRequest::New();
-    request->challenge = std::vector<uint8_t>(network_data_bytes_.begin(),
-                                              network_data_bytes_.end());
+    request->challenge =
+        std::vector<uint8_t>(challenge_bytes_.begin(), challenge_bytes_.end());
     return request;
   }
 
@@ -123,13 +126,16 @@ class SecurePaymentConfirmationAppTest : public testing::Test,
   }
 
   void OnInstrumentDetailsError(const std::string& error_message) override {
-    EXPECT_EQ(error_message, "Authenticator returned NOT_ALLOWED_ERROR.");
+    EXPECT_EQ(error_message,
+              "The operation either timed out or was not allowed. See: "
+              "https://www.w3.org/TR/webauthn-2/"
+              "#sctn-privacy-considerations-client.");
     on_instrument_details_error_called_ = true;
   }
 
   std::u16string label_;
   std::unique_ptr<PaymentRequestSpec> spec_;
-  std::string network_data_bytes_;
+  std::string challenge_bytes_;
   std::string credential_id_bytes_;
   bool on_instrument_details_ready_called_ = false;
   bool on_instrument_details_error_called_ = false;
@@ -153,11 +159,8 @@ TEST_F(SecurePaymentConfirmationAppTest, Smoke) {
       url::Origin::Create(GURL("https://merchant.example")), spec_->AsWeakPtr(),
       MakeRequest(), std::move(authenticator));
 
-  EXPECT_CALL(*mock_authenticator, SetEffectiveOrigin(Eq(url::Origin::Create(
-                                       GURL("https://effective_rp.example")))));
-
-  std::vector<uint8_t> expected_bytes = std::vector<uint8_t>(
-      network_data_bytes_.begin(), network_data_bytes_.end());
+  std::vector<uint8_t> expected_bytes =
+      std::vector<uint8_t>(challenge_bytes_.begin(), challenge_bytes_.end());
 
   EXPECT_CALL(*mock_authenticator, VerifyChallenge(Eq(expected_bytes)));
   app.InvokePaymentApp(/*delegate=*/weak_ptr_factory_.GetWeakPtr());

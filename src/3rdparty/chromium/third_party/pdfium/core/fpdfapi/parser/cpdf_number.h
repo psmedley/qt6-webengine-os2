@@ -8,8 +8,8 @@
 #define CORE_FPDFAPI_PARSER_CPDF_NUMBER_H_
 
 #include "core/fpdfapi/parser/cpdf_object.h"
+#include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/fx_number.h"
-#include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/retain_ptr.h"
 
 class CPDF_Number final : public CPDF_Object {
@@ -47,6 +47,10 @@ inline CPDF_Number* ToNumber(CPDF_Object* obj) {
 
 inline const CPDF_Number* ToNumber(const CPDF_Object* obj) {
   return obj ? obj->AsNumber() : nullptr;
+}
+
+inline RetainPtr<const CPDF_Number> ToNumber(RetainPtr<const CPDF_Object> obj) {
+  return RetainPtr<const CPDF_Number>(ToNumber(obj.Get()));
 }
 
 #endif  // CORE_FPDFAPI_PARSER_CPDF_NUMBER_H_

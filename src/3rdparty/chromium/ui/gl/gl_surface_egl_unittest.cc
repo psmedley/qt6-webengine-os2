@@ -13,7 +13,7 @@
 #include "ui/gl/init/gl_factory.h"
 #include "ui/gl/test/gl_surface_test_support.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/platform_window/platform_window_delegate.h"
 #include "ui/platform_window/win/win_window.h"
 #endif
@@ -31,7 +31,7 @@ namespace {
 class GLSurfaceEGLTest : public testing::Test {
  protected:
   void SetUp() override {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     GLSurfaceTestSupport::InitializeOneOffImplementation(
         GLImplementationParts(kGLImplementationEGLANGLE), true);
 #else
@@ -56,18 +56,21 @@ TEST_F(GLSurfaceEGLTest, MAYBE_SurfaceFormatTest) {
   EXPECT_TRUE(config);
 
   EGLint attrib;
-  eglGetConfigAttrib(surface->GetDisplay(), config, EGL_DEPTH_SIZE, &attrib);
+  eglGetConfigAttrib(surface->GetGLDisplay()->GetDisplay(), config,
+                     EGL_DEPTH_SIZE, &attrib);
   EXPECT_LE(24, attrib);
 
-  eglGetConfigAttrib(surface->GetDisplay(), config, EGL_STENCIL_SIZE, &attrib);
+  eglGetConfigAttrib(surface->GetGLDisplay()->GetDisplay(), config,
+                     EGL_STENCIL_SIZE, &attrib);
   EXPECT_LE(8, attrib);
 
-  eglGetConfigAttrib(surface->GetDisplay(), config, EGL_SAMPLES, &attrib);
+  eglGetConfigAttrib(surface->GetGLDisplay()->GetDisplay(), config, EGL_SAMPLES,
+                     &attrib);
   EXPECT_EQ(0, attrib);
 }
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 class TestPlatformDelegate : public ui::PlatformWindowDelegate {
  public:

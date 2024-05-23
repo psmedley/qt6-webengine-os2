@@ -1,6 +1,7 @@
 include_rules = [
   "+components/keyed_service/core",
   "+components/prefs",
+  "+components/shared_highlighting",
   "+components/signin/public/identity_manager",
   "+components/strings/grit",
   "+components/version_info",
@@ -10,3 +11,9 @@ include_rules = [
   "+services/network/public/mojom",
   "+ui/base",
 ]
+
+specific_include_rules = {
+  "template_(fetcher|store)_unittest\.cc": [
+    "+services/network/test",
+  ]
+}

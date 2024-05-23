@@ -10,7 +10,6 @@
 #include "ash/constants/ash_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
@@ -49,11 +48,11 @@ enum CallbackResult {
 };
 
 // Expected immediate configurations should be done without any delays.
-constexpr base::TimeDelta kNoDelay = base::TimeDelta::FromMilliseconds(0);
+constexpr base::TimeDelta kNoDelay = base::Milliseconds(0);
 
 // The expected configuration delay when resuming from suspend while in 2+
 // display mode.
-constexpr base::TimeDelta kLongDelay = base::TimeDelta::FromMilliseconds(
+constexpr base::TimeDelta kLongDelay = base::Milliseconds(
     DisplayConfigurator::kResumeConfigureMultiDisplayDelayMs);
 
 class TestObserver : public DisplayConfigurator::Observer {
@@ -63,6 +62,10 @@ class TestObserver : public DisplayConfigurator::Observer {
     Reset();
     configurator_->AddObserver(this);
   }
+
+  TestObserver(const TestObserver&) = delete;
+  TestObserver& operator=(const TestObserver&) = delete;
+
   ~TestObserver() override { configurator_->RemoveObserver(this); }
 
   int num_changes() const { return num_changes_; }
@@ -120,13 +123,15 @@ class TestObserver : public DisplayConfigurator::Observer {
   MultipleDisplayState latest_failed_state_;
   // Value most recently passed to OnPowerStateChanged().
   chromeos::DisplayPowerState latest_power_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
 
 class TestStateController : public DisplayConfigurator::StateController {
  public:
   TestStateController() : state_(MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED) {}
+
+  TestStateController(const TestStateController&) = delete;
+  TestStateController& operator=(const TestStateController&) = delete;
+
   ~TestStateController() override = default;
 
   void set_state(MultipleDisplayState state) { state_ = state; }
@@ -144,14 +149,16 @@ class TestStateController : public DisplayConfigurator::StateController {
 
  private:
   MultipleDisplayState state_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestStateController);
 };
 
 class TestMirroringController
     : public DisplayConfigurator::SoftwareMirroringController {
  public:
   TestMirroringController() : software_mirroring_enabled_(false) {}
+
+  TestMirroringController(const TestMirroringController&) = delete;
+  TestMirroringController& operator=(const TestMirroringController&) = delete;
+
   ~TestMirroringController() override = default;
 
   void SetSoftwareMirroring(bool enabled) override {
@@ -166,8 +173,6 @@ class TestMirroringController
 
  private:
   bool software_mirroring_enabled_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMirroringController);
 };
 
 // Abstracts waiting for the display configuration to be completed and getting
@@ -176,6 +181,9 @@ class ConfigurationWaiter {
  public:
   explicit ConfigurationWaiter(DisplayConfigurator::TestApi* test_api)
       : test_api_(test_api), callback_result_(CALLBACK_NOT_CALLED) {}
+
+  ConfigurationWaiter(const ConfigurationWaiter&) = delete;
+  ConfigurationWaiter& operator=(const ConfigurationWaiter&) = delete;
 
   ~ConfigurationWaiter() = default;
 
@@ -192,7 +200,7 @@ class ConfigurationWaiter {
   // runs it and returns base::TimeDelta(). Otherwise, triggers the
   // configuration timer and returns its delay. If the timer wasn't running,
   // returns base::TimeDelta::Max().
-  base::TimeDelta Wait() WARN_UNUSED_RESULT {
+  [[nodiscard]] base::TimeDelta Wait() {
     base::RunLoop().RunUntilIdle();
     if (callback_result_ != CALLBACK_NOT_CALLED)
       return base::TimeDelta();
@@ -214,13 +222,15 @@ class ConfigurationWaiter {
 
   // The status of the display configuration.
   CallbackResult callback_result_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfigurationWaiter);
 };
 
 class DisplayConfiguratorTest : public testing::Test {
  public:
   DisplayConfiguratorTest() = default;
+
+  DisplayConfiguratorTest(const DisplayConfiguratorTest&) = delete;
+  DisplayConfiguratorTest& operator=(const DisplayConfiguratorTest&) = delete;
+
   ~DisplayConfiguratorTest() override = default;
 
   void SetUp() override {
@@ -234,7 +244,7 @@ class DisplayConfiguratorTest : public testing::Test {
 
     // Force system compositor mode to simulate on-device configurator behavior.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        chromeos::switches::kForceSystemCompositorMode);
+        ash::switches::kForceSystemCompositorMode);
 
     native_display_delegate_ = new TestNativeDisplayDelegate(log_.get());
     configurator_.SetDelegateForTesting(
@@ -289,7 +299,7 @@ class DisplayConfiguratorTest : public testing::Test {
   // output-change events to |configurator_| and triggers the configure
   // timeout if one was scheduled.
   void UpdateOutputs(size_t num_outputs, bool send_events) {
-    ASSERT_LE(num_outputs, base::size(outputs_));
+    ASSERT_LE(num_outputs, std::size(outputs_));
     std::vector<DisplaySnapshot*> outputs;
     for (size_t i = 0; i < num_outputs; ++i)
       outputs.push_back(outputs_[i].get());
@@ -378,8 +388,6 @@ class DisplayConfiguratorTest : public testing::Test {
     return rest.empty() ? action
                         : JoinActions(action.c_str(), rest.c_str(), nullptr);
   }
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayConfiguratorTest);
 };
 
 }  // namespace
@@ -1296,9 +1304,8 @@ TEST_F(DisplayConfiguratorTest,
             log_->GetActionsAndClear());
 
   config_waiter_.Reset();
-  EXPECT_EQ(
-      base::TimeDelta::FromMilliseconds(DisplayConfigurator::kConfigureDelayMs),
-      config_waiter_.Wait());
+  EXPECT_EQ(base::Milliseconds(DisplayConfigurator::kConfigureDelayMs),
+            config_waiter_.Wait());
   EXPECT_EQ(CALLBACK_NOT_CALLED, config_waiter_.callback_result());
   EXPECT_EQ(kNoDelay, config_waiter_.Wait());
   EXPECT_EQ(CALLBACK_SUCCESS, config_waiter_.callback_result());
@@ -1563,9 +1570,8 @@ TEST_F(DisplayConfiguratorTest, PowerStateChange) {
   EXPECT_EQ(CALLBACK_SUCCESS, config_waiter_.callback_result());
   config_waiter_.Reset();
   // Run the task posted by OnConfigured().
-  EXPECT_EQ(
-      base::TimeDelta::FromMilliseconds(DisplayConfigurator::kConfigureDelayMs),
-      config_waiter_.Wait());
+  EXPECT_EQ(base::Milliseconds(DisplayConfigurator::kConfigureDelayMs),
+            config_waiter_.Wait());
   EXPECT_EQ(CALLBACK_NOT_CALLED, config_waiter_.callback_result());
   config_waiter_.Reset();
   // Run the task posted by TestNativeDisplayDelegate::GetDisplays().
@@ -1578,6 +1584,12 @@ TEST_F(DisplayConfiguratorTest, PowerStateChange) {
 class DisplayConfiguratorMultiMirroringTest : public DisplayConfiguratorTest {
  public:
   DisplayConfiguratorMultiMirroringTest() = default;
+
+  DisplayConfiguratorMultiMirroringTest(
+      const DisplayConfiguratorMultiMirroringTest&) = delete;
+  DisplayConfiguratorMultiMirroringTest& operator=(
+      const DisplayConfiguratorMultiMirroringTest&) = delete;
+
   ~DisplayConfiguratorMultiMirroringTest() override = default;
 
   void SetUp() override { DisplayConfiguratorTest::SetUp(); }
@@ -1609,9 +1621,6 @@ class DisplayConfiguratorMultiMirroringTest : public DisplayConfiguratorTest {
     EXPECT_TRUE(mirroring_controller_.SoftwareMirroringEnabled());
     EXPECT_EQ(1, observer_.num_changes());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DisplayConfiguratorMultiMirroringTest);
 };
 
 TEST_F(DisplayConfiguratorMultiMirroringTest,

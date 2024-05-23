@@ -339,7 +339,12 @@
 // Based on the ICU63 version of
 // https://cs.chromium.org/chromium/src/third_party/icu/source/data/sprep/spreplocal.mk?rcl=797b7c
     "stringprep": { "filterType": "exclude" },
-    "translit": { "filterType": "exclude" },
+    "translit": {
+      "filterType": "language",
+      "includelist": [
+         "root"
+      ]
+    },
 // Based on the ICU63 version of
 // https://cs.chromium.org/chromium/src/third_party/icu/source/data/unit/reslocal.mk?rcl=797b7c
 // Includes the items from UNIT_ALIAS_SOURCE and UNIT_SOURCE
@@ -632,6 +637,20 @@
         "+/Countries/US"
       ]
     },
+// Based on https://cs.chromium.org/chromium/src/third_party/icu/patches/data.build.patch?rcl=797b7c
+// +# Chromium : To save space, use '-R' option (exclude collation rules. just
+// +# include the compiled binary data.)
+// +GENRBOPTS=-k -R
+    {
+      "categories": [
+        "coll_tree"
+      ],
+      "rules": [
+        "-/UCARules",
+	"-/collations/*/Sequence"
+      ]
+    },
+// The following rules must be placed below "-/collations/*/Sequence" to avoid keeping empty unihan, big5han and gb2312han
 // Based on remove_legacy_chinese_codepoint_collation
 // # big5han and gb2312han collation do not make any sense and nobody uses them.
     {
@@ -647,19 +666,6 @@
         "-/*/unihan",
         "-/*/big5han",
         "-/*/gb2312han"
-      ]
-    },
-// Based on https://cs.chromium.org/chromium/src/third_party/icu/patches/data.build.patch?rcl=797b7c
-// +# Chromium : To save space, use '-R' option (exclude collation rules. just
-// +# include the compiled binary data.)
-// +GENRBOPTS=-k -R
-    {
-      "categories": [
-        "coll_tree"
-      ],
-      "rules": [
-        "-/UCARules",
-	"-/collations/*/Sequence"
       ]
     },
 // Based on filter_unit_data
@@ -1133,7 +1139,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/buddhist"
+        "+/calendar/buddhist",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/buddhist/DateTimeSkeletons"
       ]
     },
     {
@@ -1149,7 +1159,10 @@
         "-/calendar/*",
         "+/calendar/default",
         "+/calendar/gregorian",
-        "+/calendar/generic"
+        "+/calendar/generic",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons"
       ]
     },
 // Based on abridge_locale_data_for_non_ui_languages
@@ -1368,6 +1381,15 @@
         "+/timeData",
         "+/weekData",
         "+/weekData%variant"
+      ]
+    },
+    {
+      "categories": [
+        "translit"
+      ],
+      "rules": [
+        "-/*",
+        "+/RuleBasedTransliteratorIDs/Latin-ASCII"
       ]
     },
 // Remove all the Version

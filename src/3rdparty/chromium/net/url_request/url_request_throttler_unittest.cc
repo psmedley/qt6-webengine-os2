@@ -4,7 +4,6 @@
 
 #include <memory>
 
-#include "base/cxx17_backports.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/pickle.h"
 #include "base/strings/string_number_conversions.h"
@@ -17,12 +16,12 @@
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_test_util.h"
 #include "net/url_request/url_request_throttler_manager.h"
 #include "net/url_request/url_request_throttler_test_support.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::TimeDelta;
 using base::TimeTicks;
 
 namespace net {
@@ -117,7 +116,7 @@ class MockURLRequestThrottlerManager : public URLRequestThrottlerManager {
   void CreateEntry(bool is_outdated) {
     TimeTicks time = TimeTicks::Now();
     if (is_outdated) {
-      time -= TimeDelta::FromMilliseconds(
+      time -= base::Milliseconds(
           MockURLRequestThrottlerEntry::kDefaultEntryLifetimeMs + 1000);
     }
     std::string fake_url_string("http://www.fakeurl.com/");
@@ -162,10 +161,11 @@ struct GurlAndString {
 class URLRequestThrottlerEntryTest : public TestWithTaskEnvironment {
  protected:
   URLRequestThrottlerEntryTest()
-      : request_(context_.CreateRequest(GURL(),
-                                        DEFAULT_PRIORITY,
-                                        nullptr,
-                                        TRAFFIC_ANNOTATION_FOR_TESTS)) {}
+      : context_(CreateTestURLRequestContextBuilder()->Build()),
+        request_(context_->CreateRequest(GURL(),
+                                         DEFAULT_PRIORITY,
+                                         nullptr,
+                                         TRAFFIC_ANNOTATION_FOR_TESTS)) {}
 
   void SetUp() override;
 
@@ -173,7 +173,7 @@ class URLRequestThrottlerEntryTest : public TestWithTaskEnvironment {
   MockURLRequestThrottlerManager manager_;  // Dummy object, not used.
   scoped_refptr<MockURLRequestThrottlerEntry> entry_;
 
-  TestURLRequestContext context_;
+  std::unique_ptr<URLRequestContext> context_;
   std::unique_ptr<URLRequest> request_;
 };
 
@@ -191,8 +191,8 @@ std::ostream& operator<<(std::ostream& out, const base::TimeTicks& time) {
 
 TEST_F(URLRequestThrottlerEntryTest, InterfaceDuringExponentialBackoff) {
   base::HistogramTester histogram_tester;
-  entry_->set_exponential_backoff_release_time(
-      entry_->ImplGetTimeNow() + TimeDelta::FromMilliseconds(1));
+  entry_->set_exponential_backoff_release_time(entry_->ImplGetTimeNow() +
+                                               base::Milliseconds(1));
   EXPECT_TRUE(entry_->ShouldRejectRequest(*request_));
 
   histogram_tester.ExpectBucketCount(kRequestThrottledHistogramName, 0, 0);
@@ -203,8 +203,8 @@ TEST_F(URLRequestThrottlerEntryTest, InterfaceNotDuringExponentialBackoff) {
   base::HistogramTester histogram_tester;
   entry_->set_exponential_backoff_release_time(entry_->ImplGetTimeNow());
   EXPECT_FALSE(entry_->ShouldRejectRequest(*request_));
-  entry_->set_exponential_backoff_release_time(
-      entry_->ImplGetTimeNow() - TimeDelta::FromMilliseconds(1));
+  entry_->set_exponential_backoff_release_time(entry_->ImplGetTimeNow() -
+                                               base::Milliseconds(1));
   EXPECT_FALSE(entry_->ShouldRejectRequest(*request_));
 
   histogram_tester.ExpectBucketCount(kRequestThrottledHistogramName, 0, 2);
@@ -235,9 +235,9 @@ TEST_F(URLRequestThrottlerEntryTest, InterfaceUpdateSuccessThenFailure) {
 }
 
 TEST_F(URLRequestThrottlerEntryTest, IsEntryReallyOutdated) {
-  TimeDelta lifetime = TimeDelta::FromMilliseconds(
-      MockURLRequestThrottlerEntry::kDefaultEntryLifetimeMs);
-  const TimeDelta kFiveMs = TimeDelta::FromMilliseconds(5);
+  base::TimeDelta lifetime =
+      base::Milliseconds(MockURLRequestThrottlerEntry::kDefaultEntryLifetimeMs);
+  const base::TimeDelta kFiveMs = base::Milliseconds(5);
 
   TimeAndBool test_values[] = {
       TimeAndBool(now_, false, __LINE__),
@@ -247,7 +247,7 @@ TEST_F(URLRequestThrottlerEntryTest, IsEntryReallyOutdated) {
       TimeAndBool(now_ - lifetime, true, __LINE__),
       TimeAndBool(now_ - (lifetime + kFiveMs), true, __LINE__)};
 
-  for (unsigned int i = 0; i < base::size(test_values); ++i) {
+  for (unsigned int i = 0; i < std::size(test_values); ++i) {
     entry_->set_exponential_backoff_release_time(test_values[i].time);
     EXPECT_EQ(entry_->IsEntryOutdated(), test_values[i].result) <<
         "Test case #" << i << " line " << test_values[i].line << " failed";
@@ -259,7 +259,7 @@ TEST_F(URLRequestThrottlerEntryTest, MaxAllowedBackoff) {
     entry_->UpdateWithResponse(503);
   }
 
-  TimeDelta delay = entry_->GetExponentialBackoffReleaseTime() - now_;
+  base::TimeDelta delay = entry_->GetExponentialBackoffReleaseTime() - now_;
   EXPECT_EQ(delay.InMilliseconds(),
             MockURLRequestThrottlerEntry::kDefaultMaximumBackoffMs);
 }
@@ -285,14 +285,15 @@ TEST_F(URLRequestThrottlerEntryTest, SlidingWindow) {
   int sliding_window =
       URLRequestThrottlerEntry::kDefaultSlidingWindowPeriodMs;
 
-  TimeTicks time_1 = entry_->ImplGetTimeNow() +
-      TimeDelta::FromMilliseconds(sliding_window / 3);
-  TimeTicks time_2 = entry_->ImplGetTimeNow() +
-      TimeDelta::FromMilliseconds(2 * sliding_window / 3);
-  TimeTicks time_3 = entry_->ImplGetTimeNow() +
-      TimeDelta::FromMilliseconds(sliding_window);
-  TimeTicks time_4 = entry_->ImplGetTimeNow() +
-      TimeDelta::FromMilliseconds(sliding_window + 2 * sliding_window / 3);
+  TimeTicks time_1 =
+      entry_->ImplGetTimeNow() + base::Milliseconds(sliding_window / 3);
+  TimeTicks time_2 =
+      entry_->ImplGetTimeNow() + base::Milliseconds(2 * sliding_window / 3);
+  TimeTicks time_3 =
+      entry_->ImplGetTimeNow() + base::Milliseconds(sliding_window);
+  TimeTicks time_4 =
+      entry_->ImplGetTimeNow() +
+      base::Milliseconds(sliding_window + 2 * sliding_window / 3);
 
   entry_->set_exponential_backoff_release_time(time_1);
 
@@ -313,15 +314,16 @@ TEST_F(URLRequestThrottlerEntryTest, SlidingWindow) {
 class URLRequestThrottlerManagerTest : public TestWithTaskEnvironment {
  protected:
   URLRequestThrottlerManagerTest()
-      : request_(context_.CreateRequest(GURL(),
-                                        DEFAULT_PRIORITY,
-                                        nullptr,
-                                        TRAFFIC_ANNOTATION_FOR_TESTS)) {}
+      : context_(CreateTestURLRequestContextBuilder()->Build()),
+        request_(context_->CreateRequest(GURL(),
+                                         DEFAULT_PRIORITY,
+                                         nullptr,
+                                         TRAFFIC_ANNOTATION_FOR_TESTS)) {}
 
   void SetUp() override { request_->SetLoadFlags(0); }
 
   // context_ must be declared before request_.
-  TestURLRequestContext context_;
+  std::unique_ptr<URLRequestContext> context_;
   std::unique_ptr<URLRequest> request_;
 };
 
@@ -353,7 +355,7 @@ TEST_F(URLRequestThrottlerManagerTest, IsUrlStandardised) {
                     std::string("http://www.example.com:1234/"),
                     __LINE__)};
 
-  for (unsigned int i = 0; i < base::size(test_values); ++i) {
+  for (unsigned int i = 0; i < std::size(test_values); ++i) {
     std::string temp = manager.DoGetUrlIdFromUrl(test_values[i].url);
     EXPECT_EQ(temp, test_values[i].result) <<
         "Test case #" << i << " line " << test_values[i].line << " failed";
@@ -404,7 +406,7 @@ TEST_F(URLRequestThrottlerManagerTest, LocalHostOptedOut) {
   // so add a 100 ms buffer to avoid flakiness (that should always
   // give enough time to get from the TimeTicks::Now() call here
   // to the TimeTicks::Now() call in the entry class).
-  EXPECT_GT(TimeTicks::Now() + TimeDelta::FromMilliseconds(100),
+  EXPECT_GT(TimeTicks::Now() + base::Milliseconds(100),
             localhost_entry->GetExponentialBackoffReleaseTime());
 }
 

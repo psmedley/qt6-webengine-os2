@@ -37,14 +37,14 @@ struct NGInlineNodeData;
 template <typename Base>
 class LayoutNGBlockFlowMixin : public LayoutNGMixin<Base> {
  public:
-  explicit LayoutNGBlockFlowMixin(Element* element);
+  explicit LayoutNGBlockFlowMixin(ContainerNode*);
   ~LayoutNGBlockFlowMixin() override;
 
   NGInlineNodeData* TakeNGInlineNodeData() final;
   NGInlineNodeData* GetNGInlineNodeData() const final;
   void ResetNGInlineNodeData() final;
   void ClearNGInlineNodeData() final;
-  bool HasNGInlineNodeData() const final { return ng_inline_node_data_.get(); }
+  bool HasNGInlineNodeData() const final;
 
   LayoutUnit FirstLineBoxBaseline() const final;
   LayoutUnit InlineBlockBaseline(LineDirectionMode) const final;
@@ -56,14 +56,17 @@ class LayoutNGBlockFlowMixin : public LayoutNGMixin<Base> {
 
   PositionWithAffinity PositionForPoint(const PhysicalOffset&) const override;
 
-  using LayoutNGMixin<Base>::CurrentFragment;
+  void Trace(Visitor*) const override;
 
  protected:
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
+#if DCHECK_IS_ON()
   void AddLayoutOverflowFromChildren() final;
+#endif
 
   void AddOutlineRects(Vector<PhysicalRect>&,
+                       LayoutObject::OutlineInfo*,
                        const PhysicalOffset& additional_offset,
                        NGOutlineType) const final;
 
@@ -74,12 +77,9 @@ class LayoutNGBlockFlowMixin : public LayoutNGMixin<Base> {
   // behavior as LayoutNGBlockFlow.
   void UpdateNGBlockLayout();
 
-  std::unique_ptr<NGInlineNodeData> ng_inline_node_data_;
+  Member<NGInlineNodeData> ng_inline_node_data_;
 
   friend class NGBaseLayoutAlgorithmTest;
-
- private:
-  void AddScrollingOverflowFromChildren();
 };
 
 }  // namespace blink

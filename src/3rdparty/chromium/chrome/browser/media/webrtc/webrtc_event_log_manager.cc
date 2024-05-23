@@ -89,7 +89,7 @@ class PeerConnectionTrackerProxyImpl
 // 1. Certain platforms (mobile) are blocked from remote-bound logging.
 // 2. There is a Finch-controlled kill-switch for the feature.
 bool IsRemoteLoggingFeatureEnabled() {
-#if defined(OS_ANDROID) || defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_ANDROID) || defined(TOOLKIT_QT)
   bool enabled = false;
 #else
   bool enabled = base::FeatureList::IsEnabled(features::kWebRtcRemoteEventLog);
@@ -431,7 +431,7 @@ std::unique_ptr<LogFileWriter::Factory>
 WebRtcEventLogManager::CreateRemoteLogFileWriterFactory() {
   if (remote_log_file_writer_factory_for_testing_) {
     return std::move(remote_log_file_writer_factory_for_testing_);
-#if !defined(OS_ANDROID) && !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_ANDROID) && !defined(TOOLKIT_QT)
   } else if (base::FeatureList::IsEnabled(
                  features::kWebRtcRemoteEventLogGzipped)) {
     return std::make_unique<GzippedLogFileWriterFactory>(

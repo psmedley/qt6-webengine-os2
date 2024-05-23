@@ -13,12 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { isNode } from '../environment.js';
-
-import { assert } from './assert.js';
-import { debug } from './Debug.js';
 import { TimeoutError } from './Errors.js';
-
+import { debug } from './Debug.js';
+import { assert } from './assert.js';
+import { isNode } from '../environment.js';
 export const debugError = debug('puppeteer:error');
 function getExceptionMessage(exceptionDetails) {
     if (exceptionDetails.exception)
@@ -85,7 +83,9 @@ function isNumber(obj) {
     return typeof obj === 'number' || obj instanceof Number;
 }
 async function waitForEvent(emitter, eventName, predicate, timeout, abortPromise) {
-    let eventTimeout, resolveCallback, rejectCallback;
+    let eventTimeout;
+    let resolveCallback;
+    let rejectCallback;
     const promise = new Promise((resolve, reject) => {
         resolveCallback = resolve;
         rejectCallback = reject;
@@ -179,7 +179,9 @@ function makePredicateString(predicate, predicateQueryHandler) {
             return waitForHidden;
         if (!waitForVisible && !waitForHidden)
             return node;
-        const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        const element = node.nodeType === Node.TEXT_NODE
+            ? node.parentElement
+            : node;
         const style = window.getComputedStyle(element);
         const isVisible = style && style.visibility !== 'hidden' && hasVisibleBoundingBox();
         const success = waitForVisible === isVisible || waitForHidden === !isVisible;
@@ -214,36 +216,57 @@ async function waitWithTimeout(promise, taskName, timeout) {
             clearTimeout(timeoutTimer);
     }
 }
-async function readProtocolStream(client, handle, path) {
+async function getReadableAsBuffer(readable, path) {
     if (!isNode && path) {
         throw new Error('Cannot write to a path outside of Node.js environment.');
     }
     const fs = isNode ? await importFSModule() : null;
-    let eof = false;
     let fileHandle;
     if (path && fs) {
         fileHandle = await fs.promises.open(path, 'w');
     }
-    const bufs = [];
-    while (!eof) {
-        const response = await client.send('IO.read', { handle });
-        eof = response.eof;
-        const buf = Buffer.from(response.data, response.base64Encoded ? 'base64' : undefined);
-        bufs.push(buf);
-        if (path && fs) {
-            await fs.promises.writeFile(fileHandle, buf);
+    const buffers = [];
+    for await (const chunk of readable) {
+        buffers.push(chunk);
+        if (fileHandle && fs) {
+            await fs.promises.writeFile(fileHandle, chunk);
         }
     }
-    if (path)
+    if (path && fileHandle)
         await fileHandle.close();
-    await client.send('IO.close', { handle });
     let resultBuffer = null;
     try {
-        resultBuffer = Buffer.concat(bufs);
+        resultBuffer = Buffer.concat(buffers);
     }
     finally {
         return resultBuffer;
     }
+}
+async function getReadableFromProtocolStream(client, handle) {
+    // TODO:
+    // This restriction can be lifted once https://github.com/nodejs/node/pull/39062 has landed
+    if (!isNode) {
+        throw new Error('Cannot create a stream outside of Node.js environment.');
+    }
+    const { Readable } = await import('stream');
+    let eof = false;
+    return new Readable({
+        async read() {
+            // TODO: use the advised size parameter to read function once
+            // crbug.com/1290727 is resolved.
+            // Also, see https://github.com/puppeteer/puppeteer/pull/7868.
+            if (eof) {
+                return null;
+            }
+            const response = await client.send('IO.read', { handle });
+            this.push(response.data, response.base64Encoded ? 'base64' : undefined);
+            if (response.eof) {
+                eof = true;
+                await client.send('IO.close', { handle });
+                this.push(null);
+            }
+        },
+    });
 }
 /**
  * Loads the Node fs promises API. Needed because on Node 10.17 and below,
@@ -274,7 +297,8 @@ export const helper = {
     pageBindingDeliverErrorString,
     pageBindingDeliverErrorValueString,
     makePredicateString,
-    readProtocolStream,
+    getReadableAsBuffer,
+    getReadableFromProtocolStream,
     waitWithTimeout,
     waitForEvent,
     isString,

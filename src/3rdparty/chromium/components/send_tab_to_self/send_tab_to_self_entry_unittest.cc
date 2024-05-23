@@ -114,8 +114,7 @@ TEST(SendTabToSelfEntry, IsExpired) {
                            base::Time::FromTimeT(10), base::Time::FromTimeT(10),
                            "device1", "device1");
 
-  EXPECT_TRUE(entry.IsExpired(base::Time::FromTimeT(11) +
-                              base::TimeDelta::FromDays(10)));
+  EXPECT_TRUE(entry.IsExpired(base::Time::FromTimeT(11) + base::Days(10)));
   EXPECT_FALSE(entry.IsExpired(base::Time::FromTimeT(11)));
 }
 
@@ -125,22 +124,29 @@ TEST(SendTabToSelfEntry, InvalidStrings) {
   std::string invalid_utf8;
   base::UTF16ToUTF8(&term[0], 1, &invalid_utf8);
 
-  EXPECT_DCHECK_DEATH(SendTabToSelfEntry(
-      "1", GURL("http://example.com"), invalid_utf8, base::Time::FromTimeT(10),
-      base::Time::FromTimeT(10), "device", "device"));
+  SendTabToSelfEntry invalid1("1", GURL("http://example.com"), invalid_utf8,
+                              base::Time::FromTimeT(10),
+                              base::Time::FromTimeT(10), "device", "device");
 
-  EXPECT_DCHECK_DEATH(
-      SendTabToSelfEntry(invalid_utf8, GURL("http://example.com"), "title",
-                         base::Time::FromTimeT(10), base::Time::FromTimeT(10),
-                         "device", "device"));
+  EXPECT_EQ("1", invalid1.GetGUID());
 
-  EXPECT_DCHECK_DEATH(SendTabToSelfEntry(
+  SendTabToSelfEntry invalid2(invalid_utf8, GURL("http://example.com"), "title",
+                              base::Time::FromTimeT(10),
+                              base::Time::FromTimeT(10), "device", "device");
+
+  EXPECT_EQ(invalid_utf8, invalid2.GetGUID());
+
+  SendTabToSelfEntry invalid3(
       "1", GURL("http://example.com"), "title", base::Time::FromTimeT(10),
-      base::Time::FromTimeT(10), invalid_utf8, "device"));
+      base::Time::FromTimeT(10), invalid_utf8, "device");
 
-  EXPECT_DCHECK_DEATH(SendTabToSelfEntry(
+  EXPECT_EQ("1", invalid3.GetGUID());
+
+  SendTabToSelfEntry invalid4(
       "1", GURL("http://example.com"), "title", base::Time::FromTimeT(10),
-      base::Time::FromTimeT(10), "device", invalid_utf8));
+      base::Time::FromTimeT(10), "device", invalid_utf8);
+
+  EXPECT_EQ("1", invalid4.GetGUID());
 
   std::unique_ptr<sync_pb::SendTabToSelfSpecifics> pb_entry =
       std::make_unique<sync_pb::SendTabToSelfSpecifics>();
@@ -153,8 +159,10 @@ TEST(SendTabToSelfEntry, InvalidStrings) {
   pb_entry->set_shared_time_usec(1);
   pb_entry->set_navigation_time_usec(1);
 
-  EXPECT_DCHECK_DEATH(
+  std::unique_ptr<SendTabToSelfEntry> invalid_entry(
       SendTabToSelfEntry::FromProto(*pb_entry, base::Time::FromTimeT(10)));
+
+  EXPECT_EQ(invalid_entry->GetGUID(), invalid_utf8);
 }
 
 // Tests that the send tab to self entry is correctly encoded to

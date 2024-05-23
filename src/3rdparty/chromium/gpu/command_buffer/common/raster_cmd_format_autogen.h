@@ -393,6 +393,7 @@ struct BeginRasterCHROMIUMImmediate {
             GLuint _msaa_sample_count,
             gpu::raster::MsaaMode _msaa_mode,
             GLboolean _can_use_lcd_text,
+            GLboolean _visible,
             const GLbyte* _mailbox) {
     SetHeader();
     sk_color = _sk_color;
@@ -400,6 +401,7 @@ struct BeginRasterCHROMIUMImmediate {
     msaa_sample_count = _msaa_sample_count;
     msaa_mode = _msaa_mode;
     can_use_lcd_text = _can_use_lcd_text;
+    visible = _visible;
     memcpy(ImmediateDataAddress(this), _mailbox, ComputeDataSize());
   }
 
@@ -409,10 +411,11 @@ struct BeginRasterCHROMIUMImmediate {
             GLuint _msaa_sample_count,
             gpu::raster::MsaaMode _msaa_mode,
             GLboolean _can_use_lcd_text,
+            GLboolean _visible,
             const GLbyte* _mailbox) {
     static_cast<ValueType*>(cmd)->Init(_sk_color, _needs_clear,
                                        _msaa_sample_count, _msaa_mode,
-                                       _can_use_lcd_text, _mailbox);
+                                       _can_use_lcd_text, _visible, _mailbox);
     const uint32_t size = ComputeSize();
     return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
   }
@@ -423,10 +426,11 @@ struct BeginRasterCHROMIUMImmediate {
   uint32_t msaa_sample_count;
   uint32_t msaa_mode;
   uint32_t can_use_lcd_text;
+  uint32_t visible;
 };
 
-static_assert(sizeof(BeginRasterCHROMIUMImmediate) == 24,
-              "size of BeginRasterCHROMIUMImmediate should be 24");
+static_assert(sizeof(BeginRasterCHROMIUMImmediate) == 28,
+              "size of BeginRasterCHROMIUMImmediate should be 28");
 static_assert(offsetof(BeginRasterCHROMIUMImmediate, header) == 0,
               "offset of BeginRasterCHROMIUMImmediate header should be 0");
 static_assert(offsetof(BeginRasterCHROMIUMImmediate, sk_color) == 4,
@@ -441,6 +445,8 @@ static_assert(offsetof(BeginRasterCHROMIUMImmediate, msaa_mode) == 16,
 static_assert(
     offsetof(BeginRasterCHROMIUMImmediate, can_use_lcd_text) == 20,
     "offset of BeginRasterCHROMIUMImmediate can_use_lcd_text should be 20");
+static_assert(offsetof(BeginRasterCHROMIUMImmediate, visible) == 24,
+              "offset of BeginRasterCHROMIUMImmediate visible should be 24");
 
 struct RasterCHROMIUM {
   typedef RasterCHROMIUM ValueType;
@@ -1289,6 +1295,69 @@ static_assert(offsetof(ConvertYUVAMailboxesToRGBINTERNALImmediate,
 static_assert(offsetof(ConvertYUVAMailboxesToRGBINTERNALImmediate,
                        subsampling) == 12,
               "offset of ConvertYUVAMailboxesToRGBINTERNALImmediate "
+              "subsampling should be 12");
+
+struct ConvertRGBAToYUVAMailboxesINTERNALImmediate {
+  typedef ConvertRGBAToYUVAMailboxesINTERNALImmediate ValueType;
+  static const CommandId kCmdId = kConvertRGBAToYUVAMailboxesINTERNALImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+  static const uint8_t cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(2);
+
+  static uint32_t ComputeDataSize() {
+    return static_cast<uint32_t>(sizeof(GLbyte) * 80);
+  }
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType) + ComputeDataSize());
+  }
+
+  void SetHeader() { header.SetCmdByTotalSize<ValueType>(ComputeSize()); }
+
+  void Init(GLenum _planes_yuv_color_space,
+            GLenum _plane_config,
+            GLenum _subsampling,
+            const GLbyte* _mailboxes) {
+    SetHeader();
+    planes_yuv_color_space = _planes_yuv_color_space;
+    plane_config = _plane_config;
+    subsampling = _subsampling;
+    memcpy(ImmediateDataAddress(this), _mailboxes, ComputeDataSize());
+  }
+
+  void* Set(void* cmd,
+            GLenum _planes_yuv_color_space,
+            GLenum _plane_config,
+            GLenum _subsampling,
+            const GLbyte* _mailboxes) {
+    static_cast<ValueType*>(cmd)->Init(_planes_yuv_color_space, _plane_config,
+                                       _subsampling, _mailboxes);
+    const uint32_t size = ComputeSize();
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t planes_yuv_color_space;
+  uint32_t plane_config;
+  uint32_t subsampling;
+};
+
+static_assert(
+    sizeof(ConvertRGBAToYUVAMailboxesINTERNALImmediate) == 16,
+    "size of ConvertRGBAToYUVAMailboxesINTERNALImmediate should be 16");
+static_assert(
+    offsetof(ConvertRGBAToYUVAMailboxesINTERNALImmediate, header) == 0,
+    "offset of ConvertRGBAToYUVAMailboxesINTERNALImmediate header should be 0");
+static_assert(offsetof(ConvertRGBAToYUVAMailboxesINTERNALImmediate,
+                       planes_yuv_color_space) == 4,
+              "offset of ConvertRGBAToYUVAMailboxesINTERNALImmediate "
+              "planes_yuv_color_space should be 4");
+static_assert(offsetof(ConvertRGBAToYUVAMailboxesINTERNALImmediate,
+                       plane_config) == 8,
+              "offset of ConvertRGBAToYUVAMailboxesINTERNALImmediate "
+              "plane_config should be 8");
+static_assert(offsetof(ConvertRGBAToYUVAMailboxesINTERNALImmediate,
+                       subsampling) == 12,
+              "offset of ConvertRGBAToYUVAMailboxesINTERNALImmediate "
               "subsampling should be 12");
 
 struct TraceBeginCHROMIUM {

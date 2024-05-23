@@ -23,7 +23,7 @@
 #include "services/device/public/mojom/geolocation_context.mojom.h"
 #include "services/device/public/mojom/geolocation_control.mojom.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "services/device/public/cpp/test/fake_geolocation_manager.h"
 #endif
 
@@ -41,6 +41,11 @@ void CheckBoolReturnValue(base::OnceClosure quit_closure,
 class GeolocationServiceUnitTest : public DeviceServiceTestBase {
  public:
   GeolocationServiceUnitTest() = default;
+
+  GeolocationServiceUnitTest(const GeolocationServiceUnitTest&) = delete;
+  GeolocationServiceUnitTest& operator=(const GeolocationServiceUnitTest&) =
+      delete;
+
   ~GeolocationServiceUnitTest() override = default;
 
  protected:
@@ -91,26 +96,16 @@ class GeolocationServiceUnitTest : public DeviceServiceTestBase {
   mojo::Remote<mojom::GeolocationContext> geolocation_context_;
   mojo::Remote<mojom::Geolocation> geolocation_;
   mojo::Remote<mojom::GeolocationConfig> geolocation_config_;
-
-  DISALLOW_COPY_AND_ASSIGN(GeolocationServiceUnitTest);
 };
 
-// GeolocationServiceUnitTest.UrlWithApiKey is flaky on mac
-// https://crbug.com/1235907.
-#if defined(OS_MAC)
-#define MAYBE_UrlWithApiKey DISABLED_UrlWithApiKey
-#else
-#define MAYBE_UrlWithApiKey UrlWithApiKey
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_ANDROID)
 // ChromeOS fails to perform network geolocation when zero wifi networks are
 // detected in a scan: https://crbug.com/767300.
 #else
-TEST_F(GeolocationServiceUnitTest, MAYBE_UrlWithApiKey) {
+TEST_F(GeolocationServiceUnitTest, UrlWithApiKey) {
 // To align with user expectation we do not make Network Location Requests
 // on macOS unless the browser has Location Permission from the OS.
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   fake_geolocation_manager_->SetSystemPermission(
       LocationSystemPermissionStatus::kAllowed);
 #endif
@@ -129,6 +124,9 @@ TEST_F(GeolocationServiceUnitTest, MAYBE_UrlWithApiKey) {
 
   geolocation_->SetHighAccuracy(true);
   loop.Run();
+
+  // Clearing interceptor callback to ensure it does not outlive this scope.
+  test_url_loader_factory_.SetInterceptor(base::NullCallback());
 }
 #endif
 

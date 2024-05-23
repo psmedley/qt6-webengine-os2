@@ -6,7 +6,8 @@
 #define CONTENT_PUBLIC_GPU_CONTENT_GPU_CLIENT_H_
 
 #include "base/metrics/field_trial.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "content/common/content_export.h"
 #include "content/public/common/content_client.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 
@@ -15,6 +16,10 @@ struct GpuPreferences;
 class GpuDriverBugWorkarounds;
 class SharedImageManager;
 class SyncPointManager;
+}
+
+namespace gl {
+class GLShareGroup;
 }
 
 namespace viz {
@@ -50,6 +55,9 @@ class CONTENT_EXPORT ContentGpuClient {
   virtual gpu::SyncPointManager* GetSyncPointManager();
   virtual gpu::SharedImageManager* GetSharedImageManager();
   virtual viz::VizCompositorThreadRunner* GetVizCompositorThreadRunner();
+  // Allow an embedder to provide a share group reimplementation to connect renderer
+  // GL contexts with the root compositor.
+  virtual gl::GLShareGroup* GetInProcessGpuShareGroup();
 };
 
 }  // namespace content

@@ -11,6 +11,7 @@
 
 #include "base/check.h"
 #include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "base/ranges/algorithm.h"
 
 namespace base {
@@ -67,7 +68,7 @@ class ScopedMultiSourceObservation {
   // Remove the object passed to the constructor as an observer from |source|.
   void RemoveObservation(Source* source) {
     auto it = base::ranges::find(sources_, source);
-    DCHECK(it != sources_.end());
+    CHECK(it != sources_.end());
     sources_.erase(it);
     (source->*RemoveObsFn)(observer_);
   }
@@ -93,7 +94,7 @@ class ScopedMultiSourceObservation {
   size_t GetSourcesCount() const { return sources_.size(); }
 
  private:
-  Observer* const observer_;
+  const raw_ptr<Observer> observer_;
 
   std::vector<Source*> sources_;
 };

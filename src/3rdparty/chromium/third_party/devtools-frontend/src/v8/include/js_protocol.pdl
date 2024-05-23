@@ -104,7 +104,9 @@ domain Debugger
       # Location in the source code.
       Location location
       # JavaScript script name or url.
-      string url
+      # Deprecated in favor of using the `location.scriptId` to resolve the URL via a previously
+      # sent `Debugger.scriptParsed` event.
+      deprecated string url
       # Scope chain for this call frame.
       array of Scope scopeChain
       # `this` object for this call frame.
@@ -845,24 +847,6 @@ domain Profiler
       # Type profile entries for parameters and return values of the functions in the script.
       array of TypeProfileEntry entries
 
-  # Collected counter information.
-  experimental type CounterInfo extends object
-    properties
-      # Counter name.
-      string name
-      # Counter value.
-      integer value
-
-  # Runtime call counter information.
-  experimental type RuntimeCallCounterInfo extends object
-    properties
-      # Counter name.
-      string name
-      # Counter value.
-      number value
-      # Counter time in seconds.
-      number time
-
   command disable
 
   command enable
@@ -926,30 +910,6 @@ domain Profiler
     returns
       # Type profile for all scripts since startTypeProfile() was turned on.
       array of ScriptTypeProfile result
-
-  # Enable counters collection.
-  experimental command enableCounters
-
-  # Disable counters collection.
-  experimental command disableCounters
-
-  # Retrieve counters.
-  experimental command getCounters
-    returns
-      # Collected counters information.
-      array of CounterInfo result
-
-  # Enable run time call stats collection.
-  experimental command enableRuntimeCallStats
-
-  # Disable run time call stats collection.
-  experimental command disableRuntimeCallStats
-
-  # Retrieve run time call stats.
-  experimental command getRuntimeCallStats
-    returns
-      # Collected runtime call counter information.
-      array of RuntimeCallCounterInfo result
 
   event consoleProfileFinished
     parameters
@@ -1469,6 +1429,8 @@ domain Runtime
       experimental optional boolean accessorPropertiesOnly
       # Whether preview should be generated for the results.
       experimental optional boolean generatePreview
+      # If true, returns non-indexed properties only.
+      experimental optional boolean nonIndexedPropertiesOnly
     returns
       # Object properties.
       array of PropertyDescriptor result
@@ -1589,6 +1551,18 @@ domain Runtime
   experimental command removeBinding
     parameters
       string name
+
+  # This method tries to lookup and populate exception details for a
+  # JavaScript Error object.
+  # Note that the stackTrace portion of the resulting exceptionDetails will
+  # only be populated if the Runtime domain was enabled at the time when the
+  # Error was thrown.
+  experimental command getExceptionDetails
+    parameters
+      # The error object for which to resolve the exception details.
+      RemoteObjectId errorObjectId
+    returns
+      optional ExceptionDetails exceptionDetails
 
   # Notification is issued every time when binding is called.
   experimental event bindingCalled

@@ -12,25 +12,26 @@ import './strings.m.js';
 import './signin_shared_css.js';
 import './signin_vars_css.js';
 
+import {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
 import {CrInputElement} from 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
-import {html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {WebUIListenerMixin} from 'chrome://resources/js/web_ui_listener_mixin.js';
+import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {ProfileCustomizationBrowserProxy, ProfileCustomizationBrowserProxyImpl, ProfileInfo} from './profile_customization_browser_proxy.js';
 
 
-interface ProfileCustomizationAppElement {
+export interface ProfileCustomizationAppElement {
   $: {
+    doneButton: CrButtonElement,
     nameInput: CrInputElement,
+    title: HTMLElement,
   };
 }
 
-const ProfileCustomizationAppElementBase =
-    mixinBehaviors([WebUIListenerBehavior], PolymerElement) as
-    {new (): PolymerElement & WebUIListenerBehavior};
+const ProfileCustomizationAppElementBase = WebUIListenerMixin(PolymerElement);
 
-class ProfileCustomizationAppElement extends
+export class ProfileCustomizationAppElement extends
     ProfileCustomizationAppElementBase {
   static get is() {
     return 'profile-customization-app';
@@ -69,7 +70,7 @@ class ProfileCustomizationAppElement extends
   private profileCustomizationBrowserProxy_: ProfileCustomizationBrowserProxy =
       ProfileCustomizationBrowserProxyImpl.getInstance();
 
-  ready() {
+  override ready() {
     super.ready();
 
     // profileName_ is only set now, because it triggers a validation of the
@@ -100,6 +101,12 @@ class ProfileCustomizationAppElement extends
     this.pictureUrl_ = profileInfo.pictureUrl;
     this.isManaged_ = profileInfo.isManaged;
     this.welcomeTitle_ = profileInfo.welcomeTitle;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'profile-customization-app': ProfileCustomizationAppElement;
   }
 }
 

@@ -60,6 +60,8 @@ def main(argv, stderr):
     else:
         host = Host()
 
+    if six.PY3 and stderr.isatty():
+        stderr.reconfigure(write_through=True)
     printer = printing.Printer(host, options, stderr)
 
     try:
@@ -150,10 +152,10 @@ def parse_args(args):
                              default=True,
                              help=('Do not log Zircon debug messages.')),
         optparse.make_option('--device',
-                             choices=['aemu', 'qemu', 'device', 'fvdl'],
-                             default='aemu',
+                             choices=['qemu', 'device', 'fvdl'],
+                             default='fvdl',
                              help=('Choose device to launch Fuchsia with. '
-                                   'Defaults to AEMU.')),
+                                   'Defaults to fvdl.')),
         optparse.make_option('--fuchsia-target-cpu',
                              choices=['x64', 'arm64'],
                              default='x64',
@@ -322,6 +324,10 @@ def parse_args(args):
                 dest='build',
                 action='store_false',
                 help="Don't check to see if the build is up to date."),
+            optparse.make_option('--no-virtual-tests',
+                                 action='store_true',
+                                 default=False,
+                                 help=('Do not run virtual tests.')),
             optparse.make_option('--child-processes',
                                  '--jobs',
                                  '-j',
@@ -548,7 +554,7 @@ def parse_args(args):
                 help='A colon-separated list of tests to run. Wildcards are '
                 'NOT supported. It is the same as listing the tests as '
                 'positional arguments.'),
-            optparse.make_option('--time-out-ms',
+            optparse.make_option('--timeout-ms',
                                  help='Set the timeout for each test'),
             optparse.make_option(
                 '--initialize-webgpu-adapter-at-startup-timeout-ms',
@@ -605,7 +611,28 @@ def parse_args(args):
                  'use case is to leave enough time to allow the process to '
                  'finish post-run hooks, such as dumping code coverage data. '
                  'Default is 1 second, can be overriden for specific use cases.'
-                 ))
+                 )),
+            optparse.make_option(
+                '--git-revision',
+                help=(
+                    'The Chromium git revision being tested. This is only used '
+                    'for an experimental Skia Gold dryrun.')),
+            optparse.make_option(
+                '--gerrit-issue',
+                help=(
+                    'The Gerrit issue/CL number being tested, if applicable. '
+                    'This is only used for an experimental Skia Gold dryrun.'
+                )),
+            optparse.make_option(
+                '--gerrit-patchset',
+                help=(
+                    'The Gerrit patchset being tested, if applicable. This is '
+                    'only used for an experimental Skia Gold dryrun.')),
+            optparse.make_option(
+                '--buildbucket-id',
+                help=(
+                    'The Buildbucket ID of the bot running the test. This is '
+                    'only used for an experimental Skia Gold dryrun.')),
         ]))
 
     # FIXME: Move these into json_results_generator.py.
@@ -687,10 +714,10 @@ def _set_up_derived_options(port, options, args):
     if not options.configuration:
         options.configuration = port.default_configuration()
 
-    if not options.time_out_ms:
-        options.time_out_ms = str(port.timeout_ms())
+    if not options.timeout_ms:
+        options.timeout_ms = str(port.timeout_ms())
 
-    options.slow_time_out_ms = str(5 * int(options.time_out_ms))
+    options.slow_timeout_ms = str(5 * int(options.timeout_ms))
 
     if options.additional_platform_directory:
         additional_platform_directories = []

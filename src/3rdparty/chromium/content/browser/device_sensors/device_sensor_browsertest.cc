@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
@@ -245,7 +244,7 @@ IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, NullTestWithAlert) {
 
   // TODO(timvolodine): investigate if it is possible to test this without
   // delay, crbug.com/360044.
-  WaitForAlertDialogAndQuitAfterDelay(base::TimeDelta::FromMilliseconds(500));
+  WaitForAlertDialogAndQuitAfterDelay(base::Milliseconds(500));
 
   same_tab_observer.Wait();
   EXPECT_EQ("pass", shell()->web_contents()->GetLastCommittedURL().ref());

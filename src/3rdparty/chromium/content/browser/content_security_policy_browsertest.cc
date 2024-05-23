@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <tuple>
+
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
@@ -99,6 +101,46 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
   console_observer.Wait();
 }
 
+IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
+                       WildcardNotMatchingNonNetworkSchemeBrowserSide) {
+  const char* page = R"(
+    data:text/html,
+    <meta http-equiv="Content-Security-Policy" content="frame-src *">
+    <iframe src="mailto:arthursonzogni@chromium.org"></iframe>
+  )";
+
+  GURL url(page);
+  WebContentsConsoleObserver console_observer(web_contents());
+  console_observer.SetPattern(
+      "Refused to frame '' because it violates the following Content Security "
+      "Policy directive: \"frame-src *\". Note that '*' matches only URLs with "
+      "network schemes ('http', 'https', 'ws', 'wss'), or URLs whose scheme "
+      "matches `self`'s scheme. mailto:' must be added explicitely.\n");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  console_observer.Wait();
+}
+
+IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
+                       WildcardNotMatchingNonNetworkSchemeRendererSide) {
+  const char* page = R"(
+    data:text/html,
+    <meta http-equiv="Content-Security-Policy" content="script-src *">
+    <script src="mailto:arthursonzogni@chromium.org"></script>
+  )";
+
+  GURL url(page);
+  WebContentsConsoleObserver console_observer(web_contents());
+  console_observer.SetPattern(
+      "Refused to load the script 'mailto:arthursonzogni@chromium.org' because "
+      "it violates the following Content Security Policy directive: "
+      "\"script-src *\". Note that 'script-src-elem' was not explicitly set, "
+      "so 'script-src' is used as a fallback. Note that '*' matches only URLs "
+      "with network schemes ('http', 'https', 'ws', 'wss'), or URLs whose "
+      "scheme matches `self`'s scheme. mailto:' must be added explicitely.\n");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  console_observer.Wait();
+}
+
 namespace {
 
 base::FilePath TestFilePath(const char* filename) {
@@ -112,16 +154,16 @@ base::FilePath TestFilePath(const char* filename) {
 // Unfortunately, we cannot write this as Web Platform Test since Web Platform
 // Tests don't support file: urls.
 IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, FileURLs) {
-  url::Replacements<char> add_localhost;
-  add_localhost.SetHost("localhost", url::Component(0, 9));
-  url::Replacements<char> none;
+  GURL::Replacements add_localhost;
+  add_localhost.SetHostStr("localhost");
+  GURL::Replacements none;
   struct {
     const char* csp;
     std::string element_name;
-    const url::Replacements<char>& document_host;
-    const url::Replacements<char>& element_host;
+    const GURL::Replacements& document_host;
+    const GURL::Replacements& element_host;
     bool expect_allowed;
-  } testCases[]{
+  } test_cases[] = {
       {"img-src 'none'", "img", none, none, false},
       {"img-src file:", "img", none, none, true},
       {"img-src 'self'", "img", none, none, true},
@@ -152,18 +194,18 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, FileURLs) {
       {"frame-src 'self'", "iframe", add_localhost, add_localhost, true},
   };
 
-  for (const auto& testCase : testCases) {
+  for (const auto& test_case : test_cases) {
     GURL document_url = net::FilePathToFileURL(TestFilePath("hello.html"))
-                            .ReplaceComponents(testCase.document_host);
+                            .ReplaceComponents(test_case.document_host);
 
     // On windows, if `document_url` contains the host part "localhost", the
     // actual committed URL does not. So we omit EXPECT_TRUE and ignore the
     // result value here.
-    ignore_result(NavigateToURL(shell(), document_url));
+    std::ignore = NavigateToURL(shell(), document_url);
 
     GURL element_url = net::FilePathToFileURL(TestFilePath(
-        testCase.element_name == "iframe" ? "empty.html" : "blank.jpg"));
-    element_url = element_url.ReplaceComponents(testCase.element_host);
+        test_case.element_name == "iframe" ? "empty.html" : "blank.jpg"));
+    element_url = element_url.ReplaceComponents(test_case.element_host);
     TestNavigationObserver load_observer(shell()->web_contents());
 
     EXPECT_TRUE(
@@ -188,9 +230,9 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, FileURLs) {
           });
           document.body.appendChild(element);
     )",
-                         testCase.csp, testCase.element_name, element_url)));
+                         test_case.csp, test_case.element_name, element_url)));
 
-    if (testCase.element_name == "iframe") {
+    if (test_case.element_name == "iframe") {
       // Since iframes always trigger the onload event, we need to be more
       // careful checking whether the iframe was blocked or not.
       load_observer.Wait();
@@ -198,10 +240,10 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, FileURLs) {
                                            ->child_at(0)
                                            ->current_frame_host()
                                            ->GetLastCommittedOrigin();
-      if (testCase.expect_allowed) {
+      if (test_case.expect_allowed) {
         EXPECT_TRUE(load_observer.last_navigation_succeeded())
             << element_url << " in " << document_url << " with CSPs \""
-            << testCase.csp << "\" should be allowed";
+            << test_case.csp << "\" should be allowed";
         EXPECT_FALSE(child_origin.opaque());
       } else {
         EXPECT_FALSE(load_observer.last_navigation_succeeded());
@@ -209,20 +251,37 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, FileURLs) {
         // The blocked frame's origin should become unique.
         EXPECT_TRUE(child_origin.opaque())
             << element_url << " in " << document_url << " with CSPs \""
-            << testCase.csp << "\" should be blocked";
+            << test_case.csp << "\" should be blocked";
       }
     } else {
       std::string expect_message =
-          testCase.expect_allowed ? "allowed" : "blocked";
+          test_case.expect_allowed ? "allowed" : "blocked";
       EXPECT_EQ(expect_message, EvalJs(current_frame_host(), "promise"))
           << element_url << " in " << document_url << " with CSPs \""
-          << testCase.csp << "\" should be " << expect_message;
+          << test_case.csp << "\" should be " << expect_message;
     }
 
-    if (!testCase.expect_allowed) {
+    if (!test_case.expect_allowed) {
       EXPECT_EQ("got violation", EvalJs(current_frame_host(), "violation"));
     }
   }
+}
+
+// Test that a 'csp' attribute longer than 4096 bytes is ignored.
+IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, CSPAttributeTooLong) {
+  std::string long_csp_attribute = "script-src 'none' ";
+  long_csp_attribute.resize(4097, 'a');
+  std::string page = "data:text/html,<body><iframe csp=\"" +
+                     long_csp_attribute + "\"></iframe></body>";
+
+  GURL url(page);
+  WebContentsConsoleObserver console_observer(web_contents());
+  console_observer.SetPattern("'csp' attribute too long*");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  console_observer.Wait();
+
+  EXPECT_EQ(current_frame_host()->child_count(), 1u);
+  EXPECT_FALSE(current_frame_host()->child_at(0)->csp_attribute());
 }
 
 }  // namespace content

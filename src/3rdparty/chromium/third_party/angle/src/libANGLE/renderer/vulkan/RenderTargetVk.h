@@ -19,7 +19,6 @@ namespace rx
 {
 namespace vk
 {
-struct Format;
 class FramebufferHelper;
 class ImageHelper;
 class ImageView;
@@ -83,19 +82,22 @@ class RenderTargetVk final : public FramebufferAttachmentRenderTarget
     vk::ImageHelper &getImageForWrite() const;
 
     // For cube maps we use single-level single-layer 2D array views.
-    angle::Result getImageView(ContextVk *contextVk, const vk::ImageView **imageViewOut) const;
-    angle::Result getImageViewWithColorspace(ContextVk *contextVk,
+    angle::Result getImageView(vk::Context *contextVk, const vk::ImageView **imageViewOut) const;
+    angle::Result getImageViewWithColorspace(vk::Context *context,
                                              gl::SrgbWriteControlMode srgbWriteContrlMode,
                                              const vk::ImageView **imageViewOut) const;
-    angle::Result getResolveImageView(ContextVk *contextVk,
+    angle::Result getResolveImageView(vk::Context *context,
                                       const vk::ImageView **imageViewOut) const;
 
     // For 3D textures, the 2D view created for render target is invalid to read from.  The
     // following will return a view to the whole image (for all types, including 3D and 2DArray).
-    angle::Result getAndRetainCopyImageView(ContextVk *contextVk,
-                                            const vk::ImageView **imageViewOut) const;
+    angle::Result getCopyImageView(vk::Context *context, const vk::ImageView **imageViewOut) const;
 
-    const vk::Format &getImageFormat() const;
+    angle::FormatID getImageActualFormatID() const;
+    const angle::Format &getImageActualFormat() const;
+    angle::FormatID getImageIntendedFormatID() const;
+    const angle::Format &getImageIntendedFormat() const;
+
     gl::Extents getExtents() const;
     gl::Extents getRotatedExtents() const;
     gl::LevelIndex getLevelIndex() const { return mLevelIndexGL; }
@@ -116,16 +118,14 @@ class RenderTargetVk final : public FramebufferAttachmentRenderTarget
                                      uint32_t deferredClearIndex,
                                      uint32_t framebufferLayerCount);
 
-    void retainImageViews(ContextVk *contextVk) const;
-
     bool hasDefinedContent() const;
     bool hasDefinedStencilContent() const;
     // Mark content as undefined so that certain optimizations are possible such as using DONT_CARE
-    // as loadOp of the render target in the next renderpass.
-    void invalidateEntireContent(ContextVk *contextVk);
-    void invalidateEntireStencilContent(ContextVk *contextVk);
-    void restoreEntireContent();
-    void restoreEntireStencilContent();
+    // as loadOp of the render target in the next renderpass.  If |preferToKeepContentsDefinedOut|
+    // is set to true, it's preferred to ignore the invalidation due to image format and device
+    // architecture properties.
+    void invalidateEntireContent(ContextVk *contextVk, bool *preferToKeepContentsDefinedOut);
+    void invalidateEntireStencilContent(ContextVk *contextVk, bool *preferToKeepContentsDefinedOut);
 
     // See the description of mTransience for details of how the following two can interact.
     bool hasResolveAttachment() const { return mResolveImage != nullptr && !isEntirelyTransient(); }
@@ -136,7 +136,7 @@ class RenderTargetVk final : public FramebufferAttachmentRenderTarget
     }
 
   private:
-    angle::Result getImageViewImpl(ContextVk *contextVk,
+    angle::Result getImageViewImpl(vk::Context *context,
                                    const vk::ImageHelper &image,
                                    gl::SrgbWriteControlMode mode,
                                    vk::ImageViewHelper *imageViews,

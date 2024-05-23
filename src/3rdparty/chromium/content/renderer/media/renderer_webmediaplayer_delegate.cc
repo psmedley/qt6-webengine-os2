@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/system/sys_info.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/common/content_client.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_frame.h"
@@ -36,8 +37,8 @@ RendererWebMediaPlayerDelegate::RendererWebMediaPlayerDelegate(
       allow_idle_cleanup_(
           content::GetContentClient()->renderer()->IsIdleMediaSuspendEnabled()),
       tick_clock_(base::DefaultTickClock::GetInstance()) {
-  idle_cleanup_interval_ = base::TimeDelta::FromSeconds(5);
-  idle_timeout_ = base::TimeDelta::FromSeconds(15);
+  idle_cleanup_interval_ = base::Seconds(5);
+  idle_timeout_ = base::Seconds(15);
 
   is_low_end_ = base::SysInfo::IsLowEndDevice();
   idle_cleanup_timer_.SetTaskRunner(

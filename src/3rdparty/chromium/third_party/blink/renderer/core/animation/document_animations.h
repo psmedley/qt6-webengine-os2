@@ -31,10 +31,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_ANIMATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_ANIMATIONS_H_
 
-#include "base/auto_reset.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
@@ -90,39 +92,24 @@ class CORE_EXPORT DocumentAnimations final
   // https://github.com/w3c/csswg-drafts/issues/5261
   void ValidateTimelines();
 
-  // By default, animation updates are *implicitly* disallowed. This object
-  // can be used to allow or disallow animation updates as follows:
-  //
-  // AllowAnimationUpdatesScope(..., true): Allow animation updates, unless
-  // updates are currently *explicitly* disallowed.
-  //
-  // AllowAnimationUpdatesScope(..., false): Explicitly disallow animation
-  // updates.
-  class CORE_EXPORT AllowAnimationUpdatesScope {
-    STACK_ALLOCATED();
-
-   public:
-    AllowAnimationUpdatesScope(DocumentAnimations&, bool);
-
-   private:
-    base::AutoReset<absl::optional<bool>> allow_;
-  };
+  // Detach compositor timelines to prevent further ticking of any animations
+  // associated with the timelines.  Detached timelines may be subsequently
+  // reattached if needed.
+  void DetachCompositorTimelines();
 
   // Add an element to the set of elements with a pending animation update.
   // The elements in the set can be applied later using,
   // ApplyPendingElementUpdates.
   //
-  // It's invalid to call this function during if animation updates are not
-  // allowed (see AnimationUpdatesAllowed).
+  // It's invalid to call this function if there is no current
+  // PostStyleUpdateScope.
   void AddElementWithPendingAnimationUpdate(Element&);
 
   // Apply pending updates for any elements previously added during AddElement-
-  // WithPendingAnimationUpdate
+  // WithPendingAnimationUpdate.
   void ApplyPendingElementUpdates();
 
-  bool AnimationUpdatesAllowed() const {
-    return allow_animation_updates_.value_or(false);
-  }
+  void AddPendingOldStyleForElement(Element&);
 
   const HeapHashSet<WeakMember<AnimationTimeline>>& GetTimelinesForTesting()
       const {
@@ -135,29 +122,18 @@ class CORE_EXPORT DocumentAnimations final
   uint64_t current_transition_generation_;
   void Trace(Visitor*) const;
 
-#if DCHECK_IS_ON()
-  void AssertNoPendingUpdates() {
-    DCHECK(elements_with_pending_updates_.IsEmpty());
-  }
-#endif
-
  protected:
   using ReplaceableAnimationsMap =
       HeapHashMap<Member<Element>, Member<HeapVector<Member<Animation>>>>;
   void RemoveReplacedAnimations(ReplaceableAnimationsMap*);
 
  private:
-  friend class AllowAnimationUpdatesScope;
-  friend class AnimationUpdateScope;
-
   void MarkPendingIfCompositorPropertyAnimationChanges(
       const PaintArtifactCompositor*);
 
   Member<Document> document_;
   HeapHashSet<WeakMember<AnimationTimeline>> timelines_;
   HeapHashSet<WeakMember<AnimationTimeline>> unvalidated_timelines_;
-  HeapHashSet<WeakMember<Element>> elements_with_pending_updates_;
-  absl::optional<bool> allow_animation_updates_;
 };
 
 }  // namespace blink

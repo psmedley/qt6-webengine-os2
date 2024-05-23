@@ -54,6 +54,7 @@
                     "description": "Enum of possible native property sources (as a subtype of a particular AXValueSourceType).",
                     "type": "string",
                     "enum": [
+                        "description",
                         "figcaption",
                         "label",
                         "labelfor",
@@ -304,6 +305,12 @@
                             }
                         },
                         {
+                            "name": "parentId",
+                            "description": "ID for this node's parent.",
+                            "optional": true,
+                            "$ref": "AXNodeId"
+                        },
+                        {
                             "name": "childIds",
                             "description": "IDs for each of this node's child nodes.",
                             "optional": true,
@@ -317,6 +324,12 @@
                             "description": "The backend ID for the associated DOM node, if any.",
                             "optional": true,
                             "$ref": "DOM.BackendNodeId"
+                        },
+                        {
+                            "name": "frameId",
+                            "description": "The frame ID for the frame associated with this nodes document.",
+                            "optional": true,
+                            "$ref": "Page.FrameId"
                         }
                     ]
                 }
@@ -377,10 +390,69 @@
                     "experimental": true,
                     "parameters": [
                         {
-                            "name": "max_depth",
+                            "name": "depth",
                             "description": "The maximum depth at which descendants of the root node should be retrieved.\nIf omitted, the full tree is returned.",
                             "optional": true,
                             "type": "integer"
+                        },
+                        {
+                            "name": "frameId",
+                            "description": "The frame for whose document the AX tree should be retrieved.\nIf omited, the root frame is used.",
+                            "optional": true,
+                            "$ref": "Page.FrameId"
+                        }
+                    ],
+                    "returns": [
+                        {
+                            "name": "nodes",
+                            "type": "array",
+                            "items": {
+                                "$ref": "AXNode"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "getRootAXNode",
+                    "description": "Fetches the root node.\nRequires `enable()` to have been called previously.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "frameId",
+                            "description": "The frame in whose document the node resides.\nIf omitted, the root frame is used.",
+                            "optional": true,
+                            "$ref": "Page.FrameId"
+                        }
+                    ],
+                    "returns": [
+                        {
+                            "name": "node",
+                            "$ref": "AXNode"
+                        }
+                    ]
+                },
+                {
+                    "name": "getAXNodeAndAncestors",
+                    "description": "Fetches a node and all ancestors up to and including the root.\nRequires `enable()` to have been called previously.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "nodeId",
+                            "description": "Identifier of the node to get.",
+                            "optional": true,
+                            "$ref": "DOM.NodeId"
+                        },
+                        {
+                            "name": "backendNodeId",
+                            "description": "Identifier of the backend node to get.",
+                            "optional": true,
+                            "$ref": "DOM.BackendNodeId"
+                        },
+                        {
+                            "name": "objectId",
+                            "description": "JavaScript object id of the node wrapper to get.",
+                            "optional": true,
+                            "$ref": "Runtime.RemoteObjectId"
                         }
                     ],
                     "returns": [
@@ -401,6 +473,12 @@
                         {
                             "name": "id",
                             "$ref": "AXNodeId"
+                        },
+                        {
+                            "name": "frameId",
+                            "description": "The frame in whose document the node resides.\nIf omitted, the root frame is used.",
+                            "optional": true,
+                            "$ref": "Page.FrameId"
                         }
                     ],
                     "returns": [
@@ -453,6 +531,35 @@
                         {
                             "name": "nodes",
                             "description": "A list of `Accessibility.AXNode` matching the specified attributes,\nincluding nodes that are ignored for accessibility.",
+                            "type": "array",
+                            "items": {
+                                "$ref": "AXNode"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "events": [
+                {
+                    "name": "loadComplete",
+                    "description": "The loadComplete event mirrors the load complete event sent by the browser to assistive\ntechnology when the web page has finished loading.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "root",
+                            "description": "New document root node.",
+                            "$ref": "AXNode"
+                        }
+                    ]
+                },
+                {
+                    "name": "nodesUpdated",
+                    "description": "The nodesUpdated event is sent every time a previously requested node has changed the in tree.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "nodes",
+                            "description": "Updated node data.",
                             "type": "array",
                             "items": {
                                 "$ref": "AXNode"
@@ -810,181 +917,6 @@
             ]
         },
         {
-            "domain": "ApplicationCache",
-            "experimental": true,
-            "dependencies": [
-                "Page"
-            ],
-            "types": [
-                {
-                    "id": "ApplicationCacheResource",
-                    "description": "Detailed application cache resource information.",
-                    "type": "object",
-                    "properties": [
-                        {
-                            "name": "url",
-                            "description": "Resource url.",
-                            "type": "string"
-                        },
-                        {
-                            "name": "size",
-                            "description": "Resource size.",
-                            "type": "integer"
-                        },
-                        {
-                            "name": "type",
-                            "description": "Resource type.",
-                            "type": "string"
-                        }
-                    ]
-                },
-                {
-                    "id": "ApplicationCache",
-                    "description": "Detailed application cache information.",
-                    "type": "object",
-                    "properties": [
-                        {
-                            "name": "manifestURL",
-                            "description": "Manifest URL.",
-                            "type": "string"
-                        },
-                        {
-                            "name": "size",
-                            "description": "Application cache size.",
-                            "type": "number"
-                        },
-                        {
-                            "name": "creationTime",
-                            "description": "Application cache creation time.",
-                            "type": "number"
-                        },
-                        {
-                            "name": "updateTime",
-                            "description": "Application cache update time.",
-                            "type": "number"
-                        },
-                        {
-                            "name": "resources",
-                            "description": "Application cache resources.",
-                            "type": "array",
-                            "items": {
-                                "$ref": "ApplicationCacheResource"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "id": "FrameWithManifest",
-                    "description": "Frame identifier - manifest URL pair.",
-                    "type": "object",
-                    "properties": [
-                        {
-                            "name": "frameId",
-                            "description": "Frame identifier.",
-                            "$ref": "Page.FrameId"
-                        },
-                        {
-                            "name": "manifestURL",
-                            "description": "Manifest URL.",
-                            "type": "string"
-                        },
-                        {
-                            "name": "status",
-                            "description": "Application cache status.",
-                            "type": "integer"
-                        }
-                    ]
-                }
-            ],
-            "commands": [
-                {
-                    "name": "enable",
-                    "description": "Enables application cache domain notifications."
-                },
-                {
-                    "name": "getApplicationCacheForFrame",
-                    "description": "Returns relevant application cache data for the document in given frame.",
-                    "parameters": [
-                        {
-                            "name": "frameId",
-                            "description": "Identifier of the frame containing document whose application cache is retrieved.",
-                            "$ref": "Page.FrameId"
-                        }
-                    ],
-                    "returns": [
-                        {
-                            "name": "applicationCache",
-                            "description": "Relevant application cache data for the document in given frame.",
-                            "$ref": "ApplicationCache"
-                        }
-                    ]
-                },
-                {
-                    "name": "getFramesWithManifests",
-                    "description": "Returns array of frame identifiers with manifest urls for each frame containing a document\nassociated with some application cache.",
-                    "returns": [
-                        {
-                            "name": "frameIds",
-                            "description": "Array of frame identifiers with manifest urls for each frame containing a document\nassociated with some application cache.",
-                            "type": "array",
-                            "items": {
-                                "$ref": "FrameWithManifest"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "name": "getManifestForFrame",
-                    "description": "Returns manifest URL for document in the given frame.",
-                    "parameters": [
-                        {
-                            "name": "frameId",
-                            "description": "Identifier of the frame containing document whose manifest is retrieved.",
-                            "$ref": "Page.FrameId"
-                        }
-                    ],
-                    "returns": [
-                        {
-                            "name": "manifestURL",
-                            "description": "Manifest URL for document in the given frame.",
-                            "type": "string"
-                        }
-                    ]
-                }
-            ],
-            "events": [
-                {
-                    "name": "applicationCacheStatusUpdated",
-                    "parameters": [
-                        {
-                            "name": "frameId",
-                            "description": "Identifier of the frame containing document whose application cache updated status.",
-                            "$ref": "Page.FrameId"
-                        },
-                        {
-                            "name": "manifestURL",
-                            "description": "Manifest URL.",
-                            "type": "string"
-                        },
-                        {
-                            "name": "status",
-                            "description": "Updated application cache status.",
-                            "type": "integer"
-                        }
-                    ]
-                },
-                {
-                    "name": "networkStateUpdated",
-                    "parameters": [
-                        {
-                            "name": "isNowOnline",
-                            "type": "boolean"
-                        }
-                    ]
-                }
-            ]
-        },
-        {
             "domain": "Audits",
             "description": "Audits domain allows investigation of page violations and possible improvements.",
             "experimental": true,
@@ -1041,7 +973,7 @@
                     ]
                 },
                 {
-                    "id": "SameSiteCookieExclusionReason",
+                    "id": "CookieExclusionReason",
                     "type": "string",
                     "enum": [
                         "ExcludeSameSiteUnspecifiedTreatedAsLax",
@@ -1053,7 +985,7 @@
                     ]
                 },
                 {
-                    "id": "SameSiteCookieWarningReason",
+                    "id": "CookieWarningReason",
                     "type": "string",
                     "enum": [
                         "WarnSameSiteUnspecifiedCrossSiteContext",
@@ -1063,11 +995,12 @@
                         "WarnSameSiteStrictCrossDowngradeStrict",
                         "WarnSameSiteStrictCrossDowngradeLax",
                         "WarnSameSiteLaxCrossDowngradeStrict",
-                        "WarnSameSiteLaxCrossDowngradeLax"
+                        "WarnSameSiteLaxCrossDowngradeLax",
+                        "WarnAttributeValueExceedsMaxSize"
                     ]
                 },
                 {
-                    "id": "SameSiteCookieOperation",
+                    "id": "CookieOperation",
                     "type": "string",
                     "enum": [
                         "SetCookie",
@@ -1075,7 +1008,7 @@
                     ]
                 },
                 {
-                    "id": "SameSiteCookieIssueDetails",
+                    "id": "CookieIssueDetails",
                     "description": "This information is currently necessary, as the front-end has a difficult\ntime finding a specific cookie. With this, we can convey specific error\ninformation without the cookie.",
                     "type": "object",
                     "properties": [
@@ -1094,20 +1027,20 @@
                             "name": "cookieWarningReasons",
                             "type": "array",
                             "items": {
-                                "$ref": "SameSiteCookieWarningReason"
+                                "$ref": "CookieWarningReason"
                             }
                         },
                         {
                             "name": "cookieExclusionReasons",
                             "type": "array",
                             "items": {
-                                "$ref": "SameSiteCookieExclusionReason"
+                                "$ref": "CookieExclusionReason"
                             }
                         },
                         {
                             "name": "operation",
                             "description": "Optionally identifies the site-for-cookies and the cookie url, which\nmay be used by the front-end as additional context.",
-                            "$ref": "SameSiteCookieOperation"
+                            "$ref": "CookieOperation"
                         },
                         {
                             "name": "siteForCookies",
@@ -1139,6 +1072,7 @@
                     "id": "MixedContentResourceType",
                     "type": "string",
                     "enum": [
+                        "AttributionSrc",
                         "Audio",
                         "Beacon",
                         "CSPReport",
@@ -1289,7 +1223,8 @@
                         "kEvalViolation",
                         "kURLViolation",
                         "kTrustedTypesSinkViolation",
-                        "kTrustedTypesPolicyViolation"
+                        "kTrustedTypesPolicyViolation",
+                        "kWasmEvalViolation"
                     ]
                 },
                 {
@@ -1504,7 +1439,14 @@
                         "InvalidAttributionSourceEventId",
                         "InvalidAttributionData",
                         "AttributionSourceUntrustworthyOrigin",
-                        "AttributionUntrustworthyOrigin"
+                        "AttributionUntrustworthyOrigin",
+                        "AttributionTriggerDataTooLarge",
+                        "AttributionEventSourceTriggerDataTooLarge",
+                        "InvalidAttributionSourceExpiry",
+                        "InvalidAttributionSourcePriority",
+                        "InvalidEventSourceTriggerData",
+                        "InvalidTriggerPriority",
+                        "InvalidTriggerDedupKey"
                     ]
                 },
                 {
@@ -1582,24 +1524,129 @@
                     ]
                 },
                 {
-                    "id": "WasmCrossOriginModuleSharingIssueDetails",
+                    "id": "GenericIssueErrorType",
+                    "type": "string",
+                    "enum": [
+                        "CrossOriginPortalPostMessageError"
+                    ]
+                },
+                {
+                    "id": "GenericIssueDetails",
+                    "description": "Depending on the concrete errorType, different properties are set.",
                     "type": "object",
                     "properties": [
                         {
-                            "name": "wasmModuleUrl",
+                            "name": "errorType",
+                            "description": "Issues with the same errorType are aggregated in the frontend.",
+                            "$ref": "GenericIssueErrorType"
+                        },
+                        {
+                            "name": "frameId",
+                            "optional": true,
+                            "$ref": "Page.FrameId"
+                        }
+                    ]
+                },
+                {
+                    "id": "DeprecationIssueType",
+                    "type": "string",
+                    "enum": [
+                        "DeprecationExample",
+                        "Untranslated"
+                    ]
+                },
+                {
+                    "id": "DeprecationIssueDetails",
+                    "description": "This issue tracks information needed to print a deprecation message.\nThe formatting is inherited from the old console.log version, see more at:\nhttps://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/frame/deprecation.cc\nTODO(crbug.com/1264960): Re-work format to add i18n support per:\nhttps://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/public/devtools_protocol/README.md",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "affectedFrame",
+                            "optional": true,
+                            "$ref": "AffectedFrame"
+                        },
+                        {
+                            "name": "sourceCodeLocation",
+                            "$ref": "SourceCodeLocation"
+                        },
+                        {
+                            "name": "message",
+                            "description": "The content of an untranslated deprecation issue,\ne.g. \"window.inefficientLegacyStorageMethod will be removed in M97,\naround January 2022. Please use Web Storage or Indexed Database\ninstead. This standard was abandoned in January, 1970. See\nhttps://www.chromestatus.com/feature/5684870116278272 for more details.\"",
+                            "deprecated": true,
+                            "optional": true,
                             "type": "string"
                         },
                         {
-                            "name": "sourceOrigin",
+                            "name": "deprecationType",
+                            "description": "The id of an untranslated deprecation issue e.g. PrefixedStorageInfo.",
+                            "deprecated": true,
+                            "optional": true,
                             "type": "string"
                         },
                         {
-                            "name": "targetOrigin",
-                            "type": "string"
+                            "name": "type",
+                            "$ref": "DeprecationIssueType"
+                        }
+                    ]
+                },
+                {
+                    "id": "ClientHintIssueReason",
+                    "type": "string",
+                    "enum": [
+                        "MetaTagAllowListInvalidOrigin",
+                        "MetaTagModifiedHTML"
+                    ]
+                },
+                {
+                    "id": "FederatedAuthRequestIssueDetails",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "federatedAuthRequestIssueReason",
+                            "$ref": "FederatedAuthRequestIssueReason"
+                        }
+                    ]
+                },
+                {
+                    "id": "FederatedAuthRequestIssueReason",
+                    "description": "Represents the failure reason when a federated authentication reason fails.\nShould be updated alongside RequestIdTokenStatus in\nthird_party/blink/public/mojom/devtools/inspector_issue.mojom to include\nall cases except for success.",
+                    "type": "string",
+                    "enum": [
+                        "ApprovalDeclined",
+                        "TooManyRequests",
+                        "ManifestHttpNotFound",
+                        "ManifestNoResponse",
+                        "ManifestInvalidResponse",
+                        "ClientMetadataHttpNotFound",
+                        "ClientMetadataNoResponse",
+                        "ClientMetadataInvalidResponse",
+                        "ClientMetadataMissingPrivacyPolicyUrl",
+                        "DisabledInSettings",
+                        "ErrorFetchingSignin",
+                        "InvalidSigninResponse",
+                        "AccountsHttpNotFound",
+                        "AccountsNoResponse",
+                        "AccountsInvalidResponse",
+                        "IdTokenHttpNotFound",
+                        "IdTokenNoResponse",
+                        "IdTokenInvalidResponse",
+                        "IdTokenInvalidRequest",
+                        "ErrorIdToken",
+                        "Canceled"
+                    ]
+                },
+                {
+                    "id": "ClientHintIssueDetails",
+                    "description": "This issue tracks client hints related issues. It's used to deprecate old\nfeatures, encourage the use of new ones, and provide general guidance.",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "sourceCodeLocation",
+                            "$ref": "SourceCodeLocation"
                         },
                         {
-                            "name": "isWarning",
-                            "type": "boolean"
+                            "name": "clientHintIssueReason",
+                            "$ref": "ClientHintIssueReason"
                         }
                     ]
                 },
@@ -1608,7 +1655,7 @@
                     "description": "A unique identifier for the type of issue. Each type may use one of the\noptional fields in InspectorIssueDetails to convey more specific\ninformation about the kind of issue.",
                     "type": "string",
                     "enum": [
-                        "SameSiteCookieIssue",
+                        "CookieIssue",
                         "MixedContentIssue",
                         "BlockedByResponseIssue",
                         "HeavyAdIssue",
@@ -1620,7 +1667,10 @@
                         "AttributionReportingIssue",
                         "QuirksModeIssue",
                         "NavigatorUserAgentIssue",
-                        "WasmCrossOriginModuleSharingIssue"
+                        "GenericIssue",
+                        "DeprecationIssue",
+                        "ClientHintIssue",
+                        "FederatedAuthRequestIssue"
                     ]
                 },
                 {
@@ -1629,9 +1679,9 @@
                     "type": "object",
                     "properties": [
                         {
-                            "name": "sameSiteCookieIssueDetails",
+                            "name": "cookieIssueDetails",
                             "optional": true,
-                            "$ref": "SameSiteCookieIssueDetails"
+                            "$ref": "CookieIssueDetails"
                         },
                         {
                             "name": "mixedContentIssueDetails",
@@ -1689,9 +1739,24 @@
                             "$ref": "NavigatorUserAgentIssueDetails"
                         },
                         {
-                            "name": "wasmCrossOriginModuleSharingIssue",
+                            "name": "genericIssueDetails",
                             "optional": true,
-                            "$ref": "WasmCrossOriginModuleSharingIssueDetails"
+                            "$ref": "GenericIssueDetails"
+                        },
+                        {
+                            "name": "deprecationIssueDetails",
+                            "optional": true,
+                            "$ref": "DeprecationIssueDetails"
+                        },
+                        {
+                            "name": "clientHintIssueDetails",
+                            "optional": true,
+                            "$ref": "ClientHintIssueDetails"
+                        },
+                        {
+                            "name": "federatedAuthRequestIssueDetails",
+                            "optional": true,
+                            "$ref": "FederatedAuthRequestIssueDetails"
                         }
                     ]
                 },
@@ -2620,6 +2685,21 @@
                     ]
                 },
                 {
+                    "id": "InheritedPseudoElementMatches",
+                    "description": "Inherited pseudo element matches from pseudos of an ancestor node.",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "pseudoElements",
+                            "description": "Matches of pseudo styles from the pseudos of an ancestor node.",
+                            "type": "array",
+                            "items": {
+                                "$ref": "PseudoElementMatches"
+                            }
+                        }
+                    ]
+                },
+                {
                     "id": "RuleMatch",
                     "description": "Match data for a CSS rule.",
                     "type": "object",
@@ -2815,6 +2895,26 @@
                             "type": "array",
                             "items": {
                                 "$ref": "CSSContainerQuery"
+                            }
+                        },
+                        {
+                            "name": "supports",
+                            "description": "@supports CSS at-rule array.\nThe array enumerates @supports at-rules starting with the innermost one, going outwards.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "$ref": "CSSSupports"
+                            }
+                        },
+                        {
+                            "name": "layers",
+                            "description": "Cascade layer array. Contains the layer hierarchy that this rule belongs to starting\nwith the innermost layer and going outwards.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "$ref": "CSSLayer"
                             }
                         }
                     ]
@@ -3137,6 +3237,88 @@
                             "description": "Optional name for the container.",
                             "optional": true,
                             "type": "string"
+                        }
+                    ]
+                },
+                {
+                    "id": "CSSSupports",
+                    "description": "CSS Supports at-rule descriptor.",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "text",
+                            "description": "Supports rule text.",
+                            "type": "string"
+                        },
+                        {
+                            "name": "active",
+                            "description": "Whether the supports condition is satisfied.",
+                            "type": "boolean"
+                        },
+                        {
+                            "name": "range",
+                            "description": "The associated rule header range in the enclosing stylesheet (if\navailable).",
+                            "optional": true,
+                            "$ref": "SourceRange"
+                        },
+                        {
+                            "name": "styleSheetId",
+                            "description": "Identifier of the stylesheet containing this object (if exists).",
+                            "optional": true,
+                            "$ref": "StyleSheetId"
+                        }
+                    ]
+                },
+                {
+                    "id": "CSSLayer",
+                    "description": "CSS Layer at-rule descriptor.",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "text",
+                            "description": "Layer name.",
+                            "type": "string"
+                        },
+                        {
+                            "name": "range",
+                            "description": "The associated rule header range in the enclosing stylesheet (if\navailable).",
+                            "optional": true,
+                            "$ref": "SourceRange"
+                        },
+                        {
+                            "name": "styleSheetId",
+                            "description": "Identifier of the stylesheet containing this object (if exists).",
+                            "optional": true,
+                            "$ref": "StyleSheetId"
+                        }
+                    ]
+                },
+                {
+                    "id": "CSSLayerData",
+                    "description": "CSS Layer data.",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "name",
+                            "description": "Layer name.",
+                            "type": "string"
+                        },
+                        {
+                            "name": "subLayers",
+                            "description": "Direct sub-layers",
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "$ref": "CSSLayerData"
+                            }
+                        },
+                        {
+                            "name": "order",
+                            "description": "Layer order. The order determines the order of the layer in the cascade order.\nA higher number has higher priority in the cascade order.",
+                            "type": "number"
                         }
                     ]
                 },
@@ -3542,6 +3724,15 @@
                             }
                         },
                         {
+                            "name": "inheritedPseudoElements",
+                            "description": "A chain of inherited pseudo element styles (from the immediate node parent up to the DOM tree root).",
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "$ref": "InheritedPseudoElementMatches"
+                            }
+                        },
+                        {
                             "name": "cssKeyframesRules",
                             "description": "A list of CSS keyframed animations matching this node.",
                             "optional": true,
@@ -3599,6 +3790,23 @@
                             "name": "text",
                             "description": "The stylesheet text.",
                             "type": "string"
+                        }
+                    ]
+                },
+                {
+                    "name": "getLayersForNode",
+                    "description": "Returns all layers parsed by the rendering engine for the tree scope of a node.\nGiven a DOM element identified by nodeId, getLayersForNode returns the root\nlayer for the nearest ancestor document or shadow root. The layer root contains\nthe full layer tree for the tree scope and their ordering.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "nodeId",
+                            "$ref": "DOM.NodeId"
+                        }
+                    ],
+                    "returns": [
+                        {
+                            "name": "rootLayer",
+                            "$ref": "CSSLayerData"
                         }
                     ]
                 },
@@ -3723,6 +3931,32 @@
                             "name": "containerQuery",
                             "description": "The resulting CSS container query rule after modification.",
                             "$ref": "CSSContainerQuery"
+                        }
+                    ]
+                },
+                {
+                    "name": "setSupportsText",
+                    "description": "Modifies the expression of a supports at-rule.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "styleSheetId",
+                            "$ref": "StyleSheetId"
+                        },
+                        {
+                            "name": "range",
+                            "$ref": "SourceRange"
+                        },
+                        {
+                            "name": "text",
+                            "type": "string"
+                        }
+                    ],
+                    "returns": [
+                        {
+                            "name": "supports",
+                            "description": "The resulting CSS Supports rule after modification.",
+                            "$ref": "CSSSupports"
                         }
                     ]
                 },
@@ -4198,6 +4432,16 @@
                     ]
                 },
                 {
+                    "name": "startDesktopMirroring",
+                    "description": "Starts mirroring the desktop to the sink.",
+                    "parameters": [
+                        {
+                            "name": "sinkName",
+                            "type": "string"
+                        }
+                    ]
+                },
+                {
                     "name": "startTabMirroring",
                     "description": "Starts mirroring the tab to the sink.",
                     "parameters": [
@@ -4306,7 +4550,12 @@
                         "scrollbar-track-piece",
                         "scrollbar-corner",
                         "resizer",
-                        "input-list-button"
+                        "input-list-button",
+                        "page-transition",
+                        "page-transition-container",
+                        "page-transition-image-wrapper",
+                        "page-transition-outgoing-image",
+                        "page-transition-incoming-image"
                     ]
                 },
                 {
@@ -4815,7 +5064,20 @@
                 },
                 {
                     "name": "enable",
-                    "description": "Enables DOM agent for the given page."
+                    "description": "Enables DOM agent for the given page.",
+                    "parameters": [
+                        {
+                            "name": "includeWhitespace",
+                            "description": "Whether to include whitespaces in the children array of returned Nodes.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "string",
+                            "enum": [
+                                "none",
+                                "all"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "name": "focus",
@@ -6187,6 +6449,35 @@
             ]
         },
         {
+            "domain": "EventBreakpoints",
+            "description": "EventBreakpoints permits setting breakpoints on particular operations and\nevents in targets that run JavaScript but do not have a DOM.\nJavaScript execution will stop on these operations as if there was a regular\nbreakpoint set.",
+            "experimental": true,
+            "commands": [
+                {
+                    "name": "setInstrumentationBreakpoint",
+                    "description": "Sets breakpoint on particular native event.",
+                    "parameters": [
+                        {
+                            "name": "eventName",
+                            "description": "Instrumentation name to stop on.",
+                            "type": "string"
+                        }
+                    ]
+                },
+                {
+                    "name": "removeInstrumentationBreakpoint",
+                    "description": "Removes breakpoint on particular native event.",
+                    "parameters": [
+                        {
+                            "name": "eventName",
+                            "description": "Instrumentation name to stop on.",
+                            "type": "string"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
             "domain": "DOMSnapshot",
             "description": "This domain facilitates obtaining document snapshots with DOM, layout, and style information.",
             "experimental": true,
@@ -7467,7 +7758,16 @@
                             }
                         },
                         {
+                            "name": "fullVersionList",
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "$ref": "UserAgentBrandVersion"
+                            }
+                        },
+                        {
                             "name": "fullVersion",
+                            "deprecated": true,
                             "optional": true,
                             "type": "string"
                         },
@@ -7538,6 +7838,19 @@
                         {
                             "name": "enabled",
                             "description": "Whether to enable to disable focus emulation.",
+                            "type": "boolean"
+                        }
+                    ]
+                },
+                {
+                    "name": "setAutoDarkModeOverride",
+                    "description": "Automatically render all web contents using a dark theme.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "enabled",
+                            "description": "Whether to enable or disable automatic dark mode.\nIf not specified, any existing override will be cleared.",
+                            "optional": true,
                             "type": "boolean"
                         }
                     ]
@@ -7859,12 +8172,6 @@
                             "type": "integer"
                         },
                         {
-                            "name": "waitForNavigation",
-                            "description": "If set the virtual time policy change should be deferred until any frame starts navigating.\nNote any previous deferred policy change is superseded.",
-                            "optional": true,
-                            "type": "boolean"
-                        },
-                        {
                             "name": "initialVirtualTime",
                             "description": "If set, base::Time::Now will be overridden to initially return this value.",
                             "optional": true,
@@ -7963,6 +8270,18 @@
                             "experimental": true,
                             "optional": true,
                             "$ref": "UserAgentMetadata"
+                        }
+                    ]
+                },
+                {
+                    "name": "setAutomationOverride",
+                    "description": "Allows overriding the automation flag.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "enabled",
+                            "description": "Whether the override should be enabled.",
+                            "type": "boolean"
                         }
                     ]
                 }
@@ -8878,7 +9197,7 @@
                         },
                         {
                             "name": "commands",
-                            "description": "Editing commands to send with the key event (e.g., 'selectAll') (default: []).\nThese are related to but not equal the command names used in `document.execCommand` and NSStandardKeyBindingResponding.\nSee https://source.chromium.org/chromium/chromium/src/+/master:third_party/blink/renderer/core/editing/commands/editor_command_names.h for valid command names.",
+                            "description": "Editing commands to send with the key event (e.g., 'selectAll') (default: []).\nThese are related to but not equal the command names used in `document.execCommand` and NSStandardKeyBindingResponding.\nSee https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/editing/commands/editor_command_names.h for valid command names.",
                             "experimental": true,
                             "optional": true,
                             "type": "array",
@@ -9834,6 +10153,14 @@
                             "type": "string"
                         },
                         {
+                            "name": "category",
+                            "optional": true,
+                            "type": "string",
+                            "enum": [
+                                "cors"
+                            ]
+                        },
+                        {
                             "name": "timestamp",
                             "description": "Timestamp when this entry was added.",
                             "$ref": "Runtime.Timestamp"
@@ -10522,8 +10849,8 @@
                         },
                         {
                             "name": "timestamp",
-                            "description": "Issuance date.",
-                            "$ref": "TimeSinceEpoch"
+                            "description": "Issuance date. Unlike TimeSinceEpoch, this contains the number of\nmilliseconds since January 1, 1970, UTC, not the number of seconds.",
+                            "type": "number"
                         },
                         {
                             "name": "hashAlgorithm",
@@ -10675,12 +11002,16 @@
                         "PreflightInvalidAllowCredentials",
                         "PreflightMissingAllowExternal",
                         "PreflightInvalidAllowExternal",
+                        "PreflightMissingAllowPrivateNetwork",
+                        "PreflightInvalidAllowPrivateNetwork",
                         "InvalidAllowMethodsPreflightResponse",
                         "InvalidAllowHeadersPreflightResponse",
                         "MethodDisallowedByPreflightResponse",
                         "HeaderDisallowedByPreflightResponse",
                         "RedirectContainsCredentials",
                         "InsecurePrivateNetwork",
+                        "InvalidPrivateNetworkAccess",
+                        "UnexpectedPrivateNetworkAccess",
                         "NoCorsRedirectModeNotFollow"
                     ]
                 },
@@ -11118,6 +11449,20 @@
                             "description": "Cookie source port. Valid values are {-1, [1, 65535]}, -1 indicates an unspecified port.\nAn unspecified port value allows protocol clients to emulate legacy cookie scope for the port.\nThis is a temporary ability and it will be removed in the future.",
                             "experimental": true,
                             "type": "integer"
+                        },
+                        {
+                            "name": "partitionKey",
+                            "description": "Cookie partition key. The site of the top-level URL the browser was visiting at the start\nof the request to the endpoint that set the cookie.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "partitionKeyOpaque",
+                            "description": "True if cookie partition key is opaque.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "boolean"
                         }
                     ]
                 },
@@ -11143,7 +11488,8 @@
                         "SchemefulSameSiteLax",
                         "SchemefulSameSiteUnspecifiedTreatedAsLax",
                         "SamePartyFromCrossPartyContext",
-                        "SamePartyConflictsWithOtherAttributes"
+                        "SamePartyConflictsWithOtherAttributes",
+                        "NameValuePairExceedsMaxSize"
                     ]
                 },
                 {
@@ -11164,7 +11510,8 @@
                         "SchemefulSameSiteStrict",
                         "SchemefulSameSiteLax",
                         "SchemefulSameSiteUnspecifiedTreatedAsLax",
-                        "SamePartyFromCrossPartyContext"
+                        "SamePartyFromCrossPartyContext",
+                        "NameValuePairExceedsMaxSize"
                     ]
                 },
                 {
@@ -11299,6 +11646,13 @@
                             "experimental": true,
                             "optional": true,
                             "type": "integer"
+                        },
+                        {
+                            "name": "partitionKey",
+                            "description": "Cookie partition key. The site of the top-level URL the browser was visiting at the start\nof the request to the endpoint that set the cookie.\nIf not set, the cookie will be set as not partitioned.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "string"
                         }
                     ]
                 },
@@ -11587,7 +11941,9 @@
                     "enum": [
                         "Allow",
                         "BlockFromInsecureToMorePrivate",
-                        "WarnFromInsecureToMorePrivate"
+                        "WarnFromInsecureToMorePrivate",
+                        "PreflightBlock",
+                        "PreflightWarn"
                     ]
                 },
                 {
@@ -11599,6 +11955,18 @@
                         "Private",
                         "Public",
                         "Unknown"
+                    ]
+                },
+                {
+                    "id": "ConnectTiming",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "requestTime",
+                            "description": "Timing's requestTime is a baseline in seconds, while the other numbers are ticks in\nmilliseconds relatively to this requestTime. Matches ResourceTiming's requestTime for\nthe same request (but not for redirected requests).",
+                            "type": "number"
+                        }
                     ]
                 },
                 {
@@ -11628,7 +11996,8 @@
                         "SameOrigin",
                         "SameOriginAllowPopups",
                         "UnsafeNone",
-                        "SameOriginPlusCoep"
+                        "SameOriginPlusCoep",
+                        "SameOriginAllowPopupsPlusCoep"
                     ]
                 },
                 {
@@ -11705,6 +12074,90 @@
                             "name": "coep",
                             "optional": true,
                             "$ref": "CrossOriginEmbedderPolicyStatus"
+                        }
+                    ]
+                },
+                {
+                    "id": "ReportStatus",
+                    "description": "The status of a Reporting API report.",
+                    "experimental": true,
+                    "type": "string",
+                    "enum": [
+                        "Queued",
+                        "Pending",
+                        "MarkedForRemoval",
+                        "Success"
+                    ]
+                },
+                {
+                    "id": "ReportId",
+                    "experimental": true,
+                    "type": "string"
+                },
+                {
+                    "id": "ReportingApiReport",
+                    "description": "An object representing a report generated by the Reporting API.",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "id",
+                            "$ref": "ReportId"
+                        },
+                        {
+                            "name": "initiatorUrl",
+                            "description": "The URL of the document that triggered the report.",
+                            "type": "string"
+                        },
+                        {
+                            "name": "destination",
+                            "description": "The name of the endpoint group that should be used to deliver the report.",
+                            "type": "string"
+                        },
+                        {
+                            "name": "type",
+                            "description": "The type of the report (specifies the set of data that is contained in the report body).",
+                            "type": "string"
+                        },
+                        {
+                            "name": "timestamp",
+                            "description": "When the report was generated.",
+                            "$ref": "Network.TimeSinceEpoch"
+                        },
+                        {
+                            "name": "depth",
+                            "description": "How many uploads deep the related request was.",
+                            "type": "integer"
+                        },
+                        {
+                            "name": "completedAttempts",
+                            "description": "The number of delivery attempts made so far, not including an active attempt.",
+                            "type": "integer"
+                        },
+                        {
+                            "name": "body",
+                            "type": "object"
+                        },
+                        {
+                            "name": "status",
+                            "$ref": "ReportStatus"
+                        }
+                    ]
+                },
+                {
+                    "id": "ReportingApiEndpoint",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "url",
+                            "description": "The URL of the endpoint to which reports may be delivered.",
+                            "type": "string"
+                        },
+                        {
+                            "name": "groupName",
+                            "description": "Name of the endpoint group.",
+                            "type": "string"
                         }
                     ]
                 },
@@ -12289,6 +12742,13 @@
                             "experimental": true,
                             "optional": true,
                             "type": "integer"
+                        },
+                        {
+                            "name": "partitionKey",
+                            "description": "Cookie partition key. The site of the top-level URL the browser was visiting at the start\nof the request to the endpoint that set the cookie.\nIf not set, the cookie will be set as not partitioned.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "string"
                         }
                     ],
                     "returns": [
@@ -12400,6 +12860,18 @@
                         {
                             "name": "status",
                             "$ref": "SecurityIsolationStatus"
+                        }
+                    ]
+                },
+                {
+                    "name": "enableReportingApi",
+                    "description": "Enables tracking for the Reporting API, events generated by the Reporting API will now be delivered to the client.\nEnabling triggers 'reportingApiReportAdded' for all existing reports.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "enable",
+                            "description": "Whether to enable or disable events for the Reporting API",
+                            "type": "boolean"
                         }
                     ]
                 },
@@ -12687,6 +13159,12 @@
                             "$ref": "Initiator"
                         },
                         {
+                            "name": "redirectHasExtraInfo",
+                            "description": "In the case that redirectResponse is populated, this flag indicates whether\nrequestWillBeSentExtraInfo and responseReceivedExtraInfo events will be or were emitted\nfor the request which was just redirected.",
+                            "experimental": true,
+                            "type": "boolean"
+                        },
+                        {
                             "name": "redirectResponse",
                             "description": "Redirect response data.",
                             "optional": true,
@@ -12779,6 +13257,12 @@
                             "name": "response",
                             "description": "Response data.",
                             "$ref": "Response"
+                        },
+                        {
+                            "name": "hasExtraInfo",
+                            "description": "Indicates whether requestWillBeSentExtraInfo and responseReceivedExtraInfo events will be\nor were emitted for this request.",
+                            "experimental": true,
+                            "type": "boolean"
                         },
                         {
                             "name": "frameId",
@@ -13019,6 +13503,12 @@
                             "$ref": "Headers"
                         },
                         {
+                            "name": "connectTiming",
+                            "description": "Connection timing information for the request.",
+                            "experimental": true,
+                            "$ref": "ConnectTiming"
+                        },
+                        {
                             "name": "clientSecurityState",
                             "description": "The client security state set for the request.",
                             "optional": true,
@@ -13202,6 +13692,45 @@
                             "description": "Bundle request identifier. Used to match this information to another event.\nThis made be absent in case when the instrumentation was enabled only\nafter webbundle was parsed.",
                             "optional": true,
                             "$ref": "RequestId"
+                        }
+                    ]
+                },
+                {
+                    "name": "reportingApiReportAdded",
+                    "description": "Is sent whenever a new report is added.\nAnd after 'enableReportingApi' for all existing reports.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "report",
+                            "$ref": "ReportingApiReport"
+                        }
+                    ]
+                },
+                {
+                    "name": "reportingApiReportUpdated",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "report",
+                            "$ref": "ReportingApiReport"
+                        }
+                    ]
+                },
+                {
+                    "name": "reportingApiEndpointsChangedForOrigin",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "origin",
+                            "description": "Origin of the document(s) which configured the endpoints.",
+                            "type": "string"
+                        },
+                        {
+                            "name": "endpoints",
+                            "type": "array",
+                            "items": {
+                                "$ref": "ReportingApiEndpoint"
+                            }
                         }
                     ]
                 }
@@ -13621,6 +14150,7 @@
                     "enum": [
                         "rgb",
                         "hsl",
+                        "hwb",
                         "hex"
                     ]
                 },
@@ -13758,6 +14288,46 @@
                             "description": "The style of the descendants' borders.",
                             "optional": true,
                             "$ref": "LineStyle"
+                        }
+                    ]
+                },
+                {
+                    "id": "IsolatedElementHighlightConfig",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "isolationModeHighlightConfig",
+                            "description": "A descriptor for the highlight appearance of an element in isolation mode.",
+                            "$ref": "IsolationModeHighlightConfig"
+                        },
+                        {
+                            "name": "nodeId",
+                            "description": "Identifier of the isolated element to highlight.",
+                            "$ref": "DOM.NodeId"
+                        }
+                    ]
+                },
+                {
+                    "id": "IsolationModeHighlightConfig",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "resizerColor",
+                            "description": "The fill color of the resizers (default: transparent).",
+                            "optional": true,
+                            "$ref": "DOM.RGBA"
+                        },
+                        {
+                            "name": "resizerHandleColor",
+                            "description": "The fill color for resizer handles (default: transparent).",
+                            "optional": true,
+                            "$ref": "DOM.RGBA"
+                        },
+                        {
+                            "name": "maskColor",
+                            "description": "The fill color for the mask covering non-isolated elements (default: transparent).",
+                            "optional": true,
+                            "$ref": "DOM.RGBA"
                         }
                     ]
                 },
@@ -14165,7 +14735,8 @@
                 },
                 {
                     "name": "setShowHitTestBorders",
-                    "description": "Requests that backend shows hit-test borders on layers",
+                    "description": "Deprecated, no longer has any effect.",
+                    "deprecated": true,
                     "parameters": [
                         {
                             "name": "show",
@@ -14204,6 +14775,20 @@
                             "description": "hinge data, null means hideHinge",
                             "optional": true,
                             "$ref": "HingeConfig"
+                        }
+                    ]
+                },
+                {
+                    "name": "setShowIsolatedElements",
+                    "description": "Show elements in isolation mode with overlays.",
+                    "parameters": [
+                        {
+                            "name": "isolatedElementHighlightConfigs",
+                            "description": "An array of node identifiers and descriptors for the highlight appearance.",
+                            "type": "array",
+                            "items": {
+                                "$ref": "IsolatedElementHighlightConfig"
+                            }
                         }
                     ]
                 }
@@ -14348,12 +14933,12 @@
                         "ambient-light-sensor",
                         "attribution-reporting",
                         "autoplay",
+                        "browsing-topics",
                         "camera",
                         "ch-dpr",
                         "ch-device-memory",
                         "ch-downlink",
                         "ch-ect",
-                        "ch-lang",
                         "ch-prefers-color-scheme",
                         "ch-rtt",
                         "ch-ua",
@@ -14362,11 +14947,16 @@
                         "ch-ua-platform",
                         "ch-ua-model",
                         "ch-ua-mobile",
+                        "ch-ua-full",
                         "ch-ua-full-version",
+                        "ch-ua-full-version-list",
                         "ch-ua-platform-version",
                         "ch-ua-reduced",
+                        "ch-ua-wow64",
+                        "ch-viewport-height",
                         "ch-viewport-width",
                         "ch-width",
+                        "ch-partitioned-cookies",
                         "clipboard-read",
                         "clipboard-write",
                         "cross-origin-isolated",
@@ -14385,6 +14975,8 @@
                         "hid",
                         "idle-detection",
                         "interest-cohort",
+                        "join-ad-interest-group",
+                        "keyboard-map",
                         "magnetometer",
                         "microphone",
                         "midi",
@@ -14392,6 +14984,7 @@
                         "payment",
                         "picture-in-picture",
                         "publickey-credentials-get",
+                        "run-ad-auction",
                         "screen-wake-lock",
                         "serial",
                         "shared-autofill",
@@ -14412,7 +15005,8 @@
                     "type": "string",
                     "enum": [
                         "Header",
-                        "IframeAttribute"
+                        "IframeAttribute",
+                        "InFencedFrameTree"
                     ]
                 },
                 {
@@ -14466,7 +15060,8 @@
                         "WrongVersion",
                         "FeatureDisabled",
                         "TokenDisabled",
-                        "FeatureDisabledForUser"
+                        "FeatureDisabledForUser",
+                        "UnknownTrial"
                     ]
                 },
                 {
@@ -14652,16 +15247,6 @@
                             "type": "array",
                             "items": {
                                 "$ref": "GatedAPIFeatures"
-                            }
-                        },
-                        {
-                            "name": "originTrials",
-                            "description": "Frame document's origin trials with at least one token present.",
-                            "experimental": true,
-                            "optional": true,
-                            "type": "array",
-                            "items": {
-                                "$ref": "OriginTrial"
                             }
                         }
                     ]
@@ -15064,12 +15649,24 @@
                             "description": "The fantasy font-family.",
                             "optional": true,
                             "type": "string"
+                        }
+                    ]
+                },
+                {
+                    "id": "ScriptFontFamilies",
+                    "description": "Font families collection for a script.",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "script",
+                            "description": "Name of the script which these font families are defined for.",
+                            "type": "string"
                         },
                         {
-                            "name": "pictograph",
-                            "description": "The pictograph font-family.",
-                            "optional": true,
-                            "type": "string"
+                            "name": "fontFamilies",
+                            "description": "Generic font families collection for the script.",
+                            "$ref": "FontFamilies"
                         }
                     ]
                 },
@@ -15208,7 +15805,7 @@
                     "experimental": true,
                     "type": "string",
                     "enum": [
-                        "NotMainFrame",
+                        "NotPrimaryMainFrame",
                         "BackForwardCacheDisabled",
                         "RelatedActiveContentsExist",
                         "HTTPStatusNotOK",
@@ -15252,13 +15849,19 @@
                         "BrowsingInstanceNotSwapped",
                         "BackForwardCacheDisabledForDelegate",
                         "OptInUnloadHeaderNotPresent",
+                        "UnloadHandlerExistsInMainFrame",
                         "UnloadHandlerExistsInSubFrame",
                         "ServiceWorkerUnregistration",
                         "CacheControlNoStore",
                         "CacheControlNoStoreCookieModified",
                         "CacheControlNoStoreHTTPOnlyCookieModified",
                         "NoResponseHead",
+                        "Unknown",
+                        "ActivationNavigationsDisallowedForBug1234857",
+                        "ErrorDocument",
+                        "FencedFramesEmbedder",
                         "WebSocket",
+                        "WebTransport",
                         "WebRTC",
                         "MainResourceHasCacheControlNoStore",
                         "MainResourceHasCacheControlNoCache",
@@ -15284,7 +15887,6 @@
                         "WebShare",
                         "RequestedStorageAccessGrant",
                         "WebNfc",
-                        "WebFileSystem",
                         "OutstandingNetworkRequestFetch",
                         "OutstandingNetworkRequestXHR",
                         "AppBanner",
@@ -15299,10 +15901,35 @@
                         "KeyboardLock",
                         "WebOTPService",
                         "OutstandingNetworkRequestDirectSocket",
-                        "IsolatedWorldScript",
+                        "InjectedJavascript",
                         "InjectedStyleSheet",
-                        "MediaSessionImplOnServiceCreated",
-                        "Unknown"
+                        "Dummy",
+                        "ContentSecurityHandler",
+                        "ContentWebAuthenticationAPI",
+                        "ContentFileChooser",
+                        "ContentSerial",
+                        "ContentFileSystemAccess",
+                        "ContentMediaDevicesDispatcherHost",
+                        "ContentWebBluetooth",
+                        "ContentWebUSB",
+                        "ContentMediaSession",
+                        "ContentMediaSessionService",
+                        "ContentScreenReader",
+                        "EmbedderPopupBlockerTabHelper",
+                        "EmbedderSafeBrowsingTriggeredPopupBlocker",
+                        "EmbedderSafeBrowsingThreatDetails",
+                        "EmbedderAppBannerManager",
+                        "EmbedderDomDistillerViewerSource",
+                        "EmbedderDomDistillerSelfDeletingRequestDelegate",
+                        "EmbedderOomInterventionTabHelper",
+                        "EmbedderOfflinePage",
+                        "EmbedderChromePasswordManagerClientBindCredentialManager",
+                        "EmbedderPermissionRequestManager",
+                        "EmbedderModalDialog",
+                        "EmbedderExtensions",
+                        "EmbedderExtensionMessaging",
+                        "EmbedderExtensionMessagingForOpenPort",
+                        "EmbedderExtensionSentMessageToCachedFrame"
                     ]
                 },
                 {
@@ -15330,7 +15957,49 @@
                             "name": "reason",
                             "description": "Not restored reason",
                             "$ref": "BackForwardCacheNotRestoredReason"
+                        },
+                        {
+                            "name": "context",
+                            "description": "Context associated with the reason. The meaning of this context is\ndependent on the reason:\n- EmbedderExtensionSentMessageToCachedFrame: the extension ID.",
+                            "optional": true,
+                            "type": "string"
                         }
+                    ]
+                },
+                {
+                    "id": "BackForwardCacheNotRestoredExplanationTree",
+                    "experimental": true,
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "url",
+                            "description": "URL of each frame",
+                            "type": "string"
+                        },
+                        {
+                            "name": "explanations",
+                            "description": "Not restored reasons of each frame",
+                            "type": "array",
+                            "items": {
+                                "$ref": "BackForwardCacheNotRestoredExplanation"
+                            }
+                        },
+                        {
+                            "name": "children",
+                            "description": "Array of children frame",
+                            "type": "array",
+                            "items": {
+                                "$ref": "BackForwardCacheNotRestoredExplanationTree"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "PrerenderFinalStatus",
+                    "description": "List of FinalStatus reasons for Prerender2.",
+                    "type": "string",
+                    "enum": [
+                        "Activated"
                     ]
                 }
             ],
@@ -15590,6 +16259,25 @@
                             "name": "primaryIcon",
                             "optional": true,
                             "type": "binary"
+                        }
+                    ]
+                },
+                {
+                    "name": "getAppId",
+                    "description": "Returns the unique (PWA) app id.\nOnly returns values if the feature flag 'WebAppEnableManifestId' is enabled",
+                    "experimental": true,
+                    "returns": [
+                        {
+                            "name": "appId",
+                            "description": "App id, either from manifest's id attribute or computed from start_url",
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "recommendedId",
+                            "description": "Recommendation for manifest's id attribute to match current id computed from start_url",
+                            "optional": true,
+                            "type": "string"
                         }
                     ]
                 },
@@ -16198,6 +16886,15 @@
                             "name": "fontFamilies",
                             "description": "Specifies font families to set. If a font family is not specified, it won't be changed.",
                             "$ref": "FontFamilies"
+                        },
+                        {
+                            "name": "forScripts",
+                            "description": "Specifies font families to set for individual scripts.",
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "$ref": "ScriptFontFamilies"
+                            }
                         }
                     ]
                 },
@@ -16392,19 +17089,8 @@
                     "experimental": true
                 },
                 {
-                    "name": "setProduceCompilationCache",
-                    "description": "Forces compilation cache to be generated for every subresource script.\nSee also: `Page.produceCompilationCache`.",
-                    "experimental": true,
-                    "parameters": [
-                        {
-                            "name": "enabled",
-                            "type": "boolean"
-                        }
-                    ]
-                },
-                {
                     "name": "produceCompilationCache",
-                    "description": "Requests backend to produce compilation cache for the specified scripts.\nUnlike setProduceCompilationCache, this allows client to only produce cache\nfor specific scripts. `scripts` are appeneded to the list of scripts\nfor which the cache for would produced. Disabling compilation cache with\n`setProduceCompilationCache` would reset all pending cache requests.\nThe list may also be reset during page navigation.\nWhen script with a matching URL is encountered, the cache is optionally\nproduced upon backend discretion, based on internal heuristics.\nSee also: `Page.compilationCacheProduced`.",
+                    "description": "Requests backend to produce compilation cache for the specified scripts.\n`scripts` are appeneded to the list of scripts for which the cache\nwould be produced. The list may be reset during page navigation.\nWhen script with a matching URL is encountered, the cache is optionally\nproduced upon backend discretion, based on internal heuristics.\nSee also: `Page.compilationCacheProduced`.",
                     "experimental": true,
                     "parameters": [
                         {
@@ -16436,6 +17122,22 @@
                     "name": "clearCompilationCache",
                     "description": "Clears seeded compilation cache.",
                     "experimental": true
+                },
+                {
+                    "name": "setSPCTransactionMode",
+                    "description": "Sets the Secure Payment Confirmation transaction mode.\nhttps://w3c.github.io/secure-payment-confirmation/#sctn-automation-set-spc-transaction-mode",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "mode",
+                            "type": "string",
+                            "enum": [
+                                "none",
+                                "autoaccept",
+                                "autoreject"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "name": "generateTestReport",
@@ -16836,6 +17538,31 @@
                             "items": {
                                 "$ref": "BackForwardCacheNotRestoredExplanation"
                             }
+                        },
+                        {
+                            "name": "notRestoredExplanationsTree",
+                            "description": "Tree structure of reasons why the page could not be cached for each frame.",
+                            "optional": true,
+                            "$ref": "BackForwardCacheNotRestoredExplanationTree"
+                        }
+                    ]
+                },
+                {
+                    "name": "prerenderAttemptCompleted",
+                    "description": "Fired when a prerender attempt is completed.",
+                    "parameters": [
+                        {
+                            "name": "initiatingFrameId",
+                            "description": "The frame id of the frame initiating prerendering.",
+                            "$ref": "FrameId"
+                        },
+                        {
+                            "name": "prerenderingUrl",
+                            "type": "string"
+                        },
+                        {
+                            "name": "finalStatus",
+                            "$ref": "PrerenderFinalStatus"
                         }
                     ]
                 },
@@ -17592,7 +18319,8 @@
                 },
                 {
                     "name": "securityStateChanged",
-                    "description": "The security state of the page changed.",
+                    "description": "The security state of the page changed. No longer being sent.",
+                    "deprecated": true,
                     "parameters": [
                         {
                             "name": "securityState",
@@ -17607,7 +18335,8 @@
                         },
                         {
                             "name": "explanations",
-                            "description": "List of explanations for the security state. If the overall security state is `insecure` or\n`warning`, at least one corresponding explanation should be included.",
+                            "description": "Previously a list of explanations for the security state. Now always\nempty.",
+                            "deprecated": true,
                             "type": "array",
                             "items": {
                                 "$ref": "SecurityStateExplanation"
@@ -17621,7 +18350,8 @@
                         },
                         {
                             "name": "summary",
-                            "description": "Overrides user-visible description of the state.",
+                            "description": "Overrides user-visible description of the state. Always omitted.",
+                            "deprecated": true,
                             "optional": true,
                             "type": "string"
                         }
@@ -17952,6 +18682,7 @@
                         "websql",
                         "service_workers",
                         "cache_storage",
+                        "interest_groups",
                         "all",
                         "other"
                     ]
@@ -17986,6 +18717,103 @@
                         {
                             "name": "count",
                             "type": "number"
+                        }
+                    ]
+                },
+                {
+                    "id": "InterestGroupAccessType",
+                    "description": "Enum of interest group access types.",
+                    "type": "string",
+                    "enum": [
+                        "join",
+                        "leave",
+                        "update",
+                        "bid",
+                        "win"
+                    ]
+                },
+                {
+                    "id": "InterestGroupAd",
+                    "description": "Ad advertising element inside an interest group.",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "renderUrl",
+                            "type": "string"
+                        },
+                        {
+                            "name": "metadata",
+                            "optional": true,
+                            "type": "string"
+                        }
+                    ]
+                },
+                {
+                    "id": "InterestGroupDetails",
+                    "description": "The full details of an interest group.",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "ownerOrigin",
+                            "type": "string"
+                        },
+                        {
+                            "name": "name",
+                            "type": "string"
+                        },
+                        {
+                            "name": "expirationTime",
+                            "$ref": "Network.TimeSinceEpoch"
+                        },
+                        {
+                            "name": "joiningOrigin",
+                            "type": "string"
+                        },
+                        {
+                            "name": "biddingUrl",
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "biddingWasmHelperUrl",
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "updateUrl",
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "trustedBiddingSignalsUrl",
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "trustedBiddingSignalsKeys",
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        {
+                            "name": "userBiddingSignals",
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "ads",
+                            "type": "array",
+                            "items": {
+                                "$ref": "InterestGroupAd"
+                            }
+                        },
+                        {
+                            "name": "adComponents",
+                            "type": "array",
+                            "items": {
+                                "$ref": "InterestGroupAd"
+                            }
                         }
                     ]
                 }
@@ -18190,6 +19018,38 @@
                             "type": "boolean"
                         }
                     ]
+                },
+                {
+                    "name": "getInterestGroupDetails",
+                    "description": "Gets details for a named interest group.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "ownerOrigin",
+                            "type": "string"
+                        },
+                        {
+                            "name": "name",
+                            "type": "string"
+                        }
+                    ],
+                    "returns": [
+                        {
+                            "name": "details",
+                            "$ref": "InterestGroupDetails"
+                        }
+                    ]
+                },
+                {
+                    "name": "setInterestGroupTracking",
+                    "description": "Enables/Disables issuing of interestGroupAccessed events.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "enable",
+                            "type": "boolean"
+                        }
+                    ]
                 }
             ],
             "events": [
@@ -18248,6 +19108,28 @@
                         {
                             "name": "origin",
                             "description": "Origin to update.",
+                            "type": "string"
+                        }
+                    ]
+                },
+                {
+                    "name": "interestGroupAccessed",
+                    "description": "One of the interest groups was accessed by the associated page.",
+                    "parameters": [
+                        {
+                            "name": "accessTime",
+                            "$ref": "Network.TimeSinceEpoch"
+                        },
+                        {
+                            "name": "type",
+                            "$ref": "InterestGroupAccessType"
+                        },
+                        {
+                            "name": "ownerOrigin",
+                            "type": "string"
+                        },
+                        {
+                            "name": "name",
                             "type": "string"
                         }
                     ]
@@ -18732,6 +19614,15 @@
                             "description": "Proxy bypass list, similar to the one passed to --proxy-bypass-list",
                             "optional": true,
                             "type": "string"
+                        },
+                        {
+                            "name": "originsWithUniversalNetworkAccess",
+                            "description": "An optional list of origins to grant unlimited cross-origin access to.\nParts of the URL other than those constituting origin are ignored.",
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     ],
                     "returns": [
@@ -18781,6 +19672,7 @@
                         {
                             "name": "browserContextId",
                             "description": "The browser context to create the page in.",
+                            "experimental": true,
                             "optional": true,
                             "$ref": "Browser.BrowserContextID"
                         },
@@ -18900,7 +19792,7 @@
                 },
                 {
                     "name": "setAutoAttach",
-                    "description": "Controls whether to automatically attach to new targets which are considered to be related to\nthis one. When turned on, attaches to all existing related targets as well. When turned off,\nautomatically detaches from all currently attached targets.",
+                    "description": "Controls whether to automatically attach to new targets which are considered to be related to\nthis one. When turned on, attaches to all existing related targets as well. When turned off,\nautomatically detaches from all currently attached targets.\nThis also clears all targets added by `autoAttachRelated` from the list of targets to watch\nfor creation of related targets.",
                     "experimental": true,
                     "parameters": [
                         {
@@ -18917,6 +19809,22 @@
                             "name": "flatten",
                             "description": "Enables \"flat\" access to the session via specifying sessionId attribute in the commands.\nWe plan to make this the default, deprecate non-flattened mode,\nand eventually retire it. See crbug.com/991325.",
                             "optional": true,
+                            "type": "boolean"
+                        }
+                    ]
+                },
+                {
+                    "name": "autoAttachRelated",
+                    "description": "Adds the specified target to the list of targets that will be monitored for any related target\ncreation (such as child frames, child workers and new versions of service worker) and reported\nthrough `attachedToTarget`. The specified target is also auto-attached.\nThis cancels the effect of any previous `setAutoAttach` and is also cancelled by subsequent\n`setAutoAttach`. Only available at the Browser target.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "targetId",
+                            "$ref": "TargetID"
+                        },
+                        {
+                            "name": "waitForDebuggerOnStart",
+                            "description": "Whether to pause new targets when attaching to them. Use `Runtime.runIfWaitingForDebugger`\nto run paused targets.",
                             "type": "boolean"
                         }
                     ]
@@ -19620,7 +20528,7 @@
                         },
                         {
                             "name": "body",
-                            "description": "A response body.",
+                            "description": "A response body. If absent, original response body will be used if\nthe request is intercepted at the response stage and empty body\nwill be used if the request is intercepted at the request stage.",
                             "optional": true,
                             "type": "binary"
                         },
@@ -19690,6 +20598,45 @@
                             "name": "authChallengeResponse",
                             "description": "Response to  with an authChallenge.",
                             "$ref": "AuthChallengeResponse"
+                        }
+                    ]
+                },
+                {
+                    "name": "continueResponse",
+                    "description": "Continues loading of the paused response, optionally modifying the\nresponse headers. If either responseCode or headers are modified, all of them\nmust be present.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "requestId",
+                            "description": "An id the client received in requestPaused event.",
+                            "$ref": "RequestId"
+                        },
+                        {
+                            "name": "responseCode",
+                            "description": "An HTTP response code. If absent, original response code will be used.",
+                            "optional": true,
+                            "type": "integer"
+                        },
+                        {
+                            "name": "responsePhrase",
+                            "description": "A textual representation of responseCode.\nIf absent, a standard phrase matching responseCode is used.",
+                            "optional": true,
+                            "type": "string"
+                        },
+                        {
+                            "name": "responseHeaders",
+                            "description": "Response headers. If absent, original response headers will be used.",
+                            "optional": true,
+                            "type": "array",
+                            "items": {
+                                "$ref": "HeaderEntry"
+                            }
+                        },
+                        {
+                            "name": "binaryResponseHeaders",
+                            "description": "Alternative way of specifying response headers as a \\0-separated\nseries of name: value pairs. Prefer the above method unless you\nneed to represent some non-UTF8 values that can't be transmitted\nover the protocol as text.",
+                            "optional": true,
+                            "type": "binary"
                         }
                     ]
                 },
@@ -19769,6 +20716,12 @@
                             "description": "Response code if intercepted at response stage.",
                             "optional": true,
                             "type": "integer"
+                        },
+                        {
+                            "name": "responseStatusText",
+                            "description": "Response status text if intercepted at response stage.",
+                            "optional": true,
+                            "type": "string"
                         },
                         {
                             "name": "responseHeaders",
@@ -20363,6 +21316,12 @@
                             "type": "boolean"
                         },
                         {
+                            "name": "hasMinPinLength",
+                            "description": "If set to true, the authenticator will support the minPinLength extension.\nhttps://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#sctn-minpinlength-extension\nDefaults to false.",
+                            "optional": true,
+                            "type": "boolean"
+                        },
+                        {
                             "name": "automaticPresenceSimulation",
                             "description": "If set to true, tests of user presence will succeed immediately.\nOtherwise, they will not be resolved. Defaults to true.",
                             "optional": true,
@@ -20628,22 +21587,54 @@
                     ]
                 },
                 {
+                    "id": "PlayerErrorSourceLocation",
+                    "description": "Represents logged source line numbers reported in an error.\nNOTE: file and line are from chromium c++ implementation code, not js.",
+                    "type": "object",
+                    "properties": [
+                        {
+                            "name": "file",
+                            "type": "string"
+                        },
+                        {
+                            "name": "line",
+                            "type": "integer"
+                        }
+                    ]
+                },
+                {
                     "id": "PlayerError",
                     "description": "Corresponds to kMediaError",
                     "type": "object",
                     "properties": [
                         {
-                            "name": "type",
-                            "type": "string",
-                            "enum": [
-                                "pipeline_error",
-                                "media_error"
-                            ]
+                            "name": "errorType",
+                            "type": "string"
                         },
                         {
-                            "name": "errorCode",
-                            "description": "When this switches to using media::Status instead of PipelineStatus\nwe can remove \"errorCode\" and replace it with the fields from\na Status instance. This also seems like a duplicate of the error\nlevel enum - there is a todo bug to have that level removed and\nuse this instead. (crbug.com/1068454)",
-                            "type": "string"
+                            "name": "code",
+                            "description": "Code is the numeric enum entry for a specific set of error codes, such\nas PipelineStatusCodes in media/base/pipeline_status.h",
+                            "type": "integer"
+                        },
+                        {
+                            "name": "stack",
+                            "description": "A trace of where this error was caused / where it passed through.",
+                            "type": "array",
+                            "items": {
+                                "$ref": "PlayerErrorSourceLocation"
+                            }
+                        },
+                        {
+                            "name": "cause",
+                            "description": "Errors potentially have a root cause error, ie, a DecoderError might be\ncaused by an WindowsError",
+                            "type": "array",
+                            "items": {
+                                "$ref": "PlayerError"
+                            }
+                        },
+                        {
+                            "name": "data",
+                            "description": "Extra data attached to an error, such as an HRESULT, Video Codec, etc.",
+                            "type": "object"
                         }
                     ]
                 }
@@ -20943,7 +21934,8 @@
                         },
                         {
                             "name": "url",
-                            "description": "JavaScript script name or url.",
+                            "description": "JavaScript script name or url.\nDeprecated in favor of using the `location.scriptId` to resolve the URL via a previously\nsent `Debugger.scriptParsed` event.",
+                            "deprecated": true,
                             "type": "string"
                         },
                         {
@@ -22624,47 +23616,6 @@
                             }
                         }
                     ]
-                },
-                {
-                    "id": "CounterInfo",
-                    "description": "Collected counter information.",
-                    "experimental": true,
-                    "type": "object",
-                    "properties": [
-                        {
-                            "name": "name",
-                            "description": "Counter name.",
-                            "type": "string"
-                        },
-                        {
-                            "name": "value",
-                            "description": "Counter value.",
-                            "type": "integer"
-                        }
-                    ]
-                },
-                {
-                    "id": "RuntimeCallCounterInfo",
-                    "description": "Runtime call counter information.",
-                    "experimental": true,
-                    "type": "object",
-                    "properties": [
-                        {
-                            "name": "name",
-                            "description": "Counter name.",
-                            "type": "string"
-                        },
-                        {
-                            "name": "value",
-                            "description": "Counter value.",
-                            "type": "number"
-                        },
-                        {
-                            "name": "time",
-                            "description": "Counter time in seconds.",
-                            "type": "number"
-                        }
-                    ]
                 }
             ],
             "commands": [
@@ -22787,56 +23738,6 @@
                             "type": "array",
                             "items": {
                                 "$ref": "ScriptTypeProfile"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "name": "enableCounters",
-                    "description": "Enable counters collection.",
-                    "experimental": true
-                },
-                {
-                    "name": "disableCounters",
-                    "description": "Disable counters collection.",
-                    "experimental": true
-                },
-                {
-                    "name": "getCounters",
-                    "description": "Retrieve counters.",
-                    "experimental": true,
-                    "returns": [
-                        {
-                            "name": "result",
-                            "description": "Collected counters information.",
-                            "type": "array",
-                            "items": {
-                                "$ref": "CounterInfo"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "name": "enableRuntimeCallStats",
-                    "description": "Enable run time call stats collection.",
-                    "experimental": true
-                },
-                {
-                    "name": "disableRuntimeCallStats",
-                    "description": "Disable run time call stats collection.",
-                    "experimental": true
-                },
-                {
-                    "name": "getRuntimeCallStats",
-                    "description": "Retrieve run time call stats.",
-                    "experimental": true,
-                    "returns": [
-                        {
-                            "name": "result",
-                            "description": "Collected runtime call counter information.",
-                            "type": "array",
-                            "items": {
-                                "$ref": "RuntimeCallCounterInfo"
                             }
                         }
                     ]
@@ -23899,6 +24800,13 @@
                             "experimental": true,
                             "optional": true,
                             "type": "boolean"
+                        },
+                        {
+                            "name": "nonIndexedPropertiesOnly",
+                            "description": "If true, returns non-indexed properties only.",
+                            "experimental": true,
+                            "optional": true,
+                            "type": "boolean"
                         }
                     ],
                     "returns": [
@@ -24143,6 +25051,25 @@
                         {
                             "name": "name",
                             "type": "string"
+                        }
+                    ]
+                },
+                {
+                    "name": "getExceptionDetails",
+                    "description": "This method tries to lookup and populate exception details for a\nJavaScript Error object.\nNote that the stackTrace portion of the resulting exceptionDetails will\nonly be populated if the Runtime domain was enabled at the time when the\nError was thrown.",
+                    "experimental": true,
+                    "parameters": [
+                        {
+                            "name": "errorObjectId",
+                            "description": "The error object for which to resolve the exception details.",
+                            "$ref": "RemoteObjectId"
+                        }
+                    ],
+                    "returns": [
+                        {
+                            "name": "exceptionDetails",
+                            "optional": true,
+                            "$ref": "ExceptionDetails"
                         }
                     ]
                 }

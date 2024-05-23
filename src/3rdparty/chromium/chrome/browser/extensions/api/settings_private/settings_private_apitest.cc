@@ -5,7 +5,6 @@
 #include <memory>
 
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/task/current_thread.h"
@@ -50,7 +49,7 @@ using ContextType = ExtensionBrowserTest::ContextType;
 class SettingsPrivateApiTest : public ExtensionApiTest,
                                public testing::WithParamInterface<ContextType> {
  public:
-  SettingsPrivateApiTest() = default;
+  SettingsPrivateApiTest() : ExtensionApiTest(GetParam()) {}
   ~SettingsPrivateApiTest() override = default;
   SettingsPrivateApiTest(const SettingsPrivateApiTest&) = delete;
   SettingsPrivateApiTest& operator=(const SettingsPrivateApiTest&) = delete;
@@ -65,10 +64,8 @@ class SettingsPrivateApiTest : public ExtensionApiTest,
 
  protected:
   bool RunSettingsSubtest(const std::string& subtest) {
-    return RunExtensionTest(
-        "settings_private", {.custom_arg = subtest.c_str()},
-        {.load_as_service_worker = GetParam() == ContextType::kServiceWorker,
-         .load_as_component = true});
+    return RunExtensionTest("settings_private", {.custom_arg = subtest.c_str()},
+                            {.load_as_component = true});
   }
 
   void SetPrefPolicy(const std::string& key, policy::PolicyLevel level) {
@@ -130,7 +127,7 @@ IN_PROC_BROWSER_TEST_P(SettingsPrivateApiTest, GetPartiallyManagedPref) {
   provider->SetWebsiteSetting(
       ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
       ContentSettingsType::COOKIES,
-      std::make_unique<base::Value>(ContentSetting::CONTENT_SETTING_ALLOW));
+      base::Value(ContentSetting::CONTENT_SETTING_ALLOW));
   content_settings::TestUtils::OverrideProvider(
       HostContentSettingsMapFactory::GetForProfile(profile()),
       std::move(provider), HostContentSettingsMap::POLICY_PROVIDER);

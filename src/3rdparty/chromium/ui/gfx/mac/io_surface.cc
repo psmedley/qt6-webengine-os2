@@ -9,8 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/bits.h"
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
@@ -41,6 +41,15 @@ int32_t BytesPerElement(gfx::BufferFormat format, int plane) {
     case gfx::BufferFormat::R_8:
       DCHECK_EQ(plane, 0);
       return 1;
+    case gfx::BufferFormat::R_16:
+      DCHECK_EQ(plane, 0);
+      return 2;
+    case gfx::BufferFormat::RG_88:
+      DCHECK_EQ(plane, 0);
+      return 2;
+    case gfx::BufferFormat::RG_1616:
+      DCHECK_EQ(plane, 0);
+      return 4;
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
@@ -52,16 +61,14 @@ int32_t BytesPerElement(gfx::BufferFormat format, int plane) {
       return 8;
     case gfx::BufferFormat::YUV_420_BIPLANAR: {
       constexpr int32_t bytes_per_element[] = {1, 2};
-      DCHECK_LT(static_cast<size_t>(plane), base::size(bytes_per_element));
+      DCHECK_LT(static_cast<size_t>(plane), std::size(bytes_per_element));
       return bytes_per_element[plane];
     }
     case gfx::BufferFormat::P010: {
       constexpr int32_t bytes_per_element[] = {2, 4};
-      DCHECK_LT(static_cast<size_t>(plane), base::size(bytes_per_element));
+      DCHECK_LT(static_cast<size_t>(plane), std::size(bytes_per_element));
       return bytes_per_element[plane];
     }
-    case gfx::BufferFormat::R_16:
-    case gfx::BufferFormat::RG_88:
     case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBX_8888:
@@ -81,6 +88,12 @@ uint32_t BufferFormatToIOSurfacePixelFormat(gfx::BufferFormat format) {
   switch (format) {
     case gfx::BufferFormat::R_8:
       return 'L008';
+    case gfx::BufferFormat::RG_88:
+      return '2C08';
+    case gfx::BufferFormat::R_16:
+      return 'L016';
+    case gfx::BufferFormat::RG_1616:
+      return '2C16';
     case gfx::BufferFormat::BGRA_1010102:
       return 'l10r';  // little-endian ARGB2101010 full-range ARGB
     case gfx::BufferFormat::BGRA_8888:
@@ -93,8 +106,6 @@ uint32_t BufferFormatToIOSurfacePixelFormat(gfx::BufferFormat format) {
       return '420v';
     case gfx::BufferFormat::P010:
       return 'x420';
-    case gfx::BufferFormat::R_16:
-    case gfx::BufferFormat::RG_88:
     case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBX_8888:
@@ -160,7 +171,7 @@ bool IOSurfaceSetColorSpace(IOSurfaceRef io_surface,
   // https://crbug.com/1061723: Discussion of issues related to HLG.
   if (base::mac::IsAtLeastOS10_15()) {
     if (color_space == ColorSpace(ColorSpace::PrimaryID::BT2020,
-                                  ColorSpace::TransferID::SMPTEST2084,
+                                  ColorSpace::TransferID::PQ,
                                   ColorSpace::MatrixID::BT2020_NCL,
                                   ColorSpace::RangeID::LIMITED)) {
       if (__builtin_available(macos 11.0, *)) {
@@ -169,7 +180,7 @@ bool IOSurfaceSetColorSpace(IOSurfaceRef io_surface,
         return true;
       }
     } else if (color_space == ColorSpace(ColorSpace::PrimaryID::BT2020,
-                                         ColorSpace::TransferID::ARIB_STD_B67,
+                                         ColorSpace::TransferID::HLG,
                                          ColorSpace::MatrixID::BT2020_NCL,
                                          ColorSpace::RangeID::LIMITED)) {
       if (__builtin_available(macos 11.0, *)) {
@@ -244,9 +255,11 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size,
       const size_t plane_height = (size.height() + factor - 1) / factor;
       const size_t plane_bytes_per_element = BytesPerElement(format, plane);
       const size_t plane_bytes_per_row = IOSurfaceAlignProperty(
-          kIOSurfacePlaneBytesPerRow, plane_width * plane_bytes_per_element);
+          kIOSurfacePlaneBytesPerRow,
+          base::bits::AlignUp(plane_width, 2) * plane_bytes_per_element);
       const size_t plane_bytes_alloc = IOSurfaceAlignProperty(
-          kIOSurfacePlaneSize, plane_height * plane_bytes_per_row);
+          kIOSurfacePlaneSize,
+          base::bits::AlignUp(plane_height, 2) * plane_bytes_per_row);
       const size_t plane_offset =
           IOSurfaceAlignProperty(kIOSurfacePlaneOffset, total_bytes_alloc);
 
@@ -273,9 +286,11 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size,
   } else {
     const size_t bytes_per_element = BytesPerElement(format, 0);
     const size_t bytes_per_row = IOSurfaceAlignProperty(
-        kIOSurfaceBytesPerRow, size.width() * bytes_per_element);
+        kIOSurfaceBytesPerRow,
+        base::bits::AlignUp(size.width(), 2) * bytes_per_element);
     const size_t bytes_alloc = IOSurfaceAlignProperty(
-        kIOSurfaceAllocSize, size.height() * bytes_per_row);
+        kIOSurfaceAllocSize,
+        base::bits::AlignUp(size.height(), 2) * bytes_per_row);
     AddIntegerValue(properties, kIOSurfaceBytesPerElement, bytes_per_element);
     AddIntegerValue(properties, kIOSurfaceBytesPerRow, bytes_per_row);
     AddIntegerValue(properties, kIOSurfaceAllocSize, bytes_alloc);

@@ -11,16 +11,20 @@
 #include <vector>
 
 #include "base/callback_list.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/metadata/metadata_types.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/color/color_provider_manager.h"
+#include "ui/color/color_provider_source.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/events/event_source.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
@@ -102,6 +106,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
                             public ui::EventSource,
                             public FocusTraversable,
                             public ui::NativeThemeObserver,
+                            public ui::ColorProviderSource,
                             public ui::metadata::MetaDataProvider {
  public:
   METADATA_HEADER_BASE(Widget);
@@ -285,6 +290,11 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // be ignored on some platforms. No value indicates no preference.
     absl::optional<int> shadow_elevation;
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    ui::ColorProviderManager::ElevationMode background_elevation =
+        ui::ColorProviderManager::ElevationMode::kLow;
+#endif
+
     // The window corner radius. May be ignored on some platforms.
     absl::optional<int> corner_radius;
 
@@ -372,11 +382,17 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     std::string wm_class_name;
     std::string wm_class_class;
 
+    // Only used by Wayland, for root level windows.
+    std::string wayland_app_id;
+
     // If true then the widget uses software compositing.
     bool force_software_compositing = false;
 
     // If set, mouse events will be sent to the widget even if inactive.
     bool wants_mouse_events_when_inactive = false;
+
+    // If set, the widget was created in headless mode.
+    bool headless_mode = false;
 
     // Contains any properties with which the native widget should be
     // initialized prior to adding it to the window hierarchy. All the
@@ -391,16 +407,21 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // associated widget. See Widget::LockPaintAsActive().
   class PaintAsActiveLock {
    public:
+    PaintAsActiveLock(const PaintAsActiveLock&) = delete;
+    PaintAsActiveLock& operator=(const PaintAsActiveLock&) = delete;
+
     virtual ~PaintAsActiveLock();
 
    protected:
     PaintAsActiveLock();
-
-    DISALLOW_COPY_AND_ASSIGN(PaintAsActiveLock);
   };
 
   Widget();
   explicit Widget(InitParams params);
+
+  Widget(const Widget&) = delete;
+  Widget& operator=(const Widget&) = delete;
+
   ~Widget() override;
 
   // Creates a decorated window Widget with the specified properties. The
@@ -588,6 +609,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Default behavior is to animate both show and hide.
   void SetVisibilityAnimationTransition(VisibilityTransition transition);
 
+  // Whether calling RunMoveLoop() is supported for the widget.
+  bool IsMoveLoopSupported() const;
+
   // Starts a nested run loop that moves the window. This can be used to
   // start a window move operation from a mouse or touch event. This returns
   // when the move completes. |drag_offset| is the offset from the top left
@@ -691,7 +715,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // fullscreen state and then post a delayed task to request the actual window
   // transition, in order to handle some platform-specific quirks in specific
   // fullscreen scenarios. See crbug.com/1210548 and crbug.com/1034783.
-  void SetFullscreen(bool fullscreen, base::TimeDelta delay = {});
+  // The `target_display_id` may only be specified if `fullscreen` is true, and
+  // indicates a specific display to become fullscreen on (note that this may
+  // move a fullscreen widget from one display to another).
+  void SetFullscreen(bool fullscreen,
+                     base::TimeDelta delay = {},
+                     int64_t target_display_id = display::kInvalidDisplayId);
   bool IsFullscreen() const;
 
   // macOS: Sets whether the window can share fullscreen windows' spaces.
@@ -734,18 +763,16 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Returns the ThemeProvider that provides theme resources for this Widget.
   virtual const ui::ThemeProvider* GetThemeProvider() const;
 
+  // Returns a custom theme object suitable for use in a
+  // ColorProviderManager::Key. If this is null, the window has no custom theme.
+  virtual ui::ColorProviderManager::ThemeInitializerSupplier* GetCustomTheme()
+      const;
+
   ui::NativeTheme* GetNativeTheme() {
     return const_cast<ui::NativeTheme*>(
         static_cast<const Widget*>(this)->GetNativeTheme());
   }
   virtual const ui::NativeTheme* GetNativeTheme() const;
-
-  // Returns the ui::ColorProvider associated with this Widget.
-  ui::ColorProvider* GetColorProvider() {
-    return const_cast<ui::ColorProvider*>(
-        static_cast<const Widget*>(this)->GetColorProvider());
-  }
-  const ui::ColorProvider* GetColorProvider() const;
 
   // Returns the FocusManager for this widget.
   // Note that all widgets in a widget hierarchy share the same focus manager.
@@ -921,8 +948,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     focus_on_creation_ = focus_on_creation;
   }
 
-  // Returns the parent of this widget. Note that a top-level widget is not
-  // necessarily a root widget and can have a parent.
+  // Returns the parent of this widget. Note that
+  // * A top-level widget is not necessarily the root and may have a parent.
+  // * A child widget shares the same visual style, e.g. the dark/light theme,
+  //   with its parent.
+  // * The native widget may change a widget's parent.
+  // * The native view's parent might or might not be the parent's native view.
   Widget* parent() { return parent_; }
   const Widget* parent() const { return parent_; }
 
@@ -992,12 +1023,14 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   bool CanActivate() const override;
   bool IsNativeWidgetInitialized() const override;
   bool OnNativeWidgetActivationChanged(bool active) override;
+  bool ShouldHandleNativeWidgetActivationChanged(bool active) override;
   void OnNativeFocus() override;
   void OnNativeBlur() override;
   void OnNativeWidgetVisibilityChanged(bool visible) override;
   void OnNativeWidgetCreated() override;
   void OnNativeWidgetDestroying() override;
   void OnNativeWidgetDestroyed() override;
+  void OnNativeWidgetParentChanged(gfx::NativeView parent) override;
   gfx::Size GetMinimumSize() const override;
   gfx::Size GetMaximumSize() const override;
   void OnNativeWidgetMove() override;
@@ -1006,6 +1039,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void OnNativeWidgetWindowShowStateChanged() override;
   void OnNativeWidgetBeginUserBoundsChange() override;
   void OnNativeWidgetEndUserBoundsChange() override;
+  void OnNativeWidgetAddedToCompositor() override;
+  void OnNativeWidgetRemovingFromCompositor() override;
   bool HasFocusManager() const override;
   void OnNativeWidgetPaint(const ui::PaintContext& context) override;
   int GetNonClientComponent(const gfx::Point& point) override;
@@ -1037,6 +1072,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Overridden from ui::NativeThemeObserver:
   void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
+
+  // ui::ColorProviderSource:
+  const ui::ColorProvider* GetColorProvider() const override;
 
   // Set the native theme from which this widget gets color from.
   void SetNativeThemeForTest(ui::NativeTheme* native_theme) {
@@ -1077,6 +1115,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void SetWidth(int width);
   void SetHeight(int height);
   void SetVisible(bool visible);
+
+  // ui::ColorProviderSource:
+  ui::ColorProviderManager::Key GetColorProviderKey() const override;
 
  private:
   // Type of ways to ignore activation changes.
@@ -1121,6 +1162,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Sizes and positions the frameless window just after it is created.
   void SetInitialBoundsForFramelessWindow(const gfx::Rect& bounds);
 
+  // Set the parent of this widget.
+  void SetParent(Widget* parent);
+
   // Returns the bounds and "show" state from the delegate. Returns true if
   // the delegate wants to use a specified bounds.
   bool GetSavedWindowPlacement(gfx::Rect* bounds,
@@ -1136,7 +1180,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   static DisableActivationChangeHandlingType
       g_disable_activation_change_handling_;
 
-  internal::NativeWidgetPrivate* native_widget_ = nullptr;
+  raw_ptr<internal::NativeWidgetPrivate> native_widget_ = nullptr;
 
   base::ObserverList<WidgetObserver> observers_;
 
@@ -1144,12 +1188,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Non-owned pointer to the Widget's delegate. If a NULL delegate is supplied
   // to Init() a default WidgetDelegate is created.
-  WidgetDelegate* widget_delegate_ = nullptr;
+  raw_ptr<WidgetDelegate> widget_delegate_ = nullptr;
 
-  // The parent of this widget. This is the widget that associates with the
-  // |params.parent| supplied to Init(). If no parent is given or the native
+  // The parent of this widget. This is the widget that associates with
+  // the |params.parent| supplied to Init(). If no parent is given or the native
   // view parent has no associating Widget, this value will be nullptr.
-  Widget* parent_ = nullptr;
+  raw_ptr<Widget> parent_ = nullptr;
 
   // The root of the View hierarchy attached to this window.
   // WARNING: see warning in tooltip_manager_ for ordering dependencies with
@@ -1160,7 +1204,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // window controls, sizing borders etc). To use an implementation other than
   // the default, this class must be sub-classed and this value set to the
   // desired implementation before calling |InitWindow()|.
-  NonClientView* non_client_view_ = nullptr;
+  raw_ptr<NonClientView> non_client_view_ = nullptr;
 
   // The focus manager keeping track of focus for this Widget and any of its
   // children.  NULL for non top-level widgets.
@@ -1170,13 +1214,18 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Valid for the lifetime of RunShellDrag(), indicates the view the drag
   // started from.
-  View* dragged_view_ = nullptr;
+  raw_ptr<View> dragged_view_ = nullptr;
 
   // See class documentation for Widget above for a note about ownership.
   InitParams::Ownership ownership_ = InitParams::NATIVE_WIDGET_OWNS_WIDGET;
 
   // See set_is_secondary_widget().
   bool is_secondary_widget_ = true;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  ui::ColorProviderManager::ElevationMode background_elevation_ =
+      ui::ColorProviderManager::ElevationMode::kLow;
+#endif
 
   // The current frame type in use by this window. Defaults to
   // FrameType::kDefault.
@@ -1211,7 +1260,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   ui::WindowShowState saved_show_state_ = ui::SHOW_STATE_DEFAULT;
 
   // The restored bounds used for the initial show. This is only used if
-  // |saved_show_state_| is maximized.
+  // |saved_show_state_| is maximized. initial_restored_bounds_ is in DIP units
+  // and is converted to pixels in DesktopWindowTreeHostWin::Show.
   gfx::Rect initial_restored_bounds_;
 
   // Focus is automatically set to the view provided by the delegate
@@ -1261,14 +1311,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // The native theme this widget is using.
   // If nullptr, defaults to use the regular native theme.
-  ui::NativeTheme* native_theme_ = nullptr;
+  raw_ptr<ui::NativeTheme> native_theme_ = nullptr;
 
   base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
       native_theme_observation_{this};
 
   base::WeakPtrFactory<Widget> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Widget);
 };
 
 }  // namespace views

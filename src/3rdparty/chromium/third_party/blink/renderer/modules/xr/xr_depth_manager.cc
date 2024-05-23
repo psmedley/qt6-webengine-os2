@@ -4,9 +4,13 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_depth_manager.h"
 
+#include <utility>
+
 #include "base/trace_event/trace_event.h"
 #include "third_party/blink/renderer/modules/xr/xr_cpu_depth_information.h"
 #include "third_party/blink/renderer/modules/xr/xr_session.h"
+#include "third_party/blink/renderer/platform/bindings/exception_code.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace {
 

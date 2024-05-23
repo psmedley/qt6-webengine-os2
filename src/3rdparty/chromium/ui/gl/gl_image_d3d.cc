@@ -82,6 +82,10 @@ GLImage::BindOrCopy GLImageD3D::ShouldBindOrCopy() {
   return GLImage::BIND;
 }
 
+void* GLImageD3D::GetEGLImage() const {
+  return egl_image_;
+}
+
 gfx::Size GLImageD3D::GetSize() {
   return size_;
 }
@@ -114,18 +118,6 @@ void GLImageD3D::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                               uint64_t process_tracing_id,
                               const std::string& dump_name) {
   NOTIMPLEMENTED_LOG_ONCE();
-}
-
-bool GLImageD3D::ScheduleOverlayPlane(
-    gfx::AcceleratedWidget widget,
-    int z_order,
-    gfx::OverlayTransform transform,
-    const gfx::Rect& bounds_rect,
-    const gfx::RectF& crop_rect,
-    bool enable_blend,
-    std::unique_ptr<gfx::GpuFence> gpu_fence) {
-  NOTREACHED();
-  return false;
 }
 
 }  // namespace gl

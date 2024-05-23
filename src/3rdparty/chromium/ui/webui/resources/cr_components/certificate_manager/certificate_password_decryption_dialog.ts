@@ -11,22 +11,23 @@ import '../../cr_elements/cr_dialog/cr_dialog.m.js';
 import '../../cr_elements/cr_input/cr_input.m.js';
 import './certificate_shared_css.js';
 
-import {html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {CrButtonElement} from '../../cr_elements/cr_button/cr_button.m.js';
 import {CrDialogElement} from '../../cr_elements/cr_dialog/cr_dialog.m.js';
-import {I18nBehavior} from '../../js/i18n_behavior.m.js';
+import {I18nMixin} from '../../js/i18n_mixin.js';
 
-import {CertificatesBrowserProxy, CertificatesBrowserProxyImpl} from './certificates_browser_proxy.js';
+import {CertificatesBrowserProxyImpl} from './certificates_browser_proxy.js';
 
 export interface CertificatePasswordDecryptionDialogElement {
   $: {
     dialog: CrDialogElement,
+    ok: CrButtonElement,
   };
 }
 
 const CertificatePasswordDecryptionDialogElementBase =
-    mixinBehaviors([I18nBehavior], PolymerElement) as
-    {new (): PolymerElement & I18nBehavior};
+    I18nMixin(PolymerElement);
 
 export class CertificatePasswordDecryptionDialogElement extends
     CertificatePasswordDecryptionDialogElementBase {
@@ -49,7 +50,7 @@ export class CertificatePasswordDecryptionDialogElement extends
 
   private password_: string;
 
-  connectedCallback() {
+  override connectedCallback() {
     super.connectedCallback();
     this.$.dialog.showModal();
   }
@@ -66,6 +67,9 @@ export class CertificatePasswordDecryptionDialogElement extends
               this.$.dialog.close();
             },
             error => {
+              if (error === null) {
+                return;
+              }
               this.$.dialog.close();
               this.dispatchEvent(new CustomEvent('certificates-error', {
                 bubbles: true,
@@ -73,6 +77,13 @@ export class CertificatePasswordDecryptionDialogElement extends
                 detail: {error: error, anchor: null},
               }));
             });
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'certificate-password-decryption-dialog':
+        CertificatePasswordDecryptionDialogElement;
   }
 }
 

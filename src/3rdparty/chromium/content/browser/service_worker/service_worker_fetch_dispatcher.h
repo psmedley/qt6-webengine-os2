@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -58,6 +57,11 @@ class CONTENT_EXPORT ServiceWorkerFetchDispatcher {
                                base::OnceClosure prepare_callback,
                                FetchCallback fetch_callback,
                                bool is_offline_capability_check);
+
+  ServiceWorkerFetchDispatcher(const ServiceWorkerFetchDispatcher&) = delete;
+  ServiceWorkerFetchDispatcher& operator=(const ServiceWorkerFetchDispatcher&) =
+      delete;
+
   ~ServiceWorkerFetchDispatcher();
 
   // If appropriate, starts the navigation preload request and creates
@@ -133,8 +137,6 @@ class CONTENT_EXPORT ServiceWorkerFetchDispatcher {
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<ServiceWorkerFetchDispatcher> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerFetchDispatcher);
 };
 
 }  // namespace content

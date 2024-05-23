@@ -24,6 +24,8 @@ namespace ui {
 namespace {
 OzonePlatform* g_instance = nullptr;
 
+bool g_fail_initialize_ui_for_test = false;
+
 void EnsureInstance() {
   if (g_instance)
     return;
@@ -39,6 +41,10 @@ void EnsureInstance() {
 }
 
 }  // namespace
+
+OzonePlatform::PlatformRuntimeProperties::SupportsSsdForTest
+    OzonePlatform::PlatformRuntimeProperties::override_supports_ssd_for_test =
+        OzonePlatform::PlatformRuntimeProperties::SupportsSsdForTest::kNotSet;
 
 OzonePlatform::PlatformProperties::PlatformProperties() = default;
 OzonePlatform::PlatformProperties::~PlatformProperties() = default;
@@ -60,16 +66,18 @@ void OzonePlatform::PreEarlyInitialization() {
 }
 
 // static
-void OzonePlatform::InitializeForUI(const InitParams& args) {
+bool OzonePlatform::InitializeForUI(const InitParams& args) {
   EnsureInstance();
   if (g_instance->initialized_ui_)
-    return;
-  g_instance->initialized_ui_ = true;
+    return true;
   g_instance->single_process_ = args.single_process;
-  g_instance->InitializeUI(args);
+  if (!g_instance->InitializeUI(args))
+    return false;
+  g_instance->initialized_ui_ = true;
   // This is deliberately created after initializing so that the platform can
   // create its own version of DDM.
   DeviceDataManager::CreateInstance();
+  return true;
 }
 
 // static
@@ -149,16 +157,10 @@ OzonePlatform::GetPlatformProperties() {
 
 const OzonePlatform::PlatformRuntimeProperties&
 OzonePlatform::GetPlatformRuntimeProperties() {
-  static const OzonePlatform::PlatformRuntimeProperties properties;
+  DCHECK(initialized_ui_ || initialized_gpu_);
+
+  static const PlatformRuntimeProperties properties;
   return properties;
-}
-
-const OzonePlatform::InitializedHostProperties&
-OzonePlatform::GetInitializedHostProperties() {
-  DCHECK(initialized_ui_);
-
-  static InitializedHostProperties host_properties;
-  return host_properties;
 }
 
 void OzonePlatform::AddInterfaces(mojo::BinderMap* binders) {}
@@ -178,6 +180,16 @@ void OzonePlatform::PostCreateMainMessageLoop(
     base::OnceCallback<void()> shutdown_cb) {}
 
 void OzonePlatform::PostMainMessageLoopRun() {}
+
+// static
+bool OzonePlatform::ShouldFailInitializeUIForTest() {
+  return g_fail_initialize_ui_for_test;
+}
+
+// static
+void OzonePlatform::SetFailInitializeUIForTest(bool fail) {
+  g_fail_initialize_ui_for_test = fail;
+}
 
 void OzonePlatform::PreEarlyInitialize() {}
 

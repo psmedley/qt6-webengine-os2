@@ -23,6 +23,7 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/frame.mojom.h"
 #include "content/common/frame_messages.mojom.h"
+#include "content/public/common/alternative_error_page_override_info.mojom.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/test/policy_container_utils.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
@@ -36,6 +37,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_response_info.h"
+#include "net/http/http_util.h"
 #include "third_party/blink/public/common/loader/throttling_url_loader.h"
 #include "third_party/blink/public/common/navigation/navigation_params.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
@@ -65,6 +67,10 @@ class FakeNavigationClient : public mojom::NavigationClient {
   explicit FakeNavigationClient(
       ReceivedProviderInfoCallback on_received_callback)
       : on_received_callback_(std::move(on_received_callback)) {}
+
+  FakeNavigationClient(const FakeNavigationClient&) = delete;
+  FakeNavigationClient& operator=(const FakeNavigationClient&) = delete;
+
   ~FakeNavigationClient() override = default;
 
  private:
@@ -103,13 +109,12 @@ class FakeNavigationClient : public mojom::NavigationClient {
       const absl::optional<std::string>& error_page_content,
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle> subresource_loaders,
       blink::mojom::PolicyContainerPtr policy_container,
+      mojom::AlternativeErrorPageOverrideInfoPtr alternative_error_page_info,
       CommitFailedNavigationCallback callback) override {
     std::move(callback).Run(MinimalDidCommitNavigationLoadParams(), nullptr);
   }
 
   ReceivedProviderInfoCallback on_received_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeNavigationClient);
 };
 
 class ResourceWriter {
@@ -274,7 +279,7 @@ ServiceWorkerContainerHostAndInfo::~ServiceWorkerContainerHostAndInfo() =
     default;
 
 base::WeakPtr<ServiceWorkerContainerHost> CreateContainerHostForWindow(
-    int process_id,
+    const GlobalRenderFrameHostId& render_frame_host_id,
     bool is_parent_frame_secure,
     base::WeakPtr<ServiceWorkerContextCore> context,
     ServiceWorkerRemoteContainerEndpoint* output_endpoint) {
@@ -292,9 +297,8 @@ base::WeakPtr<ServiceWorkerContainerHost> CreateContainerHostForWindow(
   // In production code this is called from NavigationRequest in the browser
   // process right before navigation commit.
   container_host->OnBeginNavigationCommit(
-      GlobalRenderFrameHostId(process_id, 1 /* route_id */),
-      network::CrossOriginEmbedderPolicy(), std::move(reporter),
-      ukm::kInvalidSourceId);
+      render_frame_host_id, network::CrossOriginEmbedderPolicy(),
+      std::move(reporter), ukm::kInvalidSourceId);
   return container_host;
 }
 

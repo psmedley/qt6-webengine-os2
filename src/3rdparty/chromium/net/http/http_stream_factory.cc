@@ -15,9 +15,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "base/trace_event/memory_allocator_dump.h"
-#include "base/trace_event/memory_usage_estimator.h"
-#include "base/trace_event/process_memory_dump.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/network_isolation_key.h"
@@ -32,9 +29,9 @@
 #include "net/quic/quic_http_utils.h"
 #include "net/spdy/bidirectional_stream_spdy_impl.h"
 #include "net/spdy/spdy_http_stream.h"
-#include "net/third_party/quiche/src/quic/core/quic_packets.h"
-#include "net/third_party/quiche/src/quic/core/quic_server_id.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_alt_svc_wire_format.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_server_id.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_alt_svc_wire_format.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
 #include "url/url_constants.h"
@@ -167,17 +164,13 @@ void HttpStreamFactory::PreconnectStreams(int num_streams,
                                           const HttpRequestInfo& request_info) {
   DCHECK(request_info.url.is_valid());
 
-  SSLConfig server_ssl_config;
-  SSLConfig proxy_ssl_config;
-  session_->GetSSLConfig(&server_ssl_config, &proxy_ssl_config);
-
   auto job_controller = std::make_unique<JobController>(
       this, nullptr, session_, job_factory_.get(), request_info,
-      /* is_preconnect = */ true,
-      /* is_websocket = */ false,
-      /* enable_ip_based_pooling = */ true,
-      /* enable_alternative_services = */ true, server_ssl_config,
-      proxy_ssl_config);
+      /*is_preconnect=*/true,
+      /*is_websocket=*/false,
+      /*enable_ip_based_pooling=*/true,
+      /*enable_alternative_services=*/true, /*server_ssl_config=*/SSLConfig(),
+      /*proxy_ssl_config=*/SSLConfig());
   JobController* job_controller_raw_ptr = job_controller.get();
   job_controller_set_.insert(std::move(job_controller));
   job_controller_raw_ptr->Preconnect(num_streams);
@@ -196,49 +189,4 @@ void HttpStreamFactory::OnJobControllerComplete(JobController* controller) {
   }
 }
 
-void HttpStreamFactory::DumpMemoryStats(
-    base::trace_event::ProcessMemoryDump* pmd,
-    const std::string& parent_absolute_name) const {
-  if (job_controller_set_.empty())
-    return;
-  std::string name =
-      base::StringPrintf("%s/stream_factory", parent_absolute_name.c_str());
-  base::trace_event::MemoryAllocatorDump* factory_dump =
-      pmd->CreateAllocatorDump(name);
-  size_t alt_job_count = 0;
-  size_t main_job_count = 0;
-  size_t num_controllers_for_preconnect = 0;
-  for (const auto& it : job_controller_set_) {
-    // For a preconnect controller, it should have exactly the main job.
-    if (it->is_preconnect()) {
-      num_controllers_for_preconnect++;
-      continue;
-    }
-    // For non-preconnects.
-    if (it->HasPendingAltJob())
-      alt_job_count++;
-    if (it->HasPendingMainJob())
-      main_job_count++;
-  }
-  factory_dump->AddScalar(
-      base::trace_event::MemoryAllocatorDump::kNameSize,
-      base::trace_event::MemoryAllocatorDump::kUnitsBytes,
-      base::trace_event::EstimateMemoryUsage(job_controller_set_));
-  factory_dump->AddScalar(
-      base::trace_event::MemoryAllocatorDump::kNameObjectCount,
-      base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-      job_controller_set_.size());
-  // The number of non-preconnect controllers with a pending alt job.
-  factory_dump->AddScalar("alt_job_count",
-                          base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                          alt_job_count);
-  // The number of non-preconnect controllers with a pending main job.
-  factory_dump->AddScalar("main_job_count",
-                          base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                          main_job_count);
-  // The number of preconnect controllers.
-  factory_dump->AddScalar("preconnect_count",
-                          base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                          num_controllers_for_preconnect);
-}
 }  // namespace net

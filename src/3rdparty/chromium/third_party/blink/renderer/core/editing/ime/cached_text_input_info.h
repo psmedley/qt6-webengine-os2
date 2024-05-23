@@ -5,9 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_IME_CACHED_TEXT_INPUT_INFO_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_IME_CACHED_TEXT_INPUT_INFO_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator_behavior.h"
 #include "third_party/blink/renderer/core/editing/plain_text_range.h"
 #include "third_party/blink/renderer/core/editing/position.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -67,6 +69,7 @@ class CORE_EXPORT CachedTextInputInfo final {
   };
 
   static TextIteratorBehavior Behavior();
+  void Clear() const;
   void ClearIfNeeded(const LayoutObject& layout_object);
   PlainTextRange GetPlainTextRangeWithCache(
       const EphemeralRange& range,
@@ -74,7 +77,7 @@ class CORE_EXPORT CachedTextInputInfo final {
   unsigned RangeLength(const EphemeralRange& range) const;
 
   mutable Member<const ContainerNode> container_;
-  mutable const LayoutObject* layout_object_ = nullptr;
+  mutable WeakMember<const LayoutObject> layout_object_;
   // Records offset of text node from start of |container_|.
   mutable HeapHashMap<Member<const Text>, unsigned> offset_map_;
   mutable String text_;

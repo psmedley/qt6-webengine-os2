@@ -97,7 +97,7 @@ void GetAddressComponents(
       components_language_code ? components_language_code : &not_used);
   std::vector<AddressUiComponent>* line_components = nullptr;
   for (const AddressUiComponent& component : components) {
-    // Start a new line of this is the first line, or a new line literal exists.
+    // Start a new line if this is the first line, or a new line literal exists.
     if (!line_components || component.literal == "\n") {
       address_components->push_back(std::vector<AddressUiComponent>());
       line_components = &address_components->back();
@@ -114,6 +114,12 @@ void GetAddressComponents(
 
     line_components->push_back(component);
   }
+  // Filter empty lines. Those can appear e.g. when the line consists only of
+  // literals and |include_literals| is false.
+  address_components->erase(
+      base::ranges::remove_if(*address_components,
+                              [](auto line) { return line.empty(); }),
+      address_components->end());
 }
 
 std::u16string GetEnvelopeStyleAddress(const AutofillProfile& profile,
@@ -187,7 +193,7 @@ std::u16string GetProfileDescription(const AutofillProfile& profile,
   }
 
   return profile.ConstructInferredLabel(
-      kDetailsFields, base::size(kDetailsFields),
+      kDetailsFields, std::size(kDetailsFields),
       /*num_fields_to_include=*/2, ui_language_code);
 }
 
@@ -218,16 +224,14 @@ std::vector<ProfileValueDifference> GetProfileDifferenceForUi(
     // Address is handled seprately.
     if (type == ADDRESS_HOME_ADDRESS) {
       if (first_address != second_address) {
-        differences_for_ui.emplace_back(
-            ProfileValueDifference{type, first_address, second_address});
+        differences_for_ui.push_back({type, first_address, second_address});
       }
       continue;
     }
     auto it = differences.find(type);
     if (it == differences.end())
       continue;
-    differences_for_ui.emplace_back(
-        ProfileValueDifference{type, it->second.first, it->second.second});
+    differences_for_ui.push_back({type, it->second.first, it->second.second});
   }
   return differences_for_ui;
 }

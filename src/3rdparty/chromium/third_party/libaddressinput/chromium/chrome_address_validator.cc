@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/check.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "third_party/libaddressinput/chromium/addressinput_util.h"
 #include "third_party/libaddressinput/chromium/input_suggester.h"
@@ -45,7 +45,6 @@ AddressValidator::AddressValidator(std::unique_ptr<Source> source,
                                    std::unique_ptr<Storage> storage,
                                    LoadRulesListener* load_rules_listener)
     : supplier_(new PreloadSupplier(source.release(), storage.release())),
-      input_suggester_(new InputSuggester(supplier_.get())),
       normalizer_(new AddressNormalizer(supplier_.get())),
       validator_(new ::i18n::addressinput::AddressValidator(supplier_.get())),
       validated_(BuildCallback(this, &AddressValidator::Validated)),
@@ -141,6 +140,8 @@ AddressValidator::Status AddressValidator::GetSuggestions(
 
   if (focused_field == POSTAL_CODE ||
       (focused_field >= ADMIN_AREA && focused_field <= DEPENDENT_LOCALITY)) {
+    if (!input_suggester_)
+      input_suggester_ = std::make_unique<InputSuggester>(supplier_.get());
     input_suggester_->GetSuggestions(
         user_input, focused_field, suggestion_limit, suggestions);
   }
@@ -163,7 +164,7 @@ bool AddressValidator::AreRulesLoadedForRegion(const std::string& region_code) {
 AddressValidator::AddressValidator() : load_rules_listener_(nullptr) {}
 
 base::TimeDelta AddressValidator::GetBaseRetryPeriod() const {
-  return base::TimeDelta::FromSeconds(8);
+  return base::Seconds(8);
 }
 
 void AddressValidator::Validated(bool success,

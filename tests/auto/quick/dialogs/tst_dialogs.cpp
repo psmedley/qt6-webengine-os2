@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "testhandler.h"
 #include <quickutil.h>
@@ -96,7 +71,7 @@ void tst_Dialogs::createDialog(const QLatin1String &dialog, bool &ok)
     m_listener->runJavaScript(trigger.arg(dialog));
     QTRY_VERIFY(m_listener->ready());
     QTest::mouseClick(m_window, Qt::LeftButton);
-    QTRY_COMPARE(dialogSpy.count(), 1);
+    QTRY_COMPARE(dialogSpy.size(), 1);
     ok = true;
 }
 
@@ -121,7 +96,7 @@ void tst_Dialogs::contextMenuRequested()
     QTRY_COMPARE_WITH_TIMEOUT(m_listener->ready(), true, 20000);
     QSignalSpy dialogSpy(m_listener, &TestHandler::requestChanged);
     QTest::mouseClick(m_window, Qt::RightButton);
-    QTRY_COMPARE(dialogSpy.count(), 1);
+    QTRY_COMPARE(dialogSpy.size(), 1);
     auto dialog = qobject_cast<QWebEngineContextMenuRequest *>(m_listener->request());
     QVERIFY2(dialog, "Incorrect dialog requested");
 }
@@ -178,7 +153,7 @@ void tst_Dialogs::authenticationDialogRequested()
     QSignalSpy dialogSpy(m_listener, &TestHandler::requestChanged);
     m_listener->load(url);
 
-    QTRY_COMPARE(dialogSpy.count(), 1);
+    QTRY_COMPARE(dialogSpy.size(), 1);
     auto *dialog = qobject_cast<QQuickWebEngineAuthenticationDialogRequest*>(m_listener->request());
     QVERIFY2(dialog, "Incorrect dialog requested");
     dialog->dialogReject();
@@ -222,7 +197,7 @@ void tst_Dialogs::javaScriptDialogRequested()
 
     QSignalSpy dialogSpy(m_listener, &TestHandler::requestChanged);
     m_listener->runJavaScript(script);
-    QTRY_COMPARE(dialogSpy.count(), 1);
+    QTRY_COMPARE(dialogSpy.size(), 1);
     auto *dialog = qobject_cast<QQuickWebEngineJavaScriptDialogRequest*>(m_listener->request());
     QVERIFY2(dialog, "Incorrect dialog requested");
     dialog->dialogReject();

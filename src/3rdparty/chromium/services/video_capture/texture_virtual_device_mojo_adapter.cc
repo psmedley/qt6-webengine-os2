@@ -5,6 +5,7 @@
 #include "services/video_capture/texture_virtual_device_mojo_adapter.h"
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "media/base/bind_to_current_loop.h"
@@ -126,6 +127,10 @@ void TextureVirtualDeviceMojoAdapter::TakePhoto(TakePhotoCallback callback) {
 
 void TextureVirtualDeviceMojoAdapter::ProcessFeedback(
     const media::VideoCaptureFeedback& feedback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+}
+
+void TextureVirtualDeviceMojoAdapter::RequestRefreshFrame() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 

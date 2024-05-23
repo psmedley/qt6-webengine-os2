@@ -13,8 +13,8 @@
 // limitations under the License.
 
 import {Actions} from '../common/actions';
-import {Engine, QueryError} from '../common/engine';
-import {STR} from '../common/query_result';
+import {Engine} from '../common/engine';
+import {QueryError} from '../common/query_result';
 import {publishMetricResult} from '../frontend/publish';
 
 import {Controller} from './controller';
@@ -27,24 +27,7 @@ export class MetricsController extends Controller<'main'> {
   constructor(args: {engine: Engine}) {
     super('main');
     this.engine = args.engine;
-    this.setup().finally(() => {
-      this.run();
-    });
-  }
-
-  private async getMetricNames() {
-    const metrics = [];
-    const result = await this.engine.queryV2('select name from trace_metrics');
-    const it = result.iter({name: STR});
-    for (; it.valid(); it.next()) {
-      metrics.push(it.name);
-    }
-    return metrics;
-  }
-
-  private async setup() {
-    const metrics = await this.getMetricNames();
-    globals.dispatch(Actions.setAvailableMetrics({metrics}));
+    this.run();
   }
 
   private async computeMetric(name: string) {

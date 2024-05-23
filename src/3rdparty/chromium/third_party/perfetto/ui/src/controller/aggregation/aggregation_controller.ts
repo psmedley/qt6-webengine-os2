@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Actions} from '../../common/actions';
 import {
   AggregateData,
   Column,
@@ -19,9 +20,13 @@ import {
   ThreadStateExtra,
 } from '../../common/aggregation_data';
 import {Engine} from '../../common/engine';
+import {
+  SLICE_AGGREGATION_PIVOT_TABLE_ID
+} from '../../common/pivot_table_common';
 import {NUM} from '../../common/query_result';
 import {Area, Sorting} from '../../common/state';
 import {publishAggregateData} from '../../frontend/publish';
+import {AreaSelectionHandler} from '../area_selection_handler';
 import {Controller} from '../controller';
 import {globals} from '../globals';
 
@@ -36,7 +41,7 @@ function isStringColumn(column: Column): boolean {
 
 export abstract class AggregationController extends Controller<'main'> {
   readonly kind: string;
-  private previousArea?: Area;
+  private areaSelectionHandler: AreaSelectionHandler;
   private previousSorting?: Sorting;
   private requestingData = false;
   private queuedRequest = false;
@@ -52,11 +57,14 @@ export abstract class AggregationController extends Controller<'main'> {
   constructor(private args: AggregationControllerArgs) {
     super('main');
     this.kind = this.args.kind;
+    this.areaSelectionHandler = new AreaSelectionHandler();
   }
 
   run() {
     const selection = globals.state.currentSelection;
     if (selection === null || selection.kind !== 'AREA') {
+      globals.dispatch(Actions.deletePivotTable(
+          {pivotTableId: SLICE_AGGREGATION_PIVOT_TABLE_ID}));
       publishAggregateData({
         data: {
           tabName: this.getTabName(),
@@ -68,22 +76,20 @@ export abstract class AggregationController extends Controller<'main'> {
       });
       return;
     }
-    const selectedArea = globals.state.areas[selection.areaId];
     const aggregatePreferences =
         globals.state.aggregatePreferences[this.args.kind];
 
-    const areaChanged = this.previousArea !== selectedArea;
     const sortingChanged = aggregatePreferences &&
         this.previousSorting !== aggregatePreferences.sorting;
-    if (!areaChanged && !sortingChanged) return;
+    const [hasAreaChanged, area] = this.areaSelectionHandler.getAreaChange();
+    if ((!hasAreaChanged && !sortingChanged) || !area) return;
 
     if (this.requestingData) {
       this.queuedRequest = true;
     } else {
       this.requestingData = true;
       if (sortingChanged) this.previousSorting = aggregatePreferences.sorting;
-      if (areaChanged) this.previousArea = Object.assign({}, selectedArea);
-      this.getAggregateData(selectedArea, areaChanged)
+      this.getAggregateData(area, hasAreaChanged)
           .then(data => publishAggregateData({data, kind: this.args.kind}))
           .finally(() => {
             this.requestingData = false;
@@ -118,7 +124,7 @@ export abstract class AggregationController extends Controller<'main'> {
       sorting = `${pref.sorting.column} ${pref.sorting.direction}`;
     }
     const query = `select ${colIds} from ${this.kind} order by ${sorting}`;
-    const result = await this.args.engine.queryV2(query);
+    const result = await this.args.engine.query(query);
 
     const numRows = result.numRows();
     const columns = defs.map(def => this.columnFromColumnDef(def, numRows));
@@ -157,7 +163,7 @@ export abstract class AggregationController extends Controller<'main'> {
 
   async getSum(def: ColumnDef): Promise<string> {
     if (!def.sum) return '';
-    const result = await this.args.engine.queryV2(
+    const result = await this.args.engine.query(
         `select ifnull(sum(${def.columnId}), 0) as s from ${this.kind}`);
     let sum = result.firstRow({s: NUM}).s;
     if (def.kind === 'TIMESTAMP_NS') {

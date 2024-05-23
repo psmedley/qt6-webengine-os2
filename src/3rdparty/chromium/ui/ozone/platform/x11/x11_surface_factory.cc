@@ -21,7 +21,7 @@
 #include "ui/ozone/platform/x11/x11_canvas_surface.h"
 
 #if BUILDFLAG(ENABLE_VULKAN)
-#include "gpu/vulkan/x/vulkan_implementation_x11.h"
+#include "ui/ozone/platform/x11/vulkan_implementation_x11.h"
 #endif
 
 namespace ui {
@@ -30,6 +30,10 @@ namespace {
 class GLOzoneEGLX11 : public GLOzoneEGL {
  public:
   GLOzoneEGLX11() = default;
+
+  GLOzoneEGLX11(const GLOzoneEGLX11&) = delete;
+  GLOzoneEGLX11& operator=(const GLOzoneEGLX11&) = delete;
+
   ~GLOzoneEGLX11() override = default;
 
   // GLOzone:
@@ -85,8 +89,6 @@ class GLOzoneEGLX11 : public GLOzoneEGL {
 
  private:
   bool is_swiftshader_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(GLOzoneEGLX11);
 };
 
 }  // namespace
@@ -105,7 +107,7 @@ X11SurfaceFactory::GetAllowedGLImplementations() {
       gl::GLImplementationParts(gl::kGLImplementationDesktopGL),
       gl::GLImplementationParts(gl::kGLImplementationEGLGLES2),
       gl::GLImplementationParts(gl::kGLImplementationEGLANGLE),
-      gl::GLImplementationParts(gl::kGLImplementationSwiftShaderGL)};
+      gl::GLImplementationParts(gl::ANGLEImplementation::kSwiftShader)};
 }
 
 GLOzone* X11SurfaceFactory::GetGLOzone(
@@ -115,7 +117,6 @@ GLOzone* X11SurfaceFactory::GetGLOzone(
       return glx_implementation_.get();
     case gl::kGLImplementationEGLGLES2:
     case gl::kGLImplementationEGLANGLE:
-    case gl::kGLImplementationSwiftShaderGL:
       return egl_implementation_.get();
     default:
       return nullptr;
@@ -126,7 +127,7 @@ GLOzone* X11SurfaceFactory::GetGLOzone(
 std::unique_ptr<gpu::VulkanImplementation>
 X11SurfaceFactory::CreateVulkanImplementation(bool use_swiftshader,
                                               bool allow_protected_memory) {
-  return std::make_unique<gpu::VulkanImplementationX11>(use_swiftshader);
+  return std::make_unique<VulkanImplementationX11>(use_swiftshader);
 }
 #endif
 
@@ -175,6 +176,24 @@ void X11SurfaceFactory::CreateNativePixmapAsync(gfx::AcceleratedWidget widget,
   // and return the result with the provided callback.
   std::move(callback).Run(
       CreateNativePixmap(widget, vk_device, size, format, usage));
+}
+
+scoped_refptr<gfx::NativePixmap>
+X11SurfaceFactory::CreateNativePixmapFromHandle(
+    gfx::AcceleratedWidget widget,
+    gfx::Size size,
+    gfx::BufferFormat format,
+    gfx::NativePixmapHandle handle) {
+  scoped_refptr<gfx::NativePixmapDmaBuf> pixmap;
+  auto buffer =
+      ui::GpuMemoryBufferSupportX11::GetInstance()->CreateBufferFromHandle(
+          size, format, std::move(handle));
+  if (buffer) {
+    gfx::NativePixmapHandle handle = buffer->ExportHandle();
+    pixmap = base::MakeRefCounted<gfx::NativePixmapDmaBuf>(size, format,
+                                                           std::move(handle));
+  }
+  return pixmap;
 }
 
 }  // namespace ui

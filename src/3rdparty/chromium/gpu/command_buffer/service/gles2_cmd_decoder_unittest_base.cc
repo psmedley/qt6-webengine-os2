@@ -13,9 +13,9 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "build/build_config.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/context_group.h"
@@ -60,7 +60,7 @@ void NormalizeInitState(gpu::gles2::GLES2DecoderTestBase::InitState* init) {
       "GL_APPLE_vertex_array_object"
   };
   bool contains_vao_extension = false;
-  for (size_t ii = 0; ii < base::size(kVAOExtensions); ++ii) {
+  for (size_t ii = 0; ii < std::size(kVAOExtensions); ++ii) {
     if (init->extensions.find(kVAOExtensions[ii]) != std::string::npos) {
       contains_vao_extension = true;
       break;
@@ -76,11 +76,11 @@ void NormalizeInitState(gpu::gles2::GLES2DecoderTestBase::InitState* init) {
                          base::CompareCase::INSENSITIVE_ASCII)) {
       init->extensions += kVAOExtensions[0];
     } else {
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
       init->extensions += kVAOExtensions[1];
 #else
       init->extensions += kVAOExtensions[2];
-#endif  // OS_MAC
+#endif  // BUILDFLAG(IS_MAC)
     }
   } else {
     // Make sure we don't set up an invalid InitState.
@@ -290,9 +290,9 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
   static GLuint fixed_attrib_buffer_id[] = {
     kServiceFixedAttribBufferId,
   };
-  EXPECT_CALL(*gl_, GenBuffersARB(base::size(attrib_0_id), _))
+  EXPECT_CALL(*gl_, GenBuffersARB(std::size(attrib_0_id), _))
       .WillOnce(SetArrayArgument<1>(attrib_0_id,
-                                    attrib_0_id + base::size(attrib_0_id)))
+                                    attrib_0_id + std::size(attrib_0_id)))
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, kServiceAttrib0BufferId))
       .Times(1)
@@ -303,10 +303,10 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
   EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, 0))
       .Times(1)
       .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GenBuffersARB(base::size(fixed_attrib_buffer_id), _))
+  EXPECT_CALL(*gl_, GenBuffersARB(std::size(fixed_attrib_buffer_id), _))
       .WillOnce(SetArrayArgument<1>(
           fixed_attrib_buffer_id,
-          fixed_attrib_buffer_id + base::size(fixed_attrib_buffer_id)))
+          fixed_attrib_buffer_id + std::size(fixed_attrib_buffer_id)))
       .RetiresOnSaturation();
 
   for (GLint tt = 0; tt < TestHelper::kNumTextureUnits; ++tt) {
@@ -420,13 +420,13 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
   };
   EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VIEWPORT_DIMS, _))
       .WillOnce(SetArrayArgument<1>(
-          max_viewport_dims, max_viewport_dims + base::size(max_viewport_dims)))
+          max_viewport_dims, max_viewport_dims + std::size(max_viewport_dims)))
       .RetiresOnSaturation();
 
   static GLfloat line_width_range[] = { 1.0f, 2.0f };
   EXPECT_CALL(*gl_, GetFloatv(GL_ALIASED_LINE_WIDTH_RANGE, _))
       .WillOnce(SetArrayArgument<1>(
-          line_width_range, line_width_range + base::size(line_width_range)))
+          line_width_range, line_width_range + std::size(line_width_range)))
       .RetiresOnSaturation();
 
   if (group_->feature_info()->feature_flags().ext_window_rectangles) {
@@ -464,7 +464,7 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
 
   // TODO(boliu): Remove OS_ANDROID once crbug.com/259023 is fixed and the
   // workaround has been reverted.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   if (normalized_init.has_alpha && !normalized_init.request_alpha) {
     EXPECT_CALL(*gl_, ClearColor(0, 0, 0, 1)).Times(1).RetiresOnSaturation();
   }
@@ -1051,14 +1051,14 @@ void GLES2DecoderTestBase::SetupShaderForUniform(GLenum uniform_type) {
     { "bar", 1, uniform_type, 0, 2, -1, },
     { "car", 4, uniform_type, 1, 1, -1, },
   };
-  const GLuint kClientVertexShaderId = 5001;
-  const GLuint kServiceVertexShaderId = 6001;
-  const GLuint kClientFragmentShaderId = 5002;
-  const GLuint kServiceFragmentShaderId = 6002;
-  SetupShader(attribs, base::size(attribs), uniforms, base::size(uniforms),
-              client_program_id_, kServiceProgramId, kClientVertexShaderId,
-              kServiceVertexShaderId, kClientFragmentShaderId,
-              kServiceFragmentShaderId);
+  const GLuint kTestClientVertexShaderId = 5001;
+  const GLuint kTestServiceVertexShaderId = 6001;
+  const GLuint kTestClientFragmentShaderId = 5002;
+  const GLuint kTestServiceFragmentShaderId = 6002;
+  SetupShader(attribs, std::size(attribs), uniforms, std::size(uniforms),
+              client_program_id_, kServiceProgramId, kTestClientVertexShaderId,
+              kTestServiceVertexShaderId, kTestClientFragmentShaderId,
+              kTestServiceFragmentShaderId);
 
   EXPECT_CALL(*gl_, UseProgram(kServiceProgramId))
       .Times(1)
@@ -1971,7 +1971,7 @@ void GLES2DecoderTestBase::SetupDefaultProgram() {
         kUniform8FakeLocation, kUniform8RealLocation,
         kUniform8DesiredLocation },
     };
-    SetupShader(attribs, base::size(attribs), uniforms, base::size(uniforms),
+    SetupShader(attribs, std::size(attribs), uniforms, std::size(uniforms),
                 client_program_id_, kServiceProgramId, client_vertex_shader_id_,
                 kServiceVertexShaderId, client_fragment_shader_id_,
                 kServiceFragmentShaderId);
@@ -2017,7 +2017,7 @@ void GLES2DecoderTestBase::SetupCubemapProgram() {
         kUniform7FakeLocation, kUniform7RealLocation,
         kUniform7DesiredLocation },
     };
-    SetupShader(attribs, base::size(attribs), uniforms, base::size(uniforms),
+    SetupShader(attribs, std::size(attribs), uniforms, std::size(uniforms),
                 client_program_id_, kServiceProgramId, client_vertex_shader_id_,
                 kServiceVertexShaderId, client_fragment_shader_id_,
                 kServiceFragmentShaderId);
@@ -2063,7 +2063,7 @@ void GLES2DecoderTestBase::SetupSamplerExternalProgram() {
         kUniform7FakeLocation, kUniform7RealLocation,
         kUniform7DesiredLocation },
     };
-    SetupShader(attribs, base::size(attribs), uniforms, base::size(uniforms),
+    SetupShader(attribs, std::size(attribs), uniforms, std::size(uniforms),
                 client_program_id_, kServiceProgramId, client_vertex_shader_id_,
                 kServiceVertexShaderId, client_fragment_shader_id_,
                 kServiceFragmentShaderId);
@@ -2231,8 +2231,8 @@ void GLES2DecoderTestBase::DoBufferData(GLenum target, GLsizei size) {
 
 void GLES2DecoderTestBase::DoBufferSubData(
     GLenum target, GLint offset, GLsizei size, const void* data) {
-  EXPECT_CALL(*gl_, BufferSubData(target, offset, size,
-                                  shared_memory_address_))
+  EXPECT_CALL(*gl_,
+              BufferSubData(target, offset, size, shared_memory_address_.get()))
       .Times(1)
       .RetiresOnSaturation();
   memcpy(shared_memory_address_, data, size);
@@ -2284,7 +2284,7 @@ void GLES2DecoderTestBase::SetupIndexBuffer() {
                client_element_buffer_id_,
                kServiceElementBufferId);
   static const GLshort indices[] = {100, 1, 2, 3, 4, 5, 6, 7, 100, 9};
-  static_assert(base::size(indices) == kNumIndices,
+  static_assert(std::size(indices) == kNumIndices,
                 "indices should have kNumIndices elements");
   DoBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices));
   DoBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, 2, indices);
@@ -2444,7 +2444,11 @@ void GLES2DecoderPassthroughTestBase::SetUp() {
 
   gl::init::InitializeStaticGLBindingsImplementation(
       gl::GLImplementationParts(gl::kGLImplementationEGLANGLE), false);
-  gl::init::InitializeGLOneOffPlatformImplementation(false, false, true);
+  gl::init::InitializeGLOneOffPlatformImplementation(
+      /*fallback_to_software_gl=*/false,
+      /*disable_gl_drawing=*/false,
+      /*init_extensions=*/true,
+      /*system_device_id=*/0);
 
   scoped_refptr<gles2::FeatureInfo> feature_info = new gles2::FeatureInfo();
   group_ = new gles2::ContextGroup(

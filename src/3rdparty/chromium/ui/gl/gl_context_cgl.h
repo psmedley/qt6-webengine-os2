@@ -9,7 +9,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_export.h"
@@ -19,9 +18,12 @@ namespace gl {
 class GLSurface;
 
 // Encapsulates a CGL OpenGL context.
-class GL_EXPORT GLContextCGL : public GLContextReal {
+class GL_EXPORT GLContextCGL final : public GLContextReal {
  public:
   explicit GLContextCGL(GLShareGroup* share_group, int core_profile_number = 0);
+
+  GLContextCGL(const GLContextCGL&) = delete;
+  GLContextCGL& operator=(const GLContextCGL&) = delete;
 
   // Implement GLContext.
   bool Initialize(GLSurface* compatible_surface,
@@ -57,8 +59,6 @@ class GL_EXPORT GLContextCGL : public GLContextReal {
   bool has_switched_gpus_ = false;
 
   int core_profile_number_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(GLContextCGL);
 };
 
 }  // namespace gl

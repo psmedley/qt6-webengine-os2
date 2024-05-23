@@ -1,7 +1,7 @@
-/* Copyright (c) 2015-2021 The Khronos Group Inc.
- * Copyright (c) 2015-2021 Valve Corporation
- * Copyright (c) 2015-2021 LunarG, Inc.
- * Copyright (C) 2015-2021 Google Inc.
+/* Copyright (c) 2015-2022 The Khronos Group Inc.
+ * Copyright (c) 2015-2022 Valve Corporation
+ * Copyright (c) 2015-2022 LunarG, Inc.
+ * Copyright (C) 2015-2022 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@
 #include "chassis.h"
 
 #include "object_lifetime_validation.h"
+#include "layer_chassis_dispatch.h"
 
 uint64_t object_track_index = 0;
 
@@ -405,7 +406,7 @@ bool ObjectLifetimes::PreCallValidateGetDeviceQueue(VkDevice device, uint32_t qu
 
 void ObjectLifetimes::PostCallRecordGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex,
                                                    VkQueue *pQueue) {
-    auto lock = write_shared_lock();
+    auto lock = WriteSharedLock();
     CreateQueue(*pQueue);
 }
 
@@ -414,7 +415,7 @@ bool ObjectLifetimes::PreCallValidateGetDeviceQueue2(VkDevice device, const VkDe
 }
 
 void ObjectLifetimes::PostCallRecordGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *pQueueInfo, VkQueue *pQueue) {
-    auto lock = write_shared_lock();
+    auto lock = WriteSharedLock();
     CreateQueue(*pQueue);
 }
 
@@ -447,7 +448,7 @@ bool ObjectLifetimes::PreCallValidateUpdateDescriptorSets(VkDevice device, uint3
 bool ObjectLifetimes::PreCallValidateResetDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool,
                                                          VkDescriptorPoolResetFlags flags) const {
     bool skip = false;
-    auto lock = read_shared_lock();
+    auto lock = ReadSharedLock();
 
     skip |= ValidateObject(device, kVulkanObjectTypeDevice, false, "VUID-vkResetDescriptorPool-device-parameter", kVUIDUndefined);
     skip |=
@@ -467,7 +468,7 @@ bool ObjectLifetimes::PreCallValidateResetDescriptorPool(VkDevice device, VkDesc
 
 void ObjectLifetimes::PreCallRecordResetDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool,
                                                        VkDescriptorPoolResetFlags flags) {
-    auto lock = write_shared_lock();
+    auto lock = WriteSharedLock();
     // A DescriptorPool's descriptor sets are implicitly deleted when the pool is reset. Remove this pool's descriptor sets from
     // our descriptorSet map.
     auto itr = object_map[kVulkanObjectTypeDescriptorPool].find(HandleToUint64(descriptorPool));
@@ -495,8 +496,8 @@ bool ObjectLifetimes::PreCallValidateBeginCommandBuffer(VkCommandBuffer command_
                     ValidateObject(begin_info->pInheritanceInfo->framebuffer, kVulkanObjectTypeFramebuffer, true,
                                    "VUID-VkCommandBufferBeginInfo-flags-00055", "VUID-VkCommandBufferInheritanceInfo-commonparent");
                 skip |=
-                    ValidateObject(begin_info->pInheritanceInfo->renderPass, kVulkanObjectTypeRenderPass, false,
-                                   "VUID-VkCommandBufferBeginInfo-flags-00053", "VUID-VkCommandBufferInheritanceInfo-commonparent");
+                    ValidateObject(begin_info->pInheritanceInfo->renderPass, kVulkanObjectTypeRenderPass, true,
+                                   "VUID-VkCommandBufferBeginInfo-flags-06000", "VUID-VkCommandBufferInheritanceInfo-commonparent");
             }
         }
     }
@@ -516,7 +517,7 @@ bool ObjectLifetimes::PreCallValidateGetSwapchainImagesKHR(VkDevice device, VkSw
 void ObjectLifetimes::PostCallRecordGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t *pSwapchainImageCount,
                                                           VkImage *pSwapchainImages, VkResult result) {
     if ((result != VK_SUCCESS) && (result != VK_INCOMPLETE)) return;
-    auto lock = write_shared_lock();
+    auto lock = WriteSharedLock();
     if (pSwapchainImages != NULL) {
         for (uint32_t i = 0; i < *pSwapchainImageCount; i++) {
             CreateSwapchainImageObject(pSwapchainImages[i], swapchain);
@@ -654,7 +655,7 @@ void ObjectLifetimes::PostCallRecordAllocateCommandBuffers(VkDevice device, cons
 bool ObjectLifetimes::PreCallValidateAllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo *pAllocateInfo,
                                                             VkDescriptorSet *pDescriptorSets) const {
     bool skip = false;
-    auto lock = read_shared_lock();
+    auto lock = ReadSharedLock();
     skip |=
         ValidateObject(device, kVulkanObjectTypeDevice, false, "VUID-vkAllocateDescriptorSets-device-parameter", kVUIDUndefined);
     skip |= ValidateObject(pAllocateInfo->descriptorPool, kVulkanObjectTypeDescriptorPool, false,
@@ -671,7 +672,7 @@ bool ObjectLifetimes::PreCallValidateAllocateDescriptorSets(VkDevice device, con
 void ObjectLifetimes::PostCallRecordAllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo *pAllocateInfo,
                                                            VkDescriptorSet *pDescriptorSets, VkResult result) {
     if (result != VK_SUCCESS) return;
-    auto lock = write_shared_lock();
+    auto lock = WriteSharedLock();
     for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; i++) {
         AllocateDescriptorSet(pAllocateInfo->descriptorPool, pDescriptorSets[i]);
     }
@@ -719,7 +720,7 @@ void ObjectLifetimes::PreCallRecordDestroySwapchainKHR(VkDevice device, VkSwapch
 
 bool ObjectLifetimes::PreCallValidateFreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool,
                                                         uint32_t descriptorSetCount, const VkDescriptorSet *pDescriptorSets) const {
-    auto lock = read_shared_lock();
+    auto lock = ReadSharedLock();
     bool skip = false;
     skip |= ValidateObject(device, kVulkanObjectTypeDevice, false, "VUID-vkFreeDescriptorSets-device-parameter", kVUIDUndefined);
     skip |= ValidateObject(descriptorPool, kVulkanObjectTypeDescriptorPool, false,
@@ -735,7 +736,7 @@ bool ObjectLifetimes::PreCallValidateFreeDescriptorSets(VkDevice device, VkDescr
 }
 void ObjectLifetimes::PreCallRecordFreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool, uint32_t descriptorSetCount,
                                                       const VkDescriptorSet *pDescriptorSets) {
-    auto lock = write_shared_lock();
+    auto lock = WriteSharedLock();
     std::shared_ptr<ObjTrackState> pool_node = nullptr;
     auto itr = object_map[kVulkanObjectTypeDescriptorPool].find(HandleToUint64(descriptorPool));
     if (itr != object_map[kVulkanObjectTypeDescriptorPool].end()) {
@@ -751,7 +752,7 @@ void ObjectLifetimes::PreCallRecordFreeDescriptorSets(VkDevice device, VkDescrip
 
 bool ObjectLifetimes::PreCallValidateDestroyDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool,
                                                            const VkAllocationCallbacks *pAllocator) const {
-    auto lock = read_shared_lock();
+    auto lock = ReadSharedLock();
     bool skip = false;
     skip |= ValidateObject(device, kVulkanObjectTypeDevice, false, "VUID-vkDestroyDescriptorPool-device-parameter", kVUIDUndefined);
     skip |= ValidateObject(descriptorPool, kVulkanObjectTypeDescriptorPool, true,
@@ -773,7 +774,7 @@ bool ObjectLifetimes::PreCallValidateDestroyDescriptorPool(VkDevice device, VkDe
 }
 void ObjectLifetimes::PreCallRecordDestroyDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool,
                                                          const VkAllocationCallbacks *pAllocator) {
-    auto lock = write_shared_lock();
+    auto lock = WriteSharedLock();
     auto itr = object_map[kVulkanObjectTypeDescriptorPool].find(HandleToUint64(descriptorPool));
     if (itr != object_map[kVulkanObjectTypeDescriptorPool].end()) {
         auto pool_node = itr->second;
@@ -1032,4 +1033,133 @@ void ObjectLifetimes::PostCallRecordCreateDescriptorUpdateTemplateKHR(VkDevice d
                                                                       VkDescriptorUpdateTemplate *pDescriptorUpdateTemplate,
                                                                       VkResult result) {
     return PostCallRecordCreateDescriptorUpdateTemplate(device, pCreateInfo, pAllocator, pDescriptorUpdateTemplate, result);
+}
+
+bool ObjectLifetimes::ValidateAccelerationStructures(const char *dst_handle_vuid, uint32_t count,
+                                                     const VkAccelerationStructureBuildGeometryInfoKHR *infos) const {
+    bool skip = false;
+    if (infos) {
+        const char *device_vuid = "VUID-VkAccelerationStructureBuildGeometryInfoKHR-commonparent";
+        for (uint32_t i = 0; i < count; ++i) {
+            skip |= ValidateObject(infos[i].srcAccelerationStructure, kVulkanObjectTypeAccelerationStructureKHR, true,
+                                   kVUIDUndefined, device_vuid);
+            skip |= ValidateObject(infos[i].dstAccelerationStructure, kVulkanObjectTypeAccelerationStructureKHR, false,
+                                   dst_handle_vuid, device_vuid);
+        }
+    }
+
+    return skip;
+}
+
+bool ObjectLifetimes::PreCallValidateCmdBuildAccelerationStructuresKHR(
+    VkCommandBuffer commandBuffer, uint32_t infoCount, const VkAccelerationStructureBuildGeometryInfoKHR *pInfos,
+    const VkAccelerationStructureBuildRangeInfoKHR *const *ppBuildRangeInfos) const {
+    bool skip = ValidateObject(commandBuffer, kVulkanObjectTypeCommandBuffer, false,
+                               "VUID-vkCmdBuildAccelerationStructuresKHR-commandBuffer-parameter", kVUIDUndefined);
+    skip |=
+        ValidateAccelerationStructures("VUID-vkCmdBuildAccelerationStructuresKHR-dstAccelerationStructure-03800", infoCount, pInfos);
+    return skip;
+}
+
+bool ObjectLifetimes::PreCallValidateCmdBuildAccelerationStructuresIndirectKHR(
+    VkCommandBuffer commandBuffer, uint32_t infoCount, const VkAccelerationStructureBuildGeometryInfoKHR *pInfos,
+    const VkDeviceAddress *pIndirectDeviceAddresses, const uint32_t *pIndirectStrides,
+    const uint32_t *const *ppMaxPrimitiveCounts) const {
+    bool skip = ValidateObject(commandBuffer, kVulkanObjectTypeCommandBuffer, false,
+                               "VUID-vkCmdBuildAccelerationStructuresKHR-commandBuffer-parameter", kVUIDUndefined);
+    skip |= ValidateAccelerationStructures("VUID-vkCmdBuildAccelerationStructuresIndirectKHR-dstAccelerationStructure-03800",
+                                           infoCount, pInfos);
+    return skip;
+}
+
+bool ObjectLifetimes::PreCallValidateBuildAccelerationStructuresKHR(
+    VkDevice device, VkDeferredOperationKHR deferredOperation, uint32_t infoCount,
+    const VkAccelerationStructureBuildGeometryInfoKHR *pInfos,
+    const VkAccelerationStructureBuildRangeInfoKHR *const *ppBuildRangeInfos) const {
+    bool skip = ValidateObject(device, kVulkanObjectTypeDevice, false, "VUID-vkBuildAccelerationStructuresKHR-device-parameter",
+                               kVUIDUndefined);
+    skip |= ValidateObject(deferredOperation, kVulkanObjectTypeDeferredOperationKHR, true,
+                           "VUID-vkBuildAccelerationStructuresKHR-deferredOperation-parameter",
+                           "VUID-vkBuildAccelerationStructuresKHR-deferredOperation-parent");
+    skip |=
+        ValidateAccelerationStructures("VUID-vkBuildAccelerationStructuresKHR-dstAccelerationStructure-03800", infoCount, pInfos);
+    return skip;
+}
+
+bool ObjectLifetimes::PreCallValidateCreateRayTracingPipelinesKHR(VkDevice device, VkDeferredOperationKHR deferredOperation,
+                                                                  VkPipelineCache pipelineCache, uint32_t createInfoCount,
+                                                                  const VkRayTracingPipelineCreateInfoKHR *pCreateInfos,
+                                                                  const VkAllocationCallbacks *pAllocator,
+                                                                  VkPipeline *pPipelines) const {
+    bool skip = false;
+    skip |= ValidateObject(device, kVulkanObjectTypeDevice, false, "VUID-vkCreateRayTracingPipelinesKHR-device-parameter",
+                           kVUIDUndefined);
+    skip |= ValidateObject(deferredOperation, kVulkanObjectTypeDeferredOperationKHR, true,
+                           "VUID-vkCreateRayTracingPipelinesKHR-deferredOperation-parameter",
+                           "VUID-vkCreateRayTracingPipelinesKHR-deferredOperation-parent");
+    skip |= ValidateObject(pipelineCache, kVulkanObjectTypePipelineCache, true,
+                           "VUID-vkCreateRayTracingPipelinesKHR-pipelineCache-parameter",
+                           "VUID-vkCreateRayTracingPipelinesKHR-pipelineCache-parent");
+    if (pCreateInfos) {
+        for (uint32_t index0 = 0; index0 < createInfoCount; ++index0) {
+            if (pCreateInfos[index0].pStages) {
+                for (uint32_t index1 = 0; index1 < pCreateInfos[index0].stageCount; ++index1) {
+                    skip |= ValidateObject(pCreateInfos[index0].pStages[index1].module, kVulkanObjectTypeShaderModule, false,
+                                           "VUID-VkPipelineShaderStageCreateInfo-module-parameter", kVUIDUndefined);
+                }
+            }
+            if (pCreateInfos[index0].pLibraryInfo) {
+                if (pCreateInfos[index0].pLibraryInfo->pLibraries) {
+                    for (uint32_t index2 = 0; index2 < pCreateInfos[index0].pLibraryInfo->libraryCount; ++index2) {
+                        skip |= ValidateObject(pCreateInfos[index0].pLibraryInfo->pLibraries[index2], kVulkanObjectTypePipeline,
+                                               false, "VUID-VkPipelineLibraryCreateInfoKHR-pLibraries-parameter", kVUIDUndefined);
+                    }
+                }
+            }
+            skip |= ValidateObject(pCreateInfos[index0].layout, kVulkanObjectTypePipelineLayout, false,
+                                   "VUID-VkRayTracingPipelineCreateInfoKHR-layout-parameter",
+                                   "VUID-VkRayTracingPipelineCreateInfoKHR-commonparent");
+            if ((pCreateInfos[index0].flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) && (pCreateInfos[index0].basePipelineIndex == -1))
+                skip |= ValidateObject(pCreateInfos[index0].basePipelineHandle, kVulkanObjectTypePipeline, false,
+                                       "VUID-VkRayTracingPipelineCreateInfoKHR-flags-03421",
+                                       "VUID-VkRayTracingPipelineCreateInfoKHR-commonparent");
+        }
+    }
+
+    return skip;
+}
+
+void ObjectLifetimes::PostCallRecordCreateRayTracingPipelinesKHR(VkDevice device, VkDeferredOperationKHR deferredOperation,
+                                                                 VkPipelineCache pipelineCache, uint32_t createInfoCount,
+                                                                 const VkRayTracingPipelineCreateInfoKHR *pCreateInfos,
+                                                                 const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines,
+                                                                 VkResult result) {
+    if (VK_ERROR_VALIDATION_FAILED_EXT == result) return;
+    if (pPipelines) {
+        if (deferredOperation != VK_NULL_HANDLE && result == VK_OPERATION_DEFERRED_KHR) {
+            auto register_fn = [this, pAllocator](const std::vector<VkPipeline> &pipelines) {
+                for (auto pipe : pipelines) {
+                    if (!pipe) continue;
+                    this->CreateObject(pipe, kVulkanObjectTypePipeline, pAllocator);
+                }
+            };
+
+            auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+            if (wrap_handles) {
+                deferredOperation = layer_data->Unwrap(deferredOperation);
+            }
+            std::vector<std::function<void(const std::vector<VkPipeline> &)>> cleanup_fn;
+            auto find_res = layer_data->deferred_operation_post_check.pop(deferredOperation);
+            if (find_res->first) {
+                cleanup_fn = std::move(find_res->second);
+            }
+            cleanup_fn.emplace_back(register_fn);
+            layer_data->deferred_operation_post_check.insert(deferredOperation, cleanup_fn);
+        } else {
+            for (uint32_t index = 0; index < createInfoCount; index++) {
+                if (!pPipelines[index]) continue;
+                CreateObject(pPipelines[index], kVulkanObjectTypePipeline, pAllocator);
+            }
+        }
+    }
 }

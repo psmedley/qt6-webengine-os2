@@ -4,7 +4,6 @@
 
 #include "ui/events/keycodes/dom/keycode_converter.h"
 
-#include "base/cxx17_backports.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversion_utils.h"
@@ -12,7 +11,7 @@
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include <linux/input.h>
 #endif
 
@@ -22,30 +21,21 @@ namespace {
 
 // Table of USB codes (equivalent to DomCode values), native scan codes,
 // and DOM Level 3 |code| strings.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
   { usb, win, code }
-#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
   { usb, xkb, code }
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
   { usb, mac, code }
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
 #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
   { usb, evdev, code }
-#elif defined(OS_FUCHSIA)
-// TODO(https://crbug.com/1107418): Fuchsia currently delivers events
-// with a USB Code but no Page specified, so only map |native_keycode| for
-// Keyboard Usage Page codes, for now.
-inline constexpr uint32_t CodeIfOnKeyboardPage(uint32_t usage) {
-  constexpr uint32_t kUsbHidKeyboardPageBase = 0x070000;
-  if ((usage & 0xffff0000) == kUsbHidKeyboardPageBase)
-    return usage & 0xffff;
-  return 0;
-}
+#elif BUILDFLAG(IS_FUCHSIA)
 #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
-  { usb, CodeIfOnKeyboardPage(usb), code }
+  { usb, usb, code }
 #elif defined(OS_OS2)
 // TODO: Are OS/2 scan codes equal to Windows ones? Use 0 for now
 // (as it used to be in a previous Chromium version).
@@ -73,7 +63,7 @@ struct DomKeyMapEntry {
 #undef DOM_KEY_MAP
 #undef DOM_KEY_UNI
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 // The offset between XKB Keycode and evdev code.
 constexpr int kXkbKeycodeOffset = 8;
@@ -111,13 +101,13 @@ uint32_t EvdevCodeToXkbKeycode(int evdev_code) {
   return static_cast<uint32_t>(evdev_code + kXkbKeycodeOffset);
 }
 
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace
 
 // static
 size_t KeycodeConverter::NumKeycodeMapEntriesForTest() {
-  return base::size(kDomCodeMappings);
+  return std::size(kDomCodeMappings);
 }
 
 // static
@@ -127,7 +117,7 @@ const KeycodeMapEntry* KeycodeConverter::GetKeycodeMapForTest() {
 
 // static
 const char* KeycodeConverter::DomKeyStringForTest(size_t index) {
-  if (index >= base::size(kDomKeyMappings))
+  if (index >= std::size(kDomKeyMappings))
     return nullptr;
   return kDomKeyMappings[index].string;
 }
@@ -154,7 +144,7 @@ int KeycodeConverter::DomCodeToNativeKeycode(DomCode code) {
   return UsbKeycodeToNativeKeycode(static_cast<uint32_t>(code));
 }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 // static
 DomCode KeycodeConverter::XkbKeycodeToDomCode(uint32_t xkb_keycode) {
   // Currently XKB keycode is the native keycode.
@@ -184,7 +174,7 @@ int KeycodeConverter::DomCodeToEvdevCode(DomCode code) {
 }
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
 // static
 DomCode KeycodeConverter::MapUSPositionalShortcutKeyToDomCode(
     KeyboardCode key_code) {
@@ -436,7 +426,7 @@ int KeycodeConverter::UsbKeycodeToNativeKeycode(uint32_t usb_keycode) {
   // Deal with some special-cases that don't fit the 1:1 mapping.
   if (usb_keycode == 0x070032)  // non-US hash.
     usb_keycode = 0x070031;     // US backslash.
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   if (usb_keycode == 0x070046) // PrintScreen.
     usb_keycode = 0x070068; // F13.
 #endif

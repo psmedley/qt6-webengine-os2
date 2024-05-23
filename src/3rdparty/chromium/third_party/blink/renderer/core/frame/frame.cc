@@ -32,6 +32,8 @@
 
 #include <memory>
 
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_remote_frame_client.h"
@@ -42,6 +44,7 @@
 #include "third_party/blink/renderer/core/dom/increment_load_event_delay_count.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/execution_context/window_agent_factory.h"
+#include "third_party/blink/renderer/core/frame/frame_owner.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/page_dismissal_scope.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_owner.h"
@@ -133,6 +136,7 @@ bool Frame::Detach(FrameDetachType type) {
       provisional_frame_->Detach(FrameDetachType::kRemove);
     }
     SetOpener(nullptr);
+    opened_frame_tracker_.Dispose();
     // Clearing the window proxies can call back into `LocalFrameClient`, so
     // this must be done before nulling out `client_` below.
     GetWindowProxyManager()->ClearForClose();
@@ -191,12 +195,20 @@ bool Frame::IsMainFrame() const {
   return !Tree().Parent();
 }
 
+bool Frame::IsOutermostMainFrame() const {
+  return IsMainFrame() && !IsInFencedFrameTree();
+}
+
 bool Frame::IsCrossOriginToMainFrame() const {
   DCHECK(GetSecurityContext());
   const SecurityOrigin* security_origin =
       GetSecurityContext()->GetSecurityOrigin();
   return !security_origin->CanAccess(
       Tree().Top().GetSecurityContext()->GetSecurityOrigin());
+}
+
+bool Frame::IsCrossOriginToOutermostMainFrame() const {
+  return IsCrossOriginToMainFrame() || IsInFencedFrameTree();
 }
 
 bool Frame::IsCrossOriginToParentFrame() const {
@@ -257,6 +269,10 @@ WindowProxy* Frame::GetWindowProxy(DOMWrapperWorld& world) {
   return window_proxy_manager_->GetWindowProxy(world);
 }
 
+WindowProxy* Frame::GetWindowProxyMaybeUninitialized(DOMWrapperWorld& world) {
+  return window_proxy_manager_->GetWindowProxyMaybeUninitialized(world);
+}
+
 void Frame::DidChangeVisibilityState() {
   HeapVector<Member<Frame>> child_frames;
   for (Frame* child = Tree().FirstChild(); child;
@@ -268,7 +284,10 @@ void Frame::DidChangeVisibilityState() {
 
 void Frame::NotifyUserActivationInFrameTree(
     mojom::blink::UserActivationNotificationType notification_type) {
-  for (Frame* node = this; node; node = node->Tree().Parent()) {
+  // TODO(crbug.com/1262022): Remove this once we use MPArch as the underlying
+  // fenced frames implementation, instead of ShadowDOM.
+  for (Frame* node = this; node;
+       node = node->Tree().Parent(FrameTreeBoundary::kFenced)) {
     node->user_activation_state_.Activate(notification_type);
   }
 
@@ -280,8 +299,9 @@ void Frame::NotifyUserActivationInFrameTree(
     const SecurityOrigin* security_origin =
         local_frame->GetSecurityContext()->GetSecurityOrigin();
 
-    Frame& root = Tree().Top();
-    for (Frame* node = &root; node; node = node->Tree().TraverseNext(&root)) {
+    for (Frame *top = &Tree().Top(FrameTreeBoundary::kFenced), *node = top;
+         node;
+         node = node->Tree().TraverseNext(top, FrameTreeBoundary::kFenced)) {
       auto* local_frame_node = DynamicTo<LocalFrame>(node);
       if (local_frame_node &&
           security_origin->CanAccess(
@@ -294,14 +314,17 @@ void Frame::NotifyUserActivationInFrameTree(
 
 bool Frame::ConsumeTransientUserActivationInFrameTree() {
   bool was_active = user_activation_state_.IsActive();
-  Frame& root = Tree().Top();
+  // TODO(crbug.com/1262022): Remove this once we use MPArch as the underlying
+  // fenced frames implementation, instead of ShadowDOM.
+  Frame& root = Tree().Top(FrameTreeBoundary::kFenced);
 
   // To record UMA once per consumption, we arbitrarily picked the LocalFrame
   // for root.
   if (IsA<LocalFrame>(root))
     root.user_activation_state_.RecordPreconsumptionUma();
 
-  for (Frame* node = &root; node; node = node->Tree().TraverseNext(&root))
+  for (Frame* node = &root; node;
+       node = node->Tree().TraverseNext(&root, FrameTreeBoundary::kFenced))
     node->user_activation_state_.ConsumeIfActive();
 
   return was_active;
@@ -331,6 +354,75 @@ void Frame::RenderFallbackContentWithResourceTiming(
   RenderFallbackContent();
 }
 
+bool Frame::IsInFencedFrameTree() const {
+  if (!blink::features::IsFencedFramesEnabled())
+    return false;
+
+  switch (blink::features::kFencedFramesImplementationTypeParam.Get()) {
+    case blink::features::FencedFramesImplementationType::kMPArch:
+      return GetPage()->IsMainFrameFencedFrameRoot();
+    case blink::features::FencedFramesImplementationType::kShadowDOM:
+      return Tree().Top(FrameTreeBoundary::kFenced) !=
+             Tree().Top(FrameTreeBoundary::kIgnoreFence);
+    default:
+      return false;
+  }
+}
+
+absl::optional<mojom::blink::FencedFrameMode> Frame::GetFencedFrameMode()
+    const {
+  DCHECK(!IsDetached());
+
+  if (!blink::features::IsFencedFramesEnabled())
+    return absl::nullopt;
+
+  if (!IsInFencedFrameTree())
+    return absl::nullopt;
+
+  switch (blink::features::kFencedFramesImplementationTypeParam.Get()) {
+    case blink::features::FencedFramesImplementationType::kMPArch:
+      return GetPage()->FencedFrameMode();
+    case blink::features::FencedFramesImplementationType::kShadowDOM:
+      DCHECK(Tree().Top(FrameTreeBoundary::kFenced).Owner());
+      return Tree()
+          .Top(FrameTreeBoundary::kFenced)
+          .Owner()
+          ->GetFramePolicy()
+          .fenced_frame_mode;
+  }
+}
+
+bool Frame::IsInShadowDOMOpaqueAdsFencedFrameTree() const {
+  if (!blink::features::IsFencedFramesEnabled())
+    return false;
+
+  switch (blink::features::kFencedFramesImplementationTypeParam.Get()) {
+    case blink::features::FencedFramesImplementationType::kMPArch:
+      return false;
+    case blink::features::FencedFramesImplementationType::kShadowDOM: {
+      Frame* top = &Tree().Top(FrameTreeBoundary::kFenced);
+      return top->Owner() && top->Owner()->GetFramePolicy().is_fenced &&
+             top->Owner()->GetFramePolicy().fenced_frame_mode ==
+                 mojom::blink::FencedFrameMode::kOpaqueAds;
+    }
+  }
+  return false;
+}
+
+bool Frame::IsInMPArchOpaqueAdsFencedFrameTree() const {
+  if (!blink::features::IsFencedFramesEnabled())
+    return false;
+
+  switch (blink::features::kFencedFramesImplementationTypeParam.Get()) {
+    case blink::features::FencedFramesImplementationType::kMPArch:
+      return GetPage() && GetPage()->FencedFrameMode() ==
+                              mojom::blink::FencedFrameMode::kOpaqueAds;
+    case blink::features::FencedFramesImplementationType::kShadowDOM:
+      return false;
+  }
+  return false;
+}
+
 void Frame::SetOwner(FrameOwner* owner) {
   owner_ = owner;
   UpdateInertIfPossible();
@@ -340,8 +432,9 @@ void Frame::SetOwner(FrameOwner* owner) {
 void Frame::UpdateInertIfPossible() {
   if (auto* frame_owner_element =
           DynamicTo<HTMLFrameOwnerElement>(owner_.Get())) {
-    if (frame_owner_element->IsInert())
-      SetIsInert(true);
+    const ComputedStyle* style = frame_owner_element->GetComputedStyle();
+    const LocalFrame* parent = DynamicTo<LocalFrame>(Parent());
+    SetIsInert((style && style->IsInert()) || (parent && parent->IsInert()));
   }
 }
 
@@ -529,11 +622,97 @@ void Frame::SetOpenerDoNotNotify(Frame* opener) {
   opener_ = opener;
 }
 
-Frame* Frame::Top() {
-  Frame* parent;
-  for (parent = this; parent->Parent(); parent = parent->Parent()) {
+Frame* Frame::Parent(FrameTreeBoundary frame_tree_boundary) const {
+  // TODO(crbug.com/1123606): Remove this once we use MPArch as the underlying
+  // fenced frames implementation, instead of the
+  // `FencedFrameShadowDOMDelegate`.
+  if (frame_tree_boundary == FrameTreeBoundary::kFenced &&
+      RuntimeEnabledFeatures::FencedFramesEnabled(
+          DomWindow()->GetExecutionContext()) &&
+      features::kFencedFramesImplementationTypeParam.Get() ==
+          features::FencedFramesImplementationType::kShadowDOM &&
+      Owner() && Owner()->GetFramePolicy().is_fenced) {
+    return nullptr;
+  }
+
+  return parent_;
+}
+
+Frame* Frame::Top(FrameTreeBoundary frame_tree_boundary) {
+  Frame* parent = this;
+  while (true) {
+    Frame* next_parent = parent->Parent(frame_tree_boundary);
+    if (!next_parent)
+      break;
+    parent = next_parent;
   }
   return parent;
+}
+
+Frame* Frame::FirstChild(FrameTreeBoundary frame_tree_boundary) const {
+  if (frame_tree_boundary == FrameTreeBoundary::kIgnoreFence) {
+    return first_child_;
+  }
+
+  // Skip over children that are the root of a fenced subtree (and therefore
+  // on the other side of a fenced frame boundary).
+  Frame* first_child = first_child_;
+  while (first_child && first_child->Owner()->GetFramePolicy().is_fenced) {
+    first_child = first_child->next_sibling_;
+  }
+  return first_child;
+}
+
+Frame* Frame::NextSibling(FrameTreeBoundary frame_tree_boundary) const {
+  if (frame_tree_boundary == FrameTreeBoundary::kIgnoreFence) {
+    return next_sibling_;
+  }
+
+  // When respecting fenced frame boundaries, a fenced frame root is always
+  // considered as having no siblings.
+  if (Owner() && Owner()->GetFramePolicy().is_fenced) {
+    return nullptr;
+  }
+
+  // Skip over siblings that are the root of a fenced subtree (and therefore
+  // on the other side of a fenced frame boundary).
+  Frame* sibling = next_sibling_;
+  while (sibling && sibling->Owner()->GetFramePolicy().is_fenced) {
+    sibling = sibling->next_sibling_;
+  }
+
+  return sibling;
+}
+
+bool Frame::FocusCrossesFencedBoundary() {
+  DCHECK(blink::features::IsFencedFramesShadowDOMBased());
+
+  if (Frame* focused_frame = GetPage()->GetFocusController().FocusedFrame()) {
+    if (!focused_frame->IsInFencedFrameTree() && !IsInFencedFrameTree())
+      return false;
+
+    return Tree().Top(FrameTreeBoundary::kFenced) !=
+           focused_frame->Tree().Top(FrameTreeBoundary::kFenced);
+  }
+
+  return false;
+}
+
+bool Frame::AllowFocusWithoutUserActivation() {
+  if (!features::IsFencedFramesEnabled())
+    return true;
+
+  switch (blink::features::kFencedFramesImplementationTypeParam.Get()) {
+    case blink::features::FencedFramesImplementationType::kMPArch:
+      // For a newly-loaded page, no page will have focus. We allow a non-fenced
+      // frame to get the first focus before enforcing if a page already has
+      // focus.
+      return (!GetPage()->GetFocusController().IsActive() &&
+              !IsInFencedFrameTree()) ||
+             GetPage()->GetFocusController().IsFocused();
+    case blink::features::FencedFramesImplementationType::kShadowDOM:
+      return !FocusCrossesFencedBoundary();
+  }
 }
 
 bool Frame::Swap(WebFrame* new_web_frame) {

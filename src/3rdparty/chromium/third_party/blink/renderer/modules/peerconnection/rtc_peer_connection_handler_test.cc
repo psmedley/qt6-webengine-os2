@@ -19,8 +19,8 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
@@ -301,6 +301,7 @@ class RTCPeerConnectionHandlerUnderTest : public RTCPeerConnectionHandler {
   }
 
   bool HasThermalUmaListener() const { return thermal_uma_listener(); }
+  bool HasSpeedLimitUmaListener() const { return speed_limit_uma_listener(); }
 };
 
 class RTCPeerConnectionHandlerTest : public SimTest {
@@ -342,13 +343,10 @@ class RTCPeerConnectionHandlerTest : public SimTest {
         mock_client_.get(), mock_dependency_factory_.Get());
   }
 
-  // Creates a WebKit local MediaStream.
+  // Creates a local MediaStream.
   MediaStreamDescriptor* CreateLocalMediaStream(const String& stream_label) {
     String video_track_label("video-label");
     String audio_track_label("audio-label");
-    auto* audio_source = MakeGarbageCollected<MediaStreamSource>(
-        audio_track_label, MediaStreamSource::kTypeAudio,
-        String::FromUTF8("audio_track"), false /* remote */);
     auto processed_audio_source = std::make_unique<ProcessedLocalAudioSource>(
         *LocalFrameRoot().GetFrame(),
         MediaStreamDevice(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
@@ -361,14 +359,24 @@ class RTCPeerConnectionHandlerTest : public SimTest {
         blink::scheduler::GetSingleThreadTaskRunnerForTesting());
     auto* processed_audio_source_ptr = processed_audio_source.get();
     processed_audio_source->SetAllowInvalidRenderFrameIdForTesting(true);
-    audio_source->SetPlatformSource(std::move(processed_audio_source));
+    auto* audio_source = MakeGarbageCollected<MediaStreamSource>(
+        audio_track_label, MediaStreamSource::kTypeAudio,
+        String::FromUTF8("audio_track"), false /* remote */,
+        std::move(processed_audio_source));
 
-    auto* video_source = MakeGarbageCollected<MediaStreamSource>(
-        video_track_label, MediaStreamSource::kTypeVideo,
-        String::FromUTF8("video_track"), false /* remote */);
     auto native_video_source = std::make_unique<MockMediaStreamVideoSource>();
     auto* native_video_source_ptr = native_video_source.get();
-    video_source->SetPlatformSource(std::move(native_video_source));
+
+    // Dropping the MediaStreamSource reference here is ok, as
+    // native_video_source will have a weak pointer to it as Owner(), which is
+    // picked up by the MediaStreamComponent created with CreateVideoTrack()
+    // below.
+    // TODO(https://crbug.com/1302689): Fix this crazy lifecycle jumping back
+    // and forth between GCed and non-GCed objects...
+    MakeGarbageCollected<MediaStreamSource>(
+        video_track_label, MediaStreamSource::kTypeVideo,
+        String::FromUTF8("video_track"), false /* remote */,
+        std::move(native_video_source));
 
     HeapVector<Member<MediaStreamComponent>> audio_components(
         static_cast<size_t>(1));
@@ -624,7 +632,7 @@ TEST_F(RTCPeerConnectionHandlerTest, Destruct) {
 }
 
 TEST_F(RTCPeerConnectionHandlerTest, NoCallbacksToClientAfterStop) {
-  pc_handler_->Stop();
+  pc_handler_->Close();
 
   EXPECT_CALL(*mock_client_.get(), NegotiationNeeded()).Times(0);
   pc_handler_->observer()->OnRenegotiationNeeded();
@@ -691,7 +699,7 @@ TEST_F(RTCPeerConnectionHandlerTest, setLocalDescription) {
   EXPECT_CALL(*mock_tracker_.Get(),
               TrackSetSessionDescription(pc_handler_.get(), String(kDummySdp),
                                          String(kDummySdpType),
-                                         PeerConnectionTracker::SOURCE_LOCAL));
+                                         PeerConnectionTracker::kSourceLocal));
   EXPECT_CALL(*mock_peer_connection_, SetLocalDescriptionForMock(_, _));
 
   pc_handler_->SetLocalDescription(
@@ -720,12 +728,12 @@ TEST_F(RTCPeerConnectionHandlerTest, setLocalDescriptionParseError) {
   EXPECT_CALL(*mock_tracker_.Get(),
               TrackSetSessionDescription(pc_handler_.get(), String(kDummySdp),
                                          String(kDummySdpType),
-                                         PeerConnectionTracker::SOURCE_LOCAL));
-  EXPECT_CALL(*mock_tracker_.Get(),
-              TrackSessionDescriptionCallback(
-                  pc_handler_.get(),
-                  PeerConnectionTracker::ACTION_SET_LOCAL_DESCRIPTION,
-                  String("OnFailure"), _));
+                                         PeerConnectionTracker::kSourceLocal));
+  EXPECT_CALL(
+      *mock_tracker_.Get(),
+      TrackSessionDescriptionCallback(
+          pc_handler_.get(), PeerConnectionTracker::kActionSetLocalDescription,
+          String("OnFailure"), _));
 
   // Used to simulate a parse failure.
   mock_dependency_factory_->SetFailToCreateSessionDescription(true);
@@ -741,7 +749,7 @@ TEST_F(RTCPeerConnectionHandlerTest, setRemoteDescription) {
   EXPECT_CALL(*mock_tracker_.Get(),
               TrackSetSessionDescription(pc_handler_.get(), String(kDummySdp),
                                          String(kDummySdpType),
-                                         PeerConnectionTracker::SOURCE_REMOTE));
+                                         PeerConnectionTracker::kSourceRemote));
   EXPECT_CALL(*mock_peer_connection_, SetRemoteDescriptionForMock(_, _));
 
   pc_handler_->SetRemoteDescription(
@@ -770,12 +778,12 @@ TEST_F(RTCPeerConnectionHandlerTest, setRemoteDescriptionParseError) {
   EXPECT_CALL(*mock_tracker_.Get(),
               TrackSetSessionDescription(pc_handler_.get(), String(kDummySdp),
                                          String(kDummySdpType),
-                                         PeerConnectionTracker::SOURCE_REMOTE));
-  EXPECT_CALL(*mock_tracker_.Get(),
-              TrackSessionDescriptionCallback(
-                  pc_handler_.get(),
-                  PeerConnectionTracker::ACTION_SET_REMOTE_DESCRIPTION,
-                  String("OnFailure"), _));
+                                         PeerConnectionTracker::kSourceRemote));
+  EXPECT_CALL(
+      *mock_tracker_.Get(),
+      TrackSessionDescriptionCallback(
+          pc_handler_.get(), PeerConnectionTracker::kActionSetRemoteDescription,
+          String("OnFailure"), _));
 
   // Used to simulate a parse failure.
   mock_dependency_factory_->SetFailToCreateSessionDescription(true);
@@ -813,7 +821,7 @@ TEST_F(RTCPeerConnectionHandlerTest, addICECandidate) {
 
   EXPECT_CALL(*mock_tracker_.Get(),
               TrackAddIceCandidate(pc_handler_.get(), candidate,
-                                   PeerConnectionTracker::SOURCE_REMOTE, true));
+                                   PeerConnectionTracker::kSourceRemote, true));
   auto* request = MakeGarbageCollected<DummyRTCVoidRequest>();
   pc_handler_->AddIceCandidate(request, candidate);
   RunMessageLoopsUntilIdle();
@@ -883,7 +891,7 @@ TEST_F(RTCPeerConnectionHandlerTest, GetStatsNoSelector) {
 TEST_F(RTCPeerConnectionHandlerTest, GetStatsAfterClose) {
   scoped_refptr<MockRTCStatsRequest> request(
       new rtc::RefCountedObject<MockRTCStatsRequest>());
-  pc_handler_->Stop();
+  pc_handler_->Close();
   RunMessageLoopsUntilIdle();
   pc_handler_->getStats(request.get());
   RunMessageLoopsUntilIdle();
@@ -1275,7 +1283,7 @@ TEST_F(RTCPeerConnectionHandlerTest, OnIceCandidate) {
   testing::InSequence sequence;
   EXPECT_CALL(*mock_tracker_.Get(),
               TrackAddIceCandidate(pc_handler_.get(), _,
-                                   PeerConnectionTracker::SOURCE_LOCAL, true));
+                                   PeerConnectionTracker::kSourceLocal, true));
   EXPECT_CALL(*mock_client_.get(), DidGenerateICECandidate(_));
 
   std::unique_ptr<webrtc::IceCandidateInterface> native_candidate(
@@ -1299,7 +1307,7 @@ TEST_F(RTCPeerConnectionHandlerTest, CreateDataChannel) {
   blink::WebString label = "d1";
   EXPECT_CALL(*mock_tracker_.Get(),
               TrackCreateDataChannel(pc_handler_.get(), testing::NotNull(),
-                                     PeerConnectionTracker::SOURCE_LOCAL));
+                                     PeerConnectionTracker::kSourceLocal));
   scoped_refptr<webrtc::DataChannelInterface> channel =
       pc_handler_->CreateDataChannel("d1", webrtc::DataChannelInit());
   EXPECT_TRUE(channel.get());
@@ -1325,7 +1333,7 @@ TEST_F(RTCPeerConnectionHandlerTest, ThermalResourceDefaultValue) {
   EXPECT_TRUE(mock_peer_connection_->adaptation_resources().IsEmpty());
   pc_handler_->OnThermalStateChange(
       mojom::blink::DeviceThermalState::kCritical);
-#if defined(OS_MAC) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
   bool expect_disabled = false;
 #else
   bool expect_disabled = true;
@@ -1382,6 +1390,15 @@ TEST_F(RTCPeerConnectionHandlerTest,
   MediaStreamDescriptor* local_stream = CreateLocalMediaStream("local_stream");
   EXPECT_TRUE(AddStream(local_stream));
   EXPECT_TRUE(pc_handler_->HasThermalUmaListener());
+}
+
+TEST_F(RTCPeerConnectionHandlerTest,
+       SpeedLimitUmaListenerCreatedWhenStreamAdded) {
+  base::HistogramTester histogram;
+  EXPECT_FALSE(pc_handler_->HasSpeedLimitUmaListener());
+  MediaStreamDescriptor* local_stream = CreateLocalMediaStream("local_stream");
+  EXPECT_TRUE(AddStream(local_stream));
+  EXPECT_TRUE(pc_handler_->HasSpeedLimitUmaListener());
 }
 
 }  // namespace blink

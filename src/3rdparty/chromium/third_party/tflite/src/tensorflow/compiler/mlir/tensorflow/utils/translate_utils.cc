@@ -29,16 +29,18 @@ void PopulateTfVersions(mlir::ModuleOp module, const VersionDef& versions) {
   auto bad_consumers = b.getNamedAttr(
       "bad_consumers",
       b.getI32ArrayAttr(llvm::ArrayRef<int32_t>(
-          versions.bad_consumers().begin(), versions.bad_consumers().end())));
-  module.setAttr("tf.versions",
-                 b.getDictionaryAttr(llvm::ArrayRef<mlir::NamedAttribute>(
-                     {producer, min_consumer, bad_consumers})));
+          versions.bad_consumers().data(),
+          versions.bad_consumers().data() + versions.bad_consumers().size())));
+  module->setAttr("tf.versions",
+                  b.getDictionaryAttr(llvm::ArrayRef<mlir::NamedAttribute>(
+                      {producer, min_consumer, bad_consumers})));
 }
 
 mlir::LogicalResult ExtractTfVersions(mlir::ModuleOp module,
                                       VersionDef* versions) {
   versions->Clear();
-  auto version_attr = module.getAttrOfType<mlir::DictionaryAttr>("tf.versions");
+  auto version_attr =
+      module->getAttrOfType<mlir::DictionaryAttr>("tf.versions");
   if (!version_attr) return mlir::failure();
 
   auto producer =
@@ -66,7 +68,7 @@ mlir::LogicalResult ExtractTfVersions(mlir::ModuleOp module,
 
 ::stream_executor::port::StatusOr<int64_t> GetTfGraphProducerVersion(
     mlir::ModuleOp module) {
-  auto versions = module.getAttrOfType<::mlir::DictionaryAttr>("tf.versions");
+  auto versions = module->getAttrOfType<::mlir::DictionaryAttr>("tf.versions");
   if (!versions) {
     return errors::Internal(
         "Missing 'tf.versions' attribute on the module, abort.\n");

@@ -128,11 +128,15 @@ void ComputePressureHost::UpdateObservers(ComputePressureSample sample,
   blink::mojom::ComputePressureState quantized_state =
       quantizer_.Quantize(sample);
 
-  // TODO(oyiptong): Rate-limit observers in non-visible frames instead of
-  //                 cutting off their updates completely.
+  // TODO(pwnall): Rate-limit observers in non-visible frames instead of
+  //               cutting off their updates completely.
   if (sample_time - last_report_time_ < visible_observer_rate_limit_) {
     return;
   }
+
+  // No need to send an update if previous value is similar.
+  if (last_report_state_ == quantized_state)
+    return;
 
   for (auto it = observers_.begin(); it != observers_.end(); ++it) {
     mojo::RemoteSetElementId observer_id = it.id();
@@ -144,14 +148,14 @@ void ComputePressureHost::UpdateObservers(ComputePressureSample sample,
 
     RenderFrameHost* rfh = content::RenderFrameHost::FromID(frame_id);
     if (!rfh || !rfh->IsActive()) {
-      // TODO(oyiptong): Is it safe to disconnect observers in this state?
+      // TODO(pwnall): Is it safe to disconnect observers in this state?
       continue;
     }
 
     if (rfh->GetVisibilityState() !=
         blink::mojom::PageVisibilityState::kVisible) {
-      // TODO(oyiptong): Rate-limit observers in non-visible frames instead of
-      //                 cutting off their updates completely.
+      // TODO(pwnall): Rate-limit observers in non-visible frames instead of
+      //               cutting off their updates completely.
       continue;
     }
 
@@ -160,6 +164,7 @@ void ComputePressureHost::UpdateObservers(ComputePressureSample sample,
     // implement sending (less frequent) updates to observers in non-visible
     // frames.
     last_report_time_ = sample_time;
+    last_report_state_ = quantized_state;
 
     (*it)->OnUpdate(quantized_state.Clone());
   }
@@ -194,9 +199,8 @@ void ComputePressureHost::ResetObserverState() {
   last_report_time_ = base::Time::Now();
 
   // Setting to an invalid value, so any state is considered an update.
-//  last_report_sample_ = {.cpu_utilization = -1, .cpu_speed = -1};
-  last_report_sample_.cpu_utilization = -1;
-  last_report_sample_.cpu_speed = -1;
+  last_report_state_ = {/* cpu_utilization */ -1,
+                        /* cpu_speed */ -1};
 }
 
 }  // namespace content

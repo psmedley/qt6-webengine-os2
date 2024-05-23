@@ -19,13 +19,15 @@
 #include "fxjs/fx_date_helpers.h"
 #include "fxjs/fxv8.h"
 #include "third_party/base/check.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-function.h"
+#include "v8/include/v8-isolate.h"
 
 void JSDestructor(v8::Local<v8::Object> obj) {
   CFXJS_Engine::SetObjectPrivate(obj, nullptr);
 }
 
-double JS_DateParse(const WideString& str) {
-  v8::Isolate* pIsolate = v8::Isolate::GetCurrent();
+double JS_DateParse(v8::Isolate* pIsolate, const WideString& str) {
   v8::Isolate::Scope isolate_scope(pIsolate);
   v8::HandleScope scope(pIsolate);
 

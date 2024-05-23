@@ -31,12 +31,13 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_impl.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/dom/tree_scope.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/html_link_element.h"
 #include "third_party/blink/renderer/core/html/html_style_element.h"
@@ -47,7 +48,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -301,12 +302,28 @@ void CSSStyleSheet::SetMediaQueries(
 bool CSSStyleSheet::MatchesMediaQueries(const MediaQueryEvaluator& evaluator) {
   viewport_dependent_media_query_results_.clear();
   device_dependent_media_query_results_.clear();
+  media_query_unit_flags_ = 0;
 
   if (!media_queries_)
     return true;
-  return evaluator.Eval(*media_queries_,
-                        &viewport_dependent_media_query_results_,
-                        &device_dependent_media_query_results_);
+  return evaluator.Eval(
+      *media_queries_,
+      MediaQueryEvaluator::Results{&viewport_dependent_media_query_results_,
+                                   &device_dependent_media_query_results_,
+                                   &media_query_unit_flags_});
+}
+
+void CSSStyleSheet::AddedAdoptedToTreeScope(TreeScope& tree_scope) {
+  adopted_tree_scopes_.insert(&tree_scope);
+}
+
+void CSSStyleSheet::RemovedAdoptedFromTreeScope(TreeScope& tree_scope) {
+  adopted_tree_scopes_.erase(&tree_scope);
+}
+
+bool CSSStyleSheet::HasDynamicViewportDependentMediaQueries() const {
+  return media_query_unit_flags_ &
+         MediaQueryExpValue::UnitFlags::kDynamicViewport;
 }
 
 unsigned CSSStyleSheet::length() const {
@@ -449,7 +466,7 @@ int CSSStyleSheet::addRule(const String& selector,
   if (!style.IsEmpty())
     text.Append(' ');
   text.Append('}');
-  insertRule(text.ToString(), index, exception_state);
+  insertRule(text.ReleaseString(), index, exception_state);
 
   // As per Microsoft documentation, always return -1.
   return -1;
@@ -462,13 +479,13 @@ int CSSStyleSheet::addRule(const String& selector,
 }
 
 ScriptPromise CSSStyleSheet::replace(ScriptState* script_state,
-                                     const String& text) {
+                                     const String& text,
+                                     ExceptionState& exception_state) {
   if (!IsConstructed()) {
-    return ScriptPromise::RejectWithDOMException(
-        script_state,
-        MakeGarbageCollected<DOMException>(
-            DOMExceptionCode::kNotAllowedError,
-            "Can't call replace on non-constructed CSSStyleSheets."));
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotAllowedError,
+        "Can't call replace on non-constructed CSSStyleSheets.");
+    return ScriptPromise();
   }
   SetText(text, CSSImportRules::kIgnoreWithWarning);
   // We currently parse synchronously, and since @import support was removed,
@@ -546,9 +563,9 @@ bool CSSStyleSheet::SheetLoaded() {
   return load_completed_;
 }
 
-void CSSStyleSheet::StartLoadingDynamicSheet() {
+void CSSStyleSheet::SetToPendingState() {
   SetLoadCompleted(false);
-  owner_node_->StartLoadingDynamicSheet();
+  owner_node_->SetToPendingState();
 }
 
 void CSSStyleSheet::SetLoadCompleted(bool completed) {

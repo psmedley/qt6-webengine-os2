@@ -23,21 +23,23 @@ struct FX_RECT;
 // Base class for all Device-Independent Bitmaps.
 class CFX_DIBBase : public Retainable {
  public:
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   // Matches Apple's kCGBitmapByteOrder32Little in fx_quartz_device.cpp.
   static constexpr FXDIB_Format kPlatformRGBFormat = FXDIB_Format::kRgb32;
-#else   // defined(OS_APPLE)
+#else   // BUILDFLAG(IS_APPLE)
   static constexpr FXDIB_Format kPlatformRGBFormat = FXDIB_Format::kRgb;
-#endif  // defined(OS_APPLE)
+#endif  // BUILDFLAG(IS_APPLE)
 
   ~CFX_DIBBase() override;
 
   virtual uint8_t* GetBuffer() const;
-  virtual const uint8_t* GetScanline(int line) const = 0;
+  virtual pdfium::span<const uint8_t> GetScanline(int line) const = 0;
   virtual bool SkipToScanline(int line, PauseIndicatorIface* pPause) const;
+  virtual size_t GetEstimatedImageMemoryBurden() const;
 
-  uint8_t* GetWritableScanline(int line) {
-    return const_cast<uint8_t*>(GetScanline(line));
+  pdfium::span<uint8_t> GetWritableScanline(int line) {
+    pdfium::span<const uint8_t> src = GetScanline(line);
+    return {const_cast<uint8_t*>(src.data()), src.size()};
   }
   int GetWidth() const { return m_Width; }
   int GetHeight() const { return m_Height; }
@@ -58,22 +60,23 @@ class CFX_DIBBase : public Retainable {
   // Copies into internally-owned palette.
   void SetPalette(pdfium::span<const uint32_t> src_palette);
 
-  RetainPtr<CFX_DIBitmap> Clone(const FX_RECT* pClip) const;
-  RetainPtr<CFX_DIBitmap> CloneConvert(FXDIB_Format format);
+  RetainPtr<CFX_DIBitmap> Realize() const;
+  RetainPtr<CFX_DIBitmap> ClipTo(const FX_RECT& rect) const;
+  RetainPtr<CFX_DIBitmap> ConvertTo(FXDIB_Format format) const;
   RetainPtr<CFX_DIBitmap> StretchTo(int dest_width,
                                     int dest_height,
                                     const FXDIB_ResampleOptions& options,
-                                    const FX_RECT* pClip);
+                                    const FX_RECT* pClip) const;
   RetainPtr<CFX_DIBitmap> TransformTo(const CFX_Matrix& mtDest,
                                       int* left,
-                                      int* top);
+                                      int* top) const;
   RetainPtr<CFX_DIBitmap> SwapXY(bool bXFlip, bool bYFlip) const;
   RetainPtr<CFX_DIBitmap> FlipImage(bool bXFlip, bool bYFlip) const;
 
   bool HasAlphaMask() const { return !!m_pAlphaMask; }
   uint32_t GetAlphaMaskPitch() const;
-  const uint8_t* GetAlphaMaskScanline(int line) const;
-  uint8_t* GetWritableAlphaMaskScanline(int line);
+  pdfium::span<const uint8_t> GetAlphaMaskScanline(int line) const;
+  pdfium::span<uint8_t> GetWritableAlphaMaskScanline(int line);
   uint8_t* GetAlphaMaskBuffer();
   RetainPtr<CFX_DIBitmap> GetAlphaMask();
   RetainPtr<CFX_DIBitmap> CloneAlphaMask() const;
@@ -93,7 +96,7 @@ class CFX_DIBBase : public Retainable {
                       const CFX_ClipRgn* pClipRgn) const;
 
 #if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-  void DebugVerifyBitmapIsPreMultiplied(void* buffer) const;
+  void DebugVerifyBufferIsPreMultiplied(void* buffer) const;
 #endif
 
  protected:
@@ -105,15 +108,15 @@ class CFX_DIBBase : public Retainable {
       int dest_pitch,
       int width,
       int height,
-      const RetainPtr<CFX_DIBBase>& pSrcBitmap,
+      const RetainPtr<const CFX_DIBBase>& pSrcBitmap,
       int src_left,
       int src_top,
       std::vector<uint32_t, FxAllocAllocator<uint32_t>>* pal);
 
+  RetainPtr<CFX_DIBitmap> ClipToInternal(const FX_RECT* pClip) const;
   void BuildPalette();
   bool BuildAlphaMask();
   int FindPalette(uint32_t color) const;
-  void GetPalette(uint32_t* pal, int alpha) const;
 
   FXDIB_Format m_Format = FXDIB_Format::kInvalid;
   int m_Width = 0;

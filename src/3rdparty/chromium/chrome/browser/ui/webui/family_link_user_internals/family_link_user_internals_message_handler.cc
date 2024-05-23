@@ -8,11 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_key.h"
@@ -44,11 +40,11 @@ base::ListValue* AddSection(base::ListValue* parent_list,
                             const std::string& title) {
   std::unique_ptr<base::DictionaryValue> section(new base::DictionaryValue);
   std::unique_ptr<base::ListValue> section_contents(new base::ListValue);
-  section->SetString("title", title);
+  section->SetStringKey("title", title);
   // Grab a raw pointer to the result before |Pass()|ing it on.
   base::ListValue* result =
       section->SetList("data", std::move(section_contents));
-  parent_list->Append(std::move(section));
+  parent_list->Append(base::Value::FromUniquePtrValue(std::move(section)));
   return result;
 }
 
@@ -57,9 +53,9 @@ void AddSectionEntry(base::ListValue* section_list,
                      const std::string& name,
                      bool value) {
   std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
-  entry->SetString("stat_name", name);
-  entry->SetBoolean("stat_value", value);
-  entry->SetBoolean("is_valid", true);
+  entry->SetStringKey("stat_name", name);
+  entry->SetBoolKey("stat_value", value);
+  entry->SetBoolKey("is_valid", true);
   section_list->Append(std::move(entry));
 }
 
@@ -68,9 +64,9 @@ void AddSectionEntry(base::ListValue* section_list,
                      const std::string& name,
                      const std::string& value) {
   std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
-  entry->SetString("stat_name", name);
-  entry->SetString("stat_value", value);
-  entry->SetBoolean("is_valid", true);
+  entry->SetStringKey("stat_name", name);
+  entry->SetStringKey("stat_value", value);
+  entry->SetBoolKey("is_valid", true);
   section_list->Append(std::move(entry));
 }
 
@@ -129,19 +125,19 @@ FamilyLinkUserInternalsMessageHandler::
 void FamilyLinkUserInternalsMessageHandler::RegisterMessages() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "registerForEvents",
       base::BindRepeating(
           &FamilyLinkUserInternalsMessageHandler::HandleRegisterForEvents,
           base::Unretained(this)));
 
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "getBasicInfo",
       base::BindRepeating(
           &FamilyLinkUserInternalsMessageHandler::HandleGetBasicInfo,
           base::Unretained(this)));
 
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "tryURL",
       base::BindRepeating(&FamilyLinkUserInternalsMessageHandler::HandleTryURL,
                           base::Unretained(this)));
@@ -165,7 +161,7 @@ FamilyLinkUserInternalsMessageHandler::GetSupervisedUserService() {
 
 void FamilyLinkUserInternalsMessageHandler::HandleRegisterForEvents(
     const base::ListValue* args) {
-  DCHECK(args->GetList().empty());
+  DCHECK(args->GetListDeprecated().empty());
   AllowJavascript();
   if (scoped_observation_.IsObserving())
     return;
@@ -180,11 +176,12 @@ void FamilyLinkUserInternalsMessageHandler::HandleGetBasicInfo(
 
 void FamilyLinkUserInternalsMessageHandler::HandleTryURL(
     const base::ListValue* args) {
-  DCHECK_EQ(2u, args->GetSize());
-  std::string callback_id;
-  std::string url_str;
-  if (!args->GetString(0, &callback_id) || !args->GetString(1, &url_str))
+  DCHECK_EQ(2u, args->GetListDeprecated().size());
+  if (!args->GetListDeprecated()[0].is_string() ||
+      !args->GetListDeprecated()[1].is_string())
     return;
+  const std::string& callback_id = args->GetListDeprecated()[0].GetString();
+  const std::string& url_str = args->GetListDeprecated()[1].GetString();
 
   GURL url = url_formatter::FixupURL(url_str, std::string());
   if (!url.is_valid())
@@ -200,12 +197,10 @@ void FamilyLinkUserInternalsMessageHandler::HandleTryURL(
             web_contents->GetOutermostWebContents());
   }
 
-  std::map<std::string, std::u16string> allowlists =
-      filter->GetMatchingAllowlistTitles(url);
   filter->GetFilteringBehaviorForURLWithAsyncChecks(
       url,
       base::BindOnce(&FamilyLinkUserInternalsMessageHandler::OnTryURLResult,
-                     weak_factory_.GetWeakPtr(), allowlists, callback_id),
+                     weak_factory_.GetWeakPtr(), callback_id),
       skip_manual_parent_filter);
 }
 
@@ -275,24 +270,15 @@ void FamilyLinkUserInternalsMessageHandler::SendFamilyLinkUserSettings(
 }
 
 void FamilyLinkUserInternalsMessageHandler::OnTryURLResult(
-    const std::map<std::string, std::u16string>& allowlists,
     const std::string& callback_id,
     SupervisedUserURLFilter::FilteringBehavior behavior,
     supervised_user_error_page::FilteringBehaviorReason reason,
     bool uncertain) {
-  std::vector<std::string> allowlists_list;
-  for (const auto& allowlist : allowlists) {
-    allowlists_list.push_back(
-        base::StringPrintf("%s: %s", allowlist.first.c_str(),
-                           base::UTF16ToUTF8(allowlist.second).c_str()));
-  }
-  std::string allowlists_str = base::JoinString(allowlists_list, "; ");
   base::DictionaryValue result;
-  result.SetString("allowResult",
-                   FilteringBehaviorToString(behavior, uncertain));
-  result.SetBoolean("manual", reason == supervised_user_error_page::MANUAL &&
+  result.SetStringKey("allowResult",
+                      FilteringBehaviorToString(behavior, uncertain));
+  result.SetBoolKey("manual", reason == supervised_user_error_page::MANUAL &&
                                   behavior == SupervisedUserURLFilter::ALLOW);
-  result.SetString("allowlists", allowlists_str);
   ResolveJavascriptCallback(base::Value(callback_id), result);
 }
 
@@ -305,8 +291,8 @@ void FamilyLinkUserInternalsMessageHandler::OnURLChecked(
     bool uncertain) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::DictionaryValue result;
-  result.SetString("url", url.possibly_invalid_spec());
-  result.SetString("result", FilteringBehaviorToString(behavior, uncertain));
-  result.SetString("reason", FilteringBehaviorReasonToString(reason));
+  result.SetStringKey("url", url.possibly_invalid_spec());
+  result.SetStringKey("result", FilteringBehaviorToString(behavior, uncertain));
+  result.SetStringKey("reason", FilteringBehaviorReasonToString(reason));
   FireWebUIListener("filtering-result-received", result);
 }

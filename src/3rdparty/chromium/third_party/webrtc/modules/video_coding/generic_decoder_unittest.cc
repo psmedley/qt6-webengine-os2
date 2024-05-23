@@ -15,6 +15,7 @@
 
 #include "absl/types/optional.h"
 #include "api/task_queue/default_task_queue_factory.h"
+#include "api/video_codecs/video_decoder.h"
 #include "common_video/test/utilities.h"
 #include "modules/video_coding/timing.h"
 #include "rtc_base/event.h"
@@ -23,6 +24,7 @@
 #include "test/fake_decoder.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 namespace video_coding {
@@ -65,22 +67,23 @@ class GenericDecoderTest : public ::testing::Test {
  protected:
   GenericDecoderTest()
       : clock_(0),
-        timing_(&clock_),
+        timing_(&clock_, field_trials_),
         task_queue_factory_(CreateDefaultTaskQueueFactory()),
         decoder_(task_queue_factory_.get()),
-        vcm_callback_(&timing_, &clock_),
+        vcm_callback_(&timing_, &clock_, field_trials_),
         generic_decoder_(&decoder_) {}
 
   void SetUp() override {
     generic_decoder_.RegisterDecodeCompleteCallback(&vcm_callback_);
     vcm_callback_.SetUserReceiveCallback(&user_callback_);
-    VideoCodec settings;
-    settings.codecType = kVideoCodecVP8;
-    settings.width = 10;
-    settings.height = 10;
-    generic_decoder_.InitDecode(&settings, /*numberOfCores=*/4);
+    VideoDecoder::Settings settings;
+    settings.set_codec_type(kVideoCodecVP8);
+    settings.set_max_render_resolution({10, 10});
+    settings.set_number_of_cores(4);
+    generic_decoder_.Configure(settings);
   }
 
+  test::ScopedKeyValueConfig field_trials_;
   SimulatedClock clock_;
   VCMTiming timing_;
   std::unique_ptr<TaskQueueFactory> task_queue_factory_;

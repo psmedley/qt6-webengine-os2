@@ -82,12 +82,12 @@ const _bindOutputStream = function(stream: Common.StringOutputStream.OutputStrea
 };
 
 const _discardOutputStream = function(id: number): void {
-  _boundStreams[id].close();
+  void _boundStreams[id].close();
   delete _boundStreams[id];
 };
 
 export const streamWrite = function(id: number, chunk: string): void {
-  _boundStreams[id].write(chunk);
+  void _boundStreams[id].write(chunk);
 };
 export interface LoadErrorDescription {
   statusCode: number;
@@ -105,9 +105,10 @@ export let load = function(
         arg0: boolean, arg1: {
           [x: string]: string,
         },
-        arg2: string, arg3: LoadErrorDescription) => void): void {
+        arg2: string, arg3: LoadErrorDescription) => void,
+    allowFileUNCPaths: boolean): void {
   const stream = new Common.StringOutputStream.StringOutputStream();
-  loadAsStream(url, headers, stream, mycallback);
+  loadAsStream(url, headers, stream, mycallback, allowFileUNCPaths);
 
   function mycallback(
       success: boolean, headers: {
@@ -242,11 +243,24 @@ export const loadAsStream = function(
         ((arg0: boolean, arg1: {
            [x: string]: string,
          },
-          arg2: LoadErrorDescription) => void)): void {
+          arg2: LoadErrorDescription) => void),
+    allowFileUNCPaths?: boolean): void {
   const streamId = _bindOutputStream(stream);
   const parsedURL = new Common.ParsedURL.ParsedURL(url);
   if (parsedURL.isDataURL()) {
     loadXHR(url).then(dataURLDecodeSuccessful).catch(dataURLDecodeFailed);
+    return;
+  }
+
+  if (!allowFileUNCPaths && url.startsWith('file:////')) {
+    if (callback) {
+      callback(/* success */ false, /* headers */ {}, {
+        statusCode: 400,  // BAD_REQUEST
+        netError: -20,    // BLOCKED_BY_CLIENT
+        netErrorName: 'net::BLOCKED_BY_CLIENT',
+        message: 'Loading from a Windows Share via UNC path is prohibited for security reasons.',
+      });
+    }
     return;
   }
 

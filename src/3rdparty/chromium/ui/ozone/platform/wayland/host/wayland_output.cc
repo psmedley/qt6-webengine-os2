@@ -4,37 +4,38 @@
 
 #include "ui/ozone/platform/wayland/host/wayland_output.h"
 
+#include <xdg-output-unstable-v1-client-protocol.h>
+
 #include "base/logging.h"
 #include "ui/display/display.h"
 #include "ui/gfx/color_space.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
 #include "ui/ozone/platform/wayland/host/wayland_output_manager.h"
+#include "ui/ozone/platform/wayland/host/xdg_output.h"
 
 namespace ui {
 
 namespace {
-constexpr uint32_t kMinWlOutputVersion = 2;
+// TODO(crbug.com/1279681): support newer versions.
+constexpr uint32_t kMinVersion = 2;
 }
 
 // static
-void WaylandOutput::Register(WaylandConnection* connection) {
-  connection->RegisterGlobalObjectFactory("wl_output",
-                                          &WaylandOutput::Instantiate);
-}
+constexpr char WaylandOutput::kInterfaceName[];
 
 // static
 void WaylandOutput::Instantiate(WaylandConnection* connection,
                                 wl_registry* registry,
                                 uint32_t name,
+                                const std::string& interface,
                                 uint32_t version) {
-  if (version < kMinWlOutputVersion) {
-    LOG(ERROR)
-        << "Unable to bind to the unsupported wl_output object with version= "
-        << version << ". Minimum supported version is " << kMinWlOutputVersion;
+  DCHECK_EQ(interface, kInterfaceName);
+
+  if (!wl::CanBind(interface, version, kMinVersion, kMinVersion)) {
     return;
   }
 
-  auto output = wl::Bind<wl_output>(registry, name, version);
+  auto output = wl::Bind<wl_output>(registry, name, kMinVersion);
   if (!output) {
     LOG(ERROR) << "Failed to bind to wl_output global";
     return;
@@ -47,13 +48,22 @@ void WaylandOutput::Instantiate(WaylandConnection* connection,
   connection->wayland_output_manager_->AddWaylandOutput(name, output.release());
 }
 
-WaylandOutput::WaylandOutput(uint32_t output_id, wl_output* output)
-    : output_id_(output_id), output_(output) {
+WaylandOutput::WaylandOutput(uint32_t output_id,
+                             wl_output* output,
+                             WaylandConnection* connection)
+    : output_id_(output_id), output_(output), connection_(connection) {
   wl_output_set_user_data(output_.get(), this);
 }
 
 WaylandOutput::~WaylandOutput() {
   wl_output_set_user_data(output_.get(), nullptr);
+}
+
+void WaylandOutput::InitializeXdgOutput(
+    zxdg_output_manager_v1* xdg_output_manager) {
+  DCHECK(!xdg_output_);
+  xdg_output_ = std::make_unique<XDGOutput>(
+      zxdg_output_manager_v1_get_xdg_output(xdg_output_manager, output_.get()));
 }
 
 void WaylandOutput::Initialize(Delegate* delegate) {
@@ -74,8 +84,20 @@ float WaylandOutput::GetUIScaleFactor() const {
              : scale_factor();
 }
 
-void WaylandOutput::TriggerDelegateNotifications() const {
-  DCHECK(!rect_in_physical_pixels_.IsEmpty());
+void WaylandOutput::TriggerDelegateNotifications() {
+  if (xdg_output_ && connection_->surface_submission_in_pixel_coordinates()) {
+    DCHECK(!rect_in_physical_pixels_.IsEmpty());
+    const gfx::Size logical_size = xdg_output_->logical_size();
+    if (!logical_size.IsEmpty()) {
+      if (logical_size.width() >= logical_size.height()) {
+        scale_factor_ = rect_in_physical_pixels_.width() /
+                        static_cast<float>(logical_size.width());
+      } else {
+        scale_factor_ = rect_in_physical_pixels_.height() /
+                        static_cast<float>(logical_size.height());
+      }
+    }
+  }
   delegate_->OnOutputHandleMetrics(output_id_, rect_in_physical_pixels_,
                                    scale_factor_, transform_);
 }

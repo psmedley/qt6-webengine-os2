@@ -5,10 +5,9 @@
 #ifndef GPU_CONFIG_VULKAN_INFO_H_
 #define GPU_CONFIG_VULKAN_INFO_H_
 
-#include "third_party/vulkan-deps/vulkan-headers/src/include/vulkan/vulkan.h"
+#include "third_party/vulkan-deps/vulkan-headers/src/include/vulkan/vulkan_core.h"
 #include <vector>
 
-#include "base/macros.h"
 #include "base/strings/string_piece.h"
 #include "gpu/gpu_export.h"
 #include "ui/gfx/extension_set.h"

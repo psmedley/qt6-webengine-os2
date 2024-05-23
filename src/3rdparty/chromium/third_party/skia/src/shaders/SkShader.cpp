@@ -27,7 +27,11 @@
 #include "src/shaders/SkTransformShader.h"
 
 #if SK_SUPPORT_GPU
-#include "src/gpu/GrFragmentProcessor.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
+#endif
+
+#ifdef SK_ENABLE_SKSL
+#include "src/core/SkKeyHelpers.h"
 #endif
 
 SkShaderBase::SkShaderBase(const SkMatrix* localMatrix)
@@ -147,6 +151,15 @@ SkUpdatableShader* SkShaderBase::updatableShader(SkArenaAlloc* alloc) const {
 SkUpdatableShader* SkShaderBase::onUpdatableShader(SkArenaAlloc* alloc) const {
     return nullptr;
 }
+
+#ifdef SK_ENABLE_SKSL
+// TODO: add implementations for derived classes
+void SkShaderBase::addToKey(const SkKeyContext& keyContext,
+                            SkPaintParamsKeyBuilder* builder,
+                            SkPipelineDataGatherer* gatherer) const {
+    SolidColorShaderBlock::AddToKey(keyContext, builder, gatherer, {1, 0, 0, 1});
+}
+#endif
 
 sk_sp<SkShader> SkShaders::Empty() { return sk_make_sp<SkEmptyShader>(); }
 sk_sp<SkShader> SkShaders::Color(SkColor color) { return sk_make_sp<SkColorShader>(color); }

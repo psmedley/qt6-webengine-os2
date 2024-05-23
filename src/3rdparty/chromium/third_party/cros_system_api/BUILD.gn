@@ -14,11 +14,16 @@ group("all") {
     ":system_api-biod-protos",
     ":system_api-bootlockbox-goprotos",
     ":system_api-bootlockbox-protos",
+    ":system_api-cdm_oemcrypto-protos",
     ":system_api-chaps-protos",
     ":system_api-chunneld-protos",
     ":system_api-cryptohome-goprotos",
+    ":system_api-dlcservice-goprotos",
     ":system_api-dlcservice-protos",
     ":system_api-dlp-protos",
+    ":system_api-fusebox-protos",
+    ":system_api-hps-goprotos",
+    ":system_api-hps-protos",
     ":system_api-kerberos-goprotos",
     ":system_api-kerberos-protos",
     ":system_api-login_manager-goprotos",
@@ -28,6 +33,7 @@ group("all") {
     ":system_api-metrics_event-goprotos",
     ":system_api-metrics_event-protos",
     ":system_api-minios-protos",
+    ":system_api-ml-protos",
     ":system_api-oobe_config-protos",
     ":system_api-patchpanel-goprotos",
     ":system_api-patchpanel-protos",
@@ -35,6 +41,7 @@ group("all") {
     ":system_api-plugin_vm_service-protos",
     ":system_api-power_manager-goprotos",
     ":system_api-power_manager-protos",
+    ":system_api-privacy_screen-protos",
     ":system_api-protos",
     ":system_api-rmad-protos",
     ":system_api-runtime_probe-goprotos",
@@ -53,6 +60,7 @@ group("all") {
     ":system_api-vm_concierge-goprotos",
     ":system_api-vm_concierge-protos",
     ":system_api-vm_disk_management-protos",
+    ":system_api-vm_launch-protos",
     ":system_api-vm_permission_service-protos",
     ":system_api-vm_plugin_dispatcher-goprotos",
     ":system_api-vm_plugin_dispatcher-protos",
@@ -100,6 +108,7 @@ proto_library("system_api-power_manager-protos") {
     "${proto_in_dir}/suspend.proto",
     "${proto_in_dir}/switch_states.proto",
     "${proto_in_dir}/thermal.proto",
+    "${proto_in_dir}/user_charging_event.proto",
   ]
   standalone = true
 }
@@ -117,6 +126,7 @@ goproto_library("system_api-power_manager-goprotos") {
     "${proto_in_dir}/suspend.proto",
     "${proto_in_dir}/switch_states.proto",
     "${proto_in_dir}/thermal.proto",
+    "${proto_in_dir}/user_charging_event.proto",
   ]
 }
 
@@ -125,10 +135,10 @@ proto_library("system_api-cryptohome-protos") {
   proto_out_dir = "include/cryptohome/proto_bindings"
   sources = [
     "${proto_in_dir}/UserDataAuth.proto",
+    "${proto_in_dir}/auth_factor.proto",
     "${proto_in_dir}/fido.proto",
     "${proto_in_dir}/key.proto",
     "${proto_in_dir}/rpc.proto",
-    "${proto_in_dir}/signed_secret.proto",
   ]
   standalone = true
 
@@ -344,6 +354,13 @@ proto_library("system_api-vm_sk_forwarding-protos") {
   standalone = true
 }
 
+proto_library("system_api-vm_launch-protos") {
+  proto_in_dir = "dbus/vm_launch"
+  proto_out_dir = "include/vm_launch/proto_bindings"
+  sources = [ "${proto_in_dir}/launch.proto" ]
+  standalone = true
+}
+
 proto_library("system_api-vm_disk_management-protos") {
   proto_in_dir = "dbus/vm_disk_management"
   proto_out_dir = "include/vm_disk_management/proto_bindings"
@@ -406,6 +423,12 @@ proto_library("system_api-dlcservice-protos") {
   proto_out_dir = "include/dlcservice/proto_bindings"
   sources = [ "${proto_in_dir}/dlcservice.proto" ]
   standalone = true
+}
+
+goproto_library("system_api-dlcservice-goprotos") {
+  proto_in_dir = "dbus/dlcservice"
+  proto_out_dir = "go/src/"
+  sources = [ "${proto_in_dir}/dlcservice.proto" ]
 }
 
 proto_library("system_api-update_engine-protos") {
@@ -491,9 +514,57 @@ proto_library("system_api-dlp-protos") {
   standalone = true
 }
 
+proto_library("system_api-hps-protos") {
+  proto_in_dir = "dbus/hps"
+  proto_out_dir = "include/hps/proto_bindings"
+  sources = [ "${proto_in_dir}/hps_service.proto" ]
+  standalone = true
+}
+
+goproto_library("system_api-hps-goprotos") {
+  proto_in_dir = "dbus/hps"
+  proto_out_dir = "go/src/"
+  sources = [ "${proto_in_dir}/hps_service.proto" ]
+}
+
 proto_library("system_api-rmad-protos") {
   proto_in_dir = "dbus/rmad"
   proto_out_dir = "include/rmad/proto_bindings"
   sources = [ "${proto_in_dir}/rmad.proto" ]
+  standalone = true
+}
+
+proto_library("system_api-fusebox-protos") {
+  proto_in_dir = "dbus/fusebox"
+  proto_out_dir = "include/fusebox/proto_bindings"
+  sources = [ "${proto_in_dir}/fusebox.proto" ]
+  standalone = true
+}
+
+proto_library("system_api-privacy_screen-protos") {
+  proto_in_dir = "dbus/privacy_screen"
+  proto_out_dir = "include/privacy_screen/proto_bindings"
+  sources = [ "${proto_in_dir}/privacy_screen.proto" ]
+  standalone = true
+}
+
+proto_library("system_api-cdm_oemcrypto-protos") {
+  proto_in_dir = "dbus/cdm_oemcrypto"
+  proto_out_dir = "include/cdm_oemcrypto/proto_bindings"
+  sources = [
+    "${proto_in_dir}/client_information.proto",
+    "${proto_in_dir}/secure_buffer.proto",
+  ]
+  standalone = true
+
+  # system_api-cdm_oemcrypto-protos is used by a shared_library
+  # object, so we need to build it with "-fPIC" instead of "-fPIE".
+  use_pic = true
+}
+
+proto_library("system_api-ml-protos") {
+  proto_in_dir = "dbus/ml"
+  proto_out_dir = "include/ml/proto_bindings"
+  sources = [ "${proto_in_dir}/ranker_example.proto" ]
   standalone = true
 }

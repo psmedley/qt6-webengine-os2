@@ -12,13 +12,14 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
+#include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_contents_delegate.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_manager.h"
+#include "components/no_state_prefetch/common/no_state_prefetch_final_status.h"
 #include "components/no_state_prefetch/common/no_state_prefetch_utils.h"
-#include "components/no_state_prefetch/common/prerender_final_status.h"
 #include "components/no_state_prefetch/common/render_frame_prerender_messages.mojom.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -85,7 +86,7 @@ class NoStatePrefetchContents::WebContentsDelegateImpl
   }
 
   bool ShouldAllowRendererInitiatedCrossProcessNavigation(
-      bool is_main_frame_navigation) override {
+      bool is_outermost_main_frame_navigation) override {
     // Cancel the prerender if the navigation attempts to transfer to a
     // different process.  Examples include server redirects to privileged pages
     // or cross-site subframe navigations in --site-per-process.
@@ -117,7 +118,7 @@ class NoStatePrefetchContents::WebContentsDelegateImpl
   }
 
  private:
-  NoStatePrefetchContents* no_state_prefetch_contents_;
+  raw_ptr<NoStatePrefetchContents> no_state_prefetch_contents_;
 };
 
 NoStatePrefetchContents::Observer::~Observer() {}
@@ -324,7 +325,7 @@ bool NoStatePrefetchContents::Matches(
   return base::Contains(alias_urls_, url);
 }
 
-void NoStatePrefetchContents::RenderProcessGone(
+void NoStatePrefetchContents::PrimaryMainFrameRenderProcessGone(
     base::TerminationStatus status) {
   if (status == base::TERMINATION_STATUS_STILL_RUNNING) {
     // The renderer process is being killed because of the browser/test
@@ -354,9 +355,6 @@ void NoStatePrefetchContents::DidStopLoading() {
 
 void NoStatePrefetchContents::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
-  // frames. This caller was converted automatically to the primary main frame
-  // to preserve its semantics. Follow up to confirm correctness.
   if (!navigation_handle->IsInPrimaryMainFrame() ||
       navigation_handle->IsSameDocument()) {
     return;
@@ -375,9 +373,6 @@ void NoStatePrefetchContents::DidStartNavigation(
 
 void NoStatePrefetchContents::DidRedirectNavigation(
     content::NavigationHandle* navigation_handle) {
-  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
-  // frames. This caller was converted automatically to the primary main frame
-  // to preserve its semantics. Follow up to confirm correctness.
   if (!navigation_handle->IsInPrimaryMainFrame())
     return;
 
@@ -396,9 +391,6 @@ void NoStatePrefetchContents::DidFinishLoad(
 
 void NoStatePrefetchContents::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
-  // frames. This caller was converted automatically to the primary main frame
-  // to preserve its semantics. Follow up to confirm correctness.
   if (!navigation_handle->IsInPrimaryMainFrame() ||
       !navigation_handle->HasCommitted()) {
     return;
@@ -503,11 +495,11 @@ std::unique_ptr<base::DictionaryValue> NoStatePrefetchContents::GetAsValue()
   if (!no_state_prefetch_contents_)
     return nullptr;
   auto dict_value = std::make_unique<base::DictionaryValue>();
-  dict_value->SetString("url", prerender_url_.spec());
+  dict_value->SetStringKey("url", prerender_url_.spec());
   base::TimeTicks current_time = base::TimeTicks::Now();
   base::TimeDelta duration = current_time - load_start_time_;
-  dict_value->SetInteger("duration", duration.InSeconds());
-  dict_value->SetBoolean(
+  dict_value->SetIntKey("duration", duration.InSeconds());
+  dict_value->SetBoolKey(
       "is_loaded",
       no_state_prefetch_contents_ && !no_state_prefetch_contents_->IsLoading());
   return dict_value;

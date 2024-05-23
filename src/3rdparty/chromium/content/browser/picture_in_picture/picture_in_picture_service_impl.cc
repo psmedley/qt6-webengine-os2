@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "content/browser/picture_in_picture/picture_in_picture_session.h"
-#include "content/browser/picture_in_picture/picture_in_picture_window_controller_impl.h"
+#include "content/browser/picture_in_picture/video_picture_in_picture_window_controller_impl.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/web_contents_delegate.h"
 
@@ -51,7 +51,7 @@ void PictureInPictureServiceImpl::StartSession(
     // picture-in-picture continues to be displayed while the page is in the
     // cache instead of closing.
     static_cast<RenderFrameHostImpl*>(render_frame_host())
-        ->OnSchedulerTrackedFeatureUsed(
+        ->OnBackForwardCacheDisablingStickyFeatureUsed(
             blink::scheduler::WebSchedulerTrackedFeature::kPictureInPicture);
   }
 
@@ -61,7 +61,7 @@ void PictureInPictureServiceImpl::StartSession(
 PictureInPictureServiceImpl::PictureInPictureServiceImpl(
     RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<blink::mojom::PictureInPictureService> receiver)
-    : DocumentServiceBase(render_frame_host, std::move(receiver)) {}
+    : DocumentService(render_frame_host, std::move(receiver)) {}
 
 PictureInPictureServiceImpl::~PictureInPictureServiceImpl() {
   // If the service is destroyed because the frame was destroyed, the session
@@ -69,9 +69,9 @@ PictureInPictureServiceImpl::~PictureInPictureServiceImpl() {
   GetController().OnServiceDeleted(this);
 }
 
-PictureInPictureWindowControllerImpl&
+VideoPictureInPictureWindowControllerImpl&
 PictureInPictureServiceImpl::GetController() {
-  return *PictureInPictureWindowControllerImpl::GetOrCreateForWebContents(
+  return *VideoPictureInPictureWindowControllerImpl::GetOrCreateForWebContents(
       WebContents::FromRenderFrameHost(render_frame_host()));
 }
 

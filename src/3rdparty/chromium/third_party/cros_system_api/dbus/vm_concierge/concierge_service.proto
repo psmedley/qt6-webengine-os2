@@ -32,6 +32,10 @@ message VirtualMachineSpec {
   // ID of a DLC package that contains the vm_tools.img for this vm. If empty
   // the vm_tools.img from the above dlc_id is used if available.
   string tools_dlc_id = 5;
+
+  // Optional path to the wayland server which should be passed into the VM. If
+  // absent the default path (${XDG_RUNTIME_DIR}/wayland-0) will be used.
+  string wayland_server = 6;
 }
 
 // The type of disk image.
@@ -75,6 +79,10 @@ message DiskImage {
 
   // Image type of the disk.
   DiskImageType image_type = 8;
+
+  // The block size of the device. The default block size is used when zero.
+  // Only ARCVM supports the field at the moment.
+  uint32 block_size = 9;
 }
 
 // Information about a particular VM.
@@ -107,6 +115,7 @@ message VmInfo {
     TERMINA = 1;
     ARC_VM = 2;
     PLUGIN_VM = 3;
+    BOREALIS = 4;
   };
 
   // What type of VM this is.
@@ -193,6 +202,22 @@ message StartVmRequest {
   // For each FdType in fds a file descriptor must be passed along with the
   // message and that file descriptor will be used for the type's purpose.
   repeated FdType fds = 16;
+
+  // Timeout (seconds) for VM startup
+  uint32 timeout = 20;
+
+  enum TerminaFeature {
+    // This list must stay in sync with the one in vm_guest.proto
+    UNKNOWN = 0;
+    USED_BY_TESTS = 1;
+    START_LXD = 2 [deprecated = true];
+    RESET_LXD_ON_LAUNCH = 3 [deprecated = true];
+    LXD_4_LTS = 4;
+    // This list must stay in sync with the one in vm_guest.proto
+  }
+  // Experimental Termina features to enable. Like Chrome feature flags but for
+  // inside the VM.
+  repeated TerminaFeature features = 21;
 
   reserved 13, 14, 6;
 }
@@ -295,6 +320,16 @@ message StartArcVmRequest {
   // How to configure the balloon policy. If set, LimitCacheBalloonPolicy is
   // used, otherwise BalanceAvailableBalloonPolicy is used.
   BalloonPolicyOptions balloon_policy = 13;
+
+  // Whether per-VM core scheduling should be used instead of the default one
+  // (per-vCPU core scheduing.) This option is no-op on devices that have
+  // neither MDS nor L1TF vulnerability. On those non-vulnerable devices, core
+  // scheduling is not used, and all vCPU threads can be assigned to any CPU
+  // cores without restrictions.
+  bool use_per_vm_core_scheduling = 14;
+
+  // The block size of the rootfs. The default block size is used when zero.
+  uint32 rootfs_block_size = 15;
 }
 
 enum VmStatus {
@@ -312,6 +347,9 @@ enum VmStatus {
 
   // The VM can't start because its disk/image is being manipulated.
   VM_STATUS_DISK_OP_IN_PROGRESS = 4;
+
+  // The VM is stopped.
+  VM_STATUS_STOPPED = 5;
 }
 
 // Information sent back by vm_concierge in response to a StartVm dbus message.
@@ -508,22 +546,30 @@ message GetVmEnterpriseReportingInfoResponse {
   string vm_kernel_version = 3;
 }
 
-// Request for creating RT vCPUs.
-message MakeRtVcpuRequest {
-  // The name of the VM.
-  string name = 1;
-
+// Request for completing the boot process of the ARC VM
+message ArcVmCompleteBootRequest {
   // The owner of the vm.
-  string owner_id = 2;
+  string owner_id = 1;
 }
 
-// Response sent back by vm_concierge for a MakeRtVcpuRequest dbus message.
-message MakeRtVcpuResponse {
-  // If true, the request succeeded.
-  bool success = 1;
+// Result of an ArcVmCompleteBootRequest
+enum ArcVmCompleteBootResult {
+  // Not used
+  UNKNOWN = 0;
 
-  // The failure_reason if the request could not be processed.
-  string failure_reason = 2;
+  // ArcVm boot completion operations completed successfully.
+  SUCCESS = 1;
+
+  // The incoming boot complete request was mal-formed
+  BAD_REQUEST = 2;
+
+  // ArcVm does not exist or could not be found
+  ARCVM_NOT_FOUND = 3;
+}
+
+// Response sent back by vm_concierge for a ArcVmCompleteBoot dbus message.
+message ArcVmCompleteBootResponse {
+  ArcVmCompleteBootResult result = 1;
 }
 
 // The type of storage location for a disk image.
@@ -1060,8 +1106,13 @@ enum CpuCgroup {
 enum CpuRestrictionState {
   // The CPU usage is relaxed.
   CPU_RESTRICTION_FOREGROUND = 0;
-  // The CPU usage is tightly restricted.
+  // The CPU usage is tightly restricted with cpu.shares.
   CPU_RESTRICTION_BACKGROUND = 1;
+  // The CPU usage is tightly restricted with both cpu.shares and
+  // cpu.cfs_quota_us cgroup. The latter sets an absolute quota for the VM
+  // even when other (non-VM) processes are not busy. Currently, this works
+  // only for ARCVM.
+  CPU_RESTRICTION_BACKGROUND_WITH_CFS_QUOTA_ENFORCED = 2;
 }
 
 // Information that must be included with every SetVmCpuRestriction dbus
@@ -1156,4 +1207,39 @@ message ReclaimVmMemoryResponse {
 
   // If the attempt to reclaim memory failed, the reason for failure.
   string failure_reason = 2;
+}
+
+// Request a list of all VMs owned by an id. Returns all VMs in Concierge's
+// VmMap that match the owner_id, which includes starting and running VMs, but
+// not stopped.
+message ListVmsRequest {
+  // The cryptohome id to get the list of VMs for.
+  string owner_id = 1;
+}
+
+// Message used for listing VMs.
+message ExtendedVmInfo {
+  // The name of the VM which has started.
+  string name = 1;
+
+  // The owner of the vm.
+  string owner_id = 2;
+
+  // Information about the VM that was started, if successful.
+  VmInfo vm_info = 3;
+
+  // Status of the VM.
+  VmStatus status = 4;
+}
+
+// Response to a ListVmsRequest.
+message ListVmsResponse {
+  // If true, vms is valid.
+  bool success = 1;
+
+  // If getting a list of VMs failed, the reason for the failure.
+  string failure_reason = 2;
+
+  // The list of VMs that concierge is managing.
+  repeated ExtendedVmInfo vms = 3;
 }

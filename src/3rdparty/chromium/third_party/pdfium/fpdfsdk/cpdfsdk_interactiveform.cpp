@@ -23,16 +23,16 @@
 #include "core/fpdfdoc/cpdf_formcontrol.h"
 #include "core/fpdfdoc/cpdf_interactiveform.h"
 #include "core/fxcrt/autorestorer.h"
+#include "core/fxcrt/fx_string_wrappers.h"
+#include "core/fxcrt/stl_util.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "core/fxge/cfx_path.h"
-#include "fpdfsdk/cpdfsdk_actionhandler.h"
 #include "fpdfsdk/cpdfsdk_annot.h"
 #include "fpdfsdk/cpdfsdk_annotiterator.h"
 #include "fpdfsdk/cpdfsdk_formfillenvironment.h"
 #include "fpdfsdk/cpdfsdk_pageview.h"
 #include "fpdfsdk/cpdfsdk_widget.h"
 #include "fpdfsdk/formfiller/cffl_formfield.h"
-#include "fpdfsdk/ipdfsdk_annothandler.h"
 #include "fxjs/ijs_event_context.h"
 #include "fxjs/ijs_runtime.h"
 #include "third_party/base/check.h"
@@ -83,13 +83,12 @@ bool FDFToURLEncodedData(
   if (!pFields)
     return false;
 
-  std::ostringstream fdfEncodedData;
+  fxcrt::ostringstream fdfEncodedData;
   for (uint32_t i = 0; i < pFields->size(); i++) {
     CPDF_Dictionary* pField = pFields->GetDictAt(i);
     if (!pField)
       continue;
-    WideString name;
-    name = pField->GetUnicodeTextFor("T");
+    WideString name = pField->GetUnicodeTextFor("T");
     ByteString name_b = name.ToDefANSI();
     ByteString csBValue = pField->GetStringFor("V");
     WideString csWValue = PDF_DecodeText(csBValue.raw_span());
@@ -99,12 +98,13 @@ bool FDFToURLEncodedData(
       fdfEncodedData << "&";
   }
 
-  size_t nBufSize = fdfEncodedData.tellp();
+  auto nBufSize = fdfEncodedData.tellp();
   if (nBufSize <= 0)
     return false;
 
-  pBuffer->resize(nBufSize);
-  memcpy(pBuffer->data(), fdfEncodedData.str().c_str(), nBufSize);
+  size_t copy_size = static_cast<size_t>(nBufSize);
+  pBuffer->resize(copy_size);
+  memcpy(pBuffer->data(), fdfEncodedData.str().c_str(), copy_size);
   return true;
 }
 
@@ -155,7 +155,7 @@ CPDFSDK_Widget* CPDFSDK_InteractiveForm::GetWidget(
 void CPDFSDK_InteractiveForm::GetWidgets(
     const WideString& sFieldName,
     std::vector<ObservedPtr<CPDFSDK_Annot>>* widgets) const {
-  for (int i = 0, sz = m_pInteractiveForm->CountFields(sFieldName); i < sz;
+  for (size_t i = 0, sz = m_pInteractiveForm->CountFields(sFieldName); i < sz;
        ++i) {
     CPDF_FormField* pFormField = m_pInteractiveForm->GetField(i, sFieldName);
     DCHECK(pFormField);
@@ -181,17 +181,20 @@ int CPDFSDK_InteractiveForm::GetPageIndexByAnnotDict(
   DCHECK(pAnnotDict);
 
   for (int i = 0, sz = pDocument->GetPageCount(); i < sz; i++) {
-    if (CPDF_Dictionary* pPageDict = pDocument->GetPageDictionary(i)) {
-      if (CPDF_Array* pAnnots = pPageDict->GetArrayFor("Annots")) {
-        for (int j = 0, jsz = pAnnots->size(); j < jsz; j++) {
-          CPDF_Object* pDict = pAnnots->GetDirectObjectAt(j);
-          if (pAnnotDict == pDict)
-            return i;
-        }
-      }
+    CPDF_Dictionary* pPageDict = pDocument->GetPageDictionary(i);
+    if (!pPageDict)
+      continue;
+
+    CPDF_Array* pAnnots = pPageDict->GetArrayFor("Annots");
+    if (!pAnnots)
+      continue;
+
+    for (size_t j = 0, jsz = pAnnots->size(); j < jsz; j++) {
+      CPDF_Object* pDict = pAnnots->GetDirectObjectAt(j);
+      if (pAnnotDict == pDict)
+        return i;
     }
   }
-
   return -1;
 }
 
@@ -279,16 +282,16 @@ void CPDFSDK_InteractiveForm::OnCalculate(CPDF_FormField* pFormField) {
     IJS_Runtime::ScopedEventContext pContext(pRuntime);
     pContext->OnField_Calculate(pFormField, pField, &sValue, &bRC);
 
-    Optional<IJS_Runtime::JS_Error> err = pContext->RunScript(csJS);
+    absl::optional<IJS_Runtime::JS_Error> err = pContext->RunScript(csJS);
     if (!err.has_value() && bRC && sValue != sOldValue)
       pField->SetValue(sValue, NotificationOption::kNotify);
   }
 }
 
-Optional<WideString> CPDFSDK_InteractiveForm::OnFormat(
+absl::optional<WideString> CPDFSDK_InteractiveForm::OnFormat(
     CPDF_FormField* pFormField) {
   if (!m_pFormFillEnv->IsJSPlatformPresent())
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   WideString sValue = pFormField->GetValue();
   IJS_Runtime* pRuntime = m_pFormFillEnv->GetIJSRuntime();
@@ -307,18 +310,18 @@ Optional<WideString> CPDFSDK_InteractiveForm::OnFormat(
       if (!script.IsEmpty()) {
         IJS_Runtime::ScopedEventContext pContext(pRuntime);
         pContext->OnField_Format(pFormField, &sValue);
-        Optional<IJS_Runtime::JS_Error> err = pContext->RunScript(script);
+        absl::optional<IJS_Runtime::JS_Error> err = pContext->RunScript(script);
         if (!err.has_value())
           return sValue;
       }
     }
   }
-  return pdfium::nullopt;
+  return absl::nullopt;
 }
 
 void CPDFSDK_InteractiveForm::ResetFieldAppearance(
     CPDF_FormField* pFormField,
-    Optional<WideString> sValue) {
+    absl::optional<WideString> sValue) {
   for (int i = 0, sz = pFormField->CountControls(); i < sz; i++) {
     CPDF_FormControl* pFormCtrl = pFormField->GetControl(i);
     DCHECK(pFormCtrl);
@@ -354,12 +357,12 @@ bool CPDFSDK_InteractiveForm::OnKeyStrokeCommit(CPDF_FormField* pFormField,
   if (!action.GetDict())
     return true;
 
-  CPDFSDK_FieldAction fa;
+  CFFL_FieldAction fa;
   fa.bModifier = false;
   fa.bShift = false;
   fa.sValue = csValue;
-  m_pFormFillEnv->GetActionHandler()->DoAction_FieldJavaScript(
-      action, CPDF_AAction::kKeyStroke, m_pFormFillEnv.Get(), pFormField, &fa);
+  m_pFormFillEnv->DoActionFieldJavaScript(action, CPDF_AAction::kKeyStroke,
+                                          pFormField, &fa);
   return fa.bRC;
 }
 
@@ -373,12 +376,12 @@ bool CPDFSDK_InteractiveForm::OnValidate(CPDF_FormField* pFormField,
   if (!action.GetDict())
     return true;
 
-  CPDFSDK_FieldAction fa;
+  CFFL_FieldAction fa;
   fa.bModifier = false;
   fa.bShift = false;
   fa.sValue = csValue;
-  m_pFormFillEnv->GetActionHandler()->DoAction_FieldJavaScript(
-      action, CPDF_AAction::kValidate, m_pFormFillEnv.Get(), pFormField, &fa);
+  m_pFormFillEnv->DoActionFieldJavaScript(action, CPDF_AAction::kValidate,
+                                          pFormField, &fa);
   return fa.bRC;
 }
 
@@ -555,7 +558,7 @@ void CPDFSDK_InteractiveForm::AfterSelectionChange(CPDF_FormField* pField) {
     return;
 
   OnCalculate(pField);
-  ResetFieldAppearance(pField, pdfium::nullopt);
+  ResetFieldAppearance(pField, absl::nullopt);
   UpdateField(pField);
 }
 

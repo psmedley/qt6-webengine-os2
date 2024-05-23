@@ -7,8 +7,6 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 
 namespace ash {
@@ -75,7 +73,12 @@ class UpdateRequiredScreenHandler : public UpdateRequiredView,
  public:
   using TView = UpdateRequiredView;
 
-  explicit UpdateRequiredScreenHandler(JSCallsContainer* js_calls_container);
+  UpdateRequiredScreenHandler();
+
+  UpdateRequiredScreenHandler(const UpdateRequiredScreenHandler&) = delete;
+  UpdateRequiredScreenHandler& operator=(const UpdateRequiredScreenHandler&) =
+      delete;
+
   ~UpdateRequiredScreenHandler() override;
 
  private:
@@ -99,17 +102,15 @@ class UpdateRequiredScreenHandler : public UpdateRequiredView,
   // BaseScreenHandler:
   void DeclareLocalizedValues(
       ::login::LocalizedValuesBuilder* builder) override;
-  void Initialize() override;
+  void InitializeDeprecated() override;
 
   ash::UpdateRequiredScreen* screen_ = nullptr;
 
-  // If true, Initialize() will call Show().
+  // If true, InitializeDeprecated() will call Show().
   bool show_on_init_ = false;
 
   // The domain name for which update required screen is being shown.
   std::string domain_;
-
-  DISALLOW_COPY_AND_ASSIGN(UpdateRequiredScreenHandler);
 };
 
 }  // namespace chromeos

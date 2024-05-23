@@ -16,13 +16,15 @@
 #include "ui/gfx/gfx_export.h"
 #include "ui/gfx/hdr_metadata.h"
 
-#if defined(USE_OZONE) || defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(USE_OZONE) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "ui/gfx/native_pixmap_handle.h"
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
 #include "ui/gfx/mac/io_surface.h"
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
+#include "base/types/token_type.h"
 #include "base/win/scoped_handle.h"
-#elif defined(OS_ANDROID)
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#elif BUILDFLAG(IS_ANDROID)
 #include "base/android/scoped_hardware_buffer_handle.h"
 #endif
 
@@ -51,12 +53,18 @@ enum GpuMemoryBufferType {
 
 using GpuMemoryBufferId = GenericSharedMemoryId;
 
+#if BUILDFLAG(IS_WIN)
+using DXGIHandleToken = base::TokenType<class DXGIHandleTokenTypeMarker>;
+#endif
+
 // TODO(crbug.com/863011): Convert this to a proper class to ensure the state is
 // always consistent, particularly that the only one handle is set at the same
 // time and it corresponds to |type|.
 struct GFX_EXPORT GpuMemoryBufferHandle {
+  static constexpr GpuMemoryBufferId kInvalidId = GpuMemoryBufferId(-1);
+
   GpuMemoryBufferHandle();
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   explicit GpuMemoryBufferHandle(
       base::android::ScopedHardwareBufferHandle handle);
 #endif
@@ -70,13 +78,14 @@ struct GFX_EXPORT GpuMemoryBufferHandle {
   base::UnsafeSharedMemoryRegion region;
   uint32_t offset = 0;
   int32_t stride = 0;
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
   NativePixmapHandle native_pixmap_handle;
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
   ScopedIOSurface io_surface;
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   base::win::ScopedHandle dxgi_handle;
-#elif defined(OS_ANDROID)
+  absl::optional<DXGIHandleToken> dxgi_token;
+#elif BUILDFLAG(IS_ANDROID)
   base::android::ScopedHardwareBufferHandle android_hardware_buffer;
 #endif
 };
@@ -107,9 +116,6 @@ class GFX_EXPORT GpuMemoryBuffer {
 
   // Returns the format for the buffer.
   virtual BufferFormat GetFormat() const = 0;
-
-  // Returns the size in pixels of the specified plane.
-  Size GetSizeOfPlane(gfx::BufferPlane plane) const;
 
   // Fills the stride in bytes for each plane of the buffer. The stride of
   // plane K is stored at index K-1 of the |stride| array.

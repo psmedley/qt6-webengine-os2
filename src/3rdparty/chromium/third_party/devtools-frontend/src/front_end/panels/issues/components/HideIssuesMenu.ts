@@ -3,13 +3,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import type * as Common from '../../../core/common/common.js';
+import * as Common from '../../../core/common/common.js';
+import * as i18n from '../../../core/i18n/i18n.js';
 import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
 import * as IconButton from '../../../ui/components/icon_button/icon_button.js';
-import * as IssuesManager from '../../../models/issues_manager/issues_manager.js';
-import * as i18n from '../../../core/i18n/i18n.js';
-import * as LitHtml from '../../../ui/lit-html/lit-html.js';
 import * as UI from '../../../ui/legacy/legacy.js';
+import * as LitHtml from '../../../ui/lit-html/lit-html.js';
 
 import hideIssuesMenuStyles from './hideIssuesMenu.css.js';
 
@@ -17,79 +16,47 @@ const UIStrings = {
   /**
   *@description Title for the tooltip of the (3 dots) Hide Issues menu icon.
   */
-  tooltipTitle: 'Hide issues menu',
-  /**
-  *@description Menu entry for hiding a particular issue, in the Hide Issues context menu.
-  */
-  hideIssueByCode: 'Hide issues like this',
-  /**
-  *@description Menu entry for Unhiding a particular issue, in the Hide Issues context menu.
-  */
-  UnhideIssueByCode: 'Unhide issues like this',
+  tooltipTitle: 'Hide issues',
 };
 
 const str_ = i18n.i18n.registerUIStrings('panels/issues/components/HideIssuesMenu.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 export interface HiddenIssuesMenuData {
-  issueCode: string;
-  forHiddenIssue: boolean;
+  menuItemLabel: Common.UIString.LocalizedString;
+  menuItemAction: () => void;
 }
 
 export class HideIssuesMenu extends HTMLElement {
   static readonly litTagName = LitHtml.literal`devtools-hide-issues-menu`;
-  private readonly shadow: ShadowRoot = this.attachShadow({mode: 'open'});
-  private code: string = '';
-  private visible: boolean = false;
-  private hideIssueSetting: Common.Settings.Setting<IssuesManager.IssuesManager.HideIssueMenuSetting> =
-      IssuesManager.IssuesManager.getHideIssueByCodeSetting();
-  private forHiddenIssue: boolean = false;
+  readonly #shadow: ShadowRoot = this.attachShadow({mode: 'open'});
+  #menuItemLabel: Common.UIString.LocalizedString = Common.UIString.LocalizedEmptyString;
+  #menuItemAction: () => void = () => {};
 
   set data(data: HiddenIssuesMenuData) {
-    this.classList.add('hide-issues-menu');
-    this.code = data.issueCode;
-    this.forHiddenIssue = data.forHiddenIssue;
-    this.render();
+    this.#menuItemLabel = data.menuItemLabel;
+    this.#menuItemAction = data.menuItemAction;
+    this.#render();
   }
 
   connectedCallback(): void {
-    this.shadow.adoptedStyleSheets = [hideIssuesMenuStyles];
-  }
-
-  setVisible(x: boolean): void {
-    if (this.visible === x) {
-      return;
-    }
-    this.visible = x;
-    this.render();
+    this.#shadow.adoptedStyleSheets = [hideIssuesMenuStyles];
   }
 
   onMenuOpen(event: Event): void {
     event.stopPropagation();
-    const contextMenu = new UI.ContextMenu.ContextMenu(event, true);
-    if (this.forHiddenIssue) {
-      contextMenu.headerSection().appendItem(i18nString(UIStrings.UnhideIssueByCode), () => this.onUnhideIssueByCode());
-      contextMenu.show();
-      return;
-    }
-    contextMenu.headerSection().appendItem(i18nString(UIStrings.hideIssueByCode), () => this.onHideIssueByCode());
-    contextMenu.show();
+    const contextMenu = new UI.ContextMenu.ContextMenu(event, {
+      useSoftMenu: true,
+      onSoftMenuClosed: (): void => {
+        this.classList.toggle('has-context-menu-opened', false);
+      },
+    });
+    contextMenu.headerSection().appendItem(this.#menuItemLabel, () => this.#menuItemAction());
+    void contextMenu.show();
+    this.classList.toggle('has-context-menu-opened', true);
   }
 
-  onHideIssueByCode(): void {
-    const values = this.hideIssueSetting.get();
-    values[this.code] = IssuesManager.IssuesManager.IssueStatus.Hidden;
-    this.hideIssueSetting.set(values);
-  }
-
-  onUnhideIssueByCode(): void {
-    const values = this.hideIssueSetting.get();
-    values[this.code] = IssuesManager.IssuesManager.IssueStatus.Unhidden;
-    this.hideIssueSetting.set(values);
-  }
-
-  private render(): void {
-    this.classList.toggle('hidden', !this.visible);
+  #render(): void {
     // Disabled until https://crbug.com/1079231 is fixed.
     // clang-format off
       LitHtml.render(LitHtml.html`
@@ -99,7 +66,7 @@ export class HideIssuesMenu extends HTMLElement {
         >
         </${IconButton.Icon.Icon.litTagName}>
         </button>
-      `, this.shadow);
+      `, this.#shadow, {host: this});
     }
   }
 

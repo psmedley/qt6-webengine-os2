@@ -15,7 +15,7 @@ export class ShaderValidationTest extends GPUTest {
    * t.expectCompileResult('substr', `wgsl code`); // Expect validation error containing 'substr'
    * ```
    *
-   * TODO(gpuweb/gpuweb#1813): Remove the "string" overload if there are no standard error codes.
+   * MAINTENANCE_TODO(gpuweb/gpuweb#1813): Remove the "string" overload if there are no standard error codes.
    */
   expectCompileResult(expectedResult: boolean | string, code: string) {
     let shaderModule: GPUShaderModule;
@@ -28,10 +28,10 @@ export class ShaderValidationTest extends GPUTest {
     );
 
     const error = new ErrorWithExtra('', () => ({ shaderModule }));
-    (async () => {
+    this.eventualAsyncExpectation(async () => {
       const compilationInfo = await shaderModule!.compilationInfo();
 
-      // TODO: Pretty-print error messages with source context.
+      // MAINTENANCE_TODO: Pretty-print error messages with source context.
       const messagesLog = compilationInfo.messages
         .map(m => `${m.lineNum}:${m.linePos}: ${m.type}: ${m.message}`)
         .join('\n');
@@ -71,6 +71,6 @@ export class ShaderValidationTest extends GPUTest {
           this.rec.debug(error);
         }
       }
-    })();
+    });
   }
 }

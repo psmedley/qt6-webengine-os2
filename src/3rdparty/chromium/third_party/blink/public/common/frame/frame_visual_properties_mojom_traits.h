@@ -16,9 +16,9 @@ template <>
 struct BLINK_COMMON_EXPORT
     StructTraits<blink::mojom::FrameVisualPropertiesDataView,
                  blink::FrameVisualProperties> {
-  static const display::ScreenInfo& screen_info(
+  static const display::ScreenInfos& screen_infos(
       const blink::FrameVisualProperties& r) {
-    return r.screen_info;
+    return r.screen_infos;
   }
 
   static bool auto_resize_enabled(const blink::FrameVisualProperties& r) {
@@ -84,7 +84,7 @@ struct BLINK_COMMON_EXPORT
     return r.local_frame_size;
   }
 
-  static absl::optional<viz::LocalSurfaceId> local_surface_id(
+  static const viz::LocalSurfaceId& local_surface_id(
       const blink::FrameVisualProperties& r) {
     return r.local_surface_id;
   }

@@ -69,7 +69,7 @@ bool AutofillDriverIOS::IsIncognito() const {
   return web_state_->GetBrowserState()->IsOffTheRecord();
 }
 
-bool AutofillDriverIOS::IsInMainFrame() const {
+bool AutofillDriverIOS::IsInAnyMainFrame() const {
   web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
   return web_frame ? web_frame->IsMainFrame() : true;
 }
@@ -97,17 +97,20 @@ bool AutofillDriverIOS::RendererIsAvailable() {
   return true;
 }
 
-void AutofillDriverIOS::FillOrPreviewForm(
+std::vector<FieldGlobalId> AutofillDriverIOS::FillOrPreviewForm(
     int query_id,
     mojom::RendererFormDataAction action,
     const FormData& data,
     const url::Origin& triggered_origin,
     const base::flat_map<FieldGlobalId, ServerFieldType>& field_type_map) {
   web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
-  if (!web_frame) {
-    return;
+  if (web_frame) {
+    [bridge_ fillFormData:data inFrame:web_frame];
   }
-  [bridge_ fillFormData:data inFrame:web_frame];
+  std::vector<FieldGlobalId> safe_fields;
+  for (const auto& field : data.fields)
+    safe_fields.push_back(field.global_id());
+  return safe_fields;
 }
 
 void AutofillDriverIOS::PropagateAutofillPredictions(

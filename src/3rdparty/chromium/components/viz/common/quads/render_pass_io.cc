@@ -28,6 +28,7 @@
 #include "components/viz/common/quads/video_hole_draw_quad.h"
 #include "components/viz/common/quads/yuv_video_draw_quad.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/skia/include/third_party/skcms/skcms.h"
 
 namespace gl {
 struct HDRMetadata;
@@ -208,14 +209,14 @@ bool FloatArrayFromList(const base::Value& list,
   DCHECK_LT(0u, expected_count);
   if (!list.is_list())
     return false;
-  size_t count = list.GetList().size();
+  size_t count = list.GetListDeprecated().size();
   if (count != expected_count)
     return false;
   std::vector<double> double_data(count);
   for (size_t ii = 0; ii < count; ++ii) {
-    if (!list.GetList()[ii].is_double())
+    if (!list.GetListDeprecated()[ii].is_double())
       return false;
-    double_data[ii] = list.GetList()[ii].GetDouble();
+    double_data[ii] = list.GetListDeprecated()[ii].GetDouble();
   }
   for (size_t ii = 0; ii < count; ++ii)
     data[ii] = static_cast<float>(double_data[ii]);
@@ -330,12 +331,34 @@ bool RRectFFromDict(const base::Value& dict, gfx::RRectF* out) {
   return true;
 }
 
+base::Value MaskFilterInfoToDict(const gfx::MaskFilterInfo& mask_filter_info) {
+  base::Value dict(base::Value::Type::DICTIONARY);
+  dict.SetKey("rounded_corner_bounds",
+              RRectFToDict(mask_filter_info.rounded_corner_bounds()));
+  return dict;
+}
+
+bool MaskFilterInfoFromDict(const base::Value& dict, gfx::MaskFilterInfo* out) {
+  DCHECK(out);
+  if (!dict.is_dict())
+    return false;
+  const base::Value* rounded_corner_bounds =
+      dict.FindDictKey("rounded_corner_bounds");
+  if (!rounded_corner_bounds)
+    return false;
+  gfx::RRectF t_rounded_corner_bounds;
+  if (!RRectFFromDict(*rounded_corner_bounds, &t_rounded_corner_bounds))
+    return false;
+  *out = gfx::MaskFilterInfo(t_rounded_corner_bounds);
+  return true;
+}
+
 base::Value TransformToList(const gfx::Transform& transform) {
   base::Value list(base::Value::Type::LIST);
-  double data[16];
-  transform.matrix().asColMajord(data);
-  for (size_t ii = 0; ii < 16; ++ii)
-    list.Append(data[ii]);
+  float data[16];
+  transform.matrix().getColMajor(data);
+  for (float value : data)
+    list.Append(value);
   return list;
 }
 
@@ -343,15 +366,15 @@ bool TransformFromList(const base::Value& list, gfx::Transform* transform) {
   DCHECK(transform);
   if (!list.is_list())
     return false;
-  if (list.GetList().size() != 16)
+  if (list.GetListDeprecated().size() != 16)
     return false;
-  double data[16];
+  float data[16];
   for (size_t ii = 0; ii < 16; ++ii) {
-    if (!list.GetList()[ii].is_double())
+    if (!list.GetListDeprecated()[ii].is_double())
       return false;
-    data[ii] = list.GetList()[ii].GetDouble();
+    data[ii] = list.GetListDeprecated()[ii].GetDouble();
   }
-  transform->matrix().setColMajord(data);
+  transform->matrix().setColMajor(data);
   return true;
 }
 
@@ -368,11 +391,11 @@ bool ShapeRectsFromList(const base::Value& list,
   DCHECK(shape);
   if (!list.is_list())
     return false;
-  size_t size = list.GetList().size();
+  size_t size = list.GetListDeprecated().size();
   cc::FilterOperation::ShapeRects data;
   data.resize(size);
   for (size_t ii = 0; ii < size; ++ii) {
-    if (!RectFromDict(list.GetList()[ii], &data[ii]))
+    if (!RectFromDict(list.GetListDeprecated()[ii], &data[ii]))
       return false;
   }
   *shape = data;
@@ -564,9 +587,9 @@ bool FilterOperationsFromList(const base::Value& list,
   if (!list.is_list())
     return false;
   cc::FilterOperations data;
-  for (size_t ii = 0; ii < list.GetList().size(); ++ii) {
+  for (size_t ii = 0; ii < list.GetListDeprecated().size(); ++ii) {
     cc::FilterOperation filter;
-    if (!FilterOperationFromDict(list.GetList()[ii], &filter))
+    if (!FilterOperationFromDict(list.GetListDeprecated()[ii], &filter))
       return false;
     data.Append(filter);
   }
@@ -590,7 +613,7 @@ const char* ColorSpacePrimaryIdToString(gfx::ColorSpace::PrimaryID id) {
     MATCH_ENUM_CASE(PrimaryID, BT2020)
     MATCH_ENUM_CASE(PrimaryID, SMPTEST428_1)
     MATCH_ENUM_CASE(PrimaryID, SMPTEST431_2)
-    MATCH_ENUM_CASE(PrimaryID, SMPTEST432_1)
+    MATCH_ENUM_CASE(PrimaryID, P3)
     MATCH_ENUM_CASE(PrimaryID, XYZ_D50)
     MATCH_ENUM_CASE(PrimaryID, ADOBE_RGB)
     MATCH_ENUM_CASE(PrimaryID, APPLE_GENERIC_RGB)
@@ -615,13 +638,13 @@ const char* ColorSpaceTransferIdToString(gfx::ColorSpace::TransferID id) {
     MATCH_ENUM_CASE(TransferID, LOG_SQRT)
     MATCH_ENUM_CASE(TransferID, IEC61966_2_4)
     MATCH_ENUM_CASE(TransferID, BT1361_ECG)
-    MATCH_ENUM_CASE(TransferID, IEC61966_2_1)
+    MATCH_ENUM_CASE(TransferID, SRGB)
     MATCH_ENUM_CASE(TransferID, BT2020_10)
     MATCH_ENUM_CASE(TransferID, BT2020_12)
-    MATCH_ENUM_CASE(TransferID, SMPTEST2084)
+    MATCH_ENUM_CASE(TransferID, PQ)
     MATCH_ENUM_CASE(TransferID, SMPTEST428_1)
-    MATCH_ENUM_CASE(TransferID, ARIB_STD_B67)
-    MATCH_ENUM_CASE(TransferID, IEC61966_2_1_HDR)
+    MATCH_ENUM_CASE(TransferID, HLG)
+    MATCH_ENUM_CASE(TransferID, SRGB_HDR)
     MATCH_ENUM_CASE(TransferID, LINEAR_HDR)
     MATCH_ENUM_CASE(TransferID, CUSTOM)
     MATCH_ENUM_CASE(TransferID, CUSTOM_HDR)
@@ -671,7 +694,7 @@ uint8_t StringToColorSpacePrimaryId(const std::string& token) {
   MATCH_ENUM_CASE(PrimaryID, BT2020)
   MATCH_ENUM_CASE(PrimaryID, SMPTEST428_1)
   MATCH_ENUM_CASE(PrimaryID, SMPTEST431_2)
-  MATCH_ENUM_CASE(PrimaryID, SMPTEST432_1)
+  MATCH_ENUM_CASE(PrimaryID, P3)
   MATCH_ENUM_CASE(PrimaryID, XYZ_D50)
   MATCH_ENUM_CASE(PrimaryID, ADOBE_RGB)
   MATCH_ENUM_CASE(PrimaryID, APPLE_GENERIC_RGB)
@@ -695,13 +718,13 @@ uint8_t StringToColorSpaceTransferId(const std::string& token) {
   MATCH_ENUM_CASE(TransferID, LOG_SQRT)
   MATCH_ENUM_CASE(TransferID, IEC61966_2_4)
   MATCH_ENUM_CASE(TransferID, BT1361_ECG)
-  MATCH_ENUM_CASE(TransferID, IEC61966_2_1)
+  MATCH_ENUM_CASE(TransferID, SRGB)
   MATCH_ENUM_CASE(TransferID, BT2020_10)
   MATCH_ENUM_CASE(TransferID, BT2020_12)
-  MATCH_ENUM_CASE(TransferID, SMPTEST2084)
+  MATCH_ENUM_CASE(TransferID, PQ)
   MATCH_ENUM_CASE(TransferID, SMPTEST428_1)
-  MATCH_ENUM_CASE(TransferID, ARIB_STD_B67)
-  MATCH_ENUM_CASE(TransferID, IEC61966_2_1_HDR)
+  MATCH_ENUM_CASE(TransferID, HLG)
+  MATCH_ENUM_CASE(TransferID, SRGB_HDR)
   MATCH_ENUM_CASE(TransferID, LINEAR_HDR)
   MATCH_ENUM_CASE(TransferID, CUSTOM)
   MATCH_ENUM_CASE(TransferID, CUSTOM_HDR)
@@ -862,7 +885,7 @@ bool DrawQuadResourcesFromList(const base::Value& list,
   DCHECK(resources);
   if (!list.is_list())
     return false;
-  size_t size = list.GetList().size();
+  size_t size = list.GetListDeprecated().size();
   if (size == 0u) {
     resources->count = 0u;
     return true;
@@ -870,13 +893,13 @@ bool DrawQuadResourcesFromList(const base::Value& list,
   if (size > DrawQuad::Resources::kMaxResourceIdCount)
     return false;
   for (size_t ii = 0; ii < size; ++ii) {
-    if (!list.GetList()[ii].is_int())
+    if (!list.GetListDeprecated()[ii].is_int())
       return false;
   }
 
   resources->count = static_cast<uint32_t>(size);
   for (size_t ii = 0; ii < size; ++ii) {
-    resources->ids[ii] = ResourceId(list.GetList()[ii].GetInt());
+    resources->ids[ii] = ResourceId(list.GetListDeprecated()[ii].GetInt());
   }
   return true;
 }
@@ -949,29 +972,6 @@ int GetSharedQuadStateIndex(const SharedQuadStateList& shared_quad_state_list,
   return -1;
 }
 
-#define MAP_MATERIAL_TO_STRING(NAME) \
-  case DrawQuad::Material::NAME:     \
-    return #NAME;
-const char* DrawQuadMaterialToString(DrawQuad::Material material) {
-  switch (material) {
-    MAP_MATERIAL_TO_STRING(kInvalid)
-    MAP_MATERIAL_TO_STRING(kDebugBorder)
-    MAP_MATERIAL_TO_STRING(kPictureContent)
-    MAP_MATERIAL_TO_STRING(kCompositorRenderPass)
-    MAP_MATERIAL_TO_STRING(kSolidColor)
-    MAP_MATERIAL_TO_STRING(kStreamVideoContent)
-    MAP_MATERIAL_TO_STRING(kSurfaceContent)
-    MAP_MATERIAL_TO_STRING(kTextureContent)
-    MAP_MATERIAL_TO_STRING(kTiledContent)
-    MAP_MATERIAL_TO_STRING(kYuvVideoContent)
-    MAP_MATERIAL_TO_STRING(kVideoHole)
-    default:
-      NOTREACHED();
-      return "";
-  }
-}
-#undef MAP_MATERIAL_TO_STRING
-
 #define MAP_STRING_TO_MATERIAL(NAME) \
   if (str == #NAME)                  \
     return static_cast<int>(DrawQuad::Material::NAME);
@@ -980,6 +980,7 @@ int StringToDrawQuadMaterial(const std::string& str) {
   MAP_STRING_TO_MATERIAL(kDebugBorder)
   MAP_STRING_TO_MATERIAL(kPictureContent)
   MAP_STRING_TO_MATERIAL(kCompositorRenderPass)
+  MAP_STRING_TO_MATERIAL(kSharedElement)
   MAP_STRING_TO_MATERIAL(kSolidColor)
   MAP_STRING_TO_MATERIAL(kStreamVideoContent)
   MAP_STRING_TO_MATERIAL(kSurfaceContent)
@@ -1245,10 +1246,8 @@ void VideoHoleDrawQuadToDict(const VideoHoleDrawQuad* draw_quad,
   dict->SetBoolKey("overlay_plane_id.empty",
                    draw_quad->overlay_plane_id.is_empty());
   if (!draw_quad->overlay_plane_id.is_empty()) {
-    uint64_t high = draw_quad->overlay_plane_id.GetHighForSerialization();
-    dict->SetStringKey("overlay_plane_id.high", base::NumberToString(high));
-    uint64_t low = draw_quad->overlay_plane_id.GetLowForSerialization();
-    dict->SetStringKey("overlay_plane_id.low", base::NumberToString(low));
+    dict->SetKey("overlay_plane_id.unguessable_token",
+                 base::UnguessableTokenToValue(draw_quad->overlay_plane_id));
   }
 }
 
@@ -1608,18 +1607,13 @@ bool VideoHoleDrawQuadFromDict(const base::Value& dict,
   base::UnguessableToken overlay_plane_id;
   DCHECK(overlay_plane_id.is_empty());
   if (!overlay_plane_id_empty.value()) {
-    const std::string* overlay_plane_id_high =
-        dict.FindStringKey("overlay_plane_id.high");
-    const std::string* overlay_plane_id_low =
-        dict.FindStringKey("overlay_plane_id.low");
-    uint64_t high = 0, low = 0;
-    if (!overlay_plane_id_high ||
-        !base::StringToUint64(*overlay_plane_id_high, &high) ||
-        !overlay_plane_id_low ||
-        !base::StringToUint64(*overlay_plane_id_low, &low)) {
+    absl::optional<base::UnguessableToken> deserialized_overlay_plane_id =
+        base::ValueToUnguessableToken(
+            dict.FindKey("overlay_plane_id.unguessable_token"));
+    if (!deserialized_overlay_plane_id) {
       return false;
     }
-    overlay_plane_id = base::UnguessableToken::Deserialize(high, low);
+    overlay_plane_id = deserialized_overlay_plane_id.value();
   }
   draw_quad->SetAll(common.shared_quad_state, common.rect, common.visible_rect,
                     common.needs_blending, overlay_plane_id);
@@ -1630,11 +1624,11 @@ bool VideoHoleDrawQuadFromDict(const base::Value& dict,
   case DrawQuad::Material::NAME:            \
     NOTREACHED() << "Unexpected " << #NAME; \
     break;
-#define GET_QUAD_FROM_DICT(NAME, TYPE)                             \
-  case DrawQuad::Material::NAME: {                                 \
-    TYPE* quad = quads.AllocateAndConstruct<TYPE>();               \
-    if (!TYPE##FromDict(list.GetList()[ii], common.value(), quad)) \
-      return false;                                                \
+#define GET_QUAD_FROM_DICT(NAME, TYPE)                                       \
+  case DrawQuad::Material::NAME: {                                           \
+    TYPE* quad = quads.AllocateAndConstruct<TYPE>();                         \
+    if (!TYPE##FromDict(list.GetListDeprecated()[ii], common.value(), quad)) \
+      return false;                                                          \
   } break;
 bool QuadListFromList(const base::Value& list,
                       QuadList* quad_list,
@@ -1642,17 +1636,17 @@ bool QuadListFromList(const base::Value& list,
   DCHECK(quad_list);
   if (!list.is_list())
     return false;
-  size_t size = list.GetList().size();
+  size_t size = list.GetListDeprecated().size();
   if (size == 0) {
     quad_list->clear();
     return true;
   }
   QuadList quads(size);
   for (size_t ii = 0; ii < size; ++ii) {
-    if (!list.GetList()[ii].is_dict())
+    if (!list.GetListDeprecated()[ii].is_dict())
       return false;
-    absl::optional<DrawQuadCommon> common =
-        GetDrawQuadCommonFromDict(list.GetList()[ii], shared_quad_state_list);
+    absl::optional<DrawQuadCommon> common = GetDrawQuadCommonFromDict(
+        list.GetListDeprecated()[ii], shared_quad_state_list);
     if (!common)
       return false;
     switch (common->material) {
@@ -1675,47 +1669,6 @@ bool QuadListFromList(const base::Value& list,
 #undef GET_QUAD_FROM_DICT
 #undef UNEXPECTED_DRAW_QUAD_TYPE
 
-#define MAP_BLEND_MODE_TO_STRING(NAME) \
-  case SkBlendMode::NAME:              \
-    return #NAME;
-const char* BlendModeToString(SkBlendMode blend_mode) {
-  switch (blend_mode) {
-    MAP_BLEND_MODE_TO_STRING(kClear)
-    MAP_BLEND_MODE_TO_STRING(kSrc)
-    MAP_BLEND_MODE_TO_STRING(kDst)
-    MAP_BLEND_MODE_TO_STRING(kSrcOver)
-    MAP_BLEND_MODE_TO_STRING(kDstOver)
-    MAP_BLEND_MODE_TO_STRING(kSrcIn)
-    MAP_BLEND_MODE_TO_STRING(kDstIn)
-    MAP_BLEND_MODE_TO_STRING(kSrcOut)
-    MAP_BLEND_MODE_TO_STRING(kDstOut)
-    MAP_BLEND_MODE_TO_STRING(kSrcATop)
-    MAP_BLEND_MODE_TO_STRING(kDstATop)
-    MAP_BLEND_MODE_TO_STRING(kXor)
-    MAP_BLEND_MODE_TO_STRING(kPlus)
-    MAP_BLEND_MODE_TO_STRING(kModulate)
-    MAP_BLEND_MODE_TO_STRING(kScreen)
-    MAP_BLEND_MODE_TO_STRING(kOverlay)
-    MAP_BLEND_MODE_TO_STRING(kDarken)
-    MAP_BLEND_MODE_TO_STRING(kLighten)
-    MAP_BLEND_MODE_TO_STRING(kColorDodge)
-    MAP_BLEND_MODE_TO_STRING(kColorBurn)
-    MAP_BLEND_MODE_TO_STRING(kHardLight)
-    MAP_BLEND_MODE_TO_STRING(kSoftLight)
-    MAP_BLEND_MODE_TO_STRING(kDifference)
-    MAP_BLEND_MODE_TO_STRING(kExclusion)
-    MAP_BLEND_MODE_TO_STRING(kMultiply)
-    MAP_BLEND_MODE_TO_STRING(kHue)
-    MAP_BLEND_MODE_TO_STRING(kSaturation)
-    MAP_BLEND_MODE_TO_STRING(kColor)
-    MAP_BLEND_MODE_TO_STRING(kLuminosity)
-    default:
-      NOTREACHED();
-      return "";
-  }
-}
-#undef MAP_BLEND_MODE_TO_STRING
-
 base::Value SharedQuadStateToDict(const SharedQuadState& sqs) {
   base::Value dict(base::Value::Type::DICTIONARY);
   dict.SetKey("quad_to_target_transform",
@@ -1723,8 +1676,7 @@ base::Value SharedQuadStateToDict(const SharedQuadState& sqs) {
   dict.SetKey("quad_layer_rect", RectToDict(sqs.quad_layer_rect));
   dict.SetKey("visible_quad_layer_rect",
               RectToDict(sqs.visible_quad_layer_rect));
-  dict.SetKey("rounded_corner_bounds",
-              RRectFToDict(sqs.mask_filter_info.rounded_corner_bounds()));
+  dict.SetKey("mask_filter_info", MaskFilterInfoToDict(sqs.mask_filter_info));
   if (sqs.clip_rect) {
     dict.SetKey("clip_rect", RectToDict(*sqs.clip_rect));
   }
@@ -1783,8 +1735,7 @@ bool SharedQuadStateFromDict(const base::Value& dict, SharedQuadState* sqs) {
   const base::Value* quad_layer_rect = dict.FindDictKey("quad_layer_rect");
   const base::Value* visible_quad_layer_rect =
       dict.FindDictKey("visible_quad_layer_rect");
-  const base::Value* rounded_corner_bounds =
-      dict.FindDictKey("rounded_corner_bounds");
+  const base::Value* mask_filter_info = dict.FindDictKey("mask_filter_info");
   const base::Value* clip_rect = dict.FindDictKey("clip_rect");
   absl::optional<bool> is_clipped = dict.FindBoolKey("is_clipped");
   absl::optional<bool> are_contents_opaque =
@@ -1799,19 +1750,19 @@ bool SharedQuadStateFromDict(const base::Value& dict, SharedQuadState* sqs) {
       dict.FindDoubleKey("de_jelly_delta_y");
 
   if (!quad_to_target_transform || !quad_layer_rect ||
-      !visible_quad_layer_rect || !rounded_corner_bounds ||
-      !are_contents_opaque || !opacity || !blend_mode || !sorting_context_id ||
+      !visible_quad_layer_rect || !mask_filter_info || !are_contents_opaque ||
+      !opacity || !blend_mode || !sorting_context_id ||
       !is_fast_rounded_corner || !de_jelly_delta_y) {
     return false;
   }
   gfx::Transform t_quad_to_target_transform;
   gfx::Rect t_quad_layer_rect, t_visible_quad_layer_rect, t_clip_rect;
-  gfx::RRectF t_rounded_corner_bounds;
+  gfx::MaskFilterInfo t_mask_filter_info;
   if (!TransformFromList(*quad_to_target_transform,
                          &t_quad_to_target_transform) ||
       !RectFromDict(*quad_layer_rect, &t_quad_layer_rect) ||
       !RectFromDict(*visible_quad_layer_rect, &t_visible_quad_layer_rect) ||
-      !RRectFFromDict(*rounded_corner_bounds, &t_rounded_corner_bounds) ||
+      !MaskFilterInfoFromDict(*mask_filter_info, &t_mask_filter_info) ||
       (clip_rect && !RectFromDict(*clip_rect, &t_clip_rect))) {
     return false;
   }
@@ -1831,9 +1782,8 @@ bool SharedQuadStateFromDict(const base::Value& dict, SharedQuadState* sqs) {
   if (blend_mode_index < 0)
     return false;
   SkBlendMode t_blend_mode = static_cast<SkBlendMode>(blend_mode_index);
-  gfx::MaskFilterInfo mask_filter_info(t_rounded_corner_bounds);
   sqs->SetAll(t_quad_to_target_transform, t_quad_layer_rect,
-              t_visible_quad_layer_rect, mask_filter_info, clip_rect_opt,
+              t_visible_quad_layer_rect, t_mask_filter_info, clip_rect_opt,
               are_contents_opaque.value(), static_cast<float>(opacity.value()),
               t_blend_mode, sorting_context_id.value());
   sqs->is_fast_rounded_corner = is_fast_rounded_corner.value();
@@ -1854,14 +1804,14 @@ bool SharedQuadStateListFromList(const base::Value& list,
   DCHECK(shared_quad_state_list);
   if (!list.is_list())
     return false;
-  size_t size = list.GetList().size();
+  size_t size = list.GetListDeprecated().size();
   SharedQuadStateList states(alignof(SharedQuadState), sizeof(SharedQuadState),
                              size);
   for (size_t ii = 0; ii < size; ++ii) {
-    if (!list.GetList()[ii].is_dict())
+    if (!list.GetListDeprecated()[ii].is_dict())
       return false;
     SharedQuadState* sqs = states.AllocateAndConstruct<SharedQuadState>();
-    if (!SharedQuadStateFromDict(list.GetList()[ii], sqs))
+    if (!SharedQuadStateFromDict(list.GetListDeprecated()[ii], sqs))
       return false;
   }
   shared_quad_state_list->swap(states);
@@ -1888,6 +1838,71 @@ base::Value GetRenderPassListMetadata(
 }
 
 }  // namespace
+
+#define MAP_BLEND_MODE_TO_STRING(NAME) \
+  case SkBlendMode::NAME:              \
+    return #NAME;
+const char* BlendModeToString(SkBlendMode blend_mode) {
+  switch (blend_mode) {
+    MAP_BLEND_MODE_TO_STRING(kClear)
+    MAP_BLEND_MODE_TO_STRING(kSrc)
+    MAP_BLEND_MODE_TO_STRING(kDst)
+    MAP_BLEND_MODE_TO_STRING(kSrcOver)
+    MAP_BLEND_MODE_TO_STRING(kDstOver)
+    MAP_BLEND_MODE_TO_STRING(kSrcIn)
+    MAP_BLEND_MODE_TO_STRING(kDstIn)
+    MAP_BLEND_MODE_TO_STRING(kSrcOut)
+    MAP_BLEND_MODE_TO_STRING(kDstOut)
+    MAP_BLEND_MODE_TO_STRING(kSrcATop)
+    MAP_BLEND_MODE_TO_STRING(kDstATop)
+    MAP_BLEND_MODE_TO_STRING(kXor)
+    MAP_BLEND_MODE_TO_STRING(kPlus)
+    MAP_BLEND_MODE_TO_STRING(kModulate)
+    MAP_BLEND_MODE_TO_STRING(kScreen)
+    MAP_BLEND_MODE_TO_STRING(kOverlay)
+    MAP_BLEND_MODE_TO_STRING(kDarken)
+    MAP_BLEND_MODE_TO_STRING(kLighten)
+    MAP_BLEND_MODE_TO_STRING(kColorDodge)
+    MAP_BLEND_MODE_TO_STRING(kColorBurn)
+    MAP_BLEND_MODE_TO_STRING(kHardLight)
+    MAP_BLEND_MODE_TO_STRING(kSoftLight)
+    MAP_BLEND_MODE_TO_STRING(kDifference)
+    MAP_BLEND_MODE_TO_STRING(kExclusion)
+    MAP_BLEND_MODE_TO_STRING(kMultiply)
+    MAP_BLEND_MODE_TO_STRING(kHue)
+    MAP_BLEND_MODE_TO_STRING(kSaturation)
+    MAP_BLEND_MODE_TO_STRING(kColor)
+    MAP_BLEND_MODE_TO_STRING(kLuminosity)
+    default:
+      NOTREACHED();
+      return "";
+  }
+}
+#undef MAP_BLEND_MODE_TO_STRING
+
+#define MAP_MATERIAL_TO_STRING(NAME) \
+  case DrawQuad::Material::NAME:     \
+    return #NAME;
+const char* DrawQuadMaterialToString(DrawQuad::Material material) {
+  switch (material) {
+    MAP_MATERIAL_TO_STRING(kInvalid)
+    MAP_MATERIAL_TO_STRING(kDebugBorder)
+    MAP_MATERIAL_TO_STRING(kPictureContent)
+    MAP_MATERIAL_TO_STRING(kCompositorRenderPass)
+    MAP_MATERIAL_TO_STRING(kSharedElement)
+    MAP_MATERIAL_TO_STRING(kSolidColor)
+    MAP_MATERIAL_TO_STRING(kStreamVideoContent)
+    MAP_MATERIAL_TO_STRING(kSurfaceContent)
+    MAP_MATERIAL_TO_STRING(kTextureContent)
+    MAP_MATERIAL_TO_STRING(kTiledContent)
+    MAP_MATERIAL_TO_STRING(kYuvVideoContent)
+    MAP_MATERIAL_TO_STRING(kVideoHole)
+    default:
+      NOTREACHED();
+      return "";
+  }
+}
+#undef MAP_MATERIAL_TO_STRING
 
 base::Value CompositorRenderPassToDict(
     const CompositorRenderPass& render_pass) {
@@ -2130,9 +2145,9 @@ bool CompositorRenderPassListFromDict(
   const base::Value* list = dict.FindListKey("render_pass_list");
   if (!list || !list->is_list())
     return false;
-  for (size_t ii = 0; ii < list->GetList().size(); ++ii) {
+  for (size_t ii = 0; ii < list->GetListDeprecated().size(); ++ii) {
     render_pass_list->push_back(
-        CompositorRenderPassFromDict(list->GetList()[ii]));
+        CompositorRenderPassFromDict(list->GetListDeprecated()[ii]));
     if (!(*render_pass_list)[ii].get()) {
       render_pass_list->clear();
       return false;
@@ -2184,7 +2199,8 @@ bool CompositorFrameFromDict(const base::Value& dict,
   if (!referenced_surfaces || !referenced_surfaces->is_list()) {
     return false;
   }
-  for (auto& referenced_surface_dict : referenced_surfaces->GetList()) {
+  for (auto& referenced_surface_dict :
+       referenced_surfaces->GetListDeprecated()) {
     auto referenced_surface = SurfaceRangeFromDict(referenced_surface_dict);
     if (!referenced_surface) {
       return false;
@@ -2224,7 +2240,7 @@ bool FrameDataFromList(const base::Value& list,
   if (!list.is_list()) {
     return false;
   }
-  for (const auto& frame_data_dict : list.GetList()) {
+  for (const auto& frame_data_dict : list.GetListDeprecated()) {
     FrameData frame_data;
     auto* surface_id_dict = frame_data_dict.FindDictKey("surface_id");
     if (!surface_id_dict) {

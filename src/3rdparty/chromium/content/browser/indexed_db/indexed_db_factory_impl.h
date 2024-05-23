@@ -17,7 +17,7 @@
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/time/clock.h"
@@ -32,6 +32,7 @@
 #include "content/browser/indexed_db/indexed_db_factory.h"
 #include "content/browser/indexed_db/indexed_db_storage_key_state_handle.h"
 #include "content/browser/indexed_db/indexed_db_task_helper.h"
+#include "content/common/content_export.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
 
@@ -55,6 +56,10 @@ class CONTENT_EXPORT IndexedDBFactoryImpl
   IndexedDBFactoryImpl(IndexedDBContextImpl* context,
                        IndexedDBClassFactory* indexed_db_class_factory,
                        base::Clock* clock);
+
+  IndexedDBFactoryImpl(const IndexedDBFactoryImpl&) = delete;
+  IndexedDBFactoryImpl& operator=(const IndexedDBFactoryImpl&) = delete;
+
   ~IndexedDBFactoryImpl() override;
 
   // content::IndexedDBFactory overrides:
@@ -223,9 +228,9 @@ class CONTENT_EXPORT IndexedDBFactoryImpl
 
   SEQUENCE_CHECKER(sequence_checker_);
   // Raw pointer is safe because IndexedDBContextImpl owns this object.
-  IndexedDBContextImpl* context_;
-  IndexedDBClassFactory* const class_factory_;
-  base::Clock* const clock_;
+  raw_ptr<IndexedDBContextImpl> context_;
+  const raw_ptr<IndexedDBClassFactory> class_factory_;
+  const raw_ptr<base::Clock> clock_;
   base::Time earliest_sweep_;
   base::Time earliest_compaction_;
 
@@ -244,7 +249,6 @@ class CONTENT_EXPORT IndexedDBFactoryImpl
   base::WeakPtrFactory<IndexedDBFactoryImpl>
       storage_key_state_destruction_weak_factory_{this};
   base::WeakPtrFactory<IndexedDBFactoryImpl> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBFactoryImpl);
 };
 
 }  // namespace content

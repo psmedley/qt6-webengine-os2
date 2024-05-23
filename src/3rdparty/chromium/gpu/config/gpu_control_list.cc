@@ -17,7 +17,6 @@
 #include "base/system/sys_info.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "gpu/config/gpu_util.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -260,16 +259,15 @@ bool GpuControlList::More::GLVersionInfoMismatch(
 
 // static
 GpuControlList::GLType GpuControlList::More::GetDefaultGLType() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   return kGLTypeGL;
-#elif (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) || \
-    defined(OS_OPENBSD)
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD)
   return kGLTypeGL;
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
   return kGLTypeGL;
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   return kGLTypeANGLE;
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   return kGLTypeGLES;
 #else
   return kGLTypeNone;
@@ -284,16 +282,19 @@ void GpuControlList::Entry::LogControlListMatch(
                                 control_list_logging_name.c_str());
 }
 
-bool GpuControlList::DriverInfo::Contains(const GPUInfo& gpu_info) const {
-  const GPUInfo::GPUDevice& active_gpu = gpu_info.active_gpu();
-  if (StringMismatch(active_gpu.driver_vendor, driver_vendor)) {
-    return false;
+bool GpuControlList::DriverInfo::Contains(
+    const std::vector<GPUInfo::GPUDevice>& gpus) const {
+  for (auto& gpu : gpus) {
+    if (StringMismatch(gpu.driver_vendor, driver_vendor))
+      continue;
+
+    if (driver_version.IsSpecified() && !gpu.driver_version.empty() &&
+        !driver_version.Contains(gpu.driver_version)) {
+      continue;
+    }
+    return true;
   }
-  if (driver_version.IsSpecified() && !active_gpu.driver_version.empty() &&
-      !driver_version.Contains(active_gpu.driver_version)) {
-    return false;
-  }
-  return true;
+  return false;
 }
 
 bool GpuControlList::GLStrings::Contains(const GPUInfo& gpu_info) const {
@@ -361,16 +362,16 @@ bool GpuControlList::More::Contains(const GPUInfo& gpu_info) const {
     case kDontCare:
       break;
     case kSupported:
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       if (!gpu_info.overlay_info.supports_overlays)
         return false;
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
       break;
     case kUnsupported:
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       if (gpu_info.overlay_info.supports_overlays)
         return false;
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
       break;
   }
   if ((subpixel_font_rendering == kUnsupported &&
@@ -392,33 +393,34 @@ bool GpuControlList::Conditions::Contains(OsType target_os_type,
     if (os_version.IsSpecified() && !os_version.Contains(target_os_version))
       return false;
   }
+
+  std::vector<GPUInfo::GPUDevice> candidates;
+  switch (multi_gpu_category) {
+    case kMultiGpuCategoryPrimary:
+      candidates.push_back(gpu_info.gpu);
+      break;
+    case kMultiGpuCategorySecondary:
+      candidates = gpu_info.secondary_gpus;
+      break;
+    case kMultiGpuCategoryAny:
+      candidates = gpu_info.secondary_gpus;
+      candidates.push_back(gpu_info.gpu);
+      break;
+    case kMultiGpuCategoryActive:
+    case kMultiGpuCategoryNone:
+      // If gpu category is not specified, default to the active gpu.
+      if (gpu_info.gpu.active || gpu_info.secondary_gpus.empty())
+        candidates.push_back(gpu_info.gpu);
+      for (auto& gpu : gpu_info.secondary_gpus) {
+        if (gpu.active)
+          candidates.push_back(gpu);
+      }
+      if (candidates.empty())
+        candidates.push_back(gpu_info.gpu);
+  }
+
   if (vendor_id != 0 || intel_gpu_series_list_size > 0 ||
       intel_gpu_generation.IsSpecified()) {
-    std::vector<GPUInfo::GPUDevice> candidates;
-    switch (multi_gpu_category) {
-      case kMultiGpuCategoryPrimary:
-        candidates.push_back(gpu_info.gpu);
-        break;
-      case kMultiGpuCategorySecondary:
-        candidates = gpu_info.secondary_gpus;
-        break;
-      case kMultiGpuCategoryAny:
-        candidates = gpu_info.secondary_gpus;
-        candidates.push_back(gpu_info.gpu);
-        break;
-      case kMultiGpuCategoryActive:
-      case kMultiGpuCategoryNone:
-        // If gpu category is not specified, default to the active gpu.
-        if (gpu_info.gpu.active || gpu_info.secondary_gpus.empty())
-          candidates.push_back(gpu_info.gpu);
-        for (size_t ii = 0; ii < gpu_info.secondary_gpus.size(); ++ii) {
-          if (gpu_info.secondary_gpus[ii].active)
-            candidates.push_back(gpu_info.secondary_gpus[ii]);
-        }
-        if (candidates.empty())
-          candidates.push_back(gpu_info.gpu);
-    }
-
     bool found = false;
     if (intel_gpu_series_list_size > 0) {
       for (size_t ii = 0; !found && ii < candidates.size(); ++ii) {
@@ -455,17 +457,17 @@ bool GpuControlList::Conditions::Contains(OsType target_os_type,
       } else {
         for (size_t ii = 0; !found && ii < device_size; ++ii) {
           uint32_t device_id = devices[ii].device_id;
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
           uint32_t revision = devices[ii].revision;
-#endif  // OS_WIN || OS_CHROMEOS
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
           for (auto& candidate : candidates) {
             if (vendor_id != candidate.vendor_id ||
                 device_id != candidate.device_id)
               continue;
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
             if (revision && revision != candidate.revision)
               continue;
-#endif  // OS_WIN || OS_CHROMEOS
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
             found = true;
             break;
           }
@@ -503,8 +505,22 @@ bool GpuControlList::Conditions::Contains(OsType target_os_type,
     case kMultiGpuStyleNone:
       break;
   }
-  if (driver_info && !driver_info->Contains(gpu_info)) {
-    return false;
+
+  if (driver_info) {
+    // We don't have a reliable way to check driver version without
+    // also checking for vendor.
+    DCHECK(vendor_id != 0 || candidates.size() < 2);
+
+    // Remove candidate GPUs made by different vendors.
+    auto behind_last =
+        std::remove_if(candidates.begin(), candidates.end(),
+                       [vendor_id = vendor_id](const GPUInfo::GPUDevice& gpu) {
+                         return (vendor_id && vendor_id != gpu.vendor_id);
+                       });
+    candidates.erase(behind_last, candidates.end());
+
+    if (!driver_info->Contains(candidates))
+      return false;
   }
   if (gl_strings && !gl_strings->Contains(gpu_info)) {
     return false;
@@ -760,18 +776,17 @@ uint32_t GpuControlList::max_entry_id() const {
 
 // static
 GpuControlList::OsType GpuControlList::GetOsType() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   return kOsChromeOS;
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   return kOsWin;
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   return kOsAndroid;
-#elif defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA)
   return kOsFuchsia;
-#elif (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) || \
-    defined(OS_OPENBSD)
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD)
   return kOsLinux;
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
   return kOsMacosx;
 #else
   return kOsAny;

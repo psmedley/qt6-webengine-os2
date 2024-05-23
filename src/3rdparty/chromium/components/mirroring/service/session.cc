@@ -14,6 +14,8 @@
 #include "base/cpu.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/rand_util.h"
@@ -22,7 +24,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
@@ -31,6 +32,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/mirroring/service/captured_audio_input.h"
+#include "components/mirroring/service/mirroring_features.h"
 #include "components/mirroring/service/udp_socket_client.h"
 #include "components/mirroring/service/video_capture_client.h"
 #include "crypto/random.h"
@@ -41,6 +43,7 @@
 #include "media/base/bind_to_current_loop.h"
 #include "media/cast/net/cast_transport.h"
 #include "media/cast/sender/audio_sender.h"
+#include "media/cast/sender/external_video_encoder.h"
 #include "media/cast/sender/video_sender.h"
 #include "media/gpu/gpu_video_accelerator_util.h"
 #include "media/mojo/clients/mojo_video_encode_accelerator.h"
@@ -71,17 +74,15 @@ namespace {
 
 // The interval for CastTransport to send Frame/PacketEvents to Session for
 // logging.
-constexpr base::TimeDelta kSendEventsInterval = base::TimeDelta::FromSeconds(1);
+constexpr base::TimeDelta kSendEventsInterval = base::Seconds(1);
 
 // The duration for OFFER/ANSWER exchange. If timeout, notify the client that
 // the session failed to start.
-constexpr base::TimeDelta kOfferAnswerExchangeTimeout =
-    base::TimeDelta::FromSeconds(15);
+constexpr base::TimeDelta kOfferAnswerExchangeTimeout = base::Seconds(15);
 
 // Amount of time to wait before assuming the Cast Receiver does not support
 // querying for capabilities via GET_CAPABILITIES.
-constexpr base::TimeDelta kGetCapabilitiesTimeout =
-    base::TimeDelta::FromSeconds(30);
+constexpr base::TimeDelta kGetCapabilitiesTimeout = base::Seconds(30);
 
 // Used for OFFER/ANSWER message exchange. Some receivers will error out on
 // payloadType values other than the ones hard-coded here.
@@ -99,6 +100,10 @@ constexpr int kSupportedRemotingVersion = 2;
 class TransportClient final : public media::cast::CastTransport::Client {
  public:
   explicit TransportClient(Session* session) : session_(session) {}
+
+  TransportClient(const TransportClient&) = delete;
+  TransportClient& operator=(const TransportClient&) = delete;
+
   ~TransportClient() override {}
 
   // media::cast::CastTransport::Client implementation.
@@ -119,15 +124,13 @@ class TransportClient final : public media::cast::CastTransport::Client {
   }
 
  private:
-  Session* const session_;  // Outlives this class.
-
-  DISALLOW_COPY_AND_ASSIGN(TransportClient);
+  const raw_ptr<Session> session_;  // Outlives this class.
 };
 
 // Generates a string with cryptographically secure random bytes.
 std::string MakeRandomString(size_t length) {
   std::string result(length, ' ');
-  crypto::RandBytes(base::data(result), length);
+  crypto::RandBytes(std::data(result), length);
   return result;
 }
 
@@ -136,46 +139,6 @@ int NumberOfEncodeThreads() {
   // with only 1 or 2 cores, use only one thread for encoding. On systems with
   // more cores, allow half of the cores to be used for encoding.
   return std::min(8, (base::SysInfo::NumberOfProcessors() + 1) / 2);
-}
-
-// Scan profiles for hardware VP8 encoder support.
-bool IsHardwareVP8EncodingSupported(
-    const std::vector<media::VideoEncodeAccelerator::SupportedProfile>&
-        profiles) {
-  for (const auto& vea_profile : profiles) {
-    if (vea_profile.profile >= media::VP8PROFILE_MIN &&
-        vea_profile.profile <= media::VP8PROFILE_MAX) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Scan profiles for hardware H.264 encoder support.
-bool IsHardwareH264EncodingSupported(
-    const std::vector<media::VideoEncodeAccelerator::SupportedProfile>&
-        profiles) {
-// TODO(b/169533953): Look into chromecast fails to decode bitstreams produced
-// by the AMD HW encoder.
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
-  static const base::NoDestructor<base::CPU> cpuid;
-  static const bool is_amd = cpuid->vendor_name() == "AuthenticAMD";
-  if (is_amd)
-    return false;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
-
-// TODO(crbug.com/1015482): Look into why H.264 hardware encoder on MacOS is
-// broken.
-// TODO(crbug.com/1015482): Look into HW encoder initialization issues on Win.
-#if !defined(OS_APPLE) && !defined(OS_WIN)
-  for (const auto& vea_profile : profiles) {
-    if (vea_profile.profile >= media::H264PROFILE_MIN &&
-        vea_profile.profile <= media::H264PROFILE_MAX) {
-      return true;
-    }
-  }
-#endif  // !defined(OS_APPLE) && !defined(OS_WIN)
-  return false;
 }
 
 // Helper to add |config| to |config_list| with given |aes_key|.
@@ -319,6 +282,29 @@ media::mojom::RemotingSinkMetadata ToRemotingSinkMetadata(
   return sink_metadata;
 }
 
+bool ShouldQueryForRemotingCapabilities(
+    const std::string& receiver_model_name) {
+  if (base::FeatureList::IsEnabled(features::kCastForceEnableRemotingQuery)) {
+    return true;
+  }
+
+  if (base::FeatureList::IsEnabled(
+          features::kCastUseBlocklistForRemotingQuery)) {
+    // The blocklist has not yet been fully determined.
+    // TODO(b/224993260): Implement this blocklist.
+    NOTREACHED();
+    return false;
+  }
+
+  // This is a workaround for Nest Hub devices, which do not support remoting.
+  // TODO(crbug.com/1198616): filtering hack should be removed. See
+  // issuetracker.google.com/135725157 for more information.
+  return base::StartsWith(receiver_model_name, "Chromecast",
+                          base::CompareCase::SENSITIVE) ||
+         base::StartsWith(receiver_model_name, "Eureka Dongle",
+                          base::CompareCase::SENSITIVE);
+}
+
 }  // namespace
 
 class Session::AudioCapturingCallback final
@@ -333,6 +319,9 @@ class Session::AudioCapturingCallback final
         error_callback_(std::move(error_callback)) {
     DCHECK(!audio_data_callback_.is_null());
   }
+
+  AudioCapturingCallback(const AudioCapturingCallback&) = delete;
+  AudioCapturingCallback& operator=(const AudioCapturingCallback&) = delete;
 
   ~AudioCapturingCallback() override {}
 
@@ -363,8 +352,6 @@ class Session::AudioCapturingCallback final
 
   const AudioDataCallback audio_data_callback_;
   base::OnceClosure error_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioCapturingCallback);
 };
 
 Session::Session(
@@ -413,7 +400,7 @@ Session::Session(
     gpu_channel_host_ = gpu_->EstablishGpuChannelSync();
     if (gpu_channel_host_ &&
         gpu_channel_host_->gpu_feature_info().status_values
-                [gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE] ==
+                [gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_ENCODE] ==
             gpu::kGpuFeatureStatusEnabled) {
       supported_profiles_ =
           media::GpuVideoAcceleratorUtil::ConvertGpuToMediaEncodeProfiles(
@@ -549,8 +536,7 @@ void Session::CreateVideoEncodeAccelerator(
         vea.InitWithNewPipeAndPassReceiver());
     // std::make_unique doesn't work to create a unique pointer of the subclass.
     mojo_vea = base::WrapUnique<media::VideoEncodeAccelerator>(
-        new media::MojoVideoEncodeAccelerator(std::move(vea),
-                                              supported_profiles_));
+        new media::MojoVideoEncodeAccelerator(std::move(vea)));
   }
   std::move(callback).Run(base::ThreadTaskRunnerHandle::Get(),
                           std::move(mojo_vea));
@@ -605,7 +591,7 @@ void Session::SetConstraints(const openscreen::cast::Answer& answer,
         std::min(video_config->max_bitrate, video.bit_rate_limits.maximum);
     video_config->max_playout_delay =
         std::min(video_config->max_playout_delay,
-                 base::TimeDelta::FromMilliseconds(video.max_delay.count()));
+                 base::Milliseconds(video.max_delay.count()));
     video_config->max_frame_rate =
         std::min(video_config->max_frame_rate,
                  static_cast<double>(video.maximum.frame_rate));
@@ -622,7 +608,7 @@ void Session::SetConstraints(const openscreen::cast::Answer& answer,
         std::min(audio_config->max_bitrate, audio.bit_rate_limits.maximum);
     audio_config->max_playout_delay =
         std::min(audio_config->max_playout_delay,
-                 base::TimeDelta::FromMilliseconds(audio.max_delay.count()));
+                 base::Milliseconds(audio.max_delay.count()));
     // Currently, Chrome only supports stereo, so audio.max_channels is ignored.
   }
 }
@@ -789,14 +775,8 @@ void Session::OnAnswer(const std::vector<FrameSenderConfig>& audio_configs,
       media_remoter_->OnMirroringResumed();
   }
 
-  // This is a workaround for Nest Hub devices, which do not support remoting.
-  // TODO(crbug.com/1198616): filtering hack should be removed. See
-  // issuetracker.google.com/135725157 for more information.
   if (initially_starting_session &&
-      (base::StartsWith(session_params_.receiver_model_name, "Chromecast",
-                        base::CompareCase::SENSITIVE) ||
-       base::StartsWith(session_params_.receiver_model_name, "Eureka Dongle",
-                        base::CompareCase::SENSITIVE))) {
+      ShouldQueryForRemotingCapabilities(session_params_.receiver_model_name)) {
     QueryCapabilitiesForRemoting();
   }
 
@@ -865,7 +845,10 @@ void Session::CreateAndSendOffer() {
   if (session_params_.type != SessionType::AUDIO_ONLY) {
     const int32_t video_ssrc = base::RandInt(kVideoSsrcMin, kVideoSsrcMax);
     if (state_ == MIRRORING) {
-      if (IsHardwareVP8EncodingSupported(GetSupportedVeaProfiles())) {
+      // First, check if hardware VP8 and H264 are available.
+      if (media::cast::ExternalVideoEncoder::IsRecommended(
+              Codec::CODEC_VIDEO_VP8, session_params_.receiver_model_name,
+              GetSupportedVeaProfiles())) {
         FrameSenderConfig config = MirrorSettings::GetDefaultVideoConfig(
             RtpPayloadType::VIDEO_VP8, Codec::CODEC_VIDEO_VP8);
         config.use_external_encoder = true;
@@ -874,7 +857,9 @@ void Session::CreateAndSendOffer() {
         AddStreamObject(stream_index++, "VP8", video_configs.back(),
                         mirror_settings_, &stream_list);
       }
-      if (IsHardwareH264EncodingSupported(GetSupportedVeaProfiles())) {
+      if (media::cast::ExternalVideoEncoder::IsRecommended(
+              Codec::CODEC_VIDEO_H264, session_params_.receiver_model_name,
+              GetSupportedVeaProfiles())) {
         FrameSenderConfig config = MirrorSettings::GetDefaultVideoConfig(
             RtpPayloadType::VIDEO_H264, Codec::CODEC_VIDEO_H264);
         config.use_external_encoder = true;
@@ -883,6 +868,27 @@ void Session::CreateAndSendOffer() {
         AddStreamObject(stream_index++, "H264", video_configs.back(),
                         mirror_settings_, &stream_list);
       }
+
+      // Then add software AV1 and VP9 if enabled.
+      // TODO(https://crbug.com/1311770): hardware VP9 encoding should be added.
+      if (mirroring::features::IsCastStreamingAV1Enabled()) {
+        FrameSenderConfig config = MirrorSettings::GetDefaultVideoConfig(
+            RtpPayloadType::VIDEO_AV1, Codec::CODEC_VIDEO_AV1);
+        AddSenderConfig(video_ssrc, config, aes_key, aes_iv, session_params_,
+                        &video_configs);
+        AddStreamObject(stream_index++, "AV1", video_configs.back(),
+                        mirror_settings_, &stream_list);
+      }
+      if (base::FeatureList::IsEnabled(features::kCastStreamingVp9)) {
+        FrameSenderConfig config = MirrorSettings::GetDefaultVideoConfig(
+            RtpPayloadType::VIDEO_VP9, Codec::CODEC_VIDEO_VP9);
+        AddSenderConfig(video_ssrc, config, aes_key, aes_iv, session_params_,
+                        &video_configs);
+        AddStreamObject(stream_index++, "VP9", video_configs.back(),
+                        mirror_settings_, &stream_list);
+      }
+
+      // Worst case, default to offering software VP8.
       if (video_configs.empty()) {
         FrameSenderConfig config = MirrorSettings::GetDefaultVideoConfig(
             RtpPayloadType::VIDEO_VP8, Codec::CODEC_VIDEO_VP8);
@@ -891,6 +897,7 @@ void Session::CreateAndSendOffer() {
         AddStreamObject(stream_index++, "VP8", video_configs.back(),
                         mirror_settings_, &stream_list);
       }
+
     } else /* REMOTING */ {
       FrameSenderConfig config = MirrorSettings::GetDefaultVideoConfig(
           RtpPayloadType::REMOTE_VIDEO, Codec::CODEC_VIDEO_REMOTE);

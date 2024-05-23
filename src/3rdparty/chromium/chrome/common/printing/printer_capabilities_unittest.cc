@@ -8,9 +8,8 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
-#include "base/task/post_task.h"
+#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
-#include "base/task_runner_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "build/chromeos_buildflags.h"
@@ -208,7 +207,7 @@ TEST_F(PrinterCapabilitiesTest, UserDefinedPapers) {
   const Value* media_option =
       media_size->FindKeyOfType("option", Value::Type::LIST);
   ASSERT_TRUE(media_option);
-  const auto& list = media_option->GetList();
+  const auto& list = media_option->GetListDeprecated();
   ASSERT_EQ(3U, list.size());
 
   // Verify the 3 paper sizes are the ones in |caps->papers|, followed by the

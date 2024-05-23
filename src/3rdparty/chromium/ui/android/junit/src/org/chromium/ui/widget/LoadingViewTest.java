@@ -10,12 +10,14 @@ import android.widget.FrameLayout;
 
 import androidx.test.filters.SmallTest;
 
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowView;
 
@@ -29,6 +31,7 @@ import java.util.concurrent.TimeUnit;
  */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE, shadows = {ShadowView.class})
+@LooperMode(LooperMode.Mode.LEGACY)
 public class LoadingViewTest {
     static class TestObserver implements LoadingView.Observer {
         public final CallbackHelper showLoadingCallback = new CallbackHelper();
@@ -58,11 +61,16 @@ public class LoadingViewTest {
         mActivity.setContentView(content);
 
         mLoadingView = new LoadingView(mActivity);
-        mLoadingView.setDisableAnimationForTest(true);
+        LoadingView.setDisableAnimationForTest(true);
         content.addView(mLoadingView);
 
         mLoadingView.addObserver(mTestObserver1);
         mLoadingView.addObserver(mTestObserver2);
+    }
+
+    @After
+    public void tearDown() {
+        LoadingView.setDisableAnimationForTest(false);
     }
 
     @Test

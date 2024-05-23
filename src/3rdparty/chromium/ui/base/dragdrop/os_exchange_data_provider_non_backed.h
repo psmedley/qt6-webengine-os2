@@ -43,6 +43,8 @@ class COMPONENT_EXPORT(UI_BASE) OSExchangeDataProviderNonBacked
   std::unique_ptr<OSExchangeDataProvider> Clone() const override;
   void MarkOriginatedFromRenderer() override;
   bool DidOriginateFromRenderer() const override;
+  void MarkAsFromPrivileged() override;
+  bool IsFromPrivileged() const override;
   void SetString(const std::u16string& data) override;
   void SetURL(const GURL& url, const std::u16string& title) override;
   void SetFilename(const base::FilePath& path) override;
@@ -77,6 +79,14 @@ class COMPONENT_EXPORT(UI_BASE) OSExchangeDataProviderNonBacked
 
   void SetSource(std::unique_ptr<DataTransferEndpoint> data_source) override;
   DataTransferEndpoint* GetSource() const override;
+
+ protected:
+  // Copy internal data into |provider| object.
+  void CopyData(OSExchangeDataProviderNonBacked* provider) const;
+
+  const std::map<ClipboardFormatType, base::Pickle>& pickle_data() const {
+    return pickle_data_;
+  }
 
  private:
   // Returns true if |formats_| contains a file format and the file name can be
@@ -120,6 +130,9 @@ class COMPONENT_EXPORT(UI_BASE) OSExchangeDataProviderNonBacked
   // For marking data originating from the renderer.
   bool originated_from_renderer_ = false;
 #endif
+
+  // For marking data originating by privileged WebContents.
+  bool is_from_privileged_ = false;
 
   // Data source.
   std::unique_ptr<DataTransferEndpoint> source_;

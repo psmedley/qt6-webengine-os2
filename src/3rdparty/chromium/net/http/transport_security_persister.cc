@@ -9,14 +9,15 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task_runner_util.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "crypto/sha2.h"
@@ -138,7 +139,7 @@ void DeserializeSTSData(const base::Value& sts_list,
 
   base::Time current_time(base::Time::Now());
 
-  for (const base::Value& sts_entry : sts_list.GetList()) {
+  for (const base::Value& sts_entry : sts_list.GetListDeprecated()) {
     if (!sts_entry.is_dict())
       continue;
 
@@ -227,7 +228,7 @@ void DeserializeExpectCTData(const base::Value& ct_list,
 
   const base::Time current_time(base::Time::Now());
 
-  for (const base::Value& ct_entry : ct_list.GetList()) {
+  for (const base::Value& ct_entry : ct_list.GetListDeprecated()) {
     if (!ct_entry.is_dict())
       continue;
 

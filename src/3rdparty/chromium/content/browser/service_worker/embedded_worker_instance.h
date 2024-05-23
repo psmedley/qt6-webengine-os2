@@ -13,7 +13,7 @@
 #include "base/callback_forward.h"
 #include "base/check_op.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -28,6 +28,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "services/network/public/mojom/client_security_state.mojom-forward.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
@@ -46,7 +47,6 @@ class RenderProcessHost;
 class ServiceWorkerContentSettingsProxyImpl;
 class ServiceWorkerContextCore;
 class ServiceWorkerVersion;
-class CrossOriginEmbedderPolicyReporter;
 
 namespace service_worker_new_script_loader_unittest {
 class ServiceWorkerNewScriptLoaderTest;
@@ -126,6 +126,10 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   };
 
   explicit EmbeddedWorkerInstance(ServiceWorkerVersion* owner_version);
+
+  EmbeddedWorkerInstance(const EmbeddedWorkerInstance&) = delete;
+  EmbeddedWorkerInstance& operator=(const EmbeddedWorkerInstance&) = delete;
+
   ~EmbeddedWorkerInstance() override;
 
   // Starts the worker. It is invalid to call this when the worker is not in
@@ -176,11 +180,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   void SetDevToolsAttached(bool attached);
   bool devtools_attached() const { return devtools_attached_; }
 
-  // Ensures that the UMA for how long this worker ran for, normally emitted
-  // when the worker stops, is not emitted. Takes effect only for the current
-  // running session, and has no effect if the worker is not currently running.
-  void AbortLifetimeTracking();
-
   bool network_accessed_for_script() const {
     return network_accessed_for_script_;
   }
@@ -230,29 +229,19 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
 
   // The below can only be called on the UI thread. The returned factory may be
   // later supplied to UpdateLoaderFactories().
+  //
+  // `client_security_state` may be nullptr, in which case a default value is
+  // set in the bundle.
   static std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
   CreateFactoryBundle(
       RenderProcessHost* rph,
       int routing_id,
       const url::Origin& origin,
-      const absl::optional<network::CrossOriginEmbedderPolicy>&
-          cross_origin_embedder_policy,
+      network::mojom::ClientSecurityStatePtr client_security_state,
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter,
       ContentBrowserClient::URLLoaderFactoryType factory_type,
       const std::string& devtools_worker_token);
-
-  // Creates a set of factory bundles for scripts and subresources. This must be
-  // called after the COEP value for the worker script is known.
-  struct CreateFactoryBundlesResult {
-    CreateFactoryBundlesResult();
-    ~CreateFactoryBundlesResult();
-    CreateFactoryBundlesResult(CreateFactoryBundlesResult&& other);
-
-    std::unique_ptr<blink::PendingURLLoaderFactoryBundle> script_bundle;
-    std::unique_ptr<blink::PendingURLLoaderFactoryBundle> subresource_bundle;
-  };
-  CreateFactoryBundlesResult CreateFactoryBundles();
 
   // Returns the unique token that has been generated to identify this worker
   // instance, and its corresponding GlobalScope in the renderer process. If the
@@ -263,7 +252,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
 
  private:
   typedef base::ObserverList<Listener>::Unchecked ListenerList;
-  class ScopedLifetimeTracker;
   struct StartInfo;
   class WorkerProcessHandle;
   friend class EmbeddedWorkerInstanceTest;
@@ -328,7 +316,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   void BindCacheStorageInternal();
 
   base::WeakPtr<ServiceWorkerContextCore> context_;
-  ServiceWorkerVersion* owner_version_;
+  raw_ptr<ServiceWorkerVersion> owner_version_;
 
   // Unique within a ServiceWorkerContextCore.
   const int embedded_worker_id_;
@@ -366,7 +354,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   // Contains info to be recorded on completing StartWorker sequence.
   // Set on Start() and cleared on OnStarted().
   std::unique_ptr<StartInfo> inflight_start_info_;
-  std::unique_ptr<ScopedLifetimeTracker> lifetime_tracker_;
 
   // This is valid only after a process is allocated for the worker.
   ServiceWorkerMetrics::StartSituation start_situation_ =
@@ -392,8 +379,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   // COEP Reporter connected to the URLLoaderFactories that handles subresource
   // requests initiated from the service worker. The impl lives on the UI
   // thread, and |coep_reporter_| has the ownership of the impl instance.
-  mojo::Remote<network::mojom::CrossOriginEmbedderPolicyReporter>
-      coep_reporter_;
+  std::unique_ptr<CrossOriginEmbedderPolicyReporter> coep_reporter_;
 
   // A unique identifier for this service worker instance. This is unique across
   // the browser process, but not persistent across service worker restarts.
@@ -402,8 +388,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   absl::optional<blink::ServiceWorkerToken> token_;
 
   base::WeakPtrFactory<EmbeddedWorkerInstance> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(EmbeddedWorkerInstance);
 };
 
 }  // namespace content

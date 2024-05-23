@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/recommend_apps_screen_handler.h"
 
+#include "ash/components/arc/arc_prefs.h"
 #include "ash/constants/ash_features.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/values.h"
 #include "chrome/browser/ash/arc/session/arc_session_manager.h"
 #include "chrome/browser/ash/login/screens/recommend_apps_screen.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,7 +15,6 @@
 #include "chrome/browser/ui/app_list/arc/arc_fast_app_reinstall_starter.h"
 #include "chrome/grit/component_extension_resources.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/arc/arc_prefs.h"
 #include "components/login/localized_values_builder.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -73,10 +74,8 @@ namespace chromeos {
 
 constexpr StaticOobeScreenId RecommendAppsScreenView::kScreenId;
 
-RecommendAppsScreenHandler::RecommendAppsScreenHandler(
-    JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(kScreenId, js_calls_container) {
-}
+RecommendAppsScreenHandler::RecommendAppsScreenHandler()
+    : BaseScreenHandler(kScreenId) {}
 
 RecommendAppsScreenHandler::~RecommendAppsScreenHandler() {
   if (screen_)
@@ -98,21 +97,20 @@ void RecommendAppsScreenHandler::DeclareLocalizedValues(
 void RecommendAppsScreenHandler::RegisterMessages() {
   BaseScreenHandler::RegisterMessages();
   AddCallback(kUserActionSkip, &RecommendAppsScreenHandler::OnUserSkip);
-  AddRawCallback(kUserActionInstall,
-                 &RecommendAppsScreenHandler::HandleInstall);
+  AddCallback(kUserActionInstall, &RecommendAppsScreenHandler::HandleInstall);
 }
 
 void RecommendAppsScreenHandler::Bind(RecommendAppsScreen* screen) {
   screen_ = screen;
-  BaseScreenHandler::SetBaseScreen(screen);
+  BaseScreenHandler::SetBaseScreenDeprecated(screen);
 }
 
 void RecommendAppsScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!IsJavascriptAllowed()) {
     show_on_init_ = true;
     return;
   }
-  ShowScreen(kScreenId);
+  ShowInWebUI();
 
   Profile* profile = ProfileManager::GetActiveUserProfile();
   pref_service_ = profile->GetPrefs();
@@ -120,9 +118,10 @@ void RecommendAppsScreenHandler::Show() {
 
 void RecommendAppsScreenHandler::Hide() {}
 
-void RecommendAppsScreenHandler::OnLoadSuccess(const base::Value& app_list) {
-  recommended_app_count_ = static_cast<int>(app_list.GetList().size());
-  LoadAppListInUI(app_list);
+void RecommendAppsScreenHandler::OnLoadSuccess(base::Value app_list) {
+  recommended_app_count_ =
+      static_cast<int>(app_list.GetListDeprecated().size());
+  LoadAppListInUI(std::move(app_list));
 }
 
 void RecommendAppsScreenHandler::OnParseResponseError() {
@@ -130,21 +129,25 @@ void RecommendAppsScreenHandler::OnParseResponseError() {
   HandleSkip();
 }
 
-void RecommendAppsScreenHandler::Initialize() {
+void RecommendAppsScreenHandler::InitializeDeprecated() {
   if (show_on_init_) {
     Show();
     show_on_init_ = false;
   }
 }
 
-void RecommendAppsScreenHandler::LoadAppListInUI(const base::Value& app_list) {
+void RecommendAppsScreenHandler::LoadAppListInUI(base::Value app_list) {
   RecordUmaScreenState(RecommendAppsScreenState::SHOW);
   const ui::ResourceBundle& resource_bundle =
       ui::ResourceBundle::GetSharedInstance();
+  // TODO(crbug.com/1261902): Clean-up old implementation once feature is
+  // launched.
   std::string app_list_webview = resource_bundle.LoadDataResourceString(
-      IDR_ARC_SUPPORT_RECOMMEND_APP_LIST_VIEW_HTML);
-  CallJS("login.RecommendAppsScreen.setWebview", app_list_webview);
-  CallJS("login.RecommendAppsScreen.loadAppList", app_list);
+      features::IsOobeNewRecommendAppsEnabled()
+          ? IDR_ARC_SUPPORT_RECOMMEND_APP_LIST_VIEW_HTML
+          : IDR_ARC_SUPPORT_RECOMMEND_APP_OLD_LIST_VIEW_HTML);
+  CallJS("login.RecommendAppsOldScreen.setWebview", app_list_webview);
+  CallJS("login.RecommendAppsOldScreen.loadAppList", std::move(app_list));
 }
 
 void RecommendAppsScreenHandler::OnUserSkip() {
@@ -162,9 +165,9 @@ void RecommendAppsScreenHandler::HandleSkip() {
     screen_->OnSkip();
 }
 
-void RecommendAppsScreenHandler::HandleInstall(const base::ListValue* args) {
+void RecommendAppsScreenHandler::HandleInstall(const base::Value::List& apps) {
   if (recommended_app_count_ != 0) {
-    int selected_app_count = static_cast<int>(args->GetSize());
+    int selected_app_count = static_cast<int>(apps.size());
     int selected_recommended_percentage =
         100 * selected_app_count / recommended_app_count_;
     RecordUmaUserSelectionAppCount(selected_app_count);
@@ -173,14 +176,15 @@ void RecommendAppsScreenHandler::HandleInstall(const base::ListValue* args) {
 
   // If the user does not select any apps, we should skip the app downloading
   // screen.
-  if (args->GetList().empty()) {
+  if (apps.empty()) {
     RecordUmaScreenAction(RecommendAppsScreenAction::SELECTED_NONE);
     HandleSkip();
     return;
   }
 
   RecordUmaScreenAction(RecommendAppsScreenAction::APP_SELECTED);
-  pref_service_->Set(arc::prefs::kArcFastAppReinstallPackages, *args);
+  pref_service_->Set(arc::prefs::kArcFastAppReinstallPackages,
+                     base::Value(apps.Clone()));
 
   arc::ArcFastAppReinstallStarter* fast_app_reinstall_starter =
       arc::ArcSessionManager::Get()->fast_app_resintall_starter();

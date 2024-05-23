@@ -14,7 +14,6 @@
 #include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
-#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "chrome/browser/ash/crostini/crostini_util.h"
 #include "chrome/grit/generated_resources.h"
@@ -100,7 +99,7 @@ void CrostiniStartupStatus::OnCrostiniConnected(
 void CrostiniStartupStatus::ShowProgressAtInterval() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   show_progress_timer_ = std::make_unique<base::RepeatingTimer>();
-  show_progress_timer_->Start(FROM_HERE, base::TimeDelta::FromMilliseconds(300),
+  show_progress_timer_->Start(FROM_HERE, base::Milliseconds(300),
                               base::BindRepeating(
                                   [](CrostiniStartupStatus* self) {
                                     self->spinner_index_++;
@@ -111,9 +110,6 @@ void CrostiniStartupStatus::ShowProgressAtInterval() {
 
 void CrostiniStartupStatus::OnStageStarted(InstallerState stage) {
   stage_index_ = static_cast<int>(stage) + 1;
-  if (!verbose_) {
-    return;
-  }
   static base::NoDestructor<base::flat_map<InstallerState, std::string>>
       kStartStrings({
           {InstallerState::kStart,
@@ -139,7 +135,8 @@ void CrostiniStartupStatus::OnStageStarted(InstallerState stage) {
            l10n_util::GetStringUTF8(
                IDS_CROSTINI_TERMINAL_STATUS_START_CONTAINER)},
       });
-  const std::string& stage_string = (*kStartStrings)[stage];
+  const std::string& stage_string =
+      verbose_ ? (*kStartStrings)[stage] : std::string();
   PrintStage(kColor3Yellow, stage_string);
 }
 

@@ -66,6 +66,9 @@ MediaStreamVideoTrackUnderlyingSource::GetStreamTransferOptimizer() {
       this, GetRealmRunner(), MaxQueueSize(),
       CrossThreadBindOnce(
           &MediaStreamVideoTrackUnderlyingSource::OnSourceTransferStarted,
+          WrapCrossThreadWeakPersistent(this)),
+      CrossThreadBindOnce(
+          &MediaStreamVideoTrackUnderlyingSource::ClearTransferredSource,
           WrapCrossThreadWeakPersistent(this)));
 }
 
@@ -76,9 +79,9 @@ MediaStreamVideoTrackUnderlyingSource::GetIOTaskRunner() {
 
 void MediaStreamVideoTrackUnderlyingSource::OnSourceTransferStarted(
     scoped_refptr<base::SequencedTaskRunner> transferred_runner,
-    TransferredVideoFrameQueueUnderlyingSource* source) {
+    CrossThreadPersistent<TransferredVideoFrameQueueUnderlyingSource> source) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  TransferSource(source);
+  TransferSource(std::move(source));
   RecordBreakoutBoxUsage(BreakoutBoxUsage::kReadableVideoWorker);
 }
 
@@ -127,7 +130,7 @@ std::string MediaStreamVideoTrackUnderlyingSource::GetDeviceIdForMonitoring(
     case mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE:
       if (IsScreenOrWindowCapture(device.id))
         return device.id;
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       return std::string();
   }
@@ -153,7 +156,7 @@ wtf_size_t MediaStreamVideoTrackUnderlyingSource::GetFramePoolSize(
                 MediaStreamVideoTrackUnderlyingSource::kMinMonitoredFrameCount,
                 media::kVideoCaptureDefaultMaxBufferPoolSize / 2)));
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       // There will be no monitoring and no frame pool size. Return 0 to signal
       // that the returned value will not be used.

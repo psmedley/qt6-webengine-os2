@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_DEMO_SETUP_SCREEN_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_DEMO_SETUP_SCREEN_HANDLER_H_
 
+#include "base/values.h"
 #include "chrome/browser/ash/login/demo_mode/demo_setup_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 
@@ -49,7 +50,11 @@ class DemoSetupScreenHandler : public BaseScreenHandler,
  public:
   using TView = DemoSetupScreenView;
 
-  explicit DemoSetupScreenHandler(JSCallsContainer* js_calls_container);
+  DemoSetupScreenHandler();
+
+  DemoSetupScreenHandler(const DemoSetupScreenHandler&) = delete;
+  DemoSetupScreenHandler& operator=(const DemoSetupScreenHandler&) = delete;
+
   ~DemoSetupScreenHandler() override;
 
   // DemoSetupScreenView:
@@ -62,17 +67,15 @@ class DemoSetupScreenHandler : public BaseScreenHandler,
   void OnSetupSucceeded() override;
 
   // BaseScreenHandler:
-  void Initialize() override;
+  void InitializeDeprecated() override;
   void DeclareLocalizedValues(
       ::login::LocalizedValuesBuilder* builder) override;
 
   // BaseWebUIHandler:
-  void GetAdditionalParameters(base::DictionaryValue* parameters) override;
+  void GetAdditionalParameters(base::Value::Dict* parameters) override;
 
  private:
   ash::DemoSetupScreen* screen_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(DemoSetupScreenHandler);
 };
 
 }  // namespace chromeos

@@ -12,9 +12,9 @@
 
 #include "base/callback.h"
 #include "base/check.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/scoped_feature_list.h"
 #include "pdf/pdf_features.h"
-#include "pdf/ppapi_migration/callback.h"
 #include "pdf/url_loader_wrapper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -98,7 +98,7 @@ class TestURLLoader : public URLLoaderWrapper {
     char* buffer() const { return buffer_; }
     int buffer_size() const { return buffer_size_; }
 
-    void SetReadCallback(ResultCallback read_callback,
+    void SetReadCallback(base::OnceCallback<void(int)> read_callback,
                          char* buffer,
                          int buffer_size) {
       did_read_callback_ = std::move(read_callback);
@@ -106,7 +106,7 @@ class TestURLLoader : public URLLoaderWrapper {
       buffer_size_ = buffer_size;
     }
 
-    void SetOpenCallback(ResultCallback open_callback,
+    void SetOpenCallback(base::OnceCallback<void(int)> open_callback,
                          gfx::Range req_byte_range) {
       did_open_callback_ = std::move(open_callback);
       set_open_byte_range(req_byte_range);
@@ -123,9 +123,9 @@ class TestURLLoader : public URLLoaderWrapper {
     }
 
    private:
-    ResultCallback did_open_callback_;
-    ResultCallback did_read_callback_;
-    char* buffer_ = nullptr;
+    base::OnceCallback<void(int)> did_open_callback_;
+    base::OnceCallback<void(int)> did_read_callback_;
+    raw_ptr<char> buffer_ = nullptr;
     int buffer_size_ = 0;
 
     int content_length_ = -1;
@@ -177,19 +177,19 @@ class TestURLLoader : public URLLoaderWrapper {
                  const std::string& referrer_url,
                  uint32_t position,
                  uint32_t size,
-                 ResultCallback callback) override {
+                 base::OnceCallback<void(int)> callback) override {
     data_->SetOpenCallback(std::move(callback),
                            gfx::Range(position, position + size));
   }
 
   void ReadResponseBody(char* buffer,
                         int buffer_size,
-                        ResultCallback callback) override {
+                        base::OnceCallback<void(int)> callback) override {
     data_->SetReadCallback(std::move(callback), buffer, buffer_size);
   }
 
  private:
-  LoaderData* data_;
+  raw_ptr<LoaderData> data_;
 };
 
 class TestClient : public DocumentLoader::Client {

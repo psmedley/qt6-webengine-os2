@@ -4,6 +4,8 @@
 
 #include "gpu/command_buffer/client/shared_image_interface.h"
 
+#include "base/notreached.h"
+
 namespace gpu {
 
 uint32_t SharedImageInterface::UsageForMailbox(const Mailbox& mailbox) {
@@ -39,6 +41,11 @@ Mailbox SharedImageInterface::CreateSharedImage(
   return CreateSharedImage(gpu_memory_buffer, gpu_memory_buffer_manager,
                            gfx::BufferPlane::DEFAULT, color_space,
                            surface_origin, alpha_type, usage);
+}
+
+void SharedImageInterface::CopyToGpuMemoryBuffer(const SyncToken& sync_token,
+                                                 const Mailbox& mailbox) {
+  NOTREACHED();
 }
 
 }  // namespace gpu

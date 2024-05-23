@@ -349,7 +349,7 @@ def FindTestTargets(target_cache, out_dir, paths, run_all):
 
 
 def RunTestTargets(out_dir, targets, gtest_filter, extra_args, dry_run,
-                   no_try_android_wrappers):
+                   no_try_android_wrappers, no_fast_local_dev):
 
   for target in targets:
 
@@ -359,6 +359,9 @@ def RunTestTargets(out_dir, targets, gtest_filter, extra_args, dry_run,
       # If the wrapper is not found or disabled use the Desktop target
       # which is an executable.
       path = os.path.join(out_dir, target)
+    elif not no_fast_local_dev:
+      # Usually want this flag when developing locally.
+      extra_args = extra_args + ['--fast-local-dev']
 
     cmd = [path, f'--gtest_filter={gtest_filter}'] + extra_args
     print('Running test: ' + ' '.join(cmd))
@@ -368,7 +371,7 @@ def RunTestTargets(out_dir, targets, gtest_filter, extra_args, dry_run,
 
 def BuildCppTestFilter(filenames, line):
   make_filter_command = [
-      sys.executable, SRC_DIR / 'tools' / 'make-gtest-filter.py'
+      sys.executable, SRC_DIR / 'tools' / 'make_gtest_filter.py'
   ]
   if line:
     make_filter_command += ['--line', str(line)]
@@ -421,15 +424,14 @@ def main():
       '--no-try-android-wrappers',
       action='store_true',
       help='Do not try to use Android test wrappers to run tests.')
+  parser.add_argument('--no-fast-local-dev',
+                      action='store_true',
+                      help='Do not add --fast-local-dev for Android tests.')
   parser.add_argument('file',
                       metavar='FILE_NAME',
                       help='test suite file (eg. FooTest.java)')
 
   args, _extras = parser.parse_known_args()
-
-  # Use CWD as out_dir when build.ninja exists.
-  if not args.out_dir and os.path.exists('build.ninja'):
-    args.out_dir = '.'
 
   if args.out_dir:
     constants.SetOutputDirectory(args.out_dir)
@@ -471,7 +473,7 @@ def main():
   if not build_ok: sys.exit(1)
 
   RunTestTargets(out_dir, targets, gtest_filter, _extras, args.dry_run,
-                 args.no_try_android_wrappers)
+                 args.no_try_android_wrappers, args.no_fast_local_dev)
 
 
 if __name__ == '__main__':

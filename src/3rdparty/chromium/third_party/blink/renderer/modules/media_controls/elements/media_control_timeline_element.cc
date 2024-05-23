@@ -29,14 +29,14 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_remaining_time_display_element.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_shared_helper.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "ui/display/screen_info.h"
 
 namespace {
 
 const int kThumbRadius = 6;
-const base::TimeDelta kRenderTimelineInterval = base::TimeDelta::FromSeconds(1);
+const base::TimeDelta kRenderTimelineInterval = base::Seconds(1);
 
 // Only respond to main button of primary pointer(s).
 bool IsValidPointerEvent(const blink::Event& event) {

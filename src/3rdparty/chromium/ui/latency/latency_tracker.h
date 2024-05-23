@@ -5,7 +5,7 @@
 #ifndef UI_LATENCY_LATENCY_TRACKER_H_
 #define UI_LATENCY_LATENCY_TRACKER_H_
 
-#include "base/macros.h"
+#include "base/time/time.h"
 #include "ui/latency/latency_info.h"
 
 namespace ui {
@@ -15,6 +15,10 @@ namespace ui {
 class LatencyTracker {
  public:
   LatencyTracker();
+
+  LatencyTracker(const LatencyTracker&) = delete;
+  LatencyTracker& operator=(const LatencyTracker&) = delete;
+
   ~LatencyTracker();
 
   // Terminates latency tracking for events that triggered rendering, also
@@ -63,8 +67,6 @@ class LatencyTracker {
                         base::TimeTicks gpu_swap_end_timestamp,
                         const LatencyInfo& latency,
                         bool first_frame);
-
-  DISALLOW_COPY_AND_ASSIGN(LatencyTracker);
 };
 
 }  // namespace latency

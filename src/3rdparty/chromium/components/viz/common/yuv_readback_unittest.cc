@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/cxx17_backports.h"
 #include "base/json/json_reader.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -24,7 +25,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 namespace viz {
 
@@ -111,22 +112,17 @@ class YUVReadbackTest : public testing::Test {
         << ") JSON data:" << std::endl
         << json_data;
 
-    base::ListValue* list;
-    CHECK(parsed_json.value->GetAsList(&list));
-    for (size_t i = 0; i < list->GetSize(); i++) {
-      base::Value* item = nullptr;
-      if (list->Get(i, &item)) {
-        base::DictionaryValue* dict;
-        CHECK(item->GetAsDictionary(&dict));
-        std::string name;
-        CHECK(dict->GetString("name", &name));
-        std::string trace_type;
-        CHECK(dict->GetString("ph", &trace_type));
-        // Count all except END traces, as they come in BEGIN/END pairs.
-        if (trace_type != "E" && trace_type != "e")
-          (*event_counts)[name]++;
-        VLOG(1) << "trace name: " << name;
-      }
+    CHECK(parsed_json.value->is_list());
+    for (const base::Value& dict : parsed_json.value->GetListDeprecated()) {
+      CHECK(dict.is_dict());
+      const std::string* name = dict.FindStringPath("name");
+      CHECK(name);
+      const std::string* trace_type = dict.FindStringPath("ph");
+      CHECK(trace_type);
+      // Count all except END traces, as they come in BEGIN/END pairs.
+      if (*trace_type != "E" && *trace_type != "e")
+        (*event_counts)[*name]++;
+      VLOG(1) << "trace name: " << *name;
     }
   }
 
@@ -374,14 +370,12 @@ class YUVReadbackTest : public testing::Test {
             // on its coded size.
             gfx::Size((output_xsize + 15) & ~15, (output_ysize + 15) & ~15),
             gfx::Rect(0, 0, output_xsize, output_ysize),
-            gfx::Size(output_xsize, output_ysize),
-            base::TimeDelta::FromSeconds(0));
+            gfx::Size(output_xsize, output_ysize), base::Seconds(0));
     scoped_refptr<media::VideoFrame> truth_frame =
         media::VideoFrame::CreateFrame(
             media::PIXEL_FORMAT_I420, gfx::Size(output_xsize, output_ysize),
             gfx::Rect(0, 0, output_xsize, output_ysize),
-            gfx::Size(output_xsize, output_ysize),
-            base::TimeDelta::FromSeconds(0));
+            gfx::Size(output_xsize, output_ysize), base::Seconds(0));
 
     base::RunLoop run_loop;
     auto run_quit_closure = [](base::OnceClosure quit_closure, bool result) {
@@ -469,7 +463,7 @@ class YUVReadbackTest : public testing::Test {
   }
 
   std::unique_ptr<gpu::GLInProcessContext> context_;
-  gpu::gles2::GLES2Interface* gl_;
+  raw_ptr<gpu::gles2::GLES2Interface> gl_;
   std::unique_ptr<gpu::GLHelper> helper_;
   gl::DisableNullDrawGLBindings enable_pixel_output_;
 };
@@ -520,8 +514,8 @@ TEST_P(YUVReadbackPixelTest, Test) {
   unsigned int x = std::get<2>(GetParam());
   unsigned int y = std::get<3>(GetParam());
 
-  for (unsigned int ox = x; ox < base::size(kYUVReadbackSizes); ox++) {
-    for (unsigned int oy = y; oy < base::size(kYUVReadbackSizes); oy++) {
+  for (unsigned int ox = x; ox < std::size(kYUVReadbackSizes); ox++) {
+    for (unsigned int oy = y; oy < std::size(kYUVReadbackSizes); oy++) {
       // If output is a subsection of the destination frame, (letterbox)
       // then try different variations of where the subsection goes.
       for (Margin xm = x < ox ? MarginLeft : MarginRight; xm <= MarginRight;
@@ -552,8 +546,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(
         ::testing::Bool(),
         ::testing::Bool(),
-        ::testing::Range<unsigned int>(0, base::size(kYUVReadbackSizes)),
-        ::testing::Range<unsigned int>(0, base::size(kYUVReadbackSizes))));
+        ::testing::Range<unsigned int>(0, std::size(kYUVReadbackSizes)),
+        ::testing::Range<unsigned int>(0, std::size(kYUVReadbackSizes))));
 
 }  // namespace viz
 

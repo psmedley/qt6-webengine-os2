@@ -51,8 +51,7 @@ DEFINE_CERT_ERROR_ID(kFailedParsingAuthorityKeyIdentifier,
 DEFINE_CERT_ERROR_ID(kFailedParsingSubjectKeyIdentifier,
                      "Failed parsing subject key identifier");
 
-WARN_UNUSED_RESULT bool GetSequenceValue(const der::Input& tlv,
-                                         der::Input* value) {
+[[nodiscard]] bool GetSequenceValue(const der::Input& tlv, der::Input* value) {
   der::Parser parser(tlv);
   return parser.ReadTag(der::kSequence, value) && !parser.HasMore();
 }
@@ -79,55 +78,19 @@ ParsedCertificate::~ParsedCertificate() = default;
 
 // static
 scoped_refptr<ParsedCertificate> ParsedCertificate::Create(
-    bssl::UniquePtr<CRYPTO_BUFFER> cert_data,
-    const ParseCertificateOptions& options,
-    CertErrors* errors) {
-  return CreateInternal(std::move(cert_data), der::Input(), options, errors);
-}
-
-// static
-bool ParsedCertificate::CreateAndAddToVector(
-    bssl::UniquePtr<CRYPTO_BUFFER> cert_data,
-    const ParseCertificateOptions& options,
-    std::vector<scoped_refptr<net::ParsedCertificate>>* chain,
-    CertErrors* errors) {
-  scoped_refptr<ParsedCertificate> cert(
-      Create(std::move(cert_data), options, errors));
-  if (!cert)
-    return false;
-  chain->push_back(std::move(cert));
-  return true;
-}
-
-// static
-scoped_refptr<ParsedCertificate> ParsedCertificate::CreateWithoutCopyingUnsafe(
-    const uint8_t* data,
-    size_t length,
-    const ParseCertificateOptions& options,
-    CertErrors* errors) {
-  return CreateInternal(nullptr, der::Input(data, length), options, errors);
-}
-
-// static
-scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     bssl::UniquePtr<CRYPTO_BUFFER> backing_data,
-    der::Input static_data,
     const ParseCertificateOptions& options,
     CertErrors* errors) {
-  if (!errors) {
-    CertErrors unused_errors;
-    return CreateInternal(std::move(backing_data), static_data, options,
-                          &unused_errors);
-  }
+  // |errors| is an optional parameter, but to keep the code simpler, use a
+  // dummy object when one wasn't provided.
+  CertErrors unused_errors;
+  if (!errors)
+    errors = &unused_errors;
 
   scoped_refptr<ParsedCertificate> result(new ParsedCertificate);
-  if (backing_data) {
-    result->cert_data_ = std::move(backing_data);
-    result->cert_ = der::Input(CRYPTO_BUFFER_data(result->cert_data_.get()),
-                               CRYPTO_BUFFER_len(result->cert_data_.get()));
-  } else {
-    result->cert_ = static_data;
-  }
+  result->cert_data_ = std::move(backing_data);
+  result->cert_ = der::Input(CRYPTO_BUFFER_data(result->cert_data_.get()),
+                             CRYPTO_BUFFER_len(result->cert_data_.get()));
 
   if (!ParseCertificate(result->cert_, &result->tbs_certificate_tlv_,
                         &result->signature_algorithm_tlv_,
@@ -181,7 +144,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     ParsedExtension extension;
 
     // Basic constraints.
-    if (result->GetExtension(BasicConstraintsOid(), &extension)) {
+    if (result->GetExtension(der::Input(kBasicConstraintsOid), &extension)) {
       result->has_basic_constraints_ = true;
       if (!ParseBasicConstraints(extension.value,
                                  &result->basic_constraints_)) {
@@ -191,7 +154,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Key Usage.
-    if (result->GetExtension(KeyUsageOid(), &extension)) {
+    if (result->GetExtension(der::Input(kKeyUsageOid), &extension)) {
       result->has_key_usage_ = true;
       if (!ParseKeyUsage(extension.value, &result->key_usage_)) {
         errors->AddError(kFailedParsingKeyUsage);
@@ -200,7 +163,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Extended Key Usage.
-    if (result->GetExtension(ExtKeyUsageOid(), &extension)) {
+    if (result->GetExtension(der::Input(kExtKeyUsageOid), &extension)) {
       result->has_extended_key_usage_ = true;
       if (!ParseEKUExtension(extension.value, &result->extended_key_usage_)) {
         errors->AddError(kFailedParsingEku);
@@ -209,7 +172,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Subject alternative name.
-    if (result->GetExtension(SubjectAltNameOid(),
+    if (result->GetExtension(der::Input(kSubjectAltNameOid),
                              &result->subject_alt_names_extension_)) {
       // RFC 5280 section 4.2.1.6:
       // SubjectAltName ::= GeneralNames
@@ -232,7 +195,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Name constraints.
-    if (result->GetExtension(NameConstraintsOid(), &extension)) {
+    if (result->GetExtension(der::Input(kNameConstraintsOid), &extension)) {
       result->name_constraints_ =
           NameConstraints::Create(extension.value, extension.critical, errors);
       if (!result->name_constraints_) {
@@ -242,10 +205,10 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Authority information access.
-    if (result->GetExtension(AuthorityInfoAccessOid(),
+    if (result->GetExtension(der::Input(kAuthorityInfoAccessOid),
                              &result->authority_info_access_extension_)) {
       result->has_authority_info_access_ = true;
-      if (!ParseAuthorityInfoAccess(
+      if (!ParseAuthorityInfoAccessURIs(
               result->authority_info_access_extension_.value,
               &result->ca_issuers_uris_, &result->ocsp_uris_)) {
         errors->AddError(kFailedParsingAia);
@@ -254,9 +217,9 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Policies.
-    if (result->GetExtension(CertificatePoliciesOid(), &extension)) {
+    if (result->GetExtension(der::Input(kCertificatePoliciesOid), &extension)) {
       result->has_policy_oids_ = true;
-      if (!ParseCertificatePoliciesExtension(
+      if (!ParseCertificatePoliciesExtensionOids(
               extension.value, false /*fail_parsing_unknown_qualifier_oids*/,
               &result->policy_oids_, errors)) {
         errors->AddError(kFailedParsingPolicies);
@@ -265,7 +228,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Policy constraints.
-    if (result->GetExtension(PolicyConstraintsOid(), &extension)) {
+    if (result->GetExtension(der::Input(kPolicyConstraintsOid), &extension)) {
       result->has_policy_constraints_ = true;
       if (!ParsePolicyConstraints(extension.value,
                                   &result->policy_constraints_)) {
@@ -275,7 +238,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Policy mappings.
-    if (result->GetExtension(PolicyMappingsOid(), &extension)) {
+    if (result->GetExtension(der::Input(kPolicyMappingsOid), &extension)) {
       result->has_policy_mappings_ = true;
       if (!ParsePolicyMappings(extension.value, &result->policy_mappings_)) {
         errors->AddError(kFailedParsingPolicyMappings);
@@ -284,7 +247,7 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Inhibit Any Policy.
-    if (result->GetExtension(InhibitAnyPolicyOid(), &extension)) {
+    if (result->GetExtension(der::Input(kInhibitAnyPolicyOid), &extension)) {
       result->has_inhibit_any_policy_ = true;
       if (!ParseInhibitAnyPolicy(extension.value,
                                  &result->inhibit_any_policy_)) {
@@ -294,7 +257,8 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Subject Key Identifier.
-    if (result->GetExtension(SubjectKeyIdentifierOid(), &extension)) {
+    if (result->GetExtension(der::Input(kSubjectKeyIdentifierOid),
+                             &extension)) {
       result->subject_key_identifier_ = absl::make_optional<der::Input>();
       if (!ParseSubjectKeyIdentifier(
               extension.value, &result->subject_key_identifier_.value())) {
@@ -304,7 +268,8 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
     }
 
     // Authority Key Identifier.
-    if (result->GetExtension(AuthorityKeyIdentifierOid(), &extension)) {
+    if (result->GetExtension(der::Input(kAuthorityKeyIdentifierOid),
+                             &extension)) {
       result->authority_key_identifier_ =
           absl::make_optional<ParsedAuthorityKeyIdentifier>();
       if (!ParseAuthorityKeyIdentifier(
@@ -316,6 +281,20 @@ scoped_refptr<ParsedCertificate> ParsedCertificate::CreateInternal(
   }
 
   return result;
+}
+
+// static
+bool ParsedCertificate::CreateAndAddToVector(
+    bssl::UniquePtr<CRYPTO_BUFFER> cert_data,
+    const ParseCertificateOptions& options,
+    std::vector<scoped_refptr<net::ParsedCertificate>>* chain,
+    CertErrors* errors) {
+  scoped_refptr<ParsedCertificate> cert(
+      Create(std::move(cert_data), options, errors));
+  if (!cert)
+    return false;
+  chain->push_back(std::move(cert));
+  return true;
 }
 
 }  // namespace net

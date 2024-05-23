@@ -33,7 +33,6 @@
 
 #include <type_traits>
 
-#include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
@@ -45,7 +44,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_domexception_overconstrainederror.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/mediastream/identifiability_metrics.h"
 #include "third_party/blink/renderer/modules/mediastream/media_constraints_impl.h"
@@ -53,8 +52,9 @@
 #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
 #include "third_party/blink/renderer/modules/mediastream/overconstrained_error.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_controller.h"
+#include "third_party/blink/renderer/modules/peerconnection/peer_connection_tracker.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -116,6 +116,10 @@ class FeatureCounter {
  public:
   explicit FeatureCounter(ExecutionContext* context)
       : context_(context), is_unconstrained_(true) {}
+
+  FeatureCounter(const FeatureCounter&) = delete;
+  FeatureCounter& operator=(const FeatureCounter&) = delete;
+
   void Count(WebFeature feature) {
     UseCounter::Count(context_, feature);
     is_unconstrained_ = false;
@@ -125,8 +129,6 @@ class FeatureCounter {
  private:
   Persistent<ExecutionContext> context_;
   bool is_unconstrained_;
-
-  DISALLOW_COPY_AND_ASSIGN(FeatureCounter);
 };
 
 void CountAudioConstraintUses(ExecutionContext* context,
@@ -261,10 +263,6 @@ void CountVideoConstraintUses(ExecutionContext* context,
     counter.Count(WebFeature::kMediaStreamConstraintsGroupIdVideo);
   }
   if (RequestUsesDiscreteConstraint(
-          constraints, &MediaTrackConstraintSetPlatform::video_kind)) {
-    counter.Count(WebFeature::kMediaStreamConstraintsVideoKind);
-  }
-  if (RequestUsesDiscreteConstraint(
           constraints, &MediaTrackConstraintSetPlatform::media_stream_source)) {
     counter.Count(WebFeature::kMediaStreamConstraintsMediaStreamSourceVideo);
   }
@@ -304,33 +302,6 @@ MediaConstraints ParseOptions(
 }
 
 }  // namespace
-
-class UserMediaRequest::V8Callbacks final : public UserMediaRequest::Callbacks {
- public:
-  V8Callbacks(V8NavigatorUserMediaSuccessCallback* success_callback,
-              V8NavigatorUserMediaErrorCallback* error_callback)
-      : success_callback_(success_callback), error_callback_(error_callback) {}
-  ~V8Callbacks() override = default;
-
-  void Trace(Visitor* visitor) const override {
-    visitor->Trace(success_callback_);
-    visitor->Trace(error_callback_);
-    UserMediaRequest::Callbacks::Trace(visitor);
-  }
-
-  void OnSuccess(ScriptWrappable* callback_this_value,
-                 MediaStream* stream) override {
-    success_callback_->InvokeAndReportException(callback_this_value, stream);
-  }
-  void OnError(ScriptWrappable* callback_this_value,
-               const V8MediaStreamError* error) override {
-    error_callback_->InvokeAndReportException(callback_this_value, error);
-  }
-
- private:
-  Member<V8NavigatorUserMediaSuccessCallback> success_callback_;
-  Member<V8NavigatorUserMediaErrorCallback> error_callback_;
-};
 
 UserMediaRequest* UserMediaRequest::Create(
     ExecutionContext* context,
@@ -421,20 +392,6 @@ UserMediaRequest* UserMediaRequest::Create(
   return MakeGarbageCollected<UserMediaRequest>(
       context, controller, media_type, audio, video,
       options->preferCurrentTab(), callbacks, surface);
-}
-
-UserMediaRequest* UserMediaRequest::Create(
-    ExecutionContext* context,
-    UserMediaController* controller,
-    const MediaStreamConstraints* options,
-    V8NavigatorUserMediaSuccessCallback* success_callback,
-    V8NavigatorUserMediaErrorCallback* error_callback,
-    MediaErrorState& error_state,
-    IdentifiableSurface surface) {
-  return Create(
-      context, controller, UserMediaRequest::MediaType::kUserMedia, options,
-      MakeGarbageCollected<V8Callbacks>(success_callback, error_callback),
-      error_state, surface);
 }
 
 UserMediaRequest* UserMediaRequest::CreateForTesting(
@@ -566,8 +523,11 @@ void UserMediaRequest::OnMediaStreamInitialized(MediaStream* stream) {
 
   RecordIdentifiabilityMetric(surface_, GetExecutionContext(),
                               IdentifiabilityBenignStringToken(g_empty_string));
+  if (auto* window = GetWindow()) {
+    PeerConnectionTracker::From(*window).TrackGetUserMediaSuccess(this, stream);
+  }
   // After this call, the execution context may be invalid.
-  callbacks_->OnSuccess(nullptr, stream);
+  callbacks_->OnSuccess(stream);
   is_resolved_ = true;
 }
 
@@ -579,6 +539,10 @@ void UserMediaRequest::FailConstraint(const String& constraint_name,
     return;
   RecordIdentifiabilityMetric(surface_, GetExecutionContext(),
                               IdentifiabilityBenignStringToken(message));
+  if (auto* window = GetWindow()) {
+    PeerConnectionTracker::From(*window).TrackGetUserMediaFailure(
+        this, "OverConstrainedError", message);
+  }
   // After this call, the execution context may be invalid.
   callbacks_->OnError(
       nullptr, MakeGarbageCollected<V8MediaStreamError>(
@@ -624,6 +588,12 @@ void UserMediaRequest::Fail(Error name, const String& message) {
   }
   RecordIdentifiabilityMetric(surface_, GetExecutionContext(),
                               IdentifiabilityBenignStringToken(message));
+
+  if (auto* window = GetWindow()) {
+    PeerConnectionTracker::From(*window).TrackGetUserMediaFailure(
+        this, DOMException::GetErrorName(exception_code), message);
+  }
+
   // After this call, the execution context may be invalid.
   callbacks_->OnError(nullptr, MakeGarbageCollected<V8MediaStreamError>(
                                    MakeGarbageCollected<DOMException>(

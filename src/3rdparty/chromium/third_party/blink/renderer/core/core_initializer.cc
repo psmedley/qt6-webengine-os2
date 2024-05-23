@@ -30,10 +30,12 @@
 
 #include "third_party/blink/renderer/core/core_initializer.h"
 
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
+#include "third_party/blink/renderer/core/css/css_default_style_sheets.h"
 #include "third_party/blink/renderer/core/css/media_feature_names.h"
 #include "third_party/blink/renderer/core/css/media_query_evaluator.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
@@ -53,6 +55,7 @@
 #include "third_party/blink/renderer/core/media_type_names.h"
 #include "third_party/blink/renderer/core/performance_entry_names.h"
 #include "third_party/blink/renderer/core/pointer_type_names.h"
+#include "third_party/blink/renderer/core/script_type_names.h"
 #include "third_party/blink/renderer/core/securitypolicyviolation_disposition_names.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/timezone/timezone_controller.h"
@@ -60,7 +63,7 @@
 #include "third_party/blink/renderer/core/xlink_names.h"
 #include "third_party/blink/renderer/core/xml_names.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
-#include "third_party/blink/renderer/platform/font_family_names.h"
+#include "third_party/blink/renderer/platform/fonts/font_global_context.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
@@ -140,6 +143,7 @@ void CoreInitializer::Initialize() {
   performance_entry_names::Init();
   pointer_type_names::Init();
   shadow_element_names::Init();
+  script_type_names::Init();
   securitypolicyviolation_disposition_names::Init();
 
   MediaQueryEvaluator::Init();
@@ -156,6 +160,11 @@ void CoreInitializer::Initialize() {
   BindingSecurity::Init();
 
   TimeZoneController::Init();
+
+  FontGlobalContext::Init();
+
+  if (base::FeatureList::IsEnabled(features::kDefaultStyleSheetsEarlyInit))
+    CSSDefaultStyleSheets::Init();
 }
 
 }  // namespace blink

@@ -9,6 +9,7 @@ import type * as Protocol from '../../generated/protocol.js';
 import * as Bindings from '../../models/bindings/bindings.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as Timeline from '../timeline/timeline.js';
+import inputTimelineStyles from './inputTimeline.css.js';
 
 import {InputModel} from './InputModel.js';
 
@@ -47,7 +48,6 @@ export class InputTimeline extends UI.Widget.VBox implements Timeline.TimelineLo
 
   constructor() {
     super(true);
-    this.registerRequiredCSS('panels/input//inputTimeline.css');
     this.element.classList.add('inputs-timeline');
 
     this.tracingClient = null;
@@ -80,7 +80,7 @@ export class InputTimeline extends UI.Widget.VBox implements Timeline.TimelineLo
     this.loadButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, () => this.selectFileToLoad());
     this.saveButton = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.saveProfile), 'largeicon-download');
     this.saveButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, _event => {
-      this.saveToFile();
+      void this.saveToFile();
     });
     this.panelToolbar.appendSeparator();
     this.panelToolbar.appendToolbarItem(this.loadButton);
@@ -116,6 +116,8 @@ export class InputTimeline extends UI.Widget.VBox implements Timeline.TimelineLo
   }
 
   wasShown(): void {
+    super.wasShown();
+    this.registerCSSFiles([inputTimelineStyles]);
   }
 
   willHide(): void {
@@ -144,18 +146,18 @@ export class InputTimeline extends UI.Widget.VBox implements Timeline.TimelineLo
   toggleRecording(): void {
     switch (this.state) {
       case State.Recording: {
-        this.stopRecording();
+        void this.stopRecording();
         break;
       }
       case State.Idle: {
-        this.startRecording();
+        void this.startRecording();
         break;
       }
     }
   }
 
   startReplay(): void {
-    this.replayEvents();
+    void this.replayEvents();
   }
 
   toggleReplayPause(): void {
@@ -180,7 +182,8 @@ export class InputTimeline extends UI.Widget.VBox implements Timeline.TimelineLo
       return;
     }
 
-    const fileName = `InputProfile-${Platform.DateUtilities.toISO8601Compact(new Date())}.json`;
+    const fileName = `InputProfile-${Platform.DateUtilities.toISO8601Compact(new Date())}.json` as
+        Platform.DevToolsPath.RawPathString;
     const stream = new Bindings.FileUtils.FileOutputStream();
 
     const accepted = await stream.open(fileName);
@@ -190,7 +193,7 @@ export class InputTimeline extends UI.Widget.VBox implements Timeline.TimelineLo
 
     const backingStorage = this.tracingModel.backingStorage() as Bindings.TempFile.TempFileBackingStorage;
     await backingStorage.writeToStream(stream);
-    stream.close();
+    void stream.close();
   }
 
   private selectFileToLoad(): void {
@@ -308,9 +311,9 @@ export class ActionDelegate implements UI.ActionRegistration.ActionDelegate {
 
   handleAction(context: UI.Context.Context, actionId: string): boolean {
     const inputViewId = 'Inputs';
-    UI.ViewManager.ViewManager.instance()
+    void UI.ViewManager.ViewManager.instance()
         .showView(inputViewId)
-        .then(() => (UI.ViewManager.ViewManager.instance().view(inputViewId) as UI.View.View).widget())
+        .then(() => UI.ViewManager.ViewManager.instance().view(inputViewId).widget())
         .then(widget => this.innerHandleAction(widget as InputTimeline, actionId));
 
     return true;

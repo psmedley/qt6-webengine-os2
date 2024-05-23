@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/online_login_helper.h"
 
+#include "ash/components/login/auth/challenge_response/cert_utils.h"
+#include "ash/components/login/auth/cryptohome_key_constants.h"
 #include "chrome/browser/ash/login/signin_partition_manager.h"
 #include "chrome/browser/ash/login/ui/login_display_host_webui.h"
 #include "chrome/browser/ash/login/ui/signin_ui.h"
@@ -13,9 +15,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chromeos/dbus/util/version_loader.h"
-#include "chromeos/login/auth/challenge_response/cert_utils.h"
-#include "chromeos/login/auth/cryptohome_key_constants.h"
-#include "components/sync/driver/sync_driver_switches.h"
 #include "content/public/browser/storage_partition.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -26,7 +25,8 @@ namespace {
 
 const char kGAPSCookie[] = "GAPS";
 const char kOAUTHCodeCookie[] = "oauth_code";
-constexpr base::TimeDelta kCookieDelay = base::TimeDelta::FromSeconds(20);
+const char kRAPTCookie[] = "RAPT";
+constexpr base::TimeDelta kCookieDelay = base::Seconds(20);
 
 }  // namespace
 
@@ -172,7 +172,7 @@ OnlineLoginHelper::OnlineLoginHelper(
       on_cookie_timeout_callback_(std::move(on_cookie_timeout_callback)),
       complete_login_callback_(std::move(complete_login_callback)) {}
 
-OnlineLoginHelper::~OnlineLoginHelper() {}
+OnlineLoginHelper::~OnlineLoginHelper() = default;
 
 void OnlineLoginHelper::SetUserContext(
     std::unique_ptr<UserContext> pending_user_context) {
@@ -207,6 +207,7 @@ void OnlineLoginHelper::RequestCookiesAndCompleteAuthentication() {
       net::CookieOptions::MakeAllInclusive();
   cookie_manager->GetCookieList(
       GaiaUrls::GetInstance()->gaia_url(), cookie_options,
+      net::CookiePartitionKeyCollection::Todo(),
       base::BindOnce(&OnlineLoginHelper::OnGetCookiesForCompleteAuthentication,
                      weak_factory_.GetWeakPtr()));
 }
@@ -226,13 +227,15 @@ void OnlineLoginHelper::OnCookieWaitTimeout() {
 void OnlineLoginHelper::OnGetCookiesForCompleteAuthentication(
     const net::CookieAccessResultList& cookies,
     const net::CookieAccessResultList& excluded_cookies) {
-  std::string auth_code, gaps_cookie;
+  std::string auth_code, gaps_cookie, rapt;
   for (const auto& cookie_with_access_result : cookies) {
     const auto& cookie = cookie_with_access_result.cookie;
     if (cookie.Name() == login::kOAUTHCodeCookie)
       auth_code = cookie.Value();
     else if (cookie.Name() == login::kGAPSCookie)
       gaps_cookie = cookie.Value();
+    else if (cookie.Name() == login::kRAPTCookie)
+      rapt = cookie.Value();
   }
 
   if (auth_code.empty()) {
@@ -241,16 +244,18 @@ void OnlineLoginHelper::OnGetCookiesForCompleteAuthentication(
   }
 
   DCHECK(pending_user_context_);
-  UserContext user_context = *pending_user_context_;
+  auto user_context = std::move(pending_user_context_);
   pending_user_context_.reset();
   oauth_code_listener_.reset();
   cookie_waiting_timer_.reset();
 
-  user_context.SetAuthCode(auth_code);
+  user_context->SetAuthCode(auth_code);
   if (!gaps_cookie.empty())
-    user_context.SetGAPSCookie(gaps_cookie);
+    user_context->SetGAPSCookie(gaps_cookie);
+  if (!rapt.empty())
+    user_context->SetReauthProofToken(rapt);
 
-  std::move(complete_login_callback_).Run(user_context);
+  std::move(complete_login_callback_).Run(std::move(user_context));
 }
 
 }  // namespace chromeos

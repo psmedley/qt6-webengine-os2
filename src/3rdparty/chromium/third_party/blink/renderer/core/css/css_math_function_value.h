@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_MATH_FUNCTION_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_MATH_FUNCTION_VALUE_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_math_expression_node.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 
@@ -17,7 +18,7 @@ class CORE_EXPORT CSSMathFunctionValue : public CSSPrimitiveValue {
  public:
   static CSSMathFunctionValue* Create(const Length&, float zoom);
   static CSSMathFunctionValue* Create(const CSSMathExpressionNode*,
-                                      ValueRange = kValueRangeAll);
+                                      ValueRange = ValueRange::kAll);
 
   CSSMathFunctionValue(const CSSMathExpressionNode* expression,
                        ValueRange range);
@@ -38,10 +39,8 @@ class CORE_EXPORT CSSMathFunctionValue : public CSSPrimitiveValue {
 
   bool IsPx() const;
 
-  bool IsInt() const { return expression_->IsInteger(); }
-  bool IsNegative() const { return expression_->DoubleValue() < 0; }
   ValueRange PermittedValueRange() const {
-    return IsNonNegative() ? kValueRangeNonNegative : kValueRangeAll;
+    return value_range_in_target_context_;
   }
 
   // When |false|, comparisons between percentage values can be resolved without
@@ -93,11 +92,10 @@ class CORE_EXPORT CSSMathFunctionValue : public CSSPrimitiveValue {
   void TraceAfterDispatch(blink::Visitor* visitor) const;
 
  private:
-  bool IsNonNegative() const { return is_non_negative_math_function_; }
-
   double ClampToPermittedRange(double) const;
 
   Member<const CSSMathExpressionNode> expression_;
+  ValueRange value_range_in_target_context_;
 };
 
 template <>

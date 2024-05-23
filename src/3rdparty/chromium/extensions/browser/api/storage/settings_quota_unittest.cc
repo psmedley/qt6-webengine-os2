@@ -8,20 +8,22 @@
 
 #include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
+#include "components/value_store/testing_value_store.h"
 #include "extensions/browser/api/storage/settings_storage_quota_enforcer.h"
-#include "extensions/browser/value_store/testing_value_store.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::DictionaryValue;
 
 namespace extensions {
 
-// To save typing ValueStore::DEFAULTS/IGNORE_QUOTA everywhere.
-const ValueStore::WriteOptions DEFAULTS = ValueStore::DEFAULTS;
-const ValueStore::WriteOptions IGNORE_QUOTA =
-    ValueStore::IGNORE_QUOTA;
+// To save typing value_store::ValueStore::DEFAULTS/IGNORE_QUOTA everywhere.
+const value_store::ValueStore::WriteOptions DEFAULTS =
+    value_store::ValueStore::DEFAULTS;
+const value_store::ValueStore::WriteOptions IGNORE_QUOTA =
+    value_store::ValueStore::IGNORE_QUOTA;
 
 class ExtensionSettingsQuotaTest : public testing::Test {
  public:
@@ -29,7 +31,7 @@ class ExtensionSettingsQuotaTest : public testing::Test {
       : byte_value_1_(1),
         byte_value_16_("sixteen bytes."),
         byte_value_256_(base::Value(base::Value::Type::LIST)),
-        delegate_(new TestingValueStore()) {
+        delegate_(new value_store::TestingValueStore()) {
     for (int i = 1; i < 89; ++i) {
       byte_value_256_.Append(i);
     }
@@ -56,14 +58,14 @@ class ExtensionSettingsQuotaTest : public testing::Test {
     SettingsStorageQuotaEnforcer::Limits limits =
         { quota_bytes, quota_bytes_per_item, max_items };
     storage_ = std::make_unique<SettingsStorageQuotaEnforcer>(
-        limits, base::WrapUnique(delegate_));
+        limits, base::WrapUnique(delegate_.get()));
   }
 
   // Returns whether the settings in |storage_| and |delegate_| are the same as
   // |settings|.
   bool SettingsEqual(const base::DictionaryValue& settings) {
-    return settings.Equals(&storage_->Get().settings()) &&
-           settings.Equals(&delegate_->Get().settings());
+    return settings == storage_->Get().settings() &&
+           settings == delegate_->Get().settings();
   }
 
   // Values with different serialized sizes.
@@ -75,7 +77,7 @@ class ExtensionSettingsQuotaTest : public testing::Test {
   std::unique_ptr<SettingsStorageQuotaEnforcer> storage_;
 
   // In-memory storage area being delegated to.  Always owned by |storage_|.
-  TestingValueStore* delegate_;
+  raw_ptr<value_store::TestingValueStore> delegate_;
 };
 
 TEST_F(ExtensionSettingsQuotaTest, ZeroQuotaBytes) {
@@ -101,7 +103,7 @@ TEST_F(ExtensionSettingsQuotaTest, SmallByteQuota) {
   CreateStorage(8u, UINT_MAX, UINT_MAX);
 
   EXPECT_TRUE(storage_->Set(DEFAULTS, "a", byte_value_1_).status().ok());
-  settings.Set("a", byte_value_1_.CreateDeepCopy());
+  settings.SetKey("a", byte_value_1_.Clone());
   EXPECT_TRUE(SettingsEqual(settings));
 
   EXPECT_FALSE(storage_->Set(DEFAULTS, "b", byte_value_16_).status().ok());
@@ -242,7 +244,7 @@ TEST_F(ExtensionSettingsQuotaTest, RemovingNonexistentSettings) {
   EXPECT_TRUE(SettingsEqual(settings));
 
   // Max out key count.
-  to_set.Clear();
+  to_set.DictClear();
   to_set.SetKey("b1", byte_value_1_.Clone());
   to_set.SetKey("b2", byte_value_1_.Clone());
   storage_->Set(DEFAULTS, to_set);

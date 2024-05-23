@@ -12,12 +12,13 @@
 #include "base/guid.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner_helpers.h"
+#include "base/task/sequenced_task_runner_helpers.h"
 #include "components/desks_storage/core/desk_model.h"
 
 namespace ash {
 class DeskTemplate;
-}
+class OverviewTestBase;
+}  // namespace ash
 
 namespace desks_storage {
 // The LocalDeskDataManager is the local storage implementation of
@@ -58,18 +59,17 @@ class LocalDeskDataManager : public DeskModel {
   void DeleteEntry(const std::string& uuid,
                    DeleteEntryCallback callback) override;
   void DeleteAllEntries(DeleteEntryCallback callback) override;
+  std::size_t GetEntryCount() const override;
+  std::size_t GetMaxEntryCount() const override;
+  std::vector<base::GUID> GetAllEntryUuids() const override;
+  bool IsReady() const override;
+  bool IsSyncing() const override;
 
-  // Other helper methods.
-
-  // Gets the number of templates currently saved.
-  std::size_t GetTemplateCount() const;
-
-  // Gets the maximum number of templates this storage backend could hold.
-  // Adding more templates beyond this limit will result in |kHitMaximumLimit|
-  // error.
-  std::size_t GetMaxEntryCount() const;
+  static void SetDisableMaxTemplateLimitForTesting(bool disabled);
 
  private:
+  friend class ash::OverviewTestBase;
+
   // Loads desk templates from |local_path_| into cache if the cache is not
   // loaded yet.
   void EnsureCacheIsLoaded();
@@ -91,6 +91,7 @@ class LocalDeskDataManager : public DeskModel {
 
   // Wrapper method to call GetEntryByUuidCallback.
   void OnGetEntryByUuid(
+      const std::string& uuid_str,
       std::unique_ptr<DeskModel::GetEntryByUuidStatus> status_ptr,
       std::unique_ptr<ash::DeskTemplate*> entry_ptr_ptr,
       DeskModel::GetEntryByUuidCallback callback);

@@ -22,6 +22,7 @@
 #include "avcodec.h"
 #include "get_bits.h"
 #include "bytestream.h"
+#include "codec_internal.h"
 #include "internal.h"
 #include "libavutil/colorspace.h"
 #include "libavutil/imgutils.h"
@@ -764,7 +765,7 @@ static int save_subtitle_set(AVCodecContext *avctx, AVSubtitle *sub, int *got_ou
     }
     if (sub->num_rects > 0) {
 
-        sub->rects = av_mallocz_array(sizeof(*sub->rects), sub->num_rects);
+        sub->rects = av_calloc(sub->num_rects, sizeof(*sub->rects));
         if (!sub->rects) {
             ret = AVERROR(ENOMEM);
             goto fail;
@@ -823,13 +824,11 @@ static int save_subtitle_set(AVCodecContext *avctx, AVSubtitle *sub, int *got_ou
             }
             memcpy(rect->data[1], clut_table, (1 << region->depth) * sizeof(*clut_table));
 
-            rect->data[0] = av_malloc(region->buf_size);
+            rect->data[0] = av_memdup(region->pbuf, region->buf_size);
             if (!rect->data[0]) {
                 ret = AVERROR(ENOMEM);
                 goto fail;
             }
-
-            memcpy(rect->data[0], region->pbuf, region->buf_size);
 
             if ((clut == &default_clut && ctx->compute_clut < 0) || ctx->compute_clut == 1) {
                 if (!region->has_computed_clut) {
@@ -1074,11 +1073,9 @@ static int dvbsub_parse_clut_segment(AVCodecContext *avctx,
     clut = get_clut(ctx, clut_id);
 
     if (!clut) {
-        clut = av_malloc(sizeof(*clut));
+        clut = av_memdup(&default_clut, sizeof(*clut));
         if (!clut)
             return AVERROR(ENOMEM);
-
-        memcpy(clut, &default_clut, sizeof(*clut));
 
         clut->id = clut_id;
         clut->version = -1;
@@ -1719,8 +1716,6 @@ static int dvbsub_decode(AVCodecContext *avctx,
 
 end:
     if (ret < 0) {
-        *got_sub_ptr = 0;
-        avsubtitle_free(sub);
         return ret;
     } else {
         if (ctx->compute_edt == 1)
@@ -1745,15 +1740,15 @@ static const AVClass dvbsubdec_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodec ff_dvbsub_decoder = {
-    .name           = "dvbsub",
-    .long_name      = NULL_IF_CONFIG_SMALL("DVB subtitles"),
-    .type           = AVMEDIA_TYPE_SUBTITLE,
-    .id             = AV_CODEC_ID_DVB_SUBTITLE,
+const FFCodec ff_dvbsub_decoder = {
+    .p.name         = "dvbsub",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("DVB subtitles"),
+    .p.type         = AVMEDIA_TYPE_SUBTITLE,
+    .p.id           = AV_CODEC_ID_DVB_SUBTITLE,
     .priv_data_size = sizeof(DVBSubContext),
     .init           = dvbsub_init_decoder,
     .close          = dvbsub_close_decoder,
     .decode         = dvbsub_decode,
-    .priv_class     = &dvbsubdec_class,
+    .p.priv_class   = &dvbsubdec_class,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

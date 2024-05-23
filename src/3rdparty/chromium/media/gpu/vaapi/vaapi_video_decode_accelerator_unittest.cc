@@ -10,6 +10,7 @@
 #include "base/run_loop.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "media/gpu/accelerated_video_decoder.h"
 #include "media/gpu/vaapi/vaapi_picture.h"
 #include "media/gpu/vaapi/vaapi_picture_factory.h"
@@ -17,7 +18,6 @@
 #include "media/gpu/vaapi/vaapi_wrapper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/ui_base_features.h"
 
 using base::test::RunClosure;
 using ::testing::_;
@@ -108,7 +108,9 @@ class MockVaapiPicture : public VaapiPicture {
   ~MockVaapiPicture() override = default;
 
   // VaapiPicture implementation.
-  Status Allocate(gfx::BufferFormat format) override { return OkStatus(); }
+  VaapiStatus Allocate(gfx::BufferFormat format) override {
+    return VaapiStatus::Codes::kOk;
+  }
   bool ImportGpuMemoryBufferHandle(
       gfx::BufferFormat format,
       gfx::GpuMemoryBufferHandle gpu_memory_buffer_handle) override {
@@ -192,6 +194,12 @@ class VaapiVideoDecodeAcceleratorTest : public TestWithParam<TestParams>,
 
     vda_.state_ = VaapiVideoDecodeAccelerator::kIdle;
   }
+
+  VaapiVideoDecodeAcceleratorTest(const VaapiVideoDecodeAcceleratorTest&) =
+      delete;
+  VaapiVideoDecodeAcceleratorTest& operator=(
+      const VaapiVideoDecodeAcceleratorTest&) = delete;
+
   ~VaapiVideoDecodeAcceleratorTest() {}
 
   void SetUp() override {
@@ -373,7 +381,7 @@ class VaapiVideoDecodeAcceleratorTest : public TestWithParam<TestParams>,
   }
 
   // VideoDecodeAccelerator::Client methods.
-  MOCK_METHOD1(NotifyInitializationComplete, void(Status));
+  MOCK_METHOD1(NotifyInitializationComplete, void(DecoderStatus));
   MOCK_METHOD5(
       ProvidePictureBuffers,
       void(uint32_t, VideoPixelFormat, uint32_t, const gfx::Size&, uint32_t));
@@ -403,8 +411,6 @@ class VaapiVideoDecodeAcceleratorTest : public TestWithParam<TestParams>,
 
  private:
   base::WeakPtrFactory<VaapiVideoDecodeAcceleratorTest> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(VaapiVideoDecodeAcceleratorTest);
 };
 
 // Verify that it is possible to select DRM(egl) and TFP(glx) at runtime.
@@ -416,12 +422,17 @@ TEST_P(VaapiVideoDecodeAcceleratorTest, SupportedPlatforms) {
             mock_vaapi_picture_factory_->GetVaapiImplementation(
                 gl::kGLImplementationEGLGLES2));
 
-#if defined(USE_X11)
-  if (!features::IsUsingOzonePlatform()) {
-    EXPECT_EQ(VaapiPictureFactory::kVaapiImplementationX11,
-              mock_vaapi_picture_factory_->GetVaapiImplementation(
-                  gl::kGLImplementationDesktopGL));
-  }
+#if BUILDFLAG(USE_VAAPI_X11)
+  EXPECT_EQ(VaapiPictureFactory::kVaapiImplementationAngle,
+            mock_vaapi_picture_factory_->GetVaapiImplementation(
+                gl::kGLImplementationEGLANGLE));
+  EXPECT_EQ(VaapiPictureFactory::kVaapiImplementationX11,
+            mock_vaapi_picture_factory_->GetVaapiImplementation(
+                gl::kGLImplementationDesktopGL));
+#elif defined(USE_OZONE)
+  EXPECT_EQ(VaapiPictureFactory::kVaapiImplementationDrm,
+            mock_vaapi_picture_factory_->GetVaapiImplementation(
+                gl::kGLImplementationEGLANGLE));
 #endif
 }
 

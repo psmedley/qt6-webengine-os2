@@ -7,11 +7,11 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/quic/address_utils.h"
-#include "net/third_party/quiche/src/quic/core/quic_clock.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_clock.h"
 
 namespace net {
 
@@ -77,10 +77,6 @@ void QuicChromiumPacketReader::StartReading() {
       }
     }
   }
-}
-
-size_t QuicChromiumPacketReader::EstimateMemoryUsage() const {
-  return read_buffer_->size();
 }
 
 bool QuicChromiumPacketReader::ProcessReadResult(int result) {

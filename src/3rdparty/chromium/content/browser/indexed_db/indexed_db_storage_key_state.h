@@ -13,10 +13,12 @@
 #include "base/containers/flat_map.h"
 #include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/time/clock.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "components/services/storage/indexed_db/scopes/disjoint_range_lock_manager.h"
+#include "components/services/storage/indexed_db/locks/disjoint_range_lock_manager.h"
 #include "content/browser/indexed_db/indexed_db_storage_key_state_handle.h"
 #include "content/browser/indexed_db/indexed_db_task_helper.h"
 #include "content/common/content_export.h"
@@ -59,23 +61,23 @@ class CONTENT_EXPORT IndexedDBStorageKeyState {
   // occurs after backing store close.
   // Visible for testing.
   static constexpr const base::TimeDelta kMaxEarliestGlobalSweepFromNow =
-      base::TimeDelta::FromHours(1);
+      base::Hours(1);
   // Maximum time interval between runs of the IndexedDBSweeper for a given
   // storage_key. Sweeping only occurs after backing store close.
   // Visible for testing.
   static constexpr const base::TimeDelta kMaxEarliestStorageKeySweepFromNow =
-      base::TimeDelta::FromDays(3);
+      base::Days(3);
 
   // Maximum time interval between runs of the IndexedDBCompactionTask.
   // Compaction only occurs after backing store close.
   // Visible for testing.
   static constexpr const base::TimeDelta kMaxEarliestGlobalCompactionFromNow =
-      base::TimeDelta::FromHours(1);
+      base::Hours(1);
   // Maximum time interval between runs of the IndexedDBCompactionTask for a
   // given storage_key. Compaction only occurs after backing store close.
   // Visible for testing.
   static constexpr const base::TimeDelta
-      kMaxEarliestStorageKeyCompactionFromNow = base::TimeDelta::FromDays(3);
+      kMaxEarliestStorageKeyCompactionFromNow = base::Days(3);
 
   enum class ClosingState {
     // IndexedDBStorageKeyState isn't closing.
@@ -103,6 +105,10 @@ class CONTENT_EXPORT IndexedDBStorageKeyState {
       TasksAvailableCallback notify_tasks_callback,
       TearDownCallback tear_down_callback,
       std::unique_ptr<IndexedDBBackingStore> backing_store);
+
+  IndexedDBStorageKeyState(const IndexedDBStorageKeyState&) = delete;
+  IndexedDBStorageKeyState& operator=(const IndexedDBStorageKeyState&) = delete;
+
   ~IndexedDBStorageKeyState();
 
   void AbortAllTransactions(bool compact);
@@ -184,7 +190,7 @@ class CONTENT_EXPORT IndexedDBStorageKeyState {
 
   // Returns a new handle to this factory. If this object was in its closing
   // sequence, then that sequence will be halted by this call.
-  IndexedDBStorageKeyStateHandle CreateHandle() WARN_UNUSED_RESULT;
+  [[nodiscard]] IndexedDBStorageKeyStateHandle CreateHandle();
 
   void OnHandleDestruction();
 
@@ -219,16 +225,16 @@ class CONTENT_EXPORT IndexedDBStorageKeyState {
   // CanCloseFactory.
   bool has_blobs_outstanding_ = false;
   bool skip_closing_sequence_ = false;
-  base::Clock* const clock_;
-  TransactionalLevelDBFactory* const transactional_leveldb_factory_;
+  const raw_ptr<base::Clock> clock_;
+  const raw_ptr<TransactionalLevelDBFactory> transactional_leveldb_factory_;
 
   bool running_tasks_ = false;
   bool task_run_scheduled_ = false;
 
   // This is safe because it is owned by IndexedDBFactoryImpl, which owns this
   // object.
-  base::Time* earliest_global_sweep_time_;
-  base::Time* earliest_global_compaction_time_;
+  raw_ptr<base::Time> earliest_global_sweep_time_;
+  raw_ptr<base::Time> earliest_global_compaction_time_;
   ClosingState closing_stage_ = ClosingState::kNotClosing;
   base::OneShotTimer close_timer_;
   const std::unique_ptr<DisjointRangeLockManager> lock_manager_;
@@ -246,8 +252,6 @@ class CONTENT_EXPORT IndexedDBStorageKeyState {
   TearDownCallback tear_down_callback_;
 
   base::WeakPtrFactory<IndexedDBStorageKeyState> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBStorageKeyState);
 };
 
 }  // namespace content

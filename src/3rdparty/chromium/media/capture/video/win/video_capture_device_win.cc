@@ -128,15 +128,15 @@ void VideoCaptureDeviceWin::GetPinCapabilityList(
   ComPtr<IAMVideoControl> video_control;
   hr = capture_filter.As(&video_control);
 
-  int count = 0, size = 0;
-  hr = stream_config->GetNumberOfCapabilities(&count, &size);
+  int count = 0, byte_size = 0;
+  hr = stream_config->GetNumberOfCapabilities(&count, &byte_size);
   if (FAILED(hr)) {
     DLOG(ERROR) << "GetNumberOfCapabilities failed: "
                 << logging::SystemErrorCodeToString(hr);
     return;
   }
 
-  std::unique_ptr<BYTE[]> caps(new BYTE[size]);
+  std::unique_ptr<BYTE[]> caps(new BYTE[byte_size]);
   for (int i = 0; i < count; ++i) {
     VideoCaptureDeviceWin::ScopedMediaType media_type;
     hr = stream_config->GetStreamCaps(i, media_type.Receive(), caps.get());
@@ -534,8 +534,11 @@ void VideoCaptureDeviceWin::AllocateAndStart(
       params.requested_format.pixel_format,
       media::VideoPixelFormat::PIXEL_FORMAT_MAX);
 
-  client_->OnStarted();
-  state_ = kCapturing;
+  {
+    base::AutoLock lock(lock_);
+    client_->OnStarted();
+    state_ = kCapturing;
+  }
 }
 
 void VideoCaptureDeviceWin::StopAndDeAllocate() {
@@ -554,8 +557,11 @@ void VideoCaptureDeviceWin::StopAndDeAllocate() {
   graph_builder_->Disconnect(output_capture_pin_.Get());
   graph_builder_->Disconnect(input_sink_pin_.Get());
 
-  client_.reset();
-  state_ = kIdle;
+  {
+    base::AutoLock lock(lock_);
+    client_.reset();
+    state_ = kIdle;
+  }
 }
 
 void VideoCaptureDeviceWin::TakePhoto(TakePhotoCallback callback) {
@@ -860,28 +866,35 @@ void VideoCaptureDeviceWin::FrameReceived(const uint8_t* buffer,
                                           const VideoCaptureFormat& format,
                                           base::TimeDelta timestamp,
                                           bool flip_y) {
-  if (first_ref_time_.is_null())
-    first_ref_time_ = base::TimeTicks::Now();
-
-  // There is a chance that the platform does not provide us with the timestamp,
-  // in which case, we use reference time to calculate a timestamp.
-  if (timestamp == kNoTimestamp)
-    timestamp = base::TimeTicks::Now() - first_ref_time_;
-
-  // We always calculate camera rotation for the first frame. We also cache the
-  // latest value to use when AutoRotation is turned off.
+  // We always calculate camera rotation for the first frame. We also cache
+  // the latest value to use when AutoRotation is turned off.
+  // To avoid potential deadlock, do this without holding a lock.
   if (!camera_rotation_.has_value() || IsAutoRotationEnabled())
     camera_rotation_ = GetCameraRotation(device_descriptor_.facing);
 
-  // TODO(julien.isorce): retrieve the color space information using the
-  // DirectShow api, AM_MEDIA_TYPE::VIDEOINFOHEADER2::dwControlFlags. If
-  // AMCONTROL_COLORINFO_PRESENT, then reinterpret dwControlFlags as a
-  // DXVA_ExtendedFormat. Then use its fields DXVA_VideoPrimaries,
-  // DXVA_VideoTransferMatrix, DXVA_VideoTransferFunction and
-  // DXVA_NominalRangeto build a gfx::ColorSpace. See http://crbug.com/959992.
-  client_->OnIncomingCapturedData(buffer, length, format, gfx::ColorSpace(),
-                                  camera_rotation_.value(), flip_y,
-                                  base::TimeTicks::Now(), timestamp);
+  {
+    base::AutoLock lock(lock_);
+    if (state_ != kCapturing)
+      return;
+
+    if (first_ref_time_.is_null())
+      first_ref_time_ = base::TimeTicks::Now();
+
+    // There is a chance that the platform does not provide us with the
+    // timestamp, in which case, we use reference time to calculate a timestamp.
+    if (timestamp == kNoTimestamp)
+      timestamp = base::TimeTicks::Now() - first_ref_time_;
+
+    // TODO(julien.isorce): retrieve the color space information using the
+    // DirectShow api, AM_MEDIA_TYPE::VIDEOINFOHEADER2::dwControlFlags. If
+    // AMCONTROL_COLORINFO_PRESENT, then reinterpret dwControlFlags as a
+    // DXVA_ExtendedFormat. Then use its fields DXVA_VideoPrimaries,
+    // DXVA_VideoTransferMatrix, DXVA_VideoTransferFunction and
+    // DXVA_NominalRangeto build a gfx::ColorSpace. See http://crbug.com/959992.
+    client_->OnIncomingCapturedData(buffer, length, format, gfx::ColorSpace(),
+                                    camera_rotation_.value(), flip_y,
+                                    base::TimeTicks::Now(), timestamp);
+  }
 
   while (!take_photo_callbacks_.empty()) {
     TakePhotoCallback cb = std::move(take_photo_callbacks_.front());

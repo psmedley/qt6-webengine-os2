@@ -5,17 +5,26 @@
 #ifndef SERVICES_NETWORK_COOKIE_SETTINGS_H_
 #define SERVICES_NETWORK_COOKIE_SETTINGS_H_
 
+#include <set>
+#include <string>
+#include <vector>
+
 #include "base/component_export.h"
 #include "base/feature_list.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/cookie_settings_base.h"
 #include "net/base/features.h"
+#include "net/base/network_delegate.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/same_party_context.h"
 #include "services/network/public/cpp/session_cookie_delete_predicate.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
+
+namespace net {
+class SiteForCookies;
+}  // namespace net
 
 namespace url {
 class Origin;
@@ -28,6 +37,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
     : public content_settings::CookieSettingsBase {
  public:
   CookieSettings();
+
+  CookieSettings(const CookieSettings&) = delete;
+  CookieSettings& operator=(const CookieSettings&) = delete;
+
   ~CookieSettings() override;
 
   void set_content_settings(const ContentSettingsForOneType& content_settings) {
@@ -85,13 +98,17 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
                                        ContentSetting* setting) const override;
   bool ShouldIgnoreSameSiteRestrictions(
       const GURL& url,
-      const GURL& site_for_cookies) const override;
+      const net::SiteForCookies& site_for_cookies) const override;
 
-  // Returns true iff "privacy mode" should be enabled for the URL request in
-  // question, according to the user's settings.
-  bool IsPrivacyModeEnabled(
+  // Returns kStateDisallowed iff the given |url| has to be requested over
+  // connection that is not tracked by the server. Usually is kStateAllowed,
+  // unless user privacy settings block cookies from being get or set.
+  // It may be set to kPartitionedStateAllowedOnly if the request allows
+  // partitioned state to be sent over the connection, but unpartitioned
+  // state should be blocked.
+  net::NetworkDelegate::PrivacySetting IsPrivacyModeEnabled(
       const GURL& url,
-      const GURL& site_for_cookies,
+      const net::SiteForCookies& site_for_cookies,
       const absl::optional<url::Origin>& top_frame_origin,
       net::SamePartyContext::Type same_party_context_type) const;
 
@@ -101,7 +118,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
   bool IsCookieAccessible(
       const net::CanonicalCookie& cookie,
       const GURL& url,
-      const GURL& site_for_cookies,
+      const net::SiteForCookies& site_for_cookies,
       const absl::optional<url::Origin>& top_frame_origin) const;
 
   // Annotates `maybe_included_cookies` and `excluded_cookies` with
@@ -113,7 +130,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
   // building the cookie line.
   bool AnnotateAndMoveUserBlockedCookies(
       const GURL& url,
-      const GURL& site_for_cookies,
+      const net::SiteForCookies& site_for_cookies,
       const url::Origin* top_frame_origin,
       net::CookieAccessResultList& maybe_included_cookies,
       net::CookieAccessResultList& excluded_cookies) const;
@@ -137,9 +154,15 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
       bool is_third_party_request,
       content_settings::SettingSource* source) const override;
 
+  enum class ThirdPartyCookieBlockingSetting {
+    kThirdPartyStateAllowed = 1,
+    kThirdPartyStateDisallowed,
+    kPartitionedThirdPartyStateAllowedOnly,
+  };
+
   struct CookieSettingWithMetadata {
     ContentSetting cookie_setting;
-    bool blocked_by_third_party_setting;
+    ThirdPartyCookieBlockingSetting blocked_by_third_party_setting;
   };
 
   // Returns the cookie setting for the given request, along with metadata
@@ -154,7 +177,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
   // `is_third_party_request` appropriately.
   CookieSettingWithMetadata GetCookieSettingWithMetadata(
       const GURL& url,
-      const GURL& site_for_cookies,
+      const net::SiteForCookies& site_for_cookies,
       const url::Origin* top_frame_origin) const;
 
   // Returns whether the given cookie should be allowed to be sent, according to
@@ -178,6 +201,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
   bool IsHypotheticalCookieAllowed(
       const CookieSettings::CookieSettingWithMetadata& setting_with_metadata,
       bool is_same_party,
+      bool is_partitioned,
       bool record_metrics) const;
 
   // Returns true if at least one content settings is session only.
@@ -196,8 +220,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CookieSettings
   const bool sameparty_cookies_considered_first_party_ =
       base::FeatureList::IsEnabled(
           net::features::kSamePartyCookiesConsideredFirstParty);
-
-  DISALLOW_COPY_AND_ASSIGN(CookieSettings);
 };
 
 }  // namespace network

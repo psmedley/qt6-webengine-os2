@@ -6,12 +6,11 @@
 #define COMPONENTS_PAGE_LOAD_METRICS_BROWSER_OBSERVERS_AD_METRICS_ADS_PAGE_LOAD_METRICS_OBSERVER_H_
 
 #include <bitset>
-#include <list>
 #include <map>
 #include <memory>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/scoped_observation.h"
@@ -95,14 +94,22 @@ class AdsPageLoadMetricsObserver
       const ApplicationLocaleGetter& application_local_getter,
       base::TickClock* clock = nullptr,
       heavy_ad_intervention::HeavyAdBlocklist* blocklist = nullptr);
+
+  AdsPageLoadMetricsObserver(const AdsPageLoadMetricsObserver&) = delete;
+  AdsPageLoadMetricsObserver& operator=(const AdsPageLoadMetricsObserver&) =
+      delete;
+
   ~AdsPageLoadMetricsObserver() override;
 
   // PageLoadMetricsObserver
+  const char* GetObserverName() const override;
   ObservePolicy OnStart(content::NavigationHandle* navigation_handle,
                         const GURL& currently_committed_url,
                         bool started_in_foreground) override;
-  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
-                         ukm::SourceId source_id) override;
+  ObservePolicy OnFencedFramesStart(
+      content::NavigationHandle* navigation_handle,
+      const GURL& currently_committed_url) override;
+  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle) override;
   void OnTimingUpdate(content::RenderFrameHost* subframe_rfh,
                       const mojom::PageLoadTiming& timing) override;
   void OnCpuTimingUpdate(content::RenderFrameHost* subframe_rfh,
@@ -190,7 +197,7 @@ class AdsPageLoadMetricsObserver
 
   void UpdateAdFrameData(content::NavigationHandle* navigation_handle,
                          bool is_adframe,
-                         bool should_ignored_detected_ad);
+                         bool should_ignore_detected_ad);
 
   // Gets the number of bytes that we may have not attributed to ad
   // resources due to the resource being reported as an ad late.
@@ -198,7 +205,7 @@ class AdsPageLoadMetricsObserver
                             const mojom::ResourceDataUpdatePtr& resource) const;
 
   // Updates page level counters for resource loads.
-  void ProcessResourceForPage(int process_id,
+  void ProcessResourceForPage(content::RenderFrameHost* render_frame_host,
                               const mojom::ResourceDataUpdatePtr& resource);
   void ProcessResourceForFrame(content::RenderFrameHost* render_frame_host,
                                const mojom::ResourceDataUpdatePtr& resource);
@@ -281,7 +288,7 @@ class AdsPageLoadMetricsObserver
       subresource_observation_{this};
 
   // The tick clock used to get the current time. Can be replaced by tests.
-  const base::TickClock* clock_;
+  raw_ptr<const base::TickClock> clock_;
 
   // Whether the page load currently being observed is a reload of a previous
   // page.
@@ -299,13 +306,13 @@ class AdsPageLoadMetricsObserver
 
   // Pointer to the HeavyAdService from which the heavy ad blocklist is obtained
   // in production.
-  heavy_ad_intervention::HeavyAdService* heavy_ad_service_;
+  raw_ptr<heavy_ad_intervention::HeavyAdService> heavy_ad_service_;
 
   ApplicationLocaleGetter application_locale_getter_;
 
   // Pointer to the blocklist used to throttle the heavy ad intervention. Can
   // be replaced by tests.
-  heavy_ad_intervention::HeavyAdBlocklist* heavy_ad_blocklist_;
+  raw_ptr<heavy_ad_intervention::HeavyAdBlocklist> heavy_ad_blocklist_;
 
   // Whether the heavy ad privacy mitigations feature is enabled.
   const bool heavy_ad_privacy_mitigations_enabled_;
@@ -326,8 +333,6 @@ class AdsPageLoadMetricsObserver
 
   // Tracks number of memory updates received.
   int memory_update_count_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(AdsPageLoadMetricsObserver);
 };
 
 }  // namespace page_load_metrics

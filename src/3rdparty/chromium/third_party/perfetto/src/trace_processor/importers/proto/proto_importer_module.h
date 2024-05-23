@@ -17,9 +17,10 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_PROTO_IMPORTER_MODULE_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_PROTO_IMPORTER_MODULE_H_
 
+#include <cstdint>
+
 #include "perfetto/ext/base/optional.h"
 #include "perfetto/trace_processor/status.h"
-#include "src/trace_processor/util/trace_blob_view.h"
 
 namespace perfetto {
 
@@ -34,6 +35,7 @@ namespace trace_processor {
 
 class PacketSequenceState;
 struct TimestampedTracePiece;
+class TraceBlobView;
 class TraceProcessorContext;
 
 // This file contains a base class for ProtoTraceReader/Parser modules.

@@ -37,11 +37,19 @@ tf_module {
     mtype: "<type \'type\'>"
   }
   member {
+    name: "MultiWorkerMirroredStrategy"
+    mtype: "<type \'type\'>"
+  }
+  member {
     name: "NcclAllReduce"
     mtype: "<type \'type\'>"
   }
   member {
     name: "OneDeviceStrategy"
+    mtype: "<type \'type\'>"
+  }
+  member {
+    name: "ParameterServerStrategy"
     mtype: "<type \'type\'>"
   }
   member {
@@ -78,6 +86,10 @@ tf_module {
   }
   member {
     name: "cluster_resolver"
+    mtype: "<type \'module\'>"
+  }
+  member {
+    name: "coordinator"
     mtype: "<type \'module\'>"
   }
   member {

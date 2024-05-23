@@ -5,18 +5,24 @@
 #include "chrome/browser/printing/print_job_manager.h"
 
 #include "base/bind.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/notification_service.h"
 #include "printing/printed_document.h"
 
+// This should be after all other #includes.
+#if defined(_WINDOWS_)  // Detect whether windows.h was included.
+#include "base/win/windows_h_disallowed.h"
+#endif  // defined(_WINDOWS_)
+
 namespace printing {
 
-PrintQueriesQueue::PrintQueriesQueue() {
-}
+PrintQueriesQueue::PrintQueriesQueue() = default;
 
 PrintQueriesQueue::~PrintQueriesQueue() {
   base::AutoLock lock(lock_);
@@ -47,9 +53,8 @@ std::unique_ptr<PrinterQuery> PrintQueriesQueue::PopPrinterQuery(
 }
 
 std::unique_ptr<PrinterQuery> PrintQueriesQueue::CreatePrinterQuery(
-    int render_process_id,
-    int render_frame_id) {
-  return std::make_unique<PrinterQuery>(render_process_id, render_frame_id);
+    content::GlobalRenderFrameHostId rfh_id) {
+  return std::make_unique<PrinterQuery>(rfh_id);
 }
 
 void PrintQueriesQueue::Shutdown() {
@@ -110,7 +115,7 @@ void PrintJobManager::StopJobs(bool wait_for_finish) {
   for (auto job = to_stop.begin(); job != to_stop.end(); ++job) {
     // Wait for two minutes for the print job to be spooled.
     if (wait_for_finish)
-      (*job)->FlushJob(base::TimeDelta::FromMinutes(2));
+      (*job)->FlushJob(base::Minutes(2));
     (*job)->Stop();
   }
 }

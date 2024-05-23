@@ -14,9 +14,10 @@ rtc_library("alr_experiment") {
     "alr_experiment.h",
   ]
   deps = [
+    "..:logging",
     "../:rtc_base_approved",
+    "../../api:field_trials_view",
     "../../api/transport:field_trial_based_config",
-    "../../api/transport:webrtc_key_value_config",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
@@ -55,9 +56,10 @@ rtc_library("quality_rampup_experiment") {
   ]
   deps = [
     ":field_trial_parser",
+    "..:logging",
     "../:rtc_base_approved",
+    "../../api:field_trials_view",
     "../../api/transport:field_trial_based_config",
-    "../../api/transport:webrtc_key_value_config",
     "../../system_wrappers:field_trial",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
@@ -70,9 +72,26 @@ rtc_library("quality_scaler_settings") {
   ]
   deps = [
     ":field_trial_parser",
+    "..:logging",
     "../:rtc_base_approved",
+    "../../api:field_trials_view",
     "../../api/transport:field_trial_based_config",
-    "../../api/transport:webrtc_key_value_config",
+    "../../system_wrappers:field_trial",
+  ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+}
+
+rtc_library("bandwidth_quality_scaler_settings") {
+  sources = [
+    "bandwidth_quality_scaler_settings.cc",
+    "bandwidth_quality_scaler_settings.h",
+  ]
+  deps = [
+    ":field_trial_parser",
+    "..:logging",
+    "../:rtc_base_approved",
+    "../../api:field_trials_view",
+    "../../api/transport:field_trial_based_config",
     "../../system_wrappers:field_trial",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
@@ -84,6 +103,7 @@ rtc_library("quality_scaling_experiment") {
     "quality_scaling_experiment.h",
   ]
   deps = [
+    "..:logging",
     "../:rtc_base_approved",
     "../../api/video_codecs:video_codecs_api",
     "../../system_wrappers:field_trial",
@@ -97,6 +117,7 @@ rtc_library("normalize_simulcast_size_experiment") {
     "normalize_simulcast_size_experiment.h",
   ]
   deps = [
+    "..:logging",
     "../:rtc_base_approved",
     "../../system_wrappers:field_trial",
   ]
@@ -110,7 +131,9 @@ rtc_library("balanced_degradation_settings") {
   ]
   deps = [
     ":field_trial_parser",
+    "..:logging",
     "../:rtc_base_approved",
+    "../../api:field_trials_view",
     "../../api/video_codecs:video_codecs_api",
     "../../system_wrappers:field_trial",
   ]
@@ -124,6 +147,7 @@ rtc_library("cpu_speed_experiment") {
   ]
   deps = [
     ":field_trial_parser",
+    "..:logging",
     "../:rtc_base_approved",
     "../../system_wrappers:field_trial",
   ]
@@ -137,11 +161,15 @@ rtc_library("encoder_info_settings") {
   ]
   deps = [
     ":field_trial_parser",
+    "..:logging",
     "../:rtc_base_approved",
     "../../api/video_codecs:video_codecs_api",
     "../../system_wrappers:field_trial",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+  absl_deps = [
+    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/types:optional",
+  ]
 }
 
 rtc_library("rtt_mult_experiment") {
@@ -150,6 +178,7 @@ rtc_library("rtt_mult_experiment") {
     "rtt_mult_experiment.h",
   ]
   deps = [
+    "..:logging",
     "../:rtc_base_approved",
     "../../system_wrappers:field_trial",
   ]
@@ -162,6 +191,7 @@ rtc_library("jitter_upper_bound_experiment") {
     "jitter_upper_bound_experiment.h",
   ]
   deps = [
+    "..:logging",
     "../:rtc_base_approved",
     "../../system_wrappers:field_trial",
   ]
@@ -175,9 +205,11 @@ rtc_library("rate_control_settings") {
   ]
   deps = [
     ":field_trial_parser",
+    "..:logging",
+    "..:safe_conversions",
     "../:rtc_base_approved",
+    "../../api:field_trials_view",
     "../../api/transport:field_trial_based_config",
-    "../../api/transport:webrtc_key_value_config",
     "../../api/units:data_size",
     "../../api/video_codecs:video_codecs_api",
     "../../system_wrappers:field_trial",
@@ -195,8 +227,8 @@ rtc_library("keyframe_interval_settings_experiment") {
   ]
   deps = [
     ":field_trial_parser",
+    "../../api:field_trials_view",
     "../../api/transport:field_trial_based_config",
-    "../../api/transport:webrtc_key_value_config",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
@@ -209,8 +241,8 @@ rtc_library("stable_target_rate_experiment") {
   deps = [
     ":field_trial_parser",
     ":rate_control_settings",
+    "../../api:field_trials_view",
     "../../api/transport:field_trial_based_config",
-    "../../api/transport:webrtc_key_value_config",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
@@ -237,6 +269,7 @@ if (rtc_include_tests && !build_with_chromium) {
 
     sources = [
       "balanced_degradation_settings_unittest.cc",
+      "bandwidth_quality_scaler_settings_unittest.cc",
       "cpu_speed_experiment_unittest.cc",
       "encoder_info_settings_unittest.cc",
       "field_trial_list_unittest.cc",
@@ -255,6 +288,7 @@ if (rtc_include_tests && !build_with_chromium) {
     ]
     deps = [
       ":balanced_degradation_settings",
+      ":bandwidth_quality_scaler_settings",
       ":cpu_speed_experiment",
       ":encoder_info_settings",
       ":field_trial_parser",
@@ -274,9 +308,13 @@ if (rtc_include_tests && !build_with_chromium) {
       "../../api/video_codecs:video_codecs_api",
       "../../system_wrappers:field_trial",
       "../../test:field_trial",
+      "../../test:scoped_key_value_config",
       "../../test:test_main",
       "../../test:test_support",
     ]
-    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+    absl_deps = [
+      "//third_party/abseil-cpp/absl/strings",
+      "//third_party/abseil-cpp/absl/types:optional",
+    ]
   }
 }

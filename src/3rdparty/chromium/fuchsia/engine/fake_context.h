@@ -13,12 +13,15 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/macros.h"
 
 // A fake Frame implementation that manages its own lifetime.
 class FakeFrame : public fuchsia::web::testing::Frame_TestBase {
  public:
   explicit FakeFrame(fidl::InterfaceRequest<fuchsia::web::Frame> request);
+
+  FakeFrame(const FakeFrame&) = delete;
+  FakeFrame& operator=(const FakeFrame&) = delete;
+
   ~FakeFrame() override;
 
   void set_on_set_listener_callback(base::OnceClosure callback) {
@@ -41,6 +44,9 @@ class FakeFrame : public fuchsia::web::testing::Frame_TestBase {
   void SetNavigationEventListener(
       fidl::InterfaceHandle<fuchsia::web::NavigationEventListener> listener)
       override;
+  void SetNavigationEventListener2(
+      fidl::InterfaceHandle<fuchsia::web::NavigationEventListener> listener,
+      fuchsia::web::NavigationEventListenerFlags flags) override;
 
   // fuchsia::web::testing::Frame_TestBase implementation.
   void NotImplemented_(const std::string& name) override;
@@ -53,8 +59,6 @@ class FakeFrame : public fuchsia::web::testing::Frame_TestBase {
   fuchsia::web::NavigationController* navigation_controller_ = nullptr;
   fidl::BindingSet<fuchsia::web::NavigationController>
       navigation_controller_bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeFrame);
 };
 
 // An implementation of Context that creates and binds FakeFrames.
@@ -63,6 +67,10 @@ class FakeContext : public fuchsia::web::testing::Context_TestBase {
   using CreateFrameCallback = base::RepeatingCallback<void(FakeFrame*)>;
 
   FakeContext();
+
+  FakeContext(const FakeContext&) = delete;
+  FakeContext& operator=(const FakeContext&) = delete;
+
   ~FakeContext() override;
 
   // Sets a callback that is invoked whenever new Frames are bound.
@@ -79,8 +87,6 @@ class FakeContext : public fuchsia::web::testing::Context_TestBase {
 
  private:
   CreateFrameCallback on_create_frame_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeContext);
 };
 
 #endif  // FUCHSIA_ENGINE_FAKE_CONTEXT_H_

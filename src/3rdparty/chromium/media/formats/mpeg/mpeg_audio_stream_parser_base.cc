@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/time/time.h"
 #include "media/base/media_log.h"
 #include "media/base/media_tracks.h"
 #include "media/base/media_util.h"
@@ -213,7 +214,7 @@ int MPEGAudioStreamParserBase::ParseFrame(const uint8_t* data,
     config_.Initialize(audio_codec_, kSampleFormatF32, channel_layout,
                        sample_rate, extra_data, EncryptionScheme::kUnencrypted,
                        base::TimeDelta(), codec_delay_);
-    if (audio_codec_ == kCodecAAC)
+    if (audio_codec_ == AudioCodec::kAAC)
       config_.disable_discard_decoder_delay();
 
     base::TimeDelta base_timestamp;

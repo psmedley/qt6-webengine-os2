@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_XLA_SERVICE_DUMP_H_
 
 #include "absl/strings/string_view.h"
+#include "mlir/IR/Operation.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/status.h"
 #include "tensorflow/compiler/xla/xla.pb.h"
@@ -35,11 +36,11 @@ class HloSnapshot;
 
 // Get a timestamp which we can use as a filename prefix specific to this
 // module.
-string TimestampFor(const HloModule& module);
+std::string TimestampFor(const HloModule& module);
 
 // Create the filename we will use to dump in DumpToFileInDir.
-string FilenameFor(const HloModule& module, absl::string_view prefix,
-                   absl::string_view suffix);
+std::string FilenameFor(const HloModule& module, absl::string_view prefix,
+                        absl::string_view suffix);
 
 // Writes the given string to a file in the xla_dump_to directory specified by
 // module's DebugOptions.
@@ -47,6 +48,8 @@ string FilenameFor(const HloModule& module, absl::string_view prefix,
 // If module doesn't have an xla_dump_to directory, does nothing.
 void DumpToFileInDir(const HloModule& module, absl::string_view file_prefix,
                      absl::string_view file_suffix, absl::string_view contents);
+void DumpToFileInDir(const DebugOptions& debug_options,
+                     absl::string_view filename, absl::string_view contents);
 
 // Like DumpToFileInDir, except if module doesn't have an xla_dump_to directory
 // specified, or if that directory is equal to "-", writes to stdout instead.
@@ -55,12 +58,38 @@ void DumpToFileInDirOrStdout(const HloModule& module,
                              absl::string_view file_suffix,
                              absl::string_view contents);
 
-// Dumps the given execution options if dumping is enabled. Exactly
-// where and in what formats it's dumped is determined by the debug options.
-void DumpExecutionOptions(const ExecutionOptions& execution_options,
-                          const DebugOptions& debug_options);
+// Like DumpToFileInDir, except if debug_options doesn't have an xla_dump_to
+// directory specified, or if that directory is equal to "-", writes to stdout
+// instead.
+void DumpToFileInDirOrStdout(const DebugOptions& debug_options, int unique_id,
+                             absl::string_view module_name,
+                             absl::string_view file_prefix,
+                             absl::string_view file_suffix,
+                             absl::string_view contents);
 
-// Dumps the given HLO module if dumping is enabled for the module.  Exactly
+// Writes the given op to a file in the xla_dump_to directory specified by
+// module's DebugOptions. Sets the op's source locations to that file.
+//
+// If module doesn't have an xla_dump_to directory, does nothing.
+void DumpToFileInDirOrStdout(const HloModule& module,
+                             absl::string_view file_prefix,
+                             mlir::Operation* op);
+
+// Dumps the given protobuf to the given filename if dumping is enabled.
+// Exactly where and in what formats it's dumped is determined by the debug
+// options.
+void DumpProtobufToFile(const tensorflow::protobuf::Message& proto,
+                        const DebugOptions& debug_options,
+                        absl::string_view filename);
+
+// Similar to above, but the filename depends on module's information and the
+// given name.
+void DumpPerModuleProtobufToFile(const HloModule& module,
+                                 const tensorflow::protobuf::Message& proto,
+                                 const DebugOptions& debug_options,
+                                 absl::string_view name);
+
+// Dumps the given HLO module if dumping is enabled for the module. Exactly
 // where and in what formats it's dumped is determined by the module's config.
 //
 // If you pass an HloExecutionProfile, note that currently only DOT-based output
@@ -75,11 +104,11 @@ void DumpHloModuleIfEnabled(const HloModule& module,
                             absl::string_view name);
 
 // Dumps the given HLO module after running one HLO pass and before running
-// another, if that's enabled.
-void DumpHloModuleBetweenPassesIfEnabled(absl::string_view pipeline_name,
-                                         absl::string_view before_pass_name,
-                                         absl::string_view after_pass_name,
-                                         const HloModule& module);
+// another, if that's enabled. Returns the full file paths of all dumps of the
+// module, or an empty vector if nothing was dumped.
+std::vector<std::string> DumpHloModuleBetweenPassesIfEnabled(
+    absl::string_view pipeline_name, absl::string_view before_pass_name,
+    absl::string_view after_pass_name, const HloModule& module);
 
 // Dumps the given HLO module during the given HLO pass, if that's enabled.
 //
@@ -99,6 +128,8 @@ void DumpHloSnapshotIfEnabled(const HloModule& module,
                               const HloSnapshot& snapshot);
 void DumpHloSnapshotIfEnabled(const HloSnapshot& snapshot,
                               const DebugOptions& opts);
+
+void DumpHloModuleMetadataIfEnabled(const std::vector<HloModule*>& modules);
 
 // Returns true if we should dump data for an HloModule.  This is useful if you
 // want to check if DumpToFileInDir{,OrStdout} will do anything before

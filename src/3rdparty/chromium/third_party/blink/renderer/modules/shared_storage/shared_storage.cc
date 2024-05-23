@@ -5,13 +5,15 @@
 #include "third_party/blink/renderer/modules/shared_storage/shared_storage.h"
 
 #include <memory>
+#include <tuple>
 #include <utility>
 
-#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
-#include "mojo/public/cpp/bindings/pending_associated_remote.h"
-#include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
+#include "base/threading/sequence_local_storage_slot.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/shared_storage/shared_storage_utils.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
@@ -24,17 +26,60 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/probe/async_task_id.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/shared_storage/shared_storage_worklet.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
+
+namespace {
+
+// Use the native v8::ValueSerializer here as opposed to using
+// blink::V8ScriptValueSerializer. It's capable of serializing objects of
+// primitive types. It's TBD whether we want to support any other non-primitive
+// types supported by blink::V8ScriptValueSerializer.
+bool Serialize(ScriptState* script_state,
+               const SharedStorageRunOperationMethodOptions* options,
+               ExceptionState& exception_state,
+               Vector<uint8_t>& output) {
+  DCHECK(output.IsEmpty());
+
+  if (!options->hasData())
+    return true;
+
+  v8::Isolate* isolate = script_state->GetIsolate();
+  v8::ValueSerializer serializer(isolate);
+
+  v8::TryCatch try_catch(isolate);
+
+  bool wrote_value;
+  if (!serializer
+           .WriteValue(script_state->GetContext(), options->data().V8Value())
+           .To(&wrote_value)) {
+    DCHECK(try_catch.HasCaught());
+    exception_state.RethrowV8Exception(try_catch.Exception());
+    return false;
+  }
+
+  DCHECK(wrote_value);
+
+  std::pair<uint8_t*, size_t> buffer = serializer.Release();
+
+  output.ReserveInitialCapacity(SafeCast<wtf_size_t>(buffer.second));
+  output.Append(buffer.first, static_cast<wtf_size_t>(buffer.second));
+  DCHECK_EQ(output.size(), buffer.second);
+
+  free(buffer.first);
+
+  return true;
+}
+
+}  // namespace
 
 SharedStorage::SharedStorage() = default;
 SharedStorage::~SharedStorage() = default;
@@ -64,8 +109,27 @@ ScriptPromise SharedStorage::set(ScriptState* script_state,
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  // TODO: handle the operation
+  if (!IsValidSharedStorageKeyStringLength(key.length())) {
+    resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
+        script_state->GetIsolate(), DOMExceptionCode::kDataError,
+        "Length of the \"key\" parameter is not valid."));
+    return promise;
+  }
+
+  if (!IsValidSharedStorageValueStringLength(value.length())) {
+    resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
+        script_state->GetIsolate(), DOMExceptionCode::kDataError,
+        "Length of the \"value\" parameter is not valid."));
+    return promise;
+  }
+
   resolver->Resolve();
+
+  bool ignore_if_present =
+      options->hasIgnoreIfPresent() && options->ignoreIfPresent();
+  GetSharedStorageDocumentService(execution_context)
+      ->SharedStorageSet(key, value, ignore_if_present);
+
   return promise;
 }
 
@@ -80,8 +144,25 @@ ScriptPromise SharedStorage::append(ScriptState* script_state,
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  // TODO: handle the operation
+  if (!IsValidSharedStorageKeyStringLength(key.length())) {
+    resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
+        script_state->GetIsolate(), DOMExceptionCode::kDataError,
+        "Length of the \"key\" parameter is not valid."));
+    return promise;
+  }
+
+  if (!IsValidSharedStorageValueStringLength(value.length())) {
+    resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
+        script_state->GetIsolate(), DOMExceptionCode::kDataError,
+        "Length of the \"value\" parameter is not valid."));
+    return promise;
+  }
+
   resolver->Resolve();
+
+  GetSharedStorageDocumentService(execution_context)
+      ->SharedStorageAppend(key, value);
+
   return promise;
 }
 
@@ -95,8 +176,17 @@ ScriptPromise SharedStorage::Delete(ScriptState* script_state,
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  // TODO: handle the operation
+  if (!IsValidSharedStorageKeyStringLength(key.length())) {
+    resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
+        script_state->GetIsolate(), DOMExceptionCode::kDataError,
+        "Length of the \"key\" parameter is not valid."));
+    return promise;
+  }
+
   resolver->Resolve();
+
+  GetSharedStorageDocumentService(execution_context)->SharedStorageDelete(key);
+
   return promise;
 }
 
@@ -109,8 +199,10 @@ ScriptPromise SharedStorage::clear(ScriptState* script_state,
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  // TODO: handle the operation
   resolver->Resolve();
+
+  GetSharedStorageDocumentService(execution_context)->SharedStorageClear();
+
   return promise;
 }
 
@@ -137,13 +229,10 @@ ScriptPromise SharedStorage::runURLSelectionOperation(
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  if (urls.size() >
-      static_cast<unsigned int>(
-          features::kSharedStorageURLSelectionOperationInputURLSizeLimit
-              .Get())) {
+  if (!IsValidSharedStorageURLsArrayLength(urls.size())) {
     resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
         script_state->GetIsolate(), DOMExceptionCode::kDataError,
-        "Length of the \"urls\" parameter exceeds the size limit."));
+        "Length of the \"urls\" parameter is not valid."));
     return promise;
   }
 
@@ -162,7 +251,32 @@ ScriptPromise SharedStorage::runURLSelectionOperation(
     converted_urls.push_back(converted_url);
   }
 
-  // TODO: handle the operation
+  Vector<uint8_t> serialized_data;
+  if (!Serialize(script_state, options, exception_state, serialized_data))
+    return promise;
+
+  GetSharedStorageDocumentService(execution_context)
+      ->RunURLSelectionOperationOnWorklet(
+          name, std::move(converted_urls), std::move(serialized_data),
+          WTF::Bind(
+              [](ScriptPromiseResolver* resolver, SharedStorage* shared_storage,
+                 bool success, const String& error_message,
+                 const KURL& opaque_url) {
+                DCHECK(resolver);
+                ScriptState* script_state = resolver->GetScriptState();
+
+                if (!success) {
+                  ScriptState::Scope scope(script_state);
+                  resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
+                      script_state->GetIsolate(),
+                      DOMExceptionCode::kOperationError, error_message));
+                  return;
+                }
+
+                resolver->Resolve(opaque_url);
+              },
+              WrapPersistent(resolver), WrapPersistent(this)));
+
   return promise;
 }
 
@@ -182,13 +296,18 @@ ScriptPromise SharedStorage::runOperation(
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   CHECK(execution_context->IsWindow());
 
+  Vector<uint8_t> serialized_data;
+  if (!Serialize(script_state, options, exception_state, serialized_data))
+    return ScriptPromise();
+
   ScriptPromiseResolver* resolver =
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
-
   resolver->Resolve();
 
-  // TODO: handle the operation
+  GetSharedStorageDocumentService(execution_context)
+      ->RunOperationOnWorklet(name, std::move(serialized_data));
+
   return promise;
 }
 
@@ -207,11 +326,31 @@ SharedStorage::GetSharedStorageDocumentService(
     ExecutionContext* execution_context) {
   CHECK(execution_context->IsWindow());
   if (!shared_storage_document_service_.is_bound()) {
-    execution_context->GetBrowserInterfaceBroker().GetInterface(
-        shared_storage_document_service_.BindNewPipeAndPassReceiver(
+    LocalDOMWindow* window = To<LocalDOMWindow>(execution_context);
+    if (!window->GetFrame())
+      return GetEmptySharedStorageDocumentService();
+
+    window->GetFrame()->GetRemoteNavigationAssociatedInterfaces()->GetInterface(
+        shared_storage_document_service_.BindNewEndpointAndPassReceiver(
             execution_context->GetTaskRunner(TaskType::kMiscPlatformAPI)));
   }
   return shared_storage_document_service_.get();
+}
+
+mojom::blink::SharedStorageDocumentService*
+SharedStorage::GetEmptySharedStorageDocumentService() {
+  static base::SequenceLocalStorageSlot<
+      mojo::Remote<mojom::blink::SharedStorageDocumentService>>
+      slot;
+
+  if (!slot.GetValuePointer()) {
+    auto& remote = slot.GetOrCreateValue();
+    mojo::PendingRemote<mojom::blink::SharedStorageDocumentService>
+        pending_remote;
+    std::ignore = pending_remote.InitWithNewPipeAndPassReceiver();
+    remote.Bind(std::move(pending_remote), base::ThreadTaskRunnerHandle::Get());
+  }
+  return slot.GetOrCreateValue().get();
 }
 
 }  // namespace blink

@@ -13,12 +13,18 @@
 #include <vector>
 
 #include "base/check_op.h"
+#include "base/debug/crash_logging.h"
+#include "base/i18n/char_iterator.h"
 #include "base/i18n/string_search.h"
+#include "base/i18n/time_formatting.h"
+#include "base/memory/raw_ptr.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
+#include "base/strings/string_piece.h"
 #include "base/thread_annotations.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "cc/paint/paint_canvas.h"
@@ -27,6 +33,7 @@
 #include "cc/paint/paint_image_builder.h"
 #include "net/cookies/site_for_cookies.h"
 #include "pdf/accessibility_structs.h"
+#include "pdf/metrics_handler.h"
 #include "pdf/mojom/pdf.mojom.h"
 #include "pdf/parsed_params.h"
 #include "pdf/pdf_accessibility_data_handler.h"
@@ -34,10 +41,12 @@
 #include "pdf/pdf_init.h"
 #include "pdf/pdfium/pdfium_engine.h"
 #include "pdf/post_message_receiver.h"
+#include "pdf/post_message_sender.h"
 #include "pdf/ppapi_migration/bitmap.h"
 #include "pdf/ppapi_migration/graphics.h"
 #include "pdf/ppapi_migration/result_codes.h"
 #include "pdf/ppapi_migration/url_loader.h"
+#include "pdf/ui/document_properties.h"
 #include "printing/metafile_skia.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -46,16 +55,21 @@
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-shared.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
+#include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_text_input_type.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_error.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
+#include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/web_associated_url_loader.h"
 #include "third_party/blink/public/web/web_associated_url_loader_options.h"
 #include "third_party/blink/public/web/web_document.h"
+#include "third_party/blink/public/web/web_element.h"
+#include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
@@ -64,24 +78,31 @@
 #include "third_party/blink/public/web/web_print_preset_options.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/public/web/web_widget.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
+#include "ui/base/text/bytes_formatting.h"
 #include "ui/display/screen_info.h"
+#include "ui/events/base_event_utils.h"
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/geometry/scroll_offset.h"
+#include "ui/gfx/geometry/skia_conversions.h"
+#include "ui/gfx/geometry/vector2d.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/skia_util.h"
 #include "url/gurl.h"
 #include "v8/include/v8.h"
 
 namespace chrome_pdf {
 
 namespace {
+
+constexpr base::TimeDelta kFindResultCooldown = base::Milliseconds(100);
 
 // Initialization performed per renderer process. Initialization may be
 // triggered from multiple plugin instances, but should only execute once.
@@ -131,15 +152,23 @@ class PerProcessInitializer final {
 
 class BlinkContainerWrapper final : public PdfViewWebPlugin::ContainerWrapper {
  public:
-  explicit BlinkContainerWrapper(blink::WebPluginContainer* container)
-      : container_(container) {
+  BlinkContainerWrapper(blink::WebPluginContainer* container,
+                        V8ValueConverter* v8_value_converter)
+      : container_(container),
+        post_message_sender_(container_, v8_value_converter) {
     DCHECK(container_);
+    DCHECK(v8_value_converter);
   }
   BlinkContainerWrapper(const BlinkContainerWrapper&) = delete;
   BlinkContainerWrapper& operator=(const BlinkContainerWrapper&) = delete;
   ~BlinkContainerWrapper() override = default;
 
   void Invalidate() override { container_->Invalidate(); }
+
+  void RequestTouchEventType(
+      blink::WebPluginContainer::TouchEventRequestType request_type) override {
+    container_->RequestTouchEventType(request_type);
+  }
 
   void ReportFindInPageMatchCount(int identifier,
                                   int total,
@@ -151,6 +180,15 @@ class BlinkContainerWrapper final : public PdfViewWebPlugin::ContainerWrapper {
     container_->ReportFindInPageSelection(identifier, index);
   }
 
+  void ReportFindInPageTickmarks(
+      const std::vector<gfx::Rect>& tickmarks) override {
+    blink::WebLocalFrame* frame = GetFrame();
+    if (frame) {
+      frame->SetTickmarks(blink::WebElement(),
+                          blink::WebVector<gfx::Rect>(tickmarks));
+    }
+  }
+
   float DeviceScaleFactor() override {
     // Do not reply on the device scale returned by
     // `container_->DeviceScaleFactor()`, since it doesn't always reflect the
@@ -160,22 +198,40 @@ class BlinkContainerWrapper final : public PdfViewWebPlugin::ContainerWrapper {
     return widget->GetOriginalScreenInfo().device_scale_factor;
   }
 
+  gfx::PointF GetScrollPosition() override {
+    // Note that `blink::WebLocalFrame::GetScrollOffset()` actually returns a
+    // scroll position (a point relative to the top-left corner).
+    return GetFrame()->GetScrollOffset();
+  }
+
+  void PostMessage(base::Value::Dict message) override {
+    post_message_sender_.Post(std::move(message));
+  }
+
+  void UsePluginAsFindHandler() override {
+    container_->UsePluginAsFindHandler();
+  }
+
   void SetReferrerForRequest(blink::WebURLRequest& request,
                              const blink::WebURL& referrer_url) override {
     GetFrame()->SetReferrerForRequest(request, referrer_url);
   }
 
   void Alert(const blink::WebString& message) override {
-    GetFrame()->Alert(message);
+    blink::WebLocalFrame* frame = GetFrame();
+    if (frame)
+      frame->Alert(message);
   }
 
   bool Confirm(const blink::WebString& message) override {
-    return GetFrame()->Confirm(message);
+    blink::WebLocalFrame* frame = GetFrame();
+    return frame && frame->Confirm(message);
   }
 
   blink::WebString Prompt(const blink::WebString& message,
                           const blink::WebString& default_value) override {
-    return GetFrame()->Prompt(message, default_value);
+    blink::WebLocalFrame* frame = GetFrame();
+    return frame ? frame->Prompt(message, default_value) : blink::WebString();
   }
 
   void TextSelectionChanged(const blink::WebString& selection_text,
@@ -210,6 +266,18 @@ class BlinkContainerWrapper final : public PdfViewWebPlugin::ContainerWrapper {
       widget->UpdateSelectionBounds();
   }
 
+  std::string GetEmbedderOriginString() override {
+    auto* frame = GetFrame();
+    if (!frame)
+      return {};
+
+    auto* parent_frame = frame->Parent();
+    if (!parent_frame)
+      return {};
+
+    return GURL(parent_frame->GetSecurityOrigin().ToString().Utf8()).spec();
+  }
+
   blink::WebLocalFrame* GetFrame() override {
     return container_->GetDocument().GetFrame();
   }
@@ -221,7 +289,8 @@ class BlinkContainerWrapper final : public PdfViewWebPlugin::ContainerWrapper {
   blink::WebPluginContainer* Container() override { return container_; }
 
  private:
-  blink::WebPluginContainer* const container_;
+  const raw_ptr<blink::WebPluginContainer> container_;
+  PostMessageSender post_message_sender_;
 };
 
 }  // namespace
@@ -232,10 +301,6 @@ PdfViewWebPlugin::Client::CreateAccessibilityDataHandler(
   return nullptr;
 }
 
-bool PdfViewWebPlugin::Client::IsUseZoomForDSFEnabled() const {
-  return false;
-}
-
 PdfViewWebPlugin::PdfViewWebPlugin(
     std::unique_ptr<Client> client,
     mojo::AssociatedRemote<pdf::mojom::PdfService> pdf_service_remote,
@@ -244,44 +309,40 @@ PdfViewWebPlugin::PdfViewWebPlugin(
       pdf_service_remote_(std::move(pdf_service_remote)),
       initial_params_(params),
       pdf_accessibility_data_handler_(
-          client_->CreateAccessibilityDataHandler(this)) {}
+          client_->CreateAccessibilityDataHandler(this)) {
+  auto* service = GetPdfService();
+  if (service)
+    service->SetListener(listener_receiver_.BindNewPipeAndPassRemote());
+}
 
 PdfViewWebPlugin::~PdfViewWebPlugin() = default;
 
 bool PdfViewWebPlugin::Initialize(blink::WebPluginContainer* container) {
   DCHECK_EQ(container->Plugin(), this);
-  return InitializeCommon(std::make_unique<BlinkContainerWrapper>(container));
+  return InitializeCommon(
+      std::make_unique<BlinkContainerWrapper>(container, client_.get()),
+      /*engine_override=*/nullptr);
 }
 
 bool PdfViewWebPlugin::InitializeForTesting(
-    std::unique_ptr<ContainerWrapper> container_wrapper) {
-  return InitializeCommon(std::move(container_wrapper));
+    std::unique_ptr<ContainerWrapper> container_wrapper,
+    std::unique_ptr<PDFiumEngine> engine,
+    std::unique_ptr<UrlLoader> loader) {
+  test_loader_ = std::move(loader);
+  return InitializeCommon(std::move(container_wrapper), std::move(engine));
 }
 
-// Modeled on `OutOfProcessInstance::Init()`.
 bool PdfViewWebPlugin::InitializeCommon(
-    std::unique_ptr<ContainerWrapper> container_wrapper) {
+    std::unique_ptr<ContainerWrapper> container_wrapper,
+    std::unique_ptr<PDFiumEngine> engine_override) {
   container_wrapper_ = std::move(container_wrapper);
 
-  // Check if the PDF is being loaded in the PDF chrome extension. We only allow
-  // the plugin to be loaded in the extension and print preview to avoid
-  // exposing sensitive APIs directly to external websites.
-  std::string document_url;
-  auto* container = Container();
-  if (container) {
-    GURL maybe_url(container->GetDocument().Url());
-    if (maybe_url.is_valid())
-      document_url = maybe_url.possibly_invalid_spec();
-  }
-
-  base::StringPiece document_url_piece(document_url);
-  set_is_print_preview(IsPrintPreviewUrl(document_url_piece));
-  // TODO(crbug.com/1123621): Consider calling ValidateDocumentUrl() or
-  // something like it once the process model has been finalized.
+  // Allow the plugin to handle touch events.
+  container_wrapper_->RequestTouchEventType(
+      blink::WebPluginContainer::kTouchEventRequestTypeRaw);
 
   // Allow the plugin to handle find requests.
-  if (container)
-    container->UsePluginAsFindHandler();
+  container_wrapper_->UsePluginAsFindHandler();
 
   absl::optional<ParsedParams> params = ParseWebPluginParams(initial_params_);
 
@@ -291,17 +352,44 @@ bool PdfViewWebPlugin::InitializeCommon(
   if (!params.has_value())
     return false;
 
-  set_full_frame(params->full_frame);
-  if (params->background_color.has_value())
-    SetBackgroundColor(params->background_color.value());
+  // Sets crash keys like `ppapi::proxy::PDFResource::SetCrashData()`. Note that
+  // we don't set the active URL from the top-level URL, as unlike within a
+  // plugin process, the active URL changes frequently within a renderer process
+  // (see crbug.com/1266050 for details).
+  //
+  // TODO(crbug.com/1266087): If multiple PDF plugin instances share the same
+  // renderer process, the crash key will be overwritten by the newest value.
+  static base::debug::CrashKeyString* subresource_url =
+      base::debug::AllocateCrashKeyString("subresource_url",
+                                          base::debug::CrashKeySize::Size256);
+  base::debug::SetCrashKeyString(subresource_url, params->original_url);
 
   PerProcessInitializer::GetInstance().Acquire();
+  InitializeBase(
+      engine_override
+          ? std::move(engine_override)
+          : std::make_unique<PDFiumEngine>(this, params->script_option),
+      /*embedder_origin=*/container_wrapper_->GetEmbedderOriginString(),
+      /*src_url=*/params->src_url,
+      /*original_url=*/params->original_url,
+      /*full_frame=*/params->full_frame,
+      /*background_color=*/params->background_color,
+      /*has_edits=*/params->has_edits);
 
-  InitializeEngine(std::make_unique<PDFiumEngine>(this, params->script_option));
-  LoadUrl(params->src_url, /*is_print_preview=*/false);
-  set_url(params->original_url);
-  post_message_sender_.set_container(Container());
+  SendSetSmoothScrolling();
+
+  if (!IsPrintPreview())
+    metrics_handler_ = std::make_unique<MetricsHandler>();
+
   return true;
+}
+
+void PdfViewWebPlugin::SendSetSmoothScrolling() {
+  base::Value::Dict message;
+  message.Set("type", "setSmoothScrolling");
+  message.Set("smoothScrolling",
+              blink::Platform::Current()->IsScrollAnimatorEnabled());
+  SendMessage(std::move(message));
 }
 
 void PdfViewWebPlugin::Destroy() {
@@ -312,7 +400,6 @@ void PdfViewWebPlugin::Destroy() {
     DestroyEngine();
     PerProcessInitializer::GetInstance().Release();
     container_wrapper_.reset();
-    post_message_sender_.set_container(nullptr);
   }
 
   delete this;
@@ -328,9 +415,9 @@ v8::Local<v8::Object> PdfViewWebPlugin::V8ScriptableObject(
     // TODO(crbug.com/1123731): Messages should not be handled on the renderer
     // main thread.
     scriptable_receiver_.Reset(
-        isolate,
-        PostMessageReceiver::Create(isolate, weak_factory_.GetWeakPtr(),
-                                    base::SequencedTaskRunnerHandle::Get()));
+        isolate, PostMessageReceiver::Create(
+                     isolate, client_->GetWeakPtr(), weak_factory_.GetWeakPtr(),
+                     base::SequencedTaskRunnerHandle::Get()));
   }
 
   return scriptable_receiver_.Get(isolate);
@@ -344,19 +431,12 @@ void PdfViewWebPlugin::UpdateAllLifecyclePhases(
     blink::DocumentUpdateReason reason) {}
 
 void PdfViewWebPlugin::Paint(cc::PaintCanvas* canvas, const gfx::Rect& rect) {
-  // The scale level used to convert DIPs to CSS pixels.
-  float inverse_scale = 1.0f / (device_scale() * viewport_to_dip_scale_);
-
-  // `rect` is in CSS pixels, and the plugin rect is in DIPs. The plugin rect
-  // needs to be converted into CSS pixels before calculating the rect area to
-  // be invalidated.
-  gfx::Rect plugin_rect_in_css_pixels =
-      gfx::ScaleToEnclosingRectSafe(plugin_rect(), inverse_scale);
-
   // Clip the intersection of the paint rect and the plugin rect, so that
   // painting outside the plugin or the paint rect area can be avoided.
+  // Note: `rect` is in CSS pixels. We need to use `css_plugin_rect_`
+  // to calculate the intersection.
   SkRect invalidate_rect =
-      gfx::RectToSkRect(gfx::IntersectRects(plugin_rect_in_css_pixels, rect));
+      gfx::RectToSkRect(gfx::IntersectRects(css_plugin_rect_, rect));
   cc::PaintCanvasAutoRestore auto_restore(canvas, /*save=*/true);
   canvas->clipRect(invalidate_rect);
 
@@ -369,26 +449,45 @@ void PdfViewWebPlugin::Paint(cc::PaintCanvas* canvas, const gfx::Rect& rect) {
     return;
   }
 
-  if (inverse_scale != 1.0f)
-    canvas->scale(inverse_scale, inverse_scale);
+  // Layer translate is independent of scaling, so apply first.
+  if (!total_translate_.IsZero())
+    canvas->translate(total_translate_.x(), total_translate_.y());
 
-  canvas->drawImage(snapshot_, plugin_rect().x(), plugin_rect().y());
+  if (device_to_css_scale_ != 1.0f)
+    canvas->scale(device_to_css_scale_, device_to_css_scale_);
+
+  // Position layer at plugin origin before layer scaling.
+  if (!plugin_rect().origin().IsOrigin())
+    canvas->translate(plugin_rect().x(), plugin_rect().y());
+
+  if (snapshot_scale_ != 1.0f)
+    canvas->scale(snapshot_scale_, snapshot_scale_);
+
+  canvas->drawImage(snapshot_, 0, 0);
 }
 
 void PdfViewWebPlugin::UpdateGeometry(const gfx::Rect& window_rect,
                                       const gfx::Rect& clip_rect,
                                       const gfx::Rect& unobscured_rect,
                                       bool is_visible) {
-  float device_scale = container_wrapper_->DeviceScaleFactor();
-  viewport_to_dip_scale_ =
-      client_->IsUseZoomForDSFEnabled() ? 1.0f / device_scale : 1.0f;
+  // An empty `window_rect` can be received here in the following cases:
+  // - If the embedded plugin size is 0.
+  // - If the embedded plugin size is not 0, it can come from re-layouts during
+  //   the plugin initialization.
+  // For either case, there is no need to create a graphic device to display
+  // a PDF in an empty window. Since an empty `window_rect` can cause failure
+  // to create the graphic device, avoid all updates on the geometries and the
+  // device scales used by the plugin, the PaintManager and the PDFiumEngine
+  // unless a non-empty `window_rect` is received.
+  if (window_rect.IsEmpty())
+    return;
 
-  // Note that `window_rect` is in viewport coordinates. It needs to be
-  // converted to DIPs before getting passed into
-  // PdfViewPluginBase::UpdateGeometryOnViewChanged().
-  OnViewportChanged(
-      gfx::ScaleToEnclosingRectSafe(window_rect, viewport_to_dip_scale_),
-      device_scale);
+  OnViewportChanged(window_rect, container_wrapper_->DeviceScaleFactor());
+
+  gfx::PointF scroll_position = container_wrapper_->GetScrollPosition();
+  // Convert back to CSS pixels.
+  scroll_position.Scale(1.0f / device_scale());
+  UpdateScroll(scroll_position);
 }
 
 void PdfViewWebPlugin::UpdateFocus(bool focused,
@@ -424,11 +523,11 @@ blink::WebInputEventResult PdfViewWebPlugin::HandleInputEvent(
     const blink::WebCoalescedInputEvent& event,
     ui::Cursor* cursor) {
   // TODO(crbug.com/702993): The input events received by the Pepper plugin
-  // already have the device scale applied. The scaling done here should be
-  // moved into `PdfViewPluginBase::HandleInputEvent()` once the Pepper plugin
-  // is removed.
+  // already have the viewport-to-DIP scale applied. The scaling done here
+  // should be moved into `PdfViewPluginBase::HandleInputEvent()` once the
+  // Pepper plugin is removed.
   std::unique_ptr<blink::WebInputEvent> scaled_event =
-      ui::ScaleWebInputEvent(event.Event(), device_scale());
+      ui::ScaleWebInputEvent(event.Event(), viewport_to_dip_scale_);
 
   const blink::WebInputEvent& event_to_handle =
       scaled_event ? *scaled_event : event.Event();
@@ -568,8 +667,8 @@ void PdfViewWebPlugin::SelectFindResult(bool forward, int identifier) {
 void PdfViewWebPlugin::StopFind() {
   find_identifier_ = -1;
   engine()->StopFind();
-  // TODO(crbug.com/1199999): Clear tickmarks on scroller when find is
-  // dismissed.
+  tickmarks_.clear();
+  container_wrapper_->ReportFindInPageTickmarks(tickmarks_);
 }
 
 bool PdfViewWebPlugin::CanRotateView() {
@@ -589,8 +688,38 @@ void PdfViewWebPlugin::RotateView(blink::WebPlugin::RotationType type) {
   }
 }
 
+bool PdfViewWebPlugin::ShouldDispatchImeEventsToPlugin() {
+  return true;
+}
+
 blink::WebTextInputType PdfViewWebPlugin::GetPluginTextInputType() {
   return text_input_type_;
+}
+
+gfx::Rect PdfViewWebPlugin::GetPluginCaretBounds() {
+  return caret_rect_;
+}
+
+void PdfViewWebPlugin::ImeSetCompositionForPlugin(
+    const blink::WebString& text,
+    const std::vector<ui::ImeTextSpan>& /*ime_text_spans*/,
+    const gfx::Range& /*replacement_range*/,
+    int /*selection_start*/,
+    int /*selection_end*/) {
+  composition_text_ = text;
+}
+
+void PdfViewWebPlugin::ImeCommitTextForPlugin(
+    const blink::WebString& text,
+    const std::vector<ui::ImeTextSpan>& /*ime_text_spans*/,
+    const gfx::Range& /*replacement_range*/,
+    int /*relative_cursor_pos*/) {
+  HandleImeCommit(text);
+}
+
+void PdfViewWebPlugin::ImeFinishComposingTextForPlugin(
+    bool /*keep_selection*/) {
+  HandleImeCommit(composition_text_);
 }
 
 void PdfViewWebPlugin::UpdateCursor(ui::mojom::CursorType new_cursor_type) {
@@ -598,19 +727,44 @@ void PdfViewWebPlugin::UpdateCursor(ui::mojom::CursorType new_cursor_type) {
 }
 
 void PdfViewWebPlugin::UpdateTickMarks(
-    const std::vector<gfx::Rect>& tickmarks) {}
+    const std::vector<gfx::Rect>& tickmarks) {
+  float inverse_scale = 1.0f / device_scale();
+  tickmarks_.clear();
+  tickmarks_.reserve(tickmarks.size());
+  std::transform(tickmarks.begin(), tickmarks.end(),
+                 std::back_inserter(tickmarks_),
+                 [inverse_scale](const gfx::Rect& t) -> gfx::Rect {
+                   return gfx::ScaleToEnclosingRect(t, inverse_scale);
+                 });
+}
 
 void PdfViewWebPlugin::NotifyNumberOfFindResultsChanged(int total,
                                                         bool final_result) {
+  // We don't want to spam the renderer with too many updates to the number of
+  // find results. Don't send an update if we sent one too recently. If it's the
+  // final update, we always send it though.
+  if (recently_sent_find_update_ && !final_result)
+    return;
+
   // After stopping search and setting `find_identifier_` to -1 there still may
   // be a NotifyNumberOfFindResultsChanged notification pending from engine.
   // Just ignore them.
-  if (find_identifier_ == -1 || !container_wrapper_)
+  if (find_identifier_ != -1) {
+    container_wrapper_->ReportFindInPageMatchCount(find_identifier_, total,
+                                                   final_result);
+  }
+
+  container_wrapper_->ReportFindInPageTickmarks(tickmarks_);
+
+  if (final_result)
     return;
 
-  container_wrapper_->ReportFindInPageMatchCount(find_identifier_, total,
-                                                 final_result);
-  // TODO(crbug.com/1199999): Set tickmarks on scroller.
+  recently_sent_find_update_ = true;
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&PdfViewWebPlugin::ResetRecentlySentFindUpdate,
+                     weak_factory_.GetWeakPtr()),
+      kFindResultCooldown);
 }
 
 void PdfViewWebPlugin::NotifySelectedFindResultChanged(int current_find_index) {
@@ -620,6 +774,11 @@ void PdfViewWebPlugin::NotifySelectedFindResultChanged(int current_find_index) {
   DCHECK_GE(current_find_index, -1);
   container_wrapper_->ReportFindInPageSelection(find_identifier_,
                                                 current_find_index + 1);
+}
+
+void PdfViewWebPlugin::CaretChanged(const gfx::Rect& caret_rect) {
+  caret_rect_ = gfx::ScaleToEnclosingRect(
+      caret_rect + available_area().OffsetFromOrigin(), device_to_css_scale_);
 }
 
 void PdfViewWebPlugin::Alert(const std::string& message) {
@@ -637,10 +796,6 @@ std::string PdfViewWebPlugin::Prompt(const std::string& question,
                blink::WebString::FromUTF8(default_answer))
       .Utf8();
 }
-
-void PdfViewWebPlugin::SubmitForm(const std::string& url,
-                                  const void* data,
-                                  int length) {}
 
 std::vector<PDFEngine::Client::SearchStringResult>
 PdfViewWebPlugin::SearchString(const char16_t* string,
@@ -681,12 +836,17 @@ bool PdfViewWebPlugin::BindPaintGraphics(Graphics& graphics) {
   return false;
 }
 
-void PdfViewWebPlugin::ScheduleTaskOnMainThread(const base::Location& from_here,
-                                                ResultCallback callback,
-                                                int32_t result,
-                                                base::TimeDelta delay) {
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      from_here, base::BindOnce(std::move(callback), result), delay);
+void PdfViewWebPlugin::SetCaretPosition(const gfx::PointF& position) {
+  PdfViewPluginBase::SetCaretPosition(position);
+}
+
+void PdfViewWebPlugin::MoveRangeSelectionExtent(const gfx::PointF& extent) {
+  PdfViewPluginBase::MoveRangeSelectionExtent(extent);
+}
+
+void PdfViewWebPlugin::SetSelectionBounds(const gfx::PointF& base,
+                                          const gfx::PointF& extent) {
+  PdfViewPluginBase::SetSelectionBounds(base, extent);
 }
 
 bool PdfViewWebPlugin::IsValid() const {
@@ -716,7 +876,7 @@ PdfViewWebPlugin::CreateAssociatedURLLoader(
   return container_wrapper_->CreateAssociatedURLLoader(options);
 }
 
-void PdfViewWebPlugin::OnMessage(const base::Value& message) {
+void PdfViewWebPlugin::OnMessage(const base::Value::Dict& message) {
   PdfViewPluginBase::HandleMessage(message);
 }
 
@@ -730,6 +890,30 @@ void PdfViewWebPlugin::UpdateSnapshot(sk_sp<SkImage> snapshot) {
     InvalidatePluginContainer();
 }
 
+void PdfViewWebPlugin::UpdateScaledValues() {
+  total_translate_ = snapshot_translate_;
+
+  if (viewport_to_dip_scale_ != 1.0f)
+    total_translate_.Scale(1.0f / viewport_to_dip_scale_);
+}
+
+void PdfViewWebPlugin::UpdateScale(float scale) {
+  viewport_to_dip_scale_ = scale;
+  device_to_css_scale_ = 1.0f;
+  UpdateScaledValues();
+}
+
+void PdfViewWebPlugin::UpdateLayerTransform(float scale,
+                                            const gfx::Vector2dF& translate) {
+  snapshot_translate_ = translate;
+  snapshot_scale_ = scale;
+  UpdateScaledValues();
+}
+
+void PdfViewWebPlugin::EnableAccessibility() {
+  PdfViewPluginBase::EnableAccessibility();
+}
+
 void PdfViewWebPlugin::HandleAccessibilityAction(
     const AccessibilityActionData& action_data) {
   PdfViewPluginBase::HandleAccessibilityAction(action_data);
@@ -740,24 +924,24 @@ base::WeakPtr<PdfViewPluginBase> PdfViewWebPlugin::GetWeakPtr() {
 }
 
 std::unique_ptr<UrlLoader> PdfViewWebPlugin::CreateUrlLoaderInternal() {
+  if (test_loader_)
+    return std::move(test_loader_);
+
   auto loader = std::make_unique<BlinkUrlLoader>(weak_factory_.GetWeakPtr());
   loader->GrantUniversalAccess();
   return loader;
 }
 
-// Modeled on `OutOfProcessInstance::DidOpen()`.
-void PdfViewWebPlugin::DidOpen(std::unique_ptr<UrlLoader> loader,
-                               int32_t result) {
-  if (result == Result::kSuccess) {
-    if (!engine()->HandleDocumentLoad(std::move(loader), GetURL()))
-      DocumentLoadFailed();
-  } else {
-    NOTIMPLEMENTED();
-  }
+void PdfViewWebPlugin::OnDocumentLoadComplete() {
+  RecordDocumentMetrics();
+
+  SendAttachments();
+  SendBookmarks();
+  SendMetadata();
 }
 
-void PdfViewWebPlugin::SendMessage(base::Value message) {
-  post_message_sender_.Post(std::move(message));
+void PdfViewWebPlugin::SendMessage(base::Value::Dict message) {
+  container_wrapper_->PostMessage(std::move(message));
 }
 
 void PdfViewWebPlugin::SaveAs() {
@@ -773,17 +957,17 @@ void PdfViewWebPlugin::InitImageData(const gfx::Size& size) {
   mutable_image_data() = CreateN32PremulSkBitmap(gfx::SizeToSkISize(size));
 }
 
-void PdfViewWebPlugin::SetFormFieldInFocus(bool in_focus) {
+void PdfViewWebPlugin::SetFormTextFieldInFocus(bool in_focus) {
   text_input_type_ = in_focus ? blink::WebTextInputType::kWebTextInputTypeText
                               : blink::WebTextInputType::kWebTextInputTypeNone;
   container_wrapper_->UpdateTextInputState();
 }
 
-void PdfViewWebPlugin::SetAccessibilityDocInfo(
-    const AccessibilityDocInfo& doc_info) {
-  if (!pdf_accessibility_data_handler_)
-    return;
-  pdf_accessibility_data_handler_->SetAccessibilityDocInfo(doc_info);
+void PdfViewWebPlugin::SetAccessibilityDocInfo(AccessibilityDocInfo doc_info) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&PdfViewWebPlugin::OnSetAccessibilityDocInfo,
+                     weak_factory_.GetWeakPtr(), std::move(doc_info)));
 }
 
 void PdfViewWebPlugin::SetAccessibilityPageInfo(
@@ -791,17 +975,19 @@ void PdfViewWebPlugin::SetAccessibilityPageInfo(
     std::vector<AccessibilityTextRunInfo> text_runs,
     std::vector<AccessibilityCharInfo> chars,
     AccessibilityPageObjects page_objects) {
-  if (!pdf_accessibility_data_handler_)
-    return;
-  pdf_accessibility_data_handler_->SetAccessibilityPageInfo(
-      page_info, text_runs, chars, page_objects);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&PdfViewWebPlugin::OnSetAccessibilityPageInfo,
+                                weak_factory_.GetWeakPtr(),
+                                std::move(page_info), std::move(text_runs),
+                                std::move(chars), std::move(page_objects)));
 }
 
 void PdfViewWebPlugin::SetAccessibilityViewportInfo(
-    const AccessibilityViewportInfo& viewport_info) {
-  if (!pdf_accessibility_data_handler_)
-    return;
-  pdf_accessibility_data_handler_->SetAccessibilityViewportInfo(viewport_info);
+    AccessibilityViewportInfo viewport_info) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&PdfViewWebPlugin::OnSetAccessibilityViewportInfo,
+                     weak_factory_.GetWeakPtr(), std::move(viewport_info)));
 }
 
 void PdfViewWebPlugin::SetContentRestrictions(int content_restrictions) {
@@ -837,11 +1023,9 @@ void PdfViewWebPlugin::PluginDidStopLoading() {
 }
 
 void PdfViewWebPlugin::InvokePrintDialog() {
-  ScheduleTaskOnMainThread(
-      FROM_HERE,
-      base::BindOnce(&PdfViewWebPlugin::OnInvokePrintDialog,
-                     weak_factory_.GetWeakPtr()),
-      /*result=*/0, base::TimeDelta());
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&PdfViewWebPlugin::OnInvokePrintDialog,
+                                weak_factory_.GetWeakPtr()));
 }
 
 void PdfViewWebPlugin::NotifySelectionChanged(const gfx::PointF& left,
@@ -864,21 +1048,18 @@ void PdfViewWebPlugin::UserMetricsRecordAction(const std::string& action) {
   client_->RecordComputedAction(action);
 }
 
-void PdfViewWebPlugin::OnViewportChanged(const gfx::Rect& view_rect,
-                                         float new_device_scale) {
-  UpdateGeometryOnViewChanged(view_rect, new_device_scale);
+gfx::Vector2d PdfViewWebPlugin::plugin_offset_in_frame() const {
+  return gfx::Vector2d();
+}
 
-  if (IsPrintPreview() && !stop_scrolling()) {
-    DCHECK_EQ(new_device_scale, device_scale());
-    gfx::ScrollOffset scroll_offset =
-        container_wrapper_->GetFrame()->GetScrollOffset();
-    scroll_offset.Scale(device_scale());
-    set_scroll_position(gfx::Point(scroll_offset.x(), scroll_offset.y()));
-    UpdateScroll();
-  }
+void PdfViewWebPlugin::OnViewportChanged(
+    const gfx::Rect& plugin_rect_in_css_pixel,
+    float new_device_scale) {
+  css_plugin_rect_ = plugin_rect_in_css_pixel;
 
-  // Scrolling in the main PDF Viewer UI is already handled by
-  // `HandleUpdateScrollMessage()`.
+  // `plugin_rect_in_css_pixel` needs to be converted to device pixels before
+  // getting passed into PdfViewPluginBase::UpdateGeometryOnPluginRectChanged().
+  UpdateGeometryOnPluginRectChanged(plugin_rect_in_css_pixel, new_device_scale);
 }
 
 void PdfViewWebPlugin::InvalidatePluginContainer() {
@@ -925,12 +1106,169 @@ bool PdfViewWebPlugin::Redo() {
   return true;
 }
 
-void PdfViewWebPlugin::OnInvokePrintDialog(int32_t /*result*/) {
+void PdfViewWebPlugin::HandleImeCommit(const blink::WebString& text) {
+  if (text.IsEmpty())
+    return;
+
+  std::u16string text16 = text.Utf16();
+  composition_text_.Reset();
+
+  size_t i = 0;
+  for (base::i18n::UTF16CharIterator iterator(text16); iterator.Advance();) {
+    blink::WebKeyboardEvent char_event(blink::WebInputEvent::Type::kChar,
+                                       blink::WebInputEvent::kNoModifiers,
+                                       ui::EventTimeForNow());
+    char_event.windows_key_code = text16[i];
+    char_event.native_key_code = text16[i];
+
+    for (const size_t char_start = i; i < iterator.array_pos(); ++i) {
+      char_event.text[i - char_start] = text16[i];
+      char_event.unmodified_text[i - char_start] = text16[i];
+    }
+
+    blink::WebCoalescedInputEvent input_event(char_event, ui::LatencyInfo());
+    ui::Cursor dummy_cursor_info;
+    HandleInputEvent(input_event, &dummy_cursor_info);
+  }
+}
+
+void PdfViewWebPlugin::OnInvokePrintDialog() {
   client_->Print(Container()->GetElement());
+}
+
+void PdfViewWebPlugin::OnSetAccessibilityDocInfo(
+    AccessibilityDocInfo doc_info) {
+  if (!pdf_accessibility_data_handler_)
+    return;
+  pdf_accessibility_data_handler_->SetAccessibilityDocInfo(doc_info);
+  // `this` may be deleted. Don't do anything else.
+}
+
+void PdfViewWebPlugin::OnSetAccessibilityPageInfo(
+    AccessibilityPageInfo page_info,
+    std::vector<AccessibilityTextRunInfo> text_runs,
+    std::vector<AccessibilityCharInfo> chars,
+    AccessibilityPageObjects page_objects) {
+  if (!pdf_accessibility_data_handler_)
+    return;
+  pdf_accessibility_data_handler_->SetAccessibilityPageInfo(
+      page_info, text_runs, chars, page_objects);
+  // `this` may be deleted. Don't do anything else.
+}
+
+void PdfViewWebPlugin::OnSetAccessibilityViewportInfo(
+    AccessibilityViewportInfo viewport_info) {
+  if (!pdf_accessibility_data_handler_)
+    return;
+  pdf_accessibility_data_handler_->SetAccessibilityViewportInfo(viewport_info);
+  // `this` may be deleted. Don't do anything else.
 }
 
 pdf::mojom::PdfService* PdfViewWebPlugin::GetPdfService() {
   return pdf_service_remote_.is_bound() ? pdf_service_remote_.get() : nullptr;
+}
+
+void PdfViewWebPlugin::ResetRecentlySentFindUpdate() {
+  recently_sent_find_update_ = false;
+}
+
+void PdfViewWebPlugin::RecordDocumentMetrics() {
+  if (!metrics_handler_)
+    return;
+
+  metrics_handler_->RecordDocumentMetrics(engine()->GetDocumentMetadata());
+  metrics_handler_->RecordAttachmentTypes(
+      engine()->GetDocumentAttachmentInfoList());
+}
+
+void PdfViewWebPlugin::SendAttachments() {
+  const std::vector<DocumentAttachmentInfo>& attachment_infos =
+      engine()->GetDocumentAttachmentInfoList();
+  if (attachment_infos.empty())
+    return;
+
+  base::Value::List attachments;
+  for (const DocumentAttachmentInfo& attachment_info : attachment_infos) {
+    // Send `size` as -1 to indicate that the attachment is too large to be
+    // downloaded.
+    const int size = attachment_info.size_bytes <= kMaximumSavedFileSize
+                         ? static_cast<int>(attachment_info.size_bytes)
+                         : -1;
+
+    base::Value::Dict attachment;
+    attachment.Set("name", attachment_info.name);
+    attachment.Set("size", size);
+    attachment.Set("readable", attachment_info.is_readable);
+    attachments.Append(std::move(attachment));
+  }
+
+  base::Value::Dict message;
+  message.Set("type", "attachments");
+  message.Set("attachmentsData", std::move(attachments));
+  SendMessage(std::move(message));
+}
+
+void PdfViewWebPlugin::SendBookmarks() {
+  base::Value::List bookmarks = engine()->GetBookmarks();
+  if (bookmarks.empty())
+    return;
+
+  base::Value::Dict message;
+  message.Set("type", "bookmarks");
+  message.Set("bookmarksData", std::move(bookmarks));
+  SendMessage(std::move(message));
+}
+
+void PdfViewWebPlugin::SendMetadata() {
+  base::Value::Dict metadata;
+  const DocumentMetadata& document_metadata = engine()->GetDocumentMetadata();
+
+  const std::string version = FormatPdfVersion(document_metadata.version);
+  if (!version.empty())
+    metadata.Set("version", version);
+
+  metadata.Set("fileSize", ui::FormatBytes(document_metadata.size_bytes));
+
+  metadata.Set("linearized", document_metadata.linearized);
+
+  if (!document_metadata.title.empty())
+    metadata.Set("title", document_metadata.title);
+
+  if (!document_metadata.author.empty())
+    metadata.Set("author", document_metadata.author);
+
+  if (!document_metadata.subject.empty())
+    metadata.Set("subject", document_metadata.subject);
+
+  if (!document_metadata.keywords.empty())
+    metadata.Set("keywords", document_metadata.keywords);
+
+  if (!document_metadata.creator.empty())
+    metadata.Set("creator", document_metadata.creator);
+
+  if (!document_metadata.producer.empty())
+    metadata.Set("producer", document_metadata.producer);
+
+  if (!document_metadata.creation_date.is_null()) {
+    metadata.Set("creationDate", base::TimeFormatShortDateAndTime(
+                                     document_metadata.creation_date));
+  }
+
+  if (!document_metadata.mod_date.is_null()) {
+    metadata.Set("modDate",
+                 base::TimeFormatShortDateAndTime(document_metadata.mod_date));
+  }
+
+  metadata.Set("pageSize",
+               FormatPageSize(engine()->GetUniformPageSizePoints()));
+
+  metadata.Set("canSerializeDocument",
+               IsSaveDataSizeValid(engine()->GetLoadedByteSize()));
+
+  base::Value::Dict message;
+  message.Set("type", "metadata");
+  message.Set("metadataData", std::move(metadata));
+  SendMessage(std::move(message));
 }
 
 }  // namespace chrome_pdf

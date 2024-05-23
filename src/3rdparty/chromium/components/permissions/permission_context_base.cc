@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -29,6 +30,7 @@
 #include "components/permissions/request_type.h"
 #include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/disallow_activation_reason.h"
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
@@ -44,31 +46,31 @@ namespace {
 const char kPermissionBlockedKillSwitchMessage[] =
     "%s permission has been blocked.";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 const char kPermissionBlockedRepeatedDismissalsMessage[] =
     "%s permission has been blocked as the user has dismissed the permission "
     "prompt several times. This can be reset in Site Settings. See "
-    "https://www.chromestatus.com/features/6443143280984064 for more "
+    "https://www.chromestatus.com/feature/6443143280984064 for more "
     "information.";
 
 const char kPermissionBlockedRepeatedIgnoresMessage[] =
     "%s permission has been blocked as the user has ignored the permission "
     "prompt several times. This can be reset in Site Settings. See "
-    "https://www.chromestatus.com/features/6443143280984064 for more "
+    "https://www.chromestatus.com/feature/6443143280984064 for more "
     "information.";
 #else
 const char kPermissionBlockedRepeatedDismissalsMessage[] =
     "%s permission has been blocked as the user has dismissed the permission "
     "prompt several times. This can be reset in Page Info which can be "
     "accessed by clicking the lock icon next to the URL. See "
-    "https://www.chromestatus.com/features/6443143280984064 for more "
+    "https://www.chromestatus.com/feature/6443143280984064 for more "
     "information.";
 
 const char kPermissionBlockedRepeatedIgnoresMessage[] =
     "%s permission has been blocked as the user has ignored the permission "
     "prompt several times. This can be reset in Page Info which can be "
     "accessed by clicking the lock icon next to the URL. See "
-    "https://www.chromestatus.com/features/6443143280984064 for more "
+    "https://www.chromestatus.com/feature/6443143280984064 for more "
     "information.";
 #endif
 
@@ -80,10 +82,14 @@ const char kPermissionBlockedPortalsMessage[] =
     "%s permission has been blocked because it was requested inside a portal. "
     "Portals don't currently support permission requests.";
 
-void LogPermissionBlockedMessage(content::WebContents* web_contents,
+const char kPermissionBlockedFencedFrameMessage[] =
+    "%s permission has been blocked because it was requested inside a fenced "
+    "frame. Fenced frames don't currently support permission requests.";
+
+void LogPermissionBlockedMessage(content::RenderFrameHost* rfh,
                                  const char* message,
                                  ContentSettingsType type) {
-  web_contents->GetMainFrame()->AddMessageToConsole(
+  rfh->GetOutermostMainFrame()->AddMessageToConsole(
       blink::mojom::ConsoleMessageLevel::kWarning,
       base::StringPrintf(message,
                          PermissionUtil::GetPermissionString(type).c_str()));
@@ -121,9 +127,11 @@ void PermissionContextBase::RequestPermission(
     BrowserPermissionCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  GURL requesting_origin = requesting_frame.GetOrigin();
-  GURL embedding_origin =
-      PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
+  content::RenderFrameHost* const rfh = content::RenderFrameHost::FromID(
+      id.render_process_id(), id.render_frame_id());
+  const GURL requesting_origin = requesting_frame.DeprecatedGetOriginAsURL();
+  const GURL embedding_origin =
+      PermissionUtil::GetLastCommittedOriginAsURL(rfh->GetMainFrame());
 
   if (!requesting_origin.is_valid() || !embedding_origin.is_valid()) {
     std::string type_name =
@@ -141,8 +149,7 @@ void PermissionContextBase::RequestPermission(
 
   // Check the content setting to see if the user has already made a decision,
   // or if the origin is under embargo. If so, respect that decision.
-  content::RenderFrameHost* rfh = content::RenderFrameHost::FromID(
-      id.render_process_id(), id.render_frame_id());
+  DCHECK(rfh);
   PermissionResult result =
       GetPermissionStatus(rfh, requesting_origin, embedding_origin);
 
@@ -151,29 +158,31 @@ void PermissionContextBase::RequestPermission(
     switch (result.source) {
       case PermissionStatusSource::KILL_SWITCH:
         // Block the request and log to the developer console.
-        LogPermissionBlockedMessage(web_contents,
-                                    kPermissionBlockedKillSwitchMessage,
+        LogPermissionBlockedMessage(rfh, kPermissionBlockedKillSwitchMessage,
                                     content_settings_type_);
         std::move(callback).Run(CONTENT_SETTING_BLOCK);
         return;
       case PermissionStatusSource::MULTIPLE_DISMISSALS:
-        LogPermissionBlockedMessage(web_contents,
+        LogPermissionBlockedMessage(rfh,
                                     kPermissionBlockedRepeatedDismissalsMessage,
                                     content_settings_type_);
         break;
       case PermissionStatusSource::MULTIPLE_IGNORES:
-        LogPermissionBlockedMessage(web_contents,
+        LogPermissionBlockedMessage(rfh,
                                     kPermissionBlockedRepeatedIgnoresMessage,
                                     content_settings_type_);
         break;
       case PermissionStatusSource::FEATURE_POLICY:
-        LogPermissionBlockedMessage(web_contents,
+        LogPermissionBlockedMessage(rfh,
                                     kPermissionBlockedPermissionsPolicyMessage,
                                     content_settings_type_);
         break;
       case PermissionStatusSource::PORTAL:
-        LogPermissionBlockedMessage(web_contents,
-                                    kPermissionBlockedPortalsMessage,
+        LogPermissionBlockedMessage(rfh, kPermissionBlockedPortalsMessage,
+                                    content_settings_type_);
+        break;
+      case PermissionStatusSource::FENCED_FRAME:
+        LogPermissionBlockedMessage(rfh, kPermissionBlockedFencedFrameMessage,
                                     content_settings_type_);
         break;
       case PermissionStatusSource::INSECURE_ORIGIN:
@@ -199,7 +208,8 @@ void PermissionContextBase::RequestPermission(
   // document from the cache.
   // - If this is called when RenderFrameHost is in prerendering, cancel
   // prerendering.
-  if (rfh->IsInactiveAndDisallowActivation()) {
+  if (rfh->IsInactiveAndDisallowActivation(
+          content::DisallowActivationReasonId::kRequestPermission)) {
     std::move(callback).Run(result.content_setting);
     return;
   }
@@ -267,6 +277,12 @@ PermissionResult PermissionContextBase::GetPermissionStatus(
                               PermissionStatusSource::PORTAL);
     }
 
+    // Permissions are denied for fenced frames.
+    if (render_frame_host->IsNestedWithinFencedFrame()) {
+      return PermissionResult(CONTENT_SETTING_BLOCK,
+                              PermissionStatusSource::FENCED_FRAME);
+    }
+
     // Automatically deny all HTTP or HTTPS requests where the virtual URL and
     // the loaded URL are for different origins. The loaded URL is the one
     // actually in the renderer, but the virtual URL is the one
@@ -279,8 +295,7 @@ PermissionResult PermissionContextBase::GetPermissionStatus(
       const GURL loaded_url = entry->GetURL();
       if (virtual_url.SchemeIsHTTPOrHTTPS() &&
           loaded_url.SchemeIsHTTPOrHTTPS() &&
-          !url::Origin::Create(virtual_url)
-               .IsSameOriginWith(url::Origin::Create(loaded_url))) {
+          !url::IsSameOriginWith(virtual_url, loaded_url)) {
         return PermissionResult(
             CONTENT_SETTING_BLOCK,
             PermissionStatusSource::VIRTUAL_URL_DIFFERENT_ORIGIN);
@@ -441,12 +456,14 @@ content::BrowserContext* PermissionContextBase::browser_context() const {
 void PermissionContextBase::OnContentSettingChanged(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
-    ContentSettingsType content_type) {
-  if (content_type != content_settings_type_)
+    ContentSettingsTypeSet content_type_set) {
+  if (!content_type_set.Contains(content_settings_type_))
     return;
 
-  for (permissions::Observer& obs : permission_observers_)
-    obs.OnPermissionChanged(primary_pattern, secondary_pattern, content_type);
+  for (permissions::Observer& obs : permission_observers_) {
+    obs.OnPermissionChanged(primary_pattern, secondary_pattern,
+                            content_type_set);
+  }
 }
 
 void PermissionContextBase::AddObserver(
@@ -504,8 +521,8 @@ void PermissionContextBase::UpdateContentSetting(const GURL& requesting_origin,
                                                  const GURL& embedding_origin,
                                                  ContentSetting content_setting,
                                                  bool is_one_time) {
-  DCHECK_EQ(requesting_origin, requesting_origin.GetOrigin());
-  DCHECK_EQ(embedding_origin, embedding_origin.GetOrigin());
+  DCHECK_EQ(requesting_origin, requesting_origin.DeprecatedGetOriginAsURL());
+  DCHECK_EQ(embedding_origin, embedding_origin.DeprecatedGetOriginAsURL());
   DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
          content_setting == CONTENT_SETTING_BLOCK);
 

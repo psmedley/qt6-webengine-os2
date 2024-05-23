@@ -10,8 +10,8 @@
 #include "base/callback.h"
 #include "base/containers/contains.h"
 #include "base/feature_list.h"
+#include "base/hash/sha1.h"
 #include "base/i18n/char_iterator.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/field_trial_params.h"
@@ -21,7 +21,6 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/time/default_clock.h"
 #include "base/trace_event/trace_event.h"
@@ -86,6 +85,23 @@ const char kTargetEmbeddingSeparators[] = "-.";
 // treat them as public for the purposes of lookalike checks.
 const char* kPrivateRegistriesTreatedAsPublic[] = {"com.de", "com.se"};
 
+Top500DomainsParams* GetTopDomainParams() {
+  static Top500DomainsParams params{
+      top500_domains::kTop500EditDistanceSkeletons,
+      top500_domains::kNumTop500EditDistanceSkeletons};
+  return &params;
+}
+
+// Minimum length of the eTLD+1 without registry needed to show the punycode
+// interstitial. IDN whose eTLD+1 without registry is shorter than this are
+// still displayed in punycode, but don't show an interstitial.
+const size_t kMinimumE2LDLengthToShowPunycodeInterstitial = 2;
+
+// Default launch percentage of a new heuristic on Canary/Dev and Beta. These
+// are used if there is a launch config for the heuristic in the proto.
+const int kDefaultLaunchPercentageOnCanaryDev = 90;
+const int kDefaultLaunchPercentageOnBeta = 50;
+
 bool SkeletonsMatch(const url_formatter::Skeletons& skeletons1,
                     const url_formatter::Skeletons& skeletons2) {
   DCHECK(!skeletons1.empty());
@@ -124,13 +140,13 @@ bool GetSimilarDomainFromTop500(
     const LookalikeTargetAllowlistChecker& target_allowlisted,
     std::string* matched_domain,
     LookalikeUrlMatchType* match_type) {
+  Top500DomainsParams* top_500_domain_params = GetTopDomainParams();
   for (const std::string& navigated_skeleton : navigated_domain.skeletons) {
-    for (const char* const top_domain_skeleton :
-         top500_domains::kTop500EditDistanceSkeletons) {
-      // kTop500EditDistanceSkeletons may include blank entries.
-      if (strlen(top_domain_skeleton) == 0) {
-        continue;
-      }
+    for (size_t i = 0; i < top_500_domain_params->num_edit_distance_skeletons;
+         i++) {
+      const char* const top_domain_skeleton =
+          top_500_domain_params->edit_distance_skeletons[i];
+      DCHECK(strlen(top_domain_skeleton));
       // Check edit distance on skeletons.
       if (IsEditDistanceAtMostOne(base::UTF8ToUTF16(navigated_skeleton),
                                   base::UTF8ToUTF16(top_domain_skeleton))) {
@@ -161,7 +177,9 @@ bool GetSimilarDomainFromTop500(
                 top_domain_skeleton, url_formatter::SkeletonType::kFull)
                 .domain;
         DCHECK(!top_domain.empty());
-        if (!target_allowlisted.Run(top_domain)) {
+        if (!IsLikelyCharacterSwapFalsePositive(navigated_domain,
+                                                GetDomainInfo(top_domain)) &&
+            !target_allowlisted.Run(top_domain)) {
           *matched_domain = top_domain;
           *match_type = LookalikeUrlMatchType::kCharacterSwapTop500;
           return true;
@@ -205,16 +223,37 @@ bool GetSimilarDomainFromEngagedSites(
           return true;
         }
         // Check character swap on skeletons.
-        // TODO(crbug/1109056): Also check character swap on actual hostnames
-        // with diacritics etc removed. This is because some characters have two
-        // character skeletons such as m -> rn, and this prevents us from
-        // detecting character swaps between example.com and exapmle.com.
         if (HasOneCharacterSwap(base::UTF8ToUTF16(navigated_skeleton),
-                                base::UTF8ToUTF16(engaged_skeleton))) {
+                                base::UTF8ToUTF16(engaged_skeleton)) &&
+            !IsLikelyCharacterSwapFalsePositive(navigated_domain,
+                                                engaged_site)) {
           *matched_domain = engaged_site.domain_and_registry;
           *match_type = LookalikeUrlMatchType::kCharacterSwapSiteEngagement;
           return true;
         }
+      }
+    }
+  }
+
+  // Also check character swap on actual hostnames with diacritics etc removed.
+  // This is because some characters have two character skeletons such as m ->
+  // rn, and this prevents us from detecting character swaps between example.com
+  // and exapmle.com.
+  const std::u16string navigated_hostname_without_diacritics =
+      url_formatter::MaybeRemoveDiacritics(navigated_domain.idn_result.result);
+  if (navigated_hostname_without_diacritics !=
+      navigated_domain.idn_result.result) {
+    for (const DomainInfo& engaged_site : engaged_sites) {
+      DCHECK_NE(navigated_domain.domain_and_registry,
+                engaged_site.domain_and_registry);
+      const std::u16string engaged_hostname_without_diacritics =
+          url_formatter::MaybeRemoveDiacritics(engaged_site.idn_result.result);
+
+      if (HasOneCharacterSwap(navigated_hostname_without_diacritics,
+                              engaged_hostname_without_diacritics)) {
+        *matched_domain = engaged_site.domain_and_registry;
+        *match_type = LookalikeUrlMatchType::kCharacterSwapSiteEngagement;
+        return true;
       }
     }
   }
@@ -653,6 +692,19 @@ bool IsLikelyEditDistanceFalsePositive(const DomainInfo& navigated_domain,
   return false;
 }
 
+bool IsLikelyCharacterSwapFalsePositive(const DomainInfo& navigated_domain,
+                                        const DomainInfo& matched_domain) {
+  DCHECK(url_formatter::top_domains::IsEditDistanceCandidate(
+      matched_domain.domain_and_registry));
+  DCHECK(url_formatter::top_domains::IsEditDistanceCandidate(
+      navigated_domain.domain_and_registry));
+  // If the only difference between the domains is the registry part, this is
+  // unlikely to be a spoofing attempt and we should ignore this match.  E.g.
+  // exclude matches like google.sr and google.rs.
+  return navigated_domain.domain_without_registry ==
+         matched_domain.domain_without_registry;
+}
+
 bool IsTopDomain(const DomainInfo& domain_info) {
   // Top domains are only accessible through their skeletons, so query the top
   // domains trie for each skeleton of this domain.
@@ -672,7 +724,7 @@ bool ShouldBlockLookalikeUrlNavigation(LookalikeUrlMatchType match_type) {
     return true;
   }
   if (match_type == LookalikeUrlMatchType::kTargetEmbedding) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
     // TODO(crbug.com/1104384): Only enable target embedding on iOS once we can
     //    check engaged sites. Otherwise, false positives are too high.
     return false;
@@ -978,6 +1030,16 @@ bool IsASCIIAndEmojiOnly(const base::StringPiece16& text) {
   return true;
 }
 
+// Returns true if the e2LD of domain is long enough to display a punycode
+// interstitial.
+bool IsPunycodeInterstitialCandidate(const DomainInfo& domain) {
+  const url_formatter::IDNConversionResult idn_result =
+      url_formatter::UnsafeIDNToUnicodeWithDetails(
+          domain.domain_without_registry);
+  return idn_result.result.size() >=
+         kMinimumE2LDLengthToShowPunycodeInterstitial;
+}
+
 bool ShouldBlockBySpoofCheckResult(const DomainInfo& navigated_domain) {
   // Here, only a subset of spoof checks that cause an IDN to fallback to
   // punycode are configured to show an interstitial.
@@ -988,7 +1050,8 @@ bool ShouldBlockBySpoofCheckResult(const DomainInfo& navigated_domain) {
 
     case url_formatter::IDNSpoofChecker::Result::kICUSpoofChecks:
       // If the eTLD+1 contains only a mix of ASCII + Emoji, allow.
-      return !IsASCIIAndEmojiOnly(navigated_domain.idn_result.result);
+      return !IsASCIIAndEmojiOnly(navigated_domain.idn_result.result) &&
+             IsPunycodeInterstitialCandidate(navigated_domain);
 
     case url_formatter::IDNSpoofChecker::Result::kDeviationCharacters:
       // Failures because of deviation characters, especially ß, is common.
@@ -1001,7 +1064,7 @@ bool ShouldBlockBySpoofCheckResult(const DomainInfo& navigated_domain) {
     case url_formatter::IDNSpoofChecker::Result::
         kNonAsciiLatinCharMixedWithNonLatin:
     case url_formatter::IDNSpoofChecker::Result::kDangerousPattern:
-      return true;
+      return IsPunycodeInterstitialCandidate(navigated_domain);
   }
 }
 
@@ -1009,7 +1072,7 @@ bool IsAllowedByEnterprisePolicy(const PrefService* pref_service,
                                  const GURL& url) {
   const auto* list =
       pref_service->GetList(prefs::kLookalikeWarningAllowlistDomains);
-  for (const auto& domain_val : list->GetList()) {
+  for (const auto& domain_val : list->GetListDeprecated()) {
     auto domain = domain_val.GetString();
     if (url.DomainIs(domain)) {
       return true;
@@ -1060,4 +1123,54 @@ bool HasOneCharacterSwap(const std::u16string& str1,
     return false;
   }
   return has_swap;
+}
+
+void SetTop500DomainsParamsForTesting(const Top500DomainsParams& params) {
+  *GetTopDomainParams() = params;
+}
+
+void ResetTop500DomainsParamsForTesting() {
+  Top500DomainsParams* params = GetTopDomainParams();
+  *params = {top500_domains::kTop500EditDistanceSkeletons,
+             top500_domains::kNumTop500EditDistanceSkeletons};
+}
+
+bool IsHeuristicEnabledForHostname(
+    const reputation::SafetyTipsConfig* config_proto,
+    const reputation::HeuristicLaunchConfig::Heuristic heuristic,
+    const std::string& lookalike_etld_plus_one,
+    version_info::Channel channel) {
+  DCHECK(!lookalike_etld_plus_one.empty());
+  if (!config_proto) {
+    return false;
+  }
+  const unsigned char* bytes =
+      reinterpret_cast<const unsigned char*>(lookalike_etld_plus_one.c_str());
+  unsigned char data[base::kSHA1Length];
+  base::SHA1HashBytes(bytes, lookalike_etld_plus_one.length(), data);
+
+  float cohort = data[0] / 2.56;
+  for (const reputation::HeuristicLaunchConfig& config :
+       config_proto->launch_config()) {
+    if (heuristic == config.heuristic()) {
+      switch (channel) {
+        // Enable by default on local builds.
+        case version_info::Channel::UNKNOWN:
+          return true;
+
+        // Use pre-defined launch percentages for Canary/Dev and Beta. Use the
+        // launch percentage from config for Stable.
+        case version_info::Channel::CANARY:
+        case version_info::Channel::DEV:
+          return kDefaultLaunchPercentageOnCanaryDev > cohort;
+
+        case version_info::Channel::BETA:
+          return kDefaultLaunchPercentageOnBeta > cohort;
+
+        case version_info::Channel::STABLE:
+          return config.launch_percentage() > cohort;
+      }
+    }
+  }
+  return false;
 }

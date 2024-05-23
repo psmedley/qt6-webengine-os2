@@ -5,6 +5,7 @@
 #include "device/gamepad/abstract_haptic_gamepad.h"
 
 #include "base/bind.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "device/gamepad/gamepad_data_fetcher.h"
 
 namespace device {
@@ -122,7 +123,7 @@ void AbstractHapticGamepad::PlayDualRumbleEffect(int sequence_id,
       FROM_HERE,
       base::BindOnce(&AbstractHapticGamepad::StartVibration, GetWeakPtr(),
                      sequence_id, duration, strong_magnitude, weak_magnitude),
-      base::TimeDelta::FromMillisecondsD(start_delay));
+      base::Milliseconds(start_delay));
 }
 
 void AbstractHapticGamepad::StartVibration(int sequence_id,
@@ -144,13 +145,13 @@ void AbstractHapticGamepad::StartVibration(int sequence_id,
         base::BindOnce(&AbstractHapticGamepad::StartVibration, GetWeakPtr(),
                        sequence_id, remaining_duration, strong_magnitude,
                        weak_magnitude),
-        base::TimeDelta::FromMillisecondsD(max_duration));
+        base::Milliseconds(max_duration));
   } else {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&AbstractHapticGamepad::FinishEffect, GetWeakPtr(),
                        sequence_id),
-        base::TimeDelta::FromMillisecondsD(duration));
+        base::Milliseconds(duration));
   }
 }
 

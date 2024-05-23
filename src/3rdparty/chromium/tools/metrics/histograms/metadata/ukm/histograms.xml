@@ -11,10 +11,11 @@ along with a detailed description for each histogram.
 For best practices on writing histogram descriptions, see
 https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md
 
-Please send CLs to chromium-metrics-reviews@google.com rather than to specific
-individuals. These CLs will be automatically reassigned to a reviewer within
-about 5 minutes. This approach helps the metrics team to load-balance incoming
-reviews. Googlers can read more about this at go/gwsq-gerrit.
+Please follow the instructions in the OWNERS file in this directory to find a
+reviewer. If no OWNERS file exists, please consider signing up at
+go/reviewing-metrics (Googlers only), as all subdirectories are expected to
+have an OWNERS file. As a last resort you can send the CL to
+chromium-metrics-reviews@google.com.
 -->
 
 <histogram-configuration>
@@ -33,7 +34,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.BuildAndStoreLogIsEmpty" enum="Boolean"
-    expires_after="2022-07-01">
+    expires_after="2022-09-11">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -45,7 +46,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 
 <histogram name="UKM.ConsentObserver.AllowedForAllProfiles" enum="Boolean"
     expires_after="2020-08-30">
-  <owner>bcwhite@chromium.org</owner>
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -58,8 +58,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.ConsentObserver.Purge" enum="Boolean"
-    expires_after="2022-07-01">
-  <owner>bcwhite@chromium.org</owner>
+    expires_after="2022-09-11">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -70,7 +69,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.Entries.Dropped" enum="UkmDataDroppedReason"
-    expires_after="2021-12-19">
+    expires_after="2022-08-28">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -80,7 +79,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.Entries.Dropped.ByEntryHash" enum="UkmEventNameHash"
-    expires_after="2021-11-14">
+    expires_after="2022-08-21">
   <owner>jwd@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -92,7 +91,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.Entries.Recorded.ByEntryHash" enum="UkmEventNameHash"
-    expires_after="2022-01-09">
+    expires_after="2022-09-18">
   <owner>yrsun@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -104,7 +103,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.Entries.SerializedCount2" units="entries"
-    expires_after="2021-12-19">
+    expires_after="2022-08-28">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>Number of serialized UKM entries when storing a UKM log.</summary>
@@ -135,7 +134,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.IOSLog.OnSuccess" units="records"
-    expires_after="2022-01-16">
+    expires_after="2022-05-22">
   <owner>rkaplow@chromium.org</owner>
   <summary>
     Number of times when UKM.LogSize.OnSuccess was recorded on iOS. Recorded
@@ -151,7 +150,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="UKM.LogSize.OnSuccess" units="KB" expires_after="2021-12-19">
+<histogram name="UKM.LogSize.OnSuccess" units="KB" expires_after="2022-08-28">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -174,7 +173,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.LogUpload.ResponseOrErrorCode"
-    enum="CombinedHttpResponseAndNetErrorCode" expires_after="2021-12-26">
+    enum="CombinedHttpResponseAndNetErrorCode" expires_after="2022-09-11">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -213,6 +212,25 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
+<histogram name="UKM.PrunedSources.{Type}" units="sources"
+    expires_after="2022-07-01">
+  <owner>rkaplow@chromium.org</owner>
+  <owner>src/base/metrics/OWNERS</owner>
+  <summary>
+    Number of sources pruned after the operation of {Type} type.
+  </summary>
+  <token key="Type">
+    <variant name="AppExpNumAppId"
+        summary="APP_ID only when not in seen/unseen experiment"/>
+    <variant name="AppExpNumNonAppId" summary="All non-APP_ID"/>
+    <variant name="NoExp" summary="Total pruned without experimentation"/>
+    <variant name="NumAppId"
+        summary="APP_ID only under seen/unseen experiment"/>
+    <variant name="NumSeen" summary="Seen only"/>
+    <variant name="NumUnseen" summary="Unseen only"/>
+  </token>
+</histogram>
+
 <histogram name="UKM.ReportSize.NonUkmPercentage" units="%"
     expires_after="2022-07-01">
   <owner>yrsun@chromium.org</owner>
@@ -225,7 +243,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.ResetReason" enum="UkmResetReason"
-    expires_after="2022-01-09">
+    expires_after="2022-04-24">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -235,7 +253,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.Sources.Dropped" enum="UkmDataDroppedReason"
-    expires_after="2021-12-19">
+    expires_after="2022-08-28">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -245,7 +263,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.Sources.KeptSourcesCount" units="sources"
-    expires_after="2021-12-19">
+    expires_after="2022-08-28">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -284,7 +302,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.Sources.UnsentSourcesCount" units="sources"
-    expires_after="2021-12-19">
+    expires_after="2022-09-11">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -294,7 +312,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.UnsentLogs.DroppedSize" units="bytes"
-    expires_after="2022-01-02">
+    expires_after="2022-09-11">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>
@@ -304,7 +322,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="UKM.UnsentLogs.NumDropped" units="units"
-    expires_after="2021-12-19">
+    expires_after="2022-09-11">
   <owner>rkaplow@chromium.org</owner>
   <owner>ukm-team@google.com</owner>
   <summary>

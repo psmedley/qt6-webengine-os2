@@ -7,7 +7,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -53,7 +52,7 @@ class ContentFaviconDriverTest : public content::RenderViewHostTestHarness {
   const GURL kFakeManifestURL = GURL("http://www.google.com/manifest.json");
 
   ContentFaviconDriverTest() {
-    ON_CALL(favicon_service_, UpdateFaviconMappingsAndFetch(_, _, _, _, _, _))
+    ON_CALL(favicon_service_, UpdateFaviconMappingsAndFetch)
         .WillByDefault([](auto, auto, auto, auto,
                           favicon_base::FaviconResultsCallback callback,
                           base::CancelableTaskTracker* tracker) {
@@ -63,7 +62,7 @@ class ContentFaviconDriverTest : public content::RenderViewHostTestHarness {
                   std::move(callback),
                   std::vector<favicon_base::FaviconRawBitmapResult>()));
         });
-    ON_CALL(favicon_service_, GetFaviconForPageURL(_, _, _, _, _))
+    ON_CALL(favicon_service_, GetFaviconForPageURL)
         .WillByDefault([](auto, auto, auto,
                           favicon_base::FaviconResultsCallback callback,
                           base::CancelableTaskTracker* tracker) {
@@ -146,8 +145,9 @@ TEST_F(ContentFaviconDriverTest, UseManifestURLAFterOnLoad) {
             favicon_driver->GetManifestURL(web_contents()->GetMainFrame()));
 }
 
-// Test that no download is initiated when DocumentOnLoadCompletedInMainFrame()
-// is not triggered (e.g. user stopped an ongoing page load).
+// Test that no download is initiated when
+// DocumentOnLoadCompletedInPrimaryMainFrame() is not triggered (e.g. user
+// stopped an ongoing page load).
 TEST_F(ContentFaviconDriverTest, ShouldNotCauseImageDownload) {
   ContentFaviconDriver* favicon_driver =
       ContentFaviconDriver::FromWebContents(web_contents());

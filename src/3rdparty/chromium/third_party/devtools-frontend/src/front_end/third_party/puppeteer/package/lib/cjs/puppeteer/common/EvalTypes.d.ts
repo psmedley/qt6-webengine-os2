@@ -13,8 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { ElementHandle , JSHandle} from './JSHandle.js';
-
+import { JSHandle, ElementHandle } from './JSHandle.js';
 /**
  * @public
  */
@@ -38,7 +37,7 @@ export declare type Serializable = number | string | boolean | null | BigInt | J
 /**
  * @public
  */
-export declare type JSONArray = Serializable[];
+export declare type JSONArray = readonly Serializable[];
 /**
  * @public
  */

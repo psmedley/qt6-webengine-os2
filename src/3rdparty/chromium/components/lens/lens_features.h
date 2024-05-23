@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 
 namespace lens {
 namespace features {
@@ -18,6 +19,10 @@ extern const base::Feature kLensStandalone;
 // Enables Lens Region Search from the context menu.
 extern const base::Feature kLensRegionSearch;
 
+// Enables a fix for cursor pointer/crosshair state over overlay on Mac.
+// TODO(crbug/1266514): make default and remove feature once launched.
+extern const base::FeatureParam<bool> kRegionSearchMacCursorFix;
+
 // Enables alternate option 1 for the Region Search context menu item text.
 extern const base::FeatureParam<bool> kRegionSearchUseMenuItemAltText1;
 
@@ -27,11 +32,17 @@ extern const base::FeatureParam<bool> kRegionSearchUseMenuItemAltText2;
 // Enables alternate option 3 for the Region Search context menu item text.
 extern const base::FeatureParam<bool> kRegionSearchUseMenuItemAltText3;
 
+// Enables alternate option 4 for the Region Search context menu item text.
+extern const base::FeatureParam<bool> kRegionSearchUseMenuItemAltText4;
+
 // Enables UKM logging for the Lens Region Search feature.
 extern const base::FeatureParam<bool> kEnableUKMLoggingForRegionSearch;
 
 // Enables UKM logging for the LensStandalone feature.
 extern const base::FeatureParam<bool> kEnableUKMLoggingForImageSearch;
+
+// Enables the side panel for Lens features on Chrome where supported.
+extern const base::FeatureParam<bool> kEnableSidePanelForLens;
 
 // Returns whether to enable UKM logging for Lens Region Search feature.
 extern bool GetEnableUKMLoggingForRegionSearch();
@@ -50,10 +61,10 @@ extern int GetMaxAreaForRegionSearch();
 extern int GetMaxPixelsForImageSearch();
 
 // The URL for the Lens home page.
-extern std::string GetHomepageURLForImageSearch();
+extern std::string GetHomepageURLForLens();
 
-// The URL for the Lens home page as defined by Lens Region Search feature.
-extern std::string GetHomepageURLForRegionSearch();
+// Returns whether the Lens side panel is enabled.
+extern bool IsLensSidePanelEnabled();
 
 }  // namespace features
 }  // namespace lens

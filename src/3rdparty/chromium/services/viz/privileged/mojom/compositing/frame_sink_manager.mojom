@@ -92,11 +92,9 @@ interface FrameSinkManager {
   CreateRootCompositorFrameSink(RootCompositorFrameSinkParams params);
 
   // Used by unprivileged clients to create a new FrameSinkBundle in the
-  // service. Each bundle is associated with a parent frame sink and can be
-  // used to communicate aggregate notifications and requests to and from any
-  // of the other frame sinks belonging to the same client.
-  CreateFrameSinkBundle(FrameSinkId parent_frame_sink_id,
-                        FrameSinkBundleId bundle_id,
+  // service. Each bundle can be used to communicate aggregate notifications and
+  // requests to and from any frame sinks belonging to the same client.
+  CreateFrameSinkBundle(FrameSinkBundleId bundle_id,
                         pending_receiver<FrameSinkBundle> receiver,
                         pending_remote<FrameSinkBundleClient> client);
 
@@ -154,12 +152,6 @@ interface FrameSinkManager {
   // reachable from the root surface.
   RequestCopyOfOutput(SurfaceId surface_id, CopyOutputRequest request);
 
-  // Marks a region as having been recently async queried. This is used by the
-  // HitTestAggregator to highlight queried regions if hit-test debugging is
-  // enabled.
-  SetHitTestAsyncQueriedDebugRegions(
-      FrameSinkId root_frame_sink_id,
-      array<FrameSinkId> hit_test_async_queried_debug_queue);
 
   // Caches the back buffer for the |root_frame_sink_id|. The back buffer is
   // keyed using |cache_id| and evicted when EvictBackBuffer with the same id is

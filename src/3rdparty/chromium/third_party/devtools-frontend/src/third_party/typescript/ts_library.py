@@ -2,13 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import argparse
+import collections
 import errno
-import sys
-import subprocess
 import json
+import logging
 import os
 import shutil
-import collections
+import subprocess
+import sys
 
 from os import path
 _CURRENT_DIR = path.join(path.dirname(__file__))
@@ -23,6 +24,7 @@ try:
 finally:
     sys.path = old_sys_path
 NODE_LOCATION = devtools_paths.node_path()
+ESBUILD_LOCATION = devtools_paths.esbuild_path()
 
 BASE_TS_CONFIG_LOCATION = path.join(ROOT_DIRECTORY_OF_REPOSITORY, 'config',
                                     'typescript', 'tsconfig.base.json')
@@ -39,20 +41,23 @@ GLOBAL_TYPESCRIPT_DEFINITION_FILES = [
               'global_defs.d.ts'),
     path.join(ROOT_DIRECTORY_OF_REPOSITORY, 'front_end', 'global_typings',
               'request_idle_callback.d.ts'),
-    path.join(ROOT_DIRECTORY_OF_REPOSITORY, 'front_end', 'global_typings',
-              'intl_display_names.d.ts'),
     # Types for W3C FileSystem API
     path.join(ROOT_DIRECTORY_OF_REPOSITORY, 'node_modules', '@types',
               'filesystem', 'index.d.ts'),
 ]
 
 
+logging.basicConfig(
+    level=logging.DEBUG if os.environ.get('TSC_DEBUG') else logging.WARNING)
+
+
 def runTsc(tsconfig_location):
-    process = subprocess.Popen(
-        [NODE_LOCATION, TSC_LOCATION, '-p', tsconfig_location],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True)
+    cmd = [NODE_LOCATION, TSC_LOCATION, '-p', tsconfig_location]
+    logging.info("runTsc: %s", ' '.join(cmd))
+    process = subprocess.Popen(cmd,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,
+                               universal_newlines=True)
     stdout, stderr = process.communicate()
     # TypeScript does not correctly write to stderr because of https://github.com/microsoft/TypeScript/issues/33849
     return process.returncode, stdout + stderr
@@ -118,7 +123,7 @@ def maybe_update_tsconfig_file(tsconfig_output_location, tsconfig):
         with open(tsconfig_output_location, encoding="utf8") as fp:
             old_contents = fp.read()
 
-    new_contents = json.dumps(tsconfig)
+    new_contents = json.dumps(tsconfig, sort_keys=True, indent=2)
     if old_contents is None or new_contents != old_contents:
         try:
             with open(tsconfig_output_location, 'w', encoding="utf8") as fp:
@@ -196,6 +201,24 @@ def remove_generated_tsbuildinfo_file(tsbuildinfo_output_location):
         os.remove(tsbuildinfo_output_location)
 
 
+def runEsbuild(opts):
+    cmd = [
+        ESBUILD_LOCATION,
+        '--outdir=' + path.dirname(opts.tsconfig_output_location),
+        '--log-level=warning',
+        '--sourcemap',
+    ]
+
+    if opts.module == 'commonjs':
+        cmd += ['--format=cjs']
+
+    cmd += opts.sources
+
+    logging.info('runEsbuild: %s', ' '.join(cmd))
+    p = subprocess.run(cmd)
+    return p.returncode
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--sources', nargs='*', help='List of TypeScript source files')
@@ -207,13 +230,16 @@ def main():
     parser.add_argument('--verify-lib-check', action='store_true')
     parser.add_argument('--is_web_worker', action='store_true')
     parser.add_argument('--module', required=False)
+    parser.add_argument('--reset_timestamps', action='store_true')
     parser.add_argument('--use-rbe', action='store_true')
     parser.add_argument('--rewrapper-binary', required=False)
     parser.add_argument('--rewrapper-cfg', required=False)
     parser.add_argument('--rewrapper-exec-root', required=False)
+    parser.add_argument('--use-esbuild', action='store_true')
     parser.set_defaults(test_only=False,
                         no_emit=False,
                         verify_lib_check=False,
+                        reset_timestamps=False,
                         module='esnext')
 
     opts = parser.parse_args()
@@ -227,6 +253,7 @@ def main():
     tsconfig_output_location = path.join(os.getcwd(), opts.tsconfig_output_location)
     tsconfig_output_directory = path.dirname(tsconfig_output_location)
     tsbuildinfo_name = path.basename(tsconfig_output_location) + '.tsbuildinfo'
+    runs_in_node_environment = opts.module == "commonjs"
 
     def get_relative_path_from_output_directory(file_to_resolve):
         return path.relpath(path.join(os.getcwd(), file_to_resolve), tsconfig_output_directory)
@@ -242,10 +269,18 @@ def main():
     if (not opts.verify_lib_check):
         tsconfig['compilerOptions']['skipLibCheck'] = True
     tsconfig['compilerOptions']['rootDir'] = get_relative_path_from_output_directory(opts.front_end_directory)
-    tsconfig['compilerOptions']['typeRoots'] = opts.test_only and [
+    tsconfig['compilerOptions']['typeRoots'] = (
+        opts.test_only or runs_in_node_environment
+    ) and [
         get_relative_path_from_output_directory(TYPES_NODE_MODULES_DIRECTORY)
     ] or []
     if opts.test_only:
+        tsconfig['compilerOptions']['types'] = [
+            "mocha", "chai", "sinon", "karma-chai-sinon"
+        ]
+        if runs_in_node_environment:
+            tsconfig['compilerOptions']['types'] += ["node"]
+    if runs_in_node_environment:
         tsconfig['compilerOptions']['moduleResolution'] = 'node'
     if opts.no_emit:
         tsconfig['compilerOptions']['emitDeclarationOnly'] = True
@@ -264,6 +299,9 @@ def main():
     if len(sources) == 0 and not opts.verify_lib_check:
         return 0
 
+    if opts.use_esbuild:
+        return runEsbuild(opts)
+
     previously_generated_file_metadata = compute_previous_generated_file_metadata(
         sources, tsconfig_output_directory)
 
@@ -281,8 +319,10 @@ def main():
         found_errors, stderr = runTsc(
             tsconfig_location=tsconfig_output_location)
 
-    maybe_reset_timestamps_on_generated_files(
-        previously_generated_file_metadata, tsconfig_output_directory)
+    if opts.reset_timestamps:
+        maybe_reset_timestamps_on_generated_files(
+            previously_generated_file_metadata, tsconfig_output_directory)
+
     remove_generated_tsbuildinfo_file(
         path.join(tsconfig_output_directory, tsbuildinfo_name))
 

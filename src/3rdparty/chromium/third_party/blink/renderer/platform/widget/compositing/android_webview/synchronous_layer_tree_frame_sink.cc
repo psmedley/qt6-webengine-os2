@@ -12,7 +12,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/notreached.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/trees/layer_tree_frame_sink_client.h"
 #include "components/power_scheduler/power_mode.h"
@@ -39,8 +39,8 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/geometry/rect_conversions.h"
-#include "ui/gfx/skia_util.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/skia_conversions.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace blink {
 
@@ -192,7 +192,8 @@ bool SynchronousLayerTreeFrameSink::BindToClient(
   // The SharedBitmapManager is null since software compositing is not supported
   // or used on Android.
   frame_sink_manager_ = std::make_unique<viz::FrameSinkManagerImpl>(
-      /*shared_bitmap_manager=*/nullptr);
+      viz::FrameSinkManagerImpl::InitParams(
+          /*shared_bitmap_manager=*/nullptr));
 
   if (synthetic_begin_frame_source_) {
     client_->SetBeginFrameSource(synthetic_begin_frame_source_.get());
@@ -280,8 +281,7 @@ void SynchronousLayerTreeFrameSink::SetLocalSurfaceId(
 
 void SynchronousLayerTreeFrameSink::SubmitCompositorFrame(
     viz::CompositorFrame frame,
-    bool hit_test_data_changed,
-    bool show_hit_test_borders) {
+    bool hit_test_data_changed) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(sync_client_);
 
@@ -380,12 +380,13 @@ void SynchronousLayerTreeFrameSink::SubmitCompositorFrame(
                                           std::move(frame));
     root_support_->SubmitCompositorFrame(root_local_surface_id_,
                                          std::move(embed_frame));
-    display_->DrawAndSwap(base::TimeTicks::Now());
+    base::TimeTicks now = base::TimeTicks::Now();
+    display_->DrawAndSwap({now, now});
 
     // We don't track metrics for frames submitted to |display_| but it still
     // expects that every frame will receive a swap ack and presentation
     // feedback so we send null signals here.
-    base::TimeTicks now = base::TimeTicks::Now();
+    now = base::TimeTicks::Now();
     display_->DidReceiveSwapBuffersAck({now, now},
                                        /*release_fence=*/gfx::GpuFenceHandle());
     display_->DidReceivePresentationFeedback(
@@ -480,8 +481,8 @@ void SynchronousLayerTreeFrameSink::DemandDrawSw(SkCanvas* canvas) {
   SkIRect canvas_clip = canvas->getDeviceClipBounds();
   gfx::Rect viewport = gfx::SkIRectToRect(canvas_clip);
 
-  gfx::Transform transform(gfx::Transform::kSkipInitialization);
-  transform.matrix() = canvas->getTotalMatrix();  // Converts 3x3 matrix to 4x4.
+  // Converts 3x3 matrix to 4x4.
+  gfx::Transform transform(canvas->getTotalMatrix());
 
   // We will resize the Display to ensure it covers the entire |viewport|, so
   // save it for later.

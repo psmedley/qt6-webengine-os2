@@ -32,6 +32,7 @@
 
 #include <memory>
 
+#include "build/chromeos_buildflags.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
@@ -45,7 +46,7 @@
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
 #include "third_party/blink/renderer/core/events/error_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -292,7 +293,7 @@ v8::Local<v8::Context> MainThreadDebugger::ensureDefaultContextInGroup(
   // CrOS and this check failed when tested on an experimental builder. Revert
   // https://crrev.com/c/2727867 to enable it.
   // See go/chrome-dcheck-on-cros or http://crbug.com/1113456 for more details.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   DCHECK(!frame->IsProvisional());
 #endif
   if (frame->IsProvisional())
@@ -337,7 +338,7 @@ void MainThreadDebugger::consoleAPIMessage(
   // TODO(dgozman): we can save a copy of message and url here by making
   // FrameConsole work with StringView.
   std::unique_ptr<SourceLocation> location = std::make_unique<SourceLocation>(
-      ToCoreString(url), line_number, column_number,
+      ToCoreString(url), String(), line_number, column_number,
       stack_trace ? stack_trace->clone() : nullptr, 0);
   frame->Console().ReportMessageToClient(
       mojom::ConsoleMessageSource::kConsoleApi,
@@ -358,7 +359,7 @@ v8::MaybeLocal<v8::Value> MainThreadDebugger::memoryInfo(
     v8::Local<v8::Context> context) {
   DCHECK(ToLocalDOMWindow(context));
   return ToV8(
-      MakeGarbageCollected<MemoryInfo>(MemoryInfo::Precision::Bucketized),
+      MakeGarbageCollected<MemoryInfo>(MemoryInfo::Precision::kBucketized),
       context->Global(), isolate);
 }
 

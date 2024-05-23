@@ -9,7 +9,6 @@
 #include "base/feature_list.h"
 #include "base/i18n/message_formatter.h"
 #include "base/i18n/number_formatting.h"
-#include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
 #include "chrome/browser/ash/policy/handlers/minimum_version_policy_handler.h"
@@ -121,6 +120,7 @@ void MainSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
       {"dismiss", IDS_SETTINGS_DISMISS},
       {"done", IDS_DONE},
       {"edit", IDS_SETTINGS_EDIT},
+      {"endTime", IDS_SETTINGS_END_TIME},
       {"extensionsLinkTooltip", IDS_SETTINGS_MENU_EXTENSIONS_LINK_TOOLTIP},
       {"learnMore", IDS_LEARN_MORE},
       {"shortcutBannerDismissed", IDS_SETTINGS_SHORTCUT_BANNER_DISMISSED},
@@ -134,6 +134,7 @@ void MainSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
       {"searchResultsBubbleText", IDS_SEARCH_RESULTS_BUBBLE_TEXT},
       {"settings", IDS_SETTINGS_SETTINGS},
       {"settingsAltPageTitle", IDS_SETTINGS_ALT_PAGE_TITLE},
+      {"startTime", IDS_SETTINGS_START_TIME},
       {"subpageArrowRoleDescription", IDS_SETTINGS_SUBPAGE_BUTTON},
       {"subpageBackButtonAriaLabel",
        IDS_SETTINGS_SUBPAGE_BACK_BUTTON_ARIA_LABEL},
@@ -160,14 +161,10 @@ void MainSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
   html_source->AddBoolean(
       "isKioskModeActive",
       user_manager::UserManager::Get()->IsLoggedInAsAnyKioskApp());
-  html_source->AddBoolean("isSupervised", profile()->IsSupervised());
+  html_source->AddBoolean("isChildAccount", profile()->IsChild());
 
-  html_source->AddBoolean("isDeepLinkingEnabled",
-                          chromeos::features::IsDeepLinkingEnabled());
-
-  html_source->AddBoolean(
-      "appManagementIntentSettingsEnabled",
-      base::FeatureList::IsEnabled(::features::kAppManagementIntentSettings));
+  html_source->AddBoolean("isPersonalizationHubEnabled",
+                          ash::features::IsPersonalizationHubEnabled());
 
   // Add the System Web App resources for Settings.
   html_source->AddResourcePath("icon-192.png", IDR_SETTINGS_LOGO_192);
@@ -242,13 +239,8 @@ void MainSection::AddChromeOSUserStrings(
 
 std::unique_ptr<PluralStringHandler> MainSection::CreatePluralStringHandler() {
   auto plural_string_handler = std::make_unique<PluralStringHandler>();
-  if (chromeos::features::IsAccountManagementFlowsV2Enabled()) {
-    plural_string_handler->AddLocalizedString("profileLabel",
-                                              IDS_OS_SETTINGS_PROFILE_LABEL_V2);
-  } else {
-    plural_string_handler->AddLocalizedString("profileLabel",
-                                              IDS_OS_SETTINGS_PROFILE_LABEL);
-  }
+  plural_string_handler->AddLocalizedString("profileLabel",
+                                            IDS_OS_SETTINGS_PROFILE_LABEL_V2);
   plural_string_handler->AddLocalizedString(
       "nearbyShareContactVisibilityNumUnreachable",
       IDS_NEARBY_CONTACT_VISIBILITY_NUM_UNREACHABLE);

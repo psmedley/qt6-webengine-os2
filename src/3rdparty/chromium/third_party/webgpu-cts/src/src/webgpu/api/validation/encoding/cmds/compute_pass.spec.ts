@@ -5,8 +5,9 @@ Does **not** test usage scopes (resource_usages/) or programmable pass stuff (pr
 `;
 
 import { makeTestGroup } from '../../../../../common/framework/test_group.js';
-import { DefaultLimits } from '../../../../constants.js';
-import { kResourceStates, ResourceState, ValidationTest } from '../../validation_test.js';
+import { kLimitInfo } from '../../../../capability_info.js';
+import { kResourceStates, ResourceState } from '../../../../gpu_test.js';
+import { ValidationTest } from '../../validation_test.js';
 
 class F extends ValidationTest {
   createComputePipeline(state: 'valid' | 'invalid'): GPUComputePipeline {
@@ -64,9 +65,30 @@ setPipeline should generate an error iff using an 'invalid' pipeline.
 g.test('pipeline,device_mismatch')
   .desc('Tests setPipeline cannot be called with a compute pipeline created from another device')
   .paramsSubcasesOnly(u => u.combine('mismatched', [true, false]))
-  .unimplemented();
+  .fn(async t => {
+    const { mismatched } = t.params;
 
-const kMaxDispatch = DefaultLimits.maxComputeWorkgroupsPerDimension;
+    if (mismatched) {
+      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
+    }
+
+    const device = mismatched ? t.mismatchedDevice : t.device;
+
+    const pipeline = device.createComputePipeline({
+      compute: {
+        module: device.createShaderModule({
+          code: '@stage(compute) @workgroup_size(1) fn main() {}',
+        }),
+        entryPoint: 'main',
+      },
+    });
+
+    const { encoder, validateFinish } = t.createEncoder('compute pass');
+    encoder.setPipeline(pipeline);
+    validateFinish(!mismatched);
+  });
+
+const kMaxDispatch = kLimitInfo.maxComputeWorkgroupsPerDimension.default;
 g.test('dispatch_sizes')
   .desc(
     `Test 'direct' and 'indirect' dispatch with various sizes.
@@ -112,7 +134,7 @@ g.test('dispatch_sizes')
   });
 
 const kBufferData = new Uint32Array(6).fill(1);
-g.test('indirect_dispatch_buffer')
+g.test('indirect_dispatch_buffer_state')
   .desc(
     `
 Test dispatchIndirect validation by submitting various dispatches with a no-op pipeline and an
@@ -122,9 +144,6 @@ indirectBuffer with 6 elements.
   - valid, within the buffer: {beginning, middle, end} of the buffer
   - invalid, non-multiple of 4
   - invalid, the last element is outside the buffer
-
-TODO: test specifically which call the validation error occurs in.
-      (Should be finish() for invalid, but submit() for destroyed.)
 `
   )
   .paramsSubcasesOnly(u =>
@@ -162,4 +181,25 @@ g.test('indirect_dispatch_buffer,device_mismatch')
     'Tests dispatchIndirect cannot be called with an indirect buffer created from another device'
   )
   .paramsSubcasesOnly(u => u.combine('mismatched', [true, false]))
-  .unimplemented();
+  .fn(async t => {
+    const { mismatched } = t.params;
+
+    if (mismatched) {
+      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
+    }
+
+    const pipeline = t.createNoOpComputePipeline();
+
+    const device = mismatched ? t.mismatchedDevice : t.device;
+
+    const buffer = device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.INDIRECT,
+    });
+    t.trackForCleanup(buffer);
+
+    const { encoder, validateFinish } = t.createEncoder('compute pass');
+    encoder.setPipeline(pipeline);
+    encoder.dispatchIndirect(buffer, 0);
+    validateFinish(!mismatched);
+  });

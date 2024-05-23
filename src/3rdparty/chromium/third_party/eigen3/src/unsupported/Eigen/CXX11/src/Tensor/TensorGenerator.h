@@ -10,6 +10,8 @@
 #ifndef EIGEN_CXX11_TENSOR_TENSOR_GENERATOR_H
 #define EIGEN_CXX11_TENSOR_TENSOR_GENERATOR_H
 
+#include "./InternalHeaderCheck.h"
+
 namespace Eigen {
 
 /** \class TensorGeneratorOp
@@ -28,7 +30,7 @@ struct traits<TensorGeneratorOp<Generator, XprType> > : public traits<XprType>
   typedef typename XprTraits::StorageKind StorageKind;
   typedef typename XprTraits::Index Index;
   typedef typename XprType::Nested Nested;
-  typedef typename remove_reference<Nested>::type _Nested;
+  typedef typename remove_reference<Nested>::type Nested_;
   static const int NumDimensions = XprTraits::NumDimensions;
   static const int Layout = XprTraits::Layout;
   typedef typename XprTraits::PointerType PointerType;
@@ -111,7 +113,7 @@ struct TensorEvaluator<const TensorGeneratorOp<Generator, ArgType>, Device>
       TensorBlock;
   //===--------------------------------------------------------------------===//
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
+  EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
       :  m_device(device), m_generator(op.generator())
   {
     TensorEvaluator<ArgType, Device> argImpl(op.expression(), device);
@@ -136,10 +138,10 @@ struct TensorEvaluator<const TensorGeneratorOp<Generator, ArgType>, Device>
 
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Dimensions& dimensions() const { return m_dimensions; }
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(EvaluatorPointerType /*data*/) {
+  EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(EvaluatorPointerType /*data*/) {
     return true;
   }
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void cleanup() {
+  EIGEN_STRONG_INLINE void cleanup() {
   }
 
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE CoeffReturnType coeff(Index index) const
@@ -153,7 +155,6 @@ struct TensorEvaluator<const TensorGeneratorOp<Generator, ArgType>, Device>
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE PacketReturnType packet(Index index) const
   {
     const int packetSize = PacketType<CoeffReturnType, Device>::size;
-    EIGEN_STATIC_ASSERT((packetSize > 1), YOU_MADE_A_PROGRAMMING_MISTAKE)
     eigen_assert(index+packetSize-1 < dimensions().TotalSize());
 
     EIGEN_ALIGN_MAX typename internal::remove_const<CoeffReturnType>::type values[packetSize];

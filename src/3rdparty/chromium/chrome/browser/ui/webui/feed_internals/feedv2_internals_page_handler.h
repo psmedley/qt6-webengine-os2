@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/feed_internals/feed_internals.mojom.h"
 #include "components/feed/core/v2/public/common_enums.h"
@@ -36,13 +36,10 @@ class FeedV2InternalsPageHandler : public feed_internals::mojom::PageHandler {
 
   // feed_internals::mojom::PageHandler
   void GetGeneralProperties(GetGeneralPropertiesCallback) override;
-  void GetUserClassifierProperties(
-      GetUserClassifierPropertiesCallback) override;
-  void ClearUserClassifierProperties() override;
   void GetLastFetchProperties(GetLastFetchPropertiesCallback) override;
-  void ClearCachedDataAndRefreshFeed() override;
-  void RefreshFeed() override;
-  void GetCurrentContent(GetCurrentContentCallback) override;
+  void RefreshForYouFeed() override;
+  void RefreshFollowingFeed() override;
+  void RefreshWebFeedSuggestions() override;
   void GetFeedProcessScopeDump(GetFeedProcessScopeDumpCallback) override;
   void GetFeedHistograms(GetFeedHistogramsCallback) override;
   void OverrideFeedHost(const GURL& host) override;
@@ -62,8 +59,8 @@ class FeedV2InternalsPageHandler : public feed_internals::mojom::PageHandler {
   mojo::Receiver<feed_internals::mojom::PageHandler> receiver_;
 
   // Services that provide the data and functionality.
-  feed::FeedApi* feed_stream_;
-  PrefService* pref_service_;
+  raw_ptr<feed::FeedApi> feed_stream_;
+  raw_ptr<PrefService> pref_service_;
 
   base::WeakPtrFactory<FeedV2InternalsPageHandler> weak_ptr_factory_{this};
 };

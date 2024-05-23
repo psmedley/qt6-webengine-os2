@@ -184,7 +184,7 @@ greater than 1000
 ```sql
 SELECT upid
 FROM counter
-JOIN process_counter_track ON process_counter_track.id = slice.track_id
+JOIN process_counter_track ON process_counter_track.id = counter.track_id
 WHERE process_counter_track.name = 'mem.swap' AND value > 1000
 ```
 
@@ -330,6 +330,24 @@ the same table in the same partition *cannot* overlap. For performance
 reasons, span join does not attempt to detect and error out in this situation;
 instead, incorrect rows will silently be produced.
 
+Left and outer span joins are also supported; both function analogously to
+the left and outer joins from SQL.
+```sql
+-- Left table partitioned + right table unpartitioned.
+CREATE VIRTUAL TABLE left_join
+USING SPAN_LEFT_JOIN(table_a PARTITIONED a, table_b);
+
+-- Both tables unpartitioned.
+CREATE VIRTUAL TABLE outer_join
+USING SPAN_OUTER_JOIN(table_x, table_y);
+```
+
+NOTE: there is a subtlety if the partitioned table is empty and is
+either a) part of an outer join b) on the right side of a left join.
+In this case, *no* slices will be emitted even if the other table is
+non-empty. This approach was decided as being the most natural
+after considering how span joins are used in practice.
+
 ### Ancestor slice
 ancestor_slice is a custom operator table that takes a
 [slice table's id column](/docs/analysis/sql-tables.autogen#slice) and computes
@@ -353,6 +371,32 @@ SELECT
 FROM
   interesting_slices LEFT JOIN
   ancestor_slice(interesting_slices.id) AS ancestor ON ancestor.depth = 0
+```
+
+### Ancestor slice by stack
+ancestor_slice_by_stack is a custom operator table that takes a
+[slice table's stack_id column](/docs/analysis/sql-tables.autogen#slice) and
+finds all slice ids with that stack_id, then, for each id it computes
+all the ancestor slices similarly to
+[ancestor_slice](/docs/analysis/trace-processor#ancestor-slice).
+
+The returned format is the same as the
+[slice table](/docs/analysis/sql-tables.autogen#slice)
+
+For example, the following finds the top level slice of all slices with the
+given name.
+
+```sql
+CREATE VIEW interesting_stack_ids AS
+SELECT stack_id
+FROM slice WHERE name LIKE "%interesting slice name%";
+
+SELECT
+  *
+FROM
+  interesting_stack_ids LEFT JOIN
+  ancestor_slice_by_stack(interesting_stack_ids.stack_id) AS ancestor
+  ON ancestor.depth = 0
 ```
 
 ### Descendant slice
@@ -381,6 +425,32 @@ SELECT
     FROM descendant_slice(interesting_slice.id)
   )
 FROM interesting_slices
+```
+
+### Descendant slice by stack
+descendant_slice_by_stack is a custom operator table that takes a
+[slice table's stack_id column](/docs/analysis/sql-tables.autogen#slice) and
+finds all slice ids with that stack_id, then, for each id it computes
+all the descendant slices similarly to
+[descendant_slice](/docs/analysis/trace-processor#descendant-slice).
+
+The returned format is the same as the
+[slice table](/docs/analysis/sql-tables.autogen#slice)
+
+For example, the following finds the next level descendant of all slices with
+the given name.
+
+```sql
+CREATE VIEW interesting_stacks AS
+SELECT stack_id, depth
+FROM slice WHERE name LIKE "%interesting slice name%";
+
+SELECT
+  *
+FROM
+  interesting_stacks LEFT JOIN
+  descendant_slice_by_stack(interesting_stacks.stack_id) AS descendant
+  ON descendant.depth = interesting_stacks.depth + 1
 ```
 
 ### Connected/Following/Preceding flows
@@ -474,7 +544,7 @@ Creating derived events is tied very closely to
 create higher-level abstractions from raw events as intermediate artifacts.
 
 From previous example, the
-[startup metric](/src/trace_processor/metrics/android/android_startup.sql)
+[startup metric](/src/trace_processor/metrics/sql/android/android_startup.sql)
 creates the exact `launching` slice we want to display in the UI.
 
 The other benefit of aligning the two is that changes in metrics are
@@ -513,24 +583,24 @@ NOTE: The API is only compatible with Python3.
 ```python
 from perfetto.trace_processor import TraceProcessor
 # Initialise TraceProcessor with a trace file
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 ```
 
 NOTE: The TraceProcessor can be initialized in a combination of ways including:
       <br> - An address at which there exists a running instance of `trace_processor` with a
-      loaded trace (e.g. `TraceProcessor(addr='localhost:9001')`)
+      loaded trace (e.g.`TraceProcessor(addr='localhost:9001')`)
       <br> - An address at which there exists a running instance of `trace_processor` and
       needs a trace to be loaded in
-      (e.g. `TraceProcessor(addr='localhost:9001', file_path='trace.perfetto-trace')`)
+      (e.g. `TraceProcessor(trace='trace.perfetto-trace', addr='localhost:9001')`)
       <br> - A path to a `trace_processor` binary and the trace to be loaded in
-      (e.g. `TraceProcessor(bin_path='./trace_processor', file_path='trace.perfetto-trace')`)
+      (e.g. `TraceProcessor(trace='trace.perfetto-trace', config=TraceProcessorConfig(bin_path='./trace_processor'))`)
 
 
 ### API
 
 The `trace_processor.api` module contains the `TraceProcessor` class which provides various
 functions that can be called on the loaded trace. For more information on how to use
-these functions, see this [`example`](/src/trace_processor/python/example.py).
+these functions, see this [`example`](/python/example.py).
 
 #### Query
 The query() function takes an SQL query as input and returns an iterator through the rows
@@ -538,7 +608,7 @@ of the result.
 
 ```python
 from perfetto.trace_processor import TraceProcessor
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 
 qr_it = tp.query('SELECT ts, dur, name FROM slice')
 for row in qr_it:
@@ -557,7 +627,7 @@ The QueryResultIterator can also be converted to a Pandas DataFrame, although th
 requires you to have both the `NumPy` and `Pandas` modules installed.
 ```python
 from perfetto.trace_processor import TraceProcessor
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 
 qr_it = tp.query('SELECT ts, dur, name FROM slice')
 qr_df = qr_it.as_pandas_dataframe()
@@ -578,7 +648,7 @@ Furthermore, you can use the query result in a Pandas DataFrame format to easily
 make visualisations from the trace data.
 ```python
 from perfetto.trace_processor import TraceProcessor
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 
 qr_it = tp.query('SELECT ts, value FROM counter WHERE track_id=50')
 qr_df = qr_it.as_pandas_dataframe()
@@ -595,7 +665,7 @@ The metric() function takes in a list of trace metrics and returns the results a
 
 ```python
 from perfetto.trace_processor import TraceProcessor
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 
 ad_cpu_metrics = tp.metric(['android_cpu'])
 print(ad_cpu_metrics)

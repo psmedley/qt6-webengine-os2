@@ -4,11 +4,13 @@
 
 #include "base/process/memory.h"
 
-#if defined(OS_WIN)
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #else
 #include <unistd.h>
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 #include <string.h>
 
@@ -36,14 +38,14 @@ namespace internal {
 // Crash server classifies base::internal::OnNoMemoryInternal as OOM.
 NOINLINE void OnNoMemoryInternal(size_t size) {
   g_oom_size = size;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Kill the process. This is important for security since most of code
   // does not check the result of memory allocation.
   // https://msdn.microsoft.com/en-us/library/het71c37.aspx
   // Pass the size of the failed request in an exception argument.
   ULONG_PTR exception_args[] = {size};
   ::RaiseException(base::win::kOomExceptionCode, EXCEPTION_NONCONTINUABLE,
-                   base::size(exception_args), exception_args);
+                   std::size(exception_args), exception_args);
 
   // Safety check, make sure process exits here.
   _exit(win::kOomExceptionCode);
@@ -83,7 +85,7 @@ NOINLINE void OnNoMemoryInternal(size_t size) {
   // address, which is particularly an issue on Android.
   IMMEDIATE_CRASH();
 #endif
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 }
 
 }  // namespace internal
@@ -95,7 +97,7 @@ void TerminateBecauseOutOfMemory(size_t size) {
 // Defined in memory_mac.mm for macOS + use_allocator="none".  In case of
 // USE_PARTITION_ALLOC_AS_MALLOC, no need to route the call to the system
 // default calloc of macOS.
-#if !defined(OS_APPLE) || BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+#if !BUILDFLAG(IS_APPLE) || BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 
 bool UncheckedCalloc(size_t num_items, size_t size, void** result) {
   const size_t alloc_size = num_items * size;
@@ -113,7 +115,7 @@ bool UncheckedCalloc(size_t num_items, size_t size, void** result) {
   return true;
 }
 
-#endif  // !defined(OS_APPLE) || BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+#endif  // !BUILDFLAG(IS_APPLE) || BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 
 namespace internal {
 bool ReleaseAddressSpaceReservation() {

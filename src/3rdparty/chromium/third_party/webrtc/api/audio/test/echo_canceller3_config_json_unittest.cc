@@ -31,12 +31,19 @@ TEST(EchoCanceller3JsonHelpers, ToStringAndParseJson) {
   cfg.suppressor.subband_nearend_detection.subband1 = {4, 5};
   cfg.suppressor.subband_nearend_detection.nearend_threshold = 2.f;
   cfg.suppressor.subband_nearend_detection.snr_threshold = 100.f;
+  cfg.multi_channel.detect_stereo_content =
+      !cfg.multi_channel.detect_stereo_content;
+  cfg.multi_channel.stereo_detection_threshold += 1.0f;
+  cfg.multi_channel.stereo_detection_timeout_threshold_seconds += 1;
+  cfg.multi_channel.stereo_detection_hysteresis_seconds += 1;
   std::string json_string = Aec3ConfigToJsonString(cfg);
   EchoCanceller3Config cfg_transformed = Aec3ConfigFromJsonString(json_string);
 
   // Expect unchanged values to remain default.
   EXPECT_EQ(cfg.ep_strength.default_len,
             cfg_transformed.ep_strength.default_len);
+  EXPECT_EQ(cfg.ep_strength.nearend_len,
+            cfg_transformed.ep_strength.nearend_len);
   EXPECT_EQ(cfg.suppressor.normal_tuning.mask_lf.enr_suppress,
             cfg_transformed.suppressor.normal_tuning.mask_lf.enr_suppress);
 
@@ -73,5 +80,14 @@ TEST(EchoCanceller3JsonHelpers, ToStringAndParseJson) {
       cfg_transformed.suppressor.subband_nearend_detection.nearend_threshold);
   EXPECT_EQ(cfg.suppressor.subband_nearend_detection.snr_threshold,
             cfg_transformed.suppressor.subband_nearend_detection.snr_threshold);
+  EXPECT_EQ(cfg.multi_channel.detect_stereo_content,
+            cfg_transformed.multi_channel.detect_stereo_content);
+  EXPECT_EQ(cfg.multi_channel.stereo_detection_threshold,
+            cfg_transformed.multi_channel.stereo_detection_threshold);
+  EXPECT_EQ(
+      cfg.multi_channel.stereo_detection_timeout_threshold_seconds,
+      cfg_transformed.multi_channel.stereo_detection_timeout_threshold_seconds);
+  EXPECT_EQ(cfg.multi_channel.stereo_detection_hysteresis_seconds,
+            cfg_transformed.multi_channel.stereo_detection_hysteresis_seconds);
 }
 }  // namespace webrtc

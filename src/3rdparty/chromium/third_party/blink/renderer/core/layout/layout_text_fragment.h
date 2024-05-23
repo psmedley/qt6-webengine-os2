@@ -23,9 +23,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TEXT_FRAGMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TEXT_FRAGMENT_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -39,6 +40,7 @@ class FirstLetterPseudoElement;
 // node.
 class CORE_EXPORT LayoutTextFragment : public LayoutText {
  public:
+  LayoutTextFragment(Node*, StringImpl*, int start_offset, int length);
   ~LayoutTextFragment() override;
 
   static LayoutTextFragment* Create(Node*,
@@ -122,7 +124,6 @@ class CORE_EXPORT LayoutTextFragment : public LayoutText {
 
  protected:
   friend class LayoutObjectFactory;
-  LayoutTextFragment(Node*, StringImpl*, int start_offset, int length);
   void WillBeDestroyed() override;
 
  private:

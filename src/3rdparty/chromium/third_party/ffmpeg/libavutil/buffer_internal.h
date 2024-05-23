@@ -22,7 +22,6 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
-#include "internal.h"
 #include "buffer.h"
 #include "thread.h"
 
@@ -30,6 +29,11 @@
  * The buffer was av_realloc()ed, so it is reallocatable.
  */
 #define BUFFER_FLAG_REALLOCATABLE (1 << 0)
+/**
+ * The AVBuffer structure is part of a larger structure
+ * and should not be freed.
+ */
+#define BUFFER_FLAG_NO_FREE       (1 << 1)
 
 struct AVBuffer {
     uint8_t *data; /**< data described by this buffer */
@@ -73,6 +77,12 @@ typedef struct BufferPoolEntry {
 
     AVBufferPool *pool;
     struct BufferPoolEntry *next;
+
+    /*
+     * An AVBuffer structure to (re)use as AVBuffer for subsequent uses
+     * of this BufferPoolEntry.
+     */
+    AVBuffer buffer;
 } BufferPoolEntry;
 
 struct AVBufferPool {

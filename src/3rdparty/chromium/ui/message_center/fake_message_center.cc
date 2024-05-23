@@ -49,8 +49,8 @@ Notification* FakeMessageCenter::FindNotificationById(const std::string& id) {
   return nullptr;
 }
 
-Notification* FakeMessageCenter::FindOldestNotificationByNotiferId(
-    const NotifierId& notifier_id) {
+Notification* FakeMessageCenter::FindParentNotification(
+    Notification* notification) {
   // stub
   return nullptr;
 }
@@ -88,6 +88,12 @@ FakeMessageCenter::GetVisibleNotifications() {
 
 NotificationList::PopupNotifications
 FakeMessageCenter::GetPopupNotifications() {
+  return NotificationList::PopupNotifications();
+}
+
+NotificationList::PopupNotifications
+FakeMessageCenter::GetPopupNotificationsWithoutBlocker(
+    const NotificationBlocker& blocker) const {
   return NotificationList::PopupNotifications();
 }
 
@@ -137,7 +143,7 @@ void FakeMessageCenter::RemoveAllNotifications(bool by_user, RemoveType type) {
 }
 
 void FakeMessageCenter::SetNotificationIcon(const std::string& notification_id,
-                                            const gfx::Image& image) {}
+                                            const ui::ImageModel& image) {}
 
 void FakeMessageCenter::SetNotificationImage(const std::string& notification_id,
                                              const gfx::Image& image) {}
@@ -196,6 +202,9 @@ const std::u16string& FakeMessageCenter::GetSystemNotificationAppName() const {
 
 void FakeMessageCenter::SetSystemNotificationAppName(
     const std::u16string& product_os_name) {}
+
+void FakeMessageCenter::OnMessageViewHovered(
+    const std::string& notification_id) {}
 
 void FakeMessageCenter::DisableTimersForTest() {}
 

@@ -9,9 +9,16 @@
  * an animation if the percentage is indeterminate.
  */
 
-import {CrAutoImgElement} from 'chrome://resources/cr_elements/cr_auto_img/cr_auto_img.js';
+import '//resources/cr_elements/cr_auto_img/cr_auto_img.js';
+import '//resources/cr_elements/shared_style_css.m.js';
+import '//resources/cr_elements/cr_icons_css.m.js';
+import './nearby_shared_icons.js';
+import './nearby_device_icon.js';
+
+import {html, Polymer} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 Polymer({
+  _template: html`{__html_template__}`,
   is: 'nearby-progress',
 
   properties: {
@@ -33,19 +40,6 @@ Polymer({
     showIndeterminateProgress: {
       type: Boolean,
       value: false,
-    },
-
-    // TODO(crbug.com/1165852) Remove percentage option, not used in practice
-    /**
-     * The progress percentage to display, expressed as a number between 0 and
-     * 100. If null, then an animation representing an indeterminate state is
-     * shown, unless |hasError| is true.
-     * @type {number}
-     */
-    progressPercentage: {
-      type: Number,
-      value: 0,
-      observer: 'updateProgress_',
     },
 
     /**
@@ -83,18 +77,10 @@ Polymer({
     }
     if (this.showIndeterminateProgress) {
       classes.push('indeterminate-progress');
-    } else if (!this.progressPercentage) {
+    } else {
       classes.push('hidden');
     }
     return classes.join(' ');
-  },
-
-  /**
-   * Updates the css to set the progress percentage displayed to |value|.
-   * @param {?number} value
-   */
-  updateProgress_(value) {
-    this.updateStyles({'--progress-percentage': value});
   },
 
   /**

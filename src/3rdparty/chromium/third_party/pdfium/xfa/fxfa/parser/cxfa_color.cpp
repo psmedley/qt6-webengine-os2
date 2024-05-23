@@ -13,7 +13,7 @@
 namespace {
 
 const CXFA_Node::PropertyData kColorPropertyData[] = {
-    {XFA_Element::Extras, 1, 0},
+    {XFA_Element::Extras, 1, {}},
 };
 
 const CXFA_Node::AttributeData kColorAttributeData[] = {
@@ -32,9 +32,9 @@ FX_ARGB CXFA_Color::StringToFXARGB(WideStringView view) {
   if (view.IsEmpty())
     return kDefaultValue;
 
-  int cc = 0;
   const wchar_t* str = view.unterminated_c_str();
-  int len = view.GetLength();
+  size_t len = view.GetLength();
+  size_t cc = 0;
   while (cc < len && FXSYS_iswspace(str[cc]))
     cc++;
 
@@ -83,7 +83,7 @@ FX_ARGB CXFA_Color::StringToFXARGB(WideStringView view) {
 CXFA_Color::CXFA_Color(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                (XFA_XDPPACKET_Template | XFA_XDPPACKET_Form),
+                {XFA_XDPPACKET::kTemplate, XFA_XDPPACKET::kForm},
                 XFA_ObjectType::Node,
                 XFA_Element::Color,
                 kColorPropertyData,
@@ -94,13 +94,15 @@ CXFA_Color::CXFA_Color(CXFA_Document* doc, XFA_PacketType packet)
 
 CXFA_Color::~CXFA_Color() = default;
 
-FX_ARGB CXFA_Color::GetValue() {
-  Optional<WideString> val = JSObject()->TryCData(XFA_Attribute::Value, false);
+FX_ARGB CXFA_Color::GetValue() const {
+  absl::optional<WideString> val =
+      JSObject()->TryCData(XFA_Attribute::Value, false);
   return val.has_value() ? StringToFXARGB(val->AsStringView()) : 0xFF000000;
 }
 
-FX_ARGB CXFA_Color::GetValueOrDefault(FX_ARGB defaultValue) {
-  Optional<WideString> val = JSObject()->TryCData(XFA_Attribute::Value, false);
+FX_ARGB CXFA_Color::GetValueOrDefault(FX_ARGB defaultValue) const {
+  absl::optional<WideString> val =
+      JSObject()->TryCData(XFA_Attribute::Value, false);
   return val.has_value() ? StringToFXARGB(val->AsStringView()) : defaultValue;
 }
 

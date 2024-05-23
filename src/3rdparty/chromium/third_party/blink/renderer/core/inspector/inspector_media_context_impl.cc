@@ -10,6 +10,7 @@
 #include "base/unguessable_token.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
@@ -51,8 +52,7 @@ void MediaInspectorContextImpl::Trace(Visitor* visitor) const {
 
 Vector<WebString> MediaInspectorContextImpl::AllPlayerIdsAndMarkSent() {
   Vector<WebString> existing_players;
-  const auto& keys = players_.Keys();
-  existing_players.AppendRange(keys.begin(), keys.end());
+  WTF::CopyKeysToVector(players_, existing_players);
   unsent_players_.clear();
   return existing_players;
 }
@@ -69,8 +69,10 @@ WebString MediaInspectorContextImpl::CreatePlayer() {
       String::FromUTF8(base::UnguessableToken::Create().ToString());
   players_.insert(next_player_id, MakeGarbageCollected<MediaPlayer>());
   probe::PlayersCreated(GetSupplementable(), {next_player_id});
-  if (!GetSupplementable()->GetProbeSink()->HasInspectorMediaAgents())
+  if (!GetSupplementable()->GetProbeSink() ||
+      !GetSupplementable()->GetProbeSink()->HasInspectorMediaAgents()) {
     unsent_players_.push_back(next_player_id);
+  }
   return next_player_id;
 }
 
@@ -107,9 +109,13 @@ void MediaInspectorContextImpl::TrimPlayer(const WebString& playerId) {
 
 void MediaInspectorContextImpl::CullPlayers(const WebString& prefer_keep) {
   // Erase all the dead players, but only erase the required number of others.
-  for (const auto& playerId : dead_players_)
+  while (!dead_players_.IsEmpty()) {
+    auto playerId = dead_players_.back();
+    // remove it first, since |RemovePlayer| can cause a GC event which can
+    // potentially caues more players to get added to |dead_players_|.
+    dead_players_.pop_back();
     RemovePlayer(playerId);
-  dead_players_.clear();
+  }
 
   while (!expendable_players_.IsEmpty()) {
     if (total_event_count_ <= kMaxCachedPlayerEvents)
@@ -193,9 +199,7 @@ void MediaInspectorContextImpl::SetPlayerProperties(
   if (player != players_.end()) {
     for (const auto& property : props)
       player->value->properties.Set(property.name, property);
-
-    properties.AppendRange(player->value->properties.Values().begin(),
-                           player->value->properties.Values().end());
+    WTF::CopyValuesToVector(player->value->properties, properties);
   }
   probe::PlayerPropertiesChanged(GetSupplementable(), playerId, properties);
 }

@@ -18,7 +18,6 @@
 #include "api/neteq/tick_timer.h"
 #include "modules/audio_coding/neteq/buffer_level_filter.h"
 #include "modules/audio_coding/neteq/delay_manager.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 
 namespace webrtc {
@@ -36,6 +35,9 @@ class DecisionLogic : public NetEqController {
                 std::unique_ptr<BufferLevelFilter> buffer_level_filter);
 
   ~DecisionLogic() override;
+
+  DecisionLogic(const DecisionLogic&) = delete;
+  DecisionLogic& operator=(const DecisionLogic&) = delete;
 
   // Resets object to a clean state.
   void Reset() override;
@@ -66,11 +68,7 @@ class DecisionLogic : public NetEqController {
   // Resets the `cng_state_` to kCngOff.
   void SetCngOff() override { cng_state_ = kCngOff; }
 
-  // Reports back to DecisionLogic whether the decision to do expand remains or
-  // not. Note that this is necessary, since an expand decision can be changed
-  // to kNormal in NetEqImpl::GetDecision if there is still enough data in the
-  // sync buffer.
-  void ExpandDecision(NetEq::Operation operation) override;
+  void ExpandDecision(NetEq::Operation operation) override {}
 
   // Adds `value` to `sample_memory_`.
   void AddSampleMemory(int32_t value) override { sample_memory_ += value; }
@@ -83,7 +81,7 @@ class DecisionLogic : public NetEqController {
 
   void RegisterEmptyPacket() override {}
 
-  void NotifyMutedState() override {}
+  void NotifyMutedState() override;
 
   bool SetMaximumDelay(int delay_ms) override {
     return delay_manager_->SetMaximumDelay(delay_ms);
@@ -189,11 +187,7 @@ class DecisionLogic : public NetEqController {
   int time_stretched_cn_samples_ = 0;
   bool last_pack_cng_or_dtmf_ = true;
   bool buffer_flush_ = false;
-  FieldTrialParameter<bool> estimate_dtx_delay_;
-  FieldTrialParameter<bool> time_stretch_cn_;
   FieldTrialConstrained<int> target_level_window_ms_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(DecisionLogic);
 };
 
 }  // namespace webrtc

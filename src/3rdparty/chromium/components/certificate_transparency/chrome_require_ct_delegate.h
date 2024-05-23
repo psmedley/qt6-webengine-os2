@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/component_export.h"
 #include "base/memory/ref_counted.h"
 #include "components/url_matcher/url_matcher.h"
 #include "net/base/hash_value.h"
@@ -33,10 +33,14 @@ namespace certificate_transparency {
 // To support Enterprise configuration, additional requirements or exceptions
 // can be provided via |UpdateCTPolicies()|, which uses the configuration
 // syntax documented in pref_names.h for each of the options.
-class ChromeRequireCTDelegate
+class COMPONENT_EXPORT(CERTIFICATE_TRANSPARENCY) ChromeRequireCTDelegate
     : public net::TransportSecurityState::RequireCTDelegate {
  public:
   explicit ChromeRequireCTDelegate();
+
+  ChromeRequireCTDelegate(const ChromeRequireCTDelegate&) = delete;
+  ChromeRequireCTDelegate& operator=(const ChromeRequireCTDelegate&) = delete;
+
   ~ChromeRequireCTDelegate() override;
 
   // RequireCTDelegate implementation
@@ -98,8 +102,6 @@ class ChromeRequireCTDelegate
   // Both SPKI lists are sorted.
   net::HashValueVector spkis_;
   net::HashValueVector legacy_spkis_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeRequireCTDelegate);
 };
 
 }  // namespace certificate_transparency

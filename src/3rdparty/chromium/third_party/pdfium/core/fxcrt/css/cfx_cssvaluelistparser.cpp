@@ -12,16 +12,16 @@
 #include "third_party/base/check_op.h"
 
 CFX_CSSValueListParser::CFX_CSSValueListParser(const wchar_t* psz,
-                                               int32_t iLen,
+                                               size_t nLen,
                                                wchar_t separator)
-    : m_Separator(separator), m_pCur(psz), m_pEnd(psz + iLen) {
+    : m_Separator(separator), m_pCur(psz), m_pEnd(psz + nLen) {
   DCHECK(psz);
-  DCHECK_GT(iLen, 0);
+  DCHECK_NE(nLen, 0);
 }
 
 bool CFX_CSSValueListParser::NextValue(CFX_CSSValue::PrimitiveType* eType,
                                        const wchar_t** pStart,
-                                       int32_t* iLength) {
+                                       size_t* nLength) {
   while (m_pCur < m_pEnd && (*m_pCur <= ' ' || *m_pCur == m_Separator))
     ++m_pCur;
 
@@ -30,59 +30,58 @@ bool CFX_CSSValueListParser::NextValue(CFX_CSSValue::PrimitiveType* eType,
 
   *eType = CFX_CSSValue::PrimitiveType::kUnknown;
   *pStart = m_pCur;
-  *iLength = 0;
+  *nLength = 0;
   wchar_t wch = *m_pCur;
   if (wch == '#') {
-    *iLength = SkipTo(' ', false, false);
-    if (*iLength == 4 || *iLength == 7)
+    *nLength = SkipToChar(' ');
+    if (*nLength == 4 || *nLength == 7)
       *eType = CFX_CSSValue::PrimitiveType::kRGB;
   } else if (FXSYS_IsDecimalDigit(wch) || wch == '.' || wch == '-' ||
              wch == '+') {
     while (m_pCur < m_pEnd && (*m_pCur > ' ' && *m_pCur != m_Separator))
       ++m_pCur;
 
-    *iLength = m_pCur - *pStart;
+    *nLength = m_pCur - *pStart;
     *eType = CFX_CSSValue::PrimitiveType::kNumber;
   } else if (wch == '\"' || wch == '\'') {
     ++(*pStart);
     m_pCur++;
-    *iLength = SkipTo(wch, false, false);
+    *nLength = SkipToChar(wch);
     m_pCur++;
     *eType = CFX_CSSValue::PrimitiveType::kString;
   } else if (m_pEnd - m_pCur > 5 && m_pCur[3] == '(') {
     if (FXSYS_wcsnicmp(L"rgb", m_pCur, 3) == 0) {
-      *iLength = SkipTo(')', false, false) + 1;
+      *nLength = SkipToChar(')') + 1;
       m_pCur++;
       *eType = CFX_CSSValue::PrimitiveType::kRGB;
     }
   } else {
-    *iLength = SkipTo(m_Separator, true, true);
+    *nLength = SkipToCharMatchingParens(m_Separator);
     *eType = CFX_CSSValue::PrimitiveType::kString;
   }
-  return m_pCur <= m_pEnd && *iLength > 0;
+  return m_pCur <= m_pEnd && *nLength > 0;
 }
 
-int32_t CFX_CSSValueListParser::SkipTo(wchar_t wch,
-                                       bool breakOnSpace,
-                                       bool matchBrackets) {
+size_t CFX_CSSValueListParser::SkipToChar(wchar_t wch) {
   const wchar_t* pStart = m_pCur;
-  int32_t bracketCount = 0;
   while (m_pCur < m_pEnd && *m_pCur != wch) {
-    if (breakOnSpace && *m_pCur <= ' ')
-      break;
-    if (!matchBrackets) {
-      m_pCur++;
-      continue;
-    }
+    m_pCur++;
+  }
+  return m_pCur - pStart;
+}
 
+size_t CFX_CSSValueListParser::SkipToCharMatchingParens(wchar_t wch) {
+  const wchar_t* pStart = m_pCur;
+  int64_t bracketCount = 0;
+  while (m_pCur < m_pEnd && *m_pCur != wch) {
+    if (*m_pCur <= ' ')
+      break;
     if (*m_pCur == '(')
       bracketCount++;
     else if (*m_pCur == ')')
       bracketCount--;
-
     m_pCur++;
   }
-
   while (bracketCount > 0 && m_pCur < m_pEnd) {
     if (*m_pCur == ')')
       bracketCount--;

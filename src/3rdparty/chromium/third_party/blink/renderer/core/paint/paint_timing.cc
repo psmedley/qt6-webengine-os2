@@ -190,6 +190,13 @@ void PaintTiming::NotifyPaint(bool is_first_paint,
   if (image_painted)
     MarkFirstImagePaint();
   fmp_detector_->NotifyPaint();
+  if (auto* local_frame = DynamicTo<LocalFrame>(GetFrame()->Top())) {
+    if (auto* mf_checker = local_frame->View()->GetMobileFriendlinessChecker())
+      mf_checker->NotifyPaint();
+  }
+
+  if (is_first_paint)
+    GetFrame()->OnFirstPaint(text_painted, image_painted);
 }
 
 void PaintTiming::OnPortalActivate() {
@@ -253,8 +260,7 @@ void PaintTiming::SetFirstContentfulPaint(base::TimeTicks stamp) {
   if (frame->GetFrameScheduler())
     frame->GetFrameScheduler()->OnFirstContentfulPaintInMainFrame();
 
-  if (auto* mf_checker = frame->View()->GetMobileFriendlinessChecker())
-    mf_checker->NotifyFirstContentfulPaint();
+  NotifyPaintTimingChanged();
 }
 
 void PaintTiming::RegisterNotifyPresentationTime(PaintEvent event) {
@@ -283,21 +289,8 @@ void PaintTiming::RegisterNotifyPresentationTime(ReportTimeCallback callback) {
 }
 
 void PaintTiming::ReportPresentationTime(PaintEvent event,
-                                         WebSwapResult result,
                                          base::TimeTicks timestamp) {
   DCHECK(IsMainThread());
-  // If the presentation fails for any reason, we use the timestamp when the
-  // PresentationPromise was broken. |result| ==
-  // WebSwapResult::kDidNotSwapSwapFails usually means the compositor decided
-  // not to swap because there was no actual damage, which can happen when
-  // what's being painted isn't visible. In this case, the timestamp will be
-  // consistent with the case where the presentation succeeds, as they both
-  // capture the time up to presentation. In other failure cases (aborts during
-  // commit), this timestamp is an improvement over the blink paint time, but
-  // does not capture some time we're interested in, e.g.  image decoding.
-  //
-  // TODO(crbug.com/738235): Consider not reporting any timestamp when failing
-  // for reasons other than kDidNotSwapSwapFails.
   switch (event) {
     case PaintEvent::kFirstPaint:
       SetFirstPaintPresentation(timestamp);
@@ -318,7 +311,6 @@ void PaintTiming::ReportPresentationTime(PaintEvent event,
 
 void PaintTiming::ReportFirstPaintAfterBackForwardCacheRestorePresentationTime(
     wtf_size_t index,
-    WebSwapResult result,
     base::TimeTicks timestamp) {
   DCHECK(IsMainThread());
   SetFirstPaintAfterBackForwardCacheRestorePresentation(timestamp, index);
@@ -439,6 +431,17 @@ void PaintTiming::OnRestoredFromBackForwardCache() {
           MakeGarbageCollected<
               RecodingTimeAfterBackForwardCacheRestoreFrameCallback>(this,
                                                                      index));
+}
+
+bool PaintTiming::IsLCPMouseoverDispatchedRecently() {
+  static constexpr base::TimeDelta kRecencyDelta = base::Milliseconds(500);
+  return (
+      !lcp_mouse_over_dispatch_time_.is_null() &&
+      ((clock_->NowTicks() - lcp_mouse_over_dispatch_time_) < kRecencyDelta));
+}
+
+void PaintTiming::SetLCPMouseoverDispatched() {
+  lcp_mouse_over_dispatch_time_ = clock_->NowTicks();
 }
 
 }  // namespace blink

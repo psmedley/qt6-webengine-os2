@@ -12,9 +12,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/compiler_specific.h"  // for WARN_UNUSED_RESULT
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "net/base/net_export.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -37,6 +35,9 @@ struct WebSocketHandshakeResponseInfo;
 class NET_EXPORT WebSocketEventInterface {
  public:
   typedef int WebSocketMessageType;
+
+  WebSocketEventInterface(const WebSocketEventInterface&) = delete;
+  WebSocketEventInterface& operator=(const WebSocketEventInterface&) = delete;
 
   virtual ~WebSocketEventInterface() {}
 
@@ -156,9 +157,6 @@ class NET_EXPORT WebSocketEventInterface {
 
  protected:
   WebSocketEventInterface() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebSocketEventInterface);
 };
 
 }  // namespace net

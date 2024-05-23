@@ -12,12 +12,14 @@
 #include "base/containers/cxx20_erase.h"
 #include "base/logging.h"
 #include "base/time/time.h"
+#include "build/chromeos_buildflags.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine.h"
@@ -54,7 +56,7 @@ struct WaylandEventSource::TouchPoint {
   TouchPoint(gfx::PointF location, WaylandWindow* current_window);
   ~TouchPoint() = default;
 
-  WaylandWindow* const window;
+  WaylandWindow* window;
   gfx::PointF last_known_location;
 };
 
@@ -83,7 +85,8 @@ WaylandEventSource::WaylandEventSource(wl_display* display,
     : window_manager_(window_manager),
       connection_(connection),
       event_watcher_(
-          std::make_unique<WaylandEventWatcher>(display, event_queue)) {
+          WaylandEventWatcher::CreateWaylandEventWatcher(display,
+                                                         event_queue)) {
   DCHECK(window_manager_);
 
   // Observes remove changes to know when touch points can be removed.
@@ -98,10 +101,6 @@ void WaylandEventSource::SetShutdownCb(base::OnceCallback<void()> shutdown_cb) {
 
 void WaylandEventSource::StartProcessingEvents() {
   event_watcher_->StartProcessingEvents();
-}
-
-void WaylandEventSource::StopProcessingEvents() {
-  event_watcher_->StopProcessingEvents();
 }
 
 void WaylandEventSource::OnKeyboardFocusChanged(WaylandWindow* window,
@@ -136,6 +135,13 @@ uint32_t WaylandEventSource::OnKeyboardKeyEvent(
     return POST_DISPATCH_NONE;
   }
 
+#if BUILDFLAG(USE_GTK)
+  // GTK expects the state of a key event to be the mask of modifier keys
+  // _prior_ to this event. Some IMEs rely on this behavior. See
+  // https://crbug.com/1086946#c11.
+  int state_before_event = keyboard_modifiers_;
+#endif
+
   if (!repeat) {
     int flag = ModifierDomKeyToEventFlag(dom_key);
     UpdateKeyboardModifiers(flag, type == ET_KEY_PRESSED);
@@ -145,13 +151,33 @@ uint32_t WaylandEventSource::OnKeyboardKeyEvent(
                  keyboard_modifiers_ | (repeat ? EF_IS_REPEAT : 0), dom_key,
                  timestamp);
   event.set_source_device_id(device_id);
+
+  Event::Properties properties;
+#if BUILDFLAG(USE_GTK)
+  // GTK uses XKB keycodes.
+  uint32_t converted_key_code =
+      ui::KeycodeConverter::DomCodeToXkbKeycode(dom_code);
+  properties.emplace(
+      kPropertyKeyboardHwKeyCode,
+      std::vector<uint8_t>{static_cast<unsigned char>(converted_key_code)});
+  // Save state before event. The flags have different values than what GTK
+  // expects, but GtkUiPlatformWayland::GetGdkKeyEventState() takes care of the
+  // conversion.
+  properties.emplace(kPropertyKeyboardState,
+                     std::vector<uint8_t>{
+                         static_cast<uint8_t>(state_before_event),
+                         static_cast<uint8_t>(state_before_event >> 8),
+                         static_cast<uint8_t>(state_before_event >> 16),
+                         static_cast<uint8_t>(state_before_event >> 24),
+                     });
+#endif
+
   if (kind == WaylandKeyboard::KeyEventKind::kKey) {
     // Mark that this is the key event which IME did not consume.
-    event.SetProperties({{
-        kPropertyKeyboardImeFlag,
-        std::vector<uint8_t>{kPropertyKeyboardImeIgnoredFlag},
-    }});
+    properties.emplace(kPropertyKeyboardImeFlag,
+                       std::vector<uint8_t>{kPropertyKeyboardImeIgnoredFlag});
   }
+  event.SetProperties(properties);
   return DispatchEvent(&event);
 }
 
@@ -161,12 +187,15 @@ void WaylandEventSource::OnPointerFocusChanged(WaylandWindow* window,
   pointer_location_ = location;
 
   bool focused = !!window;
-  if (focused)
+  if (focused) {
+    if (SurfaceSubmissionInPixelCoordinates())
+      pointer_location_.Scale(1.0f / window->window_scale());
     window_manager_->SetPointerFocusedWindow(window);
+  }
 
   EventType type = focused ? ET_MOUSE_ENTERED : ET_MOUSE_EXITED;
-  MouseEvent event(type, location, location, EventTimeForNow(), pointer_flags_,
-                   0);
+  MouseEvent event(type, pointer_location_, pointer_location_,
+                   EventTimeForNow(), pointer_flags_, 0);
   DispatchEvent(&event);
 
   if (!focused)
@@ -200,6 +229,13 @@ void WaylandEventSource::OnPointerButtonEvent(EventType type,
 
 void WaylandEventSource::OnPointerMotionEvent(const gfx::PointF& location) {
   pointer_location_ = location;
+
+  if (SurfaceSubmissionInPixelCoordinates()) {
+    if (WaylandWindow* window =
+            window_manager_->GetCurrentPointerFocusedWindow())
+      pointer_location_.Scale(1.0f / window->window_scale());
+  }
+
   int flags = pointer_flags_ | keyboard_modifiers_;
   MouseEvent event(ET_MOUSE_MOVED, pointer_location_, pointer_location_,
                    EventTimeForNow(), flags, 0);
@@ -213,6 +249,10 @@ void WaylandEventSource::OnPointerAxisEvent(const gfx::Vector2dF& offset) {
 
 void WaylandEventSource::OnResetPointerFlags() {
   ResetPointerFlags();
+}
+
+void WaylandEventSource::RoundTripQueue() {
+  event_watcher_->RoundTripQueue();
 }
 
 const gfx::PointF& WaylandEventSource::GetPointerLocation() const {
@@ -248,13 +288,17 @@ void WaylandEventSource::OnPointerFrameEvent() {
     DispatchEvent(&event);
     recent_pointer_frames_.clear();
   } else if (current_pointer_frame_.axis_source) {
-    if (*current_pointer_frame_.axis_source == WL_POINTER_AXIS_SOURCE_WHEEL) {
+    if (*current_pointer_frame_.axis_source == WL_POINTER_AXIS_SOURCE_WHEEL ||
+        *current_pointer_frame_.axis_source ==
+            WL_POINTER_AXIS_SOURCE_WHEEL_TILT) {
       MouseWheelEvent event(
           gfx::Vector2d(current_pointer_frame_.dx, current_pointer_frame_.dy),
           pointer_location_, pointer_location_, EventTimeForNow(), flags, 0);
       DispatchEvent(&event);
     } else if (*current_pointer_frame_.axis_source ==
-               WL_POINTER_AXIS_SOURCE_FINGER) {
+                   WL_POINTER_AXIS_SOURCE_FINGER ||
+               *current_pointer_frame_.axis_source ==
+                   WL_POINTER_AXIS_SOURCE_CONTINUOUS) {
       ScrollEvent event(ET_SCROLL, pointer_location_, pointer_location_,
                         EventTimeForNow(), flags, current_pointer_frame_.dx,
                         current_pointer_frame_.dy, current_pointer_frame_.dx,
@@ -294,16 +338,21 @@ void WaylandEventSource::OnTouchPressEvent(WaylandWindow* window,
   DCHECK(window);
   HandleTouchFocusChange(window, true);
 
+  gfx::PointF loc =
+      SurfaceSubmissionInPixelCoordinates()
+          ? gfx::ScalePoint(location, 1.f / window->window_scale())
+          : location;
   // Make sure this touch point wasn't present before.
-  auto success = touch_points_.try_emplace(
-      id, std::make_unique<TouchPoint>(location, window));
+  auto success =
+      touch_points_.try_emplace(id, std::make_unique<TouchPoint>(loc, window));
   if (!success.second) {
     LOG(WARNING) << "Touch down fired with wrong id";
     return;
   }
 
   PointerDetails details(EventPointerType::kTouch, id);
-  TouchEvent event(ET_TOUCH_PRESSED, location, location, timestamp, details);
+  TouchEvent event(ET_TOUCH_PRESSED, loc, loc, timestamp, details,
+                   keyboard_modifiers_);
   DispatchEvent(&event);
 }
 
@@ -320,8 +369,22 @@ void WaylandEventSource::OnTouchReleaseEvent(base::TimeTicks timestamp,
   gfx::PointF location = touch_point->last_known_location;
   PointerDetails details(EventPointerType::kTouch, id);
 
-  TouchEvent event(ET_TOUCH_RELEASED, location, location, timestamp, details);
+  TouchEvent event(ET_TOUCH_RELEASED, location, location, timestamp, details,
+                   keyboard_modifiers_);
   DispatchEvent(&event);
+
+  // It is possible that an user interaction triggers nested loops
+  // in higher levels of the application stack in order to process a
+  // given touch down/up action.
+  // For instance, a modal dialog might block this execution point,
+  // and trigger thread to continue to process events.
+  // The auxiliary flow might clear entries in touch_points_.
+  //
+  // Hence, we check whether the TouchId is still being held.
+  if (touch_points_.find(id) == touch_points_.end()) {
+    LOG(WARNING) << "Touch has been released during processing.";
+    return;
+  }
 
   HandleTouchFocusChange(touch_point->window, false, id);
   touch_points_.erase(it);
@@ -336,9 +399,15 @@ void WaylandEventSource::OnTouchMotionEvent(const gfx::PointF& location,
     LOG(WARNING) << "Touch event fired with wrong id";
     return;
   }
-  it->second->last_known_location = location;
+
+  gfx::PointF loc =
+      SurfaceSubmissionInPixelCoordinates()
+          ? gfx::ScalePoint(location, 1.f / it->second->window->window_scale())
+          : location;
+  it->second->last_known_location = loc;
   PointerDetails details(EventPointerType::kTouch, id);
-  TouchEvent event(ET_TOUCH_MOVED, location, location, timestamp, details);
+  TouchEvent event(ET_TOUCH_MOVED, loc, loc, timestamp, details,
+                   keyboard_modifiers_);
   DispatchEvent(&event);
 }
 
@@ -362,6 +431,10 @@ void WaylandEventSource::OnTouchCancelEvent() {
   touch_points_.clear();
 }
 
+void WaylandEventSource::OnTouchFocusChanged(WaylandWindow* window) {
+  window_manager_->SetTouchFocusedWindow(window);
+}
+
 std::vector<PointerId> WaylandEventSource::GetActiveTouchPointIds() {
   std::vector<PointerId> pointer_ids;
   for (auto& touch_point : touch_points_)
@@ -373,11 +446,11 @@ void WaylandEventSource::OnPinchEvent(EventType event_type,
                                       const gfx::Vector2dF& delta,
                                       base::TimeTicks timestamp,
                                       int device_id,
-                                      absl::optional<float> scale) {
+                                      absl::optional<float> scale_delta) {
   GestureEventDetails details(event_type);
   details.set_device_type(GestureDeviceType::DEVICE_TOUCHPAD);
-  if (scale)
-    details.set_scale(*scale);
+  if (scale_delta)
+    details.set_scale(*scale_delta);
 
   auto location = pointer_location_ + delta;
   GestureEvent event(location.x(), location.y(), 0 /* flags */, timestamp,
@@ -409,15 +482,18 @@ void WaylandEventSource::ResetPointerFlags() {
   pointer_flags_ = 0;
 }
 
-void WaylandEventSource::UseSingleThreadedPollingForTesting() {
-  event_watcher_->UseSingleThreadedPollingForTesting();
-}
-
 void WaylandEventSource::OnDispatcherListChanged() {
   StartProcessingEvents();
 }
 
 void WaylandEventSource::OnWindowRemoved(WaylandWindow* window) {
+  if (connection_->IsDragInProgress()) {
+    auto* target_window = window_manager_->GetCurrentTouchFocusedWindow();
+    for (auto& touch_point : touch_points_)
+      touch_point.second->window = target_window;
+    return;
+  }
+
   // Clear touch-related data.
   base::EraseIf(touch_points_, [window](const auto& point) {
     return point.second->window == window;
@@ -474,7 +550,7 @@ gfx::Vector2dF WaylandEventSource::ComputeFlingVelocity() {
     }
     if (frame.dx == 0 && frame.dy == 0)
       break;
-    if (dt + frame.dt > base::TimeDelta::FromMilliseconds(200))
+    if (dt + frame.dt > base::Milliseconds(200))
       break;
 
     dx += frame.dx;
@@ -484,6 +560,10 @@ gfx::Vector2dF WaylandEventSource::ComputeFlingVelocity() {
   float dt_inv = 1.0f / dt.InSecondsF();
   return dt.is_zero() ? gfx::Vector2dF()
                       : gfx::Vector2dF(dx * dt_inv, dy * dt_inv);
+}
+
+bool WaylandEventSource::SurfaceSubmissionInPixelCoordinates() const {
+  return connection_->surface_submission_in_pixel_coordinates();
 }
 
 }  // namespace ui

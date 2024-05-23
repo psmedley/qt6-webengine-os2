@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "build/chromeos_buildflags.h"
@@ -46,6 +45,12 @@ namespace extensions {
 class ShellDesktopControllerAuraTest : public ShellTestBaseAura {
  public:
   ShellDesktopControllerAuraTest() = default;
+
+  ShellDesktopControllerAuraTest(const ShellDesktopControllerAuraTest&) =
+      delete;
+  ShellDesktopControllerAuraTest& operator=(
+      const ShellDesktopControllerAuraTest&) = delete;
+
   ~ShellDesktopControllerAuraTest() override = default;
 
   void SetUp() override {
@@ -92,9 +97,6 @@ class ShellDesktopControllerAuraTest : public ShellTestBaseAura {
   std::unique_ptr<display::ScreenBase> screen_;
   std::unique_ptr<display::test::ScopedScreenOverride> screen_override_;
   std::unique_ptr<ShellDesktopControllerAura> controller_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ShellDesktopControllerAuraTest);
 };
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)

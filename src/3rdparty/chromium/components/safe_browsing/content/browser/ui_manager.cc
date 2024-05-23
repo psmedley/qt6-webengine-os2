@@ -6,14 +6,13 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_contents.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/content/browser/safe_browsing_blocking_page.h"
-#include "components/safe_browsing/content/browser/safe_browsing_subresource_tab_helper.h"
 #include "components/safe_browsing/content/browser/threat_details.h"
 #include "components/safe_browsing/core/browser/db/v4_protocol_manager_util.h"
 #include "components/safe_browsing/core/browser/ping_manager.h"
@@ -60,7 +59,8 @@ void SafeBrowsingUIManager::Stop(bool shutdown) {
 
 void SafeBrowsingUIManager::CreateAndSendHitReport(
     const UnsafeResource& resource) {
-  WebContents* web_contents = resource.web_contents_getter.Run();
+  WebContents* web_contents =
+      security_interstitials::GetWebContentsForResource(resource);
   DCHECK(web_contents);
   HitReport hit_report;
   hit_report.malicious_url = resource.url;
@@ -102,7 +102,8 @@ void SafeBrowsingUIManager::CreateAndSendHitReport(
 
 void SafeBrowsingUIManager::StartDisplayingBlockingPage(
     const security_interstitials::UnsafeResource& resource) {
-  content::WebContents* web_contents = resource.web_contents_getter.Run();
+  content::WebContents* web_contents =
+      security_interstitials::GetWebContentsForResource(resource);
 
   if (!web_contents) {
     // Tab is gone.
@@ -161,7 +162,7 @@ void SafeBrowsingUIManager::StartDisplayingBlockingPage(
   // destroyed once the request is failed.
   if (resource.IsMainPageLoadBlocked()) {
     content::NavigationEntry* entry =
-        web_contents->GetController().GetPendingEntry();
+        security_interstitials::GetNavigationEntryForResource(resource);
     if (entry) {
       security_interstitials::UnsafeResource resource_copy(resource);
       resource_copy.navigation_url = entry->GetURL();
@@ -194,17 +195,14 @@ void SafeBrowsingUIManager::MaybeReportSafeBrowsingHit(
   if (!ShouldSendHitReport(hit_report, web_contents))
     return;
 
-  // The service may delete the ping manager (i.e. when user disabling service,
-  // etc). This happens on the IO thread.
-  if (shut_down_ || !delegate_->GetPingManagerIfExists())
+  if (shut_down_)
     return;
 
   DVLOG(1) << "ReportSafeBrowsingHit: " << hit_report.malicious_url << " "
            << hit_report.page_url << " " << hit_report.referrer_url << " "
            << hit_report.is_subresource << " " << hit_report.threat_type;
-  delegate_->GetPingManagerIfExists()->ReportSafeBrowsingHit(
-      delegate_->GetURLLoaderFactory(web_contents->GetBrowserContext()),
-      hit_report);
+  delegate_->GetPingManager(web_contents->GetBrowserContext())
+      ->ReportSafeBrowsingHit(hit_report);
 }
 
 // Static.
@@ -286,15 +284,12 @@ void SafeBrowsingUIManager::SendSerializedThreatDetails(
     const std::string& serialized) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  // The service may delete the ping manager (i.e. when user disabling service,
-  // etc). This happens on the IO thread.
-  if (shut_down_ || !delegate_->GetPingManagerIfExists())
+  if (shut_down_)
     return;
 
   if (!serialized.empty()) {
     DVLOG(1) << "Sending serialized threat details.";
-    delegate_->GetPingManagerIfExists()->ReportThreatDetails(
-        delegate_->GetURLLoaderFactory(browser_context), serialized);
+    delegate_->GetPingManager(browser_context)->ReportThreatDetails(serialized);
   }
 }
 
@@ -323,15 +318,10 @@ BaseBlockingPage* SafeBrowsingUIManager::CreateBlockingPageForSubresource(
     content::WebContents* contents,
     const GURL& blocked_url,
     const UnsafeResource& unsafe_resource) {
-  SafeBrowsingSubresourceTabHelper::CreateForWebContents(contents, this);
-  // This blocking page is only used to retrieve the HTML for the page, so we
-  // set |should_trigger_reporting| to false. Reports for subresources are
-  // triggered when creating the blocking page that gets associated in
-  // SafeBrowsingSubresourceTabHelper.
   SafeBrowsingBlockingPage* blocking_page =
       blocking_page_factory_->CreateSafeBrowsingPage(
           this, contents, blocked_url, {unsafe_resource},
-          /*should_trigger_reporting=*/false);
+          /*should_trigger_reporting=*/true);
 
   // Report that we showed an interstitial.
   ForwardSecurityInterstitialShownExtensionEventToEmbedder(

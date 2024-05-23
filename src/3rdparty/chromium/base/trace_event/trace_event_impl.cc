@@ -11,6 +11,7 @@
 #include "base/format_macros.h"
 #include "base/json/string_escape.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -19,6 +20,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_log.h"
 #include "base/trace_event/traced_value.h"
+#include "build/build_config.h"
 
 #if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 
@@ -33,6 +35,13 @@ template <>
 perfetto::ThreadTrack ConvertThreadId(const ::base::PlatformThreadId& thread) {
   return perfetto::ThreadTrack::ForThread(static_cast<int32_t>(thread));
 }
+
+#if BUILDFLAG(IS_WIN)
+template <>
+perfetto::ThreadTrack ConvertThreadId(const int& thread) {
+  return perfetto::ThreadTrack::ForThread(static_cast<int32_t>(thread));
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace legacy
 

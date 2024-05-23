@@ -14,12 +14,13 @@
 #include "base/big_endian.h"
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
-#include "base/cxx17_backports.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/auth.h"
@@ -79,7 +80,7 @@ bool IsStrictlyValidCloseStatusCode(int code) {
       5000, 65536,  // Codes above 5000 are invalid.
   };
   const int* const kInvalidRangesEnd =
-      kInvalidRanges + base::size(kInvalidRanges);
+      kInvalidRanges + std::size(kInvalidRanges);
 
   DCHECK_GE(code, 0);
   DCHECK_LT(code, 65536);
@@ -121,6 +122,16 @@ void GetFrameTypeForOpcode(WebSocketFrameHeader::OpCode opcode,
   }
 
   return;
+}
+
+base::Value NetLogFailParam(uint16_t code,
+                            base::StringPiece reason,
+                            base::StringPiece message) {
+  base::Value dict(base::Value::Type::DICTIONARY);
+  dict.SetDoubleKey("code", code);
+  dict.SetStringKey("reason", reason);
+  dict.SetStringKey("internal_reason", message);
+  return dict;
 }
 
 class DependentIOBuffer : public WrappedIOBuffer {
@@ -175,6 +186,9 @@ class WebSocketChannel::ConnectDelegate
  public:
   explicit ConnectDelegate(WebSocketChannel* creator) : creator_(creator) {}
 
+  ConnectDelegate(const ConnectDelegate&) = delete;
+  ConnectDelegate& operator=(const ConnectDelegate&) = delete;
+
   void OnCreateRequest(URLRequest* request) override {
     creator_->OnCreateURLRequest(request);
   }
@@ -223,9 +237,7 @@ class WebSocketChannel::ConnectDelegate
   // danger of this pointer being stale, because deleting the WebSocketChannel
   // cancels the connect process, deleting this object and preventing its
   // callbacks from being called.
-  WebSocketChannel* const creator_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConnectDelegate);
+  const raw_ptr<WebSocketChannel> creator_;
 };
 
 WebSocketChannel::WebSocketChannel(
@@ -234,9 +246,9 @@ WebSocketChannel::WebSocketChannel(
     : event_interface_(std::move(event_interface)),
       url_request_context_(url_request_context),
       closing_handshake_timeout_(
-          base::TimeDelta::FromSeconds(kClosingHandshakeTimeoutSeconds)),
-      underlying_connection_close_timeout_(base::TimeDelta::FromSeconds(
-          kUnderlyingConnectionCloseTimeoutSeconds)),
+          base::Seconds(kClosingHandshakeTimeoutSeconds)),
+      underlying_connection_close_timeout_(
+          base::Seconds(kUnderlyingConnectionCloseTimeoutSeconds)),
       has_received_close_frame_(false),
       received_close_code_(0),
       state_(FRESHLY_CONSTRUCTED),
@@ -430,7 +442,7 @@ void WebSocketChannel::SendAddChannelRequestWithSuppliedCallback(
   auto connect_delegate = std::make_unique<ConnectDelegate>(this);
   stream_request_ = std::move(callback).Run(
       socket_url_, requested_subprotocols, origin, site_for_cookies,
-      isolation_info, additional_headers, url_request_context_,
+      isolation_info, additional_headers, url_request_context_.get(),
       NetLogWithSource(), traffic_annotation, std::move(connect_delegate));
   SetState(CONNECTING);
 }
@@ -896,7 +908,10 @@ void WebSocketChannel::FailChannel(const std::string& message,
   DCHECK_NE(CONNECTING, state_);
   DCHECK_NE(CLOSED, state_);
 
-  // TODO(ricea): Logging.
+  stream_->GetNetLogWithSource().AddEvent(
+      net::NetLogEventType::WEBSOCKET_INVALID_FRAME,
+      [&] { return NetLogFailParam(code, reason, message); });
+
   if (state_ == CONNECTED) {
     if (SendClose(code, reason) == CHANNEL_DELETED)
       return;
@@ -959,7 +974,7 @@ bool WebSocketChannel::ParseClose(base::span<const char> payload,
 
   const char* data = payload.data();
   uint16_t unchecked_code = 0;
-  base::ReadBigEndian(data, &unchecked_code);
+  base::ReadBigEndian(reinterpret_cast<const uint8_t*>(data), &unchecked_code);
   static_assert(sizeof(unchecked_code) == kWebSocketCloseCodeLength,
                 "they should both be two bytes");
 
@@ -996,6 +1011,8 @@ void WebSocketChannel::DoDropChannel(bool was_clean,
 }
 
 void WebSocketChannel::CloseTimeout() {
+  stream_->GetNetLogWithSource().AddEvent(
+      net::NetLogEventType::WEBSOCKET_CLOSE_TIMEOUT);
   stream_->Close();
   SetState(CLOSED);
   DoDropChannel(false, kWebSocketErrorAbnormalClosure, "");

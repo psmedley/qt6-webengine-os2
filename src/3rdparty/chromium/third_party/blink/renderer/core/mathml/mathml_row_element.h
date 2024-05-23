@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_MATHML_MATHML_ROW_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_MATHML_MATHML_ROW_ELEMENT_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/mathml/mathml_element.h"
 
 namespace blink {
@@ -21,6 +22,8 @@ class CORE_EXPORT MathMLRowElement : public MathMLElement {
  private:
   LayoutObject* CreateLayoutObject(const ComputedStyle&,
                                    LegacyLayout legacy) override;
+
+  bool IsGroupingElement() const override { return true; }
 };
 }  // namespace blink
 

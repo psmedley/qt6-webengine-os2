@@ -8,31 +8,30 @@
 
 import("../../../webrtc.gni")
 
-rtc_source_set("strong_alias") {
-  sources = [ "strong_alias.h" ]
-}
-
 rtc_source_set("types") {
   deps = [
-    ":strong_alias",
     "../../../api:array_view",
+    "../../../rtc_base:rtc_base_approved",
   ]
   sources = [
     "dcsctp_message.h",
     "dcsctp_options.h",
     "types.h",
   ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_source_set("socket") {
   deps = [
     ":types",
     "../../../api:array_view",
-    "../../../rtc_base",
+    "../../../api/task_queue:task_queue",
     "../../../rtc_base:checks",
     "../../../rtc_base:rtc_base_approved",
   ]
   sources = [
+    "dcsctp_handover_state.cc",
+    "dcsctp_handover_state.h",
     "dcsctp_socket.h",
     "packet_observer.h",
     "timeout.h",
@@ -58,8 +57,12 @@ rtc_source_set("factory") {
 
 rtc_source_set("mocks") {
   testonly = true
-  sources = [ "mock_dcsctp_socket.h" ]
+  sources = [
+    "mock_dcsctp_socket.h",
+    "mock_dcsctp_socket_factory.h",
+  ]
   deps = [
+    ":factory",
     ":socket",
     "../../../test:test_support",
   ]
@@ -87,7 +90,6 @@ if (rtc_include_tests) {
 
     deps = [
       ":mocks",
-      ":strong_alias",
       ":types",
       "../../../rtc_base:checks",
       "../../../rtc_base:gunit_helpers",
@@ -96,7 +98,6 @@ if (rtc_include_tests) {
     ]
     sources = [
       "mock_dcsctp_socket_test.cc",
-      "strong_alias_test.cc",
       "types_test.cc",
     ]
   }

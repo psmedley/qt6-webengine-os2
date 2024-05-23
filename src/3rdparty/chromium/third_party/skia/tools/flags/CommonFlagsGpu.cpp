@@ -14,12 +14,15 @@ DEFINE_int(gpuThreads,
              "Create this many extra threads to assist with GPU work, "
              "including software path rendering. Defaults to two.");
 
+extern bool gSkBlobAsSlugTesting;
+
+namespace CommonFlags {
+
 static DEFINE_bool(cachePathMasks, true,
                    "Allows path mask textures to be cached in GPU configs.");
 static DEFINE_bool(allPathsVolatile, false,
                    "Causes all GPU paths to be processed as if 'setIsVolatile' had been called.");
 
-static DEFINE_bool(gs, true, "Enables support for geometry shaders (if hw allows).");
 static DEFINE_bool(hwtess, false, "Enables support for tessellation shaders (if hw allows.).");
 
 static DEFINE_int(maxTessellationSegments, 0,
@@ -44,8 +47,6 @@ static DEFINE_bool(disableDriverCorrectnessWorkarounds, false,
 
 static DEFINE_bool(dontReduceOpsTaskSplitting, false,
                    "Don't reorder tasks to reduce render passes");
-
-static DEFINE_bool(skgpuv2, false, "use the new GPU backend");
 
 static DEFINE_int(gpuResourceCacheLimit, -1,
                   "Maximum number of bytes to use for budgeted GPU resources. "
@@ -96,7 +97,7 @@ static GpuPathRenderers collect_gpu_path_renderers_from_flags() {
     return gpuPathRenderers;
 }
 
-void SetCtxOptionsFromCommonFlags(GrContextOptions* ctxOptions) {
+void SetCtxOptions(GrContextOptions* ctxOptions) {
     static std::unique_ptr<SkExecutor> gGpuExecutor = (0 != FLAGS_gpuThreads)
         ? SkExecutor::MakeFIFOThreadPool(FLAGS_gpuThreads)
         : nullptr;
@@ -104,13 +105,14 @@ void SetCtxOptionsFromCommonFlags(GrContextOptions* ctxOptions) {
     ctxOptions->fExecutor                            = gGpuExecutor.get();
     ctxOptions->fAllowPathMaskCaching                = FLAGS_cachePathMasks;
     ctxOptions->fAllPathsVolatile                    = FLAGS_allPathsVolatile;
-    ctxOptions->fSuppressGeometryShaders             = !FLAGS_gs;
     ctxOptions->fEnableExperimentalHardwareTessellation = FLAGS_hwtess;
     ctxOptions->fMaxTessellationSegmentsOverride     = FLAGS_maxTessellationSegments;
     ctxOptions->fAlwaysPreferHardwareTessellation    = FLAGS_alwaysHwTess;
     ctxOptions->fGpuPathRenderers                    = collect_gpu_path_renderers_from_flags();
     ctxOptions->fDisableDriverCorrectnessWorkarounds = FLAGS_disableDriverCorrectnessWorkarounds;
     ctxOptions->fResourceCacheLimitOverride          = FLAGS_gpuResourceCacheLimit;
+    // If testing with slugs ensure that padding is added in the atlas.
+    ctxOptions->fSupportBilerpFromGlyphAtlas        |= gSkBlobAsSlugTesting;
 
     if (FLAGS_internalSamples >= 0) {
         ctxOptions->fInternalMultisampleCount = FLAGS_internalSamples;
@@ -124,8 +126,6 @@ void SetCtxOptionsFromCommonFlags(GrContextOptions* ctxOptions) {
     } else {
         ctxOptions->fReduceOpsTaskSplitting = GrContextOptions::Enable::kYes;
     }
-
-    if (FLAGS_skgpuv2) {
-        ctxOptions->fUseSkGpuV2 = GrContextOptions::Enable::kYes;
-    }
 }
+
+}  // namespace CommonFlags

@@ -7,7 +7,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/aligned_memory.h"
 #include "base/sys_byteorder.h"
 #include "base/test/task_environment.h"
@@ -31,10 +30,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/scale.h"
+#include "third_party/skia/include/core/SkColorPriv.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrDirectContext.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/test/gl_surface_test_support.h"
@@ -110,6 +111,11 @@ class PaintCanvasVideoRendererTest : public testing::Test {
   };
 
   PaintCanvasVideoRendererTest();
+
+  PaintCanvasVideoRendererTest(const PaintCanvasVideoRendererTest&) = delete;
+  PaintCanvasVideoRendererTest& operator=(const PaintCanvasVideoRendererTest&) =
+      delete;
+
   ~PaintCanvasVideoRendererTest() override;
 
   // Paints to |canvas| using |renderer_| without any frame data.
@@ -150,8 +156,6 @@ class PaintCanvasVideoRendererTest : public testing::Test {
   SkBitmap bitmap_;
   cc::SkiaPaintCanvas target_canvas_;
   base::test::TaskEnvironment task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(PaintCanvasVideoRendererTest);
 };
 
 static SkBitmap AllocBitmap(int width, int height) {
@@ -164,7 +168,7 @@ static SkBitmap AllocBitmap(int width, int height) {
 static scoped_refptr<VideoFrame> CreateCroppedFrame() {
   scoped_refptr<VideoFrame> cropped_frame = VideoFrame::CreateFrame(
       PIXEL_FORMAT_I420, gfx::Size(16, 16), gfx::Rect(6, 6, 8, 6),
-      gfx::Size(8, 6), base::TimeDelta::FromMilliseconds(4));
+      gfx::Size(8, 6), base::Milliseconds(4));
   // Make sure the cropped video frame's aspect ratio matches the output device.
   // Update cropped_frame_'s crop dimensions if this is not the case.
   EXPECT_EQ(cropped_frame->visible_rect().width() * kHeight,
@@ -256,9 +260,9 @@ PaintCanvasVideoRendererTest::PaintCanvasVideoRendererTest()
       bitmap_(AllocBitmap(kWidth, kHeight)),
       target_canvas_(bitmap_) {
   // Give each frame a unique timestamp.
-  natural_frame_->set_timestamp(base::TimeDelta::FromMilliseconds(1));
-  larger_frame_->set_timestamp(base::TimeDelta::FromMilliseconds(2));
-  smaller_frame_->set_timestamp(base::TimeDelta::FromMilliseconds(3));
+  natural_frame_->set_timestamp(base::Milliseconds(1));
+  larger_frame_->set_timestamp(base::Milliseconds(2));
+  smaller_frame_->set_timestamp(base::Milliseconds(3));
 }
 
 PaintCanvasVideoRendererTest::~PaintCanvasVideoRendererTest() = default;
@@ -682,20 +686,20 @@ TEST_F(PaintCanvasVideoRendererTest, Y16) {
 TEST_F(PaintCanvasVideoRendererTest, Yuv420P12OddWidth) {
   // Allocate the Y, U, V planes for a 3x3 12-bit YUV 4:2:0 image. Note that
   // there are no padding bytes after each row.
-  constexpr int kWidth = 3;
-  constexpr int kHeight = 3;
-  constexpr int kUvWidth = (kWidth + 1) / 2;
-  constexpr int kUvHeight = (kHeight + 1) / 2;
+  constexpr int kImgWidth = 3;
+  constexpr int kImgHeight = 3;
+  constexpr int kUvWidth = (kImgWidth + 1) / 2;
+  constexpr int kUvHeight = (kImgHeight + 1) / 2;
   std::unique_ptr<uint16_t[]> y_plane =
-      std::make_unique<uint16_t[]>(kWidth * kHeight);
+      std::make_unique<uint16_t[]>(kImgWidth * kImgHeight);
   std::unique_ptr<uint16_t[]> u_plane =
       std::make_unique<uint16_t[]>(kUvWidth * kUvHeight);
   std::unique_ptr<uint16_t[]> v_plane =
       std::make_unique<uint16_t[]>(kUvWidth * kUvHeight);
   // Set all pixels to white.
-  for (int i = 0; i < kHeight; ++i) {
-    for (int j = 0; j < kWidth; ++j) {
-      y_plane[i * kWidth + j] = 4095;
+  for (int i = 0; i < kImgHeight; ++i) {
+    for (int j = 0; j < kImgWidth; ++j) {
+      y_plane[i * kImgWidth + j] = 4095;
     }
   }
   for (int i = 0; i < kUvHeight; ++i) {
@@ -704,27 +708,131 @@ TEST_F(PaintCanvasVideoRendererTest, Yuv420P12OddWidth) {
       v_plane[i * kUvWidth + j] = 2048;
     }
   }
-  const int32_t y_stride = sizeof(uint16_t) * kWidth;
+  const int32_t y_stride = sizeof(uint16_t) * kImgWidth;
   const int32_t uv_stride = sizeof(uint16_t) * kUvWidth;
   uint8_t* const y_data = reinterpret_cast<uint8_t*>(y_plane.get());
   uint8_t* const u_data = reinterpret_cast<uint8_t*>(u_plane.get());
   uint8_t* const v_data = reinterpret_cast<uint8_t*>(v_plane.get());
 
-  auto size = gfx::Size(kWidth, kHeight);
+  auto size = gfx::Size(kImgWidth, kImgHeight);
   scoped_refptr<VideoFrame> frame = VideoFrame::WrapExternalYuvData(
       PIXEL_FORMAT_YUV420P12, size, gfx::Rect(size), size, y_stride, uv_stride,
       uv_stride, y_data, u_data, v_data, base::TimeDelta());
 
   std::unique_ptr<uint32_t[]> rgba =
-      std::make_unique<uint32_t[]>(kWidth * kHeight);
+      std::make_unique<uint32_t[]>(kImgWidth * kImgHeight);
   PaintCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
       frame.get(), rgba.get(), frame->visible_rect().width() * 4,
       /*premultiply_alpha=*/true);
-  for (int i = 0; i < kHeight; ++i) {
-    for (int j = 0; j < kWidth; ++j) {
-      EXPECT_EQ(rgba[i * kWidth + j], 0xffffffff);
+  for (int i = 0; i < kImgHeight; ++i) {
+    for (int j = 0; j < kImgWidth; ++j) {
+      EXPECT_EQ(rgba[i * kImgWidth + j], 0xffffffff);
     }
   }
+}
+
+TEST_F(PaintCanvasVideoRendererTest, I420WithFilters) {
+  // Allocate the Y, U, V planes for a 4x4 8-bit YUV 4:2:0 image. Note that
+  // there are no padding bytes after each row.
+  constexpr int kImgWidth = 4;
+  constexpr int kImgHeight = 4;
+  constexpr int kUvWidth = (kImgWidth + 1) / 2;
+  constexpr int kUvHeight = (kImgHeight + 1) / 2;
+  std::unique_ptr<uint8_t[]> y_plane =
+      std::make_unique<uint8_t[]>(kImgWidth * kImgHeight);
+  std::unique_ptr<uint8_t[]> u_plane =
+      std::make_unique<uint8_t[]>(kUvWidth * kUvHeight);
+  std::unique_ptr<uint8_t[]> v_plane =
+      std::make_unique<uint8_t[]>(kUvWidth * kUvHeight);
+  // In the JPEG color space (K_R = 0.299, K_B = 0.114, full range), red
+  // (R = 255, G = 0, B = 0) is Y = 76, U = 85, V = 255.
+  //
+  // Set Y to 76 for all pixels.
+  memset(y_plane.get(), 76, kImgWidth * kImgHeight);
+  // Set U = 85 and V = 255 for the upperleft pixel. Then vary U and V with a
+  // linear, diagonal slope over the UV planes with a step size of 4 and -4,
+  // respectively.
+  //
+  // The full U plane is
+  //  85  89  93  97
+  //  89  93  97 101
+  //  93  97 101 105
+  //  97 101 105 109
+  // The subsampled U plane is
+  //    89      97
+  //    97     105
+  //
+  // The full V plane is
+  // 255 251 247 243
+  // 251 247 243 239
+  // 247 243 239 235
+  // 243 239 235 231
+  // The subsampled V plane is
+  //   251     243
+  //   243     235
+  for (int i = 0; i < kUvHeight; ++i) {
+    for (int j = 0; j < kUvWidth; ++j) {
+      u_plane[i * kUvWidth + j] = 89 + 8 * i + 8 * j;
+      v_plane[i * kUvWidth + j] = 251 - 8 * i - 8 * j;
+    }
+  }
+
+  auto size = gfx::Size(kImgWidth, kImgHeight);
+  scoped_refptr<VideoFrame> frame = VideoFrame::WrapExternalYuvData(
+      PIXEL_FORMAT_I420, size, gfx::Rect(size), size, kImgWidth, kUvWidth,
+      kUvWidth, y_plane.get(), u_plane.get(), v_plane.get(), base::TimeDelta());
+  frame->set_color_space(gfx::ColorSpace::CreateJpeg());
+
+  std::unique_ptr<uint32_t[]> rgba =
+      std::make_unique<uint32_t[]>(kImgWidth * kImgHeight);
+
+  // First convert with kFilterNone (nearest neighbor).
+  PaintCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
+      frame.get(), rgba.get(), frame->visible_rect().width() * 4,
+      /*premultiply_alpha=*/true);
+
+  // The pixel at coordinates (1, 1) will have U = 89 and V = 251 if nearest
+  // neighbor is used. (The correct values are U = 93 and V = 247.)
+  int i = 1;
+  int j = 1;
+  uint32_t color = rgba[i * kImgWidth + j];
+  EXPECT_EQ(SkGetPackedA32(color), 255u);
+  EXPECT_EQ(SkGetPackedR32(color), 249u);
+  EXPECT_EQ(SkGetPackedG32(color), 1u);
+  EXPECT_EQ(SkGetPackedB32(color), 7u);
+  // The pixel at coordinates (2, 2) will have U = 105 and V = 235 if nearest
+  // neighbor is used. (The correct values are U = 101 and V = 239.)
+  i = 2;
+  j = 2;
+  color = rgba[i * kImgWidth + j];
+  EXPECT_EQ(SkGetPackedA32(color), 255u);
+  EXPECT_EQ(SkGetPackedR32(color), 226u);
+  EXPECT_EQ(SkGetPackedG32(color), 7u);
+  EXPECT_EQ(SkGetPackedB32(color), 35u);
+
+  // Then convert with kFilterBilinear (bilinear interpolation).
+  PaintCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
+      frame.get(), rgba.get(), frame->visible_rect().width() * 4,
+      /*premultiply_alpha=*/true, PaintCanvasVideoRenderer::kFilterBilinear);
+
+  // The pixel at coordinates (1, 1) will have the correct values U = 93 and
+  // V = 247 if bilinear interpolation is used.
+  i = 1;
+  j = 1;
+  color = rgba[i * kImgWidth + j];
+  EXPECT_EQ(SkGetPackedA32(color), 255u);
+  EXPECT_EQ(SkGetPackedR32(color), 243u);
+  EXPECT_EQ(SkGetPackedG32(color), 2u);
+  EXPECT_EQ(SkGetPackedB32(color), 14u);
+  // The pixel at coordinates (2, 2) will have the correct values U = 101 and
+  // V = 239 if bilinear interpolation is used.
+  i = 2;
+  j = 2;
+  color = rgba[i * kImgWidth + j];
+  EXPECT_EQ(SkGetPackedA32(color), 255u);
+  EXPECT_EQ(SkGetPackedR32(color), 232u);
+  EXPECT_EQ(SkGetPackedG32(color), 5u);
+  EXPECT_EQ(SkGetPackedB32(color), 28u);
 }
 
 namespace {
@@ -829,8 +937,7 @@ TEST_F(PaintCanvasVideoRendererTest, CorrectFrameSizeToVisibleRect) {
 
   auto video_frame = media::VideoFrame::WrapExternalData(
       media::PIXEL_FORMAT_Y16, coded_size, gfx::Rect(visible_size),
-      visible_size, &memory[0], fWidth * fHeight * 2,
-      base::TimeDelta::FromMilliseconds(4));
+      visible_size, &memory[0], fWidth * fHeight * 2, base::Milliseconds(4));
 
   gfx::RectF visible_rect(visible_size.width(), visible_size.height());
   cc::PaintFlags flags;
@@ -934,9 +1041,8 @@ TEST_F(PaintCanvasVideoRendererTest, TexSubImage2D_Y16_R32F) {
       2 /*xoffset*/, 1 /*yoffset*/, false /*flip_y*/, true);
 }
 
-// Fixture for tests that require a GL context. The input parameter indicates
-// whether OOPR mode is enabled.
-class PaintCanvasVideoRendererWithGLTest : public testing::TestWithParam<bool> {
+// Fixture for tests that require a GL context.
+class PaintCanvasVideoRendererWithGLTest : public testing::Test {
  public:
   using GetColorCallback = base::RepeatingCallback<SkColor(int, int)>;
 
@@ -944,21 +1050,18 @@ class PaintCanvasVideoRendererWithGLTest : public testing::TestWithParam<bool> {
     gl::GLSurfaceTestSupport::InitializeOneOff();
     enable_pixels_.emplace();
     media_context_ = base::MakeRefCounted<viz::TestInProcessContextProvider>(
-        /*enable_gpu_rasterization=*/false,
-        /*enable_oop_rasterization=*/GetParam(), /*support_locking=*/false);
+        viz::TestContextType::kGpuRaster, /*support_locking=*/false);
     gpu::ContextResult result = media_context_->BindToCurrentThread();
     ASSERT_EQ(result, gpu::ContextResult::kSuccess);
 
     gles2_context_ = base::MakeRefCounted<viz::TestInProcessContextProvider>(
-        /*enable_gpu_rasterization=*/false,
-        /*enable_oop_rasterization=*/false, /*support_locking=*/false);
+        viz::TestContextType::kGLES2, /*support_locking=*/false);
     result = gles2_context_->BindToCurrentThread();
     ASSERT_EQ(result, gpu::ContextResult::kSuccess);
 
     destination_context_ =
         base::MakeRefCounted<viz::TestInProcessContextProvider>(
-            /*enable_gpu_rasterization=*/false,
-            /*enable_oop_rasterization=*/false, /*support_locking=*/false);
+            viz::TestContextType::kGLES2, /*support_locking=*/false);
     result = destination_context_->BindToCurrentThread();
     ASSERT_EQ(result, gpu::ContextResult::kSuccess);
     cropped_frame_ = CreateCroppedFrame();
@@ -1136,11 +1239,7 @@ class PaintCanvasVideoRendererWithGLTest : public testing::TestWithParam<bool> {
   base::test::TaskEnvironment task_environment_;
 };
 
-INSTANTIATE_TEST_SUITE_P(OopRasterMode,
-                         PaintCanvasVideoRendererWithGLTest,
-                         testing::Bool());
-
-TEST_P(PaintCanvasVideoRendererWithGLTest, CopyVideoFrameYUVDataToGLTexture) {
+TEST_F(PaintCanvasVideoRendererWithGLTest, CopyVideoFrameYUVDataToGLTexture) {
   auto* destination_gl = destination_context_->ContextGL();
   DCHECK(destination_gl);
   GLenum target = GL_TEXTURE_2D;
@@ -1171,7 +1270,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest, CopyVideoFrameYUVDataToGLTexture) {
   destination_gl->DeleteTextures(1, &texture);
 }
 
-TEST_P(PaintCanvasVideoRendererWithGLTest,
+TEST_F(PaintCanvasVideoRendererWithGLTest,
        CopyVideoFrameYUVDataToGLTexture_FlipY) {
   auto* destination_gl = destination_context_->ContextGL();
   DCHECK(destination_gl);
@@ -1205,7 +1304,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest,
 
 // Checks that we correctly copy a RGBA shared image VideoFrame when using
 // CopyVideoFrameYUVDataToGLTexture, including correct cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest,
+TEST_F(PaintCanvasVideoRendererWithGLTest,
        CopyVideoFrameTexturesToGLTextureRGBA) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame = CreateTestRGBAFrame(run_loop.QuitClosure());
@@ -1219,7 +1318,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest,
 // Checks that we correctly copy a RGBA shared image VideoFrame that needs read
 // lock fences, when using CopyVideoFrameYUVDataToGLTexture, including correct
 // cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest,
+TEST_F(PaintCanvasVideoRendererWithGLTest,
        CopyVideoFrameTexturesToGLTextureRGBA_ReadLockFence) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame = CreateTestRGBAFrame(run_loop.QuitClosure());
@@ -1233,7 +1332,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest,
 
 // Checks that we correctly paint a RGBA shared image VideoFrame, including
 // correct cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest, PaintRGBA) {
+TEST_F(PaintCanvasVideoRendererWithGLTest, PaintRGBA) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame = CreateTestRGBAFrame(run_loop.QuitClosure());
 
@@ -1245,7 +1344,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest, PaintRGBA) {
 
 // Checks that we correctly copy an I420 shared image VideoFrame when using
 // CopyVideoFrameYUVDataToGLTexture, including correct cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest,
+TEST_F(PaintCanvasVideoRendererWithGLTest,
        CopyVideoFrameTexturesToGLTextureI420) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame = CreateTestI420Frame(run_loop.QuitClosure());
@@ -1258,7 +1357,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest,
 
 // Checks that we correctly paint a I420 shared image VideoFrame, including
 // correct cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest, PaintI420) {
+TEST_F(PaintCanvasVideoRendererWithGLTest, PaintI420) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame = CreateTestI420Frame(run_loop.QuitClosure());
 
@@ -1270,7 +1369,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest, PaintI420) {
 
 // Checks that we correctly paint a I420 shared image VideoFrame, including
 // correct cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest, PaintI420NotSubset) {
+TEST_F(PaintCanvasVideoRendererWithGLTest, PaintI420NotSubset) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame =
       CreateTestI420FrameNotSubset(run_loop.QuitClosure());
@@ -1283,7 +1382,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest, PaintI420NotSubset) {
 
 // Checks that we correctly copy a NV12 shared image VideoFrame when using
 // CopyVideoFrameYUVDataToGLTexture, including correct cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest,
+TEST_F(PaintCanvasVideoRendererWithGLTest,
        CopyVideoFrameTexturesToGLTextureNV12) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame = CreateTestNV12Frame(run_loop.QuitClosure());
@@ -1300,7 +1399,7 @@ TEST_P(PaintCanvasVideoRendererWithGLTest,
 
 // Checks that we correctly paint a NV12 shared image VideoFrame, including
 // correct cropping.
-TEST_P(PaintCanvasVideoRendererWithGLTest, PaintNV12) {
+TEST_F(PaintCanvasVideoRendererWithGLTest, PaintNV12) {
   base::RunLoop run_loop;
   scoped_refptr<VideoFrame> frame = CreateTestNV12Frame(run_loop.QuitClosure());
   if (!frame) {

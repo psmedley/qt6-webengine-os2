@@ -198,7 +198,7 @@ void CPWL_Edit::DrawThisAppearance(CFX_RenderDevice* pDevice,
       path.AppendPoint(top, CFX_Path::Point::Type::kLine);
     }
     if (!path.GetPoints().empty()) {
-      pDevice->DrawPath(&path, &mtUser2Device, &gsd, 0,
+      pDevice->DrawPath(path, &mtUser2Device, &gsd, 0,
                         GetBorderColor().ToFXColor(255),
                         CFX_FillRenderOptions::EvenOddOptions());
     }
@@ -211,13 +211,10 @@ void CPWL_Edit::DrawThisAppearance(CFX_RenderDevice* pDevice,
     rcClip = GetClientRect();
     pRange = &wrRange;
   }
-
-  CPWL_EditImpl::DrawEdit(pDevice, mtUser2Device, m_pEditImpl.get(),
-                          GetTextColor().ToFXColor(GetTransparency()), rcClip,
-                          CFX_PointF(), pRange, GetSystemHandler(),
-                          m_pFormFiller.Get());
+  m_pEditImpl->DrawEdit(
+      pDevice, mtUser2Device, GetTextColor().ToFXColor(GetTransparency()),
+      rcClip, CFX_PointF(), pRange, GetSystemHandler(), GetAttachedData());
 }
-
 
 void CPWL_Edit::OnSetFocus() {
   ObservedPtr<CPWL_Edit> observed_ptr(this);
@@ -256,11 +253,6 @@ void CPWL_Edit::OnKillFocus() {
 
   SetCharSet(FX_Charset::kANSI);
   m_bFocus = false;
-}
-
-void CPWL_Edit::SetCharSpace(float fCharSpace) {
-  m_pEditImpl->SetCharSpace(fCharSpace);
-  m_pEditImpl->Paint();
 }
 
 CPVT_WordRange CPWL_Edit::GetSelectWordRange() const {
@@ -592,16 +584,16 @@ bool CPWL_Edit::OnKeyDownInternal(FWL_VKEYCODE nKeyCode,
         PasteText();
       return true;
     case FWL_VKEY_Up:
-      m_pEditImpl->OnVK_UP(IsSHIFTKeyDown(nFlag), false);
+      m_pEditImpl->OnVK_UP(IsSHIFTKeyDown(nFlag));
       return true;
     case FWL_VKEY_Down:
-      m_pEditImpl->OnVK_DOWN(IsSHIFTKeyDown(nFlag), false);
+      m_pEditImpl->OnVK_DOWN(IsSHIFTKeyDown(nFlag));
       return true;
     case FWL_VKEY_Left:
-      m_pEditImpl->OnVK_LEFT(IsSHIFTKeyDown(nFlag), false);
+      m_pEditImpl->OnVK_LEFT(IsSHIFTKeyDown(nFlag));
       return true;
     case FWL_VKEY_Right:
-      m_pEditImpl->OnVK_RIGHT(IsSHIFTKeyDown(nFlag), false);
+      m_pEditImpl->OnVK_RIGHT(IsSHIFTKeyDown(nFlag));
       return true;
     case FWL_VKEY_Home:
       m_pEditImpl->OnVK_HOME(IsSHIFTKeyDown(nFlag), IsCTRLKeyDown(nFlag));

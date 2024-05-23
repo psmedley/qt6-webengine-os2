@@ -19,6 +19,10 @@ namespace net {
 class NET_EXPORT TrustStoreInMemory : public TrustStore {
  public:
   TrustStoreInMemory();
+
+  TrustStoreInMemory(const TrustStoreInMemory&) = delete;
+  TrustStoreInMemory& operator=(const TrustStoreInMemory&) = delete;
+
   ~TrustStoreInMemory() override;
 
   // Returns whether the TrustStore is in the initial empty state.
@@ -31,7 +35,11 @@ class NET_EXPORT TrustStoreInMemory : public TrustStore {
   // used during verification).
   void AddTrustAnchor(scoped_refptr<ParsedCertificate> cert);
 
-  // Adds a certificate as a trust achor and extracts anchor constraints from
+  // Adds a certificate as a trust anchor which will have expiration enforced.
+  // See VerifyCertificateChain for details.
+  void AddTrustAnchorWithExpiration(scoped_refptr<ParsedCertificate> cert);
+
+  // Adds a certificate as a trust anchor and extracts anchor constraints from
   // the certificate. See VerifyCertificateChain for details.
   void AddTrustAnchorWithConstraints(scoped_refptr<ParsedCertificate> cert);
 
@@ -47,9 +55,8 @@ class NET_EXPORT TrustStoreInMemory : public TrustStore {
   // TrustStore implementation:
   void SyncGetIssuersOf(const ParsedCertificate* cert,
                         ParsedCertificateList* issuers) override;
-  void GetTrust(const scoped_refptr<ParsedCertificate>& cert,
-                CertificateTrust* trust,
-                base::SupportsUserData* debug_data) const override;
+  CertificateTrust GetTrust(const ParsedCertificate* cert,
+                            base::SupportsUserData* debug_data) const override;
 
   // Returns true if the trust store contains the given ParsedCertificate
   // (matches by DER).
@@ -74,7 +81,9 @@ class NET_EXPORT TrustStoreInMemory : public TrustStore {
   void AddCertificate(scoped_refptr<ParsedCertificate> cert,
                       const CertificateTrust& trust);
 
-  DISALLOW_COPY_AND_ASSIGN(TrustStoreInMemory);
+  // Returns the `Entry` matching `cert`, or `nullptr` if not in the trust
+  // store.
+  const Entry* GetEntry(const ParsedCertificate* cert) const;
 };
 
 }  // namespace net

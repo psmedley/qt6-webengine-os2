@@ -4,6 +4,10 @@
 
 #include "fuchsia/engine/browser/navigation_controller_impl.h"
 
+#include <fuchsia/mem/cpp/fidl.h>
+#include <lib/fpromise/result.h>
+
+#include "base/bits.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/memory/page_size.h"
 #include "base/strings/strcat.h"
@@ -69,6 +73,63 @@ fuchsia::web::Favicon GfxImageToFidlFavicon(gfx::Image gfx_image) {
 
 }  // namespace
 
+namespace {
+
+// For each field that differs between |old_entry| and |new_entry|, the field
+// is set to its new value in |difference|. |new_entry| is assumed to have been
+// fully-populated with fields.
+void DiffNavigationEntries(const fuchsia::web::NavigationState& old_entry,
+                           const fuchsia::web::NavigationState& new_entry,
+                           fuchsia::web::NavigationState* difference) {
+  DCHECK(difference);
+
+  // |new_entry| should not be empty when the difference is between states
+  // pre- and post-navigation. It is possible for non-navigation events (e.g.
+  // Renderer-process teardown) to trigger notifications, in which case both
+  // states may be empty (i.e. both come from the "initial" NavigationEntry).
+  if (new_entry.IsEmpty() && old_entry.IsEmpty()) {
+    return;
+  }
+
+  DCHECK(new_entry.has_title());
+  if (!old_entry.has_title() || (new_entry.title() != old_entry.title())) {
+    difference->set_title(new_entry.title());
+  }
+
+  DCHECK(new_entry.has_url());
+  if (!old_entry.has_url() || (new_entry.url() != old_entry.url())) {
+    difference->set_url(new_entry.url());
+  }
+
+  DCHECK(new_entry.has_page_type());
+  if (!old_entry.has_page_type() ||
+      (new_entry.page_type() != old_entry.page_type())) {
+    difference->set_page_type(new_entry.page_type());
+  }
+
+  DCHECK(new_entry.has_can_go_back());
+  if (!old_entry.has_can_go_back() ||
+      old_entry.can_go_back() != new_entry.can_go_back()) {
+    difference->set_can_go_back(new_entry.can_go_back());
+  }
+
+  DCHECK(new_entry.has_can_go_forward());
+  if (!old_entry.has_can_go_forward() ||
+      old_entry.can_go_forward() != new_entry.can_go_forward()) {
+    difference->set_can_go_forward(new_entry.can_go_forward());
+  }
+
+  DCHECK(new_entry.has_is_main_document_loaded());
+  if (!old_entry.has_is_main_document_loaded() ||
+      old_entry.is_main_document_loaded() !=
+          new_entry.is_main_document_loaded()) {
+    difference->set_is_main_document_loaded(
+        new_entry.is_main_document_loaded());
+  }
+}
+
+}  // namespace
+
 NavigationControllerImpl::NavigationControllerImpl(
     content::WebContents* web_contents)
     : web_contents_(web_contents), weak_factory_(this) {
@@ -120,29 +181,25 @@ void NavigationControllerImpl::SetEventListener(
   navigation_listener_.set_error_handler(
       [this](zx_status_t status) { SetEventListener(nullptr, {}); });
 
-  // Immediately send the current navigation state, even if it is empty.
-  if (web_contents_->GetController().GetVisibleEntry() == nullptr) {
-    waiting_for_navigation_event_ack_ = true;
-    navigation_listener_->OnNavigationStateChanged(
-        fuchsia::web::NavigationState(), [this]() {
-          waiting_for_navigation_event_ack_ = false;
-          MaybeSendNavigationEvent();
-        });
-  } else {
-    OnNavigationEntryChanged();
-  }
+  // Send the current navigation state to the listener immediately.
+  waiting_for_navigation_event_ack_ = true;
+  navigation_listener_->OnNavigationStateChanged(
+      GetVisibleNavigationState(), [this]() {
+        waiting_for_navigation_event_ack_ = false;
+        MaybeSendNavigationEvent();
+      });
 }
 
 fuchsia::web::NavigationState
 NavigationControllerImpl::GetVisibleNavigationState() const {
   content::NavigationEntry* const entry =
       web_contents_->GetController().GetVisibleEntry();
-  if (!entry)
+  if (!entry || entry->IsInitialEntry())
     return fuchsia::web::NavigationState();
 
   fuchsia::web::NavigationState state;
 
-  // Populate some fields directly from the NavigationEntry.
+  // Populate some fields directly from the NavigationEntry, if possible.
   state.set_title(base::UTF16ToUTF8(entry->GetTitleForDisplay()));
   state.set_url(entry->GetURL().spec());
 
@@ -209,11 +266,10 @@ void NavigationControllerImpl::MaybeSendNavigationEvent() {
 void NavigationControllerImpl::LoadUrl(std::string url,
                                        fuchsia::web::LoadUrlParams params,
                                        LoadUrlCallback callback) {
-  fuchsia::web::NavigationController_LoadUrl_Result result;
   GURL validated_url(url);
   if (!validated_url.is_valid()) {
-    result.set_err(fuchsia::web::NavigationControllerError::INVALID_URL);
-    callback(std::move(result));
+    callback(
+        fpromise::error(fuchsia::web::NavigationControllerError::INVALID_URL));
     return;
   }
 
@@ -226,8 +282,8 @@ void NavigationControllerImpl::LoadUrl(std::string url,
       base::StringPiece header_value = cr_fuchsia::BytesAsString(header.value);
       if (!net::HttpUtil::IsValidHeaderName(header_name) ||
           !net::HttpUtil::IsValidHeaderValue(header_value)) {
-        result.set_err(fuchsia::web::NavigationControllerError::INVALID_HEADER);
-        callback(std::move(result));
+        callback(fpromise::error(
+            fuchsia::web::NavigationControllerError::INVALID_HEADER));
         return;
       }
 
@@ -249,8 +305,7 @@ void NavigationControllerImpl::LoadUrl(std::string url,
   }
 
   web_contents_->GetController().LoadURLWithParams(params_converted);
-  result.set_response(fuchsia::web::NavigationController_LoadUrl_Response());
-  callback(std::move(result));
+  callback(fpromise::ok());
 }
 
 void NavigationControllerImpl::GoBack() {
@@ -290,8 +345,7 @@ void NavigationControllerImpl::TitleWasSet(content::NavigationEntry* entry) {
   OnNavigationEntryChanged();
 }
 
-void NavigationControllerImpl::DocumentAvailableInMainFrame(
-    content::RenderFrameHost* render_frame_host) {
+void NavigationControllerImpl::PrimaryMainDocumentElementAvailable() {
   // The main document is loaded, but not necessarily all the subresources. Some
   // fields like "title" will change here.
 
@@ -308,11 +362,15 @@ void NavigationControllerImpl::DidFinishLoad(
   if (active_navigation_)
     return;
 
+  // Only allow the primary main frame to transition this state.
+  if (!render_frame_host->IsInPrimaryMainFrame())
+    return;
+
   is_main_document_loaded_ = true;
   OnNavigationEntryChanged();
 }
 
-void NavigationControllerImpl::RenderProcessGone(
+void NavigationControllerImpl::PrimaryMainFrameRenderProcessGone(
     base::TerminationStatus status) {
   // If the current RenderProcess terminates then trigger a NavigationState
   // change to let the caller know that something is wrong.
@@ -322,9 +380,6 @@ void NavigationControllerImpl::RenderProcessGone(
 
 void NavigationControllerImpl::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
-  // frames. This caller was converted automatically to the primary main frame
-  // to preserve its semantics. Follow up to confirm correctness.
   if (!navigation_handle->IsInPrimaryMainFrame() ||
       navigation_handle->IsSameDocument()) {
     return;
@@ -367,44 +422,9 @@ void NavigationControllerImpl::OnFaviconUpdated(
   OnNavigationEntryChanged();
 }
 
-void DiffNavigationEntries(const fuchsia::web::NavigationState& old_entry,
-                           const fuchsia::web::NavigationState& new_entry,
-                           fuchsia::web::NavigationState* difference) {
-  DCHECK(difference);
-
-  DCHECK(new_entry.has_title());
-  if (!old_entry.has_title() || (new_entry.title() != old_entry.title())) {
-    difference->set_title(new_entry.title());
-  }
-
-  DCHECK(new_entry.has_url());
-  if (!old_entry.has_url() || (new_entry.url() != old_entry.url())) {
-    difference->set_url(new_entry.url());
-  }
-
-  DCHECK(new_entry.has_page_type());
-  if (!old_entry.has_page_type() ||
-      (new_entry.page_type() != old_entry.page_type())) {
-    difference->set_page_type(new_entry.page_type());
-  }
-
-  DCHECK(new_entry.has_can_go_back());
-  if (!old_entry.has_can_go_back() ||
-      old_entry.can_go_back() != new_entry.can_go_back()) {
-    difference->set_can_go_back(new_entry.can_go_back());
-  }
-
-  DCHECK(new_entry.has_can_go_forward());
-  if (!old_entry.has_can_go_forward() ||
-      old_entry.can_go_forward() != new_entry.can_go_forward()) {
-    difference->set_can_go_forward(new_entry.can_go_forward());
-  }
-
-  DCHECK(new_entry.has_is_main_document_loaded());
-  if (!old_entry.has_is_main_document_loaded() ||
-      old_entry.is_main_document_loaded() !=
-          new_entry.is_main_document_loaded()) {
-    difference->set_is_main_document_loaded(
-        new_entry.is_main_document_loaded());
-  }
+void DiffNavigationEntriesForTest(  // IN-TEST
+    const fuchsia::web::NavigationState& old_entry,
+    const fuchsia::web::NavigationState& new_entry,
+    fuchsia::web::NavigationState* difference) {
+  DiffNavigationEntries(old_entry, new_entry, difference);
 }

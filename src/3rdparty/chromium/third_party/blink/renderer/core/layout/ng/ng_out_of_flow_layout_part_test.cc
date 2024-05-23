@@ -21,8 +21,7 @@ class NGOutOfFlowLayoutPartTest
  protected:
   NGOutOfFlowLayoutPartTest() : ScopedLayoutNGBlockFragmentationForTest(true) {}
 
-  scoped_refptr<const NGPhysicalBoxFragment> RunBlockLayoutAlgorithm(
-      Element* element) {
+  const NGPhysicalBoxFragment* RunBlockLayoutAlgorithm(Element* element) {
     NGBlockNode container(element->GetLayoutBox());
     NGConstraintSpace space = ConstructBlockLayoutTestConstraintSpace(
         {WritingMode::kHorizontalTb, TextDirection::kLtr},
@@ -31,8 +30,8 @@ class NGOutOfFlowLayoutPartTest
   }
 
   String DumpFragmentTree(Element* element) {
-    auto fragment = RunBlockLayoutAlgorithm(element);
-    return DumpFragmentTree(fragment.get());
+    auto* fragment = RunBlockLayoutAlgorithm(element);
+    return DumpFragmentTree(fragment);
   }
 
   String DumpFragmentTree(const blink::NGPhysicalBoxFragment* fragment) {
@@ -89,8 +88,7 @@ TEST_F(NGOutOfFlowLayoutPartTest, FixedInsideAbs) {
   // Test whether the oof fragments have been collected at NG->Legacy boundary.
   Element* rel = GetDocument().getElementById("rel");
   auto* block_flow = To<LayoutBlockFlow>(rel->GetLayoutObject());
-  scoped_refptr<const NGLayoutResult> result =
-      block_flow->GetCachedLayoutResult();
+  const NGLayoutResult* result = block_flow->GetCachedLayoutResult();
   EXPECT_TRUE(result);
   EXPECT_EQ(result->PhysicalFragment().OutOfFlowPositionedDescendants().size(),
             2u);
@@ -1533,6 +1531,24 @@ TEST_F(NGOutOfFlowLayoutPartTest, AbsposFragWithInlineCBAndSpanner) {
   EXPECT_EQ(expectation, dump);
 }
 
+static void CheckMulticolumnPositionedObjects(const LayoutBox* multicol,
+                                              const LayoutBox* abspos) {
+  for (const NGPhysicalBoxFragment& fragmentation_root :
+       multicol->PhysicalFragments()) {
+    EXPECT_TRUE(fragmentation_root.IsFragmentationContextRoot());
+    EXPECT_FALSE(fragmentation_root.HasOutOfFlowFragmentChild());
+    for (const NGLink& fragmentainer : fragmentation_root.Children()) {
+      EXPECT_TRUE(fragmentainer->IsFragmentainerBox());
+      EXPECT_TRUE(fragmentainer->HasOutOfFlowFragmentChild());
+      for (const NGLink& child : fragmentainer->Children()) {
+        if (child->GetLayoutObject() == abspos)
+          return;
+      }
+    }
+  }
+  EXPECT_TRUE(false);
+}
+
 TEST_F(NGOutOfFlowLayoutPartTest, PositionedObjectsInMulticol) {
   SetBodyInnerHTML(
       R"HTML(
@@ -1550,21 +1566,10 @@ TEST_F(NGOutOfFlowLayoutPartTest, PositionedObjectsInMulticol) {
         </div>
       </div>
       )HTML");
-  Element* outer_multicol = GetDocument().getElementById("outer");
-  auto* multicol = To<LayoutBlockFlow>(outer_multicol->GetLayoutObject());
-  EXPECT_FALSE(multicol->PositionedObjects());
-
-  Element* inner_multicol = GetDocument().getElementById("inner");
-  multicol = To<LayoutBlockFlow>(inner_multicol->GetLayoutObject());
-  auto* abs = GetLayoutBoxByElementId("abs1");
-  EXPECT_TRUE(multicol->PositionedObjects()->Contains(abs));
-  EXPECT_EQ(multicol->PositionedObjects()->size(), 1u);
-
-  Element* rel_element = GetDocument().getElementById("rel");
-  auto* rel = To<LayoutBlockFlow>(rel_element->GetLayoutObject());
-  abs = GetLayoutBoxByElementId("abs2");
-  EXPECT_TRUE(rel->PositionedObjects()->Contains(abs));
-  EXPECT_EQ(rel->PositionedObjects()->size(), 1u);
+  CheckMulticolumnPositionedObjects(GetLayoutBoxByElementId("outer"),
+                                    GetLayoutBoxByElementId("abs1"));
+  CheckMulticolumnPositionedObjects(GetLayoutBoxByElementId("inner"),
+                                    GetLayoutBoxByElementId("abs2"));
 }
 
 TEST_F(NGOutOfFlowLayoutPartTest, PositionedObjectsInMulticolWithInline) {
@@ -1584,17 +1589,9 @@ TEST_F(NGOutOfFlowLayoutPartTest, PositionedObjectsInMulticolWithInline) {
         </div>
       </div>
       )HTML");
-  Element* multicol_element = GetDocument().getElementById("multicol");
-  auto* multicol = To<LayoutBlockFlow>(multicol_element->GetLayoutObject());
-  EXPECT_FALSE(multicol->PositionedObjects());
-
-  Element* target_element = GetDocument().getElementById("target");
-  auto* target = To<LayoutBlockFlow>(target_element->GetLayoutObject());
-  auto* abs1 = GetLayoutBoxByElementId("abs1");
-  auto* abs2 = GetLayoutBoxByElementId("abs2");
-  EXPECT_TRUE(target->PositionedObjects()->Contains(abs1));
-  EXPECT_TRUE(target->PositionedObjects()->Contains(abs2));
-  EXPECT_EQ(target->PositionedObjects()->size(), 2u);
+  const LayoutBox* multicol = GetLayoutBoxByElementId("multicol");
+  CheckMulticolumnPositionedObjects(multicol, GetLayoutBoxByElementId("abs1"));
+  CheckMulticolumnPositionedObjects(multicol, GetLayoutBoxByElementId("abs2"));
 }
 
 // Make sure the fragmentainer break tokens are correct when OOFs are added to
@@ -1891,5 +1888,79 @@ TEST_F(NGOutOfFlowLayoutPartTest, FragmentainerBreakTokenBeforeSpanner) {
   const auto& column4 = To<NGPhysicalBoxFragment>(*children[4]);
   EXPECT_FALSE(column4.BreakToken());
 }
+
+// crbug.com/1296900
+TEST_F(NGOutOfFlowLayoutPartTest, RelayoutNestedMulticolWithOOF) {
+  SetBodyInnerHTML(
+      R"HTML(
+      <div id="outer" style="columns:1; column-fill:auto; width:333px; height:100px;">
+        <div style="width:50px;">
+          <div id="inner" style="columns:1; column-fill:auto; height:50px;">
+            <div style="position:relative; height:10px;">
+              <div id="oof" style="position:absolute; width:1px; height:1px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      )HTML");
+
+  Element* outer = GetElementById("outer");
+  const LayoutBox* inner = GetLayoutBoxByElementId("inner");
+
+  auto GetInnerFragmentainer = [&inner]() -> const NGPhysicalBoxFragment* {
+    if (inner->PhysicalFragmentCount() != 1u)
+      return nullptr;
+    if (inner->GetPhysicalFragment(0)->Children().size() != 1u)
+      return nullptr;
+    return To<NGPhysicalBoxFragment>(
+        inner->GetPhysicalFragment(0)->Children()[0].fragment.Get());
+  };
+
+  const NGPhysicalBoxFragment* fragmentainer = GetInnerFragmentainer();
+  ASSERT_TRUE(fragmentainer);
+  // It should have two children: the relpos and the OOF.
+  EXPECT_EQ(fragmentainer->Children().size(), 2u);
+
+  outer->SetInlineStyleProperty(CSSPropertyID::kWidth, "334px");
+  UpdateAllLifecyclePhasesForTest();
+
+  fragmentainer = GetInnerFragmentainer();
+  ASSERT_TRUE(fragmentainer);
+  // It should still have two children: the relpos and the OOF.
+  EXPECT_EQ(fragmentainer->Children().size(), 2u);
+
+  outer->SetInlineStyleProperty(CSSPropertyID::kWidth, "335px");
+  UpdateAllLifecyclePhasesForTest();
+
+  fragmentainer = GetInnerFragmentainer();
+  ASSERT_TRUE(fragmentainer);
+  // It should still have two children: the relpos and the OOF.
+  EXPECT_EQ(fragmentainer->Children().size(), 2u);
+}
+
+// https://crbug.com/1304371
+TEST_F(NGOutOfFlowLayoutPartTest, PositionedElementMulticolLegacyNGTree) {
+  ScopedLayoutNGBlockFragmentationForTest block_frag(false);
+  ScopedLayoutNGFlexFragmentationForTest flex_frag(false);
+  ScopedLayoutNGGridFragmentationForTest grid_frag(false);
+  ScopedLayoutNGPrintingForTest printing_frag(false);
+  ScopedLayoutNGTableFragmentationForTest table_frag(false);
+  ASSERT_FALSE(RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled());
+
+  SetBodyInnerHTML(
+      R"HTML(
+      <div id="container" style="position: relative;">
+        <div style="position: absolute;">
+        </div>
+        <div style="column-count: 2;">
+          <div id="target" style="position: absolute;">PASS</div>
+        </div>
+      </div>
+      )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  ASSERT_FALSE(GetElementById("target")->GetLayoutObject()->NeedsLayout());
+}
+
 }  // namespace
 }  // namespace blink

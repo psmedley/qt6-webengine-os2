@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "storage/browser/file_system/file_system_backend.h"
@@ -22,15 +22,19 @@
 
 namespace base {
 class SequencedTaskRunner;
-}
+}  // namespace base
+
+namespace blink {
+class StorageKey;
+}  // namespace blink
 
 namespace leveldb {
 class Env;
-}
+}  // namespace leveldb
 
 namespace url {
 class Origin;
-}
+}  // namespace url
 
 namespace storage {
 
@@ -39,6 +43,10 @@ class ObfuscatedFileUtilMemoryDelegate;
 class SpecialStoragePolicy;
 class WatcherManager;
 
+// TODO(crbug.com/1231162): Remove this when removing the plugin private FS.
+// Name of the root directory in the plugin private file system.
+const char kPluginPrivateRootName[] = "pluginprivate";
+
 class COMPONENT_EXPORT(STORAGE_BROWSER) PluginPrivateFileSystemBackend
     : public FileSystemBackend,
       public FileSystemQuotaUtil {
@@ -46,12 +54,31 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) PluginPrivateFileSystemBackend
   class FileSystemIDToPluginMap;
   using StatusCallback = base::OnceCallback<void(base::File::Error result)>;
 
+  // Used to migrate media license data to the new backend.
+  struct COMPONENT_EXPORT(STORAGE_BROWSER) CdmFileInfo {
+    CdmFileInfo(const std::string& name,
+                const std::string& legacy_file_system_id);
+    CdmFileInfo(const CdmFileInfo&);
+    CdmFileInfo(CdmFileInfo&&);
+    ~CdmFileInfo();
+
+    const std::string name;
+    const std::string legacy_file_system_id;
+  };
+
   PluginPrivateFileSystemBackend(
       scoped_refptr<base::SequencedTaskRunner> file_task_runner,
       const base::FilePath& profile_path,
+      const base::FilePath& bucket_base_path,
       scoped_refptr<SpecialStoragePolicy> special_storage_policy,
       const FileSystemOptions& file_system_options,
       leveldb::Env* env_override);
+
+  PluginPrivateFileSystemBackend(const PluginPrivateFileSystemBackend&) =
+      delete;
+  PluginPrivateFileSystemBackend& operator=(
+      const PluginPrivateFileSystemBackend&) = delete;
+
   ~PluginPrivateFileSystemBackend() override;
 
   // This must be used to open 'private' filesystem instead of regular
@@ -78,7 +105,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) PluginPrivateFileSystemBackend
   CopyOrMoveFileValidatorFactory* GetCopyOrMoveFileValidatorFactory(
       FileSystemType type,
       base::File::Error* error_code) override;
-  FileSystemOperation* CreateFileSystemOperation(
+  std::unique_ptr<FileSystemOperation> CreateFileSystemOperation(
       const FileSystemURL& url,
       FileSystemContext* context,
       base::File::Error* error_code) const override;
@@ -103,24 +130,22 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) PluginPrivateFileSystemBackend
       FileSystemType type) const override;
 
   // FileSystemQuotaUtil overrides.
-  base::File::Error DeleteOriginDataOnFileTaskRunner(
+  base::File::Error DeleteStorageKeyDataOnFileTaskRunner(
       FileSystemContext* context,
       QuotaManagerProxy* proxy,
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       FileSystemType type) override;
   void PerformStorageCleanupOnFileTaskRunner(FileSystemContext* context,
                                              QuotaManagerProxy* proxy,
                                              FileSystemType type) override;
-  std::vector<url::Origin> GetOriginsForTypeOnFileTaskRunner(
+  std::vector<blink::StorageKey> GetStorageKeysForTypeOnFileTaskRunner(
       FileSystemType type) override;
-  std::vector<url::Origin> GetOriginsForHostOnFileTaskRunner(
-      FileSystemType type,
-      const std::string& host) override;
-  int64_t GetOriginUsageOnFileTaskRunner(FileSystemContext* context,
-                                         const url::Origin& origin,
-                                         FileSystemType type) override;
+  int64_t GetStorageKeyUsageOnFileTaskRunner(
+      FileSystemContext* context,
+      const blink::StorageKey& storage_key,
+      FileSystemType type) override;
   scoped_refptr<QuotaReservation> CreateQuotaReservationOnFileTaskRunner(
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       FileSystemType type) override;
 
   // Get details on the files saved for the specified |origin_url|. Returns
@@ -132,22 +157,27 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) PluginPrivateFileSystemBackend
                                         int64_t* total_size,
                                         base::Time* last_modified_time);
 
+  // Used to migrate media license data to the new backend.
+  // TODO(crbug.com/1231162): Once all media license data has been migrated, the
+  // PPFS will have no more consumers and we can remove it entirely.
+  std::vector<CdmFileInfo> GetMediaLicenseFilesForOriginOnFileTaskRunner(
+      FileSystemContext* context,
+      const url::Origin& origin);
+
   ObfuscatedFileUtilMemoryDelegate* obfuscated_file_util_memory_delegate();
+  const base::FilePath& base_path() const { return base_path_; }
 
  private:
   friend class PluginPrivateFileSystemBackendTest;
 
   ObfuscatedFileUtil* obfuscated_file_util();
-  const base::FilePath& base_path() const { return base_path_; }
 
   const scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
   const FileSystemOptions file_system_options_;
   const base::FilePath base_path_;
   std::unique_ptr<AsyncFileUtil> file_util_;
-  FileSystemIDToPluginMap* plugin_map_;  // Owned by file_util_.
+  raw_ptr<FileSystemIDToPluginMap> plugin_map_;  // Owned by file_util_.
   base::WeakPtrFactory<PluginPrivateFileSystemBackend> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PluginPrivateFileSystemBackend);
 };
 
 }  // namespace storage

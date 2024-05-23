@@ -14,11 +14,12 @@
 
 #include "base/containers/flat_set.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/timer/timer.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/authenticator_request_client_delegate.h"
 #include "content/public/browser/global_routing_id.h"
+#include "content/public/browser/web_authentication_request_proxy.h"
 #include "device/fido/authenticator_get_assertion_response.h"
 #include "device/fido/authenticator_make_credential_response.h"
 #include "device/fido/authenticator_selection_criteria.h"
@@ -66,6 +67,10 @@ class CONTENT_EXPORT AuthenticatorCommon {
   // Creates a new AuthenticatorCommon. Callers must ensure that this instance
   // outlives the RenderFrameHost.
   explicit AuthenticatorCommon(RenderFrameHost* render_frame_host);
+
+  AuthenticatorCommon(const AuthenticatorCommon&) = delete;
+  AuthenticatorCommon& operator=(const AuthenticatorCommon&) = delete;
+
   virtual ~AuthenticatorCommon();
 
   // This is not-quite an implementation of blink::mojom::Authenticator. The
@@ -100,6 +105,11 @@ class CONTENT_EXPORT AuthenticatorCommon {
   // nullptr and the process will crash when it tries to use it.
   RenderFrameHost* GetRenderFrameHost() const;
 
+  // Enables support for the webAuthenticationRequestProxy extensions API.  If
+  // called, remote desktop Chrome extensions may choose to act as a request
+  // proxy for all requests sent to this instance.
+  void EnableRequestProxyExtensionsAPISupport();
+
  protected:
   // MaybeCreateRequestDelegate returns the embedder-provided implementation of
   // AuthenticatorRequestClientDelegate, which encapsulates per-request state
@@ -121,12 +131,18 @@ class CONTENT_EXPORT AuthenticatorCommon {
     kDontCheck,
   };
 
-  // Replaces the current |request_| with a |MakeCredentialRequestHandler|,
-  // effectively restarting the request.
+  enum class AttestationErasureOption {
+    kIncludeAttestation,
+    kEraseAttestationButIncludeAaguid,
+    kEraseAttestationAndAaguid,
+  };
+
+  // Replaces the current |request_handler_| with a
+  // |MakeCredentialRequestHandler|, effectively restarting the request.
   void StartMakeCredentialRequest(bool allow_skipping_pin_touch);
 
-  // Replaces the current |request_| with a |GetAssertionRequestHandler|,
-  // effectively restarting the request.
+  // Replaces the current |request_handler_| with a
+  // |GetAssertionRequestHandler|, effectively restarting the request.
   void StartGetAssertionRequest(bool allow_skipping_pin_touch);
 
   bool IsFocused() const;
@@ -161,10 +177,15 @@ class CONTENT_EXPORT AuthenticatorCommon {
           response_data,
       const device::FidoAuthenticator* authenticator);
 
+  // Begins a timeout at the beginning of a request.
+  void BeginRequestTimeout(absl::optional<base::TimeDelta> timeout);
+
   // Runs when timer expires and cancels all issued requests to a U2fDevice.
   void OnTimeout();
+
   // Cancels the currently pending request (if any) with the supplied status.
   void CancelWithStatus(blink::mojom::AuthenticatorStatus status);
+
   // Runs when the user cancels WebAuthN request via UI dialog.
   void OnCancelFromUI();
 
@@ -181,16 +202,30 @@ class CONTENT_EXPORT AuthenticatorCommon {
       AuthenticatorRequestClientDelegate::InterestingFailureReason reason,
       blink::mojom::AuthenticatorStatus status);
 
+  // Creates a make credential response
+  blink::mojom::MakeCredentialAuthenticatorResponsePtr
+  CreateMakeCredentialResponse(
+      device::AuthenticatorMakeCredentialResponse response_data,
+      AttestationErasureOption attestation_erasure);
+
   // Runs |make_credential_response_callback_| and then Cleanup().
   void CompleteMakeCredentialRequest(
       blink::mojom::AuthenticatorStatus status,
       blink::mojom::MakeCredentialAuthenticatorResponsePtr response = nullptr,
+      blink::mojom::WebAuthnDOMExceptionDetailsPtr dom_exception_details =
+          nullptr,
       Focus focus_check = Focus::kDontCheck);
+
+  // Creates a get assertion response.
+  blink::mojom::GetAssertionAuthenticatorResponsePtr CreateGetAssertionResponse(
+      device::AuthenticatorGetAssertionResponse response_data);
 
   // Runs |get_assertion_callback_| and then Cleanup().
   void CompleteGetAssertionRequest(
       blink::mojom::AuthenticatorStatus status,
-      blink::mojom::GetAssertionAuthenticatorResponsePtr response = nullptr);
+      blink::mojom::GetAssertionAuthenticatorResponsePtr response = nullptr,
+      blink::mojom::WebAuthnDOMExceptionDetailsPtr dom_exception_details =
+          nullptr);
 
   BrowserContext* GetBrowserContext() const;
 
@@ -201,10 +236,24 @@ class CONTENT_EXPORT AuthenticatorCommon {
   device::FidoDiscoveryFactory* discovery_factory();
   void InitDiscoveryFactory(bool is_u2f_api_request);
 
+  WebAuthenticationRequestProxy* GetWebAuthnRequestProxyIfActive();
+
+  void OnMakeCredentialProxyResponse(
+      WebAuthenticationRequestProxy::RequestId request_id,
+      blink::mojom::WebAuthnDOMExceptionDetailsPtr error,
+      blink::mojom::MakeCredentialAuthenticatorResponsePtr response);
+
+  void OnGetAssertionProxyResponse(
+      WebAuthenticationRequestProxy::RequestId request_id,
+      blink::mojom::WebAuthnDOMExceptionDetailsPtr error,
+      blink::mojom::GetAssertionAuthenticatorResponsePtr response);
+
   const GlobalRenderFrameHostId render_frame_host_id_;
-  std::unique_ptr<device::FidoRequestHandlerBase> request_;
+  bool has_pending_request_ = false;
+  std::unique_ptr<device::FidoRequestHandlerBase> request_handler_;
   std::unique_ptr<device::FidoDiscoveryFactory> discovery_factory_;
-  device::FidoDiscoveryFactory* discovery_factory_testing_override_ = nullptr;
+  raw_ptr<device::FidoDiscoveryFactory> discovery_factory_testing_override_ =
+      nullptr;
   blink::mojom::Authenticator::MakeCredentialCallback
       make_credential_response_callback_;
   blink::mojom::Authenticator::GetAssertionCallback
@@ -231,12 +280,15 @@ class CONTENT_EXPORT AuthenticatorCommon {
   blink::mojom::AuthenticatorStatus error_awaiting_user_acknowledgement_ =
       blink::mojom::AuthenticatorStatus::NOT_ALLOWED_ERROR;
   data_decoder::DataDecoder data_decoder_;
+  bool enable_request_proxy_api_ = false;
 
   base::flat_set<RequestExtension> requested_extensions_;
 
-  base::WeakPtrFactory<AuthenticatorCommon> weak_factory_{this};
+  // The request ID of a pending proxied MakeCredential or GetAssertion request.
+  absl::optional<WebAuthenticationRequestProxy::RequestId>
+      pending_proxied_request_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(AuthenticatorCommon);
+  base::WeakPtrFactory<AuthenticatorCommon> weak_factory_{this};
 };
 
 }  // namespace content

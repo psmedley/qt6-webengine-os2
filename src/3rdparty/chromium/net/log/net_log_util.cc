@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/check_op.h"
+#include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
@@ -27,6 +28,9 @@
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
+#include "net/dns/public/dns_query_type.h"
+#include "net/dns/public/doh_provider_entry.h"
+#include "net/dns/public/secure_dns_mode.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties.h"
@@ -40,8 +44,8 @@
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/third_party/quiche/src/quic/core/quic_error_codes.h"
-#include "net/third_party/quiche/src/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_error_codes.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
@@ -191,6 +195,9 @@ base::Value GetNetConstants() {
                    static_cast<int>(CertificateTrustType::UNSPECIFIED));
     dict.SetIntKey("TRUSTED_ANCHOR",
                    static_cast<int>(CertificateTrustType::TRUSTED_ANCHOR));
+    dict.SetIntKey(
+        "TRUSTED_ANCHOR_WITH_EXPIRATION",
+        static_cast<int>(CertificateTrustType::TRUSTED_ANCHOR_WITH_EXPIRATION));
     dict.SetIntKey("TRUSTED_ANCHOR_WITH_CONSTRAINTS",
                    static_cast<int>(
                        CertificateTrustType::TRUSTED_ANCHOR_WITH_CONSTRAINTS));
@@ -292,6 +299,26 @@ base::Value GetNetConstants() {
     constants_dict.SetKey("addressFamily", std::move(dict));
   }
 
+  // Information about the relationship between DnsQueryType enums and their
+  // symbolic names.
+  {
+    base::Value dict(base::Value::Type::DICTIONARY);
+    for (const auto& type : kDnsQueryTypes) {
+      dict.SetIntKey(type.second, static_cast<int>(type.first));
+    }
+    constants_dict.SetKey("dnsQueryType", std::move(dict));
+  }
+
+  // Information about the relationship between SecureDnsMode enums and their
+  // symbolic names.
+  {
+    base::Value dict(base::Value::Type::DICTIONARY);
+    for (const auto& mode : kSecureDnsModes) {
+      dict.SetIntKey(mode.second, static_cast<int>(mode.first));
+    }
+    constants_dict.SetKey("secureDnsMode", std::move(dict));
+  }
+
   // Information about how the "time ticks" values we have given it relate to
   // actual system times.  Time ticks are used throughout since they are stable
   // across system clock changes. Note: |timeTickOffset| is only comparable to
@@ -350,15 +377,26 @@ NET_EXPORT base::Value GetNetInfo(URLRequestContext* context) {
                                 static_cast<int>(cache->max_entries()));
       cache_info_dict.SetIntKey("network_changes", cache->network_changes());
 
-      base::ListValue* list_value = nullptr;
-      if (cache_contents_list.GetAsList(&list_value))
-        cache->GetAsListValue(list_value, true /* include_staleness */,
-                              HostCache::SerializationType::kDebug);
+      if (cache_contents_list.is_list()) {
+        cache->GetList(&cache_contents_list, true /* include_staleness */,
+                       HostCache::SerializationType::kDebug);
+      }
       cache_info_dict.SetKey("entries", std::move(cache_contents_list));
 
       dict.SetKey("cache", std::move(cache_info_dict));
       net_info_dict.SetKey(kNetInfoHostResolver, std::move(dict));
     }
+
+    // Construct a list containing the names of the disabled DoH providers.
+    base::Value disabled_doh_providers_list(base::Value::Type::LIST);
+    for (const DohProviderEntry* provider : DohProviderEntry::GetList()) {
+      if (!base::FeatureList::IsEnabled(provider->feature)) {
+        disabled_doh_providers_list.Append(
+            NetLogStringValue(provider->provider));
+      }
+    }
+    net_info_dict.SetKey(kNetInfoDohProvidersDisabledDueToFeature,
+                         std::move(disabled_doh_providers_list));
   }
 
   HttpNetworkSession* http_network_session =

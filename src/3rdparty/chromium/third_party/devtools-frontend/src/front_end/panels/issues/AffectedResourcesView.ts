@@ -16,6 +16,7 @@ import type * as Protocol from '../../generated/protocol.js';
 import * as RequestLinkIcon from '../../ui/components/request_link_icon/request_link_icon.js';
 
 import type {IssueView} from './IssueView.js';
+import type {AggregatedIssue} from './IssueAggregator.js';
 
 const UIStrings = {
   /**
@@ -61,28 +62,35 @@ export interface CreateRequestCellOptions {
  * as well as machinery for resolving request and frame ids to SDK objects.
  */
 export abstract class AffectedResourcesView extends UI.TreeOutline.TreeElement {
-  private readonly parentView: IssueView;
+  readonly #parentView: IssueView;
+  protected issue: AggregatedIssue;
   protected affectedResourcesCountElement: HTMLElement;
   protected affectedResources: HTMLElement;
-  private affectedResourcesCount: number;
-  private frameListeners: Common.EventTarget.EventDescriptor[];
-  private unresolvedFrameIds: Set<string>;
+  #affectedResourcesCount: number;
+  #frameListeners: Common.EventTarget.EventDescriptor[];
+  #unresolvedFrameIds: Set<string>;
   protected requestResolver: Logs.RequestResolver.RequestResolver;
 
-  /**
-   * @param resourceName - Singular and plural of the affected resource name.
-   */
-  constructor(parent: IssueView) {
+  constructor(parent: IssueView, issue: AggregatedIssue) {
     super();
+    this.#parentView = parent;
+    this.issue = issue;
     this.toggleOnClick = true;
-    this.parentView = parent;
     this.affectedResourcesCountElement = this.createAffectedResourcesCounter();
 
     this.affectedResources = this.createAffectedResources();
-    this.affectedResourcesCount = 0;
+    this.#affectedResourcesCount = 0;
     this.requestResolver = new Logs.RequestResolver.RequestResolver();
-    this.frameListeners = [];
-    this.unresolvedFrameIds = new Set();
+    this.#frameListeners = [];
+    this.#unresolvedFrameIds = new Set();
+  }
+
+  /**
+   * Sets the issue to take the resources from. Does not
+   * trigger an update, the caller needs to do that explicitly.
+   */
+  setIssue(issue: AggregatedIssue): void {
+    this.issue = issue;
   }
 
   createAffectedResourcesCounter(): HTMLElement {
@@ -105,14 +113,14 @@ export abstract class AffectedResourcesView extends UI.TreeOutline.TreeElement {
   protected abstract getResourceNameWithCount(count: number): string;
 
   protected updateAffectedResourceCount(count: number): void {
-    this.affectedResourcesCount = count;
+    this.#affectedResourcesCount = count;
     this.affectedResourcesCountElement.textContent = this.getResourceNameWithCount(count);
-    this.hidden = this.affectedResourcesCount === 0;
-    this.parentView.updateAffectedResourceVisibility();
+    this.hidden = this.#affectedResourcesCount === 0;
+    this.#parentView.updateAffectedResourceVisibility();
   }
 
   isEmpty(): boolean {
-    return this.affectedResourcesCount === 0;
+    return this.#affectedResourcesCount === 0;
   }
 
   clear(): void {
@@ -121,7 +129,7 @@ export abstract class AffectedResourcesView extends UI.TreeOutline.TreeElement {
   }
 
   expandIfOneResource(): void {
-    if (this.affectedResourcesCount === 1) {
+    if (this.#affectedResourcesCount === 1) {
       this.expand();
     }
   }
@@ -131,40 +139,40 @@ export abstract class AffectedResourcesView extends UI.TreeOutline.TreeElement {
    * a listener is installed that takes care of updating the view if the frame is added. This is useful if the issue is
    * added before the frame gets reported.
    */
-  private resolveFrameId(frameId: Protocol.Page.FrameId): SDK.ResourceTreeModel.ResourceTreeFrame|null {
+  #resolveFrameId(frameId: Protocol.Page.FrameId): SDK.ResourceTreeModel.ResourceTreeFrame|null {
     const frame = SDK.FrameManager.FrameManager.instance().getFrame(frameId);
     if (!frame || !frame.url) {
-      this.unresolvedFrameIds.add(frameId);
-      if (!this.frameListeners.length) {
+      this.#unresolvedFrameIds.add(frameId);
+      if (!this.#frameListeners.length) {
         const addListener = SDK.FrameManager.FrameManager.instance().addEventListener(
-            SDK.FrameManager.Events.FrameAddedToTarget, this.onFrameChanged, this);
+            SDK.FrameManager.Events.FrameAddedToTarget, this.#onFrameChanged, this);
         const navigateListener = SDK.FrameManager.FrameManager.instance().addEventListener(
-            SDK.FrameManager.Events.FrameNavigated, this.onFrameChanged, this);
-        this.frameListeners = [addListener, navigateListener];
+            SDK.FrameManager.Events.FrameNavigated, this.#onFrameChanged, this);
+        this.#frameListeners = [addListener, navigateListener];
       }
     }
     return frame;
   }
 
-  private onFrameChanged(event: Common.EventTarget.EventTargetEvent<{frame: SDK.ResourceTreeModel.ResourceTreeFrame}>):
-      void {
+  #onFrameChanged(event: Common.EventTarget.EventTargetEvent<{frame: SDK.ResourceTreeModel.ResourceTreeFrame}>): void {
     const frame = event.data.frame;
     if (!frame.url) {
       return;
     }
-    const frameWasUnresolved = this.unresolvedFrameIds.delete(frame.id);
-    if (this.unresolvedFrameIds.size === 0 && this.frameListeners.length) {
+    const frameWasUnresolved = this.#unresolvedFrameIds.delete(frame.id);
+    if (this.#unresolvedFrameIds.size === 0 && this.#frameListeners.length) {
       // Stop listening once all requests are resolved.
-      Common.EventTarget.removeEventListeners(this.frameListeners);
-      this.frameListeners = [];
+      Common.EventTarget.removeEventListeners(this.#frameListeners);
+      this.#frameListeners = [];
     }
     if (frameWasUnresolved) {
       this.update();
     }
   }
 
-  protected createFrameCell(frameId: Protocol.Page.FrameId, issue: IssuesManager.Issue.Issue): HTMLElement {
-    const frame = this.resolveFrameId(frameId);
+  protected createFrameCell(frameId: Protocol.Page.FrameId, issueCategory: IssuesManager.Issue.IssueCategory):
+      HTMLElement {
+    const frame = this.#resolveFrameId(frameId);
     const url = frame && (frame.unreachableUrl() || frame.url) || i18nString(UIStrings.unknown);
 
     const frameCell = document.createElement('td');
@@ -174,23 +182,23 @@ export abstract class AffectedResourcesView extends UI.TreeOutline.TreeElement {
       icon.data = {iconName: 'elements_panel_icon', color: 'var(--color-link)', width: '16px', height: '16px'};
       icon.classList.add('link', 'elements-panel');
       icon.onclick = async(): Promise<void> => {
-        Host.userMetrics.issuesPanelResourceOpened(issue.getCategory(), AffectedItem.Element);
+        Host.userMetrics.issuesPanelResourceOpened(issueCategory, AffectedItem.Element);
         const frame = SDK.FrameManager.FrameManager.instance().getFrame(frameId);
         if (frame) {
           const ownerNode = await frame.getOwnerDOMNodeOrDocument();
           if (ownerNode) {
-            Common.Revealer.reveal(ownerNode);
+            void Common.Revealer.reveal(ownerNode);
           }
         }
       };
-      UI.Tooltip.Tooltip.install(icon, i18nString(UIStrings.clickToRevealTheFramesDomNodeIn));
+      icon.title = i18nString(UIStrings.clickToRevealTheFramesDomNodeIn);
       frameCell.appendChild(icon);
     }
     frameCell.appendChild(document.createTextNode(url));
     frameCell.onmouseenter = (): void => {
       const frame = SDK.FrameManager.FrameManager.instance().getFrame(frameId);
       if (frame) {
-        frame.highlight();
+        void frame.highlight();
       }
     };
     frameCell.onmouseleave = (): void => SDK.OverlayModel.OverlayModel.hideDOMNodeHighlight();
@@ -237,7 +245,8 @@ export abstract class AffectedResourcesView extends UI.TreeOutline.TreeElement {
 
   protected appendSourceLocation(
       element: HTMLElement,
-      sourceLocation: {url: string, scriptId?: string, lineNumber: number, columnNumber?: number}|undefined,
+      sourceLocation: {url: string, scriptId?: Protocol.Runtime.ScriptId, lineNumber: number, columnNumber?: number}|
+      undefined,
       target: SDK.Target.Target|null|undefined): void {
     const sourceCodeLocation = document.createElement('td');
     sourceCodeLocation.classList.add('affected-source-location');
@@ -247,7 +256,7 @@ export abstract class AffectedResourcesView extends UI.TreeOutline.TreeElement {
       const linkifier = new Components.Linkifier.Linkifier(maxLengthForDisplayedURLs);
       const sourceAnchor = linkifier.linkifyScriptLocation(
           target || null, sourceLocation.scriptId || null, sourceLocation.url, sourceLocation.lineNumber,
-          {columnNumber: sourceLocation.columnNumber, inlineFrameIndex: 0, className: undefined, tabStop: undefined});
+          {columnNumber: sourceLocation.columnNumber, inlineFrameIndex: 0});
       sourceCodeLocation.appendChild(sourceAnchor);
     }
     element.appendChild(sourceCodeLocation);

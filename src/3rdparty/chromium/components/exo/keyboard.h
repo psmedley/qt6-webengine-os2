@@ -11,6 +11,7 @@
 #include "ash/public/cpp/keyboard/keyboard_controller_observer.h"
 #include "base/containers/flat_map.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
 #include "components/exo/key_state.h"
 #include "components/exo/keyboard_observer.h"
 #include "components/exo/seat_observer.h"
@@ -65,14 +66,17 @@ class Keyboard : public ui::EventHandler,
   void OnSurfaceDestroying(Surface* surface) override;
 
   // Overridden from SeatObserver:
-  void OnSurfaceFocused(Surface* gained_focus) override;
+  void OnSurfaceFocused(Surface* gained_focus,
+                        Surface* lost_focus,
+                        bool has_focused_surface) override;
 
-  // Overridden from ash::KeyboardControllerObserver
-  void OnKeyboardEnabledChanged(bool is_enabled) override;
+  // Overridden from ash::KeyboardControllerObserver:
+  void OnKeyboardEnableFlagsChanged(
+      const std::set<keyboard::KeyboardEnableFlag>& flags) override;
   void OnKeyRepeatSettingsChanged(
       const ash::KeyRepeatSettings& settings) override;
 
-  // Overridden from ash::ImeControllerImpl::Observer
+  // Overridden from ash::ImeControllerImpl::Observer:
   void OnCapsLockChanged(bool enabled) override;
   void OnKeyboardLayoutNameChanged(const std::string& layout_name) override;
 
@@ -96,6 +100,9 @@ class Keyboard : public ui::EventHandler,
   // Chrome before they are dispatched by this class.
   void AddEventHandler();
   void RemoveEventHandler();
+
+  // Notify the current keyboard type.
+  void UpdateKeyboardType();
 
   // The delegate instance that all events except for events about device
   // configuration are dispatched to.

@@ -12,7 +12,6 @@
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/profiles/profile.h"
@@ -116,7 +115,7 @@ void InvokeUrlAndWaitForExternalHandler(Browser* browser, GURL target_url) {
   FakeProtocolHandlerDelegate external_handler_delegate;
   ExternalProtocolHandler::SetDelegateForTesting(&external_handler_delegate);
 
-  ui_test_utils::NavigateToURL(browser, target_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser, target_url));
   auto actual_url = external_handler_delegate.WaitForUrl();
   EXPECT_EQ(target_url, actual_url);
 

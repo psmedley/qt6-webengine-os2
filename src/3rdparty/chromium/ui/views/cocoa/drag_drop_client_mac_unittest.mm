@@ -126,6 +126,9 @@ class DragDropView : public View {
  public:
   DragDropView() = default;
 
+  DragDropView(const DragDropView&) = delete;
+  DragDropView& operator=(const DragDropView&) = delete;
+
   void set_formats(int formats) { formats_ = formats; }
 
   // View:
@@ -142,20 +145,25 @@ class DragDropView : public View {
     return ui::DragDropTypes::DRAG_COPY;
   }
 
-  DragOperation OnPerformDrop(const ui::DropTargetEvent& event) override {
-    return DragOperation::kMove;
+  views::View::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override {
+    return base::BindOnce([](const ui::DropTargetEvent& event,
+                             ui::mojom::DragOperation& output_drag_op) {
+      output_drag_op = DragOperation::kMove;
+    });
   }
 
  private:
   // Drop formats accepted by this View object.
   int formats_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(DragDropView);
 };
 
 class DragDropClientMacTest : public WidgetTest {
  public:
   DragDropClientMacTest() : widget_(new Widget) {}
+
+  DragDropClientMacTest(const DragDropClientMacTest&) = delete;
+  DragDropClientMacTest& operator=(const DragDropClientMacTest&) = delete;
 
   DragDropClientMac* drag_drop_client() {
     return ns_window_host_->drag_drop_client();
@@ -213,9 +221,6 @@ class DragDropClientMacTest : public WidgetTest {
   NativeWidgetMacNSWindowHost* ns_window_host_ = nullptr;
   DragDropView* target_ = nullptr;
   base::scoped_nsobject<MockDraggingInfo> dragging_info_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DragDropClientMacTest);
 };
 
 // Tests if the drag and drop target receives the dropped data.
@@ -311,17 +316,26 @@ class DragDropCloseView : public DragDropView {
  public:
   DragDropCloseView() {}
 
-  // View:
-  DragOperation OnPerformDrop(const ui::DropTargetEvent& event) override {
-    GetWidget()->CloseNow();
-    return DragOperation::kMove;
+  DragDropCloseView(const DragDropCloseView&) = delete;
+  DragDropCloseView& operator=(const DragDropCloseView&) = delete;
+
+  views::View::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override {
+    // base::Unretained is safe here because in the tests the view isn't deleted
+    // before the drop callback is run.
+    return base::BindOnce(&DragDropCloseView::PerformDrop,
+                          base::Unretained(this));
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DragDropCloseView);
+  void PerformDrop(const ui::DropTargetEvent& event,
+                   ui::mojom::DragOperation& output_drag_op) {
+    GetWidget()->CloseNow();
+    output_drag_op = DragOperation::kMove;
+  }
 };
 
-// Tests that closing Widget on OnPerformDrop does not crash.
+// Tests that closing Widget on drop does not crash.
 TEST_F(DragDropClientMacTest, CloseWidgetOnDrop) {
   OSExchangeData data;
   const std::u16string& text = u"text";
@@ -336,7 +350,7 @@ TEST_F(DragDropClientMacTest, CloseWidgetOnDrop) {
   EXPECT_EQ(DragUpdate(nil), NSDragOperationCopy);
   EXPECT_EQ(Drop(), NSDragOperationMove);
 
-  // OnPerformDrop() will have deleted the widget.
+  // Drop callback will have deleted the widget.
   widget_ = nullptr;
 }
 

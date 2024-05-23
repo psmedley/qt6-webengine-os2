@@ -14,10 +14,13 @@
 #include "core/fpdfapi/parser/cpdf_parser.h"
 #include "core/fpdfapi/parser/cpdf_read_validator.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
+#include "core/fpdfapi/parser/cpdf_stream.h"
+#include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fxcodec/jbig2/JBig2_DocumentContext.h"
 #include "core/fxcrt/fx_codepage.h"
 #include "core/fxcrt/scoped_set_insertion.h"
 #include "core/fxcrt/stl_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
 #include "third_party/base/containers/contains.h"
 
@@ -25,7 +28,9 @@ namespace {
 
 const int kMaxPageLevel = 1024;
 
-int CountPages(CPDF_Dictionary* pPages,
+// Returns a value in the range [0, `CPDF_Document::kPageMaxNum`), or nullopt on
+// error.
+absl::optional<int> CountPages(CPDF_Dictionary* pPages,
                std::set<CPDF_Dictionary*>* visited_pages) {
   int count = pPages->GetIntegerFor("Count");
   if (count > 0 && count < CPDF_Document::kPageMaxNum)
@@ -41,10 +46,18 @@ int CountPages(CPDF_Dictionary* pPages,
     if (pKid->KeyExist("Kids")) {
       // Use |visited_pages| to help detect circular references of pages.
       ScopedSetInsertion<CPDF_Dictionary*> local_add(visited_pages, pKid);
-      count += CountPages(pKid, visited_pages);
+      absl::optional<int> local_count =
+          CountPages(pKid, visited_pages);
+      if (!local_count.has_value()) {
+        return absl::nullopt;  // Propagate error.
+      }
+      count += local_count.value();
     } else {
       // This page is a leaf node.
       count++;
+    }
+    if (count >= CPDF_Document::kPageMaxNum) {
+      return absl::nullopt;  // Error: too many pages.
     }
   }
   pPages->SetNewFor<CPDF_Number>("Count", count);
@@ -122,8 +135,8 @@ CPDF_Document::~CPDF_Document() {
 
 // static
 bool CPDF_Document::IsValidPageObject(const CPDF_Object* obj) {
-  const CPDF_Dictionary* dict = ToDictionary(obj);
-  return dict && dict->GetNameFor("Type") == "Page";
+  // See ISO 32000-1:2008 spec, table 30.
+  return ValidateDictType(ToDictionary(obj), "Page");
 }
 
 RetainPtr<CPDF_Object> CPDF_Document::ParseIndirectObject(uint32_t objnum) {
@@ -311,6 +324,16 @@ JBig2_DocumentContext* CPDF_Document::GetOrCreateCodecContext() {
   return m_pCodecContext.get();
 }
 
+CPDF_Stream* CPDF_Document::CreateModifiedAPStream() {
+  auto* stream = NewIndirect<CPDF_Stream>();
+  m_ModifiedAPStreamIDs.insert(stream->GetObjNum());
+  return stream;
+}
+
+bool CPDF_Document::IsModifiedAPStream(const CPDF_Stream* stream) const {
+  return stream && pdfium::Contains(m_ModifiedAPStreamIDs, stream->GetObjNum());
+}
+
 int CPDF_Document::GetPageIndex(uint32_t objnum) {
   uint32_t skip_count = 0;
   bool bSkipped = false;
@@ -354,7 +377,7 @@ int CPDF_Document::RetrievePageCount() {
 
   std::set<CPDF_Dictionary*> visited_pages;
   visited_pages.insert(pPages);
-  return CountPages(pPages, &visited_pages);
+  return CountPages(pPages, &visited_pages).value_or(0);
 }
 
 uint32_t CPDF_Document::GetUserPermissions() const {
@@ -447,9 +470,7 @@ bool CPDF_Document::InsertNewPage(int iPage, CPDF_Dictionary* pPageDict) {
     return false;
 
   if (iPage == nPages) {
-    CPDF_Array* pPagesList = pPages->GetArrayFor("Kids");
-    if (!pPagesList)
-      pPagesList = pPages->SetNewFor<CPDF_Array>("Kids");
+    CPDF_Array* pPagesList = GetOrCreateArray(pPages, "Kids");
     pPagesList->AppendNew<CPDF_Reference>(this, pPageDict->GetObjNum());
     pPages->SetNewFor<CPDF_Number>("Count", nPages + 1);
     pPageDict->SetNewFor<CPDF_Reference>("Parent", this, pPages->GetObjNum());

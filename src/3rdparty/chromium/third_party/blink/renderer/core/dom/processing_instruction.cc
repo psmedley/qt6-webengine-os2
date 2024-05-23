@@ -33,7 +33,7 @@
 #include "third_party/blink/renderer/core/xml/document_xslt.h"
 #include "third_party/blink/renderer/core/xml/parser/xml_document_parser.h"  // for parseAttributes()
 #include "third_party/blink/renderer/core/xml/xsl_style_sheet.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -120,12 +120,17 @@ bool ProcessingInstruction::CheckStyleSheet(String& href, String& charset) {
   if (!is_css_ && !is_xsl_)
     return false;
 
-  href = attrs.Contains("href") ? attrs.at("href") : "";
-  charset = attrs.Contains("charset") ? attrs.at("charset") : "";
-  String alternate = attrs.Contains("alternate") ? attrs.at("alternate") : "";
+  auto it_href = attrs.find("href");
+  href = it_href != attrs.end() ? it_href->value : "";
+  auto it_charset = attrs.find("charset");
+  charset = it_charset != attrs.end() ? it_charset->value : "";
+  auto it_alternate = attrs.find("alternate");
+  String alternate = it_alternate != attrs.end() ? it_alternate->value : "";
   alternate_ = alternate == "yes";
-  title_ = attrs.Contains("title") ? attrs.at("title") : "";
-  media_ = attrs.Contains("media") ? attrs.at("media") : "";
+  auto it_title = attrs.find("title");
+  title_ = it_title != attrs.end() ? it_title->value : "";
+  auto it_media = attrs.find("media");
+  media_ = it_media != attrs.end() ? it_media->value : "";
 
   return !alternate_ || !title_.IsEmpty();
 }
@@ -164,7 +169,7 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
   } else {
     params.SetCharset(charset.IsEmpty() ? GetDocument().Encoding()
                                         : WTF::TextEncoding(charset));
-    GetDocument().GetStyleEngine().AddPendingSheet(style_engine_context_);
+    GetDocument().GetStyleEngine().AddPendingSheet(*this);
     CSSStyleSheetResource::Fetch(params, GetDocument().Fetcher(), this);
   }
 }
@@ -290,8 +295,7 @@ void ProcessingInstruction::ClearSheet() {
 void ProcessingInstruction::RemovePendingSheet() {
   if (is_xsl_)
     return;
-  GetDocument().GetStyleEngine().RemovePendingSheet(*this,
-                                                    style_engine_context_);
+  GetDocument().GetStyleEngine().RemovePendingSheet(*this);
 }
 
 void ProcessingInstruction::Trace(Visitor* visitor) const {

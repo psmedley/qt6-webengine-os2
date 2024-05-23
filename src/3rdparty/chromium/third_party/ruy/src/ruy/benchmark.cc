@@ -25,8 +25,7 @@ using LhsScalar = RUY_TEST_LHSSCALAR;
 using RhsScalar = RUY_TEST_RHSSCALAR;
 using AccumScalar = RUY_TEST_ACCUMSCALAR;
 using DstScalar = RUY_TEST_DSTSCALAR;
-using TestSetType =
-    TestSet<LhsScalar, RhsScalar, MulParams<AccumScalar, DstScalar>>;
+using TestSetType = TestSet<LhsScalar, RhsScalar, AccumScalar, DstScalar>;
 
 struct BenchmarkShape {
   int rows;
@@ -37,15 +36,37 @@ struct BenchmarkShape {
 };
 
 template <typename TestSetType>
-std::vector<std::unique_ptr<TestResult<DstScalar>>> BenchmarkRCC(
+std::vector<std::unique_ptr<TestResult<DstScalar>>> Benchmark(
     const BenchmarkShape& shape) {
   TestSetType test_set;
   test_set.rows = shape.rows;
   test_set.depth = shape.depth;
   test_set.cols = shape.cols;
-  test_set.lhs_order = Order::kRowMajor;
-  test_set.rhs_order = Order::kColMajor;
-  test_set.dst_order = Order::kColMajor;
+  const char* orders = "RCC";
+  const char* orders_env = getenv("ORDERS");
+  if (orders_env) {
+    bool error = false;
+    if (strlen(orders_env) != 3) {
+      error = true;
+    } else {
+      for (int i = 0; i < 3; i++) {
+        if (orders_env[i] != 'R' && orders_env[i] != 'C') {
+          error = true;
+        }
+      }
+    }
+    if (error) {
+      fprintf(stderr,
+              "ORDERS must contain 3 letters, each either R or C, indicating "
+              "whether to use Row-major or Column-major storage order for the "
+              "LHS, RHS and Destination matrix.\n");
+      exit(EXIT_FAILURE);
+    }
+    orders = orders_env;
+  }
+  test_set.lhs_order = orders[0] == 'R' ? Order::kRowMajor : Order::kColMajor;
+  test_set.rhs_order = orders[1] == 'R' ? Order::kRowMajor : Order::kColMajor;
+  test_set.dst_order = orders[2] == 'R' ? Order::kRowMajor : Order::kColMajor;
   test_set.layout_style = LayoutStyle::kUnstridedLinear;
   test_set.benchmark = true;
   const int asymmetry_lhs = shape.symm_lhs ? 0 : 1;
@@ -82,10 +103,20 @@ std::vector<int> ParseCommaSeparatedInts(
 }
 
 void Benchmark() {
+  // For now, support for int8*int16 cases is limited to the
+  // symmetric case (zero_point==0) because that appears to be
+  // the case in the initial use cases, and that limits complexity
+  // in thinking about accumulator overflows. This would not be a concern
+  // in the future if the accumulator type was int64, but for now its int32.
+  const bool is_int8_times_int16 =
+      (std::is_same<LhsScalar, std::int8_t>::value &&
+       std::is_same<RhsScalar, std::int16_t>::value) ||
+      (std::is_same<LhsScalar, std::int16_t>::value &&
+       std::is_same<RhsScalar, std::int8_t>::value);
   const bool symm_lhs = std::is_floating_point<LhsScalar>::value ||
-                        GetBoolEnvVarOrFalse("SYMM_LHS");
+                        is_int8_times_int16 || GetBoolEnvVarOrFalse("SYMM_LHS");
   const bool symm_rhs = std::is_floating_point<RhsScalar>::value ||
-                        GetBoolEnvVarOrFalse("SYMM_RHS");
+                        is_int8_times_int16 || GetBoolEnvVarOrFalse("SYMM_RHS");
   const bool benchmark_cubic = GetBoolEnvVarOrFalse("RUY_BENCHMARK_CUBIC") ||
                                GetBoolEnvVarOrFalse("RUY_BENCHMARK_CUBIC_LIST");
   const int explicit_rows = GetIntEnvVarOrZero("ROWS");
@@ -140,7 +171,7 @@ void Benchmark() {
 
   for (int i = 0; i < static_cast<int>(shapes.size()); i++) {
     const auto& shape = shapes[i];
-    const auto& results = BenchmarkRCC<TestSetType>(shape);
+    const auto& results = Benchmark<TestSetType>(shape);
     if (i == 0) {
       if (benchmark_cubic) {
         printf("size");

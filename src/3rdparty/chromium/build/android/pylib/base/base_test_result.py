@@ -6,12 +6,13 @@
 
 
 import functools
+import sys
 import threading
 
 from lib.results import result_types  # pylint: disable=import-error
 
 
-class ResultType(object):
+class ResultType:
   """Class enumerating test types.
 
   Wraps the results defined in //build/util/lib/results/.
@@ -33,7 +34,7 @@ class ResultType(object):
 
 
 @functools.total_ordering
-class BaseTestResult(object):
+class BaseTestResult:
   """Base class for a single test result."""
 
   def __init__(self, name, test_type, duration=0, log='', failure_reason=None):
@@ -103,7 +104,11 @@ class BaseTestResult(object):
     return self._log
 
   def SetFailureReason(self, failure_reason):
-    """Set the reason the test failed."""
+    """Set the reason the test failed.
+
+    This should be the first failure the test encounters and exclude any stack
+    trace.
+    """
     self._failure_reason = failure_reason
 
   def GetFailureReason(self):
@@ -123,7 +128,7 @@ class BaseTestResult(object):
     return self._links
 
 
-class TestRunResults(object):
+class TestRunResults:
   """Set of results for a test run."""
 
   def __init__(self):
@@ -150,6 +155,9 @@ class TestRunResults(object):
             if log:
               s.append('[%s] %s:' % (test_type, t))
               s.append(log)
+      if sys.version_info.major == 2:
+        decoded = [u.decode(encoding='utf-8', errors='ignore') for u in s]
+        return '\n'.join(decoded)
       return '\n'.join(s)
 
   def GetGtestForm(self):

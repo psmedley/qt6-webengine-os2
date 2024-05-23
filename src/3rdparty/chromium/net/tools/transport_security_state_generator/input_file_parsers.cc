@@ -102,7 +102,7 @@ bool MatchCertificateName(base::StringPiece name, base::StringPiece pin_name) {
     if (word == "Class" && (i + 1) < words.size()) {
       std::string class_name = base::StrCat({word, words[i + 1]});
 
-      size_t pos = pin_name.find(class_name);
+      pos = pin_name.find(class_name);
       if (pos == std::string::npos) {
         LOG(ERROR)
             << "Certficate class specification doesn't appear in the variable "
@@ -111,14 +111,14 @@ bool MatchCertificateName(base::StringPiece name, base::StringPiece pin_name) {
         return false;
       }
     } else if (word.size() == 1 && word[0] >= '0' && word[0] <= '9') {
-      size_t pos = pin_name.find(word);
+      pos = pin_name.find(word);
       if (pos == std::string::npos) {
         LOG(ERROR) << "Number doesn't appear in the certificate variable name ("
                    << pin_name << ")";
         return false;
       }
     } else if (IsImportantWordInCertificateName(word)) {
-      size_t pos = pin_name.find(word);
+      pos = pin_name.find(word);
       if (pos == std::string::npos) {
         LOG(ERROR) << std::string(word) +
                           " doesn't appear in the certificate variable name ("
@@ -187,7 +187,6 @@ bool ParseCertificatesFile(base::StringPiece certs_input, Pinsets* pinsets) {
     return false;
   }
 
-  std::string line;
   CertificateParserState current_state = CertificateParserState::PRE_NAME;
 
   const base::CompareCase& compare_mode = base::CompareCase::INSENSITIVE_ASCII;
@@ -320,7 +319,7 @@ bool ParseJSON(base::StringPiece json,
     return false;
   }
 
-  const auto preload_entries_list = preload_entries->GetList();
+  const auto preload_entries_list = preload_entries->GetListDeprecated();
   for (size_t i = 0; i < preload_entries_list.size(); ++i) {
     const base::Value& parsed = preload_entries_list[i];
     if (!parsed.is_dict()) {
@@ -392,7 +391,7 @@ bool ParseJSON(base::StringPiece json,
     return false;
   }
 
-  const auto pinsets_list = pinsets_value->GetList();
+  const auto pinsets_list = pinsets_value->GetListDeprecated();
   for (size_t i = 0; i < pinsets_list.size(); ++i) {
     const base::Value& parsed = pinsets_list[i];
     if (!parsed.is_dict()) {
@@ -418,7 +417,7 @@ bool ParseJSON(base::StringPiece json,
     const base::Value* pinset_static_hashes_list =
         parsed.FindListKey("static_spki_hashes");
     if (pinset_static_hashes_list) {
-      for (const auto& hash : pinset_static_hashes_list->GetList()) {
+      for (const auto& hash : pinset_static_hashes_list->GetListDeprecated()) {
         if (!hash.is_string()) {
           LOG(ERROR) << "Could not parse static spki hash "
                      << hash.DebugString() << " in the input JSON";
@@ -431,7 +430,8 @@ bool ParseJSON(base::StringPiece json,
     const base::Value* pinset_bad_static_hashes_list =
         parsed.FindListKey("bad_static_spki_hashes");
     if (pinset_bad_static_hashes_list) {
-      for (const auto& hash : pinset_bad_static_hashes_list->GetList()) {
+      for (const auto& hash :
+           pinset_bad_static_hashes_list->GetListDeprecated()) {
         if (!hash.is_string()) {
           LOG(ERROR) << "Could not parse bad static spki hash "
                      << hash.DebugString() << " in the input JSON";

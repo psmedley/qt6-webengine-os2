@@ -9,6 +9,7 @@
 #include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "storage/browser/blob/blob_builder_from_stream.h"
 #include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_impl.h"
@@ -75,6 +76,9 @@ class BlobRegistryImpl::BlobUnderConstruction {
   // deleting |this| by removing it from the blobs_under_construction_
   // collection in the blob service.
   void StartTransportation(base::WeakPtr<BlobImpl> blob_impl);
+
+  BlobUnderConstruction(const BlobUnderConstruction&) = delete;
+  BlobUnderConstruction& operator=(const BlobUnderConstruction&) = delete;
 
   ~BlobUnderConstruction() = default;
 
@@ -175,7 +179,7 @@ class BlobRegistryImpl::BlobUnderConstruction {
 #endif
 
   // BlobRegistryImpl we belong to.
-  BlobRegistryImpl* blob_registry_;
+  raw_ptr<BlobRegistryImpl> blob_registry_;
 
   // UUID of the blob being built.
   std::string uuid_;
@@ -209,7 +213,6 @@ class BlobRegistryImpl::BlobUnderConstruction {
   size_t ready_dependent_blob_count_ = 0;
 
   base::WeakPtrFactory<BlobUnderConstruction> weak_ptr_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(BlobUnderConstruction);
 };
 
 void BlobRegistryImpl::BlobUnderConstruction::StartTransportation(
@@ -498,10 +501,12 @@ bool BlobRegistryImpl::BlobUnderConstruction::ContainsCycles(
 BlobRegistryImpl::BlobRegistryImpl(
     base::WeakPtr<BlobStorageContext> context,
     base::WeakPtr<BlobUrlRegistry> url_registry,
+    scoped_refptr<base::TaskRunner> url_registry_runner,
     scoped_refptr<FileSystemContext> file_system_context)
     : context_(std::move(context)),
+      file_system_context_(std::move(file_system_context)),
       url_registry_(std::move(url_registry)),
-      file_system_context_(std::move(file_system_context)) {}
+      url_registry_runner_(std::move(url_registry_runner)) {}
 
 BlobRegistryImpl::~BlobRegistryImpl() {
   // BlobBuilderFromStream needs to be aborted before it can be destroyed, but
@@ -629,6 +634,7 @@ void BlobRegistryImpl::GetBlobFromUUID(
     return;
   }
   if (!context_->registry().HasEntry(uuid)) {
+    LOG(ERROR) << "Invalid UUID: " << uuid;
     // TODO(mek): Log histogram, old code logs Storage.Blob.InvalidReference
     std::move(callback).Run();
     return;
@@ -642,16 +648,28 @@ void BlobRegistryImpl::URLStoreForOrigin(
     mojo::PendingAssociatedReceiver<blink::mojom::BlobURLStore> receiver) {
   Delegate* delegate = receivers_.current_context().get();
   DCHECK(delegate);
-  if (!origin.opaque() && !delegate->CanCommitURL(origin.GetURL())) {
+  if (!origin.opaque() && !delegate->CanAccessDataForOrigin(origin)) {
     mojo::ReportBadMessage(
-        "Non committable origin passed to BlobRegistryImpl::URLStoreForOrigin");
+        "Cannot access data for origin passed to "
+        "BlobRegistryImpl::URLStoreForOrigin");
     return;
   }
-  auto self_owned_associated_receiver = mojo::MakeSelfOwnedAssociatedReceiver(
-      std::make_unique<BlobURLStoreImpl>(origin, url_registry_),
-      std::move(receiver));
-  if (g_url_store_creation_hook)
-    g_url_store_creation_hook->Run(self_owned_associated_receiver);
+  url_registry_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](const url::Origin& origin,
+             mojo::PendingAssociatedReceiver<blink::mojom::BlobURLStore>
+                 receiver,
+             base::WeakPtr<BlobUrlRegistry> url_registry) {
+            auto self_owned_associated_receiver =
+                mojo::MakeSelfOwnedAssociatedReceiver(
+                    std::make_unique<BlobURLStoreImpl>(origin,
+                                                       std::move(url_registry)),
+                    std::move(receiver));
+            if (g_url_store_creation_hook)
+              g_url_store_creation_hook->Run(self_owned_associated_receiver);
+          },
+          origin, std::move(receiver), url_registry_));
 }
 
 // static

@@ -69,7 +69,7 @@ LayoutBlockFlow* NGInlineFormattingContextOf(const Position& position) {
     return nullptr;
   LayoutBlockFlow* block_flow =
       NGOffsetMapping::GetInlineFormattingContextOf(position);
-  if (!block_flow || !block_flow->IsLayoutNGMixin())
+  if (!block_flow || !block_flow->IsLayoutNGObject())
     return nullptr;
   return block_flow;
 }
@@ -94,7 +94,10 @@ NGOffsetMappingUnit::NGOffsetMappingUnit(NGOffsetMappingUnitType type,
                                          unsigned text_content_start,
                                          unsigned text_content_end)
     : type_(type),
-      layout_object_(&layout_object),
+      // Use atomic construction to allow for concurrently marking
+      // NGOffsetMappingUnit.
+      layout_object_(&layout_object,
+                     Member<const LayoutObject>::AtomicInitializerTag{}),
       dom_start_(dom_start),
       dom_end_(dom_end),
       text_content_start_(text_content_start),
@@ -124,7 +127,8 @@ void NGOffsetMappingUnit::AssertValid() const {
 }
 
 const Node* NGOffsetMappingUnit::AssociatedNode() const {
-  if (const auto* text_fragment = DynamicTo<LayoutTextFragment>(layout_object_))
+  if (const auto* text_fragment =
+          DynamicTo<LayoutTextFragment>(layout_object_.Get()))
     return text_fragment->AssociatedTextNode();
   return layout_object_->GetNode();
 }
@@ -146,7 +150,7 @@ bool NGOffsetMappingUnit::Concatenate(const NGOffsetMappingUnit& other) {
     return false;
   // Don't merge first letter and remaining text
   if (const auto* text_fragment =
-          DynamicTo<LayoutTextFragment>(layout_object_)) {
+          DynamicTo<LayoutTextFragment>(layout_object_.Get())) {
     // TODO(layout-dev): Fix offset calculation for text-transform
     if (text_fragment->IsRemainingTextLayoutObject() &&
         other.dom_start_ == text_fragment->TextStartOffset())
@@ -222,9 +226,14 @@ bool NGOffsetMapping::AcceptsPosition(const Position& position) {
 const NGOffsetMapping* NGOffsetMapping::GetFor(const Position& position) {
   if (!RuntimeEnabledFeatures::LayoutNGEnabled())
     return nullptr;
+  return ForceGetFor(position);
+}
+
+const NGOffsetMapping* NGOffsetMapping::ForceGetFor(const Position& position) {
   if (!NGOffsetMapping::AcceptsPosition(position))
     return nullptr;
-  LayoutBlockFlow* context = NGInlineFormattingContextOf(position);
+  LayoutBlockFlow* context =
+      NGOffsetMapping::GetInlineFormattingContextOf(position);
   if (!context)
     return nullptr;
   return NGInlineNode::GetOffsetMapping(context);
@@ -237,7 +246,7 @@ const NGOffsetMapping* NGOffsetMapping::GetFor(
     return nullptr;
   if (!layout_object)
     return nullptr;
-  LayoutBlockFlow* context = layout_object->ContainingNGBlockFlow();
+  LayoutBlockFlow* context = layout_object->FragmentItemsContainer();
   if (!context)
     return nullptr;
   return NGInlineNode::GetOffsetMapping(context);
@@ -267,11 +276,11 @@ NGOffsetMapping::NGOffsetMapping(UnitVector&& units,
         << unit.TextContentEnd() << "<=" << text.length();
     unit.AssertValid();
   }
-  for (const auto& pair : ranges) {
+  for (const auto& pair : ranges_) {
     SECURITY_DCHECK(pair.value.first < units_.size())
         << pair.value.first << "<" << units_.size();
-    SECURITY_DCHECK(pair.value.second < units_.size())
-        << pair.value.second << "<" << units_.size();
+    SECURITY_DCHECK(pair.value.second <= units_.size())
+        << pair.value.second << "<=" << units_.size();
   }
 #endif
 }
@@ -590,6 +599,10 @@ bool NGOffsetMapping::HasBidiControlCharactersOnly(unsigned start,
       return false;
   }
   return true;
+}
+
+void NGOffsetMappingUnit::Trace(Visitor* visitor) const {
+  visitor->Trace(layout_object_);
 }
 
 }  // namespace blink

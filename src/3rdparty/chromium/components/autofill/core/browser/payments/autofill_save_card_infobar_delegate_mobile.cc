@@ -11,17 +11,17 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/branding_buildflags.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/metrics/payments/save_credit_card_prompt_metrics.h"
 #include "components/autofill/core/browser/payments/autofill_save_card_ui_utils_mobile.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
-#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
-#include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -38,7 +38,6 @@ AutofillSaveCardInfoBarDelegateMobile::AutofillSaveCardInfoBarDelegateMobile(
     AutofillClient::UploadSaveCardPromptCallback
         upload_save_card_prompt_callback,
     AutofillClient::LocalSaveCardPromptCallback local_save_card_prompt_callback,
-    PrefService* pref_service,
     const AccountInfo& displayed_target_account)
     : ConfirmInfoBarDelegate(),
       upload_(upload),
@@ -47,7 +46,6 @@ AutofillSaveCardInfoBarDelegateMobile::AutofillSaveCardInfoBarDelegateMobile(
           std::move(upload_save_card_prompt_callback)),
       local_save_card_prompt_callback_(
           std::move(local_save_card_prompt_callback)),
-      pref_service_(pref_service),
       had_user_interaction_(false),
       issuer_icon_id_(CreditCard::IconResourceId(card.network())),
       card_label_(card.CardIdentifierStringForAutofillDisplay()),
@@ -67,17 +65,18 @@ AutofillSaveCardInfoBarDelegateMobile::AutofillSaveCardInfoBarDelegateMobile(
     DCHECK(displayed_target_account_avatar_.IsEmpty());
   }
 
-  AutofillMetrics::LogCreditCardInfoBarMetric(
-      AutofillMetrics::INFOBAR_SHOWN, upload_, options_,
-      pref_service_->GetInteger(
-          prefs::kAutofillAcceptSaveCreditCardPromptState));
+  AutofillMetrics::LogCreditCardInfoBarMetric(AutofillMetrics::INFOBAR_SHOWN,
+                                              upload_, options_);
 }
 
 AutofillSaveCardInfoBarDelegateMobile::
     ~AutofillSaveCardInfoBarDelegateMobile() {
   if (!had_user_interaction_) {
-    RunSaveCardPromptCallback(AutofillClient::IGNORED,
-                              /*user_provided_details=*/{});
+    RunSaveCardPromptCallback(
+        AutofillClient::SaveCardOfferUserDecision::kIgnored,
+        /*user_provided_details=*/{});
+    LogSaveCreditCardPromptResult(SaveCreditCardPromptResult::kIgnored, upload_,
+                                  options_);
     LogUserAction(AutofillMetrics::INFOBAR_IGNORED);
   }
 }
@@ -134,7 +133,7 @@ AutofillSaveCardInfoBarDelegateMobile::GetIdentifier() const {
 
 bool AutofillSaveCardInfoBarDelegateMobile::ShouldExpire(
     const NavigationDetails& details) const {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   if (base::FeatureList::IsEnabled(
           features::kAutofillSaveCardDismissOnNavigation)) {
     // Expire the Infobar unless the navigation was triggered by the form that
@@ -144,24 +143,30 @@ bool AutofillSaveCardInfoBarDelegateMobile::ShouldExpire(
     // Use the default behavior used by Android.
     return false;
   }
-#else   // defined(OS_IOS)
+#else   // BUILDFLAG(IS_IOS)
   // The user has submitted a form, causing the page to navigate elsewhere. We
   // don't want the infobar to be expired at this point, because the user won't
   // get a chance to answer the question.
   return false;
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 }
 
 void AutofillSaveCardInfoBarDelegateMobile::InfoBarDismissed() {
-  RunSaveCardPromptCallback(AutofillClient::DECLINED,
-                            /*user_provided_details=*/{});
+  RunSaveCardPromptCallback(
+      AutofillClient::SaveCardOfferUserDecision::kDeclined,
+      /*user_provided_details=*/{});
   LogUserAction(AutofillMetrics::INFOBAR_DENIED);
+  LogSaveCreditCardPromptResult(SaveCreditCardPromptResult::kDenied, upload_,
+                                options_);
 }
 
 bool AutofillSaveCardInfoBarDelegateMobile::Cancel() {
-  RunSaveCardPromptCallback(AutofillClient::DECLINED,
-                            /*user_provided_details=*/{});
+  RunSaveCardPromptCallback(
+      AutofillClient::SaveCardOfferUserDecision::kDeclined,
+      /*user_provided_details=*/{});
   LogUserAction(AutofillMetrics::INFOBAR_DENIED);
+  LogSaveCreditCardPromptResult(SaveCreditCardPromptResult::kDenied, upload_,
+                                options_);
   return true;
 }
 
@@ -192,13 +197,22 @@ std::u16string AutofillSaveCardInfoBarDelegateMobile::GetButtonLabel(
 }
 
 bool AutofillSaveCardInfoBarDelegateMobile::Accept() {
-  RunSaveCardPromptCallback(AutofillClient::ACCEPTED,
-                            /*user_provided_details=*/{});
+  // Acceptance can be logged immediately if:
+  // 1. the user is accepting local save.
+  // 2. or when we don't need more info in order to upload.
+  if (!upload_ || (!options_.should_request_name_from_user &&
+                   !options_.should_request_expiration_date_from_user)) {
+    LogSaveCreditCardPromptResult(SaveCreditCardPromptResult::kAccepted,
+                                  upload_, options_);
+  }
+  RunSaveCardPromptCallback(
+      AutofillClient::SaveCardOfferUserDecision::kAccepted,
+      /*user_provided_details=*/{});
   LogUserAction(AutofillMetrics::INFOBAR_ACCEPTED);
   return true;
 }
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 bool AutofillSaveCardInfoBarDelegateMobile::UpdateAndAccept(
     std::u16string cardholder_name,
     std::u16string expiration_date_month,
@@ -207,11 +221,13 @@ bool AutofillSaveCardInfoBarDelegateMobile::UpdateAndAccept(
   user_provided_details.cardholder_name = cardholder_name;
   user_provided_details.expiration_date_month = expiration_date_month;
   user_provided_details.expiration_date_year = expiration_date_year;
-  RunSaveCardPromptCallback(AutofillClient::ACCEPTED, user_provided_details);
+  RunSaveCardPromptCallback(
+      AutofillClient::SaveCardOfferUserDecision::kAccepted,
+      user_provided_details);
   LogUserAction(AutofillMetrics::INFOBAR_ACCEPTED);
   return true;
 }
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 
 void AutofillSaveCardInfoBarDelegateMobile::RunSaveCardPromptCallback(
     AutofillClient::SaveCardOfferUserDecision user_decision,
@@ -228,12 +244,7 @@ void AutofillSaveCardInfoBarDelegateMobile::LogUserAction(
     AutofillMetrics::InfoBarMetric user_action) {
   DCHECK(!had_user_interaction_);
 
-  AutofillMetrics::LogCreditCardInfoBarMetric(
-      user_action, upload_, options_,
-      pref_service_->GetInteger(
-          prefs::kAutofillAcceptSaveCreditCardPromptState));
-  UpdateAutofillAcceptSaveCreditCardPromptState(
-      pref_service_, user_action == AutofillMetrics::INFOBAR_ACCEPTED);
+  AutofillMetrics::LogCreditCardInfoBarMetric(user_action, upload_, options_);
   had_user_interaction_ = true;
 }
 

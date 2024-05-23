@@ -11,10 +11,11 @@ along with a detailed description for each histogram.
 For best practices on writing histogram descriptions, see
 https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md
 
-Please send CLs to chromium-metrics-reviews@google.com rather than to specific
-individuals. These CLs will be automatically reassigned to a reviewer within
-about 5 minutes. This approach helps the metrics team to load-balance incoming
-reviews. Googlers can read more about this at go/gwsq-gerrit.
+Please follow the instructions in the OWNERS file in this directory to find a
+reviewer. If no OWNERS file exists, please consider signing up at
+go/reviewing-metrics (Googlers only), as all subdirectories are expected to
+have an OWNERS file. As a last resort you can send the CL to
+chromium-metrics-reviews@google.com.
 -->
 
 <histogram-configuration>
@@ -30,7 +31,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </variants>
 
 <histogram name="WebCore.DistillabilityUs" units="microseconds"
-    expires_after="2021-12-12">
+    expires_after="2022-08-21">
   <owner>wychen@chromium.org</owner>
   <owner>gilmanmh@google.com</owner>
   <summary>
@@ -47,7 +48,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="WebCore.Document.execCommand" enum="MappedEditingCommands"
-    expires_after="2021-12-31">
+    expires_after="2022-08-14">
   <owner>yosin@chromium.org</owner>
   <owner>kojii@chromium.org</owner>
   <summary>
@@ -57,12 +58,25 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="WebCore.Editing.Commands" enum="MappedEditingCommands"
-    expires_after="2021-12-31">
+    expires_after="2022-12-31">
   <owner>yosin@chromium.org</owner>
   <owner>kojii@chromium.org</owner>
   <summary>
     Counts the number of times each Editor::Command::execute is called. This
     doesn't count commands not supported by Blink.
+  </summary>
+</histogram>
+
+<histogram name="WebCore.FindInPage.DurationBetweenKeystrokes" units="ms"
+    expires_after="2022-08-28">
+  <owner>jarhar@chromium.org</owner>
+  <owner>vmpstr@chromium.org</owner>
+  <summary>
+    Records the amount of time between keystrokes the user made while typing a
+    search query into the find-in-page browser dialog. Reported on each Find
+    request that extends the text of the previous request. This will be used in
+    order to determine how long we should make the find-in-page scroll delay:
+    http://crbug.com/1250158
   </summary>
 </histogram>
 
@@ -76,13 +90,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
     request. Emitted when a find-in-page request is finished (it went through
     the whole document) or when it got aborted. {FindInPageRequestEndState}
   </summary>
-  <token key="FindInPageRequestEndState" variants="FindInPageRequestEndState">
-    <variant name="">
-      <obsolete>
-        Base histogram. Use suffixes of this histogram instead.
-      </obsolete>
-    </variant>
-  </token>
+  <token key="FindInPageRequestEndState" variants="FindInPageRequestEndState"/>
 </histogram>
 
 <histogram name="WebCore.FindInPage.RequestDuration{FindInPageRequestEndState}"
@@ -95,17 +103,11 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
     finished. Emitted when a find-in-page request is finished (it went through
     the whole document) or when it got aborted. {FindInPageRequestEndState}
   </summary>
-  <token key="FindInPageRequestEndState" variants="FindInPageRequestEndState">
-    <variant name="">
-      <obsolete>
-        Base histogram. Use suffixes of this histogram instead.
-      </obsolete>
-    </variant>
-  </token>
+  <token key="FindInPageRequestEndState" variants="FindInPageRequestEndState"/>
 </histogram>
 
 <histogram name="WebCore.FindInPage.TaskDuration" units="ms"
-    expires_after="2021-12-19">
+    expires_after="2022-08-28">
   <owner>rakina@chromium.org</owner>
   <owner>altimin@chromium.org</owner>
   <summary>
@@ -126,17 +128,11 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
     through the whole document) or when it got aborted.
     {FindInPageRequestEndState}
   </summary>
-  <token key="FindInPageRequestEndState" variants="FindInPageRequestEndState">
-    <variant name="">
-      <obsolete>
-        Base histogram. Use suffixes of this histogram instead.
-      </obsolete>
-    </variant>
-  </token>
+  <token key="FindInPageRequestEndState" variants="FindInPageRequestEndState"/>
 </histogram>
 
 <histogram name="WebCore.Framebust.ClickThroughPosition"
-    enum="ListItemPosition" expires_after="2021-01-30">
+    enum="ListItemPosition" expires_after="M110">
   <owner>csharrison@chromium.org</owner>
   <owner>japhet@chromium.org</owner>
   <summary>
@@ -149,7 +145,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="WebCore.Framebust.InterventionOutcome"
-    enum="FramebustInterventionOutcome" expires_after="2021-01-30">
+    enum="FramebustInterventionOutcome" expires_after="M110">
   <owner>csharrison@chromium.org</owner>
   <owner>japhet@chromium.org</owner>
   <summary>
@@ -328,19 +324,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="WebCore.IndexedDB.DestroyCorruptBackingStoreStatus"
-    enum="LevelDBStatus" expires_after="2020-10-18">
-  <obsolete>
-    Expired in 2020-10.
-  </obsolete>
-  <owner>cmumford@chromium.org</owner>
-  <owner>storage-dev@chromium.org</owner>
-  <summary>
-    Count of the results when attempting to destroy a corrupt Indexed DB backing
-    store.
-  </summary>
-</histogram>
-
 <histogram name="WebCore.IndexedDB.ErrorDuringForceCloseAborts"
     enum="LevelDBStatus" expires_after="2022-08-01">
   <owner>dmurph@chromium.org</owner>
@@ -356,7 +339,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="WebCore.IndexedDB.FoundBlobFileForValue" enum="Boolean"
-    expires_after="2022-08-01">
+    expires_after="2022-10-04">
   <owner>enne@chromium.org</owner>
   <owner>mek@chromium.org</owner>
   <owner>storage-dev@chromium.org</owner>
@@ -597,84 +580,6 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
   </summary>
 </histogram>
 
-<histogram name="WebCore.IndexedDB.SchemaV2HasBlobs" enum="Boolean"
-    expires_after="2020-09-27">
-  <obsolete>
-    Expired in 2020-09. Used for checking upgrades from SchemaV2.
-  </obsolete>
-  <owner>dmurph@chromium.org</owner>
-  <owner>pwnall@chromium.org</owner>
-  <owner>storage-dev@chromium.org</owner>
-  <summary>
-    Records if a v2 schema has blob keys in the database, which means the
-    database is corrupt. These databases will eventually be wiped as corrupt.
-    Recorded when the IndexedDB backing store for an origin is first opened,
-    which happens when a IndexedDB database connection is opened or when
-    database names are fetched. Note: The backing store stays alive for
-    subsequent connections, and sticks around for a couple seconds after the
-    last connection is closed. See WebCore.IndexedDB.SchemaV2HasBlobs.Docs for
-    the Docs-only version.
-  </summary>
-</histogram>
-
-<histogram name="WebCore.IndexedDB.SchemaV2HasBlobs.Docs" enum="Boolean"
-    expires_after="2020-10-11">
-  <obsolete>
-    Expired in 2020-10. Used for checking upgrades from SchemaV2 for docs.
-  </obsolete>
-  <owner>dmurph@chromium.org</owner>
-  <owner>pwnall@chromium.org</owner>
-  <owner>storage-dev@chromium.org</owner>
-  <summary>
-    Records if a v2 schema has blob keys in the database, which means the
-    database is corrupt. These databases will eventually be wiped as corrupt.
-    Recorded when the IndexedDB backing store for an origin is first opened,
-    which happens when a IndexedDB database connection is opened or when
-    database names are fetched. Note: The backing store stays alive for
-    subsequent connections, and sticks around for a couple seconds after the
-    last connection is closed. Only for docs.google.com. Note that these samples
-    will also be recorded in WebCore.IndexedDB.SchemaV2HasBlobs.
-  </summary>
-</histogram>
-
-<histogram name="WebCore.IndexedDB.SchemaVersion" units="version"
-    expires_after="2020-11-29">
-  <obsolete>
-    Expired in 2020-11.
-  </obsolete>
-  <owner>dmurph@chromium.org</owner>
-  <owner>pwnall@chromium.org</owner>
-  <owner>storage-dev@chromium.org</owner>
-  <summary>
-    Records the schema version of the IndexedDB database read from disk.
-    Recorded when the IndexedDB backing store for an origin is first opened,
-    which happens when a IndexedDB database connection is opened or when
-    database names are fetched. Note: The backing store stays alive for
-    subsequent connections, and sticks around for a couple seconds after the
-    last connection is closed. See WebCore.IndexedDB.SchemaVersion.Docs for the
-    Docs-only version.
-  </summary>
-</histogram>
-
-<histogram name="WebCore.IndexedDB.SchemaVersion.Docs" units="version"
-    expires_after="2020-11-29">
-  <obsolete>
-    Expired in 2020-11.
-  </obsolete>
-  <owner>dmurph@chromium.org</owner>
-  <owner>pwnall@chromium.org</owner>
-  <owner>storage-dev@chromium.org</owner>
-  <summary>
-    Records the schema version of the IndexedDB database read from disk.
-    Recorded when the IndexedDB backing store for an origin is first opened,
-    which happens when a IndexedDB database connection is opened or when
-    database names are fetched. Note: The backing store stays alive for
-    subsequent connections, and sticks around for a couple seconds after the
-    last connection is closed. Only for docs.google.com. Note that these samples
-    will also be recorded in WebCore.IndexedDB.SchemaVersion.
-  </summary>
-</histogram>
-
 <histogram name="WebCore.IndexedDB.TombstoneSweeper.DeletedTombstonesSize"
     units="bytes" expires_after="2022-08-01">
   <owner>dmurph@chromium.org</owner>
@@ -870,14 +775,14 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="WebCore.Scripts.Async.NotStreamingReason"
-    enum="NotStreamingReason" expires_after="2021-12-12">
+    enum="NotStreamingReason" expires_after="2022-02-20">
   <owner>leszeks@chromium.org</owner>
   <owner>v8-runtime@google.com</owner>
   <summary>Reason for not streaming an async script.</summary>
 </histogram>
 
 <histogram name="WebCore.Scripts.Async.StartedStreaming" enum="BooleanStreamed"
-    expires_after="2021-12-12">
+    expires_after="2022-02-20">
   <owner>leszeks@chromium.org</owner>
   <owner>v8-runtime@google.com</owner>
   <summary>Whether an async script was streamed or not.</summary>

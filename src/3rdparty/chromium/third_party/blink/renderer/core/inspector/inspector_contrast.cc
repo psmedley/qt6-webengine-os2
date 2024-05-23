@@ -145,13 +145,13 @@ void InspectorContrast::CollectNodesAndBuildRTreeIfNeeded() {
   }
 
   InspectorDOMAgent::CollectNodes(
-      document_, INT_MAX, true,
+      document_, INT_MAX, true, InspectorDOMAgent::IncludeWhitespaceEnum::NONE,
       WTF::BindRepeating(&NodeIsElementWithLayoutObject), &elements_);
   SortElementsByPaintOrder(elements_, document_);
   rtree_.Build(
       elements_,
       [](const HeapVector<Member<Node>>& items, size_t index) {
-        return PixelSnappedIntRect(
+        return ToPixelSnappedRect(
             GetNodeRect(items[static_cast<wtf_size_t>(index)]));
       },
       [](const HeapVector<Member<Node>>& items, size_t index) {
@@ -290,7 +290,7 @@ std::vector<Node*> InspectorContrast::ElementsFromRect(const PhysicalRect& rect,
                                                        Document& document) {
   CollectNodesAndBuildRTreeIfNeeded();
   std::vector<Node*> overlapping_elements;
-  rtree_.Search(PixelSnappedIntRect(rect), &overlapping_elements);
+  rtree_.Search(ToPixelSnappedRect(rect), &overlapping_elements);
   return overlapping_elements;
 }
 
@@ -380,7 +380,7 @@ bool InspectorContrast::GetColorsFromRect(PhysicalRect rect,
 void InspectorContrast::SortElementsByPaintOrder(
     HeapVector<Member<Node>>& unsorted_elements,
     Document* document) {
-  std::unique_ptr<InspectorDOMSnapshotAgent::PaintOrderMap> paint_layer_tree =
+  InspectorDOMSnapshotAgent::PaintOrderMap* paint_layer_tree =
       InspectorDOMSnapshotAgent::BuildPaintLayerTree(document);
 
   std::stable_sort(

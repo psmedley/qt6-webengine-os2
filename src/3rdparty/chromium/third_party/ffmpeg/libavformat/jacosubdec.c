@@ -28,7 +28,6 @@
 #include "avformat.h"
 #include "internal.h"
 #include "subtitles.h"
-#include "libavcodec/internal.h"
 #include "libavcodec/jacosub.h"
 #include "libavutil/avstring.h"
 #include "libavutil/bprint.h"
@@ -133,6 +132,9 @@ static int get_shift(int timeres, const char *buf)
 #define SSEP "%*1[.:]"
     int n = sscanf(buf, "%d"SSEP"%d"SSEP"%d"SSEP"%d", &a, &b, &c, &d);
 #undef SSEP
+
+    if (a == INT_MIN)
+        return 0;
 
     if (*buf == '-' || a < 0) {
         sign = -1;

@@ -9,8 +9,8 @@
 #define GrRecordingContext_DEFINED
 
 #include "include/core/SkRefCnt.h"
-#include "include/private/GrImageContext.h"
 #include "include/private/SkTArray.h"
+#include "include/private/gpu/ganesh/GrImageContext.h"
 
 #if GR_GPU_STATS && GR_TEST_UTILS
 #include <map>
@@ -28,7 +28,7 @@ class GrProxyProvider;
 class GrRecordingContextPriv;
 class GrSubRunAllocator;
 class GrSurfaceProxy;
-class GrTextBlobCache;
+class GrTextBlobRedrawCoordinator;
 class GrThreadSafeCache;
 class SkArenaAlloc;
 class SkJSONWriter;
@@ -90,7 +90,9 @@ public:
      * rendering is supported for the color type. 0 is returned if rendering to this color type
      * is not supported at all.
      */
-    SK_API int maxSurfaceSampleCountForColorType(SkColorType) const;
+    SK_API int maxSurfaceSampleCountForColorType(SkColorType colorType) const {
+        return INHERITED::maxSurfaceSampleCountForColorType(colorType);
+    }
 
     // Provides access to functions that aren't part of the public API.
     GrRecordingContextPriv priv();
@@ -182,8 +184,8 @@ protected:
     // same lifetime at the DDL itself.
     virtual void detachProgramData(SkTArray<ProgramData>*) {}
 
-    GrTextBlobCache* getTextBlobCache();
-    const GrTextBlobCache* getTextBlobCache() const;
+    GrTextBlobRedrawCoordinator* getTextBlobRedrawCoordinator();
+    const GrTextBlobRedrawCoordinator* getTextBlobRedrawCoordinator() const;
 
     GrThreadSafeCache* threadSafeCache();
     const GrThreadSafeCache* threadSafeCache() const;

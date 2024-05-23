@@ -121,7 +121,7 @@ export function makeInfoView(browserBridge) {
       const gpuInfo = browserBridge.gpuInfo;
       let i;
       if (gpuInfo) {
-        // Not using jstemplate here for blacklist status because we construct
+        // Not using jstemplate here for blocklist status because we construct
         // href from data, which jstemplate can't seem to do.
         if (gpuInfo.featureStatus) {
           this.appendFeatureInfo_(
@@ -266,7 +266,6 @@ export function makeInfoView(browserBridge) {
         'texture_sharing': 'Texture Sharing',
         'video_decode': 'Video Decode',
         'rasterization': 'Rasterization',
-        'oop_rasterization': 'Out-of-process Rasterization',
         'opengl': 'OpenGL',
         'metal': 'Metal',
         'vulkan': 'Vulkan',
@@ -277,6 +276,12 @@ export function makeInfoView(browserBridge) {
         'vpx_decode': 'VPx Video Decode',
         'webgl2': 'WebGL2',
         'skia_renderer': 'Skia Renderer',
+        'canvas_oop_rasterization': 'Canvas out-of-process rasterization',
+        'raw_draw': 'Raw Draw',
+        'video_encode': 'Video Encode',
+        'direct_rendering_display_compositor':
+            'Direct Rendering Display Compositor',
+        'webgpu': 'WebGPU',
       };
 
       const statusMap = {
@@ -315,7 +320,7 @@ export function makeInfoView(browserBridge) {
 
         const nameEl = document.createElement('span');
         if (!featureLabelMap[featureName]) {
-          console.log('Missing featureLabel for', featureName);
+          console.info('Missing featureLabel for', featureName);
         }
         nameEl.textContent = featureLabelMap[featureName] + ': ';
         featureEl.appendChild(nameEl);
@@ -323,7 +328,7 @@ export function makeInfoView(browserBridge) {
         const statusEl = document.createElement('span');
         const statusInfo = statusMap[featureStatus];
         if (!statusInfo) {
-          console.log('Missing status for ', featureStatus);
+          console.info('Missing status for ', featureStatus);
           statusEl.textContent = 'Unknown';
           statusEl.className = 'feature-red';
         } else {
@@ -578,7 +583,7 @@ export function makeInfoView(browserBridge) {
           infoEl.classList.add('feature-green');
           infoEl.textContent = infoString;
 
-          if (infoString == '[Supported Extensions]') {
+          if (infoString === '[Supported Features]') {
             inProcessingToggles = false;
           } else {
             inProcessingToggles = true;

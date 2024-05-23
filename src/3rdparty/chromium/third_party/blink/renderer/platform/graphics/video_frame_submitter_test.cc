@@ -5,11 +5,11 @@
 #include "third_party/blink/renderer/platform/graphics/video_frame_submitter.h"
 
 #include <memory>
+#include <tuple>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/test/bind.h"
@@ -113,6 +113,7 @@ class VideoMockCompositorFrameSink
   MOCK_METHOD1(DidDeleteSharedBitmap, void(const gpu::Mailbox& id));
   MOCK_METHOD1(InitializeCompositorFrameSinkType,
                void(viz::mojom::CompositorFrameSinkType));
+  MOCK_METHOD1(SetThreadIds, void(const WTF::Vector<int32_t>&));
 
  private:
   mojo::Receiver<viz::mojom::blink::CompositorFrameSink> receiver_{this};
@@ -172,7 +173,7 @@ class VideoFrameSubmitterTest : public testing::Test {
     resource_provider_ = new StrictMock<MockVideoFrameResourceProvider>(
         context_provider_.get(), nullptr);
     submitter_ = std::make_unique<VideoFrameSubmitter>(
-        base::DoNothing(), reporting_cb, viz::FrameSinkId(1, 1),
+        base::DoNothing(), reporting_cb,
         base::WrapUnique<MockVideoFrameResourceProvider>(resource_provider_));
 
     submitter_->Initialize(video_frame_provider_.get(), false);
@@ -186,7 +187,7 @@ class VideoFrameSubmitterTest : public testing::Test {
     submitter_->remote_frame_sink_.Bind(std::move(submitter_sink));
     submitter_->compositor_frame_sink_ = submitter_->remote_frame_sink_.get();
     mojo::Remote<mojom::blink::SurfaceEmbedder> embedder;
-    ignore_result(embedder.BindNewPipeAndPassReceiver());
+    std::ignore = embedder.BindNewPipeAndPassReceiver();
     submitter_->surface_embedder_ = std::move(embedder);
     auto surface_id = viz::SurfaceId(
         viz::FrameSinkId(1, 1),
@@ -686,11 +687,11 @@ TEST_F(VideoFrameSubmitterTest, WaitingForAckPreventsSubmitSingleFrame) {
 // SurfaceEmbedder isn't.
 TEST_F(VideoFrameSubmitterTest, RecreateCompositorFrameSinkAfterContextLost) {
   MockEmbeddedFrameSinkProvider mock_embedded_frame_sink_provider;
-  mojo::Receiver<mojom::blink::EmbeddedFrameSinkProvider>
-      embedded_frame_sink_provider_binding(&mock_embedded_frame_sink_provider);
+  mojo::ReceiverSet<mojom::blink::EmbeddedFrameSinkProvider>
+      embedded_frame_sink_provider_receivers;
   auto override =
       mock_embedded_frame_sink_provider.CreateScopedOverrideMojoInterface(
-          &embedded_frame_sink_provider_binding);
+          embedded_frame_sink_provider_receivers);
 
   EXPECT_CALL(*resource_provider_, Initialize(_, _));
   EXPECT_CALL(mock_embedded_frame_sink_provider, ConnectToEmbedder(_, _))
@@ -707,11 +708,11 @@ TEST_F(VideoFrameSubmitterTest, RecreateCompositorFrameSinkAfterContextLost) {
 TEST_F(VideoFrameSubmitterTest,
        RecreateCompositorFrameSinkAfterContextLostSoftwareCompositing) {
   MockEmbeddedFrameSinkProvider mock_embedded_frame_sink_provider;
-  mojo::Receiver<mojom::blink::EmbeddedFrameSinkProvider>
-      embedded_frame_sink_provider_binding(&mock_embedded_frame_sink_provider);
+  mojo::ReceiverSet<mojom::blink::EmbeddedFrameSinkProvider>
+      embedded_frame_sink_provider_receivers;
   auto override =
       mock_embedded_frame_sink_provider.CreateScopedOverrideMojoInterface(
-          &embedded_frame_sink_provider_binding);
+          embedded_frame_sink_provider_receivers);
 
   EXPECT_CALL(*resource_provider_, Initialize(_, _));
   EXPECT_CALL(mock_embedded_frame_sink_provider, ConnectToEmbedder(_, _))
@@ -931,7 +932,7 @@ TEST_F(VideoFrameSubmitterTest, PageVisibilityControlsSubmission) {
 }
 
 TEST_F(VideoFrameSubmitterTest, PreferredInterval) {
-  video_frame_provider_->preferred_interval = base::TimeDelta::FromSeconds(1);
+  video_frame_provider_->preferred_interval = base::Seconds(1);
 
   EXPECT_CALL(*sink_, SetNeedsBeginFrame(true));
 
@@ -1022,7 +1023,7 @@ TEST_F(VideoFrameSubmitterTest, ZeroSizedFramesAreNotSubmitted) {
 TEST_F(VideoFrameSubmitterTest, ProcessTimingDetails) {
   int fps = 24;
   int reports = 0;
-  base::TimeDelta frame_duration = base::TimeDelta::FromSecondsD(1.0 / fps);
+  base::TimeDelta frame_duration = base::Seconds(1.0 / fps);
   int frames_to_run =
       fps * (cc::VideoPlaybackRoughnessReporter::kMinWindowsBeforeSubmit + 1);
   WTF::HashMap<uint32_t, viz::FrameTimingDetails> timing_details;

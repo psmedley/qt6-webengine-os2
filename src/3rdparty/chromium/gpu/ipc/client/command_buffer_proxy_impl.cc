@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
@@ -141,7 +142,7 @@ ContextResult CommandBufferProxyImpl::Initialize(
 }
 
 void CommandBufferProxyImpl::OnDisconnect() {
-  base::AutoLockMaybe lock(lock_);
+  base::AutoLockMaybe lock(lock_.get());
   base::AutoLock last_state_lock(last_state_lock_);
 
   gpu::error::ContextLostReason context_lost_reason =
@@ -163,7 +164,7 @@ void CommandBufferProxyImpl::BindMediaReceiver(
 
 void CommandBufferProxyImpl::OnDestroyed(gpu::error::ContextLostReason reason,
                                          gpu::error::Error error) {
-  base::AutoLockMaybe lock(lock_);
+  base::AutoLockMaybe lock(lock_.get());
   base::AutoLock last_state_lock(last_state_lock_);
   OnGpuAsyncMessageError(reason, error);
 }
@@ -180,19 +181,19 @@ void CommandBufferProxyImpl::OnGpuSwitched(
 }
 
 void CommandBufferProxyImpl::AddDeletionObserver(DeletionObserver* observer) {
-  base::AutoLockMaybe lock(lock_);
+  base::AutoLockMaybe lock(lock_.get());
   deletion_observers_.AddObserver(observer);
 }
 
 void CommandBufferProxyImpl::RemoveDeletionObserver(
     DeletionObserver* observer) {
-  base::AutoLockMaybe lock(lock_);
+  base::AutoLockMaybe lock(lock_.get());
   deletion_observers_.RemoveObserver(observer);
 }
 
 void CommandBufferProxyImpl::OnSignalAck(uint32_t id,
                                          const CommandBuffer::State& state) {
-  base::AutoLockMaybe lock(lock_);
+  base::AutoLockMaybe lock(lock_.get());
   {
     base::AutoLock last_state_lock(last_state_lock_);
     SetStateFromMessageReply(state);
@@ -430,8 +431,7 @@ int32_t CommandBufferProxyImpl::CreateImage(ClientBuffer buffer,
       gpu_memory_buffer->GetFormat(), capabilities_))
       << gfx::BufferFormatToString(gpu_memory_buffer->GetFormat());
   DCHECK(gpu::IsImageSizeValidForGpuMemoryBufferFormat(
-      gfx::Size(width, height), gpu_memory_buffer->GetFormat(),
-      gfx::BufferPlane::DEFAULT))
+      gfx::Size(width, height), gpu_memory_buffer->GetFormat()))
       << gfx::BufferFormatToString(gpu_memory_buffer->GetFormat());
 
   auto params = mojom::CreateImageParams::New();
@@ -482,9 +482,8 @@ void CommandBufferProxyImpl::EnsureWorkVisible() {
       elapsed_timer.Elapsed().InMicroseconds());
 
   UMA_HISTOGRAM_CUSTOM_TIMES("GPU.EnsureWorkVisibleDurationLowRes",
-                             elapsed_timer.Elapsed(),
-                             base::TimeDelta::FromMilliseconds(1),
-                             base::TimeDelta::FromSeconds(5), 100);
+                             elapsed_timer.Elapsed(), base::Milliseconds(1),
+                             base::Seconds(5), 100);
 }
 
 gpu::CommandBufferNamespace CommandBufferProxyImpl::GetNamespaceID() const {
@@ -778,7 +777,7 @@ void CommandBufferProxyImpl::OnSwapBuffersCompleted(
 void CommandBufferProxyImpl::OnBufferPresented(
     uint64_t swap_id,
     const gfx::PresentationFeedback& feedback) {
-  base::AutoLockMaybe lock(lock_);
+  base::AutoLockMaybe lock(lock_.get());
   if (gpu_control_client_)
     gpu_control_client_->OnSwapBufferPresented(swap_id, feedback);
 
@@ -792,7 +791,10 @@ void CommandBufferProxyImpl::OnBufferPresented(
 void CommandBufferProxyImpl::OnGpuSyncReplyError() {
   CheckLock();
   last_state_.error = gpu::error::kLostContext;
-  last_state_.context_lost_reason = gpu::error::kInvalidGpuMessage;
+  // This error typically happens while waiting for a synchronous
+  // reply from the GPU process because the GPU process crashed.
+  // Report this as a lost GPU channel rather than invalid GPU message.
+  last_state_.context_lost_reason = gpu::error::kGpuChannelLost;
   // This method may be inside a callstack from the GpuControlClient (we got a
   // bad reply to something we are sending to the GPU process). So avoid
   // re-entering the GpuControlClient here.
@@ -847,7 +849,7 @@ void CommandBufferProxyImpl::DisconnectChannelInFreshCallStack() {
 }
 
 void CommandBufferProxyImpl::LockAndDisconnectChannel() {
-  base::AutoLockMaybe lock(lock_);
+  base::AutoLockMaybe lock(lock_.get());
   DisconnectChannel();
 }
 

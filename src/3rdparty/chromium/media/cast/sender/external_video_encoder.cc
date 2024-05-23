@@ -9,18 +9,28 @@
 #include <sstream>
 #include <utility>
 
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "base/cpu.h"                     // nogncheck
+#include "base/no_destructor.h"           // nogncheck
+#include "third_party/re2/src/re2/re2.h"  // nogncheck
+#endif
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/shared_memory_mapping.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/bitrate.h"
+#include "media/base/bitstream_buffer.h"
 #include "media/base/media_switches.h"
+#include "media/base/media_util.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_types.h"
 #include "media/base/video_util.h"
@@ -28,7 +38,7 @@
 #include "media/cast/common/rtp_time.h"
 #include "media/cast/logging/logging_defines.h"
 #include "media/cast/net/cast_transport_config.h"
-#include "media/cast/sender/vp8_quantizer_parser.h"
+#include "media/cast/sender/vpx_quantizer_parser.h"
 #include "media/video/h264_parser.h"
 
 namespace {
@@ -56,10 +66,65 @@ constexpr int kBacklogRedlineThreshold = 4;
 // histograms must encompass the range [-255, 255] (inclusive).
 constexpr int kQuantizationHistogramSize = 511;
 
+// Scan profiles for hardware VP8 encoder support.
+bool IsHardwareVP8EncodingSupported(
+    base::StringPiece receiver_model_name,
+    const std::vector<media::VideoEncodeAccelerator::SupportedProfile>&
+        profiles) {
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // NOTE: the hardware encoder on some Chrome OS devices does not play well
+  // with Vizio TVs. See https://crbug.com/1238774 for more information.
+  // Vizio uses the TV model string for the receiver model name.
+  const char* kVizioRegex =
+      R"(^(?i)(([DEMPV]|OLED)\d\d\w*-[A-Z]\w*)|(.*Vizio.*)$)";
+
+  if (RE2::FullMatch(re2::StringPiece(receiver_model_name.data(),
+                                      receiver_model_name.size()),
+                     RE2(kVizioRegex))) {
+    return false;
+  }
+#endif
+
+  for (const auto& vea_profile : profiles) {
+    if (vea_profile.profile >= media::VP8PROFILE_MIN &&
+        vea_profile.profile <= media::VP8PROFILE_MAX) {
+      return true;
+    }
+  }
+
+  return false;
 }  // namespace
 
-namespace media {
-namespace cast {
+// Scan profiles for hardware H.264 encoder support.
+bool IsHardwareH264EncodingSupported(
+    const std::vector<media::VideoEncodeAccelerator::SupportedProfile>&
+        profiles) {
+// TODO(b/169533953): Look into chromecast fails to decode bitstreams produced
+// by the AMD HW encoder.
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  static const base::NoDestructor<base::CPU> cpuid;
+  static const bool is_amd = cpuid->vendor_name() == "AuthenticAMD";
+  if (is_amd)
+    return false;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+
+// TODO(crbug.com/1015482): Look into why H.264 hardware encoder on MacOS is
+// broken.
+// TODO(crbug.com/1015482): Look into HW encoder initialization issues on Win.
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_WIN)
+  for (const auto& vea_profile : profiles) {
+    if (vea_profile.profile >= media::H264PROFILE_MIN &&
+        vea_profile.profile <= media::H264PROFILE_MAX) {
+      return true;
+    }
+  }
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_WIN)
+  return false;
+}
+
+}  // namespace
+
+namespace media::cast {
 
 // Container for the associated data of a video frame being processed.
 struct InProgressExternalVideoFrameEncode {
@@ -119,6 +184,9 @@ class ExternalVideoEncoder::VEAClientImpl final
         requested_bit_rate_(-1),
         allocate_input_buffer_in_progress_(false) {}
 
+  VEAClientImpl(const VEAClientImpl&) = delete;
+  VEAClientImpl& operator=(const VEAClientImpl&) = delete;
+
   base::SingleThreadTaskRunner* task_runner() const {
     return task_runner_.get();
   }
@@ -130,10 +198,14 @@ class ExternalVideoEncoder::VEAClientImpl final
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
     requested_bit_rate_ = start_bit_rate;
+    // TODO(crbug.com/1289909): remove this cast if media/cast migrates to
+    // uint32_t bitrates
+    const media::Bitrate bitrate = media::Bitrate::ConstantBitrate(
+        base::saturated_cast<uint32_t>(start_bit_rate));
     const media::VideoEncodeAccelerator::Config config(
-        media::PIXEL_FORMAT_I420, frame_size, codec_profile,
-        media::Bitrate::ConstantBitrate(start_bit_rate));
-    encoder_active_ = video_encode_accelerator_->Initialize(config, this);
+        media::PIXEL_FORMAT_I420, frame_size, codec_profile, bitrate);
+    encoder_active_ = video_encode_accelerator_->Initialize(
+        config, this, std::make_unique<media::NullMediaLog>());
     next_frame_id_ = first_frame_id;
     codec_profile_ = codec_profile;
 
@@ -152,8 +224,10 @@ class ExternalVideoEncoder::VEAClientImpl final
 
     requested_bit_rate_ = bit_rate;
     if (encoder_active_) {
+      // TODO(crbug.com/1289909): remove this cast if media/cast migrates to
+      // uint32_t bitrates
       video_encode_accelerator_->RequestEncodingParametersChange(
-          Bitrate::ConstantBitrate(bit_rate),
+          Bitrate::ConstantBitrate(base::saturated_cast<uint32_t>(bit_rate)),
           static_cast<uint32_t>(max_frame_rate_ + 0.5));
     }
   }
@@ -253,8 +327,9 @@ class ExternalVideoEncoder::VEAClientImpl final
         CastEnvironment::MAIN, FROM_HERE,
         base::BindOnce(status_change_cb_, STATUS_CODEC_RUNTIME_ERROR));
 
-    // TODO(crbug.com/1199930): Force-flush all |in_progress_frame_encodes_|
-    // immediately so pending frames do not become stuck, freezing VideoSender.
+    // Flush all in progress frames to avoid any getting stuck.
+    while (!in_progress_frame_encodes_.empty())
+      AbortLatestEncodeAttemptDueToErrors();
   }
 
   void AllocateInputBuffer(size_t size) {
@@ -368,7 +443,7 @@ class ExternalVideoEncoder::VEAClientImpl final
       base::TimeDelta frame_duration =
           request.video_frame->metadata().frame_duration.value_or(
               base::TimeDelta());
-      if (frame_duration > base::TimeDelta()) {
+      if (frame_duration.is_positive()) {
         // Compute encoder utilization in terms of the number of frames in
         // backlog, including the current frame encode that is finishing
         // here. This "backlog" model works as follows: First, assume that all
@@ -397,7 +472,7 @@ class ExternalVideoEncoder::VEAClientImpl final
         // and all the following delta frames.
         if (metadata.key_frame || key_frame_quantizer_parsable_) {
           if (codec_profile_ == media::VP8PROFILE_ANY) {
-            quantizer = ParseVp8HeaderQuantizer(
+            quantizer = ParseVpxHeaderQuantizer(
                 reinterpret_cast<const uint8_t*>(encoded_frame->data.data()),
                 encoded_frame->data.size());
           } else if (codec_profile_ == media::H264PROFILE_MAIN) {
@@ -608,8 +683,6 @@ class ExternalVideoEncoder::VEAClientImpl final
   // Set to true when the allocation of an input buffer is in progress, and
   // reset to false after the allocated buffer is received.
   bool allocate_input_buffer_in_progress_;
-
-  DISALLOW_COPY_AND_ASSIGN(VEAClientImpl);
 };
 
 // static
@@ -620,6 +693,21 @@ bool ExternalVideoEncoder::IsSupported(const FrameSenderConfig& video_config) {
 
   // We assume that the system provides a hardware encoder at this point.
   return video_config.use_external_encoder;
+}
+
+// static
+bool ExternalVideoEncoder::IsRecommended(
+    Codec codec,
+    base::StringPiece receiver_model_name,
+    const std::vector<media::VideoEncodeAccelerator::SupportedProfile>&
+        profiles) {
+  if (codec == CODEC_VIDEO_VP8)
+    return IsHardwareVP8EncodingSupported(receiver_model_name, profiles);
+
+  if (codec == CODEC_VIDEO_H264)
+    return IsHardwareH264EncodingSupported(profiles);
+
+  return false;
 }
 
 ExternalVideoEncoder::ExternalVideoEncoder(
@@ -727,7 +815,7 @@ void ExternalVideoEncoder::OnCreateVideoEncodeAccelerator(
       break;
     case CODEC_VIDEO_FAKE:
       NOTREACHED() << "Fake software video encoder cannot be external";
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       cast_environment_->PostTask(
           CastEnvironment::MAIN, FROM_HERE,
@@ -936,5 +1024,4 @@ double QuantizerEstimator::ToQuantizerEstimate(double shannon_entropy) {
   return quantizer;
 }
 
-}  //  namespace cast
-}  //  namespace media
+}  //  namespace media::cast

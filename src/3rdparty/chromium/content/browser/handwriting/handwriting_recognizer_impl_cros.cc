@@ -10,15 +10,59 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/handwriting/handwriting.mojom.h"
 
 namespace {
 // Supported language tags. At the moment, CrOS only ships two models.
 static constexpr char kLanguageTagEnglish[] = "en";
 static constexpr char kLanguageTagGesture[] = "zxx-x-Gesture";
+
+// Supported model identifiers. This is passed to mlservice.
+static constexpr char kModelEn[] = "en";
+static constexpr char kModelGesture[] = "gesture_in_context";
+
+// Model descriptors.
+handwriting::mojom::QueryHandwritingRecognizerResultPtr
+CreateEnglishModelDescriptor() {
+  auto desc = handwriting::mojom::QueryHandwritingRecognizerResult::New();
+  desc->text_alternatives = true;
+  desc->text_segmentation = true;
+  desc->hints = handwriting::mojom::HandwritingHintsQueryResult::New();
+  desc->hints->alternatives = true;
+  desc->hints->text_context = true;
+  desc->hints->recognition_type = {
+      handwriting::mojom::HandwritingRecognitionType::kText};
+  desc->hints->input_type = {
+      handwriting::mojom::HandwritingInputType::kMouse,
+      handwriting::mojom::HandwritingInputType::kStylus,
+      handwriting::mojom::HandwritingInputType::kTouch,
+  };
+
+  return desc;
+}
+
+handwriting::mojom::QueryHandwritingRecognizerResultPtr
+CreateGestureModelDescriptor() {
+  auto desc = handwriting::mojom::QueryHandwritingRecognizerResult::New();
+  desc->text_alternatives = true;
+  desc->text_segmentation = false;
+  desc->hints = handwriting::mojom::HandwritingHintsQueryResult::New();
+  desc->hints->alternatives = true;
+  desc->hints->text_context = true;
+  desc->hints->recognition_type = {
+      handwriting::mojom::HandwritingRecognitionType::kText};
+  desc->hints->input_type = {
+      handwriting::mojom::HandwritingInputType::kMouse,
+      handwriting::mojom::HandwritingInputType::kStylus,
+      handwriting::mojom::HandwritingInputType::kTouch,
+  };
+  return desc;
+}
 
 // Returns whether the two language tags are semantically the same.
 // TODO(https://crbug.com/1166910): We may need a better language tag matching
@@ -32,10 +76,10 @@ bool LanguageTagsAreMatching(base::StringPiece a, base::StringPiece b) {
 // ml_service backend. Returns absl::nullopt if language_tag isn't supported.
 absl::optional<std::string> GetModelIdentifier(base::StringPiece language_tag) {
   if (LanguageTagsAreMatching(language_tag, kLanguageTagEnglish))
-    return "en";
+    return kModelEn;
 
   if (LanguageTagsAreMatching(language_tag, kLanguageTagGesture))
-    return "gesture_in_context";
+    return kModelGesture;
 
   return absl::nullopt;
 }
@@ -45,6 +89,7 @@ absl::optional<std::string> GetModelIdentifier(base::StringPiece language_tag) {
 namespace content {
 
 namespace {
+using chromeos::machine_learning::mojom::LoadHandwritingModelResult;
 
 // The callback for `mojom::MachineLearningService::LoadHandwritingModel`
 // (CrOS).
@@ -52,16 +97,40 @@ void OnModelBinding(
     mojo::PendingRemote<handwriting::mojom::HandwritingRecognizer> remote,
     handwriting::mojom::HandwritingRecognitionService::
         CreateHandwritingRecognizerCallback callback,
-    chromeos::machine_learning::mojom::LoadHandwritingModelResult result) {
-  if (result ==
-      chromeos::machine_learning::mojom::LoadHandwritingModelResult::OK) {
+    LoadHandwritingModelResult result) {
+  if (result == LoadHandwritingModelResult::OK) {
     std::move(callback).Run(
         handwriting::mojom::CreateHandwritingRecognizerResult::kOk,
         std::move(remote));
-  } else {
-    std::move(callback).Run(
-        handwriting::mojom::CreateHandwritingRecognizerResult::kError,
-        mojo::NullRemote());
+    return;
+  }
+  switch (result) {
+    case LoadHandwritingModelResult::OK:
+      // Handled above.
+      NOTREACHED();
+      break;
+    case LoadHandwritingModelResult::FEATURE_NOT_SUPPORTED_ERROR:
+    case LoadHandwritingModelResult::LANGUAGE_NOT_SUPPORTED_ERROR:
+    case LoadHandwritingModelResult::FEATURE_DISABLED_BY_USER:
+    case LoadHandwritingModelResult::DLC_DOES_NOT_EXIST:
+      // Report as NotSupported if MLService indicates the model isn't
+      // available, or user doesn't want to use handwriting recognition.
+      std::move(callback).Run(
+          handwriting::mojom::CreateHandwritingRecognizerResult::kNotSupported,
+          mojo::NullRemote());
+      return;
+    case LoadHandwritingModelResult::DLC_GET_PATH_ERROR:
+    case LoadHandwritingModelResult::DLC_INSTALL_ERROR:
+    case LoadHandwritingModelResult::LOAD_NATIVE_LIB_ERROR:
+    case LoadHandwritingModelResult::LOAD_FUNC_PTR_ERROR:
+    case LoadHandwritingModelResult::LOAD_MODEL_FILES_ERROR:
+    case LoadHandwritingModelResult::LOAD_MODEL_ERROR:
+    case LoadHandwritingModelResult::DEPRECATED_MODEL_SPEC_ERROR:
+      // Report as error otherwise.
+      std::move(callback).Run(
+          handwriting::mojom::CreateHandwritingRecognizerResult::kError,
+          mojo::NullRemote());
+      return;
   }
 }
 
@@ -112,7 +181,7 @@ void CrOSHandwritingRecognizerImpl::Create(
   // On CrOS, only one language is supported.
   if (constraint_blink->languages.size() != 1) {
     std::move(callback).Run(
-        handwriting::mojom::CreateHandwritingRecognizerResult::kError,
+        handwriting::mojom::CreateHandwritingRecognizerResult::kNotSupported,
         mojo::NullRemote());
     return;
   }
@@ -193,6 +262,32 @@ void CrOSHandwritingRecognizerImpl::GetPrediction(
   remote_cros_->GetPrediction(
       std::move(strokes_ml), std::move(hints_ml),
       base::BindOnce(&OnRecognitionResult, std::move(callback)));
+}
+
+// static
+handwriting::mojom::QueryHandwritingRecognizerResultPtr
+CrOSHandwritingRecognizerImpl::GetModelDescriptor(
+    handwriting::mojom::HandwritingModelConstraintPtr constraint) {
+  if (!constraint) {
+    // CrOS doesn't provide a default recognizer.
+    return nullptr;
+  }
+
+  if (constraint->languages.size() != 1) {
+    // CrOS only supports single language recognizers.
+    return nullptr;
+  }
+
+  // TODO(https://crbug.com/1231900): Integrate with language packs instead of
+  // returning hard-coded values.
+  const auto& model_identifier = GetModelIdentifier(constraint->languages[0]);
+  if (model_identifier == kModelEn) {
+    return CreateEnglishModelDescriptor();
+  } else if (model_identifier == kModelGesture) {
+    return CreateGestureModelDescriptor();
+  } else {
+    return nullptr;
+  }
 }
 
 }  // namespace content

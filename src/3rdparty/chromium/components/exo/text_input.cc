@@ -5,8 +5,10 @@
 #include "components/exo/text_input.h"
 
 #include <algorithm>
+#include <utility>
 
-#include "ash/keyboard/ui/keyboard_ui_controller.h"
+#include "base/check.h"
+#include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "components/exo/shell_surface_util.h"
 #include "components/exo/surface.h"
@@ -16,6 +18,7 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/utf_offset.h"
+#include "ui/base/ime/virtual_keyboard_controller.h"
 #include "ui/events/event.h"
 
 namespace exo {
@@ -28,29 +31,34 @@ ui::InputMethod* GetInputMethod(aura::Window* window) {
   return window->GetHost()->GetInputMethod();
 }
 
+ui::CompositionText GenerateCompositionTextFrom(
+    const std::u16string& surrounding_text,
+    const gfx::Range& composition_range,
+    const std::vector<ui::ImeTextSpan>& ui_ime_text_spans) {
+  ui::CompositionText composition;
+  composition.text = surrounding_text.substr(composition_range.GetMin(),
+                                             composition_range.length());
+  composition.ime_text_spans = ui_ime_text_spans;
+  return composition;
+}
+
 }  // namespace
 
 TextInput::TextInput(std::unique_ptr<Delegate> delegate)
     : delegate_(std::move(delegate)) {}
 
 TextInput::~TextInput() {
-  if (keyboard_ui_controller_)
-    keyboard_ui_controller_->RemoveObserver(this);
   if (input_method_)
     Deactivate();
 }
 
 void TextInput::Activate(Surface* surface) {
-  DLOG_IF(ERROR, window_) << "Already activated with " << window_;
   DCHECK(surface);
-
-  window_ = surface->window();
-  AttachInputMethod();
+  AttachInputMethod(surface->window());
 }
 
 void TextInput::Deactivate() {
   DetachInputMethod();
-  window_ = nullptr;
 }
 
 void TextInput::ShowVirtualKeyboardIfEnabled() {
@@ -59,12 +67,12 @@ void TextInput::ShowVirtualKeyboardIfEnabled() {
     pending_vk_visible_ = true;
     return;
   }
-  input_method_->ShowVirtualKeyboardIfEnabled();
+  input_method_->SetVirtualKeyboardVisibilityIfEnabled(true);
 }
 
 void TextInput::HideVirtualKeyboard() {
-  if (keyboard_ui_controller_)
-    keyboard_ui_controller_->HideKeyboardByUser();
+  if (input_method_)
+    input_method_->SetVirtualKeyboardVisibilityIfEnabled(false);
   pending_vk_visible_ = false;
 }
 
@@ -74,20 +82,20 @@ void TextInput::Resync() {
 }
 
 void TextInput::Reset() {
-  composition_ = ui::CompositionText();
+  ResetCompositionTextCache();
   if (input_method_)
     input_method_->CancelComposition(this);
 }
 
 void TextInput::SetSurroundingText(const std::u16string& text,
-                                   uint32_t cursor_pos,
-                                   uint32_t anchor) {
+                                   const gfx::Range& cursor_pos) {
   surrounding_text_ = text;
-  cursor_pos_ = gfx::Range(cursor_pos);
-  if (anchor < cursor_pos)
-    cursor_pos_->set_start(anchor);
-  else
-    cursor_pos_->set_end(anchor);
+  cursor_pos_ = cursor_pos;
+
+  // TODO(b/206068262): Consider introducing an API to notify surrounding text
+  // update explicitly.
+  if (input_method_)
+    input_method_->OnCaretBoundsChanged(this);
 }
 
 void TextInput::SetTypeModeFlags(ui::TextInputType type,
@@ -116,6 +124,17 @@ void TextInput::SetCaretBounds(const gfx::Rect& bounds) {
 
 void TextInput::SetCompositionText(const ui::CompositionText& composition) {
   composition_ = composition;
+  // Identify the starting index of the current composition. If a composition
+  // range has been set previously, then use it's starting index, otherwise
+  // use the current cursor position as the start of the composition. If the
+  // user has a selection, then we can assume the min value of the cursor_pos
+  // range as the start of the composition, as the selection will be replaced
+  // by the composition text being set.
+  uint32_t composition_start = composition_range_.IsValid()
+                                   ? composition_range_.GetMin()
+                                   : cursor_pos_.GetMin();
+  composition_range_ = gfx::Range(composition_start,
+                                  composition_start + composition.text.size());
   delegate_->SetCompositionText(composition);
 }
 
@@ -128,14 +147,14 @@ uint32_t TextInput::ConfirmCompositionText(bool keep_selection) {
   const uint32_t composition_text_length =
       static_cast<uint32_t>(composition_.text.length());
   delegate_->Commit(composition_.text);
-  composition_ = ui::CompositionText();
+  ResetCompositionTextCache();
   return composition_text_length;
 }
 
 void TextInput::ClearCompositionText() {
   if (composition_.text.empty())
     return;
-  composition_ = ui::CompositionText();
+  ResetCompositionTextCache();
   delegate_->SetCompositionText(composition_);
 }
 
@@ -143,16 +162,10 @@ void TextInput::InsertText(const std::u16string& text,
                            InsertTextCursorBehavior cursor_behavior) {
   // TODO(crbug.com/1155331): Handle |cursor_behavior| correctly.
   delegate_->Commit(text);
+  ResetCompositionTextCache();
 }
 
 void TextInput::InsertChar(const ui::KeyEvent& event) {
-  char16_t ch = event.GetCharacter();
-  if (u_isprint(ch)) {
-    InsertText(
-        std::u16string(1, ch),
-        ui::TextInputClient::InsertTextCursorBehavior::kMoveCursorAfterText);
-    return;
-  }
   // TextInput is currently used only for Lacros, and this is the
   // short term workaround not to duplicate KeyEvent there.
   // This is what we do for ARC, which is being removed in the near
@@ -207,58 +220,42 @@ ui::TextInputClient::FocusReason TextInput::GetFocusReason() const {
 }
 
 bool TextInput::GetTextRange(gfx::Range* range) const {
-  if (!cursor_pos_)
+  if (!cursor_pos_.IsValid())
     return false;
   range->set_start(0);
-  if (composition_.text.empty()) {
-    range->set_end(surrounding_text_.size());
-  } else {
-    range->set_end(surrounding_text_.size() - cursor_pos_->length() +
-                   composition_.text.size());
-  }
+  range->set_end(surrounding_text_.size());
   return true;
 }
 
 bool TextInput::GetCompositionTextRange(gfx::Range* range) const {
-  if (!cursor_pos_ || composition_.text.empty())
-    return false;
+  DCHECK(range);
+  if (composition_range_.IsValid()) {
+    *range = composition_range_;
+    return true;
+  }
 
-  range->set_start(cursor_pos_->start());
-  range->set_end(cursor_pos_->start() + composition_.text.size());
-  return true;
+  return false;
 }
 
 bool TextInput::GetEditableSelectionRange(gfx::Range* range) const {
-  if (!cursor_pos_)
+  if (!cursor_pos_.IsValid())
     return false;
-  range->set_start(cursor_pos_->start());
-  range->set_end(cursor_pos_->end());
+  range->set_start(cursor_pos_.start());
+  range->set_end(cursor_pos_.end());
   return true;
 }
 
 bool TextInput::SetEditableSelectionRange(const gfx::Range& range) {
   if (surrounding_text_.size() < range.GetMax())
     return false;
-  auto start = ui::Utf8OffsetFromUtf16Offset(surrounding_text_, range.start());
-  if (!start)
-    return false;
-  auto end = ui::Utf8OffsetFromUtf16Offset(surrounding_text_, range.end());
-  if (!end)
-    return false;
-  delegate_->SetCursor(gfx::Range(*start, *end));
+  delegate_->SetCursor(surrounding_text_, range);
   return true;
 }
 
 bool TextInput::DeleteRange(const gfx::Range& range) {
   if (surrounding_text_.size() < range.GetMax())
     return false;
-  auto start = ui::Utf8OffsetFromUtf16Offset(surrounding_text_, range.start());
-  if (!start)
-    return false;
-  auto end = ui::Utf8OffsetFromUtf16Offset(surrounding_text_, range.end());
-  if (!end)
-    return false;
-  delegate_->DeleteSurroundingText(gfx::Range(*start, *end));
+  delegate_->DeleteSurroundingText(surrounding_text_, range);
   return true;
 }
 
@@ -267,34 +264,7 @@ bool TextInput::GetTextFromRange(const gfx::Range& range,
   gfx::Range text_range;
   if (!GetTextRange(&text_range) || !text_range.Contains(range))
     return false;
-  if (composition_.text.empty() || range.GetMax() <= cursor_pos_->GetMin()) {
-    text->assign(surrounding_text_, range.GetMin(), range.length());
-    return true;
-  }
-  size_t composition_end = cursor_pos_->GetMin() + composition_.text.size();
-  if (range.GetMin() >= composition_end) {
-    size_t start =
-        range.GetMin() - composition_.text.size() + cursor_pos_->length();
-    text->assign(surrounding_text_, start, range.length());
-    return true;
-  }
-
-  size_t start_in_composition = 0;
-  if (range.GetMin() <= cursor_pos_->GetMin()) {
-    text->assign(surrounding_text_, range.GetMin(),
-                 cursor_pos_->GetMin() - range.GetMin());
-  } else {
-    start_in_composition = range.GetMin() - cursor_pos_->GetMin();
-  }
-  if (range.GetMax() <= composition_end) {
-    text->append(composition_.text, start_in_composition,
-                 range.GetMax() - cursor_pos_->GetMin() - start_in_composition);
-  } else {
-    text->append(composition_.text, start_in_composition,
-                 composition_.text.size() - start_in_composition);
-    text->append(surrounding_text_, cursor_pos_->GetMax(),
-                 range.GetMax() - composition_end);
-  }
+  text->assign(surrounding_text_.substr(range.GetMin(), range.length()));
   return true;
 }
 
@@ -303,7 +273,11 @@ void TextInput::OnInputMethodChanged() {
   if (input_method == input_method_)
     return;
   input_method_->DetachTextInputClient(this);
+  if (auto* controller = input_method_->GetVirtualKeyboardController())
+    controller->RemoveObserver(this);
   input_method_ = input_method;
+  if (auto* controller = input_method_->GetVirtualKeyboardController())
+    controller->AddObserver(this);
   input_method_->SetFocusedTextInputClient(this);
 }
 
@@ -317,20 +291,14 @@ bool TextInput::ChangeTextDirectionAndLayoutAlignment(
 }
 
 void TextInput::ExtendSelectionAndDelete(size_t before, size_t after) {
-  if (!cursor_pos_)
+  if (!cursor_pos_.IsValid())
     return;
   size_t utf16_start =
-      (cursor_pos_->GetMin() < before) ? 0 : (cursor_pos_->GetMin() - before);
+      std::max(static_cast<size_t>(cursor_pos_.GetMin()), before) - before;
   size_t utf16_end =
-      std::min(cursor_pos_->GetMax() + after, surrounding_text_.size());
-  auto start = ui::Utf8OffsetFromUtf16Offset(surrounding_text_, utf16_start);
-  if (!start)
-    return;
-  auto end = ui::Utf8OffsetFromUtf16Offset(surrounding_text_, utf16_end);
-  if (!end)
-    return;
-
-  delegate_->DeleteSurroundingText(gfx::Range(*start, *end));
+      std::min(cursor_pos_.GetMax() + after, surrounding_text_.size());
+  delegate_->DeleteSurroundingText(surrounding_text_,
+                                   gfx::Range(utf16_start, utf16_end));
 }
 
 void TextInput::EnsureCaretNotInRect(const gfx::Rect& rect) {}
@@ -354,9 +322,24 @@ bool TextInput::ShouldDoLearning() {
 bool TextInput::SetCompositionFromExistingText(
     const gfx::Range& range,
     const std::vector<ui::ImeTextSpan>& ui_ime_text_spans) {
-  // TODO(https://crbug.com/952757): Implement this method.
-  NOTIMPLEMENTED_LOG_ONCE();
-  return false;
+  if (!cursor_pos_.IsValid())
+    return false;
+  if (surrounding_text_.size() < range.GetMax())
+    return false;
+
+  const auto composition_length = range.length();
+  for (const auto& span : ui_ime_text_spans) {
+    if (composition_length < std::max(span.start_offset, span.end_offset))
+      return false;
+  }
+
+  composition_ =
+      GenerateCompositionTextFrom(surrounding_text_, range, ui_ime_text_spans);
+  composition_range_.set_start(range.GetMin());
+  composition_range_.set_end(range.GetMax());
+  delegate_->SetCompositionFromExistingText(surrounding_text_, cursor_pos_,
+                                            range, ui_ime_text_spans);
+  return true;
 }
 
 gfx::Range TextInput::GetAutocorrectRange() const {
@@ -397,36 +380,46 @@ bool TextInput::AddGrammarFragments(
   return false;
 }
 
-void TextInput::OnKeyboardVisibilityChanged(bool is_visible) {
-  delegate_->OnVirtualKeyboardVisibilityChanged(is_visible);
+void GetActiveTextInputControlLayoutBounds(
+    absl::optional<gfx::Rect>* control_bounds,
+    absl::optional<gfx::Rect>* selection_bounds) {
+  NOTIMPLEMENTED_LOG_ONCE();
 }
 
-void TextInput::AttachInputMethod() {
+void TextInput::OnKeyboardVisible(const gfx::Rect& keyboard_rect) {
+  delegate_->OnVirtualKeyboardVisibilityChanged(true);
+}
+
+void TextInput::OnKeyboardHidden() {
+  delegate_->OnVirtualKeyboardVisibilityChanged(false);
+}
+
+void TextInput::AttachInputMethod(aura::Window* window) {
+  DCHECK(window);
+
+  if (window_) {
+    if (window == window_)
+      return;
+    DetachInputMethod();
+  }
   DCHECK(!input_method_);
 
-  ui::InputMethod* input_method = GetInputMethod(window_);
-  if (!input_method) {
+  window_ = window;
+  input_method_ = GetInputMethod(window_);
+  if (!input_method_) {
     LOG(ERROR) << "input method not found";
     return;
   }
 
   input_mode_ = ui::TEXT_INPUT_MODE_TEXT;
   input_type_ = ui::TEXT_INPUT_TYPE_TEXT;
-  input_method_ = input_method;
+  if (auto* controller = input_method_->GetVirtualKeyboardController())
+    controller->AddObserver(this);
   input_method_->SetFocusedTextInputClient(this);
   delegate_->Activated();
 
-  if (!keyboard_ui_controller_ &&
-      keyboard::KeyboardUIController::HasInstance()) {
-    auto* keyboard_ui_controller = keyboard::KeyboardUIController::Get();
-    if (keyboard_ui_controller->IsEnabled()) {
-      keyboard_ui_controller_ = keyboard_ui_controller;
-      keyboard_ui_controller_->AddObserver(this);
-    }
-  }
-
   if (pending_vk_visible_) {
-    input_method_->ShowVirtualKeyboardIfEnabled();
+    input_method_->SetVirtualKeyboardVisibilityIfEnabled(true);
     pending_vk_visible_ = false;
   }
 }
@@ -439,8 +432,16 @@ void TextInput::DetachInputMethod() {
   input_mode_ = ui::TEXT_INPUT_MODE_DEFAULT;
   input_type_ = ui::TEXT_INPUT_TYPE_NONE;
   input_method_->DetachTextInputClient(this);
+  if (auto* controller = input_method_->GetVirtualKeyboardController())
+    controller->RemoveObserver(this);
   input_method_ = nullptr;
+  window_ = nullptr;
   delegate_->Deactivated();
+}
+
+void TextInput::ResetCompositionTextCache() {
+  composition_ = ui::CompositionText();
+  composition_range_ = gfx::Range::InvalidRange();
 }
 
 }  // namespace exo

@@ -22,14 +22,13 @@ limitations under the License.
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include "tensorflow/lite/testing/util.h"
 
 namespace tflite {
 namespace profiling {
 namespace {
 
 double GetDurationOfEventMs(const ProfileEvent* event) {
-  return (event->end_timestamp_us - event->begin_timestamp_us) / 1e3;
+  return (event->elapsed_time) / 1e3;
 }
 
 void SleepForQuarterSecond(tflite::Profiler* profiler) {
@@ -61,7 +60,7 @@ TEST(ProfilerTest, NoProfilesAreCollectedWhenEventTypeUnsupported) {
   tflite::Profiler* p = &profiler;
   p->AddEvent("Hello",
               Profiler::EventType::GENERAL_RUNTIME_INSTRUMENTATION_EVENT,
-              /*start*/ 0, /*end*/ 1,
+              /*elaped_time*/ 1,
               /*event_metadata*/ 2);
   auto handler = p->BeginEvent(
       "begin", Profiler::EventType::GENERAL_RUNTIME_INSTRUMENTATION_EVENT, 0);
@@ -136,9 +135,3 @@ TEST(ProfilingTest, NoopProfiler) {
 }  // namespace
 }  // namespace profiling
 }  // namespace tflite
-
-int main(int argc, char** argv) {
-  ::tflite::LogToStderr();
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}

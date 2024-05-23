@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/common/content_export.h"
@@ -41,9 +41,15 @@ class CONTENT_EXPORT BlinkNotificationServiceImpl
       PlatformNotificationContextImpl* notification_context,
       BrowserContext* browser_context,
       scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
+      RenderProcessHost* render_process_host,
       const url::Origin& origin,
       const GURL& document_url,
       mojo::PendingReceiver<blink::mojom::NotificationService> receiver);
+
+  BlinkNotificationServiceImpl(const BlinkNotificationServiceImpl&) = delete;
+  BlinkNotificationServiceImpl& operator=(const BlinkNotificationServiceImpl&) =
+      delete;
+
   ~BlinkNotificationServiceImpl() override;
 
   // blink::mojom::NotificationService implementation.
@@ -94,11 +100,13 @@ class CONTENT_EXPORT BlinkNotificationServiceImpl
       const std::vector<NotificationDatabaseData>& notifications);
 
   // The notification context that owns this service instance.
-  PlatformNotificationContextImpl* notification_context_;
+  raw_ptr<PlatformNotificationContextImpl> notification_context_;
 
-  BrowserContext* browser_context_;
+  raw_ptr<BrowserContext> browser_context_;
 
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
+
+  int render_process_host_id_;
 
   // The origin that this notification service is communicating with.
   url::Origin origin_;
@@ -110,8 +118,6 @@ class CONTENT_EXPORT BlinkNotificationServiceImpl
 
   base::WeakPtrFactory<BlinkNotificationServiceImpl> weak_factory_for_io_{this};
   base::WeakPtrFactory<BlinkNotificationServiceImpl> weak_factory_for_ui_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BlinkNotificationServiceImpl);
 };
 
 }  // namespace content

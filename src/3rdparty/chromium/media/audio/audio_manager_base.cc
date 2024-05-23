@@ -9,11 +9,11 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/observer_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
@@ -88,15 +88,16 @@ struct AudioManagerBase::DispatcherParams {
       : input_params(input),
         output_params(output),
         output_device_id(output_device_id) {}
+
+  DispatcherParams(const DispatcherParams&) = delete;
+  DispatcherParams& operator=(const DispatcherParams&) = delete;
+
   ~DispatcherParams() = default;
 
   const AudioParameters input_params;
   const AudioParameters output_params;
   const std::string output_device_id;
   std::unique_ptr<AudioOutputDispatcher> dispatcher;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DispatcherParams);
 };
 
 class AudioManagerBase::CompareByParams {
@@ -230,6 +231,9 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
       break;
     case AudioParameters::AUDIO_BITSTREAM_AC3:
     case AudioParameters::AUDIO_BITSTREAM_EAC3:
+    case AudioParameters::AUDIO_BITSTREAM_DTS:
+    case AudioParameters::AUDIO_BITSTREAM_DTS_HD:
+    case AudioParameters::AUDIO_BITSTREAM_IEC61937:
       stream = MakeBitstreamOutputStream(params, device_id, log_callback);
       break;
     case AudioParameters::AUDIO_FAKE:
@@ -432,8 +436,7 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
   if (it != output_dispatchers_.end())
     return (*it)->dispatcher->CreateStreamProxy();
 
-  const base::TimeDelta kCloseDelay =
-      base::TimeDelta::FromSeconds(kStreamCloseDelaySeconds);
+  const base::TimeDelta kCloseDelay = base::Seconds(kStreamCloseDelaySeconds);
   std::unique_ptr<AudioOutputDispatcher> dispatcher;
   if (output_params.format() != AudioParameters::AUDIO_FAKE &&
       !output_params.IsBitstreamFormat()) {

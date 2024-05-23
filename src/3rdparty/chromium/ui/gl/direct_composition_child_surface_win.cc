@@ -9,7 +9,6 @@
 
 #include "base/debug/alias.h"
 #include "base/debug/dump_without_crashing.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/process.h"
@@ -30,11 +29,6 @@
 #include "ui/gl/gl_utils.h"
 #include "ui/gl/scoped_make_current.h"
 #include "ui/gl/vsync_thread_win.h"
-
-#ifndef EGL_ANGLE_flexible_surface_compatibility
-#define EGL_ANGLE_flexible_surface_compatibility 1
-#define EGL_FLEXIBLE_SURFACE_COMPATIBILITY_SUPPORTED_ANGLE 0x33A6
-#endif /* EGL_ANGLE_flexible_surface_compatibility */
 
 #ifndef EGL_ANGLE_d3d_texture_client_buffer
 #define EGL_ANGLE_d3d_texture_client_buffer 1
@@ -57,10 +51,19 @@ bool g_direct_composition_swap_chain_failed = false;
 // the swap chain with full damage.
 float kForceFullDamageThreshold = 0.6f;
 
+const char* kDirectCompositionChildSurfaceLabel =
+    "DirectCompositionChildSurface";
+
 bool SupportsLowLatencyPresentation() {
   return base::FeatureList::IsEnabled(
       features::kDirectCompositionLowLatencyPresentation);
 }
+
+bool IsVerifyDrawOffsetEnabled() {
+  return base::FeatureList::IsEnabled(
+      features::kDirectCompositionVerifyDrawOffset);
+}
+
 }  // namespace
 
 DirectCompositionChildSurfaceWin::PendingFrame::PendingFrame(
@@ -94,19 +97,17 @@ DirectCompositionChildSurfaceWin::~DirectCompositionChildSurfaceWin() {
 
 bool DirectCompositionChildSurfaceWin::Initialize(GLSurfaceFormat format) {
   d3d11_device_ = QueryD3D11DeviceObjectFromANGLE();
-  dcomp_device_ = QueryDirectCompositionDevice(d3d11_device_);
+  dcomp_device_ = DirectCompositionSurfaceWin::GetDirectCompositionDevice();
   if (!dcomp_device_)
     return false;
 
-  EGLDisplay display = GetDisplay();
+  EGLDisplay display = GetEGLDisplay();
 
   EGLint pbuffer_attribs[] = {
       EGL_WIDTH,
       1,
       EGL_HEIGHT,
       1,
-      EGL_FLEXIBLE_SURFACE_COMPATIBILITY_SUPPORTED_ANGLE,
-      EGL_TRUE,
       EGL_NONE,
   };
 
@@ -137,13 +138,14 @@ bool DirectCompositionChildSurfaceWin::ReleaseDrawTexture(bool will_discard) {
   DLOG_IF(ERROR, !result) << "Failed to make current in ReleaseDrawTexture";
 
   if (egl_surface)
-    eglDestroySurface(GetDisplay(), egl_surface);
+    eglDestroySurface(GetEGLDisplay(), egl_surface);
 
   if (dcomp_surface_.Get() == g_current_surface)
     g_current_surface = nullptr;
 
   HRESULT hr, device_removed_reason;
   if (draw_texture_) {
+    CopyOffscreenTextureToDrawTexture();
     draw_texture_.Reset();
     if (dcomp_surface_) {
       TRACE_EVENT0("gpu", "DirectCompositionChildSurfaceWin::EndDraw");
@@ -250,26 +252,28 @@ void DirectCompositionChildSurfaceWin::Destroy() {
     vsync_thread_->RemoveObserver(this);
 
   if (default_surface_) {
-    if (!eglDestroySurface(GetDisplay(), default_surface_)) {
+    if (!eglDestroySurface(GetEGLDisplay(), default_surface_)) {
       DLOG(ERROR) << "eglDestroySurface failed with error "
                   << ui::GetLastEGLErrorString();
     }
     default_surface_ = nullptr;
   }
   if (real_surface_) {
-    if (!eglDestroySurface(GetDisplay(), real_surface_)) {
+    if (!eglDestroySurface(GetEGLDisplay(), real_surface_)) {
       DLOG(ERROR) << "eglDestroySurface failed with error "
                   << ui::GetLastEGLErrorString();
     }
     real_surface_ = nullptr;
   }
   if (dcomp_surface_ && (dcomp_surface_.Get() == g_current_surface)) {
+    CopyOffscreenTextureToDrawTexture();
     HRESULT hr = dcomp_surface_->EndDraw();
     if (FAILED(hr))
       DLOG(ERROR) << "EndDraw failed with error " << std::hex << hr;
     g_current_surface = nullptr;
   }
   draw_texture_.Reset();
+  offscreen_texture_.Reset();
   dcomp_surface_.Reset();
 }
 
@@ -398,6 +402,7 @@ bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
               dxgi_format == DXGI_FORMAT::DXGI_FORMAT_R10G10B10A2_UNORM)) {
     TRACE_EVENT2("gpu", "DirectCompositionChildSurfaceWin::CreateSwapChain",
                  "width", size_.width(), "height", size_.height());
+    offscreen_texture_.Reset();
     dcomp_surface_.Reset();
 
     Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
@@ -444,6 +449,9 @@ bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
       return false;
     }
 
+    gl::LabelSwapChainAndBuffers(swap_chain_.Get(),
+                                 kDirectCompositionChildSurfaceLabel);
+
     Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain;
     if (SUCCEEDED(swap_chain_.As(&swap_chain))) {
       hr = swap_chain->SetColorSpace1(
@@ -455,18 +463,24 @@ bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
 
   swap_rect_ = rectangle;
   draw_offset_ = gfx::Vector2d();
+  const bool verify_draw_offset = dcomp_surface_ && IsVerifyDrawOffsetEnabled();
 
   if (dcomp_surface_) {
     TRACE_EVENT0("gpu", "DirectCompositionChildSurfaceWin::BeginDraw");
-    POINT update_offset;
     const RECT rect = rectangle.ToRECT();
+    dcomp_update_offset_ = {};
     HRESULT hr = dcomp_surface_->BeginDraw(&rect, IID_PPV_ARGS(&draw_texture_),
-                                           &update_offset);
+                                           &dcomp_update_offset_);
     if (FAILED(hr)) {
       DLOG(ERROR) << "BeginDraw failed with error " << std::hex << hr;
       return false;
     }
-    draw_offset_ = gfx::Point(update_offset) - rectangle.origin();
+    if (verify_draw_offset) {
+      draw_offset_ = {features::kVerifyDrawOffsetX.Get(),
+                      features::kVerifyDrawOffsetY.Get()};
+    } else {
+      draw_offset_ = gfx::Point(dcomp_update_offset_) - rectangle.origin();
+    }
   } else {
     TRACE_EVENT0("gpu", "DirectCompositionChildSurfaceWin::GetBuffer");
     swap_chain_->GetBuffer(0, IID_PPV_ARGS(&draw_texture_));
@@ -480,8 +494,6 @@ bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
   pbuffer_attribs.push_back(size_.width());
   pbuffer_attribs.push_back(EGL_HEIGHT);
   pbuffer_attribs.push_back(size_.height());
-  pbuffer_attribs.push_back(EGL_FLEXIBLE_SURFACE_COMPATIBILITY_SUPPORTED_ANGLE);
-  pbuffer_attribs.push_back(EGL_TRUE);
   if (use_angle_texture_offset_) {
     pbuffer_attribs.push_back(EGL_TEXTURE_OFFSET_X_ANGLE);
     pbuffer_attribs.push_back(draw_offset_.x());
@@ -492,8 +504,13 @@ bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
 
   EGLClientBuffer buffer =
       reinterpret_cast<EGLClientBuffer>(draw_texture_.Get());
+
+  if (verify_draw_offset) {
+    buffer = reinterpret_cast<EGLClientBuffer>(GetOffscreenTexture().Get());
+  }
+
   real_surface_ = eglCreatePbufferFromClientBuffer(
-      GetDisplay(), EGL_D3D_TEXTURE_ANGLE, buffer, GetConfig(),
+      GetEGLDisplay(), EGL_D3D_TEXTURE_ANGLE, buffer, GetConfig(),
       pbuffer_attribs.data());
   if (!real_surface_) {
     DLOG(ERROR) << "eglCreatePbufferFromClientBuffer failed with error "
@@ -513,6 +530,7 @@ bool DirectCompositionChildSurfaceWin::SetDrawRectangle(
 
 void DirectCompositionChildSurfaceWin::SetDCompSurfaceForTesting(
     Microsoft::WRL::ComPtr<IDCompositionSurface> surface) {
+  offscreen_texture_.Reset();
   dcomp_surface_ = std::move(surface);
 }
 
@@ -556,10 +574,16 @@ bool DirectCompositionChildSurfaceWin::Resize(
                           SUCCEEDED(hr));
     if (SUCCEEDED(hr))
       return true;
+
+    // Resizing swap chain buffers causes the internal textures to be released
+    // and re-created as new textures. We need to label the new textures.
+    gl::LabelSwapChainBuffers(swap_chain_.Get(),
+                              kDirectCompositionChildSurfaceLabel);
     DLOG(ERROR) << "ResizeBuffers failed with error 0x" << std::hex << hr;
   }
   // Next SetDrawRectangle call will recreate the swap chain or surface.
   swap_chain_.Reset();
+  offscreen_texture_.Reset();
   dcomp_surface_.Reset();
   return true;
 }
@@ -572,6 +596,7 @@ bool DirectCompositionChildSurfaceWin::SetEnableDCLayers(bool enable) {
     return false;
   // Next SetDrawRectangle call will recreate the swap chain or surface.
   swap_chain_.Reset();
+  offscreen_texture_.Reset();
   dcomp_surface_.Reset();
   return true;
 }
@@ -696,6 +721,47 @@ void DirectCompositionChildSurfaceWin::EnqueuePendingFrame(
   pending_frames_.emplace_back(std::move(query), std::move(callback));
 
   StartOrStopVSyncThread();
+}
+
+Microsoft::WRL::ComPtr<ID3D11Texture2D>
+DirectCompositionChildSurfaceWin::GetOffscreenTexture() {
+  if (!dcomp_surface_) {
+    return offscreen_texture_ = nullptr;
+  }
+  if (offscreen_texture_) {
+    return offscreen_texture_;
+  }
+
+  D3D11_TEXTURE2D_DESC desc = {};
+  desc.Width = size_.width() + features::kVerifyDrawOffsetX.Get();
+  desc.Height = size_.height() + features::kVerifyDrawOffsetY.Get();
+  desc.MipLevels = 1;
+  desc.ArraySize = 1;
+  desc.Format = gfx::ColorSpaceWin::GetDXGIFormat(color_space_);
+  desc.SampleDesc.Count = 1;
+  desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+  d3d11_device_->CreateTexture2D(&desc, nullptr, &offscreen_texture_);
+  return offscreen_texture_;
+}
+
+void DirectCompositionChildSurfaceWin::CopyOffscreenTextureToDrawTexture() {
+  if (!offscreen_texture_ || !draw_texture_ || !dcomp_surface_) {
+    return;
+  }
+
+  D3D11_BOX box = {};
+  box.left = swap_rect_.origin().x() + features::kVerifyDrawOffsetX.Get();
+  box.top = swap_rect_.origin().y() + features::kVerifyDrawOffsetY.Get();
+  box.right = box.left + swap_rect_.width();
+  box.bottom = box.top + swap_rect_.height();
+  box.front = 0;
+  box.back = 1;
+
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+  d3d11_device_->GetImmediateContext(&context);
+  context->CopySubresourceRegion(draw_texture_.Get(), 0, dcomp_update_offset_.x,
+                                 dcomp_update_offset_.y, 0,
+                                 offscreen_texture_.Get(), 0, &box);
 }
 
 // static

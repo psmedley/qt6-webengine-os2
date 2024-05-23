@@ -6,7 +6,6 @@
 #define COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_MOCK_WEBSITE_LOGIN_MANAGER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "components/autofill_assistant/browser/website_login_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -16,6 +15,10 @@ namespace autofill_assistant {
 class MockWebsiteLoginManager : public WebsiteLoginManager {
  public:
   MockWebsiteLoginManager();
+
+  MockWebsiteLoginManager(const MockWebsiteLoginManager&) = delete;
+  MockWebsiteLoginManager& operator=(const MockWebsiteLoginManager&) = delete;
+
   ~MockWebsiteLoginManager() override;
 
   MOCK_METHOD(void,
@@ -42,7 +45,7 @@ class MockWebsiteLoginManager : public WebsiteLoginManager {
                base::OnceCallback<void(bool)> callback),
               (override));
 
-  MOCK_METHOD(std::string,
+  MOCK_METHOD(absl::optional<std::string>,
               GeneratePassword,
               (autofill::FormSignature form_signature,
                autofill::FieldSignature field_signature,
@@ -57,17 +60,31 @@ class MockWebsiteLoginManager : public WebsiteLoginManager {
                base::OnceCallback<void()> callback),
               (override));
 
-  MOCK_METHOD(bool, ReadyToCommitGeneratedPassword, (), (override));
+  MOCK_METHOD(void,
+              GetGetLastTimePasswordUsed,
+              (const Login& login,
+               base::OnceCallback<void(absl::optional<base::Time>)> callback),
+              (override));
 
-  MOCK_METHOD(void, CommitGeneratedPassword, (), (override));
+  MOCK_METHOD2(OnDeletePasswordForLogin,
+               void(const Login& login, base::OnceCallback<void(bool)>&));
+
+  MOCK_METHOD(bool, ReadyToSaveGeneratedPassword, (), (override));
+
+  MOCK_METHOD(void, SaveGeneratedPassword, (), (override));
 
   MOCK_METHOD(void, ResetPendingCredentials, (), (override));
 
-  MOCK_METHOD(bool, ReadyToCommitSubmittedPassword, (), (override));
+  MOCK_METHOD(bool, ReadyToSaveSubmittedPassword, (), (override));
+
+  MOCK_METHOD(bool, SubmittedPasswordIsSame, (), (override));
+
+  MOCK_METHOD(void,
+              CheckWhetherSubmittedCredentialIsLeaked,
+              (SavePasswordLeakDetectionDelegate::Callback, base::TimeDelta),
+              (override));
 
   MOCK_METHOD(bool, SaveSubmittedPassword, (), (override));
-
-  DISALLOW_COPY_AND_ASSIGN(MockWebsiteLoginManager);
 };
 
 }  // namespace autofill_assistant

@@ -8,9 +8,11 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/guid.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/time.h"
 #include "components/browser_sync/browser_sync_switches.h"
@@ -43,8 +45,7 @@ std::unique_ptr<DeviceInfo> CreateFakeDeviceInfo(
       base::GUID::GenerateRandomV4().AsLowercaseString(), name,
       "chrome_version", "user_agent", sync_pb::SyncEnums::TYPE_UNSET,
       "device_id", "manufacturer_name", "model_name", "full_hardware_class",
-      last_updated_timestamp,
-      base::TimeDelta::FromMinutes(kPulseIntervalMinutes),
+      last_updated_timestamp, base::Minutes(kPulseIntervalMinutes),
       /*send_tab_to_self_receiving_enabled=*/false,
       /*sharing_info=*/absl::nullopt, /*paask_info=*/absl::nullopt,
       fcm_registration_token, interested_data_types);
@@ -79,15 +80,15 @@ class ActiveDevicesProviderImplTest : public testing::Test {
 };
 
 TEST_F(ActiveDevicesProviderImplTest, ShouldFilterInactiveDevices) {
-  AddDevice(
-      "local_device_pulse_interval",
-      /*fcm_registration_token=*/"", DefaultInterestedDataTypes(),
-      clock_.Now() - base::TimeDelta::FromMinutes(kPulseIntervalMinutes + 1));
+  base::test::ScopedFeatureList feature_override(
+      switches::kSyncFilterOutInactiveDevicesForSingleClient);
+  AddDevice("local_device_pulse_interval",
+            /*fcm_registration_token=*/"", DefaultInterestedDataTypes(),
+            clock_.Now() - base::Minutes(kPulseIntervalMinutes + 1));
 
   // Very old device.
   AddDevice("device_inactive", /*fcm_registration_token=*/"",
-            DefaultInterestedDataTypes(),
-            clock_.Now() - base::TimeDelta::FromDays(100));
+            DefaultInterestedDataTypes(), clock_.Now() - base::Days(100));
 
   // The local device should be considered active due to margin even though the
   // device is outside the pulse interval. This is not a single client because
@@ -148,12 +149,14 @@ TEST_F(ActiveDevicesProviderImplTest, ShouldInvokeCallback) {
 }
 
 TEST_F(ActiveDevicesProviderImplTest, ShouldReturnActiveFCMRegistrationTokens) {
+  base::test::ScopedFeatureList feature_override(
+      switches::kSyncFilterOutInactiveDevicesForSingleClient);
   AddDevice("device_1", "fcm_token_1", DefaultInterestedDataTypes(),
-            clock_.Now() - base::TimeDelta::FromMinutes(1));
+            clock_.Now() - base::Minutes(1));
   AddDevice("device_2", "fcm_token_2", DefaultInterestedDataTypes(),
-            clock_.Now() - base::TimeDelta::FromMinutes(1));
+            clock_.Now() - base::Minutes(1));
   AddDevice("device_inactive", "fcm_token_3", DefaultInterestedDataTypes(),
-            clock_.Now() - base::TimeDelta::FromDays(100));
+            clock_.Now() - base::Days(100));
 
   ASSERT_EQ(3u, device_list_.size());
 
@@ -180,7 +183,7 @@ TEST_F(ActiveDevicesProviderImplTest, ShouldReturnEmptyListWhenTooManyDevices) {
     const std::string device_name = "device_" + base::NumberToString(i);
     const std::string fcm_token = "fcm_token_" + device_name;
     AddDevice(device_name, fcm_token, DefaultInterestedDataTypes(),
-              clock_.Now() - base::TimeDelta::FromMinutes(1));
+              clock_.Now() - base::Minutes(1));
   }
 
   EXPECT_THAT(active_devices_provider_

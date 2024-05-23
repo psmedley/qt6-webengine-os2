@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -74,7 +74,8 @@ def _ProcessManifest(path, arsc_package_name, disable_isolated_processes):
   # Ensure the manifest package matches that of the apk's arsc package
   # So that resource references resolve correctly. The actual manifest
   # package name is set via --rename-manifest-package.
-  manifest_node.set('package', arsc_package_name)
+  if arsc_package_name is not None:
+    manifest_node.set('package', arsc_package_name)
 
   # Pylint for some reason things app_node is an int.
   # pylint: disable=no-member
@@ -100,6 +101,9 @@ def _ProcessManifest(path, arsc_package_name, disable_isolated_processes):
   ret = ret.replace(b'extractNativeLibs="false"', b'extractNativeLibs="true"')
   if disable_isolated_processes:
     ret = ret.replace(b'isolatedProcess="true"', b'isolatedProcess="false"')
+    # externalService only matters for isolatedProcess="true". See:
+    # https://developer.android.com/reference/android/R.attr#externalService
+    ret = ret.replace(b'externalService="true"', b'externalService="false"')
   return ret
 
 

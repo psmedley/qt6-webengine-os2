@@ -12,10 +12,11 @@
 
 #include "base/bind_internal.h"
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/template_util.h"
 #include "build/build_config.h"
 
-#if defined(OS_APPLE) && !HAS_FEATURE(objc_arc)
+#if BUILDFLAG(IS_APPLE) && !HAS_FEATURE(objc_arc)
 #include "base/mac/scoped_block.h"
 #endif
 
@@ -88,28 +89,33 @@ BindRepeating(Functor&& functor, Args&&... args) {
                                                std::forward<Args>(args)...);
 }
 
-// Special cases for binding to a base::{Once, Repeating}Callback without extra
-// bound arguments. We CHECK() the validity of callback to guard against null
-// pointers accidentally ending up in posted tasks, causing hard-to-debug
-// crashes.
-template <typename Signature>
-OnceCallback<Signature> BindOnce(OnceCallback<Signature> callback) {
-  CHECK(callback);
-  return callback;
-}
-
-template <typename Signature>
-OnceCallback<Signature> BindOnce(RepeatingCallback<Signature> callback) {
-  CHECK(callback);
-  return callback;
-}
-
-template <typename Signature>
-RepeatingCallback<Signature> BindRepeating(
-    RepeatingCallback<Signature> callback) {
-  CHECK(callback);
-  return callback;
-}
+// Overloads to allow nicer compile errors when attempting to pass the address
+// an overloaded function to `BindOnce()` or `BindRepeating()`. Otherwise, clang
+// provides only the error message "no matching function [...] candidate
+// template ignored: couldn't infer template argument 'Functor'", with no
+// reference to the fact that `&` is being used on an overloaded function.
+//
+// These overloads to provide better error messages will never be selected
+// unless template type deduction fails because of how overload resolution
+// works; per [over.ics.rank/2.2]:
+//
+//   When comparing the basic forms of implicit conversion sequences (as defined
+//   in [over.best.ics])
+//   - a standard conversion sequence is a better conversion sequence than a
+//     user-defined conversion sequence or an ellipsis conversion sequence, and
+//   - a user-defined conversion sequence is a better conversion sequence than
+//     an ellipsis conversion sequence.
+//
+// So these overloads will only be selected as a last resort iff template type
+// deduction fails.
+//
+// These overloads also intentionally do not return `void`, as this prevents
+// clang from emitting spurious errors such as "variable has incomplete type
+// 'void'" when assigning the result of `BindOnce()`/`BindRepeating()` to a
+// variable with type `auto` or `decltype(auto)`.
+struct BindFailedCheckPreviousErrors {};
+BindFailedCheckPreviousErrors BindOnce(...);
+BindFailedCheckPreviousErrors BindRepeating(...);
 
 // Unretained() allows binding a non-refcounted class, and to disable
 // refcounting on arguments that are refcounted objects.
@@ -131,6 +137,11 @@ RepeatingCallback<Signature> BindRepeating(
 // to compile because Foo does not support the AddRef() and Release() methods.
 template <typename T>
 inline internal::UnretainedWrapper<T> Unretained(T* o) {
+  return internal::UnretainedWrapper<T>(o);
+}
+
+template <typename T>
+inline internal::UnretainedWrapper<T> Unretained(const raw_ptr<T>& o) {
   return internal::UnretainedWrapper<T>(o);
 }
 
@@ -262,7 +273,7 @@ internal::OwnedRefWrapper<std::decay_t<T>> OwnedRef(T&& t) {
 // Both versions of Passed() prevent T from being an lvalue reference. The first
 // via use of enable_if, and the second takes a T* which will not bind to T&.
 template <typename T,
-          std::enable_if_t<!std::is_lvalue_reference<T>::value>* = nullptr>
+          std::enable_if_t<!std::is_lvalue_reference_v<T>>* = nullptr>
 inline internal::PassedWrapper<T> Passed(T&& scoper) {
   return internal::PassedWrapper<T>(std::move(scoper));
 }
@@ -291,7 +302,7 @@ inline internal::IgnoreResultHelper<T> IgnoreResult(T data) {
   return internal::IgnoreResultHelper<T>(std::move(data));
 }
 
-#if defined(OS_APPLE) && !HAS_FEATURE(objc_arc)
+#if BUILDFLAG(IS_APPLE) && !HAS_FEATURE(objc_arc)
 
 // RetainBlock() is used to adapt an Objective-C block when Automated Reference
 // Counting (ARC) is disabled. This is unnecessary when ARC is enabled, as the
@@ -309,7 +320,7 @@ base::mac::ScopedBlock<R (^)(Args...)> RetainBlock(R (^block)(Args...)) {
                                                 base::scoped_policy::RETAIN);
 }
 
-#endif  // defined(OS_APPLE) && !HAS_FEATURE(objc_arc)
+#endif  // BUILDFLAG(IS_APPLE) && !HAS_FEATURE(objc_arc)
 
 }  // namespace base
 

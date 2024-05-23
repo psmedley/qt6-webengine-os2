@@ -9,6 +9,7 @@ import "content/common/frame_messages.mojom";
 import "content/common/native_types.mojom";
 import "content/common/navigation_client.mojom";
 import "content/common/web_ui.mojom";
+import "content/public/common/extra_mojo_js_features.mojom";
 import "content/public/common/window_container_type.mojom";
 import "ipc/constants.mojom";
 import "mojo/public/mojom/base/file_path.mojom";
@@ -29,8 +30,8 @@ import "third_party/blink/public/mojom/browser_interface_broker.mojom";
 import "third_party/blink/public/mojom/commit_result/commit_result.mojom";
 import "third_party/blink/public/mojom/conversions/conversions.mojom";
 import "third_party/blink/public/mojom/devtools/console_message.mojom";
+import "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom";
 import "third_party/blink/public/mojom/frame/frame.mojom";
-import "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom";
 import "third_party/blink/public/mojom/frame/frame_owner_properties.mojom";
 import "third_party/blink/public/mojom/frame/frame_policy.mojom";
 import "third_party/blink/public/mojom/frame/frame_replication_state.mojom";
@@ -44,6 +45,7 @@ import "third_party/blink/public/mojom/loader/url_loader_factory_bundle.mojom";
 import "third_party/blink/public/mojom/messaging/transferable_message.mojom";
 import "third_party/blink/public/mojom/navigation/navigation_params.mojom";
 import "third_party/blink/public/mojom/page/page.mojom";
+import "third_party/blink/public/mojom/widget/platform_widget.mojom";
 import "third_party/blink/public/mojom/page/widget.mojom";
 import "third_party/blink/public/mojom/portal/portal.mojom";
 import "third_party/blink/public/mojom/renderer_preferences.mojom";
@@ -70,7 +72,24 @@ enum ViewWidgetType {
   // A GuestView used to render contents inside a <webview> element.
   kGuestView,
   // A view used to render contents inside a <portal> element.
-  kPortal
+  kPortal,
+  // A view used to render contents inside a <fencedframe> element.
+  kFencedFrame
+};
+
+// The type of the frame owner element for a child frame. In cross-process
+// frames, this would be the type of the HTMLFrameOwnerElement for the remote
+// child frame in the parent process. Note that only HTMLFrameOwnerElements for
+// which CreateChildFrame is used are included here. Other
+// HTMLFrameOwnerElements such as portals do not use this.
+enum ChildFrameOwnerElementType {
+  kIframe,
+  kObject,
+  kEmbed,
+  kFrame,
+  // Note that only Fenced Frames based on Shadow DOM may create child frames.
+  // See crbug.com/1123606.
+  kFencedframe
 };
 
 struct CreateViewParams {
@@ -119,8 +138,8 @@ struct CreateViewParams {
   // for displaying graphical output.
   bool never_composited;
 
-  // Whether the window associated with this view was created with an opener.
-  bool window_was_created_with_opener;
+  // Whether the window associated with this view was created by another window.
+  bool window_was_opened_by_another_window;
 
   // Whether lookup of frames in the created RenderView (e.g. lookup via
   // window.open or via <a target=...>) should be renderer-wide (i.e. going
@@ -130,6 +149,14 @@ struct CreateViewParams {
   // Indicates whether the view is a regular top-level widget or some other
   // nested "main frame" widget type.
   ViewWidgetType type;
+
+  // If the frame being created is a fenced frame, stores the mode the fenced
+  // frame is set to. For all other frame types (type != kFencedFrame), this
+  // value will always be set to kDefault. Frames embedded in fenced frames
+  // will also have this value set to kDefault.
+  // Used by fenced frames to determine various security restrictions such as
+  // the URL type and size constraints.
+  blink.mojom.FencedFrameMode fenced_frame_mode;
 
   // Endpoint for any messages that are broadcast to all views in a WebContents.
   pending_associated_receiver<blink.mojom.PageBroadcast> blink_page_broadcast;
@@ -158,8 +185,8 @@ struct CreateLocalMainFrameParams {
 
   pending_remote<blink.mojom.BrowserInterfaceBroker> interface_broker;
 
-  // Whether or not the frame has previously committed a real load.
-  bool has_committed_real_load;
+  // Whether the frame is still on the initial empty document or not.
+  bool is_on_initial_empty_document = true;
 
   // Null when the main frame has no policy container yet (for example, because
   // it is a speculative RenderFrameHost), and the policy container will be
@@ -265,8 +292,8 @@ struct CreateFrameParams {
   // new RenderFrame (if one is needed).
   CreateFrameWidgetParams? widget_params;
 
-  // Whether or not the frame has previously committed a real load.
-  bool has_committed_real_load;
+  // Whether the frame is still on the initial empty document or not.
+  bool is_on_initial_empty_document = true;
 
   // The policy container for the frame to be created. This can be null if we
   // could not determine a policy container yet, for example in case of a
@@ -451,6 +478,11 @@ interface Frame {
   SnapshotAccessibilityTree(SnapshotAccessibilityTreeParams params)
       => (ax.mojom.AXTreeUpdate snapshot);
 
+  // Requests a one-time distillation of the accessibility tree without enabling
+  // accessibility if it wasn't already enabled.
+  SnapshotAndDistillAXTree() => (ax.mojom.AXTreeUpdate snapshot,
+                                 array<int32> content_node_ids);
+
   // Get HTML data by serializing the target frame and replacing all resource
   // links with a path to the local copy passed in the message payload. In order
   // to report progress to the the browser process, a pending remote is passed
@@ -475,8 +507,18 @@ interface FrameBindingsControl {
   // Used to tell the RenderFrame to enable Mojo JS bindings, which allows
   // JS code running in the renderer process to connect to Mojo interfaces
   // and make method calls on them.
+  //
+  // ExtraMojoJsFeatures describes a set of additional features that can be
+  // used with MojoJs. For example, helper methods for MojoJs to better work
+  // with Web API objects.
+  //
   // This is used for WebUI only at this time.
-  EnableMojoJsBindings();
+  EnableMojoJsBindings(ExtraMojoJsFeatures? features);
+
+  // Used to enable MojoJS bindings, exposing only the interfaces provided
+  // by `broker`.
+  EnableMojoJsBindingsWithBroker(
+    pending_remote<blink.mojom.BrowserInterfaceBroker> broker);
 
   // Used to bind WebUI and WebUIHost mojo connections.
   BindWebUI(pending_associated_receiver<content.mojom.WebUI> receiver,
@@ -632,6 +674,33 @@ interface FrameHost {
           blink.mojom.RemoteFrameToken frame_token,
           mojo_base.mojom.UnguessableToken devtools_frame_token);
 
+  // Sent by the frame in a renderer process that hosts/owns a <fencedframe>
+  // element, to the browser process requesting the creation of a new fenced
+  // frame tree that will host the contents of the <fencedframe> element.
+  // `fenced_frame` - the receiver that the browser will bind to receive
+  //                  messages from the renderer.
+  // `proxy_routing_id` - the routing ID assigned to the RenderFrameProxy
+  //                      placeholder in the owner process.
+  // `initial_replication_state` - the replicated state associated with the
+  //                               above RenderFrameProxy. This state is
+  //                               default-constructed, and thus has an opaque
+  //                               origin. This ensures that the origin that the
+  //                               proxy host is initialized with in the browser
+  //                               and renderer processes both match. For more
+  //                               info about this parameter see
+  //                               crbug.com/1028269.
+  // `frame_token` - the unique identifier of the RenderFrameProxy
+  // `devtools_frame_token` - the unique identifier of the main FrameTreeNode in
+  //                          the "inner" fenced frame FrameTree
+  [Sync] CreateFencedFrame(
+      pending_associated_receiver<blink.mojom.FencedFrameOwnerHost>
+        fenced_frame,
+      blink.mojom.FencedFrameMode mode)
+      => (int32 proxy_routing_id,
+          blink.mojom.FrameReplicationState initial_replication_state,
+          blink.mojom.RemoteFrameToken frame_token,
+          mojo_base.mojom.UnguessableToken devtools_frame_token);
+
   // Asynchronously creates a child frame. A routing ID must be allocated first
   // by calling RenderMessageFilter::GenerateFrameRoutingID()
   // Each of these messages will have a corresponding mojom::FrameHost::Detach
@@ -648,7 +717,7 @@ interface FrameHost {
                    bool is_created_by_script,
                    blink.mojom.FramePolicy frame_policy,
                    blink.mojom.FrameOwnerProperties frame_owner_properties,
-                   blink.mojom.FrameOwnerElementType frame_owner_element_type);
+                   ChildFrameOwnerElementType child_frame_owner_element_type);
 
   // Sent by the renderer when a navigation commits in the frame.
 
@@ -729,13 +798,6 @@ interface FrameHost {
   // Change the encoding name of the page in UI when the page has detected
   // proper encoding name. Sent for top-level frames.
   UpdateEncoding(string encoding_name);
-
-  // Updates information to determine whether a user gesture should carryover to
-  // future navigations. This is needed so navigations within a certain
-  // timeframe of a request initiated by a gesture will be treated as if they
-  // were initiated by a gesture too, otherwise the navigation may be blocked.
-  [EnableIf=is_android]
-  UpdateUserGestureCarryoverInfo();
 
   // Notifies the browser that this frame has new session history information.
   //

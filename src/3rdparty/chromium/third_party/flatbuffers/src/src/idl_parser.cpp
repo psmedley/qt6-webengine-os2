@@ -20,6 +20,7 @@
 #include <string>
 #include <utility>
 
+#include "flatbuffers/base.h"
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
 
@@ -812,8 +813,7 @@ CheckedError Parser::ParseField(StructDef &struct_def) {
           "or in structs.");
     if (IsString(type) || IsVector(type)) {
       advanced_features_ |= reflection::DefaultVectorsAndStrings;
-      if (field->value.constant != "0" && field->value.constant != "null" &&
-          !SupportsDefaultVectorsAndStrings()) {
+      if (field->value.constant != "0" && !SupportsDefaultVectorsAndStrings()) {
         return Error(
             "Default values for strings and vectors are not supported in one "
             "of the specified programming languages");
@@ -1627,7 +1627,7 @@ CheckedError Parser::ParseArray(Value &array) {
   auto length = array.type.fixed_length;
   uoffset_t count = 0;
   auto err = ParseVectorDelimiters(count, [&](uoffset_t &) -> CheckedError {
-    vector_emplace_back(&stack, Value());
+    stack.emplace_back(Value());
     auto &val = stack.back();
     val.type = type;
     if (IsStruct(type)) {
@@ -1671,7 +1671,12 @@ CheckedError Parser::ParseNestedFlatbuffer(Value &val, FieldDef *field,
                                            size_t fieldn,
                                            const StructDef *parent_struct_def) {
   if (token_ == '[') {  // backwards compat for 'legacy' ubyte buffers
-    ECHECK(ParseAnyValue(val, field, fieldn, parent_struct_def, 0));
+    if (opts.json_nested_legacy_flatbuffers) {
+      ECHECK(ParseAnyValue(val, field, fieldn, parent_struct_def, 0));
+    } else {
+      return Error("cannot parse nested_flatbuffer as bytes unless"
+                   " --json-nested-bytes is set");
+    }
   } else {
     auto cursor_at_value_begin = cursor_;
     ECHECK(SkipAnyJsonValue());
@@ -2152,10 +2157,16 @@ void EnumDef::SortByValue() {
   auto &v = vals.vec;
   if (IsUInt64())
     std::sort(v.begin(), v.end(), [](const EnumVal *e1, const EnumVal *e2) {
+      if (e1->GetAsUInt64() == e2->GetAsUInt64()) {
+        return e1->name < e2->name;
+      }
       return e1->GetAsUInt64() < e2->GetAsUInt64();
     });
   else
     std::sort(v.begin(), v.end(), [](const EnumVal *e1, const EnumVal *e2) {
+      if (e1->GetAsInt64() == e2->GetAsInt64()) {
+        return e1->name < e2->name;
+      }
       return e1->GetAsInt64() < e2->GetAsInt64();
     });
 }
@@ -2479,8 +2490,7 @@ bool Parser::SupportsDefaultVectorsAndStrings() const {
 }
 
 bool Parser::SupportsAdvancedUnionFeatures() const {
-  return opts.lang_to_generate != 0 &&
-         (opts.lang_to_generate &
+  return (opts.lang_to_generate &
           ~(IDLOptions::kCpp | IDLOptions::kTs | IDLOptions::kPhp |
             IDLOptions::kJava | IDLOptions::kCSharp | IDLOptions::kKotlin |
             IDLOptions::kBinary | IDLOptions::kSwift)) == 0;
@@ -3256,7 +3266,7 @@ CheckedError Parser::ParseRoot(const char *source, const char **include_paths,
       for (auto val_it = enum_def.Vals().begin();
            val_it != enum_def.Vals().end(); ++val_it) {
         auto &val = **val_it;
-        if (!SupportsAdvancedUnionFeatures() &&
+        if (!(opts.lang_to_generate != 0 && SupportsAdvancedUnionFeatures()) &&
             (IsStruct(val.union_type) || IsString(val.union_type)))
           return Error(
               "only tables can be union elements in the generated language: " +
@@ -3320,7 +3330,7 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
       ECHECK(ParseProtoDecl());
     } else if (IsIdent("native_include")) {
       NEXT();
-      vector_emplace_back(&native_included_files_, attribute_);
+      native_included_files_.emplace_back(attribute_);
       EXPECT(kTokenStringConstant);
       EXPECT(';');
     } else if (IsIdent("include") || (opts.proto_mode && IsIdent("import"))) {
@@ -3406,9 +3416,9 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
       NEXT();
       file_identifier_ = attribute_;
       EXPECT(kTokenStringConstant);
-      if (file_identifier_.length() != FlatBufferBuilder::kFileIdentifierLength)
+      if (file_identifier_.length() != flatbuffers::kFileIdentifierLength)
         return Error("file_identifier must be exactly " +
-                     NumToString(FlatBufferBuilder::kFileIdentifierLength) +
+                     NumToString(flatbuffers::kFileIdentifierLength) +
                      " characters");
       EXPECT(';');
     } else if (IsIdent("file_extension")) {
@@ -3670,7 +3680,7 @@ Offset<reflection::Field> FieldDef::Serialize(FlatBufferBuilder *builder,
       IsInteger(value.type.base_type) ? StringToInt(value.constant.c_str()) : 0,
       // result may be platform-dependent if underlying is float (not double)
       IsFloat(value.type.base_type) ? d : 0.0, deprecated, IsRequired(), key,
-      attr__, docs__, IsOptional());
+      attr__, docs__, IsOptional(), static_cast<uint16_t>(padding));
   // TODO: value.constant is almost always "0", we could save quite a bit of
   // space by sharing it. Same for common values of value.type.
 }
@@ -3686,6 +3696,7 @@ bool FieldDef::Deserialize(Parser &parser, const reflection::Field *field) {
     value.constant = FloatToString(field->default_real(), 16);
   }
   presence = FieldDef::MakeFieldPresence(field->optional(), field->required());
+  padding = field->padding();
   key = field->key();
   if (!DeserializeAttributes(parser, field->attributes())) return false;
   // TODO: this should probably be handled by a separate attribute
@@ -3829,7 +3840,8 @@ Offset<reflection::Type> Type::Serialize(FlatBufferBuilder *builder) const {
       *builder, static_cast<reflection::BaseType>(base_type),
       static_cast<reflection::BaseType>(element),
       struct_def ? struct_def->index : (enum_def ? enum_def->index : -1),
-      fixed_length);
+      fixed_length, static_cast<uint32_t>(SizeOf(base_type)),
+      static_cast<uint32_t>(SizeOf(element)));
 }
 
 bool Type::Deserialize(const Parser &parser, const reflection::Type *type) {

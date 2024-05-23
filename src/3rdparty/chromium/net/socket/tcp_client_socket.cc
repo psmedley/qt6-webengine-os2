@@ -35,7 +35,8 @@ TCPClientSocket::TCPClientSocket(
     std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
     NetworkQualityEstimator* network_quality_estimator,
     net::NetLog* net_log,
-    const net::NetLogSource& source)
+    const net::NetLogSource& source,
+    NetworkChangeNotifier::NetworkHandle network)
     : TCPClientSocket(
           std::make_unique<TCPSocket>(std::move(socket_performance_watcher),
                                       net_log,
@@ -43,7 +44,8 @@ TCPClientSocket::TCPClientSocket(
           addresses,
           -1 /* current_address_index */,
           nullptr /* bind_address */,
-          network_quality_estimator) {}
+          network_quality_estimator,
+          network) {}
 
 TCPClientSocket::TCPClientSocket(std::unique_ptr<TCPSocket> connected_socket,
                                  const IPEndPoint& peer_address)
@@ -53,7 +55,8 @@ TCPClientSocket::TCPClientSocket(std::unique_ptr<TCPSocket> connected_socket,
                       nullptr /* bind_address */,
                       // TODO(https://crbug.com/1123197: Pass non-null
                       // NetworkQualityEstimator
-                      nullptr /* network_quality_estimator */) {}
+                      nullptr /* network_quality_estimator */,
+                      NetworkChangeNotifier::kInvalidNetworkHandle) {}
 
 TCPClientSocket::~TCPClientSocket() {
   Disconnect();
@@ -69,7 +72,8 @@ std::unique_ptr<TCPClientSocket> TCPClientSocket::CreateFromBoundSocket(
     NetworkQualityEstimator* network_quality_estimator) {
   return base::WrapUnique(new TCPClientSocket(
       std::move(bound_socket), addresses, -1 /* current_address_index */,
-      std::make_unique<IPEndPoint>(bound_address), network_quality_estimator));
+      std::make_unique<IPEndPoint>(bound_address), network_quality_estimator,
+      NetworkChangeNotifier::kInvalidNetworkHandle));
 }
 
 int TCPClientSocket::Bind(const IPEndPoint& address) {
@@ -145,17 +149,19 @@ TCPClientSocket::TCPClientSocket(
     const AddressList& addresses,
     int current_address_index,
     std::unique_ptr<IPEndPoint> bind_address,
-    NetworkQualityEstimator* network_quality_estimator)
+    NetworkQualityEstimator* network_quality_estimator,
+    NetworkChangeNotifier::NetworkHandle network)
     : socket_(std::move(socket)),
       bind_address_(std::move(bind_address)),
       addresses_(addresses),
-      current_address_index_(-1),
+      current_address_index_(current_address_index),
       next_connect_state_(CONNECT_STATE_NONE),
       previously_disconnected_(false),
       total_received_bytes_(0),
       was_ever_used_(false),
       was_disconnected_on_suspend_(false),
-      network_quality_estimator_(network_quality_estimator) {
+      network_quality_estimator_(network_quality_estimator),
+      network_(network) {
   DCHECK(socket_);
   if (socket_->IsValid())
     socket_->SetDefaultOptionsForClient();
@@ -558,6 +564,14 @@ int TCPClientSocket::OpenSocket(AddressFamily family) {
   if (result != OK)
     return result;
 
+  if (network_ != NetworkChangeNotifier::kInvalidNetworkHandle) {
+    result = socket_->BindToNetwork(network_);
+    if (result != OK) {
+      socket_->Close();
+      return result;
+    }
+  }
+
   socket_->SetDefaultOptionsForClient();
 
   return OK;
@@ -567,8 +581,7 @@ void TCPClientSocket::EmitTCPMetricsHistogramsOnDisconnect() {
   base::TimeDelta rtt;
   if (socket_->GetEstimatedRoundTripTime(&rtt)) {
     UMA_HISTOGRAM_CUSTOM_TIMES("Net.TcpRtt.AtDisconnect", rtt,
-                               base::TimeDelta::FromMilliseconds(1),
-                               base::TimeDelta::FromMinutes(10), 100);
+                               base::Milliseconds(1), base::Minutes(10), 100);
   }
 }
 

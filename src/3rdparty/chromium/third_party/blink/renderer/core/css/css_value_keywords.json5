@@ -109,6 +109,12 @@
     "bolder",
     "lighter",
 
+    // font-synthesis
+    // none
+    // style
+    // small-caps
+    "weight",
+
     //
     // font-stretch
     //
@@ -140,12 +146,17 @@
     //
     // font-family (<generic-family> in CSS 2.1)
     //
+    // If you modify this list, please make sure you update css_parsing_utils's
+    // ConsumeGenericFamily, ComputedStyleUtils::IdentifierForFamily and
+    // FontFamily::InferredTypeFor accordingly.
     "serif",
     "sans-serif",
     "cursive",
     "fantasy",
     "monospace",
+    "system-ui",
     "-webkit-body",
+    "math",
 
     //
     // font-display
@@ -184,6 +195,7 @@
     "activetext",
     "appworkspace",
     "background",
+    "buttonborder",
     "buttonface",
     "buttonhighlight",
     "buttonshadow",
@@ -202,6 +214,8 @@
     "infobackground",
     "infotext",
     "linktext",
+    "mark",
+    "marktext",
     "menutext",
     "scrollbar",
     "threeddarkshadow",
@@ -447,7 +461,7 @@
     "table",
     "flex",
     "grid",
-    "math",
+    //"math",
     // The order must match the order found in IsDisplayBox().
     "contents",
     //none
@@ -707,6 +721,12 @@
     "ellipsis",
 
     //
+    // text-decoration-line
+    //
+    "spelling-error",
+    "grammar-error",
+
+    //
     // text-decoration-skip-ink
     //
     // auto
@@ -949,7 +969,7 @@
     "after",
     "before",
 
-    // -webkit-text-emphasis-position
+    // text-emphasis-position
     "over",
     "under",
     //right
@@ -1061,6 +1081,7 @@
 
     // grid-template-{columns|rows}
     "minmax",
+    "subgrid",
 
     // text-indent
     "each-line",
@@ -1178,6 +1199,7 @@
     // initial
     // inherit
     "revert",
+    "revert-layer",
     "unset",
 
     // background-image, etc.
@@ -1234,6 +1256,8 @@
     "rgba",
     "hsl",
     "hsla",
+    "hwb",
+    "hwba",
     "-internal-light-dark",
 
     // transform
@@ -1312,6 +1336,10 @@
     "block-size",
     "inline-size",
 
+    // @container
+    "name",
+    "type",
+
     // grid auto-repeat
     "auto-fill",
     "auto-fit",
@@ -1373,6 +1401,11 @@
     // none
     "active",
 
+    // forced-color-adjust
+    // auto
+    // none
+    "preserve-parent-color",
+
     // (navigation-controls) media feature
     // none
     "back-button",
@@ -1387,11 +1420,6 @@
     // @supports selector(...)
     // https://drafts.csswg.org/css-conditional-4/#typedef-supports-selector-fn
     "selector",
-
-    // (screen-spanning) media feature
-    // none
-    "single-fold-vertical",
-    "single-fold-horizontal",
 
     // (device-posture) media feature
     "continuous",

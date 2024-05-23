@@ -38,10 +38,10 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_object_store.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_open_db_request.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_request_queue_item.h"
-#include "third_party/blink/renderer/modules/indexeddb/idb_tracing.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
@@ -387,6 +387,11 @@ void IDBTransaction::commit(ExceptionState& exception_state) {
 
   if (transaction_backend())
     transaction_backend()->Commit(num_errors_handled_);
+
+  // Once IDBtransaction.commit() is called, the page should no longer be
+  // prevented from entering back/forward cache for having outstanding IDB
+  // connections. Commit ends the inflight IDB transactions.
+  feature_handle_for_scheduler_.reset();
 }
 
 void IDBTransaction::RegisterRequest(IDBRequest* request) {
@@ -430,7 +435,7 @@ void IDBTransaction::OnResultReady() {
 }
 
 void IDBTransaction::OnAbort(DOMException* error) {
-  IDB_TRACE1("IDBTransaction::onAbort", "txn.id", id_);
+  TRACE_EVENT1("IndexedDB", "IDBTransaction::onAbort", "txn.id", id_);
   if (!GetExecutionContext()) {
     Finished();
     return;
@@ -458,7 +463,7 @@ void IDBTransaction::OnAbort(DOMException* error) {
 }
 
 void IDBTransaction::OnComplete() {
-  IDB_TRACE1("IDBTransaction::onComplete", "txn.id", id_);
+  TRACE_EVENT1("IndexedDB", "IDBTransaction::onComplete", "txn.id", id_);
   if (!GetExecutionContext()) {
     Finished();
     return;
@@ -565,7 +570,7 @@ const char* IDBTransaction::InactiveErrorMessage() const {
 }
 
 DispatchEventResult IDBTransaction::DispatchEventInternal(Event& event) {
-  IDB_TRACE1("IDBTransaction::dispatchEvent", "txn.id", id_);
+  TRACE_EVENT1("IndexedDB", "IDBTransaction::dispatchEvent", "txn.id", id_);
 
   event.SetTarget(this);
 

@@ -11,7 +11,6 @@
 
 #include <algorithm>
 
-#include "base/cxx17_backports.h"
 #include "base/logging.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_variant.h"
@@ -66,6 +65,14 @@ HRESULT TSFTextStore::Initialize() {
                           IID_PPV_ARGS(&display_attribute_manager_));
   if (FAILED(hr)) {
     DVLOG(1) << "Failed to initialize DisplayAttributeMgr.";
+    return hr;
+  }
+
+  hr = ::CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
+                          CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(&input_processor_profile_mgr_));
+  if (FAILED(hr)) {
+    DVLOG(1) << "Failed to initialize InputProcessorProfileMgr.";
     return hr;
   }
 
@@ -325,25 +332,17 @@ HRESULT TSFTextStore::GetTextExt(TsViewCookie view_cookie,
     return TS_E_INVALIDPOS;
   }
 
+  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "start, end",
+               std::to_string(acp_start) + ", " + std::to_string(acp_end));
+
   // According to a behavior of notepad.exe and wordpad.exe, top left corner of
   // rect indicates a first character's one, and bottom right corner of rect
   // indicates a last character's one.
   // TODO(IME): add tests for scenario that left position is bigger than right
   // position.
   absl::optional<gfx::Rect> result_rect;
-  absl::optional<gfx::Rect> tmp_opt_rect;
   const uint32_t start_pos = acp_start - composition_start_;
   const uint32_t end_pos = acp_end - composition_start_;
-  // If there is an active EditContext, then fetch the layout bounds from it.
-  text_input_client_->GetActiveTextInputControlLayoutBounds(&tmp_opt_rect,
-                                                            &result_rect);
-  if (result_rect) {
-    *rect = display::win::ScreenWin::DIPToScreenRect(window_handle_,
-                                                     result_rect.value())
-                .ToRECT();
-    *clipped = FALSE;
-    return S_OK;
-  }
 
   gfx::Rect tmp_rect;
   if (start_pos == end_pos) {
@@ -407,11 +406,14 @@ HRESULT TSFTextStore::GetTextExt(TsViewCookie view_cookie,
       result_rect = gfx::Rect(text_input_client_->GetCaretBounds());
     }
   }
+  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "DIP rect",
+               result_rect->ToString());
+
   *rect = display::win::ScreenWin::DIPToScreenRect(window_handle_,
                                                    result_rect.value())
               .ToRECT();
   *clipped = FALSE;
-  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "selection_bounding_rect",
+  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "screen rect",
                gfx::Rect(*rect).ToString());
   return S_OK;
 }
@@ -528,8 +530,10 @@ HRESULT TSFTextStore::QueryInsert(LONG acp_test_start,
   const LONG composition_start = static_cast<LONG>(composition_start_);
   const LONG buffer_size = static_cast<LONG>(string_buffer_document_.size());
   *acp_result_start =
-      base::clamp(acp_test_start, composition_start, buffer_size);
-  *acp_result_end = base::clamp(acp_test_end, composition_start, buffer_size);
+      std::min(std::max(acp_test_start, composition_start), buffer_size);
+  *acp_result_end =
+      std::min(std::max(acp_test_end, composition_start), buffer_size) +
+      text_size;
   return S_OK;
 }
 
@@ -626,6 +630,8 @@ HRESULT TSFTextStore::RequestLock(DWORD lock_flags, HRESULT* result) {
   // If string_pending_insertion_ is empty, then there are four cases:
   // 1. there is no composition We only need to do comparison between our
   //    cache and latest textinputstate and send notifications accordingly.
+  //    There might be selection change from input service without staring new
+  //    composition. We should update tic selection.
   // 2. A new composition is about to start on existing text. We need to start
   //    composition on range from composition_range_.
   // 3. There is composition. User cancels the composition by deleting all of
@@ -651,6 +657,10 @@ HRESULT TSFTextStore::RequestLock(DWORD lock_flags, HRESULT* result) {
         is_tic_write_in_progress_ = false;
       } else {
         composition_start_ = selection_.start();
+        if (!selection_.EqualsIgnoringDirection(selection_from_client_) &&
+            !IsInputIME()) {
+          text_input_client_->SetEditableSelectionRange(selection_);
+        }
         CalculateTextandSelectionDiffAndNotifyIfNeeded();
       }
       ResetCacheAfterEditSession();
@@ -752,12 +762,16 @@ HRESULT TSFTextStore::RequestSupportedAttrs(
     return E_INVALIDARG;
   if (!text_input_client_)
     return E_FAIL;
-  // We support only input scope attribute.
+
+  supported_attrs_.clear();
   for (size_t i = 0; i < attribute_buffer_size; ++i) {
-    if (IsEqualGUID(GUID_PROP_INPUTSCOPE, attribute_buffer[i]))
-      return S_OK;
+    const auto& attribute = attribute_buffer[i];
+    if (IsEqualGUID(GUID_PROP_INPUTSCOPE, attribute) ||
+        IsEqualGUID(GUID_PROP_URL, attribute)) {
+      supported_attrs_.push_back(attribute);
+    }
   }
-  return E_FAIL;
+  return S_OK;
 }
 
 HRESULT TSFTextStore::RetrieveRequestedAttrs(ULONG attribute_buffer_size,
@@ -769,20 +783,43 @@ HRESULT TSFTextStore::RetrieveRequestedAttrs(ULONG attribute_buffer_size,
     return E_INVALIDARG;
   if (!text_input_client_)
     return E_UNEXPECTED;
-  // We support only input scope attribute.
+
   *attribute_buffer_copied = 0;
   if (attribute_buffer_size == 0)
     return S_OK;
 
-  attribute_buffer[0].dwOverlapId = 0;
-  attribute_buffer[0].idAttr = GUID_PROP_INPUTSCOPE;
-  attribute_buffer[0].varValue.vt = VT_UNKNOWN;
-  attribute_buffer[0].varValue.punkVal =
-      tsf_inputscope::CreateInputScope(text_input_client_->GetTextInputType(),
-                                       text_input_client_->GetTextInputMode(),
-                                       text_input_client_->ShouldDoLearning());
-  attribute_buffer[0].varValue.punkVal->AddRef();
-  *attribute_buffer_copied = 1;
+  *attribute_buffer_copied = std::min(
+      attribute_buffer_size, static_cast<ULONG>(supported_attrs_.size()));
+
+  for (size_t i = 0; i < *attribute_buffer_copied; ++i) {
+    attribute_buffer[i].idAttr = supported_attrs_[i];
+    // In TSF, this parameter value is zero.
+    // https://docs.microsoft.com/en-us/windows/win32/api/textstor/ns-textstor-ts_attrval
+    attribute_buffer[i].dwOverlapId = 0;
+    // If the caller is asking for the input scope, then create one based on
+    // the input client and return the COM object for it.
+    if (IsEqualGUID(GUID_PROP_INPUTSCOPE, supported_attrs_[i])) {
+      attribute_buffer[i].varValue.vt = VT_UNKNOWN;
+      attribute_buffer[i].varValue.punkVal = tsf_inputscope::CreateInputScope(
+          text_input_client_->GetTextInputType(),
+          text_input_client_->GetTextInputMode(),
+          text_input_client_->ShouldDoLearning());
+      attribute_buffer[i].varValue.punkVal->AddRef();
+    } else if (IsEqualGUID(GUID_PROP_URL, supported_attrs_[i])) {
+      const ui::TextInputClient::EditingContext editing_context =
+          text_input_client_->GetTextEditingContext();
+      attribute_buffer[i].varValue.vt = VT_BSTR;
+      std::wstring wide_url;
+      // If the caller is asking for the URL, get the URL from the
+      // the text input client (if there is one).
+      if (!editing_context.page_url.is_empty()) {
+        const std::string& url_string = editing_context.page_url.spec();
+        wide_url = base::UTF8ToWide(url_string);
+      }
+      attribute_buffer[i].varValue.bstrVal =
+          SysAllocStringLen(wide_url.c_str(), wide_url.length());
+    }
+  }
   return S_OK;
 }
 
@@ -922,7 +959,8 @@ void TSFTextStore::DispatchKeyEvent(ui::EventType type,
 
   // prepare ui::KeyEvent.
   UINT message = type == ui::ET_KEY_PRESSED ? WM_KEYDOWN : WM_KEYUP;
-  const MSG key_event_MSG = {window_handle_, message, VK_PROCESSKEY, lparam};
+  const CHROME_MSG key_event_MSG = {window_handle_, message, VK_PROCESSKEY,
+                                    lparam};
   ui::KeyEvent key_event = KeyEventFromMSG(key_event_MSG);
 
   if (input_method_delegate_) {
@@ -1464,6 +1502,12 @@ void TSFTextStore::CommitTextAndEndCompositionIfAny(size_t old_size,
   } else {
     text_input_client_->ClearCompositionText();
   }
+
+  if (!selection_.is_empty() && !IsInputIME() &&
+      selection_.GetMax() <= string_buffer_document_.size()) {
+    text_input_client_->SetEditableSelectionRange(selection_);
+  }
+
   // Notify accessibility about this committed composition
   text_input_client_->SetActiveCompositionForAccessibility(
       replace_text_range_, new_committed_string,
@@ -1568,6 +1612,16 @@ void TSFTextStore::ResetCacheAfterEditSession() {
   // reset string_buffer_ if composition is no longer active.
   if (text_input_client_ && !text_input_client_->HasCompositionText())
     string_pending_insertion_.clear();
+}
+
+bool TSFTextStore::IsInputIME() const {
+  TF_INPUTPROCESSORPROFILE profile;
+  if (SUCCEEDED(input_processor_profile_mgr_->GetActiveProfile(
+          GUID_TFCAT_TIP_KEYBOARD, &profile))) {
+    return profile.hkl == NULL &&
+           profile.dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR;
+  }
+  return false;
 }
 
 }  // namespace ui

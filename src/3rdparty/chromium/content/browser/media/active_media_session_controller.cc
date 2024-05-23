@@ -138,6 +138,10 @@ void ActiveMediaSessionController::OnStop() {
   MaybePerformAction(MediaSessionAction::kStop);
 }
 
+void ActiveMediaSessionController::OnSeek(const base::TimeDelta& time) {
+  media_controller_remote_->Seek(time);
+}
+
 void ActiveMediaSessionController::OnSeekTo(const base::TimeDelta& time) {
   if (base::Contains(actions_,
                      media_session::mojom::MediaSessionAction::kSeekTo)) {
@@ -199,6 +203,7 @@ void ActiveMediaSessionController::PerformAction(MediaSessionAction action) {
     case MediaSessionAction::kToggleCamera:
     case MediaSessionAction::kHangUp:
     case MediaSessionAction::kRaise:
+    case MediaSessionAction::kSetMute:
       NOTREACHED();
       return;
   }
@@ -251,6 +256,7 @@ ActiveMediaSessionController::MediaSessionActionToKeyCode(
     case MediaSessionAction::kToggleCamera:
     case MediaSessionAction::kHangUp:
     case MediaSessionAction::kRaise:
+    case MediaSessionAction::kSetMute:
       return absl::nullopt;
   }
 }

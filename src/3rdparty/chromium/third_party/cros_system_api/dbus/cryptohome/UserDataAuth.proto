@@ -14,6 +14,7 @@ option optimize_for = LITE_RUNTIME;
 
 package user_data_auth;
 
+import "auth_factor.proto";
 import "fido.proto";
 import "key.proto";
 
@@ -30,8 +31,7 @@ import "rpc.proto";
 // callers know if specialized errors apply.
 // TODO(b/135984863): Rename this.
 enum CryptohomeErrorCode {
-  // 0 is the default value of BaseReply::error. It
-  // should never be used.
+  // No error: the operation succeeded.
   CRYPTOHOME_ERROR_NOT_SET = 0;
 
   CRYPTOHOME_ERROR_ACCOUNT_NOT_FOUND = 1;
@@ -86,6 +86,12 @@ enum CryptohomeErrorCode {
   CRYPTOHOME_TOKEN_SERIALIZATION_FAILED = 48;
   CRYPTOHOME_INVALID_AUTH_SESSION_TOKEN = 49;
   CRYPTOHOME_ADD_CREDENTIALS_FAILED = 50;
+  CRYPTOHOME_ERROR_UNAUTHENTICATED_AUTH_SESSION = 51;
+  CRYPTOHOME_ERROR_UNKNOWN_LEGACY = 52;
+  // Note: After adding new fields to this enum, the new enum should be added
+  // to ash/components/login/auth/auth_session_authenticator.cc's
+  // AuthSessionAuthenticator::ProcessCryptohomeError() so that Chromium
+  // can handle them properly.
 }
 
 // This is used by MountRequest to store details about the mount to create
@@ -106,6 +112,135 @@ message CreateRequest {
 
   // If set to true, always use eCryptfs as the encryption method.
   bool force_ecryptfs = 3;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Error handling related
+///////////////////////////////////////////////////////////////////////////////
+
+// PrimaryAction is used to indicate that cryptohomed believes that a certain
+// condition is true and thus the corresponding action should be carried out or
+// it can resolve the issues.
+enum PrimaryAction {
+  // PRIMARY_NO_ERROR indicates that there's no error.
+  PRIMARY_NO_ERROR = 0;
+
+  // PRIMARY_NONE indicates that cryptohomed is not sure. Caller should check
+  // PossibleAction.
+  PRIMARY_NONE = 1;
+
+  // PRIMARY_CREATE_REQUIRED indicates that the user doesn't exist and the
+  // caller should add CreateRequest to the Mount() call.
+  PRIMARY_CREATE_REQUIRED = 2;
+
+  // PRIMARY_NOTIFY_OLD_ENCRYPTION_POLICY indicates that the vault is using
+  // legacy crypto and the policy doesn't allow it. The caller should notify
+  // users regarding the policy.
+  PRIMARY_NOTIFY_OLD_ENCRYPTION_POLICY = 3;
+
+  // PRIMARY_RESUME_PREVIOUS_MIGRATION indicates that eCryptfs is being
+  // migrated to dircrypto but it's not completed yet. Caller should finish
+  // the migration before trying again.
+  PRIMARY_RESUME_PREVIOUS_MIGRATION = 4;
+
+  // PRIMARY_TPM_UDPATE_REQUIRED indicates that the TPM firmware should be
+  // updated before proceeding.
+  PRIMARY_TPM_UDPATE_REQUIRED = 5;
+
+  // PRIMARY_TPM_NEEDS_REBOOT indicates that the TPM encountered a critical
+  // error that can only be resolved by rebooting.
+  PRIMARY_TPM_NEEDS_REBOOT = 6;
+
+  // PRIMARY_TPM_LOCKOUT indicates that the TPM is in dictionary attack lockout
+  // state. The caller should advise the user to wait it out.
+  PRIMARY_TPM_LOCKOUT = 7;
+
+  // PRIMARY_INCORRECT_AUTH indicates that the supplied auth material
+  // (password) is incorrect. The caller should notify the user as such.
+  // Note that it is a special case, see CryptohomeErrorInfo's
+  // probable_action field for more info.
+  PRIMARY_INCORRECT_AUTH = 8;
+}
+
+// PossibleAction is used to indicate that cryptohomed believies some actions
+// are more likely to resolve the error than other actions.
+enum PossibleAction {
+  // POSSIBLY_NONE is not used, it's defined to take the 0 position.
+  POSSIBLY_NONE = 0;
+
+  // POSSIBLY_RETRY suggests the caller to retry immediately.
+  POSSIBLY_RETRY = 1;
+
+  // POSSIBLY_REBOOT suggests the caller to reboot then retry.
+  POSSIBLY_REBOOT = 2;
+
+  // POSSIBLY_AUTH suggests the caller to try another authentication method.
+  POSSIBLY_AUTH = 3;
+
+  // POSSIBLY_INCORRECT_AUTH suggests that incorrect auth material (password)
+  // have been supplied. The caller should notify the user as such.
+  POSSIBLY_INCORRECT_AUTH = 4;
+
+  // POSSIBLY_DELETE_VAULT suggests the caller to delete the user's vault
+  // because it's unrecoverable.
+  POSSIBLY_DELETE_VAULT = 5;
+
+  // POSSIBLY_POWERWASH suggests the caller to powerwash because certain TPM
+  // state is corrupted and can only be obtained at OOBE.
+  POSSIBLY_POWERWASH = 6;
+
+  // POSSIBLY_DEV_CHECK_UNEXPECTED_STATE suggests that it's the developer's
+  // problem. Software developers should investigate if this error ever occurs.
+  POSSIBLY_DEV_CHECK_UNEXPECTED_STATE = 7;
+
+  // POSSIBLY_FATAL suggests that there's no way to resolve the issue.
+  // It should not have happened and the caller should not retry.
+  POSSIBLY_FATAL = 8;
+}
+
+// CryptohomeErrorInfo contains the information regarding an error or a
+// condition that occurred.
+message CryptohomeErrorInfo {
+  // error_id is a unique identifier that identifies the location that the
+  // error occurred within cryptohome. More effectively, it's a "smart
+  // stacktrace" that remains the same from version to version for the same
+  // error.
+  // There's no guarantee on the exact formatting to users external to
+  // cryptohome, except that it should be short enough to be displayed on
+  // one line and contains fine-grained and detailed information on the error.
+  // For cryptohome developers, see cryptohome/docs/error_reporting.md.
+  // Example: "42-15-3"
+  string error_id = 1;
+
+  // readable_error_id is the human readable version of the error_id. It
+  // encompasses all information that is in error_id and is more human
+  // readable. However, it may or may not remain the same from version to
+  // version.
+  // There's no guarantee on the exact formatting of this field to users
+  // external to cryptohome, except that it should be at most a few lines in
+  // length and should be reasonable to write to the logs.
+  // For cryptohome developers, see cryptohome/docs/error_reporting.md.
+  string readable_error_id = 2;
+
+  // primary_action is when cryptohome is quite certain that something can
+  // be done to resolve the error/condition. Usually primary_action is used
+  // to indicate to the Chromium side that an action should be done.
+  PrimaryAction primary_action = 3;
+
+  // probable_action is when cryptohome is not quite sure how the error
+  // occurred, but believes that some of the actions (as listed in this field)
+  // are more likely to resolve the error than other actions.
+  // The entries in this repeated field are not ordered.
+  // This field can be ignored if primary_action is not PRIMARY_NONE or
+  // PRIMARY_INCORRECT_AUTH.
+  // Note that primary_action = PRIMARY_INCORRECT_AUTH is a special case,
+  // because the Chromium side will handle it different depending the number
+  // of times it happened. Therefore, for the case when primary_action =
+  // PRIMARY_INCORRECT_AUTH, the probable_action field will be populated with
+  // any PossibleAction entry that might be relevant (if any).
+  // In the future we intend to weed out any false positives in reporting
+  // PRIMARY_INCORRECT_AUTH, and thus probable_action will eventually be empty.
+  repeated PossibleAction possible_actions = 4;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -179,6 +314,7 @@ message MountRequest {
 // Output parameters for Mount()
 message MountReply {
   // Indicate an error when |error| is not empty.
+  // This will be replaced by |error_info| soon.
   CryptohomeErrorCode error = 1;
   // |recreated| is set when the cryptohome had to be wiped
   // because the key or data was an unrecoverable.  It does not imply
@@ -187,31 +323,23 @@ message MountReply {
   bool recreated = 2;
   // Returns the filesystem-sanitized username.
   string sanitized_username = 3;
+
+  // Indicate an error if this field exists.
+  // This field is replacing the |error| field above.
+  CryptohomeErrorInfo error_info = 10;
 }
 
 // Input parameters to Remove()
+// If an AuthSession ID is provided, then that will be used and validated.
 message RemoveRequest {
   // Identifies the user, whose home directory to remove
   cryptohome.AccountIdentifier identifier = 1;
+  // Token that would be get user id from AuthSession.
+  bytes auth_session_id = 2;
 }
 
 // Output parameters for Remove()
 message RemoveReply {
-  // Indicate an error when |error| is not empty.
-  CryptohomeErrorCode error = 1;
-}
-
-// Input parameters to Rename()
-message RenameRequest {
-  // Identifies the user, whose home directory to rename
-  cryptohome.AccountIdentifier id_from = 1;
-  // After the Rename() operation the home directory will have a name that is
-  // the same as if it is owned by |id_to|
-  cryptohome.AccountIdentifier id_to = 2;
-}
-
-// Output parameters for Rename()
-message RenameReply {
   // Indicate an error when |error| is not empty.
   CryptohomeErrorCode error = 1;
 }
@@ -265,6 +393,8 @@ message CheckKeyRequest {
   cryptohome.AccountIdentifier account_id = 1;
   // The authentication credentials to check against the keys
   cryptohome.AuthorizationRequest authorization_request = 2;
+  // Whether the webauthn secret should be unlocked.
+  bool unlock_webauthn_secret = 3;
 }
 
 // Output parameters for CheckKey()
@@ -289,23 +419,6 @@ message AddKeyRequest {
 message AddKeyReply {
   // Indicates an error if error is not empty.
   CryptohomeErrorCode error = 1;
-}
-
-// Input parameters to AddDataRestoreKey()
-message AddDataRestoreKeyRequest {
-  // The owner the account.
-  cryptohome.AccountIdentifier account_id = 1;
-  // The authentication data of the account.
-  cryptohome.AuthorizationRequest authorization_request = 2;
-}
-
-// Output parameters for AddDataRestoreKey()
-message AddDataRestoreKeyReply {
-  // Indicates an error if error is not empty.
-  CryptohomeErrorCode error = 1;
-
-  // 256 bits data restore key in raw bytes
-  bytes data_restore_key = 2;
 }
 
 // Input parameters to RemoveKey()
@@ -416,6 +529,34 @@ message GetWebAuthnSecretReply {
   bytes webauthn_secret = 2;
 }
 
+// Input parameters to GetWebAuthnSecretHash()
+message GetWebAuthnSecretHashRequest {
+  // This represents the "single user" that the secret belongs to.
+  cryptohome.AccountIdentifier account_id = 1;
+}
+
+// Output parameters for GetWebAuthnSecretHash()
+message GetWebAuthnSecretHashReply {
+  // Indicates an error if |error| is not empty.
+  CryptohomeErrorCode error = 1;
+  // The WebAuthn secret hash.
+  bytes webauthn_secret_hash = 2;
+}
+
+// Input parameters to GetHibernateSecret()
+message GetHibernateSecretRequest {
+  // This represents the "single user" that the secret belongs to.
+  cryptohome.AccountIdentifier account_id = 1;
+}
+
+// Output parameters for GetHibernateSecret()
+message GetHibernateSecretReply {
+  // Indicates an error if |error| is not empty.
+  CryptohomeErrorCode error = 1;
+  // The hibernate secret.
+  bytes hibernate_secret = 2;
+}
+
 // TODO(b/126307305): For the messages, below, we'll need to add the documentations
 // for them.
 
@@ -519,10 +660,11 @@ message LowDiskSpace {
 // These flags will define any requests from the caller for how to run an
 // AuthSession.
 enum AuthSessionFlags {
-  // Default Value
+  // Default Value.
   AUTH_SESSION_FLAGS_NONE = 0;
-  // Is the user a kiosk user?
-  AUTH_SESSION_FLAGS_KIOSK_USER = 1;
+  // This flag is set when auth session is used for an ephemeral user.
+  AUTH_SESSION_FLAGS_EPHEMERAL_USER = 2;
+  reserved 1;
 }
 
 message StartAuthSessionRequest {
@@ -546,6 +688,9 @@ message StartAuthSessionReply {
   // Map to return label and public key data for the authentication credential
   // to be sent in. This will be empty if user_exists is set to false.
   map<string, cryptohome.KeyData> key_label_data = 4;
+  // List of AuthFactors to return all the AuthFactors available for user
+  // authentication. This will be empty if user_exists is set to false.
+  repeated AuthFactor auth_factors = 5;
 }
 
 message AddCredentialsRequest {
@@ -577,6 +722,131 @@ message AuthenticateAuthSessionReply {
   CryptohomeErrorCode error = 1;
   // Returns if the Auth Session is authenticated.
   bool authenticated = 2;
+}
+
+message InvalidateAuthSessionRequest {
+  // Serialized form of token that is used to identify Auth Session that needs
+  // to be invalidated.
+  bytes auth_session_id = 1;
+}
+
+message InvalidateAuthSessionReply {
+  // Error if any to invalidate the Auth Session.
+  CryptohomeErrorCode error = 1;
+}
+
+message ExtendAuthSessionRequest {
+  // Serialized form of token that is used to identify Auth Session that needs
+  // to be extended.
+  bytes auth_session_id = 1;
+  // Duration of the extension requested in seconds, with a default of
+  // 60 seconds if not specified.
+  uint32 extension_duration = 2;
+}
+
+message ExtendAuthSessionReply {
+  // Error if any to extend the Auth Session.
+  CryptohomeErrorCode error = 1;
+}
+
+message UpdateCredentialRequest {
+  // Serialized form of token that is used to identify Auth Session that will
+  // be used to update credentials.
+  bytes auth_session_id = 1;
+  // Label of the credential that will be updated by this request.
+  // If this is empty, it would be considered a password keyset as those keysets
+  // do not have any label stored for them.
+  string old_credential_label = 2;
+  // Authorization data from the user for the new credential. The label in this
+  // request should match |old_credential_label|.
+  cryptohome.AuthorizationRequest authorization = 3;
+}
+
+message UpdateCredentialReply {
+  // Error if any to update credential.
+  CryptohomeErrorCode error = 1;
+}
+
+message CreatePersistentUserRequest {
+  // Id of the auth session associated with the user we aim to create.
+  bytes auth_session_id = 1;
+}
+
+message CreatePersistentUserReply {
+  // The status of the operation.
+  CryptohomeErrorCode error = 1;
+  // The sanitized username, this is basically a hashed representation
+  // of the username used in the paths of user's home directory.
+  string sanitized_username = 2;
+}
+
+message PrepareGuestVaultRequest {}
+
+message PrepareGuestVaultReply {
+  // The status of the operation.
+  CryptohomeErrorCode error = 1;
+  // The sanitized username, this is basically a hashed representation
+  // of the username used in the paths of user's home directory.
+  string sanitized_username = 2;
+}
+
+message PrepareEphemeralVaultRequest {
+  // Id of the auth session associated with the user we aim to prepare vault
+  // for.
+  bytes auth_session_id = 1;
+}
+
+message PrepareEphemeralVaultReply {
+  // The status of the operation.
+  CryptohomeErrorCode error = 1;
+  // The sanitized username, this is basically a hashed representation
+  // of the username used in the paths of user's home directory.
+  string sanitized_username = 2;
+}
+
+enum VaultEncryptionType {
+  CRYPTOHOME_VAULT_ENCRYPTION_ANY = 0;
+  CRYPTOHOME_VAULT_ENCRYPTION_ECRYPTFS = 1;
+  CRYPTOHOME_VAULT_ENCRYPTION_FSCRYPT = 2;
+  CRYPTOHOME_VAULT_ENCRYPTION_DMCRYPT = 3;
+}
+
+message PreparePersistentVaultRequest {
+  // Id of the auth session associated with the user we aim to prepare vault
+  // for.
+  bytes auth_session_id = 1;
+  // Whether ecryptfs mount should be prohibited
+  // TODO(dlunev): deprecate the field once we migrate to the new interface.
+  // |force_encryption_type| will fully supercede it for all cases later on, but
+  // in the interim we need to preserve it for backward compatibility.
+  bool block_ecryptfs = 2;
+  // Expected encryption type.
+  // TODO(dlunev): for now it is enforced only for the vault creation. After
+  // removing the old interface it will superceded |block_ecryptfs| flag to
+  // enforce mandatory migrations.
+  VaultEncryptionType encryption_type = 3;
+}
+
+message PreparePersistentVaultReply {
+  // The status of the operation.
+  CryptohomeErrorCode error = 1;
+  // The sanitized username, this is basically a hashed representation
+  // of the username used in the paths of user's home directory.
+  string sanitized_username = 2;
+}
+
+message PrepareVaultForMigrationRequest {
+  // Id of the auth session associated with the user we aim to prepare vault
+  // for.
+  bytes auth_session_id = 1;
+}
+
+message PrepareVaultForMigrationReply {
+  // The status of the operation.
+  CryptohomeErrorCode error = 1;
+  // The sanitized username, this is basically a hashed representation
+  // of the username used in the paths of user's home directory.
+  string sanitized_username = 2;
 }
 
 // ------------------------- ArcQuota Interface -------------------------
@@ -657,8 +927,23 @@ message SetProjectIdRequest {
 
 // Output parameters for SetProjectId().
 message SetProjectIdReply {
-  // Set to true if ioctl syscall for setting the proect ID succeeds.
+  // Set to true if ioctl syscall for setting the project ID succeeds.
   bool success = 1;
+}
+
+// Input parameters to SetMediaRWDataFileProjectId().
+message SetMediaRWDataFileProjectIdRequest {
+  // The project ID.
+  uint32 project_id = 1;
+}
+
+// Output parameters for SetMediaRWDataFileProjectId().
+message SetMediaRWDataFileProjectIdReply {
+  // Set to true if ioctl syscall for setting the project ID succeeds.
+  bool success = 1;
+
+  // Errno if success == false.
+  int32 error = 2;
 }
 
 // ------------------------- PKCS#11 Interface -------------------------
@@ -995,4 +1280,97 @@ message FidoGetAssertionReply {
   CryptohomeErrorCode error = 1;
   // Contains GetAssertionAuthenticatorResponse.
   cryptohome.fido.GetAssertionAuthenticatorResponse get_assertion_response = 2;
+}
+
+// AddAuthFactorRequest is built when a user is trying to add an AuthFactor
+// for a user. When the call is made, AuthSession should be authenticated. After
+// the operation the AuthSession would still be in the authenticated state.
+message AddAuthFactorRequest {
+  // AuthFactor cannot be added without an active AuthSession running. This id
+  // would be used to associate the AuthFactor to an AuthSession.
+  bytes auth_session_id = 1;
+  // The AuthFactor that will be added for a given user. This should be
+  // populated with any factor specific data and metadata.
+  // If AuthFactor in the request be constructed with an existing label, the
+  // call would return an error.
+  AuthFactor auth_factor = 2;
+  // In some cases, such as password, the secret would be user supplied. In
+  // those cases the secret can be passed here.
+  AuthInput auth_input = 3;
+}
+
+message AddAuthFactorReply {
+  // Return the status of the request.
+  CryptohomeErrorCode error = 1;
+}
+
+// AuthenticateAuthFactorRequest is built when a user is trying to
+// authenticate with an AuthFactor for a user. When the call is made,
+// AuthSession is in an unauthenticated state. After the operation the
+// AuthSession would still be in an authenticated state.
+message AuthenticateAuthFactorRequest {
+  // AuthFactor cannot be authenticated without an active AuthSession running.
+  // This id would be used to associate the AuthFactor to an AuthSession.
+  bytes auth_session_id = 1;
+  // The AuthFactor label would be used to determine the AuthFactor that
+  // needs to be authenticated. If the label does not exist, the call would
+  // return an error.
+  bytes auth_factor_label = 2;
+  // In some cases, such as password, the secret would be user supplied. In
+  // those cases the secret can be passed here.
+  AuthInput auth_input = 3;
+}
+
+message AuthenticateAuthFactorReply {
+  // Return the status of the request.
+  CryptohomeErrorCode error = 1;
+}
+
+// UpdateAuthFactorRequest is built when a user is trying to
+// update an AuthFactor for a user. old_auth_factor_label would identify
+// the AuthFactor that the request is trying to update. When the call is made,
+// AuthSession is in an authenticated state. After the operation the
+// AuthSession would still be in an authenticated state.
+message UpdateAuthFactorRequest {
+  // AuthFactor cannot be updated without an active and authenticated
+  // AuthSession running. This id would be used to associate the AuthFactor to
+  // an AuthSession.
+  bytes auth_session_id = 1;
+  // Label to identify the existing AuthFactor.
+  string old_auth_factor_label = 2;
+  // The AuthFactor that we will replace the existing AuthFactor with. The full
+  // structure should be populated with factor specific data and metadata. The
+  // new label should either be same as old_auth_factor_label or be different
+  // than anything else that exist for a user already.
+  AuthFactor auth_factor = 3;
+  // In some cases, such as password, the secret would be user supplied. In
+  // those cases the secret can be passed here
+  AuthInput auth_input = 4;
+}
+
+message UpdateAuthFactorReply {
+  // Return the status of the request.
+  CryptohomeErrorCode error = 1;
+}
+
+// RemoveAuthFactorRequest is built when a user is trying to
+// remove an AuthFactor for a user. auth_factor_label would identify
+// the AuthFactor that the request is trying to remove. When the call is made,
+// AuthSession is in an authenticated state. After the operation the
+// AuthSession would still be in an authenticated state.
+message RemoveAuthFactorRequest {
+  // AuthFactor cannot be removed without an authenticated AuthSession running.
+  // This id would be used to get the user whose AuthFactor the call is trying
+  // to delete.
+  bytes auth_session_id = 1;
+  // The AuthFactor label would be used to determine the AuthFactor that
+  // needs to be removed.
+  // If this AuthFactor is the last AuthFactor for a given user, then the call
+  // would return an error stating that.
+  string auth_factor_label = 2;
+}
+
+message RemoveAuthFactorReply {
+  // Return the status of the request.
+  CryptohomeErrorCode error = 1;
 }

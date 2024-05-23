@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
@@ -31,7 +30,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/frame/frame_policy.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
-#include "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom.h"
 
 namespace content {
@@ -49,7 +47,7 @@ class RenderProcessHostUnitTest : public RenderViewHostImplTestHarness {
         browser_context(),
         UrlInfo::CreateForTesting(url,
                                   CreateStoragePartitionConfigForTesting()),
-        WebExposedIsolationInfo::CreateNonIsolated(), can_reuse_process);
+        can_reuse_process);
   }
 };
 
@@ -72,7 +70,7 @@ TEST_F(RenderProcessHostUnitTest, GuestsAreNotSuitableHosts) {
             RenderProcessHostImpl::GetExistingProcessHost(site_instance.get()));
 }
 
-#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(RenderProcessHostUnitTest, RendererProcessLimit) {
   // This test shouldn't run with --site-per-process mode, which prohibits
   // the renderer process reuse this test explicitly exercises.
@@ -101,7 +99,7 @@ TEST_F(RenderProcessHostUnitTest, RendererProcessLimit) {
 }
 #endif
 
-#if defined(OS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(RenderProcessHostUnitTest, NoRendererProcessLimitOnAndroidOrChromeOS) {
   // Add a few dummy process hosts.
   static constexpr size_t kMaxRendererProcessCountForTesting = 82;
@@ -126,7 +124,7 @@ TEST_F(RenderProcessHostUnitTest, ReuseCommittedSite) {
   // cached and reused after the navigation to |kUrl2| with BFCache enabled. The
   // test expects that a new process (either spare or created) is used instead.
   contents()->GetController().GetBackForwardCache().DisableForTesting(
-      BackForwardCache::TEST_ASSUMES_NO_CACHING);
+      BackForwardCache::TEST_REQUIRES_NO_CACHING);
 
   // At first, trying to get a RenderProcessHost with the
   // REUSE_PENDING_OR_COMMITTED_SITE policy should return a new process.
@@ -170,9 +168,13 @@ TEST_F(RenderProcessHostUnitTest, ReuseCommittedSite) {
       blink::mojom::TreeScopeType::kDocument, std::string(), unique_name, false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
       blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
-      blink::mojom::FrameOwnerElementType::kIframe);
-  TestRenderFrameHost* subframe = static_cast<TestRenderFrameHost*>(
-      contents()->GetFrameTree()->root()->child_at(0)->current_frame_host());
+      blink::FrameOwnerElementType::kIframe);
+  TestRenderFrameHost* subframe =
+      static_cast<TestRenderFrameHost*>(contents()
+                                            ->GetPrimaryFrameTree()
+                                            .root()
+                                            ->child_at(0)
+                                            ->current_frame_host());
   subframe = static_cast<TestRenderFrameHost*>(
       NavigationSimulator::NavigateAndCommitFromDocument(kUrl1, subframe));
   site_instance = SiteInstanceImpl::CreateReusableInstanceForTesting(
@@ -434,7 +436,7 @@ TEST_F(RenderProcessHostUnitTest, DoNotReuseError) {
   // This cannot happen if the page is restored from the back-forward
   // cache, because no network requests would be made.
   contents()->GetController().GetBackForwardCache().DisableForTesting(
-      BackForwardCache::TEST_ASSUMES_NO_CACHING);
+      BackForwardCache::TEST_REQUIRES_NO_CACHING);
   const GURL kUrl1("http://foo.com");
   const GURL kUrl2("http://bar.com");
 
@@ -475,8 +477,7 @@ TEST_F(RenderProcessHostUnitTest, DoNotReuseError) {
 }
 
 // Tests that RenderProcessHost reuse considers navigations correctly.
-// Disabled for flakiness: see https://crbug.com/826595
-TEST_F(RenderProcessHostUnitTest, DISABLED_ReuseNavigationProcess) {
+TEST_F(RenderProcessHostUnitTest, ReuseNavigationProcess) {
   const GURL kUrl1("http://foo.com");
   const GURL kUrl2("http://bar.com");
 
@@ -944,6 +945,12 @@ TEST_F(RenderProcessHostUnitTest, ProcessAssignmentDefault) {
 class SpareRenderProcessHostUnitTest : public RenderViewHostImplTestHarness {
  public:
   SpareRenderProcessHostUnitTest() {}
+
+  SpareRenderProcessHostUnitTest(const SpareRenderProcessHostUnitTest&) =
+      delete;
+  SpareRenderProcessHostUnitTest& operator=(
+      const SpareRenderProcessHostUnitTest&) = delete;
+
   ~SpareRenderProcessHostUnitTest() override = default;
 
  protected:
@@ -979,9 +986,6 @@ class SpareRenderProcessHostUnitTest : public RenderViewHostImplTestHarness {
   }
 
   MockRenderProcessHostFactory rph_factory_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SpareRenderProcessHostUnitTest);
 };
 
 using SpareProcessMaybeTakeAction =

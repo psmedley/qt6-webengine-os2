@@ -23,6 +23,7 @@
 #include "net/base/mime_util.h"
 #include "net/base/parse_number.h"
 #include "net/base/url_util.h"
+#include "net/http/http_response_headers.h"
 
 namespace net {
 
@@ -267,14 +268,14 @@ bool HttpUtil::ParseRetryAfterHeader(const std::string& retry_after_string,
   base::TimeDelta interval;
 
   if (net::ParseUint32(retry_after_string, &seconds)) {
-    interval = base::TimeDelta::FromSeconds(seconds);
+    interval = base::Seconds(seconds);
   } else if (base::Time::FromUTCString(retry_after_string.c_str(), &time)) {
     interval = time - now;
   } else {
     return false;
   }
 
-  if (interval < base::TimeDelta::FromSeconds(0))
+  if (interval < base::Seconds(0))
     return false;
 
   *retry_after = interval;
@@ -311,6 +312,23 @@ const char* const kForbiddenHeaderFields[] = {
     "via",
 };
 
+// A header string containing any of the following fields with a forbidden
+// method name in the value will cause an error. The list comes from the fetch
+// standard.
+const char* const kForbiddenHeaderFieldsWithForbiddenMethod[] = {
+    "x-http-method",
+    "x-http-method-override",
+    "x-method-override",
+};
+
+// The forbidden method names that is defined in the fetch standard, and used
+// to check the kForbiddenHeaderFileWithForbiddenMethod above.
+const char* const kForbiddenMethods[] = {
+    "connect",
+    "trace",
+    "track",
+};
+
 }  // namespace
 
 // static
@@ -325,7 +343,7 @@ bool HttpUtil::IsMethodIdempotent(base::StringPiece method) {
 }
 
 // static
-bool HttpUtil::IsSafeHeader(base::StringPiece name) {
+bool HttpUtil::IsSafeHeader(base::StringPiece name, base::StringPiece value) {
   if (base::StartsWith(name, "proxy-", base::CompareCase::INSENSITIVE_ASCII) ||
       base::StartsWith(name, "sec-", base::CompareCase::INSENSITIVE_ASCII))
     return false;
@@ -333,6 +351,28 @@ bool HttpUtil::IsSafeHeader(base::StringPiece name) {
   for (const char* field : kForbiddenHeaderFields) {
     if (base::LowerCaseEqualsASCII(name, field))
       return false;
+  }
+
+  if (base::FeatureList::IsEnabled(features::kBlockNewForbiddenHeaders)) {
+    bool is_forbidden_header_fields_with_forbidden_method = false;
+    for (const char* field : kForbiddenHeaderFieldsWithForbiddenMethod) {
+      if (base::EqualsCaseInsensitiveASCII(name, field)) {
+        is_forbidden_header_fields_with_forbidden_method = true;
+        break;
+      }
+    }
+    if (is_forbidden_header_fields_with_forbidden_method) {
+      std::string value_string(value);
+      ValuesIterator method_iterator(value_string.begin(), value_string.end(),
+                                     ',');
+      while (method_iterator.GetNext()) {
+        base::StringPiece method = method_iterator.value_piece();
+        for (const char* forbidden_method : kForbiddenMethods) {
+          if (base::EqualsCaseInsensitiveASCII(method, forbidden_method))
+            return false;
+        }
+      }
+    }
   }
   return true;
 }
@@ -1120,6 +1160,23 @@ bool HttpUtil::ParseContentEncoding(const std::string& content_encoding,
     used_encodings->insert(base::ToLowerASCII(encoding));
   }
   return true;
+}
+
+bool HttpUtil::HeadersContainMultipleCopiesOfField(
+    const HttpResponseHeaders& headers,
+    const std::string& field_name) {
+  size_t it = 0;
+  std::string field_value;
+  if (!headers.EnumerateHeader(&it, field_name, &field_value))
+    return false;
+  // There's at least one `field_name` header.  Check if there are any more
+  // such headers, and if so, return true if they have different values.
+  std::string field_value2;
+  while (headers.EnumerateHeader(&it, field_name, &field_value2)) {
+    if (field_value != field_value2)
+      return true;
+  }
+  return false;
 }
 
 }  // namespace net

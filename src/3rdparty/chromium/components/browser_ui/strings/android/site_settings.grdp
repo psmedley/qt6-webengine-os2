@@ -39,6 +39,9 @@
   <message name="IDS_WEBSITE_SETTINGS_DEVICE_LOCATION" desc="Title for Location settings, which control which websites can access your location." meaning="Geolocation">
     Location
   </message>
+  <message name="IDS_WEBSITE_SETTINGS_FEDERATED_IDENTITY" desc="Title for Third-Party Sign In settings, which control whether websites can access browser third-party sign in API.">
+    Third-party sign-in
+  </message>
   <message name="IDS_WEBSITE_SETTINGS_USE_MIC" desc="The category filter 'Mic' for site settings.">
     Microphone
   </message>
@@ -68,6 +71,12 @@
   </message>
   <message name="IDS_VR_PERMISSION_TITLE" desc="Title of the permission to use Virtual Reality [CHAR_LIMIT=32]">
     Virtual reality
+  </message>
+  <message name="IDS_AUTO_DARK_WEB_CONTENT_TITLE" desc="Title of the permission auto darken web content [CHAR_LIMIT=32]">
+    Dark theme for sites
+  </message>
+  <message name="IDS_DESKTOP_SITE_TITLE" desc="Title of the permission to request the desktop view of a site by default [CHAR_LIMIT=32]">
+    Desktop site
   </message>
 
   <!-- Site settings global toggles -->
@@ -112,6 +121,12 @@
   </message>
   <message name="IDS_WEBSITE_SETTINGS_BLOCKED_GROUP_HEADING_SOUND" desc="The heading for a list of websites that have been muted.">
     Muted
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_ALLOWED_GROUP_HEADING_REQUEST_DESKTOP_SITE" desc="The heading for a list of websites that will be requested the desktop view of sites.">
+    Always request desktop site
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_BLOCKED_GROUP_HEADING_REQUEST_DESKTOP_SITE" desc="The heading for a list of websites that will be requested the mobile view of sites.">
+    Always request mobile site
   </message>
   <message name="IDS_WEBSITE_SETTINGS_MANAGED_GROUP_HEADING" desc="The heading for a list of websites that are managed by an external app.">
     Managed by app
@@ -320,10 +335,10 @@
     Sites will work normally
   </message>
   <message name="IDS_WEBSITE_SETTINGS_CATEGORY_COOKIE_BLOCK_THIRD_PARTY_ADDITION" desc="Additional text used to explain the block third-party cookies option in settings">
-    Features on some sites may break
+    Features on some sites may not work
   </message>
   <message name="IDS_WEBSITE_SETTINGS_CATEGORY_COOKIE_BLOCK_ADDITION" desc="Additional text used to explain the block cookies option in settings">
-    Features on many sites may break
+    Features on many sites may not work
   </message>
   <message name="IDS_WEBSITE_SETTINGS_CATEGORY_COOKIE_ALLOWED" desc="Summary text explaining that sites are allowed to use cookies and that it is the recommended setting.">
     Allow sites to save and read cookie data (recommended)
@@ -336,6 +351,28 @@
   </message>
   <message name="IDS_WEBSITE_SETTINGS_COOKIE_INFO" desc="Text describing cookie and third-party cookie settings.">
     Cookies are files created by websites you visit. Sites use them to remember your preferences. Third-party cookies are created by other sites. These sites own some of the content, like ads or images, that you see on the webpage you visit.
+  </message>
+
+  <!-- Desktop Site -->
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_DESKTOP_SITE_ALLOWED" desc="Summary text explaining that desktop view of sites will be requested by default.">
+    Request desktop view
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_DESKTOP_SITE_BLOCKED" desc="Summary text explaining that mobile view of sites will be requested by default and that it is the recommended setting.">
+    Request mobile view (recommended)
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_DESKTOP_SITE_ALLOWED_LIST" desc="Summary text explaining that desktop view of sites will be requested by default. To be shown in the list of permission categories.">
+    On
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_DESKTOP_SITE_BLOCKED_LIST" desc="Summary text explaining that mobile view of sites will be requested by default. To be shown in the list of permission categories.">
+    Off
+  </message>
+
+  <!-- Federated Identity -->
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_FEDERATED_IDENTITY_ALLOWED" desc="The description for the option to allow sites to use the browser Third-Party Sign In API.">
+    Sites can show sign-in prompts from identity services.
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_FEDERATED_IDENTITY_BLOCKED" desc="The description for the option to block sites from using the browser Third-Party Sign In API.">
+    Block sign-in prompts from identity services.
   </message>
 
   <!-- Idle Detection -->
@@ -403,10 +440,10 @@
   <!-- NFC -->
 
   <message name="IDS_WEBSITE_SETTINGS_CATEGORY_NFC_ASK" desc="Summary text explaining that sites need to ask for permission before using NFC and that it is the recommended setting.">
-    Ask before allowing sites to send and receive info when you tap NFC devices (recommended)
+    Ask before allowing sites to see and change information on NFC devices (recommended)
   </message>
   <message name="IDS_WEBSITE_SETTINGS_CATEGORY_NFC_BLOCKED" desc="Summary text explaining that sites are blocked from using NFC.">
-    Block sites from sending and receiving info when you tap NFC devices
+    Block sites from seeing and changing information on NFC devices
   </message>
   <message name="IDS_ANDROID_NFC_OFF_GLOBALLY" desc="The message to show when NFC has been turned off globally in Android. Contains a link to the settings menu to enable NFC.">
     NFC is off for this device. Turn it on in <ph name="BEGIN_LINK">&lt;link&gt;</ph>Android Settings<ph name="END_LINK">&lt;/link&gt;</ph>.
@@ -519,4 +556,16 @@
   <message name="IDS_WEBSITE_SETTINGS_CATEGORY_VR_BLOCKED" desc="Summary text explaining that sites are blocked from using VR.">
     Block sites from using your virtual reality device and data
   </message>
+
+  <!-- Auto-darken web content -->
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_AUTO_DARK_ALLOWED" desc="Summary text explaining that sites are alllowed to be darkend with Chrome branded darkening algorithm.">
+    Apply dark theme to sites when Chrome uses dark theme, when possible
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_CATEGORY_AUTO_DARK_BLOCKED" desc="Summary text explaining that sites are blocked to be darkend with Chrome branded darkening algorithm.">
+    Don’t apply dark theme to sites
+  </message>
+  <message name="IDS_WEBSITE_SETTINGS_ADD_SITE_DESCRIPTION_AUTO_DARK_BLOCK" desc="The description for the block auto darken for a specific website dialog.">
+    Don’t apply dark theme for a specific site
+  </message>
+
 </grit-part>

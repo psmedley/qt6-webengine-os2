@@ -9,8 +9,9 @@
 #include <utility>
 
 #include "base/callback_helpers.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -19,6 +20,8 @@
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/views/border.h"
@@ -31,8 +34,6 @@
 #include "ui/views/round_rect_painter.h"
 #include "ui/views/view.h"
 #include "ui/views/view_class_properties.h"
-
-using ui::NativeTheme;
 
 namespace views {
 
@@ -64,8 +65,7 @@ class MenuScrollButton : public View {
 
   void OnThemeChanged() override {
     View::OnThemeChanged();
-    arrow_color_ = GetNativeTheme()->GetSystemColor(
-        ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor);
+    arrow_color_ = GetColorProvider()->GetColor(ui::kColorMenuItemForeground);
   }
 
   bool CanDrop(const OSExchangeData& data) override {
@@ -88,11 +88,6 @@ class MenuScrollButton : public View {
     host_->GetMenuItem()->GetMenuController()->OnDragExitedScrollButton(host_);
   }
 
-  ui::mojom::DragOperation OnPerformDrop(
-      const ui::DropTargetEvent& event) override {
-    return ui::mojom::DragOperation::kNone;
-  }
-
   DropCallback GetDropCallback(const ui::DropTargetEvent& event) override {
     return base::DoNothing();
   }
@@ -102,10 +97,10 @@ class MenuScrollButton : public View {
 
     // The background.
     gfx::Rect item_bounds(0, 0, width(), height());
-    NativeTheme::ExtraParams extra;
-    GetNativeTheme()->Paint(canvas->sk_canvas(),
-                            NativeTheme::kMenuItemBackground,
-                            NativeTheme::kNormal, item_bounds, extra);
+    ui::NativeTheme::ExtraParams extra;
+    GetNativeTheme()->Paint(canvas->sk_canvas(), GetColorProvider(),
+                            ui::NativeTheme::kMenuItemBackground,
+                            ui::NativeTheme::kNormal, item_bounds, extra);
 
     // Then the arrow.
     int x = width() / 2;
@@ -136,7 +131,7 @@ class MenuScrollButton : public View {
 
  private:
   // SubmenuView we were created for.
-  SubmenuView* host_;
+  raw_ptr<SubmenuView> host_;
 
   // Direction of the button.
   bool is_up_;
@@ -214,7 +209,7 @@ class MenuScrollViewContainer::MenuScrollView : public View {
   const View* GetContents() const { return children().front(); }
 
  private:
-  MenuScrollViewContainer* owner_;
+  raw_ptr<MenuScrollViewContainer> owner_;
 };
 
 BEGIN_METADATA(MenuScrollViewContainer, MenuScrollView, View)
@@ -266,8 +261,10 @@ gfx::Size MenuScrollViewContainer::CalculatePreferredSize() const {
   prefsize.Enlarge(insets.width(), insets.height());
   const MenuConfig& config = MenuConfig::instance();
   // Leave space for the menu border, below the footnote.
-  if (GetFootnote() && config.use_outer_border && !HasBubbleBorder())
+  if (GetFootnote() && config.use_outer_border && !HasBubbleBorder() &&
+      !config.win11_style_menus) {
     prefsize.Enlarge(0, 1);
+  }
   return prefsize;
 }
 
@@ -283,13 +280,13 @@ void MenuScrollViewContainer::OnPaintBackground(gfx::Canvas* canvas) {
   }
 
   gfx::Rect bounds(0, 0, width(), height());
-  NativeTheme::ExtraParams extra;
+  ui::NativeTheme::ExtraParams extra;
   const MenuConfig& menu_config = MenuConfig::instance();
   extra.menu_background.corner_radius = menu_config.CornerRadiusForMenu(
       content_view_->GetMenuItem()->GetMenuController());
-  GetNativeTheme()->Paint(canvas->sk_canvas(),
-                          NativeTheme::kMenuPopupBackground,
-                          NativeTheme::kNormal, bounds, extra);
+  GetNativeTheme()->Paint(canvas->sk_canvas(), GetColorProvider(),
+                          ui::NativeTheme::kMenuPopupBackground,
+                          ui::NativeTheme::kNormal, bounds, extra);
 }
 
 void MenuScrollViewContainer::GetAccessibleNodeData(ui::AXNodeData* node_data) {
@@ -300,7 +297,7 @@ void MenuScrollViewContainer::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   // allow VoiceOver to recognize this as a menu and to read aloud the total
   // number of items inside it, we ignore the MenuScrollViewContainer (which
   // holds the menu itself: the SubmenuView).
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   node_data->role = ax::mojom::Role::kNone;
 #else
   node_data->role = ax::mojom::Role::kMenuBar;
@@ -368,36 +365,57 @@ void MenuScrollViewContainer::CreateDefaultBorder() {
   int bottom_inset = GetFootnote() ? 0 : vertical_inset;
 
   if (menu_config.use_outer_border) {
-    SkColor color = GetWidget() ? GetNativeTheme()->GetSystemColor(
-                                      ui::NativeTheme::kColorId_MenuBorderColor)
-                                : gfx::kPlaceholderColor;
-    SetBorder(views::CreateBorderPainter(
-        std::make_unique<views::RoundRectPainter>(color, corner_radius_),
-        gfx::Insets(vertical_inset, horizontal_inset, bottom_inset,
-                    horizontal_inset)));
+    if (menu_config.win11_style_menus &&
+        menu_config.CornerRadiusForMenu(
+            content_view_->GetMenuItem()->GetMenuController())) {
+      CreateBubbleBorder();
+    } else {
+      SkColor color = GetWidget()
+                          ? GetColorProvider()->GetColor(ui::kColorMenuBorder)
+                          : gfx::kPlaceholderColor;
+      SetBorder(views::CreateBorderPainter(
+          std::make_unique<views::RoundRectPainter>(color, corner_radius_),
+          gfx::Insets::TLBR(vertical_inset, horizontal_inset, bottom_inset,
+                            horizontal_inset)));
+    }
   } else {
-    SetBorder(CreateEmptyBorder(vertical_inset, horizontal_inset, bottom_inset,
-                                horizontal_inset));
+    SetBorder(CreateEmptyBorder(gfx::Insets::TLBR(
+        vertical_inset, horizontal_inset, bottom_inset, horizontal_inset)));
   }
 }
 
 void MenuScrollViewContainer::CreateBubbleBorder() {
-  const SkColor color = GetWidget()
-                            ? GetNativeTheme()->GetSystemColor(
-                                  ui::NativeTheme::kColorId_MenuBackgroundColor)
-                            : gfx::kPlaceholderColor;
-  auto bubble_border = std::make_unique<BubbleBorder>(
-      arrow_, BubbleBorder::STANDARD_SHADOW, color);
-  if (content_view_->GetMenuItem()
-          ->GetMenuController()
-          ->use_touchable_layout()) {
-    const MenuConfig& menu_config = MenuConfig::instance();
-    bubble_border->SetCornerRadius(menu_config.touchable_corner_radius);
+  const MenuConfig& menu_config = MenuConfig::instance();
+  auto* menu_controller = content_view_->GetMenuItem()->GetMenuController();
+  const int border_radius = menu_config.CornerRadiusForMenu(menu_controller);
+  const bool use_ash_system_ui_layout =
+      menu_controller->use_ash_system_ui_layout();
+
+  ui::ColorId id = ui::kColorMenuBackground;
+  BubbleBorder::Shadow shadow_type = BubbleBorder::STANDARD_SHADOW;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  id = ui::kColorAshSystemUIMenuBackground;
+  // For ash system ui, we use chromeos system ui shadow.
+  if (use_ash_system_ui_layout)
+    shadow_type = BubbleBorder::CHROMEOS_SYSTEM_UI_SHADOW;
+#endif
+
+  const SkColor color =
+      GetWidget() ? GetColorProvider()->GetColor(id) : gfx::kPlaceholderColor;
+  auto bubble_border =
+      std::make_unique<BubbleBorder>(arrow_, shadow_type, color);
+  if (use_ash_system_ui_layout || border_radius > 0) {
+    bubble_border->SetCornerRadius(border_radius);
+
+    const bool is_top_menu = !content_view_->GetMenuItem()->GetParentMenuItem();
     bubble_border->set_md_shadow_elevation(
-        menu_config.touchable_menu_shadow_elevation);
-    gfx::Insets insets(menu_config.vertical_touchable_menu_item_padding, 0);
+        is_top_menu ? menu_config.touchable_menu_shadow_elevation
+                    : menu_config.touchable_submenu_shadow_elevation);
+
+    auto insets =
+        gfx::Insets::VH(menu_config.vertical_touchable_menu_item_padding, 0);
     if (GetFootnote())
-      insets.Set(menu_config.vertical_touchable_menu_item_padding, 0, 0, 0);
+      insets.set_bottom(0);
     scroll_view_->GetContents()->SetBorder(CreateEmptyBorder(insets));
   }
 

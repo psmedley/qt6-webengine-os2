@@ -13,9 +13,9 @@
 #include "base/feature_list.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task/post_task.h"
+#include "base/task/task_runner.h"
 #include "base/task/thread_pool.h"
-#include "base/task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/frame.mojom.h"
@@ -23,14 +23,14 @@
 #include "content/public/common/resource_usage_reporter.mojom.h"
 #include "content/public/common/resource_usage_reporter_type_converters.h"
 #include "content/public/renderer/content_renderer_client.h"
-#include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/service_worker/embedded_worker_instance_client_impl.h"
 #include "content/renderer/worker/shared_worker_factory_impl.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-statistics.h"
 
 namespace content {
 
@@ -120,7 +120,7 @@ class ResourceUsageReporterImpl : public content::mojom::ResourceUsageReporter {
           FROM_HERE,
           base::BindOnce(&ResourceUsageReporterImpl::SendResults,
                          weak_factory_.GetWeakPtr()),
-          base::TimeDelta::FromMilliseconds(kWaitForWorkersStatsTimeoutMS));
+          base::Milliseconds(kWaitForWorkersStatsTimeoutMS));
     } else {
       // No worker threads so just send out the main thread data right away.
       SendResults();

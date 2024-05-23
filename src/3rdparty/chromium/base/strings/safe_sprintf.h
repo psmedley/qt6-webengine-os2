@@ -5,13 +5,13 @@
 #ifndef BASE_STRINGS_SAFE_SPRINTF_H_
 #define BASE_STRINGS_SAFE_SPRINTF_H_
 
-#include "build/build_config.h"
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 // For ssize_t
 #include <unistd.h>
 #endif

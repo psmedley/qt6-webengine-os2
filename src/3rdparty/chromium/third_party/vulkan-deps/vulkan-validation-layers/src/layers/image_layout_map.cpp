@@ -1,7 +1,7 @@
-/* Copyright (c) 2019-2021 The Khronos Group Inc.
- * Copyright (c) 2019-2021 Valve Corporation
- * Copyright (c) 2019-2021 LunarG, Inc.
- * Copyright (C) 2019-2021 Google Inc.
+/* Copyright (c) 2019-2022 The Khronos Group Inc.
+ * Copyright (c) 2019-2022 Valve Corporation
+ * Copyright (c) 2019-2022 LunarG, Inc.
+ * Copyright (C) 2019-2022 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,21 +52,22 @@ static bool UpdateLayoutStateImpl(LayoutsMap& layouts, InitialLayoutStates& init
                 initial_layout_states.emplace_back(cb_state, view_state);
                 new_entry.state = &initial_layout_states.back();
             }
-            layouts.insert(it, std::make_pair(IndexRange(start, limit), new_entry));
-            // We inserted before pos->lower_bound, so pos->lower_bound isn't invalid, but the associated index *is* and seek
-            // will fix this (and move the state to valid)
+            auto insert_result = layouts.insert(it, std::make_pair(IndexRange(start, limit), new_entry));
+            pos.invalidate(insert_result, start);
             pos.seek(limit);
             updated_current = true;
         }
         // Note that after the "fill" operation pos may have become valid so we check again
         if (pos->valid) {
-            if (pos->lower_bound->second.CurrentWillChange(new_entry.current_layout)) {
+            auto intersected_range = pos->lower_bound->first & range;
+            if (!intersected_range.empty() && pos->lower_bound->second.CurrentWillChange(new_entry.current_layout)) {
                 LayoutEntry orig_entry = pos->lower_bound->second; //intentional copy
                 assert(orig_entry.state != nullptr);
                 updated_current |= orig_entry.Update(new_entry);
-
-                layouts.overwrite_range(std::make_pair(range, orig_entry));
-                break;
+                auto overwrite_result = layouts.overwrite_range(pos->lower_bound, std::make_pair(intersected_range, orig_entry));
+                // If we didn't cover the whole range, we'll need to go around again
+                pos.invalidate(overwrite_result, intersected_range.begin);
+                pos.seek(intersected_range.end);
             } else {
                 // Point just past the end of this section,  if it's within the given range, it will get filled next iteration
                 // ++pos could move us past the end of range (which would exit the loop) so we don't use it.
@@ -97,7 +98,7 @@ ImageSubresourceLayoutMap::ImageSubresourceLayoutMap(const IMAGE_STATE& image_st
       initial_layout_states_() {}
 
 ImageSubresourceLayoutMap::ConstIterator ImageSubresourceLayoutMap::Begin(bool always_get_initial) const {
-    return Find(image_state_.full_range, /* skip_invalid */ true, always_get_initial);
+    return ConstIterator(layouts_, encoder_, encoder_.FullRange(), true, always_get_initial);
 }
 
 // Use the unwrapped maps from the BothMap in the actual implementation
@@ -292,6 +293,7 @@ void ImageSubresourceLayoutMap::ConstIterator::IncrementInterval() {
     // When current index is set to point to that, UpdateRangeAndValue skips to the next constant value range,
     // setting that state as the current position / state for the iterator.
     current_index_ = constant_value_bound_;
+    range_gen_.GetSubresourceGenerator().Seek(current_index_);
     UpdateRangeAndValue();
 }
 

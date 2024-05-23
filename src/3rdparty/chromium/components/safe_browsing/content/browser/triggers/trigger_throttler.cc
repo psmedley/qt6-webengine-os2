@@ -22,7 +22,7 @@ const char kTriggerTypeAndQuotaParam[] = "trigger_type_and_quota_csv";
 
 namespace {
 const size_t kUnlimitedTriggerQuota = std::numeric_limits<size_t>::max();
-constexpr base::TimeDelta kOneDayTimeDelta = base::TimeDelta::FromDays(1);
+constexpr base::TimeDelta kOneDayTimeDelta = base::Days(1);
 
 // Predicate used to search |trigger_type_and_quota_list_| by trigger type.
 class TriggerTypeIs {
@@ -198,7 +198,7 @@ void TriggerThrottler::LoadTriggerEventsFromPref() {
   if (!local_state_prefs_)
     return;
 
-  const base::DictionaryValue* event_dict = local_state_prefs_->GetDictionary(
+  const base::Value* event_dict = local_state_prefs_->GetDictionary(
       prefs::kSafeBrowsingTriggerEventTimestamps);
   for (auto trigger_pair : event_dict->DictItems()) {
     // Check that the first item in the pair is convertible to a trigger type
@@ -213,7 +213,7 @@ void TriggerThrottler::LoadTriggerEventsFromPref() {
       continue;
 
     const TriggerType trigger_type = static_cast<TriggerType>(trigger_type_int);
-    for (const auto& timestamp : trigger_pair.second.GetList()) {
+    for (const auto& timestamp : trigger_pair.second.GetListDeprecated()) {
       if (timestamp.is_double())
         trigger_events_[trigger_type].push_back(
             base::Time::FromDoubleT(timestamp.GetDouble()));

@@ -15,8 +15,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "components/viz/common/gpu/context_lost_observer.h"
 #include "components/viz/common/viz_common_export.h"
@@ -172,6 +171,22 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
       // Note 2: This requires a GL context that supports multiple render
       // targets with at least two draw buffers.
       DEINTERLEAVE_PAIRWISE,
+
+      // Select CHANNEL_1 and CHANNEL_2, packing each 2-channel pair from
+      // 4-pixel values into the 2 elements of one output quad. The channels
+      // will be selected at half-width and full height. This should be
+      // equivalent to the second texture produced by ExportFormat::NV61 (see
+      // above). If used on textures after they have gone through RGB→YUV color
+      // space conversion, the transformation is:
+      //
+      //             (interleaved quads)              (channels 1 & 2)
+      //   YUVx YUVx YUVx YUVx YUVx YUVx YUVx YUVx       UVUV UVUV
+      //   YUVx YUVx YUVx YUVx YUVx YUVx YUVx YUVx  -->  UVUV UVUV
+      //   YUVx YUVx YUVx YUVx YUVx YUVx YUVx YUVx       UVUV UVUV
+      //
+      // Note: Because of this packing, the horizontal coordinates of the
+      // |output_rect| used with Scale() should be divided by 4.
+      UV_CHANNELS,
     } export_format = ExportFormat::INTERLEAVED_QUADS;
 
     // Optionally swizzle the ordering of the values in each output quad. If the
@@ -193,6 +208,9 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
 
   explicit GLScaler(ContextProvider* context_provider);
 
+  GLScaler(const GLScaler&) = delete;
+  GLScaler& operator=(const GLScaler&) = delete;
+
   ~GLScaler() final;
 
   // Returns true if the GL context provides the necessary support for enabling
@@ -205,7 +223,7 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
 
   // [Re]Configure the scaler with the given |new_params|. Returns true on
   // success, or false on failure.
-  bool Configure(const Parameters& new_params) WARN_UNUSED_RESULT;
+  [[nodiscard]] bool Configure(const Parameters& new_params);
 
   // Returns the currently-configured and resolved Parameters. Note that these
   // Parameters might not be exactly the same as those that were passed to
@@ -236,23 +254,23 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
   //
   // Note that the |src_texture| will have the min/mag filter set to GL_LINEAR
   // and wrap_s/t set to CLAMP_TO_EDGE in this call.
-  bool Scale(GLuint src_texture,
-             const gfx::Size& src_texture_size,
-             const gfx::Vector2d& src_offset,
-             GLuint dest_texture,
-             const gfx::Rect& output_rect) WARN_UNUSED_RESULT {
+  [[nodiscard]] bool Scale(GLuint src_texture,
+                           const gfx::Size& src_texture_size,
+                           const gfx::Vector2d& src_offset,
+                           GLuint dest_texture,
+                           const gfx::Rect& output_rect) {
     return ScaleToMultipleOutputs(src_texture, src_texture_size, src_offset,
                                   dest_texture, 0, output_rect);
   }
 
   // Same as above, but for use cases where there are two output textures drawn
   // (see Parameters::ExportFormat).
-  bool ScaleToMultipleOutputs(GLuint src_texture,
-                              const gfx::Size& src_texture_size,
-                              const gfx::Vector2d& src_offset,
-                              GLuint dest_texture_0,
-                              GLuint dest_texture_1,
-                              const gfx::Rect& output_rect) WARN_UNUSED_RESULT;
+  [[nodiscard]] bool ScaleToMultipleOutputs(GLuint src_texture,
+                                            const gfx::Size& src_texture_size,
+                                            const gfx::Vector2d& src_offset,
+                                            GLuint dest_texture_0,
+                                            GLuint dest_texture_1,
+                                            const gfx::Rect& output_rect);
 
   // Returns true if from:to represent the same scale ratio as that specified in
   // |params|.
@@ -287,6 +305,7 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
     PLANAR_CHANNEL_1,
     PLANAR_CHANNEL_2,
     PLANAR_CHANNEL_3,
+    PLANAR_CHANNELS_1_2,
     I422_NV61_MRT,
     DEINTERLEAVE_PAIRWISE_MRT,
   };
@@ -300,6 +319,10 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
                   GLenum texture_type,
                   const gfx::ColorTransform* color_transform,
                   const GLenum swizzle[2]);
+
+    ShaderProgram(const ShaderProgram&) = delete;
+    ShaderProgram& operator=(const ShaderProgram&) = delete;
+
     ~ShaderProgram();
 
     Shader shader() const { return shader_; }
@@ -330,7 +353,7 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
     static const GLfloat kVertexAttributes[16];
 
    private:
-    GLES2Interface* const gl_;
+    const raw_ptr<GLES2Interface> gl_;
     const Shader shader_;
     const GLenum texture_type_;
 
@@ -350,8 +373,6 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
     GLint src_pixelsize_location_ = -1;
     // Location of vector for scaling ratio between source and dest textures.
     GLint scaling_vector_location_ = -1;
-
-    DISALLOW_COPY_AND_ASSIGN(ShaderProgram);
   };
 
   // One scaling stage in a chain of scaler pipeline stages. Each ScalerStage
@@ -369,6 +390,10 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
                 Axis primary_axis,
                 const gfx::Vector2d& scale_from,
                 const gfx::Vector2d& scale_to);
+
+    ScalerStage(const ScalerStage&) = delete;
+    ScalerStage& operator=(const ScalerStage&) = delete;
+
     ~ScalerStage();
 
     Shader shader() const { return shader_; }
@@ -414,22 +439,20 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
     // changed.
     void EnsureIntermediateTextureDefined(const gfx::Size& size);
 
-    GLES2Interface* const gl_;
+    const raw_ptr<GLES2Interface> gl_;
     const Shader shader_;
     const Axis primary_axis_;
     const gfx::Vector2d scale_from_;
     const gfx::Vector2d scale_to_;
 
     std::unique_ptr<ScalerStage> input_stage_;
-    ShaderProgram* program_ = nullptr;
+    raw_ptr<ShaderProgram> program_ = nullptr;
     bool is_flipped_source_ = false;
     bool flip_output_ = false;
 
     GLuint intermediate_texture_ = 0;
     gfx::Size intermediate_texture_size_;
     GLuint dest_framebuffer_ = 0;
-
-    DISALLOW_COPY_AND_ASSIGN(ScalerStage);
   };
 
   // ContextLostObserver implementation.
@@ -474,7 +497,7 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
 
   // The provider of the GL context. This is non-null while the GL context is
   // valid and GLScaler is observing for context loss.
-  ContextProvider* context_provider_;
+  raw_ptr<ContextProvider> context_provider_;
 
   // Set by Configure() to the resolved set of Parameters.
   Parameters params_;
@@ -504,8 +527,6 @@ class VIZ_COMMON_EXPORT GLScaler final : public ContextLostObserver {
 
   // The color space in which the scaling stages operate.
   gfx::ColorSpace scaling_color_space_;
-
-  DISALLOW_COPY_AND_ASSIGN(GLScaler);
 };
 
 // For logging.

@@ -13,17 +13,17 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/compiler_specific.h"
 #include "base/containers/contains.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "ppapi/shared_impl/ppapi_constants.h"
 #include "storage/browser/file_system/async_file_util.h"
 #include "storage/browser/file_system/async_file_util_adapter.h"
 #include "storage/browser/file_system/file_system_context.h"
@@ -40,11 +40,23 @@ namespace content {
 namespace {
 
 std::string StringTypeToString(const base::FilePath::StringType& value) {
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   return value;
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   return base::WideToUTF8(value);
 #endif
+}
+
+// TODO(https://crbug.com/1231162): temporary function to convert a vector of
+// StorageKeys to a vector of their origin values; should be obsolete when
+// Plugin-Private File System is converted to StorageKey and partitioned.
+std::vector<url::Origin> ToOrigins(
+    const std::vector<blink::StorageKey>& storage_keys) {
+  std::vector<url::Origin> origins;
+  origins.reserve(storage_keys.size());
+  for (const blink::StorageKey& storage_key : storage_keys)
+    origins.emplace_back(storage_key.origin());
+  return origins;
 }
 
 // Helper for checking the plugin private data for a specified origin and
@@ -77,7 +89,7 @@ class PluginPrivateDataByOriginChecker {
     fsid_ = storage::IsolatedContext::GetInstance()
                 ->RegisterFileSystemForVirtualPath(
                     storage::kFileSystemTypePluginPrivate,
-                    ppapi::kPluginPrivateRootName, base::FilePath());
+                    storage::kPluginPrivateRootName, base::FilePath());
   }
   ~PluginPrivateDataByOriginChecker() {}
 
@@ -105,7 +117,7 @@ class PluginPrivateDataByOriginChecker {
 
   // Not owned by this object. Caller is responsible for keeping the
   // FileSystemContext alive until |callback_| is called.
-  storage::FileSystemContext* filesystem_context_;
+  raw_ptr<storage::FileSystemContext> filesystem_context_;
 
   const GURL origin_;
   const std::string plugin_name_;
@@ -150,7 +162,7 @@ void PluginPrivateDataByOriginChecker::OnFileSystemOpened(
   storage::AsyncFileUtil* file_util = filesystem_context_->GetAsyncFileUtil(
       storage::kFileSystemTypePluginPrivate);
   std::string root = storage::GetIsolatedFileSystemRootURIString(
-      origin_, fsid_, ppapi::kPluginPrivateRootName);
+      origin_, fsid_, storage::kPluginPrivateRootName);
   std::unique_ptr<storage::FileSystemOperationContext> operation_context =
       std::make_unique<storage::FileSystemOperationContext>(
           filesystem_context_);
@@ -311,8 +323,13 @@ void PluginPrivateDataDeletionHelper::CheckOriginsOnFileTaskRunner(
     // Determine the available plugin private filesystem directories
     // for this origin.
     base::File::Error error;
-    base::FilePath path = obfuscated_file_util->GetDirectoryForOriginAndType(
-        origin, "", false, &error);
+    // TODO(https://crbug.com/1231162): determine whether EME/CDM/plugin private
+    // file system will be partitioned; if so, replace the in-line conversion
+    // with the correct third-party StorageKey.
+    base::FilePath path =
+        obfuscated_file_util->GetDirectoryForStorageKeyAndType(
+            blink::StorageKey(origin), /*type_string=*/std::string(),
+            /*create=*/false, &error);
     if (error != base::File::FILE_OK) {
       DLOG(ERROR) << "Unable to read directory for " << origin;
       continue;
@@ -332,7 +349,8 @@ void PluginPrivateDataDeletionHelper::CheckOriginsOnFileTaskRunner(
       IncrementTaskCount();
       PluginPrivateDataByOriginChecker* helper =
           new PluginPrivateDataByOriginChecker(
-              filesystem_context_.get(), origin.GetURL().GetOrigin(),
+              filesystem_context_.get(),
+              origin.GetURL().DeprecatedGetOriginAsURL(),
               plugin_path.BaseName().MaybeAsASCII(), begin_, end_,
               decrement_callback);
       GetIOThreadTaskRunner({})->PostTask(
@@ -372,10 +390,13 @@ void PluginPrivateDataDeletionHelper::DecrementTaskCount(
         filesystem_context_->GetFileSystemBackend(
             storage::kFileSystemTypePluginPrivate);
     storage::FileSystemQuotaUtil* quota_util = backend->GetQuotaUtil();
-    base::File::Error result = quota_util->DeleteOriginDataOnFileTaskRunner(
-        filesystem_context_.get(), nullptr, url::Origin::Create(origin),
-        storage::kFileSystemTypePluginPrivate);
-    ALLOW_UNUSED_LOCAL(result);
+    // TODO(https://crbug.com/1231162): determine whether EME/CDM/plugin private
+    // file system will be partitioned and use the appropriate StorageKey.
+    [[maybe_unused]] base::File::Error result =
+        quota_util->DeleteStorageKeyDataOnFileTaskRunner(
+            filesystem_context_.get(), nullptr,
+            blink::StorageKey(url::Origin::Create(origin)),
+            storage::kFileSystemTypePluginPrivate);
     DLOG_IF(ERROR, result != base::File::FILE_OK)
         << "Unable to delete the plugin data for " << origin;
   }
@@ -410,48 +431,50 @@ void ClearPluginPrivateDataOnFileTaskRunner(
           storage::kFileSystemTypePluginPrivate);
   storage::FileSystemQuotaUtil* quota_util = backend->GetQuotaUtil();
 
-  // Determine the origins used.
-  std::vector<url::Origin> origins =
-      quota_util->GetOriginsForTypeOnFileTaskRunner(
+  // Determine the StorageKeys used.
+  std::vector<blink::StorageKey> storage_keys =
+      quota_util->GetStorageKeysForTypeOnFileTaskRunner(
           storage::kFileSystemTypePluginPrivate);
 
-  if (origins.empty()) {
-    // No origins, so nothing to do.
+  if (storage_keys.empty()) {
+    // No StorageKeys, so nothing to do.
     std::move(callback).Run();
     return;
   }
 
-  // If a specific origin is provided, then check that it is in the list
-  // returned and remove all the other origins.
+  // If a specific origin parameter is provided, then check that it is in the
+  // list returned and remove all the other StorageKeys.
   if (!storage_origin_url.is_empty()) {
     DCHECK(!origin_matcher) << "Only 1 of |storage_origin_url| and "
                                "|origin_matcher| should be specified.";
-    url::Origin storage_origin = url::Origin::Create(storage_origin_url);
-    if (!base::Contains(origins, storage_origin)) {
+    const blink::StorageKey storage_key =
+        blink::StorageKey(url::Origin::Create(storage_origin_url));
+    if (!base::Contains(storage_keys, storage_key)) {
       // Nothing matches, so nothing to do.
       std::move(callback).Run();
       return;
     }
 
     // List should only contain the one value that matches.
-    origins.clear();
-    origins.push_back(storage_origin);
+    storage_keys.clear();
+    storage_keys.push_back(storage_key);
   }
 
-  // If a filter is provided, determine which origins match.
+  // If a filter is provided, determine which StorageKeys match.
   if (origin_matcher) {
     DCHECK(storage_origin_url.is_empty())
         << "Only 1 of |storage_origin_url| and |origin_matcher| should be "
            "specified.";
-    std::vector<url::Origin> origins_to_check;
-    origins_to_check.swap(origins);
-    for (auto& origin : origins_to_check) {
-      if (origin_matcher.Run(origin, special_storage_policy.get()))
-        origins.push_back(std::move(origin));
+    std::vector<blink::StorageKey> storage_keys_to_check;
+    storage_keys_to_check.swap(storage_keys);
+    for (auto& storage_key : storage_keys_to_check) {
+      if (origin_matcher.Run(storage_key.origin(),
+                             special_storage_policy.get()))
+        storage_keys.push_back(std::move(storage_key));
     }
 
-    // If no origins matched, there is nothing to do.
-    if (origins.empty()) {
+    // If no StorageKeys matched, there is nothing to do.
+    if (storage_keys.empty()) {
       std::move(callback).Run();
       return;
     }
@@ -459,7 +482,7 @@ void ClearPluginPrivateDataOnFileTaskRunner(
 
   PluginPrivateDataDeletionHelper* helper = new PluginPrivateDataDeletionHelper(
       std::move(filesystem_context), begin, end, std::move(callback));
-  helper->CheckOriginsOnFileTaskRunner(origins);
+  helper->CheckOriginsOnFileTaskRunner(ToOrigins(storage_keys));
   // |helper| will delete itself when all origins have been checked.
 }
 

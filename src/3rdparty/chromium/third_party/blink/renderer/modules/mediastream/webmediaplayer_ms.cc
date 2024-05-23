@@ -14,6 +14,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "cc/layers/video_frame_provider_client_impl.h"
 #include "cc/layers/video_layer.h"
@@ -49,6 +50,7 @@
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/timer.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_media.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace WTF {
@@ -122,11 +124,10 @@ const char* NetworkStateToString(WebMediaPlayer::NetworkState state) {
   }
 }
 
-constexpr base::TimeDelta kForceBeginFramesTimeout =
-    base::TimeDelta::FromSeconds(1);
+constexpr base::TimeDelta kForceBeginFramesTimeout = base::Seconds(1);
 }  // namespace
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // Since we do not have native GMB support in Windows, using GMBs can cause a
 // CPU regression. This is more apparent and can have adverse affects in lower
 // resolution content which are defined by these thresholds, see
@@ -134,7 +135,7 @@ constexpr base::TimeDelta kForceBeginFramesTimeout =
 // static
 const gfx::Size WebMediaPlayerMS::kUseGpuMemoryBufferVideoFramesMinResolution =
     gfx::Size(1920, 1080);
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 // FrameDeliverer is responsible for delivering frames received on
 // the IO thread by calling of EnqueueFrame() method of |compositor_|.
@@ -153,34 +154,30 @@ class WebMediaPlayerMS::FrameDeliverer {
       : main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
         player_(player),
         enqueue_frame_cb_(std::move(enqueue_frame_cb)),
-        media_task_runner_(media_task_runner) {
+        media_task_runner_(media_task_runner),
+        worker_task_runner_(worker_task_runner),
+        gpu_factories_(gpu_factories) {
     DETACH_FROM_THREAD(io_thread_checker_);
 
-    if (gpu_factories && gpu_factories->ShouldUseGpuMemoryBuffersForVideoFrames(
-                             true /* for_media_stream */)) {
-      gpu_memory_buffer_pool_ =
-          std::make_unique<media::GpuMemoryBufferVideoFramePool>(
-              media_task_runner, worker_task_runner, gpu_factories);
-    }
+    CreateGpuMemoryBufferPoolIfNecessary();
   }
+
+  FrameDeliverer(const FrameDeliverer&) = delete;
+  FrameDeliverer& operator=(const FrameDeliverer&) = delete;
 
   ~FrameDeliverer() {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
-    if (gpu_memory_buffer_pool_) {
-      DropCurrentPoolTasks();
-      media_task_runner_->DeleteSoon(FROM_HERE,
-                                     gpu_memory_buffer_pool_.release());
-    }
+    FreeGpuMemoryBufferPool();
   }
 
   void OnVideoFrame(scoped_refptr<media::VideoFrame> frame) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
 
 // On Android, stop passing frames.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     if (render_frame_suspended_)
       return;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
     if (!gpu_memory_buffer_pool_) {
       int original_frame_id = frame->unique_id();
@@ -188,21 +185,21 @@ class WebMediaPlayerMS::FrameDeliverer {
       return;
     }
 
-#if defined(OS_WIN)
-    const bool skip_creating_gpu_memory_buffer =
-        frame->visible_rect().width() <
-            kUseGpuMemoryBufferVideoFramesMinResolution.width() ||
-        frame->visible_rect().height() <
-            kUseGpuMemoryBufferVideoFramesMinResolution.height();
-#else
-    const bool skip_creating_gpu_memory_buffer = false;
-#endif  // defined(OS_WIN)
-
     // If |render_frame_suspended_|, we can keep passing the frames to keep the
     // latest frame in compositor up to date. However, creating GMB backed
     // frames is unnecessary, because the frames are not going to be shown for
     // the time period.
-    if (render_frame_suspended_ || skip_creating_gpu_memory_buffer) {
+    bool skip_creating_gpu_memory_buffer = render_frame_suspended_;
+
+#if BUILDFLAG(IS_WIN)
+    skip_creating_gpu_memory_buffer |=
+        frame->visible_rect().width() <
+            kUseGpuMemoryBufferVideoFramesMinResolution.width() ||
+        frame->visible_rect().height() <
+            kUseGpuMemoryBufferVideoFramesMinResolution.height();
+#endif  // BUILDFLAG(IS_WIN)
+
+    if (skip_creating_gpu_memory_buffer) {
       int original_frame_id = frame->unique_id();
       EnqueueFrame(original_frame_id, std::move(frame));
       // If there are any existing MaybeCreateHardwareFrame() calls, we do not
@@ -233,6 +230,12 @@ class WebMediaPlayerMS::FrameDeliverer {
   void SetRenderFrameSuspended(bool render_frame_suspended) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     render_frame_suspended_ = render_frame_suspended;
+    if (render_frame_suspended_) {
+      // Drop GpuMemoryBuffer pool to free memory.
+      FreeGpuMemoryBufferPool();
+    } else {
+      CreateGpuMemoryBufferPoolIfNecessary();
+    }
   }
 
   WTF::CrossThreadRepeatingFunction<
@@ -244,6 +247,26 @@ class WebMediaPlayerMS::FrameDeliverer {
 
  private:
   friend class WebMediaPlayerMS;
+
+  void CreateGpuMemoryBufferPoolIfNecessary() {
+    if (!gpu_memory_buffer_pool_ && gpu_factories_ &&
+        gpu_factories_->ShouldUseGpuMemoryBuffersForVideoFrames(
+            true /* for_media_stream */)) {
+      gpu_memory_buffer_pool_ =
+          std::make_unique<media::GpuMemoryBufferVideoFramePool>(
+              media_task_runner_, worker_task_runner_, gpu_factories_);
+    }
+  }
+
+  void FreeGpuMemoryBufferPool() {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+
+    if (gpu_memory_buffer_pool_) {
+      DropCurrentPoolTasks();
+      media_task_runner_->DeleteSoon(FROM_HERE,
+                                     gpu_memory_buffer_pool_.release());
+    }
+  }
 
   void EnqueueFrame(int original_frame_id,
                     scoped_refptr<media::VideoFrame> frame) {
@@ -293,14 +316,15 @@ class WebMediaPlayerMS::FrameDeliverer {
   // Pool of GpuMemoryBuffers and resources used to create hardware frames.
   std::unique_ptr<media::GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool_;
   const scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
+  const scoped_refptr<base::TaskRunner> worker_task_runner_;
+
+  media::GpuVideoAcceleratorFactories* const gpu_factories_;
 
   // Used for DCHECKs to ensure method calls are executed on the correct thread.
   THREAD_CHECKER(io_thread_checker_);
 
   base::WeakPtrFactory<FrameDeliverer> weak_factory_for_pool_{this};
   base::WeakPtrFactory<FrameDeliverer> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(FrameDeliverer);
 };
 
 WebMediaPlayerMS::WebMediaPlayerMS(
@@ -366,8 +390,9 @@ WebMediaPlayerMS::~WebMediaPlayerMS() {
   SendLogMessage(
       String::Format("%s() [delegate_id=%d]", __func__, delegate_id_));
 
-  if (!web_stream_.IsNull())
+  if (!web_stream_.IsNull()) {
     web_stream_.RemoveObserver(this);
+  }
 
   // Destruct compositor resources in the proper order.
   get_client()->SetCcLayer(nullptr);
@@ -376,17 +401,35 @@ WebMediaPlayerMS::~WebMediaPlayerMS() {
     video_layer_->StopUsingProvider();
   }
 
-  if (frame_deliverer_)
-    io_task_runner_->DeleteSoon(FROM_HERE, frame_deliverer_.release());
+  if (frame_deliverer_) {
+    io_task_runner_->DeleteSoon(FROM_HERE, std::move(frame_deliverer_));
+  }
 
-  if (compositor_)
-    compositor_->StopUsingProvider();
-
-  if (video_frame_provider_)
+  if (video_frame_provider_) {
     video_frame_provider_->Stop();
+  }
 
-  if (audio_renderer_)
+  // This must be destroyed before `compositor_` since it will grab a couple of
+  // final metrics during destruction.
+  watch_time_reporter_.reset();
+
+  if (compositor_) {
+    // `compositor_` receives frames on `io_task_runner_` from
+    // `frame_deliverer_` and operates on the `compositor_task_runner_`, so
+    // must trampoline through both to ensure a safe destruction.
+    PostCrossThreadTask(
+        *io_task_runner_, FROM_HERE,
+        WTF::CrossThreadBindOnce(
+            [](scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+               std::unique_ptr<WebMediaPlayerMSCompositor> compositor) {
+              task_runner->DeleteSoon(FROM_HERE, std::move(compositor));
+            },
+            compositor_task_runner_, std::move(compositor_)));
+  }
+
+  if (audio_renderer_) {
     audio_renderer_->Stop();
+  }
 
   media_log_->AddEvent<media::MediaLogEvent::kWebMediaPlayerDestroyed>();
 
@@ -427,7 +470,7 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
 
   watch_time_reporter_.reset();
 
-  compositor_ = base::MakeRefCounted<WebMediaPlayerMSCompositor>(
+  compositor_ = std::make_unique<WebMediaPlayerMSCompositor>(
       compositor_task_runner_, io_task_runner_, web_stream_,
       std::move(submitter_), surface_layer_mode_, weak_this_);
 
@@ -450,7 +493,7 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
   frame_deliverer_ = std::make_unique<WebMediaPlayerMS::FrameDeliverer>(
       weak_this_,
       CrossThreadBindRepeating(&WebMediaPlayerMSCompositor::EnqueueFrame,
-                               compositor_),
+                               CrossThreadUnretained(compositor_.get())),
       media_task_runner_, worker_task_runner_, gpu_factories_);
   video_frame_provider_ = renderer_factory_->GetVideoRenderer(
       web_stream_,
@@ -793,7 +836,19 @@ void WebMediaPlayerMS::Pause() {
     video_frame_provider_->Pause();
 
   compositor_->StopRendering();
-  compositor_->ReplaceCurrentFrameWithACopy();
+
+  // Bounce this call off of video task runner to since there might still be
+  // frames passed on video task runner.
+  PostCrossThreadTask(
+      *io_task_runner_, FROM_HERE,
+      WTF::CrossThreadBindOnce(
+          [](scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+             WTF::CrossThreadOnceClosure copy_cb) {
+            PostCrossThreadTask(*task_runner, FROM_HERE, std::move(copy_cb));
+          },
+          main_render_task_runner_,
+          WTF::CrossThreadBindOnce(
+              &WebMediaPlayerMS::ReplaceCurrentFrameWithACopy, weak_this_)));
 
   if (audio_renderer_)
     audio_renderer_->Pause();
@@ -806,6 +861,11 @@ void WebMediaPlayerMS::Pause() {
   delegate_->SetIdle(delegate_id_, true);
 
   paused_ = true;
+}
+
+void WebMediaPlayerMS::ReplaceCurrentFrameWithACopy() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  compositor_->ReplaceCurrentFrameWithACopy();
 }
 
 void WebMediaPlayerMS::Seek(double seconds) {
@@ -840,7 +900,8 @@ void WebMediaPlayerMS::SetPreservesPitch(bool preserves_pitch) {
   // and thus there should be no pitch-shifting.
 }
 
-void WebMediaPlayerMS::SetAutoplayInitiated(bool autoplay_initiated) {}
+void WebMediaPlayerMS::SetWasPlayedWithUserActivation(
+    bool was_played_with_user_activation) {}
 
 void WebMediaPlayerMS::OnRequestPictureInPicture() {
   if (!bridge_)
@@ -1011,7 +1072,7 @@ bool WebMediaPlayerMS::WouldTaintOrigin() const {
 }
 
 double WebMediaPlayerMS::MediaTimeForTimeValue(double timeValue) const {
-  return base::TimeDelta::FromSecondsD(timeValue).InSecondsF();
+  return base::Seconds(timeValue).InSecondsF();
 }
 
 unsigned WebMediaPlayerMS::DecodedFrameCount() const {
@@ -1064,24 +1125,24 @@ void WebMediaPlayerMS::OnFrameHidden() {
 
 // On Android, substitute the displayed VideoFrame with a copy to avoid holding
 // onto it unnecessarily.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (!paused_)
     compositor_->ReplaceCurrentFrameWithACopy();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 void WebMediaPlayerMS::SuspendForFrameClosed() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
 // On Android, pause the video completely for this time period.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (!paused_) {
     Pause();
     should_play_upon_shown_ = true;
   }
 
   delegate_->PlayerGone(delegate_id_);
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   if (frame_deliverer_) {
     PostCrossThreadTask(
@@ -1113,10 +1174,10 @@ void WebMediaPlayerMS::OnFrameShown() {
 
 // On Android, resume playback on visibility. play() clears
 // |should_play_upon_shown_|.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (should_play_upon_shown_)
     Play();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 void WebMediaPlayerMS::OnIdleTimeout() {}
@@ -1143,8 +1204,9 @@ void WebMediaPlayerMS::ActivateSurfaceLayerForVideo() {
   PostCrossThreadTask(
       *compositor_task_runner_, FROM_HERE,
       CrossThreadBindOnce(&WebMediaPlayerMSCompositor::EnableSubmission,
-                          compositor_, bridge_->GetSurfaceId(),
-                          video_transformation_, IsInPictureInPicture()));
+                          CrossThreadUnretained(compositor_.get()),
+                          bridge_->GetSurfaceId(), video_transformation_,
+                          IsInPictureInPicture()));
 
   // If the element is already in Picture-in-Picture mode, it means that it
   // was set in this mode prior to this load, with a different
@@ -1433,7 +1495,7 @@ void WebMediaPlayerMS::UpdateWatchTimeReporterSecondaryProperties() {
   // TODO(https://crbug.com/1147813) Report codec information once accessible.
   watch_time_reporter_->UpdateSecondaryProperties(
       media::mojom::SecondaryPlaybackProperties::New(
-          media::kUnknownAudioCodec, media::kUnknownVideoCodec,
+          media::AudioCodec::kUnknown, media::VideoCodec::kUnknown,
           media::AudioCodecProfile::kUnknown,
           media::VideoCodecProfile::VIDEO_CODEC_PROFILE_UNKNOWN,
           media::AudioDecoderType::kUnknown, media::VideoDecoderType::kUnknown,
@@ -1515,6 +1577,16 @@ WebMediaPlayerMS::GetMediaStreamType() {
   }
 
   return absl::nullopt;
+}
+
+void WebMediaPlayerMS::RegisterFrameSinkHierarchy() {
+  if (bridge_)
+    bridge_->RegisterFrameSinkHierarchy();
+}
+
+void WebMediaPlayerMS::UnregisterFrameSinkHierarchy() {
+  if (bridge_)
+    bridge_->UnregisterFrameSinkHierarchy();
 }
 
 }  // namespace blink

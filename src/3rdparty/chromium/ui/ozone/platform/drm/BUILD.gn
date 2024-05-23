@@ -132,7 +132,6 @@ source_set("gbm") {
     "//third_party/minigbm",
     "//ui/base",
     "//ui/base/cursor",
-    "//ui/base/cursor:cursor_base",
     "//ui/base/cursor/mojom:cursor_type",
     "//ui/base/ime",
     "//ui/display",
@@ -151,7 +150,7 @@ source_set("gbm") {
     "//ui/gl",
     "//ui/ozone:ozone_base",
     "//ui/ozone/common",
-    "//ui/ozone/public/mojom",
+    "//ui/ozone/platform/drm/mojom",
     "//ui/platform_window",
   ]
 
@@ -163,7 +162,7 @@ source_set("gbm") {
   }
 
   if (is_chromeos_ash) {
-    deps += [ "//ui/base/ime/chromeos" ]
+    deps += [ "//ui/base/ime/ash" ]
   }
 
   if (enable_vulkan) {
@@ -203,9 +202,13 @@ source_set("gbm_unittests") {
   deps = [
     ":gbm",
     "//base/test:test_support",
-    "//build/config/linux/libdrm",
     "//skia",
     "//testing/gtest",
+
+    # We're using this instead of the config to ensure that our tests built for
+    # linux have a controllable dependency instead of relying on whatever is on
+    # the system.
+    "//third_party/libdrm",
     "//ui/base/ime",
     "//ui/gfx",
     "//ui/gfx/linux:drm",

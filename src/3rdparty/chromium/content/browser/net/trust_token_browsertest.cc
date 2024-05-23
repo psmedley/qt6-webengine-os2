@@ -16,6 +16,7 @@
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
+#include "build/build_config.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/test/browser_test.h"
@@ -38,10 +39,10 @@
 #include "services/network/public/cpp/trust_token_http_headers.h"
 #include "services/network/public/cpp/trust_token_parameterization.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
+#include "services/network/test/trust_token_request_handler.h"
+#include "services/network/test/trust_token_test_server_handler_registration.h"
+#include "services/network/test/trust_token_test_util.h"
 #include "services/network/trust_tokens/test/signed_request_verification_util.h"
-#include "services/network/trust_tokens/test/test_server_handler_registration.h"
-#include "services/network/trust_tokens/test/trust_token_request_handler.h"
-#include "services/network/trust_tokens/test/trust_token_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -1031,8 +1032,8 @@ IN_PROC_BROWSER_TEST_F(TrustTokenBrowsertest,
       shell(), server_.GetURL("a.test", "/page_with_sandboxed_iframe.html")));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   EXPECT_EQ("Success",
             EvalJs(root->child_at(0)->current_frame_host(),
@@ -1051,8 +1052,8 @@ IN_PROC_BROWSER_TEST_F(TrustTokenBrowsertest,
       shell(), server_.GetURL("a.test", "/page_with_sandboxed_iframe.html")));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   EXPECT_EQ("Success", EvalJs(root->child_at(0)->current_frame_host(),
                               JsReplace(R"(
@@ -1105,8 +1106,8 @@ IN_PROC_BROWSER_TEST_F(TrustTokenBrowsertest,
   // For good measure, make sure the analogous signing operation works from
   // fetch, too, even though it wasn't broken by the same bug.
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   EXPECT_EQ("Success", EvalJs(root->child_at(0)->current_frame_host(),
                               JsReplace(R"(
@@ -1697,7 +1698,7 @@ class TrustTokenBrowsertestWithPlatformIssuance : public TrustTokenBrowsertest {
   base::test::ScopedFeatureList features_;
 };
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 HandlerWrappingLocalTrustTokenFulfiller::
     HandlerWrappingLocalTrustTokenFulfiller(TrustTokenRequestHandler& handler)
     : handler_(handler) {
@@ -1830,8 +1831,8 @@ IN_PROC_BROWSER_TEST_F(TrustTokenBrowsertestWithPlatformIssuance,
                     "PlatformProvided"}),
       1);
 }
-#endif  // defined(OS_ANDROID)
-#if !defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 IN_PROC_BROWSER_TEST_F(
     TrustTokenBrowsertestWithPlatformIssuance,
     IssuanceOnOsNotSpecifiedInKeyCommitmentsReturnsErrorIfConfiguredToDoSo) {
@@ -1922,6 +1923,6 @@ IN_PROC_BROWSER_TEST_F(
                     "PlatformProvided"}),
       0);  // No platform-provided operation was attempted.
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace content

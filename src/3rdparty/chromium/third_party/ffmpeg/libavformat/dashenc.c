@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+#include "config_components.h"
 #if HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -551,7 +552,7 @@ static void write_hls_media_playlist(OutputStream *os, AVFormatContext *s,
     for (i = start_index; i < os->nb_segments; i++) {
         Segment *seg = os->segments[i];
 
-        if (prog_date_time == 0) {
+        if (fabs(prog_date_time) < 1e-7) {
             if (os->nb_segments == 1)
                 prog_date_time = c->start_time_s;
             else
@@ -859,7 +860,7 @@ static int write_adaptation_set(AVFormatContext *s, AVIOContext *out, int as_ind
             avio_printf(out, "\t\t\t<Representation id=\"%d\" mimeType=\"audio/%s\" codecs=\"%s\"%s audioSamplingRate=\"%d\">\n",
                 i, os->format_name, os->codec_str, bandwidth_str, s->streams[i]->codecpar->sample_rate);
             avio_printf(out, "\t\t\t\t<AudioChannelConfiguration schemeIdUri=\"urn:mpeg:dash:23003:3:audio_channel_configuration:2011\" value=\"%d\" />\n",
-                s->streams[i]->codecpar->channels);
+                s->streams[i]->codecpar->ch_layout.nb_channels);
         }
         if (!final && c->write_prft && os->producer_reference_time_str[0]) {
             avio_printf(out, "\t\t\t\t<ProducerReferenceTime id=\"%d\" inband=\"true\" type=\"%s\" wallClockTime=\"%s\" presentationTime=\"%"PRId64"\">\n",
@@ -1396,18 +1397,18 @@ static int dash_init(AVFormatContext *s)
     }
 
     if (c->lhls && !c->streaming) {
-        av_log(s, AV_LOG_WARNING, "LHLS option will be ignored as streaming is not enabled\n");
-        c->lhls = 0;
+        av_log(s, AV_LOG_WARNING, "Enabling streaming as LHLS is enabled\n");
+        c->streaming = 1;
     }
 
     if (c->lhls && !c->hls_playlist) {
-        av_log(s, AV_LOG_WARNING, "LHLS option will be ignored as hls_playlist is not enabled\n");
-        c->lhls = 0;
+        av_log(s, AV_LOG_INFO, "Enabling hls_playlist as LHLS is enabled\n");
+        c->hls_playlist = 1;
     }
 
     if (c->ldash && !c->streaming) {
-        av_log(s, AV_LOG_WARNING, "LDash option will be ignored as streaming is not enabled\n");
-        c->ldash = 0;
+        av_log(s, AV_LOG_WARNING, "Enabling streaming as LDash is enabled\n");
+        c->streaming = 1;
     }
 
     if (c->target_latency && !c->streaming) {
@@ -1546,6 +1547,7 @@ static int dash_init(AVFormatContext *s)
         ctx->interrupt_callback    = s->interrupt_callback;
         ctx->opaque                = s->opaque;
         ctx->io_close              = s->io_close;
+        ctx->io_close2             = s->io_close2;
         ctx->io_open               = s->io_open;
         ctx->strict_std_compliance = s->strict_std_compliance;
 
@@ -2333,21 +2335,21 @@ static int dash_write_trailer(AVFormatContext *s)
     return 0;
 }
 
-static int dash_check_bitstream(struct AVFormatContext *s, const AVPacket *avpkt)
+static int dash_check_bitstream(AVFormatContext *s, AVStream *st,
+                                const AVPacket *avpkt)
 {
     DASHContext *c = s->priv_data;
-    OutputStream *os = &c->streams[avpkt->stream_index];
+    OutputStream *os = &c->streams[st->index];
     AVFormatContext *oc = os->ctx;
     if (oc->oformat->check_bitstream) {
+        AVStream *const ost = oc->streams[0];
         int ret;
-        AVPacket pkt = *avpkt;
-        pkt.stream_index = 0;
-        ret = oc->oformat->check_bitstream(oc, &pkt);
+        ret = oc->oformat->check_bitstream(oc, ost, avpkt);
         if (ret == 1) {
-            AVStream *st = s->streams[avpkt->stream_index];
-            AVStream *ost = oc->streams[0];
-            st->internal->bsfc = ost->internal->bsfc;
-            ost->internal->bsfc = NULL;
+            FFStream *const  sti = ffstream(st);
+            FFStream *const osti = ffstream(ost);
+             sti->bsfc = osti->bsfc;
+            osti->bsfc = NULL;
         }
         return ret;
     }

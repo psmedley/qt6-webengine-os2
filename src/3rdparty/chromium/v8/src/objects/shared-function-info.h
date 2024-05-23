@@ -10,6 +10,7 @@
 #include "src/base/bit-field.h"
 #include "src/builtins/builtins.h"
 #include "src/codegen/bailout-reason.h"
+#include "src/common/globals.h"
 #include "src/objects/compressed-slots.h"
 #include "src/objects/function-kind.h"
 #include "src/objects/function-syntax-kind.h"
@@ -21,7 +22,6 @@
 #include "src/roots/roots.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"  // nogncheck
 #include "torque-generated/bit-fields.h"
-#include "torque-generated/field-offsets.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -40,6 +40,8 @@ class Signature;
 class WasmCapiFunctionData;
 class WasmExportedFunctionData;
 class WasmJSFunctionData;
+
+enum OSRCodeCacheStateOfSFI : uint8_t;
 
 namespace wasm {
 struct WasmModule;
@@ -145,27 +147,38 @@ class UncompiledDataWithPreparseData
   TQ_OBJECT_CONSTRUCTORS(UncompiledDataWithPreparseData)
 };
 
+// Class representing data for an uncompiled function that does not have any
+// data from the pre-parser, either because it's a leaf function or because the
+// pre-parser bailed out, but has a job pointer.
+class UncompiledDataWithoutPreparseDataWithJob
+    : public TorqueGeneratedUncompiledDataWithoutPreparseDataWithJob<
+          UncompiledDataWithoutPreparseDataWithJob,
+          UncompiledDataWithoutPreparseData> {
+ public:
+  class BodyDescriptor;
+
+  TQ_OBJECT_CONSTRUCTORS(UncompiledDataWithoutPreparseDataWithJob)
+};
+
+// Class representing data for an uncompiled function that has pre-parsed scope
+// data and a job pointer.
+class UncompiledDataWithPreparseDataAndJob
+    : public TorqueGeneratedUncompiledDataWithPreparseDataAndJob<
+          UncompiledDataWithPreparseDataAndJob,
+          UncompiledDataWithPreparseData> {
+ public:
+  class BodyDescriptor;
+
+  TQ_OBJECT_CONSTRUCTORS(UncompiledDataWithPreparseDataAndJob)
+};
+
 class InterpreterData
     : public TorqueGeneratedInterpreterData<InterpreterData, Struct> {
  public:
-  DECL_ACCESSORS(interpreter_trampoline, Code)
-
-  DECL_PRINTER(InterpreterData)
+  using BodyDescriptor = StructBodyDescriptor;
 
  private:
-  DECL_ACCESSORS(raw_interpreter_trampoline, CodeT)
-
   TQ_OBJECT_CONSTRUCTORS(InterpreterData)
-};
-
-class BaselineData : public TorqueGeneratedBaselineData<BaselineData, Struct> {
- public:
-  inline BytecodeArray GetActiveBytecodeArray() const;
-  inline void SetActiveBytecodeArray(BytecodeArray bytecode);
-
-  DECL_ACCESSORS(baseline_code, Code)
-
-  TQ_OBJECT_CONSTRUCTORS(BaselineData)
 };
 
 // SharedFunctionInfo describes the JSFunction information that can be
@@ -192,16 +205,12 @@ class SharedFunctionInfo
   inline void SetName(String name);
 
   // Get the code object which represents the execution of this function.
-  V8_EXPORT_PRIVATE Code GetCode() const;
+  V8_EXPORT_PRIVATE CodeT GetCode() const;
 
   // Get the abstract code associated with the function, which will either be
   // a Code object or a BytecodeArray.
   template <typename IsolateT>
   inline AbstractCode abstract_code(IsolateT* isolate);
-
-  // Tells whether or not this shared function info has an attached
-  // BytecodeArray.
-  inline bool IsInterpreted() const;
 
   // Set up the link between shared function info and the script. The shared
   // function info is added to the list on the script.
@@ -209,6 +218,11 @@ class SharedFunctionInfo
                                    HeapObject script_object,
                                    int function_literal_id,
                                    bool reset_preparsed_scope_data = true);
+
+  // Copy the data from another SharedFunctionInfo. Used for copying data into
+  // and out of a placeholder SharedFunctionInfo, for off-thread compilation
+  // which is not allowed to touch a main-thread-visible SharedFunctionInfo.
+  void CopyFrom(SharedFunctionInfo other);
 
   // Layout description of the optimized code map.
   static const int kEntriesStart = 0;
@@ -279,8 +293,12 @@ class SharedFunctionInfo
 
   // [internal formal parameter count]: The declared number of parameters.
   // For subclass constructors, also includes new.target.
-  // The size of function's frame is internal_formal_parameter_count + 1.
-  DECL_UINT16_ACCESSORS(internal_formal_parameter_count)
+  // The size of function's frame is
+  // internal_formal_parameter_count_with_receiver.
+  inline void set_internal_formal_parameter_count(int value);
+  inline uint16_t internal_formal_parameter_count_with_receiver() const;
+  inline uint16_t internal_formal_parameter_count_without_receiver() const;
+
  private:
   using TorqueGeneratedSharedFunctionInfo::formal_parameter_count;
   using TorqueGeneratedSharedFunctionInfo::set_formal_parameter_count;
@@ -289,6 +307,7 @@ class SharedFunctionInfo
   // Set the formal parameter count so the function code will be
   // called without using argument adaptor frames.
   inline void DontAdaptArguments();
+  inline bool IsDontAdaptArguments() const;
 
   // [function data]: This field holds some additional data for function.
   // Currently it has one of:
@@ -314,14 +333,14 @@ class SharedFunctionInfo
   inline BytecodeArray GetBytecodeArray(IsolateT* isolate) const;
 
   inline void set_bytecode_array(BytecodeArray bytecode);
-  inline Code InterpreterTrampoline() const;
+  inline CodeT InterpreterTrampoline() const;
   inline bool HasInterpreterData() const;
   inline InterpreterData interpreter_data() const;
   inline void set_interpreter_data(InterpreterData interpreter_data);
-  inline bool HasBaselineData() const;
-  inline BaselineData baseline_data() const;
-  inline void set_baseline_data(BaselineData Baseline_data);
-  inline void flush_baseline_data();
+  inline bool HasBaselineCode() const;
+  inline CodeT baseline_code(AcquireLoadTag) const;
+  inline void set_baseline_code(CodeT baseline_code, ReleaseStoreTag);
+  inline void FlushBaselineCode();
   inline BytecodeArray GetActiveBytecodeArray() const;
   inline void SetActiveBytecodeArray(BytecodeArray bytecode);
 
@@ -330,6 +349,7 @@ class SharedFunctionInfo
   inline bool HasWasmExportedFunctionData() const;
   inline bool HasWasmJSFunctionData() const;
   inline bool HasWasmCapiFunctionData() const;
+  inline bool HasWasmOnFulfilledData() const;
   inline AsmWasmData asm_wasm_data() const;
   inline void set_asm_wasm_data(AsmWasmData data);
 
@@ -355,6 +375,7 @@ class SharedFunctionInfo
   inline void set_uncompiled_data_with_preparse_data(
       UncompiledDataWithPreparseData data);
   inline bool HasUncompiledDataWithoutPreparseData() const;
+  inline void ClearUncompiledDataJobPointer();
 
   // Clear out pre-parsed scope data from UncompiledDataWithPreparseData,
   // turning it into UncompiledDataWithoutPreparseData.
@@ -389,7 +410,7 @@ class SharedFunctionInfo
   //  - a DebugInfo which holds the actual script [HasDebugInfo()].
   DECL_RELEASE_ACQUIRE_ACCESSORS(script_or_debug_info, HeapObject)
 
-  inline HeapObject script() const;
+  DECL_GETTER(script, HeapObject)
   inline void set_script(HeapObject script);
 
   // True if the underlying script was parsed and compiled in REPL mode.
@@ -418,13 +439,15 @@ class SharedFunctionInfo
   inline bool HasSharedName() const;
 
   // [flags] Bit field containing various flags about the function.
-  DECL_INT32_ACCESSORS(flags)
+  DECL_RELAXED_INT32_ACCESSORS(flags)
   DECL_UINT8_ACCESSORS(flags2)
 
   // True if the outer class scope contains a private brand for
   // private instance methdos.
   DECL_BOOLEAN_ACCESSORS(class_scope_has_private_brand)
   DECL_BOOLEAN_ACCESSORS(has_static_private_methods_or_accessors)
+
+  DECL_BOOLEAN_ACCESSORS(maglev_compilation_failed)
 
   // Is this function a top-level function (scripts, evals).
   DECL_BOOLEAN_ACCESSORS(is_toplevel)
@@ -491,11 +514,15 @@ class SharedFunctionInfo
   inline bool optimization_disabled() const;
 
   // The reason why optimization was disabled.
-  inline BailoutReason disable_optimization_reason() const;
+  inline BailoutReason disabled_optimization_reason() const;
 
   // Disable (further) attempted optimization of all functions sharing this
   // shared function info.
   void DisableOptimization(BailoutReason reason);
+
+  inline OSRCodeCacheStateOfSFI osr_code_cache_state() const;
+
+  inline void set_osr_code_cache_state(OSRCodeCacheStateOfSFI state);
 
   // This class constructor needs to call out to an instance fields
   // initializer. This flag is set when creating the
@@ -541,19 +568,21 @@ class SharedFunctionInfo
   inline bool ShouldFlushCode(base::EnumSet<CodeFlushMode> code_flush_mode);
 
   enum Inlineability {
-    kIsInlineable,
     // Different reasons for not being inlineable:
     kHasNoScript,
     kNeedsBinaryCoverage,
-    kHasOptimizationDisabled,
     kIsBuiltin,
     kIsNotUserCode,
     kHasNoBytecode,
     kExceedsBytecodeLimit,
     kMayContainBreakPoints,
+    kHasOptimizationDisabled,
+    // Actually inlineable!
+    kIsInlineable,
   };
+  // Returns the first value that applies (see enum definition for the order).
   template <typename IsolateT>
-  Inlineability GetInlineability(IsolateT* isolate, bool is_turboprop) const;
+  Inlineability GetInlineability(IsolateT* isolate) const;
 
   // Source size of this function.
   int SourceSize();
@@ -563,7 +592,8 @@ class SharedFunctionInfo
   // TODO(caitp): make this a flag set during parsing
   inline bool has_simple_parameters();
 
-  // Initialize a SharedFunctionInfo from a parsed function literal.
+  // Initialize a SharedFunctionInfo from a parsed or preparsed function
+  // literal.
   template <typename IsolateT>
   static void InitFromFunctionLiteral(IsolateT* isolate,
                                       Handle<SharedFunctionInfo> shared_info,
@@ -644,7 +674,7 @@ class SharedFunctionInfo
   STATIC_ASSERT(BailoutReason::kLastErrorMessage <=
                 DisabledOptimizationReasonBits::kMax);
 
-  STATIC_ASSERT(kLastFunctionKind <= FunctionKindBits::kMax);
+  STATIC_ASSERT(FunctionKind::kLastFunctionKind <= FunctionKindBits::kMax);
   STATIC_ASSERT(FunctionSyntaxKind::kLastFunctionSyntaxKind <=
                 FunctionSyntaxKindBits::kMax);
 
@@ -681,6 +711,10 @@ class SharedFunctionInfo
   inline void set_kind(FunctionKind kind);
 
   inline uint16_t get_property_estimate_from_literal(FunctionLiteral* literal);
+
+  // For ease of use of the BITFIELD macro.
+  inline int32_t relaxed_flags() const;
+  inline void set_relaxed_flags(int32_t flags);
 
   template <typename Impl>
   friend class FactoryBase;

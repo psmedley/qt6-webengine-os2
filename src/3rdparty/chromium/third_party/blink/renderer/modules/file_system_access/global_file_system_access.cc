@@ -15,6 +15,7 @@
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-shared.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-shared.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_usvstring_usvstringsequence.h"
@@ -34,7 +35,7 @@
 #include "third_party/blink/renderer/modules/file_system_access/file_system_file_handle.h"
 #include "third_party/blink/renderer/platform/bindings/enumeration_base.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -115,6 +116,8 @@ Vector<mojom::blink::ChooseFileSystemEntryAcceptsOptionPtr> ConvertAccepts(
   Vector<mojom::blink::ChooseFileSystemEntryAcceptsOptionPtr> result;
   result.ReserveInitialCapacity(types.size());
   for (const auto& t : types) {
+    if (!t->hasAccept())
+      continue;
     Vector<String> mimeTypes;
     mimeTypes.ReserveInitialCapacity(t->accept().size());
     Vector<String> extensions;

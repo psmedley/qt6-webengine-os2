@@ -43,10 +43,9 @@ namespace chromeos {
 constexpr StaticOobeScreenId AppLaunchSplashScreenView::kScreenId;
 
 AppLaunchSplashScreenHandler::AppLaunchSplashScreenHandler(
-    JSCallsContainer* js_calls_container,
     const scoped_refptr<NetworkStateInformer>& network_state_informer,
     ErrorScreen* error_screen)
-    : BaseScreenHandler(kScreenId, js_calls_container),
+    : BaseScreenHandler(kScreenId),
       network_state_informer_(network_state_informer),
       error_screen_(error_screen) {
   network_state_informer_->AddObserver(this);
@@ -70,7 +69,7 @@ void AppLaunchSplashScreenHandler::DeclareLocalizedValues(
                                           product_os_name));
 }
 
-void AppLaunchSplashScreenHandler::Initialize() {
+void AppLaunchSplashScreenHandler::InitializeDeprecated() {
   if (show_on_init_) {
     show_on_init_ = false;
     Show();
@@ -78,21 +77,29 @@ void AppLaunchSplashScreenHandler::Initialize() {
 }
 
 void AppLaunchSplashScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!IsJavascriptAllowed()) {
     show_on_init_ = true;
     return;
   }
 
-  base::DictionaryValue data;
-  data.SetBoolean("shortcutEnabled",
-                  !KioskAppManager::Get()->GetDisableBailoutShortcut());
+  is_shown_ = true;
+
+  base::Value::Dict data;
+  data.Set("shortcutEnabled",
+           !KioskAppManager::Get()->GetDisableBailoutShortcut());
 
   base::DictionaryValue app_info;
   PopulateAppInfo(&app_info);
-  data.SetKey("appInfo", std::move(app_info));
+  data.Set("appInfo", std::move(app_info));
 
   SetLaunchText(l10n_util::GetStringUTF8(GetProgressMessageFromState(state_)));
-  ShowScreenWithData(kScreenId, &data);
+  ShowInWebUI(std::move(data));
+  if (toggle_network_config_on_show_.has_value()) {
+    DoToggleNetworkConfig(toggle_network_config_on_show_.value());
+    toggle_network_config_on_show_.reset();
+  }
+  if (network_config_shown_)
+    ShowNetworkConfigureUI();
 }
 
 void AppLaunchSplashScreenHandler::RegisterMessages() {
@@ -106,10 +113,16 @@ void AppLaunchSplashScreenHandler::RegisterMessages() {
               &AppLaunchSplashScreenHandler::HandleNetworkConfigRequested);
 }
 
-void AppLaunchSplashScreenHandler::Hide() {}
+void AppLaunchSplashScreenHandler::Hide() {
+  is_shown_ = false;
+}
 
 void AppLaunchSplashScreenHandler::ToggleNetworkConfig(bool visible) {
-  CallJS("login.AppLaunchSplashScreen.toggleNetworkConfig", visible);
+  if (!is_shown_) {
+    toggle_network_config_on_show_ = visible;
+    return;
+  }
+  DoToggleNetworkConfig(visible);
 }
 
 void AppLaunchSplashScreenHandler::UpdateAppLaunchState(AppLaunchState state) {
@@ -117,7 +130,7 @@ void AppLaunchSplashScreenHandler::UpdateAppLaunchState(AppLaunchState state) {
     return;
 
   state_ = state;
-  if (page_is_ready()) {
+  if (IsJavascriptAllowed()) {
     SetLaunchText(
         l10n_util::GetStringUTF8(GetProgressMessageFromState(state_)));
   }
@@ -226,12 +239,13 @@ void AppLaunchSplashScreenHandler::PopulateAppInfo(
 
   // Display app domain if present.
   if (!app.url.is_empty()) {
-    app.url = app.url.GetOrigin();
+    app.url = app.url.DeprecatedGetOriginAsURL();
   }
 
-  out_info->SetString("name", app.name);
-  out_info->SetString("iconURL", webui::GetBitmapDataUrl(*app.icon.bitmap()));
-  out_info->SetString("url", app.url.spec());
+  out_info->SetStringKey("name", app.name);
+  out_info->SetStringKey("iconURL",
+                         webui::GetBitmapDataUrl(*app.icon.bitmap()));
+  out_info->SetStringKey("url", app.url.spec());
 }
 
 void AppLaunchSplashScreenHandler::SetLaunchText(const std::string& text) {
@@ -287,6 +301,10 @@ void AppLaunchSplashScreenHandler::HandleContinueAppLaunch() {
   network_config_shown_ = false;
   delegate_->OnNetworkConfigFinished();
   Show();
+}
+
+void AppLaunchSplashScreenHandler::DoToggleNetworkConfig(bool visible) {
+  CallJS("login.AppLaunchSplashScreen.toggleNetworkConfig", visible);
 }
 
 }  // namespace chromeos

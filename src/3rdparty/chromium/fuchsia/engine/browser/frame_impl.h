@@ -6,10 +6,11 @@
 #define FUCHSIA_ENGINE_BROWSER_FRAME_IMPL_H_
 
 #include <fuchsia/logger/cpp/fidl.h>
+#include <fuchsia/mem/cpp/fidl.h>
 #include <fuchsia/web/cpp/fidl.h>
 #include <lib/fidl/cpp/binding_set.h>
 #include <lib/inspect/cpp/vmo/types.h>
-#include <lib/syslog/logger.h>
+#include <lib/syslog/structured_backend/cpp/fuchsia_syslog.h>
 #include <lib/ui/scenic/cpp/view_ref_pair.h>
 #include <lib/zx/channel.h>
 
@@ -21,10 +22,11 @@
 #include <vector>
 
 #include "base/fuchsia/scoped_fx_logger.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "components/media_control/browser/media_blocker.h"
 #include "components/on_load_script_injector/browser/on_load_script_injector_host.h"
+#include "components/url_rewrite/browser/url_request_rewrite_rules_manager.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "fuchsia/engine/browser/accessibility_bridge.h"
@@ -32,8 +34,9 @@
 #include "fuchsia/engine/browser/frame_permission_controller.h"
 #include "fuchsia/engine/browser/navigation_controller_impl.h"
 #include "fuchsia/engine/browser/theme_manager.h"
-#include "fuchsia/engine/browser/url_request_rewrite_rules_manager.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
+#include "ui/accessibility/platform/fuchsia/accessibility_bridge_fuchsia_impl.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/wm/core/focus_controller.h"
 #include "url/gurl.h"
@@ -55,11 +58,15 @@ class FrameImpl : public fuchsia::web::Frame,
                   public content::WebContentsDelegate {
  public:
   // Returns FrameImpl that owns the |web_contents| or nullptr if the
-  // |web_contents| is nullptr.
+  // |web_contents| is nullptr. Returns nullptr if there is no FrameImpl that
+  // owns the |web_contents|, which can happen if FrameImpl has not been
+  // initialized yet.
   static FrameImpl* FromWebContents(content::WebContents* web_contents);
 
   // Returns FrameImpl that owns the |render_frame_host| or nullptr if the
-  // |render_frame_host| is nullptr.
+  // |render_frame_host| is nullptr. Returns nullptr if there is no FrameImpl
+  // that owns the |web_contents|, which can happen if FrameImpl has not been
+  // initialized yet.
   static FrameImpl* FromRenderFrameHost(
       content::RenderFrameHost* render_frame_host);
 
@@ -78,13 +85,16 @@ class FrameImpl : public fuchsia::web::Frame,
   FrameImpl(const FrameImpl&) = delete;
   FrameImpl& operator=(const FrameImpl&) = delete;
 
-  uint64_t media_session_id() const { return media_session_id_; }
+  absl::optional<uint64_t> media_session_id() const {
+    return media_session_id_;
+  }
 
   FramePermissionController* permission_controller() {
     return &permission_controller_;
   }
 
-  UrlRequestRewriteRulesManager* url_request_rewrite_rules_manager() {
+  url_rewrite::UrlRequestRewriteRulesManager*
+  url_request_rewrite_rules_manager() {
     return &url_request_rewrite_rules_manager_;
   }
 
@@ -106,6 +116,15 @@ class FrameImpl : public fuchsia::web::Frame,
     return web_contents_.get();
   }
   bool has_view_for_test() const { return window_tree_host_ != nullptr; }
+  FrameWindowTreeHost* window_tree_host_for_test() {
+    return window_tree_host_.get();
+  }
+
+  // Accessibility bridge accessor/setter methods.
+  // TODO(crbug.com/1291330): Remove the three methods below.
+  void set_use_v2_accessibility_bridge(bool use_v2_accessibility_bridge) {
+    use_v2_accessibility_bridge_ = use_v2_accessibility_bridge;
+  }
   AccessibilityBridge* accessibility_bridge_for_test() const {
     return accessibility_bridge_.get();
   }
@@ -113,8 +132,19 @@ class FrameImpl : public fuchsia::web::Frame,
       fuchsia::accessibility::semantics::SemanticsManager* semantics_manager) {
     semantics_manager_for_test_ = semantics_manager;
   }
-  FrameWindowTreeHost* window_tree_host_for_test() {
-    return window_tree_host_.get();
+
+  // Override |blink_prefs| with settings defined in |content_settings_|.
+  //
+  // This method is called when WebPreferences is first created and when it is
+  // recomputed.
+  void OverrideWebPreferences(blink::web_pref::WebPreferences* web_prefs);
+
+  void set_window_size_for_test(gfx::Size size) {
+    window_size_for_test_ = size;
+  }
+
+  void set_device_scale_factor_for_test(float device_scale_factor) {
+    device_scale_factor_for_test_ = device_scale_factor;
   }
 
  private:
@@ -123,6 +153,19 @@ class FrameImpl : public fuchsia::web::Frame,
   FRIEND_TEST_ALL_PREFIXES(FrameImplTest, NoNavigationObserverAttached);
   FRIEND_TEST_ALL_PREFIXES(FrameImplTest, ReloadFrame);
   FRIEND_TEST_ALL_PREFIXES(FrameImplTest, Stop);
+
+  // Used for storing awaiting popup frames in |pending_popups_|
+  struct PendingPopup {
+    PendingPopup(FrameImpl* frame_ptr,
+                 fidl::InterfaceHandle<fuchsia::web::Frame> handle,
+                 fuchsia::web::PopupFrameCreationInfo creation_info);
+    PendingPopup(PendingPopup&& other);
+    ~PendingPopup();
+
+    FrameImpl* frame_ptr;
+    fidl::InterfaceHandle<fuchsia::web::Frame> handle;
+    fuchsia::web::PopupFrameCreationInfo creation_info;
+  };
 
   aura::Window* root_window() const;
 
@@ -141,12 +184,22 @@ class FrameImpl : public fuchsia::web::Frame,
   void OnMediaPlayerDisconnect();
 
   // An error handler for |accessibility_bridge_|.
-  void OnAccessibilityError(zx_status_t error);
+  bool OnAccessibilityError(zx_status_t error);
 
-  // Initializes WindowTreeHost for the view with the specified |view_token|.
-  // |view_token| may be uninitialized in headless mode.
-  void InitWindowTreeHost(fuchsia::ui::views::ViewToken view_token,
-                          scenic::ViewRefPair view_ref_pair);
+  // Creates and initializes WindowTreeHost for the view with the specified
+  // |view_token|. |view_token| may be uninitialized in headless mode.
+  void SetupWindowTreeHost(fuchsia::ui::views::ViewToken view_token,
+                           scenic::ViewRefPair view_ref_pair);
+
+  // Creates and initializes WindowTreeHost for the view with the specified
+  // |view_creation_token|. |view_creation_token| may be uninitialized in
+  // headless mode.
+  void SetupWindowTreeHost(
+      fuchsia::ui::views::ViewCreationToken view_creation_token,
+      scenic::ViewRefPair view_ref_pair);
+
+  // Initializes WindowTreeHost.
+  void InitWindowTreeHost();
 
   // Destroys the WindowTreeHost along with its view or other associated
   // resources.
@@ -169,11 +222,16 @@ class FrameImpl : public fuchsia::web::Frame,
   // Updates zoom level for the specified |render_view_host|.
   void UpdateRenderViewZoomLevel(content::RenderViewHost* render_view_host);
 
+  // Helper method for connecting to AccessibilityBridge on
+  // |accessibility_bridge_|.
+  void ConnectToAccessibilityBridge();
+
   // fuchsia::web::Frame implementation.
   void CreateView(fuchsia::ui::views::ViewToken view_token) override;
   void CreateViewWithViewRef(fuchsia::ui::views::ViewToken view_token,
                              fuchsia::ui::views::ViewRefControl control_ref,
                              fuchsia::ui::views::ViewRef view_ref) override;
+  void CreateView2(fuchsia::web::CreateView2Args view_args) override;
   void GetMediaPlayer(fidl::InterfaceRequest<fuchsia::media::sessions2::Player>
                           player) override;
   void GetNavigationController(
@@ -233,6 +291,10 @@ class FrameImpl : public fuchsia::web::Frame,
       override;
   void SetPreferredTheme(fuchsia::settings::ThemeType theme) override;
   void SetPageScale(float scale) override;
+  void SetContentAreaSettings(
+      fuchsia::web::ContentAreaSettings settings) override;
+  void ResetContentAreaSettings() override;
+  void OnThemeManagerError();
 
   // content::WebContentsDelegate implementation.
   void CloseContents(content::WebContents* source) override;
@@ -283,6 +345,9 @@ class FrameImpl : public fuchsia::web::Frame,
       const content::GlobalRequestID& request_id,
       const blink::mojom::ResourceLoadInfo& resource_load_info) override;
 
+  float GetDeviceScaleFactor();
+  void SetAccessibilityEnabled(bool enabled);
+
   const std::unique_ptr<content::WebContents> web_contents_;
   ContextImpl* const context_;
 
@@ -291,7 +356,7 @@ class FrameImpl : public fuchsia::web::Frame,
 
   // Logger used for console messages from content, depending on |log_level_|.
   base::ScopedFxLogger console_logger_;
-  fx_log_severity_t log_level_ = FX_LOG_NONE;
+  FuchsiaLogSeverity log_level_ = FUCHSIA_LOG_NONE;
 
   // Parameters applied to popups created by content running in this Frame.
   const fuchsia::web::CreateFrameParams params_for_popups_;
@@ -303,26 +368,33 @@ class FrameImpl : public fuchsia::web::Frame,
   // Owned via |window_tree_host_|.
   FrameLayoutManager* layout_manager_ = nullptr;
 
+  // TODO(crbug.com/1291330): Remove acessibility_bridge_ and
+  // semantics_manager_for_test_.
   std::unique_ptr<AccessibilityBridge> accessibility_bridge_;
   fuchsia::accessibility::semantics::SemanticsManager*
       semantics_manager_for_test_ = nullptr;
+  std::unique_ptr<ui::AccessibilityBridgeFuchsiaImpl> v2_accessibility_bridge_;
+
+  // Test settings.
+  absl::optional<gfx::Size> window_size_for_test_;
+  absl::optional<float> device_scale_factor_for_test_;
 
   EventFilter event_filter_;
   NavigationControllerImpl navigation_controller_;
-  UrlRequestRewriteRulesManager url_request_rewrite_rules_manager_;
+  url_rewrite::UrlRequestRewriteRulesManager url_request_rewrite_rules_manager_;
   FramePermissionController permission_controller_;
   std::unique_ptr<NavigationPolicyHandler> navigation_policy_handler_;
 
-  // Current page scale. Updated by calling SetPageScale().
-  float page_scale_ = 1.0;
-
   // Session ID to use for fuchsia.media.AudioConsumer. Set with
   // SetMediaSessionId().
-  uint64_t media_session_id_ = 0;
+  absl::optional<uint64_t> media_session_id_;
+
+  // Stored settings for web contents in the current Frame.
+  fuchsia::web::ContentAreaSettings content_area_settings_;
 
   // Used for receiving and dispatching popup created by this Frame.
   fuchsia::web::PopupFrameCreationListenerPtr popup_listener_;
-  std::list<std::unique_ptr<content::WebContents>> pending_popups_;
+  std::list<PendingPopup> pending_popups_;
   bool popup_ack_outstanding_ = false;
   gfx::Size render_size_override_;
 
@@ -343,6 +415,10 @@ class FrameImpl : public fuchsia::web::Frame,
   // Used to publish Frame details to Inspect.
   inspect::Node inspect_node_;
   const inspect::StringProperty inspect_name_property_;
+
+  // TODO(crbug.com/1291330): Remove.
+  // Used to control which accessibility bridge version is live.
+  bool use_v2_accessibility_bridge_ = true;
 
   base::WeakPtrFactory<FrameImpl> weak_factory_{this};
 };

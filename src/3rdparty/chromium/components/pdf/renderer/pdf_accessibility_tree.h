@@ -109,6 +109,7 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
       const ui::AXNode& target_node) override;
 
   // content::RenderFrameObserver:
+  void AccessibilityModeChanged(const ui::AXMode& /*mode*/) override;
   void OnDestruct() override;
 
   bool ShowContextMenu();
@@ -149,6 +150,10 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
   content::RenderAccessibility* GetRenderAccessibilityIfEnabled();
 
   std::unique_ptr<gfx::Transform> MakeTransformFromViewInfo() const;
+
+  // Handles an accessibility change only if there is a valid
+  // `RenderAccessibility` for the frame.
+  void MaybeHandleAccessibilityChange();
 
   ui::AXTreeData tree_data_;
   ui::AXTree tree_;
@@ -192,6 +197,8 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
   // Index of the next expected PDF accessibility page info, used to ignore
   // outdated calls of SetAccessibilityPageInfo().
   uint32_t next_page_index_ = 0;
+
+  bool did_get_a_text_run_ = false;
 
   base::WeakPtrFactory<PdfAccessibilityTree> weak_ptr_factory_{this};
 };

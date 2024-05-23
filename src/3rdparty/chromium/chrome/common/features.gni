@@ -10,10 +10,12 @@ import("//build/config/dcheck_always_on.gni")
 import("//build/config/features.gni")
 import("//components/feed/features.gni")
 import("//components/safe_browsing/buildflags.gni")
+import("//crypto/features.gni")
 import("//device/vr/buildflags/buildflags.gni")
 import("//extensions/buildflags/buildflags.gni")
 import("//media/media_options.gni")
 import("//net/features.gni")
+import("//pdf/features.gni")
 import("//ppapi/buildflags/buildflags.gni")
 import("//printing/buildflags/buildflags.gni")
 import("//ui/base/ui_features.gni")
@@ -37,7 +39,7 @@ declare_args() {
 
   # Enable the printing system dialog for platforms that support printing
   # and have a system dialog.
-  enable_basic_print_dialog = enable_basic_printing && !is_chromeos_ash
+  enable_basic_print_dialog = enable_basic_printing && !is_chromeos
 
   # Enables usage of notifications via Chrome's MessageCenter.
   enable_chrome_notifications = enable_message_center && (is_mac || is_win || is_linux || is_fuchsia)
@@ -50,7 +52,7 @@ declare_args() {
   enable_hangout_services_extension = is_chrome_branded
 
   enable_one_click_signin = is_win || is_mac || is_fuchsia ||
-                            ((is_linux || is_chromeos_lacros) && !is_chromecast)
+                            ((is_linux && !is_chromecast) || is_chromeos_lacros)
 
   enable_service_discovery = (enable_mdns && !is_android) || is_mac
 
@@ -58,7 +60,12 @@ declare_args() {
   # Android stores them separately on the Java side.
   enable_session_service = !is_android && !is_chromecast
 
-  enable_supervised_users = is_chromeos_ash || is_android
+  # Enables usage of the side search feature, which is disabled by default.
+  enable_side_search = toolkit_views
+
+  # Enables supervision for Family Link users.
+  # Supervision is only supported on Chrome OS and Android.
+  enable_supervised_users = is_chromeos || is_android
 
   # Enables usage of the system-provided notification center.
   enable_system_notifications =
@@ -82,9 +89,11 @@ chrome_grit_defines = [
   "enable_extensions=$enable_extensions",
   "enable_hangout_services_extension=$enable_hangout_services_extension",
   "enable_plugins=$enable_plugins",
+  "enable_pdf=$enable_pdf",
   "enable_print_preview=$enable_print_preview",
   "enable_printing=$enable_basic_printing",
   "enable_service_discovery=$enable_service_discovery",
+  "enable_side_search=$enable_side_search",
   "enable_supervised_users=$enable_supervised_users",
   "enable_vr=$enable_vr",
   "enable_webrtc=$enable_webrtc",
@@ -92,4 +101,5 @@ chrome_grit_defines = [
   "safe_browsing_mode=$safe_browsing_mode",
   "optimize_webui=$optimize_webui",
   "enable_feed_v2=$enable_feed_v2",
+  "use_nss_certs=$use_nss_certs",
 ]

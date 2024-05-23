@@ -18,29 +18,34 @@ import("//tools/grit/repack.gni")
 assert(!is_ios, "Chromium/iOS shouldn't use anything in //chrome")
 
 group("resources") {
-  public_deps = []
+  public_deps = [ "segmentation_internals:resources" ]
 
   if (!is_android) {
     public_deps += [
       ":component_extension_resources",
       ":dev_ui_paks",
       ":webid_resources",
+      "access_code_cast:resources",
       "app_service_internals:resources",
       "bookmarks:resources",
       "commander:resources",
       "download_shelf:resources",
       "downloads:resources",
-      "federated_learning:resources",
+      "feed:resources",
       "feedback_webui:resources",
       "gaia_auth_host:resources",
       "history:resources",
+      "image_editor:trusted_resources",
+      "image_editor:untrusted_resources",
       "management:resources",
       "new_tab_page:resources",
       "new_tab_page_instant:resources",
       "new_tab_page_third_party:resources",
-      "read_later:resources",
+      "privacy_sandbox:resources",
       "settings:resources",
+      "side_panel:resources",
       "signin:resources",
+      "support_tool:resources",
       "tab_search:resources",
       "whats_new:resources",
     ]
@@ -54,24 +59,27 @@ group("resources") {
       ":bluetooth_pairing_dialog_resources",
       ":internet_config_dialog_resources",
       ":internet_detail_dialog_resources",
-      "chromeos:multidevice_setup_resources",
-      "chromeos/accessibility:build",
-      "chromeos/audio:resources",
-      "chromeos/emoji_picker:resources",
-      "chromeos/enterprise_casting:resources",
-      "chromeos/launcher_internals:resources",
-      "chromeos/login:modulized_resources",
-      "chromeos/login:resources",
-      "chromeos/multidevice_internals:resources",
-      "chromeos/network_ui:resources",
+      "chromeos:resources",
       "nearby_internals:resources",
       "nearby_share:resources",
       "settings/chromeos:resources",
     ]
   }
 
+  if (is_win || is_mac || is_linux || is_chromeos_ash) {
+    public_deps += [ "connectors_internals:resources" ]
+  }
+
   if (is_win || is_mac || is_linux || is_chromeos_lacros || is_fuchsia) {
     public_deps += [ "browser_switch:resources" ]
+  }
+
+  if (is_win || is_mac || is_linux || is_chromeos || is_fuchsia) {
+    public_deps += [ "discards:resources" ]
+  }
+
+  if (is_win || is_mac || is_linux || is_fuchsia) {
+    public_deps += [ "app_settings:resources" ]
   }
 
   if (is_linux || is_chromeos) {
@@ -121,25 +129,16 @@ if (enable_js_type_check) {
     if (is_linux || is_chromeos || is_win || is_mac) {
       deps += [
         "bluetooth_internals:closure_compile",
-        "commander:closure_compile",
-        "discards:closure_compile",
-        "federated_learning:closure_compile",
-        "feedback_webui/js:closure_compile",
         "gaia_auth_host:closure_compile",
+        "image_editor:closure_compile",
         "inline_login:closure_compile",
         "internals/user_education:closure_compile",
         "media_router:closure_compile",
         "nearby_internals:closure_compile",
-        "new_tab_page:closure_compile",
-        "new_tab_page_instant:closure_compile",
-        "new_tab_page_third_party:closure_compile",
         "ntp4:closure_compile",
         "omnibox:closure_compile",
-        "quota_internals:closure_compile",
-        "read_later:closure_compile",
         "settings:closure_compile",
         "sync_file_system_internals:closure_compile",
-        "tab_search:closure_compile",
         "usb_internals:closure_compile",
       ]
     }
@@ -153,21 +152,11 @@ if (enable_js_type_check) {
       deps += [
         "chromeos:closure_compile",
         "nearby_share:closure_compile",
-        "nearby_share/shared:closure_compile",
         "nearby_share/shared:closure_compile_module",
       ]
     }
     if (enable_nacl) {
       deps += [ "about_nacl:closure_compile" ]
-    }
-    if (enable_pdf) {
-      deps += [ "pdf:closure_compile" ]
-    }
-    if (enable_print_preview) {
-      deps += [ "print_preview:closure_compile" ]
-    }
-    if (enable_webui_tab_strip) {
-      deps += [ "tab_strip:closure_compile" ]
     }
     if (is_android) {
       deps += [
@@ -310,16 +299,16 @@ repack("dev_ui_paks") {
   sources = [
     "$root_gen_dir/chrome/bluetooth_internals_resources.pak",
     "$root_gen_dir/chrome/dev_ui_browser_resources.pak",
-    "$root_gen_dir/chrome/floc_internals_resources.pak",
     "$root_gen_dir/chrome/internals_resources.pak",
     "$root_gen_dir/chrome/invalidations_resources.pak",
     "$root_gen_dir/chrome/net_internals_resources.pak",
     "$root_gen_dir/chrome/omnibox_resources.pak",
-    "$root_gen_dir/chrome/quota_internals_resources.pak",
     "$root_gen_dir/chrome/usb_internals_resources.pak",
     "$root_gen_dir/chrome/webrtc_logs_resources.pak",
     "$root_gen_dir/components/dev_ui_components_resources.pak",
     "$root_gen_dir/components/download_internals_resources.pak",
+    "$root_gen_dir/components/history_clusters_internals_resources.pak",
+    "$root_gen_dir/components/optimization_guide_internals_resources.pak",
     "$root_gen_dir/components/sync_driver_sync_internals_resources.pak",
     "$root_gen_dir/content/browser/resources/media/media_internals_resources.pak",
     "$root_gen_dir/content/browser/webrtc/resources/webrtc_internals_resources.pak",
@@ -328,15 +317,15 @@ repack("dev_ui_paks") {
   deps = [
     "//chrome/browser:dev_ui_browser_resources",
     "//chrome/browser/resources/bluetooth_internals:resources",
-    "//chrome/browser/resources/federated_learning:resources",
     "//chrome/browser/resources/internals:resources",
     "//chrome/browser/resources/invalidations:resources",
     "//chrome/browser/resources/media:webrtc_logs_resources",
     "//chrome/browser/resources/net_internals:resources",
     "//chrome/browser/resources/omnibox:resources",
-    "//chrome/browser/resources/quota_internals:resources",
     "//chrome/browser/resources/usb_internals:resources",
     "//components/download/resources/download_internals:resources",
+    "//components/history_clusters/history_clusters_internals/resources",
+    "//components/optimization_guide/optimization_guide_internals/resources",
     "//components/resources:dev_ui_components_resources",
     "//components/sync/driver/resources",
     "//content:dev_ui_content_resources",

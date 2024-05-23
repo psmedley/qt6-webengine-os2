@@ -96,6 +96,10 @@ AudioNode CreateAudioNode(const AudioNodeInfo& info, int version) {
 class AudioApiTest : public ShellApiTest {
  public:
   AudioApiTest() = default;
+
+  AudioApiTest(const AudioApiTest&) = delete;
+  AudioApiTest& operator=(const AudioApiTest&) = delete;
+
   ~AudioApiTest() override = default;
 
   void SetUp() override {
@@ -116,9 +120,6 @@ class AudioApiTest : public ShellApiTest {
  protected:
   std::unique_ptr<base::AutoReset<extensions::mojom::FeatureSessionType>>
       session_feature_type_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioApiTest);
 };
 
 IN_PROC_BROWSER_TEST_F(AudioApiTest, Audio) {
@@ -277,10 +278,10 @@ IN_PROC_BROWSER_TEST_F(AudioApiTest, OnNodesChangedRemoveNodes) {
   EXPECT_TRUE(result_catcher.GetNextResult()) << result_catcher.message();
 }
 
-class WhitelistedAudioApiTest : public AudioApiTest {
+class AllowlistedAudioApiTest : public AudioApiTest {
  public:
-  WhitelistedAudioApiTest() = default;
-  ~WhitelistedAudioApiTest() override = default;
+  AllowlistedAudioApiTest() = default;
+  ~AllowlistedAudioApiTest() override = default;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(
@@ -289,7 +290,7 @@ class WhitelistedAudioApiTest : public AudioApiTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(WhitelistedAudioApiTest, DeprecatedApi) {
+IN_PROC_BROWSER_TEST_F(AllowlistedAudioApiTest, DeprecatedApi) {
   // Set up the audio nodes for testing.
   AudioNodeList audio_nodes = {
       CreateAudioNode(kJabraSpeaker1, 2), CreateAudioNode(kJabraSpeaker2, 2),

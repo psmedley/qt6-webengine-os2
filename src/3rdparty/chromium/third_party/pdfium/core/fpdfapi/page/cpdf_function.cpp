@@ -18,6 +18,7 @@
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/scoped_set_insertion.h"
+#include "core/fxcrt/stl_util.h"
 #include "third_party/base/containers/contains.h"
 #include "third_party/base/cxx17_backports.h"
 
@@ -92,7 +93,7 @@ bool CPDF_Function::Init(const CPDF_Object* pObj,
   if (!pDomains)
     return false;
 
-  m_nInputs = pDomains->size() / 2;
+  m_nInputs = fxcrt::CollectionSize<uint32_t>(*pDomains) / 2;
   if (m_nInputs == 0)
     return false;
 
@@ -100,7 +101,7 @@ bool CPDF_Function::Init(const CPDF_Object* pObj,
   m_Domains = ReadArrayElementsToVector(pDomains, nInputs);
 
   const CPDF_Array* pRanges = pDict->GetArrayFor("Range");
-  m_nOutputs = pRanges ? pRanges->size() / 2 : 0;
+  m_nOutputs = pRanges ? fxcrt::CollectionSize<uint32_t>(*pRanges) / 2 : 0;
 
   // Ranges are required for type 0 and type 4 functions. A non-zero
   // |m_nOutputs| here implied Ranges meets the requirements.
@@ -126,22 +127,23 @@ bool CPDF_Function::Init(const CPDF_Object* pObj,
   return true;
 }
 
-Optional<uint32_t> CPDF_Function::Call(pdfium::span<const float> inputs,
-                                       pdfium::span<float> results) const {
+absl::optional<uint32_t> CPDF_Function::Call(
+    pdfium::span<const float> inputs,
+    pdfium::span<float> results) const {
   if (m_nInputs != inputs.size())
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   std::vector<float> clamped_inputs(m_nInputs);
   for (uint32_t i = 0; i < m_nInputs; i++) {
     float domain1 = m_Domains[i * 2];
     float domain2 = m_Domains[i * 2 + 1];
     if (domain1 > domain2)
-      return pdfium::nullopt;
+      return absl::nullopt;
 
     clamped_inputs[i] = pdfium::clamp(inputs[i], domain1, domain2);
   }
   if (!v_Call(clamped_inputs, results))
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   if (m_Ranges.empty())
     return m_nOutputs;
@@ -150,7 +152,7 @@ Optional<uint32_t> CPDF_Function::Call(pdfium::span<const float> inputs,
     float range1 = m_Ranges[i * 2];
     float range2 = m_Ranges[i * 2 + 1];
     if (range1 > range2)
-      return pdfium::nullopt;
+      return absl::nullopt;
 
     results[i] = pdfium::clamp(results[i], range1, range2);
   }

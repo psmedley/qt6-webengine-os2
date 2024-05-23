@@ -165,7 +165,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFrame *out;
     int i, h, p, new_out_samples;
 
-    av_assert0(in->channels == (s->nb_inputs * s->nb_handles));
+    av_assert0(in->ch_layout.nb_channels == (s->nb_inputs * s->nb_handles));
 
     if (!s->nb_outputs ||
         (av_frame_is_writable(in) && s->nb_inputs == s->nb_outputs &&
@@ -181,7 +181,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         av_frame_copy_props(out, in);
     }
 
-    av_assert0(!s->nb_outputs || out->channels == (s->nb_outputs * s->nb_handles));
+    av_assert0(!s->nb_outputs || out->ch_layout.nb_channels == (s->nb_outputs * s->nb_handles));
 
     for (h = 0; h < s->nb_handles; h++) {
         for (i = 0; i < s->nb_inputs; i++) {
@@ -221,7 +221,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         return 0;
     } else if (new_out_samples < out->nb_samples) {
         int offset = out->nb_samples - new_out_samples;
-        for (int ch = 0; ch < out->channels; ch++)
+        for (int ch = 0; ch < out->ch_layout.nb_channels; ch++)
             memmove(out->extended_data[ch], out->extended_data[ch] + sizeof(float) * offset,
                     sizeof(float) * new_out_samples);
         out->nb_samples = new_out_samples;
@@ -318,7 +318,7 @@ static int connect_ports(AVFilterContext *ctx, AVFilterLink *link)
     LADSPAContext *s = ctx->priv;
     int i, j;
 
-    s->nb_handles = s->nb_inputs == 1 && s->nb_outputs == 1 ? link->channels : 1;
+    s->nb_handles = s->nb_inputs == 1 && s->nb_outputs == 1 ? link->ch_layout.nb_channels : 1;
     s->handles    = av_calloc(s->nb_handles, sizeof(*s->handles));
     if (!s->handles)
         return AVERROR(ENOMEM);
@@ -366,8 +366,13 @@ static int config_output(AVFilterLink *outlink)
         outlink->format      = inlink->format;
         outlink->sample_rate = inlink->sample_rate;
         if (s->nb_inputs == s->nb_outputs) {
+            if ((ret = av_channel_layout_copy(&outlink->ch_layout, &inlink->ch_layout)) < 0)
+                return ret;
+#if FF_API_OLD_CHANNEL_LAYOUT
+FF_DISABLE_DEPRECATION_WARNINGS
             outlink->channel_layout = inlink->channel_layout;
-            outlink->channels = inlink->channels;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
         }
 
         ret = 0;
@@ -456,7 +461,7 @@ static av_cold int init(AVFilterContext *ctx)
     AVFilterPad pad = { NULL };
     char *p, *arg, *saveptr = NULL;
     unsigned long nb_ports;
-    int i, j = 0;
+    int i, j = 0, ret;
 
     if (!s->dl_name) {
         av_log(ctx, AV_LOG_ERROR, "No plugin name provided\n");
@@ -639,10 +644,8 @@ static av_cold int init(AVFilterContext *ctx)
 
         pad.filter_frame = filter_frame;
         pad.config_props = config_input;
-        if (ff_insert_inpad(ctx, ctx->nb_inputs, &pad) < 0) {
-            av_freep(&pad.name);
-            return AVERROR(ENOMEM);
-        }
+        if ((ret = ff_append_inpad_free_name(ctx, &pad)) < 0)
+            return ret;
     }
 
     av_log(ctx, AV_LOG_DEBUG, "ports: %lu\n", nb_ports);
@@ -657,47 +660,33 @@ static av_cold int init(AVFilterContext *ctx)
 static int query_formats(AVFilterContext *ctx)
 {
     LADSPAContext *s = ctx->priv;
-    AVFilterFormats *formats;
     AVFilterChannelLayouts *layouts;
     static const enum AVSampleFormat sample_fmts[] = {
         AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_NONE };
-    int ret;
-
-    formats = ff_make_format_list(sample_fmts);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    ret = ff_set_common_formats(ctx, formats);
+    int ret = ff_set_common_formats_from_list(ctx, sample_fmts);
     if (ret < 0)
         return ret;
 
     if (s->nb_inputs) {
-        formats = ff_all_samplerates();
-        if (!formats)
-            return AVERROR(ENOMEM);
-
-        ret = ff_set_common_samplerates(ctx, formats);
+        ret = ff_set_common_all_samplerates(ctx);
         if (ret < 0)
             return ret;
     } else {
         int sample_rates[] = { s->sample_rate, -1 };
 
-        ret = ff_set_common_samplerates(ctx, ff_make_format_list(sample_rates));
+        ret = ff_set_common_samplerates_from_list(ctx, sample_rates);
         if (ret < 0)
             return ret;
     }
 
     if (s->nb_inputs == 1 && s->nb_outputs == 1) {
         // We will instantiate multiple LADSPA_Handle, one over each channel
-        layouts = ff_all_channel_counts();
-        if (!layouts)
-            return AVERROR(ENOMEM);
-
-        ret = ff_set_common_channel_layouts(ctx, layouts);
+        ret = ff_set_common_all_channel_counts(ctx);
         if (ret < 0)
             return ret;
     } else if (s->nb_inputs == 2 && s->nb_outputs == 2) {
         layouts = NULL;
-        ret = ff_add_channel_layout(&layouts, AV_CH_LAYOUT_STEREO);
+        ret = ff_add_channel_layout(&layouts, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO);
         if (ret < 0)
             return ret;
         ret = ff_set_common_channel_layouts(ctx, layouts);
@@ -708,10 +697,10 @@ static int query_formats(AVFilterContext *ctx)
 
         if (s->nb_inputs >= 1) {
             AVFilterLink *inlink = ctx->inputs[0];
-            uint64_t inlayout = FF_COUNT2LAYOUT(s->nb_inputs);
+            AVChannelLayout inlayout = FF_COUNT2LAYOUT(s->nb_inputs);
 
             layouts = NULL;
-            ret = ff_add_channel_layout(&layouts, inlayout);
+            ret = ff_add_channel_layout(&layouts, &inlayout);
             if (ret < 0)
                 return ret;
             ret = ff_channel_layouts_ref(layouts, &inlink->outcfg.channel_layouts);
@@ -726,10 +715,10 @@ static int query_formats(AVFilterContext *ctx)
         }
 
         if (s->nb_outputs >= 1) {
-            uint64_t outlayout = FF_COUNT2LAYOUT(s->nb_outputs);
+            AVChannelLayout outlayout = FF_COUNT2LAYOUT(s->nb_outputs);
 
             layouts = NULL;
-            ret = ff_add_channel_layout(&layouts, outlayout);
+            ret = ff_add_channel_layout(&layouts, &outlayout);
             if (ret < 0)
                 return ret;
             ret = ff_channel_layouts_ref(layouts, &outlink->incfg.channel_layouts);
@@ -764,9 +753,6 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_freep(&s->octlv);
     av_freep(&s->handles);
     av_freep(&s->ctl_needs_value);
-
-    if (ctx->nb_inputs)
-        av_freep(&ctx->input_pads[0].name);
 }
 
 static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
@@ -788,7 +774,6 @@ static const AVFilterPad ladspa_outputs[] = {
         .config_props  = config_output,
         .request_frame = request_frame,
     },
-    { NULL }
 };
 
 const AVFilter ff_af_ladspa = {
@@ -798,9 +783,9 @@ const AVFilter ff_af_ladspa = {
     .priv_class    = &ladspa_class,
     .init          = init,
     .uninit        = uninit,
-    .query_formats = query_formats,
     .process_command = process_command,
     .inputs        = 0,
-    .outputs       = ladspa_outputs,
+    FILTER_OUTPUTS(ladspa_outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .flags         = AVFILTER_FLAG_DYNAMIC_INPUTS,
 };

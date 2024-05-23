@@ -12,14 +12,13 @@
 #include "base/containers/contains.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
+#include "base/no_destructor.h"
 #include "base/notreached.h"
+#include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
-
-#if defined(USE_OZONE)
-#include "ui/base/ui_base_features.h"
-#endif
 
 namespace ui {
 
@@ -28,14 +27,11 @@ bool Clipboard::IsSupportedClipboardBuffer(ClipboardBuffer buffer) {
   // Use lambda instead of local helper function in order to access private
   // member IsSelectionBufferAvailable().
   static auto IsSupportedSelectionClipboard = []() -> bool {
-#if defined(USE_OZONE) && !defined(OS_CHROMEOS)
-    if (features::IsUsingOzonePlatform()) {
-      ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
-      CHECK(clipboard);
-      return clipboard->IsSelectionBufferAvailable();
-    }
-#endif
-#if !defined(OS_WIN) && !defined(OS_APPLE) && !defined(OS_CHROMEOS)
+#if defined(USE_OZONE) && !BUILDFLAG(IS_CHROMEOS)
+    ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+    CHECK(clipboard);
+    return clipboard->IsSelectionBufferAvailable();
+#elif !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_CHROMEOS)
     return true;
 #else
     return false;
@@ -45,10 +41,11 @@ bool Clipboard::IsSupportedClipboardBuffer(ClipboardBuffer buffer) {
   switch (buffer) {
     case ClipboardBuffer::kCopyPaste:
       return true;
-    case ClipboardBuffer::kSelection:
+    case ClipboardBuffer::kSelection: {
       // Cache the result to make this function cheap.
       static bool selection_result = IsSupportedSelectionClipboard();
       return selection_result;
+    }
     case ClipboardBuffer::kDrag:
       return false;
   }
@@ -154,15 +151,42 @@ std::map<std::string, std::string> Clipboard::ExtractCustomPlatformNames(
           base::JSONReader::Read(custom_format_json);
       if (json_val.has_value()) {
         for (const auto it : json_val->DictItems()) {
-          std::string custom_format_name;
-          if (it.second.GetAsString(&custom_format_name)) {
-            custom_format_names.emplace(it.first, custom_format_name);
-          }
+          const std::string* custom_format_name = it.second.GetIfString();
+          if (custom_format_name)
+            custom_format_names.emplace(it.first, *custom_format_name);
         }
       }
     }
   }
   return custom_format_names;
+}
+
+std::vector<std::u16string>
+Clipboard::ReadAvailableStandardAndCustomFormatNames(
+    ClipboardBuffer buffer,
+    const DataTransferEndpoint* data_dst) const {
+  DCHECK(CalledOnValidThread());
+  std::vector<std::u16string> format_names;
+  // Native applications generally read formats in order of
+  // fidelity/specificity, reading only the most specific format they support
+  // when possible to save resources. For example, if an image/tiff and
+  // image/jpg were both available on the clipboard, an image editing
+  // application with sophisticated needs may choose the image/tiff payload, due
+  // to it providing an uncompressed image, and only fall back to image/jpg when
+  // the image/tiff is not available. To allow other native applications to read
+  // these most specific formats first, clipboard formats will be ordered as
+  // follows:
+  // 1. Pickled formats, in order of definition in the ClipboardItem.
+  // 2. Sanitized standard formats, ordered as determined by the browser.
+
+  std::map<std::string, std::string> custom_format_names =
+      ExtractCustomPlatformNames(buffer, data_dst);
+  for (const auto& items : custom_format_names)
+    format_names.push_back(base::ASCIIToUTF16(items.first));
+  for (const auto& item : GetStandardFormats(buffer, data_dst)) {
+    format_names.push_back(item);
+  }
+  return format_names;
 }
 
 Clipboard::Clipboard() = default;
@@ -236,6 +260,14 @@ void Clipboard::DispatchPortableRepresentation(PortableFormat format,
                 &(params[0].front()), params[0].size());
       break;
 
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+    case PortableFormat::kEncodedDataTransferEndpoint:
+      // Only supported on Lacros.
+      WriteData(ClipboardFormatType::DataTransferEndpointDataType(),
+                &(params[0].front()), params[0].size());
+      break;
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+
     default:
       NOTREACHED();
   }
@@ -295,14 +327,6 @@ void Clipboard::ReadAvailableTypes(ClipboardBuffer buffer,
   std::vector<std::u16string> types;
   ReadAvailableTypes(buffer, data_dst, &types);
   std::move(callback).Run(std::move(types));
-}
-
-void Clipboard::ReadAvailablePlatformSpecificFormatNames(
-    ClipboardBuffer buffer,
-    const DataTransferEndpoint* data_dst,
-    ReadAvailablePlatformSpecificFormatNamesCallback callback) const {
-  std::move(callback).Run(
-      ReadAvailablePlatformSpecificFormatNames(buffer, data_dst));
 }
 
 void Clipboard::ReadText(ClipboardBuffer buffer,

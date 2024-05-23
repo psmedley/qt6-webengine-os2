@@ -8,13 +8,46 @@
 
 #include "base/bind.h"
 #include "base/notreached.h"
+#include "components/device_event_log/device_event_log.h"
 #include "dbus/bus.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_gatt_connection.h"
 #include "device/bluetooth/floss/bluetooth_adapter_floss.h"
 #include "device/bluetooth/floss/floss_dbus_client.h"
+#include "device/bluetooth/floss/floss_dbus_manager.h"
 
 namespace floss {
+
+namespace {
+
+void OnCreateBond(const absl::optional<bool>& ret,
+                  const absl::optional<Error>& error) {
+  if (ret.has_value() && !*ret) {
+    BLUETOOTH_LOG(ERROR) << "CreateBond returned failure";
+  }
+
+  if (error.has_value()) {
+    BLUETOOTH_LOG(ERROR) << "Failed to create bond: " << error->name << ": "
+                         << error->message;
+  }
+}
+
+void OnRemoveBond(base::OnceClosure callback,
+                  const absl::optional<bool>& ret,
+                  const absl::optional<Error>& error) {
+  if (ret.has_value() && !*ret) {
+    BLUETOOTH_LOG(ERROR) << "RemoveBond returned failure";
+  }
+
+  if (error.has_value()) {
+    BLUETOOTH_LOG(ERROR) << "Failed to remove bond: " << error->name << ": "
+                         << error->message;
+  }
+
+  std::move(callback).Run();
+}
+
+}  // namespace
 
 using AddressType = device::BluetoothDevice::AddressType;
 using VendorIDSource = device::BluetoothDevice::VendorIDSource;
@@ -81,15 +114,21 @@ absl::optional<std::string> BluetoothDeviceFloss::GetName() const {
 }
 
 bool BluetoothDeviceFloss::IsPaired() const {
-  NOTIMPLEMENTED();
-
-  return false;
+  return bond_state_ == FlossAdapterClient::BondState::kBonded;
 }
 
-bool BluetoothDeviceFloss::IsConnected() const {
+#if BUILDFLAG(IS_CHROMEOS)
+bool BluetoothDeviceFloss::IsBonded() const {
+  // TODO(b/220387308): Update the implementation to return whether the device
+  // is bonded, and not just whether it is paired.
   NOTIMPLEMENTED();
 
-  return false;
+  return IsPaired();
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+bool BluetoothDeviceFloss::IsConnected() const {
+  return is_connected_;
 }
 
 bool BluetoothDeviceFloss::IsGattConnected() const {
@@ -99,9 +138,9 @@ bool BluetoothDeviceFloss::IsGattConnected() const {
 }
 
 bool BluetoothDeviceFloss::IsConnectable() const {
-  NOTIMPLEMENTED();
-
-  return false;
+  // Mark all devices as connectable for now.
+  // TODO(b/211126690): Implement based on supported profiles.
+  return true;
 }
 
 bool BluetoothDeviceFloss::IsConnecting() const {
@@ -109,14 +148,6 @@ bool BluetoothDeviceFloss::IsConnecting() const {
 
   return false;
 }
-
-#if defined(OS_CHROMEOS)
-bool BluetoothDeviceFloss::IsBlockedByPolicy() const {
-  NOTIMPLEMENTED();
-
-  return false;
-}
-#endif
 
 device::BluetoothDevice::UUIDSet BluetoothDeviceFloss::GetUUIDs() const {
   NOTIMPLEMENTED();
@@ -137,21 +168,27 @@ absl::optional<int8_t> BluetoothDeviceFloss::GetInquiryTxPower() const {
 }
 
 bool BluetoothDeviceFloss::ExpectingPinCode() const {
-  NOTIMPLEMENTED();
+  if (!pairing_)
+    return false;
 
-  return false;
+  return pairing_->pairing_expectation() ==
+         BluetoothPairingFloss::PairingExpectation::kPinCode;
 }
 
 bool BluetoothDeviceFloss::ExpectingPasskey() const {
-  NOTIMPLEMENTED();
+  if (!pairing_)
+    return false;
 
-  return false;
+  return pairing_->pairing_expectation() ==
+         BluetoothPairingFloss::PairingExpectation::kPasskey;
 }
 
 bool BluetoothDeviceFloss::ExpectingConfirmation() const {
-  NOTIMPLEMENTED();
+  if (!pairing_)
+    return false;
 
-  return false;
+  return pairing_->pairing_expectation() ==
+         BluetoothPairingFloss::PairingExpectation::kConfirmation;
 }
 
 void BluetoothDeviceFloss::GetConnectionInfo(ConnectionInfoCallback callback) {
@@ -168,27 +205,57 @@ void BluetoothDeviceFloss::SetConnectionLatency(
 void BluetoothDeviceFloss::Connect(
     device::BluetoothDevice::PairingDelegate* pairing_delegate,
     ConnectCallback callback) {
-  NOTIMPLEMENTED();
+  BLUETOOTH_LOG(EVENT) << "Connecting to " << address_;
+
+  // To simulate BlueZ API behavior, we don't reply the callback as soon as
+  // Floss CreateBond API returns, but rather we trigger the callback later
+  // after pairing is done and profiles are connected.
+  pending_callback_on_connect_profiles_ = std::move(callback);
+
+  if (IsPaired() || !pairing_delegate) {
+    // No need to pair, or unable to, skip straight to connection.
+    ConnectAllEnabledProfiles();
+  } else {
+    pairing_ = std::make_unique<BluetoothPairingFloss>(pairing_delegate);
+    FlossDBusManager::Get()->GetAdapterClient()->CreateBond(
+        base::BindOnce(&OnCreateBond), AsFlossDeviceId(),
+        FlossAdapterClient::BluetoothTransport::kAuto);
+  }
 }
 
-void BluetoothDeviceFloss::SetPinCode(const std::string& pincode) {
+#if BUILDFLAG(IS_CHROMEOS)
+void BluetoothDeviceFloss::ConnectClassic(
+    device::BluetoothDevice::PairingDelegate* pairing_delegate,
+    ConnectCallback callback) {
+  // TODO(b/215621933): Explicitly create a classic Bluetooth connection.
   NOTIMPLEMENTED();
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+void BluetoothDeviceFloss::SetPinCode(const std::string& pincode) {
+  std::vector<uint8_t> pin(pincode.begin(), pincode.end());
+  FlossDBusManager::Get()->GetAdapterClient()->SetPin(
+      base::DoNothing(), AsFlossDeviceId(), /*accept=*/true, pin);
 }
 
 void BluetoothDeviceFloss::SetPasskey(uint32_t passkey) {
+  // No use case in Chrome OS.
   NOTIMPLEMENTED();
 }
 
 void BluetoothDeviceFloss::ConfirmPairing() {
-  NOTIMPLEMENTED();
+  FlossDBusManager::Get()->GetAdapterClient()->SetPairingConfirmation(
+      base::DoNothing(), AsFlossDeviceId(), /*accept=*/true);
 }
 
 void BluetoothDeviceFloss::RejectPairing() {
-  NOTIMPLEMENTED();
+  FlossDBusManager::Get()->GetAdapterClient()->SetPairingConfirmation(
+      base::DoNothing(), AsFlossDeviceId(), /*accept=*/false);
 }
 
 void BluetoothDeviceFloss::CancelPairing() {
-  NOTIMPLEMENTED();
+  FlossDBusManager::Get()->GetAdapterClient()->CancelBondProcess(
+      base::DoNothing(), AsFlossDeviceId());
 }
 
 void BluetoothDeviceFloss::Disconnect(base::OnceClosure callback,
@@ -198,7 +265,8 @@ void BluetoothDeviceFloss::Disconnect(base::OnceClosure callback,
 
 void BluetoothDeviceFloss::Forget(base::OnceClosure callback,
                                   ErrorCallback error_callback) {
-  NOTIMPLEMENTED();
+  FlossDBusManager::Get()->GetAdapterClient()->RemoveBond(
+      base::BindOnce(&OnRemoveBond, std::move(callback)), AsFlossDeviceId());
 }
 
 void BluetoothDeviceFloss::ConnectToService(
@@ -238,7 +306,7 @@ void BluetoothDeviceFloss::Pair(
   NOTIMPLEMENTED();
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 void BluetoothDeviceFloss::ExecuteWrite(
     base::OnceClosure callback,
     ExecuteWriteErrorCallback error_callback) {
@@ -249,10 +317,34 @@ void BluetoothDeviceFloss::AbortWrite(base::OnceClosure callback,
                                       AbortWriteErrorCallback error_callback) {
   NOTIMPLEMENTED();
 }
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+
+FlossDeviceId BluetoothDeviceFloss::AsFlossDeviceId() const {
+  return FlossDeviceId{.address = address_, .name = name_};
+}
 
 void BluetoothDeviceFloss::SetName(const std::string& name) {
   name_ = name;
+}
+
+void BluetoothDeviceFloss::SetBondState(
+    FlossAdapterClient::BondState bond_state) {
+  bond_state_ = bond_state;
+}
+
+void BluetoothDeviceFloss::SetIsConnected(bool is_connected) {
+  is_connected_ = is_connected;
+}
+
+void BluetoothDeviceFloss::ConnectAllEnabledProfiles() {
+  FlossDBusManager::Get()->GetAdapterClient()->ConnectAllEnabledProfiles(
+      base::BindOnce(&BluetoothDeviceFloss::OnConnectAllEnabledProfiles,
+                     weak_ptr_factory_.GetWeakPtr()),
+      AsFlossDeviceId());
+}
+
+void BluetoothDeviceFloss::ResetPairing() {
+  pairing_.reset();
 }
 
 void BluetoothDeviceFloss::CreateGattConnectionImpl(
@@ -317,6 +409,28 @@ void BluetoothDeviceFloss::OnCancelPairingError(const Error& error) {
 void BluetoothDeviceFloss::OnForgetError(ErrorCallback error_callback,
                                          const Error& error) {
   NOTIMPLEMENTED();
+}
+
+void BluetoothDeviceFloss::OnConnectAllEnabledProfiles(
+    const absl::optional<Void>& ret,
+    const absl::optional<Error>& error) {
+  if (error.has_value()) {
+    BLUETOOTH_LOG(ERROR) << "Failed to connect all enabled profiles: "
+                         << error->name << ": " << error->message;
+    // TODO(b/202874707): Design a proper new errors for Floss.
+    if (pending_callback_on_connect_profiles_)
+      TriggerConnectCallback(BluetoothDevice::ConnectErrorCode::ERROR_UNKNOWN);
+  }
+
+  TriggerConnectCallback(absl::nullopt);
+}
+
+void BluetoothDeviceFloss::TriggerConnectCallback(
+    absl::optional<BluetoothDevice::ConnectErrorCode> error_code) {
+  if (pending_callback_on_connect_profiles_) {
+    std::move(*pending_callback_on_connect_profiles_).Run(error_code);
+    pending_callback_on_connect_profiles_ = absl::nullopt;
+  }
 }
 
 }  // namespace floss

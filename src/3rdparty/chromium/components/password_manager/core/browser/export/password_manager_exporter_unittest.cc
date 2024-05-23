@@ -44,7 +44,7 @@ using DeleteCallback = PasswordManagerExporter::DeleteCallback;
 using SetPosixFilePermissionsCallback =
     PasswordManagerExporter::SetPosixFilePermissionsCallback;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 const base::FilePath::CharType kNullFileName[] = FILE_PATH_LITERAL("/nul");
 #else
 const base::FilePath::CharType kNullFileName[] = FILE_PATH_LITERAL("/dev/null");
@@ -54,6 +54,9 @@ const base::FilePath::CharType kNullFileName[] = FILE_PATH_LITERAL("/dev/null");
 class FakeCredentialProvider : public CredentialProviderInterface {
  public:
   FakeCredentialProvider() = default;
+
+  FakeCredentialProvider(const FakeCredentialProvider&) = delete;
+  FakeCredentialProvider& operator=(const FakeCredentialProvider&) = delete;
 
   void SetPasswordList(
       const std::vector<std::unique_ptr<PasswordForm>>& password_list) {
@@ -74,8 +77,6 @@ class FakeCredentialProvider : public CredentialProviderInterface {
 
  private:
   std::vector<std::unique_ptr<PasswordForm>> password_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeCredentialProvider);
 };
 
 // Creates a hardcoded set of credentials for tests.
@@ -102,6 +103,10 @@ class PasswordManagerExporterTest : public testing::Test {
         mock_set_posix_file_permissions_.Get());
   }
 
+  PasswordManagerExporterTest(const PasswordManagerExporterTest&) = delete;
+  PasswordManagerExporterTest& operator=(const PasswordManagerExporterTest&) =
+      delete;
+
   ~PasswordManagerExporterTest() override = default;
 
  protected:
@@ -117,9 +122,6 @@ class PasswordManagerExporterTest : public testing::Test {
       mock_set_posix_file_permissions_;
   base::FilePath destination_path_;
   base::HistogramTester histogram_tester_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PasswordManagerExporterTest);
 };
 
 TEST_F(PasswordManagerExporterTest, PasswordExportSetPasswordListFirst) {
@@ -253,7 +255,7 @@ TEST_F(PasswordManagerExporterTest, CancelAfterExporting) {
   task_environment_.RunUntilIdle();
 }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 // Chrome creates files using the broadest permissions allowed. Passwords are
 // sensitive and should be explicitly limited to the owner.
 TEST_F(PasswordManagerExporterTest, OutputHasRestrictedPermissions) {

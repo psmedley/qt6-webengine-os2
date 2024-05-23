@@ -25,6 +25,7 @@ mojom_component("base") {
     "read_only_buffer.mojom",
     "read_only_file.mojom",
     "ref_counted_memory.mojom",
+    "safe_base_name.mojom",
     "shared_memory.mojom",
     "string16.mojom",
     "text_direction.mojom",
@@ -36,7 +37,10 @@ mojom_component("base") {
   ]
 
   if (is_win) {
-    sources += [ "logfont_win.mojom" ]
+    sources += [
+      "logfont_win.mojom",
+      "wstring.mojom",
+    ]
   }
   enabled_features = []
   if (is_win) {
@@ -51,6 +55,21 @@ mojom_component("base") {
   macro_prefix = "MOJO_BASE_MOJOM"
 
   common_typemaps = [
+    {
+      types = [
+        {
+          mojom = "mojo_base.mojom.SafeBaseName"
+          cpp = "::base::SafeBaseName"
+        },
+      ]
+      traits_headers =
+          [ "//mojo/public/cpp/base/safe_base_name_mojom_traits.h" ]
+      traits_public_deps = [
+        "//base",
+        "//mojo/public/cpp/base",
+        "//mojo/public/cpp/base:shared_typemap_traits",
+      ]
+    },
     {
       types = [
         {
@@ -296,12 +315,22 @@ mojom_component("base") {
           move_only = true
         },
         {
+          mojom = "mojo_base.mojom.DictionaryValue"
+          cpp = "::base::Value::Dict"
+          move_only = true
+        },
+        {
           mojom = "mojo_base.mojom.ListValue"
+          cpp = "::base::Value::List"
+          move_only = true
+        },
+        {
+          mojom = "mojo_base.mojom.DeprecatedDictionaryValue"
           cpp = "::base::Value"
           move_only = true
         },
         {
-          mojom = "mojo_base.mojom.DictionaryValue"
+          mojom = "mojo_base.mojom.DeprecatedListValue"
           cpp = "::base::Value"
           move_only = true
         },
@@ -482,6 +511,20 @@ mojom_component("base") {
         ]
         traits_public_deps = [
           "//base",
+          "//mojo/public/cpp/base:typemap_traits",
+        ]
+      },
+      {
+        types = [
+          {
+            mojom = "mojo_base.mojom.WString"
+            cpp = "::std::wstring"
+          },
+        ]
+        traits_headers = [ "//mojo/public/cpp/base/wstring_mojom_traits.h" ]
+        traits_public_deps = [
+          "//base",
+          "//mojo/public/cpp/base",
           "//mojo/public/cpp/base:typemap_traits",
         ]
       },

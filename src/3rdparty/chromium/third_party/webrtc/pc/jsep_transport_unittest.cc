@@ -10,15 +10,34 @@
 
 #include "pc/jsep_transport.h"
 
-#include <memory>
+#include <stdint.h>
+#include <string.h>
+
+#include <ostream>
+#include <string>
 #include <tuple>
 #include <utility>
 
-#include "api/ice_transport_factory.h"
+#include "api/candidate.h"
 #include "media/base/fake_rtp.h"
 #include "p2p/base/fake_dtls_transport.h"
 #include "p2p/base/fake_ice_transport.h"
-#include "rtc_base/gunit.h"
+#include "p2p/base/p2p_constants.h"
+#include "p2p/base/packet_transport_internal.h"
+#include "rtc_base/async_packet_socket.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/byte_order.h"
+#include "rtc_base/copy_on_write_buffer.h"
+#include "rtc_base/helpers.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/net_helper.h"
+#include "rtc_base/ref_counted_object.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/ssl_certificate.h"
+#include "rtc_base/ssl_identity.h"
+#include "rtc_base/third_party/sigslot/sigslot.h"
+#include "test/gtest.h"
+#include "test/scoped_key_value_config.h"
 
 namespace cricket {
 namespace {
@@ -42,6 +61,20 @@ struct NegotiateRoleParams {
   SdpType remote_type;
 };
 
+std::ostream& operator<<(std::ostream& os, const ConnectionRole& role) {
+  std::string str = "invalid";
+  ConnectionRoleToString(role, &str);
+  os << str;
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const NegotiateRoleParams& param) {
+  os << "[Local role " << param.local_role << " Remote role "
+     << param.remote_role << " LocalType " << SdpTypeToString(param.local_type)
+     << " RemoteType " << SdpTypeToString(param.remote_type) << "]";
+  return os;
+}
+
 rtc::scoped_refptr<webrtc::IceTransportInterface> CreateIceTransport(
     std::unique_ptr<FakeIceTransport> internal) {
   if (!internal) {
@@ -57,7 +90,7 @@ class JsepTransport2Test : public ::testing::Test, public sigslot::has_slots<> {
       rtc::PacketTransportInternal* rtp_packet_transport,
       rtc::PacketTransportInternal* rtcp_packet_transport) {
     auto srtp_transport = std::make_unique<webrtc::SrtpTransport>(
-        rtcp_packet_transport == nullptr);
+        rtcp_packet_transport == nullptr, field_trials_);
 
     srtp_transport->SetRtpPacketTransport(rtp_packet_transport);
     if (rtcp_packet_transport) {
@@ -70,7 +103,7 @@ class JsepTransport2Test : public ::testing::Test, public sigslot::has_slots<> {
       cricket::DtlsTransportInternal* rtp_dtls_transport,
       cricket::DtlsTransportInternal* rtcp_dtls_transport) {
     auto dtls_srtp_transport = std::make_unique<webrtc::DtlsSrtpTransport>(
-        rtcp_dtls_transport == nullptr);
+        rtcp_dtls_transport == nullptr, field_trials_);
     dtls_srtp_transport->SetDtlsTransports(rtp_dtls_transport,
                                            rtcp_dtls_transport);
     return dtls_srtp_transport;
@@ -110,7 +143,7 @@ class JsepTransport2Test : public ::testing::Test, public sigslot::has_slots<> {
             rtp_dtls_transport.get(), rtcp_dtls_transport.get());
         break;
       default:
-        RTC_NOTREACHED();
+        RTC_DCHECK_NOTREACHED();
     }
 
     auto jsep_transport = std::make_unique<JsepTransport>(
@@ -160,6 +193,8 @@ class JsepTransport2Test : public ::testing::Test, public sigslot::has_slots<> {
   // The SrtpTransport is owned by `jsep_transport_`. Keep a raw pointer here
   // for testing.
   webrtc::SrtpTransport* sdes_transport_ = nullptr;
+
+  webrtc::test::ScopedKeyValueConfig field_trials_;
 };
 
 // The parameterized tests cover both cases when RTCP mux is enable and
@@ -445,7 +480,13 @@ TEST_P(JsepTransport2WithRtcpMux, ValidDtlsRoleNegotiation) {
       {CONNECTIONROLE_ACTPASS, CONNECTIONROLE_PASSIVE, SdpType::kOffer,
        SdpType::kAnswer},
       {CONNECTIONROLE_ACTPASS, CONNECTIONROLE_PASSIVE, SdpType::kOffer,
-       SdpType::kPrAnswer}};
+       SdpType::kPrAnswer},
+      // Combinations permitted by RFC 8842 section 5.3
+      {CONNECTIONROLE_ACTIVE, CONNECTIONROLE_PASSIVE, SdpType::kAnswer,
+       SdpType::kOffer},
+      {CONNECTIONROLE_ACTIVE, CONNECTIONROLE_PASSIVE, SdpType::kPrAnswer,
+       SdpType::kOffer},
+  };
 
   for (auto& param : valid_client_params) {
     jsep_transport_ =
@@ -487,7 +528,11 @@ TEST_P(JsepTransport2WithRtcpMux, ValidDtlsRoleNegotiation) {
       {CONNECTIONROLE_ACTPASS, CONNECTIONROLE_ACTIVE, SdpType::kOffer,
        SdpType::kAnswer},
       {CONNECTIONROLE_ACTPASS, CONNECTIONROLE_ACTIVE, SdpType::kOffer,
-       SdpType::kPrAnswer}};
+       SdpType::kPrAnswer},
+      // Combinations permitted by RFC 8842 section 5.3
+      {CONNECTIONROLE_PASSIVE, CONNECTIONROLE_ACTIVE, SdpType::kPrAnswer,
+       SdpType::kOffer},
+  };
 
   for (auto& param : valid_server_params) {
     jsep_transport_ =
@@ -590,20 +635,15 @@ TEST_P(JsepTransport2WithRtcpMux, InvalidDtlsRoleNegotiation) {
     }
   }
 
-  // Invalid parameters due to the offerer not using ACTPASS.
+  // Invalid parameters due to the offerer not using a role consistent with the
+  // state
   NegotiateRoleParams offerer_without_actpass_params[] = {
-      {CONNECTIONROLE_ACTIVE, CONNECTIONROLE_PASSIVE, SdpType::kAnswer,
-       SdpType::kOffer},
-      {CONNECTIONROLE_PASSIVE, CONNECTIONROLE_ACTIVE, SdpType::kAnswer,
-       SdpType::kOffer},
+      // Cannot use ACTPASS in an answer
       {CONNECTIONROLE_ACTPASS, CONNECTIONROLE_PASSIVE, SdpType::kAnswer,
-       SdpType::kOffer},
-      {CONNECTIONROLE_ACTIVE, CONNECTIONROLE_PASSIVE, SdpType::kPrAnswer,
-       SdpType::kOffer},
-      {CONNECTIONROLE_PASSIVE, CONNECTIONROLE_ACTIVE, SdpType::kPrAnswer,
        SdpType::kOffer},
       {CONNECTIONROLE_ACTPASS, CONNECTIONROLE_PASSIVE, SdpType::kPrAnswer,
        SdpType::kOffer},
+      // Cannot send ACTIVE or PASSIVE in an offer (must handle, must not send)
       {CONNECTIONROLE_ACTIVE, CONNECTIONROLE_PASSIVE, SdpType::kOffer,
        SdpType::kAnswer},
       {CONNECTIONROLE_PASSIVE, CONNECTIONROLE_ACTIVE, SdpType::kOffer,
@@ -629,20 +669,24 @@ TEST_P(JsepTransport2WithRtcpMux, InvalidDtlsRoleNegotiation) {
       EXPECT_TRUE(jsep_transport_
                       ->SetLocalJsepTransportDescription(local_description,
                                                          param.local_type)
-                      .ok());
+                      .ok())
+          << param;
       EXPECT_FALSE(jsep_transport_
                        ->SetRemoteJsepTransportDescription(remote_description,
                                                            param.remote_type)
-                       .ok());
+                       .ok())
+          << param;
     } else {
       EXPECT_TRUE(jsep_transport_
                       ->SetRemoteJsepTransportDescription(remote_description,
                                                           param.remote_type)
-                      .ok());
+                      .ok())
+          << param;
       EXPECT_FALSE(jsep_transport_
                        ->SetLocalJsepTransportDescription(local_description,
                                                           param.local_type)
-                       .ok());
+                       .ok())
+          << param;
     }
   }
 }

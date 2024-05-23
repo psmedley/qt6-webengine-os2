@@ -27,6 +27,9 @@ const base::Feature kCapReferrerToOriginOnCrossOrigin{
 const base::Feature kChromeStaticPinning{
     "ChromeStaticPinning", base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kCookieDomainAttributeEmptyString{
+    "CookieDomainAttributeEmptyString", base::FEATURE_ENABLED_BY_DEFAULT};
+
 const base::Feature kDnsTransactionDynamicTimeouts{
     "DnsTransactionDynamicTimeouts", base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -35,7 +38,7 @@ const base::FeatureParam<double> kDnsTransactionTimeoutMultiplier{
 
 const base::FeatureParam<base::TimeDelta> kDnsMinTransactionTimeout{
     &kDnsTransactionDynamicTimeouts, "DnsMinTransactionTimeout",
-    base::TimeDelta::FromSeconds(12)};
+    base::Seconds(12)};
 
 const base::Feature kDnsHttpssvc{"DnsHttpssvc",
                                  base::FEATURE_DISABLED_BY_DEFAULT};
@@ -67,7 +70,7 @@ const base::FeatureParam<bool> kDnsHttpssvcControlDomainWildcard{
 namespace dns_httpssvc_experiment {
 base::TimeDelta GetExtraTimeAbsolute() {
   DCHECK(base::FeatureList::IsEnabled(features::kDnsHttpssvc));
-  return base::TimeDelta::FromMilliseconds(kDnsHttpssvcExtraTimeMs.Get());
+  return base::Milliseconds(kDnsHttpssvcExtraTimeMs.Get());
 }
 }  // namespace dns_httpssvc_experiment
 
@@ -83,6 +86,26 @@ const base::FeatureParam<bool> kUseDnsHttpsSvcbEnforceSecureResponse{
 const base::FeatureParam<bool> kUseDnsHttpsSvcbEnableInsecure{
     &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbEnableInsecure", false};
 
+const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbInsecureExtraTimeMax{
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbInsecureExtraTimeMax",
+    base::TimeDelta()};
+
+const base::FeatureParam<int> kUseDnsHttpsSvcbInsecureExtraTimePercent{
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbInsecureExtraTimePercent", 0};
+
+const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbInsecureExtraTimeMin{
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbInsecureExtraTimeMin",
+    base::TimeDelta()};
+
+const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbSecureExtraTimeMax{
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimeMax", base::TimeDelta()};
+
+const base::FeatureParam<int> kUseDnsHttpsSvcbSecureExtraTimePercent{
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimePercent", 0};
+
+const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbSecureExtraTimeMin{
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimeMin", base::TimeDelta()};
+
 const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbExtraTimeAbsolute{
     &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbExtraTimeAbsolute", base::TimeDelta()};
 
@@ -92,8 +115,14 @@ const base::FeatureParam<int> kUseDnsHttpsSvcbExtraTimePercent{
 const base::Feature kEnableTLS13EarlyData{"EnableTLS13EarlyData",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kEncryptedClientHello{"EncryptedClientHello",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kNetworkQualityEstimator{"NetworkQualityEstimator",
                                              base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSplitCacheByIncludeCredentials{
+    "SplitCacheByIncludeCredentials", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kSplitCacheByNetworkIsolationKey{
     "SplitCacheByNetworkIsolationKey", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -103,6 +132,10 @@ const base::Feature kSplitHostCacheByNetworkIsolationKey{
 
 const base::Feature kPartitionConnectionsByNetworkIsolationKey{
     "PartitionConnectionsByNetworkIsolationKey",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kForceIsolationInfoFrameOriginToTopLevelFrame{
+    "ForceIsolationInfoFrameOriginToTopLevelFrame",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kPartitionHttpServerPropertiesByNetworkIsolationKey{
@@ -142,6 +175,9 @@ NET_EXPORT extern const base::FeatureParam<int>
 const base::Feature kTLS13KeyUpdate{"TLS13KeyUpdate",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kPermuteTLSExtensions{"PermuteTLSExtensions",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kPostQuantumCECPQ2{"PostQuantumCECPQ2",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
 const base::Feature kPostQuantumCECPQ2SomeDomains{
@@ -161,12 +197,12 @@ const base::Feature kSameSiteDefaultChecksMethodRigorously{
 #if BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
 const base::Feature kCertVerifierBuiltinFeature{
     "CertVerifierBuiltin", base::FEATURE_DISABLED_BY_DEFAULT};
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 const base::FeatureParam<int> kCertVerifierBuiltinImpl{
     &kCertVerifierBuiltinFeature, "impl", 0};
 const base::FeatureParam<int> kCertVerifierBuiltinCacheSize{
     &kCertVerifierBuiltinFeature, "cachesize", 0};
-#endif /* defined(OS_MAC) */
+#endif /* BUILDFLAG(IS_MAC) */
 #endif
 
 #if BUILDFLAG(TRIAL_COMPARISON_CERT_VERIFIER_SUPPORTED)
@@ -174,12 +210,12 @@ const base::FeatureParam<int> kCertVerifierBuiltinCacheSize{
 // https://crbug.com/649026
 const base::Feature kCertDualVerificationTrialFeature{
     "CertDualVerificationTrial", base::FEATURE_DISABLED_BY_DEFAULT};
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 const base::FeatureParam<int> kCertDualVerificationTrialImpl{
     &kCertDualVerificationTrialFeature, "impl", 0};
 const base::FeatureParam<int> kCertDualVerificationTrialCacheSize{
     &kCertDualVerificationTrialFeature, "cachesize", 0};
-#endif /* defined(OS_MAC) */
+#endif /* BUILDFLAG(IS_MAC) */
 #endif
 
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
@@ -193,23 +229,8 @@ const base::Feature kTurnOffStreamingMediaCachingOnBattery{
 const base::Feature kTurnOffStreamingMediaCachingAlways{
     "TurnOffStreamingMediaCachingAlways", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kLegacyTLSEnforced{"LegacyTLSEnforced",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kSchemefulSameSite{"SchemefulSameSite",
                                        base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kTLSLegacyCryptoFallbackForMetrics{
-    "TLSLegacyCryptoFallbackForMetrics", base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kUseLookalikesForNavigationSuggestions{
-    "UseLookalikesForNavigationSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kReportPoorConnectivity{"ReportPoorConnectivity",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kPreemptiveMobileNetworkActivation{
-    "PreemptiveMobileNetworkActivation", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kLimitOpenUDPSockets{"LimitOpenUDPSockets",
                                          base::FEATURE_ENABLED_BY_DEFAULT};
@@ -230,29 +251,23 @@ extern const base::FeatureParam<double> kTimeoutTcpConnectAttemptRTTMultiplier(
 extern const base::FeatureParam<base::TimeDelta> kTimeoutTcpConnectAttemptMin(
     &kTimeoutTcpConnectAttempt,
     "TimeoutTcpConnectAttemptMin",
-    base::TimeDelta::FromSeconds(8));
+    base::Seconds(8));
 
 extern const base::FeatureParam<base::TimeDelta> kTimeoutTcpConnectAttemptMax(
     &kTimeoutTcpConnectAttempt,
     "TimeoutTcpConnectAttemptMax",
-    base::TimeDelta::FromSeconds(30));
-
-const base::Feature kFirstPartySets{"FirstPartySets",
-                                    base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::FeatureParam<bool> kFirstPartySetsIsDogfooder{
-    &kFirstPartySets, "FirstPartySetsIsDogfooder", false};
+    base::Seconds(30));
 
 #if BUILDFLAG(ENABLE_REPORTING)
 const base::Feature kDocumentReporting{"DocumentReporting",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
+                                       base::FEATURE_ENABLED_BY_DEFAULT};
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 const base::Feature kUdpSocketPosixAlwaysUpdateBytesReceived{
     "UdpSocketPosixAlwaysUpdateBytesReceived",
     base::FEATURE_ENABLED_BY_DEFAULT};
-#endif  // defined(OS_POSIX) || defined(OS_FUCHSIA)
+#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 
 const base::Feature kCookieSameSiteConsidersRedirectChain{
     "CookieSameSiteConsidersRedirectChain", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -262,6 +277,35 @@ const base::Feature kSamePartyCookiesConsideredFirstParty{
 
 const base::Feature kPartitionedCookies{"PartitionedCookies",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kPartitionedCookiesBypassOriginTrial{
+    "PartitionedCookiesBypassOriginTrial", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kNoncedPartitionedCookies{
+    "NoncedPartitionedCookies", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kExtraCookieValidityChecks{
+    "ExtraCookieValidityChecks", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kRecordRadioWakeupTrigger{
+    "RecordRadioWakeupTrigger", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSandboxHttpCache("SandboxHttpCache",
+                                      base::FEATURE_DISABLED_BY_DEFAULT);
+
+const base::Feature kClampCookieExpiryTo400Days(
+    "ClampCookieExpiryTo400Days",
+    base::FEATURE_DISABLED_BY_DEFAULT);
+
+const base::Feature kAlpsParsing{"AlpsParsing",
+                                 base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kAlpsClientHintParsing{"AlpsClientHintParsing",
+                                           base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kShouldKillSessionOnAcceptChMalformed{
+    "ShouldKillSessionOnAcceptChMalformed", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kBlockNewForbiddenHeaders{
+    "BlockNewForbiddenHeaders", base::FEATURE_ENABLED_BY_DEFAULT};
 }  // namespace features
 }  // namespace net

@@ -34,7 +34,7 @@ import * as UI from '../../ui/legacy/legacy.js';
 import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
 import type * as Protocol from '../../generated/protocol.js';
 
-export class LayerTreeModel extends SDK.SDKModel.SDKModel {
+export class LayerTreeModel extends SDK.SDKModel.SDKModel<EventTypes> {
   readonly layerTreeAgent: ProtocolProxyApi.LayerTreeApi;
   readonly paintProfilerModel: SDK.PaintProfiler.PaintProfilerModel;
   private layerTreeInternal: SDK.LayerTreeBase.LayerTreeBase|null;
@@ -70,7 +70,7 @@ export class LayerTreeModel extends SDK.SDKModel.SDKModel {
       return;
     }
     this.enabled = true;
-    this.forceEnable();
+    void this.forceEnable();
   }
 
   private async forceEnable(): Promise<void> {
@@ -89,7 +89,7 @@ export class LayerTreeModel extends SDK.SDKModel.SDKModel {
     if (!this.enabled) {
       return;
     }
-    this.throttler.schedule(this.innerSetLayers.bind(this, layers));
+    void this.throttler.schedule(this.innerSetLayers.bind(this, layers));
   }
 
   private async innerSetLayers(layers: Protocol.LayerTree.Layer[]|null): Promise<void> {
@@ -135,7 +135,7 @@ export class LayerTreeModel extends SDK.SDKModel.SDKModel {
   private onMainFrameNavigated(): void {
     this.layerTreeInternal = null;
     if (this.enabled) {
-      this.forceEnable();
+      void this.forceEnable();
     }
   }
 }
@@ -148,6 +148,11 @@ export enum Events {
   LayerTreeChanged = 'LayerTreeChanged',
   LayerPainted = 'LayerPainted',
 }
+
+export type EventTypes = {
+  [Events.LayerTreeChanged]: void,
+  [Events.LayerPainted]: AgentLayer,
+};
 
 export class AgentLayerTree extends SDK.LayerTreeBase.LayerTreeBase {
   private layerTreeModel: LayerTreeModel;
@@ -439,7 +444,7 @@ class LayerTreeDispatcher implements ProtocolProxyApi.LayerTreeDispatcher {
   }
 
   layerTreeDidChange({layers}: Protocol.LayerTree.LayerTreeDidChangeEvent): void {
-    this.layerTreeModel.layerTreeChanged(layers || null);
+    void this.layerTreeModel.layerTreeChanged(layers || null);
   }
 
   layerPainted({layerId, clip}: Protocol.LayerTree.LayerPaintedEvent): void {

@@ -8,7 +8,6 @@
 #include "components/feedback/feedback_data.h"
 #include "extensions/browser/api/feedback_private/feedback_private_delegate.h"
 
-#include "base/macros.h"
 #include "build/chromeos_buildflags.h"
 
 namespace extensions {
@@ -16,6 +15,11 @@ namespace extensions {
 class ShellFeedbackPrivateDelegate : public FeedbackPrivateDelegate {
  public:
   ShellFeedbackPrivateDelegate();
+
+  ShellFeedbackPrivateDelegate(const ShellFeedbackPrivateDelegate&) = delete;
+  ShellFeedbackPrivateDelegate& operator=(const ShellFeedbackPrivateDelegate&) =
+      delete;
+
   ~ShellFeedbackPrivateDelegate() override;
 
   // FeedbackPrivateDelegate:
@@ -40,9 +44,6 @@ class ShellFeedbackPrivateDelegate : public FeedbackPrivateDelegate {
   void NotifyFeedbackDelayed() const override;
   feedback::FeedbackUploader* GetFeedbackUploaderForContext(
       content::BrowserContext* context) const override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ShellFeedbackPrivateDelegate);
 };
 
 }  // namespace extensions

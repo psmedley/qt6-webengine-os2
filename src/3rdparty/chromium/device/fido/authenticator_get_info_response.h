@@ -12,7 +12,6 @@
 
 #include "base/component_export.h"
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
 #include "device/fido/authenticator_supported_options.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_types.h"
@@ -31,6 +30,11 @@ struct COMPONENT_EXPORT(DEVICE_FIDO) AuthenticatorGetInfoResponse {
                                base::span<const uint8_t, kAaguidLength> aaguid);
   AuthenticatorGetInfoResponse(AuthenticatorGetInfoResponse&& that);
   AuthenticatorGetInfoResponse& operator=(AuthenticatorGetInfoResponse&& other);
+
+  AuthenticatorGetInfoResponse(const AuthenticatorGetInfoResponse&) = delete;
+  AuthenticatorGetInfoResponse& operator=(const AuthenticatorGetInfoResponse&) =
+      delete;
+
   ~AuthenticatorGetInfoResponse();
 
   static std::vector<uint8_t> EncodeToCBOR(
@@ -60,9 +64,6 @@ struct COMPONENT_EXPORT(DEVICE_FIDO) AuthenticatorGetInfoResponse {
   absl::optional<uint32_t> max_cred_blob_length;
 
   AuthenticatorSupportedOptions options;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AuthenticatorGetInfoResponse);
 };
 
 }  // namespace device

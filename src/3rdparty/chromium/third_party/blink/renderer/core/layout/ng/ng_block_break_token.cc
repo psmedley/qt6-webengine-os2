@@ -6,6 +6,8 @@
 
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_break_token.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -14,48 +16,43 @@ namespace blink {
 namespace {
 
 struct SameSizeAsNGBlockBreakToken : NGBreakToken {
-  unsigned numbers[4];
+  std::unique_ptr<void> data;
+  unsigned numbers[1];
 };
 
 ASSERT_SIZE(NGBlockBreakToken, SameSizeAsNGBlockBreakToken);
 
 }  // namespace
 
-scoped_refptr<NGBlockBreakToken> NGBlockBreakToken::Create(
-    const NGBoxFragmentBuilder& builder) {
+NGBlockBreakToken* NGBlockBreakToken::Create(NGBoxFragmentBuilder* builder) {
   // We store the children list inline in the break token as a flexible
   // array. Therefore, we need to make sure to allocate enough space for that
   // array here, which requires a manual allocation + placement new.
-  void* data = ::WTF::Partitions::FastMalloc(
-      sizeof(NGBlockBreakToken) +
-          builder.child_break_tokens_.size() * sizeof(NGBreakToken*),
-      ::WTF::GetStringWithTypeName<NGBlockBreakToken>());
-  new (data) NGBlockBreakToken(PassKey(), builder);
-  return base::AdoptRef(static_cast<NGBlockBreakToken*>(data));
+  return MakeGarbageCollected<NGBlockBreakToken>(
+      AdditionalBytes(builder->child_break_tokens_.size() *
+                      sizeof(Member<NGBreakToken>)),
+      PassKey(), builder);
 }
 
-NGBlockBreakToken::NGBlockBreakToken(PassKey key,
-                                     const NGBoxFragmentBuilder& builder)
-    : NGBreakToken(kBlockBreakToken, builder.node_),
-      consumed_block_size_(builder.consumed_block_size_),
-      consumed_block_size_legacy_adjustment_(
-          builder.consumed_block_size_legacy_adjustment_),
-      sequence_number_(builder.sequence_number_),
-      num_children_(builder.child_break_tokens_.size()) {
-  break_appeal_ = builder.break_appeal_;
-  has_seen_all_children_ = builder.has_seen_all_children_;
-  is_caused_by_column_spanner_ = builder.FoundColumnSpanner();
-  is_at_block_end_ = builder.is_at_block_end_;
+NGBlockBreakToken::NGBlockBreakToken(PassKey key, NGBoxFragmentBuilder* builder)
+    : NGBreakToken(kBlockBreakToken, builder->node_),
+      const_num_children_(builder->child_break_tokens_.size()) {
+  has_seen_all_children_ = builder->has_seen_all_children_;
+  is_caused_by_column_spanner_ = builder->FoundColumnSpanner();
+  is_at_block_end_ = builder->is_at_block_end_;
   has_unpositioned_list_marker_ =
-      static_cast<bool>(builder.UnpositionedListMarker());
-  for (wtf_size_t i = 0; i < builder.child_break_tokens_.size(); ++i) {
-    child_break_tokens_[i] = builder.child_break_tokens_[i].get();
-    child_break_tokens_[i]->AddRef();
-  }
+      static_cast<bool>(builder->UnpositionedListMarker());
+  DCHECK(builder->HasBreakTokenData());
+  data_ = builder->break_token_data_;
+  builder->break_token_data_ = nullptr;
+  for (wtf_size_t i = 0; i < builder->child_break_tokens_.size(); ++i)
+    child_break_tokens_[i] = builder->child_break_tokens_[i];
 }
 
 NGBlockBreakToken::NGBlockBreakToken(PassKey key, NGLayoutInputNode node)
-    : NGBreakToken(kBlockBreakToken, node), num_children_(0) {}
+    : NGBreakToken(kBlockBreakToken, node),
+      data_(MakeGarbageCollected<NGBlockBreakTokenData>()),
+      const_num_children_(0) {}
 
 const NGInlineBreakToken* NGBlockBreakToken::InlineBreakTokenFor(
     const NGLayoutInputNode& node) const {
@@ -89,12 +86,12 @@ String NGBlockBreakToken::ToString() const {
   StringBuilder string_builder;
   string_builder.Append(NGBreakToken::ToString());
   string_builder.Append(" consumed:");
-  string_builder.Append(consumed_block_size_.ToString());
+  string_builder.Append(ConsumedBlockSize().ToString());
   string_builder.Append("px");
 
-  if (consumed_block_size_legacy_adjustment_) {
+  if (ConsumedBlockSizeForLegacy()) {
     string_builder.Append(" legacy adjustment:");
-    string_builder.Append(consumed_block_size_legacy_adjustment_.ToString());
+    string_builder.Append(ConsumedBlockSizeForLegacy().ToString());
     string_builder.Append("px");
   }
 
@@ -102,5 +99,14 @@ String NGBlockBreakToken::ToString() const {
 }
 
 #endif  // DCHECK_IS_ON()
+
+void NGBlockBreakToken::TraceAfterDispatch(Visitor* visitor) const {
+  visitor->Trace(data_);
+  // Looking up |ChildBreakTokens()| in Trace() here is safe because
+  // |const_num_children_| is const.
+  for (auto& child : ChildBreakTokens())
+    visitor->Trace(child);
+  NGBreakToken::TraceAfterDispatch(visitor);
+}
 
 }  // namespace blink

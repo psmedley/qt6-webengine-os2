@@ -22,20 +22,29 @@ exports.logPolitely = exports.downloadBrowser = void 0;
 const os_1 = __importDefault(require("os"));
 const https_1 = __importDefault(require("https"));
 const progress_1 = __importDefault(require("progress"));
+const url_1 = __importDefault(require("url"));
 const node_js_1 = __importDefault(require("../node.js"));
 const revisions_js_1 = require("../revisions.js");
+const https_proxy_agent_1 = __importDefault(require("https-proxy-agent"));
+const proxy_from_env_1 = require("proxy-from-env");
 const supportedProducts = {
     chrome: 'Chromium',
     firefox: 'Firefox Nightly',
 };
+function getProduct(input) {
+    if (input !== 'chrome' && input !== 'firefox') {
+        throw new Error(`Unsupported product ${input}`);
+    }
+    return input;
+}
 async function downloadBrowser() {
     const downloadHost = process.env.PUPPETEER_DOWNLOAD_HOST ||
         process.env.npm_config_puppeteer_download_host ||
         process.env.npm_package_config_puppeteer_download_host;
-    const product = process.env.PUPPETEER_PRODUCT ||
+    const product = getProduct(process.env.PUPPETEER_PRODUCT ||
         process.env.npm_config_puppeteer_product ||
         process.env.npm_package_config_puppeteer_product ||
-        'chrome';
+        'chrome');
     const downloadPath = process.env.PUPPETEER_DOWNLOAD_PATH ||
         process.env.npm_config_puppeteer_download_path ||
         process.env.npm_package_config_puppeteer_download_path;
@@ -46,7 +55,7 @@ async function downloadBrowser() {
     });
     const revision = await getRevision();
     await fetchBinary(revision);
-    function getRevision() {
+    async function getRevision() {
         if (product === 'chrome') {
             return (process.env.PUPPETEER_CHROMIUM_REVISION ||
                 process.env.npm_config_puppeteer_chromium_revision ||
@@ -121,14 +130,25 @@ async function downloadBrowser() {
         const mb = bytes / 1024 / 1024;
         return `${Math.round(mb * 10) / 10} Mb`;
     }
-    function getFirefoxNightlyVersion() {
-        const firefoxVersions = 'https://product-details.mozilla.org/1.0/firefox_versions.json';
+    async function getFirefoxNightlyVersion() {
+        const firefoxVersionsUrl = 'https://product-details.mozilla.org/1.0/firefox_versions.json';
+        const proxyURL = (0, proxy_from_env_1.getProxyForUrl)(firefoxVersionsUrl);
+        const requestOptions = {};
+        if (proxyURL) {
+            const parsedProxyURL = url_1.default.parse(proxyURL);
+            const proxyOptions = {
+                ...parsedProxyURL,
+                secureProxy: parsedProxyURL.protocol === 'https:',
+            };
+            requestOptions.agent = (0, https_proxy_agent_1.default)(proxyOptions);
+            requestOptions.rejectUnauthorized = false;
+        }
         const promise = new Promise((resolve, reject) => {
             let data = '';
-            logPolitely(`Requesting latest Firefox Nightly version from ${firefoxVersions}`);
+            logPolitely(`Requesting latest Firefox Nightly version from ${firefoxVersionsUrl}`);
             https_1.default
-                .get(firefoxVersions, (r) => {
-                if (r.statusCode >= 400)
+                .get(firefoxVersionsUrl, requestOptions, (r) => {
+                if (r.statusCode && r.statusCode >= 400)
                     return reject(new Error(`Got status code ${r.statusCode}`));
                 r.on('data', (chunk) => {
                     data += chunk;
@@ -150,7 +170,7 @@ async function downloadBrowser() {
 }
 exports.downloadBrowser = downloadBrowser;
 function logPolitely(toBeLogged) {
-    const logLevel = process.env.npm_config_loglevel;
+    const logLevel = process.env.npm_config_loglevel || '';
     const logLevelDisplay = ['silent', 'error', 'warn'].indexOf(logLevel) > -1;
     // eslint-disable-next-line no-console
     if (!logLevelDisplay)

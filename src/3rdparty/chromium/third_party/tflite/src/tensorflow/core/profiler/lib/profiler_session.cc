@@ -16,39 +16,37 @@ limitations under the License.
 #include "tensorflow/core/profiler/lib/profiler_session.h"
 
 #include <memory>
+#include <utility>
 
 #include "absl/memory/memory.h"
-#include "tensorflow/core/platform/env_time.h"
+#include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/platform.h"
 #include "tensorflow/core/platform/status.h"
 #include "tensorflow/core/platform/types.h"
-#include "tensorflow/core/profiler/internal/profiler_interface.h"
 #include "tensorflow/core/profiler/profiler_options.pb.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
-#include "tensorflow/core/protobuf/config.pb.h"
-#include "tensorflow/core/protobuf/error_codes.pb.h"
-#include "tensorflow/core/util/env_var.h"
 
 #if !defined(IS_MOBILE_PLATFORM)
-#include "tensorflow/core/profiler/internal/profiler_factory.h"
-#include "tensorflow/core/profiler/lib/profiler_utils.h"
-#include "tensorflow/core/profiler/utils/derived_timeline.h"
-#include "tensorflow/core/profiler/utils/group_events.h"
-#include "tensorflow/core/profiler/utils/xplane_schema.h"
-#include "tensorflow/core/profiler/utils/xplane_utils.h"
+#include "tensorflow/core/profiler/convert/post_process_single_host_xplane.h"
+#include "tensorflow/core/profiler/lib/profiler_collection.h"
+#include "tensorflow/core/profiler/lib/profiler_factory.h"
+#include "tensorflow/core/profiler/lib/profiler_interface.h"
+#include "tensorflow/core/profiler/lib/profiler_lock.h"
+#include "tensorflow/core/profiler/utils/time_utils.h"
 #endif
 
 namespace tensorflow {
-
 namespace {
+
 ProfileOptions GetOptions(const ProfileOptions& opts) {
   if (opts.version()) return opts;
   ProfileOptions options = ProfilerSession::DefaultOptions();
   options.set_include_dataset_ops(opts.include_dataset_ops());
   return options;
 }
+
 };  // namespace
 
 /*static*/ std::unique_ptr<ProfilerSession> ProfilerSession::Create(
@@ -56,137 +54,77 @@ ProfileOptions GetOptions(const ProfileOptions& opts) {
   return absl::WrapUnique(new ProfilerSession(options));
 }
 
-/*static*/ std::unique_ptr<ProfilerSession> ProfilerSession::Create() {
-  int64 host_tracer_level = 2;
-  tensorflow::Status s = ReadInt64FromEnvVar("TF_PROFILER_HOST_TRACER_LEVEL", 2,
-                                             &host_tracer_level);
-  if (!s.ok()) {
-    LOG(WARNING) << "ProfilerSession: " << s.error_message();
-  }
-  ProfileOptions options = DefaultOptions();
-  options.set_host_tracer_level(host_tracer_level);
-  return Create(options);
-}
-
 tensorflow::Status ProfilerSession::Status() {
   mutex_lock l(mutex_);
   return status_;
 }
 
-Status ProfilerSession::CollectData(profiler::XSpace* space) {
+#if !defined(IS_MOBILE_PLATFORM)
+Status ProfilerSession::CollectDataInternal(profiler::XSpace* space) {
   mutex_lock l(mutex_);
-  if (!status_.ok()) return status_;
-  for (auto& profiler : profilers_) {
-    profiler->Stop().IgnoreError();
+  TF_RETURN_IF_ERROR(status_);
+  LOG(INFO) << "Profiler session collecting data.";
+  if (profilers_ != nullptr) {
+    profilers_->Stop().IgnoreError();
+    profilers_->CollectData(space).IgnoreError();
+    profilers_.reset();  // data has been collected.
   }
-
-  for (auto& profiler : profilers_) {
-    profiler->CollectData(space).IgnoreError();
-  }
-
-  if (active_) {
-    // Allow another session to start.
-#if !defined(IS_MOBILE_PLATFORM)
-    profiler::ReleaseProfilerLock();
-#endif
-    active_ = false;
-  }
-
-#if !defined(IS_MOBILE_PLATFORM)
-  // Post processing the collected XSpace without hold profiler lock.
-  // 1. Merge plane of host events with plane of CUPTI driver api.
-  const profiler::XPlane* cupti_driver_api_plane =
-      profiler::FindPlaneWithName(*space, profiler::kCuptiDriverApiPlaneName);
-  if (cupti_driver_api_plane) {
-    profiler::XPlane* host_plane = profiler::FindOrAddMutablePlaneWithName(
-        space, profiler::kHostThreadsPlaneName);
-    profiler::MergePlanes(*cupti_driver_api_plane, host_plane);
-    profiler::SortXLinesBy(host_plane, profiler::XLinesComparatorByName());
-    profiler::RemovePlaneWithName(space, profiler::kCuptiDriverApiPlaneName);
-  }
-  // 2. Normalize all timestamps by shifting timeline to profiling start time.
-  // NOTE: this have to be done before sorting XSpace due to timestamp overflow.
-  profiler::NormalizeTimestamps(space, start_time_ns_);
-  // 3. Sort each plane of the XSpace
-  profiler::SortXSpace(space);
-  // 4. Grouping (i.e. marking step number) events in the XSpace.
-  profiler::EventGroupNameMap event_group_name_map;
-  profiler::GroupTfEvents(space, &event_group_name_map);
-  // 5. Generated miscellaneous derived time lines for device planes.
-  profiler::GenerateDerivedTimeLines(event_group_name_map, space);
-#endif
-
+  // Allow another session to start.
+  profiler_lock_.ReleaseIfActive();
   return Status::OK();
 }
-
-Status ProfilerSession::CollectData(RunMetadata* run_metadata) {
-  mutex_lock l(mutex_);
-  if (!status_.ok()) return status_;
-  for (auto& profiler : profilers_) {
-    profiler->Stop().IgnoreError();
-  }
-
-  for (auto& profiler : profilers_) {
-    profiler->CollectData(run_metadata).IgnoreError();
-  }
-
-  if (active_) {
-    // Allow another session to start.
-#if !defined(IS_MOBILE_PLATFORM)
-    profiler::ReleaseProfilerLock();
 #endif
-    active_ = false;
-  }
 
+Status ProfilerSession::CollectData(profiler::XSpace* space) {
+#if !defined(IS_MOBILE_PLATFORM)
+  TF_RETURN_IF_ERROR(CollectDataInternal(space));
+  PostProcessSingleHostXSpace(space, start_time_ns_);
+#endif
   return Status::OK();
 }
 
 ProfilerSession::ProfilerSession(const ProfileOptions& options)
-#if !defined(IS_MOBILE_PLATFORM)
-    : active_(profiler::AcquireProfilerLock()),
+#if defined(IS_MOBILE_PLATFORM)
+    : status_(errors::Unimplemented(
+          "Profiler is unimplemented for mobile platforms.")) {
 #else
-    : active_(false),
-#endif
-      start_time_ns_(EnvTime::NowNanos()),
-      options_(GetOptions(options)) {
-  if (!active_) {
-#if !defined(IS_MOBILE_PLATFORM)
-    status_ = tensorflow::Status(error::UNAVAILABLE,
-                                 "Another profiler session is active.");
-#else
-    status_ =
-        tensorflow::Status(error::UNIMPLEMENTED,
-                           "Profiler is unimplemented for mobile platforms.");
-#endif
+    : options_(GetOptions(options)) {
+  auto profiler_lock = profiler::ProfilerLock::Acquire();
+  if (!profiler_lock.ok()) {
+    status_ = profiler_lock.status();
     return;
+  }
+  profiler_lock_ = *std::move(profiler_lock);
+
+  LOG(INFO) << "Profiler session initializing.";
+  // Sleep until it is time to start profiling.
+  if (options_.start_timestamp_ns() > 0) {
+    int64_t sleep_duration_ns =
+        options_.start_timestamp_ns() - profiler::GetCurrentTimeNanos();
+    if (sleep_duration_ns < 0) {
+      LOG(WARNING) << "Profiling is late by " << -sleep_duration_ns
+                   << " nanoseconds and will start immediately.";
+    } else {
+      LOG(INFO) << "Delaying start of profiler session by "
+                << sleep_duration_ns;
+      profiler::SleepForNanos(sleep_duration_ns);
+    }
   }
 
   LOG(INFO) << "Profiler session started.";
+  start_time_ns_ = profiler::GetCurrentTimeNanos();
 
-#if !defined(IS_MOBILE_PLATFORM)
-  CreateProfilers(options_, &profilers_);
+  DCHECK(profiler_lock_.Active());
+  profilers_ = absl::make_unique<profiler::ProfilerCollection>(
+      profiler::CreateProfilers(options_));
+  profilers_->Start().IgnoreError();
 #endif
-  status_ = Status::OK();
-
-  for (auto& profiler : profilers_) {
-    auto start_status = profiler->Start();
-    if (!start_status.ok()) {
-      LOG(WARNING) << "Encountered error while starting profiler: "
-                   << start_status.ToString();
-    }
-  }
 }
 
 ProfilerSession::~ProfilerSession() {
-  for (auto& profiler : profilers_) {
-    profiler->Stop().IgnoreError();
-  }
-
-  if (active_) {
-    // Allow another session to start.
 #if !defined(IS_MOBILE_PLATFORM)
-    profiler::ReleaseProfilerLock();
+  LOG(INFO) << "Profiler session tear down.";
 #endif
-  }
 }
+
 }  // namespace tensorflow

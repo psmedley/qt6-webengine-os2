@@ -11,12 +11,11 @@
 #include <stdint.h>
 
 #include <array>
-#include <memory>
 #include <set>
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_pattern.h"
-#include "core/fxcrt/fx_string.h"
+#include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
@@ -24,6 +23,7 @@
 
 class CPDF_Array;
 class CPDF_Document;
+class CPDF_IndexedCS;
 class CPDF_Object;
 class CPDF_PatternCS;
 
@@ -69,19 +69,20 @@ class CPDF_ColorSpace : public Retainable, public Observable {
   };
 
   static RetainPtr<CPDF_ColorSpace> GetStockCS(Family family);
-  static RetainPtr<CPDF_ColorSpace> ColorspaceFromName(const ByteString& name);
-  static RetainPtr<CPDF_ColorSpace> Load(CPDF_Document* pDoc,
-                                         CPDF_Object* pObj);
+  static RetainPtr<CPDF_ColorSpace> GetStockCSForName(const ByteString& name);
   static RetainPtr<CPDF_ColorSpace> Load(
       CPDF_Document* pDoc,
       const CPDF_Object* pObj,
       std::set<const CPDF_Object*>* pVisited);
 
+  static RetainPtr<CPDF_ColorSpace> AllocateColorSpaceForID(
+      CPDF_Document* pDocument,
+      uint32_t family_id);
+
   static uint32_t ComponentsForFamily(Family family);
   static bool IsValidIccComponents(int components);
 
   const CPDF_Array* GetArray() const { return m_pArray.Get(); }
-  const CPDF_Document* GetDocument() const { return m_pDocument.Get(); }
 
   // Should only be called if this colorspace is not a pattern.
   std::vector<float> CreateBufAndSetDefaultColor() const;
@@ -94,6 +95,7 @@ class CPDF_ColorSpace : public Retainable, public Observable {
            GetFamily() == Family::kPattern;
   }
 
+  // Use CPDF_Pattern::GetPatternRGB() instead of GetRGB() for patterns.
   virtual bool GetRGB(pdfium::span<const float> pBuf,
                       float* R,
                       float* G,
@@ -103,8 +105,9 @@ class CPDF_ColorSpace : public Retainable, public Observable {
                                float* value,
                                float* min,
                                float* max) const;
-  virtual void TranslateImageLine(uint8_t* dest_buf,
-                                  const uint8_t* src_buf,
+
+  virtual void TranslateImageLine(pdfium::span<uint8_t> dest_span,
+                                  pdfium::span<const uint8_t> src_span,
                                   int pixels,
                                   int image_width,
                                   int image_height,
@@ -112,18 +115,14 @@ class CPDF_ColorSpace : public Retainable, public Observable {
   virtual void EnableStdConversion(bool bEnabled);
   virtual bool IsNormal() const;
 
-  // Returns |this| as a CPDF_PatternCS* if |this| is a pattern.
-  virtual CPDF_PatternCS* AsPatternCS();
+  // Returns `this` as a CPDF_PatternCS* if `this` is a pattern.
   virtual const CPDF_PatternCS* AsPatternCS() const;
 
-  // Use instead of GetRGB() for patterns.
-  virtual bool GetPatternRGB(const PatternValue& value,
-                             float* R,
-                             float* G,
-                             float* B) const;
+  // Returns `this` as a CPDF_IndexedCS* if `this` is indexed.
+  virtual const CPDF_IndexedCS* AsIndexedCS() const;
 
  protected:
-  CPDF_ColorSpace(CPDF_Document* pDoc, Family family);
+  explicit CPDF_ColorSpace(Family family);
   ~CPDF_ColorSpace() override;
 
   // Returns the number of components, or 0 on failure.
@@ -135,12 +134,19 @@ class CPDF_ColorSpace : public Retainable, public Observable {
   // components count.
   void SetComponentsForStockCS(uint32_t nComponents);
 
-  UnownedPtr<const CPDF_Document> const m_pDocument;
+  bool IsStdConversionEnabled() const { return m_dwStdConversion != 0; }
+
   RetainPtr<const CPDF_Array> m_pArray;
   const Family m_Family;
-  uint32_t m_dwStdConversion = 0;
 
  private:
+  friend class CPDF_CalGray_TranslateImageLine_Test;
+  friend class CPDF_CalRGB_TranslateImageLine_Test;
+
+  static RetainPtr<CPDF_ColorSpace> AllocateColorSpace(
+      ByteStringView bsFamilyName);
+
+  uint32_t m_dwStdConversion = 0;
   uint32_t m_nComponents = 0;
 };
 

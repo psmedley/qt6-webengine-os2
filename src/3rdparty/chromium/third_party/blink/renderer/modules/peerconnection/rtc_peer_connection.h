@@ -34,6 +34,9 @@
 #include <memory>
 #include <utility>
 
+#include "base/gtest_prod_util.h"
+#include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -48,18 +51,22 @@
 #include "third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_rtp_transceiver.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_session_description_enums.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/modules/peerconnection/rtp_contributing_source_cache.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_peer_connection_handler_client.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_session_description_request.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_void_request.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
+class Dictionary;
 class ExceptionState;
 class MediaStreamTrack;
 class RTCAnswerOptions;
@@ -237,15 +244,7 @@ class MODULES_EXPORT RTCPeerConnection final
   MediaStream* getRemoteStreamById(const String&) const;
   bool IsRemoteStream(MediaStream* stream) const;
 
-  void addStream(ScriptState*,
-                 MediaStream*,
-                 const ScriptValue& media_constraints,
-                 ExceptionState&);
   void addStream(ScriptState*, MediaStream*, ExceptionState&);
-  void AddStream(ScriptState*,
-                 MediaStream*,
-                 const Dictionary& media_constraints,
-                 ExceptionState&);
 
   void removeStream(MediaStream*, ExceptionState&);
 
@@ -270,6 +269,7 @@ class MODULES_EXPORT RTCPeerConnection final
   const HeapVector<Member<RTCRtpTransceiver>>& getTransceivers() const;
   const HeapVector<Member<RTCRtpSender>>& getSenders() const;
   const HeapVector<Member<RTCRtpReceiver>>& getReceivers() const;
+  RtpContributingSourceCache& GetRtpContributingSourceCache();
   RTCRtpTransceiver* addTransceiver(
       const V8UnionMediaStreamTrackOrString* track_or_kind,
       const RTCRtpTransceiverInit* init,
@@ -464,7 +464,7 @@ class MODULES_EXPORT RTCPeerConnection final
   void ScheduleDispatchEvent(Event*);
   void ScheduleDispatchEvent(Event*, BoolFunction);
   void DispatchScheduledEvents();
-  MediaStreamTrack* GetTrack(MediaStreamComponent*) const;
+  MediaStreamTrack* GetTrackForTesting(MediaStreamComponent*) const;
   RTCRtpSender* FindSenderForTrackAndStream(MediaStreamTrack*, MediaStream*);
   HeapVector<Member<RTCRtpSender>>::iterator FindSender(
       const RTCRtpSenderPlatform& web_sender);
@@ -607,6 +607,9 @@ class MODULES_EXPORT RTCPeerConnection final
   HeapVector<Member<RTCRtpSender>> rtp_senders_;
   HeapVector<Member<RTCRtpReceiver>> rtp_receivers_;
   HeapVector<Member<RTCRtpTransceiver>> transceivers_;
+  // Always has a value if initialization was successful (the constructor did
+  // not throw an exception).
+  absl::optional<RtpContributingSourceCache> rtp_contributing_source_cache_;
 
   // A map of all webrtc::DtlsTransports that have a corresponding
   // RTCDtlsTransport object. Garbage collection will remove map entries

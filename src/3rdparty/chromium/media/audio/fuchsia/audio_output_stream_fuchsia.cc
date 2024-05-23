@@ -20,10 +20,6 @@ namespace media {
 
 namespace {
 
-// Current AudioRenderer implementation allows only one buffer with id=0.
-// TODO(crbug.com/1131179): Replace with an incrementing buffer id now that
-// AddPayloadBuffer() and RemovePayloadBuffer() are implemented properly in
-// AudioRenderer.
 const uint32_t kBufferId = 0;
 
 fuchsia::media::AudioRenderUsage GetStreamUsage(
@@ -174,7 +170,7 @@ bool AudioOutputStreamFuchsia::InitializePayloadBuffer() {
 void AudioOutputStreamFuchsia::OnMinLeadTimeChanged(int64_t min_lead_time) {
   bool min_lead_time_was_unknown = !min_lead_time_.has_value();
 
-  min_lead_time_ = base::TimeDelta::FromNanoseconds(min_lead_time);
+  min_lead_time_ = base::Nanoseconds(min_lead_time);
 
   // When min_lead_time_ increases we may need to reallocate |payload_buffer_|.
   // Code below just unmaps the current buffer. The new buffer will be allocated
@@ -188,6 +184,7 @@ void AudioOutputStreamFuchsia::OnMinLeadTimeChanged(int64_t min_lead_time) {
     // Discard all packets currently in flight. This is required because
     // AddPayloadBuffer() will fail if there are any packets in flight.
     audio_renderer_->DiscardAllPacketsNoReply();
+    audio_renderer_->RemovePayloadBuffer(kBufferId);
   }
 
   // If playback was started but we were waiting for MinLeadTime, then start

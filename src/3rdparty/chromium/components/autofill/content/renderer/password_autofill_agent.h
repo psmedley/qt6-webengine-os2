@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/types/strong_alias.h"
 #include "build/build_config.h"
@@ -33,7 +32,7 @@
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/web/web_input_element.h"
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 #include "components/autofill/content/renderer/page_passwords_analyser.h"
 #endif
 
@@ -113,6 +112,10 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
 
   PasswordAutofillAgent(content::RenderFrame* render_frame,
                         blink::AssociatedInterfaceRegistry* registry);
+
+  PasswordAutofillAgent(const PasswordAutofillAgent&) = delete;
+  PasswordAutofillAgent& operator=(const PasswordAutofillAgent&) = delete;
+
   ~PasswordAutofillAgent() override;
 
   void BindPendingReceiver(
@@ -123,6 +126,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
 
   void SetPasswordGenerationAgent(PasswordGenerationAgent* generation_agent);
 
+  // Callers should not store the returned value longer than a function scope.
   mojom::PasswordManagerDriver& GetPasswordManagerDriver();
 
   // mojom::PasswordAutofillAgent:
@@ -132,9 +136,12 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   void FillIntoFocusedField(bool is_password,
                             const std::u16string& credential) override;
   void SetLoggingState(bool active) override;
-  void TouchToFillClosed(bool show_virtual_keyboard) override;
   void AnnotateFieldsWithParsingResult(
       const ParsingResult& parsing_result) override;
+#if BUILDFLAG(IS_ANDROID)
+  void TouchToFillClosed(bool show_virtual_keyboard) override;
+  void TriggerFormSubmission() override;
+#endif
 
   // FormTracker::Observer
   void OnProvisionallySaveForm(const blink::WebFormElement& form,
@@ -239,7 +246,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   virtual bool FrameCanAccessPasswordManager();
 
   // RenderFrameObserver:
-  void DidFinishDocumentLoad() override;
+  void DidDispatchDOMContentLoadedEvent() override;
   void DidFinishLoad() override;
   void ReadyToCommitNavigation(
       blink::WebDocumentLoader* document_loader) override;
@@ -309,6 +316,10 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
     // Creates a new notifier that uses the agent which owns it to access the
     // real driver implementation.
     explicit FocusStateNotifier(PasswordAutofillAgent* agent);
+
+    FocusStateNotifier(const FocusStateNotifier&) = delete;
+    FocusStateNotifier& operator=(const FocusStateNotifier&) = delete;
+
     ~FocusStateNotifier();
 
     void FocusedInputChanged(FieldRendererId focused_field_id,
@@ -319,8 +330,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
     mojom::FocusedFieldType focused_field_type_ =
         mojom::FocusedFieldType::kUnknown;
     PasswordAutofillAgent* agent_ = nullptr;
-
-    DISALLOW_COPY_AND_ASSIGN(FocusStateNotifier);
   };
 
   // This class keeps track of autofilled username and password input elements
@@ -330,6 +339,10 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   class PasswordValueGatekeeper {
    public:
     PasswordValueGatekeeper();
+
+    PasswordValueGatekeeper(const PasswordValueGatekeeper&) = delete;
+    PasswordValueGatekeeper& operator=(const PasswordValueGatekeeper&) = delete;
+
     ~PasswordValueGatekeeper();
 
     // Call this for every autofilled username and password field, so that
@@ -349,8 +362,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
 
     bool was_user_gesture_seen_;
     std::vector<blink::WebInputElement> elements_;
-
-    DISALLOW_COPY_AND_ASSIGN(PasswordValueGatekeeper);
   };
 
   // Annotate |forms| and all fields in the current frame with form and field
@@ -547,7 +558,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
 
   PasswordGenerationAgent* password_generation_agent_;  // Weak reference.
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   PagePasswordsAnalyser page_passwords_analyser_;
 #endif
 
@@ -590,8 +601,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   // Current state of Touch To Fill. This is reset during
   // CleanupOnDocumentShutdown.
   TouchToFillState touch_to_fill_state_ = TouchToFillState::kShouldShow;
-
-  DISALLOW_COPY_AND_ASSIGN(PasswordAutofillAgent);
 };
 
 }  // namespace autofill

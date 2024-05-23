@@ -23,6 +23,7 @@
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 class SkCanvas;
 
@@ -136,7 +137,8 @@ class CC_PAINT_EXPORT DisplayItemList
   void Finalize();
 
   struct DirectlyCompositedImageResult {
-    gfx::Size intrinsic_image_size;
+    // See PictureLayerImpl::direct_composited_image_default_raster_scale_.
+    gfx::Vector2dF default_raster_scale;
     bool nearest_neighbor;
   };
 
@@ -145,14 +147,20 @@ class CC_PAINT_EXPORT DisplayItemList
   // of the image and whether or not to use nearest neighbor filtering when
   // scaling the layer.
   absl::optional<DirectlyCompositedImageResult>
-  GetDirectlyCompositedImageResult(gfx::Size containing_layer_bounds) const;
+  GetDirectlyCompositedImageResult() const;
 
-  int NumSlowPaths() const { return paint_op_buffer_.numSlowPaths(); }
+  int num_slow_paths() const { return paint_op_buffer_.num_slow_paths(); }
   bool HasNonAAPaint() const { return paint_op_buffer_.HasNonAAPaint(); }
 
   // This gives the total number of PaintOps.
   size_t TotalOpCount() const { return paint_op_buffer_.total_op_count(); }
-  size_t BytesUsed() const;
+  size_t BytesUsed() const {
+    // TODO(jbroman): Does anything else owned by this class substantially
+    // contribute to memory usage?
+    // TODO(vmpstr): Probably DiscardableImageMap is worth counting here.
+    return sizeof(*this) + paint_op_buffer_.bytes_used();
+  }
+  size_t OpBytesUsed() const { return paint_op_buffer_.paint_ops_size(); }
 
   const DiscardableImageMap& discardable_image_map() const {
     return image_map_;

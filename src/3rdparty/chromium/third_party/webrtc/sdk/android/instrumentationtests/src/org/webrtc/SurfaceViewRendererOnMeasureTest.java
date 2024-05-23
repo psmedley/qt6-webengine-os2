@@ -23,14 +23,11 @@ import androidx.test.filters.MediumTest;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
-import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-@RunWith(BaseJUnit4ClassRunner.class)
 public class SurfaceViewRendererOnMeasureTest {
-  @Rule public UiThreadTestRule uiThreadTestRule = new UiThreadTestRule();
+  @Rule public final UiThreadTestRule uiThreadRule = new UiThreadTestRule();
 
   /**
    * List with all possible scaling types.

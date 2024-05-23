@@ -19,27 +19,23 @@
 #include "System/Types.hpp"
 #include "Vulkan/VkFormat.hpp"
 
-namespace vk {
-class Image;
-}
-
 namespace sw {
 
 struct Mipmap
 {
 	const void *buffer;
 
-	short4 uHalf;
-	short4 vHalf;
-	short4 wHalf;
-	int4 width;
-	int4 height;
-	int4 depth;
+	ushort4 uHalf;
+	ushort4 vHalf;
+	ushort4 wHalf;
+	uint4 width;
+	uint4 height;
+	uint4 depth;
 	short4 onePitchP;
-	int4 pitchP;
-	int4 sliceP;
-	int4 samplePitchP;
-	int4 sampleMax;
+	uint4 pitchP;
+	uint4 sliceP;
+	uint4 samplePitchP;
+	uint4 sampleMax;
 };
 
 struct Texture
@@ -130,9 +126,8 @@ struct Sampler
 			return false;
 		default:
 			UNSUPPORTED("VkImageViewType %d", (int)textureType);
+			return false;
 		}
-
-		return false;
 	}
 
 	bool is2D() const
@@ -150,9 +145,8 @@ struct Sampler
 			return false;
 		default:
 			UNSUPPORTED("VkImageViewType %d", (int)textureType);
+			return false;
 		}
-
-		return false;
 	}
 
 	bool is3D() const
@@ -170,9 +164,8 @@ struct Sampler
 			return false;
 		default:
 			UNSUPPORTED("VkImageViewType %d", (int)textureType);
+			return false;
 		}
-
-		return false;
 	}
 
 	bool isCube() const
@@ -190,9 +183,8 @@ struct Sampler
 			return false;
 		default:
 			UNSUPPORTED("VkImageViewType %d", (int)textureType);
+			return false;
 		}
-
-		return false;
 	}
 
 	bool isArrayed() const
@@ -210,9 +202,30 @@ struct Sampler
 			return false;
 		default:
 			UNSUPPORTED("VkImageViewType %d", (int)textureType);
+			return false;
 		}
+	}
 
-		return false;
+	// Returns the number of coordinates required to sample the image,
+	// not including any array coordinate, which is indicated by isArrayed().
+	unsigned int dimensionality() const
+	{
+		switch(textureType)
+		{
+		case VK_IMAGE_VIEW_TYPE_1D:
+		case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+			return 1;
+		case VK_IMAGE_VIEW_TYPE_2D:
+		case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+			return 2;
+		case VK_IMAGE_VIEW_TYPE_3D:
+		case VK_IMAGE_VIEW_TYPE_CUBE:
+		case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+			return 3;
+		default:
+			UNSUPPORTED("VkImageViewType %d", (int)textureType);
+			return 0;
+		}
 	}
 };
 

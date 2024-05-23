@@ -10,6 +10,7 @@
 #include "base/strings/string_piece.h"
 #include "base/types/strong_alias.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 namespace autofill {
@@ -64,18 +65,22 @@ struct Suggestion {
   // Contains an image to display for the suggestion.
   gfx::Image custom_icon;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // The url for the custom icon. This is used by android to fetch the image as
   // android does not support gfx::Image directly.
   GURL custom_icon_url;
-#endif  // OS_ANDROID
+#endif  // BUILDFLAG(IS_ANDROID)
 
   // TODO(crbug.com/1019660): Identify icons with enum instead of strings.
   // If |custom_icon| is empty, the name of the fallback built-in icon.
   std::string icon;
-  // This icon string shows whether the suggestion originates from local or
-  // account store. If it's empty, no store indication should be shown.
-  std::string store_indicator_icon;
+  // An icon that appears after the suggestion in the suggestion view. For
+  // passwords, this icon string shows whether the suggestion originates from
+  // local or account store. It is also used on the settings entry for the
+  // credit card Autofill popup to indicate if all credit cards are server
+  // cards. It also holds Google Password Manager icon on the settings entry for
+  // the passwords Autofill popup.
+  std::string trailing_icon;
   MatchMode match = PREFIX_MATCH;
   // Whether |value| should be displayed as secondary text.
   bool is_value_secondary = false;
@@ -83,6 +88,9 @@ struct Suggestion {
   IsLoading is_loading = IsLoading(false);
   // The In-Product-Help feature that should be shown for the suggestion.
   std::string feature_for_iph;
+
+  // If specified, this text will be played back as voice over for a11y.
+  absl::optional<std::u16string> voice_over;
 };
 
 }  // namespace autofill

@@ -16,6 +16,9 @@
 
 #include <windows.h>
 
+// Must be after windows.h.
+#include <versionhelpers.h>
+
 #include <signal.h>
 #include <stdint.h>
 #include <string.h>
@@ -24,11 +27,11 @@
 
 #include "base/atomicops.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/scoped_generic.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "build/build_config.h"
 #include "util/file/file_io.h"
 #include "util/misc/capture_context.h"
 #include "util/misc/from_pointer_cast.h"
@@ -37,6 +40,7 @@
 #include "util/win/command_line.h"
 #include "util/win/context_wrappers.h"
 #include "util/win/critical_section_with_debug_info.h"
+#include "util/win/exception_codes.h"
 #include "util/win/get_function.h"
 #include "util/win/handle.h"
 #include "util/win/initial_client_data.h"
@@ -339,6 +343,11 @@ class ScopedCallSetHandlerStartupState {
  public:
   ScopedCallSetHandlerStartupState() : successful_(false) {}
 
+  ScopedCallSetHandlerStartupState(const ScopedCallSetHandlerStartupState&) =
+      delete;
+  ScopedCallSetHandlerStartupState& operator=(
+      const ScopedCallSetHandlerStartupState&) = delete;
+
   ~ScopedCallSetHandlerStartupState() {
     SetHandlerStartupState(successful_ ? StartupState::kSucceeded
                                        : StartupState::kFailed);
@@ -348,8 +357,6 @@ class ScopedCallSetHandlerStartupState {
 
  private:
   bool successful_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedCallSetHandlerStartupState);
 };
 
 bool StartHandlerProcess(
@@ -821,10 +828,7 @@ void CrashpadClient::DumpAndCrash(EXCEPTION_POINTERS* exception_pointers) {
 bool CrashpadClient::DumpAndCrashTargetProcess(HANDLE process,
                                                HANDLE blame_thread,
                                                DWORD exception_code) {
-  // Confirm we're on Vista or later.
-  const DWORD version = GetVersion();
-  const DWORD major_version = LOBYTE(LOWORD(version));
-  if (major_version < 6) {
+  if (!IsWindowsVistaOrGreater()) {
     LOG(ERROR) << "unavailable before Vista";
     return false;
   }
@@ -924,7 +928,7 @@ bool CrashpadClient::DumpAndCrashTargetProcess(HANDLE process,
 
     // ecx = kTriggeredExceptionCode for dwExceptionCode.
     data_to_write.push_back(0xb9);
-    AddUint32(&data_to_write, kTriggeredExceptionCode);
+    AddUint32(&data_to_write, ExceptionCodes::kTriggeredExceptionCode);
 
     // jmp to RaiseException() via rax.
     data_to_write.push_back(0x48);  // mov rax, imm.

@@ -8,7 +8,7 @@
 #ifndef SkSurface_Gpu_DEFINED
 #define SkSurface_Gpu_DEFINED
 
-#include "include/private/GrTypesPriv.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/image/SkSurface_Base.h"
 
 #if SK_SUPPORT_GPU
@@ -44,9 +44,9 @@ public:
                                            RescaleMode,
                                            ReadPixelsCallback callback,
                                            ReadPixelsContext context) override;
-
-    void onCopyOnWrite(ContentChangeMode) override;
+    bool onCopyOnWrite(ContentChangeMode) override;
     void onDiscard() override;
+    void onResolveMSAA() override;
     GrSemaphoresSubmitted onFlush(BackendSurfaceAccess access, const GrFlushInfo& info,
                                   const GrBackendSurfaceMutableState*) override;
     bool onWait(int numSemaphores, const GrBackendSemaphore* waitSemaphores,

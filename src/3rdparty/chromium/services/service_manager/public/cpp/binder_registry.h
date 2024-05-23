@@ -12,6 +12,7 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
+#include "base/notreached.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "services/service_manager/public/cpp/export.h"
@@ -26,6 +27,10 @@ class BinderRegistryWithArgs {
       void(const std::string&, mojo::ScopedMessagePipeHandle, BinderArgs...)>;
 
   BinderRegistryWithArgs() {}
+
+  BinderRegistryWithArgs(const BinderRegistryWithArgs&) = delete;
+  BinderRegistryWithArgs& operator=(const BinderRegistryWithArgs&) = delete;
+
   ~BinderRegistryWithArgs() = default;
 
   template <typename Interface>
@@ -133,8 +138,6 @@ class BinderRegistryWithArgs {
   InterfaceNameToBinderMap binders_;
 
   base::WeakPtrFactory<BinderRegistryWithArgs> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BinderRegistryWithArgs);
 };
 
 using BinderRegistry = BinderRegistryWithArgs<>;

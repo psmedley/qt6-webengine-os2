@@ -30,7 +30,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
@@ -150,16 +149,18 @@ class MODULES_EXPORT DeferredTaskHandler final
     return CurrentThread() == audio_thread_.load(std::memory_order_relaxed);
   }
 
-  void lock();
-  bool TryLock();
-  void unlock();
+  void lock() EXCLUSIVE_LOCK_FUNCTION(context_graph_mutex_);
+  bool TryLock() EXCLUSIVE_TRYLOCK_FUNCTION(true, context_graph_mutex_);
+  void unlock() UNLOCK_FUNCTION(context_graph_mutex_);
 
   // This locks the audio render thread for OfflineAudioContext rendering.
   // MUST NOT be used in the real-time audio context.
-  void OfflineLock();
+  void OfflineLock() EXCLUSIVE_LOCK_FUNCTION(context_graph_mutex_);
 
   // In DCHECK builds, fails if this thread does not own the context's lock.
-  void AssertGraphOwner() const { context_graph_mutex_.AssertAcquired(); }
+  void AssertGraphOwner() const ASSERT_EXCLUSIVE_LOCK(context_graph_mutex_) {
+    context_graph_mutex_.AssertAcquired();
+  }
 
   class MODULES_EXPORT GraphAutoLocker {
     STACK_ALLOCATED();

@@ -16,6 +16,7 @@
 #include "core/fxge/text_char_pos.h"
 #include "third_party/base/check.h"
 #include "third_party/base/cxx17_backports.h"
+#include "third_party/base/numerics/safe_conversions.h"
 #include "v8/include/cppgc/visitor.h"
 #include "xfa/fde/cfde_textout.h"
 #include "xfa/fgas/font/cfgas_gefont.h"
@@ -39,7 +40,7 @@ namespace {
 
 constexpr int kEditMargin = 3;
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
 constexpr XFA_FWL_KeyFlag kEditingModifier = XFA_FWL_KeyFlag::kCommand;
 #else
 constexpr XFA_FWL_KeyFlag kEditingModifier = XFA_FWL_KeyFlag::kCtrl;
@@ -157,7 +158,7 @@ void CFWL_Edit::SetTextSkipNotify(const WideString& wsText) {
                         CFDE_TextEditEngine::RecordOperation::kSkipNotify);
 }
 
-int32_t CFWL_Edit::GetTextLength() const {
+size_t CFWL_Edit::GetTextLength() const {
   return m_pEditEngine->GetLength();
 }
 
@@ -204,16 +205,16 @@ void CFWL_Edit::SetAliasChar(wchar_t wAlias) {
   m_pEditEngine->SetAliasChar(wAlias);
 }
 
-Optional<WideString> CFWL_Edit::Copy() {
+absl::optional<WideString> CFWL_Edit::Copy() {
   if (!m_pEditEngine->HasSelection())
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   return m_pEditEngine->GetSelectedText();
 }
 
-Optional<WideString> CFWL_Edit::Cut() {
+absl::optional<WideString> CFWL_Edit::Cut() {
   if (!m_pEditEngine->HasSelection())
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   WideString cut_text = m_pEditEngine->DeleteSelectedText();
   UpdateCaret();
@@ -327,8 +328,9 @@ void CFWL_Edit::DrawContent(CFGAS_GEGraphics* pGraphics,
     size_t sel_start;
     size_t count;
     std::tie(sel_start, count) = m_pEditEngine->GetSelection();
-    std::vector<CFX_RectF> rects =
-        m_pEditEngine->GetCharacterRectsInRange(sel_start, count);
+    std::vector<CFX_RectF> rects = m_pEditEngine->GetCharacterRectsInRange(
+        pdfium::base::checked_cast<int32_t>(sel_start),
+        pdfium::base::checked_cast<int32_t>(count));
 
     CFGAS_GEPath path;
     for (auto& rect : rects) {
@@ -758,8 +760,8 @@ void CFWL_Edit::InitCaret() {
 void CFWL_Edit::UpdateCursorRect() {
   int32_t bidi_level;
   if (m_pEditEngine->CanGenerateCharacterInfo()) {
-    std::tie(bidi_level, m_CaretRect) =
-        m_pEditEngine->GetCharacterInfo(m_CursorPosition);
+    std::tie(bidi_level, m_CaretRect) = m_pEditEngine->GetCharacterInfo(
+        pdfium::base::checked_cast<int32_t>(m_CursorPosition));
   } else {
     bidi_level = 0;
     m_CaretRect = CFX_RectF();
@@ -1056,44 +1058,45 @@ void CFWL_Edit::OnChar(CFWL_MessageKey* pMsg) {
 bool CFWL_Edit::OnScroll(CFWL_ScrollBar* pScrollBar,
                          CFWL_EventScroll::Code dwCode,
                          float fPos) {
-  CFX_SizeF fs;
-  pScrollBar->GetRange(&fs.width, &fs.height);
+  float fMin;
+  float fMax;
+  pScrollBar->GetRange(&fMin, &fMax);
   float iCurPos = pScrollBar->GetPos();
   float fStep = pScrollBar->GetStepSize();
   switch (dwCode) {
     case CFWL_EventScroll::Code::Min: {
-      fPos = fs.width;
+      fPos = fMin;
       break;
     }
     case CFWL_EventScroll::Code::Max: {
-      fPos = fs.height;
+      fPos = fMax;
       break;
     }
     case CFWL_EventScroll::Code::StepBackward: {
       fPos -= fStep;
-      if (fPos < fs.width + fStep / 2) {
-        fPos = fs.width;
+      if (fPos < fMin + fStep / 2) {
+        fPos = fMin;
       }
       break;
     }
     case CFWL_EventScroll::Code::StepForward: {
       fPos += fStep;
-      if (fPos > fs.height - fStep / 2) {
-        fPos = fs.height;
+      if (fPos > fMax - fStep / 2) {
+        fPos = fMax;
       }
       break;
     }
     case CFWL_EventScroll::Code::PageBackward: {
       fPos -= pScrollBar->GetPageSize();
-      if (fPos < fs.width) {
-        fPos = fs.width;
+      if (fPos < fMin) {
+        fPos = fMin;
       }
       break;
     }
     case CFWL_EventScroll::Code::PageForward: {
       fPos += pScrollBar->GetPageSize();
-      if (fPos > fs.height) {
-        fPos = fs.height;
+      if (fPos > fMax) {
+        fPos = fMax;
       }
       break;
     }

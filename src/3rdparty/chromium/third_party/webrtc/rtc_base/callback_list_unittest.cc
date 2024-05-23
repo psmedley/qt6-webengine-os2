@@ -17,7 +17,7 @@
 namespace webrtc {
 namespace {
 
-TEST(CallbackList, NoRecieverSingleMessageTest) {
+TEST(CallbackList, NoReceiverSingleMessageTest) {
   CallbackList<std::string> c;
 
   c.Send("message");
@@ -128,7 +128,7 @@ struct LargeNonTrivial {
   LargeNonTrivial(LargeNonTrivial&& m) {}
   ~LargeNonTrivial() = default;
 
-  void operator()(int& a) { a = 1; }
+  void operator()(int& b) { b = 1; }
 };
 
 TEST(CallbackList, LargeNonTrivialTest) {
@@ -250,6 +250,19 @@ TEST(CallbackList, RemoveManyReceivers) {
   c.RemoveReceivers(&removal_tag);
   c.Send();
   EXPECT_EQ(accumulator, 1212);
+}
+
+TEST(CallbackList, RemoveFromSend) {
+  int removal_tag = 0;
+  CallbackList<> c;
+  c.AddReceiver(&removal_tag, [&] {
+    c.RemoveReceivers(&removal_tag);
+    // Do after RemoveReceivers to make sure the lambda is still valid.
+    ++removal_tag;
+  });
+  c.Send();
+  c.Send();
+  EXPECT_EQ(removal_tag, 1);
 }
 
 }  // namespace

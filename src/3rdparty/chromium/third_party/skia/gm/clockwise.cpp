@@ -18,34 +18,35 @@
 #include "include/core/SkTypes.h"
 #include "include/gpu/GrRecordingContext.h"
 #include "include/gpu/GrTypes.h"
-#include "include/private/GrTypesPriv.h"
 #include "include/private/SkColorData.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/core/SkCanvasPriv.h"
-#include "src/gpu/GrBuffer.h"
-#include "src/gpu/GrCaps.h"
-#include "src/gpu/GrColorSpaceXform.h"
-#include "src/gpu/GrDirectContextPriv.h"
-#include "src/gpu/GrGeometryProcessor.h"
-#include "src/gpu/GrGpuBuffer.h"
-#include "src/gpu/GrMemoryPool.h"
-#include "src/gpu/GrOpFlushState.h"
-#include "src/gpu/GrOpsRenderPass.h"
-#include "src/gpu/GrPipeline.h"
-#include "src/gpu/GrProcessor.h"
-#include "src/gpu/GrProcessorSet.h"
-#include "src/gpu/GrProgramInfo.h"
-#include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/GrResourceProvider.h"
-#include "src/gpu/GrSamplerState.h"
-#include "src/gpu/GrShaderCaps.h"
-#include "src/gpu/GrShaderVar.h"
-#include "src/gpu/GrSurfaceProxy.h"
-#include "src/gpu/GrTextureProxy.h"
-#include "src/gpu/glsl/GrGLSLFragmentShaderBuilder.h"
-#include "src/gpu/glsl/GrGLSLVarying.h"
-#include "src/gpu/ops/GrDrawOp.h"
-#include "src/gpu/ops/GrOp.h"
-#include "src/gpu/v1/SurfaceDrawContext_v1.h"
+#include "src/gpu/KeyBuilder.h"
+#include "src/gpu/ganesh/GrBuffer.h"
+#include "src/gpu/ganesh/GrCaps.h"
+#include "src/gpu/ganesh/GrColorSpaceXform.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrGeometryProcessor.h"
+#include "src/gpu/ganesh/GrGpuBuffer.h"
+#include "src/gpu/ganesh/GrMemoryPool.h"
+#include "src/gpu/ganesh/GrOpFlushState.h"
+#include "src/gpu/ganesh/GrOpsRenderPass.h"
+#include "src/gpu/ganesh/GrPipeline.h"
+#include "src/gpu/ganesh/GrProcessor.h"
+#include "src/gpu/ganesh/GrProcessorSet.h"
+#include "src/gpu/ganesh/GrProgramInfo.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrResourceProvider.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
+#include "src/gpu/ganesh/GrShaderCaps.h"
+#include "src/gpu/ganesh/GrShaderVar.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
+#include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
+#include "src/gpu/ganesh/glsl/GrGLSLVarying.h"
+#include "src/gpu/ganesh/ops/GrDrawOp.h"
+#include "src/gpu/ganesh/ops/GrOp.h"
+#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 #include "tools/gpu/ProxyUtils.h"
 
 #include <memory>
@@ -57,7 +58,7 @@ class GrGLSLProgramDataManager;
 namespace {
 
 static constexpr GrGeometryProcessor::Attribute gVertex =
-        {"position", kFloat2_GrVertexAttribType, kFloat2_GrSLType};
+        {"position", kFloat2_GrVertexAttribType, SkSLType::kFloat2};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SkSL code.
@@ -72,7 +73,7 @@ public:
 
     const char* name() const final { return "ClockwiseTestProcessor"; }
 
-    void addToKey(const GrShaderCaps&, GrProcessorKeyBuilder* b) const final {
+    void addToKey(const GrShaderCaps&, skgpu::KeyBuilder* b) const final {
         b->add32(fReadSkFragCoord);
     }
 
@@ -84,7 +85,7 @@ private:
     ClockwiseTestProcessor(bool readSkFragCoord)
             : GrGeometryProcessor(kClockwiseTestProcessor_ClassID)
             , fReadSkFragCoord(readSkFragCoord) {
-        this->setVertexAttributes(&gVertex, 1);
+        this->setVertexAttributesWithImplicitOffsets(&gVertex, 1);
     }
 
     const bool fReadSkFragCoord;
@@ -104,7 +105,7 @@ std::unique_ptr<GrGeometryProcessor::ProgramImpl> ClockwiseTestProcessor::makePr
         void onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) override {
             const ClockwiseTestProcessor& proc = args.fGeomProc.cast<ClockwiseTestProcessor>();
             args.fVaryingHandler->emitAttributes(proc);
-            gpArgs->fPositionVar.set(kFloat2_GrSLType, "position");
+            gpArgs->fPositionVar.set(SkSLType::kFloat2, "position");
             args.fFragBuilder->codeAppendf(
                     "half4 %s = sk_Clockwise ? half4(0,1,0,1) : half4(1,0,0,1);",
                     args.fOutputColor);
@@ -150,13 +151,14 @@ private:
     GrProgramInfo* createProgramInfo(const GrCaps* caps,
                                      SkArenaAlloc* arena,
                                      const GrSurfaceProxyView& writeView,
+                                     bool usesMSAASurface,
                                      GrAppliedClip&& appliedClip,
                                      const GrDstProxyView& dstProxyView,
                                      GrXferBarrierFlags renderPassXferBarriers,
                                      GrLoadOp colorLoadOp) const {
         GrGeometryProcessor* geomProc = ClockwiseTestProcessor::Make(arena, fReadSkFragCoord);
 
-        return sk_gpu_test::CreateProgramInfo(caps, arena, writeView,
+        return sk_gpu_test::CreateProgramInfo(caps, arena, writeView, usesMSAASurface,
                                               std::move(appliedClip), dstProxyView,
                                               geomProc, SkBlendMode::kPlus,
                                               GrPrimitiveType::kTriangleStrip,
@@ -167,6 +169,7 @@ private:
         return this->createProgramInfo(&flushState->caps(),
                                        flushState->allocator(),
                                        flushState->writeView(),
+                                       flushState->usesMSAASurface(),
                                        flushState->detachAppliedClip(),
                                        flushState->dstProxyView(),
                                        flushState->renderPassBarriers(),
@@ -181,12 +184,15 @@ private:
                       GrLoadOp colorLoadOp) final {
         SkArenaAlloc* arena = context->priv().recordTimeAllocator();
 
+        // DMSAA is not supported on DDL.
+        bool usesMSAASurface = writeView.asRenderTargetProxy()->numSamples() > 1;
+
         // This is equivalent to a GrOpFlushState::detachAppliedClip
         GrAppliedClip appliedClip = clip ? std::move(*clip) : GrAppliedClip::Disabled();
 
         fProgramInfo = this->createProgramInfo(context->priv().caps(), arena, writeView,
-                                               std::move(appliedClip), dstProxyView,
-                                               renderPassXferBarriers, colorLoadOp);
+                                               usesMSAASurface, std::move(appliedClip),
+                                               dstProxyView, renderPassXferBarriers, colorLoadOp);
 
         context->priv().recordProgramInfo(fProgramInfo);
     }
@@ -281,7 +287,6 @@ DrawResult ClockwiseGM::onDraw(GrRecordingContext* rContext, SkCanvas* canvas, S
                          SK_PMColor4fWHITE,
                          {0, 0, 100, 200},
                          {100, 0, 200, 200},
-                         GrAA::kNo,
                          GrQuadAAFlags::kNone,
                          SkCanvas::SrcRectConstraint::kStrict_SrcRectConstraint,
                          SkMatrix::I(),
@@ -305,7 +310,6 @@ DrawResult ClockwiseGM::onDraw(GrRecordingContext* rContext, SkCanvas* canvas, S
                          SK_PMColor4fWHITE,
                          {0, 0, 100, 200},
                          {200, 0, 300, 200},
-                         GrAA::kNo,
                          GrQuadAAFlags::kNone,
                          SkCanvas::SrcRectConstraint::kStrict_SrcRectConstraint,
                          SkMatrix::I(),

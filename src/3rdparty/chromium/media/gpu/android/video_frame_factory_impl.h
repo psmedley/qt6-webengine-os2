@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "gpu/config/gpu_preferences.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/android/codec_buffer_wait_coordinator.h"
@@ -55,6 +55,10 @@ class MEDIA_GPU_EXPORT VideoFrameFactoryImpl
       std::unique_ptr<MaybeRenderEarlyManager> mre_manager,
       std::unique_ptr<FrameInfoHelper> frame_info_helper,
       scoped_refptr<gpu::RefCountedLock> drdc_lock);
+
+  VideoFrameFactoryImpl(const VideoFrameFactoryImpl&) = delete;
+  VideoFrameFactoryImpl& operator=(const VideoFrameFactoryImpl&) = delete;
+
   ~VideoFrameFactoryImpl() override;
 
   void Initialize(OverlayMode overlay_mode, InitCB init_cb) override;
@@ -137,8 +141,6 @@ class MEDIA_GPU_EXPORT VideoFrameFactoryImpl
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<VideoFrameFactoryImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VideoFrameFactoryImpl);
 };
 
 }  // namespace media

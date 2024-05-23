@@ -7,7 +7,6 @@
 
 #include "chrome/common/safe_browsing/archive_analyzer_results.h"
 
-#include "base/cxx17_backports.h"
 #include "base/files/file.h"
 #include "base/i18n/streaming_utf8_validator.h"
 #include "base/logging.h"
@@ -21,13 +20,13 @@
 #include "crypto/secure_hash.h"
 #include "crypto/sha2.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 #include "base/containers/span.h"
 #include "chrome/common/safe_browsing/disk_image_type_sniffer_mac.h"
 #include "chrome/common/safe_browsing/mach_o_image_reader_mac.h"
-#endif  // OS_MAC
+#endif  // BUILDFLAG(IS_MAC)
 
 namespace safe_browsing {
 
@@ -65,8 +64,8 @@ void SetLengthAndDigestForContainedFile(
   }
 
   uint8_t digest[crypto::kSHA256Length];
-  hasher->Finish(digest, base::size(digest));
-  archived_binary->mutable_digests()->set_sha256(digest, base::size(digest));
+  hasher->Finish(digest, std::size(digest));
+  archived_binary->mutable_digests()->set_sha256(digest, std::size(digest));
 }
 
 void AnalyzeContainedBinary(
@@ -109,7 +108,7 @@ void UpdateArchiveAnalyzerResultsWithFile(base::FilePath path,
       new BinaryFeatureExtractor());
   bool current_entry_is_executable;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   uint32_t magic;
   file->Read(0, reinterpret_cast<char*>(&magic), sizeof(uint32_t));
 
@@ -142,7 +141,7 @@ void UpdateArchiveAnalyzerResultsWithFile(base::FilePath path,
 #else
   current_entry_is_executable =
       FileTypePolicies::GetInstance()->IsCheckedBinaryFile(path);
-#endif  // OS_MAC
+#endif  // BUILDFLAG(IS_MAC)
 
   if (FileTypePolicies::GetInstance()->IsArchiveFile(path)) {
     DVLOG(2) << "Downloaded a zipped archive: " << path.value();
@@ -156,14 +155,14 @@ void UpdateArchiveAnalyzerResultsWithFile(base::FilePath path,
     SetLengthAndDigestForContainedFile(path, file, file_length,
                                        archived_archive);
   } else {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     // This check prevents running analysis on .app files since they are
     // really just directories and will cause binary feature extraction
     // to fail.
     if (path.Extension().compare(".app") == 0) {
       DVLOG(2) << "Downloaded a zipped .app directory: " << path.value();
     } else {
-#endif  // OS_MAC
+#endif  // BUILDFLAG(IS_MAC)
       DVLOG(2) << "Downloaded a zipped executable: " << path.value();
       results->has_executable |= current_entry_is_executable;
       ClientDownloadRequest::ArchivedBinary* archived_binary =
@@ -177,9 +176,9 @@ void UpdateArchiveAnalyzerResultsWithFile(base::FilePath path,
       if (current_entry_is_executable) {
         AnalyzeContainedBinary(binary_feature_extractor, file, archived_binary);
       }
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     }
-#endif  // OS_MAC
+#endif  // BUILDFLAG(IS_MAC)
   }
 }
 

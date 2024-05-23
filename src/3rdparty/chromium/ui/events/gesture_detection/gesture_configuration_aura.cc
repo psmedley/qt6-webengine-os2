@@ -5,7 +5,6 @@
 #include "ui/events/gesture_detection/gesture_configuration.h"
 
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "build/chromeos_buildflags.h"
 #include "ui/events/event_switches.h"
@@ -21,6 +20,9 @@ constexpr bool kDoubleTapAuraSupport = false;
 
 class GestureConfigurationAura : public GestureConfiguration {
  public:
+  GestureConfigurationAura(const GestureConfigurationAura&) = delete;
+  GestureConfigurationAura& operator=(const GestureConfigurationAura&) = delete;
+
   ~GestureConfigurationAura() override {
   }
 
@@ -37,7 +39,7 @@ class GestureConfigurationAura : public GestureConfiguration {
     set_max_touch_move_in_pixels_for_click(6);
 #endif
     set_double_tap_enabled(kDoubleTapAuraSupport);
-    set_double_tap_timeout_in_ms(semi_long_press_time_in_ms());
+    set_double_tap_timeout_in_ms(double_tap_timeout_in_ms());
     set_gesture_begin_end_types_enabled(true);
     set_min_gesture_bounds_length(default_radius());
     set_min_pinch_update_span_delta(
@@ -54,7 +56,6 @@ class GestureConfigurationAura : public GestureConfiguration {
   }
 
   friend struct base::DefaultSingletonTraits<GestureConfigurationAura>;
-  DISALLOW_COPY_AND_ASSIGN(GestureConfigurationAura);
 };
 
 }  // namespace

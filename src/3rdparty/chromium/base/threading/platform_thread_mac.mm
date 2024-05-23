@@ -8,6 +8,7 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
+#include <mach/thread_switch.h>
 #include <stddef.h>
 #include <sys/resource.h>
 
@@ -54,6 +55,17 @@ void InitThreading() {
 }
 
 // static
+void PlatformThread::YieldCurrentThread() {
+  // Don't use sched_yield(), as it can lead to 10ms delays.
+  //
+  // This only depresses the thread priority for 1ms, which is more in line
+  // with what calling code likely wants. See this bug in webkit for context:
+  // https://bugs.webkit.org/show_bug.cgi?id=204871
+  mach_msg_timeout_t timeout_ms = 1;
+  thread_switch(MACH_PORT_NULL, SWITCH_OPTION_DEPRESS, timeout_ms);
+}
+
+// static
 void PlatformThread::SetName(const std::string& name) {
   ThreadIdNameManager::GetInstance()->SetName(name);
 
@@ -69,7 +81,7 @@ void PlatformThread::SetName(const std::string& name) {
 // Whether optimized realt-time thread config should be used for audio.
 const Feature kOptimizedRealtimeThreadingMac {
   "OptimizedRealtimeThreadingMac",
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       FEATURE_ENABLED_BY_DEFAULT
 #else
       FEATURE_DISABLED_BY_DEFAULT
@@ -79,7 +91,7 @@ const Feature kOptimizedRealtimeThreadingMac {
 namespace {
 
 bool IsOptimizedRealtimeThreadingMacEnabled() {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // There is some platform bug on 10.14.
   if (mac::IsOS10_14())
     return false;
@@ -155,8 +167,7 @@ TimeDelta GetCurrentThreadRealtimePeriod() {
   NSNumber* period = mac::ObjCCast<NSNumber>(
       [[NSThread currentThread] threadDictionary][kRealtimePeriodNsKey]);
 
-  return period ? TimeDelta::FromNanoseconds(period.longLongValue)
-                : TimeDelta();
+  return period ? Nanoseconds(period.longLongValue) : TimeDelta();
 }
 
 // Calculates time constrints for THREAD_TIME_CONSTRAINT_POLICY.
@@ -267,12 +278,12 @@ void SetPriorityRealtimeAudio(TimeDelta realtime_period) {
 
   UmaHistogramCustomMicrosecondsTimes(
       "PlatformThread.Mac.AttemptedRealtimePeriod", realtime_period,
-      base::TimeDelta(), base::TimeDelta::FromMilliseconds(100), 100);
+      base::TimeDelta(), base::Milliseconds(100), 100);
 
   if (result == KERN_SUCCESS) {
     UmaHistogramCustomMicrosecondsTimes(
         "PlatformThread.Mac.SucceededRealtimePeriod", realtime_period,
-        base::TimeDelta(), base::TimeDelta::FromMilliseconds(100), 100);
+        base::TimeDelta(), base::Milliseconds(100), 100);
   }
   return;
 }
@@ -280,7 +291,8 @@ void SetPriorityRealtimeAudio(TimeDelta realtime_period) {
 }  // anonymous namespace
 
 // static
-bool PlatformThread::CanIncreaseThreadPriority(ThreadPriority priority) {
+bool PlatformThread::CanChangeThreadPriority(ThreadPriority from,
+                                             ThreadPriority to) {
   return true;
 }
 
@@ -345,7 +357,7 @@ ThreadPriority PlatformThread::GetCurrentThreadPriority() {
 }
 
 size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   return 0;
 #else
   // The Mac OS X default for a pthread stack size is 512kB.

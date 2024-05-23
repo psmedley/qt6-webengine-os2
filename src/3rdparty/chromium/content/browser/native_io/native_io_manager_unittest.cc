@@ -6,21 +6,29 @@
 #include <string>
 
 #include "base/files/file.h"
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
+#include "components/services/storage/public/cpp/buckets/bucket_info.h"
+#include "components/services/storage/public/cpp/buckets/constants.h"
+#include "components/services/storage/public/cpp/quota_error_or.h"
 #include "content/browser/native_io/native_io_manager.h"
-#include "content/test/fake_mojo_message_dispatch_context.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/test_support/fake_message_dispatch_context.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/test/mock_quota_manager.h"
 #include "storage/browser/test/mock_quota_manager_proxy.h"
+#include "storage/browser/test/mock_special_storage_policy.h"
+#include "storage/browser/test/quota_manager_proxy_sync.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/native_io/native_io.mojom.h"
@@ -72,21 +80,6 @@ class NativeIOManagerSync {
     return storage_keys;
   }
 
-  std::vector<StorageKey> GetStorageKeysForHost(blink::mojom::StorageType type,
-                                                const std::string& host) {
-    std::vector<StorageKey> storage_keys;
-    base::RunLoop run_loop;
-    io_manager_->GetStorageKeysForHost(
-        type, host,
-        base::BindLambdaForTesting(
-            [&](const std::vector<StorageKey>& returned_storage_keys) {
-              storage_keys = returned_storage_keys;
-              run_loop.Quit();
-            }));
-    run_loop.Run();
-    return storage_keys;
-  }
-
   int64_t GetStorageKeyUsage(const StorageKey& storage_key,
                              blink::mojom::StorageType type) {
     int64_t usage;
@@ -102,7 +95,7 @@ class NativeIOManagerSync {
   }
 
  private:
-  NativeIOManager* const io_manager_;
+  const raw_ptr<NativeIOManager> io_manager_;
 };
 
 struct OpenFileResult {
@@ -111,13 +104,13 @@ struct OpenFileResult {
   NativeIOErrorPtr error;
 };
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 struct SetLengthResult {
   base::File file;
   int64_t actual_length;
   NativeIOErrorPtr error;
 };
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
 // Synchronous proxies to a wrapped NativeIOHost's methods.
 class NativeIOHostSync {
@@ -194,7 +187,7 @@ class NativeIOHostSync {
   }
 
  private:
-  blink::mojom::NativeIOHost* const io_host_;
+  const raw_ptr<blink::mojom::NativeIOHost> io_host_;
 };
 
 // Synchronous proxies to a wrapped NativeIOFileHost's methods.
@@ -216,7 +209,7 @@ class NativeIOFileHostSync {
     return;
   }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   SetLengthResult SetLength(const int64_t length, base::File file) {
     SetLengthResult result;
     base::RunLoop run_loop;
@@ -233,10 +226,10 @@ class NativeIOFileHostSync {
     run_loop.Run();
     return result;
   }
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
  private:
-  blink::mojom::NativeIOFileHost* const file_host_;
+  const raw_ptr<blink::mojom::NativeIOFileHost> file_host_;
 };
 
 const char kExampleStorageKey[] = "https://example.com";
@@ -244,20 +237,24 @@ const char kGoogleStorageKey[] = "https://google.com";
 
 class NativeIOManagerTest : public testing::TestWithParam<bool> {
  public:
+  NativeIOManagerTest()
+      : special_storage_policy_(
+            base::MakeRefCounted<storage::MockSpecialStoragePolicy>()) {}
+  ~NativeIOManagerTest() override = default;
+
   void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     quota_manager_ = base::MakeRefCounted<storage::MockQuotaManager>(
         /*is_incognito=*/false, data_dir_.GetPath(),
-        base::ThreadTaskRunnerHandle::Get().get(),
-        /*special storage policy=*/nullptr);
+        base::ThreadTaskRunnerHandle::Get(), special_storage_policy_);
     quota_manager_proxy_ = base::MakeRefCounted<storage::MockQuotaManagerProxy>(
         quota_manager(), base::ThreadTaskRunnerHandle::Get());
-    manager_ = std::make_unique<NativeIOManager>(
-        data_dir_.GetPath(),
-#if defined(OS_MAC)
-        allow_set_length_ipc(),
-#endif  // defined(OS_MAC)
-        /*special storage policy=*/nullptr, quota_manager_proxy());
+    manager_ = std::make_unique<NativeIOManager>(data_dir_.GetPath(),
+#if BUILDFLAG(IS_MAC)
+                                                 allow_set_length_ipc(),
+#endif  // BUILDFLAG(IS_MAC)
+                                                 special_storage_policy_,
+                                                 quota_manager_proxy_);
 
     manager_->BindReceiver(
         StorageKey::CreateFromStringForTesting(kExampleStorageKey),
@@ -283,7 +280,6 @@ class NativeIOManagerTest : public testing::TestWithParam<bool> {
     quota_manager_proxy_ = nullptr;
   }
 
- protected:
   storage::MockQuotaManager* quota_manager() {
     return static_cast<storage::MockQuotaManager*>(quota_manager_.get());
   }
@@ -298,28 +294,11 @@ class NativeIOManagerTest : public testing::TestWithParam<bool> {
                           base::Unretained(this));
   }
 
-  void OnBadMessage(const std::string& reason) { NOTREACHED(); }
+  void OnBadMessage(base::StringPiece reason) { NOTREACHED(); }
 
-  // This must be above NativeIOManager, to ensure that no file is accessed when
-  // the temporary directory is deleted.
-  base::ScopedTempDir data_dir_;
+  bool allow_set_length_ipc() { return GetParam(); }
 
-  // These tests need a full TaskEnvironment because NativeIOHost uses the
-  // thread pool for file I/O.
-  base::test::TaskEnvironment task_environment_;
-
-  // The NativeIOManager is on the heap because it requires the profile path at
-  // construction, and we only know the path during SetUp.
-  std::unique_ptr<NativeIOManager> manager_;
-
-  std::unique_ptr<NativeIOManagerSync> sync_manager_;
-
-  // Hosts for two different storage_keys, used for isolation testing.
-  mojo::Remote<blink::mojom::NativeIOHost> example_host_remote_;
-  mojo::Remote<blink::mojom::NativeIOHost> google_host_remote_;
-  std::unique_ptr<NativeIOHostSync> example_host_;
-  std::unique_ptr<NativeIOHostSync> google_host_;
-
+ protected:
   struct Filename {
     std::string name;
     bool valid;
@@ -339,12 +318,58 @@ class NativeIOManagerTest : public testing::TestWithParam<bool> {
       {std::string(9999, 'x'), false},
   };
 
-  bool allow_set_length_ipc() { return GetParam(); }
+  scoped_refptr<storage::MockSpecialStoragePolicy> special_storage_policy_;
 
- private:
+  // This must be above NativeIOManager, to ensure that no file is accessed when
+  // the temporary directory is deleted.
+  base::ScopedTempDir data_dir_;
+
+  // These tests need a full TaskEnvironment because NativeIOHost uses the
+  // thread pool for file I/O.
+  base::test::TaskEnvironment task_environment_;
+
   scoped_refptr<storage::QuotaManager> quota_manager_;
   scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy_;
+
+  // The NativeIOManager is on the heap because it requires the profile path at
+  // construction, and we only know the path during SetUp.
+  std::unique_ptr<NativeIOManager> manager_;
+
+  std::unique_ptr<NativeIOManagerSync> sync_manager_;
+
+  // Hosts for two different storage_keys, used for isolation testing.
+  mojo::Remote<blink::mojom::NativeIOHost> example_host_remote_;
+  mojo::Remote<blink::mojom::NativeIOHost> google_host_remote_;
+  std::unique_ptr<NativeIOHostSync> example_host_;
+  std::unique_ptr<NativeIOHostSync> google_host_;
 };
+
+TEST_P(NativeIOManagerTest, DefaultBucketCreatedOnBindReceiver) {
+  EXPECT_THAT(google_host_->GetAllFileNames(), testing::SizeIs(0));
+  storage::QuotaManagerProxySync quota_manager_proxy_sync(
+      quota_manager_proxy());
+
+  // Check default bucket exists for https://example.com.
+  storage::QuotaErrorOr<storage::BucketInfo> result =
+      quota_manager_proxy_sync.GetBucket(
+          StorageKey::CreateFromStringForTesting(kExampleStorageKey),
+          storage::kDefaultBucketName, blink::mojom::StorageType::kTemporary);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result->name, storage::kDefaultBucketName);
+  EXPECT_EQ(result->storage_key,
+            StorageKey::CreateFromStringForTesting(kExampleStorageKey));
+  EXPECT_GT(result->id.value(), 0);
+
+  // Check default bucket exists for https://google.com.
+  result = quota_manager_proxy_sync.GetBucket(
+      StorageKey::CreateFromStringForTesting(kGoogleStorageKey),
+      storage::kDefaultBucketName, blink::mojom::StorageType::kTemporary);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result->name, storage::kDefaultBucketName);
+  EXPECT_EQ(result->storage_key,
+            StorageKey::CreateFromStringForTesting(kGoogleStorageKey));
+  EXPECT_GT(result->id.value(), 0);
+}
 
 TEST_P(NativeIOManagerTest, OpenFile_Names) {
   for (const Filename& filename : filenames_) {
@@ -599,7 +624,7 @@ TEST_P(NativeIOManagerTest, RenameFile_Names) {
   }
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 TEST_P(NativeIOManagerTest, SetLength) {
   const std::string kTestData("Test Data");
   const int kTestDataSize = kTestData.size();
@@ -652,7 +677,7 @@ TEST_P(NativeIOManagerTest, SetLength_NegativeLength) {
                                    : "SetLength() disabled on this OS.",
             bad_message_observer.WaitForBadMessage());
 }
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
 TEST_P(NativeIOManagerTest, StorageKeyIsolation) {
   const std::string kTestData("Test Data");
@@ -689,7 +714,7 @@ TEST_P(NativeIOManagerTest, StorageKeyIsolation) {
 TEST_P(NativeIOManagerTest, BindReceiver_UntrustworthyStorageKey) {
   mojo::Remote<blink::mojom::NativeIOHost> insecure_host_remote_;
 
-  FakeMojoMessageDispatchContext fake_dispatch_context;
+  mojo::FakeMessageDispatchContext fake_dispatch_context;
   mojo::test::BadMessageObserver bad_message_observer;
   manager_->BindReceiver(
       StorageKey::CreateFromStringForTesting("http://insecure.com"),
@@ -831,68 +856,6 @@ TEST_P(NativeIOManagerTest, GetStorageKeysByType_ReturnsActiveStorageKeys) {
   example_file_host.Close();
 }
 
-TEST_P(NativeIOManagerTest, GetStorageKeysByHost_ReturnsActiveStorageKeys) {
-  mojo::Remote<blink::mojom::NativeIOFileHost> example_file_host_remote;
-  base::File example_file =
-      example_host_
-          ->OpenFile("test_file",
-                     example_file_host_remote.BindNewPipeAndPassReceiver())
-          .file;
-
-  mojo::Remote<blink::mojom::NativeIOHost> example_with_port_host_remote;
-  std::string example_with_port_storage_key =
-      std::string(kExampleStorageKey).append(":1");
-  manager_->BindReceiver(
-      StorageKey::CreateFromStringForTesting(example_with_port_storage_key),
-      example_with_port_host_remote.BindNewPipeAndPassReceiver(),
-      GetBadMessageCallback());
-  NativeIOHostSync example_with_port_host(example_with_port_host_remote.get());
-  mojo::Remote<blink::mojom::NativeIOFileHost>
-      example_with_port_file_host_remote;
-  base::File example_with_port_file =
-      example_with_port_host
-          .OpenFile(
-              "test_file",
-              example_with_port_file_host_remote.BindNewPipeAndPassReceiver())
-          .file;
-
-  mojo::Remote<blink::mojom::NativeIOFileHost> google_file_host_remote;
-  base::File google_file =
-      google_host_
-          ->OpenFile("test_file",
-                     google_file_host_remote.BindNewPipeAndPassReceiver())
-          .file;
-
-  example_file.Close();
-  NativeIOFileHostSync example_file_host(example_file_host_remote.get());
-  example_file_host.Close();
-  example_with_port_file.Close();
-  NativeIOFileHostSync example_with_port_file_host(
-      example_with_port_file_host_remote.get());
-  example_with_port_file_host.Close();
-  google_file.Close();
-  NativeIOFileHostSync google_file_host(google_file_host_remote.get());
-  google_file_host.Close();
-
-  std::vector<StorageKey> example_storage_keys =
-      sync_manager_->GetStorageKeysForHost(
-          blink::mojom::StorageType::kTemporary, "example.com");
-  EXPECT_EQ(2u, example_storage_keys.size());
-  EXPECT_THAT(example_storage_keys,
-              testing::Contains(StorageKey::CreateFromStringForTesting(
-                  example_with_port_storage_key)));
-  EXPECT_THAT(example_storage_keys,
-              testing::Contains(
-                  StorageKey::CreateFromStringForTesting(kExampleStorageKey)));
-
-  std::vector<StorageKey> google_storage_keys =
-      sync_manager_->GetStorageKeysForHost(
-          blink::mojom::StorageType::kTemporary, "google.com");
-  EXPECT_EQ(1u, google_storage_keys.size());
-  EXPECT_EQ(StorageKey::CreateFromStringForTesting(kGoogleStorageKey),
-            google_storage_keys[0]);
-}
-
 TEST_P(NativeIOManagerTest, GetStorageKeyUsage_ActiveStorageKeyUsage) {
   mojo::Remote<blink::mojom::NativeIOFileHost> example_host_remote;
   base::File example_file =
@@ -922,16 +885,39 @@ TEST_P(NativeIOManagerTest, GetStorageKeyUsage_NonexistingStorageKeyUsage) {
   EXPECT_EQ(0u, usage);
 }
 
-INSTANTIATE_TEST_CASE_P(,
-                        NativeIOManagerTest,
-                        ::testing::Values(
-#if defined(OS_MAC)
-                            false,
-                            true
-#else   // !defined(OS_MAC)
-                            false
-#endif  // defined(OS_MAC)
-                            ));
+TEST_P(NativeIOManagerTest, IncognitoQuota) {
+  auto quota_manager = base::MakeRefCounted<storage::MockQuotaManager>(
+      /*is_incognito=*/true, base::FilePath(),
+      base::ThreadTaskRunnerHandle::Get().get(), special_storage_policy_);
+  auto quota_manager_proxy =
+      base::MakeRefCounted<storage::MockQuotaManagerProxy>(
+          quota_manager.get(), base::ThreadTaskRunnerHandle::Get());
+  auto manager = std::make_unique<NativeIOManager>(base::FilePath(),
+#if BUILDFLAG(IS_MAC)
+                                                   allow_set_length_ipc(),
+#endif  // BUILDFLAG(IS_MAC)
+                                                   special_storage_policy_,
+                                                   quota_manager_proxy);
+  auto sync_manager = std::make_unique<NativeIOManagerSync>(manager.get());
+
+  EXPECT_THAT(sync_manager->GetStorageKeysForType(
+                  blink::mojom::StorageType::kTemporary),
+              testing::SizeIs(0));
+  EXPECT_EQ(0, sync_manager->GetStorageKeyUsage(
+                   StorageKey::CreateFromStringForTesting(kExampleStorageKey),
+                   blink::mojom::StorageType::kTemporary));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         NativeIOManagerTest,
+                         ::testing::Values(
+#if BUILDFLAG(IS_MAC)
+                             false,
+                             true
+#else   // !BUILDFLAG(IS_MAC)
+                             false
+#endif  // BUILDFLAG(IS_MAC)
+                             ));
 
 }  // namespace
 

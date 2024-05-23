@@ -16,9 +16,8 @@
 #include "base/callback_forward.h"
 #include "base/callback_list.h"
 #include "base/compiler_specific.h"
-#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
@@ -31,6 +30,7 @@
 #include "components/ntp_tiles/popular_sites.h"
 #include "components/ntp_tiles/section_type.h"
 #include "components/ntp_tiles/tile_source.h"
+#include "components/webapps/common/constants.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
@@ -47,12 +47,6 @@ class IconCacher;
 // Shim interface for SupervisedUserService.
 class MostVisitedSitesSupervisor {
  public:
-  struct Allowlist {
-    std::u16string title;
-    GURL entry_point;
-    base::FilePath large_icon_path;
-  };
-
   class Observer {
    public:
     virtual void OnBlockedSitesChanged() = 0;
@@ -71,10 +65,6 @@ class MostVisitedSitesSupervisor {
 
   // If true, |url| should not be shown on the NTP.
   virtual bool IsBlocked(const GURL& url) = 0;
-
-  // TODO(crbug.com/1149782): Remove the allowlists from New Tab Page.
-  // Explicitly-specified sites to show on NTP.
-  virtual std::vector<Allowlist> GetAllowlists() = 0;
 
   // If true, be conservative about suggesting sites from outside sources.
   virtual bool IsChildProfile() = 0;
@@ -123,7 +113,11 @@ class MostVisitedSites : public history::TopSitesObserver,
                    std::unique_ptr<PopularSites> popular_sites,
                    std::unique_ptr<CustomLinksManager> custom_links,
                    std::unique_ptr<IconCacher> icon_cacher,
-                   std::unique_ptr<MostVisitedSitesSupervisor> supervisor);
+                   std::unique_ptr<MostVisitedSitesSupervisor> supervisor,
+                   bool is_default_chrome_app_migrated);
+
+  MostVisitedSites(const MostVisitedSites&) = delete;
+  MostVisitedSites& operator=(const MostVisitedSites&) = delete;
 
   ~MostVisitedSites() override;
 
@@ -232,9 +226,14 @@ class MostVisitedSites : public history::TopSitesObserver,
   // Workhorse for SaveNewTilesAndNotify. Implemented as a separate static and
   // public method for ease of testing.
   static NTPTilesVector MergeTiles(NTPTilesVector personal_tiles,
-                                   NTPTilesVector allowlist_tiles,
                                    NTPTilesVector popular_tiles,
                                    absl::optional<NTPTile> explore_tile);
+
+  // Verifies if NTPTile App was migrated to a WebApp.
+  static bool WasNtpAppMigratedToWebApp(PrefService* prefs, GURL url);
+
+  // Verifies if NTPTile App comes from a PreInstalledApp.
+  static bool IsNtpTileFromPreinstalledApp(GURL url);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(MostVisitedSitesTest,
@@ -263,9 +262,6 @@ class MostVisitedSites : public history::TopSitesObserver,
   // Initialize the query to Top Sites.
   void InitiateTopSitesQuery();
 
-  // If there's a allowlist entry point for the URL, return the large icon path.
-  base::FilePath GetAllowlistLargeIconPath(const GURL& url);
-
   // Callback for when data is available from TopSites.
   void OnMostVisitedURLsAvailable(
       const history::MostVisitedURLList& visited_list);
@@ -273,11 +269,6 @@ class MostVisitedSites : public history::TopSitesObserver,
   // Builds the current tileset based on available caches and notifies the
   // observer.
   void BuildCurrentTiles();
-
-  // Creates allowlist entry point suggestions whose hosts weren't used yet.
-  NTPTilesVector CreateAllowlistEntryPointTiles(
-      const std::set<std::string>& used_hosts,
-      size_t num_actual_tiles);
 
   // Creates tiles for all popular site sections. Uses |num_actual_tiles| and
   // |used_hosts| to restrict results for the PERSONALIZED section.
@@ -303,9 +294,12 @@ class MostVisitedSites : public history::TopSitesObserver,
   // |SaveTilesAndNotify| in the end.
   void InitiateNotificationForNewTiles(NTPTilesVector new_tiles);
 
-  // Takes the personal tiles, creates and merges in allowlist and popular tiles
-  // if appropriate. Calls |SaveTilesAndNotify| at the end.
+  // Takes the personal tiles and merges in popular tiles if appropriate. Calls
+  // |SaveTilesAndNotify| at the end.
   void MergeMostVisitedTiles(NTPTilesVector personal_tiles);
+
+  // Removes pre installed apps which turn invalid because of migration.
+  NTPTilesVector RemoveInvalidPreinstallApps(NTPTilesVector new_tiles);
 
   // Saves the new tiles and notifies the observer if the tiles were actually
   // changed.
@@ -343,7 +337,8 @@ class MostVisitedSites : public history::TopSitesObserver,
   void TopSitesChanged(history::TopSites* top_sites,
                        ChangeReason change_reason) override;
 
-  PrefService* prefs_;
+  raw_ptr<PrefService> prefs_;
+
   scoped_refptr<history::TopSites> top_sites_;
   std::unique_ptr<PopularSites> const popular_sites_;
   std::unique_ptr<CustomLinksManager> const custom_links_;
@@ -351,6 +346,7 @@ class MostVisitedSites : public history::TopSitesObserver,
   std::unique_ptr<MostVisitedSitesSupervisor> supervisor_;
   std::unique_ptr<HomepageClient> homepage_client_;
   std::unique_ptr<ExploreSitesClient> explore_sites_client_;
+  bool is_default_chrome_app_migrated_;
 
   base::ObserverList<Observer> observers_;
 
@@ -384,8 +380,6 @@ class MostVisitedSites : public history::TopSitesObserver,
   // For callbacks may be run after destruction, used exclusively for TopSites
   // (since it's used to detect whether there's a query in flight).
   base::WeakPtrFactory<MostVisitedSites> top_sites_weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MostVisitedSites);
 };
 
 }  // namespace ntp_tiles

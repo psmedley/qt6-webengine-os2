@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "build/build_config.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
@@ -37,6 +36,7 @@
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/frame_owner.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -56,7 +56,7 @@
 #include "third_party/blink/renderer/modules/payments/update_payment_details_function.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -65,10 +65,6 @@
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
-
-#if defined(OS_ANDROID)
-#include "third_party/blink/renderer/modules/payments/skip_to_gpay_utils.h"
-#endif  // defined(OS_ANDROID)
 
 namespace {
 
@@ -438,7 +434,11 @@ void StringifyAndParseMethodSpecificData(ExecutionContext& execution_context,
   }
 
   // Parse method data to avoid parsing JSON in the browser.
-  if (supported_method == "basic-card") {
+  if (RuntimeEnabledFeatures::PaymentRequestBasicCardEnabled(
+          &execution_context) &&
+      supported_method == "basic-card") {
+    Deprecation::CountDeprecation(&execution_context,
+                                  WebFeature::kPaymentRequestBasicCard);
     BasicCardHelper::ParseBasiccardData(input, output->supported_networks,
                                         exception_state);
   } else if (supported_method == kSecurePaymentConfirmationMethod &&
@@ -600,8 +600,6 @@ void ValidateAndConvertPaymentDetailsUpdate(const PaymentDetailsUpdate* input,
   if (exception_state.HadException())
     return;
   if (input->hasTotal()) {
-    DCHECK(!RuntimeEnabledFeatures::DigitalGoodsEnabled(&execution_context) ||
-           !ignore_total);
     if (ignore_total) {
       output->total =
           CreateTotalPlaceHolderForAppStoreBilling(execution_context);
@@ -645,7 +643,6 @@ void ValidateAndConvertPaymentDetailsUpdate(const PaymentDetailsUpdate* input,
 void ValidateAndConvertPaymentMethodData(
     const HeapVector<Member<PaymentMethodData>>& input,
     const PaymentOptions* options,
-    bool& skip_to_gpay_ready,
     Vector<payments::mojom::blink::PaymentMethodDataPtr>& output,
     HashSet<String>& method_names,
     ExecutionContext& execution_context,
@@ -660,12 +657,6 @@ void ValidateAndConvertPaymentMethodData(
         "At most 1024 payment methods are supported");
     return;
   }
-
-#if defined(OS_ANDROID)
-  // TODO(crbug.com/984694): Remove this special hack for GPay after general
-  // delegation for shipping and contact information is available.
-  bool skip_to_gpay_eligible = SkipToGPayUtils::IsEligible(input);
-#endif
 
   for (const PaymentMethodData* payment_method_data : input) {
     if (!PaymentsValidators::IsValidMethodFormat(
@@ -723,21 +714,13 @@ void ValidateAndConvertPaymentMethodData(
           payment_method_data->data(), output.back(), exception_state);
       if (exception_state.HadException())
         continue;
-
-#if defined(OS_ANDROID)
-      if (skip_to_gpay_eligible &&
-          payment_method_data->supportedMethod() == kGooglePayMethod &&
-          SkipToGPayUtils::PatchPaymentMethodData(*options, output.back())) {
-        skip_to_gpay_ready = true;
-      }
-#endif  // defined(OS_ANDROID)
     } else {
       output.back()->stringified_data = "";
     }
   }
 }
 
-bool AllowedToUsePaymentRequest(const ExecutionContext* execution_context) {
+bool AllowedToUsePaymentRequest(ExecutionContext* execution_context) {
   // To determine whether a Document object |document| is allowed to use the
   // feature indicated by attribute name |allowpaymentrequest|, run these steps:
 
@@ -821,20 +804,33 @@ ScriptPromise PaymentRequest::show(ScriptState* script_state,
 
   LocalFrame* local_frame = DomWindow()->GetFrame();
 
-  bool payment_request_allowed =
+  bool has_transient_user_activation =
       LocalFrame::HasTransientUserActivation(local_frame);
-  if (!payment_request_allowed) {
-    UseCounter::Count(GetExecutionContext(),
-                      WebFeature::kPaymentRequestShowWithoutGesture);
+  bool payment_request_token_active =
+      DomWindow()->IsPaymentRequestTokenActive();
+
+  if (!has_transient_user_activation) {
+    Deprecation::CountDeprecation(
+        GetExecutionContext(), WebFeature::kPaymentRequestShowWithoutGesture);
+
+    if (!payment_request_token_active) {
+      UseCounter::Count(GetExecutionContext(),
+                        WebFeature::kPaymentRequestShowWithoutGestureOrToken);
+    }
   }
+
+  bool payment_request_allowed = has_transient_user_activation;
 
   if (RuntimeEnabledFeatures::CapabilityDelegationPaymentRequestEnabled(
           GetExecutionContext())) {
-    payment_request_allowed |= local_frame->IsPaymentRequestTokenActive();
-    if (!payment_request_allowed) {
-      UseCounter::Count(GetExecutionContext(),
-                        WebFeature::kPaymentRequestShowWithoutGestureOrToken);
-
+    payment_request_allowed |= payment_request_token_active;
+    DomWindow()->ConsumePaymentRequestToken();
+  }
+  if (RuntimeEnabledFeatures::PaymentRequestRequiresUserActivationEnabled(
+          GetExecutionContext())) {
+    if (payment_request_allowed) {
+      LocalFrame::ConsumeTransientUserActivation(local_frame);
+    } else {
       String message =
           "PaymentRequest.show() requires either transient user activation or "
           "delegated payment request capability";
@@ -842,20 +838,9 @@ ScriptPromise PaymentRequest::show(ScriptState* script_state,
           MakeGarbageCollected<ConsoleMessage>(
               mojom::blink::ConsoleMessageSource::kJavaScript,
               mojom::blink::ConsoleMessageLevel::kWarning, message));
-      exception_state.ThrowDOMException(DOMExceptionCode::kNotAllowedError,
-                                        message);
+      exception_state.ThrowSecurityError(message);
       return ScriptPromise();
     }
-    LocalFrame::ConsumeTransientUserActivation(local_frame);
-    local_frame->ConsumePaymentRequestToken();
-
-  } else if (RuntimeEnabledFeatures::SecurePaymentConfirmationEnabled(
-                 GetExecutionContext())) {
-    // TODO(crbug.com/825270): Pretend that a user gesture is provided to allow
-    // origins that are part of the Secure Payment Confirmation Origin Trial to
-    // use skip-the-sheet flow as a hack for secure modal window
-    // (crbug.com/1122028). Remove this after user gesture delegation ships.
-    payment_request_allowed = true;
   }
 
   // TODO(crbug.com/779126): add support for handling payment requests in
@@ -876,15 +861,16 @@ ScriptPromise PaymentRequest::show(ScriptState* script_state,
   if (is_waiting_for_show_promise_to_resolve_) {
     // If the website does not calculate the final shopping cart contents within
     // 10 seconds, abort payment.
-    update_payment_details_timer_.StartOneShot(base::TimeDelta::FromSeconds(10),
-                                               FROM_HERE);
+    update_payment_details_timer_.StartOneShot(base::Seconds(10), FROM_HERE);
     details_promise.Then(
-        UpdatePaymentDetailsFunction::CreateFunction(
-            script_state, this,
-            UpdatePaymentDetailsFunction::ResolveType::kFulfill),
-        UpdatePaymentDetailsFunction::CreateFunction(
-            script_state, this,
-            UpdatePaymentDetailsFunction::ResolveType::kReject));
+        MakeGarbageCollected<ScriptFunction>(
+            script_state,
+            MakeGarbageCollected<UpdatePaymentDetailsFunction>(
+                this, UpdatePaymentDetailsFunction::ResolveType::kFulfill)),
+        MakeGarbageCollected<ScriptFunction>(
+            script_state,
+            MakeGarbageCollected<UpdatePaymentDetailsFunction>(
+                this, UpdatePaymentDetailsFunction::ResolveType::kReject)));
   }
 
   accept_resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
@@ -1106,6 +1092,8 @@ ScriptPromise PaymentRequest::Complete(ScriptState* script_state,
     return ScriptPromise();
   }
 
+  UseCounter::Count(GetExecutionContext(), WebFeature::kPaymentRequestComplete);
+
   complete_timer_.Stop();
 
   // The payment provider should respond in PaymentRequest::OnComplete().
@@ -1254,7 +1242,7 @@ PaymentRequest::PaymentRequest(
   if (!AllowedToUsePaymentRequest(execution_context)) {
     exception_state.ThrowSecurityError(
         "Must be in a top-level browsing context or an iframe needs to specify "
-        "'allowpaymentrequest' explicitly");
+        "allow=\"payment\" explicitly");
     return;
   }
 
@@ -1271,14 +1259,8 @@ PaymentRequest::PaymentRequest(
 
   VLOG(2) << "Renderer: New PaymentRequest (" << id_.Utf8() << ")";
 
-  // This flag is set to true by ValidateAndConvertPaymentMethodData() if this
-  // request is eligible for the Skip-to-GPay experimental flow and the GPay
-  // payment method data has been patched to delegate shipping and contact
-  // information collection to the GPay payment app.
-  bool skip_to_gpay_ready = false;
-
   Vector<payments::mojom::blink::PaymentMethodDataPtr> validated_method_data;
-  ValidateAndConvertPaymentMethodData(method_data, options_, skip_to_gpay_ready,
+  ValidateAndConvertPaymentMethodData(method_data, options_,
                                       validated_method_data, method_names_,
                                       *GetExecutionContext(), exception_state);
   if (exception_state.HadException())
@@ -1310,17 +1292,6 @@ PaymentRequest::PaymentRequest(
 
   if (options_->requestShipping()) {
     shipping_type_ = options_->shippingType();
-
-    // Skip-to-GPay flow does not support changing shipping address or shipping
-    // options, so disable it if the merchant provides more than one shipping
-    // option for the user to choose from or if no payment option is selected up
-    // front, as this may indicate an intent to change it based on shipping
-    // address change.
-    if (!validated_details->shipping_options ||
-        !(validated_details->shipping_options->size() == 1 &&
-          validated_details->shipping_options->front()->selected)) {
-      skip_to_gpay_ready = false;
-    }
   } else {
     validated_details->shipping_options = absl::nullopt;
   }
@@ -1345,18 +1316,10 @@ PaymentRequest::PaymentRequest(
   UseCounter::Count(execution_context, WebFeature::kPaymentRequestInitialized);
   mojo::PendingRemote<payments::mojom::blink::PaymentRequestClient> client;
   client_receiver_.Bind(client.InitWithNewPipeAndPassReceiver(), task_runner);
-#if defined(OS_ANDROID)
-  payment_provider_->Init(
-      std::move(client), std::move(validated_method_data),
-      std::move(validated_details),
-      payments::mojom::blink::PaymentOptions::From(*options_),
-      skip_to_gpay_ready);
-#else
   payment_provider_->Init(
       std::move(client), std::move(validated_method_data),
       std::move(validated_details),
       payments::mojom::blink::PaymentOptions::From(*options_));
-#endif
 }
 
 void PaymentRequest::ContextDestroyed() {
@@ -1503,9 +1466,11 @@ void PaymentRequest::OnPaymentResponse(PaymentResponsePtr response) {
     return;
   }
 
+  UseCounter::Count(GetExecutionContext(), WebFeature::kPaymentRequestResponse);
+
   // If the website does not call complete() 60 seconds after show() has been
   // resolved, then behave as if the website called complete("fail").
-  complete_timer_.StartOneShot(base::TimeDelta::FromSeconds(60), FROM_HERE);
+  complete_timer_.StartOneShot(base::Seconds(60), FROM_HERE);
 
   if (retry_resolver_) {
     DCHECK(payment_response_);
@@ -1655,14 +1620,14 @@ void PaymentRequest::OnHasEnrolledInstrument(
     case HasEnrolledInstrumentQueryResult::WARNING_HAS_ENROLLED_INSTRUMENT:
       WarnIgnoringQueryQuotaForCanMakePayment(*GetExecutionContext(),
                                               kHasEnrolledInstrumentDebugName);
-      FALLTHROUGH;
+      [[fallthrough]];
     case HasEnrolledInstrumentQueryResult::HAS_ENROLLED_INSTRUMENT:
       has_enrolled_instrument_resolver_->Resolve(true);
       break;
     case HasEnrolledInstrumentQueryResult::WARNING_HAS_NO_ENROLLED_INSTRUMENT:
       WarnIgnoringQueryQuotaForCanMakePayment(*GetExecutionContext(),
                                               kHasEnrolledInstrumentDebugName);
-      FALLTHROUGH;
+      [[fallthrough]];
     case HasEnrolledInstrumentQueryResult::HAS_NO_ENROLLED_INSTRUMENT:
       has_enrolled_instrument_resolver_->Resolve(false);
       break;
@@ -1727,8 +1692,7 @@ void PaymentRequest::DispatchPaymentRequestUpdateEvent(
 
   // If the website does not calculate the updated shopping cart contents
   // within 60 seconds, abort payment.
-  update_payment_details_timer_.StartOneShot(base::TimeDelta::FromSeconds(60),
-                                             FROM_HERE);
+  update_payment_details_timer_.StartOneShot(base::Seconds(60), FROM_HERE);
 
   event_target->DispatchEvent(*event);
   // Check whether the execution context still exists, because DispatchEvent()

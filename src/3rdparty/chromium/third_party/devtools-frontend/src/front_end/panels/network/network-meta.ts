@@ -3,16 +3,14 @@
 // found in the LICENSE file.
 
 import * as Common from '../../core/common/common.js';
-import * as Root from '../../core/root/root.js';
+import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Workspace from '../../models/workspace/workspace.js';
 import * as NetworkForward from '../../panels/network/forward/forward.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-// eslint-disable-next-line rulesdir/es_modules_import
 import type * as Network from './network.js';
 
-import * as i18n from '../../core/i18n/i18n.js';
 const UIStrings = {
   /**
   *@description Command for showing the 'Network' tool
@@ -110,6 +108,11 @@ const UIStrings = {
   *@description Title of a setting under the Network category that can be invoked through the Command Menu
   */
   dontGroupNetworkLogItemsByFrame: 'Don\'t group network log items by frame',
+  /**
+   * @description Label of a checkbox in the DevTools settings UI.
+   */
+  enableUNCLoading:
+      'Allow `DevTools` to load resources, such as source maps, from Windows Shares via `UNC` paths. Disabled by default for security reasons.',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/network/network-meta.ts', UIStrings);
 const i18nLazyString = i18n.i18n.getLazilyComputedLocalizedString.bind(undefined, str_);
@@ -117,8 +120,6 @@ let loadedNetworkModule: (typeof Network|undefined);
 
 async function loadNetworkModule(): Promise<typeof Network> {
   if (!loadedNetworkModule) {
-    // Side-effect import resources in module.json
-    await Root.Runtime.Runtime.instance().loadModulePromise('panels/network');
     loadedNetworkModule = await import('./network.js');
   }
   return loadedNetworkModule;
@@ -275,6 +276,7 @@ UI.ActionRegistration.registerActionExtension({
 
 Common.Settings.registerSettingExtension({
   category: Common.Settings.SettingCategory.NETWORK,
+  storageType: Common.Settings.SettingStorageType.Synced,
   title: i18nLazyString(UIStrings.colorcodeResourceTypes),
   settingName: 'networkColorCodeResourceTypes',
   settingType: Common.Settings.SettingType.BOOLEAN,
@@ -297,6 +299,7 @@ Common.Settings.registerSettingExtension({
 
 Common.Settings.registerSettingExtension({
   category: Common.Settings.SettingCategory.NETWORK,
+  storageType: Common.Settings.SettingStorageType.Synced,
   title: i18nLazyString(UIStrings.groupNetworkLogByFrame),
   settingName: 'network.group-by-frame',
   settingType: Common.Settings.SettingType.BOOLEAN,
@@ -316,6 +319,17 @@ Common.Settings.registerSettingExtension({
       title: i18nLazyString(UIStrings.dontGroupNetworkLogItemsByFrame),
     },
   ],
+});
+
+// While this setting is used by the Network module, we place it under the
+// "sources" category as source map loading is the dominant use case.
+Common.Settings.registerSettingExtension({
+  category: Common.Settings.SettingCategory.SOURCES,
+  storageType: Common.Settings.SettingStorageType.Synced,
+  title: i18nLazyString(UIStrings.enableUNCLoading),
+  settingName: 'network.enable-unc-loading',
+  settingType: Common.Settings.SettingType.BOOLEAN,
+  defaultValue: false,
 });
 
 UI.ViewManager.registerLocationResolver({

@@ -9,8 +9,8 @@
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/aligned_memory.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "media/base/media_export.h"
 
@@ -50,6 +50,10 @@ class MEDIA_EXPORT SincResampler {
   SincResampler(double io_sample_rate_ratio,
                 int request_frames,
                 const ReadCB read_cb);
+
+  SincResampler(const SincResampler&) = delete;
+  SincResampler& operator=(const SincResampler&) = delete;
+
   ~SincResampler();
 
   // Resample |frames| of data from |read_cb_| into |destination|.
@@ -165,13 +169,11 @@ class MEDIA_EXPORT SincResampler {
 
   // Pointers to the various regions inside |input_buffer_|.  See the diagram at
   // the top of the .cc file for more information.
-  float* r0_;
-  float* const r1_;
-  float* const r2_;
-  float* r3_;
-  float* r4_;
-
-  DISALLOW_COPY_AND_ASSIGN(SincResampler);
+  raw_ptr<float> r0_;
+  const raw_ptr<float> r1_;
+  const raw_ptr<float> r2_;
+  raw_ptr<float> r3_;
+  raw_ptr<float> r4_;
 };
 
 }  // namespace media

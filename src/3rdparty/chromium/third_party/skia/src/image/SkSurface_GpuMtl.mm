@@ -9,17 +9,17 @@
 #include "include/core/SkSurface.h"
 #include "include/gpu/GrBackendSurface.h"
 #include "include/gpu/mtl/GrMtlTypes.h"
-#include "src/gpu/GrProxyProvider.h"
-#include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/GrResourceProvider.h"
-#include "src/gpu/GrResourceProviderPriv.h"
-#include "src/gpu/v1/SurfaceDrawContext_v1.h"
+#include "src/gpu/ganesh/GrProxyProvider.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrResourceProvider.h"
+#include "src/gpu/ganesh/GrResourceProviderPriv.h"
+#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 #include "src/image/SkSurface_Gpu.h"
 
 #if SK_SUPPORT_GPU
 
-#include "src/gpu/GrSurface.h"
-#include "src/gpu/mtl/GrMtlTextureRenderTarget.h"
+#include "src/gpu/ganesh/GrSurface.h"
+#include "src/gpu/ganesh/mtl/GrMtlTextureRenderTarget.h"
 
 #ifdef SK_METAL
 #import <Metal/Metal.h>
@@ -88,7 +88,7 @@ sk_sp<SkSurface> SkSurface::MakeFromCAMetalLayer(GrRecordingContext* rContext,
                                                 std::move(colorSpace),
                                                 origin,
                                                 SkSurfacePropsCopyOrDefault(surfaceProps),
-                                                skgpu::BaseDevice::kUninit_InitContents);
+                                                skgpu::BaseDevice::InitContents::kUninit);
     if (!device) {
         return nullptr;
     }
@@ -157,7 +157,7 @@ sk_sp<SkSurface> SkSurface::MakeFromMTKView(GrRecordingContext* rContext,
                                                 std::move(colorSpace),
                                                 origin,
                                                 SkSurfacePropsCopyOrDefault(surfaceProps),
-                                                skgpu::BaseDevice::kUninit_InitContents);
+                                                skgpu::BaseDevice::InitContents::kUninit);
     if (!device) {
         return nullptr;
     }

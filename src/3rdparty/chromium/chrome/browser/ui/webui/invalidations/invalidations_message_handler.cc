@@ -56,7 +56,7 @@ void InvalidationsMessageHandler::OnJavascriptDisallowed() {
     logger_->UnregisterObserver(this);
 }
 
-void InvalidationsMessageHandler::UIReady(const base::ListValue* args) {
+void InvalidationsMessageHandler::UIReady(const base::Value::List& args) {
   AllowJavascript();
   invalidation::ProfileInvalidationProvider* invalidation_provider =
       GetInvalidationProvider(Profile::FromWebUI(web_ui()));
@@ -70,7 +70,7 @@ void InvalidationsMessageHandler::UIReady(const base::ListValue* args) {
 }
 
 void InvalidationsMessageHandler::HandleRequestDetailedStatus(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   invalidation::ProfileInvalidationProvider* invalidation_provider =
       GetInvalidationProvider(Profile::FromWebUI(web_ui()));
   if (invalidation_provider) {
@@ -80,17 +80,16 @@ void InvalidationsMessageHandler::HandleRequestDetailedStatus(
   }
 }
 
-void InvalidationsMessageHandler::UpdateContent(const base::ListValue* args) {
+void InvalidationsMessageHandler::UpdateContent(const base::Value::List& args) {
   if (logger_)
     logger_->EmitContent();
 }
 
 void InvalidationsMessageHandler::OnRegistrationChange(
-    const std::multiset<std::string>& registered_handlers) {
+    const std::set<std::string>& registered_handlers) {
   base::ListValue list_of_handlers;
-  for (auto it = registered_handlers.begin(); it != registered_handlers.end();
-       ++it) {
-    list_of_handlers.AppendString(*it);
+  for (const auto& registered_handler : registered_handlers) {
+    list_of_handlers.Append(registered_handler);
   }
   FireWebUIListener("handlers-updated", list_of_handlers);
 }
@@ -109,13 +108,13 @@ void InvalidationsMessageHandler::OnUpdatedTopics(
   base::ListValue list_of_objects;
   for (const auto& topic_item : topics) {
     std::unique_ptr<base::DictionaryValue> dic(new base::DictionaryValue());
-    dic->SetString("name", topic_item.first);
+    dic->SetStringKey("name", topic_item.first);
     // TODO(crbug.com/1056181): source has been deprecated and after Topic->
     // ObjectID refactoring completely makes no sense. It needs to be cleaned
     // up together with other ObjectID references in js counterpart. Pass 0
     // temporary to avoid changes in js counterpart.
-    dic->SetInteger("source", 0);
-    dic->SetInteger("totalCount", topic_item.second);
+    dic->SetIntKey("source", 0);
+    dic->SetIntKey("totalCount", topic_item.second);
     list_of_objects.Append(std::move(dic));
   }
   FireWebUIListener("update-ids", base::Value(handler_name), list_of_objects);

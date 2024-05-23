@@ -39,18 +39,18 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/ad_tracker.h"
+#include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
-#include "third_party/blink/renderer/core/html/conversion_measurement_parsing.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/number_parsing_options.h"
@@ -70,10 +70,9 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
                                               LocalDOMWindow* dom_window) {
   WebWindowFeatures window_features;
 
-  ImpressionFeatures impression_features;
-  bool conversion_measurement_enabled =
+  bool attribution_reporting_enabled =
       dom_window &&
-      RuntimeEnabledFeatures::ConversionMeasurementEnabled(dom_window);
+      RuntimeEnabledFeatures::AttributionReportingEnabled(dom_window);
 
   // This code follows the HTML spec, specifically
   // https://html.spec.whatwg.org/C/#concept-window-open-features-tokenize
@@ -81,12 +80,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
     return window_features;
 
   bool ui_features_were_disabled = false;
-
-  // See crbug.com/1192701 for details, but we're working on changing the
-  // popup-triggering conditions for window.open. This bool represents the "new"
-  // state after this change.
-  bool is_popup_with_new_behavior = false;
-
+  enum class PopupState { kUnknown, kPopup, kWindow };
+  PopupState popup_state = PopupState::kUnknown;
   unsigned key_begin, key_end;
   unsigned value_begin, value_end;
 
@@ -151,7 +146,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
     // Listing a key with no value is shorthand for key=yes
     int value;
-    if (value_string.IsEmpty() || value_string == "yes") {
+    if (value_string.IsEmpty() || value_string == "yes" ||
+        value_string == "true") {
       value = 1;
     } else if (value_string.Is8Bit()) {
       value = CharactersToInt(value_string.Characters8(), value_string.length(),
@@ -164,12 +160,7 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
     if (!ui_features_were_disabled && key_string != "noopener" &&
         key_string != "noreferrer" &&
-        (!conversion_measurement_enabled ||
-         (key_string != "attributionsourceeventid" &&
-          key_string != "attributiondestination" &&
-          key_string != "attributionreportto" &&
-          key_string != "attributionexpiry" &&
-          key_string != "attributionsourcepriority"))) {
+        (!attribution_reporting_enabled || key_string != "attributionsrc")) {
       ui_features_were_disabled = true;
       window_features.menu_bar_visible = false;
       window_features.status_bar_visible = false;
@@ -186,8 +177,9 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
     } else if (key_string == "width" || key_string == "innerwidth") {
       window_features.width_set = true;
       window_features.width = value;
-      // Width will be the only trigger for a popup.
-      is_popup_with_new_behavior = true;
+    } else if (key_string == "popup") {
+      // The 'popup' property explicitly triggers a popup.
+      popup_state = value ? PopupState::kPopup : PopupState::kWindow;
     } else if (key_string == "height" || key_string == "innerheight") {
       window_features.height_set = true;
       window_features.height = value;
@@ -209,41 +201,32 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
       window_features.background = true;
     } else if (key_string == "persistent") {
       window_features.persistent = true;
-    } else if (conversion_measurement_enabled) {
-      if (key_string == "attributionsourceeventid") {
-        impression_features.impression_data = value_string.ToString();
-      } else if (key_string == "attributiondestination") {
-        impression_features.conversion_destination = value_string.ToString();
-      } else if (key_string == "attributionreportto") {
-        impression_features.reporting_origin = value_string.ToString();
-      } else if (key_string == "attributionexpiry") {
-        impression_features.expiry = value_string.ToString();
-      } else if (key_string == "attributionsourcepriority") {
-        impression_features.priority = value_string.ToString();
-      }
+    } else if (attribution_reporting_enabled &&
+               key_string == "attributionsrc") {
+      window_features.impression =
+          dom_window->GetFrame()->GetAttributionSrcLoader()->RegisterNavigation(
+              dom_window->CompleteURL(value_string.ToString()));
     }
   }
 
-  // Existing logic from NavigationPolicy::NavigationPolicyForCreateWindow():
-  if (dom_window && dom_window->document()) {
-    bool is_popup_with_current_behavior = !window_features.tool_bar_visible ||
-                                          !window_features.status_bar_visible ||
-                                          !window_features.scrollbars_visible ||
-                                          !window_features.menu_bar_visible ||
-                                          !window_features.resizable;
-    if (is_popup_with_current_behavior != is_popup_with_new_behavior) {
-      UseCounter::Count(dom_window->document(),
-                        WebFeature::kWindowOpenNewPopupBehaviorMismatch);
+  if (RuntimeEnabledFeatures::WindowOpenNewPopupBehaviorEnabled()) {
+    bool is_popup = popup_state == PopupState::kPopup;
+    if (popup_state == PopupState::kUnknown) {
+      is_popup = !window_features.tool_bar_visible ||
+                 !window_features.menu_bar_visible ||
+                 !window_features.resizable ||
+                 !window_features.scrollbars_visible ||
+                 !window_features.status_bar_visible;
     }
+    // If this is a popup, set all BarProps to false, and vice versa.
+    window_features.tool_bar_visible = !is_popup;
+    window_features.menu_bar_visible = !is_popup;
+    window_features.scrollbars_visible = !is_popup;
+    window_features.status_bar_visible = !is_popup;
   }
 
   if (window_features.noreferrer)
     window_features.noopener = true;
-
-  if (conversion_measurement_enabled) {
-    window_features.impression =
-        GetImpressionFromWindowFeatures(dom_window, impression_features);
-  }
 
   return window_features;
 }
@@ -289,15 +272,11 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
   request.SetFrameType(mojom::RequestContextFrameType::kAuxiliary);
 
   const KURL& url = request.GetResourceRequest().Url();
-  auto* csp_for_world = opener_window.GetContentSecurityPolicyForCurrentWorld();
-  if (url.ProtocolIsJavaScript() && csp_for_world) {
-    String script_source = DecodeURLEscapeSequences(
-        url.GetString(), DecodeURLMode::kUTF8OrIsomorphic);
-
-    if (!csp_for_world->AllowInline(
-            ContentSecurityPolicy::InlineType::kNavigation,
-            nullptr /* element */, script_source, String() /* nonce */,
-            opener_window.Url(), OrdinalNumber::First())) {
+  if (url.ProtocolIsJavaScript()) {
+    if (opener_window
+            .CheckAndGetJavascriptUrl(request.JavascriptWorld().get(), url,
+                                      nullptr /* element */)
+            .IsEmpty()) {
       return nullptr;
     }
   }
@@ -311,9 +290,15 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
   }
 
   const WebWindowFeatures& features = request.GetWindowFeatures();
-  request.SetNavigationPolicy(NavigationPolicyForCreateWindow(features));
-  probe::WindowOpen(&opener_window, url, frame_name, features,
-                    LocalFrame::HasTransientUserActivation(&opener_frame));
+  const auto& picture_in_picture_window_options =
+      request.GetPictureInPictureWindowOptions();
+  if (picture_in_picture_window_options.has_value()) {
+    request.SetNavigationPolicy(kNavigationPolicyPictureInPicture);
+  } else {
+    request.SetNavigationPolicy(NavigationPolicyForCreateWindow(features));
+    probe::WindowOpen(&opener_window, url, frame_name, features,
+                      LocalFrame::HasTransientUserActivation(&opener_frame));
+  }
 
   // Sandboxed frames cannot open new auxiliary browsing contexts.
   if (opener_window.IsSandboxed(
@@ -367,20 +352,18 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
 
   frame.View()->SetCanHaveScrollbars(features.scrollbars_visible);
 
-  IntRect window_rect = page->GetChromeClient().RootWindowRect(frame);
+  gfx::Rect window_rect = page->GetChromeClient().RootWindowRect(frame);
   if (features.x_set)
-    window_rect.SetX(features.x);
+    window_rect.set_x(features.x);
   if (features.y_set)
-    window_rect.SetY(features.y);
+    window_rect.set_y(features.y);
   if (features.width_set)
-    window_rect.SetWidth(features.width);
+    window_rect.set_width(features.width);
   if (features.height_set)
-    window_rect.SetHeight(features.height);
+    window_rect.set_height(features.height);
 
-  IntRect rect = page->GetChromeClient().CalculateWindowRectWithAdjustment(
-      window_rect, frame, opener_frame);
-  page->GetChromeClient().Show(opener_frame.GetLocalFrameToken(),
-                               request.GetNavigationPolicy(), rect,
+  page->GetChromeClient().Show(frame, opener_frame,
+                               request.GetNavigationPolicy(), window_rect,
                                consumed_user_gesture);
   MaybeLogWindowOpen(opener_frame);
   return &frame;

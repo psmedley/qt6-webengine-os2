@@ -35,9 +35,10 @@
 import * as Common from '../../core/common/common.js';
 import * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import type * as Protocol from '../../generated/protocol.js';
 import * as Workspace from '../workspace/workspace.js';
 
-export function resourceForURL(url: string): SDK.Resource.Resource|null {
+export function resourceForURL(url: Platform.DevToolsPath.UrlString): SDK.Resource.Resource|null {
   for (const resourceTreeModel of SDK.TargetManager.TargetManager.instance().models(
            SDK.ResourceTreeModel.ResourceTreeModel)) {
     const resource = resourceTreeModel.resourceForURL(url);
@@ -48,7 +49,7 @@ export function resourceForURL(url: string): SDK.Resource.Resource|null {
   return null;
 }
 
-export function displayNameForURL(url: string): string {
+export function displayNameForURL(url: Platform.DevToolsPath.UrlString): string {
   if (!url) {
     return '';
   }
@@ -88,7 +89,8 @@ export function displayNameForURL(url: string): string {
 }
 
 export function metadataForURL(
-    target: SDK.Target.Target, frameId: string, url: string): Workspace.UISourceCode.UISourceCodeMetadata|null {
+    target: SDK.Target.Target, frameId: Protocol.Page.FrameId,
+    url: Platform.DevToolsPath.UrlString): Workspace.UISourceCode.UISourceCodeMetadata|null {
   const resourceTreeModel = target.model(SDK.ResourceTreeModel.ResourceTreeModel);
   if (!resourceTreeModel) {
     return null;

@@ -97,10 +97,13 @@ namespace {
 
 class CrOSDataSource : public tracing::PerfettoTracedProcess::DataSourceBase {
  public:
-  static CrOSDataSource* GetInstance() {
+  static CrOSDataSource& GetInstance() {
     static base::NoDestructor<CrOSDataSource> instance;
-    return instance.get();
+    return *instance;
   }
+
+  CrOSDataSource(const CrOSDataSource&) = delete;
+  CrOSDataSource& operator=(const CrOSDataSource&) = delete;
 
   // Called from the tracing::PerfettoProducer on its sequence.
   void StartTracingImpl(
@@ -220,15 +223,13 @@ class CrOSDataSource : public tracing::PerfettoTracedProcess::DataSourceBase {
   std::unique_ptr<
       tracing::SystemTraceWriter<scoped_refptr<base::RefCountedString>>>
       trace_writer_;
-
-  DISALLOW_COPY_AND_ASSIGN(CrOSDataSource);
 };
 
 }  // namespace
 
 CrOSTracingAgent::CrOSTracingAgent() {
   tracing::PerfettoTracedProcess::Get()->AddDataSource(
-      CrOSDataSource::GetInstance());
+      &CrOSDataSource::GetInstance());
 }
 
 CrOSTracingAgent::~CrOSTracingAgent() = default;

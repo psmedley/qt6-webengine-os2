@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "content/browser/devtools/devtools_throttle_handle.h"
+#include "content/browser/renderer_host/back_forward_cache_impl.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/global_routing_id.h"
@@ -22,6 +23,7 @@
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom-forward.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-forward.h"
 #include "third_party/blink/public/mojom/navigation/navigation_params.mojom-forward.h"
 #include "third_party/blink/public/mojom/page/widget.mojom.h"
@@ -52,6 +54,7 @@ namespace content {
 class BackForwardCacheCanStoreDocumentResult;
 class BrowserContext;
 class DevToolsAgentHostImpl;
+class FencedFrame;
 class FrameTreeNode;
 class NavigationHandle;
 class NavigationRequest;
@@ -74,12 +77,16 @@ class InspectorIssue;
 
 namespace devtools_instrumentation {
 
+// If this function caused the User-Agent header to be overridden,
+// `devtools_user_agent_overridden` will be set to true; otherwise, it will be
+// set to false.
 void ApplyNetworkRequestOverrides(
     FrameTreeNode* frame_tree_node,
     blink::mojom::BeginNavigationParams* begin_params,
     bool* report_raw_headers,
     absl::optional<std::vector<net::SourceStream::SourceType>>*
-        devtools_accepted_stream_types);
+        devtools_accepted_stream_types,
+    bool* devtools_user_agent_overridden);
 
 // Returns true if devtools want |*override_out| to be used.
 // (A true return and |*override_out| being nullopt means no user agent client
@@ -149,7 +156,10 @@ void WillBeginDownload(download::DownloadCreateInfo* info,
 
 void BackForwardCacheNotUsed(
     const NavigationRequest* nav_request,
-    const BackForwardCacheCanStoreDocumentResult* result);
+    const BackForwardCacheCanStoreDocumentResult* result,
+    const BackForwardCacheCanStoreTreeResult* tree_result);
+
+void DidActivatePrerender(const NavigationRequest& nav_request);
 
 void OnSignedExchangeReceived(
     FrameTreeNode* frame_tree_node,
@@ -191,10 +201,20 @@ std::vector<std::unique_ptr<NavigationThrottle>> CreateNavigationThrottles(
 //   installing service worker agent. It is expected to exist.
 // - `requesting_frame_id` is required, because the auto attacher is the one of
 //   the frame registering the worker.
-void ThrottleMainScriptFetch(
+void ThrottleServiceWorkerMainScriptFetch(
     ServiceWorkerContextWrapper* wrapper,
     int64_t version_id,
     const GlobalRenderFrameHostId& requesting_frame_id,
+    scoped_refptr<DevToolsThrottleHandle> throttle_handle);
+
+// For PlzDedicatedWorker. When creating a new DedicatedWorker with
+// PlzDedicatedWorker, the worker script fetch happens before starting the
+// worker. This function is called when DedicatedWorkerHost, which is the
+// representation of a worker in the browser process, is created.
+// `throttle_handle` controls when the script fetch resumes.
+void ThrottleWorkerMainScriptFetch(
+    const base::UnguessableToken& devtools_worker_token,
+    const GlobalRenderFrameHostId& ancestor_render_frame_host_id,
     scoped_refptr<DevToolsThrottleHandle> throttle_handle);
 
 bool ShouldWaitForDebuggerInWindowOpen();
@@ -217,12 +237,16 @@ void PortalAttached(RenderFrameHostImpl* render_frame_host_impl);
 void PortalDetached(RenderFrameHostImpl* render_frame_host_impl);
 void PortalActivated(RenderFrameHostImpl* render_frame_host_impl);
 
-void ReportSameSiteCookieIssue(
+void FencedFrameCreated(
+    base::SafeRef<RenderFrameHostImpl> owner_render_frame_host,
+    FencedFrame* fenced_frame);
+
+void ReportCookieIssue(
     RenderFrameHostImpl* render_frame_host_impl,
     const network::mojom::CookieOrLineWithAccessResultPtr& excluded_cookie,
     const GURL& url,
     const net::SiteForCookies& site_for_cookies,
-    blink::mojom::SameSiteCookieOperation operation,
+    blink::mojom::CookieOperation operation,
     const absl::optional<std::string>& devtools_request_id);
 
 // This function works similar to RenderFrameHostImpl::AddInspectorIssue, in
@@ -258,13 +282,50 @@ void OnWebTransportHandshakeFailed(
 void OnServiceWorkerMainScriptFetchingFailed(
     const GlobalRenderFrameHostId& requesting_frame_id,
     const std::string& error);
+void OnServiceWorkerMainScriptRequestWillBeSent(
+    const GlobalRenderFrameHostId& requesting_frame_id,
+    const ServiceWorkerContextWrapper* context_wrapper,
+    int64_t version_id,
+    const network::ResourceRequest& request);
 
-// Adds a debug error message from a worklet to the devtools console.
-void LogWorkletError(RenderFrameHostImpl* frame_host, const std::string& error);
+// Fires `Network.onLoadingFailed` event for a dedicated worker main script.
+// Used for PlzDedicatedWorker.
+void OnWorkerMainScriptLoadingFailed(
+    const GURL& url,
+    const base::UnguessableToken& worker_token,
+    FrameTreeNode* ftn,
+    RenderFrameHostImpl* ancestor_rfh,
+    const network::URLLoaderCompletionStatus& status);
+
+// Fires `Network.onLoadingFinished` event for a dedicated worker main script.
+// Used for PlzDedicatedWorker.
+void OnWorkerMainScriptLoadingFinished(
+    FrameTreeNode* ftn,
+    const base::UnguessableToken& worker_token,
+    const network::URLLoaderCompletionStatus& status);
+
+// Fires `Network.onRequestWillBeSent` event for a dedicated worker and shared
+// worker main script. Used for PlzDedicatedWorker/PlzSharedWorker.
+void OnWorkerMainScriptRequestWillBeSent(
+    FrameTreeNode* ftn,
+    const base::UnguessableToken& worker_token,
+    const network::ResourceRequest& request);
+
+// Adds a message from a worklet to the devtools console. This is specific to
+// FLEDGE auction worklet and shared storage worklet where the message may
+// contain sensitive cross-origin information, and therefore the devtools
+// logging needs to bypass the usual path through the renderer.
+void CONTENT_EXPORT
+LogWorkletMessage(RenderFrameHostImpl& frame_host,
+                  blink::mojom::ConsoleMessageLevel log_level,
+                  const std::string& message);
 
 void ApplyNetworkContextParamsOverrides(
     BrowserContext* browser_context,
     network::mojom::NetworkContextParams* network_context_params);
+
+void DidRejectCrossOriginPortalMessage(
+    RenderFrameHostImpl* render_frame_host_impl);
 
 }  // namespace devtools_instrumentation
 

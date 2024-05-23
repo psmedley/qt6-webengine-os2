@@ -7,7 +7,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_driver.h"
@@ -15,7 +14,7 @@
 #include "services/network/test/test_url_loader_factory.h"
 #include "url/origin.h"
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/webauthn/core/browser/internal_authenticator.h"
 #endif
@@ -23,7 +22,7 @@
 namespace autofill {
 
 // This class is only for easier writing of tests.
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 class TestAutofillDriver : public AutofillDriver {
 #else
 class TestAutofillDriver : public ContentAutofillDriver {
@@ -36,21 +35,25 @@ class TestAutofillDriver : public ContentAutofillDriver {
 
   // AutofillDriver implementation overrides.
   bool IsIncognito() const override;
-  bool IsInMainFrame() const override;
+  bool IsInAnyMainFrame() const override;
   bool IsPrerendering() const override;
   bool CanShowAutofillUi() const override;
   ui::AXTreeID GetAxTreeId() const override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   bool RendererIsAvailable() override;
-#if !defined(OS_IOS)
-  InternalAuthenticator* GetOrCreateCreditCardInternalAuthenticator() override;
+#if !BUILDFLAG(IS_IOS)
+  webauthn::InternalAuthenticator* GetOrCreateCreditCardInternalAuthenticator()
+      override;
 #endif
-  void FillOrPreviewForm(int query_id,
-                         mojom::RendererFormDataAction action,
-                         const FormData& data,
-                         const url::Origin& triggered_origin,
-                         const base::flat_map<FieldGlobalId, ServerFieldType>&
-                             field_type_map) override;
+  // The return value contains the members (field, type) of `field_type_map` for
+  // which `field_type_filter_.Run(triggered_origin, field, type)` is true.
+  std::vector<FieldGlobalId> FillOrPreviewForm(
+      int query_id,
+      mojom::RendererFormDataAction action,
+      const FormData& data,
+      const url::Origin& triggered_origin,
+      const base::flat_map<FieldGlobalId, ServerFieldType>& field_type_map)
+      override;
   void PropagateAutofillPredictions(
       const std::vector<autofill::FormStructure*>& forms) override;
   void HandleParsedForms(const std::vector<const FormData*>& forms) override;
@@ -78,24 +81,32 @@ class TestAutofillDriver : public ContentAutofillDriver {
   // functionality.
 
   void SetIsIncognito(bool is_incognito);
-  void SetIsInMainFrame(bool is_in_main_frame);
+  void SetIsInAnyMainFrame(bool is_in_any_main_frame);
   void SetIsolationInfo(const net::IsolationInfo& isolation_info);
+
+  // The filter that determines the return value of FillOrPreviewForm().
+  void SetFieldTypeMapFilter(
+      base::RepeatingCallback<
+          bool(const url::Origin&, FieldGlobalId, ServerFieldType)> callback);
 
   void SetSharedURLLoaderFactory(
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
-#if !defined(OS_IOS)
-  void SetAuthenticator(InternalAuthenticator* authenticator_);
+#if !BUILDFLAG(IS_IOS)
+  void SetAuthenticator(webauthn::InternalAuthenticator* authenticator_);
 #endif
 
  private:
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   bool is_incognito_ = false;
-  bool is_in_main_frame_ = false;
+  bool is_in_any_main_frame_ = false;
   net::IsolationInfo isolation_info_;
+  base::RepeatingCallback<
+      bool(const url::Origin&, FieldGlobalId, ServerFieldType)>
+      field_type_map_filter_;
 
-#if !defined(OS_IOS)
-  std::unique_ptr<InternalAuthenticator> test_authenticator_;
+#if !BUILDFLAG(IS_IOS)
+  std::unique_ptr<webauthn::InternalAuthenticator> test_authenticator_;
 #endif
 };
 

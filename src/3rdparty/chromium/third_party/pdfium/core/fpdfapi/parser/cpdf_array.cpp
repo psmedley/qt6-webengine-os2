@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "core/fpdfapi/parser/cpdf_boolean.h"
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_name.h"
 #include "core/fpdfapi/parser/cpdf_number.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
@@ -28,7 +29,7 @@ CPDF_Array::~CPDF_Array() {
   // Break cycles for cyclic references.
   m_ObjNum = kInvalidObjNum;
   for (auto& it : m_Objects) {
-    if (it && it->GetObjNum() == kInvalidObjNum)
+    if (it->GetObjNum() == kInvalidObjNum)
       it.Leak();
   }
 }
@@ -88,6 +89,18 @@ CFX_Matrix CPDF_Array::GetMatrix() const {
                     GetNumberAt(3), GetNumberAt(4), GetNumberAt(5));
 }
 
+absl::optional<size_t> CPDF_Array::Find(const CPDF_Object* pThat) const {
+  for (size_t i = 0; i < size(); ++i) {
+    if (GetDirectObjectAt(i) == pThat)
+      return i;
+  }
+  return absl::nullopt;
+}
+
+bool CPDF_Array::Contains(const CPDF_Object* pThat) const {
+  return Find(pThat).has_value();
+}
+
 CPDF_Object* CPDF_Array::GetObjectAt(size_t index) {
   if (index >= m_Objects.size())
     return nullptr;
@@ -101,15 +114,13 @@ const CPDF_Object* CPDF_Array::GetObjectAt(size_t index) const {
 }
 
 CPDF_Object* CPDF_Array::GetDirectObjectAt(size_t index) {
-  if (index >= m_Objects.size())
-    return nullptr;
-  return m_Objects[index]->GetDirect();
+  CPDF_Object* pObj = GetObjectAt(index);
+  return pObj ? pObj->GetDirect() : nullptr;
 }
 
 const CPDF_Object* CPDF_Array::GetDirectObjectAt(size_t index) const {
-  if (index >= m_Objects.size())
-    return nullptr;
-  return m_Objects[index]->GetDirect();
+  const CPDF_Object* pObj = GetObjectAt(index);
+  return pObj ? pObj->GetDirect() : nullptr;
 }
 
 ByteString CPDF_Array::GetStringAt(size_t index) const {
@@ -141,6 +152,10 @@ float CPDF_Array::GetNumberAt(size_t index) const {
   if (index >= m_Objects.size())
     return 0;
   return m_Objects[index]->GetNumber();
+}
+
+RetainPtr<CPDF_Dictionary> CPDF_Array::GetMutableDictAt(size_t index) {
+  return pdfium::WrapRetain(GetDictAt(index));
 }
 
 CPDF_Dictionary* CPDF_Array::GetDictAt(size_t index) {
@@ -207,11 +222,11 @@ void CPDF_Array::ConvertToIndirectObjectAt(size_t index,
 
 CPDF_Object* CPDF_Array::SetAt(size_t index, RetainPtr<CPDF_Object> pObj) {
   CHECK(!IsLocked());
-  DCHECK(!pObj || pObj->IsInline());
-  if (index >= m_Objects.size()) {
-    NOTREACHED();
+  CHECK(pObj);
+  CHECK(pObj->IsInline());
+  if (index >= m_Objects.size())
     return nullptr;
-  }
+
   CPDF_Object* pRet = pObj.Get();
   m_Objects[index] = std::move(pObj);
   return pRet;
@@ -219,22 +234,20 @@ CPDF_Object* CPDF_Array::SetAt(size_t index, RetainPtr<CPDF_Object> pObj) {
 
 CPDF_Object* CPDF_Array::InsertAt(size_t index, RetainPtr<CPDF_Object> pObj) {
   CHECK(!IsLocked());
-  CHECK(!pObj || pObj->IsInline());
+  CHECK(pObj);
+  CHECK(pObj->IsInline());
+  if (index > m_Objects.size())
+    return nullptr;
+
   CPDF_Object* pRet = pObj.Get();
-  if (index >= m_Objects.size()) {
-    // Allocate space first.
-    m_Objects.resize(index + 1);
-    m_Objects[index] = std::move(pObj);
-  } else {
-    // Directly insert.
-    m_Objects.insert(m_Objects.begin() + index, std::move(pObj));
-  }
+  m_Objects.insert(m_Objects.begin() + index, std::move(pObj));
   return pRet;
 }
 
 CPDF_Object* CPDF_Array::Append(RetainPtr<CPDF_Object> pObj) {
   CHECK(!IsLocked());
-  CHECK(!pObj || pObj->IsInline());
+  CHECK(pObj);
+  CHECK(pObj->IsInline());
   CPDF_Object* pRet = pObj.Get();
   m_Objects.push_back(std::move(pObj));
   return pRet;

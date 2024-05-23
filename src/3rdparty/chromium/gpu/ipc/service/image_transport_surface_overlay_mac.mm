@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "gpu/command_buffer/common/swap_buffers_complete_params.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
@@ -21,6 +22,7 @@
 #include "ui/accelerated_widget_mac/io_surface_context.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/video_types.h"
 #include "ui/gl/ca_renderer_layer_params.h"
 #include "ui/gl/gl_context.h"
@@ -29,6 +31,12 @@
 #include "ui/gl/scoped_cgl.h"
 
 namespace gpu {
+
+namespace {
+// Control use of AVFoundation to draw video content.
+base::Feature kAVFoundationOverlays{"avfoundation-overlays",
+                                    base::FEATURE_ENABLED_BY_DEFAULT};
+}  // namespace
 
 template <typename BaseClass>
 ImageTransportSurfaceOverlayMacBase<BaseClass>::
@@ -42,8 +50,7 @@ ImageTransportSurfaceOverlayMacBase<BaseClass>::
   ui::GpuSwitchingManager::GetInstance()->AddObserver(this);
 
   static bool av_disabled_at_command_line =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableAVFoundationOverlays);
+      !base::FeatureList::IsEnabled(kAVFoundationOverlays);
 
   bool allow_av_sample_buffer_display_layer =
       !av_disabled_at_command_line &&
@@ -189,8 +196,9 @@ ImageTransportSurfaceOverlayMacBase<BaseClass>::SwapBuffersInternal(
       base::Time::kMicrosecondsPerSecond / 60;
   gfx::PresentationFeedback feedback(
       base::TimeTicks::Now(),
-      base::TimeDelta::FromMicroseconds(kRefreshIntervalInMicroseconds),
-      0 /* flags */);
+      base::Microseconds(kRefreshIntervalInMicroseconds), /*flags=*/0);
+  feedback.ca_layer_error_code = ca_layer_error_code_;
+
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(
@@ -203,16 +211,15 @@ ImageTransportSurfaceOverlayMacBase<BaseClass>::SwapBuffersInternal(
 template <typename BaseClass>
 gfx::SwapResult ImageTransportSurfaceOverlayMacBase<BaseClass>::SwapBuffers(
     gl::GLSurface::PresentationCallback callback) {
-  return SwapBuffersInternal(
-      base::DoNothing(), std::move(callback));
+  return SwapBuffersInternal(base::DoNothing(), std::move(callback));
 }
 
 template <typename BaseClass>
 void ImageTransportSurfaceOverlayMacBase<BaseClass>::SwapBuffersAsync(
     gl::GLSurface::SwapCompletionCallback completion_callback,
     gl::GLSurface::PresentationCallback presentation_callback) {
-  SwapBuffersInternal(
-      std::move(completion_callback), std::move(presentation_callback));
+  SwapBuffersInternal(std::move(completion_callback),
+                      std::move(presentation_callback));
 }
 
 template <typename BaseClass>
@@ -296,19 +303,14 @@ bool ImageTransportSurfaceOverlayMacBase<BaseClass>::OnMakeCurrent(
 
 template <typename BaseClass>
 bool ImageTransportSurfaceOverlayMacBase<BaseClass>::ScheduleOverlayPlane(
-    int z_order,
-    gfx::OverlayTransform transform,
     gl::GLImage* image,
-    const gfx::Rect& pixel_frame_rect,
-    const gfx::RectF& crop_rect,
-    bool enable_blend,
-    const gfx::Rect& damage_rect,
-    std::unique_ptr<gfx::GpuFence> gpu_fence) {
-  if (transform != gfx::OVERLAY_TRANSFORM_NONE) {
+    std::unique_ptr<gfx::GpuFence> gpu_fence,
+    const gfx::OverlayPlaneData& overlay_plane_data) {
+  if (overlay_plane_data.plane_transform != gfx::OVERLAY_TRANSFORM_NONE) {
     DLOG(ERROR) << "Invalid overlay plane transform.";
     return false;
   }
-  if (z_order) {
+  if (overlay_plane_data.z_order) {
     DLOG(ERROR) << "Invalid non-zero Z order.";
     return false;
   }
@@ -318,14 +320,17 @@ bool ImageTransportSurfaceOverlayMacBase<BaseClass>::ScheduleOverlayPlane(
     DLOG(ERROR) << "Not an IOSurface image.";
     return false;
   }
+  // TODO(1290313): the display_bounds might not need to be rounded to the
+  // nearest rect as this eventually gets made into a CALayer. CALayers work in
+  // floats.
   const ui::CARendererLayerParams overlay_as_calayer_params(
       false,          // is_clipped
       gfx::Rect(),    // clip_rect
       gfx::RRectF(),  // rounded_corner_bounds
       0,              // sorting_context_id
       gfx::Transform(), image,
-      crop_rect,                         // contents_rect
-      pixel_frame_rect,                  // rect
+      overlay_plane_data.crop_rect,                           // contents_rect
+      gfx::ToNearestRect(overlay_plane_data.display_bounds),  // rect
       SK_ColorTRANSPARENT,               // background_color
       0,                                 // edge_aa_mask
       1.f,                               // opacity
@@ -396,14 +401,17 @@ void ImageTransportSurfaceOverlayMacBase<BaseClass>::OnGpuSwitched(
   }
   gl_renderer_id_ = context_renderer_id & kCGLRendererIDMatchingMask;
 
-  // Post a task holding a reference to the new GL context. The reason for
-  // this is to avoid creating-then-destroying the context for every image
-  // transport surface that is observing the GPU switch.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          base::DoNothing::Once<scoped_refptr<ui::IOSurfaceContext>>(),
-          context_on_new_gpu));
+  // Delay releasing the reference to the new GL context. The reason for this
+  // is to avoid creating-then-destroying the context for every image transport
+  // surface that is observing the GPU switch.
+  base::ThreadTaskRunnerHandle::Get()->ReleaseSoon(
+      FROM_HERE, std::move(context_on_new_gpu));
+}
+
+template <typename BaseClass>
+void ImageTransportSurfaceOverlayMacBase<BaseClass>::SetCALayerErrorCode(
+    gfx::CALayerResult ca_layer_error_code) {
+  ca_layer_error_code_ = ca_layer_error_code;
 }
 
 // Template instantiation

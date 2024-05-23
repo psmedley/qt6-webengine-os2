@@ -4,6 +4,7 @@
 
 #include "components/feed/core/v2/types.h"
 
+#include <ostream>
 #include <utility>
 
 #include "base/base64.h"
@@ -12,6 +13,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "components/feed/core/v2/proto_util.h"
 #include "components/feed/core/v2/public/types.h"
 
 // Note: This file contains implementation for both types.h and public/types.h.
@@ -42,9 +44,9 @@ bool UnpickleNetworkResponseInfo(base::PickleIterator& iterator,
         iterator.ReadString(&value.bless_nonce) &&
         iterator.ReadString(&base_request_url)))
     return false;
-  value.fetch_duration = base::TimeDelta::FromMilliseconds(fetch_duration_ms);
-  value.fetch_time = base::TimeDelta::FromMilliseconds(fetch_time_ms) +
-                     base::Time::UnixEpoch();
+  value.fetch_duration = base::Milliseconds(fetch_duration_ms);
+  value.fetch_time =
+      base::Milliseconds(fetch_time_ms) + base::Time::UnixEpoch();
   value.base_request_url = GURL(base_request_url);
   return true;
 }
@@ -79,7 +81,6 @@ bool UnpickleOptionalNetworkResponseInfo(
 }
 
 void PickleDebugStreamData(const DebugStreamData& value, base::Pickle& pickle) {
-  (void)PickleOptionalNetworkResponseInfo;
   pickle.WriteInt(DebugStreamData::kVersion);
   PickleOptionalNetworkResponseInfo(value.fetch_info, pickle);
   PickleOptionalNetworkResponseInfo(value.upload_info, pickle);
@@ -101,6 +102,9 @@ RequestMetadata::RequestMetadata() = default;
 RequestMetadata::~RequestMetadata() = default;
 RequestMetadata::RequestMetadata(RequestMetadata&&) = default;
 RequestMetadata& RequestMetadata::operator=(RequestMetadata&&) = default;
+feedwire::ClientInfo RequestMetadata::ToClientInfo() const {
+  return CreateClientInfo(*this);
+}
 
 NetworkResponseInfo::NetworkResponseInfo() = default;
 NetworkResponseInfo::~NetworkResponseInfo() = default;
@@ -205,6 +209,14 @@ bool ContentIdSet::IsEmpty() const {
 }
 bool ContentIdSet::operator==(const ContentIdSet& rhs) const {
   return content_ids_ == rhs.content_ids_;
+}
+std::ostream& operator<<(std::ostream& s, const ContentIdSet& id_set) {
+  s << "{";
+  for (int64_t id : id_set.values()) {
+    s << id << ", ";
+  }
+  s << "}";
+  return s;
 }
 
 LaunchResult::LaunchResult(LoadStreamStatus load_stream_status,

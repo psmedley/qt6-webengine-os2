@@ -22,7 +22,7 @@ class LayoutNGTextTest : public NGLayoutTest {
       return "LayoutText has NeedsCollectInlines";
     if (!layout_text.HasValidInlineItems())
       return "No valid inline items in LayoutText";
-    const LayoutBlockFlow& block_flow = *layout_text.ContainingNGBlockFlow();
+    const LayoutBlockFlow& block_flow = *layout_text.FragmentItemsContainer();
     if (block_flow.NeedsCollectInlines())
       return "LayoutBlockFlow has NeedsCollectInlines";
     const NGInlineNodeData& data = *block_flow.GetNGInlineNodeData();
@@ -39,7 +39,7 @@ class LayoutNGTextTest : public NGLayoutTest {
       if (const auto* shape_result = item.TextShapeResult()) {
         stream << ", ShapeResult=" << shape_result->StartIndex() << "+"
                << shape_result->NumCharacters();
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
         if (shape_result->NumCharacters() != shape_result->NumGlyphs())
           stream << " #glyphs=" << shape_result->NumGlyphs();
 #else
@@ -168,6 +168,24 @@ TEST_F(LayoutNGTextTest, SetTextWithOffsetDeleteCollapseWhiteSpaceEnd) {
   text.deleteData(2, 2, ASSERT_NO_EXCEPTION);  // remove "bc"
 
   EXPECT_EQ("*{'a', ShapeResult=0+1}\n",
+            GetItemsAsString(*text.GetLayoutObject()));
+}
+
+// http://crbug.com/1253931
+TEST_F(LayoutNGTextTest, SetTextWithOffsetCopyItemBefore) {
+  SetBodyInnerHTML(u"<p id=target><img> a</p>");
+
+  auto& target = *GetElementById("target");
+  const auto& text = *To<Text>(target.lastChild());
+
+  target.appendChild(Text::Create(GetDocument(), "YuGFkVSKiG"));
+  UpdateAllLifecyclePhasesForTest();
+
+  // Combine Text nodes "a " and "YuGFkVSKiG".
+  target.normalize();
+  UpdateAllLifecyclePhasesForTest();
+
+  EXPECT_EQ("*{' aYuGFkVSKiG', ShapeResult=1+12}\n",
             GetItemsAsString(*text.GetLayoutObject()));
 }
 

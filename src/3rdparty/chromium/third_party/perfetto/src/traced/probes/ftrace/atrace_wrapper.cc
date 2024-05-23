@@ -28,14 +28,11 @@
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/base/time.h"
+#include "perfetto/ext/base/android_utils.h"
 #include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/pipe.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/utils.h"
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-#include <sys/system_properties.h>
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 
 namespace perfetto {
 
@@ -46,7 +43,8 @@ base::Optional<bool> g_is_old_atrace_for_testing{};
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 // Args should include "atrace" for argv[0].
-bool ExecvAtrace(const std::vector<std::string>& args) {
+bool ExecvAtrace(const std::vector<std::string>& args,
+                 std::string* atrace_errors) {
   int status = 1;
 
   std::vector<char*> argv;
@@ -166,21 +164,22 @@ bool ExecvAtrace(const std::vector<std::string>& args) {
   PERFETTO_EINTR(waitpid(pid, &status, 0));
 
   bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-  if (!ok) {
-    // TODO(lalitm): use the stderr result from atrace.
+  if (!ok)
     PERFETTO_ELOG("%s", error.c_str());
-  }
+  if (atrace_errors)
+    atrace_errors->append(error);
   return ok;
 }
 #endif
 
 }  // namespace
 
-bool RunAtrace(const std::vector<std::string>& args) {
+bool RunAtrace(const std::vector<std::string>& args,
+               std::string* atrace_errors) {
   if (g_run_atrace_for_testing)
-    return g_run_atrace_for_testing(args);
+    return g_run_atrace_for_testing(args, atrace_errors);
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-  return ExecvAtrace(args);
+  return ExecvAtrace(args, atrace_errors);
 #else
   PERFETTO_LOG("Atrace only supported on Android.");
   return false;
@@ -197,10 +196,10 @@ bool IsOldAtrace() {
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) && \
     !PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
   // Sideloaded case. We could be sideloaded on a modern device or an older one.
-  char str_value[PROP_VALUE_MAX];
-  if (!__system_property_get("ro.build.version.sdk", str_value))
+  std::string str_value = base::GetAndroidProp("ro.build.version.sdk");
+  if (str_value.empty())
     return false;
-  auto opt_value = base::CStringToUInt32(str_value);
+  auto opt_value = base::CStringToUInt32(str_value.c_str());
   return opt_value.has_value() && *opt_value < 28;  // 28 == Android P.
 #else
   // In in-tree builds we know that atrace is current, no runtime checks needed.

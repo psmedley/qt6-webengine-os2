@@ -12,10 +12,6 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
-#ifdef SK_BUILD_FOR_POSIX
-#include <unistd.h>
-#endif
-
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
@@ -54,7 +50,8 @@ static FILE* fopen_win(const char* utf8path, const char* perm) {
     }
     std::vector<uint16_t> wchars(n + 1);
     uint16_t* out = wchars.data();
-    for (const char* ptr = utf8path; ptr < end;) {
+    ptr = utf8path;
+    while (ptr < end) {
         out += SkUTF::ToUTF16(SkUTF::NextUTF8(&ptr, end), out);
     }
     SkASSERT(out == &wchars[n]);
@@ -125,14 +122,6 @@ size_t sk_fwrite(const void* buffer, size_t byteCount, FILE* f) {
 void sk_fflush(FILE* f) {
     SkASSERT(f);
     fflush(f);
-}
-
-void sk_fsync(FILE* f) {
-#if !defined(_WIN32) && !defined(SK_BUILD_FOR_ANDROID) && !defined(__UCLIBC__) \
-        && !defined(_NEWLIB_VERSION)
-    int fd = fileno(f);
-    fsync(fd);
-#endif
 }
 
 size_t sk_ftell(FILE* f) {

@@ -171,8 +171,12 @@ void ViewAccessibility::GetAccessibleNodeData(ui::AXNodeData* data) const {
     // been closed. Returning the wrong result might cause a crash, because the
     // focus manager might be expecting the result to be the same regardless of
     // the state of the view's widget.
-    if (ViewAccessibility::IsAccessibilityFocusable())
+    if (ViewAccessibility::IsAccessibilityFocusable()) {
       data->AddState(ax::mojom::State::kFocusable);
+      // Set this node as intentionally nameless to avoid DCHECKs for a missing
+      // name of a focusable.
+      data->SetNameExplicitlyEmpty();
+    }
     return;
   }
 
@@ -334,7 +338,7 @@ void ViewAccessibility::EndPopupFocusOverride() {
 }
 
 void ViewAccessibility::FireFocusAfterMenuClose() {
-  NotifyAccessibilityEvent(ax::mojom::Event::kFocusAfterMenuClose);
+  view_->NotifyAccessibilityEvent(ax::mojom::Event::kFocusAfterMenuClose, true);
 }
 
 void ViewAccessibility::OverrideRole(const ax::mojom::Role role) {
@@ -438,19 +442,25 @@ void ViewAccessibility::OverridePosInSet(int pos_in_set, int set_size) {
 }
 
 void ViewAccessibility::OverrideNextFocus(Widget* widget) {
-  next_focus_ = widget;
+  if (widget)
+    next_focus_ = widget->GetWeakPtr();
+  else
+    next_focus_ = nullptr;
 }
 
 void ViewAccessibility::OverridePreviousFocus(Widget* widget) {
-  previous_focus_ = widget;
+  if (widget)
+    previous_focus_ = widget->GetWeakPtr();
+  else
+    previous_focus_ = nullptr;
 }
 
 Widget* ViewAccessibility::GetNextFocus() const {
-  return next_focus_;
+  return next_focus_.get();
 }
 
 Widget* ViewAccessibility::GetPreviousFocus() const {
-  return previous_focus_;
+  return previous_focus_.get();
 }
 
 void ViewAccessibility::OverrideChildTreeID(ui::AXTreeID tree_id) {

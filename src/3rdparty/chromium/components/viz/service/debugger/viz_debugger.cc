@@ -113,8 +113,8 @@ base::Value VizDebugger::FrameAsJson(const uint64_t counter,
     base::DictionaryValue dict = each.GetDictionaryValue();
     {
       base::ListValue list_xy;
-      list_xy.AppendInteger(each.obj_size.width());
-      list_xy.AppendInteger(each.obj_size.height());
+      list_xy.Append(each.obj_size.width());
+      list_xy.Append(each.obj_size.height());
       dict.SetKey("size", std::move(list_xy));
     }
     {
@@ -287,7 +287,7 @@ void VizDebugger::FilterDebugStream(base::Value json) {
 
   new_filters_.clear();
 
-  for (const auto& filter : filterlist->GetList()) {
+  for (const auto& filter : filterlist->GetListDeprecated()) {
     const base::Value* file = filter.FindPath("selector.file");
     const base::Value* func = filter.FindPath("selector.func");
     const base::Value* anno = filter.FindPath("selector.anno");

@@ -35,17 +35,20 @@ class CONTENT_EXPORT ClientHintsControllerDelegate {
 
   // Get which client hints opt-ins were persisted on current origin.
   virtual void GetAllowedClientHintsFromSource(
-      const GURL& url,
+      const url::Origin& origin,
       blink::EnabledClientHints* client_hints) = 0;
 
   virtual bool IsJavaScriptAllowed(const GURL& url) = 0;
+
+  // Returns true iff cookies are blocked for the URL or third-party cookies
+  // are disabled in the user agent.
+  virtual bool AreThirdPartyCookiesBlocked(const GURL& url) = 0;
 
   virtual blink::UserAgentMetadata GetUserAgentMetadata() = 0;
 
   virtual void PersistClientHints(
       const url::Origin& primary_origin,
-      const std::vector<network::mojom::WebClientHintsType>& client_hints,
-      base::TimeDelta expiration_duration) = 0;
+      const std::vector<network::mojom::WebClientHintsType>& client_hints) = 0;
 
   // Optionally implemented by implementations used in tests. Clears all hints
   // that would have been returned by GetAllowedClientHintsFromSource(),

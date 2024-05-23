@@ -37,7 +37,7 @@ config("vulkan_internal_config") {
   if (is_clang || !is_win) {
     cflags = [ "-Wno-unused-function" ]
   }
-  if (is_linux) {
+  if (is_linux || is_chromeos) {
     defines += [
       "SYSCONFDIR=\"/etc\"",
       "FALLBACK_CONFIG_DIRS=\"/etc/xdg\"",
@@ -46,17 +46,25 @@ config("vulkan_internal_config") {
   }
 }
 
+# Vulkan tool generated utility headers
+source_set("vulkan_tools_headers") {
+  public_deps = [ "$vulkan_headers_dir:vulkan_headers" ]
+  sources = [
+      "icd/generated/vk_typemap_helper.h",
+  ]
+}
+
 if (!is_android) {
   # Vulkan Mock ICD
   # ---------------
   shared_library("VkICD_mock_icd") {
     configs -= vulkan_undefine_configs
+    deps = [ ":vulkan_tools_headers" ]
     public_deps = [ "$vulkan_headers_dir:vulkan_headers" ]
     data_deps = [ ":vulkan_gen_icd_json_file" ]
     sources = [
       "icd/generated/mock_icd.cpp",
       "icd/generated/mock_icd.h",
-      "icd/generated/vk_typemap_helper.h",
     ]
     if (is_win) {
       sources += [ "icd/VkICD_mock_icd.def" ]
@@ -74,7 +82,7 @@ if (!is_android) {
       sources += [ "icd/windows/VkICD_mock_icd.json" ]
       args += [ "$raw_vulkan_icd_dir/windows" ]
     }
-    if (is_linux) {
+    if (is_linux || is_chromeos) {
       sources += [ "icd/linux/VkICD_mock_icd.json" ]
       args += [ "$raw_vulkan_icd_dir/linux" ]
     }

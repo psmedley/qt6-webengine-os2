@@ -114,8 +114,8 @@ void DriverGLX::InitializeExtensionBindings(const std::string& platform_extensio
 void DriverGLX::InitializeExtensionBindings() {
   std::string platform_extensions(GetPlatformExtensions());
 #endif
-  gfx::ExtensionSet extensions(gfx::MakeExtensionSet(platform_extensions));
-  ALLOW_UNUSED_LOCAL(extensions);
+  [[maybe_unused]] gfx::ExtensionSet extensions(
+      gfx::MakeExtensionSet(platform_extensions));
 
   ext.b_GLX_ARB_create_context =
       gfx::HasExtension(extensions, "GLX_ARB_create_context");

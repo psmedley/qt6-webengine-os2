@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/dns/host_resolver.h"
@@ -164,7 +164,7 @@ int HttpAuthHandlerMock::Factory::CreateAuthHandler(
     HttpAuth::Target target,
     const SSLInfo& ssl_info,
     const NetworkIsolationKey& network_isolation_key,
-    const GURL& origin,
+    const url::SchemeHostPort& scheme_host_port,
     CreateReason reason,
     int nonce_count,
     const NetLogWithSource& net_log,
@@ -178,7 +178,8 @@ int HttpAuthHandlerMock::Factory::CreateAuthHandler(
   handlers.erase(handlers.begin());
   if (do_init_from_challenge_ &&
       !tmp_handler->InitFromChallenge(challenge, target, ssl_info,
-                                      network_isolation_key, origin, net_log)) {
+                                      network_isolation_key, scheme_host_port,
+                                      net_log)) {
     return ERR_INVALID_RESPONSE;
   }
   handler->swap(tmp_handler);

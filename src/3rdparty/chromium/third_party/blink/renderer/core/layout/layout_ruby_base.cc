@@ -35,8 +35,8 @@
 
 namespace blink {
 
-LayoutRubyBase::LayoutRubyBase(Element* element) : LayoutBlockFlow(nullptr) {
-  DCHECK(!element);
+LayoutRubyBase::LayoutRubyBase(ContainerNode* node) : LayoutBlockFlow(nullptr) {
+  DCHECK(!node);
   SetInline(false);
 }
 
@@ -46,9 +46,9 @@ LayoutRubyBase* LayoutRubyBase::CreateAnonymous(Document* document,
                                                 const LayoutRubyRun& ruby_run) {
   LayoutRubyBase* layout_object;
   if (ruby_run.IsLayoutNGObject()) {
-    layout_object = new LayoutNGRubyBase();
+    layout_object = MakeGarbageCollected<LayoutNGRubyBase>();
   } else {
-    layout_object = new LayoutRubyBase(nullptr);
+    layout_object = MakeGarbageCollected<LayoutRubyBase>(nullptr);
   }
   layout_object->SetDocumentForAnonymous(document);
   return layout_object;

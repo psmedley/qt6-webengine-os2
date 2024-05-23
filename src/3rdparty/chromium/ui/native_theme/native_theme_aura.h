@@ -5,7 +5,6 @@
 #ifndef UI_NATIVE_THEME_NATIVE_THEME_AURA_H_
 #define UI_NATIVE_THEME_NATIVE_THEME_AURA_H_
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "ui/native_theme/native_theme_base.h"
 
@@ -20,6 +19,10 @@ class NATIVE_THEME_EXPORT NativeThemeAura : public NativeThemeBase {
 
   explicit NativeThemeAura(bool use_overlay_scrollbars,
                            bool should_only_use_dark_colors);
+
+  NativeThemeAura(const NativeThemeAura&) = delete;
+  NativeThemeAura& operator=(const NativeThemeAura&) = delete;
+
   ~NativeThemeAura() override;
 
   static NativeThemeAura* web_instance();
@@ -30,10 +33,12 @@ class NATIVE_THEME_EXPORT NativeThemeAura : public NativeThemeBase {
   // NativeThemeBase:
   void PaintMenuPopupBackground(
       cc::PaintCanvas* canvas,
+      const ColorProvider* color_provider,
       const gfx::Size& size,
       const MenuBackgroundExtraParams& menu_background,
       ColorScheme color_scheme) const override;
   void PaintMenuItemBackground(cc::PaintCanvas* canvas,
+                               const ColorProvider* color_provider,
                                State state,
                                const gfx::Rect& rect,
                                const MenuItemExtraParams& menu_item,
@@ -51,6 +56,7 @@ class NATIVE_THEME_EXPORT NativeThemeAura : public NativeThemeBase {
                            const gfx::Rect& rect,
                            ColorScheme color_scheme) const override;
   void PaintScrollbarThumb(cc::PaintCanvas* canvas,
+                           const ColorProvider* color_provider,
                            Part part,
                            State state,
                            const gfx::Rect& rect,
@@ -77,8 +83,6 @@ class NATIVE_THEME_EXPORT NativeThemeAura : public NativeThemeBase {
                                      const cc::PaintFlags& flags);
 
   bool use_overlay_scrollbars_;
-
-  DISALLOW_COPY_AND_ASSIGN(NativeThemeAura);
 };
 
 }  // namespace ui

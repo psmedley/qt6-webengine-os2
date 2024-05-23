@@ -5,6 +5,7 @@
 #include "components/performance_manager/graph/frame_node_impl.h"
 
 #include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/gtest_util.h"
 #include "components/performance_manager/graph/page_node_impl.h"
@@ -163,7 +164,7 @@ class LenientMockObserver : public FrameNodeImpl::Observer {
   const FrameNode* created_frame_node() { return created_frame_node_; }
 
  private:
-  const FrameNode* created_frame_node_ = nullptr;
+  raw_ptr<const FrameNode> created_frame_node_ = nullptr;
 };
 
 using MockObserver = ::testing::StrictMock<LenientMockObserver>;
@@ -469,7 +470,7 @@ TEST_F(FrameNodeImplTest, FirstContentfulPaint) {
   MockObserver obs;
   graph()->AddFrameNodeObserver(&obs);
 
-  base::TimeDelta fcp = base::TimeDelta::FromMilliseconds(1364);
+  base::TimeDelta fcp = base::Milliseconds(1364);
   EXPECT_CALL(obs, OnFirstContentfulPaint(frame_node.get(), fcp));
   frame_node->OnFirstContentfulPaint(fcp);
 
@@ -501,10 +502,8 @@ TEST_F(FrameNodeImplTest, PublicInterface) {
             public_frame_node->GetSiteInstanceId());
 
   auto child_frame_nodes = public_frame_node->GetChildFrameNodes();
-  for (auto* child_frame_node : frame_node->child_frame_nodes()) {
-    const FrameNode* child = child_frame_node;
+  for (auto* child : frame_node->child_frame_nodes())
     EXPECT_TRUE(base::Contains(child_frame_nodes, child));
-  }
   EXPECT_EQ(child_frame_nodes.size(), frame_node->child_frame_nodes().size());
 
   EXPECT_EQ(frame_node->lifecycle_state(),

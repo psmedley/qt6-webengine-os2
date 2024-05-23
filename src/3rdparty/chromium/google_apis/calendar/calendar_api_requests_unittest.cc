@@ -7,6 +7,7 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "google_apis/calendar/calendar_api_response_types.h"
 #include "google_apis/common/dummy_auth_service.h"
 #include "google_apis/common/request_sender.h"
@@ -102,11 +103,10 @@ TEST_F(CalendarApiRequestsTest, GetEventListRequest) {
   EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
   EXPECT_EQ(
       "/calendar/v3/calendars/primary/"
-      "events?timeMin=2021-06-13T10%3A00%3A00.000Z"
-      "&timeMax=2021-06-16T10%3A00%3A00.000Z"
-      "&fields=timeZone%2Cetag%2Ckind%2C"
-      "items(id%2Csummary%2CcolorId%2C+status%2C"
-      "start(dateTime)%2Cend(dateTime)%2ChtmlLink)",
+      "events?timeMin=2021-06-13T10%3A00%3A00.000Z&timeMax=2021-06-16T10%3A00%"
+      "3A00.000Z&singleEvents=true&fields=timeZone%2Cetag%2Ckind%2Citems(id%"
+      "2Csummary%2CcolorId%2C+status%2Cstart(dateTime)%2Cend(dateTime)%"
+      "2ChtmlLink)",
       http_request_.relative_url);
 
   ASSERT_TRUE(events.get());

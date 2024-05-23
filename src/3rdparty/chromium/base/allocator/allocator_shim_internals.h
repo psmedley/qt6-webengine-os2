@@ -9,7 +9,9 @@
 
 #if defined(__GNUC__)
 
+#if BUILDFLAG(IS_POSIX)
 #include <sys/cdefs.h>  // for __THROW
+#endif
 
 #ifndef __THROW  // Not a glibc system
 #ifdef _NOEXCEPT  // LLVM libc++ uses noexcept instead
@@ -41,7 +43,7 @@
 // impression that they can hook the allocator.
 #define SHIM_ALWAYS_EXPORT __attribute__((visibility("default"), noinline))
 
-#elif defined(OS_WIN)  // __GNUC__
+#elif BUILDFLAG(IS_WIN)  // __GNUC__
 
 #define __THROW
 #define SHIM_ALWAYS_EXPORT __declspec(noinline)

@@ -10,7 +10,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
@@ -20,7 +20,7 @@
 #include "third_party/blink/renderer/modules/peerconnection/test_webrtc_stats_report_obtainer.h"
 #include "third_party/blink/renderer/modules/peerconnection/testing/mock_rtp_sender.h"
 #include "third_party/blink/renderer/modules/peerconnection/webrtc_media_stream_track_adapter_map.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
@@ -68,13 +68,12 @@ class RTCRtpSenderImplTest : public ::testing::Test {
   }
 
   MediaStreamComponent* CreateTrack(const std::string& id) {
-    auto* source = MakeGarbageCollected<MediaStreamSource>(
-        String::FromUTF8(id), MediaStreamSource::kTypeAudio,
-        String::FromUTF8("local_audio_track"), false);
     auto audio_source = std::make_unique<MediaStreamAudioSource>(
         blink::scheduler::GetSingleThreadTaskRunnerForTesting(), true);
     auto* audio_source_ptr = audio_source.get();
-    source->SetPlatformSource(std::move(audio_source));
+    auto* source = MakeGarbageCollected<MediaStreamSource>(
+        String::FromUTF8(id), MediaStreamSource::kTypeAudio,
+        String::FromUTF8("local_audio_track"), false, std::move(audio_source));
 
     auto* component =
         MakeGarbageCollected<MediaStreamComponent>(source->Id(), source);
@@ -92,8 +91,7 @@ class RTCRtpSenderImplTest : public ::testing::Test {
     }
     RtpSenderState sender_state(
         main_thread_, dependency_factory_->GetWebRtcSignalingTaskRunner(),
-        mock_webrtc_sender_.get(), std::move(track_ref),
-        std::vector<std::string>());
+        mock_webrtc_sender_, std::move(track_ref), std::vector<std::string>());
     sender_state.Initialize();
     return std::make_unique<RTCRtpSenderImpl>(
         peer_connection_.get(), track_map_, std::move(sender_state),

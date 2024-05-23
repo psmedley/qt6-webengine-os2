@@ -40,7 +40,7 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
                                  bool user_gesture) override;
   void DidDisplayInsecureContent() override;
   void DidContainInsecureFormAction() override;
-  void DocumentAvailableInMainFrame(bool uses_temporary_zoom_level) override;
+  void MainDocumentElementAvailable(bool uses_temporary_zoom_level) override;
   void SetNeedsOcclusionTracking(bool needs_tracking) override;
   void SetVirtualKeyboardOverlayPolicy(bool vk_overlays_content) override;
   void VisibilityChanged(mojom::blink::FrameVisibility visibility) override;
@@ -54,7 +54,6 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
   void EnforceInsecureRequestPolicy(
       mojom::InsecureRequestPolicy policy_bitmap) override;
   void EnforceInsecureNavigationsSet(const WTF::Vector<uint32_t>& set) override;
-  void DidChangeActiveSchedulerTrackedFeatures(uint64_t features_mask) override;
   void SuddenTerminationDisablerChanged(
       bool present,
       blink::mojom::SuddenTerminationDisablerType disabler_type) override;
@@ -65,7 +64,6 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
   void BubbleLogicalScrollInParentFrame(
       blink::mojom::blink::ScrollDirection direction,
       ui::ScrollGranularity granularity) override;
-  void DidAccessInitialDocument() override;
   void DidBlockNavigation(const KURL& blocked_url,
                           const KURL& initiator_url,
                           mojom::NavigationBlockedReason reason) override;
@@ -73,8 +71,8 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
   void DidFinishLoad(const KURL& validated_url) override;
   void DispatchLoad() override;
   void GoToEntryAtOffset(int32_t offset, bool has_user_gesture) override;
-  void NavigateToAppHistoryKey(const WTF::String& key,
-                               bool has_user_gesture) override {}
+  void NavigateToNavigationApiKey(const WTF::String& key,
+                                  bool has_user_gesture) override {}
   void UpdateTitle(const WTF::String& title,
                    base::i18n::TextDirection title_direction) override;
   void UpdateUserActivationState(
@@ -86,7 +84,7 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
   void DocumentOnLoadCompleted() override;
   void ForwardResourceTimingToParent(
       mojom::blink::ResourceTimingInfoPtr timing) override;
-  void DidFinishDocumentLoad() override;
+  void DidDispatchDOMContentLoadedEvent() override;
   void RunModalAlertDialog(const WTF::String& alert_message,
                            bool disable_third_party_subframe_suppresion,
                            RunModalAlertDialogCallback callback) override;
@@ -131,7 +129,8 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
       const KURL& url,
       const WTF::String& http_method,
       const WTF::String& mime_type,
-      network::mojom::blink::RequestDestination request_destination) override;
+      network::mojom::blink::RequestDestination request_destination,
+      bool include_credentials) override;
   void DidChangeFrameOwnerProperties(
       const blink::FrameToken& child_frame_token,
       mojom::blink::FrameOwnerPropertiesPtr frame_owner_properties) override;
@@ -146,8 +145,8 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
   void CapturePaintPreviewOfSubframe(
       const gfx::Rect& clip_rect,
       const base::UnguessableToken& guid) override;
-  void SetModalCloseListener(
-      mojo::PendingRemote<mojom::blink::ModalCloseListener>) override;
+  void SetCloseListener(
+      mojo::PendingRemote<mojom::blink::CloseListener>) override;
   void Detach() override;
   void GetKeepAliveHandleFactory(
       mojo::PendingReceiver<mojom::blink::KeepAliveHandleFactory> receiver)
@@ -155,12 +154,16 @@ class FakeLocalFrameHost : public mojom::blink::LocalFrameHost {
   void DidAddMessageToConsole(
       mojom::blink::ConsoleMessageLevel log_level,
       const WTF::String& message,
-      int32_t line_no,
+      uint32_t line_no,
       const WTF::String& source_id,
       const WTF::String& untrusted_stack_trace) override;
   void FrameSizeChanged(const gfx::Size& frame_size) override;
   void DidUpdatePreferredColorScheme(
       blink::mojom::PreferredColorScheme preferred_color_scheme) override;
+  void DidInferColorScheme(
+      blink::mojom::PreferredColorScheme preferred_color_scheme) override;
+  void DidChangeSrcDoc(const blink::FrameToken& child_frame_token,
+                       const WTF::String& srcdoc_value) override;
 
  private:
   void BindFrameHostReceiver(mojo::ScopedInterfaceEndpointHandle handle);

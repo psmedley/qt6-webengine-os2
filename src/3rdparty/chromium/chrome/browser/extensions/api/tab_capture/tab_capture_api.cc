@@ -108,8 +108,8 @@ void AddMediaStreamSourceConstraints(content::WebContents* target_contents,
     if (!msc)
       continue;
     base::DictionaryValue* constraint = &msc->mandatory.additional_properties;
-    constraint->SetString(kMediaStreamSource, kMediaStreamSourceTab);
-    constraint->SetString(kMediaStreamSourceId, device_id);
+    constraint->SetStringKey(kMediaStreamSource, kMediaStreamSourceTab);
+    constraint->SetStringKey(kMediaStreamSourceId, device_id);
   }
 }
 
@@ -134,11 +134,23 @@ Browser* GetLastActiveBrowser(const Profile* profile,
   return target_browser;
 }
 
+// Get the id of the allowlisted extension. At the moment two switches can
+// contain it. Prioritize the non-deprecated one.
+std::string GetAllowlistedExtensionID() {
+  std::string id = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kAllowlistedExtensionID);
+  if (id.empty()) {
+    id = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kDEPRECATED_AllowlistedExtensionID);
+  }
+  return id;
+}
+
 }  // namespace
 
 ExtensionFunction::ResponseAction TabCaptureCaptureFunction::Run() {
   std::unique_ptr<api::tab_capture::Capture::Params> params =
-      TabCapture::Capture::Params::Create(*args_);
+      TabCapture::Capture::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
 
   Profile* profile = Profile::FromBrowserContext(browser_context());
@@ -157,10 +169,11 @@ ExtensionFunction::ResponseAction TabCaptureCaptureFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(extension_web_contents);
 
   const GURL& extension_origin =
-      extension_web_contents->GetLastCommittedURL().GetOrigin();
+      extension_web_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL();
   AllowedScreenCaptureLevel capture_level =
       capture_policy::GetAllowedCaptureLevel(
-          extension_web_contents->GetLastCommittedURL().GetOrigin(),
+          extension_web_contents->GetLastCommittedURL()
+              .DeprecatedGetOriginAsURL(),
           extension_web_contents);
 
   DesktopMediaList::WebContentsFilter includable_web_contents_filter =
@@ -177,8 +190,7 @@ ExtensionFunction::ResponseAction TabCaptureCaptureFunction::Run() {
   if (!extension()->permissions_data()->HasAPIPermissionForTab(
           sessions::SessionTabHelper::IdForTab(target_contents).id(),
           mojom::APIPermissionID::kTabCaptureForTab) &&
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kAllowlistedExtensionID) != extension_id) {
+      (GetAllowlistedExtensionID() != extension_id)) {
     return RespondNow(Error(kGrantError));
   }
 
@@ -192,8 +204,6 @@ ExtensionFunction::ResponseAction TabCaptureCaptureFunction::Run() {
       target_contents, extension_id, false, extension()->url(), source,
       extension()->name(), extension_web_contents);
   if (device_id.empty()) {
-    // TODO(miu): Allow multiple consumers of single tab capture.
-    // http://crbug.com/535336
     return RespondNow(Error(kCapturingSameTab));
   }
   AddMediaStreamSourceConstraints(target_contents, &params->options, device_id);
@@ -223,7 +233,7 @@ ExtensionFunction::ResponseAction TabCaptureGetCapturedTabsFunction::Run() {
 
 ExtensionFunction::ResponseAction TabCaptureGetMediaStreamIdFunction::Run() {
   std::unique_ptr<api::tab_capture::GetMediaStreamId::Params> params =
-      TabCapture::GetMediaStreamId::Params::Create(*args_);
+      TabCapture::GetMediaStreamId::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
 
   content::WebContents* target_contents = nullptr;
@@ -253,8 +263,7 @@ ExtensionFunction::ResponseAction TabCaptureGetMediaStreamIdFunction::Run() {
   if (!extension()->permissions_data()->HasAPIPermissionForTab(
           sessions::SessionTabHelper::IdForTab(target_contents).id(),
           mojom::APIPermissionID::kTabCaptureForTab) &&
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kAllowlistedExtensionID) != extension_id) {
+      (GetAllowlistedExtensionID() != extension_id)) {
     return RespondNow(Error(kGrantError));
   }
 
@@ -269,7 +278,8 @@ ExtensionFunction::ResponseAction TabCaptureGetMediaStreamIdFunction::Run() {
       return RespondNow(Error(kInvalidTabIdError));
     }
 
-    origin = consumer_contents->GetLastCommittedURL().GetOrigin();
+    origin =
+        consumer_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL();
     if (!origin.is_valid()) {
       return RespondNow(Error(kInvalidOriginError));
     }

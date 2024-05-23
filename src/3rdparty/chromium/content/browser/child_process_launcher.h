@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/kill.h"
@@ -25,8 +25,12 @@
 #include "mojo/public/cpp/system/invitation.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_proto.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "content/public/browser/android/child_process_importance.h"
+#endif
+
+#if BUILDFLAG(IS_WIN)
+#include "base/win/windows_types.h"
 #endif
 
 namespace base {
@@ -58,7 +62,7 @@ enum LaunchResultCode {
   LAUNCH_RESULT_CODE_LAST_CODE
 };
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 static_assert(static_cast<int>(LAUNCH_RESULT_START) >
                   static_cast<int>(sandbox::SBOX_ERROR_LAST),
               "LaunchResultCode must not overlap with sandbox::ResultCode");
@@ -71,7 +75,7 @@ struct ChildProcessLauncherPriority {
                                unsigned int frame_depth,
                                bool intersects_viewport,
                                bool boost_for_pending_views
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
                                ,
                                ChildProcessImportance importance
 #endif
@@ -82,7 +86,7 @@ struct ChildProcessLauncherPriority {
         frame_depth(frame_depth),
         intersects_viewport(intersects_viewport),
         boost_for_pending_views(boost_for_pending_views)
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
         ,
         importance(importance)
 #endif
@@ -97,9 +101,8 @@ struct ChildProcessLauncherPriority {
     return !(*this == other);
   }
 
-  void WriteIntoTrace(
-      perfetto::TracedProto<
-          perfetto::protos::pbzero::ChildProcessLauncherPriority> proto);
+  using TraceProto = perfetto::protos::pbzero::ChildProcessLauncherPriority;
+  void WriteIntoTrace(perfetto::TracedProto<TraceProto> proto) const;
 
   // Prefer |is_background()| to inspecting these fields individually (to ensure
   // all logic uses the same notion of "backgrounded").
@@ -137,7 +140,7 @@ struct ChildProcessLauncherPriority {
   // during navigation).
   bool boost_for_pending_views;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   ChildProcessImportance importance;
 #endif
 };
@@ -155,7 +158,7 @@ class CONTENT_EXPORT ChildProcessLauncher {
 
     virtual void OnProcessLaunchFailed(int error_code) {}
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     // Whether the process can use pre-warmed up connection.
     virtual bool CanUseWarmUpConnection();
 #endif
@@ -187,6 +190,10 @@ class CONTENT_EXPORT ChildProcessLauncher {
       const mojo::ProcessErrorCallback& process_error_callback,
       std::map<std::string, base::FilePath> files_to_preload,
       bool terminate_on_shutdown = true);
+
+  ChildProcessLauncher(const ChildProcessLauncher&) = delete;
+  ChildProcessLauncher& operator=(const ChildProcessLauncher&) = delete;
+
   ~ChildProcessLauncher();
 
   // True if the process is being launched and so the handle isn't available.
@@ -228,7 +235,7 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // previous  client.
   Client* ReplaceClientForTest(Client* client);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Dumps the stack of the child process without crashing it.
   void DumpProcessStack();
 #endif
@@ -237,9 +244,12 @@ class CONTENT_EXPORT ChildProcessLauncher {
 
   // Notifies the client about the result of the operation.
   void Notify(internal::ChildProcessLauncherHelper::Process process,
+#if BUILDFLAG(IS_WIN)
+              DWORD last_error,
+#endif
               int error_code);
 
-  Client* client_;
+  raw_ptr<Client> client_;
 
   // The process associated with this ChildProcessLauncher. Set in Notify by
   // ChildProcessLauncherHelper once the process was started.
@@ -258,8 +268,6 @@ class CONTENT_EXPORT ChildProcessLauncher {
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<ChildProcessLauncher> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ChildProcessLauncher);
 };
 
 }  // namespace content

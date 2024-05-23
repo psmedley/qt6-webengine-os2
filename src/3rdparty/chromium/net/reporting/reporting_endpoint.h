@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "net/base/net_export.h"
@@ -46,6 +45,10 @@ struct NET_EXPORT ReportingEndpointGroupKey {
   ~ReportingEndpointGroupKey();
 
   std::string ToString() const;
+
+  // True if this endpoint "group" is actually being used to represent a single
+  // V1 document endpoint.
+  bool IsDocumentEndpoint() const { return reporting_source.has_value(); }
 
   // The NetworkIsolationKey the group is scoped to. Needed to prevent leaking
   // third party contexts across sites.

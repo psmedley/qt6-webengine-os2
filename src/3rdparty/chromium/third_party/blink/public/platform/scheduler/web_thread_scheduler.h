@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/message_loop/message_pump.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
@@ -194,16 +194,11 @@ class BLINK_PLATFORM_EXPORT WebThreadScheduler {
   // constructed. Must be called on the main thread.
   virtual void SetRendererBackgrounded(bool backgrounded);
 
-  // Tells the scheduler about "keep-alive" state which can be due to:
-  // service workers, shared workers, or fetch keep-alive.
-  // If set to true, then the scheduler should not freeze the renderer.
-  virtual void SetSchedulerKeepActive(bool keep_active);
-
   // Tells the scheduler when a begin main frame is requested due to input
   // handling.
   virtual void OnMainFrameRequestedForInput();
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Android WebView has very strange WebView.pauseTimers/resumeTimers API.
   // It's very old and very inconsistent. The API promises that this
   // "pauses all layout, parsing, and JavaScript timers for all WebViews".
@@ -214,7 +209,7 @@ class BLINK_PLATFORM_EXPORT WebThreadScheduler {
   // DO NOT USE FOR ANYTHING EXCEPT ANDROID WEBVIEW API IMPLEMENTATION.
   virtual void PauseTimersForAndroidWebView();
   virtual void ResumeTimersForAndroidWebView();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   // RAII handle for pausing the renderer. Renderer is paused while
   // at least one pause handle exists.
@@ -232,8 +227,7 @@ class BLINK_PLATFORM_EXPORT WebThreadScheduler {
   //
   // Renderer will be resumed when the handle is destroyed.
   // Handle should be destroyed before the renderer.
-  virtual std::unique_ptr<RendererPauseHandle> PauseRenderer()
-      WARN_UNUSED_RESULT;
+  [[nodiscard]] virtual std::unique_ptr<RendererPauseHandle> PauseRenderer();
 
   // Returns true if the scheduler has reason to believe that high priority work
   // may soon arrive on the main thread, e.g., if gesture events were observed

@@ -91,7 +91,9 @@ class AbstractLineBox {
     do {
       previous_line.MoveToPreviousIncludingFragmentainer();
     } while (previous_line && !previous_line.Current().IsLineBox());
-    return previous_line ? AbstractLineBox(previous_line) : AbstractLineBox();
+    if (!previous_line || previous_line.Current()->IsBlockInInline())
+      return AbstractLineBox();
+    return AbstractLineBox(previous_line);
   }
 
   AbstractLineBox NextLine() const {
@@ -104,7 +106,9 @@ class AbstractLineBox {
     do {
       next_line.MoveToNextIncludingFragmentainer();
     } while (next_line && !next_line.Current().IsLineBox());
-    return next_line ? AbstractLineBox(next_line) : AbstractLineBox();
+    if (!next_line || next_line.Current()->IsBlockInInline())
+      return AbstractLineBox();
+    return AbstractLineBox(next_line);
   }
 
   PhysicalOffset AbsoluteLineDirectionPointToLocalPointInBlock(

@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/timer/timer.h"
 
 namespace base {
@@ -31,6 +30,11 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ThrottlingNetworkInterceptor {
   using ThrottleCallback = base::RepeatingCallback<void(int, int64_t)>;
 
   ThrottlingNetworkInterceptor();
+
+  ThrottlingNetworkInterceptor(const ThrottlingNetworkInterceptor&) = delete;
+  ThrottlingNetworkInterceptor& operator=(const ThrottlingNetworkInterceptor&) =
+      delete;
+
   virtual ~ThrottlingNetworkInterceptor();
 
   base::WeakPtr<ThrottlingNetworkInterceptor> GetWeakPtr();
@@ -82,6 +86,11 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ThrottlingNetworkInterceptor {
   // Whether offline network is emulated.
   bool IsOffline();
 
+  void SetSuspendWhenOffline(bool suspend);
+
+  // Calculates buffer len to pass to network transaction Read call.
+  int GetReadBufLen(int buf_len) const;
+
  private:
   struct ThrottleRecord {
    public:
@@ -131,10 +140,9 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ThrottlingNetworkInterceptor {
   base::TimeDelta latency_length_;
   uint64_t download_last_tick_;
   uint64_t upload_last_tick_;
+  bool suspend_when_offline_ = false;
 
   base::WeakPtrFactory<ThrottlingNetworkInterceptor> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ThrottlingNetworkInterceptor);
 };
 
 }  // namespace network

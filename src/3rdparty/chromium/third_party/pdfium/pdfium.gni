@@ -44,9 +44,6 @@ declare_args() {
   # paths.
   pdf_use_skia_paths = pdf_use_skia_paths_override
 
-  # Build PDFium with or without experimental win32 GDI APIs.
-  pdf_use_win32_gdi = pdf_use_win32_gdi_override
-
   # Build PDFium standalone
   pdf_is_standalone = false
 
@@ -67,6 +64,9 @@ declare_args() {
 
   # Don't build against bundled libpng.
   pdfium_use_system_libpng = false
+
+  # Enable SSE2 for MSVC builds. Ignored if it's not a MSVC build.
+  msvc_use_sse2 = true
 
   pdfium_use_qt_libpng = false
   qt_libpng_config = ""

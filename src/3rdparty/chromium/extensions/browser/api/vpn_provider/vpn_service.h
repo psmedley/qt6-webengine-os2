@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "chromeos/network/network_configuration_observer.h"
@@ -63,6 +62,10 @@ class VpnService : public KeyedService,
              NetworkConfigurationHandler* network_configuration_handler,
              NetworkProfileHandler* network_profile_handler,
              NetworkStateHandler* network_state_handler);
+
+  VpnService(const VpnService&) = delete;
+  VpnService& operator=(const VpnService&) = delete;
+
   ~VpnService() override;
 
   void SendShowAddDialogToExtension(const std::string& extension_id);
@@ -168,20 +171,16 @@ class VpnService : public KeyedService,
                                     const std::string& guid);
 
   // Callback used to indicate that configuration creation failed.
-  void OnCreateConfigurationFailure(
-      FailureCallback callback,
-      VpnConfiguration* configuration,
-      const std::string& error_name,
-      std::unique_ptr<base::DictionaryValue> error_data);
+  void OnCreateConfigurationFailure(FailureCallback callback,
+                                    VpnConfiguration* configuration,
+                                    const std::string& error_name);
 
   // Callback used to indicate that removing a configuration succeeded.
   void OnRemoveConfigurationSuccess(SuccessCallback callback);
 
   // Callback used to indicate that removing a configuration failed.
-  void OnRemoveConfigurationFailure(
-      FailureCallback callback,
-      const std::string& error_name,
-      std::unique_ptr<base::DictionaryValue> error_data);
+  void OnRemoveConfigurationFailure(FailureCallback callback,
+                                    const std::string& error_name);
 
   void OnGetShillProperties(const std::string& service_path,
                             absl::optional<base::Value> dictionary);
@@ -240,8 +239,6 @@ class VpnService : public KeyedService,
   StringToConfigurationMap service_path_to_configuration_map_;
 
   base::WeakPtrFactory<VpnService> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VpnService);
 };
 
 }  // namespace chromeos

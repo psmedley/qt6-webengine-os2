@@ -10,13 +10,13 @@
 
 #include "ash/public/cpp/window_properties.h"
 #include "ash/utility/rounded_window_targeter.h"
+#include "ash/webui/projector_app/public/cpp/projector_app_constants.h"
+#include "ash/webui/projector_app/trusted_projector_ui.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/bubble/webui_bubble_dialog_view.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/components/projector_app/projector_app_constants.h"
-#include "chromeos/components/projector_app/trusted_projector_ui.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -47,8 +47,6 @@ constexpr gfx::Size kExpandCollapseButtonPreferredSize(
     2 * kExpandCollapseButtonRadius,
     2 * kExpandCollapseButtonRadius);
 constexpr int kButtonCircleHighlightPaddingDip = 2;
-constexpr SkColor kExpandCollapseButtonBackground =
-    SkColorSetARGB(0xFF, 0x8A, 0xB4, 0xF8);
 
 // Margin of the bubble with respect to the context window.
 constexpr int kMinAnchorMarginDip = 15;
@@ -60,9 +58,8 @@ std::unique_ptr<views::MdTextButton> BuildButton(
   std::u16string text = l10n_util::GetStringUTF16(tooltip_text_id);
   auto button =
       std::make_unique<views::MdTextButton>(std::move(callback), text);
+  button->SetProminent(true);
   button->SetTooltipText(text);
-  button->SetBgColorOverride(kExpandCollapseButtonBackground);
-  button->SetEnabledTextColors(SK_ColorBLACK);
   button->SetCornerRadius(kExpandCollapseButtonRadius);
   button->SetPreferredSize(kExpandCollapseButtonPreferredSize);
   button->SetVisible(is_visible);
@@ -165,7 +162,7 @@ class SelfieCamBubbleDialogView : public WebUIBubbleDialogView {
         ->SetOrientation(views::LayoutOrientation::kVertical)
         .SetMainAxisAlignment(views::LayoutAlignment::kEnd)
         .SetCrossAxisAlignment(views::LayoutAlignment::kCenter)
-        .SetInteriorMargin(gfx::Insets(0, 0, /*bottom=*/8, 0));
+        .SetInteriorMargin(gfx::Insets::TLBR(0, 0, 8, 0));
 
     views::Button::PressedCallback expand_or_collapse_callback =
         base::BindRepeating(
@@ -250,7 +247,7 @@ class SelfieCamBubbleDialogView : public WebUIBubbleDialogView {
 // Renders the WebUI contents and asks for camera permission so that
 // we don't need to prompt the user.
 class SelfieCamBubbleContentsWrapper
-    : public BubbleContentsWrapperT<TrustedProjectorUI> {
+    : public BubbleContentsWrapperT<ash::TrustedProjectorUI> {
  public:
   SelfieCamBubbleContentsWrapper(const GURL& webui_url,
                                  content::BrowserContext* browser_context,
@@ -287,7 +284,7 @@ void SelfieCamBubbleManager::Show(Profile* profile,
     return;
 
   auto contents_wrapper = std::make_unique<SelfieCamBubbleContentsWrapper>(
-      GURL(chromeos::kChromeUITrustedProjectorSelfieCamUrl), profile,
+      GURL(ash::kChromeUITrustedProjectorSelfieCamUrl), profile,
       IDS_SELFIE_CAM_TITLE);
   // Need to reload the web contents here because the view isn't visible unless
   // ShowUI is called from the JS side.  By reloading, we trigger the JS to

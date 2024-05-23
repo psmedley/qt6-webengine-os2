@@ -53,11 +53,11 @@ class LayoutSVGHiddenContainer : public LayoutSVGContainer {
     NOT_DESTROYED();
     return PhysicalRect();
   }
-  FloatRect VisualRectInLocalSVGCoordinates() const final {
+  gfx::RectF VisualRectInLocalSVGCoordinates() const final {
     NOT_DESTROYED();
-    return FloatRect();
+    return gfx::RectF();
   }
-  void AbsoluteQuads(Vector<FloatQuad>&,
+  void AbsoluteQuads(Vector<gfx::QuadF>&,
                      MapCoordinatesFlags mode = 0) const final {
     NOT_DESTROYED();
   }

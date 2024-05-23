@@ -119,7 +119,7 @@ export class LayersPanel extends UI.Panel.PanelWithSidebar implements SDK.Target
 
   willHide(): void {
     if (this.model) {
-      this.model.disable();
+      void this.model.disable();
     }
     super.willHide();
   }
@@ -145,12 +145,12 @@ export class LayersPanel extends UI.Panel.PanelWithSidebar implements SDK.Target
     }
     this.model.removeEventListener(Events.LayerTreeChanged, this.onLayerTreeUpdated, this);
     this.model.removeEventListener(Events.LayerPainted, this.onLayerPainted, this);
-    this.model.disable();
+    void this.model.disable();
     this.model = null;
   }
 
   private onLayerTreeUpdated(): void {
-    this.updateThrottler.schedule(this.update.bind(this));
+    void this.updateThrottler.schedule(this.update.bind(this));
   }
 
   private update(): Promise<void> {
@@ -169,11 +169,10 @@ export class LayersPanel extends UI.Panel.PanelWithSidebar implements SDK.Target
     return Promise.resolve();
   }
 
-  private onLayerPainted(event: Common.EventTarget.EventTargetEvent): void {
+  private onLayerPainted({data: layer}: Common.EventTarget.EventTargetEvent<SDK.LayerTreeBase.Layer>): void {
     if (!this.model) {
       return;
     }
-    const layer = event.data as SDK.LayerTreeBase.Layer;
     const selection = this.layerViewHost.selection();
     if (selection && selection.layer() === layer) {
       this.layerDetailsView.update();
@@ -181,9 +180,9 @@ export class LayersPanel extends UI.Panel.PanelWithSidebar implements SDK.Target
     this.layers3DView.updateLayerSnapshot(layer);
   }
 
-  private onPaintProfileRequested(event: Common.EventTarget.EventTargetEvent): void {
-    const selection = event.data as LayerViewer.LayerViewHost.Selection;
-    this.layers3DView.snapshotForSelection(selection).then(snapshotWithRect => {
+  private onPaintProfileRequested({data: selection}:
+                                      Common.EventTarget.EventTargetEvent<LayerViewer.LayerViewHost.Selection>): void {
+    void this.layers3DView.snapshotForSelection(selection).then(snapshotWithRect => {
       if (!snapshotWithRect) {
         return;
       }
@@ -197,7 +196,7 @@ export class LayersPanel extends UI.Panel.PanelWithSidebar implements SDK.Target
     });
   }
 
-  private onTabClosed(event: Common.EventTarget.EventTargetEvent): void {
+  private onTabClosed(event: Common.EventTarget.EventTargetEvent<UI.TabbedPane.EventData>): void {
     if (event.data.tabId !== DetailsViewTabs.Profiler || !this.layerBeingProfiled) {
       return;
     }
@@ -212,8 +211,8 @@ export class LayersPanel extends UI.Panel.PanelWithSidebar implements SDK.Target
     }
   }
 
-  private onScaleChanged(event: Common.EventTarget.EventTargetEvent): void {
-    this.paintProfilerView.setScale(event.data as number);
+  private onScaleChanged(event: Common.EventTarget.EventTargetEvent<number>): void {
+    this.paintProfilerView.setScale(event.data);
   }
 }
 

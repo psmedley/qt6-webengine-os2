@@ -12,6 +12,7 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fxcrt/fx_safe_types.h"
+#include "core/fxcrt/stl_util.h"
 
 namespace {
 
@@ -44,7 +45,7 @@ bool CPDF_StitchFunc::v_Init(const CPDF_Object* pObj,
   if (!pEncodeArray)
     return false;
 
-  const uint32_t nSubs = pFunctionsArray->size();
+  const uint32_t nSubs = fxcrt::CollectionSize<uint32_t>(*pFunctionsArray);
   if (nSubs == 0)
     return false;
 
@@ -65,7 +66,7 @@ bool CPDF_StitchFunc::v_Init(const CPDF_Object* pObj,
 
   // Check sub-functions.
   {
-    Optional<uint32_t> nOutputs;
+    absl::optional<uint32_t> nOutputs;
     for (uint32_t i = 0; i < nSubs; ++i) {
       const CPDF_Object* pSub = pFunctionsArray->GetDirectObjectAt(i);
       if (pSub == pObj)

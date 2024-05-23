@@ -74,9 +74,12 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_EQ(context, NumInputs(node), 3);
   TF_LITE_ENSURE_EQ(context, NumOutputs(node), 1);
 
-  const TfLiteTensor* indices = GetInput(context, node, kIndices);
-  const TfLiteTensor* updates = GetInput(context, node, kUpdates);
-  const TfLiteTensor* shape = GetInput(context, node, kShape);
+  const TfLiteTensor* indices;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kIndices, &indices));
+  const TfLiteTensor* updates;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kUpdates, &updates));
+  const TfLiteTensor* shape;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kShape, &shape));
 
   switch (updates->type) {
     case kTfLiteFloat32:
@@ -86,17 +89,19 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
     case kTfLiteInt32:
       break;
     default:
-      context->ReportError(
+      TF_LITE_KERNEL_LOG(
           context, "Updates of type '%s' are not supported by scatter_nd.",
           TfLiteTypeGetName(updates->type));
       return kTfLiteError;
   }
   if (indices->type != shape->type) {
-    context->ReportError(context, "Indices and shape must have the same type.");
+    TF_LITE_KERNEL_LOG(context, "Indices and shape must have the same type.");
     return kTfLiteError;
   }
 
-  TfLiteTensor* output = GetOutput(context, node, kOutputTensor);
+  TfLiteTensor* output;
+  TF_LITE_ENSURE_OK(context,
+                    GetOutputSafe(context, node, kOutputTensor, &output));
   output->type = updates->type;
 
   if (IsConstantTensor(shape)) {
@@ -109,7 +114,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
                                  GetTensorData<int32_t>(shape)));
         return ResizeOutputTensor<int32_t>(context, shape, output);
       default:
-        context->ReportError(
+        TF_LITE_KERNEL_LOG(
             context, "Indices of type '%s' are not supported by scatter_nd.",
             TfLiteTypeGetName(indices->type));
         return kTfLiteError;
@@ -155,7 +160,7 @@ TfLiteStatus EvalScatterNd(TfLiteContext* context, const TfLiteTensor* indices,
     case kTfLiteInt64:
       return ScatterNd<IndicesT, int64_t>(indices, updates, output);
     default:
-      context->ReportError(
+      TF_LITE_KERNEL_LOG(
           context, "Updates of type '%s' are not supported by scatter_nd.",
           TfLiteTypeGetName(updates->type));
       return kTfLiteError;
@@ -163,16 +168,21 @@ TfLiteStatus EvalScatterNd(TfLiteContext* context, const TfLiteTensor* indices,
 }
 
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
-  const TfLiteTensor* indices = GetInput(context, node, kIndices);
-  const TfLiteTensor* updates = GetInput(context, node, kUpdates);
-  const TfLiteTensor* shape = GetInput(context, node, kShape);
-  TfLiteTensor* output = GetOutput(context, node, kOutputTensor);
+  const TfLiteTensor* indices;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kIndices, &indices));
+  const TfLiteTensor* updates;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kUpdates, &updates));
+  const TfLiteTensor* shape;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kShape, &shape));
+  TfLiteTensor* output;
+  TF_LITE_ENSURE_OK(context,
+                    GetOutputSafe(context, node, kOutputTensor, &output));
 
   switch (indices->type) {
     case kTfLiteInt32:
       return EvalScatterNd<int32_t>(context, indices, updates, shape, output);
     default:
-      context->ReportError(
+      TF_LITE_KERNEL_LOG(
           context, "Indices of type '%s' are not supported by scatter_nd.",
           TfLiteTypeGetName(indices->type));
       return kTfLiteError;

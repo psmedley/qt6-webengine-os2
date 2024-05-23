@@ -9,9 +9,9 @@
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/default_tick_clock.h"
 #include "media/base/logging_override_if_enabled.h"
 
@@ -31,7 +31,7 @@ void Log(const media::MediaLogRecord& event) {
   if (event.type == media::MediaLogRecord::Type::kMediaStatus) {
     DVLOG(1) << "MediaEvent: " << ToJSON(event);
   } else if (event.type == media::MediaLogRecord::Type::kMessage &&
-             event.params.HasKey("error")) {
+             event.params.FindKey("error")) {
     DVLOG(1) << "MediaEvent: " << ToJSON(event);
   } else if (event.type != media::MediaLogRecord::Type::kMediaPropertyChange) {
     DVLOG(1) << "MediaEvent: " << ToJSON(event);
@@ -60,6 +60,7 @@ BatchingMediaLog::BatchingMediaLog(
   // Pre-bind the WeakPtr on the right thread since we'll receive calls from
   // other threads and don't want races.
   weak_this_ = weak_factory_.GetWeakPtr();
+  AddEvent<media::MediaLogEvent::kMediaLogCreated>(base::Time::Now());
 }
 
 BatchingMediaLog::~BatchingMediaLog() {
@@ -96,7 +97,7 @@ void BatchingMediaLog::AddLogRecordLocked(
   {
     base::AutoLock auto_lock(lock_);
     switch (event->type) {
-      // Hold onto the most recent PIPELINE_ERROR and the first, if any,
+      // Hold onto the most recent failed status and the first, if any,
       // MEDIA_LOG_ERROR_ENTRY for use in GetErrorMessage().
       case media::MediaLogRecord::Type::kMediaStatus:
         last_pipeline_error_ = *event;
@@ -104,7 +105,7 @@ void BatchingMediaLog::AddLogRecordLocked(
         break;
 
       case media::MediaLogRecord::Type::kMediaEventTriggered: {
-        DCHECK(event->params.HasKey(MediaLog::kEventKey));
+        DCHECK(event->params.FindKey(MediaLog::kEventKey));
         const auto* event_key =
             event->params.FindStringKey(MediaLog::kEventKey);
         if (*event_key == kDurationChangedMessage) {
@@ -120,7 +121,7 @@ void BatchingMediaLog::AddLogRecordLocked(
       }
 
       case media::MediaLogRecord::Type::kMessage:
-        if (event->params.HasKey(media::MediaLogMessageLevelToString(
+        if (event->params.FindKey(media::MediaLogMessageLevelToString(
                 media::MediaLogMessageLevel::kERROR)) &&
             !cached_media_error_for_message_) {
           cached_media_error_for_message_ = *event;
@@ -136,11 +137,11 @@ void BatchingMediaLog::AddLogRecordLocked(
       return;
 
     ipc_send_pending_ = true;
-    delay_for_next_ipc_send = base::TimeDelta::FromSeconds(1) -
-                              (tick_clock_->NowTicks() - last_ipc_send_time_);
+    delay_for_next_ipc_send =
+        base::Seconds(1) - (tick_clock_->NowTicks() - last_ipc_send_time_);
   }
 
-  if (delay_for_next_ipc_send > base::TimeDelta()) {
+  if (delay_for_next_ipc_send.is_positive()) {
     task_runner_->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&BatchingMediaLog::SendQueuedMediaEvents, weak_this_),
@@ -181,11 +182,18 @@ std::string BatchingMediaLog::MediaEventToMessageString(
     const media::MediaLogRecord& event) {
   switch (event.type) {
     case media::MediaLogRecord::Type::kMediaStatus: {
-      int error_code = 0;
-      event.params.GetInteger(media::MediaLog::kStatusText, &error_code);
-      DCHECK_NE(error_code, 0);
-      return PipelineStatusToString(
-          static_cast<media::PipelineStatus>(error_code));
+      const std::string* group =
+          event.params.FindStringKey(media::StatusConstants::kGroupKey);
+      auto code =
+          event.params.FindIntKey(media::StatusConstants::kCodeKey).value_or(0);
+      DCHECK_NE(code, 0);
+      if (group && *group == media::PipelineStatus::Traits::Group()) {
+        return PipelineStatusToString(
+            static_cast<media::PipelineStatusCodes>(code));
+      }
+      std::stringstream formatted;
+      formatted << *group << ":" << code;
+      return formatted.str();
     }
     case media::MediaLogRecord::Type::kMessage: {
       std::string result;

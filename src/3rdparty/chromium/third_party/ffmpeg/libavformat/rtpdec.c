@@ -135,7 +135,16 @@ static const RTPDynamicProtocolHandler *const rtp_dynamic_protocol_handler_list[
     NULL,
 };
 
-const RTPDynamicProtocolHandler *ff_rtp_handler_iterate(void **opaque)
+/**
+ * Iterate over all registered rtp dynamic protocol handlers.
+ *
+ * @param opaque a pointer where libavformat will store the iteration state.
+ *               Must point to NULL to start the iteration.
+ *
+ * @return the next registered rtp dynamic protocol handler
+ *         or NULL when the iteration is finished
+ */
+static const RTPDynamicProtocolHandler *rtp_handler_iterate(void **opaque)
 {
     uintptr_t i = (uintptr_t)*opaque;
     const RTPDynamicProtocolHandler *r = rtp_dynamic_protocol_handler_list[i];
@@ -151,7 +160,7 @@ const RTPDynamicProtocolHandler *ff_rtp_handler_find_by_name(const char *name,
 {
     void *i = 0;
     const RTPDynamicProtocolHandler *handler;
-    while (handler = ff_rtp_handler_iterate(&i)) {
+    while (handler = rtp_handler_iterate(&i)) {
         if (handler->enc_name &&
             !av_strcasecmp(name, handler->enc_name) &&
             codec_type == handler->codec_type)
@@ -165,7 +174,7 @@ const RTPDynamicProtocolHandler *ff_rtp_handler_find_by_id(int id,
 {
     void *i = 0;
     const RTPDynamicProtocolHandler *handler;
-    while (handler = ff_rtp_handler_iterate(&i)) {
+    while (handler = rtp_handler_iterate(&i)) {
         if (handler->static_payload_id && handler->static_payload_id == id &&
             codec_type == handler->codec_type)
             return handler;
@@ -529,7 +538,7 @@ static int opus_write_extradata(AVCodecParameters *codecpar)
      * This mapping family only supports mono and stereo layouts. And RFC7587
      * specifies that the number of channels in the SDP must be 2.
      */
-    if (codecpar->channels > 2) {
+    if (codecpar->ch_layout.nb_channels > 2) {
         return AVERROR_INVALIDDATA;
     }
 
@@ -544,7 +553,7 @@ static int opus_write_extradata(AVCodecParameters *codecpar)
     /* Version */
     bytestream_put_byte  (&bs, 0x1);
     /* Channel count */
-    bytestream_put_byte  (&bs, codecpar->channels);
+    bytestream_put_byte  (&bs, codecpar->ch_layout.nb_channels);
     /* Pre skip */
     bytestream_put_le16  (&bs, 0);
     /* Input sample rate */
@@ -826,9 +835,14 @@ static int rtp_parse_queued_packet(RTPDemuxContext *s, AVPacket *pkt)
     if (s->queue_len <= 0)
         return -1;
 
-    if (!has_next_packet(s))
+    if (!has_next_packet(s)) {
+        int pkt_missed  = s->queue->seq - s->seq - 1;
+
+        if (pkt_missed < 0)
+            pkt_missed += UINT16_MAX;
         av_log(s->ic, AV_LOG_WARNING,
-               "RTP: missed %d packets\n", s->queue->seq - s->seq - 1);
+               "RTP: missed %d packets\n", pkt_missed);
+    }
 
     /* Parse the first packet in the queue, and dequeue it */
     rv   = rtp_parse_packet_internal(s, pkt, s->queue->buf, s->queue->len);

@@ -247,7 +247,7 @@ void SkM44::normalizePerspective() {
  */
 bool SkM44::invert(SkM44* inverse) const {
     SkScalar tmp[16];
-    if (!SkInvert4x4Matrix(fMat, tmp)) {
+    if (SkInvert4x4Matrix(fMat, tmp) == 0.0f) {
         return false;
     }
     memcpy(inverse->fMat, tmp, sizeof(tmp));
@@ -290,11 +290,10 @@ SkM44& SkM44::setRotate(SkV3 axis, SkScalar radians) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void SkM44::dump() const {
-    static const char* format = "|%g %g %g %g|\n"
-                                "|%g %g %g %g|\n"
-                                "|%g %g %g %g|\n"
-                                "|%g %g %g %g|\n";
-    SkDebugf(format,
+    SkDebugf("|%g %g %g %g|\n"
+             "|%g %g %g %g|\n"
+             "|%g %g %g %g|\n"
+             "|%g %g %g %g|\n",
              fMat[0], fMat[4], fMat[8],  fMat[12],
              fMat[1], fMat[5], fMat[9],  fMat[13],
              fMat[2], fMat[6], fMat[10], fMat[14],

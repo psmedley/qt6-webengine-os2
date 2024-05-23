@@ -9,14 +9,12 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AOM_DSP_MATHUTILS_H_
-#define AOM_DSP_MATHUTILS_H_
+#ifndef AOM_AOM_DSP_MATHUTILS_H_
+#define AOM_AOM_DSP_MATHUTILS_H_
 
-#include <memory.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <assert.h>
+#include <math.h>
+#include <string.h>
 
 #include "aom_dsp/aom_dsp_common.h"
 #include "aom_mem/aom_mem.h"
@@ -72,6 +70,7 @@ static INLINE int least_squares(int n, double *A, int rows, int stride,
   double *AtA, *Atb;
   if (!scratch) {
     scratch_ = (double *)aom_malloc(sizeof(*scratch) * n * (n + 1));
+    if (!scratch_) return 0;
     scratch = scratch_;
   }
   AtA = scratch;
@@ -88,7 +87,7 @@ static INLINE int least_squares(int n, double *A, int rows, int stride,
     for (k = 0; k < rows; ++k) Atb[i] += A[k * stride + i] * b[k];
   }
   int ret = linsolve(n, AtA, n, Atb, x);
-  if (scratch_) aom_free(scratch_);
+  aom_free(scratch_);
   return ret;
 }
 
@@ -140,6 +139,7 @@ static INLINE int svdcmp(double **u, int m, int n, double w[], double **v) {
   int flag, i, its, j, jj, k, l, nm;
   double anorm, c, f, g, h, s, scale, x, y, z;
   double *rv1 = (double *)aom_malloc(sizeof(*rv1) * (n + 1));
+  if (!rv1) return 0;
   g = scale = anorm = 0.0;
   for (i = 0; i < n; i++) {
     l = i + 1;
@@ -335,8 +335,8 @@ static INLINE int SVD(double *U, double *W, double *V, double *matx, int M,
       nrV[i] = &V[i * N];
     }
   } else {
-    if (nrU) aom_free(nrU);
-    if (nrV) aom_free(nrV);
+    aom_free(nrU);
+    aom_free(nrV);
     return 1;
   }
 
@@ -359,4 +359,4 @@ static INLINE int SVD(double *U, double *W, double *V, double *matx, int M,
   return 0;
 }
 
-#endif  // AOM_DSP_MATHUTILS_H_
+#endif  // AOM_AOM_DSP_MATHUTILS_H_

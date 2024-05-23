@@ -16,8 +16,8 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/transform.h"
 #include "ui/gfx/icc_profile.h"
-#include "ui/gfx/transform.h"
 
 namespace display {
 namespace {
@@ -230,7 +230,7 @@ Display::Display(int64_t id, const gfx::Rect& bounds)
   // using it. Using a not supported profile can result in fatal errors in the
   // GPU process.
   auto color_space = gfx::ColorSpace::CreateSRGB();
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   if (HasForceDisplayColorProfile())
     color_space = GetForcedDisplayColorProfile();
 #endif
@@ -298,16 +298,17 @@ int Display::PanelRotationAsDegree() const {
 }
 
 gfx::Insets Display::GetWorkAreaInsets() const {
-  return gfx::Insets(work_area_.y() - bounds_.y(), work_area_.x() - bounds_.x(),
-                     bounds_.bottom() - work_area_.bottom(),
-                     bounds_.right() - work_area_.right());
+  return gfx::Insets::TLBR(work_area_.y() - bounds_.y(),
+                           work_area_.x() - bounds_.x(),
+                           bounds_.bottom() - work_area_.bottom(),
+                           bounds_.right() - work_area_.right());
 }
 
 void Display::SetScaleAndBounds(float device_scale_factor,
                                 const gfx::Rect& bounds_in_pixel) {
   gfx::Insets insets = bounds_.InsetsFrom(work_area_);
   if (!HasForceDeviceScaleFactor()) {
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
     // Unless an explicit scale factor was provided for testing, ensure the
     // scale is integral.
     device_scale_factor = static_cast<int>(device_scale_factor);

@@ -9,13 +9,15 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/process/process.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/task_runner.h"
 #include "base/task/thread_pool.h"
-#include "base/task_runner.h"
+#include "base/time/time.h"
+#include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
 #include "components/services/storage/filesystem_proxy_factory.h"
 #include "content/browser/indexed_db/cursor_impl.h"
@@ -27,7 +29,6 @@
 #include "content/browser/indexed_db/indexed_db_database_callbacks.h"
 #include "content/browser/indexed_db/indexed_db_factory_impl.h"
 #include "content/browser/indexed_db/indexed_db_pending_connection.h"
-#include "content/browser/indexed_db/indexed_db_tracing.h"
 #include "content/browser/indexed_db/transaction_impl.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "net/base/net_errors.h"
@@ -100,6 +101,9 @@ class IndexedDBDataItemReader : public storage::mojom::BlobDataItemReader {
                             base::Unretained(this)));
   }
 
+  IndexedDBDataItemReader(const IndexedDBDataItemReader&) = delete;
+  IndexedDBDataItemReader& operator=(const IndexedDBDataItemReader&) = delete;
+
   ~IndexedDBDataItemReader() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     release_callback_.Run();
@@ -171,7 +175,7 @@ class IndexedDBDataItemReader : public storage::mojom::BlobDataItemReader {
   mojo::ReceiverSet<storage::mojom::BlobDataItemReader> receivers_;
 
   // |this| is owned by |host|, so this raw "client pointer" is safe.
-  IndexedDBDispatcherHost* host_;
+  raw_ptr<IndexedDBDispatcherHost> host_;
 
   base::FilePath file_path_;
   base::Time expected_modification_time_;
@@ -191,8 +195,6 @@ class IndexedDBDataItemReader : public storage::mojom::BlobDataItemReader {
   scoped_refptr<base::TaskRunner> io_task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBDataItemReader);
 };
 
 IndexedDBDispatcherHost::IndexedDBDispatcherHost(
@@ -395,7 +397,8 @@ void IndexedDBDispatcherHost::CreateAllExternalObjects(
     std::vector<blink::mojom::IDBExternalObjectPtr>* mojo_objects) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  IDB_TRACE("IndexedDBDispatcherHost::CreateAllExternalObjects");
+  TRACE_EVENT0("IndexedDB",
+               "IndexedDBDispatcherHost::CreateAllExternalObjects");
 
   DCHECK_EQ(objects.size(), mojo_objects->size());
   if (objects.empty())
@@ -428,7 +431,7 @@ void IndexedDBDispatcherHost::CreateAllExternalObjects(
         base::Time last_modified;
         // Android doesn't seem to consistently be able to set file modification
         // times. https://crbug.com/1045488
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
         last_modified = blob_info.last_modified();
 #endif
         BindFileReader(blob_info.indexed_db_file_path(), last_modified,
@@ -453,10 +456,8 @@ void IndexedDBDispatcherHost::CreateAllExternalObjects(
               mojo_token.InitWithNewPipeAndPassReceiver());
         } else {
           DCHECK(!blob_info.file_system_access_token().empty());
-          // TODO(https://crbug.com/1199077): Pass the real StorageKey when
-          // FileSystemAccessContext is converted.
           file_system_access_context()->DeserializeHandle(
-              storage_key.origin(), blob_info.file_system_access_token(),
+              storage_key, blob_info.file_system_access_token(),
               mojo_token.InitWithNewPipeAndPassReceiver());
         }
         mojo_object->get_file_system_access_token() = std::move(mojo_token);

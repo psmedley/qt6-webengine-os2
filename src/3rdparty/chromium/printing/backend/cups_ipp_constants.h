@@ -6,7 +6,7 @@
 #define PRINTING_BACKEND_CUPS_IPP_CONSTANTS_H_
 
 #include "base/component_export.h"
-#include "build/chromeos_buildflags.h"
+#include "build/build_config.h"
 
 #include "build/build_config.h"
 
@@ -27,7 +27,7 @@ COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppPinEncryption[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kCollated[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kUncollated[];
 
-#if defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppDocumentAttributes[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppJobAttributes[];
@@ -37,7 +37,7 @@ COMPONENT_EXPORT(PRINT_BACKEND) extern const char kPinEncryptionNone[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kOptionFalse[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kOptionTrue[];
 
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 }  // namespace printing
 

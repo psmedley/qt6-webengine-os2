@@ -40,6 +40,18 @@ std::string SystemErrorCodeToString(int error_code) {
 
 }  // namespace
 
+#if DCHECK_IS_ON()
+// These are out-of-line so that the .h file doesn't have to include ostream.
+void dcheck_trylock_result(int rv) {
+  DCHECK(rv == 0 || rv == EBUSY)
+      << ". " << base::internal::SystemErrorCodeToString(rv);
+}
+
+void dcheck_unlock_result(int rv) {
+  DCHECK_EQ(rv, 0) << ". " << strerror(rv);
+}
+#endif
+
 // Determines which platforms can consider using priority inheritance locks. Use
 // this define for platform code that may not compile if priority inheritance
 // locks aren't available. For this platform code,
@@ -47,8 +59,8 @@ std::string SystemErrorCodeToString(int error_code) {
 // Lock::PriorityInheritanceAvailable still must be checked as the code may
 // compile but the underlying platform still may not correctly support priority
 // inheritance locks.
-#if defined(OS_NACL) || defined(OS_ANDROID) || defined(OS_FUCHSIA) || \
-  defined(OS_OS2)
+#if BUILDFLAG(IS_NACL) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || \
+  BUILDFLAG(IS_OS2)
 #define PRIORITY_INHERITANCE_LOCKS_POSSIBLE() 0
 #else
 #define PRIORITY_INHERITANCE_LOCKS_POSSIBLE() 1
@@ -91,7 +103,7 @@ void LockImpl::LockInternalWithTracking() {
 bool LockImpl::PriorityInheritanceAvailable() {
 #if BUILDFLAG(ENABLE_MUTEX_PRIORITY_INHERITANCE)
   return true;
-#elif PRIORITY_INHERITANCE_LOCKS_POSSIBLE() && defined(OS_APPLE)
+#elif PRIORITY_INHERITANCE_LOCKS_POSSIBLE() && BUILDFLAG(IS_APPLE)
   return true;
 #else
   // Security concerns prevent the use of priority inheritance mutexes on Linux.

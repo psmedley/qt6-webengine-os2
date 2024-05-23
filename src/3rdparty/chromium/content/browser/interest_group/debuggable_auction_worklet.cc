@@ -4,28 +4,50 @@
 
 #include "content/browser/interest_group/debuggable_auction_worklet.h"
 
+#include "base/strings/strcat.h"
 #include "content/browser/interest_group/debuggable_auction_worklet_tracker.h"
+#include "content/services/auction_worklet/public/mojom/bidder_worklet.mojom.h"
+#include "content/services/auction_worklet/public/mojom/seller_worklet.mojom.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 namespace content {
 
-DebuggableAuctionWorklet::DebuggableAuctionWorklet(
-    RenderFrameHostImpl* owning_frame,
-    const GURL& url,
-    auction_worklet::mojom::BidderWorklet* bidder_worklet,
-    bool& should_pause_on_start)
-    : owning_frame_(owning_frame), url_(url), bidder_worklet_(bidder_worklet) {
-  DebuggableAuctionWorkletTracker::GetInstance()->NotifyCreated(
-      this, should_pause_on_start);
+std::string DebuggableAuctionWorklet::Title() const {
+  if (absl::holds_alternative<auction_worklet::mojom::BidderWorklet*>(
+          worklet_)) {
+    return base::StrCat({"FLEDGE bidder worklet for ", url_.spec()});
+  } else {
+    return base::StrCat({"FLEDGE seller worklet for ", url_.spec()});
+  }
+}
+
+void DebuggableAuctionWorklet::ConnectDevToolsAgent(
+    mojo::PendingAssociatedReceiver<blink::mojom::DevToolsAgent> agent) {
+  if (auction_worklet::mojom::BidderWorklet** bidder_worklet =
+          absl::get_if<auction_worklet::mojom::BidderWorklet*>(&worklet_)) {
+    (*bidder_worklet)->ConnectDevToolsAgent(std::move(agent));
+  } else {
+    absl::get<auction_worklet::mojom::SellerWorklet*>(worklet_)
+        ->ConnectDevToolsAgent(std::move(agent));
+  }
 }
 
 DebuggableAuctionWorklet::DebuggableAuctionWorklet(
     RenderFrameHostImpl* owning_frame,
     const GURL& url,
-    auction_worklet::mojom::SellerWorklet* seller_worklet,
-    bool& should_pause_on_start)
-    : owning_frame_(owning_frame), url_(url), seller_worklet_(seller_worklet) {
+    auction_worklet::mojom::BidderWorklet* bidder_worklet)
+    : owning_frame_(owning_frame), url_(url), worklet_(bidder_worklet) {
   DebuggableAuctionWorkletTracker::GetInstance()->NotifyCreated(
-      this, should_pause_on_start);
+      this, should_pause_on_start_);
+}
+
+DebuggableAuctionWorklet::DebuggableAuctionWorklet(
+    RenderFrameHostImpl* owning_frame,
+    const GURL& url,
+    auction_worklet::mojom::SellerWorklet* seller_worklet)
+    : owning_frame_(owning_frame), url_(url), worklet_(seller_worklet) {
+  DebuggableAuctionWorkletTracker::GetInstance()->NotifyCreated(
+      this, should_pause_on_start_);
 }
 
 DebuggableAuctionWorklet::~DebuggableAuctionWorklet() {

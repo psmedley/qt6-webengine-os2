@@ -70,9 +70,9 @@ TfLiteStatus CheckDimensionsMatch(TfLiteContext* context,
       break;
     }
     default:
-      context->ReportError(
-          context, "Wrong indices dimensions %d, should be less than 3.",
-          NumDimensions(indices));
+      TF_LITE_KERNEL_LOG(context,
+                         "Wrong indices dimensions %d, should be less than 3.",
+                         NumDimensions(indices));
       return kTfLiteError;
   }
   return kTfLiteOk;
@@ -117,9 +117,9 @@ TfLiteStatus GetIndicesVector(TfLiteContext* context,
       break;
     }
     default:
-      context->ReportError(context,
-                           "Indices dimensions problem, got %d dimensions",
-                           NumDimensions(indices));
+      TF_LITE_KERNEL_LOG(context,
+                         "Indices dimensions problem, got %d dimensions",
+                         NumDimensions(indices));
       return kTfLiteError;
   }
   return kTfLiteOk;
@@ -133,8 +133,8 @@ TfLiteStatus ResizeOutputShape(TfLiteContext* context,
   } else if (output_shape->type == kTfLiteInt64) {
     return Resize<int64_t>(context, output_shape, output);
   } else {
-    context->ReportError(context, "Dense shape type %d not supported.",
-                         output_shape->type);
+    TF_LITE_KERNEL_LOG(context, "Dense shape type %d not supported.",
+                       output_shape->type);
     return kTfLiteError;
   }
 }
@@ -143,12 +143,18 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_EQ(context, NumInputs(node), 4);
   TF_LITE_ENSURE_EQ(context, NumOutputs(node), 1);
 
-  const TfLiteTensor* indices = GetInput(context, node, kIndicesTensor);
-  const TfLiteTensor* output_shape =
-      GetInput(context, node, kOutputShapeTensor);
-  const TfLiteTensor* values = GetInput(context, node, kValueInputTensor);
-  const TfLiteTensor* default_value =
-      GetInput(context, node, kDefaultValueTensor);
+  const TfLiteTensor* indices;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, kIndicesTensor, &indices));
+  const TfLiteTensor* output_shape;
+  TF_LITE_ENSURE_OK(
+      context, GetInputSafe(context, node, kOutputShapeTensor, &output_shape));
+  const TfLiteTensor* values;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, kValueInputTensor, &values));
+  const TfLiteTensor* default_value;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kDefaultValueTensor,
+                                          &default_value));
 
   // TODO(renjieliu): Handle validate_indices.
 
@@ -178,11 +184,13 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_OK(
       context, CheckDimensionsMatch(context, indices, output_shape, values));
 
-  TfLiteTensor* output = GetOutput(context, node, kOutputTensor);
+  TfLiteTensor* output;
+  TF_LITE_ENSURE_OK(context,
+                    GetOutputSafe(context, node, kOutputTensor, &output));
   output->type = values->type;
   TF_LITE_ENSURE_EQ(context, NumDimensions(output_shape), 1);
 
-  if (!IsConstantTensor(output_shape)) {
+  if (!IsConstantOrPersistentTensor(output_shape)) {
     SetTensorToDynamic(output);
     return kTfLiteOk;
   }
@@ -191,13 +199,21 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
 
 template <typename T, typename TI>
 TfLiteStatus SparseToDenseImpl(TfLiteContext* context, TfLiteNode* node) {
-  const TfLiteTensor* indices = GetInput(context, node, kIndicesTensor);
-  const TfLiteTensor* output_shape =
-      GetInput(context, node, kOutputShapeTensor);
-  const TfLiteTensor* values = GetInput(context, node, kValueInputTensor);
-  const TfLiteTensor* default_value =
-      GetInput(context, node, kDefaultValueTensor);
-  TfLiteTensor* output = GetOutput(context, node, kOutputTensor);
+  const TfLiteTensor* indices;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, kIndicesTensor, &indices));
+  const TfLiteTensor* output_shape;
+  TF_LITE_ENSURE_OK(
+      context, GetInputSafe(context, node, kOutputShapeTensor, &output_shape));
+  const TfLiteTensor* values;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, kValueInputTensor, &values));
+  const TfLiteTensor* default_value;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kDefaultValueTensor,
+                                          &default_value));
+  TfLiteTensor* output;
+  TF_LITE_ENSURE_OK(context,
+                    GetOutputSafe(context, node, kOutputTensor, &output));
 
   if (IsDynamicTensor(output)) {
     TF_LITE_ENSURE_OK(context,
@@ -238,8 +254,12 @@ TfLiteStatus EvalForIndexType(TfLiteContext* context, TfLiteNode* node,
 }
 
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
-  const TfLiteTensor* indices = GetInput(context, node, kIndicesTensor);
-  const TfLiteTensor* values = GetInput(context, node, kValueInputTensor);
+  const TfLiteTensor* indices;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, kIndicesTensor, &indices));
+  const TfLiteTensor* values;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, kValueInputTensor, &values));
 
   switch (values->type) {
     case kTfLiteFloat32:

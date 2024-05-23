@@ -10,12 +10,14 @@
 
 #include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
+#include "components/network_time/historical_latencies_container.h"
 #include "url/gurl.h"
 
 class PrefRegistrySimple;
@@ -37,13 +39,13 @@ class SharedURLLoaderFactory;
 namespace network_time {
 
 // Clock resolution is platform dependent.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 const int64_t kTicksResolutionMs = base::Time::kMinLowResolutionThresholdMs;
 #else
 const int64_t kTicksResolutionMs = 1;  // Assume 1ms for non-windows platforms.
 #endif
 
-// Variations Service feature that enables network time service querying.
+// Feature that enables network time service querying.
 extern const base::Feature kNetworkTimeServiceQuerying;
 
 // A class that receives network time updates and can provide the network time
@@ -99,6 +101,10 @@ class NetworkTimeTracker {
       std::unique_ptr<const base::TickClock> tick_clock,
       PrefService* pref_service,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+
+  NetworkTimeTracker(const NetworkTimeTracker&) = delete;
+  NetworkTimeTracker& operator=(const NetworkTimeTracker&) = delete;
+
   ~NetworkTimeTracker();
 
   // Sets |network_time| to an estimate of the true time.  Returns
@@ -140,33 +146,51 @@ class NetworkTimeTracker {
   bool AreTimeFetchesEnabled() const;
   FetchBehavior GetFetchBehavior() const;
 
+  // Blocks until the the next time query completes.
+  void WaitForFetch();
+
   void SetMaxResponseSizeForTesting(size_t limit);
 
-  void SetPublicKeyForTesting(const base::StringPiece& key);
+  void SetPublicKeyForTesting(base::StringPiece key);
 
   void SetTimeServerURLForTesting(const GURL& url);
 
   GURL GetTimeServerURLForTesting() const;
 
-  bool QueryTimeServiceForTesting();
+  bool QueryTimeServiceForTesting(bool on_demand = true);
 
   void WaitForFetchForTesting(uint32_t nonce);
 
   void OverrideNonceForTesting(uint32_t nonce);
 
+  void OverrideUMANoiseFactorForTesting(double noise_factor);
+
   base::TimeDelta GetTimerDelayForTesting() const;
 
  private:
+  // Tells how a call to CheckTime was initiated.
+  enum class CheckTimeType {
+    ON_DEMAND,
+    BACKGROUND,
+  };
+
   // Checks whether a network time query should be issued, and issues one if so.
   // Upon response, execution resumes in |OnURLFetchComplete|.
-  void CheckTime();
+  void CheckTime(CheckTimeType check_type);
 
   // Updates network time from a time server response, returning true
   // if successful.
-  bool UpdateTimeFromResponse(std::unique_ptr<std::string> response_body);
+  bool UpdateTimeFromResponse(CheckTimeType check_type,
+                              std::unique_ptr<std::string> response_body);
+
+  // Records histograms related to clock skew. All of these histograms are
+  // currently local-only. See https://crbug.com/1258624.
+  void RecordClockSkewHistograms(base::Time current_time,
+                                 base::TimeDelta fetch_latency);
 
   // Called to process responses from the secure time service.
-  void OnURLLoaderComplete(std::unique_ptr<std::string> response_body);
+  void OnURLLoaderComplete(CheckTimeType check_type,
+                           std::unique_ptr<std::string> response_body);
 
   // Sets the next time query to be run at the specified time.
   void QueueCheckTime(base::TimeDelta delay);
@@ -195,7 +219,7 @@ class NetworkTimeTracker {
   std::unique_ptr<base::Clock> clock_;
   std::unique_ptr<const base::TickClock> tick_clock_;
 
-  PrefService* pref_service_;
+  raw_ptr<PrefService> pref_service_;
 
   // Network time based on last call to UpdateNetworkTime().
   mutable base::Time network_time_at_last_measurement_;
@@ -225,9 +249,16 @@ class NetworkTimeTracker {
   // Callbacks to run when the in-progress time fetch completes.
   std::vector<base::OnceClosure> fetch_completion_callbacks_;
 
-  base::ThreadChecker thread_checker_;
+  // Computes statistics over a sliding window of the most recent fetch
+  // latencies.
+  HistoricalLatenciesContainer historical_latencies_;
 
-  DISALLOW_COPY_AND_ASSIGN(NetworkTimeTracker);
+  // Clock skews reported to UMA will have ±`uma_noise_factor_` noise (relative
+  // to the clock skew itself) for privacy reasons. For example, specifying 0.1
+  // here means ±10% noise.
+  double uma_noise_factor_ = 0.1;
+
+  base::ThreadChecker thread_checker_;
 };
 
 }  // namespace network_time

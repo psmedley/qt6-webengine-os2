@@ -174,6 +174,7 @@ if (pdf_bundle_freetype) {
       "//third_party/freetype/src/src/base/ftbase.h",
       "//third_party/freetype/src/src/base/ftbitmap.c",
       "//third_party/freetype/src/src/base/ftdebug.c",
+      "//third_party/freetype/src/src/base/ftfstype.c",
       "//third_party/freetype/src/src/base/ftglyph.c",
       "//third_party/freetype/src/src/base/ftinit.c",
       "//third_party/freetype/src/src/base/ftmm.c",
@@ -193,14 +194,20 @@ if (pdf_bundle_freetype) {
     if (pdf_use_skia || pdf_use_skia_paths) {
       sources += [
         "//third_party/freetype/src/include/freetype/ftsynth.h",
-        "//third_party/freetype/src/src/base/ftfstype.c",
         "//third_party/freetype/src/src/base/fttype1.c",
       ]
     }
   }
 }
 
-if (!pdf_use_skia && !pdf_use_skia_paths) {
+if (pdf_use_skia || pdf_use_skia_paths) {
+  config("system_fontconfig") {
+    libs = [ "fontconfig" ]
+  }
+  group("fontconfig") {
+    public_configs = [ ":system_fontconfig" ]
+  }
+} else {
   config("fx_agg_warnings") {
     visibility = [ ":*" ]
     if (is_clang) {
@@ -406,7 +413,8 @@ source_set("fx_libopenjpeg") {
     "libopenjpeg20/mct.c",
     "libopenjpeg20/mqc.c",
     "libopenjpeg20/openjpeg.c",
-    "libopenjpeg20/opj_clock.c",
+
+    # NOTE: libopenjpeg20/opj_clock.c is not used.
     "libopenjpeg20/opj_malloc.cc",
     "libopenjpeg20/opj_malloc.h",
     "libopenjpeg20/pi.c",
@@ -470,7 +478,10 @@ source_set("fx_lpng") {
 
   defines = []
   cflags = []
-  deps = [ ":zlib" ]
+  deps = [
+    ":zlib",
+    "../core/fxcrt",
+  ]
 
   if (current_cpu == "x86" || current_cpu == "x64") {
     sources += [
@@ -511,8 +522,7 @@ if (pdf_enable_xfa_tiff) {
       ":pdfium_third_party_config",
     ]
     if (is_win) {
-      # Need to undefine the macro since it is redefined in
-      # tif_ojpeg.c and tif_jpeg.c.
+      # Need to undefine the macro since it is redefined in tif_jpeg.c.
       configs -= [ "//build/config/win:lean_and_mean" ]
     }
     deps = [
@@ -541,7 +551,6 @@ if (pdf_enable_xfa_tiff) {
       "libtiff/tif_luv.c",
       "libtiff/tif_lzw.c",
       "libtiff/tif_next.c",
-      "libtiff/tif_ojpeg.c",
       "libtiff/tif_open.c",
       "libtiff/tif_packbits.c",
       "libtiff/tif_pixarlog.c",
@@ -555,7 +564,6 @@ if (pdf_enable_xfa_tiff) {
       "libtiff/tif_version.c",
       "libtiff/tif_warning.c",
       "libtiff/tif_write.c",
-      "libtiff/tif_zip.c",
       "libtiff/tiffiop.h",
       "libtiff/tiffvers.h",
     ]
@@ -623,15 +631,20 @@ source_set("pdfium_base") {
     "base/numerics/safe_math_arm_impl.h",
     "base/numerics/safe_math_clang_gcc_impl.h",
     "base/numerics/safe_math_shared_impl.h",
-    "base/optional.h",
     "base/span.h",
     "base/sys_byteorder.h",
     "base/template_util.h",
   ]
 
+  public_deps = [
+    "../core/fxcrt:unowned_ptr",
+    "//third_party/abseil-cpp:absl",
+  ]
+
   if (is_win) {
     sources += [
       "base/allocator/partition_allocator/page_allocator_internals_win.h",
+      "base/win/scoped_select_object.h",
       "base/win/win_util.cc",
       "base/win/win_util.h",
     ]
@@ -646,10 +659,12 @@ source_set("pdfium_base") {
 
 source_set("pdfium_base_test_support") {
   testonly = true
-  configs += [ "../:pdfium_strict_config" ]
   sources = []
+  configs += [
+    "../:pdfium_strict_config",
+    "../:pdfium_noshorten_config",
+  ]
   deps = []
-
   if (is_posix || is_fuchsia) {
     sources += [
       "base/test/scoped_locale.cc",
@@ -660,9 +675,12 @@ source_set("pdfium_base_test_support") {
 }
 
 source_set("skia_shared") {
-  configs += [ "../:pdfium_strict_config" ]
   sources = [
     "skia_shared/SkFloatToDecimal.cpp",
     "skia_shared/SkFloatToDecimal.h",
+  ]
+  configs += [
+    "../:pdfium_strict_config",
+    "../:pdfium_noshorten_config",
   ]
 }

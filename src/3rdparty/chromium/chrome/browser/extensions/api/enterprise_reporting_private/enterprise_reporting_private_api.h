@@ -18,7 +18,7 @@
 
 namespace extensions {
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS)
 namespace enterprise_reporting {
 
 extern const char kDeviceIdNotFound[];
@@ -30,18 +30,22 @@ class EnterpriseReportingPrivateGetDeviceIdFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("enterprise.reportingPrivate.getDeviceId",
                              ENTERPRISEREPORTINGPRIVATE_GETDEVICEID)
+
   EnterpriseReportingPrivateGetDeviceIdFunction();
+
+  EnterpriseReportingPrivateGetDeviceIdFunction(
+      const EnterpriseReportingPrivateGetDeviceIdFunction&) = delete;
+  EnterpriseReportingPrivateGetDeviceIdFunction& operator=(
+      const EnterpriseReportingPrivateGetDeviceIdFunction&) = delete;
 
   // ExtensionFunction
   ExtensionFunction::ResponseAction Run() override;
 
  private:
   ~EnterpriseReportingPrivateGetDeviceIdFunction() override;
-
-  DISALLOW_COPY_AND_ASSIGN(EnterpriseReportingPrivateGetDeviceIdFunction);
 };
 
-#if !defined(OS_LINUX)
+#if !BUILDFLAG(IS_LINUX)
 
 class EnterpriseReportingPrivateGetPersistentSecretFunction
     : public ExtensionFunction {
@@ -69,7 +73,7 @@ class EnterpriseReportingPrivateGetPersistentSecretFunction
   void SendResponse(const std::string& data, long int status);
 };
 
-#endif  // !defined(OS_LINUX)
+#endif  // !BUILDFLAG(IS_LINUX)
 
 class EnterpriseReportingPrivateGetDeviceDataFunction
     : public ExtensionFunction {
@@ -148,7 +152,7 @@ class EnterpriseReportingPrivateGetDeviceInfoFunction
   void OnDeviceInfoRetrieved(::enterprise_signals::DeviceInfo device_info);
 };
 
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
 class EnterpriseReportingPrivateGetContextInfoFunction
     : public ExtensionFunction {

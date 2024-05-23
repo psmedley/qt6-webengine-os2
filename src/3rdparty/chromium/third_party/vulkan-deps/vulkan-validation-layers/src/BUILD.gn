@@ -1,5 +1,5 @@
 # Copyright (C) 2018-2021 The ANGLE Project Authors.
-# Copyright (C) 2019-2021 LunarG, Inc.
+# Copyright (C) 2019-2022 LunarG, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -82,7 +82,9 @@ config("vulkan_layer_config") {
 
 core_validation_sources = [
   "layers/android_ndk_types.h",
+  "layers/base_node.cpp",
   "layers/base_node.h",
+  "layers/buffer_state.cpp",
   "layers/buffer_state.h",
   "layers/buffer_validation.cpp",
   "layers/buffer_validation.h",
@@ -91,7 +93,6 @@ core_validation_sources = [
   "layers/core_validation.cpp",
   "layers/core_validation.h",
   "layers/core_validation_error_enums.h",
-  "layers/base_node.h",
   "layers/cmd_buffer_state.h",
   "layers/cmd_buffer_state.cpp",
   "layers/device_memory_state.h",
@@ -101,8 +102,13 @@ core_validation_sources = [
   "layers/image_state.cpp",
   "layers/pipeline_state.h",
   "layers/pipeline_state.cpp",
+  "layers/pipeline_layout_state.h",
+  "layers/pipeline_layout_state.cpp",
+  "layers/pipeline_sub_state.h",
+  "layers/pipeline_sub_state.cpp",
   "layers/qfo_transfer.h",
   "layers/query_state.h",
+  "layers/queue_state.cpp",
   "layers/queue_state.h",
   "layers/ray_tracing_state.h",
   "layers/render_pass_state.h",
@@ -116,6 +122,8 @@ core_validation_sources = [
   "layers/generated/corechecks_optick_instrumentation.cpp",
   "layers/generated/corechecks_optick_instrumentation.h",
   "layers/generated/spirv_validation_helper.cpp",
+  "layers/generated/spirv_grammar_helper.cpp",
+  "layers/generated/spirv_grammar_helper.h",
   "layers/generated/command_validation.cpp",
   "layers/generated/command_validation.h",
   "layers/generated/gpu_pre_draw_shader.h",
@@ -263,11 +271,11 @@ source_set("vulkan_layer_utils") {
     "layers/generated/vk_safe_struct.h",
     "layers/generated/vk_typemap_helper.h",
     "layers/generated/vk_validation_error_messages.h",
+    "layers/generated/vk_format_utils.cpp",
+    "layers/generated/vk_format_utils.h",
     "layers/hash_util.h",
     "layers/hash_vk_types.h",
     "layers/sparse_containers.h",
-    "layers/vk_format_utils.cpp",
-    "layers/vk_format_utils.h",
     "layers/vk_layer_config.cpp",
     "layers/vk_layer_config.h",
     "layers/vk_layer_data.h",
@@ -337,7 +345,7 @@ foreach(layer_info, layers) {
     if (is_linux || is_android) {
       ldflags = [ "-Wl,-Bsymbolic,--exclude-libs,ALL" ]
     }
-    if (use_x11) {
+    if (ozone_platform_x11) {
       defines += [ "VK_USE_PLATFORM_XLIB_KHR" ]
     }
     if (is_android) {

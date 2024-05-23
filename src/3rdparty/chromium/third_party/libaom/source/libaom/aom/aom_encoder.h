@@ -35,14 +35,24 @@ extern "C" {
 
 /*!\brief Current ABI version number
  *
+ * \hideinitializer
  * \internal
  * If this file is altered in any way that changes the ABI, this value
  * must be bumped.  Examples include, but are not limited to, changing
  * types, removing or reassigning enums, adding/removing/rearranging
  * fields to structures
+ *
+ * Note: In the definition of AOM_ENCODER_ABI_VERSION, 3 is the value of
+ * AOM_EXT_PART_ABI_VERSION in libaom v3.2.0. The old value of
+ * AOM_EXT_PART_ABI_VERSION is used so as to not break the ABI version check in
+ * aom_codec_enc_init_ver() when an application compiled against libaom v3.2.0
+ * passes the old value of AOM_ENCODER_ABI_VERSION to aom_codec_enc_init_ver().
+ * The external partition API is still experimental. When it is declared stable,
+ * we will replace 3 with AOM_EXT_PART_ABI_VERSION in the definition of
+ * AOM_ENCODER_ABI_VERSION.
  */
 #define AOM_ENCODER_ABI_VERSION \
-  (10 + AOM_CODEC_ABI_VERSION + AOM_EXT_PART_ABI_VERSION) /**<\hideinitializer*/
+  (10 + AOM_CODEC_ABI_VERSION + /*AOM_EXT_PART_ABI_VERSION=*/3)
 
 /*! \brief Encoder capabilities bitfield
  *
@@ -425,6 +435,11 @@ typedef struct aom_codec_enc_cfg {
 
   /*!\brief Max number of frames to encode
    *
+   * If force video mode is off (the default) and g_limit is 1, the encoder
+   * will encode a still picture (still_picture is set to 1 in the sequence
+   * header OBU). If in addition full_still_picture_hdr is 0 (the default),
+   * the encoder will use a reduced header (reduced_still_picture_header is
+   * set to 1 in the sequence header OBU) for the still picture.
    */
   unsigned int g_limit;
 
@@ -657,7 +672,7 @@ typedef struct aom_codec_enc_cfg {
   /*!\brief Rate control adaptation undershoot control
    *
    * This value, controls the tolerance of the VBR algorithm to undershoot
-   * and is used as a trigger threshold for more agressive adaptation of Q.
+   * and is used as a trigger threshold for more aggressive adaptation of Q.
    *
    * Valid values in the range 0-100.
    */
@@ -666,9 +681,9 @@ typedef struct aom_codec_enc_cfg {
   /*!\brief Rate control adaptation overshoot control
    *
    * This value, controls the tolerance of the VBR algorithm to overshoot
-   * and is used as a trigger threshold for more agressive adaptation of Q.
+   * and is used as a trigger threshold for more aggressive adaptation of Q.
    *
-   * Valid values in the range 0-1000.
+   * Valid values in the range 0-100.
    */
   unsigned int rc_overshoot_pct;
 
@@ -807,10 +822,12 @@ typedef struct aom_codec_enc_cfg {
 
   /*!\brief full_still_picture_hdr
    *
-   * If this is nonzero, the encoder will generate a full header even for
-   * still picture encoding. if zero, a reduced header is used for still
-   * picture. This flag has no effect when a regular video with more than
-   * a single frame is encoded.
+   * If this is nonzero, the encoder will generate a full header
+   * (reduced_still_picture_header is set to 0 in the sequence header OBU) even
+   * for still picture encoding. If this is zero (the default), a reduced
+   * header (reduced_still_picture_header is set to 1 in the sequence header
+   * OBU) is used for still picture encoding. This flag has no effect when a
+   * regular video with more than a single frame is encoded.
    */
   unsigned int full_still_picture_hdr;
 
@@ -868,37 +885,16 @@ typedef struct aom_codec_enc_cfg {
    *
    * If a value of 1 is provided, encoder will use fixed QP offsets for frames
    * at different levels of the pyramid.
-   * - If 'fixed_qp_offsets' is also provided, encoder will use the given
-   * offsets
-   * - If not, encoder will select the fixed offsets based on the cq-level
-   *   provided.
-   * If a value of 0 is provided and fixed_qp_offset are not provided, encoder
-   * will NOT use fixed QP offsets.
+   * If a value of 0 is provided, encoder will NOT use fixed QP offsets.
    * Note: This option is only relevant for --end-usage=q.
    */
   unsigned int use_fixed_qp_offsets;
 
-/*!\brief Max number of fixed QP offsets
- *
- * This defines the number of elements in the fixed_qp_offsets array.
- */
-#define FIXED_QP_OFFSET_COUNT 6
-
-  /*!\brief Array of fixed QP offsets
+  /*!\brief Deprecated and ignored. DO NOT USE.
    *
-   * This array specifies fixed QP offsets (range: 0 to 63) for frames at
-   * different levels of the pyramid. It is a comma-separated list of 5 values:
-   * - QP offset for keyframe
-   * - QP offset for ALTREF frame
-   * - QP offset for 1st level internal ARF
-   * - QP offset for 2nd level internal ARF
-   * - QP offset for 3rd level internal ARF
-   * Notes:
-   * - QP offset for leaf level frames is not explicitly specified. These frames
-   *   use the worst quality allowed (--cq-level).
-   * - This option is only relevant for --end-usage=q.
+   * TODO(aomedia:3269): Remove fixed_qp_offsets in libaom v4.0.0.
    */
-  int fixed_qp_offsets[FIXED_QP_OFFSET_COUNT];
+  int fixed_qp_offsets[5];
 
   /*!\brief Options defined per config file
    *
@@ -913,7 +909,7 @@ typedef struct aom_codec_enc_cfg {
  * function directly, to ensure that the ABI version number parameter
  * is properly initialized.
  *
- * If the library was configured with --disable-multithread, this call
+ * If the library was configured with -DCONFIG_MULTITHREAD=0, this call
  * is not thread safe and should be guarded with a lock if being used
  * in a multithreaded context.
  *
@@ -1027,6 +1023,8 @@ aom_fixed_buf_t *aom_codec_get_global_headers(aom_codec_ctx_t *ctx);
  *
  * \param[in]    ctx       Pointer to this instance's context
  * \param[in]    img       Image data to encode, NULL to flush.
+ *                         Encoding sample values outside the range
+ *                         [0..(1<<img->bit_depth)-1] is undefined behavior.
  * \param[in]    pts       Presentation time stamp, in timebase units. If img
  *                         is NULL, pts is ignored.
  * \param[in]    duration  Duration to show frame, in timebase units. If img

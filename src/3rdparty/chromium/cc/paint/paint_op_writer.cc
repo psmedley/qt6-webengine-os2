@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/bits.h"
+#include "base/notreached.h"
 #include "cc/paint/draw_image.h"
 #include "cc/paint/image_provider.h"
 #include "cc/paint/image_transfer_cache_entry.h"
@@ -14,18 +15,31 @@
 #include "cc/paint/paint_flags.h"
 #include "cc/paint/paint_op_buffer_serializer.h"
 #include "cc/paint/paint_shader.h"
-#include "cc/paint/transfer_cache_serialize_helper.h"
-#include "gpu/command_buffer/common/mailbox.h"
-#include "third_party/skia/include/core/SkSerialProcs.h"
-#include "third_party/skia/include/core/SkTextBlob.h"
-#include "third_party/skia/src/core/SkRemoteGlyphCache.h"
-#include "ui/gfx/geometry/rect_conversions.h"
-#include "ui/gfx/skia_util.h"
-
-#if !defined(OS_ANDROID)
 #include "cc/paint/skottie_transfer_cache_entry.h"
 #include "cc/paint/skottie_wrapper.h"
-#endif
+#include "cc/paint/transfer_cache_serialize_helper.h"
+#include "gpu/command_buffer/common/mailbox.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
+#include "third_party/skia/include/core/SkData.h"
+#include "third_party/skia/include/core/SkFlattenable.h"
+#include "third_party/skia/include/core/SkM44.h"
+#include "third_party/skia/include/core/SkMatrix.h"
+#include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkRect.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkRegion.h"
+#include "third_party/skia/include/core/SkSamplingOptions.h"
+#include "third_party/skia/include/core/SkScalar.h"
+#include "third_party/skia/include/core/SkSerialProcs.h"
+#include "third_party/skia/include/core/SkSize.h"
+#include "third_party/skia/include/core/SkTextBlob.h"
+#include "third_party/skia/include/core/SkTypeface.h"
+#include "third_party/skia/include/private/chromium/GrSlug.h"
+#include "third_party/skia/include/private/chromium/SkChromeRemoteGlyphCache.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace cc {
 namespace {
@@ -108,7 +122,7 @@ void PaintOpWriter::WriteSimple(const T& val) {
   if (!valid_)
     return;
 
-  reinterpret_cast<T*>(memory_)[0] = val;
+  reinterpret_cast<T*>(memory_.get())[0] = val;
 
   memory_ += size;
   remaining_bytes_ -= size;
@@ -136,7 +150,7 @@ void PaintOpWriter::WriteFlattenable(const SkFlattenable* val) {
 
 uint64_t* PaintOpWriter::WriteSize(size_t size) {
   AlignMemory(8);
-  uint64_t* memory = reinterpret_cast<uint64_t*>(memory_);
+  uint64_t* memory = reinterpret_cast<uint64_t*>(memory_.get());
   WriteSimple<uint64_t>(size);
   return memory;
 }
@@ -282,9 +296,6 @@ void PaintOpWriter::Write(const DrawImage& draw_image,
   WriteImage(decoded_draw_image);
 }
 
-// Android does not use skottie. Remove below section to keep binary size to a
-// minimum.
-#if !defined(OS_ANDROID)
 void PaintOpWriter::Write(scoped_refptr<SkottieWrapper> skottie) {
   uint32_t id = skottie->id();
   Write(id);
@@ -309,7 +320,6 @@ void PaintOpWriter::Write(scoped_refptr<SkottieWrapper> skottie) {
   memory_ += bytes_written;
   remaining_bytes_ -= bytes_written;
 }
-#endif  // !defined(OS_ANDROID)
 
 void PaintOpWriter::WriteImage(const DecodedDrawImage& decoded_draw_image) {
   if (!decoded_draw_image.mailbox().IsZero()) {
@@ -390,6 +400,31 @@ void PaintOpWriter::Write(const SkColorSpace* color_space) {
 
   memory_ += written;
   remaining_bytes_ -= written;
+}
+
+void PaintOpWriter::Write(const sk_sp<GrSlug>& slug) {
+  if (!valid_)
+    return;
+
+  AlignMemory(4);
+  uint64_t* size_memory = WriteSize(0u);
+  if (!valid_)
+    return;
+
+  size_t bytes_written = 0;
+  if (slug) {
+    // TODO(penghuang): should we use a unique id to avoid sending the same
+    // slug?
+    bytes_written = slug->serialize(
+        memory_, base::bits::AlignDown(remaining_bytes_, kSkiaAlignment));
+    if (bytes_written == 0u) {
+      valid_ = false;
+      return;
+    }
+  }
+  *size_memory = bytes_written;
+  memory_ += bytes_written;
+  remaining_bytes_ -= bytes_written;
 }
 
 void PaintOpWriter::Write(const sk_sp<SkTextBlob>& blob) {
@@ -588,7 +623,7 @@ void PaintOpWriter::AlignMemory(size_t alignment) {
   DCHECK_GT(alignment, 0u);
   DCHECK_EQ(alignment & (alignment - 1), 0u);
 
-  uintptr_t memory = reinterpret_cast<uintptr_t>(memory_);
+  uintptr_t memory = reinterpret_cast<uintptr_t>(memory_.get());
   // The following is equivalent to:
   //   padding = (alignment - memory % alignment) % alignment;
   // because alignment is a power of two. This doesn't use modulo operator
@@ -608,7 +643,7 @@ void PaintOpWriter::Write(const PaintFilter* filter, const SkM44& current_ctm) {
     return;
   }
   WriteEnum(filter->type());
-  auto* crop_rect = filter->crop_rect();
+  auto* crop_rect = filter->GetCropRect();
   WriteSimple(static_cast<uint32_t>(!!crop_rect));
   if (crop_rect) {
     WriteSimple(*crop_rect);

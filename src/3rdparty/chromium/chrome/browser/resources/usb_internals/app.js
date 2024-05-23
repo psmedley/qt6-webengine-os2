@@ -9,6 +9,7 @@
 import {assert} from 'chrome://resources/js/assert.m.js';
 import {decorate} from 'chrome://resources/js/cr/ui.m.js';
 import {TabBox} from 'chrome://resources/js/cr/ui/tabs.js';
+import {getTrustedHTML} from 'chrome://resources/js/static_types.js';
 
 import {DevicesPage} from './devices_page.js';
 import {UsbInternalsPageHandler} from './usb_internals.mojom-webui.js';
@@ -21,7 +22,7 @@ window.setupFn = window.setupFn || function() {
 
 class UsbInternalsAppElement extends HTMLElement {
   static get template() {
-    return `{__html_template__}`;
+    return getTrustedHTML`{__html_template__}`;
   }
 
   constructor() {
@@ -29,7 +30,7 @@ class UsbInternalsAppElement extends HTMLElement {
 
     this.attachShadow({mode: 'open'});
     const template = document.createElement('template');
-    template.innerHTML = this.constructor.template || '';
+    template.innerHTML = this.constructor.template || trustedTypes.emptyHTML;
     this.shadowRoot.appendChild(template.content.cloneNode(true));
   }
 
@@ -51,7 +52,7 @@ class UsbInternalsAppElement extends HTMLElement {
     // Connection to the UsbInternalsPageHandler instance running in the
     // browser process.
     /** @type {UsbDeviceManagerRemote} */
-    const usbManager = new UsbDeviceManagerRemote;
+    const usbManager = new UsbDeviceManagerRemote();
     await pageHandler.bindUsbDeviceManagerInterface(
         usbManager.$.bindNewPipeAndPassReceiver());
 
@@ -59,7 +60,7 @@ class UsbInternalsAppElement extends HTMLElement {
     this.devicesPage_ = new DevicesPage(usbManager, assert(this.shadowRoot));
 
     /** @private {UsbDeviceManagerTestRemote} */
-    this.usbManagerTest_ = new UsbDeviceManagerTestRemote;
+    this.usbManagerTest_ = new UsbDeviceManagerTestRemote();
     await pageHandler.bindTestInterface(
         this.usbManagerTest_.$.bindNewPipeAndPassReceiver());
 

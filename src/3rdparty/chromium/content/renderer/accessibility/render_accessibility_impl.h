@@ -9,7 +9,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
@@ -95,6 +94,10 @@ class CONTENT_EXPORT RenderAccessibilityImpl : public RenderAccessibility,
       RenderAccessibilityManager* const render_accessibility_manager,
       RenderFrameImpl* const render_frame,
       ui::AXMode mode);
+
+  RenderAccessibilityImpl(const RenderAccessibilityImpl&) = delete;
+  RenderAccessibilityImpl& operator=(const RenderAccessibilityImpl&) = delete;
+
   ~RenderAccessibilityImpl() override;
 
   ui::AXMode GetAccessibilityMode() {
@@ -124,6 +127,7 @@ class CONTENT_EXPORT RenderAccessibilityImpl : public RenderAccessibility,
   void MarkWebAXObjectDirty(
       const blink::WebAXObject& obj,
       bool subtree,
+      ax::mojom::EventFrom event_from = ax::mojom::EventFrom::kNone,
       ax::mojom::Action event_from_action = ax::mojom::Action::kNone,
       std::vector<ui::AXEventIntent> event_intents = {},
       ax::mojom::Event event_type = ax::mojom::Event::kNone);
@@ -322,7 +326,6 @@ class CONTENT_EXPORT RenderAccessibilityImpl : public RenderAccessibility,
   // slowest_serialization_ms_. We report UKM before the user navigates
   // away, or every few minutes.
   ukm::SourceId last_ukm_source_id_;
-  std::string last_ukm_url_;
 
   // So we can queue up tasks to be executed later.
   base::WeakPtrFactory<RenderAccessibilityImpl>
@@ -332,8 +335,6 @@ class CONTENT_EXPORT RenderAccessibilityImpl : public RenderAccessibility,
   friend class PluginActionHandlingTest;
   friend class RenderAccessibilityImplTest;
   friend class RenderAccessibilityImplUKMTest;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderAccessibilityImpl);
 };
 
 }  // namespace content

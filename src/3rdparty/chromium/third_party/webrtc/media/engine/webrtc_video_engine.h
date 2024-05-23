@@ -94,7 +94,7 @@ class WebRtcVideoEngine : public VideoEngineInterface {
   WebRtcVideoEngine(
       std::unique_ptr<webrtc::VideoEncoderFactory> video_encoder_factory,
       std::unique_ptr<webrtc::VideoDecoderFactory> video_decoder_factory,
-      const webrtc::WebRtcKeyValueConfig& trials);
+      const webrtc::FieldTrialsView& trials);
 
   ~WebRtcVideoEngine() override;
 
@@ -116,7 +116,7 @@ class WebRtcVideoEngine : public VideoEngineInterface {
   const std::unique_ptr<webrtc::VideoEncoderFactory> encoder_factory_;
   const std::unique_ptr<webrtc::VideoBitrateAllocatorFactory>
       bitrate_allocator_factory_;
-  const webrtc::WebRtcKeyValueConfig& trials_;
+  const webrtc::FieldTrialsView& trials_;
 };
 
 class WebRtcVideoChannel : public VideoMediaChannel,
@@ -167,7 +167,7 @@ class WebRtcVideoChannel : public VideoMediaChannel,
                         int64_t packet_time_us) override;
   void OnPacketSent(const rtc::SentPacket& sent_packet) override;
   void OnReadyToSend(bool ready) override;
-  void OnNetworkRouteChanged(const std::string& transport_name,
+  void OnNetworkRouteChanged(absl::string_view transport_name,
                              const rtc::NetworkRoute& network_route) override;
   void SetInterface(NetworkInterface* iface) override;
 
@@ -224,11 +224,8 @@ class WebRtcVideoChannel : public VideoMediaChannel,
 
   // Implements webrtc::EncoderSwitchRequestCallback.
   void RequestEncoderFallback() override;
-
-  // TODO(bugs.webrtc.org/11341) : Remove this version of RequestEncoderSwitch.
-  void RequestEncoderSwitch(
-      const EncoderSwitchRequestCallback::Config& conf) override;
-  void RequestEncoderSwitch(const webrtc::SdpVideoFormat& format) override;
+  void RequestEncoderSwitch(const webrtc::SdpVideoFormat& format,
+                            bool allow_default_fallback) override;
 
   void SetRecordableEncodedFrameCallback(
       uint32_t ssrc,
@@ -598,7 +595,7 @@ class WebRtcVideoChannel : public VideoMediaChannel,
   std::vector<VideoCodecSettings> negotiated_codecs_
       RTC_GUARDED_BY(thread_checker_);
 
-  absl::optional<std::vector<webrtc::RtpExtension>> send_rtp_extensions_
+  std::vector<webrtc::RtpExtension> send_rtp_extensions_
       RTC_GUARDED_BY(thread_checker_);
 
   webrtc::VideoEncoderFactory* const encoder_factory_
@@ -638,9 +635,10 @@ class WebRtcVideoChannel : public VideoMediaChannel,
   std::unique_ptr<UnhandledPacketsBuffer> unknown_ssrc_packet_buffer_
       RTC_GUARDED_BY(thread_checker_);
 
+  // TODO(bugs.webrtc.org/11341): Remove this and relevant PC API. Presence
+  // of multiple negotiated codecs allows generic encoder fallback on failures.
+  // Presence of EncoderSelector allows switching to specific encoders.
   bool allow_codec_switching_ = false;
-  absl::optional<EncoderSwitchRequestCallback::Config>
-      requested_encoder_switch_;
 };
 
 class EncoderStreamFactory
@@ -660,7 +658,7 @@ class EncoderStreamFactory
                        int max_qp,
                        bool is_screenshare,
                        bool conference_mode,
-                       const webrtc::WebRtcKeyValueConfig* trials);
+                       const webrtc::FieldTrialsView* trials);
 
  private:
   std::vector<webrtc::VideoStream> CreateEncoderStreams(
@@ -688,7 +686,7 @@ class EncoderStreamFactory
   // layering and various settings.
   const bool conference_mode_;
   const webrtc::FieldTrialBasedConfig fallback_trials_;
-  const webrtc::WebRtcKeyValueConfig& trials_;
+  const webrtc::FieldTrialsView& trials_;
 };
 
 }  // namespace cricket

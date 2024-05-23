@@ -5,8 +5,8 @@
 #include "components/autofill/core/browser/personal_data_manager_cleaner.h"
 
 #include "base/logging.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/data_model/autofill_profile_comparator.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_constants.h"
@@ -100,9 +100,9 @@ void PersonalDataManagerCleaner::SyncStarted(syncer::ModelType model_type) {
 }
 
 void PersonalDataManagerCleaner::ApplyAddressFixesAndCleanups() {
-  // Validate profiles once per major.
-  personal_data_manager_->UpdateClientValidityStates(
-      personal_data_manager_->GetProfiles());
+  // TODO(crbug.com/1288863): Remove prefs in M102 or above.
+  pref_service_->ClearPref(prefs::kAutofillLastVersionValidated);
+  pref_service_->ClearPref(prefs::kAutofillProfileValidity);
 
   // One-time fix, otherwise NOP.
   RemoveOrphanAutofillTableRows();
@@ -120,6 +120,9 @@ void PersonalDataManagerCleaner::ApplyAddressFixesAndCleanups() {
 
   // Ran everytime it is called.
   ClearProfileNonSettingsOrigins();
+
+  // Once per user profile startup.
+  RemoveInaccessibleProfileValues();
 }
 
 void PersonalDataManagerCleaner::ApplyCardFixesAndCleanups() {
@@ -150,6 +153,30 @@ void PersonalDataManagerCleaner::RemoveOrphanAutofillTableRows() {
 
   // Set the pref so that this fix is never run again.
   pref_service_->SetBoolean(prefs::kAutofillOrphanRowsRemoved, true);
+}
+
+void PersonalDataManagerCleaner::RemoveInaccessibleProfileValues() {
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillRemoveInaccessibleProfileValues)) {
+    return;
+  }
+
+  for (const AutofillProfile* profile : personal_data_manager_->GetProfiles()) {
+    const std::string stored_country_code =
+        base::UTF16ToUTF8(profile->GetRawInfo(ADDRESS_HOME_COUNTRY));
+    const std::string country_code =
+        stored_country_code.empty() ? "US" : stored_country_code;
+    const ServerFieldTypeSet inaccessible_fields =
+        profile->FindInaccessibleProfileValues(country_code);
+    if (!inaccessible_fields.empty()) {
+      // We need to create a copy, because otherwise the internally stored
+      // profile in |personal_data_manager_| is modified, which should only
+      // happen via UpdateProfile().
+      AutofillProfile updated_profile = *profile;
+      updated_profile.ClearFields(inaccessible_fields);
+      personal_data_manager_->UpdateProfile(updated_profile);
+    }
+  }
 }
 
 bool PersonalDataManagerCleaner::ApplyDedupingRoutine() {

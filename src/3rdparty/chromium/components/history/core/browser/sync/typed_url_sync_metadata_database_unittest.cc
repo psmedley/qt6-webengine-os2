@@ -8,6 +8,8 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "components/history/core/browser/url_row.h"
+#include "components/sync/model/metadata_batch.h"
+#include "components/sync/protocol/entity_metadata.pb.h"
 #include "components/sync/protocol/model_type_state.pb.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
@@ -34,6 +36,12 @@ class TypedURLSyncMetadataDatabaseTest : public testing::Test,
                                          public TypedURLSyncMetadataDatabase {
  public:
   TypedURLSyncMetadataDatabaseTest() {}
+
+  TypedURLSyncMetadataDatabaseTest(const TypedURLSyncMetadataDatabaseTest&) =
+      delete;
+  TypedURLSyncMetadataDatabaseTest& operator=(
+      const TypedURLSyncMetadataDatabaseTest&) = delete;
+
   ~TypedURLSyncMetadataDatabaseTest() override {}
 
  protected:
@@ -58,9 +66,6 @@ class TypedURLSyncMetadataDatabaseTest : public testing::Test,
   base::ScopedTempDir temp_dir_;
   sql::Database db_;
   sql::MetaTable meta_table_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TypedURLSyncMetadataDatabaseTest);
 };
 
 TEST_F(TypedURLSyncMetadataDatabaseTest, TypedURLNoMetadata) {

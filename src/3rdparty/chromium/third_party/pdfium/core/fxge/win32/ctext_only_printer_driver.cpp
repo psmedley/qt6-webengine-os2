@@ -55,21 +55,25 @@ int CTextOnlyPrinterDriver::GetDeviceCaps(int caps_id) const {
   }
 }
 
+void CTextOnlyPrinterDriver::SaveState() {}
+
+void CTextOnlyPrinterDriver::RestoreState(bool bKeepSaved) {}
+
 bool CTextOnlyPrinterDriver::SetClip_PathFill(
-    const CFX_Path* pPath,
+    const CFX_Path& path,
     const CFX_Matrix* pObject2Device,
     const CFX_FillRenderOptions& fill_options) {
   return true;
 }
 
 bool CTextOnlyPrinterDriver::SetClip_PathStroke(
-    const CFX_Path* pPath,
+    const CFX_Path& path,
     const CFX_Matrix* pObject2Device,
     const CFX_GraphStateData* pGraphState) {
   return false;
 }
 
-bool CTextOnlyPrinterDriver::DrawPath(const CFX_Path* pPath,
+bool CTextOnlyPrinterDriver::DrawPath(const CFX_Path& path,
                                       const CFX_Matrix* pObject2Device,
                                       const CFX_GraphStateData* pGraphState,
                                       uint32_t fill_color,
@@ -121,16 +125,15 @@ bool CTextOnlyPrinterDriver::StartDIBits(
 }
 
 bool CTextOnlyPrinterDriver::DrawDeviceText(
-    int nChars,
-    const TextCharPos* pCharPos,
+    pdfium::span<const TextCharPos> pCharPos,
     CFX_Font* pFont,
     const CFX_Matrix& mtObject2Device,
     float font_size,
     uint32_t color,
     const CFX_TextRenderOptions& /*options*/) {
-  if (g_pdfium_print_mode != 1)
+  if (g_pdfium_print_mode != WindowsPrintMode::kTextOnly)
     return false;
-  if (nChars < 1 || !pFont || !pFont->IsEmbedded() || !pFont->IsTTFont())
+  if (pCharPos.empty() || !pFont || !pFont->IsEmbedded() || !pFont->IsTTFont())
     return false;
 
   // Scale factor used to minimize the kerning problems caused by rounding
@@ -142,7 +145,7 @@ bool CTextOnlyPrinterDriver::DrawDeviceText(
   // preserved in the text location. clrf characters seem to be ignored by
   // label printers that use this driver.
   WideString wsText;
-  size_t len = nChars;
+  size_t len = pCharPos.size();
   float fOffsetY = mtObject2Device.f * kScaleFactor;
   if (m_SetOrigin && FXSYS_roundf(m_OriginY) != FXSYS_roundf(fOffsetY)) {
     wsText += L"\r\n";
@@ -153,16 +156,14 @@ bool CTextOnlyPrinterDriver::DrawDeviceText(
   m_SetOrigin = true;
 
   // Text
-  for (int i = 0; i < nChars; ++i) {
+  for (const auto& charpos : pCharPos) {
     // Only works with PDFs from Skia's PDF generator. Cannot handle arbitrary
     // values from PDFs.
-    const TextCharPos& charpos = pCharPos[i];
     DCHECK_EQ(charpos.m_AdjustMatrix[0], 0);
     DCHECK_EQ(charpos.m_AdjustMatrix[1], 0);
     DCHECK_EQ(charpos.m_AdjustMatrix[2], 0);
     DCHECK_EQ(charpos.m_AdjustMatrix[3], 0);
     DCHECK_EQ(charpos.m_Origin.y, 0);
-
     wsText += charpos.m_Unicode;
   }
   ByteString text = wsText.ToDefANSI();
@@ -172,7 +173,7 @@ bool CTextOnlyPrinterDriver::DrawDeviceText(
     size_t send_len = std::min<size_t>(text_span.size(), 1024);
     *(reinterpret_cast<uint16_t*>(buffer)) = static_cast<uint16_t>(send_len);
     memcpy(buffer + 2, text_span.data(), send_len);
-    ::GdiComment(m_hDC, send_len + 2, buffer);
+    ::GdiComment(m_hDC, static_cast<UINT>(send_len + 2), buffer);
     text_span = text_span.subspan(send_len);
   }
   return true;

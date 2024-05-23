@@ -10,6 +10,8 @@
 #ifndef EIGEN_CXX11_TENSOR_TENSOR_FORCED_EVAL_H
 #define EIGEN_CXX11_TENSOR_TENSOR_FORCED_EVAL_H
 
+#include "./InternalHeaderCheck.h"
+
 namespace Eigen {
 
 /** \class TensorForcedEval
@@ -29,7 +31,7 @@ struct traits<TensorForcedEvalOp<XprType> >
   typedef typename traits<XprType>::StorageKind StorageKind;
   typedef typename traits<XprType>::Index Index;
   typedef typename XprType::Nested Nested;
-  typedef typename remove_reference<Nested>::type _Nested;
+  typedef typename remove_reference<Nested>::type Nested_;
   static const int NumDimensions = XprTraits::NumDimensions;
   static const int Layout = XprTraits::Layout;
   typedef typename XprTraits::PointerType PointerType;
@@ -135,16 +137,13 @@ struct TensorEvaluator<const TensorForcedEvalOp<ArgType_>, Device>
       TensorBlock;
   //===--------------------------------------------------------------------===//
 
-  EIGEN_DEVICE_FUNC TensorEvaluator(const XprType& op, const Device& device)
+  TensorEvaluator(const XprType& op, const Device& device)
       : m_impl(op.expression(), device), m_op(op.expression()),
       m_device(device), m_buffer(NULL)
   { }
 
   EIGEN_DEVICE_FUNC const Dimensions& dimensions() const { return m_impl.dimensions(); }
 
-  #if !defined(EIGEN_HIPCC)
-  EIGEN_DEVICE_FUNC
-  #endif
   EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(EvaluatorPointerType) {
     const Index numValues =  internal::array_prod(m_impl.dimensions());
     m_buffer = m_device.get((CoeffReturnType*)m_device.allocate_temp(numValues * sizeof(CoeffReturnType)));
@@ -165,7 +164,7 @@ struct TensorEvaluator<const TensorForcedEvalOp<ArgType_>, Device>
 
 #ifdef EIGEN_USE_THREADS
   template <typename EvalSubExprsCallback>
-  EIGEN_STRONG_INLINE EIGEN_DEVICE_FUNC void evalSubExprsIfNeededAsync(
+  EIGEN_STRONG_INLINE void evalSubExprsIfNeededAsync(
       EvaluatorPointerType, EvalSubExprsCallback done) {
     const Index numValues = internal::array_prod(m_impl.dimensions());
     m_buffer = m_device.get((CoeffReturnType*)m_device.allocate_temp(
@@ -185,7 +184,7 @@ struct TensorEvaluator<const TensorForcedEvalOp<ArgType_>, Device>
   }
 #endif
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void cleanup() {
+  EIGEN_STRONG_INLINE void cleanup() {
     m_device.deallocate_temp(m_buffer);
     m_buffer = NULL;
   }

@@ -6,7 +6,6 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
-import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Workspace from '../../models/workspace/workspace.js';
 import * as LighthouseReport from '../../third_party/lighthouse/report/report.js';
@@ -49,11 +48,6 @@ export class LighthouseReportRenderer extends LighthouseReport.ReportRenderer {
     const simulated = artifacts.settings.throttlingMethod === 'simulate';
     const container = el.querySelector('.lh-audit-group');
     if (!container) {
-      return;
-    }
-    const disclaimerEl = container.querySelector('.lh-metrics__disclaimer');
-    // If it was a PWA-only run, we'd have a trace but no perf category to add the button to
-    if (!disclaimerEl) {
       return;
     }
 
@@ -130,13 +124,9 @@ export class LighthouseReportRenderer extends LighthouseReport.ReportRenderer {
       const element = await Components.Linkifier.Linkifier.linkifyURL(url, {
         lineNumber: line,
         columnNumber: column,
+        showColumnNumber: false,
         inlineFrameIndex: 0,
         maxLength: MaxLengthForLinks,
-        bypassURLTrimming: undefined,
-        className: undefined,
-        preventClick: undefined,
-        tabStop: undefined,
-        text: undefined,
       });
       UI.Tooltip.Tooltip.install(origHTMLElement, '');
       origHTMLElement.textContent = '';
@@ -145,13 +135,16 @@ export class LighthouseReportRenderer extends LighthouseReport.ReportRenderer {
   }
 
   static handleDarkMode(el: Element): void {
-    if (ThemeSupport.ThemeSupport.instance().themeName() === 'dark') {
-      el.classList.add('dark');
-    }
+    const updateDarkModeIfNecessary = (): void => {
+      el.classList.toggle('lh-dark', ThemeSupport.ThemeSupport.instance().themeName() === 'dark');
+    };
+    ThemeSupport.ThemeSupport.instance().addEventListener(
+        ThemeSupport.ThemeChangeEvent.eventName, updateDarkModeIfNecessary);
+    updateDarkModeIfNecessary();
   }
 }
 
-// @ts-expect-error https://github.com/GoogleChrome/lighthouse/issues/11628
+// @ts-ignore https://github.com/GoogleChrome/lighthouse/issues/11628
 export class LighthouseReportUIFeatures extends LighthouseReport.ReportUIFeatures {
   private beforePrint: (() => void)|null;
   private afterPrint: (() => void)|null;
@@ -160,6 +153,7 @@ export class LighthouseReportUIFeatures extends LighthouseReport.ReportUIFeature
     super(dom);
     this.beforePrint = null;
     this.afterPrint = null;
+    this._topbar._print = this._print.bind(this);
   }
 
   setBeforePrint(beforePrint: (() => void)|null): void {
@@ -190,9 +184,9 @@ export class LighthouseReportUIFeatures extends LighthouseReport.ReportUIFeature
     const sanitizedDomain = domain.replace(/[^a-z0-9.-]+/gi, '_');
     const timestamp = Platform.DateUtilities.toISO8601Compact(new Date(this.json.fetchTime));
     const ext = blob.type.match('json') ? '.json' : '.html';
-    const basename = `${sanitizedDomain}-${timestamp}${ext}`;
+    const basename = `${sanitizedDomain}-${timestamp}${ext}` as Platform.DevToolsPath.RawPathString;
     const text = await blob.text();
-    Workspace.FileManager.FileManager.instance().save(basename, text, true /* forceSaveAs */);
+    void Workspace.FileManager.FileManager.instance().save(basename, text, true /* forceSaveAs */);
   }
 
   // This implements the interface ReportUIFeatures from lighthouse
@@ -205,9 +199,7 @@ export class LighthouseReportUIFeatures extends LighthouseReport.ReportUIFeature
     if (!printWindow) {
       return;
     }
-    const style = printWindow.document.createElement('style');
-    style.textContent = Root.Runtime.cachedResources.get('third_party/lighthouse/report-assets/report.css') || '';
-    printWindow.document.head.appendChild(style);
+
     printWindow.document.body.replaceWith(clonedReport);
     // Linkified nodes are shadow elements, which aren't exposed via `cloneNode`.
     await LighthouseReportRenderer.linkifyNodeDetails(clonedReport as HTMLElement);
@@ -224,8 +216,9 @@ export class LighthouseReportUIFeatures extends LighthouseReport.ReportUIFeature
   }
 
   getDocument(): Document {
-    return this._document;
+    return this._dom.document();
   }
+
   resetUIState(): void {
     this._resetUIState();
   }

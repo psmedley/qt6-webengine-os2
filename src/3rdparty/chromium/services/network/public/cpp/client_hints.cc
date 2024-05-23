@@ -7,7 +7,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/flat_map.h"
 #include "base/cxx17_backports.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
@@ -15,35 +14,58 @@
 #include "base/strings/string_util.h"
 #include "net/http/structured_headers.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace network {
 
-const char* const kClientHintsNameMapping[] = {"device-memory",
-                                               "dpr",
-                                               "width",
-                                               "viewport-width",
-                                               "rtt",
-                                               "downlink",
-                                               "ect",
-                                               "lang",
-                                               "sec-ch-ua",
-                                               "sec-ch-ua-arch",
-                                               "sec-ch-ua-platform",
-                                               "sec-ch-ua-model",
-                                               "sec-ch-ua-mobile",
-                                               "sec-ch-ua-full-version",
-                                               "sec-ch-ua-platform-version",
-                                               "sec-ch-prefers-color-scheme",
-                                               "sec-ch-ua-bitness",
-                                               "sec-ch-ua-reduced"};
+ClientHintToNameMap MakeClientHintToNameMap() {
+  return {
+      {network::mojom::WebClientHintsType::kDeviceMemory_DEPRECATED,
+       "device-memory"},
+      {network::mojom::WebClientHintsType::kDpr_DEPRECATED, "dpr"},
+      {network::mojom::WebClientHintsType::kResourceWidth_DEPRECATED, "width"},
+      {network::mojom::WebClientHintsType::kViewportWidth_DEPRECATED,
+       "viewport-width"},
+      {network::mojom::WebClientHintsType::kRtt_DEPRECATED, "rtt"},
+      {network::mojom::WebClientHintsType::kDownlink_DEPRECATED, "downlink"},
+      {network::mojom::WebClientHintsType::kEct_DEPRECATED, "ect"},
+      {network::mojom::WebClientHintsType::kUA, "sec-ch-ua"},
+      {network::mojom::WebClientHintsType::kUAArch, "sec-ch-ua-arch"},
+      {network::mojom::WebClientHintsType::kUAPlatform, "sec-ch-ua-platform"},
+      {network::mojom::WebClientHintsType::kUAModel, "sec-ch-ua-model"},
+      {network::mojom::WebClientHintsType::kUAMobile, "sec-ch-ua-mobile"},
+      {network::mojom::WebClientHintsType::kUAFullVersion,
+       "sec-ch-ua-full-version"},
+      {network::mojom::WebClientHintsType::kUAPlatformVersion,
+       "sec-ch-ua-platform-version"},
+      {network::mojom::WebClientHintsType::kPrefersColorScheme,
+       "sec-ch-prefers-color-scheme"},
+      {network::mojom::WebClientHintsType::kUABitness, "sec-ch-ua-bitness"},
+      {network::mojom::WebClientHintsType::kUAReduced, "sec-ch-ua-reduced"},
+      {network::mojom::WebClientHintsType::kViewportHeight,
+       "sec-ch-viewport-height"},
+      {network::mojom::WebClientHintsType::kDeviceMemory,
+       "sec-ch-device-memory"},
+      {network::mojom::WebClientHintsType::kDpr, "sec-ch-dpr"},
+      {network::mojom::WebClientHintsType::kResourceWidth, "sec-ch-width"},
+      {network::mojom::WebClientHintsType::kViewportWidth,
+       "sec-ch-viewport-width"},
+      {network::mojom::WebClientHintsType::kUAFullVersionList,
+       "sec-ch-ua-full-version-list"},
+      {network::mojom::WebClientHintsType::kFullUserAgent, "sec-ch-ua-full"},
+      {network::mojom::WebClientHintsType::kUAWoW64, "sec-ch-ua-wow64"},
+      {network::mojom::WebClientHintsType::kPartitionedCookies,
+       "sec-ch-partitioned-cookies"},
+      {network::mojom::WebClientHintsType::kSaveData, "save-data"},
+  };
+}
 
-const size_t kClientHintsMappingsCount = base::size(kClientHintsNameMapping);
-
-static_assert(
-    base::size(kClientHintsNameMapping) ==
-        (static_cast<int>(network::mojom::WebClientHintsType::kMaxValue) + 1),
-    "Client Hint name table size must match network::mojom::WebClientHintsType "
-    "range");
+const ClientHintToNameMap& GetClientHintToNameMap() {
+  static const base::NoDestructor<ClientHintToNameMap> map(
+      MakeClientHintToNameMap());
+  return *map;
+}
 
 namespace {
 
@@ -59,12 +81,10 @@ using DecodeMap = base::flat_map<std::string,
 
 DecodeMap MakeDecodeMap() {
   DecodeMap result;
-  for (size_t i = 0;
-       i < static_cast<int>(network::mojom::WebClientHintsType::kMaxValue) + 1;
-       ++i) {
-    result.insert(
-        std::make_pair(kClientHintsNameMapping[i],
-                       static_cast<network::mojom::WebClientHintsType>(i)));
+  for (const auto& elem : network::GetClientHintToNameMap()) {
+    const auto& type = elem.first;
+    const auto& header = elem.second;
+    result.insert(std::make_pair(header, type));
   }
   return result;
 }
@@ -79,7 +99,7 @@ const DecodeMap& GetDecodeMap() {
 absl::optional<std::vector<network::mojom::WebClientHintsType>>
 ParseClientHintsHeader(const std::string& header) {
   // Accept-CH is an sh-list of tokens; see:
-  // https://httpwg.org/http-extensions/client-hints.html#rfc.section.3.1
+  // https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-header-structure-19#section-3.1
   absl::optional<net::structured_headers::List> maybe_list =
       net::structured_headers::ParseList(header);
   if (!maybe_list.has_value())
@@ -108,13 +128,54 @@ ParseClientHintsHeader(const std::string& header) {
   return absl::make_optional(std::move(result));
 }
 
-base::TimeDelta ParseAcceptCHLifetime(const std::string& header) {
-  int64_t persist_duration_seconds = 0;
-  if (!base::StringToInt64(header, &persist_duration_seconds) ||
-      persist_duration_seconds <= 0)
-    return base::TimeDelta();
+ClientHintToDelegatedThirdPartiesHeader::
+    ClientHintToDelegatedThirdPartiesHeader() = default;
 
-  return base::TimeDelta::FromSeconds(persist_duration_seconds);
+ClientHintToDelegatedThirdPartiesHeader::
+    ~ClientHintToDelegatedThirdPartiesHeader() = default;
+
+ClientHintToDelegatedThirdPartiesHeader::
+    ClientHintToDelegatedThirdPartiesHeader(
+        const ClientHintToDelegatedThirdPartiesHeader&) = default;
+
+absl::optional<const ClientHintToDelegatedThirdPartiesHeader>
+ParseClientHintToDelegatedThirdPartiesHeader(const std::string& header) {
+  // Accept-CH is an sh-dictionary of tokens to origins; see:
+  // https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-header-structure-19#section-3.2
+  absl::optional<net::structured_headers::Dictionary> maybe_dictionary =
+      // We need to lower-case the string here or dictionary parsing refuses to
+      // see the keys.
+      net::structured_headers::ParseDictionary(base::ToLowerASCII(header));
+  if (!maybe_dictionary.has_value())
+    return absl::nullopt;
+
+  ClientHintToDelegatedThirdPartiesHeader result;
+
+  // Now convert those to actual hint enums.
+  const DecodeMap& decode_map = GetDecodeMap();
+  for (const auto& dictionary_pair : maybe_dictionary.value()) {
+    std::vector<url::Origin> delegates;
+    for (const auto& member : dictionary_pair.second.member) {
+      if (!member.item.is_token())
+        continue;
+      const GURL maybe_gurl = GURL(member.item.GetString());
+      if (!maybe_gurl.is_valid()) {
+        result.had_invalid_origins = true;
+        continue;
+      }
+      url::Origin maybe_origin = url::Origin::Create(maybe_gurl);
+      if (maybe_origin.opaque()) {
+        result.had_invalid_origins = true;
+        continue;
+      }
+      delegates.push_back(maybe_origin);
+    }
+    const std::string& client_hint_string = dictionary_pair.first;
+    auto iter = decode_map.find(client_hint_string);
+    if (iter != decode_map.end())
+      result.map.insert(std::make_pair(iter->second, delegates));
+  }  // for dictionary_pair
+  return absl::make_optional(std::move(result));
 }
 
 }  // namespace network

@@ -46,7 +46,6 @@ class PLATFORM_EXPORT VideoFrameSubmitter
  public:
   VideoFrameSubmitter(WebContextProviderCallback,
                       cc::VideoPlaybackRoughnessReporter::ReportingCallback,
-                      const viz::FrameSinkId& parent_frame_sink_id,
                       std::unique_ptr<VideoFrameResourceProvider>);
   VideoFrameSubmitter(const VideoFrameSubmitter&) = delete;
   VideoFrameSubmitter& operator=(const VideoFrameSubmitter&) = delete;
@@ -95,6 +94,12 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   // requested.
   void OnReceivedContextProvider(
       bool use_gpu_compositing,
+      scoped_refptr<viz::RasterContextProvider> context_provider);
+
+  // Adopts `context_provider` if it's non-null and in a usable state. Returns
+  // true on success and false on failure, implying that a new ContextProvider
+  // should be requested.
+  bool MaybeAcceptContextProvider(
       scoped_refptr<viz::RasterContextProvider> context_provider);
 
   // Starts submission and calls UpdateSubmissionState(); which may submit.
@@ -146,8 +151,6 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   WebContextProviderCallback context_provider_callback_;
   std::unique_ptr<VideoFrameResourceProvider> resource_provider_;
   bool waiting_for_compositor_ack_ = false;
-
-  const viz::FrameSinkId parent_frame_sink_id_;
 
   // When UseVideoFrameSinkBundle is enabled, this is initialized to a local
   // implementation which batches outgoing Viz requests with those from other

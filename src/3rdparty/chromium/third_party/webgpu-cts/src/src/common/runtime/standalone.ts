@@ -6,7 +6,7 @@ import { Logger } from '../internal/logging/logger.js';
 import { LiveTestCaseResult } from '../internal/logging/result.js';
 import { parseQuery } from '../internal/query/parseQuery.js';
 import { TestQueryLevel } from '../internal/query/query.js';
-import { TestTreeNode, TestSubtree, TestTreeLeaf } from '../internal/tree.js';
+import { TestTreeNode, TestSubtree, TestTreeLeaf, TestTree } from '../internal/tree.js';
 import { assert, ErrorWithExtra } from '../util/util.js';
 
 import { optionEnabled } from './helper/options.js';
@@ -29,6 +29,7 @@ setBaseResourcePath('../out/resources');
 
 const worker = optionEnabled('worker') ? new TestWorker(debug) : undefined;
 
+const autoCloseOnPass = document.getElementById('autoCloseOnPass') as HTMLInputElement;
 const resultsVis = document.getElementById('resultsVis')!;
 
 interface SubtreeResult {
@@ -240,6 +241,9 @@ function makeSubtreeHTML(n: TestSubtree, parentLevel: TestQueryLevel): Visualize
         status += 'fail';
       }
       div.setAttribute('data-status', status);
+      if (autoCloseOnPass.checked && status === 'pass') {
+        div.firstElementChild!.removeAttribute('open');
+      }
     };
 
     updateRenderedResult();
@@ -348,12 +352,21 @@ function makeTreeNodeHeaderHTML(
       });
   }
   const nodetitle = $('<div>').addClass('nodetitle').appendTo(header);
-  $('<input>')
-    .attr('type', 'text')
-    .prop('readonly', true)
-    .addClass('nodequery')
-    .val(n.query.toString())
-    .appendTo(nodetitle);
+  const nodecolumns = $('<span>').addClass('nodecolumns').appendTo(nodetitle);
+  {
+    $('<input>')
+      .attr('type', 'text')
+      .prop('readonly', true)
+      .addClass('nodequery')
+      .val(n.query.toString())
+      .appendTo(nodecolumns);
+    if (n.subtreeCounts) {
+      $('<span>')
+        .attr('title', '(Nodes with TODOs) / (Total test count)')
+        .text(TestTree.countsToString(n))
+        .appendTo(nodecolumns);
+    }
+  }
   if ('description' in n && n.description) {
     nodetitle.append('&nbsp;');
     $('<pre>') //
@@ -370,7 +383,7 @@ let lastQueryLevelToExpand: TestQueryLevel = 2;
 (async () => {
   const loader = new DefaultTestFileLoader();
 
-  // TODO: start populating page before waiting for everything to load?
+  // MAINTENANCE_TODO: start populating page before waiting for everything to load?
   const qs = new URLSearchParams(window.location.search).getAll('q');
   if (qs.length === 0) {
     qs.push('webgpu:*');
@@ -396,6 +409,12 @@ let lastQueryLevelToExpand: TestQueryLevel = 2;
   if (rootQuery.level > lastQueryLevelToExpand) {
     lastQueryLevelToExpand = rootQuery.level;
   }
+  loader.addEventListener('import', ev => {
+    $('#info')[0].textContent = `loading: ${ev.data.url}`;
+  });
+  loader.addEventListener('finish', () => {
+    $('#info')[0].textContent = '';
+  });
   const tree = await loader.loadTree(rootQuery);
 
   tree.dissolveSingleChildTrees();

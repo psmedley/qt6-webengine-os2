@@ -5,14 +5,11 @@
 #ifndef V8_COMPILER_EFFECT_CONTROL_LINEARIZER_H_
 #define V8_COMPILER_EFFECT_CONTROL_LINEARIZER_H_
 
-#include <vector>
-
-#include "src/handles/handles.h"
+#include "src/base/macros.h"
 
 namespace v8 {
 namespace internal {
 
-class Map;
 class Zone;
 
 namespace compiler {
@@ -26,15 +23,7 @@ class JSHeapBroker;
 V8_EXPORT_PRIVATE void LinearizeEffectControl(
     JSGraph* graph, Schedule* schedule, Zone* temp_zone,
     SourcePositionTable* source_positions, NodeOriginTable* node_origins,
-    PoisoningMitigationLevel poison_level, JSHeapBroker* broker);
-
-// Performs effect control linearization lowering in addition to machine
-// lowering, producing a scheduled graph that is ready for instruction
-// selection.
-V8_EXPORT_PRIVATE void LowerToMachineSchedule(
-    JSGraph* graph, Schedule* schedule, Zone* temp_zone,
-    SourcePositionTable* source_positions, NodeOriginTable* node_origins,
-    PoisoningMitigationLevel poison_level, JSHeapBroker* broker);
+    JSHeapBroker* broker);
 
 }  // namespace compiler
 }  // namespace internal

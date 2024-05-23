@@ -67,6 +67,8 @@ source_set("cdm") {
     "supported_audio_codecs.h",
   ]
 
+  public_deps = [ ":cdm_type" ]
+
   deps = [
     "//crypto",
     "//media/base",
@@ -82,7 +84,6 @@ source_set("cdm") {
     deps += [
       ":cdm_api",
       ":cdm_paths",
-      "//components/crash/core/common:crash_key",
     ]
     sources += [
       "cdm_adapter.cc",
@@ -120,13 +121,14 @@ source_set("cdm") {
     deps += [
       ":cdm_api",
       ":cdm_type_conversion",
+      "//components/crash/core/common:crash_key",
     ]
   }
 
   if (is_win) {
     sources += [
-      "cdm_preference_data.cc",
-      "cdm_preference_data.h",
+      "media_foundation_cdm_data.cc",
+      "media_foundation_cdm_data.h",
       "win/media_foundation_cdm.cc",
       "win/media_foundation_cdm.h",
       "win/media_foundation_cdm_factory.cc",
@@ -151,10 +153,18 @@ static_library("cdm_paths") {
     "cdm_paths.cc",
     "cdm_paths.h",
   ]
+
+  public_deps = [ ":cdm_type" ]
+
   deps = [
     "//base",
     "//media:media_buildflags",
   ]
+}
+
+source_set("cdm_type") {
+  sources = [ "cdm_type.h" ]
+  deps = [ "//base" ]
 }
 
 source_set("unit_tests") {
@@ -179,9 +189,7 @@ source_set("unit_tests") {
     "//url",
   ]
 
-  configs += [
-    "//media:media_config",
-  ]
+  configs += [ "//media:media_config" ]
 
   data_deps = []
 

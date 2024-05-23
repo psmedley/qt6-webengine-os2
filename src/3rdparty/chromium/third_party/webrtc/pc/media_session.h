@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "api/crypto/crypto_options.h"
+#include "api/field_trials_view.h"
 #include "api/media_types.h"
 #include "api/rtp_parameters.h"
 #include "api/rtp_transceiver_direction.h"
@@ -34,6 +35,13 @@
 #include "pc/session_description.h"
 #include "pc/simulcast_description.h"
 #include "rtc_base/unique_id_generator.h"
+
+namespace webrtc {
+
+// Forward declaration due to circular dependecy.
+class ConnectionContext;
+
+}  // namespace webrtc
 
 namespace cricket {
 
@@ -141,8 +149,7 @@ class MediaSessionDescriptionFactory {
   // This helper automatically sets up the factory to get its configuration
   // from the specified ChannelManager.
   MediaSessionDescriptionFactory(ChannelManager* cmanager,
-                                 const TransportDescriptionFactory* factory,
-                                 rtc::UniqueRandomIdGenerator* ssrc_generator);
+                                 const TransportDescriptionFactory* factory);
 
   const AudioCodecs& audio_sendrecv_codecs() const;
   const AudioCodecs& audio_send_codecs() const;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 The Khronos Group Inc.
+/* Copyright (c) 2021-2022 The Khronos Group Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,12 +26,17 @@
 #include <vector>
 
 #include "base_node.h"
-#include "pipeline_state.h"
+#include "sampler_state.h"
 #include <spirv/unified1/spirv.hpp>
 #include "spirv-tools/optimizer.hpp"
 
+class PIPELINE_STATE;
+
 // A forward iterator over spirv instructions. Provides easy access to len, opcode, and content words
 // without the caller needing to care too much about the physical SPIRV module layout.
+//
+// For more information of the physical module layout to help understand this struct:
+// https://github.com/KhronosGroup/SPIRV-Guide/blob/master/chapters/parsing_instructions.md
 struct spirv_inst_iter {
     std::vector<uint32_t>::const_iterator zero;
     std::vector<uint32_t>::const_iterator it;
@@ -44,7 +49,7 @@ struct spirv_inst_iter {
 
     uint32_t opcode() const { return *it & 0x0ffffu; }
 
-    uint32_t const &word(unsigned n) const {
+    uint32_t const &word(uint32_t n) const {
         assert(n < len());
         return it[n];
     }
@@ -58,6 +63,8 @@ struct spirv_inst_iter {
     bool operator==(spirv_inst_iter const &other) const { return it == other.it; }
 
     bool operator!=(spirv_inst_iter const &other) const { return it != other.it; }
+
+    bool operator!=(std::vector<uint32_t>::const_iterator other) const { return it != other; }
 
     spirv_inst_iter operator++(int) {  // x++
         spirv_inst_iter ii = *this;
@@ -75,6 +82,44 @@ struct spirv_inst_iter {
     spirv_inst_iter const &operator*() const { return *this; }
 };
 
+struct interface_var {
+    uint32_t id;
+    uint32_t type_id;
+    uint32_t offset;
+
+    // List of samplers that sample a given image. The index of array is index of image.
+    std::vector<layer_data::unordered_set<SamplerUsedByImage>> samplers_used_by_image;
+
+    bool is_patch;
+    bool is_block_member;
+    bool is_relaxed_precision;
+    bool is_readable;
+    bool is_writable;
+    bool is_atomic_operation;
+    bool is_sampler_implicitLod_dref_proj;
+    bool is_sampler_bias_offset;
+    bool is_read_without_format;   // For storage images
+    bool is_write_without_format;  // For storage images
+    bool is_dref_operation;
+    // TODO: collect the name, too? Isn't required to be present.
+
+    interface_var()
+        : id(0),
+          type_id(0),
+          offset(0),
+          is_patch(false),
+          is_block_member(false),
+          is_relaxed_precision(false),
+          is_readable(false),
+          is_writable(false),
+          is_atomic_operation(false),
+          is_sampler_implicitLod_dref_proj(false),
+          is_sampler_bias_offset(false),
+          is_read_without_format(false),
+          is_write_without_format(false),
+          is_dref_operation(false) {}
+};
+
 // Utils taking a spirv_inst_iter
 uint32_t GetConstantValue(const spirv_inst_iter &itr);
 std::vector<uint32_t> FindEntrypointInterfaces(const spirv_inst_iter &entrypoint);
@@ -85,7 +130,7 @@ enum FORMAT_TYPE {
     FORMAT_TYPE_UINT = 4,
 };
 
-typedef std::pair<unsigned, unsigned> location_t;
+typedef std::pair<uint32_t, uint32_t> location_t;
 
 struct decoration_set {
     enum {
@@ -101,6 +146,8 @@ struct decoration_set {
         nonwritable_bit = 1 << 9,
         builtin_bit = 1 << 10,
         nonreadable_bit = 1 << 11,
+        per_vertex_bit = 1 << 12,
+        passthrough_bit = 1 << 13,
     };
     static constexpr uint32_t kInvalidValue = std::numeric_limits<uint32_t>::max();
 
@@ -127,9 +174,9 @@ struct atomic_instruction {
 };
 
 struct function_set {
-    unsigned id;
-    unsigned offset;
-    unsigned length;
+    uint32_t id;
+    uint32_t offset;
+    uint32_t length;
     std::unordered_multimap<uint32_t, uint32_t> op_lists;  // key: spv::Op,  value: offset
 
     function_set() : id(0), offset(0), length(0) {}
@@ -174,59 +221,108 @@ struct shader_struct_member {
 struct shader_module_used_operators;
 
 struct SHADER_MODULE_STATE : public BASE_NODE {
-    // The spirv image itself
-    std::vector<uint32_t> words;
-    // A mapping of <id> to the first word of its def. this is useful because walking type
-    // trees, constant expressions, etc requires jumping all over the instruction stream.
-    layer_data::unordered_map<unsigned, unsigned> def_index;
-    layer_data::unordered_map<unsigned, decoration_set> decorations;
-    // <Specialization constant ID -> target ID> mapping
-    layer_data::unordered_map<uint32_t, uint32_t> spec_const_map;
-    // Find all decoration instructions to prevent relooping module later - many checks need this info
-    std::vector<spirv_inst_iter> decoration_inst;
-    std::vector<spirv_inst_iter> member_decoration_inst;
-    // Execution are not tied to an entry point and are their own mapping tied to entry point function
-    // [OpEntryPoint function <id> operand] : [Execution Mode Instruction list]
-    layer_data::unordered_map<uint32_t, std::vector<spirv_inst_iter>> execution_mode_inst;
-    // both OpDecorate and OpMemberDecorate builtin instructions
-    std::vector<builtin_set> builtin_decoration_list;
     struct EntryPoint {
         uint32_t offset;  // into module to get OpEntryPoint instruction
         VkShaderStageFlagBits stage;
-        std::unordered_multimap<unsigned, unsigned> decorate_list;  // key: spv::Op,  value: offset
+        std::unordered_multimap<uint32_t, uint32_t> decorate_list;  // key: spv::Op,  value: offset
         std::vector<function_set> function_set_list;
         shader_struct_member push_constant_used_in_shader;
     };
-    // entry point is not unqiue to single value so need multimap
-    std::unordered_multimap<std::string, EntryPoint> entry_points;
-    bool multiple_entry_points{false};
-    bool has_valid_spirv;
-    bool has_specialization_constants{false};
-    uint32_t gpu_validation_shader_id;
-    std::unordered_map<uint32_t, atomic_instruction> atomic_inst;
 
-    SHADER_MODULE_STATE(VkShaderModuleCreateInfo const *pCreateInfo, VkShaderModule shaderModule, spv_target_env env,
-                        uint32_t unique_shader_id)
-        : BASE_NODE(shaderModule, kVulkanObjectTypeShaderModule),
-          words(),
-          def_index(),
-          has_valid_spirv(true),
-          gpu_validation_shader_id(unique_shader_id) {
-        words = PreprocessShaderBinary((uint32_t *)pCreateInfo->pCode, pCreateInfo->codeSize, env);
-        BuildDefIndex();
+    // Static/const data extracted from a SPIRV module.
+    struct SpirvStaticData {
+        SpirvStaticData() = default;
+        SpirvStaticData(const SHADER_MODULE_STATE &module_state);
+
+        // A mapping of <id> to the first word of its def. this is useful because walking type
+        // trees, constant expressions, etc requires jumping all over the instruction stream.
+        layer_data::unordered_map<uint32_t, uint32_t> def_index;
+        layer_data::unordered_map<uint32_t, decoration_set> decorations;
+        // <Specialization constant ID -> target ID> mapping
+        layer_data::unordered_map<uint32_t, uint32_t> spec_const_map;
+        // Find all decoration instructions to prevent relooping module later - many checks need this info
+        std::vector<spirv_inst_iter> decoration_inst;
+        std::vector<spirv_inst_iter> member_decoration_inst;
+        // Execution are not tied to an entry point and are their own mapping tied to entry point function
+        // [OpEntryPoint function <id> operand] : [Execution Mode Instruction list]
+        layer_data::unordered_map<uint32_t, std::vector<spirv_inst_iter>> execution_mode_inst;
+        // both OpDecorate and OpMemberDecorate builtin instructions
+        std::vector<builtin_set> builtin_decoration_list;
+        std::unordered_map<uint32_t, atomic_instruction> atomic_inst;
+
+        bool has_group_decoration = false;
+        bool has_specialization_constants{false};
+
+        // entry point is not unqiue to single value so need multimap
+        std::unordered_multimap<std::string, EntryPoint> entry_points;
+        bool multiple_entry_points{false};
+    };
+
+    // The spirv image itself
+    // NOTE: this _must_ be initialized first.
+    // NOTE: this may end up being an _optimized_ version of what was passed in at initialization time.
+    const std::vector<uint32_t> words;
+
+    const SpirvStaticData static_data_;
+
+    const bool has_valid_spirv{false};
+    const uint32_t gpu_validation_shader_id{std::numeric_limits<uint32_t>::max()};
+
+    SHADER_MODULE_STATE(const uint32_t *code, std::size_t count, spv_target_env env = SPV_ENV_VULKAN_1_0)
+        : BASE_NODE(static_cast<VkShaderModule>(VK_NULL_HANDLE), kVulkanObjectTypeShaderModule),
+          words(code, code + (count / sizeof(uint32_t))) {
+        PreprocessShaderBinary(env);
     }
 
-    SHADER_MODULE_STATE()
+    template <typename SpirvContainer>
+    SHADER_MODULE_STATE(const SpirvContainer &spirv)
+        : SHADER_MODULE_STATE(spirv.data(), spirv.size() * sizeof(typename SpirvContainer::value_type)) {}
+
+    SHADER_MODULE_STATE(const VkShaderModuleCreateInfo &create_info, spv_target_env env, uint32_t unique_shader_id)
         : BASE_NODE(static_cast<VkShaderModule>(VK_NULL_HANDLE), kVulkanObjectTypeShaderModule),
-          has_valid_spirv(false),
-          gpu_validation_shader_id(UINT32_MAX) {}
+          words(create_info.pCode, create_info.pCode + create_info.codeSize / sizeof(uint32_t)),
+          static_data_(*this),
+          has_valid_spirv(true),
+          gpu_validation_shader_id(unique_shader_id) {
+        PreprocessShaderBinary(env);
+    }
+
+    SHADER_MODULE_STATE(const VkShaderModuleCreateInfo &create_info, VkShaderModule shaderModule, spv_target_env env,
+                        uint32_t unique_shader_id)
+        : BASE_NODE(shaderModule, kVulkanObjectTypeShaderModule),
+          words(create_info.pCode, create_info.pCode + create_info.codeSize / sizeof(uint32_t)),
+          static_data_(*this),
+          has_valid_spirv(true),
+          gpu_validation_shader_id(unique_shader_id) {
+        PreprocessShaderBinary(env);
+    }
+
+    SHADER_MODULE_STATE() : BASE_NODE(static_cast<VkShaderModule>(VK_NULL_HANDLE), kVulkanObjectTypeShaderModule) {}
+
+    const std::vector<spirv_inst_iter> &GetDecorationInstructions() const { return static_data_.decoration_inst; }
+
+    const std::unordered_map<uint32_t, atomic_instruction> &GetAtomicInstructions() const { return static_data_.atomic_inst; }
+
+    const layer_data::unordered_map<uint32_t, std::vector<spirv_inst_iter>> &GetExecutionModeInstructions() const {
+        return static_data_.execution_mode_inst;
+    }
+
+    const std::vector<builtin_set> &GetBuiltinDecorationList() const { return static_data_.builtin_decoration_list; }
+
+    const layer_data::unordered_map<uint32_t, uint32_t> &GetSpecConstMap() const { return static_data_.spec_const_map; }
+
+    bool HasSpecConstants() const { return static_data_.has_specialization_constants; }
+
+    const std::unordered_multimap<std::string, EntryPoint> &GetEntryPoints() const { return static_data_.entry_points; }
+
+    bool HasMultipleEntryPoints() const { return static_data_.multiple_entry_points; }
 
     VkShaderModule vk_shader_module() const { return handle_.Cast<VkShaderModule>(); }
 
-    decoration_set get_decorations(unsigned id) const {
+    decoration_set get_decorations(uint32_t id) const {
         // return the actual decorations for this id, or a default set.
-        auto it = decorations.find(id);
-        if (it != decorations.end()) return it->second;
+        auto it = static_data_.decorations.find(id);
+        if (it != static_data_.decorations.end()) return it->second;
         return decoration_set();
     }
 
@@ -234,42 +330,44 @@ struct SHADER_MODULE_STATE : public BASE_NODE {
     spirv_inst_iter begin() const { return spirv_inst_iter(words.begin(), words.begin() + 5); }  // First insn
     spirv_inst_iter end() const { return spirv_inst_iter(words.begin(), words.end()); }          // Just past last insn
     // Given an offset into the module, produce an iterator there.
-    spirv_inst_iter at(unsigned offset) const { return spirv_inst_iter(words.begin(), words.begin() + offset); }
+    spirv_inst_iter at(uint32_t offset) const { return spirv_inst_iter(words.begin(), words.begin() + offset); }
 
     // Gets an iterator to the definition of an id
-    spirv_inst_iter get_def(unsigned id) const {
-        auto it = def_index.find(id);
-        if (it == def_index.end()) {
+    spirv_inst_iter get_def(uint32_t id) const {
+        auto it = static_data_.def_index.find(id);
+        if (it == static_data_.def_index.end()) {
             return end();
         }
         return at(it->second);
     }
 
-    // Used to populate the shader module object
-    void BuildDefIndex();
-    std::vector<uint32_t> PreprocessShaderBinary(uint32_t *src_binary, size_t binary_size, spv_target_env env);
-
     // Used to get human readable strings for error messages
-    void DescribeTypeInner(std::ostringstream &ss, unsigned type) const;
-    std::string DescribeType(unsigned type) const;
+    void DescribeTypeInner(std::ostringstream &ss, uint32_t type) const;
+    std::string DescribeType(uint32_t type) const;
+    std::string DescribeInstruction(const spirv_inst_iter &insn) const;
 
     layer_data::unordered_set<uint32_t> MarkAccessibleIds(spirv_inst_iter entrypoint) const;
-    void ProcessExecutionModes(const spirv_inst_iter &entrypoint, PIPELINE_STATE *pipeline) const;
+    layer_data::unordered_set<uint32_t> MarkVariableIds() const;
+    layer_data::optional<VkPrimitiveTopology> GetTopology(const spirv_inst_iter &entrypoint) const;
+    // TODO (https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/2450)
+    // Since we currently don't support multiple entry points, this is a helper to return the topology
+    // for the "first" (and for our purposes _only_) entrypoint.
+    layer_data::optional<VkPrimitiveTopology> GetTopology() const;
 
     const EntryPoint *FindEntrypointStruct(char const *name, VkShaderStageFlagBits stageBits) const;
     spirv_inst_iter FindEntrypoint(char const *name, VkShaderStageFlagBits stageBits) const;
     bool FindLocalSize(const spirv_inst_iter &entrypoint, uint32_t &local_size_x, uint32_t &local_size_y,
                        uint32_t &local_size_z) const;
 
-    spirv_inst_iter GetConstantDef(unsigned id) const;
-    uint32_t GetConstantValueById(unsigned id) const;
+    spirv_inst_iter GetConstantDef(uint32_t id) const;
+    uint32_t GetConstantValueById(uint32_t id) const;
     int32_t GetShaderResourceDimensionality(const interface_var &resource) const;
-    unsigned GetLocationsConsumedByType(unsigned type, bool strip_array_level) const;
-    unsigned GetComponentsConsumedByType(unsigned type, bool strip_array_level) const;
-    unsigned GetFundamentalType(unsigned type) const;
+    uint32_t GetLocationsConsumedByType(uint32_t type, bool strip_array_level) const;
+    uint32_t GetComponentsConsumedByType(uint32_t type, bool strip_array_level) const;
+    uint32_t GetFundamentalType(uint32_t type) const;
     spirv_inst_iter GetStructType(spirv_inst_iter def, bool is_array_of_verts) const;
 
-    void DefineStructMember(const spirv_inst_iter &it, const std::vector<uint32_t> &memberDecorate_offsets,
+    void DefineStructMember(const spirv_inst_iter &it, const std::vector<uint32_t> &member_decorate_offsets,
                             shader_struct_member &data) const;
     void RunUsedArray(uint32_t offset, std::vector<uint32_t> array_indices, uint32_t access_chain_word_index,
                       spirv_inst_iter &access_chain_it, const shader_struct_member &data) const;
@@ -279,7 +377,8 @@ struct SHADER_MODULE_STATE : public BASE_NODE {
                              const shader_struct_member &data) const;
 
     // Push consants
-    void SetPushConstantUsedInShader();
+    static void SetPushConstantUsedInShader(const SHADER_MODULE_STATE &module_state,
+                                            std::unordered_multimap<std::string, SHADER_MODULE_STATE::EntryPoint> &entry_points);
 
     uint32_t DescriptorTypeToReqs(uint32_t type_id) const;
 
@@ -288,31 +387,34 @@ struct SHADER_MODULE_STATE : public BASE_NODE {
     // State tracking helpers for collecting interface information
     void IsSpecificDescriptorType(const spirv_inst_iter &id_it, bool is_storage_buffer, bool is_check_writable,
                                   interface_var &out_interface_var, shader_module_used_operators &used_operators) const;
-    std::vector<std::pair<descriptor_slot_t, interface_var>> CollectInterfaceByDescriptorSlot(
-        layer_data::unordered_set<uint32_t> const &accessible_ids, bool *has_writable_descriptor,
-        bool *has_atomic_descriptor) const;
-    layer_data::unordered_set<uint32_t> CollectWritableOutputLocationinFS(const VkPipelineShaderStageCreateInfo &stage_info) const;
+    std::vector<std::pair<DescriptorSlot, interface_var>> CollectInterfaceByDescriptorSlot(
+        layer_data::unordered_set<uint32_t> const &ids) const;
+    layer_data::unordered_set<uint32_t> CollectWritableOutputLocationinFS(const spirv_inst_iter &entrypoint) const;
     bool CollectInterfaceBlockMembers(std::map<location_t, interface_var> *out, bool is_array_of_verts, uint32_t id,
-                                      uint32_t type_id, bool is_patch, int first_location) const;
+                                      uint32_t type_id, bool is_patch, uint32_t first_location) const;
     std::map<location_t, interface_var> CollectInterfaceByLocation(spirv_inst_iter entrypoint, spv::StorageClass sinterface,
                                                                    bool is_array_of_verts) const;
     std::vector<uint32_t> CollectBuiltinBlockMembers(spirv_inst_iter entrypoint, uint32_t storageClass) const;
     std::vector<std::pair<uint32_t, interface_var>> CollectInterfaceByInputAttachmentIndex(
         layer_data::unordered_set<uint32_t> const &accessible_ids) const;
 
-    // Get the image type from a variable id or load operation that reference an image
-    spirv_inst_iter GetImageFormatInst(uint32_t id) const;
-
+    uint32_t GetNumComponentsInBaseType(const spirv_inst_iter &iter) const;
     uint32_t GetTypeBitsSize(const spirv_inst_iter &iter) const;
     uint32_t GetTypeBytesSize(const spirv_inst_iter &iter) const;
+    uint32_t GetBaseType(const spirv_inst_iter &iter) const;
+    uint32_t GetTypeId(uint32_t id) const;
     uint32_t CalcComputeSharedMemory(VkShaderStageFlagBits stage,
                                      const spirv_inst_iter &insn) const;
+
+  private:
+    // Functions used for initialization only
+    // Used to populate the shader module object
+    void PreprocessShaderBinary(spv_target_env env);
+
+    static std::unordered_multimap<std::string, EntryPoint> ProcessEntryPoints(const SHADER_MODULE_STATE &module_state);
 };
 
-// TODO - Most things below are agnostic of even the shader module and more of pure SPIR-V utils
-//        Stuff like this could be part of a future auto-generated file from the spirv grammar json
-bool AtomicOperation(uint32_t opcode);
-bool GroupOperation(uint32_t opcode);
-char const *StorageClassName(unsigned sc);
+// String helpers functions to give better error messages
+char const *StorageClassName(uint32_t sc);
 
 #endif  // VULKAN_SHADER_MODULE_H

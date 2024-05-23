@@ -43,6 +43,7 @@ source_set("web") {
     ":navigation_resources",
     ":plugin_placeholder_js",
     ":resources",
+    ":share_workaround_js",
     ":threads",
     "//base",
     "//components/leveldb_proto",
@@ -108,7 +109,6 @@ source_set("core") {
 }
 
 source_set("eg_app_support+eg2") {
-  defines = [ "CHROME_EARL_GREY_2" ]
   configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
 
@@ -141,6 +141,7 @@ source_set("run_all_unittests") {
     "//base",
     "//base/test:test_support",
     "//ios/web/public/test",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/http_server",
     "//mojo/core/embedder",
   ]
@@ -256,7 +257,9 @@ source_set("ios_web_navigation_unittests") {
     "//ios/web/public/session",
     "//ios/web/public/session",
     "//ios/web/public/test",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
+    "//ios/web/session",
     "//ios/web/test:mojo_bindings",
     "//ios/web/test:test_constants",
     "//ios/web/test:test_support",
@@ -282,6 +285,7 @@ source_set("ios_web_navigation_unittests") {
     "navigation/navigation_manager_util_unittest.mm",
     "navigation/nscoder_util_unittest.mm",
     "navigation/session_storage_builder_unittest.mm",
+    "navigation/synthesized_session_restore_unittest.mm",
     "navigation/wk_back_forward_list_item_holder_unittest.mm",
     "navigation/wk_navigation_action_policy_util_unittest.mm",
     "navigation/wk_navigation_action_util_unittest.mm",
@@ -307,6 +311,7 @@ source_set("ios_web_net_unittests") {
     "//ios/web/public",
     "//ios/web/public/security",
     "//ios/web/public/test",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
     "//ios/web/security",
     "//ios/web/test:mojo_bindings",
@@ -354,6 +359,7 @@ source_set("ios_web_text_fragments_unittests") {
     "//ios/web/navigation:core",
     "//ios/web/public/navigation:referrer",
     "//ios/web/public/test",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
     "//ios/web/text_fragments",
     "//ios/web/web_state:web_state_impl_header",
@@ -395,6 +401,7 @@ source_set("ios_web_web_state_unittests") {
     "//ios/web/public/security",
     "//ios/web/public/session",
     "//ios/web/public/test",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
     "//ios/web/security",
     "//ios/web/security",
@@ -406,6 +413,7 @@ source_set("ios_web_web_state_unittests") {
     "//ios/web/web_state",
     "//ios/web/web_state:page_viewport_state",
     "//ios/web/web_state:policy_decision_state_tracker",
+    "//ios/web/web_state:test_util",
     "//ios/web/web_state:web_view_internal_creation_util",
     "//net:test_support",
     "//testing/gmock",
@@ -447,6 +455,7 @@ source_set("ios_web_web_state_js_unittests") {
     "//ios/web/public",
     "//ios/web/public/js_messaging",
     "//ios/web/public/test",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
     "//ios/web/test:mojo_bindings",
     "//ios/web/test:test_constants",
@@ -496,6 +505,7 @@ source_set("ios_web_web_state_ui_unittests") {
     "//ios/web/test:test_support",
     "//ios/web/test/fakes:fakes",
     "//ios/web/web_state/js",
+    "//ios/web/web_state/ui",
     "//ios/web/web_state/ui:crw_context_menu_controller",
     "//net:test_support",
     "//testing/gmock",
@@ -527,6 +537,7 @@ source_set("ios_web_webui_unittests") {
     "//ios/net",
     "//ios/testing:ocmock_support",
     "//ios/web/public/test",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
     "//ios/web/public/webui",
     "//ios/web/test:mojo_bindings",
@@ -572,10 +583,12 @@ test("ios_web_inttests") {
     "//ios/web/navigation:wk_navigation_util",
     "//ios/web/public/find_in_page",
     "//ios/web/public/js_messaging",
+    "//ios/web/public/permissions",
     "//ios/web/public/security",
     "//ios/web/public/session",
     "//ios/web/public/test",
     "//ios/web/public/test:element_selector",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/http_server",
     "//ios/web/public/webui",
     "//ios/web/test:mojo_bindings",
@@ -584,6 +597,7 @@ test("ios_web_inttests") {
     "//ios/web/test:test_constants",
     "//ios/web/test:test_support",
     "//ios/web/web_state",
+    "//ios/web/web_state:test_util",
     "//ios/web/web_state/ui:crw_context_menu_controller",
     "//mojo/core/embedder",
     "//net:test_support",
@@ -596,7 +610,6 @@ test("ios_web_inttests") {
   ]
   sources = [
     "browser_state_web_view_partition_inttest.mm",
-    "cookie_blocking_inttest.mm",
     "find_in_page/find_in_page_manager_inttest.mm",
     "navigation/crw_error_page_helper_inttest.mm",
     "navigation/crw_wk_navigation_handler_inttest.mm",
@@ -607,10 +620,10 @@ test("ios_web_inttests") {
     "public/test/http_server_inttest.mm",
     "test/run_all_unittests.cc",
     "url_loader_inttest.mm",
-    "web_state/bad_ssl_response_inttest.mm",
     "web_state/error_page_inttest.mm",
     "web_state/http_auth_inttest.mm",
     "web_state/keep_render_process_alive_inttest.mm",
+    "web_state/permissions_inttest.mm",
     "web_state/ui/crw_context_menu_element_fetcher_inttest.mm",
     "web_state/web_state_observer_inttest.mm",
     "webui/web_ui_inttest.mm",
@@ -621,42 +634,18 @@ test("ios_web_inttests") {
   }
 }
 
-js_compile_bundle("main_frame_web_bundle") {
-  visibility = [ ":js_resources" ]
-  closure_entry_point = "__crWeb.mainFrameWebBundle"
-
-  sources = [
-    "web_state/js/resources/main_frame_web_bundle.js",
-    "web_state/js/resources/navigation.js",
-  ]
-}
-
-js_compile_bundle("all_frames_web_bundle") {
-  visibility = [ ":js_resources" ]
-  closure_entry_point = "__crWeb.allFramesWebBundle"
-
-  sources = [
-    "web_state/js/resources/all_frames_web_bundle.js",
-    "web_state/js/resources/cookie.js",
-    "web_state/js/resources/share_workaround.js",
-  ]
-}
-
-js_compile_bundle("all_frames_document_end_web_bundle") {
-  visibility = [ ":js_resources" ]
-  closure_entry_point = "__crWeb.allFramesDocumentEndWebBundle"
-
-  sources = [
-    "js_messaging/resources/setup_frame.js",
-    "web_state/js/resources/all_frames_document_end_web_bundle.js",
-  ]
-}
-
 js_compile_bundle("plugin_placeholder_js") {
   visibility = [ ":web" ]
   closure_entry_point = "__crWeb.pluginPlaceholder"
 
   sources = [ "web_state/js/resources/plugin_placeholder.js" ]
+}
+
+js_compile_bundle("share_workaround_js") {
+  visibility = [ ":web" ]
+  closure_entry_point = "__crWeb.shareWorkaround"
+
+  sources = [ "web_state/js/resources/share_workaround.js" ]
 }
 
 js_compile_bundle("base_js") {
@@ -681,12 +670,6 @@ js_compile_bundle("message_js") {
 }
 
 js_compile_checked("js_resources") {
-  public_deps = [
-    ":all_frames_document_end_web_bundle",
-    ":all_frames_web_bundle",
-    ":main_frame_web_bundle",
-  ]
-
   js_modules = [
     "//ios/web/web_state/js/resources/base.js",
     "//ios/web/web_state/js/resources/common.js",
@@ -700,6 +683,7 @@ bundle_data("navigation_resources") {
   sources = [
     "navigation/resources/error_page_injected.html",
     "navigation/resources/error_page_loaded.html",
+    "navigation/resources/error_page_reloaded.html",
     "navigation/resources/restore_session.html",
   ]
   outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]

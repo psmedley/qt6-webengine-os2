@@ -18,7 +18,7 @@
 #include "base/cancelable_callback.h"
 #include "base/clang_profiling_buildflags.h"
 #include "base/containers/unique_ptr_adapters.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/discardable_memory_allocator.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ref_counted.h"
@@ -36,6 +36,7 @@
 #include "content/common/renderer_host.mojom.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/discardable_memory_utils.h"
+#include "content/services/shared_storage_worklet/public/mojom/shared_storage_worklet_service.mojom.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "ipc/ipc_sync_channel.h"
 #include "media/media_buildflags.h"
@@ -59,8 +60,6 @@
 #include "third_party/blink/public/web/web_memory_statistics.h"
 #include "ui/gfx/native_widget_types.h"
 
-class SkBitmap;
-
 namespace blink {
 class WebResourceRequestSenderDelegate;
 class WebVideoCaptureImplManager;
@@ -69,14 +68,11 @@ class WebVideoCaptureImplManager;
 namespace base {
 class SingleThreadTaskRunner;
 class Thread;
+class WaitableEvent;
 }
 
 namespace cc {
 class TaskGraphRunner;
-}
-
-namespace gfx {
-class RenderingPipeline;
 }
 
 namespace gpu {
@@ -84,7 +80,6 @@ class GpuChannelHost;
 }
 
 namespace media {
-class DecoderFactory;
 class GpuVideoAcceleratorFactories;
 }
 
@@ -102,17 +97,16 @@ namespace content {
 class AgentSchedulingGroup;
 class CategorizedWorkerPool;
 class GpuVideoAcceleratorFactoriesImpl;
-class MediaInterfaceFactory;
 class RenderFrameImpl;
 class RenderThreadObserver;
 class RendererBlinkPlatformImpl;
 class VariationsRenderThreadObserver;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 class StreamTextureFactory;
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 class DCOMPTextureFactory;
 #endif
 
@@ -151,6 +145,10 @@ class CONTENT_EXPORT RenderThreadImpl
       const InProcessChildThreadParams& params,
       int32_t client_id,
       std::unique_ptr<blink::scheduler::WebThreadScheduler> scheduler);
+
+  RenderThreadImpl(const RenderThreadImpl&) = delete;
+  RenderThreadImpl& operator=(const RenderThreadImpl&) = delete;
+
   ~RenderThreadImpl() override;
   void Shutdown() override;
   bool ShouldBeDestroyed() override;
@@ -189,8 +187,12 @@ class CONTENT_EXPORT RenderThreadImpl
   void SetRendererProcessType(
       blink::scheduler::WebRendererProcessType type) override;
   blink::WebString GetUserAgent() override;
+  blink::WebString GetFullUserAgent() override;
+  blink::WebString GetReducedUserAgent() override;
   const blink::UserAgentMetadata& GetUserAgentMetadata() override;
-  bool IsUseZoomForDSF() override;
+  void WriteIntoTrace(
+      perfetto::TracedProto<perfetto::protos::pbzero::RenderProcessHost> proto)
+      override;
 
   // IPC::Listener implementation via ChildThreadImpl:
   void OnAssociatedInterfaceRequest(
@@ -199,8 +201,6 @@ class CONTENT_EXPORT RenderThreadImpl
 
   blink::scheduler::WebThreadScheduler* GetWebMainThreadScheduler();
   cc::TaskGraphRunner* GetTaskGraphRunner();
-  gfx::RenderingPipeline* GetMainThreadPipeline();
-  gfx::RenderingPipeline* GetCompositorThreadPipeline();
   bool IsLcdTextEnabled();
   bool IsElasticOverscrollEnabled();
   bool IsScrollAnimatorEnabled();
@@ -227,6 +227,11 @@ class CONTENT_EXPORT RenderThreadImpl
   // If there is a pending asynchronous request, it will be completed by the
   // time this routine returns.
   scoped_refptr<gpu::GpuChannelHost> EstablishGpuChannelSync();
+
+  // Same as above, but asynchronous.
+  using EstablishGpuChannelCallback =
+      base::OnceCallback<void(scoped_refptr<gpu::GpuChannelHost>)>;
+  void EstablishGpuChannel(EstablishGpuChannelCallback callback);
 
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager();
 
@@ -257,12 +262,12 @@ class CONTENT_EXPORT RenderThreadImpl
     return url_loader_throttle_provider_.get();
   }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   scoped_refptr<StreamTextureFactory> GetStreamTexureFactory();
   bool EnableStreamTextureCopy();
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   scoped_refptr<DCOMPTextureFactory> GetDCOMPTextureFactory();
 #endif
 
@@ -295,10 +300,9 @@ class CONTENT_EXPORT RenderThreadImpl
   // Returns a worker context provider that will be bound on the compositor
   // thread.
   scoped_refptr<viz::RasterContextProvider>
-  SharedCompositorWorkerContextProvider(bool try_gpu_rasterization);
+  SharedCompositorWorkerContextProvider();
 
   media::GpuVideoAcceleratorFactories* GetGpuFactories();
-  media::DecoderFactory* GetMediaDecoderFactory();
 
   scoped_refptr<viz::ContextProviderCommandBuffer>
   SharedMainThreadContextProvider();
@@ -311,6 +315,10 @@ class CONTENT_EXPORT RenderThreadImpl
   class CONTENT_EXPORT HistogramCustomizer {
    public:
     HistogramCustomizer();
+
+    HistogramCustomizer(const HistogramCustomizer&) = delete;
+    HistogramCustomizer& operator=(const HistogramCustomizer&) = delete;
+
     ~HistogramCustomizer();
 
     // Called when a top frame of a RenderView navigates. This function updates
@@ -349,8 +357,6 @@ class CONTENT_EXPORT RenderThreadImpl
     // Set of histograms for which we want to produce a custom histogram if
     // possible.
     std::set<std::string> custom_histograms_;
-
-    DISALLOW_COPY_AND_ASSIGN(HistogramCustomizer);
   };
 
   HistogramCustomizer* histogram_customizer() {
@@ -393,6 +399,17 @@ class CONTENT_EXPORT RenderThreadImpl
     video_frame_compositor_task_runner_ = task_runner;
   }
 
+  void CreateSharedStorageWorkletService(
+      mojo::PendingReceiver<
+          shared_storage_worklet::mojom::SharedStorageWorkletService> receiver);
+
+  // The time the run loop started for this thread.
+  base::TimeTicks run_loop_start_time() const { return run_loop_start_time_; }
+
+  void set_run_loop_start_time(base::TimeTicks run_loop_start_time) {
+    run_loop_start_time_ = run_loop_start_time;
+  }
+
  private:
   friend class RenderThreadImplBrowserTest;
   friend class AgentSchedulingGroup;
@@ -412,9 +429,6 @@ class CONTENT_EXPORT RenderThreadImpl
   void InitializeCompositorThread();
   void InitializeWebKit(mojo::BinderMap* binders);
 
-  void OnTransferBitmap(const SkBitmap& bitmap, int resource_id);
-  void OnGetAccessibilityTree();
-
   // mojom::Renderer:
   void CreateAgentSchedulingGroup(
       mojo::PendingReceiver<IPC::mojom::ChannelBootstrap> bootstrap,
@@ -433,9 +447,12 @@ class CONTENT_EXPORT RenderThreadImpl
                                base::TimeDelta transport_rtt,
                                double bandwidth_kbps) override;
   void SetWebKitSharedTimersSuspended(bool suspend) override;
-  void SetUserAgent(const std::string& user_agent) override;
-  void SetUserAgentMetadata(const blink::UserAgentMetadata& metadata) override;
-  void SetCorsExemptHeaderList(const std::vector<std::string>& list) override;
+  void InitializeRenderer(
+      const std::string& user_agent,
+      const std::string& full_user_agent,
+      const std::string& reduced_user_agent,
+      const blink::UserAgentMetadata& user_agent_metadata,
+      const std::vector<std::string>& cors_exempt_header_list) override;
   void UpdateScrollbarTheme(
       mojom::UpdateScrollbarThemeParamsPtr params) override;
   void OnSystemColorsChanged(int32_t aqua_color_variant,
@@ -446,7 +463,6 @@ class CONTENT_EXPORT RenderThreadImpl
   void PurgePluginListCache(bool reload_pages) override;
   void SetProcessState(mojom::RenderProcessBackgroundState background_state,
                        mojom::RenderProcessVisibleState visible_state) override;
-  void SetSchedulerKeepActive(bool keep_active) override;
   void SetIsLockedToSite() override;
 #if BUILDFLAG(CLANG_PROFILING_INSIDE_SANDBOX)
   void WriteClangProfilingProfile(
@@ -454,6 +470,8 @@ class CONTENT_EXPORT RenderThreadImpl
 #endif
   void SetIsCrossOriginIsolated(bool value) override;
   void SetIsDirectSocketEnabled(bool value) override;
+  void EnableBlinkRuntimeFeatures(
+      const std::vector<std::string>& features) override;
   void OnMemoryPressure(
       base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
 
@@ -500,6 +518,8 @@ class CONTENT_EXPORT RenderThreadImpl
   absl::optional<mojom::RenderProcessVisibleState> visible_state_;
 
   blink::WebString user_agent_;
+  blink::WebString full_user_agent_;
+  blink::WebString reduced_user_agent_;
   blink::UserAgentMetadata user_agent_metadata_;
 
   // Sticky once true, indicates that compositing is done without Gpu, so
@@ -513,15 +533,8 @@ class CONTENT_EXPORT RenderThreadImpl
   // NOTE(dcastagna): At worst this accumulates a few bytes per context lost.
   std::vector<std::unique_ptr<GpuVideoAcceleratorFactoriesImpl>> gpu_factories_;
 
-  // Utility classes to allow WebRTC to create video decoders.
-  std::unique_ptr<MediaInterfaceFactory> media_interface_factory_;
-  std::unique_ptr<media::DecoderFactory> media_decoder_factory_;
-
   // Thread for running multimedia operations (e.g., video decoding).
   std::unique_ptr<base::Thread> media_thread_;
-
-  std::unique_ptr<gfx::RenderingPipeline> main_thread_pipeline_;
-  std::unique_ptr<gfx::RenderingPipeline> compositor_thread_pipeline_;
 
   // Will point to appropriate task runner after initialization,
   // regardless of whether |compositor_thread_| is overriden.
@@ -534,11 +547,11 @@ class CONTENT_EXPORT RenderThreadImpl
   // Pool of workers used for raster operations (e.g., tile rasterization).
   scoped_refptr<CategorizedWorkerPool> categorized_worker_pool_;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   scoped_refptr<StreamTextureFactory> stream_texture_factory_;
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   scoped_refptr<DCOMPTextureFactory> dcomp_texture_factory_;
 #endif
 
@@ -566,7 +579,6 @@ class CONTENT_EXPORT RenderThreadImpl
   bool is_gpu_memory_buffer_compositor_resources_enabled_;
   bool is_partial_raster_enabled_;
   bool is_elastic_overscroll_enabled_;
-  bool is_zoom_for_dsf_enabled_;
   bool is_threaded_animation_enabled_;
   bool is_scroll_animator_enabled_;
 
@@ -604,9 +616,10 @@ class CONTENT_EXPORT RenderThreadImpl
   blink::WebResourceRequestSenderDelegate* resource_request_sender_delegate_ =
       nullptr;
 
-  base::WeakPtrFactory<RenderThreadImpl> weak_factory_{this};
+  // Tracks the time the run loop started for this thread.
+  base::TimeTicks run_loop_start_time_;
 
-  DISALLOW_COPY_AND_ASSIGN(RenderThreadImpl);
+  base::WeakPtrFactory<RenderThreadImpl> weak_factory_{this};
 };
 
 }  // namespace content

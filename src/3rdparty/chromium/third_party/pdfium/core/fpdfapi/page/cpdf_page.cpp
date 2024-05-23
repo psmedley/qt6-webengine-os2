@@ -77,7 +77,7 @@ void CPDF_Page::ParseContent() {
 CPDF_Object* CPDF_Page::GetPageAttr(const ByteString& name) const {
   CPDF_Dictionary* pPageDict = GetDict();
   std::set<CPDF_Dictionary*> visited;
-  while (1) {
+  while (true) {
     visited.insert(pPageDict);
     if (CPDF_Object* pObj = pPageDict->GetDirectObjectFor(name))
       return pObj;
@@ -99,7 +99,7 @@ CFX_FloatRect CPDF_Page::GetBox(const ByteString& name) const {
   return box;
 }
 
-Optional<CFX_PointF> CPDF_Page::DeviceToPage(
+absl::optional<CFX_PointF> CPDF_Page::DeviceToPage(
     const FX_RECT& rect,
     int rotate,
     const CFX_PointF& device_point) const {
@@ -107,7 +107,7 @@ Optional<CFX_PointF> CPDF_Page::DeviceToPage(
   return page2device.GetInverse().Transform(device_point);
 }
 
-Optional<CFX_PointF> CPDF_Page::PageToDevice(
+absl::optional<CFX_PointF> CPDF_Page::PageToDevice(
     const FX_RECT& rect,
     int rotate,
     const CFX_PointF& page_point) const {

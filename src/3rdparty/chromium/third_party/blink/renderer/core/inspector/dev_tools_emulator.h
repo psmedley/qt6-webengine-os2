@@ -9,7 +9,7 @@
 #include "third_party/blink/public/common/widget/device_emulation_params.h"
 #include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
@@ -19,7 +19,6 @@ class PointF;
 
 namespace blink {
 
-class IntRect;
 class WebViewImpl;
 
 class CORE_EXPORT DevToolsEmulator final
@@ -60,6 +59,8 @@ class CORE_EXPORT DevToolsEmulator final
   void SetScriptExecutionDisabled(bool);
   void SetScrollbarsHidden(bool);
   void SetDocumentCookieDisabled(bool);
+  void SetAutoDarkModeOverride(bool);
+  void ResetAutoDarkModeOverride();
 
   bool HasViewportOverride() const { return !!viewport_override_; }
 
@@ -67,14 +68,6 @@ class CORE_EXPORT DevToolsEmulator final
   // frame. Returns an updated emulation transform for a viewport override, and
   // should only be called when HasViewportOverride() is true.
   TransformationMatrix MainFrameScrollOrScaleChanged();
-
-  // Rewrites the |visible_rect| to the area of the devtools custom viewport if
-  // it is enabled. Otherwise, leaves |visible_rect| unchanged. Takes as input
-  // the size of the viewport, which gives an upper bound on the size of the
-  // area that is visible. The |viewport_size| is physical pixels if
-  // UseZoomForDSF() is enabled, or DIP otherwise.
-  void OverrideVisibleRect(const IntSize& viewport_size,
-                           IntRect* visible_rect) const;
 
   // Returns the scale used to convert incoming input events while emulating
   // device metics.
@@ -111,7 +104,7 @@ class CORE_EXPORT DevToolsEmulator final
   DeviceEmulationParams emulation_params_;
 
   struct ViewportOverride {
-    FloatPoint position;
+    gfx::PointF position;
     double scale;
   };
   absl::optional<ViewportOverride> viewport_override_;
@@ -147,6 +140,9 @@ class CORE_EXPORT DevToolsEmulator final
 
   bool embedder_cookie_enabled_;
   bool document_cookie_disabled_;
+
+  bool embedder_force_dark_mode_enabled_;
+  bool auto_dark_overriden_;
 };
 
 }  // namespace blink

@@ -10,8 +10,8 @@
 #include "core/fxcrt/fx_system.h"
 #include "third_party/base/check.h"
 
-#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_CHROMEOS) || \
-    defined(OS_APPLE) || defined(OS_ASMJS) || defined(OS_OS2)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+    BUILDFLAG(IS_APPLE) || defined(OS_ASMJS) || BUILDFLAG(IS_OS2)
 #include <sys/time.h>
 #include <time.h>
 #endif
@@ -69,7 +69,8 @@ int64_t DateToDays(int32_t iYear,
          iYear / 400;
 }
 
-struct FXUT_SYSTEMTIME {
+// Exact same structure as Win32 SYSTEMTIME.
+struct FX_SYSTEMTIME {
   uint16_t wYear;
   uint16_t wMonth;
   uint16_t wDayOfWeek;
@@ -98,31 +99,33 @@ bool FX_IsLeapYear(int32_t iYear) {
 
 // static
 CFX_DateTime CFX_DateTime::Now() {
-  FXUT_SYSTEMTIME utLocal;
-#if defined(OS_WIN)
-  ::GetLocalTime((LPSYSTEMTIME)&utLocal);
+  FX_SYSTEMTIME local_time;
+#if BUILDFLAG(IS_WIN)
+  ::GetLocalTime(reinterpret_cast<LPSYSTEMTIME>(&local_time));
+#elif BUILDFLAG(IS_FUCHSIA)
+  // TODO(crbug.com/pdfium/1775): Implement using ICU.
 #else
-  timeval curTime;
-  gettimeofday(&curTime, nullptr);
+  timeval tv;
+  gettimeofday(&tv, nullptr);
 
   struct tm st;
-  localtime_r(&curTime.tv_sec, &st);
-  utLocal.wYear = st.tm_year + 1900;
-  utLocal.wMonth = st.tm_mon + 1;
-  utLocal.wDayOfWeek = st.tm_wday;
-  utLocal.wDay = st.tm_mday;
-  utLocal.wHour = st.tm_hour;
-  utLocal.wMinute = st.tm_min;
-  utLocal.wSecond = st.tm_sec;
-  utLocal.wMillisecond = curTime.tv_usec / 1000;
-#endif  // defined(OS_WIN)
+  localtime_r(&tv.tv_sec, &st);
+  local_time.wYear = st.tm_year + 1900;
+  local_time.wMonth = st.tm_mon + 1;
+  local_time.wDayOfWeek = st.tm_wday;
+  local_time.wDay = st.tm_mday;
+  local_time.wHour = st.tm_hour;
+  local_time.wMinute = st.tm_min;
+  local_time.wSecond = st.tm_sec;
+  local_time.wMillisecond = tv.tv_usec / 1000;
+#endif  // BUILDFLAG(IS_WIN)
 
-  return CFX_DateTime(utLocal.wYear, static_cast<uint8_t>(utLocal.wMonth),
-                      static_cast<uint8_t>(utLocal.wDay),
-                      static_cast<uint8_t>(utLocal.wHour),
-                      static_cast<uint8_t>(utLocal.wMinute),
-                      static_cast<uint8_t>(utLocal.wSecond),
-                      static_cast<uint16_t>(utLocal.wMillisecond));
+  return CFX_DateTime(local_time.wYear, static_cast<uint8_t>(local_time.wMonth),
+                      static_cast<uint8_t>(local_time.wDay),
+                      static_cast<uint8_t>(local_time.wHour),
+                      static_cast<uint8_t>(local_time.wMinute),
+                      static_cast<uint8_t>(local_time.wSecond),
+                      local_time.wMillisecond);
 }
 
 int32_t CFX_DateTime::GetDayOfWeek() const {

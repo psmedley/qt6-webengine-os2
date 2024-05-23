@@ -5,7 +5,10 @@
 #ifndef UI_OZONE_PLATFORM_WAYLAND_TEST_WAYLAND_DRAG_DROP_TEST_H_
 #define UI_OZONE_PLATFORM_WAYLAND_TEST_WAYLAND_DRAG_DROP_TEST_H_
 
+#include <cstdint>
+
 #include "base/callback_forward.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "ui/ozone/platform/wayland/test/test_data_device.h"
 #include "ui/ozone/platform/wayland/test/test_data_source.h"
 #include "ui/ozone/platform/wayland/test/wayland_test.h"
@@ -32,12 +35,14 @@ class WaylandDragDropTest : public WaylandTest,
   WaylandDragDropTest();
   WaylandDragDropTest(const WaylandDragDropTest&) = delete;
   WaylandDragDropTest& operator=(const WaylandDragDropTest&) = delete;
+  ~WaylandDragDropTest() override;
 
   // These are public for convenience, as they must be callable from lambda
   // functions, usually posted to task queue while the drag loop runs.
   void SendDndEnter(WaylandWindow* window, const gfx::Point& location);
   void SendDndLeave();
   void SendDndMotion(const gfx::Point& location);
+  void SendDndDrop();
   void SendDndCancelled();
   void ReadData(const std::string& mime_type,
                 wl::TestDataSource::ReadDataCallback callback);
@@ -55,10 +60,16 @@ class WaylandDragDropTest : public WaylandTest,
                              MockPlatformWindowDelegate* delegate,
                              int id,
                              const gfx::Point& location);
+  virtual void SendTouchUp(int id);
   virtual void SendTouchMotion(WaylandWindow* window,
                                MockPlatformWindowDelegate* delegate,
                                int id,
                                const gfx::Point& location);
+
+  MOCK_METHOD3(MockStartDrag,
+               void(wl::TestDataSource* source,
+                    wl::MockSurface* origin,
+                    uint32_t serial));
 
  protected:
   // WaylandTest:
@@ -71,7 +82,7 @@ class WaylandDragDropTest : public WaylandTest,
                  uint32_t serial) override;
 
   void OfferAndEnter(wl::MockSurface* surface, const gfx::Point& location);
-  uint32_t NextSerial() const;
+  uint32_t NextSerial();
   uint32_t NextTime() const;
   void ScheduleTestTask(base::OnceClosure test_task);
   void RunTestTask(base::OnceClosure test_task);
@@ -85,6 +96,8 @@ class WaylandDragDropTest : public WaylandTest,
   wl::TestDataSource* data_source_;
   wl::MockPointer* pointer_;
   wl::TestTouch* touch_;
+
+  uint32_t current_serial_;
 };
 
 }  // namespace ui

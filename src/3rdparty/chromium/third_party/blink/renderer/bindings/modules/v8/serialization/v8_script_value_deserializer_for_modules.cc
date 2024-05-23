@@ -17,6 +17,7 @@
 #include "third_party/blink/renderer/modules/file_system_access/file_system_directory_handle.h"
 #include "third_party/blink/renderer/modules/file_system_access/file_system_file_handle.h"
 #include "third_party/blink/renderer/modules/filesystem/dom_file_system.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_certificate.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_certificate_generator.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame.h"
@@ -89,6 +90,8 @@ ScriptWrappable* V8ScriptValueDeserializerForModules::ReadDOMObject(
       return ReadEncodedAudioChunk();
     case kEncodedVideoChunkTag:
       return ReadEncodedVideoChunk();
+    case kMediaStreamTrack:
+      return ReadMediaStreamTrack();
     default:
       break;
   }
@@ -218,12 +221,12 @@ bool KeyUsagesFromWireFormat(uint32_t raw_usages,
 
 CryptoKey* V8ScriptValueDeserializerForModules::ReadCryptoKey() {
   // Read params.
-  uint8_t raw_key_type;
-  if (!ReadOneByte(&raw_key_type))
+  uint8_t raw_key_byte;
+  if (!ReadOneByte(&raw_key_byte))
     return nullptr;
   WebCryptoKeyAlgorithm algorithm;
   WebCryptoKeyType key_type = kWebCryptoKeyTypeSecret;
-  switch (raw_key_type) {
+  switch (raw_key_byte) {
     case kAesKeyTag: {
       uint32_t raw_id;
       WebCryptoAlgorithmId id;
@@ -520,6 +523,20 @@ V8ScriptValueDeserializerForModules::ReadEncodedVideoChunk() {
     return nullptr;
 
   return MakeGarbageCollected<EncodedVideoChunk>(buffers[index]);
+}
+
+MediaStreamTrack* V8ScriptValueDeserializerForModules::ReadMediaStreamTrack() {
+  if (!RuntimeEnabledFeatures::MediaStreamTrackTransferEnabled(
+          ExecutionContext::From(GetScriptState()))) {
+    return nullptr;
+  }
+
+  base::UnguessableToken session_id;
+  if (!ReadUnguessableToken(&session_id))
+    return nullptr;
+
+  return MediaStreamTrack::Create(ExecutionContext::From(GetScriptState()),
+                                  session_id);
 }
 
 }  // namespace blink

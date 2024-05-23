@@ -26,10 +26,10 @@ ASSERT_SIZE(NGPhysicalLineBoxFragment, SameSizeAsNGPhysicalLineBoxFragment);
 
 }  // namespace
 
-scoped_refptr<const NGPhysicalLineBoxFragment>
-NGPhysicalLineBoxFragment::Create(NGLineBoxFragmentBuilder* builder) {
+const NGPhysicalLineBoxFragment* NGPhysicalLineBoxFragment::Create(
+    NGLineBoxFragmentBuilder* builder) {
   DCHECK_EQ(builder->children_.size(), 0u);
-  return base::MakeRefCounted<NGPhysicalLineBoxFragment>(PassKey(), builder);
+  return MakeGarbageCollected<NGPhysicalLineBoxFragment>(PassKey(), builder);
 }
 
 NGPhysicalLineBoxFragment::NGPhysicalLineBoxFragment(
@@ -42,12 +42,16 @@ NGPhysicalLineBoxFragment::NGPhysicalLineBoxFragment(
       metrics_(builder->metrics_) {
   // A line box must have a metrics unless it's an empty line box.
   DCHECK(!metrics_.IsEmpty() || IsEmptyLineBox());
-  base_or_resolved_direction_ = static_cast<unsigned>(builder->base_direction_);
+  base_direction_ = static_cast<unsigned>(builder->base_direction_);
   has_hanging_ = builder->hang_inline_size_ != 0;
   has_propagated_descendants_ = has_floating_descendants_for_paint_ ||
                                 HasOutOfFlowPositionedDescendants() ||
                                 builder->unpositioned_list_marker_;
 }
+
+NGPhysicalLineBoxFragment::~NGPhysicalLineBoxFragment() = default;
+
+void NGPhysicalLineBoxFragment::Dispose() {}
 
 FontHeight NGPhysicalLineBoxFragment::BaselineMetrics() const {
   // TODO(kojii): Computing other baseline types than the used one is not
@@ -118,4 +122,9 @@ bool NGPhysicalLineBoxFragment::HasSoftWrapToNextLine() const {
   const auto* break_token = To<NGInlineBreakToken>(BreakToken());
   return break_token && !break_token->IsForcedBreak();
 }
+
+void NGPhysicalLineBoxFragment::TraceAfterDispatch(Visitor* visitor) const {
+  NGPhysicalFragment::TraceAfterDispatch(visitor);
+}
+
 }  // namespace blink

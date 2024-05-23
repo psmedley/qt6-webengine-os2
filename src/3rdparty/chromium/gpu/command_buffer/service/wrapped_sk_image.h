@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "gpu/command_buffer/service/shared_image_backing_factory.h"
 #include "gpu/command_buffer/service/texture_base.h"
@@ -26,6 +25,10 @@ class GPU_GLES2_EXPORT WrappedSkImageFactory
  public:
   explicit WrappedSkImageFactory(
       scoped_refptr<SharedContextState> context_state);
+
+  WrappedSkImageFactory(const WrappedSkImageFactory&) = delete;
+  WrappedSkImageFactory& operator=(const WrappedSkImageFactory&) = delete;
+
   ~WrappedSkImageFactory() override;
 
   // SharedImageBackingFactory implementation:
@@ -74,8 +77,7 @@ class GPU_GLES2_EXPORT WrappedSkImageFactory
                             GrContextType gr_context_type) const;
 
   scoped_refptr<SharedContextState> context_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(WrappedSkImageFactory);
+  const bool is_drdc_enabled_;
 };
 
 }  // namespace raster

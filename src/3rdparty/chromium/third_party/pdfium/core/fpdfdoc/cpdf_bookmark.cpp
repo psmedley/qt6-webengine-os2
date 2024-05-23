@@ -6,7 +6,6 @@
 
 #include "core/fpdfdoc/cpdf_bookmark.h"
 
-#include <memory>
 #include <vector>
 
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
@@ -31,12 +30,12 @@ WideString CPDF_Bookmark::GetTitle() const {
     return WideString();
 
   WideString title = pString->GetUnicodeText();
-  int len = title.GetLength();
+  size_t len = title.GetLength();
   if (!len)
     return WideString();
 
   std::vector<wchar_t, FxAllocAllocator<wchar_t>> buf(len);
-  for (int i = 0; i < len; i++) {
+  for (size_t i = 0; i < len; i++) {
     wchar_t w = title[i];
     buf[i] = w > 0x20 ? w : 0x20;
   }

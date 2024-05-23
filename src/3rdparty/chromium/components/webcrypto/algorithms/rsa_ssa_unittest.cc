@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include "base/check_op.h"
-#include "base/cxx17_backports.h"
 #include "base/values.h"
 #include "components/webcrypto/algorithm_dispatch.h"
 #include "components/webcrypto/algorithms/test_helpers.h"
@@ -24,7 +23,7 @@ namespace {
 // Helper for ImportJwkRsaFailures. Restores the JWK JSON
 // dictionary to a good state
 void RestoreJwkRsaDictionary(base::DictionaryValue* dict) {
-  dict->Clear();
+  dict->DictClear();
   dict->SetString("kty", "RSA");
   dict->SetString("alg", "RS256");
   dict->SetString("use", "sig");
@@ -202,31 +201,31 @@ TEST_F(WebCryptoRsaSsaTest, ImportRsaPrivateKeyJwkToPkcs8RoundTrip) {
 // be imported correctly, however every key after that would actually import
 // the first key.
 TEST_F(WebCryptoRsaSsaTest, ImportMultipleRSAPrivateKeysJwk) {
-  base::ListValue key_list;
-  ASSERT_TRUE(ReadJsonTestFileToList("rsa_private_keys.json", &key_list));
-
   // For this test to be meaningful the keys MUST be kept alive before importing
   // new keys.
   std::vector<blink::WebCryptoKey> live_keys;
 
-  for (size_t key_index = 0; key_index < key_list.GetSize(); ++key_index) {
-    SCOPED_TRACE(key_index);
+  base::Value::List keys = ReadJsonTestFileAsList("rsa_private_keys.json");
+  for (const auto& key_values : keys) {
+    SCOPED_TRACE(&key_values - &keys[0]);
 
-    base::DictionaryValue* key_values;
-    ASSERT_TRUE(key_list.GetDictionary(key_index, &key_values));
+    ASSERT_TRUE(key_values.is_dict());
+    const base::DictionaryValue* key_values_dict =
+        &base::Value::AsDictionaryValue(key_values);
 
     // Get the JWK representation of the key.
-    base::DictionaryValue* key_jwk;
-    ASSERT_TRUE(key_values->GetDictionary("jwk", &key_jwk));
+    const base::DictionaryValue* key_jwk;
+    ASSERT_TRUE(key_values_dict->GetDictionary("jwk", &key_jwk));
 
     // Get the PKCS8 representation of the key.
     std::string pkcs8_hex_string;
-    ASSERT_TRUE(key_values->GetString("pkcs8", &pkcs8_hex_string));
+    ASSERT_TRUE(key_values_dict->GetString("pkcs8", &pkcs8_hex_string));
     std::vector<uint8_t> pkcs8_bytes = HexStringToBytes(pkcs8_hex_string);
 
     // Get the modulus length for the key.
-    int modulus_length_bits = 0;
-    ASSERT_TRUE(key_values->GetInteger("modulusLength", &modulus_length_bits));
+    absl::optional<int> modulus_length_bits =
+        key_values_dict->FindIntKey("modulusLength");
+    ASSERT_TRUE(modulus_length_bits);
 
     blink::WebCryptoKey private_key;
 
@@ -242,7 +241,7 @@ TEST_F(WebCryptoRsaSsaTest, ImportMultipleRSAPrivateKeysJwk) {
     live_keys.push_back(private_key);
 
     EXPECT_EQ(
-        modulus_length_bits,
+        *modulus_length_bits,
         static_cast<int>(
             private_key.Algorithm().RsaHashedParams()->ModulusLengthBits()));
 
@@ -260,13 +259,14 @@ TEST_F(WebCryptoRsaSsaTest, ImportMultipleRSAPrivateKeysJwk) {
 // that the second import retrieves the first key. See http://crbug.com/378315
 // for how that could happen.
 TEST_F(WebCryptoRsaSsaTest, ImportJwkExistingModulusAndInvalid) {
-  base::ListValue key_list;
-  ASSERT_TRUE(ReadJsonTestFileToList("rsa_private_keys.json", &key_list));
+  base::Value::List key_list = ReadJsonTestFileAsList("rsa_private_keys.json");
 
   // Import a 1024-bit private key.
-  base::DictionaryValue* key1_props;
-  ASSERT_TRUE(key_list.GetDictionary(1, &key1_props));
-  base::DictionaryValue* key1_jwk;
+  const base::Value& key1_props_value = key_list[1];
+  ASSERT_TRUE(key1_props_value.is_dict());
+  const base::DictionaryValue* key1_props =
+      &base::Value::AsDictionaryValue(key1_props_value);
+  const base::DictionaryValue* key1_jwk;
   ASSERT_TRUE(key1_props->GetDictionary("jwk", &key1_jwk));
 
   blink::WebCryptoKey key1;
@@ -282,8 +282,10 @@ TEST_F(WebCryptoRsaSsaTest, ImportJwkExistingModulusAndInvalid) {
 
   // Construct a JWK using the modulus of key1, but all the other fields from
   // another key (also a 1024-bit private key).
-  base::DictionaryValue* key2_props;
-  ASSERT_TRUE(key_list.GetDictionary(5, &key2_props));
+  base::Value& key2_props_value = key_list[5];
+  ASSERT_TRUE(key2_props_value.is_dict());
+  base::DictionaryValue* key2_props = const_cast<base::DictionaryValue*>(
+      &base::Value::AsDictionaryValue(key2_props_value));
   base::DictionaryValue* key2_jwk;
   ASSERT_TRUE(key2_props->GetDictionary("jwk", &key2_jwk));
   std::string modulus;
@@ -477,7 +479,7 @@ TEST_F(WebCryptoRsaSsaTest, GenerateKeyPairRsaBadModulusLength) {
 
   const std::vector<uint8_t> public_exponent = HexStringToBytes("010001");
 
-  for (size_t i = 0; i < base::size(kBadModulusBits); ++i) {
+  for (size_t i = 0; i < std::size(kBadModulusBits); ++i) {
     const unsigned int modulus_length_bits = kBadModulusBits[i];
     blink::WebCryptoAlgorithm algorithm = CreateRsaHashedKeyGenAlgorithm(
         blink::kWebCryptoAlgorithmIdRsaSsaPkcs1v1_5,
@@ -509,7 +511,7 @@ TEST_F(WebCryptoRsaSsaTest, GenerateKeyPairRsaBadExponent) {
       "010000",  // 65536
   };
 
-  for (size_t i = 0; i < base::size(kPublicExponents); ++i) {
+  for (size_t i = 0; i < std::size(kPublicExponents); ++i) {
     SCOPED_TRACE(i);
     blink::WebCryptoAlgorithm algorithm = CreateRsaHashedKeyGenAlgorithm(
         blink::kWebCryptoAlgorithmIdRsaSsaPkcs1v1_5,
@@ -631,9 +633,6 @@ TEST_F(WebCryptoRsaSsaTest, SignVerifyFailures) {
 }
 
 TEST_F(WebCryptoRsaSsaTest, SignVerifyKnownAnswer) {
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("pkcs1v15_sign.json", &tests));
-
   // Import the key pair.
   blink::WebCryptoAlgorithm import_algorithm = CreateRsaHashedImportAlgorithm(
       blink::kWebCryptoAlgorithmIdRsaSsaPkcs1v1_5,
@@ -650,12 +649,15 @@ TEST_F(WebCryptoRsaSsaTest, SignVerifyKnownAnswer) {
       CreateAlgorithm(blink::kWebCryptoAlgorithmIdRsaSsaPkcs1v1_5);
 
   // Validate the signatures are computed and verified as expected.
-  std::vector<uint8_t> signature;
-  for (size_t test_index = 0; test_index < tests.GetSize(); ++test_index) {
-    SCOPED_TRACE(test_index);
+  base::Value::List tests = ReadJsonTestFileAsList("pkcs1v15_sign.json");
 
-    base::DictionaryValue* test;
-    ASSERT_TRUE(tests.GetDictionary(test_index, &test));
+  std::vector<uint8_t> signature;
+  for (const auto& test_value : tests) {
+    SCOPED_TRACE(&test_value - &tests[0]);
+
+    ASSERT_TRUE(test_value.is_dict());
+    const base::DictionaryValue* test =
+        &base::Value::AsDictionaryValue(test_value);
 
     std::vector<uint8_t> test_message =
         GetBytesFromHexString(test, "message_hex");
@@ -689,7 +691,7 @@ TEST_F(WebCryptoRsaSsaTest, ImportRsaSsaPublicKeyBadUsage_SPKI) {
       blink::kWebCryptoKeyUsageEncrypt | blink::kWebCryptoKeyUsageDecrypt,
   };
 
-  for (size_t i = 0; i < base::size(bad_usages); ++i) {
+  for (size_t i = 0; i < std::size(bad_usages); ++i) {
     SCOPED_TRACE(i);
 
     blink::WebCryptoKey public_key;
@@ -719,7 +721,7 @@ TEST_F(WebCryptoRsaSsaTest, ImportRsaSsaPublicKeyBadUsage_JWK) {
   dict.RemoveKey("use");
   dict.SetString("alg", "RS256");
 
-  for (size_t i = 0; i < base::size(bad_usages); ++i) {
+  for (size_t i = 0; i < std::size(bad_usages); ++i) {
     SCOPED_TRACE(i);
 
     blink::WebCryptoKey public_key;
@@ -741,7 +743,7 @@ TEST_F(WebCryptoRsaSsaTest, GenerateKeyBadUsages) {
   const unsigned int modulus_length = 256;
   const std::vector<uint8_t> public_exponent = HexStringToBytes("010001");
 
-  for (size_t i = 0; i < base::size(bad_usages); ++i) {
+  for (size_t i = 0; i < std::size(bad_usages); ++i) {
     SCOPED_TRACE(i);
 
     blink::WebCryptoKey public_key;
@@ -877,7 +879,7 @@ TEST_F(WebCryptoRsaSsaTest, ImportExportJwkRsaPublicKey) {
                              {blink::kWebCryptoAlgorithmIdSha512,
                               blink::kWebCryptoKeyUsageVerify, "RS512"}};
 
-  for (size_t test_index = 0; test_index < base::size(kTests); ++test_index) {
+  for (size_t test_index = 0; test_index < std::size(kTests); ++test_index) {
     SCOPED_TRACE(test_index);
     const TestCase& test = kTests[test_index];
 
@@ -944,7 +946,7 @@ TEST_F(WebCryptoRsaSsaTest, ImportJwkRsaFailures) {
 
   // Fail if either "n" or "e" is not present or malformed.
   const std::string kKtyParmName[] = {"n", "e"};
-  for (size_t idx = 0; idx < base::size(kKtyParmName); ++idx) {
+  for (size_t idx = 0; idx < std::size(kKtyParmName); ++idx) {
     // Fail on missing parameter.
     dict.RemoveKey(kKtyParmName[idx]);
     EXPECT_NE(Status::Success(),
@@ -986,14 +988,13 @@ TEST_F(WebCryptoRsaSsaTest, ImportRsaSsaJwkBadUsageAndData) {
 
 // Imports invalid JWK/SPKI/PKCS8 data and verifies that it fails as expected.
 TEST_F(WebCryptoRsaSsaTest, ImportInvalidKeyData) {
-  base::ListValue tests;
-  ASSERT_TRUE(ReadJsonTestFileToList("bad_rsa_keys.json", &tests));
+  base::Value::List tests = ReadJsonTestFileAsList("bad_rsa_keys.json");
+  for (const auto& test_value : tests) {
+    SCOPED_TRACE(&test_value - &tests[0]);
 
-  for (size_t test_index = 0; test_index < tests.GetSize(); ++test_index) {
-    SCOPED_TRACE(test_index);
-
-    const base::DictionaryValue* test;
-    ASSERT_TRUE(tests.GetDictionary(test_index, &test));
+    ASSERT_TRUE(test_value.is_dict());
+    const base::DictionaryValue* test =
+        &base::Value::AsDictionaryValue(test_value);
 
     blink::WebCryptoKeyFormat key_format = GetKeyFormatFromJsonTestCase(test);
     std::vector<uint8_t> key_data =

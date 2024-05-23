@@ -31,7 +31,7 @@ namespace {
 class SettingsOverridePermissionTest : public ChromeManifestTest {
  protected:
   SettingsOverridePermissionTest()
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       : scoped_channel_(version_info::Channel::UNKNOWN)
 #endif
   {
@@ -55,7 +55,7 @@ class SettingsOverridePermissionTest : public ChromeManifestTest {
       settings_override->SetString("homepage", "http://www.google.com/home");
     if (flags & kStartupPages) {
       std::unique_ptr<base::ListValue> startup_pages(new base::ListValue);
-      startup_pages->AppendString("http://startup.com/startup.html");
+      startup_pages->Append("http://startup.com/startup.html");
       settings_override->Set("startup_pages", std::move(startup_pages));
     }
     if (flags & kSearchProvider) {
@@ -77,10 +77,10 @@ class SettingsOverridePermissionTest : public ChromeManifestTest {
     return LoadAndExpectSuccess(manifest);
   }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // On Mac, this API is limited to trunk.
   extensions::ScopedCurrentChannel scoped_channel_;
-#endif  // OS_MAC
+#endif  // BUILDFLAG(IS_MAC)
 };
 
 TEST_F(SettingsOverridePermissionTest, HomePage) {
@@ -88,7 +88,7 @@ TEST_F(SettingsOverridePermissionTest, HomePage) {
   const PermissionSet& permission_set =
       extension->permissions_data()->active_permissions();
 
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   EXPECT_TRUE(permission_set.HasAPIPermission(APIPermissionID::kHomepage));
   VerifyOnePermissionMessage(extension->permissions_data(),
                              "Change your home page to: google.com");
@@ -106,7 +106,7 @@ TEST_F(SettingsOverridePermissionTest, StartupPages) {
   const PermissionSet& permission_set =
       extension->permissions_data()->active_permissions();
 
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   EXPECT_TRUE(permission_set.HasAPIPermission(APIPermissionID::kStartupPages));
   VerifyOnePermissionMessage(extension->permissions_data(),
                              "Change your start page to: startup.com");
@@ -124,7 +124,7 @@ TEST_F(SettingsOverridePermissionTest, SearchSettings) {
   const PermissionSet& permission_set =
       extension->permissions_data()->active_permissions();
 
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   EXPECT_TRUE(
       permission_set.HasAPIPermission(APIPermissionID::kSearchProvider));
   VerifyOnePermissionMessage(extension->permissions_data(),
@@ -144,7 +144,7 @@ TEST_F(SettingsOverridePermissionTest, All) {
   const PermissionSet& permission_set =
       extension->permissions_data()->active_permissions();
 
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   EXPECT_TRUE(permission_set.HasAPIPermission(APIPermissionID::kHomepage));
   EXPECT_TRUE(permission_set.HasAPIPermission(APIPermissionID::kStartupPages));
   EXPECT_TRUE(
@@ -163,7 +163,7 @@ TEST_F(SettingsOverridePermissionTest, Some) {
   const PermissionSet& permission_set =
       extension->permissions_data()->active_permissions();
 
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   EXPECT_TRUE(permission_set.HasAPIPermission(APIPermissionID::kHomepage));
   EXPECT_TRUE(
       permission_set.HasAPIPermission(APIPermissionID::kSearchProvider));

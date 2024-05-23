@@ -58,6 +58,11 @@ base::RefCountedMemory* ShellContentClient::GetDataResourceBytes(
       resource_id);
 }
 
+std::string ShellContentClient::GetDataResourceString(int resource_id) {
+  return ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
+      resource_id);
+}
+
 gfx::Image& ShellContentClient::GetNativeImageNamed(int resource_id) {
   return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       resource_id);
@@ -68,7 +73,7 @@ blink::OriginTrialPolicy* ShellContentClient::GetOriginTrialPolicy() {
 }
 
 void ShellContentClient::AddAdditionalSchemes(Schemes* schemes) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   schemes->local_schemes.push_back(url::kContentScheme);
 #endif
 }

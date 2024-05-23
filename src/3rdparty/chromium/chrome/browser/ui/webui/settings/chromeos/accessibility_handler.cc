@@ -26,8 +26,8 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "ui/accessibility/accessibility_features.h"
-#include "ui/base/ime/chromeos/input_method_manager.h"
-#include "ui/base/ime/chromeos/input_method_util.h"
+#include "ui/base/ime/ash/input_method_manager.h"
+#include "ui/base/ime/ash/input_method_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -86,36 +86,38 @@ void AccessibilityHandler::RegisterMessages() {
 }
 
 void AccessibilityHandler::HandleShowChromeVoxSettings(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   OpenExtensionOptionsPage(extension_misc::kChromeVoxExtensionId);
 }
 
 void AccessibilityHandler::HandleShowSelectToSpeakSettings(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   OpenExtensionOptionsPage(extension_misc::kSelectToSpeakExtensionId);
 }
 
 void AccessibilityHandler::HandleSetStartupSoundEnabled(
-    const base::ListValue* args) {
-  DCHECK_EQ(1U, args->GetSize());
-  bool enabled;
-  args->GetBoolean(0, &enabled);
+    const base::Value::List& args) {
+  DCHECK_EQ(1U, args.size());
+  bool enabled = false;
+  if (args[0].is_bool())
+    enabled = args[0].GetBool();
   AccessibilityManager::Get()->SetStartupSoundEnabled(enabled);
 }
 
 void AccessibilityHandler::HandleRecordSelectedShowShelfNavigationButtonsValue(
-    const base::ListValue* args) {
-  DCHECK_EQ(1U, args->GetSize());
-  bool enabled;
-  args->GetBoolean(0, &enabled);
+    const base::Value::List& args) {
+  DCHECK_EQ(1U, args.size());
+  bool enabled = false;
+  if (args[0].is_bool())
+    enabled = args[0].GetBool();
 
   a11y_nav_buttons_toggle_metrics_reporter_timer_.Start(
-      FROM_HERE, base::TimeDelta::FromSeconds(10),
+      FROM_HERE, base::Seconds(10),
       base::BindOnce(&RecordShowShelfNavigationButtonsValueChange, enabled));
 }
 
 void AccessibilityHandler::HandleManageA11yPageReady(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
 }
 
@@ -128,12 +130,12 @@ void AccessibilityHandler::OnJavascriptAllowed() {
 }
 
 void AccessibilityHandler::OnJavascriptDisallowed() {
-  if (features::IsDictationOfflineAvailableAndEnabled())
+  if (features::IsDictationOfflineAvailable())
     soda_observation_.Reset();
 }
 
 void AccessibilityHandler::HandleShowChromeVoxTutorial(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AccessibilityManager::Get()->ShowChromeVoxTutorial();
 }
 
@@ -149,51 +151,64 @@ void AccessibilityHandler::OpenExtensionOptionsPage(const char extension_id[]) {
 }
 
 void AccessibilityHandler::MaybeAddSodaInstallerObserver() {
-  // TODO(crbug.com/1173135): Don't display SODA status if the Dictation
-  // language is not a downloaded or available SODA language.
-  if (features::IsDictationOfflineAvailableAndEnabled()) {
-    const std::string dictation_locale =
-        profile_->GetPrefs()->GetString(prefs::kAccessibilityDictationLocale);
-    if (speech::SodaInstaller::GetInstance()->IsSodaInstalled(
-            speech::GetLanguageCode(dictation_locale))) {
-      OnSodaInstalled();
-    } else {
-      // Add self as an observer. If this was a page refresh we don't want to
-      // get added twice.
-      soda_observation_.Observe(speech::SodaInstaller::GetInstance());
-    }
+  if (!features::IsDictationOfflineAvailable())
+    return;
+
+  speech::SodaInstaller* soda_installer = speech::SodaInstaller::GetInstance();
+  if (!soda_installer->IsSodaInstalled(GetDictationLocale())) {
+    // Add self as an observer. If this was a page refresh we don't want to
+    // get added twice.
+    soda_observation_.Observe(soda_installer);
   }
 }
 
 // SodaInstaller::Observer:
-void AccessibilityHandler::OnSodaInstalled() {
-  speech::SodaInstaller::GetInstance()->RemoveObserver(this);
+void AccessibilityHandler::OnSodaInstalled(speech::LanguageCode language_code) {
+  if (language_code != GetDictationLocale())
+    return;
+
+  // Only show the success message if both the SODA binary and the language pack
+  // matching the Dictation locale have been downloaded.
   FireWebUIListener(
-      "dictation-setting-subtitle-changed",
-      base::Value(l10n_util::GetStringUTF16(
-          IDS_SETTINGS_ACCESSIBILITY_DICTATION_SUBTITLE_SODA_DOWNLOAD_COMPLETE)));
+      "dictation-locale-menu-subtitle-changed",
+      base::Value(l10n_util::GetStringFUTF16(
+          IDS_SETTINGS_ACCESSIBILITY_DICTATION_LOCALE_SUB_LABEL_OFFLINE,
+          GetDictationLocaleDisplayName())));
 }
 
-void AccessibilityHandler::OnSodaProgress(int progress) {
+void AccessibilityHandler::OnSodaProgress(speech::LanguageCode language_code,
+                                          int progress) {
+  if (language_code != speech::LanguageCode::kNone &&
+      language_code != GetDictationLocale()) {
+    return;
+  }
+
+  // Only show the progress message if either the Dictation locale or the SODA
+  // binary has progress (encoded by LanguageCode::kNone).
   FireWebUIListener(
-      "dictation-setting-subtitle-changed",
+      "dictation-locale-menu-subtitle-changed",
       base::Value(l10n_util::GetStringFUTF16Int(
           IDS_SETTINGS_ACCESSIBILITY_DICTATION_SUBTITLE_SODA_DOWNLOAD_PROGRESS,
           progress)));
 }
 
-void AccessibilityHandler::OnSodaError() {
+void AccessibilityHandler::OnSodaError(speech::LanguageCode language_code) {
+  if (language_code != speech::LanguageCode::kNone &&
+      language_code != GetDictationLocale()) {
+    return;
+  }
+
+  // Show the failed message if either the Dictation locale failed or the SODA
+  // binary failed (encoded by LanguageCode::kNone).
   FireWebUIListener(
-      "dictation-setting-subtitle-changed",
-      base::Value(l10n_util::GetStringUTF16(
-          IDS_SETTINGS_ACCESSIBILITY_DICTATION_SUBTITLE_SODA_DOWNLOAD_ERROR)));
+      "dictation-locale-menu-subtitle-changed",
+      base::Value(l10n_util::GetStringFUTF16(
+          IDS_SETTINGS_ACCESSIBILITY_DICTATION_SUBTITLE_SODA_DOWNLOAD_ERROR,
+          GetDictationLocaleDisplayName())));
 }
 
 void AccessibilityHandler::MaybeAddDictationLocales() {
-  if (!features::IsExperimentalAccessibilityDictationOfflineEnabled())
-    return;
-
-  base::flat_map<std::string, bool> locales =
+  base::flat_map<std::string, ash::Dictation::LocaleData> locales =
       ash::Dictation::GetAllSupportedLocales();
 
   // Get application locale.
@@ -205,7 +220,7 @@ void AccessibilityHandler::MaybeAddDictationLocales() {
   input_method::InputMethodManager* ime_manager =
       input_method::InputMethodManager::Get();
   std::vector<std::string> input_method_ids =
-      ime_manager->GetActiveIMEState()->GetActiveInputMethodIds();
+      ime_manager->GetActiveIMEState()->GetEnabledInputMethodIds();
   std::vector<std::string> ime_languages;
   ime_manager->GetInputMethodUtil()->GetLanguageCodesFromInputMethodIds(
       input_method_ids, &ime_languages);
@@ -234,7 +249,8 @@ void AccessibilityHandler::MaybeAddDictationLocales() {
     option.SetKey("name",
                   base::Value(l10n_util::GetDisplayNameForLocale(
                       locale.first, application_locale, /*is_for_ui=*/true)));
-    option.SetKey("offline", base::Value(locale.second));
+    option.SetKey("worksOffline", base::Value(locale.second.works_offline));
+    option.SetKey("installed", base::Value(locale.second.installed));
 
     // We can recommend languages that match the current application
     // locale, IME languages or enabled preferred languages.
@@ -247,6 +263,23 @@ void AccessibilityHandler::MaybeAddDictationLocales() {
   }
 
   FireWebUIListener("dictation-locales-set", locales_list);
+}
+
+// Returns the Dictation locale as a language code.
+speech::LanguageCode AccessibilityHandler::GetDictationLocale() {
+  const std::string dictation_locale =
+      profile_->GetPrefs()->GetString(prefs::kAccessibilityDictationLocale);
+  return speech::GetLanguageCode(dictation_locale);
+}
+
+std::u16string AccessibilityHandler::GetDictationLocaleDisplayName() {
+  const std::string dictation_locale =
+      profile_->GetPrefs()->GetString(prefs::kAccessibilityDictationLocale);
+
+  return l10n_util::GetDisplayNameForLocale(
+      /*locale=*/dictation_locale,
+      /*display_locale=*/g_browser_process->GetApplicationLocale(),
+      /*is_ui=*/true);
 }
 
 }  // namespace settings

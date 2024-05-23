@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include "ash/components/arc/arc_prefs.h"
+#include "ash/components/arc/session/arc_service_manager.h"
 #include "ash/components/audio/cras_audio_handler.h"
 #include "ash/public/cpp/assistant/assistant_setup.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller.h"
@@ -14,8 +16,6 @@
 #include "base/values.h"
 #include "chrome/browser/ui/webui/chromeos/assistant_optin/assistant_optin_ui.h"
 #include "chromeos/services/assistant/public/cpp/assistant_service.h"
-#include "components/arc/arc_prefs.h"
-#include "components/arc/arc_service_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -71,29 +71,29 @@ void GoogleAssistantHandler::RegisterMessages() {
 }
 
 void GoogleAssistantHandler::HandleShowGoogleAssistantSettings(
-    const base::ListValue* args) {
-  CHECK_EQ(0U, args->GetSize());
+    const base::Value::List& args) {
+  CHECK_EQ(0U, args.size());
   ash::AssistantController::Get()->OpenAssistantSettings();
 }
 
 void GoogleAssistantHandler::HandleRetrainVoiceModel(
-    const base::ListValue* args) {
-  CHECK_EQ(0U, args->GetSize());
+    const base::Value::List& args) {
+  CHECK_EQ(0U, args.size());
   chromeos::AssistantOptInDialog::Show(ash::FlowType::kSpeakerIdRetrain,
                                        base::DoNothing());
 }
 
 void GoogleAssistantHandler::HandleSyncVoiceModelStatus(
-    const base::ListValue* args) {
-  CHECK_EQ(0U, args->GetSize());
+    const base::Value::List& args) {
+  CHECK_EQ(0U, args.size());
 
   auto* settings = assistant::AssistantSettings::Get();
   if (settings)
     settings->SyncSpeakerIdEnrollmentStatus();
 }
 
-void GoogleAssistantHandler::HandleInitialized(const base::ListValue* args) {
-  CHECK_EQ(0U, args->GetSize());
+void GoogleAssistantHandler::HandleInitialized(const base::Value::List& args) {
+  CHECK_EQ(0U, args.size());
   AllowJavascript();
 }
 

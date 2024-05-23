@@ -8,8 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 
@@ -63,7 +61,11 @@ class UpdateScreenHandler : public UpdateView, public BaseScreenHandler {
  public:
   using TView = UpdateView;
 
-  explicit UpdateScreenHandler(JSCallsContainer* js_calls_container);
+  UpdateScreenHandler();
+
+  UpdateScreenHandler(const UpdateScreenHandler&) = delete;
+  UpdateScreenHandler& operator=(const UpdateScreenHandler&) = delete;
+
   ~UpdateScreenHandler() override;
 
  private:
@@ -87,14 +89,12 @@ class UpdateScreenHandler : public UpdateView, public BaseScreenHandler {
   // BaseScreenHandler:
   void DeclareLocalizedValues(
       ::login::LocalizedValuesBuilder* builder) override;
-  void Initialize() override;
+  void InitializeDeprecated() override;
 
   ash::UpdateScreen* screen_ = nullptr;
 
-  // If true, Initialize() will call Show().
+  // If true, InitializeDeprecated() will call Show().
   bool show_on_init_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(UpdateScreenHandler);
 };
 
 }  // namespace chromeos

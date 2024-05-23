@@ -31,10 +31,6 @@ jumbo_static_library("url_formatter") {
     "url_formatter.h",
   ]
 
-  configs += [
-    "//build/config/compiler:noshadowing",
-  ]
-
   deps = [
     "//base",
     "//base:i18n",
@@ -56,6 +52,7 @@ jumbo_static_library("url_formatter") {
     deps += [
       "android:jni_headers",
       "//url:gurl_android",
+      "//url:origin_android",
     ]
   }
 }
@@ -76,6 +73,7 @@ jumbo_source_set("unit_tests") {
   ]
 
   deps = [
+    ":skeleton_generator",
     ":url_formatter",
     "//base",
     "//base/test:test_support",

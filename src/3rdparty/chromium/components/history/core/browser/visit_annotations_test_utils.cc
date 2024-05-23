@@ -4,11 +4,12 @@
 
 #include "components/history/core/browser/visit_annotations_test_utils.h"
 
+#include "components/history/core/browser/history_types.h"
+
 namespace history {
 
 base::Time IntToTime(int seconds) {
-  return base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromSeconds(seconds));
+  return base::Time::FromDeltaSinceWindowsEpoch(base::Seconds(seconds));
 }
 
 std::vector<VisitID> GetVisitIds(
@@ -23,23 +24,25 @@ std::vector<VisitID> GetVisitIds(
 }
 
 std::vector<VisitID> GetVisitIds(
-    const std::vector<AnnotatedVisitRow>& annotated_visits) {
+    const std::vector<ClusterVisit>& cluster_visits) {
   std::vector<VisitID> visit_ids;
-  visit_ids.reserve(annotated_visits.size());
-  base::ranges::transform(annotated_visits, std::back_inserter(visit_ids),
-                          &AnnotatedVisitRow::visit_id);
+  visit_ids.reserve(cluster_visits.size());
+  base::ranges::transform(
+      cluster_visits, std::back_inserter(visit_ids),
+      [](const auto& cluster_visit) {
+        return cluster_visit.annotated_visit.visit_row.visit_id;
+      });
   return visit_ids;
 }
 
 Cluster CreateCluster(const std::vector<VisitID>& visit_ids) {
   Cluster cluster;
-  cluster.scored_annotated_visits.reserve(visit_ids.size());
-  base::ranges::transform(visit_ids,
-                          std::back_inserter(cluster.scored_annotated_visits),
+  cluster.visits.reserve(visit_ids.size());
+  base::ranges::transform(visit_ids, std::back_inserter(cluster.visits),
                           [](const auto& visit_id) {
-                            AnnotatedVisit annotated_visit;
-                            annotated_visit.visit_row.visit_id = visit_id;
-                            return ScoredAnnotatedVisit{annotated_visit};
+                            ClusterVisit visit;
+                            visit.annotated_visit.visit_row.visit_id = visit_id;
+                            return visit;
                           });
   return cluster;
 }

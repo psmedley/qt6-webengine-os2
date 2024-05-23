@@ -13,7 +13,6 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/cxx17_backports.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
@@ -100,10 +99,23 @@ DisplayMac BuildDisplayForScreen(NSScreen* screen) {
 
   // Examine the presence of HDR.
   bool enable_hdr = false;
+  float hdr_max_lum_relative = 1.f;
   if (@available(macOS 10.15, *)) {
-    if ([screen maximumPotentialExtendedDynamicRangeColorComponentValue] >
-        1.0) {
+    // It can be the case that `max_potential_edr_value` > 1, but
+    // `max_edr_value` == 1. This happens, e.g, when an HDR capable Macbook Pro
+    // display is set to maximum brightness. This can create the confusing
+    // appearance that the display is rapidly fluctuating between being HDR
+    // capable and HDR incapable. To avoid this confusion, set a minimum value
+    // to report when `max_potential_edr_value` > 1.
+    constexpr float kMinMaxEdrValueForHDR = 1.0625;
+
+    const float max_potential_edr_value =
+        [screen maximumPotentialExtendedDynamicRangeColorComponentValue];
+    const float max_edr_value =
+        [screen maximumExtendedDynamicRangeColorComponentValue];
+    if (max_potential_edr_value > 1.f) {
       enable_hdr = true;
+      hdr_max_lum_relative = std::max(kMinMaxEdrValueForHDR, max_edr_value);
     }
   }
 
@@ -138,6 +150,7 @@ DisplayMac BuildDisplayForScreen(NSScreen* screen) {
             gfx::ContentColorUsage::kHDR, needs_alpha,
             gfx::ColorSpace::CreateExtendedSRGB(), gfx::BufferFormat::RGBA_F16);
       }
+      display_color_spaces.SetHDRMaxLuminanceRelative(hdr_max_lum_relative);
     }
     display.set_color_spaces(display_color_spaces);
   }
@@ -182,7 +195,7 @@ std::vector<DisplayMac> BuildDisplaysFromQuartz() {
   // doesn't hurt.
   CGDirectDisplayID online_displays[1024];
   CGDisplayCount online_display_count = 0;
-  if (CGGetOnlineDisplayList(base::size(online_displays), online_displays,
+  if (CGGetOnlineDisplayList(std::size(online_displays), online_displays,
                              &online_display_count) != kCGErrorSuccess) {
     return std::vector<DisplayMac>(1, BuildPrimaryDisplay());
   }
@@ -255,6 +268,9 @@ class ScreenMac : public Screen {
                      queue:nil
                 usingBlock:update_block] retain]);
   }
+
+  ScreenMac(const ScreenMac&) = delete;
+  ScreenMac& operator=(const ScreenMac&) = delete;
 
   ~ScreenMac() override {
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
@@ -447,27 +463,18 @@ class ScreenMac : public Screen {
   base::scoped_nsobject<id> screen_params_change_observer_;
 
   DisplayChangeNotifier change_notifier_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScreenMac);
 };
 
 }  // namespace
 
 // static
 gfx::NativeWindow Screen::GetWindowForView(gfx::NativeView native_view) {
-#if !defined(USE_AURA)
   NSView* view = native_view.GetNativeNSView();
   return [view window];
-#else
-  gfx::NativeWindow window = nil;
-  return window;
-#endif
 }
 
-#if !defined(USE_AURA)
 Screen* CreateNativeScreen() {
   return new ScreenMac;
 }
-#endif
 
 }  // namespace display

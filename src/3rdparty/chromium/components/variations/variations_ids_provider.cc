@@ -9,6 +9,7 @@
 #include "base/base64.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
+#include "base/observer_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -76,6 +77,8 @@ VariationsIdsProvider::GetClientDataHeaders(bool is_signed_in) {
 
   if (mode_ == Mode::kIgnoreSignedInState)
     is_signed_in = true;
+  else if (mode_ == Mode::kDontSendSignedInVariations)
+    is_signed_in = false;
 
   std::string first_party_header_copy;
   std::string any_context_header_copy;

@@ -28,7 +28,7 @@
 //  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 //  THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {contrastRatio, contrastRatioAPCA, getAPCAThreshold, getContrastThreshold} from '../front_end/core/common/ColorUtils.js';
+import {contrastRatio, contrastRatioAPCA, getAPCAThreshold, getContrastThreshold} from '../front_end/core/common/ColorUtils.js';  // eslint-disable-line rulesdir/es_modules_import
 
 import type {Bounds, PathCommands, ResetData} from './common.js';
 import {constrainNumber, createChild, createElement, createTextChild, ellipsify, Overlay} from './common.js';
@@ -41,6 +41,7 @@ import {drawLayoutGridHighlight} from './highlight_grid_common.js';
 import type {ScrollSnapHighlight} from './highlight_scroll_snap.js';
 import type {ContainerQueryHighlight} from './highlight_container_query.js';
 import {drawContainerQueryHighlight} from './highlight_container_query.js';
+import type {IsolatedElementHighlight} from './highlight_isolated_element.js';
 import {PersistentOverlay} from './tool_persistent.js';
 
 interface Path {
@@ -85,6 +86,7 @@ interface Highlight {
   flexInfo: FlexContainerHighlight[];
   flexItemInfo: FlexItemHighlight[];
   containerQueryInfo: ContainerQueryHighlight[];
+  isolatedElementInfo: IsolatedElementHighlight[];
 }
 
 export class HighlightOverlay extends Overlay {
@@ -243,6 +245,10 @@ export class HighlightOverlay extends Overlay {
 
   drawContainerQueryHighlight(highlight: ContainerQueryHighlight) {
     this.persistentOverlay?.drawContainerQueryHighlight(highlight);
+  }
+
+  drawIsolatedElementHighlight(highlight: IsolatedElementHighlight) {
+    this.persistentOverlay?.drawIsolatedElementHighlight(highlight);
   }
 
   private drawAxis(context: CanvasRenderingContext2D, rulerAtRight: boolean, rulerAtBottom: boolean) {

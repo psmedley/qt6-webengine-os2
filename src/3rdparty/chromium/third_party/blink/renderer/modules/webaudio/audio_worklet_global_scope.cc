@@ -15,8 +15,10 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_worklet_processor.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_blink_audio_worklet_process_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_blink_audio_worklet_processor_constructor.h"
+#include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_object_proxy.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_worklet_processor.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_processor_definition.h"
 #include "third_party/blink/renderer/modules/webaudio/cross_thread_audio_worklet_processor_info.h"
 #include "third_party/blink/renderer/platform/bindings/callback_method_retriever.h"
@@ -81,15 +83,17 @@ void AudioWorkletGlobalScope::registerProcessor(
   //    TypeError .
   CallbackMethodRetriever retriever(processor_ctor);
   retriever.GetPrototypeObject(exception_state);
-  if (exception_state.HadException())
+  if (exception_state.HadException()) {
     return;
+  }
 
   // TODO(crbug.com/1077911): Do not extract process() function at the
   // registration step.
   v8::Local<v8::Function> v8_process =
       retriever.GetMethodOrThrow("process", exception_state);
-  if (exception_state.HadException())
+  if (exception_state.HadException()) {
     return;
+  }
   V8BlinkAudioWorkletProcessCallback* process =
       V8BlinkAudioWorkletProcessCallback::Create(v8_process);
 
@@ -123,8 +127,9 @@ void AudioWorkletGlobalScope::registerProcessor(
     const HeapVector<Member<AudioParamDescriptor>>& given_param_descriptors =
         NativeValueTraits<IDLSequence<AudioParamDescriptor>>::NativeValue(
             isolate, v8_parameter_descriptors, exception_state);
-    if (exception_state.HadException())
+    if (exception_state.HadException()) {
       return;
+    }
 
     // 7.2. Let paramNames be an empty Array.
     HeapVector<Member<AudioParamDescriptor>> sanitized_param_descriptors;
@@ -218,7 +223,11 @@ AudioWorkletProcessor* AudioWorkletGlobalScope::CreateProcessor(
 
 AudioWorkletProcessorDefinition* AudioWorkletGlobalScope::FindDefinition(
     const String& name) {
-  return processor_definition_map_.DeprecatedAtOrEmptyValue(name);
+  const auto it = processor_definition_map_.find(name);
+  if (it == processor_definition_map_.end()) {
+    return nullptr;
+  }
+  return it->value.Get();
 }
 
 unsigned AudioWorkletGlobalScope::NumberOfRegisteredDefinitions() {

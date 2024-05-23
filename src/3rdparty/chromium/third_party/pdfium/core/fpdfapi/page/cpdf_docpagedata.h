@@ -14,9 +14,9 @@
 #include "core/fpdfapi/font/cpdf_font.h"
 #include "core/fpdfapi/page/cpdf_colorspace.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
+#include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/fx_codepage_forward.h"
 #include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
 
@@ -30,8 +30,8 @@ class CPDF_Pattern;
 class CPDF_Stream;
 class CPDF_StreamAcc;
 
-class CPDF_DocPageData : public CPDF_Document::PageDataIface,
-                         public CPDF_Font::FormFactoryIface {
+class CPDF_DocPageData final : public CPDF_Document::PageDataIface,
+                               public CPDF_Font::FormFactoryIface {
  public:
   static CPDF_DocPageData* FromDocument(const CPDF_Document* pDoc);
 
@@ -59,7 +59,7 @@ class CPDF_DocPageData : public CPDF_Document::PageDataIface,
                                        const CPDF_FontEncoding* pEncoding);
   RetainPtr<CPDF_Font> GetStandardFont(const ByteString& fontName,
                                        const CPDF_FontEncoding* pEncoding);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   RetainPtr<CPDF_Font> AddWindowsFont(LOGFONTA* pLogFont);
 #endif
 

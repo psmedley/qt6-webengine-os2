@@ -12,13 +12,14 @@
 #include "cc/test/skia_common.h"
 #include "cc/test/test_paint_worklet_input.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 
 namespace cc {
 
 TEST(PaintImageTest, DecodesCorrectFrames) {
   std::vector<FrameMetadata> frames = {
-      FrameMetadata(true, base::TimeDelta::FromMilliseconds(2)),
-      FrameMetadata(true, base::TimeDelta::FromMilliseconds(3))};
+      FrameMetadata(true, base::Milliseconds(2)),
+      FrameMetadata(true, base::Milliseconds(3))};
   sk_sp<FakePaintImageGenerator> generator =
       sk_make_sp<FakePaintImageGenerator>(SkImageInfo::MakeN32Premul(10, 10),
                                           frames);

@@ -130,7 +130,8 @@ bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
   }
 
   // The partition list must have at least one entry.
-  base::Value::ConstListView partition_list_view = partition_list->GetList();
+  base::Value::ConstListView partition_list_view =
+      partition_list->GetListDeprecated();
   if (partition_list_view.empty()) {
     *error = errors::kInvalidWebviewPartitionsList;
     return false;
@@ -160,7 +161,7 @@ bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
     }
 
     // The URL list should have at least one entry.
-    base::Value::ConstListView url_list_view = url_list->GetList();
+    base::Value::ConstListView url_list_view = url_list->GetListDeprecated();
     if (url_list_view.empty()) {
       *error = errors::kInvalidWebviewAccessibleResourcesList;
       return false;
@@ -168,15 +169,15 @@ bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
 
     auto partition_item = std::make_unique<PartitionItem>(partition_pattern);
 
-    for (size_t i = 0; i < url_list_view.size(); ++i) {
-      if (!url_list_view[i].is_string()) {
+    for (size_t url = 0; url < url_list_view.size(); ++url) {
+      if (!url_list_view[url].is_string()) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
             errors::kInvalidWebviewAccessibleResource, base::NumberToString(i));
         return false;
       }
 
       GURL pattern_url = Extension::GetResourceURL(
-          extension->url(), url_list_view[i].GetString());
+          extension->url(), url_list_view[url].GetString());
       // If passed a non-relative URL (like http://example.com),
       // Extension::GetResourceURL() will return that URL directly. (See
       // https://crbug.com/1135236). Check if this happened by comparing the

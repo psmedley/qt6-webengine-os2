@@ -9,15 +9,15 @@
 #include "net/quic/mock_decrypter.h"
 #include "net/quic/mock_encrypter.h"
 #include "net/quic/quic_chromium_client_session.h"
-#include "net/third_party/quiche/src/quic/core/crypto/null_decrypter.h"
-#include "net/third_party/quiche/src/quic/core/crypto/null_encrypter.h"
-#include "net/third_party/quiche/src/quic/core/crypto/quic_decrypter.h"
-#include "net/third_party/quiche/src/quic/core/crypto/quic_encrypter.h"
-#include "net/third_party/quiche/src/quic/core/http/quic_spdy_client_session_base.h"
-#include "net/third_party/quiche/src/quic/core/quic_utils.h"
-#include "net/third_party/quiche/src/quic/test_tools/quic_config_peer.h"
-#include "net/third_party/quiche/src/quic/test_tools/quic_connection_peer.h"
-#include "net/third_party/quiche/src/quic/test_tools/quic_test_utils.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/null_decrypter.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/null_encrypter.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_decrypter.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_encrypter.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/quic_spdy_client_session_base.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_utils.h"
+#include "net/third_party/quiche/src/quiche/quic/test_tools/quic_config_peer.h"
+#include "net/third_party/quiche/src/quiche/quic/test_tools/quic_connection_peer.h"
+#include "net/third_party/quiche/src/quiche/quic/test_tools/quic_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 
@@ -278,9 +278,14 @@ CryptoMessageParser* MockCryptoClientStream::crypto_message_parser() {
 }
 
 // Tests using MockCryptoClientStream() do not care about the handshaker's
-// state.  Intercept and ignore OnOneRttPacketAcknowledged() calls to prevent
-// DCHECKs within the handshaker from failing.
+// state.  Intercept and ignore the calls calls to prevent DCHECKs within the
+// handshaker from failing.
 void MockCryptoClientStream::OnOneRttPacketAcknowledged() {}
+
+std::unique_ptr<quic::QuicDecrypter>
+MockCryptoClientStream::AdvanceKeysAndCreateCurrentOneRttDecrypter() {
+  return std::make_unique<NullDecrypter>(Perspective::IS_CLIENT);
+}
 
 void MockCryptoClientStream::NotifySessionZeroRttComplete() {
   DCHECK(session()->version().UsesTls());

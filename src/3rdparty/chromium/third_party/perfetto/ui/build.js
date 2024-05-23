@@ -75,12 +75,15 @@ const pjoin = path.join;
 
 const ROOT_DIR = path.dirname(__dirname);  // The repo root.
 const VERSION_SCRIPT = pjoin(ROOT_DIR, 'tools/write_version_header.py');
+const GEN_IMPORTS_SCRIPT = pjoin(ROOT_DIR, 'tools/gen_ui_imports');
 
 const cfg = {
   watch: false,
   verbose: false,
   debug: false,
   startHttpServer: false,
+  httpServerListenHost: '127.0.0.1',
+  httpServerListenPort: 10000,
   wasmModules: ['trace_processor', 'trace_to_text'],
 
   // The fields below will be changed by main() after cmdline parsing.
@@ -125,6 +128,8 @@ async function main() {
   parser.addArgument('--out', {help: 'Output directory'});
   parser.addArgument(['--watch', '-w'], {action: 'storeTrue'});
   parser.addArgument(['--serve', '-s'], {action: 'storeTrue'});
+  parser.addArgument('--serve-host', {help: '--serve bind host'});
+  parser.addArgument('--serve-port', {help: '--serve bind port', type: 'int'});
   parser.addArgument(['--verbose', '-v'], {action: 'storeTrue'});
   parser.addArgument(['--no-build', '-n'], {action: 'storeTrue'});
   parser.addArgument(['--no-wasm', '-W'], {action: 'storeTrue'});
@@ -133,6 +138,7 @@ async function main() {
   parser.addArgument(['--debug', '-d'], {action: 'storeTrue'});
   parser.addArgument(['--interactive', '-i'], {action: 'storeTrue'});
   parser.addArgument(['--rebaseline', '-r'], {action: 'storeTrue'});
+  parser.addArgument(['--no-depscheck'], {action: 'storeTrue'});
 
   const args = parser.parseArgs();
   const clean = !args.no_build;
@@ -149,6 +155,12 @@ async function main() {
   cfg.verbose = !!args.verbose;
   cfg.debug = !!args.debug;
   cfg.startHttpServer = args.serve;
+  if (args.serve_host) {
+    cfg.httpServerListenHost = args.serve_host
+  }
+  if (args.serve_port) {
+    cfg.httpServerListenPort = args.serve_port
+  }
   if (args.interactive) {
     process.env.PERFETTO_UI_TESTS_INTERACTIVE = '1';
   }
@@ -164,11 +176,27 @@ async function main() {
     process.exit(130);  // 130 -> Same behavior of bash when killed by SIGINT.
   });
 
-  // Check that deps are current before starting.
-  const installBuildDeps = pjoin(ROOT_DIR, 'tools/install-build-deps');
-  const checkDepsPath = pjoin(cfg.outDir, '.check_deps');
-  const depsArgs = [`--check-only=${checkDepsPath}`, '--ui'];
-  exec(installBuildDeps, depsArgs);
+  if (!args.no_depscheck) {
+    // Check that deps are current before starting.
+    const installBuildDeps = pjoin(ROOT_DIR, 'tools/install-build-deps');
+    const checkDepsPath = pjoin(cfg.outDir, '.check_deps');
+    let args = [installBuildDeps, `--check-only=${checkDepsPath}`, '--ui'];
+
+    if (process.platform === "darwin") {
+      const result = child_process.spawnSync("arch", ["-arm64", "true"]);
+      const isArm64Capable = result.status === 0;
+      if (isArm64Capable) {
+        const archArgs = [
+          "arch",
+          "-arch",
+          "arm64",
+        ];
+        args = archArgs.concat(args);
+      }
+    }
+    const cmd = args.shift();
+    exec(cmd, args);
+  }
 
   console.log('Entering', cfg.outDir);
   process.chdir(cfg.outDir);
@@ -186,6 +214,7 @@ async function main() {
     scanDir('ui/src/chrome_extension');
     scanDir('buildtools/typefaces');
     scanDir('buildtools/catapult_trace_viewer');
+    generateImports('ui/src/tracks', 'all_tracks.ts');
     compileProtos();
     genVersion();
     transpileTsProject('ui');
@@ -304,6 +333,19 @@ function compileProtos() {
   addTask(execNode, ['pbts', pbtsArgs]);
 }
 
+function generateImports(dir, name) {
+  // We have to use the symlink (ui/src/gen) rather than cfg.outGenDir
+  // below since we want to generate the correct relative imports. For example:
+  // ui/src/frontend/foo.ts
+  //    import '../gen/all_plugins.ts';
+  // ui/src/gen/all_plugins.ts (aka ui/out/tsc/gen/all_plugins.ts)
+  //    import '../frontend/some_plugin.ts';
+  const dstTs = pjoin(ROOT_DIR, 'ui/src/gen', name);
+  const inputDir = pjoin(ROOT_DIR, dir);
+  const args = [GEN_IMPORTS_SCRIPT, inputDir, '--out', dstTs];
+  addTask(exec, ['python3', args]);
+}
+
 // Generates a .ts source that defines the VERSION and SCM_REVISION constants.
 function genVersion() {
   const cmd = 'python3';
@@ -406,8 +448,9 @@ function genServiceWorkerManifestJson() {
 }
 
 function startServer() {
-  const port = 10000;
-  console.log(`Starting HTTP server on http://localhost:${port}`);
+  console.log(
+      'Starting HTTP server on',
+      `http://${cfg.httpServerListenHost}:${cfg.httpServerListenPort}`);
   http.createServer(function(req, res) {
         console.debug(req.method, req.url);
         let uri = req.url.split('?', 1)[0];
@@ -440,6 +483,13 @@ function startServer() {
           absPath = pjoin(ROOT_DIR, uri);
         }
 
+        // Don't serve contents outside of the project root (b/221101533).
+        if (path.relative(ROOT_DIR, absPath).startsWith('..')) {
+          res.writeHead(403);
+          res.end('403 Forbidden - Request path outside of the repo root');
+          return;
+        }
+
         fs.readFile(absPath, function(err, data) {
           if (err) {
             res.writeHead(404);
@@ -466,7 +516,7 @@ function startServer() {
           res.end();
         });
       })
-      .listen(port, '127.0.0.1');
+      .listen(cfg.httpServerListenPort, cfg.httpServerListenHost);
 }
 
 function isDistComplete() {

@@ -51,7 +51,7 @@ bool IsListOf(const base::Value* v, bool (*predicate)(const base::Value&)) {
   if (!v->is_list()) {
     return false;
   }
-  auto contents = v->GetList();
+  auto contents = v->GetListDeprecated();
   return !contents.empty() &&
          std::all_of(contents.begin(), contents.end(), predicate);
 }
@@ -62,7 +62,7 @@ std::vector<std::string> GetStringOrListOfStrings(const base::Value* v) {
   }
 
   std::vector<std::string> ret;
-  for (const auto& elem : v->GetList()) {
+  for (const auto& elem : v->GetListDeprecated()) {
     ret.push_back(elem.GetString());
   }
   return ret;
@@ -81,7 +81,7 @@ absl::optional<std::vector<FilterStep>> ParseJSON(base::StringPiece json) {
   }
 
   std::vector<FilterStep> ret;
-  const auto filter_list = filters->GetList();
+  const auto filter_list = filters->GetListDeprecated();
   for (const auto& filter : filter_list) {
     if (!filter.is_dict()) {
       return absl::nullopt;
@@ -173,18 +173,18 @@ absl::optional<std::vector<FilterStep>> ParseJSON(base::StringPiece json) {
       step.id = GetStringOrListOfStrings(id);
     }
     if (id_min_size) {
-      const int v = id_min_size->GetInt();
-      if (v < 0) {
+      const int min_size_int = id_min_size->GetInt();
+      if (min_size_int < 0) {
         return absl::nullopt;
       }
-      step.id_min_size = v;
+      step.id_min_size = min_size_int;
     }
     if (id_max_size) {
-      const int v = id_max_size->GetInt();
-      if (v < 0) {
+      const int max_size_int = id_max_size->GetInt();
+      if (max_size_int < 0) {
         return absl::nullopt;
       }
-      step.id_max_size = v;
+      step.id_max_size = max_size_int;
     }
 
     ret.emplace_back(std::move(step));

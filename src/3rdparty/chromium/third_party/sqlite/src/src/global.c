@@ -286,9 +286,13 @@ SQLITE_WSD struct Sqlite3Config sqlite3Config = {
    0,                         /* xTestCallback */
 #endif
    0,                         /* bLocaltimeFault */
+   0,                         /* xAltLocaltime */
    0x7ffffffe,                /* iOnceResetThreshold */
    SQLITE_DEFAULT_SORTERREF_SIZE,   /* szSorterRef */
    0,                         /* iPrngSeed */
+#ifdef SQLITE_DEBUG
+   {0,0,0,0,0,0}              /* aTune */
+#endif
 };
 
 /*
@@ -297,6 +301,18 @@ SQLITE_WSD struct Sqlite3Config sqlite3Config = {
 ** read-only.
 */
 FuncDefHash sqlite3BuiltinFunctions;
+
+#if defined(SQLITE_COVERAGE_TEST) || defined(SQLITE_DEBUG)
+/*
+** Counter used for coverage testing.  Does not come into play for
+** release builds.
+**
+** Access to this global variable is not mutex protected.  This might
+** result in TSAN warnings.  But as the variable does not exist in
+** release builds, that should not be a concern.
+*/
+unsigned int sqlite3CoverageCounter;
+#endif /* SQLITE_COVERAGE_TEST || SQLITE_DEBUG */
 
 #ifdef VDBE_PROFILE
 /*
@@ -331,7 +347,7 @@ int sqlite3PendingByte = 0x40000000;
 /*
 ** Tracing flags set by SQLITE_TESTCTRL_TRACEFLAGS.
 */
-u32 sqlite3SelectTrace = 0;
+u32 sqlite3TreeTrace = 0;
 u32 sqlite3WhereTrace = 0;
 
 #include "opcodes.h"
@@ -347,3 +363,45 @@ const unsigned char sqlite3OpcodeProperty[] = OPFLG_INITIALIZER;
 ** Name of the default collating sequence
 */
 const char sqlite3StrBINARY[] = "BINARY";
+
+/*
+** Standard typenames.  These names must match the COLTYPE_* definitions.
+** Adjust the SQLITE_N_STDTYPE value if adding or removing entries.
+**
+**    sqlite3StdType[]            The actual names of the datatypes.
+**
+**    sqlite3StdTypeLen[]         The length (in bytes) of each entry
+**                                in sqlite3StdType[].
+**
+**    sqlite3StdTypeAffinity[]    The affinity associated with each entry
+**                                in sqlite3StdType[].
+**
+**    sqlite3StdTypeMap[]         The type value (as returned from
+**                                sqlite3_column_type() or sqlite3_value_type())
+**                                for each entry in sqlite3StdType[].
+*/
+const unsigned char sqlite3StdTypeLen[] = { 3, 4, 3, 7, 4, 4 };
+const char sqlite3StdTypeAffinity[] = {
+  SQLITE_AFF_NUMERIC,
+  SQLITE_AFF_BLOB,
+  SQLITE_AFF_INTEGER,
+  SQLITE_AFF_INTEGER,
+  SQLITE_AFF_REAL,
+  SQLITE_AFF_TEXT
+};
+const char sqlite3StdTypeMap[] = {
+  0,
+  SQLITE_BLOB,
+  SQLITE_INTEGER,
+  SQLITE_INTEGER,
+  SQLITE_FLOAT,
+  SQLITE_TEXT
+};
+const char *sqlite3StdType[] = {
+  "ANY",
+  "BLOB",
+  "INT",
+  "INTEGER",
+  "REAL",
+  "TEXT"
+};

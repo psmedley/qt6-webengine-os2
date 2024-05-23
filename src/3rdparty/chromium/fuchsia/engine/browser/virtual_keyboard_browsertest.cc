@@ -11,6 +11,7 @@
 #include "base/fuchsia/koid.h"
 #include "base/fuchsia/scoped_service_binding.h"
 #include "base/fuchsia/test_component_context_for_process.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
 #include "content/public/test/browser_test.h"
@@ -96,13 +97,21 @@ class VirtualKeyboardTest : public cr_fuchsia::WebEngineBrowserTest {
         base::GetKoid(scenic_test_helper_.CloneViewRef().reference).value());
   }
 
+  // The tests expect to have input processed immediately, even if the
+  // content has not been displayed yet. That's fine for the test, but
+  // we need to explicitly allow it.
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch("allow-pre-commit-input");
+  }
+
   gfx::Point GetCoordinatesOfInputField(base::StringPiece id) {
     // Distance to click from the top/left extents of an input field.
     constexpr int kInputFieldClickInset = 8;
 
     absl::optional<base::Value> result = cr_fuchsia::ExecuteJavaScript(
         frame_for_test_.ptr().get(),
-        base::StringPrintf("getPointInsideText('%s')", id.data()));
+        base::StringPrintf("getPointInsideText('%.*s')",
+                           base::saturated_cast<int>(id.length()), id.data()));
     CHECK(result);
 
     // Note that coordinates are floating point and must be retrieved as such
@@ -130,8 +139,7 @@ class VirtualKeyboardTest : public cr_fuchsia::WebEngineBrowserTest {
 
 // Verifies that RequestShow() is not called redundantly if the virtual
 // keyboard is reported as visible.
-// TODO(https://crbug.com/1226757): Flaky on Fuchsia-x64.
-IN_PROC_BROWSER_TEST_F(VirtualKeyboardTest, DISABLED_ShowAndHideWithVisibility) {
+IN_PROC_BROWSER_TEST_F(VirtualKeyboardTest, ShowAndHideWithVisibility) {
   testing::InSequence s;
 
   // Alphanumeric field click.
@@ -157,6 +165,13 @@ IN_PROC_BROWSER_TEST_F(VirtualKeyboardTest, DISABLED_ShowAndHideWithVisibility) 
       .WillOnce(testing::InvokeWithoutArgs(
           [&on_hide_run_loop]() { on_hide_run_loop.Quit(); }))
       .RetiresOnSaturation();
+
+  // In some cases, Blink may signal an
+  // InputMethodClient::OnTextInputTypeChanged event, which will cause
+  // an extra call to VirtualKeyboardController:RequestHide. This is harmless
+  // in practice due to RequestHide()'s idempotence, however we still need to
+  // anticipate that behavior in the controller mocks.
+  EXPECT_CALL(*controller_, RequestHide()).Times(testing::AtMost(1));
 
   // Give focus to an alphanumeric input field, which will result in
   // RequestShow() being called.
@@ -202,8 +217,8 @@ IN_PROC_BROWSER_TEST_F(VirtualKeyboardTest, InputModeMappings) {
   testing::InSequence s;
   virtualkeyboard::TextType previous_text_type =
       virtualkeyboard::TextType::ALPHANUMERIC;
-  std::vector<base::RunLoop> set_type_loops(base::size(kInputTypeMappings));
-  for (size_t i = 0; i < base::size(kInputTypeMappings); ++i) {
+  std::vector<base::RunLoop> set_type_loops(std::size(kInputTypeMappings));
+  for (size_t i = 0; i < std::size(kInputTypeMappings); ++i) {
     const auto& field_type_pair = kInputTypeMappings[i];
     DCHECK_NE(field_type_pair.second, previous_text_type);
 
@@ -216,7 +231,7 @@ IN_PROC_BROWSER_TEST_F(VirtualKeyboardTest, InputModeMappings) {
 
   controller_->AwaitWatchAndRespondWith(false);
 
-  for (size_t i = 0; i < base::size(kInputTypeMappings); ++i) {
+  for (size_t i = 0; i < std::size(kInputTypeMappings); ++i) {
     content::SimulateTapAt(
         web_contents_, GetCoordinatesOfInputField(kInputTypeMappings[i].first));
 

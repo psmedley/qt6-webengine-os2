@@ -32,6 +32,9 @@ using autofill::ADDRESS_HOME_SORTING_CODE;
 using autofill::ADDRESS_HOME_STATE;
 using autofill::ADDRESS_HOME_STREET_ADDRESS;
 using autofill::ADDRESS_HOME_ZIP;
+using autofill::BIRTHDATE_DAY;
+using autofill::BIRTHDATE_MONTH;
+using autofill::BIRTHDATE_YEAR_4_DIGITS;
 using autofill::COMPANY_NAME;
 using autofill::EMAIL_ADDRESS;
 using autofill::NAME_FIRST;
@@ -51,6 +54,7 @@ using autofill::Address;
 using autofill::AutofillClock;
 using autofill::AutofillProfile;
 using autofill::AutofillType;
+using autofill::Birthdate;
 using autofill::CompanyInfo;
 using autofill::EmailInfo;
 using autofill::NameInfo;
@@ -63,7 +67,7 @@ const char kLocale[] = "en-US";
 
 class AutofillProfileComparatorTest
     : public testing::Test,
-      public testing::WithParamInterface<std::tuple<bool, bool, bool>> {
+      public testing::WithParamInterface<std::tuple<bool, bool>> {
  public:
   // Expose the protected methods of autofill::AutofillProfileComparator for
   // testing.
@@ -74,6 +78,7 @@ class AutofillProfileComparatorTest
     using Super::CompareTokens;
     using Super::GetNamePartVariants;
     using Super::HaveMergeableAddresses;
+    using Super::HaveMergeableBirthdates;
     using Super::HaveMergeableCompanyNames;
     using Super::HaveMergeableEmailAddresses;
     using Super::HaveMergeableNames;
@@ -91,6 +96,10 @@ class AutofillProfileComparatorTest
   AutofillProfileComparatorTest() {
     autofill::CountryNames::SetLocaleString(kLocale);
   }
+
+  AutofillProfileComparatorTest(const AutofillProfileComparatorTest&) = delete;
+  AutofillProfileComparatorTest& operator=(
+      const AutofillProfileComparatorTest&) = delete;
 
   NameInfo CreateNameInfo(const char16_t* first,
                           const char16_t* middle,
@@ -178,12 +187,22 @@ class AutofillProfileComparatorTest
     return profile;
   }
 
+  AutofillProfile CreateProfileWithBirthdate(const char* day,
+                                             const char* month,
+                                             const char* year) {
+    AutofillProfile profile(base::GenerateGUID(), "http://www.example.com/");
+    profile.SetRawInfo(BIRTHDATE_DAY, base::UTF8ToUTF16(day));
+    profile.SetRawInfo(BIRTHDATE_MONTH, base::UTF8ToUTF16(month));
+    profile.SetRawInfo(BIRTHDATE_YEAR_4_DIGITS, base::UTF8ToUTF16(year));
+    return profile;
+  }
+
   AutofillProfile CopyAndModify(
       const AutofillProfile& profile,
       const std::vector<std::pair<ServerFieldType, const char16_t*>>& updates) {
     AutofillProfile new_profile = profile;
-    for (const auto& update : updates) {
-      new_profile.SetRawInfo(update.first, update.second);
+    for (const auto& [field_type, value] : updates) {
+      new_profile.SetRawInfo(field_type, value);
     }
     new_profile.FinalizeAfterImport();
     return new_profile;
@@ -193,7 +212,7 @@ class AutofillProfileComparatorTest
                            const AutofillProfile& b,
                            const NameInfo& expected) {
     NameInfo actual;
-    ASSERT_TRUE(comparator_.MergeNames(a, b, &actual));
+    ASSERT_TRUE(comparator_.MergeNames(a, b, actual));
 
     // Is the "processed" data correct?
     EXPECT_EQ(expected.GetInfo(AutofillType(NAME_FULL), kLocale),
@@ -216,7 +235,7 @@ class AutofillProfileComparatorTest
                                     const AutofillProfile& b,
                                     const EmailInfo& expected) {
     EmailInfo actual;
-    ASSERT_TRUE(comparator_.MergeEmailAddresses(a, b, &actual));
+    ASSERT_TRUE(comparator_.MergeEmailAddresses(a, b, actual));
     EXPECT_EQ(expected.GetRawInfo(EMAIL_ADDRESS),
               actual.GetRawInfo(EMAIL_ADDRESS));
   }
@@ -225,7 +244,7 @@ class AutofillProfileComparatorTest
                                   const AutofillProfile& b,
                                   const CompanyInfo& expected) {
     CompanyInfo actual;
-    ASSERT_TRUE(comparator_.MergeCompanyNames(a, b, &actual));
+    ASSERT_TRUE(comparator_.MergeCompanyNames(a, b, actual));
     EXPECT_EQ(expected.GetRawInfo(COMPANY_NAME),
               actual.GetRawInfo(COMPANY_NAME));
   }
@@ -237,7 +256,7 @@ class AutofillProfileComparatorTest
 
     // Merge the phone numbers.
     PhoneNumber actual(&dummy);
-    ASSERT_TRUE(comparator_.MergePhoneNumbers(a, b, &actual));
+    ASSERT_TRUE(comparator_.MergePhoneNumbers(a, b, actual));
 
     // Construct the expected value.
     PhoneNumber expected(&dummy);
@@ -266,7 +285,7 @@ class AutofillProfileComparatorTest
                                const Address& expected,
                                bool check_structured_address_tokens = false) {
     Address actual;
-    ASSERT_TRUE(comparator_.MergeAddresses(a, b, &actual));
+    ASSERT_TRUE(comparator_.MergeAddresses(a, b, actual));
 
     EXPECT_EQ(expected.GetInfo(AutofillType(ADDRESS_HOME_LINE1), kLocale),
               actual.GetInfo(AutofillType(ADDRESS_HOME_LINE1), kLocale));
@@ -294,9 +313,7 @@ class AutofillProfileComparatorTest
               actual.GetInfo(AutofillType(ADDRESS_HOME_COUNTRY), kLocale));
 
     if (check_structured_address_tokens &&
-        (base::FeatureList::IsEnabled(
-             autofill::features::kAutofillAddressEnhancementVotes) ||
-         autofill::structured_address::StructuredAddressesEnabled())) {
+        autofill::structured_address::StructuredAddressesEnabled()) {
       EXPECT_EQ(expected.GetInfo(
                     AutofillType(autofill::ADDRESS_HOME_STREET_NAME), kLocale),
                 actual.GetInfo(AutofillType(autofill::ADDRESS_HOME_STREET_NAME),
@@ -331,8 +348,7 @@ class AutofillProfileComparatorTest
 
   void InitializeFeatures() {
     structured_names_enabled_ = std::get<0>(GetParam());
-    address_enhancement_votes_enabled_ = std::get<1>(GetParam());
-    structured_addresses_enabled_ = std::get<2>(GetParam());
+    structured_addresses_enabled_ = std::get<1>(GetParam());
 
     std::vector<base::Feature> enabled_features;
     std::vector<base::Feature> disabled_features;
@@ -343,14 +359,6 @@ class AutofillProfileComparatorTest
     } else {
       disabled_features.push_back(
           autofill::features::kAutofillEnableSupportForMoreStructureInNames);
-    }
-
-    if (address_enhancement_votes_enabled_) {
-      enabled_features.push_back(
-          autofill::features::kAutofillAddressEnhancementVotes);
-    } else {
-      disabled_features.push_back(
-          autofill::features::kAutofillAddressEnhancementVotes);
     }
 
     if (structured_addresses_enabled_) {
@@ -368,17 +376,10 @@ class AutofillProfileComparatorTest
 
   bool StructuredAddresses() const { return structured_addresses_enabled_; }
   bool StructuredNames() const { return structured_names_enabled_; }
-  bool AddressEnhancementVotes() const {
-    return address_enhancement_votes_enabled_;
-  }
 
-  bool address_enhancement_votes_enabled_;
   bool structured_names_enabled_;
   bool structured_addresses_enabled_;
   base::test::ScopedFeatureList scoped_features_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AutofillProfileComparatorTest);
 };
 
 }  // namespace
@@ -740,6 +741,30 @@ TEST_P(AutofillProfileComparatorTest, HaveMergeableAddresses) {
   EXPECT_FALSE(comparator_.HaveMergeableAddresses(p1, differentSortingCode));
 }
 
+TEST_P(AutofillProfileComparatorTest, HaveMergeableBirthdates) {
+  base::test::ScopedFeatureList feature;
+  feature.InitAndEnableFeature(
+      autofill::features::kAutofillEnableCompatibilitySupportForBirthdates);
+
+  // Birthdates are mergeable if the components are either equal or one of them
+  // is empty.
+  AutofillProfile p1 = CreateProfileWithBirthdate("14", "", "1997");
+  AutofillProfile p2 = CreateProfileWithBirthdate("", "3", "1997");
+  AutofillProfile p3 = CreateProfileWithBirthdate("15", "4", "1997");
+
+  EXPECT_TRUE(comparator_.HaveMergeableBirthdates(p1, p1));
+  EXPECT_TRUE(comparator_.HaveMergeableBirthdates(p1, p2));
+  EXPECT_FALSE(comparator_.HaveMergeableBirthdates(p1, p3));
+
+  EXPECT_TRUE(comparator_.HaveMergeableBirthdates(p2, p1));
+  EXPECT_TRUE(comparator_.HaveMergeableBirthdates(p2, p2));
+  EXPECT_FALSE(comparator_.HaveMergeableBirthdates(p2, p3));
+
+  EXPECT_FALSE(comparator_.HaveMergeableBirthdates(p3, p1));
+  EXPECT_FALSE(comparator_.HaveMergeableBirthdates(p3, p2));
+  EXPECT_TRUE(comparator_.HaveMergeableBirthdates(p3, p3));
+}
+
 TEST_P(AutofillProfileComparatorTest, AreMergeable) {
   AutofillProfile p(base::GenerateGUID(), "https://www.example.com/");
   autofill::test::SetProfileInfo(&p, "Marion", "Mitchell", "Morrison",
@@ -814,7 +839,7 @@ TEST_P(AutofillProfileComparatorTest, MergeStructuredNames_WithPermutation) {
   profile2.FinalizeAfterImport();
 
   NameInfo merged_name;
-  comparator_.MergeNames(profile1, profile2, &merged_name);
+  comparator_.MergeNames(profile1, profile2, merged_name);
 
   // The merged name should maintain the structure but use the observation of
   // the custom-formatted full name.
@@ -927,13 +952,13 @@ TEST_P(AutofillProfileComparatorTest, MergeCJKNames) {
   AutofillProfile p1 = CreateProfileWithName(name1);
   p1.set_use_date(AutofillClock::Now());
   AutofillProfile p2 = CreateProfileWithName(name2);
-  p2.set_use_date(AutofillClock::Now() - base::TimeDelta::FromHours(1));
+  p2.set_use_date(AutofillClock::Now() - base::Hours(1));
   AutofillProfile p3 = CreateProfileWithName(name3);
-  p3.set_use_date(AutofillClock::Now() - base::TimeDelta::FromHours(2));
+  p3.set_use_date(AutofillClock::Now() - base::Hours(2));
   AutofillProfile p4 = CreateProfileWithName(name4);
-  p4.set_use_date(AutofillClock::Now() - base::TimeDelta::FromHours(3));
+  p4.set_use_date(AutofillClock::Now() - base::Hours(3));
   AutofillProfile p5 = CreateProfileWithName(name5);
-  p5.set_use_date(AutofillClock::Now() - base::TimeDelta::FromHours(4));
+  p5.set_use_date(AutofillClock::Now() - base::Hours(4));
 
   AutofillProfile p6 = CreateProfileWithName(name6);
   AutofillProfile p7 = CreateProfileWithName(name7);
@@ -984,7 +1009,7 @@ TEST_P(AutofillProfileComparatorTest, MergeEmailAddresses) {
   EmailInfo email_b;
   email_b.SetRawInfo(EMAIL_ADDRESS, kEmailB16);
   AutofillProfile profile_b = CreateProfileWithEmail(kEmailB);
-  profile_b.set_use_date(profile_a.use_date() + base::TimeDelta::FromDays(1));
+  profile_b.set_use_date(profile_a.use_date() + base::Days(1));
 
   MergeEmailAddressesAndExpect(profile_a, profile_a, email_a);
   MergeEmailAddressesAndExpect(profile_b, profile_b, email_b);
@@ -1012,14 +1037,14 @@ TEST_P(AutofillProfileComparatorTest, MergeCompanyNames) {
   CompanyInfo company_b;
   company_b.SetRawInfo(COMPANY_NAME, kCompanyB16);
   AutofillProfile profile_b = CreateProfileWithCompanyName(kCompanyB);
-  profile_b.set_use_date(profile_a.use_date() + base::TimeDelta::FromDays(1));
+  profile_b.set_use_date(profile_a.use_date() + base::Days(1));
 
   // Company Name C is the most complete. Even though it has the earliest use
   // date, it will be preferred to the other two.
   CompanyInfo company_c;
   company_c.SetRawInfo(COMPANY_NAME, kCompanyC16);
   AutofillProfile profile_c = CreateProfileWithCompanyName(kCompanyC);
-  profile_c.set_use_date(profile_a.use_date() - base::TimeDelta::FromDays(1));
+  profile_c.set_use_date(profile_a.use_date() - base::Days(1));
 
   // Company Name D is in the format of a birthyear, invalid and non-verified.
   CompanyInfo company_d;
@@ -1223,7 +1248,7 @@ TEST_P(AutofillProfileComparatorTest, MergeAddressesMostUniqueTokens) {
   AutofillProfile p2 = CreateProfileWithAddress(
       "1 Some Other Street", "Unit 3", "Carver City", "ca", "90210-1234", "us");
 
-  p2.set_use_date(p1.use_date() + base::TimeDelta::FromMinutes(1));
+  p2.set_use_date(p1.use_date() + base::Minutes(1));
   p2.SetRawInfo(autofill::ADDRESS_HOME_STREET_NAME, u"Some Other Street");
   p2.SetRawInfo(autofill::ADDRESS_HOME_DEPENDENT_STREET_NAME,
                 u"DependentStreetName2");
@@ -1239,17 +1264,6 @@ TEST_P(AutofillProfileComparatorTest, MergeAddressesMostUniqueTokens) {
   expected.SetRawInfo(ADDRESS_HOME_ZIP, u"90210-1234");
   expected.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
 
-  // If address enhancement votes are enabled, it is expecfted that the
-  // substructure from p2 since it is a superset of p1.
-  // Otherwise the fields are expected to be empty after the merge process.
-  if (AddressEnhancementVotes()) {
-    expected.SetRawInfo(autofill::ADDRESS_HOME_STREET_NAME, u"StreetName2");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_DEPENDENT_STREET_NAME,
-                        u"DependentStreetName2");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_HOUSE_NUMBER, u"HouseNumber2");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_PREMISE_NAME, u"PremiseName2");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_SUBPREMISE, u"Subpremise2");
-  }
   MergeAddressesAndExpect(p1, p2, expected);
   MergeAddressesAndExpect(p2, p1, expected);
 }
@@ -1267,7 +1281,7 @@ TEST_P(AutofillProfileComparatorTest, MergeAddressesWithStructure) {
 
   AutofillProfile p2 = CreateProfileWithAddress(
       "6543, Bacon Rd", "", "Montreal", "QC", "hhh 999", "CA");
-  p2.set_use_date(p1.use_date() + base::TimeDelta::FromMinutes(1));
+  p2.set_use_date(p1.use_date() + base::Minutes(1));
   p2.SetRawInfo(autofill::ADDRESS_HOME_STREET_NAME, u"StreetName2");
   p2.SetRawInfo(autofill::ADDRESS_HOME_DEPENDENT_STREET_NAME,
                 u"DependentStreetName2");
@@ -1282,18 +1296,6 @@ TEST_P(AutofillProfileComparatorTest, MergeAddressesWithStructure) {
   expected.SetRawInfo(ADDRESS_HOME_STATE, u"QC");
   expected.SetRawInfo(ADDRESS_HOME_ZIP, u"hhh 999");
   expected.SetRawInfo(ADDRESS_HOME_COUNTRY, u"CA");
-
-  // If address enhancement votes are enabled, it is expecfted that the
-  // substructure from p1 is used since it is most recent.
-  // Otherwise the fields are expected to be empty after the merge process.
-  if (AddressEnhancementVotes()) {
-    expected.SetRawInfo(autofill::ADDRESS_HOME_STREET_NAME, u"StreetName");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_DEPENDENT_STREET_NAME,
-                        u"DependentStreetName");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_HOUSE_NUMBER, u"HouseNumber");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_PREMISE_NAME, u"PremiseName");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_SUBPREMISE, u"Subpremise");
-  }
 
   MergeAddressesAndExpect(p1, p2, expected);
   MergeAddressesAndExpect(p2, p1, expected);
@@ -1319,7 +1321,7 @@ TEST_P(AutofillProfileComparatorTest, MergeAddressesWithRewrite) {
   p2.SetRawInfo(autofill::ADDRESS_HOME_PREMISE_NAME, u"PremiseName2");
   p2.SetRawInfo(autofill::ADDRESS_HOME_SUBPREMISE, u"Subpremise2");
 
-  p2.set_use_date(p1.use_date() + base::TimeDelta::FromMinutes(1));
+  p2.set_use_date(p1.use_date() + base::Minutes(1));
 
   Address expected;
   expected.SetRawInfo(ADDRESS_HOME_LINE1, u"6543 CH BACON");
@@ -1328,17 +1330,6 @@ TEST_P(AutofillProfileComparatorTest, MergeAddressesWithRewrite) {
   expected.SetRawInfo(ADDRESS_HOME_STATE, u"QC");
   expected.SetRawInfo(ADDRESS_HOME_ZIP, u"hhh 999");
   expected.SetRawInfo(ADDRESS_HOME_COUNTRY, u"CA");
-
-  // If address enhancement votes are enabled, it is expecfted that the
-  // substructure from p1 is used since it has more tokens.
-  if (AddressEnhancementVotes()) {
-    expected.SetRawInfo(autofill::ADDRESS_HOME_STREET_NAME, u"StreetName");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_DEPENDENT_STREET_NAME,
-                        u"DependentStreetName");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_HOUSE_NUMBER, u"HouseNumber");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_PREMISE_NAME, u"PremiseName");
-    expected.SetRawInfo(autofill::ADDRESS_HOME_SUBPREMISE, u"Subpremise");
-  }
 
   MergeAddressesAndExpect(p1, p2, expected);
   MergeAddressesAndExpect(p2, p1, expected);
@@ -1354,7 +1345,7 @@ TEST_P(AutofillProfileComparatorTest,
       "6543, Bacon Rd", "", "Montreal", "QC", "hhh 999", "CA");
   p2.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"Some Other String");
   p2.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"64205 Biarritz");
-  p2.set_use_date(p1.use_date() + base::TimeDelta::FromMinutes(1));
+  p2.set_use_date(p1.use_date() + base::Minutes(1));
 
   Address expected;
   expected.SetRawInfo(ADDRESS_HOME_LINE1, u"6543 CH BACON");
@@ -1369,6 +1360,26 @@ TEST_P(AutofillProfileComparatorTest,
 
   MergeAddressesAndExpect(p1, p2, expected);
   MergeAddressesAndExpect(p2, p1, expected);
+}
+
+TEST_P(AutofillProfileComparatorTest, MergeBirthdates) {
+  base::test::ScopedFeatureList feature;
+  feature.InitAndEnableFeature(
+      autofill::features::kAutofillEnableCompatibilitySupportForBirthdates);
+
+  AutofillProfile profile1 = CreateProfileWithBirthdate("14", "", "1997");
+  AutofillProfile profile2 = CreateProfileWithBirthdate("", "3", "1997");
+
+  Birthdate expected;
+  expected.SetRawInfo(BIRTHDATE_DAY, u"14");
+  expected.SetRawInfo(BIRTHDATE_MONTH, u"3");
+  expected.SetRawInfo(BIRTHDATE_YEAR_4_DIGITS, u"1997");
+
+  Birthdate actual;
+  EXPECT_TRUE(comparator_.MergeBirthdates(profile1, profile2, actual));
+  for (ServerFieldType component : Birthdate::GetRawComponents()) {
+    EXPECT_EQ(expected.GetRawInfo(component), actual.GetRawInfo(component));
+  }
 }
 
 // Checks for various scenarios for determining mergeability of profiles w.r.t.
@@ -1727,7 +1738,5 @@ INSTANTIATE_TEST_SUITE_P(
     All,
     AutofillProfileComparatorTest,
     testing::Combine(testing::Bool(),
-                     testing::Bool(),
                      testing::Bool()));  // Test with and without structured
-                                         // names and address enhancement votes
-                                         // and structured addresses.
+                                         // name and structured addresses.

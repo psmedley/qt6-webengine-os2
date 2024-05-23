@@ -29,10 +29,9 @@ bool DnsConfigOverrides::operator==(const DnsConfigOverrides& other) const {
          ndots == other.ndots && fallback_period == other.fallback_period &&
          attempts == other.attempts && doh_attempts == other.doh_attempts &&
          rotate == other.rotate && use_local_ipv6 == other.use_local_ipv6 &&
-         dns_over_https_servers == other.dns_over_https_servers &&
+         dns_over_https_config == other.dns_over_https_config &&
          secure_dns_mode == other.secure_dns_mode &&
          allow_dns_over_https_upgrade == other.allow_dns_over_https_upgrade &&
-         disabled_upgrade_providers == other.disabled_upgrade_providers &&
          clear_hosts == other.clear_hosts;
 }
 
@@ -55,11 +54,10 @@ DnsConfigOverrides::CreateOverridingEverythingWithDefaults() {
   overrides.doh_attempts = defaults.doh_attempts;
   overrides.rotate = defaults.rotate;
   overrides.use_local_ipv6 = defaults.use_local_ipv6;
-  overrides.dns_over_https_servers = defaults.dns_over_https_servers;
+  overrides.dns_over_https_config = defaults.doh_config;
   overrides.secure_dns_mode = defaults.secure_dns_mode;
   overrides.allow_dns_over_https_upgrade =
       defaults.allow_dns_over_https_upgrade;
-  overrides.disabled_upgrade_providers = defaults.disabled_upgrade_providers;
   overrides.clear_hosts = true;
 
   return overrides;
@@ -68,9 +66,8 @@ DnsConfigOverrides::CreateOverridingEverythingWithDefaults() {
 bool DnsConfigOverrides::OverridesEverything() const {
   return nameservers && search && append_to_multi_label_name && ndots &&
          fallback_period && attempts && doh_attempts && rotate &&
-         use_local_ipv6 && dns_over_https_servers && secure_dns_mode &&
-         allow_dns_over_https_upgrade && disabled_upgrade_providers &&
-         clear_hosts;
+         use_local_ipv6 && dns_over_https_config && secure_dns_mode &&
+         allow_dns_over_https_upgrade && clear_hosts;
 }
 
 DnsConfig DnsConfigOverrides::ApplyOverrides(const DnsConfig& config) const {
@@ -97,16 +94,14 @@ DnsConfig DnsConfigOverrides::ApplyOverrides(const DnsConfig& config) const {
     overridden.rotate = rotate.value();
   if (use_local_ipv6)
     overridden.use_local_ipv6 = use_local_ipv6.value();
-  if (dns_over_https_servers)
-    overridden.dns_over_https_servers = dns_over_https_servers.value();
+  if (dns_over_https_config)
+    overridden.doh_config = dns_over_https_config.value();
   if (secure_dns_mode)
     overridden.secure_dns_mode = secure_dns_mode.value();
   if (allow_dns_over_https_upgrade) {
     overridden.allow_dns_over_https_upgrade =
         allow_dns_over_https_upgrade.value();
   }
-  if (disabled_upgrade_providers)
-    overridden.disabled_upgrade_providers = disabled_upgrade_providers.value();
   if (clear_hosts)
     overridden.hosts.clear();
 

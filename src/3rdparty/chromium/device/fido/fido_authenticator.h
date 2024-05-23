@@ -11,7 +11,6 @@
 #include "base/callback_forward.h"
 #include "base/component_export.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -72,6 +71,9 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   using DeleteCredentialCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
                               absl::optional<DeleteCredentialResponse>)>;
+  using UpdateUserInformationCallback =
+      base::OnceCallback<void(CtapDeviceResponseCode,
+                              absl::optional<UpdateUserInformationResponse>)>;
   using BioEnrollmentCallback =
       base::OnceCallback<void(CtapDeviceResponseCode,
                               absl::optional<BioEnrollmentResponse>)>;
@@ -81,6 +83,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
           callback)>;
 
   FidoAuthenticator() = default;
+
+  FidoAuthenticator(const FidoAuthenticator&) = delete;
+  FidoAuthenticator& operator=(const FidoAuthenticator&) = delete;
+
   virtual ~FidoAuthenticator() = default;
 
   // Sends GetInfo request to connected authenticator. Once response to GetInfo
@@ -205,6 +211,13 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
       const PublicKeyCredentialDescriptor& credential_id,
       DeleteCredentialCallback callback);
 
+  virtual bool SupportsUpdateUserInformation() const;
+  virtual void UpdateUserInformation(
+      const pin::TokenResponse& pin_token,
+      const PublicKeyCredentialDescriptor& credential_id,
+      const PublicKeyCredentialUserEntity& updated_user,
+      UpdateUserInformationCallback callback);
+
   // Biometric enrollment commands.
   virtual void GetModality(BioEnrollmentCallback callback);
   virtual void GetSensorInfo(BioEnrollmentCallback callback);
@@ -253,6 +266,16 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   // stored resident keys and any configured PIN.
   virtual void Reset(ResetCallback callback);
   virtual void Cancel() = 0;
+
+  enum class Type {
+    kWinNative,  // i.e. webauthn.dll
+    kTouchID,    // the Chrome-native Touch ID integration on macOS
+    kChromeOS,   // the platform authenticator on Chrome OS
+    kOther,
+  };
+  // GetType returns the type of the authenticator.
+  virtual Type GetType() const;
+
   // GetId returns a unique string representing this device. This string should
   // be distinct from all other devices concurrently discovered.
   virtual std::string GetId() const = 0;
@@ -273,19 +296,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoAuthenticator {
   virtual bool IsInPairingMode() const = 0;
   virtual bool IsPaired() const = 0;
   virtual bool RequiresBlePairingPin() const = 0;
-#if defined(OS_WIN)
-  virtual bool IsWinNativeApiAuthenticator() const = 0;
-#endif  // defined(OS_WIN)
-#if defined(OS_MAC)
-  virtual bool IsTouchIdAuthenticator() const = 0;
-#endif  // defined(OS_MAC)
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  virtual bool IsChromeOSAuthenticator() const = 0;
-#endif
   virtual base::WeakPtr<FidoAuthenticator> GetWeakPtr() = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FidoAuthenticator);
 };
 
 }  // namespace device

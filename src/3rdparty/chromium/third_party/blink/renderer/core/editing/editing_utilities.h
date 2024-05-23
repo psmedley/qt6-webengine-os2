@@ -31,10 +31,10 @@
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/events/input_event.h"
 #include "third_party/blink/renderer/core/html/html_br_element.h"
-#include "third_party/blink/renderer/platform/geometry/float_quad.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "ui/gfx/geometry/quad_f.h"
 
 namespace blink {
 
@@ -151,7 +151,7 @@ void WriteImageNodeToClipboard(SystemClipboard&, const Node&, const String&);
 // Returns true for nodes that either have no content, or have content that is
 // ignored (skipped over) while editing. There are no VisiblePositions inside
 // these nodes.
-bool EditingIgnoresContent(const Node&);
+CORE_EXPORT bool EditingIgnoresContent(const Node&);
 
 inline bool CanHaveChildrenForEditing(const Node* node) {
   return !node->IsTextNode() && node->CanContainRangeEndPoint();
@@ -368,7 +368,7 @@ wtf_size_t ComputeDistanceToRightGraphemeBoundary(const Position&);
 // LocalCaretRect conversions
 // -------------------------------------------------------------------------
 
-FloatQuad LocalToAbsoluteQuadOf(const LocalCaretRect&);
+gfx::QuadF LocalToAbsoluteQuadOf(const LocalCaretRect&);
 
 // -------------------------------------------------------------------------
 // Events

@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/macros.h"
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/unsafe_shared_memory_region.h"
@@ -54,16 +53,25 @@ class MEDIA_EXPORT BitstreamBuffer {
   BitstreamBuffer(BitstreamBuffer&&);
   BitstreamBuffer& operator=(BitstreamBuffer&&);
 
+  BitstreamBuffer(const BitstreamBuffer&) = delete;
+  BitstreamBuffer& operator=(const BitstreamBuffer&) = delete;
+
   ~BitstreamBuffer();
 
-  // Produce an equivalent DecoderBuffer. This consumes region(), even if
+  // Produce an equivalent DecoderBuffer. This may consume region(), even if
   // nullptr is returned.
   //
   // This method is only intended to be used by VDAs that are being converted to
   // use DecoderBuffer.
   //
+  // The 2 arg variant adds |offset| to the internal offset and will then use
+  // |size| bytes at that location. This is allowed to go beyond the size of the
+  // buffer specified in the constructor, but it does ensure it does not go
+  // beyond the size of the shared memory region.
+  //
   // TODO(sandersd): Remove once all VDAs are converted.
   scoped_refptr<DecoderBuffer> ToDecoderBuffer();
+  scoped_refptr<DecoderBuffer> ToDecoderBuffer(off_t offset, size_t size);
 
   // TODO(crbug.com/813845): As this is only used by Android, include
   // EncryptionScheme and optional EncryptionPattern when updating for Android.
@@ -130,8 +138,6 @@ class MEDIA_EXPORT BitstreamBuffer {
   std::vector<SubsampleEntry> subsamples_;  // clear/cypher sizes
 
   friend struct IPC::ParamTraits<media::BitstreamBuffer>;
-
-  DISALLOW_COPY_AND_ASSIGN(BitstreamBuffer);
 };
 
 }  // namespace media

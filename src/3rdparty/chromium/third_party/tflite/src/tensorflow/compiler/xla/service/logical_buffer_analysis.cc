@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <utility>
 
-#include "absl/memory/memory.h"
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
+#include "tensorflow/compiler/xla/service/logical_buffer.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/logging.h"
@@ -76,9 +78,7 @@ Status LogicalBufferAnalysis::Analyze() {
 }
 
 LogicalBuffer& LogicalBufferAnalysis::GetBuffer(LogicalBuffer::Id id) const {
-  CHECK_GE(id, 0);
-  CHECK_LT(id, logical_buffers_.size());
-  return *logical_buffers_[id];
+  return *logical_buffers_.at(id);
 }
 
 LogicalBuffer& LogicalBufferAnalysis::GetBuffer(HloInstruction* instruction,
@@ -88,13 +88,11 @@ LogicalBuffer& LogicalBufferAnalysis::GetBuffer(HloInstruction* instruction,
 
 void LogicalBufferAnalysis::NewLogicalBuffer(HloInstruction* instruction,
                                              const ShapeIndex& index) {
-  CHECK_EQ(logical_buffers_.size(), next_buffer_id_);
-  logical_buffers_.emplace_back(
-      absl::make_unique<LogicalBuffer>(instruction, index, next_buffer_id_));
-  output_buffers_[std::make_pair(instruction, index)] =
-      logical_buffers_.back().get();
-
-  ++next_buffer_id_;
+  LogicalBuffer::Id id = logical_buffers_.size();
+  auto buffer = std::make_unique<LogicalBuffer>(instruction, index, id);
+  auto position = std::make_pair(instruction, index);
+  CHECK(output_buffers_.insert({position, buffer.get()}).second);
+  logical_buffers_.push_back(std::move(buffer));
 }
 
 Status LogicalBufferAnalysis::DefaultAction(HloInstruction* hlo_instruction) {
@@ -184,6 +182,21 @@ Status LogicalBufferAnalysis::HandleTupleSelect(HloInstruction* tuple_select) {
   // Select allocates a new buffer and then shallow copies the on_true or
   // on_false buffer into this new buffer.
   NewLogicalBuffer(tuple_select, /*index=*/{});
+  return Status::OK();
+}
+
+Status LogicalBufferAnalysis::HandleCustomCall(HloInstruction* custom_call) {
+  auto ccall = Cast<HloCustomCallInstruction>(custom_call);
+  absl::flat_hash_set<ShapeIndex> aliased_outputs;
+  for (const auto& pair : ccall->output_to_operand_aliasing()) {
+    aliased_outputs.insert(pair.first);
+  }
+  ShapeUtil::ForEachSubshape(ccall->shape(),
+                             [&](const Shape& shape, const ShapeIndex& index) {
+                               if (!aliased_outputs.contains(index)) {
+                                 NewLogicalBuffer(custom_call, index);
+                               }
+                             });
   return Status::OK();
 }
 

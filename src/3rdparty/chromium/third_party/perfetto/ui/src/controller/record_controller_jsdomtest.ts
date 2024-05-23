@@ -14,8 +14,8 @@
 
 import {assertExists} from '../base/logging';
 import {TraceConfig} from '../common/protos';
-import {createEmptyRecordConfig} from '../common/state';
 
+import {createEmptyRecordConfig} from './record_config_types';
 import {genConfigProto, toPbtxt} from './record_controller';
 
 test('encodeConfig', () => {
@@ -37,6 +37,60 @@ test('SysConfig', () => {
   const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
   expect(ftraceEvents.includes('raw_syscalls/sys_enter')).toBe(true);
   expect(ftraceEvents.includes('raw_syscalls/sys_exit')).toBe(true);
+});
+
+test('cpu scheduling includes kSyms if OS >= S', () => {
+  const config = createEmptyRecordConfig();
+  config.cpuSched = true;
+  const result =
+      TraceConfig.decode(genConfigProto(config, {os: 'S', name: 'Android S'}));
+  const sources = assertExists(result.dataSources);
+  const srcConfig = assertExists(sources[1].config);
+  const ftraceConfig = assertExists(srcConfig.ftraceConfig);
+  const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
+  expect(ftraceConfig.symbolizeKsyms).toBe(true);
+  expect(ftraceEvents.includes('sched/sched_blocked_reason')).toBe(true);
+});
+
+test('cpu scheduling does not include kSyms if OS <= S', () => {
+  const config = createEmptyRecordConfig();
+  config.cpuSched = true;
+  const result =
+      TraceConfig.decode(genConfigProto(config, {os: 'Q', name: 'Android Q'}));
+  const sources = assertExists(result.dataSources);
+  const srcConfig = assertExists(sources[1].config);
+  const ftraceConfig = assertExists(srcConfig.ftraceConfig);
+  const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
+  expect(ftraceConfig.symbolizeKsyms).toBe(false);
+  expect(ftraceEvents.includes('sched/sched_blocked_reason')).toBe(false);
+});
+
+test('kSyms can be enabled individually', () => {
+  const config = createEmptyRecordConfig();
+  config.ftrace = true;
+  config.symbolizeKsyms = true;
+  const result =
+      TraceConfig.decode(genConfigProto(config, {os: 'Q', name: 'Android Q'}));
+  const sources = assertExists(result.dataSources);
+  const srcConfig = assertExists(sources[0].config);
+  const ftraceConfig = assertExists(srcConfig.ftraceConfig);
+  const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
+  expect(ftraceConfig.symbolizeKsyms).toBe(true);
+  expect(ftraceEvents.includes('sched/sched_blocked_reason')).toBe(true);
+});
+
+test('kSyms can be disabled individually', () => {
+  const config = createEmptyRecordConfig();
+  config.ftrace = true;
+  config.symbolizeKsyms = false;
+  const result =
+      TraceConfig.decode(genConfigProto(config, {os: 'Q', name: 'Android Q'}));
+  const sources = assertExists(result.dataSources);
+  const srcConfig = assertExists(sources[0].config);
+  const ftraceConfig = assertExists(srcConfig.ftraceConfig);
+  const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
+  expect(ftraceConfig.symbolizeKsyms).toBe(false);
+  expect(ftraceEvents.includes('sched/sched_blocked_reason')).toBe(false);
 });
 
 test('toPbtxt', () => {
@@ -116,7 +170,8 @@ test('ChromeConfig', () => {
 
 test('ChromeMemoryConfig', () => {
   const config = createEmptyRecordConfig();
-  config.chromeCategoriesSelected = ['disabled-by-default-memory-infra'];
+  config.chromeHighOverheadCategoriesSelected =
+      ['disabled-by-default-memory-infra'];
   const result =
       TraceConfig.decode(genConfigProto(config, {os: 'C', name: 'Chrome'}));
   const sources = assertExists(result.dataSources);
@@ -178,7 +233,6 @@ test('ChromeConfigRingBuffer', () => {
   expect(traceConfigM).toEqual(expectedTraceConfig);
   expect(traceConfig).toEqual(expectedTraceConfig);
 });
-
 
 test('ChromeConfigLongTrace', () => {
   const config = createEmptyRecordConfig();
