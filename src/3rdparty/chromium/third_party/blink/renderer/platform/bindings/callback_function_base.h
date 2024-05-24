@@ -31,12 +31,10 @@ class PLATFORM_EXPORT CallbackFunctionBase
   virtual void Trace(Visitor* visitor) const;
 
   v8::Local<v8::Object> CallbackObject() {
-fprintf(stderr,"callback_function_base\n");
     return callback_function_.NewLocal(GetIsolate());
   }
 
   v8::Isolate* GetIsolate() const {
-fprintf(stderr,"callback_function_base99\n");
     return incumbent_script_state_->GetIsolate();
   }
 
@@ -94,7 +92,6 @@ fprintf(stderr,"callback_function_base99\n");
   explicit CallbackFunctionBase(v8::Local<v8::Object>);
 
   v8::Local<v8::Function> CallbackFunction() const {
-fprintf(stderr,"callback_function_base2\n");
     return callback_function_.NewLocal(GetIsolate()).As<v8::Function>();
   }
 
