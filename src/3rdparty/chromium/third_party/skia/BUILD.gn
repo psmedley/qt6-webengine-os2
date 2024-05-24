@@ -219,7 +219,7 @@ opts("sse42") {
 }
 
 opts("avx") {
-  enabled = is_x86
+  enabled = is_x86 && !is_os2
   sources = skia_opts.avx_sources
   if (is_win) {
     cflags = [ "/arch:AVX" ]

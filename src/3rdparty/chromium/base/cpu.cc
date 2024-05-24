@@ -291,14 +291,22 @@ void CPU::Initialize(bool require_branding) {
     // even after following Intel's example code. (See crbug.com/375968.)
     // Because of that, we also test the XSAVE bit because its description in
     // the CPUID documentation suggests that it signals xgetbv support.
+#ifndef OS_OS2
     has_avx_ =
         (cpu_info[2] & 0x10000000) != 0 &&
         (cpu_info[2] & 0x04000000) != 0 /* XSAVE */ &&
         (cpu_info[2] & 0x08000000) != 0 /* OSXSAVE */ &&
         (xgetbv(0) & 6) == 6 /* XSAVE enabled by kernel */;
+#else
+    has_avx_ = 0;
+#endif
     has_aesni_ = (cpu_info[2] & 0x02000000) != 0;
     has_fma3_ = (cpu_info[2] & 0x00001000) != 0;
+#ifndef OS_OS2
     has_avx2_ = has_avx_ && (cpu_info7[1] & 0x00000020) != 0;
+#else
+    has_avx2_ = 0;
+#endif
   }
 
   // Get the brand string of the cpu.

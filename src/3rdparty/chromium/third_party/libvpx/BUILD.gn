@@ -15,6 +15,10 @@ declare_args() {
   use_system_libvpx = false
 }
 
+if (is_os2) {
+  use_system_libvpx = true
+}
+
 # Sets the architecture name for building libvpx.
 if (current_cpu == "x86") {
   cpu_arch_full = "ia32"
