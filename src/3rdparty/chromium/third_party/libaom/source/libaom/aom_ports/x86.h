@@ -204,6 +204,7 @@ static INLINE int x86_simd_caps(void) {
 
   if (reg_ecx & BIT(20)) flags |= HAS_SSE4_2;
 
+#ifndef __OS2__ /* don't want avx */
   // bits 27 (OSXSAVE) & 28 (256-bit AVX)
   if ((reg_ecx & (BIT(27) | BIT(28))) == (BIT(27) | BIT(28))) {
     // Check for OS-support of YMM state. Necessary for AVX and AVX2.
@@ -218,7 +219,7 @@ static INLINE int x86_simd_caps(void) {
       }
     }
   }
-
+#endif
   (void)reg_eax;  // Avoid compiler warning on unused-but-set variable.
 
   return flags & mask;

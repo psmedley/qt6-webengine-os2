@@ -494,8 +494,13 @@ CPU::CPU()
     has_sse42_ = (cpu_info[2] & 0x00100000) != 0;
     has_popcnt_ = (cpu_info[2] & 0x00800000) != 0;
     has_osxsave_ = (cpu_info[2] & 0x08000000) != 0;
+#ifndef __OS2__
     has_avx_ = (cpu_info[2] & 0x10000000) != 0;
     has_avx2_ = (cpu_info7[1] & 0x00000020) != 0;
+#else
+    has_avx_ = false;
+    has_avx2_ = false;
+#endif
     has_fma3_ = (cpu_info[2] & 0x00001000) != 0;
     // "Hypervisor Present Bit: Bit 31 of ECX of CPUID leaf 0x1."
     // See https://lwn.net/Articles/301888/

@@ -216,6 +216,7 @@ static SAFEBUFFERS int GetCpuFlags(void) {
              ((cpu_info1[2] & 0x00100000) ? kCpuHasSSE42 : 0) |
              ((cpu_info7[1] & 0x00000200) ? kCpuHasERMS : 0);
 
+#ifndef __OS2__
   // AVX requires OS saves YMM registers.
   if (((cpu_info1[2] & 0x1c000000) == 0x1c000000) &&  // AVX and OSXSave
       ((GetXCR0() & 6) == 6)) {  // Test OS saves YMM registers
@@ -234,6 +235,7 @@ static SAFEBUFFERS int GetCpuFlags(void) {
       cpu_info |= (cpu_info7[2] & 0x00000100) ? kCpuHasGFNI : 0;
     }
   }
+#endif /* __OS2__ */
 #endif
 #if defined(__mips__) && defined(__linux__)
   cpu_info = MipsCpuCaps("/proc/cpuinfo");
