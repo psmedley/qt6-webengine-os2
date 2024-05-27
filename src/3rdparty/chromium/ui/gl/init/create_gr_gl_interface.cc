@@ -730,11 +730,11 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
       // Emulate APPLE_sync via egl
       extensions.add("GL_APPLE_sync");
 
-      BIND_EXTENSION(FenceSync, glFenceSyncEmulateEGL);
-      BIND_EXTENSION(IsSync, glIsSyncEmulateEGL);
-      BIND_EXTENSION(ClientWaitSync, glClientWaitSyncEmulateEGL);
-      BIND_EXTENSION(WaitSync, glWaitSyncEmulateEGL);
-      BIND_EXTENSION(DeleteSync, glDeleteSyncEmulateEGL);
+      functions->fFenceSync = glFenceSyncEmulateEGL;
+      functions->fIsSync = glIsSyncEmulateEGL;
+      functions->fClientWaitSync = glClientWaitSyncEmulateEGL;
+      functions->fWaitSync = glWaitSyncEmulateEGL;
+      functions->fDeleteSync = glDeleteSyncEmulateEGL;
 #endif
     }
   } else if (use_version_es2) {

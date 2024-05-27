@@ -13,7 +13,7 @@
 namespace gl {
 namespace init {
 
-bool InitializeGLOneOffPlatform() {
+bool InitializeGLOneOffPlatform(uint64_t) {
   // TODO: Implement it on OS/2.
 
   switch (GetGLImplementation()) {

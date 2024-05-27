@@ -47,7 +47,7 @@ class AudioManagerOS2 : public AudioManagerBase {
       const AudioParameters& input_params) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(AudioManagerOS2);
+//  DISALLOW_COPY_AND_ASSIGN(AudioManagerOS2);
 };
 
 }  // namespace media

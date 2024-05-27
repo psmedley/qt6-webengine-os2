@@ -52,7 +52,7 @@ class AudioOutputStreamOS2 : public AudioOutputStream {
 
   HKAI handle_ = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(AudioOutputStreamOS2);
+//  DISALLOW_COPY_AND_ASSIGN(AudioOutputStreamOS2);
 };
 
 }  // namespace media

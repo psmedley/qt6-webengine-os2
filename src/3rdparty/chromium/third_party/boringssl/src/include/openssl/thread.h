@@ -77,7 +77,7 @@ typedef struct crypto_mutex_st {
 typedef union crypto_mutex_st {
   void *handle;
 } CRYPTO_MUTEX;
-#elif !defined(__GLIBC__)
+#elif !defined(__GLIBC__) && !defined(__OS2__)
 typedef pthread_rwlock_t CRYPTO_MUTEX;
 #else
 // On glibc, |pthread_rwlock_t| is hidden under feature flags, and we can't

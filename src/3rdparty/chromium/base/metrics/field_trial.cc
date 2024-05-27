@@ -762,34 +762,19 @@ bool FieldTrialList::CreateTrialsFromString(const std::string& trials_string) {
 }
 
 // static
-void FieldTrialList::CreateTrialsFromCommandLine(
-    const CommandLine& cmd_line,
-    const char* field_trial_handle_switch,
-    int fd_key) {
+void FieldTrialList::CreateTrialsFromCommandLine(const CommandLine& cmd_line,
+                                                 int fd_key) {
   global_->create_trials_from_command_line_called_ = true;
-
-#if defined(OS_WIN) || defined(OS_FUCHSIA) || defined(OS_MAC) || defined(__OS2__)
-  if (cmd_line.HasSwitch(field_trial_handle_switch)) {
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS)
+  if (cmd_line.HasSwitch(switches::kFieldTrialHandle)) {
     std::string switch_value =
-        cmd_line.GetSwitchValueASCII(field_trial_handle_switch);
-    bool result = CreateTrialsFromSwitchValue(switch_value);
-    UMA_HISTOGRAM_BOOLEAN("ChildProcess.FieldTrials.CreateFromShmemSuccess",
-                          result);
-  }
-#elif defined(OS_POSIX) && !defined(OS_NACL)
-  // On POSIX, we check if the handle is valid by seeing if the browser process
-  // sent over the switch (we don't care about the value). Invalid handles
-  // occur in some browser tests which don't initialize the allocator.
-  if (cmd_line.HasSwitch(field_trial_handle_switch)) {
-    std::string switch_value =
-        cmd_line.GetSwitchValueASCII(field_trial_handle_switch);
-    bool result = CreateTrialsFromDescriptor(fd_key, switch_value);
+        cmd_line.GetSwitchValueASCII(switches::kFieldTrialHandle);
+    bool result = CreateTrialsFromSwitchValue(switch_value, fd_key);
     UMA_HISTOGRAM_BOOLEAN("ChildProcess.FieldTrials.CreateFromShmemSuccess",
                           result);
     DCHECK(result);
   }
-#endif
-
+#endif  // !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS)
   if (cmd_line.HasSwitch(switches::kForceFieldTrials)) {
     bool result = FieldTrialList::CreateTrialsFromString(
         cmd_line.GetSwitchValueASCII(switches::kForceFieldTrials));
@@ -1243,7 +1228,7 @@ FieldTrialList::DeserializeSharedMemoryRegionMetadata(
     return ReadOnlySharedMemoryRegion();
   }
   win::ScopedHandle scoped_handle(handle);
-#elif BUILDFLAG(IS_WIN)
+#elif BUILDFLAG(IS_OS2)
   SHMEM handle = static_cast<SHMEM>(field_trial_handle);
   os2::ScopedShmemHandle scoped_handle(handle);
 #elif BUILDFLAG(IS_MAC)

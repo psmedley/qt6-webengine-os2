@@ -38,7 +38,7 @@
 #include "base/threading/platform_thread.h"
 // Linux/glibc doesn't natively have setproctitle().
 #include "content/common/set_process_title_linux.h"
-#endif  // #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 namespace content {
 

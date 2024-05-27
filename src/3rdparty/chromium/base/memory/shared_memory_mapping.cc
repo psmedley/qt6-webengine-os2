@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/memory/platform_shared_memory_mapper.h"
 #include "base/memory/shared_memory_security_policy.h"
 #include "base/memory/shared_memory_tracker.h"
 #include "base/unguessable_token.h"

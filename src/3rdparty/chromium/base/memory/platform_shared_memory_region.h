@@ -12,6 +12,8 @@
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 
+#include <stdint.h>
+
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 namespace content {
 class SandboxIPCHandler;

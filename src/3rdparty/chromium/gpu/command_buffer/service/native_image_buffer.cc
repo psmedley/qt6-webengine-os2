@@ -4,8 +4,6 @@
 
 #include "gpu/command_buffer/service/native_image_buffer.h"
 
-// #include <stdint.h>
-
 #include <list>
 
 #include "base/memory/raw_ptr.h"

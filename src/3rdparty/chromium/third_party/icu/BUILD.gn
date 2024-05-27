@@ -144,6 +144,7 @@ config("icu_code") {
       # is fixed.
       "-Wno-implicit-int-float-conversion",
       "-Wno-conversion",
+
       # Needed for C++20
       "-Wno-ambiguous-reversed-operator",
       "-Wno-rewrite-not-bool",
@@ -151,9 +152,9 @@ config("icu_code") {
       "-Wno-deprecated-array-compare",
       "-Wno-deprecated-pragma",
 
-       # Used for conditional changes to the compilation process that
-       # are only needed for the Fuchsia toolchain.
-       "-DICU_IS_IN_FUCHSIA",
+      # Used for conditional changes to the compilation process that
+      # are only needed for the Fuchsia toolchain.
+      "-DICU_IS_IN_FUCHSIA",
     ]
   }
   if (target_cpu == "wasm") {

@@ -360,6 +360,7 @@ class PLATFORM_EXPORT FontCache final {
       const FontDescription&,
       UChar32);
 
+  // Don't purge if this count is > 0;
   int purge_prevent_count_ = 0;
 
   sk_sp<SkFontMgr> font_manager_;

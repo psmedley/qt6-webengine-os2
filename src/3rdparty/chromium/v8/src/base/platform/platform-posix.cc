@@ -22,6 +22,8 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
 #if defined(__APPLE__) || defined(__DragonFly__) || defined(__FreeBSD__) || \
     defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/sysctl.h>  // for sysctl
@@ -194,7 +196,6 @@ void* Allocate(void* hint, size_t size, OS::MemoryPermission access,
 }
 
 #endif  // !V8_OS_FUCHSIA && !V8_OS_OS2
-
 }  // namespace
 
 #if V8_OS_LINUX || V8_OS_FREEBSD
@@ -966,7 +967,8 @@ bool AddressSpaceReservation::Free(void* address, size_t size) {
 }
 
 // macOS specific implementation in platform-macos.cc.
-#if !defined(V8_OS_MACOS)
+// OS/2 specific implementation in platform-os2.cc.
+#if !defined(V8_OS_MACOS) && !defined(V8_OS_OS2)
 bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
                                              OS::MemoryPermission access,
                                              PlatformSharedMemoryHandle handle,
@@ -977,7 +979,7 @@ bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
   return mmap(address, size, prot, MAP_SHARED | MAP_FIXED, fd, offset) !=
          MAP_FAILED;
 }
-#endif  // !defined(V8_OS_MACOS)
+#endif  // !defined(V8_OS_MACOS) && !defined(V8_OS_OS2)
 
 bool AddressSpaceReservation::FreeShared(void* address, size_t size) {
   DCHECK(Contains(address, size));

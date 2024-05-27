@@ -57,7 +57,6 @@ class BooleanWithStack {
       else
         out << " (value by default)";
     }
-#endif
     return out;
   }
 

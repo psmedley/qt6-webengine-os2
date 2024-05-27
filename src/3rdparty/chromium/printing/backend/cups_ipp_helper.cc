@@ -316,6 +316,7 @@ size_t AddInputTray(const CupsOptionProvider& printer,
   // made to media-col-database.
   KeywordHandler(printer, "media-source", caps);
   return caps->size() - previous_size;
+}
 
 void ExtractAdvancedCapabilities(const CupsOptionProvider& printer,
                                  PrinterSemanticCapsAndDefaults* printer_info) {
@@ -325,7 +326,7 @@ void ExtractAdvancedCapabilities(const CupsOptionProvider& printer,
   attr_count += AddAttributes(printer, kIppDocumentAttributes, options);
   base::UmaHistogramCounts1000("Printing.CUPS.IppAttributesCount", attr_count);
 }
-#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace
 
@@ -348,10 +349,10 @@ void CapsAndDefaultsFromPrinter(const CupsOptionProvider& printer,
   printer_info->default_paper = DefaultPaper(printer);
   printer_info->papers = SupportedPapers(printer);
 
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+#if BUILDFLAG(IS_CHROMEOS)
   printer_info->pin_supported = PinSupported(printer);
   ExtractAdvancedCapabilities(printer, printer_info);
-#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   ExtractCopies(printer, printer_info);
   ExtractColor(printer, printer_info);

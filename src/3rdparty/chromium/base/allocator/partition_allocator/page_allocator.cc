@@ -71,30 +71,29 @@ uintptr_t AllocPagesIncludingReserved(
   return ret;
 }
 
-// Trims |base| to given |trim_length| and |alignment|.
+// Trims memory at |base_address| to given |trim_length| and |alignment|.
 //
-// On failure, on Windows and OS/2, this function returns nullptr and frees
-// |base|.
-void* TrimMapping(void* base,
-                  size_t base_length,
-                  size_t trim_length,
-                  uintptr_t alignment,
-                  uintptr_t alignment_offset,
-                  PageAccessibilityConfiguration accessibility) {
+// On failure, on Windows, this function returns 0 and frees memory at
+// |base_address|.
+uintptr_t TrimMapping(uintptr_t base_address,
+                      size_t base_length,
+                      size_t trim_length,
+                      uintptr_t alignment,
+                      uintptr_t alignment_offset,
+                      PageAccessibilityConfiguration accessibility) {
   PA_DCHECK(base_length >= trim_length);
-  PA_DCHECK(bits::IsPowerOfTwo(alignment));
+  PA_DCHECK(internal::base::bits::IsPowerOfTwo(alignment));
   PA_DCHECK(alignment_offset < alignment);
-  uintptr_t base_as_uintptr = reinterpret_cast<uintptr_t>(base);
   uintptr_t new_base =
-      NextAlignedWithOffset(base_as_uintptr, alignment, alignment_offset);
-  PA_DCHECK(new_base >= base_as_uintptr);
-  size_t pre_slack = new_base - base_as_uintptr;
+      NextAlignedWithOffset(base_address, alignment, alignment_offset);
+  PA_DCHECK(new_base >= base_address);
+  size_t pre_slack = new_base - base_address;
   size_t post_slack = base_length - pre_slack - trim_length;
   PA_DCHECK(base_length == trim_length || pre_slack || post_slack);
   PA_DCHECK(pre_slack < base_length);
   PA_DCHECK(post_slack < base_length);
-  return TrimMappingInternal(base, base_length, trim_length, accessibility,
-                             pre_slack, post_slack);
+  return internal::TrimMappingInternal(base_address, base_length, trim_length,
+                                       accessibility, pre_slack, post_slack);
 }
 
 }  // namespace

@@ -67,8 +67,8 @@ struct FileDescriptor;
 }  // namespace base
 
 namespace IPC {
-class Message;
 
+class Message;
 struct ChannelHandle;
 
 #if BUILDFLAG(IS_WIN)

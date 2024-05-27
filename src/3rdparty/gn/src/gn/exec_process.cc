@@ -189,6 +189,7 @@ bool ExecProcess(const base::CommandLine& cmdline,
 
   int out_fd[2], err_fd[2];
   pid_t pid;
+  base::InjectiveMultimap fd_shuffle1, fd_shuffle2;
   std::unique_ptr<char*[]> argv_cstr(new char*[argv.size() + 1]);
 #if defined(OS_OS2)
   int stdfds[3] = {0};

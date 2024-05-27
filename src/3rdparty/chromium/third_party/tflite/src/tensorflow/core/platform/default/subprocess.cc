@@ -18,6 +18,7 @@ limitations under the License.
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>

@@ -57,7 +57,7 @@ typedef std::vector<HandleToTransfer> HandlesToTransferVector;
 typedef std::vector<std::pair<int, int>> FileHandleMappingVector;
 #elif BUILDFLAG(IS_POSIX)
 typedef std::vector<std::pair<int, int>> FileHandleMappingVector;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 // Options for launching a subprocess that are passed to LaunchProcess().
 // The default constructor constructs the object with default options.

@@ -19,6 +19,7 @@
 
 namespace printing {
 
+mojom::ColorModel ColorModeToColorModel(int color_mode) {
   if (color_mode < static_cast<int>(mojom::ColorModel::kUnknownColorModel) ||
       color_mode > static_cast<int>(mojom::ColorModel::kColorModelLast))
     return mojom::ColorModel::kUnknownColorModel;

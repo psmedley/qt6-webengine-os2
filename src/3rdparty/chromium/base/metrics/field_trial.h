@@ -546,6 +546,8 @@ class BASE_EXPORT FieldTrialList {
   // if they are prefixed with |kActivationMarker|.
   static bool CreateTrialsFromString(const std::string& trials_string);
 
+  // Achieves the same thing as CreateTrialsFromString, except wraps the logic
+  // by taking in the trials from the command line, either via shared memory
   // handle or command line argument.
   // On non-Mac POSIX platforms, we simply get the trials from opening |fd_key|
   // if using shared memory. The argument is needed here since //base can't
@@ -694,6 +696,7 @@ class BASE_EXPORT FieldTrialList {
   static bool CreateTrialsFromSwitchValue(const std::string& switch_value,
                                           int fd_key);
 #endif  // !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS)
+
   // Takes an unmapped ReadOnlySharedMemoryRegion, maps it with the correct size
   // and creates field trials via CreateTrialsFromSharedMemoryMapping(). Returns
   // true if successful and false otherwise.

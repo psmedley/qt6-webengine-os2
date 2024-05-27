@@ -5090,7 +5090,7 @@ void RenderProcessHostImpl::OnProcessLaunched() {
   tracing_registration_ = TracingServiceController::Get().RegisterClient(
       GetProcess().Pid(),
       base::BindRepeating(&RenderProcessHostImpl::BindTracedProcess,
-                          instance_weak_factory_->GetWeakPtr()));
+                          instance_weak_factory_.GetWeakPtr()));
 
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_OS2)
   system_tracing_service_ = std::make_unique<tracing::SystemTracingService>();

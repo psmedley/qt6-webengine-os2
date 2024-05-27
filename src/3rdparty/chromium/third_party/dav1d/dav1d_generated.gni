@@ -23,6 +23,7 @@ x86_asm_sources = [
   "libdav1d/src/x86/ipred16_avx512.asm",
   "libdav1d/src/x86/ipred16_sse.asm",
   "libdav1d/src/x86/ipred_avx2.asm",
+  "libdav1d/src/x86/ipred_avx512.asm",
   "libdav1d/src/x86/ipred_sse.asm",
   "libdav1d/src/x86/itx16_avx2.asm",
   "libdav1d/src/x86/itx16_avx512.asm",
@@ -72,10 +73,11 @@ x86_asm_sources = [
   "libdav1d/src/x86/refmvs.asm",
 ]}
 
+x86_template_sources = []
 arm32_asm_sources = [
   "libdav1d/src/arm/32/cdef.S",
   "libdav1d/src/arm/32/cdef16.S",
-+  "libdav1d/src/arm/32/filmgrain.S",
+  "libdav1d/src/arm/32/filmgrain.S",
   "libdav1d/src/arm/32/filmgrain16.S",
   "libdav1d/src/arm/32/ipred.S",
   "libdav1d/src/arm/32/ipred16.S",

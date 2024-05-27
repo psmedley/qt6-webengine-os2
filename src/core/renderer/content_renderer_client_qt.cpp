@@ -29,6 +29,7 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/public/child/child_thread.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/renderer/key_system_support.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "media/base/key_system_properties.h"
@@ -650,17 +651,20 @@ void OnKeySystemSupportUpdated(media::GetSupportedKeySystemsCB cb,
     for (const auto &entry : key_system_capabilities) {
         const auto &key_system = entry.first;
         const auto &capability = entry.second;
+#if !BUILDFLAG(IS_OS2)
 #if BUILDFLAG(ENABLE_WIDEVINE)
         if (key_system == kWidevineKeySystem) {
             AddWidevine(capability, &key_systems);
             continue;
         }
-#endif  // BUILDFLAG(ENABLE_WIDEVINE)
-
+#endif // BUILDFLAG(ENABLE_WIDEVINE)
+#endif // BUILDFLAG(IS_OS2)
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
         if (key_system == kExternalClearKeyKeySystem) {
             AddExternalClearKey(capability, &key_systems);
             continue;
         }
+#endif // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
         DLOG(ERROR) << "Unrecognized key system: " << key_system;
     }
@@ -670,8 +674,10 @@ void OnKeySystemSupportUpdated(media::GetSupportedKeySystemsCB cb,
 
 void ContentRendererClientQt::GetSupportedKeySystems(media::GetSupportedKeySystemsCB cb)
 {
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
     content::ObserveKeySystemSupportUpdate(
         base::BindRepeating(&OnKeySystemSupportUpdated, std::move(cb)));
+#endif // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 }
 
 #if QT_CONFIG(webengine_spellchecker)

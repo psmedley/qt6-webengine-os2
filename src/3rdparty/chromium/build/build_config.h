@@ -208,7 +208,7 @@
 #define BUILDFLAG_INTERNAL_IS_NETBSD() (1)
 #else
 #define BUILDFLAG_INTERNAL_IS_NETBSD() (0)
-endif
+#endif
 
 #if defined(OS_OPENBSD)
 #define BUILDFLAG_INTERNAL_IS_OPENBSD() (1)

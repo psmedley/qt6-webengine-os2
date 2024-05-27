@@ -8,9 +8,10 @@
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator_internal.h"
 #include "base/logging.h"
+#include "base/allocator/partition_allocator/partition_alloc_check.h"
 #include "base/allocator/partition_allocator/partition_alloc_notreached.h"
 
-namespace base {
+namespace partition_alloc::internal {
 
 namespace {
 
@@ -46,7 +47,7 @@ APIRET MyDosSetMem(PVOID base, ULONG length, ULONG flags) {
   return NO_ERROR;
 }
 
-}
+} // namespace
 
 // |DosAllocMemEx| will fail if allocation at the hint address is blocked.
 constexpr bool kHintIsAdvisory = false;
@@ -72,21 +73,21 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   }
 }
 
-void* SystemAllocPagesInternal(void* hint,
+uintptr_t SystemAllocPagesInternal(uintptr_t hint,
                                size_t length,
                                PageAccessibilityConfiguration accessibility,
                                PageTag page_tag) {
   ULONG flags = GetAccessFlags(accessibility);
   if (flags == 0)
     flags = PAG_READ; // OS/2 requires at least one permission bit.
-  if (accessibility != PageInaccessible)
+  if (accessibility != PageAccessibilityConfiguration::kInaccessible)
     flags |= PAG_COMMIT;
   if (hint)
     flags |= OBJ_LOCATION;
   else
-    flags |= OBJ_ANY; // Requiest high memory.
+    flags |= OBJ_ANY; // Request high memory.
 
-  void *base = hint;
+  void *base = reinterpret_cast<void*>(hint);
   APIRET arc = DosAllocMemEx(&base, length, flags);
   if (arc != NO_ERROR && (flags & OBJ_ANY)) {
     // Try low memory.
@@ -95,51 +96,52 @@ void* SystemAllocPagesInternal(void* hint,
   }
   if (arc != NO_ERROR) {
     s_allocPageErrorCode = arc;
-    return nullptr;
   }
-  return base;
+  return reinterpret_cast<uintptr_t>(base);
 }
 
-void* TrimMappingInternal(void* base,
-                          size_t base_length,
-                          size_t trim_length,
-                          PageAccessibilityConfiguration accessibility,
-                          size_t pre_slack,
-                          size_t post_slack) {
-  void* ret = base;
+uintptr_t TrimMappingInternal(uintptr_t base_address,
+                              size_t base_length,
+                              size_t trim_length,
+                              PageAccessibilityConfiguration accessibility,
+                              size_t pre_slack,
+                              size_t post_slack) {
+  uintptr_t ret = base_address;
   if (pre_slack || post_slack) {
     // We cannot resize the allocation run. Free it and retry at the aligned
     // address within the freed range.
-    ret = reinterpret_cast<char*>(base) + pre_slack;
-    FreePages(base, base_length);
+    ret = base_address + pre_slack;
+    FreePages(base_address, base_length);
     ret = SystemAllocPages(ret, trim_length, accessibility, PageTag::kChromium);
   }
   return ret;
 }
 
 bool TrySetSystemPagesAccessInternal(
-    void* address,
+    uintptr_t address,
     size_t length,
     PageAccessibilityConfiguration accessibility) {
-  if (accessibility == PageInaccessible)
-    return MyDosSetMem(address, length, PAG_DECOMMIT) == NO_ERROR;
-  return MyDosSetMem(address, length, PAG_COMMIT |
+  void* ptr = reinterpret_cast<void*>(address);
+  if (accessibility == PageAccessibilityConfiguration::kInaccessible)
+    return MyDosSetMem(ptr, length, PAG_DECOMMIT) == NO_ERROR;
+  return MyDosSetMem(ptr, length, PAG_COMMIT |
                      GetAccessFlags(accessibility)) == NO_ERROR;
 }
 
 void SetSystemPagesAccessInternal(
-    void* address,
+    uintptr_t address,
     size_t length,
     PageAccessibilityConfiguration accessibility) {
-  if (accessibility == PageInaccessible) {
-    APIRET arc = MyDosSetMem(address, length, PAG_DECOMMIT);
+  void* ptr = reinterpret_cast<void*>(address);
+  if (accessibility == PageAccessibilityConfiguration::kInaccessible) {
+    APIRET arc = MyDosSetMem(ptr, length, PAG_DECOMMIT);
     if (arc != NO_ERROR) {
       // We check `arc` for `NO_ERROR` here so that in a crash
       // report we get the error number.
       PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
     }
   } else {
-    APIRET arc = MyDosSetMem(address, length, PAG_COMMIT |
+    APIRET arc = MyDosSetMem(ptr, length, PAG_COMMIT |
                              GetAccessFlags(accessibility));
     if (arc != NO_ERROR) {
       if (arc == ERROR_NOT_ENOUGH_MEMORY)
@@ -151,22 +153,27 @@ void SetSystemPagesAccessInternal(
   }
 }
 
-void FreePagesInternal(void* address, size_t length) {
-  APIRET arc = DosFreeMemEx(address);
-  CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
+void FreePagesInternal(uintptr_t address, size_t length) {
+  APIRET arc = DosFreeMemEx(reinterpret_cast<void*>(address));
+  if (arc != ERROR_INVALID_ADDRESS) PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
 }
 
 void DecommitSystemPagesInternal(
-    void* address,
+    uintptr_t address,
     size_t length,
     PageAccessibilityDisposition accessibility_disposition) {
   // Ignore accessibility_disposition, because decommitting is equivalent to
   // making pages inaccessible.
-  SetSystemPagesAccess(address, length, PageInaccessible);
+  SetSystemPagesAccess(address, length, PageAccessibilityConfiguration::kInaccessible);
 }
 
-void RecommitSystemPagesInternal(void* address,
-                                 size_t length,
+void DecommitAndZeroSystemPagesInternal(uintptr_t address, size_t length) {
+  PA_CHECK(MyDosSetMem(reinterpret_cast<void*>(address), length, PAG_DECOMMIT));
+}
+
+void RecommitSystemPagesInternal(
+    uintptr_t address,
+    size_t length,
     PageAccessibilityConfiguration accessibility,
     PageAccessibilityDisposition accessibility_disposition) {
   // Ignore accessibility_disposition, because decommitting is equivalent to
@@ -175,7 +182,7 @@ void RecommitSystemPagesInternal(void* address,
 }
 
 bool TryRecommitSystemPagesInternal(
-    void* address,
+    uintptr_t address,
     size_t length,
     PageAccessibilityConfiguration accessibility,
     PageAccessibilityDisposition accessibility_disposition) {
@@ -184,10 +191,10 @@ bool TryRecommitSystemPagesInternal(
   return TrySetSystemPagesAccess(address, length, accessibility);
 }
 
-void DiscardSystemPagesInternal(void* address, size_t length) {
+void DiscardSystemPagesInternal(uintptr_t address, size_t length) {
   // TODO: OS/2 doen't seem to have madvise(MADV_DONTNEED)/MEM_RESET semantics.
 }
 
-}  // namespace base
+}  // namespace namespace partition_alloc::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_PAGE_ALLOCATOR_INTERNALS_OS2_H_

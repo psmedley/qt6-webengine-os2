@@ -76,6 +76,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
   explicit PlatformHandle(base::ScopedFD fd);
 #endif
 
+  PlatformHandle(const PlatformHandle&) = delete;
+  PlatformHandle& operator=(const PlatformHandle&) = delete;
   ~PlatformHandle();
 
   PlatformHandle& operator=(PlatformHandle&& other);
@@ -165,7 +167,7 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
       type_ = Type::kNone;
     return std::move(mach_receive_);
   }
-  mach_port_t ReleaseMachReceiveRight() WARN_UNUSED_RESULT {
+  [[nodiscard]] mach_port_t ReleaseMachReceiveRight() {
     return TakeMachReceiveRight().release();
   }
 #elif BUILDFLAG(IS_OS2)
@@ -180,7 +182,7 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
       type_ = Type::kNone;
     return std::move(handle_);
   }
-  SHMEM ReleaseShmemHandle() WARN_UNUSED_RESULT {
+  [[nodiscard]] SHMEM ReleaseShmemHandle() {
     if (type_ == Type::kShmemHandle)
       type_ = Type::kNone;
     return handle_.release();
@@ -252,8 +254,6 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   base::ScopedFD fd_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformHandle);
 };
 
 }  // namespace mojo

@@ -84,6 +84,7 @@ bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
   return true;
 }
 
+#if 0
 bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
                                                size_t size,
                                                void** memory,
@@ -99,6 +100,7 @@ bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
   *mapped_size = size;
   return true;
 }
+#endif
 
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
@@ -120,7 +122,7 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
 
 // static
 bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
-    PlatformHandle handle,
+    PlatformSharedMemoryHandle handle,
     Mode mode,
     size_t size) {
   int flags;

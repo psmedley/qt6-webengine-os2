@@ -40,6 +40,8 @@ std::string GetUserAgentPlatform() {
   return "Linux; ";
 #elif BUILDFLAG(IS_FUCHSIA)
   return "";
+#elif BUILDFLAG(IS_OS2)
+  return "";
 #else
 #error Unsupported platform
 #endif

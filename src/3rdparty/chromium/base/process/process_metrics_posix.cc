@@ -20,9 +20,7 @@
 
 #if BUILDFLAG(IS_OS2)
 #include <umalloc.h>
-#endif
-
-if BUILDFLAG(IS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 #include <malloc/malloc.h>
 #else
 #include <malloc.h>

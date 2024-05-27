@@ -42,11 +42,13 @@ rtc::IPAddress NetIPAddressToRtcIPAddress(const net::IPAddress& ip_address) {
     address = rtc::NetworkToHost32(address);
     return rtc::IPAddress(address);
   }
+#ifndef __OS2__
   if (ip_address.IsIPv6()) {
     in6_addr address;
     memcpy(&address, ip_address.bytes().data(), sizeof(in6_addr));
     return rtc::IPAddress(address);
   }
+#endif
   return rtc::IPAddress();
 }
 

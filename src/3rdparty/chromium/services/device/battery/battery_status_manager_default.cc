@@ -26,11 +26,11 @@ class BatteryStatusManagerDefault : public BatteryStatusManager {
  private:
   // BatteryStatusManager:
   bool StartListeningBatteryChange() override {
-    NOTIMPLEMENTED_LOG_ONCE();
+    NOTIMPLEMENTED();
     return false;
   }
 
-  void StopListeningBatteryChange() override { NOTIMPLEMENTED_LOG_ONCE(); }
+  void StopListeningBatteryChange() override { NOTIMPLEMENTED(); }
 };
 
 }  // namespace

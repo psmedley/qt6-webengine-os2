@@ -43,12 +43,14 @@ QuicSocketAddress::QuicSocketAddress(const struct sockaddr_storage& saddr) {
       port_ = ntohs(v4->sin_port);
       break;
     }
+#ifndef __OS2__
     case AF_INET6: {
       const sockaddr_in6* v6 = reinterpret_cast<const sockaddr_in6*>(&saddr);
       host_ = QuicIpAddress(v6->sin6_addr);
       port_ = ntohs(v6->sin6_port);
       break;
     }
+#endif
     default:
       QUIC_BUG(quic_bug_10075_1)
           << "Unknown address family passed: " << saddr.ss_family;
@@ -63,8 +65,10 @@ QuicSocketAddress::QuicSocketAddress(const sockaddr* saddr, socklen_t len) {
   if (len < static_cast<socklen_t>(sizeof(sockaddr)) ||
       (saddr->sa_family == AF_INET &&
        len < static_cast<socklen_t>(sizeof(sockaddr_in))) ||
+#ifndef __OS2__
       (saddr->sa_family == AF_INET6 &&
        len < static_cast<socklen_t>(sizeof(sockaddr_in6))) ||
+#endif
       len > static_cast<socklen_t>(sizeof(storage))) {
     QUIC_BUG(quic_bug_10075_2) << "Socket address of invalid length provided";
     return;
@@ -126,7 +130,9 @@ sockaddr_storage QuicSocketAddress::generic_address() const {
   union {
     sockaddr_storage storage;
     sockaddr_in v4;
+#ifndef __OS2__
     sockaddr_in6 v6;
+#endif
   } result;
   memset(&result.storage, 0, sizeof(result.storage));
 
@@ -136,11 +142,13 @@ sockaddr_storage QuicSocketAddress::generic_address() const {
       result.v4.sin_addr = host_.GetIPv4();
       result.v4.sin_port = htons(port_);
       break;
+#ifndef __OS2__
     case IpAddressFamily::IP_V6:
       result.v6.sin6_family = AF_INET6;
       result.v6.sin6_addr = host_.GetIPv6();
       result.v6.sin6_port = htons(port_);
       break;
+#endif
     default:
       result.storage.ss_family = AF_UNSPEC;
       break;

@@ -17,8 +17,8 @@ class TimeZoneMonitorOS2 : public TimeZoneMonitor {
   TimeZoneMonitorOS2() = default;
   ~TimeZoneMonitorOS2() override = default;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(TimeZoneMonitorOS2);
+// private:
+//  DISALLOW_COPY_AND_ASSIGN(TimeZoneMonitorOS2);
 };
 
 }  // namespace

@@ -8,8 +8,6 @@
 #include "base/component_export.h"
 #include "build/build_config.h"
 
-#include "build/build_config.h"
-
 namespace printing {
 
 // property names

@@ -115,4 +115,5 @@ TEST(PrintSettingsConversionTest, FilterNonJobSettings) {
   EXPECT_EQ(settings->advanced_settings().at("Foo"), base::Value("Bar"));
 }
 #endif  // BUILDFLAG(IS_CHROMEOS) || (BUILDFLAG(IS_LINUX) && defined(USE_CUPS))
+
 }  // namespace printing

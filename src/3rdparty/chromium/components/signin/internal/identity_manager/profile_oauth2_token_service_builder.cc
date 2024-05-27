@@ -137,6 +137,7 @@ CreateOAuth2TokenServiceDelegate(
       reauth_callback,
 #endif  // BUILDFLAG(IS_WIN)
       network_connection_tracker);
+#elif BUILDFLAG(IS_OS2)
 #else
   NOTREACHED();
   return nullptr;
@@ -175,6 +176,7 @@ std::unique_ptr<ProfileOAuth2TokenService> BuildProfileOAuth2TokenService(
   DCHECK(!device_id.empty());
 #endif
 
+#if !BUILDFLAG(IS_OS2) //fixme gcc 9.2.0 bug or?
   return std::make_unique<ProfileOAuth2TokenService>(
       pref_service,
       CreateOAuth2TokenServiceDelegate(
@@ -192,4 +194,5 @@ std::unique_ptr<ProfileOAuth2TokenService> BuildProfileOAuth2TokenService(
           reauth_callback,
 #endif
           network_connection_tracker));
+#endif // !BUILDFLAG(IS_OS2)
 }

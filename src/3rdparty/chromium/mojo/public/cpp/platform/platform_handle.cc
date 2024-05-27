@@ -278,18 +278,18 @@ void PlatformHandle::release() {
   type_ = Type::kNone;
 
 #if BUILDFLAG(IS_WIN)
-  ignore_result(handle_.Take());
+  std::ignore = handle_.Take();
 #elif BUILDFLAG(IS_FUCHSIA)
-  ignore_result(handle_.release());
+  std::ignore = handle_.release();
 #elif BUILDFLAG(IS_MAC)
-  ignore_result(mach_send_.release());
-  ignore_result(mach_receive_.release());
+  std::ignore = mach_send_.release();
+  std::ignore = mach_receive_.release();
 #elif BUILDFLAG(IS_OS2)
-  ignore_result(handle_.release());
+  std::ignore = handle_.release();
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
-  ignore_result(fd_.release());
+  std::ignore = fd_.release();
 #endif
 }
 

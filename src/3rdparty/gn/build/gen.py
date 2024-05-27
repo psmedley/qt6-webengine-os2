@@ -416,9 +416,9 @@ def WriteGNNinja(path, platform, host, options, args_list):
   ar = options.ar
 
   if not ar:
-    if platform.is_msvc():
-      ar = os.environ.get('AR', 'lib.exe')
-    else:
+   if platform.is_msvc():
+     ar = os.environ.get('AR', 'lib.exe')
+   else:
       if platform.is_os2():
         ar = os.environ.get('AR', 'emxomfar')
       else:

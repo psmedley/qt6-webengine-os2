@@ -36,7 +36,6 @@ class PLATFORM_EXPORT CallbackFunctionBase
   }
 
   v8::Isolate* GetIsolate() const {
-fprintf(stderr,"callback_function_base99\n");
     return incumbent_script_state_->GetIsolate();
   }
 

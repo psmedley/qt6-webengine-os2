@@ -21,6 +21,7 @@
 
 namespace base {
 
+#if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || \
     defined(OS_HAIKU) || defined(OS_MSYS) || defined(OS_ZOS) ||  \
     defined(OS_OS2) || defined(OS_ANDROID) && __ANDROID_API__ < 21
 typedef struct stat stat_wrapper_t;

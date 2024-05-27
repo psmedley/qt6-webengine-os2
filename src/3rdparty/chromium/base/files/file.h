@@ -18,10 +18,7 @@
 #include "base/trace_event/base_tracing_forward.h"
 #include "build/build_config.h"
 
-#if defined(OS_BSD) || defined(OS_APPLE) || defined(OS_NACL) || \
-    defined(OS_FUCHSIA) || (defined(OS_ANDROID) && __ANDROID_API__ < 21) || \
-    defined(OS_OS2)
-+#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_NACL) || \
+#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_NACL) || \
     BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_OS2) || \
     (BUILDFLAG(IS_ANDROID) && __ANDROID_API__ < 21)
 struct stat;

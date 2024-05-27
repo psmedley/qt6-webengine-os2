@@ -87,8 +87,7 @@ const char kSymbolCharacters[] =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
 #endif  // !defined(USE_SYMBOLIZE)
 
-#if !defined(USE_SYMBOLIZE) && \
-  !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
+#if !defined(USE_SYMBOLIZE) && !defined(OS_OS2)
 // Demangles C++ symbols in the given text. Example:
 //
 // "out/Debug/base_unittests(_ZN10StackTraceC1Ev+0x20) [0x817778c]"
@@ -98,6 +97,7 @@ void DemangleSymbols(std::string* text) {
   // Note: code in this function is NOT async-signal safe (std::string uses
   // malloc internally).
 
+#if !defined(__UCLIBC__) && !defined(_AIX)
   std::string::size_type search_from = 0;
   while (search_from < text->size()) {
     // Look for the start of a mangled symbol, from search_from.
@@ -133,8 +133,9 @@ void DemangleSymbols(std::string* text) {
     }
   }
 }
-#endif  // !defined(USE_SYMBOLIZE) && \
-        // !defined(__UCLIBC__) && !defined(_AIX) && !defined(OS_OS2)
+#endif  // !defined(__UCLIBC__) && !defined(_AIX)
+}
+#endif  // !defined(USE_SYMBOLIZE) && !defined(__OS2__)
 
 class BacktraceOutputHandler {
  public:

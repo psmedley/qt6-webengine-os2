@@ -185,6 +185,7 @@ base::LazyInstance<TimeClamper>::Leaky g_time_clamper =
     LAZY_INSTANCE_INITIALIZER;
 
 #if BUILDFLAG(USE_PARTITION_ALLOC)
+
 base::LazyInstance<gin::PageAllocator>::Leaky g_page_allocator =
     LAZY_INSTANCE_INITIALIZER;
 

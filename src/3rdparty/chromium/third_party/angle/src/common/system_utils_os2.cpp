@@ -39,7 +39,7 @@ const char *GetSharedLibraryExtension()
     return "dll";
 }
 
-double GetCurrentTime()
+double GetCurrentSystemTime()
 {
     struct timespec currentTime;
     clock_gettime(CLOCK_MONOTONIC, &currentTime);

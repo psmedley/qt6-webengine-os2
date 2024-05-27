@@ -826,7 +826,7 @@ void AddSuggestionsDetails(int error_code,
   }
 
   // TODO(https://crbug.com/1254714): Provide meaningful strings for Fuchsia.
-#if !BUILDFLAG(IS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA) && !BUILDFLAG(IS_OS2)
   if (suggestions & SUGGEST_PROXY_CONFIG) {
     AddSuggestionDetailDictionaryToList(
         suggestions_details, IDS_ERRORPAGES_SUGGESTION_PROXY_CONFIG_HEADER, 0,

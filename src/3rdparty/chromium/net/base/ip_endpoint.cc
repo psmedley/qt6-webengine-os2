@@ -21,7 +21,7 @@
 #if BUILDFLAG(IS_WIN)
 #include <winsock2.h>
 #include <ws2bth.h>
-#include "net/base/winsock_util.h"
+
 #include "net/base/winsock_util.h"  // For kBluetoothAddressSize
 #endif
 

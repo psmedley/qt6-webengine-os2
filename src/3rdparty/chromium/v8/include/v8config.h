@@ -100,6 +100,7 @@ path. Add it with -I<path> to the command line
 #  define V8_OS_MACOS 1
 #  define V8_OS_STRING "macos"
 # endif  // defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+
 #elif defined(__CYGWIN__)
 # define V8_OS_CYGWIN 1
 # define V8_OS_POSIX 1

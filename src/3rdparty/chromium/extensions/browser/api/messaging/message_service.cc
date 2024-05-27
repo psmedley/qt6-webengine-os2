@@ -518,6 +518,7 @@ void MessageService::OpenChannelToTab(const ChannelEndpoint& source,
                                       const PortId& source_port_id,
                                       int tab_id,
                                       int frame_id,
+                                      const std::string& document_id,
                                       const std::string& extension_id,
                                       const std::string& channel_name) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);

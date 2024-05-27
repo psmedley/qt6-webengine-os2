@@ -112,8 +112,10 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   static EGLDisplay GetHardwareDisplay();
   // |system_device_id| specifies which GPU to use on a multi-GPU system.
   // If its value is 0, use the default GPU of the system.
+#ifdef USE_EGL
   static GLDisplayEGL* InitializeDisplay(EGLDisplayPlatform native_display,
                                          uint64_t system_device_id);
+#endif
   static EGLNativeDisplayType GetNativeDisplay();
   static DisplayType GetDisplayType();
 
@@ -155,7 +157,9 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   GLSurfaceFormat format_;
 
  private:
+#ifdef USE_EGL
   static bool InitializeOneOffCommon(GLDisplayEGL* display);
+#endif
   static bool initialized_;
 };
 

@@ -15,11 +15,11 @@
 #elif BUILDFLAG(IS_WIN)
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_types.h"
+#elif BUILDFLAG(IS_OS2)
+#include "base/os2/scoped_shmem_handle.h"
 #elif BUILDFLAG(IS_POSIX)
 #include <sys/types.h>
 #include "base/files/scoped_file.h"
-#elif BUILDFLAG(IS_OS2)
-#include "base/os2/scoped_shmem_handle.h"
 #endif
 
 namespace base::subtle {
@@ -63,9 +63,9 @@ using ScopedPlatformSharedMemoryHandle = win::ScopedHandle;
 #elif BUILDFLAG(IS_ANDROID)
 using PlatformSharedMemoryHandle = int;
 using ScopedPlatformSharedMemoryHandle = ScopedFD;
-#elif defined(OS_OS2)
-  using PlatformHandle = SHMEM;
-  using ScopedPlatformHandle = os2::ScopedShmemHandle;
+#elif BUILDFLAG(IS_OS2)
+using PlatformSharedMemoryHandle = SHMEM;
+using ScopedPlatformSharedMemoryHandle = os2::ScopedShmemHandle;
 #else
 using PlatformSharedMemoryHandle = FDPair;
 using ScopedPlatformSharedMemoryHandle = ScopedFDPair;

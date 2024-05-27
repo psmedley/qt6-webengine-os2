@@ -912,11 +912,15 @@ test("gfx_unittests") {
     deps += [ "//third_party/fontconfig" ]
   }
 
-  if (is_fuchsia || is_os2) {
+  if (is_fuchsia) {
     # TODO(https://crbug.com/1287051): fuchsia.sys.Launcher is used to launch
     # fuchsia-pkg://fuchsia.com/fonts#meta/fonts.cmx with specific test
     # args.
     use_cfv2 = false
+    deps += [ "//skia:test_fonts" ]
+  }
+
+  if (is_os2) {
     deps += [ "//skia:test_fonts" ]
   }
 }

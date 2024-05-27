@@ -57,13 +57,8 @@ class MessageView {
   // Owns |message|. |offset| indexes the first unsent byte in the message.
   MessageView(Channel::MessagePtr message, size_t offset)
       : message_(std::move(message)),
-        offset_(offset)
-#if defined(OS_OS2)
-      , handles_(message_->TakeHandles())
-#else
-      , handles_(message_->TakeHandles()) {
-#endif
-  {
+        offset_(offset),
+        handles_(message_->TakeHandles()) {
     DCHECK(!message_->data_num_bytes() || message_->data_num_bytes() > offset_);
   }
 

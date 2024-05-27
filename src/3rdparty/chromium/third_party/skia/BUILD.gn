@@ -648,10 +648,10 @@ if (skia_compile_modules) {
     defines = [
       "SKSL_STANDALONE",
       "SK_DISABLE_TRACING",
+    ]
     sources = skslc_deps
     sources += [ "tools/sksl-precompile/SkSLPrecompile.cpp" ]
     libs = []
-    ]
     if (is_win) {
       sources += [ "src/ports/SkOSFile_win.cpp" ]
     } else {
