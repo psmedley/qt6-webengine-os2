@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "base/cxx17_backports.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/third_party/mozilla/url_parse.h"
 #include "url/url_canon.h"
@@ -204,7 +205,7 @@ TEST_F(URLUtilTest, ReplaceScheme) {
             CheckReplaceScheme("about:google.com", "http"));
   EXPECT_EQ("http:", CheckReplaceScheme("", "http"));
 
-#ifdef WIN32
+#ifdef OS_DOSLIKE
   // Magic Windows drive letter behavior when converting to a file URL.
   EXPECT_EQ("file:///E:/foo/",
             CheckReplaceScheme("http://localhost/e:foo/", "file"));
