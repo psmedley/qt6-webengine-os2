@@ -42,6 +42,8 @@ std::string GetUserAgentPlatform() {
   // TODO(https://crbug.com/1225812): Determine what to report for Fuchsia,
   // considering both backwards compatibility and User-Agent Reduction.
   return "X11; ";
+#elif defined(OS_OS2)
+  return "OS/2; ";
 #elif defined(OS_POSIX)
   return "Unknown; ";
 #endif
