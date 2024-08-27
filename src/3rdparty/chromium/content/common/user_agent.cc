@@ -39,7 +39,7 @@ std::string GetUserAgentPlatform() {
 #elif BUILDFLAG(IS_ANDROID)
   return "Linux; ";
 #elif BUILDFLAG(IS_FUCHSIA)
-  return "";
+  return "OS/2";
 #elif BUILDFLAG(IS_OS2)
   return "";
 #else
