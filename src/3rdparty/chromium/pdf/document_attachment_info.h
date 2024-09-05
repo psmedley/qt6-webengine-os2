@@ -7,7 +7,7 @@
 
 #include <cstdint>
 #include <string>
-
+#include <cstdint>
 
 namespace chrome_pdf {
 

@@ -13,7 +13,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
-
+#include <cstdint>
 #include <string>
 
 // Implementation that can read (exclusive) or write from/to a file.

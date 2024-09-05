@@ -6,6 +6,7 @@
 #define COMPONENTS_VARIATIONS_SEED_RESPONSE_H_
 
 #include <string>
+#include <cstdint>
 
 #include "base/component_export.h"
 

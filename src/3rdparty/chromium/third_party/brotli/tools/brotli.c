@@ -28,7 +28,12 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #include <utime.h>
+#ifndef __OS2__
 #define MAKE_BINARY(FILENO) (FILENO)
+#else
+#include <io.h>
+#define MAKE_BINARY(FILENO) (setmode((FILENO), O_BINARY), (FILENO))
+#endif
 #else
 #include <io.h>
 #include <share.h>

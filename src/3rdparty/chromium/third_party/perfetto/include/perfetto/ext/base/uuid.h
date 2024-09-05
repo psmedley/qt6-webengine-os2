@@ -22,6 +22,7 @@
 #include <string>
 
 #include "perfetto/ext/base/optional.h"
+#include <cstdint>
 
 namespace perfetto {
 namespace base {
