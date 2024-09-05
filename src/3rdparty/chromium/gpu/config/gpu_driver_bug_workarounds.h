@@ -6,6 +6,7 @@
 #define GPU_CONFIG_GPU_DRIVER_BUG_WORKAROUNDS_H_
 
 #include <vector>
+#include <cstdint>
 
 #include "base/macros.h"
 #include "build/build_config.h"

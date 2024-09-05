@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 
 #include "quic/platform/api/quic_export.h"
 

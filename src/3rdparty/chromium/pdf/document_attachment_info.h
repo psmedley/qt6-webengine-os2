@@ -6,7 +6,7 @@
 #define PDF_DOCUMENT_ATTACHMENT_INFO_H_
 
 #include <string>
-
+#include <cstdint>
 
 namespace chrome_pdf {
 

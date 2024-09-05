@@ -128,7 +128,7 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
 
     // An identifier for a document transition shared element. `id.valid()`
     // returns true if this has been set, and false otherwise.
-    DocumentTransitionSharedElementId document_transition_shared_element_id;
+    blink::DocumentTransitionSharedElementId document_transition_shared_element_id;
 
     // TODO(crbug.com/900241): Use direct_compositing_reasons to check for
     // active animations when we can track animations for each property type.

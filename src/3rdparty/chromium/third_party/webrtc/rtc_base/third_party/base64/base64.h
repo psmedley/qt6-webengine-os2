@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "rtc_base/system/rtc_export.h"
+#include <cstdint>
 
 namespace rtc {
 
