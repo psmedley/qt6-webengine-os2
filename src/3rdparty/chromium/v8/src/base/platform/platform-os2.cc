@@ -19,6 +19,7 @@ namespace {
 ULONG GetProtectionFromMemoryPermission(OS::MemoryPermission access) {
   switch (access) {
     case OS::MemoryPermission::kNoAccess:
+    case OS::MemoryPermission::kNoAccessWillJitLater:
       return 0;  // no permissions
     case OS::MemoryPermission::kRead:
       return PAG_READ;
