@@ -31,9 +31,6 @@
 #ifndef __OS2__
 #define MAKE_BINARY(FILENO) (FILENO)
 #else
-#define MAKE_BINARY(FILENO) (setmode((FILENO), O_BINARY), (FILENO))
-#endif
-#else
 #include <io.h>
 #define MAKE_BINARY(FILENO) (setmode((FILENO), O_BINARY), (FILENO))
 #endif
