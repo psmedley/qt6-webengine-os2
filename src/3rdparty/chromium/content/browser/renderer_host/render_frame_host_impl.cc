@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if defined( __OS2__) && (__GNUC__ >= 10) 
+// GCC newer than 9 has stack alignment issues with this source file
+#pragma GCC push_options
+#pragma GCC target("no-sse")
+#endif
+
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 
 #include <algorithm>
@@ -13506,3 +13512,6 @@ std::ostream& operator<<(std::ostream& o,
 }
 
 }  // namespace content
+#if defined( __OS2__) && (__GNUC__ >= 10) 
+#pragma GCC pop_options
+#endif

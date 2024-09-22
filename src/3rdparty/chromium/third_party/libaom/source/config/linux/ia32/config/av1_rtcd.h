@@ -3005,8 +3005,10 @@ static void setup_rtcd_internal(void) {
   av1_fwd_txfm2d_8x16 = av1_fwd_txfm2d_8x16_c;
   if (flags & HAS_SSE4_1)
     av1_fwd_txfm2d_8x16 = av1_fwd_txfm2d_8x16_sse4_1;
+#ifndef __OS2__
   if (flags & HAS_AVX2)
     av1_fwd_txfm2d_8x16 = av1_fwd_txfm2d_8x16_avx2;
+#endif
   av1_fwd_txfm2d_8x4 = av1_fwd_txfm2d_8x4_c;
   if (flags & HAS_SSE4_1)
     av1_fwd_txfm2d_8x4 = av1_fwd_txfm2d_8x4_sse4_1;

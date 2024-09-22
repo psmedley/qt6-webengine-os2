@@ -13,6 +13,9 @@ assert(is_os2)
 config("compiler") {
   cflags = [
     "-Zomf",
+    "-mno-avx",
+    "-mstackrealign",
+    "-fno-common",
   ]
 
   ldflags = [
