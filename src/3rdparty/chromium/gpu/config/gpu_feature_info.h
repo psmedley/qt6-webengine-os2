@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/gpu_export.h"

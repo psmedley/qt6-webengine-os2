@@ -35,6 +35,10 @@
 #endif
 #else
 #include <io.h>
+#define MAKE_BINARY(FILENO) (setmode((FILENO), O_BINARY), (FILENO))
+#endif
+#else
+#include <io.h>
 #include <share.h>
 #include <sys/utime.h>
 

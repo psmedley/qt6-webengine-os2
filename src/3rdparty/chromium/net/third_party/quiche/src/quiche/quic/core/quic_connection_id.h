@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 #include "absl/types/span.h"
 #include "quiche/quic/platform/api/quic_export.h"

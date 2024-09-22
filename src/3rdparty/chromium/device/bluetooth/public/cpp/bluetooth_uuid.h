@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "build/build_config.h"
+#include <cstdint>
 
 #if BUILDFLAG(IS_WIN)
 #include <rpc.h>

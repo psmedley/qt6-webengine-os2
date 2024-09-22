@@ -61,6 +61,10 @@
 #include <winsock2.h>
 #endif
 
+#ifdef __OS2__
+#include <arpa/inet.h>
+#endif
+
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
