@@ -66,7 +66,9 @@ rtc_library("common_audio") {
 
   if (current_cpu == "x86" || current_cpu == "x64") {
     deps += [ ":common_audio_sse2" ]
-    deps += [ ":common_audio_avx2" ]
+    if (!is_os2) {
+      deps += [ ":common_audio_avx2" ]
+    }
   }
 }
 
@@ -234,7 +236,9 @@ rtc_library("fir_filter_factory") {
   ]
   if (current_cpu == "x86" || current_cpu == "x64") {
     deps += [ ":common_audio_sse2" ]
-    deps += [ ":common_audio_avx2" ]
+    if (!is_os2) {
+      deps += [ ":common_audio_avx2" ]
+    }
   }
   if (rtc_build_with_neon) {
     deps += [ ":common_audio_neon" ]
@@ -262,12 +266,14 @@ if (current_cpu == "x86" || current_cpu == "x64") {
     ]
   }
 
-  rtc_library("common_audio_avx2") {
-    sources = [
-      "fir_filter_avx2.cc",
-      "fir_filter_avx2.h",
-      "resampler/sinc_resampler_avx2.cc",
-    ]
+    if (!is_os2) {
+      rtc_library("common_audio_avx2") {
+      sources = [
+        "fir_filter_avx2.cc",
+        "fir_filter_avx2.h",
+        "resampler/sinc_resampler_avx2.cc",
+      ]
+    }
 
     if (is_win) {
       cflags = [ "/arch:AVX2" ]

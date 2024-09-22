@@ -1866,10 +1866,14 @@ jumbo_component("platform") {
     ]
   }
 
-  if (current_cpu == "x86" || current_cpu == "x64") {
+  if ((current_cpu == "x86" && !is_os2) || current_cpu == "x64") {
     deps += [ ":blink_x86_avx" ]
     sources += [ "audio/cpu/x86/audio_delay_dsp_kernel_sse2.cc" ]
     allow_circular_includes_from += [ ":blink_x86_avx" ]
+  }
+
+  if (is_os2) {
+    sources += [ "audio/cpu/x86/audio_delay_dsp_kernel_sse2.cc" ]
   }
 
   if (current_cpu == "arm64" || (current_cpu == "arm" && arm_use_neon)) {
@@ -2452,7 +2456,7 @@ group("blink_platform_unittests_data") {
   data_deps = [ "//third_party/hyphenation-patterns:test_data" ]
 }
 
-if (current_cpu == "x86" || current_cpu == "x64") {
+if ((current_cpu == "x86" && !is_os2) || current_cpu == "x64") {
   source_set("blink_x86_avx") {
     sources = blink_platform_avx_files
     configs += [

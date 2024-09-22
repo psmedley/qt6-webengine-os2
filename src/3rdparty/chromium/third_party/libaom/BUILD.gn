@@ -46,6 +46,8 @@ if (enable_libaom) {
   } else {
     if (is_ios && current_cpu == "arm") {
       os_category = current_os
+    } else if (is_os2) {
+      os_category = "os2"
     } else if (is_posix || is_fuchsia) {
       # Should cover linux, fuchsia, mac, and the ios simulator.
       os_category = "linux"
@@ -241,10 +243,20 @@ if (enable_libaom) {
       defines += [ "DO_RANGE_CHECK_CLAMP=1" ]
     }
     deps = []
-    if (current_cpu == "x86" || (current_cpu == "x64" && !is_msan)) {
+    if ((current_cpu == "x86" && !is_os2) || (current_cpu == "x64" && !is_msan)) {
       deps += [
         ":libaom_intrinsics_avx",
         ":libaom_intrinsics_avx2",
+        ":libaom_intrinsics_sse2",
+        ":libaom_intrinsics_sse3",
+        ":libaom_intrinsics_sse4_1",
+        ":libaom_intrinsics_sse4_2",
+        ":libaom_intrinsics_ssse3",
+        ":libaom_nasm",
+      ]
+    }
+    if (is_os2) {
+      deps += [
         ":libaom_intrinsics_sse2",
         ":libaom_intrinsics_sse3",
         ":libaom_intrinsics_sse4_1",
