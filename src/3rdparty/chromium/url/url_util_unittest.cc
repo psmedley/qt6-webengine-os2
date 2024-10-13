@@ -6,9 +6,14 @@
 
 #include <stddef.h>
 
+<<<<<<< HEAD
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest-message.h"
+=======
+#include "base/cxx17_backports.h"
+#include "build/build_config.h"
+>>>>>>> 0e53634c96 (Better handle drive letters in urlbar - based on https://github.com/bitwiseworks/qtwebengine-chromium-os2/issues/50)
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -210,7 +215,7 @@ TEST_F(URLUtilTest, ReplaceScheme) {
             CheckReplaceScheme("about:google.com", "http"));
   EXPECT_EQ("http:", CheckReplaceScheme("", "http"));
 
-#ifdef WIN32
+#ifdef OS_DOSLIKE
   // Magic Windows drive letter behavior when converting to a file URL.
   EXPECT_EQ("file:///E:/foo/",
             CheckReplaceScheme("http://localhost/e:foo/", "file"));

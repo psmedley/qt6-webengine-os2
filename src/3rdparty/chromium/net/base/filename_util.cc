@@ -69,7 +69,7 @@ bool FileURLToFilePath(const GURL& url, base::FilePath* file_path) {
   if (!url.SchemeIsFile())
     return false;
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
   std::string path;
   std::string host = url.host();
   if (host.empty()) {
@@ -88,7 +88,7 @@ bool FileURLToFilePath(const GURL& url, base::FilePath* file_path) {
     path.append(url.path());
   }
   std::replace(path.begin(), path.end(), '/', '\\');
-#else   // BUILDFLAG(IS_WIN)
+#else   // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
   // On POSIX, there's no obvious interpretation of file:// URLs with a host.
   // Usually, remote mounts are still mounted onto the local filesystem.
   // Therefore, we discard all URLs that are not obviously local to prevent
@@ -97,7 +97,7 @@ bool FileURLToFilePath(const GURL& url, base::FilePath* file_path) {
     return false;
   }
   std::string path = url.path();
-#endif  // !BUILDFLAG(IS_WIN)
+#endif  // !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_OS2)
 
   if (path.empty())
     return false;
@@ -111,7 +111,7 @@ bool FileURLToFilePath(const GURL& url, base::FilePath* file_path) {
   // because '/' is not a valid filename character on either POSIX or Windows.
   std::set<unsigned char> illegal_encoded_bytes{'/'};
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
   // "%5C" ('\\') on Windows results in failure, for the same reason as '/'
   // above. On POSIX, "%5C" simply decodes as '\\', a valid filename character.
   illegal_encoded_bytes.insert('\\');
@@ -162,7 +162,7 @@ void GenerateSafeFileName(const std::string& mime_type,
   // Make sure we get the right file extension
   EnsureSafeExtension(mime_type, ignore_extension, file_path);
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
   // Prepend "_" to the file name if it's a reserved name
   base::FilePath::StringType leaf_name = file_path->BaseName().value();
   DCHECK(!leaf_name.empty());

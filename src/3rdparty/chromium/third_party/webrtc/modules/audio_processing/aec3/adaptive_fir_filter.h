@@ -43,10 +43,12 @@ void ComputeFrequencyResponse_Sse2(
     const std::vector<std::vector<FftData>>& H,
     std::vector<std::array<float, kFftLengthBy2Plus1>>* H2);
 
+#ifndef __OS2__
 void ComputeFrequencyResponse_Avx2(
     size_t num_partitions,
     const std::vector<std::vector<FftData>>& H,
     std::vector<std::array<float, kFftLengthBy2Plus1>>* H2);
+#endif
 #endif
 
 // Adapts the filter partitions.
@@ -66,10 +68,12 @@ void AdaptPartitions_Sse2(const RenderBuffer& render_buffer,
                           size_t num_partitions,
                           std::vector<std::vector<FftData>>* H);
 
+#ifndef __OS2__
 void AdaptPartitions_Avx2(const RenderBuffer& render_buffer,
                           const FftData& G,
                           size_t num_partitions,
                           std::vector<std::vector<FftData>>* H);
+#endif
 #endif
 
 // Produces the filter output.
@@ -89,10 +93,12 @@ void ApplyFilter_Sse2(const RenderBuffer& render_buffer,
                       const std::vector<std::vector<FftData>>& H,
                       FftData* S);
 
+#ifndef __OS2__
 void ApplyFilter_Avx2(const RenderBuffer& render_buffer,
                       size_t num_partitions,
                       const std::vector<std::vector<FftData>>& H,
                       FftData* S);
+#endif
 #endif
 
 }  // namespace aec3
