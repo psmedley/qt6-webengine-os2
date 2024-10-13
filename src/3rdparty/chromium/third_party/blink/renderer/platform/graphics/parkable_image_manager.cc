@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if defined( __OS2__) && (__GNUC__ >= 10) 
+// GCC newer than 9 has stack alignment issues with this source file
+#pragma GCC push_options
+#pragma GCC target("no-sse")
+#endif
+
 #include "third_party/blink/renderer/platform/graphics/parkable_image_manager.h"
 
 #include "base/metrics/histogram_functions.h"
@@ -37,6 +43,7 @@ ParkableImageManager& ParkableImageManager::Instance() {
 bool ParkableImageManager::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs&,
     base::trace_event::ProcessMemoryDump* pmd) {
+#ifndef __OS2__
   auto* dump = pmd->CreateAllocatorDump(kAllocatorDumpName);
 
   base::AutoLock lock(lock_);
@@ -45,7 +52,7 @@ bool ParkableImageManager::OnMemoryDump(
   dump->AddScalar("total_size", "bytes", stats.total_size);
   dump->AddScalar("unparked_size", "bytes", stats.unparked_size);
   dump->AddScalar("on_disk_size", "bytes", stats.on_disk_size);
-
+#endif
   return true;
 }
 
@@ -273,3 +280,7 @@ void ParkableImageManager::MaybeParkImages() {
 }
 
 }  // namespace blink
+#if defined( __OS2__) && (__GNUC__ >= 10) 
+// GCC newer than 9 has stack alignment issues with this source file
+#pragma GCC pop_options
+#endif

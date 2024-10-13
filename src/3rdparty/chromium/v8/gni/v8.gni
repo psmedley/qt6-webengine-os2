@@ -150,7 +150,7 @@ if (is_debug && !v8_optimized_debug) {
   }
 }
 
-if (!is_debug) {
+if (!is_debug && !is_os2) {
   v8_remove_configs += [
     # Too much performance impact, unclear security benefit.
     "//build/config/compiler:default_init_stack_vars",

@@ -614,7 +614,7 @@ class PodArray : public ByteArray {
   inline int length() const;
   DECL_CAST(PodArray<T>)
 
-  OBJECT_CONSTRUCTORS(PodArray<T>, ByteArray);
+  OBJECT_CONSTRUCTORS(PodArray, ByteArray);
 };
 
 class TemplateList

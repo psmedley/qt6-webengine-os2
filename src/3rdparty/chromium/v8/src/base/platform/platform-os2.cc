@@ -5,9 +5,8 @@
 #define INCL_BASE
 #define INCL_EXAPIS
 #include <os2.h>
-
-// TODO: Use map/unmap for the moment (port to native later).
-#include <sys/mman.h>
+#include <libcx/shmem.h>
+#include <cstdlib>
 
 #include "src/base/macros.h"
 #include "src/base/platform/platform-posix-time.h"
@@ -123,20 +122,18 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
 
 void* OS::AllocateShared(void* hint, size_t size, MemoryPermission access,
                          PlatformSharedMemoryHandle handle, uint64_t offset) {
-  // TODO: Use map/unmap for the moment (port to native later).
-  DCHECK_EQ(0, size % AllocatePageSize());
-  int prot = GetProtectionFromMemoryPermission(access);
-  int fd = FileDescriptorFromSharedMemoryHandle(handle);
-  void* result = mmap(hint, size, prot, MAP_SHARED, fd, offset);
-  if (result == MAP_FAILED) return nullptr;
+
+  void* result = shmem_map(handle, offset, size);
+  if (result) {
+    return nullptr;
+  }
   return result;
 }
 
 // static
 void OS::FreeShared(void* address, size_t size) {
-  // TODO: Use map/unmap for the moment (port to native later).
   DCHECK_EQ(0, size % AllocatePageSize());
-  CHECK_EQ(0, munmap(address, size));
+  CHECK_EQ(0, shmem_unmap(address));
 }
 
 // static
@@ -198,10 +195,7 @@ bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
                                              PlatformSharedMemoryHandle handle,
                                              uint64_t offset) {
   DCHECK(Contains(address, size));
-  int prot = GetProtectionFromMemoryPermission(access);
-  int fd = FileDescriptorFromSharedMemoryHandle(handle);
-  return mmap(address, size, prot, MAP_SHARED | MAP_FIXED, fd, offset) !=
-         MAP_FAILED;
+  return shmem_map(handle, offset, size);
 }
 
 // static

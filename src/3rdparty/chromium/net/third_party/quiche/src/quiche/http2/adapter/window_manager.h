@@ -2,6 +2,7 @@
 #define QUICHE_HTTP2_ADAPTER_WINDOW_MANAGER_H_
 
 #include <stddef.h>
+#include <cstdint>
 
 #include <functional>
 
