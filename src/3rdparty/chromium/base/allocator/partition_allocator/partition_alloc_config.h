@@ -85,7 +85,7 @@ static_assert(sizeof(void*) != 8, "");
 //
 // Otherwise, a userspace spinlock implementation is used.
 #if defined(PA_HAS_LINUX_KERNEL) || BUILDFLAG(IS_WIN) || \
-    (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE)) || BUILDFLAG(IS_FUCHSIA)
+    (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)) || BUILDFLAG(IS_FUCHSIA)
 #define PA_HAS_FAST_MUTEX
 #endif
 
