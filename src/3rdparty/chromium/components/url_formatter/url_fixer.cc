@@ -434,11 +434,7 @@ std::string SegmentURLInternal(std::string* text, url::Parsed* parts) {
     return std::string();  // Nothing to segment.
 
   std::string scheme;
-<<<<<<< HEAD
-#if BUILDFLAG(IS_WIN)
-=======
-#if defined(OS_DOSLIKE)
->>>>>>> 437b9f2ba0 (Path fixes)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
   int trimmed_length = static_cast<int>(trimmed.length());
   if (url::DoesBeginWindowsDriveSpec(trimmed.data(), 0, trimmed_length) ||
       url::DoesBeginUNCPath(trimmed.data(), 0, trimmed_length, true))

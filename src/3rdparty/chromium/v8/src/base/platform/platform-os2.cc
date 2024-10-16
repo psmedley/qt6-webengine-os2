@@ -5,7 +5,7 @@
 #define INCL_BASE
 #define INCL_EXAPIS
 #include <os2.h>
-#include <libcx/shmem.h>
+#include <sys/mman.h>
 #include <cstdlib>
 
 #include "src/base/macros.h"
@@ -31,6 +31,23 @@ ULONG GetProtectionFromMemoryPermission(OS::MemoryPermission access) {
       return PAG_READ | PAG_WRITE | PAG_EXECUTE;
     case OS::MemoryPermission::kReadExecute:
       return PAG_READ | PAG_EXECUTE;
+  }
+  UNREACHABLE();
+}
+
+int GetProtectionFromMemoryPermissionPosix(OS::MemoryPermission access) {
+  switch (access) {
+    case OS::MemoryPermission::kNoAccess:
+    case OS::MemoryPermission::kNoAccessWillJitLater:
+      return PROT_NONE;
+    case OS::MemoryPermission::kRead:
+      return PROT_READ;
+    case OS::MemoryPermission::kReadWrite:
+      return PROT_READ | PROT_WRITE;
+    case OS::MemoryPermission::kReadWriteExecute:
+      return PROT_READ | PROT_WRITE | PROT_EXEC;
+    case OS::MemoryPermission::kReadExecute:
+      return PROT_READ | PROT_EXEC;
   }
   UNREACHABLE();
 }
@@ -123,17 +140,20 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
 void* OS::AllocateShared(void* hint, size_t size, MemoryPermission access,
                          PlatformSharedMemoryHandle handle, uint64_t offset) {
 
-  void* result = shmem_map(handle, offset, size);
-  if (result) {
-    return nullptr;
-  }
+  // TODO: Use map/unmap for the moment (port to native later).
+  DCHECK_EQ(0, size % AllocatePageSize());
+  int prot = GetProtectionFromMemoryPermissionPosix(access);
+  int fd = FileDescriptorFromSharedMemoryHandle(handle);
+  void* result = mmap(hint, size, prot, MAP_SHARED, fd, offset);
+  if (result == MAP_FAILED) return nullptr;
   return result;
 }
 
 // static
 void OS::FreeShared(void* address, size_t size) {
+  // TODO: Use map/unmap for the moment (port to native later).
   DCHECK_EQ(0, size % AllocatePageSize());
-  CHECK_EQ(0, shmem_unmap(address));
+  CHECK_EQ(0, munmap(address, size));
 }
 
 // static
@@ -195,7 +215,10 @@ bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
                                              PlatformSharedMemoryHandle handle,
                                              uint64_t offset) {
   DCHECK(Contains(address, size));
-  return shmem_map(handle, offset, size);
+  int prot = GetProtectionFromMemoryPermissionPosix(access);
+  int fd = FileDescriptorFromSharedMemoryHandle(handle);
+  return mmap(address, size, prot, MAP_SHARED | MAP_FIXED, fd, offset) !=
+         MAP_FAILED;
 }
 
 // static

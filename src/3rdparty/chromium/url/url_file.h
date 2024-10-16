@@ -68,7 +68,7 @@ inline bool DoesBeginWindowsDriveSpec(const CHAR* spec,
                                           spec_len) == start_offset;
 }
 
-#ifdef WIN32
+#ifdef OS_DOSLIKE
 
 // Returns true if the start_offset in the given text looks like it begins a
 // UNC path, for example "\\". This function explicitly handles start_offset

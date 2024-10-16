@@ -123,7 +123,7 @@ class LOCKABLE BASE_EXPORT SpinningMutex {
   static constexpr int kLockedContended = 2;
 
   std::atomic<int32_t> state_{kUnlocked};
-#elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
+#elif BUILDFLAG(IS_WIN)
   CHROME_SRWLOCK lock_ = SRWLOCK_INIT;
 #elif BUILDFLAG(IS_POSIX)
   pthread_mutex_t lock_ = PTHREAD_MUTEX_INITIALIZER;
@@ -203,7 +203,7 @@ ALWAYS_INLINE void SpinningMutex::Release() {
   }
 }
 
-#elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
+#elif BUILDFLAG(IS_WIN)
 
 ALWAYS_INLINE bool SpinningMutex::Try() {
   return !!::TryAcquireSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&lock_));
