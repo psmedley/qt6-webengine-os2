@@ -27,6 +27,10 @@ constexpr const char* ParkableImageManager::kAllocatorDumpName;
 constexpr base::TimeDelta ParkableImageManager::kDelayedParkingInterval;
 
 // static
+
+#if __OS2__ //Avoids TRP due to lack of 16-bit alignment of SSE instructions
+__attribute__ ((__target__ ("no-sse")))
+#endif
 ParkableImageManager& ParkableImageManager::Instance() {
   static base::NoDestructor<ParkableImageManager> instance;
   return *instance;
