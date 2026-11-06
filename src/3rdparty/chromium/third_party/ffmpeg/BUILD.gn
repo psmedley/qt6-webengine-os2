@@ -209,18 +209,23 @@ if (is_component_ffmpeg) {
   link_target_type = "static_library"
 }
 target(link_target_type, "ffmpeg_internal") {
-  sources = ffmpeg_c_sources + ffmpeg_gas_sources + [
-              "$platform_config_root/config.h",
-              "$platform_config_root/libavutil/avconfig.h",
-            ]
+  _excluded_sources = []
   if (is_os2 && !has_nasm_deps) {
     # The x86 source lists assume NASM. Leave out the C files that FFmpeg's
     # own build only compiles with HAVE_X86ASM (OBJS-$(HAVE_X86ASM) in
     # lib*/x86/Makefile) because they reference assembly functions from
     # static tables, which the compiler can't drop. Not every FFmpeg version
-    # has them, hence filter_exclude() rather than "-=".
-    sources = filter_exclude(sources, [ "*/x86/tx_float_init.c" ])
+    # has them, hence filter_exclude() rather than "-=". The patterns are
+    # collected first because GN refuses to replace the nonempty sources
+    # list with another nonempty one.
+    _excluded_sources = [ "*/x86/tx_float_init.c" ]
   }
+  sources = filter_exclude(ffmpeg_c_sources + ffmpeg_gas_sources +
+                               [
+                                 "$platform_config_root/config.h",
+                                 "$platform_config_root/libavutil/avconfig.h",
+                               ],
+                           _excluded_sources)
   include_dirs = [
     platform_config_root,
     ".",
