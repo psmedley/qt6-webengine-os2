@@ -219,11 +219,23 @@ target(link_target_type, "ffmpeg_internal") {
   ]
   defines = [
     "HAVE_AV_CONFIG_H",
-    "_POSIX_C_SOURCE=200112",
-    "_XOPEN_SOURCE=600",
     "PIC",
     "FFMPEG_CONFIGURATION=NULL",
   ]
+  if (is_os2) {
+    # Match FFmpeg's configure for OS/2, which the OS/2 config.h was
+    # generated with: it adds -D_GNU_SOURCE and, because kLIBC's default
+    # environment already declares everything FFmpeg needs, no
+    # _POSIX_C_SOURCE/_XOPEN_SOURCE. With those, kLIBC's FreeBSD-style
+    # <sys/cdefs.h> hides BSD extensions such as isnanf(), which its isnan()
+    # macro uses.
+    defines += [ "_GNU_SOURCE" ]
+  } else {
+    defines += [
+      "_POSIX_C_SOURCE=200112",
+      "_XOPEN_SOURCE=600",
+    ]
+  }
 
   if (is_component_ffmpeg) {
     configs += [ "//build/config/sanitizers:cfi_icall_disable" ]
