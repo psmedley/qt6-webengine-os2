@@ -13,9 +13,12 @@ import("//build/config/sanitizers/sanitizers.gni")
 platform_config_root =
     "chromium/config/$ffmpeg_branding/$os_config/$ffmpeg_arch"
 
+# OS/2: x86 assembly is disabled in its config (--disable-x86asm) for now;
+# FFmpeg's x86inc.asm would need an OMF (or a.out + emxomf) object format.
 has_nasm_deps =
     ffmpeg_asm_sources != [] &&
-    (current_cpu == "x86" || current_cpu == "x64") && os_config != "linux-noasm"
+    (current_cpu == "x86" || current_cpu == "x64") &&
+    os_config != "linux-noasm" && !is_os2
 if (has_nasm_deps) {
   import("//third_party/nasm/nasm_assemble.gni")
 
@@ -292,11 +295,16 @@ target(link_target_type, "ffmpeg_internal") {
 
   if (is_fuchsia || is_posix) {
     cflags += [
-      "-fPIC",
-
       # ffmpeg uses its own deprecated functions.
       "-Wno-deprecated-declarations",
     ]
+
+    # OS/2 doesn't build position-independent code anywhere else (see
+    # //build/config/compiler:compiler), and on x86 PIC also takes EBX, which
+    # FFmpeg's inline assembly needs.
+    if (!is_os2) {
+      cflags += [ "-fPIC" ]
+    }
 
     if (!(is_android && use_call_graph)) {
       # Remove default stack frames config so we can force -fomit-frame-pointer.
