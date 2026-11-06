@@ -93,6 +93,10 @@ for branding in Chromium Chrome; do
        > configure.log 2>&1) || {
     echo "configure failed for $branding; see $build_dir/configure.log and" \
          "$build_dir/ffbuild/config.log" >&2
+    echo "--- last lines of configure.log:" >&2
+    tail -n 15 "$build_dir/configure.log" >&2
+    echo "--- last lines of ffbuild/config.log:" >&2
+    tail -n 40 "$build_dir/ffbuild/config.log" >&2
     exit 1
   }
 
@@ -103,14 +107,15 @@ for branding in Chromium Chrome; do
       "$build_dir/config.h" > "$build_dir/config.h.new"
   mv "$build_dir/config.h.new" "$build_dir/config.h"
 
+  # Copy with Unix line endings (tools on OS/2 may write CRLF).
   for f in $FILES; do
     mkdir -p "$out_dir/$(dirname "$f")"
-    cp "$build_dir/$f" "$out_dir/$f"
+    tr -d '\r' < "$build_dir/$f" > "$out_dir/$f"
   done
   # config.asm is only written when x86 assembly is enabled; it's only used
   # by the ffmpeg_nasm target.
   if [ -f "$build_dir/config.asm" ]; then
-    cp "$build_dir/config.asm" "$out_dir/config.asm"
+    tr -d '\r' < "$build_dir/config.asm" > "$out_dir/config.asm"
   else
     rm -f "$out_dir/config.asm"
   fi
@@ -122,8 +127,11 @@ for branding in Chromium Chrome; do
 
   # The Linux source lists are only valid if the same components are
   # enabled. Compare CONFIG_* (components and features) with Linux.
-  grep '^#define CONFIG_' "$ref_dir/config.h" | sort > "$build_dir/ref.cfg"
-  grep '^#define CONFIG_' "$out_dir/config.h" | sort > "$build_dir/new.cfg"
+  # CONFIG_PIC is expected to differ: OS/2 doesn't build PIC (see BUILD.gn).
+  grep '^#define CONFIG_' "$ref_dir/config.h" | grep -v '^#define CONFIG_PIC ' |
+    sort > "$build_dir/ref.cfg"
+  grep '^#define CONFIG_' "$out_dir/config.h" | grep -v '^#define CONFIG_PIC ' |
+    sort > "$build_dir/new.cfg"
   if diff -u "$build_dir/ref.cfg" "$build_dir/new.cfg" > "$build_dir/cfg.diff"; then
     echo "    CONFIG_* matches $COMPARE_WITH"
   else
@@ -133,8 +141,11 @@ for branding in Chromium Chrome; do
   fi
   for f in libavcodec/codec_list.c libavcodec/parser_list.c \
            libavformat/demuxer_list.c; do
-    cmp -s "$ref_dir/$f" "$out_dir/$f" ||
-      { echo "    $f differs from $COMPARE_WITH"; status=2; }
+    if ! cmp -s "$ref_dir/$f" "$out_dir/$f"; then
+      echo "    $f differs from $COMPARE_WITH:"
+      diff -u "$ref_dir/$f" "$out_dir/$f" | sed -n '3,40s/^/      /p'
+      status=2
+    fi
   done
 done
 
