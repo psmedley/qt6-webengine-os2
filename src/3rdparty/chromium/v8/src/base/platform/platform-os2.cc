@@ -182,7 +182,13 @@ Stack::StackSlot Stack::GetStackStart() {
   PTIB ptib;
   if (DosGetInfoBlocks(&ptib, NULL))
     return nullptr;
-  return ptib->tib_pstack;
+  // The stack grows down, and V8 expects the stack start to be its highest
+  // address. tib_pstack is the lowest address (the stack base), while
+  // tib_pstacklimit is the highest one (see also WTF::GetStackStart()).
+  // Returning tib_pstack makes conservative stack scanning in cppgc (Blink's
+  // Oilpan) scan nothing, and makes GlobalHandles treat on-stack
+  // TracedReferences as heap ones.
+  return ptib->tib_pstacklimit;
 }
 
 }  // namespace base
