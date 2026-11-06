@@ -109,6 +109,11 @@ static base::TimeDelta ExtractStartTime(AVStream* stream) {
   if (stream->start_time != kNoFFmpegTimestamp)
     start_time = ConvertFromTimeBase(stream->time_base, stream->start_time);
 
+#if !BUILDFLAG(USE_SYSTEM_FFMPEG) || LIBAVCODEC_VERSION_MAJOR < 59
+  // av_stream_get_first_dts() only exists in Chromium's patched FFmpeg, and
+  // FFmpeg 5+ made AVStream::first_dts private, so with a system FFmpeg 5 or
+  // newer the first DTS isn't available and |start_time| alone is used.
+  //
   // Next try to use the first DTS value, for codecs where we know PTS == DTS
   // (excludes all H26x codecs). The start time must be returned in PTS.
   if (av_stream_get_first_dts(stream) != kNoFFmpegTimestamp &&
@@ -120,6 +125,7 @@ static base::TimeDelta ExtractStartTime(AVStream* stream) {
     if (first_pts < start_time)
       start_time = first_pts;
   }
+#endif
 
   return start_time;
 }
