@@ -3,12 +3,12 @@
 # Generates Chromium's FFmpeg configuration for OS/2 (ia32):
 #
 #   chromium/config/{Chromium,Chrome}/os2/ia32/
-#     config.h, [config.asm,] libavutil/avconfig.h, libavutil/ffversion.h,
+#     config.h, [config_components.h,] [config.asm,] libavutil/avconfig.h, libavutil/ffversion.h,
 #     libavcodec/{bsf,codec,parser}_list.c,
 #     libavformat/{demuxer,muxer,protocol}_list.c
 #
 # This mirrors what build_ffmpeg.py + copy_config.sh do for Linux ia32, using
-# the same configure flags, so that the Linux ia32 source lists in
+# the configure flags recorded in the Linux ia32 config (see FLAGS_FROM), so that the Linux ia32 source lists in
 # ffmpeg_generated.gni can be reused for OS/2 (see use_linux_config there).
 # x86 assembly (NASM) is disabled for now; see BUILD.gn (has_nasm_deps).
 #
@@ -22,6 +22,8 @@
 #   EXTRA_FLAGS      extra configure flags (e.g. --disable-inline-asm)
 #   WORK_DIR         scratch directory for the configure runs
 #                    (default: a new temporary directory)
+#   FLAGS_FROM       config directory whose recorded configure flags are used
+#                    (default: linux/ia32)
 #   COMPARE_WITH     config directory to compare CONFIG_* against
 #                    (default: linux/ia32)
 
@@ -41,37 +43,45 @@ if [ -e "$FFMPEG_DIR/config.h" ]; then
   exit 1
 fi
 
-# Same flags as Chromium's Linux ia32 build (build_ffmpeg.py; also recorded
-# in chromium/config/Chrome/linux/ia32/config.h), minus the clang/-m32/PIC
-# and nasm settings, plus the OS/2 x86 settings used for system FFmpeg.
-COMMON_FLAGS="
-  --disable-everything --disable-all --disable-doc --disable-htmlpages
-  --disable-manpages --disable-podpages --disable-txtpages --disable-static
-  --enable-avcodec --enable-avformat --enable-avutil --enable-fft --enable-rdft
-  --enable-static --enable-libopus
-  --disable-debug --disable-bzlib --disable-error-resilience --disable-iconv
-  --disable-lzo --disable-network --disable-schannel --disable-sdl2
-  --disable-symver --disable-xlib --disable-zlib --disable-securetransport
-  --disable-faan --disable-alsa --disable-autodetect
-  --enable-decoder=vorbis,libopus,flac
-  --enable-decoder=pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,mp3
-  --enable-decoder=pcm_s16be,pcm_s24be,pcm_mulaw,pcm_alaw
-  --enable-demuxer=ogg,matroska,wav,flac,mp3,mov
-  --enable-parser=opus,vorbis,flac,mpegaudio,vp9
+# The configure flags come from the Linux ia32 config.h of the same branding
+# (FLAGS_FROM), where Chromium's build_ffmpeg.py records the exact configure
+# command line as FFMPEG_CONFIGURATION. Using that instead of a copy keeps
+# this script working across Chromium/FFmpeg versions, whose flags differ
+# (e.g. --disable-lzo was dropped when FFmpeg removed liblzo support).
+#
+# From those flags, drop the ones that only apply to Chromium's Linux build
+# machines (clang, -m32, PIC, NASM, the machine's opus path and -O2 quoting)
+# and add the OS/2 ones.
+FLAGS_FROM=${FLAGS_FROM:-linux/ia32}
+OS2_FLAGS="
   --extra-cflags=-I$CHROMIUM_ROOT/third_party/opus/src/include
-  --disable-linux-perf
   --optflags=-O2
-  --enable-decoder=theora,vp8
-  --enable-parser=vp3,vp8
-  --arch=i686
   --disable-x86asm
   --disable-avx --disable-avx2 --disable-avx512
 "
-CHROME_FLAGS="
-  --enable-decoder=aac,h264
-  --enable-demuxer=aac
-  --enable-parser=aac,h264
-"
+
+# Prints the configure flags recorded in config.h $1, each single-quoted and
+# space-separated, without the Linux-build-machine-only ones.
+reference_flags() {
+  line=$(sed -n 's/^.*#define FFMPEG_CONFIGURATION "\(.*\)".*$/\1/p' "$1" |
+         head -n 1)
+  if [ -z "$line" ]; then
+    echo "error: no FFMPEG_CONFIGURATION in $1" >&2
+    return 1
+  fi
+  # The C string escapes double quotes.
+  line=$(printf '%s\n' "$line" | sed 's/\\"/"/g')
+  eval "set -- $line"
+  for arg; do
+    case $arg in
+      --cc=*|--cxx=*|--ld=*|--enable-pic|--enable-lto|--x86asmexe=*) ;;
+      --optflags=*|--enable-cross-compile|--target-os=*|--sysroot=*) ;;
+      --extra-cflags=*-m32*|--extra-ldflags=*-m32*) ;;
+      --extra-cflags=-I*/third_party/opus/src/include) ;;
+      *) printf "'%s' " "$arg" ;;
+    esac
+  done
+}
 
 FILES="config.h libavutil/avconfig.h libavcodec/bsf_list.c
   libavcodec/codec_list.c libavcodec/parser_list.c libavformat/demuxer_list.c
@@ -82,14 +92,18 @@ for branding in Chromium Chrome; do
   build_dir="$WORK_DIR/$branding"
   out_dir="$FFMPEG_DIR/chromium/config/$branding/$OS_DIR/$ARCH_DIR"
   ref_dir="$FFMPEG_DIR/chromium/config/$branding/$COMPARE_WITH"
-  flags="$COMMON_FLAGS"
-  [ "$branding" = Chrome ] && flags="$flags $CHROME_FLAGS"
+  flags=$(reference_flags \
+           "$FFMPEG_DIR/chromium/config/$branding/$FLAGS_FROM/config.h")
+  for f in $OS2_FLAGS; do
+    flags="$flags '$f'"
+  done
 
   echo "=== $branding: configuring in $build_dir"
   mkdir -p "$build_dir"
   # shellcheck disable=SC2086
+  printf '%s\n' "$flags" $EXTRA_FLAGS > "$build_dir/configure.flags"
   (cd "$build_dir" &&
-   "$CONFIGURE_SHELL" "$FFMPEG_DIR/configure" $flags $EXTRA_FLAGS \
+   eval "\"\$CONFIGURE_SHELL\" \"\$FFMPEG_DIR/configure\" $flags" $EXTRA_FLAGS \
        > configure.log 2>&1) || {
     echo "configure failed for $branding; see $build_dir/configure.log and" \
          "$build_dir/ffbuild/config.log" >&2
@@ -112,6 +126,14 @@ for branding in Chromium Chrome; do
     mkdir -p "$out_dir/$(dirname "$f")"
     tr -d '\r' < "$build_dir/$f" > "$out_dir/$f"
   done
+  # Newer FFmpeg (e.g. in Chromium 102) moves the component switches
+  # (CONFIG_*_DECODER etc.) from config.h into config_components.h.
+  if [ -f "$build_dir/config_components.h" ]; then
+    tr -d '\r' < "$build_dir/config_components.h" \
+        > "$out_dir/config_components.h"
+  else
+    rm -f "$out_dir/config_components.h"
+  fi
   # config.asm is only written when x86 assembly is enabled; it's only used
   # by the ffmpeg_nasm target.
   if [ -f "$build_dir/config.asm" ]; then
@@ -128,9 +150,12 @@ for branding in Chromium Chrome; do
   # The Linux source lists are only valid if the same components are
   # enabled. Compare CONFIG_* (components and features) with Linux.
   # CONFIG_PIC is expected to differ: OS/2 doesn't build PIC (see BUILD.gn).
-  grep '^#define CONFIG_' "$ref_dir/config.h" | grep -v '^#define CONFIG_PIC ' |
+  # Include config_components.h where FFmpeg has one.
+  cat "$ref_dir/config.h" "$ref_dir"/config_components.h 2>/dev/null |
+    grep '^#define CONFIG_' | grep -v '^#define CONFIG_PIC ' |
     sort > "$build_dir/ref.cfg"
-  grep '^#define CONFIG_' "$out_dir/config.h" | grep -v '^#define CONFIG_PIC ' |
+  cat "$out_dir/config.h" "$out_dir"/config_components.h 2>/dev/null |
+    grep '^#define CONFIG_' | grep -v '^#define CONFIG_PIC ' |
     sort > "$build_dir/new.cfg"
   if diff -u "$build_dir/ref.cfg" "$build_dir/new.cfg" > "$build_dir/cfg.diff"; then
     echo "    CONFIG_* matches $COMPARE_WITH"
