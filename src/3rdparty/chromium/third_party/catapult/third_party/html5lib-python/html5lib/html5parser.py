@@ -348,7 +348,7 @@ class HTMLParser(object):
     def adjustForeignAttributes(self, token):
         replacements = adjustForeignAttributesMap
 
-        for originalName in token["data"].keys():
+        for originalName in list(token["data"].keys()):
             if originalName in replacements:
                 foreignName = replacements[originalName]
                 token["data"][foreignName] = token["data"][originalName]
