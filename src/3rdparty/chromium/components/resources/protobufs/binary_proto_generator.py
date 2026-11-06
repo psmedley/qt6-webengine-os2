@@ -9,7 +9,6 @@
 """
 from __future__ import print_function
 import abc
-import imp
 import optparse
 import os
 import re
@@ -68,7 +67,23 @@ class GoogleProtobufModuleImporter:
       raise ImportError(fullname)
 
     filepath = self._fullname_to_filepath(fullname)
+    # Only reached on Python 2; Python 3 uses find_spec() below. The imp
+    # module was removed in Python 3.12, so import it lazily.
+    import imp
     return imp.load_source(fullname, filepath)
+
+  def find_spec(self, fullname, path=None, target=None):
+    """Returns a module spec for the google.protobuf module in pyproto.
+
+    Python 3.4+ prefers this over find_module()/load_module(), and Python 3.12
+    no longer falls back to them at all (PEP 451).
+    """
+    if (fullname.startswith('google.protobuf.')
+        and self._module_exists(fullname)):
+      import importlib.util
+      return importlib.util.spec_from_file_location(
+          fullname, self._fullname_to_filepath(fullname))
+    return None
 
 class BinaryProtoGenerator:
 

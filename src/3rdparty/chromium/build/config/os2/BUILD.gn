@@ -16,6 +16,15 @@ config("compiler") {
     "-mno-avx",
     "-mstackrealign",
     "-fno-common",
+
+    # Lower cc1plus peak memory. GCC sizes its garbage collector thresholds
+    # from the amount of physical RAM, which lets the heap grow far before
+    # collecting; large (jumbo) Blink and V8 translation units can then
+    # exceed the ~3 GB per-process address space limit on OS/2 and fail with
+    # "out of memory allocating ...". Collecting more often trades some
+    # compile time for a much lower peak.
+    "--param=ggc-min-expand=20",
+    "--param=ggc-min-heapsize=131072",
   ]
 
   ldflags = [

@@ -209,7 +209,9 @@ def ReadFile(filename, encoding):
     mode = 'rb'
     encoding = None
   else:
-    mode = 'rU'
+    # Text mode uses universal newlines by default; the 'U' flag was removed
+    # in Python 3.11.
+    mode = 'r'
 
   with io.open(filename, mode, encoding=encoding) as f:
     return f.read()
