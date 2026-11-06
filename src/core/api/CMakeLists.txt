@@ -64,7 +64,7 @@ endif()
 
 qt_internal_extend_target(WebEngineCore CONDITION OS2
     LINK_OPTIONS
-        @src/core/Release/i386/QtWebEngineCore_objects.rsp @src/core/Release/i386/QtWebEngineCore_archives.rsp @src/core/Release/i386/QtWebEngineCore_libs.rsp
+        @src/core/Release/2.45/QtWebEngineCore_objects.rsp @src/core/Release/2.45/QtWebEngineCore_archives.rsp @src/core/Release/2.45/QtWebEngineCore_libs.rsp
     PUBLIC_LIBRARIES
         "-lssp -lavcodec -lavdevice -lavfilter -lavformat -lavresample -lavutil"
 )

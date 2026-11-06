@@ -122,6 +122,9 @@ void RemoveEventFilteredListenerOnIO(const std::string& extension_id,
 WorkerThreadDispatcher::WorkerThreadDispatcher() = default;
 WorkerThreadDispatcher::~WorkerThreadDispatcher() = default;
 
+#if __OS2__ //Avoids TRP due to lack of 16-bit alignment of SSE instructions
+__attribute__ ((__target__ ("no-sse")))
+#endif
 WorkerThreadDispatcher* WorkerThreadDispatcher::Get() {
   static base::NoDestructor<WorkerThreadDispatcher> dispatcher;
   return dispatcher.get();

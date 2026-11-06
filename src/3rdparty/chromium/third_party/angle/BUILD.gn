@@ -433,7 +433,7 @@ angle_static_library("angle_image_util") {
 }
 
 config("angle_gl_visibility_config") {
-  if (is_win) {
+  if (is_win || is_os2) {
     defines = [
       "GL_APICALL=",
       "GL_API=",
@@ -1315,7 +1315,7 @@ angle_shared_library("libEGL") {
   ]
 
   defines = [ "LIBEGL_IMPLEMENTATION" ]
-  if (is_win) {
+  if (is_win || is_os2) {
     defines += [ "EGLAPI=" ]
   } else {
     defines += [ "EGLAPI=__attribute__((visibility(\"default\")))" ]
