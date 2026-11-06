@@ -13,12 +13,20 @@ import("//build/config/sanitizers/sanitizers.gni")
 platform_config_root =
     "chromium/config/$ffmpeg_branding/$os_config/$ffmpeg_arch"
 
-# OS/2: x86 assembly is disabled in its config (--disable-x86asm) for now;
-# FFmpeg's x86inc.asm would need an OMF (or a.out + emxomf) object format.
+# OS/2: x86 assembly is optional (os2_generate_config.sh with NASM=1). Use it
+# when the generated config.h enables it, so that the build always matches the
+# config. x86inc.asm maps FFmpeg's sections to 32-bit OMF segments for NASM's
+# -fobj output (see SECTION_RODATA and the "section" macro there).
+os2_has_x86asm = false
+if (is_os2 && (current_cpu == "x86" || current_cpu == "x64")) {
+  os2_has_x86asm =
+      filter_include(read_file("$platform_config_root/config.h", "list lines"),
+                     [ "#define HAVE_X86ASM 1" ]) != []
+}
 has_nasm_deps =
     ffmpeg_asm_sources != [] &&
     (current_cpu == "x86" || current_cpu == "x64") &&
-    os_config != "linux-noasm" && !is_os2
+    os_config != "linux-noasm" && (!is_os2 || os2_has_x86asm)
 if (has_nasm_deps) {
   import("//third_party/nasm/nasm_assemble.gni")
 

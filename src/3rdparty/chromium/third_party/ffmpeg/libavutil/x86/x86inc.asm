@@ -97,20 +97,55 @@
     %elifidn __OUTPUT_FORMAT__,aout
         SECTION .text
     %elifidn __OUTPUT_FORMAT__,obj
-        SECTION CONST32 public align=%1 use32 class=CONST flat
+        ; OMF only supports alignments of 1, 2, 4, 16, 256 and 4096; NASM
+        ; rounds anything else up (to 256 for 32) with a warning, which
+        ; -W+error turns into an error. Ask for 256 directly instead.
+        %if %1 > 16
+            SECTION CONST32 public align=256 use32 class=CONST flat
+        %else
+            SECTION CONST32 public align=%1 use32 class=CONST flat
+        %endif
     %else
         SECTION .rodata align=%1
     %endif
 %endmacro
 
-; Needed on OS/2 where it is 16-bit by default.
+; Needed on OS/2 where it is 16-bit by default (TEXT32 is declared as a
+; 32-bit segment below).
 %macro SECTION_TEXT 0
     %ifidn __OUTPUT_FORMAT__,obj
-        SEGMENT TEXT32 CLASS=CODE USE32
+        SEGMENT TEXT32
     %else
         SECTION .text
     %endif
 %endmacro
+
+%ifidn __OUTPUT_FORMAT__,obj
+; OMF segments are 16-bit unless declared USE32, but FFmpeg's .asm files
+; use a plain "SECTION .text" rather than SECTION_TEXT. Map it to the same
+; 32-bit code segment. SECTION is a standard NASM macro, so this only
+; overrides it in files that include x86inc.asm.
+;
+; Declare the segment, with its attributes, once here; later switches only
+; use its name (NASM warns about attributes on a redeclaration).
+[section TEXT32 CLASS=CODE USE32]
+[warning push]
+[warning -pp-macro-redef-multi] ; NASM 2.16+
+[warning -other]                ; NASM 2.15 (Chromium's bundled NASM)
+%imacro section 1+.nolist
+    %ifidni %1,.text
+        [section TEXT32]
+        %define __SECT__ [section TEXT32]
+    %else
+        [section %1]
+        %define __SECT__ [section %1]
+    %endif
+%endmacro
+[warning pop]
+; NASM's initial __SECT__ is the default .text segment, which endstruc
+; returns to when a struc comes before the first SECTION (e.g. fft.asm).
+%define __SECT__ [section TEXT32]
+%endif
 
 %if WIN64
     %define PIC

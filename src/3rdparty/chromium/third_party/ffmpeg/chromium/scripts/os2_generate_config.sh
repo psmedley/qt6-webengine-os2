@@ -10,7 +10,8 @@
 # This mirrors what build_ffmpeg.py + copy_config.sh do for Linux ia32, using
 # the configure flags recorded in the Linux ia32 config (see FLAGS_FROM), so that the Linux ia32 source lists in
 # ffmpeg_generated.gni can be reused for OS/2 (see use_linux_config there).
-# x86 assembly (NASM) is disabled for now; see BUILD.gn (has_nasm_deps).
+# x86 assembly (NASM) is disabled unless NASM=1; BUILD.gn assembles FFmpeg's
+# .asm files when the generated config.h has HAVE_X86ASM 1.
 #
 # Run on OS/2 from anywhere, with the OS/2 toolchain on PATH:
 #
@@ -19,6 +20,8 @@
 # Optional environment variables:
 #   CONFIGURE_SHELL  shell used to run FFmpeg's configure (default: dash)
 #   OS_DIR           name of the config directory to write (default: os2)
+#   NASM             1 to enable x86 assembly (default: 0)
+#   NASM_EXE         NASM used by configure with NASM=1 (default: nasm)
 #   EXTRA_FLAGS      extra configure flags (e.g. --disable-inline-asm)
 #   WORK_DIR         scratch directory for the configure runs
 #                    (default: a new temporary directory)
@@ -53,10 +56,18 @@ fi
 # machines (clang, -m32, PIC, NASM, the machine's opus path and -O2 quoting)
 # and add the OS/2 ones.
 FLAGS_FROM=${FLAGS_FROM:-linux/ia32}
+# x86 assembly: off by default; NASM=1 enables it (needs a NASM on PATH, or
+# NASM_EXE, for configure's checks; the Chromium build then assembles with
+# its own //third_party/nasm, see BUILD.gn). AVX stays disabled either way.
+if [ "${NASM:-0}" = 1 ]; then
+  X86ASM_FLAG="--x86asmexe=${NASM_EXE:-nasm}"
+else
+  X86ASM_FLAG="--disable-x86asm"
+fi
 OS2_FLAGS="
   --extra-cflags=-I$CHROMIUM_ROOT/third_party/opus/src/include
   --optflags=-O2
-  --disable-x86asm
+  $X86ASM_FLAG
   --disable-avx --disable-avx2 --disable-avx512
 "
 
